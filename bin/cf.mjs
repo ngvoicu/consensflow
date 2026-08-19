@@ -25,6 +25,15 @@ import {
 } from '../src/roster.js'
 import { generateSkill } from '../src/skill.js'
 
+// `cf … | head` closes our stdout mid-stream; dying with an EPIPE stack for
+// that is a crash where a quiet exit is the whole contract of a CLI.
+for (const stream of [process.stdout, process.stderr]) {
+  stream.on('error', (error) => {
+    if (error.code === 'EPIPE') process.exit(0)
+    throw error
+  })
+}
+
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PKG = JSON.parse(readFileSync(join(HERE, '..', 'package.json'), 'utf8'))
 const env = process.env

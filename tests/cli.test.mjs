@@ -94,6 +94,27 @@ describe('cf manages the roster', () => {
     const out = await cf(['--version'], t.env)
     assert.match(out.stdout, /3\.0\.0/)
   })
+
+  it('survives its output pipe closing early, like `cf … | head`', async () => {
+    const { spawn } = await import('node:child_process')
+    // `false` never reads: the pipe is closed before cf writes anything, so
+    // every write EPIPEs. PIPESTATUS surfaces cf's own exit code.
+    const child = spawn(
+      '/bin/bash',
+      ['-c', `"${process.execPath}" "${CF}" help | false; exit \${PIPESTATUS[0]}`],
+      {
+        env: { ...t.env, PATH: `${t.env.PATH}:/usr/bin:/bin` },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      },
+    )
+    let stderr = ''
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk
+    })
+    const code = await new Promise((resolve) => child.on('close', resolve))
+    assert.doesNotMatch(stderr, /EPIPE/)
+    assert.equal(code, 0)
+  })
 })
 
 describe('roster changes keep installed skills current', () => {
