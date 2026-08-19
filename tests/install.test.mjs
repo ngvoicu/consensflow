@@ -110,4 +110,21 @@ describe('install writes owned files with a hash manifest; drift is sacred', () 
     assert.ok(existsSync(foreign), 'foreign file must survive')
     assert.equal(skillsStatus(t.env).length, 0)
   })
+
+  it('uninstall leaves no empty directory shells behind, even for nested skills', () => {
+    installSkill({ relPath: 'nested/SKILL.md', content: 'top\n', source: 'consensflow' }, t.env, {
+      force: true,
+    })
+    installSkill(
+      { relPath: 'nested/references/deep.md', content: 'deep\n', source: 'consensflow' },
+      t.env,
+      { force: true },
+    )
+
+    uninstallSkills(t.env, { force: true })
+
+    // The skill's own directory must vanish with its files; the skills root stays.
+    assert.equal(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'nested')), false)
+    assert.equal(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills')), true)
+  })
 })

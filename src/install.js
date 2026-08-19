@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { detectAgents } from './agents.js'
 import { fileState, loadManifest, saveManifest, sha256 } from './manifest.js'
 
@@ -68,10 +68,18 @@ export function uninstallSkills(env, options = {}) {
       continue
     }
     rmSync(path, { force: true })
-    try {
-      if (readdirSync(dirname(path)).length === 0) rmdirSync(dirname(path))
-    } catch {
-      // The parent was already gone or not empty; either is fine.
+    // Climb away every directory the removal emptied, stopping at the agent's
+    // skills root — a skill is a directory tree, and leaving hollow shells
+    // behind reads as "still installed" in every agent's skill picker.
+    let parent = dirname(path)
+    while (basename(parent) !== 'skills') {
+      try {
+        if (readdirSync(parent).length > 0) break
+        rmdirSync(parent)
+      } catch {
+        break
+      }
+      parent = dirname(parent)
     }
     delete manifest.files[path]
     report.push({ path, action: state === 'missing' ? 'already-gone' : 'removed' })
