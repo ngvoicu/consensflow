@@ -8,8 +8,7 @@
  * agent on the machine (claude, codex, pi, opencode). The skill teaches the
  * agents everything else.
  */
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
@@ -19,7 +18,6 @@ import { installSkill, skillsStatus, uninstallSkills } from '../src/install.js'
 import {
   addParticipant,
   editParticipant,
-  importV1,
   listParticipants,
   removeParticipant,
 } from '../src/roster.js'
@@ -42,14 +40,15 @@ const USAGE = `consensflow ${PKG.version}
 
 Usage: cf <command> [options]
 
-  setup [--no-cmux] [--force]                  One command: import a v1 roster if found, generate the
-                                               consensflow skill, install it (and cmux's skills) into
-                                               every detected coding agent
+  setup [--no-cmux] [--force]                  One command: install the cmux skills and, when the
+                                               shared roster has participants, the consensflow skill
+                                               into every detected coding agent
   participant add <name> --runtime <r> --model <m> [--effort <e>] [--permission workspace-write|full-auto] [--description <d>]
   participant list [--json]
   participant edit <name> [--model <m>] [--effort <e>] [--permission <p>] [--description <d>]
   participant remove <name>
-  participant import-v1 [--from <path>] [--presets <path>]
+      the roster is the shared ~/.consensflow/participants.json — the same
+      file the consensflow-cc plugin and consensflow-pi extension use
   skills install [--with-cmux] [--force]       Generate + install the consensflow skill (and cmux's)
   skills update [--force]                      Regenerate ours; re-fetch cmux's if they are installed
   skills status                                Every owned file: ok, drifted (user-edited) or missing
@@ -136,9 +135,7 @@ function participantVerb(rest) {
         return
       }
       if (participants.length === 0) {
-        out(
-          'no participants yet — add one with `cf participant add` or import v1 with `cf participant import-v1`',
-        )
+        out('no participants yet — add one with `cf ui` or `cf participant add`')
         return
       }
       for (const p of participants) {
@@ -169,18 +166,8 @@ function participantVerb(rest) {
       out(`removed ${name}`)
       return
     }
-    case 'import-v1': {
-      const v1Path = values.from ?? join(env.HOME ?? homedir(), '.consensflow', 'participants.json')
-      // Efforts for claude/codex/opencode kinds live in the v1 plugin's
-      // presets; find them unless the caller pointed elsewhere.
-      const outcome = importV1({ v1Path, presetsPath: values.presets ?? v1PresetsPath() }, env)
-      refreshInstalledSkill()
-      out(`imported ${outcome.imported.length}: ${outcome.imported.map((p) => p.name).join(', ')}`)
-      for (const s of outcome.skipped) out(`skipped ${s.name}: ${s.reason}`)
-      return
-    }
     default:
-      fail('usage: cf participant add|list|edit|remove|import-v1')
+      fail('usage: cf participant add|list|edit|remove')
   }
 }
 
@@ -199,7 +186,7 @@ function skillsVerb(rest) {
     case 'install': {
       const participants = listParticipants(env)
       if (participants.length === 0) {
-        fail('the roster is empty — add a participant (or `cf participant import-v1`) first')
+        fail('the roster is empty — add a participant with `cf ui` or `cf participant add` first')
         return
       }
       printReport(
@@ -271,12 +258,6 @@ function setup(rest) {
     out(
       'participants: none yet — create them with `cf ui` (or `cf participant add`); the skill installs itself on the first one',
     )
-    const v1Path = join(env.HOME ?? homedir(), '.consensflow', 'participants.json')
-    if (existsSync(v1Path)) {
-      out(
-        'found a ConsensFlow v1 roster — bring it over with `cf participant import-v1` if you want it',
-      )
-    }
   } else if (agents.length > 0) {
     printReport(
       installSkill(
@@ -295,27 +276,6 @@ function setup(rest) {
     const cmux = installCmuxSkills(env, { force: values.force })
     out(`cmux skills @ ${cmux.commit}`)
     printReport(cmux.report)
-  }
-}
-
-/** The v1 Claude Code plugin's presets.js, when that plugin is installed. */
-function v1PresetsPath() {
-  const base = join(
-    env.HOME ?? homedir(),
-    '.claude',
-    'plugins',
-    'cache',
-    'consensflow-cc',
-    'consensflow',
-  )
-  try {
-    const versions = readdirSync(base).sort()
-    const newest = versions[versions.length - 1]
-    if (newest === undefined) return undefined
-    const candidate = join(base, newest, 'lib', 'presets.js')
-    return existsSync(candidate) ? candidate : undefined
-  } catch {
-    return undefined
   }
 }
 

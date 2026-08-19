@@ -65,26 +65,6 @@ describe('cf manages the roster', () => {
     assert.doesNotMatch((await cf(['participant', 'list'], t.env)).stdout, /zeus/)
   })
 
-  it('imports the v1 roster from an explicit path', async () => {
-    const out = await cf(
-      [
-        'participant',
-        'import-v1',
-        '--from',
-        join(FIXTURES, 'v1-participants.json'),
-        '--presets',
-        join(FIXTURES, 'v1-presets.js'),
-      ],
-      t.env,
-    )
-    assert.equal(out.code, 0)
-    assert.match(out.stdout, /imported 4/)
-    assert.match(out.stdout, /pygmalion/)
-    for (const name of ['zeus', 'hyperion', 'endymion', 'mani']) {
-      await cf(['participant', 'remove', name], t.env)
-    }
-  })
-
   it('fails an unknown verb loudly', async () => {
     const out = await cf(['frobnicate'], t.env)
     assert.notEqual(out.code, 0)
@@ -164,8 +144,8 @@ describe('cf setup readies a machine in one command', () => {
   after(() => t.cleanup())
   stubCli(t, 'claude')
 
-  it('suggests a v1 import when it finds one, but never imports on its own', async () => {
-    // A fake v1 roster in the fake home.
+  it('a machine that already ran cc or pi gets its skill from the shared roster', async () => {
+    // The cc/pi roster IS the roster: no import, no copy.
     mkdirSync(join(t.env.HOME, '.consensflow'), { recursive: true })
     cpSync(
       join(FIXTURES, 'v1-participants.json'),
@@ -174,18 +154,21 @@ describe('cf setup readies a machine in one command', () => {
 
     const out = await cf(['setup', '--no-cmux'], t.env)
     assert.equal(out.code, 0)
-    // Participants are the user's to create — cf ui / cf participant add.
-    assert.match(out.stdout, /import-v1/)
-    assert.doesNotMatch(out.stdout, /imported \d/)
-    assert.match(out.stdout, /cf ui/)
 
-    const listed = await cf(['participant', 'list', '--json'], t.env)
-    assert.equal(JSON.parse(listed.stdout).participants.length, 0)
+    const installed = readFileSync(
+      join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md'),
+      'utf8',
+    )
+    assert.match(installed, /hyperion/)
+    // The unsupported image participant is skipped by the skill, not the roster.
+    assert.doesNotMatch(installed, /pygmalion/)
+    const listed = await cf(['participant', 'list'], t.env)
+    assert.match(listed.stdout, /pygmalion/)
   })
 
-  it('the first participant added installs the skill everywhere, no separate step', async () => {
+  it('a participant added on top regenerates the installed skill', async () => {
     await cf(
-      ['participant', 'add', 'zeus', '--runtime', 'claude', '--model', 'claude-opus-5'],
+      ['participant', 'add', 'freya', '--runtime', 'claude', '--model', 'claude-opus-5'],
       t.env,
     )
 
@@ -193,7 +176,8 @@ describe('cf setup readies a machine in one command', () => {
       join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md'),
       'utf8',
     )
-    assert.match(installed, /zeus/)
+    assert.match(installed, /freya/)
+    assert.match(installed, /hyperion/)
   })
 
   it('is idempotent', async () => {

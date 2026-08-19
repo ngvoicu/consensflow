@@ -47,8 +47,15 @@ The CLI does the same job if you prefer it:
 ```sh
 cf participant add zeus --runtime claude --model claude-opus-5 --effort max
 cf participant list | edit | remove …
-cf participant import-v1     # only if you used ConsensFlow v1: brings that roster over
 ```
+
+**The roster is shared.** It lives at `~/.consensflow/participants.json` —
+the very file the `consensflow-cc` plugin and `consensflow-pi` extension
+already use. One roster, three consumers: edit it here (UI or CLI) and cc
+and pi see the change on their next run; if you already used either, `cf
+setup` finds your participants and installs the skill immediately — nothing
+to import. v3 preserves every field it doesn't understand, so cc/pi-specific
+settings survive round-trips.
 
 ## The skills ConsensFlow manages
 
@@ -86,9 +93,12 @@ delete it without `--force`, and it never touches files it didn't write.
 - [`consensflow-pi`](https://github.com/ngvoicu/consensflow-pi) — the same
   idea as a **pi extension** (installed through pi, not npm).
 
+All three share the same participants file, so they always agree on who
+your participants are.
+
 ## State
 
-Everything lives in `~/.config/consensflow/` (override `CONSENSFLOW_HOME`):
-`participants.json` and `skills-manifest.json`. Leave completely with
-`cf skills uninstall && npm uninstall -g consensflow`, then delete that
-folder.
+The roster: `~/.consensflow/participants.json` (shared with cc/pi). The
+manifest: `~/.config/consensflow/skills-manifest.json` (override with
+`CONSENSFLOW_HOME`). Leave completely with `cf skills uninstall &&
+npm uninstall -g consensflow`.
