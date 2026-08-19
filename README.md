@@ -55,7 +55,10 @@ already use. One roster, three consumers: edit it here (UI or CLI) and cc
 and pi see the change on their next run; if you already used either, `cf
 setup` finds your participants and installs the skill immediately — nothing
 to import. v3 preserves every field it doesn't understand, so cc/pi-specific
-settings survive round-trips.
+settings survive round-trips. And it heals: if cc or pi change the roster
+behind v3's back, the next `cf` invocation notices (a stored roster hash)
+and regenerates the installed skill — and the skill itself tells agents to
+run `cf skills update` when a name is missing from its table.
 
 ## The skills ConsensFlow manages
 

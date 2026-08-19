@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { chmodSync, cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { promisify } from 'node:util'
@@ -136,6 +136,57 @@ describe('roster changes keep installed skills current', () => {
     const out = await cf(['skills', 'uninstall'], t.env)
     assert.equal(out.code, 0)
     assert.equal((await cf(['skills', 'status'], t.env)).stdout.trim(), 'no skills installed')
+  })
+})
+
+describe('the skill heals itself when cc or pi edit the shared roster', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+  stubCli(t, 'claude')
+
+  it('any cf invocation regenerates a skill the roster has outrun', async () => {
+    await cf(
+      ['participant', 'add', 'zeus', '--runtime', 'claude', '--model', 'claude-opus-5'],
+      t.env,
+    )
+
+    // cc adds a participant behind v3's back: a raw write to the shared file.
+    const rosterFile = join(t.env.HOME, '.consensflow', 'participants.json')
+    const raw = JSON.parse(readFileSync(rosterFile, 'utf8'))
+    raw.participants.push({
+      id: 'apollo',
+      name: 'Apollo',
+      kind: 'codex',
+      toolsPolicy: 'workspace-write',
+      model: 'gpt-5.6-terra',
+      effort: 'xhigh',
+    })
+    writeFileSync(rosterFile, JSON.stringify(raw, null, 2))
+
+    // Any verb at all — not a skills verb — notices and heals.
+    await cf(['doctor'], t.env)
+
+    const installed = readFileSync(
+      join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md'),
+      'utf8',
+    )
+    assert.match(installed, /apollo/)
+  })
+
+  it('never resurrects a skill the user uninstalled', async () => {
+    await cf(['skills', 'uninstall'], t.env)
+
+    const rosterFile = join(t.env.HOME, '.consensflow', 'participants.json')
+    const raw = JSON.parse(readFileSync(rosterFile, 'utf8'))
+    raw.participants[0].model = 'changed-again'
+    writeFileSync(rosterFile, JSON.stringify(raw, null, 2))
+
+    await cf(['doctor'], t.env)
+
+    assert.equal(
+      existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')),
+      false,
+    )
   })
 })
 

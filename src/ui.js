@@ -1,7 +1,6 @@
 import { spawn } from 'node:child_process'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createServer } from 'node:http'
-import { installSkill } from './install.js'
 import {
   addParticipant,
   editParticipant,
@@ -10,7 +9,7 @@ import {
   RUNTIMES,
   removeParticipant,
 } from './roster.js'
-import { generateSkill } from './skill.js'
+import { refreshInstalledSkill } from './sync.js'
 
 /**
  * The minimal roster editor: one ephemeral loopback HTTP server, one inline
@@ -23,20 +22,6 @@ function tokenMatches(presented, token) {
   return timingSafeEqual(
     createHash('sha256').update(presented).digest(),
     createHash('sha256').update(token).digest(),
-  )
-}
-
-/** Installed on the first participant, regenerated on every change after. */
-function refreshInstalledSkill(env) {
-  const participants = listParticipants(env)
-  if (participants.length === 0) return
-  installSkill(
-    {
-      relPath: 'consensflow/SKILL.md',
-      content: generateSkill(participants),
-      source: 'consensflow',
-    },
-    env,
   )
 }
 

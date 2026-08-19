@@ -22,6 +22,7 @@ import {
   removeParticipant,
 } from '../src/roster.js'
 import { generateSkill } from '../src/skill.js'
+import { healSkillIfStale, refreshInstalledSkill as refreshSkill } from '../src/sync.js'
 
 // `cf … | head` closes our stdout mid-stream; dying with an EPIPE stack for
 // that is a crash where a quiet exit is the whole contract of a CLI.
@@ -75,24 +76,6 @@ function printReport(report) {
   }
 }
 
-/**
- * Every roster mutation lands the skill: installed on the first participant,
- * regenerated on every change after. The skill IS the product — a roster
- * nobody's agents can see is not a roster.
- */
-function refreshInstalledSkill() {
-  const participants = listParticipants(env)
-  if (participants.length === 0) return
-  installSkill(
-    {
-      relPath: 'consensflow/SKILL.md',
-      content: generateSkill(participants),
-      source: 'consensflow',
-    },
-    env,
-  )
-}
-
 function participantVerb(rest) {
   const action = rest[0]
   const { values, positionals } = parseArgs({
@@ -124,7 +107,7 @@ function participantVerb(rest) {
         },
         env,
       )
-      refreshInstalledSkill()
+      refreshSkill(env)
       out(`${added.name}  ${added.runtime}  ${added.model}`)
       return
     }
@@ -156,13 +139,13 @@ function participantVerb(rest) {
         },
         env,
       )
-      refreshInstalledSkill()
+      refreshSkill(env)
       out(`${edited.name}  ${edited.runtime}  ${edited.model}`)
       return
     }
     case 'remove': {
       removeParticipant(name, env)
-      refreshInstalledSkill()
+      refreshSkill(env)
       out(`removed ${name}`)
       return
     }
@@ -208,7 +191,7 @@ function skillsVerb(rest) {
       return
     }
     case 'update': {
-      refreshInstalledSkill()
+      refreshSkill(env)
       const hasCmux = skillsStatus(env).some((row) => row.source.startsWith('cmux@'))
       if (hasCmux) {
         const cmux = installCmuxSkills(env, { force: values.force })
@@ -301,6 +284,13 @@ async function main() {
   if (command === '--version' || command === '-v' || command === 'version') {
     out(PKG.version)
     return
+  }
+
+  // cc and pi write the shared roster without telling v3; any invocation is
+  // an opportunity to notice and regenerate the installed skill. Skills
+  // verbs manage installation explicitly, so they are exempt.
+  if (['participant', 'setup', 'ui', 'doctor'].includes(command)) {
+    healSkillIfStale(env)
   }
 
   switch (command) {

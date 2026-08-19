@@ -22,7 +22,7 @@ export function sha256(content) {
 export function loadManifest(env) {
   try {
     const parsed = JSON.parse(readFileSync(manifestPath(env), 'utf8'))
-    return { files: parsed.files ?? {} }
+    return { files: parsed.files ?? {}, rosterSha: parsed.rosterSha }
   } catch {
     return { files: {} }
   }

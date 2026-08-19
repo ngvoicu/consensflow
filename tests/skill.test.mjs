@@ -90,6 +90,11 @@ describe('the generated skill carries the live-verified command per engine', () 
     assert.ok(!hyperionRow.includes('--dangerously'))
   })
 
+  it('teaches the agent to self-heal when a name is missing from the table', () => {
+    assert.match(md, /cf skills update/)
+    assert.match(md, /missing from (the|this) table/i)
+  })
+
   it('keeps the etiquette that survived two product generations', () => {
     assert.match(md, /One participant at a time/i)
     assert.match(md, /Never apply a participant/i)
