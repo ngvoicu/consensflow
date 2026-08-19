@@ -10,8 +10,8 @@ participants and generates/installs **one skill** teaching every coding agent
 (claude, codex, pi, opencode — all read the same Agent Skills `SKILL.md`
 format) how to consult them via exact one-shot CLI commands. It also
 installs and updates cmux's own skills. There is deliberately **no
-delegation engine** — no daemon, no SQLite, no panes, no state machine; v2
-(`../consensflow-v2`) keeps that machinery as reference.
+delegation engine** — no daemon, no SQLite, no panes, no state machine (the
+v2 engine that had one was retired and deleted 2026-08-19).
 
 ## Source map
 
