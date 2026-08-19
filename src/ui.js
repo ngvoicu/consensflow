@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createServer } from 'node:http'
-import { installSkill, skillsStatus } from './install.js'
+import { installSkill } from './install.js'
 import {
   addParticipant,
   editParticipant,
@@ -26,10 +26,10 @@ function tokenMatches(presented, token) {
   )
 }
 
+/** Installed on the first participant, regenerated on every change after. */
 function refreshInstalledSkill(env) {
-  const owned = skillsStatus(env).filter((row) => row.source === 'consensflow')
   const participants = listParticipants(env)
-  if (owned.length === 0 || participants.length === 0) return
+  if (participants.length === 0) return
   installSkill(
     {
       relPath: 'consensflow/SKILL.md',

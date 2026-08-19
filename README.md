@@ -1,57 +1,73 @@
-# ConsensFlow v3
+# ConsensFlow
 
 Named AI participants for every coding agent on your machine.
 
-You keep a roster — `zeus` (Claude Opus, max effort), `hyperion` (GPT 5.6 Sol,
-ultra), `endymion` (Kimi K3, 1M context)… — and ConsensFlow generates one
-**skill** from it and installs that skill into every coding agent you have:
-Claude Code, codex, pi and opencode all read the same Agent Skills format.
-From then on, any agent in any project understands "ask hyperion whether this
-migration is safe": it runs hyperion's exact one-shot command, waits, and
-reports the answer, attributed.
+You create a roster — say `zeus` (Claude Opus, max effort) or `hyperion`
+(GPT 5.6, ultra) — and ConsensFlow generates one **skill** from it and
+installs that skill into every coding agent you have: Claude Code, codex, pi
+and opencode all read the same Agent Skills format. From then on, any agent
+in any project understands "ask hyperion whether this migration is safe": it
+runs hyperion's exact one-shot command, waits, and reports the answer,
+attributed.
 
-There is no daemon, no database, no delegation engine — the skill *is* the
-product. ConsensFlow manages the roster and keeps the skills current
-(including cmux's own skills, which teach agents pane control).
+**No accounts, no API keys.** Participants run through the agent CLIs you
+already have installed and logged in — your Claude subscription, your ChatGPT
+login, whatever providers you configured in pi or opencode. ConsensFlow
+stores no credentials and asks for none. (The generated commands even strip
+stray `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` shell variables for the one
+command they run, so a leftover export can't silently switch a subscription
+login to per-token API billing.)
+
+There is no daemon and no database — the skill *is* the product. ConsensFlow
+manages the roster and keeps the skills current, including cmux's own skills.
 
 ## Install
 
+Node ≥ 20:
+
 ```sh
-npm install -g <git-url-or-checkout-path>   # Node ≥ 20; installs `cf` and `consensflow`
+npm install -g ngvoicu/consensflow
 cf setup
 ```
 
-(It's a Node tool, so npm — not pipx — is the installer.)
-
-`cf setup` is idempotent and does everything:
-
-1. Imports your ConsensFlow v1 roster (`~/.consensflow/participants.json`)
-   if the v3 roster is empty — efforts included.
-2. Generates the consensflow skill from the roster and installs it into every
-   detected agent (`~/.claude/skills`, `~/.codex/skills`,
-   `~/.config/opencode/skills`, `~/.pi/agent/skills`).
-3. Fetches and installs cmux's own skills (`--no-cmux` to skip).
-
-Open a fresh agent session anywhere and say "ask zeus …".
-
-## Managing the roster
+`cf setup` detects your agents and installs the cmux skills (see below).
+Participants are yours to create — nothing is seeded:
 
 ```sh
-cf ui                                        # minimal browser editor, Ctrl-C to stop
-cf participant add freya --runtime codex --model gpt-5.6-terra --effort xhigh
-cf participant list
-cf participant edit freya --model gpt-5.6-sol
-cf participant remove freya
-cf participant import-v1                     # re-import from v1 any time
+cf ui
 ```
 
-Every change regenerates the installed skill everywhere, immediately.
+opens a minimal browser editor (Ctrl-C to stop). Add a participant — name,
+runtime, model, optional effort — and **the skill installs itself into every
+agent the moment the first participant exists, and rewrites itself on every
+add, edit or remove after that.** No install step, no sync step.
 
-## Managing the skills
+The CLI does the same job if you prefer it:
+
+```sh
+cf participant add zeus --runtime claude --model claude-opus-5 --effort max
+cf participant list | edit | remove …
+cf participant import-v1     # only if you used ConsensFlow v1: brings that roster over
+```
+
+## The skills ConsensFlow manages
+
+Two sources, one owner:
+
+- **`consensflow`** — generated from your roster: a table of exact commands,
+  one per participant, with model, effort and permission baked in.
+  `--dangerously-*` flags appear only on participants you explicitly stored
+  as `full-auto`. Participants run in the agent's working directory, so they
+  read project files themselves.
+- **cmux's skills** — fetched by shallow-cloning
+  [`manaflow-ai/cmux`](https://github.com/manaflow-ai/cmux) (its `skills/`
+  tree: core, workspace, browser, settings, …) and installed the same way,
+  recorded as `cmux@<commit>`. They teach agents pane control; skip with
+  `cf setup --no-cmux`.
 
 ```sh
 cf skills status      # every file ConsensFlow owns: ok, drifted, missing
-cf skills update      # regenerate ours; re-fetch cmux's if installed
+cf skills update      # regenerate ours; re-fetch cmux's at the latest commit
 cf skills uninstall   # remove exactly what the manifest owns, nothing else
 cf doctor
 ```
@@ -60,25 +76,19 @@ Ownership is a hash manifest (`~/.config/consensflow/skills-manifest.json`).
 A file you edited by hand is **drifted**: ConsensFlow refuses to overwrite or
 delete it without `--force`, and it never touches files it didn't write.
 
-## How the skill works
+## Which ConsensFlow?
 
-The generated `SKILL.md` carries a table of exact commands, one per
-participant — model, effort and permission baked in:
-
-```
-env -u OPENAI_API_KEY codex exec --skip-git-repo-check -m gpt-5.6-sol -c model_reasoning_effort="ultra" "<question>"
-```
-
-The `env -u …_API_KEY` guards keep subscription logins from silently
-switching to API-key billing. `--dangerously-*` flags appear only on
-participants you explicitly stored as `full-auto`. Participants run in the
-agent's working directory, so they read project files themselves.
-
-The prose was live-proven before the generator existed: fresh claude and
-codex sessions each consulted a participant correctly on the first try.
+- **This repo (`consensflow`)** — the one to install: works with all four
+  agents, one npm command.
+- [`consensflow-cc`](https://github.com/ngvoicu/consensflow-cc) — a Claude
+  Code **plugin** (installed through Claude Code, not npm) that additionally
+  hands your *current conversation* to the participant as context.
+- [`consensflow-pi`](https://github.com/ngvoicu/consensflow-pi) — the same
+  idea as a **pi extension** (installed through pi, not npm).
 
 ## State
 
 Everything lives in `~/.config/consensflow/` (override `CONSENSFLOW_HOME`):
-`participants.json` and `skills-manifest.json`. Uninstall completely with
-`cf skills uninstall && npm uninstall -g consensflow` and delete that folder.
+`participants.json` and `skills-manifest.json`. Leave completely with
+`cf skills uninstall && npm uninstall -g consensflow`, then delete that
+folder.

@@ -76,10 +76,12 @@ function printReport(report) {
   }
 }
 
-/** Regenerates + reinstalls the consensflow skill wherever it is installed. */
+/**
+ * Every roster mutation lands the skill: installed on the first participant,
+ * regenerated on every change after. The skill IS the product — a roster
+ * nobody's agents can see is not a roster.
+ */
 function refreshInstalledSkill() {
-  const owned = skillsStatus(env).filter((row) => row.source === 'consensflow')
-  if (owned.length === 0) return
   const participants = listParticipants(env)
   if (participants.length === 0) return
   installSkill(
@@ -169,7 +171,9 @@ function participantVerb(rest) {
     }
     case 'import-v1': {
       const v1Path = values.from ?? join(env.HOME ?? homedir(), '.consensflow', 'participants.json')
-      const outcome = importV1({ v1Path, presetsPath: values.presets }, env)
+      // Efforts for claude/codex/opencode kinds live in the v1 plugin's
+      // presets; find them unless the caller pointed elsewhere.
+      const outcome = importV1({ v1Path, presetsPath: values.presets ?? v1PresetsPath() }, env)
       refreshInstalledSkill()
       out(`imported ${outcome.imported.length}: ${outcome.imported.map((p) => p.name).join(', ')}`)
       for (const s of outcome.skipped) out(`skipped ${s.name}: ${s.reason}`)
@@ -254,17 +258,6 @@ function setup(rest) {
     },
   })
 
-  // A v1 roster on this machine is curation worth keeping: import it once,
-  // stated — never silently on a roster that already has entries.
-  const v1Path = join(env.HOME ?? homedir(), '.consensflow', 'participants.json')
-  if (listParticipants(env).length === 0 && existsSync(v1Path)) {
-    const outcome = importV1({ v1Path, presetsPath: v1PresetsPath() }, env)
-    out(
-      `imported ${outcome.imported.length} v1 participants: ${outcome.imported.map((p) => p.name).join(', ')}`,
-    )
-    for (const s of outcome.skipped) out(`skipped ${s.name}: ${s.reason}`)
-  }
-
   const agents = detectAgents(env)
   out(
     agents.length > 0
@@ -274,9 +267,16 @@ function setup(rest) {
 
   const participants = listParticipants(env)
   if (participants.length === 0) {
+    // Participants are the user's to create; nothing is seeded for them.
     out(
-      'participants: none — add some with `cf participant add` or `cf ui`, then rerun `cf skills install`',
+      'participants: none yet — create them with `cf ui` (or `cf participant add`); the skill installs itself on the first one',
     )
+    const v1Path = join(env.HOME ?? homedir(), '.consensflow', 'participants.json')
+    if (existsSync(v1Path)) {
+      out(
+        'found a ConsensFlow v1 roster — bring it over with `cf participant import-v1` if you want it',
+      )
+    }
   } else if (agents.length > 0) {
     printReport(
       installSkill(

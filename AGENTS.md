@@ -17,7 +17,7 @@ delegation engine** — no daemon, no SQLite, no panes, no state machine; v2
 
 | Path | Owns |
 |---|---|
-| `bin/cf.mjs` | All verbs: setup, participant …, skills …, ui, doctor |
+| `bin/cf.mjs` | All verbs: setup, participant …, skills …, ui, doctor. Setup never seeds participants (it suggests `import-v1` when a v1 roster exists); every roster mutation installs-or-regenerates the skill — first add installs it everywhere |
 | `src/roster.js` | Roster CRUD + v1 import; state root resolution (`CONSENSFLOW_HOME` → XDG → `~/.config/consensflow`) |
 | `src/skill.js` | SKILL.md generation — the prose IS the product; template live-proven before the generator existed |
 | `src/agents.js` | Agent detection (CLI on PATH) + per-agent skills dir (honours `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`) |

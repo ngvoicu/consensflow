@@ -164,7 +164,7 @@ describe('cf setup readies a machine in one command', () => {
   after(() => t.cleanup())
   stubCli(t, 'claude')
 
-  it('imports a v1 roster it finds, installs the skill, and says what it did', async () => {
+  it('suggests a v1 import when it finds one, but never imports on its own', async () => {
     // A fake v1 roster in the fake home.
     mkdirSync(join(t.env.HOME, '.consensflow'), { recursive: true })
     cpSync(
@@ -174,14 +174,26 @@ describe('cf setup readies a machine in one command', () => {
 
     const out = await cf(['setup', '--no-cmux'], t.env)
     assert.equal(out.code, 0)
-    assert.match(out.stdout, /imported/)
-    assert.match(out.stdout, /claude/)
+    // Participants are the user's to create — cf ui / cf participant add.
+    assert.match(out.stdout, /import-v1/)
+    assert.doesNotMatch(out.stdout, /imported \d/)
+    assert.match(out.stdout, /cf ui/)
+
+    const listed = await cf(['participant', 'list', '--json'], t.env)
+    assert.equal(JSON.parse(listed.stdout).participants.length, 0)
+  })
+
+  it('the first participant added installs the skill everywhere, no separate step', async () => {
+    await cf(
+      ['participant', 'add', 'zeus', '--runtime', 'claude', '--model', 'claude-opus-5'],
+      t.env,
+    )
 
     const installed = readFileSync(
       join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md'),
       'utf8',
     )
-    assert.match(installed, /hyperion/)
+    assert.match(installed, /zeus/)
   })
 
   it('is idempotent', async () => {

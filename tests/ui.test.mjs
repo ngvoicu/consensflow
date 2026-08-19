@@ -70,19 +70,8 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     assert.equal((await listed.json()).participants.length, 1)
   })
 
-  it('regenerates the installed skill after a change', async () => {
-    // Install once (the CLI would normally have done this).
-    const { installSkill } = await import('../src/install.js')
-    const { generateSkill } = await import('../src/skill.js')
-    installSkill(
-      {
-        relPath: 'consensflow/SKILL.md',
-        content: generateSkill(listParticipants(t.env)),
-        source: 'consensflow',
-      },
-      t.env,
-    )
-
+  it('installs and regenerates the skill on every change — no separate step', async () => {
+    // The add in the previous test already installed it; the edit refreshes.
     await api('/api/participants/zeus', {
       method: 'PATCH',
       body: JSON.stringify({ model: 'claude-opus-5' }),
