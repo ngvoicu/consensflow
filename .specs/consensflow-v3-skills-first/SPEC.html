@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ConsensFlow v3 — Skills-First</title>
+<link rel="stylesheet" href="../assets/spec-styles.css">
+<script type="application/json" id="spec-meta">
+{"id":"consensflow-v3-skills-first","title":"ConsensFlow v3 — Skills-First","status":"completed","priority":"high","created":"2026-08-19","updated":"2026-08-19"}
+</script>
+</head>
+<body>
+<main class="spec">
+  <header class="spec__header">
+    <h1>ConsensFlow v3 — Skills-First</h1>
+    <dl>
+      <dt>Status</dt><dd><span class="pill pill--done">Completed</span></dd>
+      <dt>Created</dt><dd>2026-08-19</dd>
+      <dt>Updated</dt><dd>2026-08-19</dd>
+    </dl>
+  </header>
+
+  <section class="section" id="overview">
+    <div class="section__header"><h2 class="section__title">Overview</h2></div>
+    <p>v3 replaces the v2 delegation engine with prose: a generated
+    <code>SKILL.md</code> (Agent Skills format) teaches any coding agent
+    (claude, codex, pi, opencode) to consult the user's named participants by
+    running their exact one-shot CLI commands. ConsensFlow itself shrinks to a
+    zero-dependency npm package: a roster, a skill generator/installer that
+    also manages cmux's own skills, and a minimal ephemeral web UI for the
+    roster. No daemon, no SQLite, no state machine.</p>
+    <p><strong>Proven before building</strong>: the hand-written v0 skill was
+    installed into claude and codex by hand; both runtimes consulted a
+    participant correctly on the first try (codex→diana: DIANA-VIA-SKILL-OK;
+    claude→phoebe: PHOEBE-VIA-SKILL-OK, cross-runtime). All four one-shot
+    command forms verified live 2026-08-19.</p>
+    <p><strong>Decisions</strong> (user, 2026-08-19): skills-first minimal —
+    no engine port; minimal UI for participant management; npm-installable
+    (<code>npm install -g</code>, bins <code>cf</code> + <code>consensflow</code>);
+    ConsensFlow also installs/updates cmux's skills. State root:
+    <code>~/.config/consensflow/</code> (override <code>CONSENSFLOW_HOME</code>);
+    v1 roster importable from <code>~/.consensflow/participants.json</code>.</p>
+  </section>
+
+  <section class="section" id="acceptance">
+    <div class="section__header"><h2 class="section__title">Acceptance Criteria</h2></div>
+    <ul class="ac-list">
+      <li class="ac-item" id="ac-1" data-ac="1" data-status="completed"><span class="ac-text">Roster CRUD works via CLI and survives round-trips; v1 import brings names, models, efforts (pi thinking + preset efforts when v1 presets.js is present).</span></li>
+      <li class="ac-item" id="ac-2" data-ac="2" data-status="completed"><span class="ac-text">The generated SKILL.md matches the live-verified v0 shape: per-participant exact commands, env -u billing guards, effort flags per engine, full-auto flags only for full-auto participants, names in the description.</span></li>
+      <li class="ac-item" id="ac-3" data-ac="3" data-status="completed"><span class="ac-text">skills install/update/status/uninstall manage both the consensflow skill and cmux's skills across all detected agents, with a hash manifest; drifted files are never silently clobbered (--force required); uninstall removes only what the manifest owns.</span></li>
+      <li class="ac-item" id="ac-4" data-ac="4" data-status="completed"><span class="ac-text">Roster changes regenerate and reinstall the consensflow skill everywhere it is installed.</span></li>
+      <li class="ac-item" id="ac-5" data-ac="5" data-status="completed"><span class="ac-text">cf ui serves a loopback, token-gated single-page roster editor; edits persist and trigger skill regeneration; the process is ephemeral (Ctrl-C).</span></li>
+      <li class="ac-item" id="ac-6" data-ac="6" data-status="completed"><span class="ac-text">Tests never touch the real HOME/agent dirs (guard), never invoke live agent CLIs or the network (git is PATH-shimmed).</span></li>
+      <li class="ac-item" id="ac-7" data-ac="7" data-status="completed"><span class="ac-text">npm install -g from the repo yields working cf/consensflow bins with no build step; README covers install on a fresh machine.</span></li>
+    </ul>
+  </section>
+
+  <section class="section" id="phases">
+    <div class="section__header"><h2 class="section__title">Phases</h2></div>
+
+    <details class="phase" data-phase="1" data-status="completed" open>
+      <summary><span class="pill pill--done">Done</span> Phase 1 — Roster</summary>
+      <ul class="task-list">
+        <li class="task task--test" data-task="TEST-V3-01" data-status="completed">[TEST-V3-01] tests/roster.test.mjs: CRUD, validation (name/runtime/model), persistence round-trip, unknown-name errors, v1 import (fixture v1 file + fixture presets.js: pi thinking and preset efforts land; image kind skipped).</li>
+        <li class="task task--impl" data-task="IMPL-V3-02" data-status="completed" data-tdd-phase="refactor">[IMPL-V3-02] src/roster.js: load/save/validate at CONSENSFLOW_HOME (default ~/.config/consensflow), add/edit/remove/list/importV1.</li>
+      </ul>
+    </details>
+
+    <details class="phase" data-phase="2" data-status="completed">
+      <summary><span class="pill pill--done">Done</span> Phase 2 — Skill generator</summary>
+      <ul class="task-list">
+        <li class="task task--test" data-task="TEST-V3-03" data-status="completed">[TEST-V3-03] tests/skill.test.mjs: generated SKILL.md carries every participant with the exact live-verified command per engine; env -u guards; effort flags (claude --effort, codex -c model_reasoning_effort, pi --thinking, opencode --variant); --dangerously flags only for full-auto rows; description lists names; unsupported kinds noted, not dropped silently.</li>
+        <li class="task task--impl" data-task="IMPL-V3-04" data-status="completed" data-tdd-phase="refactor">[IMPL-V3-04] src/skill.js: template from the proven v0 skill/SKILL.md, table generated from the roster.</li>
+      </ul>
+    </details>
+
+    <details class="phase" data-phase="3" data-status="completed">
+      <summary><span class="pill pill--done">Done</span> Phase 3 — Agents & install manifest</summary>
+      <ul class="task-list">
+        <li class="task task--test" data-task="TEST-V3-05" data-status="completed">[TEST-V3-05] tests/install.test.mjs: agent detection honors CLAUDE_CONFIG_DIR/CODEX_HOME/XDG_CONFIG_HOME/HOME and PATH; install writes SKILL.md into each detected agent with a manifest entry (path+sha256+source); reinstall over drifted file refuses without --force; uninstall removes only manifest-owned files; status reports ok/drifted/missing.</li>
+        <li class="task task--impl" data-task="IMPL-V3-06" data-status="completed" data-tdd-phase="refactor">[IMPL-V3-06] src/agents.js + src/manifest.js + src/install.js.</li>
+      </ul>
+    </details>
+
+    <details class="phase" data-phase="4" data-status="completed">
+      <summary><span class="pill pill--done">Done</span> Phase 4 — cmux skills</summary>
+      <ul class="task-list">
+        <li class="task task--test" data-task="TEST-V3-07" data-status="completed">[TEST-V3-07] tests/cmux-skills.test.mjs: fetch via PATH-shimmed git (fixture repo with skills/*/SKILL.md); installs each into detected agents under the manifest with source cmux@&lt;commit&gt;; update detects a new commit and rewrites unchanged-by-user files; drifted ones refuse without --force.</li>
+        <li class="task task--impl" data-task="IMPL-V3-08" data-status="completed" data-tdd-phase="refactor">[IMPL-V3-08] src/cmux-skills.js: git clone --depth 1 to temp, copy skills/, record commit.</li>
+      </ul>
+    </details>
+
+    <details class="phase" data-phase="5" data-status="completed">
+      <summary><span class="pill pill--done">Done</span> Phase 5 — CLI</summary>
+      <ul class="task-list">
+        <li class="task task--test" data-task="TEST-V3-09" data-status="completed">[TEST-V3-09] tests/cli.test.mjs: subprocess runs of bin/cf.mjs with temp env — participant add/list/edit/remove/import-v1 (add/edit/remove regenerate installed skills), skills install/status/update/uninstall, setup (install everything + summary), doctor, --version, unknown verb fails.</li>
+        <li class="task task--impl" data-task="IMPL-V3-10" data-status="completed" data-tdd-phase="refactor">[IMPL-V3-10] bin/cf.mjs wiring all verbs over the src modules.</li>
+      </ul>
+    </details>
+
+    <details class="phase" data-phase="6" data-status="completed">
+      <summary><span class="pill pill--done">Done</span> Phase 6 — Minimal UI</summary>
+      <ul class="task-list">
+        <li class="task task--test" data-task="TEST-V3-11" data-status="completed">[TEST-V3-11] tests/ui.test.mjs: server binds loopback with token; unauthenticated requests refused; GET roster; POST add + edit; DELETE remove; each mutation persists and regenerates installed skills; page HTML served.</li>
+        <li class="task task--impl" data-task="IMPL-V3-12" data-status="completed" data-tdd-phase="refactor">[IMPL-V3-12] src/ui.js: node:http, inline single-page editor, cf ui opens it.</li>
+      </ul>
+    </details>
+  </section>
+
+  <section class="section" id="decisions">
+    <div class="section__header"><h2 class="section__title">Decision Log</h2></div>
+    <table class="decision-table"><tbody>
+      <tr><td>2026-08-19</td><td>Skill-first inversion: v0 SKILL.md hand-written and live-proven on two runtimes before any factory code (advisor).</td></tr>
+      <tr><td>2026-08-19</td><td>Zero runtime deps, no build step: plain Node ESM + node:test, so npm install -g works from a git checkout.</td></tr>
+      <tr><td>2026-08-19</td><td>env -u ANTHROPIC_API_KEY / OPENAI_API_KEY kept in generated commands: prevents subscription logins silently switching to API billing (v1 dropEnv).</td></tr>
+      <tr><td>2026-08-19</td><td>Pane control is cmux's skills' job; the consensflow skill teaches only what to run (v2 lesson: typed-bootstrap verification is a minefield).</td></tr>
+    </tbody></table>
+  </section>
+
+  <section class="section" id="tdd-log">
+    <div class="section__header"><h2 class="section__title">TDD Log</h2></div>
+    <p class="muted">One entry per completed TEST-IMPL pair.</p>
+    <article class="tdd-cycle"><header class="tdd-cycle__header"><span><code>[TEST-V3-01]</code> &rarr; <code>[IMPL-V3-02]</code> &middot; <strong>roster + v1 import</strong></span><span class="muted">2026-08-19</span></header>
+      <div class="tdd-lanes"><div class="lane lane--red"><div class="lane__title">Red</div><pre class="lane__output">node --test → fail 1 (Cannot find module src/roster.js)</pre></div>
+      <div class="lane lane--green"><div class="lane__title">Green</div><pre class="lane__output">pass 7 / fail 0 — CRUD, validation, round-trip, import maps kinds + efforts, image skipped</pre></div>
+      <div class="lane lane--refactor"><div class="lane__title">Refactor</div><p style="margin:0;font-size:12.5px;">Preset-effort parse made quote-agnostic after biome single-quoted the fixture — the real v1 file is double-quoted; both now parse.</p></div></div></article>
+
+    <article class="tdd-cycle"><header class="tdd-cycle__header"><span><code>[TEST-V3-03]</code> &rarr; <code>[IMPL-V3-04]</code> &middot; <strong>skill generator</strong></span><span class="muted">2026-08-19</span></header>
+      <div class="tdd-lanes"><div class="lane lane--red"><div class="lane__title">Red</div><pre class="lane__output">pass 7 / fail 1 (src/skill.js missing)</pre></div>
+      <div class="lane lane--green"><div class="lane__title">Green</div><pre class="lane__output">pass 16 / fail 0 — exact per-engine commands, env -u guards, danger flags only on full-auto</pre></div>
+      <div class="lane lane--refactor"><div class="lane__title">Refactor</div><p style="margin:0;font-size:12.5px;">None — the template is the live-proven v0 prose verbatim.</p></div></div></article>
+
+    <article class="tdd-cycle"><header class="tdd-cycle__header"><span><code>[TEST-V3-05]</code> &rarr; <code>[IMPL-V3-06]</code> &middot; <strong>agents + manifest + install</strong></span><span class="muted">2026-08-19</span></header>
+      <div class="tdd-lanes"><div class="lane lane--red"><div class="lane__title">Red</div><pre class="lane__output">pass 16 / fail 1 (src/agents.js missing)</pre></div>
+      <div class="lane lane--green"><div class="lane__title">Green</div><pre class="lane__output">pass 24 / fail 0 — detection by PATH, drift refused, unowned refused, uninstall manifest-only</pre></div>
+      <div class="lane lane--refactor"><div class="lane__title">Refactor</div><p style="margin:0;font-size:12.5px;">install action ternary read existence after the write; captured `existed` before it.</p></div></div></article>
+
+    <article class="tdd-cycle"><header class="tdd-cycle__header"><span><code>[TEST-V3-07]</code> &rarr; <code>[IMPL-V3-08]</code> &middot; <strong>cmux skills</strong></span><span class="muted">2026-08-19</span></header>
+      <div class="tdd-lanes"><div class="lane lane--red"><div class="lane__title">Red</div><pre class="lane__output">fail 3: git shim rev-parse arg position wrong, then shim PATH lacked cp/mkdir</pre></div>
+      <div class="lane lane--green"><div class="lane__title">Green</div><pre class="lane__output">pass 4 / fail 0 — fixture tree installed as cmux@commit, update rewrites, drift refused</pre></div>
+      <div class="lane lane--refactor"><div class="lane__title">Refactor</div><p style="margin:0;font-size:12.5px;">None beyond the shim fixes (test infrastructure, not product).</p></div></div></article>
+
+    <article class="tdd-cycle"><header class="tdd-cycle__header"><span><code>[TEST-V3-09]</code> &rarr; <code>[IMPL-V3-10]</code> &middot; <strong>CLI</strong></span><span class="muted">2026-08-19</span></header>
+      <div class="tdd-lanes"><div class="lane lane--red"><div class="lane__title">Red</div><pre class="lane__output">first draft of bin/cf.mjs had a syntax error in setup() and an eager ui import</pre></div>
+      <div class="lane lane--green"><div class="lane__title">Green</div><pre class="lane__output">pass 9 CLI / 37 total — verbs, regeneration on edit, setup imports v1 + installs</pre></div>
+      <div class="lane lane--refactor"><div class="lane__title">Refactor</div><p style="margin:0;font-size:12.5px;">v1PresetsPath() extracted; ui import made lazy so the CLI stands before Phase 6.</p></div></div></article>
+
+    <article class="tdd-cycle"><header class="tdd-cycle__header"><span><code>[TEST-V3-11]</code> &rarr; <code>[IMPL-V3-12]</code> &middot; <strong>minimal UI</strong></span><span class="muted">2026-08-19</span></header>
+      <div class="tdd-lanes"><div class="lane lane--red"><div class="lane__title">Red</div><pre class="lane__output">pass 37 / fail 1 (src/ui.js missing)</pre></div>
+      <div class="lane lane--green"><div class="lane__title">Green</div><pre class="lane__output">pass 43 / fail 0 — loopback+token, CRUD persists, mutations regenerate the installed skill</pre></div>
+      <div class="lane lane--refactor"><div class="lane__title">Refactor</div><p style="margin:0;font-size:12.5px;">Row-append cleaned (tbody.appendChild(tr)).</p></div></div></article>
+
+  </section>
+</main>
+<script src="../assets/spec-runtime.js"></script>
+</body>
+</html>

@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "participants": [
+    {
+      "id": "zeus",
+      "name": "Zeus",
+      "kind": "claude-code",
+      "toolsPolicy": "workspace-write",
+      "model": "claude-opus-5",
+      "description": "Deepest Opus-tier reviewer.",
+      "preset": "zeus"
+    },
+    {
+      "id": "hyperion",
+      "name": "Hyperion",
+      "kind": "codex",
+      "toolsPolicy": "workspace-write",
+      "model": "gpt-5.6-sol",
+      "description": "Flagship Codex.",
+      "preset": "hyperion"
+    },
+    {
+      "id": "endymion",
+      "name": "Endymion",
+      "kind": "pi",
+      "toolsPolicy": "workspace-write",
+      "model": "openrouter/moonshotai/kimi-k3",
+      "thinking": "xhigh",
+      "description": "Kimi K3 via pi.",
+      "preset": "endymion"
+    },
+    {
+      "id": "mani",
+      "name": "Mani",
+      "kind": "opencode",
+      "toolsPolicy": "workspace-write",
+      "model": "openrouter/moonshotai/kimi-k3",
+      "description": "Kimi K3 via opencode.",
+      "preset": "mani"
+    },
+    {
+      "id": "pygmalion",
+      "name": "Pygmalion",
+      "kind": "image",
+      "toolsPolicy": "workspace-write",
+      "model": "gpt-5.5",
+      "description": "Image generator.",
+      "preset": "pygmalion"
+    }
+  ]
+}
