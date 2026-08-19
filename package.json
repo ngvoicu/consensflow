@@ -1,5 +1,5 @@
 {
-  "name": "consensflow",
+  "name": "consensflow-cmux",
   "version": "3.0.0-alpha.0",
   "description": "Named AI participants for every coding agent: a roster, a generated skill that teaches claude/codex/pi/opencode to consult them, and a manager for the skills (ConsensFlow's and cmux's).",
   "license": "UNLICENSED",
@@ -9,7 +9,7 @@
   },
   "bin": {
     "cf": "bin/cf.mjs",
-    "consensflow": "bin/cf.mjs"
+    "consensflow-cmux": "bin/cf.mjs"
   },
   "files": [
     "bin",
@@ -28,10 +28,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ngvoicu/consensflow.git"
+    "url": "git+https://github.com/ngvoicu/consensflow-cmux.git"
   },
   "homepage": "https://consensflow.ngvoicu.dev",
-  "bugs": "https://github.com/ngvoicu/consensflow/issues",
+  "bugs": "https://github.com/ngvoicu/consensflow-cmux/issues",
   "keywords": [
     "ai",
     "coding-agents",

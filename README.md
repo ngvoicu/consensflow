@@ -1,4 +1,4 @@
-# ConsensFlow
+# consensflow-cmux
 
 Named AI participants for every coding agent on your machine.
 
@@ -26,7 +26,7 @@ manages the roster and keeps the skills current, including cmux's own skills.
 Node ≥ 20:
 
 ```sh
-npm install -g ngvoicu/consensflow
+npm install -g ngvoicu/consensflow-cmux
 cf setup
 ```
 
@@ -88,8 +88,8 @@ delete it without `--force`, and it never touches files it didn't write.
 
 ## Which ConsensFlow?
 
-- **This repo (`consensflow`)** — the one to install: works with all four
-  agents, one npm command.
+- **This repo (`consensflow-cmux`)** — the one to install: works with all
+  four agents, one npm command; also manages cmux's skills.
 - [`consensflow-cc`](https://github.com/ngvoicu/consensflow-cc) — a Claude
   Code **plugin** (installed through Claude Code, not npm) that additionally
   hands your *current conversation* to the participant as context.
@@ -104,4 +104,4 @@ your participants are.
 The roster: `~/.consensflow/participants.json` (shared with cc/pi). The
 manifest: `~/.config/consensflow/skills-manifest.json` (override with
 `CONSENSFLOW_HOME`). Leave completely with `cf skills uninstall &&
-npm uninstall -g consensflow`.
+npm uninstall -g consensflow-cmux`.

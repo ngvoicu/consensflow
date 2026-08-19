@@ -4,7 +4,7 @@ Byte-identical to `AGENTS.md` — keep both in sync (workspace convention).
 
 ## What this is
 
-ConsensFlow v3: skills-first. A zero-dependency Node ESM npm package
+consensflow-cmux (ConsensFlow v3): skills-first. A zero-dependency Node ESM npm package
 (`cf`/`consensflow` bins, no build step) that manages a roster of named AI
 participants and generates/installs **one skill** teaching every coding agent
 (claude, codex, pi, opencode — all read the same Agent Skills `SKILL.md`
