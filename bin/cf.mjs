@@ -23,7 +23,12 @@ import {
   removeParticipant,
 } from '../src/roster.js'
 import { generateSkill } from '../src/skill.js'
-import { healSkillIfStale, refreshInstalledSkill as refreshSkill } from '../src/sync.js'
+import {
+  healSkillIfStale,
+  refreshInstalledSkill as refreshSkill,
+  retireSkillFromNativeHosts,
+  skillTargets,
+} from '../src/sync.js'
 
 // `cf … | head` closes our stdout mid-stream; dying with an EPIPE stack for
 // that is a crash where a quiet exit is the whole contract of a CLI.
@@ -42,7 +47,7 @@ const USAGE = `consensflow ${PKG.version}
 
 Usage: cf <command> [options]
 
-  setup [--no-cmux] [--force]                  One command: install the cmux skills and, when the
+  setup [--no-cmux] [--all] [--force]          One command: install the cmux skills and, when the
                                                shared roster has participants, the consensflow skill
                                                into every detected coding agent
   catalog [--runtime <r>] [--json]              The ready-made participants for each tool
@@ -53,7 +58,10 @@ Usage: cf <command> [options]
   participant remove <name>
       the roster is the shared ~/.consensflow/participants.json — the same
       file the consensflow-cc plugin and consensflow-pi extension use
-  skills install [--with-cmux] [--force]       Generate + install the consensflow skill (and cmux's)
+  skills install [--with-cmux] [--all] [--force]
+                                               Generate + install the consensflow skill (and cmux's).
+                                               Hosts with their own ConsensFlow (the cc plugin, the pi
+                                               extension) are left alone unless --all
   skills update [--force]                      Regenerate ours; re-fetch cmux's if they are installed
   skills status                                Every owned file: ok, drifted (user-edited) or missing
   skills uninstall [--force]                   Remove exactly what the manifest owns
@@ -71,6 +79,29 @@ function out(text) {
 function fail(message) {
   process.stderr.write(`cf: ${message}\n`)
   process.exitCode = 1
+}
+
+const NATIVE_OWNER = {
+  claude: 'the consensflow-cc plugin',
+  pi: 'the consensflow-pi extension',
+}
+
+/** Says out loud where the generated skill was deliberately not installed. */
+function reportNativeHosts(env, all) {
+  if (all) return
+  // An upgrade can inherit copies installed before the host had its own.
+  for (const row of retireSkillFromNativeHosts(env)) {
+    out(
+      row.action === 'retired'
+        ? `retired          ${row.path}`
+        : `kept (you edited it)  ${row.path}`,
+    )
+  }
+  for (const agent of detectAgents(env).filter((a) => a.native === true)) {
+    out(
+      `${agent.id}: left alone — ${NATIVE_OWNER[agent.id] ?? 'its own integration'} already provides a consensflow skill (--all to install ours too)`,
+    )
+  }
 }
 
 function printReport(report) {
@@ -197,6 +228,7 @@ function skillsVerb(rest) {
     allowPositionals: true,
     options: {
       'with-cmux': { type: 'boolean', default: false },
+      all: { type: 'boolean', default: false },
       force: { type: 'boolean', default: false },
     },
   })
@@ -216,9 +248,10 @@ function skillsVerb(rest) {
             source: 'consensflow',
           },
           env,
-          { force: values.force },
+          { force: values.force, targets: skillTargets(env, { all: values.all }) },
         ),
       )
+      reportNativeHosts(env, values.all)
       if (values['with-cmux']) {
         const cmux = installCmuxSkills(env, { force: values.force })
         out(`cmux skills @ ${cmux.commit}`)
@@ -260,6 +293,7 @@ function setup(rest) {
     allowPositionals: true,
     options: {
       'no-cmux': { type: 'boolean', default: false },
+      all: { type: 'boolean', default: false },
       force: { type: 'boolean', default: false },
     },
   })
@@ -286,9 +320,10 @@ function setup(rest) {
           source: 'consensflow',
         },
         env,
-        { force: values.force },
+        { force: values.force, targets: skillTargets(env, { all: values.all }) },
       ),
     )
+    reportNativeHosts(env, values.all)
   }
 
   if (!values['no-cmux'] && agents.length > 0) {
@@ -301,7 +336,9 @@ function setup(rest) {
 function doctor() {
   const agents = detectAgents(env)
   out(`consensflow ${PKG.version}`)
-  out(`agents:       ${agents.length > 0 ? agents.map((a) => a.id).join(', ') : 'none on PATH'}`)
+  out(
+    `agents:       ${agents.length > 0 ? agents.map((a) => `${a.id}${a.native ? ' (has its own consensflow)' : ''}`).join(', ') : 'none on PATH'}`,
+  )
   out(`participants: ${listParticipants(env).length}`)
   const rows = skillsStatus(env)
   const drifted = rows.filter((r) => r.state !== 'ok').length

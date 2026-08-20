@@ -35,6 +35,7 @@ v2 engine that had one was retired and deleted 2026-08-19).
 - **Drift is sacred.** A manifest-owned file whose hash changed was edited by
   the user: refuse without `--force`, never clobber. A file not in the
   manifest is never touched, installed over, or deleted.
+- **A host with its own ConsensFlow keeps it.** `detectAgents` marks `native` (cc plugin cache / pi extension checkout); `skillTargets` excludes those from the generated skill, `retireSkillFromNativeHosts` removes copies installed before the host had one (unedited only), and `--all` overrides. Without this, claude and pi see two same-named skills with the same trigger.
 - **No permission concept anywhere.** Participants run with their CLI's own defaults; the generator never emits `--dangerously-*`. Removed 2026-08-20 across all three ConsensFlow projects.
 - **The generated commands carry `env -u ANTHROPIC_API_KEY` / `-u
   OPENAI_API_KEY`** — v1's dropEnv as prose; prevents subscription logins

@@ -1,4 +1,4 @@
-import { accessSync, constants, statSync } from 'node:fs'
+import { accessSync, constants, existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
@@ -8,6 +8,19 @@ import { delimiter, join } from 'node:path'
  * commands live or die by. Directories honour each agent's own override
  * variable, which is also what keeps tests off the real machine.
  */
+
+/**
+ * A host that ships its own ConsensFlow already has a richer path than the
+ * generated skill — consensflow-cc packets the live Claude Code conversation,
+ * consensflow-pi does the same inside pi. Installing our skill there too
+ * would put two entries with the same name and the same trigger in front of
+ * one agent, competing for its skills budget. So we detect them and stand
+ * aside (`--all` overrides).
+ */
+const NATIVE = {
+  claude: (env) => join(home(env), '.claude', 'plugins', 'cache', 'consensflow-cc'),
+  pi: (env) => join(home(env), '.pi', 'agent', 'git', 'github.com', 'ngvoicu', 'consensflow-pi'),
+}
 
 const AGENTS = [
   {
@@ -57,5 +70,6 @@ export function detectAgents(env) {
     id: agent.id,
     command: agent.command,
     skillsDir: agent.skillsDir(env),
+    native: NATIVE[agent.id] !== undefined && existsSync(NATIVE[agent.id](env)),
   }))
 }

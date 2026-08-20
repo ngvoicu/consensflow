@@ -105,7 +105,13 @@ delete it without `--force`, and it never touches files it didn't write.
   idea as a **pi extension** (installed through pi, not npm).
 
 All three share the same participants file, so they always agree on who
-your participants are.
+your participants are — and they don't stack up on one agent. Where a host
+already ships its own ConsensFlow (Claude Code via the plugin, pi via the
+extension), `consensflow-cmux` leaves it alone rather than adding a second
+skill with the same name, and retires any copy it installed earlier. Its own
+skill goes where nothing else provides one — codex and opencode, plus any
+host without the native integration. `--all` overrides if you want ours
+everywhere.
 
 ## State
 

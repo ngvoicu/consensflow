@@ -11,12 +11,15 @@ import { fileState, loadManifest, saveManifest, sha256 } from './manifest.js'
  * - a target we own that the user edited is refused without force;
  * - a target we never wrote is refused without force, always;
  * - force backs nothing up silently — the refusal message is the preview.
+ *
+ * `options.targets` narrows the agents written to; callers use it to leave a
+ * host's own ConsensFlow integration alone (see skillTargets).
  */
 export function installSkill({ relPath, content, source }, env, options = {}) {
   const manifest = loadManifest(env)
   const report = []
 
-  for (const agent of detectAgents(env)) {
+  for (const agent of options.targets ?? detectAgents(env)) {
     const path = join(agent.skillsDir, relPath)
     const owned = manifest.files[path]
     const existed = existsSync(path)
@@ -53,15 +56,19 @@ export function skillsStatus(env) {
 }
 
 /**
- * Removes every manifest-owned file. A drifted file is refused without force
- * (the user's edits are theirs); anything not in the manifest is never
- * touched. Emptied skill directories are cleaned up.
+ * Removes every manifest-owned file, or the subset `options.filter` accepts.
+ * A drifted file is refused without force (the user's edits are theirs);
+ * anything not in the manifest is never touched. Emptied skill directories
+ * are cleaned up.
  */
 export function uninstallSkills(env, options = {}) {
   const manifest = loadManifest(env)
   const report = []
 
   for (const [path, recorded] of Object.entries(manifest.files)) {
+    // A filter narrows the sweep (retiring one skill from one host, say);
+    // without it every owned file goes.
+    if (options.filter !== undefined && !options.filter(path, recorded)) continue
     const state = fileState(path, recorded)
     if (state === 'drifted' && options.force !== true) {
       report.push({ path, action: 'refused-drifted' })

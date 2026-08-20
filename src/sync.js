@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
-import { installSkill } from './install.js'
+import { detectAgents } from './agents.js'
+import { installSkill, uninstallSkills } from './install.js'
 import { loadManifest, saveManifest, sha256 } from './manifest.js'
 import { listParticipants, RUNTIMES, rosterPath } from './roster.js'
 import { generateSkill } from './skill.js'
@@ -17,6 +18,36 @@ import { generateSkill } from './skill.js'
  *   but only where it is already installed, so an uninstall stays uninstalled.
  */
 
+/**
+ * Where the generated skill belongs: every detected agent except the ones
+ * that already ship their own ConsensFlow. `all` installs regardless.
+ */
+export function skillTargets(env, { all = false } = {}) {
+  const agents = detectAgents(env)
+  return all ? agents : agents.filter((agent) => agent.native !== true)
+}
+
+/**
+ * Removes a generated skill we installed on a host that has since gained its
+ * own ConsensFlow (the cc plugin, the pi extension) — otherwise an upgrade
+ * would leave two same-named skills competing there forever. Only our own,
+ * only unedited: a file the user changed is theirs and stays.
+ */
+export function retireSkillFromNativeHosts(env) {
+  const nativeDirs = detectAgents(env)
+    .filter((agent) => agent.native === true)
+    .map((agent) => agent.skillsDir)
+  if (nativeDirs.length === 0) return []
+
+  return uninstallSkills(env, {
+    filter: (path, recorded) =>
+      recorded.source === 'consensflow' && nativeDirs.some((dir) => path.startsWith(dir)),
+  }).map((row) => ({
+    ...row,
+    action: row.action === 'refused-drifted' ? 'kept-drifted' : 'retired',
+  }))
+}
+
 export function refreshInstalledSkill(env) {
   const participants = listParticipants(env)
   if (!participants.some((p) => RUNTIMES.includes(p.runtime))) return
@@ -27,6 +58,7 @@ export function refreshInstalledSkill(env) {
       source: 'consensflow',
     },
     env,
+    { targets: skillTargets(env) },
   )
   recordRosterSha(env)
 }

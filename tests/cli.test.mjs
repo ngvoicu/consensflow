@@ -139,6 +139,43 @@ describe('roster changes keep installed skills current', () => {
   })
 })
 
+describe('cf explains where it stands aside for a host integration', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+  stubCli(t, 'claude')
+  stubCli(t, 'codex')
+
+  it('setup names the host that already has its own ConsensFlow', async () => {
+    mkdirSync(join(t.env.HOME, '.claude', 'plugins', 'cache', 'consensflow-cc'), {
+      recursive: true,
+    })
+    await cf(['participant', 'add', 'zeus'], t.env)
+
+    const out = await cf(['setup', '--no-cmux'], t.env)
+    assert.equal(out.code, 0)
+    assert.match(out.stdout, /claude/)
+    assert.match(out.stdout, /consensflow-cc/)
+    assert.match(out.stdout, /--all/)
+    assert.equal(
+      existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')),
+      false,
+    )
+    assert.ok(existsSync(join(t.env.CODEX_HOME, 'skills', 'consensflow', 'SKILL.md')))
+  })
+
+  it('installs there anyway when asked with --all', async () => {
+    const out = await cf(['skills', 'install', '--all'], t.env)
+    assert.equal(out.code, 0)
+    assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')))
+  })
+
+  it('doctor reports the native integration too', async () => {
+    const out = await cf(['doctor'], t.env)
+    assert.match(out.stdout, /claude/)
+    assert.match(out.stdout, /own consensflow|native/i)
+  })
+})
+
 describe('the catalog turns a name into a working participant', () => {
   const t = tempEnv()
   after(() => t.cleanup())

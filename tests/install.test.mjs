@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { detectAgents } from '../src/agents.js'
 import { installSkill, skillsStatus, uninstallSkills } from '../src/install.js'
+import { retireSkillFromNativeHosts, skillTargets } from '../src/sync.js'
 import { tempEnv } from './helpers.mjs'
 
 function stubCli(env, name) {
@@ -37,6 +38,104 @@ describe('agents are detected by their CLI on PATH, dirs from their own env', ()
     const byId = Object.fromEntries(detectAgents(t.env).map((a) => [a.id, a]))
     assert.equal(byId.opencode.skillsDir, join(t.env.XDG_CONFIG_HOME, 'opencode', 'skills'))
     assert.equal(byId.pi.skillsDir, join(t.env.HOME, '.pi', 'agent', 'skills'))
+  })
+})
+
+describe('a host with its own ConsensFlow integration keeps it', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+  stubCli(t.env, 'claude')
+  stubCli(t.env, 'codex')
+  stubCli(t.env, 'pi')
+
+  it('sees no native integration on a bare machine', () => {
+    for (const agent of detectAgents(t.env)) {
+      assert.equal(agent.native, false, `${agent.id} should look bare`)
+    }
+  })
+
+  it('spots the consensflow-cc plugin and the consensflow-pi extension', () => {
+    mkdirSync(join(t.env.HOME, '.claude', 'plugins', 'cache', 'consensflow-cc'), {
+      recursive: true,
+    })
+    mkdirSync(join(t.env.HOME, '.pi', 'agent', 'git', 'github.com', 'ngvoicu', 'consensflow-pi'), {
+      recursive: true,
+    })
+
+    const byId = Object.fromEntries(detectAgents(t.env).map((a) => [a.id, a]))
+    assert.equal(byId.claude.native, true)
+    assert.equal(byId.pi.native, true)
+    assert.equal(byId.codex.native, false)
+  })
+
+  it('installs the generated skill only where nothing else provides one', () => {
+    const report = installSkill(
+      { relPath: 'consensflow/SKILL.md', content: 'GENERATED\n', source: 'consensflow' },
+      t.env,
+      { targets: skillTargets(t.env) },
+    )
+
+    const byAgent = Object.fromEntries(report.map((r) => [r.agent, r.action]))
+    assert.equal(byAgent.codex, 'installed')
+    assert.equal(byAgent.claude, undefined, 'claude has the plugin')
+    assert.equal(byAgent.pi, undefined, 'pi has the extension')
+    assert.equal(
+      existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')),
+      false,
+    )
+  })
+
+  it('retires a copy it installed before the host gained its own', () => {
+    // Installed everywhere first (the state an upgrade inherits).
+    installSkill(
+      { relPath: 'consensflow/SKILL.md', content: 'GENERATED\n', source: 'consensflow' },
+      t.env,
+      { targets: skillTargets(t.env, { all: true }) },
+    )
+    const claudeSkill = join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')
+    assert.ok(existsSync(claudeSkill))
+
+    const report = retireSkillFromNativeHosts(t.env)
+
+    assert.ok(report.some((r) => r.action === 'retired' && r.path === claudeSkill))
+    assert.equal(existsSync(claudeSkill), false)
+    // Only ours, only there: codex keeps its copy.
+    assert.ok(existsSync(join(t.env.CODEX_HOME, 'skills', 'consensflow', 'SKILL.md')))
+  })
+
+  it('never retires a file the user edited', () => {
+    installSkill(
+      { relPath: 'consensflow/SKILL.md', content: 'GENERATED\n', source: 'consensflow' },
+      t.env,
+      { targets: skillTargets(t.env, { all: true }) },
+    )
+    const claudeSkill = join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')
+    writeFileSync(claudeSkill, 'MY EDITS\n')
+
+    const report = retireSkillFromNativeHosts(t.env)
+
+    assert.ok(report.some((r) => r.action === 'kept-drifted'))
+    assert.equal(readFileSync(claudeSkill, 'utf8'), 'MY EDITS\n')
+  })
+
+  it('installs everywhere when the user insists', () => {
+    const report = installSkill(
+      { relPath: 'consensflow/SKILL.md', content: 'GENERATED\n', source: 'consensflow' },
+      t.env,
+      { targets: skillTargets(t.env, { all: true }) },
+    )
+
+    assert.equal(report.length, 3)
+    assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')))
+  })
+
+  it('still installs the cmux skills on every agent — those never collide', () => {
+    const report = installSkill(
+      { relPath: 'cmux/SKILL.md', content: 'PANES\n', source: 'cmux@abc' },
+      t.env,
+      { force: true },
+    )
+    assert.equal(report.length, 3)
   })
 })
 
