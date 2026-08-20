@@ -393,3 +393,30 @@ describe('cf setup readies a machine in one command', () => {
     assert.equal(out.code, 0)
   })
 })
+
+describe('the CLI can undo an install as completely as the app', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+
+  it('takes everything back but the roster', async () => {
+    stubCli(t, 'claude')
+    await cf(
+      ['participant', 'add', 'zeus', '--runtime', 'claude', '--model', 'claude-opus-5'],
+      t.env,
+    )
+    await cf(['install', 'claude'], t.env)
+    assert.ok(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts', 'claude')))
+
+    const off = await cf(['off'], t.env)
+    assert.equal(off.code, 0)
+    assert.match(off.stdout, /off/i)
+
+    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts')), false, 'payloads gone')
+    assert.equal(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'commands', 'consensflow.md')), false)
+    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'mode.json')), false)
+
+    // Participants are the user's, and outlive any install.
+    const listed = await cf(['participant', 'list'], t.env)
+    assert.match(listed.stdout, /zeus/)
+  })
+})

@@ -23,6 +23,7 @@ import {
   modeLabel,
   modeReport,
   syncCmuxSkills,
+  turnOff,
 } from '../src/mode.js'
 import {
   addParticipant,
@@ -62,9 +63,11 @@ Usage: cf <command> [options]
                                                claude / pi = that agent consults, with your
                                                conversation as context, and no other agent has
                                                ConsensFlow; cmux (pi, cc, codex, opencode) = every
-                                               agent can consult. cmux's own skills come with all
-                                               three
+                                               agent can consult, and cmux's own pane-control skills
+                                               come with that mode and only that one
   mode                                         Which one is active, and what it means
+  off [--force]                                Take it all back: both host payloads, every file the
+                                               manifest owns, and the mode. Participants are kept
   install <claude|pi|all> [--force]            Install a host integration — the deeper path that hands
                                                the participant your live conversation
   uninstall <claude|pi>                        Remove one, exactly as it was installed
@@ -77,10 +80,12 @@ Usage: cf <command> [options]
   participant remove <name>
       the roster is the shared ~/.consensflow/participants.json — the same
       file the consensflow-cc plugin and consensflow-pi extension use
-  skills install [--all] [--force]             Generate + install the consensflow skill and cmux's.
+  skills install [--all] [--force]             Generate + install the consensflow skill, and cmux's
+                                               own in cmux mode.
                                                Hosts with their own ConsensFlow (the cc plugin, the pi
                                                extension) are left alone unless --all
-  skills update [--force]                      Regenerate ours; re-fetch cmux's if they are installed
+  skills update [--force]                      Regenerate ours; re-fetch cmux's in cmux mode, take
+                                               them back in any other
   skills status                                Every owned file: ok, drifted (user-edited) or missing
   skills uninstall [--force]                   Remove exactly what the manifest owns
   ui [--json] [--no-open]                      Ephemeral local roster editor (Ctrl-C to stop);
@@ -172,6 +177,25 @@ function modeVerb() {
   for (const line of modeReport(mode ?? 'cmux', env)) out(`  ${line}`)
   if (mode === null) out('')
   if (mode === null) out(`choose one with \`consensflow use <${MODES.join('|')}>\``)
+}
+
+/**
+ * Everything ConsensFlow installed, taken back: both host payloads, every
+ * file the manifest owns, and the mode itself. The roster is the user's and
+ * survives — the same contract as the app's "Turn ConsensFlow off".
+ */
+function offVerb(rest) {
+  const { values } = parseArgs({
+    args: rest,
+    allowPositionals: true,
+    options: { force: { type: 'boolean', default: false } },
+  })
+  const outcome = turnOff(env, { force: values.force })
+  for (const change of outcome.changes) {
+    const what = change.path ?? `the ${change.host} integration`
+    out(`${String(change.action ?? 'removed').padEnd(16)} ${what}`)
+  }
+  out('ConsensFlow is off — participants are kept in ~/.consensflow/participants.json')
 }
 
 function useVerb(rest) {
@@ -463,6 +487,9 @@ async function main() {
       return
     case 'mode':
       modeVerb()
+      return
+    case 'off':
+      offVerb(rest)
       return
     case 'hosts':
       hostsVerb()

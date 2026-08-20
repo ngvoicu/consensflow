@@ -104,6 +104,7 @@ Two sources, one owner:
   with `cmux` mode and only that one.
 
 ```sh
+cf off                # take it all back; participants are kept
 cf skills status      # every file ConsensFlow owns: ok, drifted, missing
 cf skills update      # regenerate ours; re-fetch cmux's at the latest commit
 cf skills uninstall   # remove exactly what the manifest owns, nothing else

@@ -218,7 +218,11 @@ function uninstallClaude(env) {
     writeSettings(claudeDir, (settings) => {
       const merged = { ...(settings.hooks ?? {}) }
       for (const event of Object.keys(merged)) {
-        merged[event] = merged[event].filter((entry) => !isOurs(entry))
+        const theirs = merged[event].filter((entry) => !isOurs(entry))
+        // An event that existed only to hold our hook goes with it; one that
+        // still holds someone else's stays, minus ours.
+        if (theirs.length === 0) delete merged[event]
+        else merged[event] = theirs
       }
       return { ...settings, hooks: merged }
     })

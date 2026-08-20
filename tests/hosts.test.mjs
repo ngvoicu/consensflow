@@ -130,7 +130,11 @@ describe('the manager installs the Claude Code side through user config', () => 
     assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts', 'claude')), false)
     const after = JSON.parse(readFileSync(settings(), 'utf8'))
     assert.equal(after.model, 'opus', 'user settings survive')
-    assert.equal((after.hooks?.SessionStart ?? []).length, 0)
+    assert.equal(
+      'SessionStart' in (after.hooks ?? {}),
+      false,
+      'an event that existed only for our hook goes with it, not as an empty husk',
+    )
     assert.equal(hostStatus(t.env).find((h) => h.id === 'claude').installed, false)
   })
 })
