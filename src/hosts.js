@@ -44,6 +44,25 @@ function payloadDir(env) {
   return join(configRoot(env), 'hosts', 'claude')
 }
 
+/**
+ * The engine, installed beside the payloads rather than inside one.
+ *
+ * Both payloads reach it as a sibling — `../lib` from pi's `index.ts`,
+ * `../../lib` from Claude Code's `bin/cf.mjs` and hooks — because that is
+ * the shape of the repo they are written in. Nesting a copy inside each
+ * payload puts it one level too deep and every entry point dies with
+ * ERR_MODULE_NOT_FOUND at run time, long after the install reported success.
+ */
+function sharedLibDir(env) {
+  return join(configRoot(env), 'hosts', 'lib')
+}
+
+/** Drops the shared engine once no host is left to import it. */
+function pruneSharedLib(env) {
+  if (Object.keys(hostsState(env).hosts).length > 0) return
+  rmSync(sharedLibDir(env), { recursive: true, force: true })
+}
+
 function hostsState(env) {
   const path = join(configRoot(env), 'hosts.json')
   try {
@@ -130,7 +149,8 @@ function installClaude(env, options) {
   rmSync(target, { recursive: true, force: true })
   mkdirSync(target, { recursive: true })
   cpSync(join(bundled, 'claude'), target, { recursive: true })
-  cpSync(join(bundled, 'lib'), join(target, 'lib'), { recursive: true })
+  rmSync(sharedLibDir(env), { recursive: true, force: true })
+  cpSync(join(bundled, 'lib'), sharedLibDir(env), { recursive: true })
 
   const written = []
   // Payload files address their own root symbolically; make it concrete.
@@ -206,6 +226,7 @@ function uninstallClaude(env) {
 
   delete state.hosts.claude
   saveHostsState(state, env)
+  pruneSharedLib(env)
   return { host: 'claude', removed: record?.files?.length ?? 0 }
 }
 
@@ -233,7 +254,8 @@ export function installHost(host, env, options = {}) {
     rmSync(target, { recursive: true, force: true })
     mkdirSync(target, { recursive: true })
     cpSync(join(bundled, 'pi'), target, { recursive: true })
-    cpSync(join(bundled, 'lib'), join(target, 'lib'), { recursive: true })
+    rmSync(sharedLibDir(env), { recursive: true, force: true })
+    cpSync(join(bundled, 'lib'), sharedLibDir(env), { recursive: true })
 
     const source = options.source ?? target
     pi(['install', source], env)
@@ -254,6 +276,7 @@ export function uninstallHost(host, env, options = {}) {
     const state = hostsState(env)
     delete state.hosts.pi
     saveHostsState(state, env)
+    pruneSharedLib(env)
     return { host: 'pi', ok: true }
   }
   throw new Error(`unknown host ${JSON.stringify(host)}; expected ${HOSTS.join(', ')}`)

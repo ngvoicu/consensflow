@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { hostStatus, installHost, uninstallHost } from '../src/hosts.js'
 
@@ -82,8 +82,9 @@ describe('the manager installs the Claude Code side through user config', () => 
     const outcome = installHost('claude', t.env, { bundled })
 
     assert.equal(outcome.version, VERSION)
-    // The payload lands in our own directory, never inside Claude Code.
-    const payload = join(t.env.CONSENSFLOW_HOME, 'hosts', 'claude', 'lib', 'runners.js')
+    // The payload lands in our own directory, never inside Claude Code —
+    // with the engine beside it, which is where its imports look.
+    const payload = join(t.env.CONSENSFLOW_HOME, 'hosts', 'lib', 'runners.js')
     assert.ok(existsSync(payload), 'payload copied')
 
     // Plugin-root references are rewritten to where the payload actually is.
@@ -201,7 +202,8 @@ describe('the manager drives pi through its own supported CLI', () => {
     // The payload is ours to place; adding it to pi's settings is pi's job.
     const payload = join(t.env.CONSENSFLOW_HOME, 'hosts', 'pi')
     assert.ok(existsSync(join(payload, 'index.ts')))
-    assert.ok(existsSync(join(payload, 'lib', 'runners.js')))
+    // `../lib` from index.ts: a sibling of the payload, not a child of it.
+    assert.ok(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts', 'lib', 'runners.js')))
     assert.match(readFileSync(log, 'utf8'), new RegExp(`install ${payload}`))
   })
 
@@ -217,6 +219,39 @@ describe('the manager drives pi through its own supported CLI', () => {
       assert.throws(() => installHost('pi', bare.env, { bundled }), /pi/)
     } finally {
       bare.cleanup()
+    }
+  })
+})
+
+describe('the payload that ships can actually run once installed', () => {
+  it('keeps lib a sibling, so every relative import resolves', () => {
+    const t = tempEnv()
+    try {
+      // The real bundled payload, not a fixture: this is exactly the tree a
+      // user installs, and its own import strings are the specification.
+      installHost('claude', t.env)
+      const root = join(t.env.CONSENSFLOW_HOME, 'hosts', 'claude')
+      const entries = [
+        join(root, 'bin', 'cf.mjs'),
+        join(root, 'scripts', 'session-start-hook.mjs'),
+        join(root, 'scripts', 'user-prompt-hook.mjs'),
+      ]
+
+      let checked = 0
+      for (const entry of entries) {
+        assert.ok(existsSync(entry), `${entry} is part of the payload`)
+        for (const match of readFileSync(entry, 'utf8').matchAll(/from ["'](\.[^"']+)["']/g)) {
+          const target = resolve(dirname(entry), match[1])
+          assert.ok(
+            existsSync(target),
+            `${entry} imports ${match[1]}, which is missing after install`,
+          )
+          checked += 1
+        }
+      }
+      assert.ok(checked > 0, 'the payload really does import its own modules')
+    } finally {
+      t.cleanup()
     }
   })
 })

@@ -94,7 +94,7 @@ describe('the machine runs exactly one ConsensFlow path', () => {
 
     assert.equal(currentMode(t.env), 'claude')
     // The Claude Code payload is in place …
-    assert.ok(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts', 'claude', 'lib', 'runners.js')))
+    assert.ok(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts', 'lib', 'runners.js')))
     assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'commands', 'consensflow.md')))
     // … and nothing else has a ConsensFlow path any more.
     assert.equal(existsSync(generated(t.env.CODEX_HOME)), false)
