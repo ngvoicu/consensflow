@@ -41,10 +41,20 @@ const COMMANDS = {
     ['opencode run --model', p.model, ...(p.effort ? ['--variant', p.effort] : []), q].join(' '),
 }
 
+/**
+ * The exact command a participant becomes. Exported because the roster editor
+ * shows it verbatim: what you see in the UI is the line that lands in the
+ * skill, which is the line the agent runs.
+ */
+export function participantCommand(p) {
+  const build = COMMANDS[p.runtime]
+  return build === undefined ? undefined : build(p)
+}
+
 function row(p) {
   const traits = [p.description, p.effort ? `${p.effort} effort` : null].filter(Boolean).join('; ')
   const label = traits.length > 0 ? `**${p.name}** — ${traits}` : `**${p.name}**`
-  return `| ${label} | ${p.runtime} | \`${COMMANDS[p.runtime](p)}\` |`
+  return `| ${label} | ${p.runtime} | \`${participantCommand(p)}\` |`
 }
 
 export function generateSkill(participants) {

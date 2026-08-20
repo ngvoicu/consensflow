@@ -43,6 +43,14 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     assert.equal(res.status, 401)
   })
 
+  it('serves a page whose script actually ran through the template', async () => {
+    const html = await (await fetch(`${server.url}/?token=${server.token}`)).text()
+    // An escaped `\${…}` ships a page that dies on load: the token never
+    // interpolates and the browser hits a syntax error before fetching data.
+    assert.ok(html.includes(`const TOKEN = "${server.token}"`))
+    assert.ok(!html.includes('${JSON.stringify'))
+  })
+
   it('serves the editor page', async () => {
     const res = await fetch(`${server.url}/?token=${server.token}`)
     assert.equal(res.status, 200)

@@ -9,6 +9,7 @@ import {
   RUNTIMES,
   removeParticipant,
 } from './roster.js'
+import { participantCommand } from './skill.js'
 import { refreshInstalledSkill } from './sync.js'
 
 /**
@@ -23,6 +24,12 @@ function tokenMatches(presented, token) {
     createHash('sha256').update(presented).digest(),
     createHash('sha256').update(token).digest(),
   )
+}
+
+/** The line this participant becomes in the skill — shown verbatim in the UI. */
+function withCommand(participant) {
+  const command = participantCommand(participant)
+  return command === undefined ? participant : { ...participant, command }
 }
 
 function readBody(request) {
@@ -60,9 +67,14 @@ export async function startUiServer(env) {
       }
       if (request.method === 'GET' && url.pathname === '/api/participants') {
         return send(200, {
-          participants: listParticipants(env),
+          participants: listParticipants(env).map(withCommand),
           runtimes: RUNTIMES,
-          catalog: CATALOG,
+          catalog: Object.fromEntries(
+            Object.entries(CATALOG).map(([runtime, entries]) => [
+              runtime,
+              entries.map((entry) => withCommand({ ...entry, runtime })),
+            ]),
+          ),
           efforts: EFFORTS,
         })
       }
@@ -114,76 +126,227 @@ const PAGE = (token) => `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ConsensFlow</title>
+<title>ConsensFlow roster</title>
 <style>
-  :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui; }
-  body { margin: 2rem auto; max-width: 720px; padding: 0 1rem; }
-  h1 { font-size: 1.2rem; }
-  table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
-  td, th { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent); }
-  form { display: grid; grid-template-columns: repeat(2, 1fr); gap: .5rem; margin-top: 1rem; }
-  input, select, button { font: inherit; padding: .35rem .5rem; }
-  button { cursor: pointer; }
+  /* Dark-first: this window lives beside a terminal. Brand marine palette;
+     Archivo and IBM Plex Mono when installed locally, never fetched — a local
+     tool must not wait on a font CDN. */
+  :root {
+    --ink: #0C1E23;
+    --panel: #12262C;
+    --line: #1E3A42;
+    --foam: #E9F1EF;
+    --muted: #8FA9AF;
+    --seafoam: #63C7B2;
+    /* Seafoam on foam is unreadable; light mode gets a deeper teal for text
+       while keeping seafoam for fills and borders. */
+    --accent-text: #63C7B2;
+    --buoy: #FF6B5A;
+    --ui: Archivo, "Helvetica Neue", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --ink: #E9F1EF; --panel: #FFFFFF; --line: #C9DAD8; --foam: #0C1E23;
+      --muted: #52717A; --accent-text: #16766A; --buoy: #C2402F;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 40px 24px 64px; background: var(--ink); color: var(--foam);
+    font-family: var(--ui); font-size: 15px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 760px; margin: 0 auto; }
+
+  .mark { font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-text); }
+  h1 { font-size: 26px; font-weight: 600; letter-spacing: -.015em; margin: 6px 0 4px; }
+  .lede { color: var(--muted); font-size: 13.5px; margin: 0 0 32px; max-width: 52ch; }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--muted); display: flex; align-items: center; gap: 12px; margin: 34px 0 12px;
+  }
+  .eyebrow::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  /* The section head announces; the tool heads inside it only sort. */
+  .eyebrow--section { color: var(--foam); font-size: 12px; margin-top: 46px; }
+  .eyebrow--tool { margin: 22px 0 4px; }
+  .eyebrow--tool::after { display: none; }
+
+  /* A participant IS a command: the callsign names it, the line below is
+     exactly what lands in the skill and exactly what an agent will run. */
+  .member { border-top: 1px solid var(--line); padding: 14px 0; display: grid; gap: 8px; }
+  /* Grid children default to min-width:auto, so a long command line would
+     stretch the row and push the controls off the page instead of scrolling. */
+  .member > * { min-width: 0; }
+  .member:last-of-type { border-bottom: 1px solid var(--line); }
+  .member__head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .callsign { font-size: 17px; font-weight: 600; color: var(--accent-text); letter-spacing: -.01em; }
+  .tag { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .member__head .spacer { flex: 1; }
+  .member__desc { color: var(--muted); font-size: 13px; margin: 0; }
+  .cmd-wrap { position: relative; }
+  /* A long command scrolls rather than wrapping (it stays one readable line);
+     the fade is the only hint that there is more to the right. */
+  .cmd-wrap::after {
+    content: ""; position: absolute; inset: 1px 1px 1px auto; width: 44px; border-radius: 0 4px 4px 0;
+    background: linear-gradient(90deg, transparent, var(--panel)); pointer-events: none;
+  }
+  .cmd {
+    font-family: var(--mono); font-size: 11.5px; line-height: 1.6; color: var(--muted);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+    padding: 9px 11px; margin: 0; overflow-x: auto; white-space: pre; scrollbar-width: thin;
+  }
+  .cmd b { color: var(--foam); font-weight: 500; }
+
+  button {
+    font: inherit; font-size: 13px; color: var(--foam); background: transparent;
+    border: 1px solid var(--line); border-radius: 4px; padding: 4px 12px; cursor: pointer;
+    transition: border-color .12s ease, color .12s ease, background .12s ease;
+  }
+  button:hover { border-color: var(--seafoam); color: var(--accent-text); }
+  button.danger:hover { border-color: var(--buoy); color: var(--buoy); }
+  button.primary { background: var(--seafoam); border-color: var(--seafoam); color: #06171C; font-weight: 600; }
+  button.primary:hover { filter: brightness(1.08); color: #06171C; }
+  :focus-visible { outline: 2px solid var(--seafoam); outline-offset: 2px; }
+
+  .offer { display: flex; align-items: baseline; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
+  .offer:first-of-type { border-top: none; }
+  .offer__name { font-family: var(--mono); font-size: 13px; color: var(--foam); min-width: 96px; }
+  .offer__what { color: var(--muted); font-size: 13px; flex: 1; }
+
+  form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+  input, select {
+    font: inherit; font-size: 13px; padding: 7px 10px; color: var(--foam);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+  }
+  input::placeholder { color: var(--muted); }
   .full { grid-column: 1 / -1; }
-  .error { color: #d33; }
-  .muted { opacity: .65; font-size: .85em; }
-  h2 { font-size: 1rem; margin-top: 1.6rem; }
-  h3 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; opacity: .7; margin: 1rem 0 .3rem; }
-  .catalog-row { display: flex; gap: .75rem; align-items: baseline; justify-content: space-between; padding: .3rem 0; border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent); }
-  .catalog-row span { font-size: .9em; }
+  .alert { color: var(--buoy); font-size: 13px; margin: 0; }
+  .empty { color: var(--muted); font-size: 13.5px; border: 1px dashed var(--line); border-radius: 4px; padding: 18px; }
+  @media (max-width: 620px) { form { grid-template-columns: 1fr; } .offer { flex-wrap: wrap; } }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
 <body>
-<h1>ConsensFlow participants</h1>
-<p class="muted">Every change regenerates the skill installed into your coding agents.</p>
-<table id="roster"><thead><tr><th>Name</th><th>Runtime</th><th>Model</th><th>Effort</th><th>Permission</th><th></th></tr></thead><tbody></tbody></table>
-<h2>Ready-made</h2>
-<p class="muted">One click adds a curated participant for that tool.</p>
-<div id="catalog"></div>
+<main>
+  <p class="mark">consensflow</p>
+  <h1>Your participants</h1>
+  <p class="lede" id="lede">Each one is a real coding-agent CLI. Every change here rewrites the skill installed in your agents, so they can consult it by name.</p>
 
-<h2>Custom</h2>
-<form id="add">
-  <input name="name" placeholder="name (lowercase)" required>
-  <select name="runtime"></select>
-  <input name="model" placeholder="model (verbatim)" required class="full">
-  <input name="effort" list="effort-options" placeholder="effort (optional)">
-  <datalist id="effort-options"></datalist>
-  <button class="full">Add participant</button>
-  <p id="error" class="error full"></p>
-</form>
+  <section id="roster"></section>
+
+  <p class="eyebrow eyebrow--section">Ready-made</p>
+  <div id="catalog"></div>
+
+  <p class="eyebrow eyebrow--section">Define your own</p>
+  <form id="add">
+    <input name="name" placeholder="callsign, lowercase" required>
+    <select name="runtime"></select>
+    <input class="full" name="model" placeholder="model — anything this runtime accepts" required>
+    <input name="effort" list="effort-options" placeholder="effort (optional)">
+    <datalist id="effort-options"></datalist>
+    <button class="primary">Add participant</button>
+    <p id="error" class="alert full"></p>
+  </form>
+</main>
 <script>
 const TOKEN = ${JSON.stringify(token)};
 const headers = { authorization: 'Bearer ' + TOKEN, 'content-type': 'application/json' };
-async function load() {
-  const res = await fetch('/api/participants', { headers });
-  const data = await res.json();
-  const tbody = document.querySelector('#roster tbody');
-  tbody.innerHTML = '';
+const el = (tag, className, text) => {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+};
+
+/** The model and effort are what the reader is scanning for: mark them. */
+function renderCommand(entry) {
+  const pre = el('pre', 'cmd');
+  let rest = entry.command;
+  for (const value of [entry.model, entry.effort].filter(Boolean)) {
+    const at = rest.indexOf(value);
+    if (at === -1) continue;
+    pre.append(rest.slice(0, at));
+    pre.append(el('b', null, value));
+    rest = rest.slice(at + value.length);
+  }
+  pre.append(rest);
+  const wrap = el('div', 'cmd-wrap');
+  wrap.append(pre);
+  return wrap;
+}
+
+function renderRoster(data) {
+  const host = document.querySelector('#roster');
+  host.innerHTML = '';
+  document.querySelector('#lede').textContent = data.participants.length === 0
+    ? 'Each one is a real coding-agent CLI. Add the first and the skill installs itself into every agent you have.'
+    : 'Each one is a real coding-agent CLI. Every change here rewrites the skill installed in your agents, so they can consult it by name.';
+
+  if (data.participants.length === 0) {
+    host.appendChild(el('p', 'empty', 'No participants yet. Take a ready-made one below, or define your own.'));
+    return;
+  }
   for (const p of data.participants) {
-    const tr = document.createElement('tr');
-    for (const key of ['name', 'runtime', 'model', 'effort', 'permission']) {
-      const td = document.createElement('td');
-      td.textContent = p[key] ?? '—';
-      tr.appendChild(td);
-    }
-    const td = document.createElement('td');
-    const btn = document.createElement('button');
-    btn.textContent = 'Remove';
-    btn.onclick = async () => {
+    const card = el('div', 'member');
+    const head = el('div', 'member__head');
+    head.append(el('span', 'callsign', p.name));
+    head.append(el('span', 'tag', p.runtime + (p.effort ? ' · ' + p.effort : '')));
+    head.append(el('span', 'spacer'));
+    const remove = el('button', 'danger', 'Remove');
+    remove.onclick = async () => {
       await fetch('/api/participants/' + p.name, { method: 'DELETE', headers });
       load();
     };
-    td.appendChild(btn);
-    tr.appendChild(td);
-    tbody.appendChild(tr);
+    head.append(remove);
+    card.append(head);
+    if (p.description) card.append(el('p', 'member__desc', p.description));
+    if (p.command) card.append(renderCommand(p));
+    else card.append(el('p', 'member__desc', p.runtime + ' participants are not run by this tool — it leaves them alone.'));
+    host.append(card);
   }
+}
+
+function renderCatalog(data) {
+  const taken = new Set(data.participants.map((p) => p.name));
+  const host = document.querySelector('#catalog');
+  host.innerHTML = '';
+  for (const [runtime, entries] of Object.entries(data.catalog)) {
+    const available = entries.filter((e) => !taken.has(e.name));
+    if (available.length === 0) continue;
+    const group = el('section');
+    group.append(el('p', 'eyebrow eyebrow--tool', runtime));
+    for (const entry of available) {
+      const row = el('div', 'offer');
+      row.append(el('span', 'offer__name', entry.name));
+      row.append(el('span', 'offer__what', entry.description));
+      const add = el('button', null, 'Add');
+      add.onclick = async () => {
+        await fetch('/api/participants', {
+          method: 'POST', headers,
+          body: JSON.stringify({
+            name: entry.name, runtime, model: entry.model,
+            ...(entry.effort ? { effort: entry.effort } : {}),
+            description: entry.description,
+          }),
+        });
+        load();
+      };
+      row.append(add);
+      group.append(row);
+    }
+    host.append(group);
+  }
+}
+
+function renderForm(data) {
   const runtimeSelect = document.querySelector('select[name=runtime]');
   if (runtimeSelect.options.length === 0) {
     for (const r of data.runtimes) runtimeSelect.add(new Option(r, r));
     runtimeSelect.onchange = () => showEfforts(data.efforts, runtimeSelect.value);
   }
   showEfforts(data.efforts, runtimeSelect.value);
-  renderCatalog(data);
 }
 
 function showEfforts(efforts, runtime) {
@@ -192,45 +355,13 @@ function showEfforts(efforts, runtime) {
   for (const e of efforts[runtime] ?? []) list.appendChild(new Option(e, e));
 }
 
-/** The taken names decide which ready-made entries are still offerable. */
-function renderCatalog(data) {
-  const taken = new Set(data.participants.map((p) => p.name));
-  const host = document.querySelector('#catalog');
-  host.innerHTML = '';
-  for (const [runtime, entries] of Object.entries(data.catalog)) {
-    const available = entries.filter((e) => !taken.has(e.name));
-    if (available.length === 0) continue;
-    const section = document.createElement('section');
-    const h = document.createElement('h3');
-    h.textContent = runtime;
-    section.appendChild(h);
-    for (const entry of available) {
-      const row = document.createElement('div');
-      row.className = 'catalog-row';
-      const label = document.createElement('span');
-      label.innerHTML = '<strong>' + entry.name + '</strong> — ' + entry.description;
-      const btn = document.createElement('button');
-      btn.textContent = 'Add';
-      btn.onclick = async () => {
-        await fetch('/api/participants', {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            name: entry.name,
-            runtime,
-            model: entry.model,
-            ...(entry.effort ? { effort: entry.effort } : {}),
-            description: entry.description,
-          }),
-        });
-        load();
-      };
-      row.append(label, btn);
-      section.appendChild(row);
-    }
-    host.appendChild(section);
-  }
+async function load() {
+  const data = await (await fetch('/api/participants', { headers })).json();
+  renderRoster(data);
+  renderCatalog(data);
+  renderForm(data);
 }
+
 document.querySelector('#add').onsubmit = async (event) => {
   event.preventDefault();
   const form = new FormData(event.target);

@@ -35,6 +35,20 @@ const ROSTER = [
   },
 ]
 
+describe('one command builder serves the skill and the roster editor', () => {
+  it('gives the exact line the skill table will contain', async () => {
+    const { participantCommand } = await import('../src/skill.js')
+    const command = participantCommand(ROSTER[0])
+    assert.ok(generateSkill(ROSTER).includes(command))
+    assert.match(command, /claude -p "<question>"/)
+  })
+
+  it('has nothing to show for a runtime it cannot run', async () => {
+    const { participantCommand } = await import('../src/skill.js')
+    assert.equal(participantCommand({ name: 'x', runtime: 'image', model: 'm' }), undefined)
+  })
+})
+
 describe('the generated skill carries the live-verified command per engine', () => {
   const md = generateSkill(ROSTER)
 
