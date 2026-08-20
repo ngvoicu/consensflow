@@ -41,6 +41,12 @@
     },
     "macOS": {
       "exceptionDomain": "localhost"
+    },
+    "externalBin": [
+      "binaries/node"
+    ],
+    "resources": {
+      "resources/cli": "cli"
     }
   }
 }

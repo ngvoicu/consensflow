@@ -1,2 +1,6 @@
 node_modules/
 src-tauri/target/
+# Staged at build time by scripts/prepare-sidecar.mjs
+.cache/
+src-tauri/binaries/
+src-tauri/resources/

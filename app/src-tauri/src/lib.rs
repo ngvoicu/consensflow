@@ -29,67 +29,57 @@ fn handle_line(child: &mut Child) -> Result<String, String> {
     Ok(line)
 }
 
-/// Where the CLI is, for a program that did not inherit a shell.
+/// The CLI this app runs: its own copy, with its own Node.
 ///
-/// A .app launched from Finder gets a minimal PATH — `/usr/bin:/bin:...` —
-/// which never contains a global npm bin directory. So: try PATH, then the
-/// usual install locations, then ask the user's login shell, which is the
-/// only thing that truly knows.
-fn locate_cli() -> Option<String> {
-    if Command::new("consensflow")
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-    {
-        return Some("consensflow".to_string());
-    }
-
-    let home = std::env::var("HOME").unwrap_or_default();
-    let candidates = [
-        "/opt/homebrew/bin/consensflow".to_string(),
-        "/usr/local/bin/consensflow".to_string(),
-        format!("{home}/.local/bin/consensflow"),
-        format!("{home}/.volta/bin/consensflow"),
-    ];
-    if let Some(found) = candidates.iter().find(|path| std::path::Path::new(path).exists()) {
-        return Some(found.clone());
-    }
-
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-    let resolved = Command::new(shell)
-        .args(["-lc", "command -v consensflow"])
-        .output()
-        .ok()?;
-    let path = String::from_utf8_lossy(&resolved.stdout).trim().to_string();
-    if path.is_empty() {
-        None
+/// The app is the whole installation — someone who downloads it has not
+/// installed Node, npm, or ConsensFlow, and should not have to. So the
+/// bundle carries an official Node build (a Tauri sidecar) and the CLI's
+/// sources (a resource), and nothing on the machine is consulted. A .app
+/// launched from Finder has almost no PATH anyway, which is what made
+/// depending on an installed CLI fragile in the first place.
+fn bundled_cli(app: &tauri::AppHandle) -> Result<(std::path::PathBuf, std::path::PathBuf), String> {
+    let resources = app
+        .path()
+        .resource_dir()
+        .map_err(|error| format!("the app could not find its own resources: {error}"))?;
+    let node = resources.join("binaries/node");
+    let node = if node.exists() {
+        node
     } else {
-        Some(path)
+        // Tauri lays sidecars beside the executable in a bundled app.
+        std::env::current_exe()
+            .map_err(|error| format!("the app could not find itself: {error}"))?
+            .parent()
+            .ok_or_else(|| "the app has no directory".to_string())?
+            .join("node")
+    };
+    let cli = resources.join("cli/bin/cf.mjs");
+
+    if !node.exists() {
+        return Err(format!("the bundled runtime is missing from this app ({node:?})"));
     }
+    if !cli.exists() {
+        return Err(format!("the bundled ConsensFlow is missing from this app ({cli:?})"));
+    }
+    Ok((node, cli))
 }
 
 /// Starts the editor and returns the address to show, or a human explanation.
-fn start_editor() -> Result<(String, Child), String> {
-    let cli = locate_cli().ok_or_else(|| {
-        "ConsensFlow was not found on this machine. Install it with \
-         `npm install -g ngvoicu/consensflow`, then open this app again."
-            .to_string()
-    })?;
+fn start_editor(app: &tauri::AppHandle) -> Result<(String, Child), String> {
+    let (node, cli) = bundled_cli(app)?;
 
-    let mut child = Command::new(&cli)
+    let mut child = Command::new(&node)
+        .arg(&cli)
         .args(["ui", "--json", "--no-open"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .map_err(|error| format!("`{cli} ui` could not be started: {error}"))?;
+        .map_err(|error| format!("the bundled ConsensFlow could not be started: {error}"))?;
 
     // Anything that goes wrong from here leaves a server running unless the
     // child is killed on the way out.
-    let address = read_address(&mut child, &cli);
+    let address = read_address(&mut child);
     match address {
         Ok(address) => Ok((address, child)),
         Err(explanation) => {
@@ -99,15 +89,10 @@ fn start_editor() -> Result<(String, Child), String> {
     }
 }
 
-fn read_address(child: &mut Child, cli: &str) -> Result<String, String> {
+fn read_address(child: &mut Child) -> Result<String, String> {
     let line = handle_line(child)?;
-    let handle: serde_json::Value = serde_json::from_str(line.trim()).map_err(|_| {
-        format!(
-            "`{cli} ui --json` answered with something else: {}. This app needs a newer \
-             ConsensFlow — update it with `npm install -g ngvoicu/consensflow`.",
-            line.trim()
-        )
-    })?;
+    let handle: serde_json::Value = serde_json::from_str(line.trim())
+        .map_err(|_| format!("the editor answered with something else: {}", line.trim()))?;
     let url = handle["url"]
         .as_str()
         .ok_or_else(|| "the editor did not say where it is listening".to_string())?;
@@ -128,7 +113,7 @@ pub fn run() {
             // The window is built AT the editor's address rather than being
             // navigated afterwards: a window that starts somewhere else and
             // moves can fail silently and leave a blank frame.
-            let started = start_editor();
+            let started = start_editor(app.handle());
             let url = match &started {
                 Ok((address, _)) => {
                     eprintln!("consensflow: editor at {address}");

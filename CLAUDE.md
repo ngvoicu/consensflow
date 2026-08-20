@@ -34,6 +34,11 @@ v2 engine that had one was retired and deleted 2026-08-19).
 `app/` (Tauri v2, Rust) is a window around `cf ui`, never a second editor.
 Load-bearing facts, each learned by running the built bundle:
 
+- **The app is self-contained**: `app/scripts/prepare-sidecar.mjs` downloads an
+  official Node build (pinned) into `src-tauri/binaries/node-<triple>` and
+  copies `bin/ src/ hosts/ skill/` into `src-tauri/resources/cli`. The Rust
+  side runs that pair and consults nothing on the machine. Never copy the
+  system Node: package-manager builds link machine-local dylibs.
 - macOS ATS blocks cleartext http in WKWebView → `bundle.macOS.exceptionDomain
   = "localhost"` and the URL must say `localhost`, not `127.0.0.1`.
 - Build the window AT the address (`WebviewUrl::External`); navigating after
