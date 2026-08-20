@@ -66,6 +66,33 @@ function rememberMode(mode, env) {
   )
 }
 
+/**
+ * cmux's own skills — pane control, browser surfaces, its settings — belong
+ * to the cmux path and only to it.
+ *
+ * They have nothing to do with consulting: a Claude Code install runs its
+ * participants as subprocesses and never touches a pane. So the mode named
+ * after cmux carries them, and a host mode carries none. Anyone outside the
+ * target set gives them back, because a rule that only ever added would
+ * leave every agent it had once touched holding files it has no use for.
+ */
+export function syncCmuxSkills(env, options = {}) {
+  const mode = options.mode ?? currentMode(env)
+  const targets = mode === 'cmux' ? detectAgents(env) : []
+  const keep = targets.map((agent) => agent.skillsDir)
+
+  const report = uninstallSkills(env, {
+    filter: (path, recorded) =>
+      recorded.source.startsWith('cmux@') && !keep.some((dir) => path.startsWith(dir)),
+  })
+  // No target, no clone: a host mode should not reach the network for files
+  // it has already decided nobody gets.
+  if (targets.length === 0) return { commit: null, report }
+
+  const cmux = installCmuxSkills(env, { force: options.force, targets })
+  return { commit: cmux.commit, report: [...report, ...cmux.report] }
+}
+
 /** Removes the generated skill from every agent that has ours. */
 function dropGeneratedSkill(env) {
   return uninstallSkills(env, { filter: (_path, recorded) => recorded.source === 'consensflow' })
@@ -158,31 +185,11 @@ export function applyMode(rawMode, env, options = {}) {
     changes.push(installHost(mode, env, options))
   }
 
-  // cmux's own skills (pane control) come with every mode: they teach the
-  // agent to drive the terminal it lives in, which is useful whichever path
-  // consults. A machine with no network still gets its mode — it is told
-  // what it missed instead of losing the switch.
+  // A machine with no network still gets its mode — it is told what it
+  // missed instead of losing the switch.
   const report = modeReport(mode, env)
   try {
-    // Pane control goes to whoever consults: one agent in a host mode, all
-    // of them in cmux mode. Telling an agent it gets nothing and then
-    // writing 77 files into it is not "nothing".
-    const agents = detectAgents(env)
-    const targets = mode === 'cmux' ? agents : agents.filter((agent) => agent.id === mode)
-
-    // An agent that no longer consults gives its pane-control skills back:
-    // a switch that only ever adds would leave every agent it ever touched
-    // carrying files it has no use for.
-    const keep = new Set(targets.map((agent) => agent.skillsDir))
-    changes.push(
-      ...uninstallSkills(env, {
-        filter: (path, recorded) =>
-          recorded.source.startsWith('cmux@') && ![...keep].some((dir) => path.startsWith(dir)),
-      }),
-    )
-
-    const cmux = installCmuxSkills(env, { force: options.force, targets })
-    changes.push(...cmux.report)
+    changes.push(...syncCmuxSkills(env, { mode, force: options.force }).report)
   } catch (cause) {
     report.push(
       `cmux skills were not fetched (${cause instanceof Error ? cause.message.split('(')[0].trim() : cause}) — run \`consensflow skills update\` when you are online`,

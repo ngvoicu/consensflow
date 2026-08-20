@@ -24,10 +24,12 @@ function fixturePayload(t) {
   writeFileSync(join(fixture, 'pi', 'index.ts'), '// pi extension\n')
   writeFileSync(
     join(fixture, 'claude', 'skills', 'consensflow', 'SKILL.md'),
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the payload's own placeholder, not a template
     'run: node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" status\n',
   )
   writeFileSync(
     join(fixture, 'claude', 'commands', 'cf.md'),
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the payload's own placeholder, not a template
     'node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" run\n',
   )
   writeFileSync(
@@ -39,6 +41,7 @@ function fixturePayload(t) {
             hooks: [
               {
                 type: 'command',
+                // biome-ignore lint/suspicious/noTemplateCurlyInString: the payload's own placeholder, not a template
                 command: 'node "${CONSENSFLOW_HOST_ROOT}/scripts/session-start-hook.mjs"',
                 timeout: 15,
               },
@@ -126,7 +129,6 @@ describe('the manager installs the Claude Code side through user config', () => 
     assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts', 'claude')), false)
     const after = JSON.parse(readFileSync(settings(), 'utf8'))
     assert.equal(after.model, 'opus', 'user settings survive')
-    assert.equal(after.hooks?.SessionStart ?? [], 0 === 0 ? (after.hooks?.SessionStart ?? []) : [])
     assert.equal((after.hooks?.SessionStart ?? []).length, 0)
     assert.equal(hostStatus(t.env).find((h) => h.id === 'claude').installed, false)
   })

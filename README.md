@@ -19,7 +19,8 @@ command they run, so a leftover export can't silently switch a subscription
 login to per-token API billing.)
 
 There is no daemon and no database — the skill *is* the product. ConsensFlow
-manages the roster and keeps the skills current, including cmux's own skills.
+manages the roster and keeps the skills current — plus cmux's own skills, if
+you run the cmux path.
 
 ## Install
 
@@ -48,7 +49,8 @@ consensflow use cmux
 ```
 </details>
 
-`cf setup` detects your agents and installs the cmux skills (see below).
+`cf setup` detects your agents and, in cmux mode, installs the cmux skills
+(see below).
 Participants are yours to create — nothing is seeded:
 
 ```sh
@@ -98,8 +100,8 @@ Two sources, one owner:
 - **cmux's skills** — fetched by shallow-cloning
   [`manaflow-ai/cmux`](https://github.com/manaflow-ai/cmux) (its `skills/`
   tree: core, workspace, browser, settings, …) and installed the same way,
-  recorded as `cmux@<commit>`. They teach agents pane control; skip with
-  `cf setup --no-cmux`.
+  recorded as `cmux@<commit>`. They teach agents pane control, so they come
+  with `cmux` mode and only that one.
 
 ```sh
 cf skills status      # every file ConsensFlow owns: ok, drifted, missing
@@ -132,10 +134,12 @@ consensflow mode         # which one is active, and what it means
 The modes are named after the three things they are: the Claude Code
 integration, the pi extension, and the cmux-wide path that teaches every
 agent at once. **cmux's own skills — the ones that let an agent drive panes,
-workspaces and browser surfaces — come with all three**; they are part of an
-install, not an option. If you are offline when you switch, the mode still
-applies and says the cmux skills are pending (`consensflow skills update`
-fetches them later).
+workspaces and browser surfaces — come with `cmux` mode and only that one**;
+there they are part of the install, not an option. Consulting through a host
+runs a subprocess and never touches a pane, so `claude` and `pi` install none
+and take back any they find. If you are offline when you switch to cmux, the
+mode still applies and says the cmux skills are pending (`consensflow skills
+update` fetches them later).
 
 Switching removes what the previous mode installed, so two paths are never
 live at once. The trade is stated every time you switch and every time you

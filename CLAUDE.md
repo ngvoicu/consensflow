@@ -8,8 +8,8 @@ ConsensFlow (the manager, npm `consensflow`): skills-first. A zero-dependency No
 (`cf`/`consensflow` bins, no build step) that manages a roster of named AI
 participants and generates/installs **one skill** teaching every coding agent
 (claude, codex, pi, opencode — all read the same Agent Skills `SKILL.md`
-format) how to consult them via exact one-shot CLI commands. It also
-installs and updates cmux's own skills. There is deliberately **no
+format) how to consult them via exact one-shot CLI commands. In `cmux`
+mode it also installs and updates cmux's own skills. There is deliberately **no
 delegation engine** — no daemon, no SQLite, no panes, no state machine (the
 v2 engine that had one was retired and deleted 2026-08-19).
 
@@ -68,8 +68,10 @@ that to wherever it installed the payload.
   recorded in `<config>/mode.json`. `applyMode` installs the chosen path and
   removes the others' — so two ConsensFlow paths can never be live at once.
   `cf skills install` refuses in a host mode rather than quietly breaking the
-  invariant. cmux's own skills install with every mode — no flag, and a failed
-  fetch never costs the mode switch. Every entry point states the cost of a host mode (codex and
+  invariant. cmux's own skills belong to `cmux` mode alone (`syncCmuxSkills`,
+  the single rule the CLI, the UI and `applyMode` all call): a host mode
+  installs none, takes back any it finds, and never clones. A failed fetch
+  never costs the mode switch. Every entry point states the cost of a host mode (codex and
   opencode get nothing).
 
 - **Modules never read `process.env`** — the environment is an explicit
@@ -88,7 +90,9 @@ that to wherever it installed the payload.
   call `refreshInstalledSkill`); only where the manifest says it is installed.
 - **Pane control belongs to cmux's skills**, never ours — the v2 lesson
   (typed-bootstrap verification is a minefield). Our skill says *what* to
-  run; theirs say *how* to drive panes.
+  run; theirs say *how* to drive panes. It is also a different product from
+  consulting, which is why only `cmux` mode carries it: a Claude Code install
+  runs its participants as subprocesses and never touches a pane.
 - **Tests spawn no live agent CLIs and no network** — agent CLIs are stub
   scripts on a fake PATH; git is a PATH shim copying a fixture tree.
 

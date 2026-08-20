@@ -14,10 +14,16 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { detectAgents } from '../src/agents.js'
 import { CATALOG, catalogEntry } from '../src/catalog.js'
-import { installCmuxSkills } from '../src/cmux-skills.js'
 import { HOSTS, hostStatus, installHost, uninstallHost } from '../src/hosts.js'
 import { installSkill, skillsStatus, uninstallSkills } from '../src/install.js'
-import { applyMode, currentMode, MODES, modeLabel, modeReport } from '../src/mode.js'
+import {
+  applyMode,
+  currentMode,
+  MODES,
+  modeLabel,
+  modeReport,
+  syncCmuxSkills,
+} from '../src/mode.js'
 import {
   addParticipant,
   editParticipant,
@@ -113,6 +119,22 @@ function reportNativeHosts(env, all) {
   for (const agent of detectAgents(env).filter((a) => a.native === true)) {
     out(
       `${agent.id}: left alone — ${NATIVE_OWNER[agent.id] ?? 'its own integration'} already provides a consensflow skill (--all to install ours too)`,
+    )
+  }
+}
+
+/**
+ * cmux's own skills, wherever the mode says they belong — which in a host
+ * mode is nowhere, so this quietly takes back any that are left over.
+ */
+function syncCmux(env, values) {
+  try {
+    const cmux = syncCmuxSkills(env, { force: values.force })
+    if (cmux.commit !== null) out(`cmux skills @ ${cmux.commit}`)
+    printReport(cmux.report)
+  } catch (cause) {
+    out(
+      `cmux skills were not fetched (${cause instanceof Error ? cause.message.split('(')[0].trim() : cause})`,
     )
   }
 }
@@ -333,27 +355,14 @@ function skillsVerb(rest) {
         ),
       )
       reportNativeHosts(env, values.all)
-      // cmux's skills come with an install; being offline costs those, not
-      // the consensflow skill that just landed.
-      try {
-        const cmux = installCmuxSkills(env, { force: values.force })
-        out(`cmux skills @ ${cmux.commit}`)
-        printReport(cmux.report)
-      } catch (cause) {
-        out(
-          `cmux skills were not fetched (${cause instanceof Error ? cause.message.split('(')[0].trim() : cause})`,
-        )
-      }
+      // In cmux mode its skills come with the install; being offline costs
+      // those, not the consensflow skill that just landed.
+      syncCmux(env, values)
       return
     }
     case 'update': {
       refreshSkill(env)
-      const hasCmux = skillsStatus(env).some((row) => row.source.startsWith('cmux@'))
-      if (hasCmux) {
-        const cmux = installCmuxSkills(env, { force: values.force })
-        out(`cmux skills @ ${cmux.commit}`)
-        printReport(cmux.report)
-      }
+      syncCmux(env, values)
       out('updated')
       return
     }
@@ -412,17 +421,7 @@ function setup(rest) {
     reportNativeHosts(env, values.all)
   }
 
-  if (agents.length > 0) {
-    try {
-      const cmux = installCmuxSkills(env, { force: values.force })
-      out(`cmux skills @ ${cmux.commit}`)
-      printReport(cmux.report)
-    } catch (cause) {
-      out(
-        `cmux skills were not fetched (${cause instanceof Error ? cause.message.split('(')[0].trim() : cause})`,
-      )
-    }
-  }
+  if (agents.length > 0) syncCmux(env, values)
 }
 
 function doctor() {

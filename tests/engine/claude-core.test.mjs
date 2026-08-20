@@ -9,7 +9,6 @@ import {
   getPreset,
   listPresetIds,
   PARTICIPANT_PRESETS,
-  PRESET_OWNED_FIELDS,
   participantFromPreset,
 } from '../../hosts/lib/presets.js'
 import {

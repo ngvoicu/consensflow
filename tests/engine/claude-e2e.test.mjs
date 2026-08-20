@@ -1006,8 +1006,7 @@ test('every lib symbol the CLI and hooks import is actually exported (boundary s
   let checked = 0
   for (const source of sources) {
     const src = await readFile(source, 'utf8')
-    let match
-    while ((match = importRe.exec(src))) {
+    for (const match of src.matchAll(importRe)) {
       const symbols = match[1]
         .split(',')
         .map((s) =>

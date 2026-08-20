@@ -34,6 +34,14 @@ exit 1
   chmodSync(git, 0o755)
 }
 
+/** How many cmux-sourced files the manifest owns right now. */
+function cmuxFiles(t) {
+  const manifest = join(t.env.CONSENSFLOW_HOME, 'skills-manifest.json')
+  if (!existsSync(manifest)) return 0
+  const recorded = JSON.parse(readFileSync(manifest, 'utf8')).files ?? {}
+  return Object.values(recorded).filter((entry) => entry.source.startsWith('cmux@')).length
+}
+
 function bundle(t) {
   const root = join(t.root, 'bundled')
   mkdirSync(join(root, 'lib'), { recursive: true })
@@ -131,7 +139,7 @@ describe('the machine runs exactly one ConsensFlow path', () => {
     applyMode('cmux', t.env, { bundled })
   })
 
-  it('brings the cmux skills with it, whichever mode is chosen', () => {
+  it('brings the cmux skills with it when cmux mode is chosen', () => {
     stubGit(t)
     applyMode('cmux', t.env, { bundled })
 
@@ -141,18 +149,39 @@ describe('the machine runs exactly one ConsensFlow path', () => {
     )
   })
 
-  it('gives the cmux skills only to the agent that consults', () => {
+  it('keeps cmux pane skills out of a host mode entirely', () => {
     stubGit(t)
-    applyMode('claude', t.env, { bundled })
-
-    // In a host mode one agent consults; the others were told they get
-    // nothing, so they must not quietly receive 77 pane-control files.
-    assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'cmux-core', 'SKILL.md')))
-    assert.equal(existsSync(join(t.env.CODEX_HOME, 'skills', 'cmux-core', 'SKILL.md')), false)
-
-    // In cmux mode every agent consults, so every agent gets them.
     applyMode('cmux', t.env, { bundled })
+    // cmux mode is the path named after cmux, so pane control comes with it.
+    assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'cmux-core', 'SKILL.md')))
     assert.ok(existsSync(join(t.env.CODEX_HOME, 'skills', 'cmux-core', 'SKILL.md')))
+
+    // Choosing Claude Code takes them back everywhere: consulting through the
+    // host runs a subprocess and never touches a pane, so nobody needs them.
+    applyMode('claude', t.env, { bundled })
+    assert.equal(cmuxFiles(t), 0, 'a cc-only install should own no cmux files')
+    assert.equal(
+      existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'cmux-core', 'SKILL.md')),
+      false,
+    )
+    assert.equal(existsSync(join(t.env.CODEX_HOME, 'skills', 'cmux-core', 'SKILL.md')), false)
+  })
+
+  it('does not reach for cmux at all in a host mode', () => {
+    // git that fails loudly: a host mode must never clone, so the switch
+    // succeeds without it. (Offline machines choose cc modes too.)
+    mkdirSync(t.env.PATH, { recursive: true })
+    const git = join(t.env.PATH, 'git')
+    writeFileSync(git, '#!/bin/sh\necho "no network" >&2\nexit 1\n')
+    chmodSync(git, 0o755)
+
+    const applied = applyMode('claude', t.env, { bundled })
+    assert.equal(applied.mode, 'claude')
+    assert.equal(
+      applied.report.some((line) => line.includes('cmux skills were not fetched')),
+      false,
+      'a host mode has no cmux skills to miss, so it must not report a failure',
+    )
   })
 
   it('does not fail the switch when the cmux skills cannot be fetched', () => {

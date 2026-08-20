@@ -6,10 +6,17 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { detectAgents } from './agents.js'
 import { CATALOG, EFFORTS } from './catalog.js'
-import { installCmuxSkills } from './cmux-skills.js'
 import { hostStatus } from './hosts.js'
 import { installSkill, skillsStatus, uninstallSkills } from './install.js'
-import { applyMode, currentMode, MODES, modeLabel, modeReport, turnOff } from './mode.js'
+import {
+  applyMode,
+  currentMode,
+  MODES,
+  modeLabel,
+  modeReport,
+  syncCmuxSkills,
+  turnOff,
+} from './mode.js'
 import {
   addParticipant,
   editParticipant,
@@ -56,7 +63,7 @@ const INTEGRATIONS = {
   cmux: {
     title: 'cmux (pi, cc, codex, opencode)',
     summary:
-      'Every coding agent can consult, through the generated skill. No conversation is shared.',
+      'Every coding agent can consult, through the generated skill, and each gets cmux’s pane-control skills. No conversation is shared.',
   },
 }
 
@@ -125,7 +132,8 @@ function systemState(env) {
 
 /**
  * The install the page can trigger: the generated skill everywhere it
- * belongs, optionally cmux's own skills too. Named operations only — there
+ * belongs, and cmux's own skills wherever the mode says they go. Named
+ * operations only — there
  * is deliberately no endpoint that runs a command someone typed.
  */
 function installFromUi(body, env) {
@@ -145,10 +153,11 @@ function installFromUi(body, env) {
     )
     if (body.all !== true) report.push(...retireSkillFromNativeHosts(env))
   }
-  // cmux's own skills are part of an install, not a checkbox.
+  // cmux's own skills follow the mode, never the button: in a host mode this
+  // takes them back rather than handing them out.
   let cmuxCommit = null
   try {
-    const cmux = installCmuxSkills(env, { force: body.force === true })
+    const cmux = syncCmuxSkills(env, { force: body.force === true })
     cmuxCommit = cmux.commit
     report.push(...cmux.report)
   } catch {

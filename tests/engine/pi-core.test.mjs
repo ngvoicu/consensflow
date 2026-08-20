@@ -1049,9 +1049,8 @@ test('the cf_run_participant consent gate and name-neutrality stay locked in the
 test('every lib symbol the extension imports is actually exported (boundary smoke)', async () => {
   const src = await readFile(new URL('../../hosts/pi/index.ts', import.meta.url), 'utf8')
   const importRe = /import\s+(?:type\s+)?\{([^}]+)\}\s+from\s+"(\.\.\/lib\/[^"]+)"/g
-  let match
   let checked = 0
-  while ((match = importRe.exec(src))) {
+  for (const match of src.matchAll(importRe)) {
     const symbols = match[1]
       .split(',')
       .map((s) =>

@@ -3,14 +3,13 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { homedir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { configRoot } from './roster.js'
@@ -135,6 +134,7 @@ function installClaude(env, options) {
 
   const written = []
   // Payload files address their own root symbolically; make it concrete.
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: the payload's own placeholder, not a template
   const rewrite = (text) => text.split('${CONSENSFLOW_HOST_ROOT}').join(target)
 
   const skillSource = join(target, 'skills', 'consensflow', 'SKILL.md')
