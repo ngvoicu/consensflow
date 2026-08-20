@@ -203,6 +203,23 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     assert.equal(res.status, 400)
   })
 
+  it('reports each integration: what it is, and where it stands', async () => {
+    const system = await (await api('/api/system')).json()
+
+    const byId = Object.fromEntries(system.integrations.map((i) => [i.id, i]))
+    assert.deepEqual(Object.keys(byId).sort(), ['claude', 'cmux', 'pi'])
+
+    // Each one says what it gives you and whether it is the active path.
+    for (const integration of system.integrations) {
+      assert.ok(integration.title.length > 0)
+      assert.ok(integration.summary.length > 0)
+      assert.equal(typeof integration.active, 'boolean')
+      assert.equal(typeof integration.present, 'boolean')
+    }
+    assert.match(byId.cmux.title, /cmux/)
+    assert.match(byId.claude.summary, /conversation/i)
+  })
+
   it('installs and updates the skills from the page', async () => {
     const res = await api('/api/skills/install', { method: 'POST', body: JSON.stringify({}) })
     assert.equal(res.status, 200)

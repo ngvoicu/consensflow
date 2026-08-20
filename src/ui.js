@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { detectAgents } from './agents.js'
 import { CATALOG, EFFORTS } from './catalog.js'
 import { installCmuxSkills } from './cmux-skills.js'
+import { hostStatus } from './hosts.js'
 import { installSkill, skillsStatus, uninstallSkills } from './install.js'
 import { applyMode, currentMode, MODES, modeLabel, modeReport } from './mode.js'
 import {
@@ -37,6 +38,58 @@ const VERSION = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'),
 ).version
 
+/**
+ * The three integrations, each described in the terms someone choosing
+ * between them needs: what it gives you, whether it is the path this
+ * machine runs, and whether anything of it is already installed.
+ */
+const INTEGRATIONS = {
+  claude: {
+    title: 'Claude Code',
+    summary: 'Claude Code consults, and the participant gets your live conversation as context.',
+  },
+  pi: {
+    title: 'pi',
+    summary: 'pi consults, and the participant gets your live pi session as context.',
+  },
+  cmux: {
+    title: 'cmux (pi, cc, codex, opencode)',
+    summary:
+      'Every coding agent can consult, through the generated skill. No conversation is shared.',
+  },
+}
+
+function integrations(env) {
+  const mode = currentMode(env)
+  const hosts = Object.fromEntries(hostStatus(env).map((host) => [host.id, host]))
+  const owned = skillsStatus(env)
+
+  return MODES.map((id) => {
+    const host = hosts[id]
+    const generated = owned.filter((file) => file.source === 'consensflow')
+    return {
+      id,
+      title: INTEGRATIONS[id].title,
+      summary: INTEGRATIONS[id].summary,
+      active: mode === id,
+      present:
+        id === 'cmux'
+          ? generated.length > 0
+          : (host?.installed ?? false) || (host?.present ?? false),
+      detail:
+        id === 'cmux'
+          ? generated.length > 0
+            ? `${generated.length} agents carry the skill`
+            : 'not installed'
+          : host?.installed === true
+            ? `installed by ConsensFlow${host.version ? ` (v${host.version})` : ''}`
+            : host?.present === true
+              ? `already present via ${host.via}`
+              : 'not installed',
+    }
+  })
+}
+
 /** Everything `cf doctor` and `cf skills status` would tell you, as data. */
 function systemState(env) {
   const files = skillsStatus(env)
@@ -50,6 +103,7 @@ function systemState(env) {
       report: modeReport(mode ?? 'cmux', env),
       labels: Object.fromEntries(MODES.map((name) => [name, modeLabel(name)])),
     },
+    integrations: integrations(env),
     agents: detectAgents(env).map((agent) => ({
       id: agent.id,
       native: agent.native === true,
@@ -356,6 +410,20 @@ const PAGE = (token) => `<!DOCTYPE html>
   input::placeholder { color: var(--muted); }
   .full { grid-column: 1 / -1; }
   .alert { color: var(--buoy); font-size: 13px; margin: 0; }
+  .integration {
+    border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; margin-bottom: 10px;
+    display: grid; gap: 6px; background: var(--panel);
+  }
+  .integration[data-active="true"] { border-color: var(--seafoam); }
+  .integration__head { display: flex; align-items: baseline; gap: 10px; }
+  .integration__title { font-weight: 600; font-size: 15px; }
+  .integration__state {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--muted);
+  }
+  .integration[data-active="true"] .integration__state { color: var(--accent-text); }
+  .integration__head .spacer { flex: 1; }
+  .integration p { margin: 0; font-size: 13px; color: var(--muted); }
   .facts { display: grid; gap: 4px; margin: 0 0 14px; }
   .fact { display: flex; gap: 12px; font-size: 13px; }
   .fact dt { color: var(--muted); min-width: 104px; font-family: var(--mono); font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; padding-top: 2px; }
@@ -382,9 +450,9 @@ const PAGE = (token) => `<!DOCTYPE html>
   <p class="eyebrow eyebrow--section">Ready-made</p>
   <div id="catalog"></div>
 
-  <p class="eyebrow eyebrow--section">Mode</p>
+  <p class="eyebrow eyebrow--section">How this machine consults</p>
   <p class="lede" id="mode-lede"></p>
-  <div class="actions" id="modes"></div>
+  <div id="integrations"></div>
 
   <p class="eyebrow eyebrow--section">Skills</p>
   <div id="system"></div>
@@ -512,17 +580,32 @@ function showEfforts(efforts, runtime) {
 
 function renderMode(system) {
   document.querySelector('#mode-lede').textContent =
-    (system.mode.current === null
-      ? 'No mode chosen yet — nothing is installed. '
-      : 'Running in ' + system.mode.current + ' mode. ') + system.mode.report.join(' · ');
+    system.mode.current === null
+      ? 'Nothing is installed yet. Pick the one path this machine runs — switching later removes the previous one.'
+      : system.mode.report.join(' · ');
 
-  const host = document.querySelector('#modes');
+  const host = document.querySelector('#integrations');
   host.innerHTML = '';
-  for (const mode of system.mode.available) {
-    const btn = el('button', mode === system.mode.current ? 'primary' : null, system.mode.labels[mode] ?? mode);
-    btn.disabled = mode === system.mode.current;
-    btn.onclick = () => post('/api/mode', { mode }, 'Switching to ' + mode + '…');
-    host.append(btn);
+  for (const integration of system.integrations) {
+    const card = el('div', 'integration');
+    card.dataset.active = String(integration.active);
+
+    const head = el('div', 'integration__head');
+    head.append(el('span', 'integration__title', integration.title));
+    head.append(el('span', 'integration__state', integration.active ? 'active' : integration.detail));
+    head.append(el('span', 'spacer'));
+    if (!integration.active) {
+      const use = el('button', null, 'Use this');
+      use.onclick = () =>
+        post('/api/mode', { mode: integration.id }, 'Switching to ' + integration.title + '…');
+      head.append(use);
+    }
+    card.append(head);
+    card.append(el('p', null, integration.summary));
+    if (integration.active && integration.detail !== 'not installed') {
+      card.append(el('p', null, integration.detail));
+    }
+    host.append(card);
   }
 }
 

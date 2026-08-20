@@ -166,10 +166,9 @@ merged into `settings.json` — your other settings and hooks are left alone,
 and the file is backed up before each write. `install pi` shells out to pi's
 supported CLI rather than editing pi's state by hand.
 
-The payload repos ([`consensflow-cc`](https://github.com/ngvoicu/consensflow-cc),
-[`consensflow-pi`](https://github.com/ngvoicu/consensflow-pi)) exist to be
-installed *by this manager*. Managing participants happens here, in one
-place, for all of them.
+Both payloads live in this repo (`hosts/claude`, `hosts/pi`) and share one
+engine (`hosts/lib`), so there is nothing to install from anywhere else and
+nothing to keep in sync.
 
 Every host reads the same participants file, so they always agree on who
 your participants are — and they don't stack up on one agent. Where a host
@@ -215,6 +214,13 @@ now, not one per host. What it guarantees:
 - **The roster is shared.** Every host reads the same
   `~/.consensflow/participants.json`, so participants defined once are
   available everywhere.
+
+## History
+
+`consensflow-cc` (the Claude Code plugin) and `consensflow-pi` (the pi
+extension) were separate repositories until 2026-08-20. They are archived:
+their payloads live here under `hosts/`, sharing one engine, and this app
+installs them. Nothing is maintained outside this repo.
 
 ## State
 

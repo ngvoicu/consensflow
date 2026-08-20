@@ -340,7 +340,9 @@ function skillsVerb(rest) {
         out(`cmux skills @ ${cmux.commit}`)
         printReport(cmux.report)
       } catch (cause) {
-        out(`cmux skills were not fetched (${cause instanceof Error ? cause.message.split('(')[0].trim() : cause})`)
+        out(
+          `cmux skills were not fetched (${cause instanceof Error ? cause.message.split('(')[0].trim() : cause})`,
+        )
       }
       return
     }
@@ -416,7 +418,9 @@ function setup(rest) {
       out(`cmux skills @ ${cmux.commit}`)
       printReport(cmux.report)
     } catch (cause) {
-      out(`cmux skills were not fetched (${cause instanceof Error ? cause.message.split('(')[0].trim() : cause})`)
+      out(
+        `cmux skills were not fetched (${cause instanceof Error ? cause.message.split('(')[0].trim() : cause})`,
+      )
     }
   }
 }
