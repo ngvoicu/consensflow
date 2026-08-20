@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ConsensFlow</title>
+<style>
+  :root { color-scheme: dark light; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: #0C1E23; color: #E9F1EF; font-family: Archivo, system-ui, sans-serif;
+    padding: 2rem; text-align: center;
+  }
+  main { max-width: 46ch; }
+  p.mark { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px;
+    letter-spacing: .14em; text-transform: uppercase; color: #63C7B2; margin: 0 0 10px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 10px; }
+  p { line-height: 1.55; color: #8FA9AF; margin: 0; font-size: 14px; }
+  code { font-family: "IBM Plex Mono", ui-monospace, monospace; color: #E9F1EF; }
+</style>
+</head>
+<body>
+<main>
+  <p class="mark">consensflow</p>
+  <h1 id="headline">Starting the editor…</h1>
+  <p id="detail">This window opens ConsensFlow's roster editor.</p>
+</main>
+<script>
+  // The Rust side sets data-error when the editor could not be started.
+  new MutationObserver(() => {
+    const error = document.body.dataset.error;
+    if (!error) return;
+    document.querySelector('#headline').textContent = 'The editor did not start';
+    document.querySelector('#detail').textContent = error;
+  }).observe(document.body, { attributes: true, attributeFilter: ['data-error'] });
+</script>
+</body>
+</html>

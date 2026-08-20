@@ -13,6 +13,41 @@ function stubCli(t, name) {
   chmodSync(path, 0o755)
 }
 
+describe('a host program can start the editor and be told where it is', () => {
+  it('prints one machine-readable line, then serves', async () => {
+    const t = tempEnv()
+    const { spawn } = await import('node:child_process')
+    const cf = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
+    const child = spawn(process.execPath, [cf, 'ui', '--json', '--no-open'], {
+      env: t.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    try {
+      const line = await new Promise((resolve, reject) => {
+        let buffer = ''
+        child.stdout.on('data', (chunk) => {
+          buffer += chunk
+          const end = buffer.indexOf('\n')
+          if (end !== -1) resolve(buffer.slice(0, end))
+        })
+        child.on('error', reject)
+        setTimeout(() => reject(new Error('no handle line')), 10_000)
+      })
+
+      const handle = JSON.parse(line)
+      assert.match(handle.url, /^http:\/\/127\.0\.0\.1:\d+\/$/)
+      assert.equal(typeof handle.token, 'string')
+
+      // The address it printed is really serving.
+      const res = await fetch(`${handle.url}?token=${handle.token}`)
+      assert.equal(res.status, 200)
+    } finally {
+      child.kill()
+      t.cleanup()
+    }
+  })
+})
+
 describe('the roster UI is loopback, token-gated and ephemeral', () => {
   const t = tempEnv()
   let server

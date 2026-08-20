@@ -76,7 +76,8 @@ Usage: cf <command> [options]
   skills update [--force]                      Regenerate ours; re-fetch cmux's if they are installed
   skills status                                Every owned file: ok, drifted (user-edited) or missing
   skills uninstall [--force]                   Remove exactly what the manifest owns
-  ui                                           Ephemeral local roster editor (Ctrl-C to stop)
+  ui [--json] [--no-open]                      Ephemeral local roster editor (Ctrl-C to stop);
+                                               --json prints a handle line for a host program
   doctor                                       Agents detected, roster size, skills state
 
 Every roster change regenerates the installed consensflow skill. Drifted files
@@ -476,7 +477,15 @@ async function main() {
       return
     case 'ui': {
       const { serveUi } = await import('../src/ui.js')
-      await serveUi(env, { onOut: out })
+      const { values } = parseArgs({
+        args: rest,
+        allowPositionals: true,
+        options: {
+          json: { type: 'boolean', default: false },
+          'no-open': { type: 'boolean', default: false },
+        },
+      })
+      await serveUi(env, { onOut: out, json: values.json, open: !values['no-open'] })
       return
     }
     case 'doctor':

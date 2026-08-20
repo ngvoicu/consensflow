@@ -204,13 +204,24 @@ export async function startUiServer(env) {
   }
 }
 
-/** `cf ui`: start, print the URL, open the browser, run until Ctrl-C. */
-export async function serveUi(env, { onOut }) {
+/**
+ * `cf ui`: start, say where it is, run until Ctrl-C.
+ *
+ * `json` prints one machine-readable handle line first, so a host program
+ * (the desktop app) can start the editor and point a window at it instead of
+ * scraping prose. `open: false` leaves the browser alone for the same reason.
+ */
+export async function serveUi(env, { onOut, json = false, open = true }) {
   const server = await startUiServer(env)
   const url = `${server.url}/?token=${server.token}`
-  onOut(`roster editor: ${url}`)
-  onOut('Ctrl-C to stop — nothing keeps running after it.')
-  spawn('open', [url], { stdio: 'ignore', detached: true }).unref()
+
+  if (json) {
+    onOut(JSON.stringify({ url: `${server.url}/`, token: server.token }))
+  } else {
+    onOut(`roster editor: ${url}`)
+    onOut('Ctrl-C to stop — nothing keeps running after it.')
+  }
+  if (open) spawn('open', [url], { stdio: 'ignore', detached: true }).unref()
   await new Promise(() => {})
 }
 
