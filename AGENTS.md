@@ -29,6 +29,21 @@ v2 engine that had one was retired and deleted 2026-08-19).
 | `src/ui.js` | Ephemeral loopback roster editor (random bearer token, no daemon): roster CRUD, catalog quick-adds, the mode switcher (`POST /api/mode`), and the skills panel (`GET /api/system`, `POST /api/skills/install`, `POST /api/skills/uninstall` — uninstall needs `confirm:true`). Named operations only: never an endpoint that executes a supplied command |
 | `skill/SKILL.md` | The hand-written v0 the generator's template mirrors |
 
+## The desktop app
+
+`app/` (Tauri v2, Rust) is a window around `cf ui`, never a second editor.
+Load-bearing facts, each learned by running the built bundle:
+
+- macOS ATS blocks cleartext http in WKWebView → `bundle.macOS.exceptionDomain
+  = "localhost"` and the URL must say `localhost`, not `127.0.0.1`.
+- Build the window AT the address (`WebviewUrl::External`); navigating after
+  the fact fails silently.
+- A .app launched from Finder has a minimal PATH — `locate_cli()` tries PATH,
+  known install locations, then the login shell.
+- The editor is tied to the app's lifetime by a pipe on its stdin
+  (`isPipe` accepts a socketpair, which is what Node's `'pipe'` is on macOS);
+  `cf ui` run by hand keeps a terminal/dev-null stdin and is unaffected.
+
 ## The merged layout
 
 `hosts/lib` is THE engine — one copy, shared by both host payloads
