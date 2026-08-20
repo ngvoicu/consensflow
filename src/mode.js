@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { detectAgents } from './agents.js'
 import { installCmuxSkills } from './cmux-skills.js'
@@ -96,6 +96,23 @@ export function modeReport(rawMode, env) {
     lines.push(`${others.join(', ')}: no ConsensFlow in this mode — switch to cmux to include them`)
   }
   return lines
+}
+
+/**
+ * ConsensFlow off: every file it installed removed, both host payloads gone,
+ * no mode. The counterpart to choosing a path — and the only way to leave
+ * no trace without uninstalling the app itself.
+ */
+export function turnOff(env, options = {}) {
+  const changes = []
+  for (const host of ['claude', 'pi']) changes.push(...dropHost(host, env))
+  changes.push(...uninstallSkills(env, { force: options.force }))
+  try {
+    rmSync(statePath(env), { force: true })
+  } catch {
+    // Never written, or already gone.
+  }
+  return { mode: null, changes }
 }
 
 export function applyMode(rawMode, env, options = {}) {

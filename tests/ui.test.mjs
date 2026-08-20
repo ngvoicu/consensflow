@@ -232,7 +232,24 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     )
   })
 
+  it('turns everything off from the page, deliberately', async () => {
+    const refused = await api('/api/off', { method: 'POST', body: JSON.stringify({}) })
+    assert.equal(refused.status, 400)
+
+    const done = await api('/api/off', { method: 'POST', body: JSON.stringify({ confirm: true }) })
+    assert.equal(done.status, 200)
+    assert.equal((await done.json()).system.mode.current, null)
+    assert.equal(
+      existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')),
+      false,
+    )
+  })
+
   it('removes them again, but only when the click was deliberate', async () => {
+    // Off cleared everything; put the skill back so removal has a target.
+    await api('/api/skills/install', { method: 'POST', body: JSON.stringify({}) })
+    assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')))
+
     const refused = await api('/api/skills/uninstall', { method: 'POST', body: JSON.stringify({}) })
     assert.equal(refused.status, 400)
     assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')))

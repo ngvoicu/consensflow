@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
-import { applyMode, currentMode, MODES, modeLabel, modeReport } from '../src/mode.js'
+import { applyMode, currentMode, MODES, modeLabel, modeReport, turnOff } from '../src/mode.js'
 import { addParticipant, removeParticipant } from '../src/roster.js'
 import { refreshInstalledSkill } from '../src/sync.js'
 import { tempEnv } from './helpers.mjs'
@@ -156,6 +156,19 @@ describe('the machine runs exactly one ConsensFlow path', () => {
     } finally {
       offline.cleanup()
     }
+  })
+
+  it('turns everything off: no path, no skills, no payloads, no mode', () => {
+    stubGit(t)
+    applyMode('cmux', t.env, { bundled })
+    assert.ok(existsSync(generated(t.env.CODEX_HOME)))
+
+    const outcome = turnOff(t.env)
+
+    assert.equal(currentMode(t.env), null)
+    assert.equal(existsSync(generated(t.env.CODEX_HOME)), false)
+    assert.equal(existsSync(join(t.env.CODEX_HOME, 'skills', 'cmux-core', 'SKILL.md')), false)
+    assert.ok(outcome.changes.length > 0)
   })
 
   it('refuses a mode it does not have, naming the ones it does', () => {

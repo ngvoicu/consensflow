@@ -9,7 +9,7 @@ import { CATALOG, EFFORTS } from './catalog.js'
 import { installCmuxSkills } from './cmux-skills.js'
 import { hostStatus } from './hosts.js'
 import { installSkill, skillsStatus, uninstallSkills } from './install.js'
-import { applyMode, currentMode, MODES, modeLabel, modeReport } from './mode.js'
+import { applyMode, currentMode, MODES, modeLabel, modeReport, turnOff } from './mode.js'
 import {
   addParticipant,
   editParticipant,
@@ -240,6 +240,18 @@ export async function startUiServer(env) {
         const body = JSON.parse((await readBody(request)) || '{}')
         return send(200, installFromUi(body, env))
       }
+      if (request.method === 'POST' && url.pathname === '/api/off') {
+        const body = JSON.parse((await readBody(request)) || '{}')
+        if (body.confirm !== true) {
+          return send(400, { error: 'confirm before turning ConsensFlow off' })
+        }
+        const outcome = turnOff(env, { force: body.force === true })
+        return send(200, {
+          ...outcome,
+          report: ['ConsensFlow is off — nothing is installed'],
+          system: systemState(env),
+        })
+      }
       if (request.method === 'POST' && url.pathname === '/api/skills/uninstall') {
         const body = JSON.parse((await readBody(request)) || '{}')
         // A click that removes 300 files says so first; the flag is the say-so.
@@ -454,11 +466,11 @@ const PAGE = (token) => `<!DOCTYPE html>
   <p class="lede" id="mode-lede"></p>
   <div id="integrations"></div>
 
-  <p class="eyebrow eyebrow--section">Skills</p>
+  <p class="eyebrow eyebrow--section">Installed</p>
   <div id="system"></div>
   <div class="actions">
-    <button id="install" class="primary">Install / update skills</button>
-    <button id="uninstall" class="danger">Remove installed skills</button>
+    <button id="update">Update skills</button>
+    <button id="off" class="danger">Turn ConsensFlow off</button>
   </div>
   <p id="skills-note" class="note"></p>
 
@@ -609,6 +621,14 @@ function renderMode(system) {
   }
 }
 
+/** What each agent has, given the path this machine runs. */
+function agentState(agent, mode) {
+  if (mode === null) return 'nothing yet';
+  if (mode === 'cmux') return 'consults, via the generated skill';
+  if (agent.id === mode) return 'consults, with your conversation as context';
+  return 'nothing in ' + mode + ' mode';
+}
+
 function renderSystem(system) {
   const host = document.querySelector('#system');
   host.innerHTML = '';
@@ -618,7 +638,7 @@ function renderSystem(system) {
   for (const agent of system.agents) {
     const line = el('div', 'host');
     line.append(agent.id + ' ');
-    line.append(el('span', null, agent.native ? '— has its own consensflow skill' : '— gets the generated skill'));
+    line.append(el('span', null, '— ' + agentState(agent, system.mode.current)));
     hosts.append(line);
   }
   if (system.agents.length === 0) hosts.append(el('span', null, 'none on PATH'));
@@ -657,10 +677,12 @@ async function post(path, body, note) {
   load();
 }
 
-document.querySelector('#install').onclick = () => post('/api/skills/install', {}, 'Installing…');
-document.querySelector('#uninstall').onclick = () => {
-  if (!confirm('Remove every skill file ConsensFlow installed?')) return;
-  post('/api/skills/uninstall', { confirm: true }, 'Removing…');
+// Choosing an integration installs it; this only refreshes what is there.
+document.querySelector('#update').onclick = () =>
+  post('/api/skills/install', {}, 'Updating…');
+document.querySelector('#off').onclick = () => {
+  if (!confirm('Turn ConsensFlow off? Every file it installed is removed and no agent will consult.')) return;
+  post('/api/off', { confirm: true }, 'Turning off…');
 };
 
 async function load() {
