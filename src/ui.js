@@ -19,11 +19,7 @@ import {
 } from './roster.js'
 import { generateSkill, participantCommand } from './skill.js'
 import { refreshInstalledSkill, retireSkillFromNativeHosts, skillTargets } from './sync.js'
-import {
-  installTerminalCommand,
-  removeTerminalCommand,
-  terminalCommandStatus,
-} from './terminal.js'
+import { installTerminalCommand, removeTerminalCommand, terminalCommandStatus } from './terminal.js'
 
 /**
  * The minimal roster editor: one ephemeral loopback HTTP server, one inline
@@ -77,6 +73,8 @@ function integrations(env) {
       title: INTEGRATIONS[id].title,
       summary: INTEGRATIONS[id].summary,
       active: mode === id,
+      files:
+        id === 'cmux' ? owned.filter((f) => f.source === 'consensflow').length : (host?.files ?? 0),
       present:
         id === 'cmux'
           ? generated.length > 0
@@ -685,10 +683,10 @@ function agentState(agent, mode) {
 function renderTerminal(system) {
   const btn = document.querySelector('#terminal');
   const installed = system.terminal.installed;
-  btn.textContent = installed ? 'Remove terminal command' : 'Install terminal command';
+  btn.textContent = installed ? 'Remove terminal command' : 'Install terminal command (optional)';
   btn.title = installed
     ? system.terminal.path + (system.terminal.onPath ? '' : ' (not on your PATH)')
-    : 'Puts the consensflow command on your PATH, pointing at this app';
+    : 'Optional: puts the consensflow command on your PATH for scripting. Nothing here needs it.';
   btn.onclick = () =>
     post('/api/terminal-command', { remove: installed }, installed ? 'Removing…' : 'Installing…');
 }
@@ -708,12 +706,18 @@ function renderSystem(system) {
   }
   if (system.agents.length === 0) hosts.append(el('span', null, 'none on PATH'));
 
-  const skills = system.skills.owned === 0
-    ? 'none installed'
-    : system.skills.owned + ' files'
-      + (system.skills.cmuxCommit ? ' · cmux@' + system.skills.cmuxCommit : '')
-      + (system.skills.drifted ? ' · ' + system.skills.drifted + ' edited by you' : '')
-      + (system.skills.missing ? ' · ' + system.skills.missing + ' missing' : '');
+  const active = system.integrations.find((i) => i.active);
+  const parts = [];
+  if (active && active.files > 0) {
+    parts.push(active.id === 'cmux'
+      ? active.files + ' agents carry the skill'
+      : active.title + ': ' + active.files + ' files wired + payload');
+  }
+  if (system.skills.owned > 0) parts.push(system.skills.owned + ' skill files');
+  if (system.skills.cmuxCommit) parts.push('cmux@' + system.skills.cmuxCommit);
+  if (system.skills.drifted) parts.push(system.skills.drifted + ' edited by you');
+  if (system.skills.missing) parts.push(system.skills.missing + ' missing');
+  const skills = parts.length > 0 ? parts.join(' · ') : 'nothing yet';
 
   for (const [label, value] of [['Agents', hosts], ['Installed', skills]]) {
     const dt = el('dt', null, label);

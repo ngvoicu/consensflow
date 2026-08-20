@@ -118,7 +118,13 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
   it('serves a page that can do the whole job, not half of it', async () => {
     const html = await (await fetch(`${server.url}/?token=${server.token}`)).text()
     // Everything the CLI can do has an affordance here.
-    for (const marker of ['id="integrations"', 'id="update"', 'id="terminal"', 'id="off"', 'Edit']) {
+    for (const marker of [
+      'id="integrations"',
+      'id="update"',
+      'id="terminal"',
+      'id="off"',
+      'Edit',
+    ]) {
       assert.ok(html.includes(marker), `the page is missing ${marker}`)
     }
   })
@@ -226,6 +232,13 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     }
     assert.match(byId.cmux.title, /cmux/)
     assert.match(byId.claude.summary, /conversation/i)
+  })
+
+  it('counts a host integration as installed, not just skill files', async () => {
+    const system = await (await api('/api/system')).json()
+    for (const integration of system.integrations) {
+      assert.equal(typeof integration.files, 'number')
+    }
   })
 
   it('installs and updates the skills from the page', async () => {

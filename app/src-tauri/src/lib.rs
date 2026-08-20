@@ -64,13 +64,30 @@ fn bundled_cli(app: &tauri::AppHandle) -> Result<(std::path::PathBuf, std::path:
     Ok((node, cli))
 }
 
+/// The PATH a terminal would have.
+///
+/// A .app launched from Finder gets `/usr/bin:/bin:/usr/sbin:/sbin` — none of
+/// the places coding agents actually live. The editor inherits our
+/// environment, so without this it reports "no agents on PATH" on a machine
+/// with four of them, and would install skills nowhere.
+fn login_path() -> Option<String> {
+    let shell = std::env::var("SHELL").ok()?;
+    let output = Command::new(shell).args(["-lc", "printf %s \"$PATH\""]).output().ok()?;
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if path.is_empty() { None } else { Some(path) }
+}
+
 /// Starts the editor and returns the address to show, or a human explanation.
 fn start_editor(app: &tauri::AppHandle) -> Result<(String, Child), String> {
     let (node, cli) = bundled_cli(app)?;
 
-    let mut child = Command::new(&node)
-        .arg(&cli)
-        .args(["ui", "--json", "--no-open"])
+    let mut command = Command::new(&node);
+    command.arg(&cli).args(["ui", "--json", "--no-open"]);
+    if let Some(path) = login_path() {
+        eprintln!("consensflow: using the login shell's PATH");
+        command.env("PATH", path);
+    }
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
