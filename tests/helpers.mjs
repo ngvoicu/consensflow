@@ -16,6 +16,7 @@ export function tempEnv() {
     CODEX_HOME: join(root, 'home', '.codex'),
     XDG_CONFIG_HOME: join(root, 'home', '.config'),
     PATH: join(root, 'bin'),
+    CONSENSFLOW_BIN_DIR: join(root, 'user-bin'),
   }
   return {
     root,

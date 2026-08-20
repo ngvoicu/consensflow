@@ -19,6 +19,11 @@ import {
 } from './roster.js'
 import { generateSkill, participantCommand } from './skill.js'
 import { refreshInstalledSkill, retireSkillFromNativeHosts, skillTargets } from './sync.js'
+import {
+  installTerminalCommand,
+  removeTerminalCommand,
+  terminalCommandStatus,
+} from './terminal.js'
 
 /**
  * The minimal roster editor: one ephemeral loopback HTTP server, one inline
@@ -104,6 +109,7 @@ function systemState(env) {
       labels: Object.fromEntries(MODES.map((name) => [name, modeLabel(name)])),
     },
     integrations: integrations(env),
+    terminal: terminalCommandStatus(env),
     agents: detectAgents(env).map((agent) => ({
       id: agent.id,
       native: agent.native === true,
@@ -239,6 +245,12 @@ export async function startUiServer(env) {
       if (request.method === 'POST' && url.pathname === '/api/skills/install') {
         const body = JSON.parse((await readBody(request)) || '{}')
         return send(200, installFromUi(body, env))
+      }
+      if (request.method === 'POST' && url.pathname === '/api/terminal-command') {
+        const body = JSON.parse((await readBody(request)) || '{}')
+        const outcome =
+          body.remove === true ? removeTerminalCommand(env) : installTerminalCommand(env)
+        return send(200, { ...outcome, system: systemState(env) })
       }
       if (request.method === 'POST' && url.pathname === '/api/off') {
         const body = JSON.parse((await readBody(request)) || '{}')
@@ -453,7 +465,7 @@ const PAGE = (token) => `<!DOCTYPE html>
 </head>
 <body>
 <main>
-  <p class="mark">consensflow</p>
+  <p class="mark"><span>consensflow</span> <span id="version"></span></p>
   <h1>Your participants</h1>
   <p class="lede" id="lede">Each one is a real coding-agent CLI. Every change here rewrites the skill installed in your agents, so they can consult it by name.</p>
 
@@ -470,6 +482,7 @@ const PAGE = (token) => `<!DOCTYPE html>
   <div id="system"></div>
   <div class="actions">
     <button id="update">Update skills</button>
+    <button id="terminal"></button>
     <button id="off" class="danger">Turn ConsensFlow off</button>
   </div>
   <p id="skills-note" class="note"></p>
@@ -529,6 +542,9 @@ function renderRoster(data) {
     head.append(el('span', 'callsign', p.name));
     head.append(el('span', 'tag', p.runtime + (p.effort ? ' · ' + p.effort : '')));
     head.append(el('span', 'spacer'));
+    const edit = el('button', null, 'Edit');
+    edit.onclick = () => openEditor(card, p);
+    head.append(edit);
     const remove = el('button', 'danger', 'Remove');
     remove.onclick = async () => {
       await fetch('/api/participants/' + p.name, { method: 'DELETE', headers });
@@ -541,6 +557,43 @@ function renderRoster(data) {
     else card.append(el('p', 'member__desc', p.runtime + ' participants are not run by this tool — it leaves them alone.'));
     host.append(card);
   }
+}
+
+/** Editing a participant is changing its model, effort or description. */
+function openEditor(card, participant) {
+  if (card.querySelector('form')) return;
+  const form = el('form', 'form');
+  const fields = [
+    ['model', participant.model, 'model'],
+    ['effort', participant.effort ?? '', 'effort (blank for none)'],
+    ['description', participant.description ?? '', 'description'],
+  ];
+  for (const [name, value, placeholder] of fields) {
+    const input = document.createElement('input');
+    input.name = name;
+    input.value = value;
+    input.placeholder = placeholder;
+    input.className = 'full';
+    form.append(input);
+  }
+  const save = el('button', 'primary', 'Save');
+  save.type = 'submit';
+  const cancel = el('button', null, 'Cancel');
+  cancel.type = 'button';
+  cancel.onclick = () => form.remove();
+  form.append(save, cancel);
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    const entries = Object.fromEntries(new FormData(form).entries());
+    const res = await fetch('/api/participants/' + participant.name, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(entries),
+    });
+    if (res.ok) load();
+    else document.querySelector('#skills-note').textContent = (await res.json()).error;
+  };
+  card.append(form);
 }
 
 function renderCatalog(data) {
@@ -629,7 +682,19 @@ function agentState(agent, mode) {
   return 'nothing in ' + mode + ' mode';
 }
 
+function renderTerminal(system) {
+  const btn = document.querySelector('#terminal');
+  const installed = system.terminal.installed;
+  btn.textContent = installed ? 'Remove terminal command' : 'Install terminal command';
+  btn.title = installed
+    ? system.terminal.path + (system.terminal.onPath ? '' : ' (not on your PATH)')
+    : 'Puts the consensflow command on your PATH, pointing at this app';
+  btn.onclick = () =>
+    post('/api/terminal-command', { remove: installed }, installed ? 'Removing…' : 'Installing…');
+}
+
 function renderSystem(system) {
+  document.querySelector('#version').textContent = 'v' + system.version;
   const host = document.querySelector('#system');
   host.innerHTML = '';
   const list = el('dl', 'facts');
@@ -695,6 +760,7 @@ async function load() {
   renderForm(data);
   renderSystem(system);
   renderMode(system);
+  renderTerminal(system);
 }
 
 document.querySelector('#add').onsubmit = async (event) => {

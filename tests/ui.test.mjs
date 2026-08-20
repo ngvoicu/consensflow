@@ -115,6 +115,14 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     assert.ok(!html.includes('${JSON.stringify'))
   })
 
+  it('serves a page that can do the whole job, not half of it', async () => {
+    const html = await (await fetch(`${server.url}/?token=${server.token}`)).text()
+    // Everything the CLI can do has an affordance here.
+    for (const marker of ['id="integrations"', 'id="update"', 'id="terminal"', 'id="off"', 'Edit']) {
+      assert.ok(html.includes(marker), `the page is missing ${marker}`)
+    }
+  })
+
   it('serves the editor page', async () => {
     const res = await fetch(`${server.url}/?token=${server.token}`)
     assert.equal(res.status, 200)
@@ -230,6 +238,22 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
       existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')),
       'the generated skill is on disk',
     )
+  })
+
+  it('can put the terminal command on PATH, and take it back', async () => {
+    const before = await (await api('/api/system')).json()
+    assert.equal(before.terminal.installed, false)
+
+    const installed = await (
+      await api('/api/terminal-command', { method: 'POST', body: JSON.stringify({}) })
+    ).json()
+    assert.equal(installed.system.terminal.installed, true)
+    assert.match(installed.system.terminal.path, /consensflow$/)
+
+    const removed = await (
+      await api('/api/terminal-command', { method: 'POST', body: JSON.stringify({ remove: true }) })
+    ).json()
+    assert.equal(removed.system.terminal.installed, false)
   })
 
   it('turns everything off from the page, deliberately', async () => {
