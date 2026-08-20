@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, before, describe, it } from 'node:test'
 import { listParticipants } from '../src/roster.js'
@@ -94,6 +94,56 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
       'utf8',
     )
     assert.match(installed, /claude-opus-5/)
+  })
+
+  it('reports the same system state cf doctor prints', async () => {
+    const res = await api('/api/system')
+    assert.equal(res.status, 200)
+    const system = await res.json()
+
+    assert.match(system.version, /^3\./)
+    assert.deepEqual(
+      system.agents.map((a) => a.id),
+      ['claude'],
+    )
+    assert.equal(system.agents[0].native, false)
+    assert.equal(typeof system.skills.owned, 'number')
+    assert.equal(system.participants, 1)
+  })
+
+  it('installs and updates the skills from the page', async () => {
+    const res = await api('/api/skills/install', { method: 'POST', body: JSON.stringify({}) })
+    assert.equal(res.status, 200)
+    const body = await res.json()
+
+    assert.ok(body.report.some((r) => r.action === 'installed' || r.action === 'updated'))
+    assert.ok(
+      existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')),
+      'the generated skill is on disk',
+    )
+  })
+
+  it('removes them again, but only when the click was deliberate', async () => {
+    const refused = await api('/api/skills/uninstall', { method: 'POST', body: JSON.stringify({}) })
+    assert.equal(refused.status, 400)
+    assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')))
+
+    const done = await api('/api/skills/uninstall', {
+      method: 'POST',
+      body: JSON.stringify({ confirm: true }),
+    })
+    assert.equal(done.status, 200)
+    assert.equal(
+      existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')),
+      false,
+    )
+  })
+
+  it('never exposes a way to run arbitrary commands', async () => {
+    for (const path of ['/api/exec', '/api/run', '/api/shell']) {
+      const res = await api(path, { method: 'POST', body: JSON.stringify({ command: 'id' }) })
+      assert.equal(res.status, 404, `${path} must not exist`)
+    }
   })
 
   it('surfaces validation errors as JSON, not crashes', async () => {

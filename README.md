@@ -90,6 +90,12 @@ cf skills uninstall   # remove exactly what the manifest owns, nothing else
 cf doctor
 ```
 
+`cf ui` does this part too: it shows which agents were found (and which
+already have their own ConsensFlow), how many files are installed and at
+which cmux commit, and offers **Install / update skills** and **Remove
+installed skills**. Those are named operations — the page has no endpoint
+that runs a command you type, by design.
+
 Ownership is a hash manifest (`~/.config/consensflow/skills-manifest.json`).
 A file you edited by hand is **drifted**: ConsensFlow refuses to overwrite or
 delete it without `--force`, and it never touches files it didn't write.

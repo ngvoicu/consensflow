@@ -1,7 +1,13 @@
 import { spawn } from 'node:child_process'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { detectAgents } from './agents.js'
 import { CATALOG, EFFORTS } from './catalog.js'
+import { installCmuxSkills } from './cmux-skills.js'
+import { installSkill, skillsStatus, uninstallSkills } from './install.js'
 import {
   addParticipant,
   editParticipant,
@@ -9,8 +15,8 @@ import {
   RUNTIMES,
   removeParticipant,
 } from './roster.js'
-import { participantCommand } from './skill.js'
-import { refreshInstalledSkill } from './sync.js'
+import { generateSkill, participantCommand } from './skill.js'
+import { refreshInstalledSkill, retireSkillFromNativeHosts, skillTargets } from './sync.js'
 
 /**
  * The minimal roster editor: one ephemeral loopback HTTP server, one inline
@@ -24,6 +30,62 @@ function tokenMatches(presented, token) {
     createHash('sha256').update(presented).digest(),
     createHash('sha256').update(token).digest(),
   )
+}
+
+const VERSION = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'),
+).version
+
+/** Everything `cf doctor` and `cf skills status` would tell you, as data. */
+function systemState(env) {
+  const files = skillsStatus(env)
+  const cmux = files.find((file) => file.source.startsWith('cmux@'))
+  return {
+    version: VERSION,
+    agents: detectAgents(env).map((agent) => ({
+      id: agent.id,
+      native: agent.native === true,
+      skillsDir: agent.skillsDir,
+    })),
+    participants: listParticipants(env).length,
+    skills: {
+      owned: files.length,
+      drifted: files.filter((file) => file.state === 'drifted').length,
+      missing: files.filter((file) => file.state === 'missing').length,
+      cmuxCommit: cmux === undefined ? null : cmux.source.slice('cmux@'.length),
+    },
+  }
+}
+
+/**
+ * The install the page can trigger: the generated skill everywhere it
+ * belongs, optionally cmux's own skills too. Named operations only — there
+ * is deliberately no endpoint that runs a command someone typed.
+ */
+function installFromUi(body, env) {
+  const participants = listParticipants(env)
+  const report = []
+  if (participants.length > 0) {
+    report.push(
+      ...installSkill(
+        {
+          relPath: 'consensflow/SKILL.md',
+          content: generateSkill(participants),
+          source: 'consensflow',
+        },
+        env,
+        { force: body.force === true, targets: skillTargets(env, { all: body.all === true }) },
+      ),
+    )
+    if (body.all !== true) report.push(...retireSkillFromNativeHosts(env))
+  }
+  let cmuxCommit = null
+  if (body.withCmux === true) {
+    const cmux = installCmuxSkills(env, { force: body.force === true })
+    cmuxCommit = cmux.commit
+    report.push(...cmux.report)
+  }
+  return { report, cmuxCommit, system: systemState(env) }
 }
 
 /** The line this participant becomes in the skill — shown verbatim in the UI. */
@@ -83,6 +145,22 @@ export async function startUiServer(env) {
         refreshInstalledSkill(env)
         return send(201, { participant: added })
       }
+      if (request.method === 'GET' && url.pathname === '/api/system') {
+        return send(200, systemState(env))
+      }
+      if (request.method === 'POST' && url.pathname === '/api/skills/install') {
+        const body = JSON.parse((await readBody(request)) || '{}')
+        return send(200, installFromUi(body, env))
+      }
+      if (request.method === 'POST' && url.pathname === '/api/skills/uninstall') {
+        const body = JSON.parse((await readBody(request)) || '{}')
+        // A click that removes 300 files says so first; the flag is the say-so.
+        if (body.confirm !== true) {
+          return send(400, { error: 'confirm the removal before it runs' })
+        }
+        return send(200, { report: uninstallSkills(env, { force: body.force === true }) })
+      }
+
       const named = /^\/api\/participants\/([a-z][a-z0-9-]*)$/.exec(url.pathname)
       if (named !== null && request.method === 'PATCH') {
         const edited = editParticipant(named[1], JSON.parse(await readBody(request)), env)
@@ -223,6 +301,16 @@ const PAGE = (token) => `<!DOCTYPE html>
   input::placeholder { color: var(--muted); }
   .full { grid-column: 1 / -1; }
   .alert { color: var(--buoy); font-size: 13px; margin: 0; }
+  .facts { display: grid; gap: 4px; margin: 0 0 14px; }
+  .fact { display: flex; gap: 12px; font-size: 13px; }
+  .fact dt { color: var(--muted); min-width: 104px; font-family: var(--mono); font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; padding-top: 2px; }
+  .fact dd { margin: 0; }
+  .host { font-family: var(--mono); font-size: 12.5px; }
+  .host + .host { margin-top: 2px; }
+  .host span { color: var(--muted); }
+  .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .check { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .note { font-size: 13px; color: var(--muted); min-height: 20px; margin: 10px 0 0; }
   .empty { color: var(--muted); font-size: 13.5px; border: 1px dashed var(--line); border-radius: 4px; padding: 18px; }
   @media (max-width: 620px) { form { grid-template-columns: 1fr; } .offer { flex-wrap: wrap; } }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
@@ -238,6 +326,15 @@ const PAGE = (token) => `<!DOCTYPE html>
 
   <p class="eyebrow eyebrow--section">Ready-made</p>
   <div id="catalog"></div>
+
+  <p class="eyebrow eyebrow--section">Skills</p>
+  <div id="system"></div>
+  <div class="actions">
+    <button id="install" class="primary">Install / update skills</button>
+    <label class="check"><input type="checkbox" id="with-cmux"> include cmux's own skills</label>
+    <button id="uninstall" class="danger">Remove installed skills</button>
+  </div>
+  <p id="skills-note" class="note"></p>
 
   <p class="eyebrow eyebrow--section">Define your own</p>
   <form id="add">
@@ -355,11 +452,68 @@ function showEfforts(efforts, runtime) {
   for (const e of efforts[runtime] ?? []) list.appendChild(new Option(e, e));
 }
 
+function renderSystem(system) {
+  const host = document.querySelector('#system');
+  host.innerHTML = '';
+  const list = el('dl', 'facts');
+
+  const hosts = el('div');
+  for (const agent of system.agents) {
+    const line = el('div', 'host');
+    line.append(agent.id + ' ');
+    line.append(el('span', null, agent.native ? '— has its own consensflow skill' : '— gets the generated skill'));
+    hosts.append(line);
+  }
+  if (system.agents.length === 0) hosts.append(el('span', null, 'none on PATH'));
+
+  const skills = system.skills.owned === 0
+    ? 'none installed'
+    : system.skills.owned + ' files'
+      + (system.skills.cmuxCommit ? ' · cmux@' + system.skills.cmuxCommit : '')
+      + (system.skills.drifted ? ' · ' + system.skills.drifted + ' edited by you' : '')
+      + (system.skills.missing ? ' · ' + system.skills.missing + ' missing' : '');
+
+  for (const [label, value] of [['Agents', hosts], ['Installed', skills]]) {
+    const dt = el('dt', null, label);
+    const dd = el('dd');
+    if (typeof value === 'string') dd.textContent = value;
+    else dd.append(value);
+    const row = el('div', 'fact');
+    row.append(dt, dd);
+    list.append(row);
+  }
+  host.append(list);
+}
+
+async function post(path, body, note) {
+  const el2 = document.querySelector('#skills-note');
+  el2.textContent = note;
+  const res = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) { el2.textContent = data.error; return; }
+  const counts = {};
+  for (const row of data.report ?? []) counts[row.action] = (counts[row.action] ?? 0) + 1;
+  const summary = Object.entries(counts).map(([action, n]) => n + ' ' + action).join(' · ');
+  el2.textContent = summary.length > 0 ? summary : 'nothing to do';
+  load();
+}
+
+document.querySelector('#install').onclick = () =>
+  post('/api/skills/install', { withCmux: document.querySelector('#with-cmux').checked }, 'Installing…');
+document.querySelector('#uninstall').onclick = () => {
+  if (!confirm('Remove every skill file ConsensFlow installed?')) return;
+  post('/api/skills/uninstall', { confirm: true }, 'Removing…');
+};
+
 async function load() {
-  const data = await (await fetch('/api/participants', { headers })).json();
+  const [data, system] = await Promise.all([
+    (await fetch('/api/participants', { headers })).json(),
+    (await fetch('/api/system', { headers })).json(),
+  ]);
   renderRoster(data);
   renderCatalog(data);
   renderForm(data);
+  renderSystem(system);
 }
 
 document.querySelector('#add').onsubmit = async (event) => {
