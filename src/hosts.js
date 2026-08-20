@@ -235,14 +235,35 @@ export function uninstallHost(host, env, options = {}) {
   throw new Error(`unknown host ${JSON.stringify(host)}; expected ${HOSTS.join(', ')}`)
 }
 
-/** What is installed where, from our own record — never guessed. */
+/**
+ * A host we installed ourselves is `installed` (with the commit we put
+ * there). One installed another way — the Claude Code plugin marketplace,
+ * `pi install` run by hand — is `present`: we did not put it there and will
+ * not remove it, but saying "not installed" about a working integration
+ * would be a lie.
+ */
+function presence(id, env) {
+  if (id === 'claude') {
+    const cache = join(env.HOME ?? homedir(), '.claude', 'plugins', 'cache', 'consensflow-cc')
+    return existsSync(cache) ? 'the Claude Code plugin marketplace' : null
+  }
+  if (id === 'pi') {
+    const listed = spawnSync('pi', ['list'], { env, encoding: 'utf8' })
+    return (listed.stdout ?? '').includes('consensflow-pi') ? 'pi install' : null
+  }
+  return null
+}
+
 export function hostStatus(env) {
   const state = hostsState(env)
   return HOSTS.map((id) => {
     const record = state.hosts[id]
+    const via = record !== undefined ? 'consensflow' : presence(id, env)
     return {
       id,
       installed: record !== undefined,
+      present: via !== null,
+      via,
       commit: record?.commit,
       source: record?.source,
       files: record?.files?.length ?? 0,

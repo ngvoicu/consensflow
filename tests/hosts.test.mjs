@@ -133,6 +133,33 @@ describe('the manager installs the Claude Code side through user config', () => 
   })
 })
 
+describe('a host installed some other way is reported, not denied', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+
+  it('spots a Claude Code plugin install it did not perform', () => {
+    mkdirSync(join(t.env.HOME, '.claude', 'plugins', 'cache', 'consensflow-cc'), {
+      recursive: true,
+    })
+
+    const claude = hostStatus(t.env).find((h) => h.id === 'claude')
+    assert.equal(claude.installed, false, 'not ours')
+    assert.equal(claude.present, true)
+    assert.match(claude.via, /plugin/i)
+  })
+
+  it('spots a pi extension it did not install, by asking pi', () => {
+    mkdirSync(t.env.PATH, { recursive: true })
+    const pi = join(t.env.PATH, 'pi')
+    writeFileSync(pi, '#!/bin/sh\necho "  https://github.com/ngvoicu/consensflow-pi"\nexit 0\n')
+    chmodSync(pi, 0o755)
+
+    const status = hostStatus(t.env).find((h) => h.id === 'pi')
+    assert.equal(status.present, true)
+    assert.match(status.via, /pi/i)
+  })
+})
+
 describe('the manager drives pi through its own supported CLI', () => {
   const t = tempEnv()
   after(() => t.cleanup())
