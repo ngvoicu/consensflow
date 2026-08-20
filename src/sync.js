@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { detectAgents } from './agents.js'
+import { currentMode } from './mode.js'
 import { installSkill, uninstallSkills } from './install.js'
 import { loadManifest, saveManifest, sha256 } from './manifest.js'
 import { listParticipants, RUNTIMES, rosterPath } from './roster.js'
@@ -23,6 +24,12 @@ import { generateSkill } from './skill.js'
  * that already ship their own ConsensFlow. `all` installs regardless.
  */
 export function skillTargets(env, { all = false } = {}) {
+  // A host mode means one agent consults and the rest do not: the generated
+  // skill belongs nowhere until the machine is back in standalone. Without
+  // this, the next roster edit would quietly undo the mode.
+  const mode = currentMode(env)
+  if (mode !== null && mode !== 'standalone') return []
+
   const agents = detectAgents(env)
   return all ? agents : agents.filter((agent) => agent.native !== true)
 }
@@ -51,6 +58,8 @@ export function retireSkillFromNativeHosts(env) {
 export function refreshInstalledSkill(env) {
   const participants = listParticipants(env)
   if (!participants.some((p) => RUNTIMES.includes(p.runtime))) return
+  const targets = skillTargets(env)
+  if (targets.length === 0) return
   installSkill(
     {
       relPath: 'consensflow/SKILL.md',

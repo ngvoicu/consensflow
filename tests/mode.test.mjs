@@ -3,7 +3,8 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { applyMode, currentMode, MODES, modeReport } from '../src/mode.js'
-import { addParticipant } from '../src/roster.js'
+import { addParticipant, removeParticipant } from '../src/roster.js'
+import { refreshInstalledSkill } from '../src/sync.js'
 import { tempEnv } from './helpers.mjs'
 
 function stubCli(t, name, script = '#!/bin/sh\nexit 0\n') {
@@ -84,6 +85,20 @@ describe('the machine runs exactly one ConsensFlow path', () => {
 
     assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts', 'pi')), false)
     assert.ok(existsSync(generated(t.env.CODEX_HOME)))
+  })
+
+  it('adding a participant in a host mode does not smuggle the skill back', () => {
+    applyMode('claude', t.env, { bundled })
+    assert.equal(existsSync(generated(t.env.CODEX_HOME)), false)
+
+    // The mutation path must obey the mode, or the invariant only holds
+    // until the next roster edit.
+    addParticipant({ name: 'apollo', runtime: 'codex', model: 'gpt-5.6-terra' }, t.env)
+    refreshInstalledSkill(t.env)
+
+    assert.equal(existsSync(generated(t.env.CODEX_HOME)), false, 'codex stays out in claude mode')
+    removeParticipant('apollo', t.env)
+    applyMode('standalone', t.env, { bundled })
   })
 
   it('refuses a mode it does not have, naming the ones it does', () => {
