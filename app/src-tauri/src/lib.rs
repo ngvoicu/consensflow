@@ -81,6 +81,7 @@ fn start_editor() -> Result<(String, Child), String> {
 
     let mut child = Command::new(&cli)
         .args(["ui", "--json", "--no-open"])
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
@@ -113,7 +114,10 @@ fn read_address(child: &mut Child, cli: &str) -> Result<String, String> {
     let token = handle["token"]
         .as_str()
         .ok_or_else(|| "the editor did not hand over a token".to_string())?;
-    Ok(format!("{url}?token={token}"))
+    // macOS App Transport Security only lets the webview load cleartext http
+    // from the domain declared in the bundle — `localhost`, not the literal
+    // loopback address the server prints.
+    Ok(format!("{}?token={token}", url.replace("127.0.0.1", "localhost")))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -121,16 +125,38 @@ pub fn run() {
     let app = tauri::Builder::default()
         .manage(Editor(Mutex::new(None)))
         .setup(|app| {
-            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+            // The window is built AT the editor's address rather than being
+            // navigated afterwards: a window that starts somewhere else and
+            // moves can fail silently and leave a blank frame.
+            let started = start_editor();
+            let url = match &started {
+                Ok((address, _)) => {
+                    eprintln!("consensflow: editor at {address}");
+                    WebviewUrl::External(address.parse()?)
+                }
+                Err(explanation) => {
+                    eprintln!("consensflow: {explanation}");
+                    WebviewUrl::default()
+                }
+            };
+
+            let window = WebviewWindowBuilder::new(app, "main", url)
                 .title("ConsensFlow")
                 .inner_size(880.0, 900.0)
                 .min_inner_size(560.0, 480.0)
+                .on_navigation(|target| {
+                    eprintln!("consensflow: navigating to {target}");
+                    true
+                })
+                .on_page_load(|_window, payload| {
+                    eprintln!("consensflow: page {:?} {}", payload.event(), payload.url());
+                })
                 .build()?;
+            eprintln!("consensflow: window built");
 
-            match start_editor() {
-                Ok((address, child)) => {
+            match started {
+                Ok((_, child)) => {
                     *app.state::<Editor>().0.lock().unwrap() = Some(child);
-                    window.navigate(address.parse()?)?;
                 }
                 Err(explanation) => {
                     // A blank window explains nothing; say what went wrong and

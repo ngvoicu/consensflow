@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { fstatSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -113,6 +113,20 @@ function readBody(request) {
   })
 }
 
+/**
+ * True when this descriptor is the parent's end of a pipe. Node's `'pipe'`
+ * stdio is a socketpair on macOS and a FIFO elsewhere, so both count; a
+ * terminal or /dev/null is neither.
+ */
+function isPipe(fd) {
+  try {
+    const stats = fstatSync(fd)
+    return stats.isFIFO() || stats.isSocket()
+  } catch {
+    return false
+  }
+}
+
 export async function startUiServer(env) {
   const token = randomBytes(24).toString('hex')
 
@@ -222,6 +236,16 @@ export async function serveUi(env, { onOut, json = false, open = true }) {
     onOut('Ctrl-C to stop — nothing keeps running after it.')
   }
   if (open) spawn('open', [url], { stdio: 'ignore', detached: true }).unref()
+
+  // A parent that holds a pipe to our stdin is telling us it wants to own
+  // this editor's lifetime: when that pipe closes the parent is gone, and an
+  // editor nobody can see must not keep serving. A stdin that is a terminal
+  // or /dev/null says nothing of the sort, so it is left alone.
+  if (isPipe(0)) {
+    process.stdin.on('end', () => process.exit(0))
+    process.stdin.on('close', () => process.exit(0))
+    process.stdin.resume()
+  }
   await new Promise(() => {})
 }
 

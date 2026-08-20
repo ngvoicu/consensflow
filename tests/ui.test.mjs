@@ -18,6 +18,7 @@ describe('a host program can start the editor and be told where it is', () => {
     const t = tempEnv()
     const { spawn } = await import('node:child_process')
     const cf = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
+    // No stdin at all: the editor serves until it is killed.
     const child = spawn(process.execPath, [cf, 'ui', '--json', '--no-open'], {
       env: t.env,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -35,12 +36,40 @@ describe('a host program can start the editor and be told where it is', () => {
       })
 
       const handle = JSON.parse(line)
+      assert.ok(handle.url.length > 0)
       assert.match(handle.url, /^http:\/\/127\.0\.0\.1:\d+\/$/)
       assert.equal(typeof handle.token, 'string')
 
       // The address it printed is really serving.
       const res = await fetch(`${handle.url}?token=${handle.token}`)
       assert.equal(res.status, 200)
+    } finally {
+      child.kill()
+      t.cleanup()
+    }
+  })
+
+  it('shuts down when the program that started it goes away', async () => {
+    const t = tempEnv()
+    const { spawn } = await import('node:child_process')
+    const cf = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
+    const child = spawn(process.execPath, [cf, 'ui', '--json', '--no-open'], {
+      env: t.env,
+      stdio: ['pipe', 'pipe', 'ignore'],
+    })
+    try {
+      await new Promise((resolve, reject) => {
+        child.stdout.once('data', resolve)
+        setTimeout(() => reject(new Error('never started')), 10_000)
+      })
+
+      // A parent that holds a pipe owns the lifetime: closing it says "gone".
+      child.stdin.end()
+      const code = await new Promise((resolve, reject) => {
+        child.once('exit', resolve)
+        setTimeout(() => reject(new Error('the editor kept serving')), 10_000)
+      })
+      assert.equal(code, 0)
     } finally {
       child.kill()
       t.cleanup()
