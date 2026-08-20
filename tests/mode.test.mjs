@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
-import { applyMode, currentMode, MODES, modeReport } from '../src/mode.js'
+import { applyMode, currentMode, MODES, modeLabel, modeReport } from '../src/mode.js'
 import { addParticipant, removeParticipant } from '../src/roster.js'
 import { refreshInstalledSkill } from '../src/sync.js'
 import { tempEnv } from './helpers.mjs'
@@ -12,6 +12,26 @@ function stubCli(t, name, script = '#!/bin/sh\nexit 0\n') {
   const path = join(t.env.PATH, name)
   writeFileSync(path, script)
   chmodSync(path, 0o755)
+}
+
+/** git that clones a two-file cmux skills tree. */
+function stubGit(t, commit = 'cmux1234') {
+  const fixture = join(t.root, 'cmux-repo')
+  mkdirSync(join(fixture, 'skills', 'cmux-core'), { recursive: true })
+  writeFileSync(join(fixture, 'skills', 'cmux-core', 'SKILL.md'), 'pane control\n')
+  mkdirSync(t.env.PATH, { recursive: true })
+  const git = join(t.env.PATH, 'git')
+  writeFileSync(
+    git,
+    `#!/bin/sh
+PATH=/usr/bin:/bin
+for last do :; done
+if [ "$1" = "clone" ]; then mkdir -p "$last"; cp -R "${fixture}/." "$last/"; exit 0; fi
+case "$*" in *rev-parse*) echo "${commit}"; exit 0 ;; esac
+exit 1
+`,
+  )
+  chmodSync(git, 0o755)
 }
 
 function bundle(t) {
@@ -38,14 +58,24 @@ describe('the machine runs exactly one ConsensFlow path', () => {
   const generated = (dir) => join(dir, 'skills', 'consensflow', 'SKILL.md')
 
   it('offers exactly three modes and starts in none of them', () => {
-    assert.deepEqual([...MODES].sort(), ['claude', 'pi', 'standalone'])
+    assert.deepEqual([...MODES].sort(), ['claude', 'cmux', 'pi'])
     assert.equal(currentMode(t.env), null)
   })
 
-  it('standalone puts the generated skill on every agent', () => {
-    applyMode('standalone', t.env, { bundled })
+  it('labels the cmux mode with the agents it covers', () => {
+    assert.equal(modeLabel('cmux'), 'cmux (pi, cc, codex, opencode)')
+    assert.equal(modeLabel('claude'), 'claude')
+  })
 
-    assert.equal(currentMode(t.env), 'standalone')
+  it('still answers to the old name for it', () => {
+    applyMode('standalone', t.env, { bundled })
+    assert.equal(currentMode(t.env), 'cmux')
+  })
+
+  it('cmux mode puts the generated skill on every agent', () => {
+    applyMode('cmux', t.env, { bundled })
+
+    assert.equal(currentMode(t.env), 'cmux')
     for (const dir of [t.env.CLAUDE_CONFIG_DIR, t.env.CODEX_HOME]) {
       assert.ok(existsSync(generated(dir)), `${dir} has the generated skill`)
     }
@@ -80,8 +110,8 @@ describe('the machine runs exactly one ConsensFlow path', () => {
     assert.ok(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts', 'pi', 'index.ts')))
   })
 
-  it('going back to standalone removes the pi payload again', () => {
-    applyMode('standalone', t.env, { bundled })
+  it('going back to cmux mode removes the pi payload again', () => {
+    applyMode('cmux', t.env, { bundled })
 
     assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts', 'pi')), false)
     assert.ok(existsSync(generated(t.env.CODEX_HOME)))
@@ -98,10 +128,37 @@ describe('the machine runs exactly one ConsensFlow path', () => {
 
     assert.equal(existsSync(generated(t.env.CODEX_HOME)), false, 'codex stays out in claude mode')
     removeParticipant('apollo', t.env)
-    applyMode('standalone', t.env, { bundled })
+    applyMode('cmux', t.env, { bundled })
+  })
+
+  it('brings the cmux skills with it, whichever mode is chosen', () => {
+    stubGit(t)
+    applyMode('cmux', t.env, { bundled })
+
+    assert.ok(
+      existsSync(join(t.env.CODEX_HOME, 'skills', 'cmux-core', 'SKILL.md')),
+      'cmux skills install without being asked for',
+    )
+  })
+
+  it('does not fail the switch when the cmux skills cannot be fetched', () => {
+    const offline = tempEnv()
+    try {
+      stubCli(offline, 'codex')
+      addParticipant({ name: 'zeus', runtime: 'claude', model: 'claude-opus-5' }, offline.env)
+
+      // No git on PATH at all: the mode still applies, and says what it missed.
+      const outcome = applyMode('cmux', offline.env, { bundled })
+
+      assert.equal(currentMode(offline.env), 'cmux')
+      assert.ok(existsSync(join(offline.env.CODEX_HOME, 'skills', 'consensflow', 'SKILL.md')))
+      assert.match(outcome.report.join(' '), /cmux skills/i)
+    } finally {
+      offline.cleanup()
+    }
   })
 
   it('refuses a mode it does not have, naming the ones it does', () => {
-    assert.throws(() => applyMode('emacs', t.env, { bundled }), /claude, pi, standalone/)
+    assert.throws(() => applyMode('emacs', t.env, { bundled }), /claude, pi, cmux/)
   })
 })

@@ -44,7 +44,7 @@ new machine needs:
 
 ```sh
 npm install -g ngvoicu/consensflow    # Node ≥ 20
-consensflow use standalone
+consensflow use cmux
 ```
 </details>
 
@@ -123,16 +123,24 @@ delete it without `--force`, and it never touches files it didn't write.
 A machine runs exactly one ConsensFlow path, and `consensflow use` chooses it:
 
 ```sh
-consensflow use standalone   # every agent can consult, via the generated skill
-consensflow use claude       # only Claude Code consults — with your conversation as context
-consensflow use pi           # only pi consults, the same way
-consensflow mode             # which one is active, and what it means
+consensflow use cmux     # cmux (pi, cc, codex, opencode) — every agent can consult
+consensflow use claude   # only Claude Code consults — with your conversation as context
+consensflow use pi       # only pi consults, the same way
+consensflow mode         # which one is active, and what it means
 ```
+
+The modes are named after the three things they are: the Claude Code
+integration, the pi extension, and the cmux-wide path that teaches every
+agent at once. **cmux's own skills — the ones that let an agent drive panes,
+workspaces and browser surfaces — come with all three**; they are part of an
+install, not an option. If you are offline when you switch, the mode still
+applies and says the cmux skills are pending (`consensflow skills update`
+fetches them later).
 
 Switching removes what the previous mode installed, so two paths are never
 live at once. The trade is stated every time you switch and every time you
 ask: in `claude` mode, **codex and opencode have no ConsensFlow at all** —
-that's the price of the deeper path, and `standalone` is how you take it
+that's the price of the deeper path, and `cmux` mode is how you take it
 back. ConsensFlow only ever removes what it installed; an integration you
 put there another way is reported and left alone.
 

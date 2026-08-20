@@ -17,7 +17,7 @@ import { CATALOG, catalogEntry } from '../src/catalog.js'
 import { installCmuxSkills } from '../src/cmux-skills.js'
 import { HOSTS, hostStatus, installHost, uninstallHost } from '../src/hosts.js'
 import { installSkill, skillsStatus, uninstallSkills } from '../src/install.js'
-import { applyMode, currentMode, MODES, modeReport } from '../src/mode.js'
+import { applyMode, currentMode, MODES, modeLabel, modeReport } from '../src/mode.js'
 import {
   addParticipant,
   editParticipant,
@@ -49,13 +49,15 @@ const USAGE = `consensflow ${PKG.version}
 
 Usage: cf <command> [options]
 
-  setup [--no-cmux] [--all] [--force]          One command: install the cmux skills and, when the
+  setup [--all] [--force]                      One command: install the cmux skills and, when the
                                                shared roster has participants, the consensflow skill
                                                into every detected coding agent
-  use <claude|pi|standalone>                   Choose the one path this machine runs:
+  use <claude|pi|cmux>                         Choose the one path this machine runs:
                                                claude / pi = that agent consults, with your
                                                conversation as context, and no other agent has
-                                               ConsensFlow; standalone = every agent can consult
+                                               ConsensFlow; cmux (pi, cc, codex, opencode) = every
+                                               agent can consult. cmux's own skills come with all
+                                               three
   mode                                         Which one is active, and what it means
   install <claude|pi|all> [--force]            Install a host integration — the deeper path that hands
                                                the participant your live conversation
@@ -69,8 +71,7 @@ Usage: cf <command> [options]
   participant remove <name>
       the roster is the shared ~/.consensflow/participants.json — the same
       file the consensflow-cc plugin and consensflow-pi extension use
-  skills install [--with-cmux] [--all] [--force]
-                                               Generate + install the consensflow skill (and cmux's).
+  skills install [--all] [--force]             Generate + install the consensflow skill and cmux's.
                                                Hosts with their own ConsensFlow (the cc plugin, the pi
                                                extension) are left alone unless --all
   skills update [--force]                      Regenerate ours; re-fetch cmux's if they are installed
@@ -145,8 +146,8 @@ function resolveAdd(name, values) {
 
 function modeVerb() {
   const mode = currentMode(env)
-  out(`mode: ${mode ?? 'not set — nothing is installed yet'}`)
-  for (const line of modeReport(mode ?? 'standalone', env)) out(`  ${line}`)
+  out(`mode: ${mode === null ? 'not set — nothing is installed yet' : modeLabel(mode)}`)
+  for (const line of modeReport(mode ?? 'cmux', env)) out(`  ${line}`)
   if (mode === null) out('')
   if (mode === null) out(`choose one with \`consensflow use <${MODES.join('|')}>\``)
 }
@@ -164,7 +165,7 @@ function useVerb(rest) {
     else if (change.path) out(`${(change.action ?? 'changed').padEnd(16)} ${change.path}`)
   }
   out('')
-  out(`mode: ${outcome.mode}`)
+  out(`mode: ${modeLabel(outcome.mode)}`)
   for (const line of outcome.report) out(`  ${line}`)
 }
 
@@ -301,7 +302,6 @@ function skillsVerb(rest) {
     args: rest.slice(1),
     allowPositionals: true,
     options: {
-      'with-cmux': { type: 'boolean', default: false },
       all: { type: 'boolean', default: false },
       force: { type: 'boolean', default: false },
     },
@@ -312,7 +312,7 @@ function skillsVerb(rest) {
       const mode = currentMode(env)
       if (mode !== null && mode !== 'standalone') {
         fail(
-          `this machine is in ${mode} mode, where only ${mode} consults — run \`consensflow use standalone\` to give every agent the generated skill`,
+          `this machine is in ${mode} mode, where only ${mode} consults — run \`consensflow use cmux\` to give every agent the generated skill`,
         )
         return
       }
@@ -333,10 +333,14 @@ function skillsVerb(rest) {
         ),
       )
       reportNativeHosts(env, values.all)
-      if (values['with-cmux']) {
+      // cmux's skills come with an install; being offline costs those, not
+      // the consensflow skill that just landed.
+      try {
         const cmux = installCmuxSkills(env, { force: values.force })
         out(`cmux skills @ ${cmux.commit}`)
         printReport(cmux.report)
+      } catch (cause) {
+        out(`cmux skills were not fetched (${cause instanceof Error ? cause.message.split('(')[0].trim() : cause})`)
       }
       return
     }
@@ -373,7 +377,6 @@ function setup(rest) {
     args: rest,
     allowPositionals: true,
     options: {
-      'no-cmux': { type: 'boolean', default: false },
       all: { type: 'boolean', default: false },
       force: { type: 'boolean', default: false },
     },
@@ -407,10 +410,14 @@ function setup(rest) {
     reportNativeHosts(env, values.all)
   }
 
-  if (!values['no-cmux'] && agents.length > 0) {
-    const cmux = installCmuxSkills(env, { force: values.force })
-    out(`cmux skills @ ${cmux.commit}`)
-    printReport(cmux.report)
+  if (agents.length > 0) {
+    try {
+      const cmux = installCmuxSkills(env, { force: values.force })
+      out(`cmux skills @ ${cmux.commit}`)
+      printReport(cmux.report)
+    } catch (cause) {
+      out(`cmux skills were not fetched (${cause instanceof Error ? cause.message.split('(')[0].trim() : cause})`)
+    }
   }
 }
 

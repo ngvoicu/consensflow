@@ -8,7 +8,7 @@ import { detectAgents } from './agents.js'
 import { CATALOG, EFFORTS } from './catalog.js'
 import { installCmuxSkills } from './cmux-skills.js'
 import { installSkill, skillsStatus, uninstallSkills } from './install.js'
-import { applyMode, currentMode, MODES, modeReport } from './mode.js'
+import { applyMode, currentMode, MODES, modeLabel, modeReport } from './mode.js'
 import {
   addParticipant,
   editParticipant,
@@ -47,7 +47,8 @@ function systemState(env) {
     mode: {
       current: mode,
       available: MODES,
-      report: modeReport(mode ?? 'standalone', env),
+      report: modeReport(mode ?? 'cmux', env),
+      labels: Object.fromEntries(MODES.map((name) => [name, modeLabel(name)])),
     },
     agents: detectAgents(env).map((agent) => ({
       id: agent.id,
@@ -86,11 +87,15 @@ function installFromUi(body, env) {
     )
     if (body.all !== true) report.push(...retireSkillFromNativeHosts(env))
   }
+  // cmux's own skills are part of an install, not a checkbox.
   let cmuxCommit = null
-  if (body.withCmux === true) {
+  try {
     const cmux = installCmuxSkills(env, { force: body.force === true })
     cmuxCommit = cmux.commit
     report.push(...cmux.report)
+  } catch {
+    // Offline: the consensflow skill still installed, and skills update
+    // will fetch cmux's later.
   }
   return { report, cmuxCommit, system: systemState(env) }
 }
@@ -385,7 +390,6 @@ const PAGE = (token) => `<!DOCTYPE html>
   <div id="system"></div>
   <div class="actions">
     <button id="install" class="primary">Install / update skills</button>
-    <label class="check"><input type="checkbox" id="with-cmux"> include cmux's own skills</label>
     <button id="uninstall" class="danger">Remove installed skills</button>
   </div>
   <p id="skills-note" class="note"></p>
@@ -515,7 +519,7 @@ function renderMode(system) {
   const host = document.querySelector('#modes');
   host.innerHTML = '';
   for (const mode of system.mode.available) {
-    const btn = el('button', mode === system.mode.current ? 'primary' : null, mode);
+    const btn = el('button', mode === system.mode.current ? 'primary' : null, system.mode.labels[mode] ?? mode);
     btn.disabled = mode === system.mode.current;
     btn.onclick = () => post('/api/mode', { mode }, 'Switching to ' + mode + '…');
     host.append(btn);
@@ -570,8 +574,7 @@ async function post(path, body, note) {
   load();
 }
 
-document.querySelector('#install').onclick = () =>
-  post('/api/skills/install', { withCmux: document.querySelector('#with-cmux').checked }, 'Installing…');
+document.querySelector('#install').onclick = () => post('/api/skills/install', {}, 'Installing…');
 document.querySelector('#uninstall').onclick = () => {
   if (!confirm('Remove every skill file ConsensFlow installed?')) return;
   post('/api/skills/uninstall', { confirm: true }, 'Removing…');

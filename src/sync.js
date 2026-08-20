@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { detectAgents } from './agents.js'
-import { currentMode } from './mode.js'
 import { installSkill, uninstallSkills } from './install.js'
 import { loadManifest, saveManifest, sha256 } from './manifest.js'
+import { currentMode } from './mode.js'
 import { listParticipants, RUNTIMES, rosterPath } from './roster.js'
 import { generateSkill } from './skill.js'
 
@@ -28,7 +28,7 @@ export function skillTargets(env, { all = false } = {}) {
   // skill belongs nowhere until the machine is back in standalone. Without
   // this, the next roster edit would quietly undo the mode.
   const mode = currentMode(env)
-  if (mode !== null && mode !== 'standalone') return []
+  if (mode !== null && mode !== 'cmux') return []
 
   const agents = detectAgents(env)
   return all ? agents : agents.filter((agent) => agent.native !== true)

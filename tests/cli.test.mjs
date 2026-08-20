@@ -104,6 +104,8 @@ describe('roster changes keep installed skills current', () => {
   stubCli(t, 'codex')
 
   it('skills install writes the generated skill into every detected agent', async () => {
+    // No git on this fake PATH: the cmux fetch fails, which must not stop
+    // the consensflow skill from installing.
     await cf(
       ['participant', 'add', 'zeus', '--runtime', 'claude', '--model', 'claude-opus-5'],
       t.env,
@@ -148,13 +150,13 @@ describe('the machine runs one mode, and cf keeps it that way', () => {
   it('reports no mode before one is chosen', async () => {
     const out = await cf(['mode'], t.env)
     assert.equal(out.code, 0)
-    assert.match(out.stdout, /standalone/)
+    assert.match(out.stdout, /cmux/)
     assert.match(out.stdout, /not set|none/i)
   })
 
-  it('switches to standalone and says who can consult', async () => {
+  it('switches to cmux mode and says who can consult', async () => {
     await cf(['participant', 'add', 'zeus'], t.env)
-    const out = await cf(['use', 'standalone'], t.env)
+    const out = await cf(['use', 'cmux'], t.env)
 
     assert.equal(out.code, 0)
     assert.match(out.stdout, /claude/)
@@ -173,13 +175,13 @@ describe('the machine runs one mode, and cf keeps it that way', () => {
     const out = await cf(['skills', 'install'], t.env)
     assert.notEqual(out.code, 0)
     assert.match(out.stdout + out.stderr, /mode/)
-    assert.match(out.stdout + out.stderr, /use standalone/)
+    assert.match(out.stdout + out.stderr, /use cmux/)
   })
 
   it('names the modes when given one it does not have', async () => {
     const out = await cf(['use', 'emacs'], t.env)
     assert.notEqual(out.code, 0)
-    assert.match(out.stdout + out.stderr, /claude, pi, standalone/)
+    assert.match(out.stdout + out.stderr, /claude, pi, cmux/)
   })
 })
 
@@ -220,7 +222,7 @@ describe('cf explains where it stands aside for a host integration', () => {
     })
     await cf(['participant', 'add', 'zeus'], t.env)
 
-    const out = await cf(['setup', '--no-cmux'], t.env)
+    const out = await cf(['setup'], t.env)
     assert.equal(out.code, 0)
     assert.match(out.stdout, /claude/)
     assert.match(out.stdout, /consensflow-cc/)
@@ -358,7 +360,7 @@ describe('cf setup readies a machine in one command', () => {
       join(t.env.HOME, '.consensflow', 'participants.json'),
     )
 
-    const out = await cf(['setup', '--no-cmux'], t.env)
+    const out = await cf(['setup'], t.env)
     assert.equal(out.code, 0)
 
     const installed = readFileSync(
@@ -387,7 +389,7 @@ describe('cf setup readies a machine in one command', () => {
   })
 
   it('is idempotent', async () => {
-    const out = await cf(['setup', '--no-cmux'], t.env)
+    const out = await cf(['setup'], t.env)
     assert.equal(out.code, 0)
   })
 })

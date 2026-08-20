@@ -180,19 +180,20 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     const system = await res.json()
 
     assert.equal(system.mode.current, null)
-    assert.deepEqual([...system.mode.available].sort(), ['claude', 'pi', 'standalone'])
+    assert.equal(system.mode.labels.cmux, 'cmux (pi, cc, codex, opencode)')
+    assert.deepEqual([...system.mode.available].sort(), ['claude', 'cmux', 'pi'])
     assert.ok(Array.isArray(system.mode.report))
   })
 
   it('switches mode from the page, saying who gains and loses access', async () => {
     const res = await api('/api/mode', {
       method: 'POST',
-      body: JSON.stringify({ mode: 'standalone' }),
+      body: JSON.stringify({ mode: 'cmux' }),
     })
     assert.equal(res.status, 200)
     const body = await res.json()
 
-    assert.equal(body.mode, 'standalone')
+    assert.equal(body.mode, 'cmux')
     assert.match(body.report.join(' '), /claude/)
     assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')))
   })

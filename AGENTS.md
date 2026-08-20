@@ -64,11 +64,12 @@ that to wherever it installed the payload.
 
 ## Load-bearing rules
 
-- **One mode per machine** (`src/mode.js`): `claude` | `pi` | `standalone`,
+- **One mode per machine** (`src/mode.js`): `claude` | `pi` | `cmux` (named after the three products; `standalone` is accepted as the old name for `cmux`),
   recorded in `<config>/mode.json`. `applyMode` installs the chosen path and
   removes the others' — so two ConsensFlow paths can never be live at once.
   `cf skills install` refuses in a host mode rather than quietly breaking the
-  invariant. Every entry point states the cost of a host mode (codex and
+  invariant. cmux's own skills install with every mode — no flag, and a failed
+  fetch never costs the mode switch. Every entry point states the cost of a host mode (codex and
   opencode get nothing).
 
 - **Modules never read `process.env`** — the environment is an explicit
