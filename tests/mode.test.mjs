@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { applyMode, currentMode, MODES, modeLabel, modeReport, turnOff } from '../src/mode.js'
@@ -169,6 +169,11 @@ describe('the machine runs exactly one ConsensFlow path', () => {
     assert.equal(existsSync(generated(t.env.CODEX_HOME)), false)
     assert.equal(existsSync(join(t.env.CODEX_HOME, 'skills', 'cmux-core', 'SKILL.md')), false)
     assert.ok(outcome.changes.length > 0)
+
+    // "Off" means off: no bookkeeping left claiming state that is gone.
+    const config = t.env.CONSENSFLOW_HOME
+    const leftovers = existsSync(config) ? readdirSync(config) : []
+    assert.deepEqual(leftovers, [], `nothing should remain, found ${leftovers.join(', ')}`)
   })
 
   it('refuses a mode it does not have, naming the ones it does', () => {

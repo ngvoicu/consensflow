@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { detectAgents } from './agents.js'
 import { installCmuxSkills } from './cmux-skills.js'
@@ -107,11 +107,20 @@ export function turnOff(env, options = {}) {
   const changes = []
   for (const host of ['claude', 'pi']) changes.push(...dropHost(host, env))
   changes.push(...uninstallSkills(env, { force: options.force }))
-  try {
-    rmSync(statePath(env), { force: true })
-  } catch {
-    // Never written, or already gone.
+  // Off means off: the bookkeeping goes too, so nothing is left claiming
+  // state that no longer exists. The roster is untouched — participants are
+  // the user's, shared with anything else that reads them.
+  const root = configRoot(env)
+  for (const name of ['mode.json', 'hosts.json', 'skills-manifest.json']) {
+    rmSync(join(root, name), { force: true })
   }
+  rmSync(join(root, 'hosts'), { recursive: true, force: true })
+  try {
+    if (readdirSync(root).length === 0) rmSync(root, { recursive: true, force: true })
+  } catch {
+    // Already gone, or something else lives there — either is fine.
+  }
+
   return { mode: null, changes }
 }
 
