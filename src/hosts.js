@@ -12,6 +12,7 @@ import {
 } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { configRoot } from './roster.js'
 
 /**
@@ -31,7 +32,6 @@ import { configRoot } from './roster.js'
  *   write is recorded, and uninstall removes exactly that.
  */
 
-const CLAUDE_REPO = 'https://github.com/ngvoicu/consensflow-cc'
 const PI_SOURCE = 'github.com/ngvoicu/consensflow-pi'
 const HOOK_TAG = 'consensflow'
 
@@ -93,79 +93,71 @@ function everyFile(dir) {
   return found
 }
 
+/** Where the payloads ship: inside this package, beside src/. */
+function bundledRoot() {
+  return join(dirname(fileURLToPath(import.meta.url)), '..', 'hosts')
+}
+
+const VERSION = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'),
+).version
+
 function installClaude(env, options) {
   const claudeDir = claudeConfigDir(env)
   const target = payloadDir(env)
-  const checkout = mkdtempSync(join(tmpdir(), 'cf-cc-'))
+  const bundled = options.bundled ?? bundledRoot()
 
-  try {
-    const repo = options.repo ?? CLAUDE_REPO
-    const clone = spawnSync('git', ['clone', '--depth', '1', repo, checkout], {
-      env,
-      encoding: 'utf8',
-    })
-    if (clone.error || clone.status !== 0) {
-      throw new Error(
-        `git clone of ${repo} failed — is git installed and the network up? (${clone.error?.message ?? clone.stderr?.trim()})`,
-      )
-    }
-    const rev = spawnSync('git', ['-C', checkout, 'rev-parse', 'HEAD'], { env, encoding: 'utf8' })
-    const commit = (rev.stdout ?? '').trim().slice(0, 12)
+  // The payload travels with the manager, so an install is a copy: no clone,
+  // no network, and the payload always matches the manager that installed it.
+  rmSync(target, { recursive: true, force: true })
+  mkdirSync(target, { recursive: true })
+  cpSync(join(bundled, 'claude'), target, { recursive: true })
+  cpSync(join(bundled, 'lib'), join(target, 'lib'), { recursive: true })
 
-    // The payload lives with us, never inside Claude Code's own directories.
-    rmSync(target, { recursive: true, force: true })
-    mkdirSync(dirname(target), { recursive: true })
-    cpSync(checkout, target, { recursive: true })
-    rmSync(join(target, '.git'), { recursive: true, force: true })
+  const written = []
+  // Payload files address their own root symbolically; make it concrete.
+  const rewrite = (text) => text.split('${CONSENSFLOW_HOST_ROOT}').join(target)
 
-    // Everything the payload says about ${CLAUDE_PLUGIN_ROOT} is true of the
-    // directory we just put it in.
-    const written = []
-    const rewrite = (text) => text.split('${CLAUDE_PLUGIN_ROOT}').join(target)
-
-    const skillSource = join(target, 'skills', 'consensflow', 'SKILL.md')
-    if (existsSync(skillSource)) {
-      const skillPath = join(claudeDir, 'skills', 'consensflow', 'SKILL.md')
-      mkdirSync(dirname(skillPath), { recursive: true })
-      writeFileSync(skillPath, rewrite(readFileSync(skillSource, 'utf8')))
-      written.push(skillPath)
-    }
-
-    const commandSource = join(target, 'commands', 'cf.md')
-    if (existsSync(commandSource)) {
-      const commandPath = join(claudeDir, 'commands', 'consensflow.md')
-      mkdirSync(dirname(commandPath), { recursive: true })
-      writeFileSync(commandPath, rewrite(readFileSync(commandSource, 'utf8')))
-      written.push(commandPath)
-    }
-
-    const hookSource = existsSync(join(target, 'hooks', 'hooks.json'))
-      ? join(target, 'hooks', 'hooks.json')
-      : join(target, 'hooks.json')
-    const hooks = readJson(hookSource, { hooks: {} }).hooks ?? {}
-    writeSettings(claudeDir, (settings) => {
-      const merged = { ...(settings.hooks ?? {}) }
-      for (const [event, entries] of Object.entries(hooks)) {
-        // Ours are replaced, never stacked; everyone else's are left alone.
-        const theirs = (merged[event] ?? []).filter((entry) => !isOurs(entry))
-        merged[event] = [...theirs, ...JSON.parse(rewrite(JSON.stringify(entries)))]
-      }
-      return { ...settings, hooks: merged }
-    })
-
-    const state = hostsState(env)
-    state.hosts.claude = {
-      commit,
-      payload: target,
-      files: written,
-      hookEvents: Object.keys(hooks),
-      installedAt: new Date().toISOString(),
-    }
-    saveHostsState(state, env)
-    return { host: 'claude', commit, files: written, payload: target }
-  } finally {
-    rmSync(checkout, { recursive: true, force: true })
+  const skillSource = join(target, 'skills', 'consensflow', 'SKILL.md')
+  if (existsSync(skillSource)) {
+    const skillPath = join(claudeDir, 'skills', 'consensflow', 'SKILL.md')
+    mkdirSync(dirname(skillPath), { recursive: true })
+    writeFileSync(skillPath, rewrite(readFileSync(skillSource, 'utf8')))
+    written.push(skillPath)
   }
+
+  const commandSource = join(target, 'commands', 'cf.md')
+  if (existsSync(commandSource)) {
+    const commandPath = join(claudeDir, 'commands', 'consensflow.md')
+    mkdirSync(dirname(commandPath), { recursive: true })
+    writeFileSync(commandPath, rewrite(readFileSync(commandSource, 'utf8')))
+    written.push(commandPath)
+  }
+
+  const hookSource = existsSync(join(target, 'hooks', 'hooks.json'))
+    ? join(target, 'hooks', 'hooks.json')
+    : join(target, 'hooks.json')
+  const hooks = readJson(hookSource, { hooks: {} }).hooks ?? {}
+  writeSettings(claudeDir, (settings) => {
+    const merged = { ...(settings.hooks ?? {}) }
+    for (const [event, entries] of Object.entries(hooks)) {
+      // Ours are replaced, never stacked; everyone else's are left alone.
+      const theirs = (merged[event] ?? []).filter((entry) => !isOurs(entry))
+      merged[event] = [...theirs, ...JSON.parse(rewrite(JSON.stringify(entries)))]
+    }
+    return { ...settings, hooks: merged }
+  })
+
+  const state = hostsState(env)
+  state.hosts.claude = {
+    version: VERSION,
+    payload: target,
+    files: written,
+    hookEvents: Object.keys(hooks),
+    installedAt: new Date().toISOString(),
+  }
+  saveHostsState(state, env)
+  return { host: 'claude', version: VERSION, files: written, payload: target }
 }
 
 function uninstallClaude(env) {
@@ -214,11 +206,22 @@ function pi(args, env) {
 export function installHost(host, env, options = {}) {
   if (host === 'claude') return installClaude(env, options)
   if (host === 'pi') {
-    pi(['install', options.source ?? PI_SOURCE], env)
+    // pi installs from a path (`pi install ./local/path`), so the bundled
+    // payload is copied where it can live, then handed to pi's own CLI —
+    // pi's settings stay pi's to write.
+    const target = join(configRoot(env), 'hosts', 'pi')
+    const bundled = options.bundled ?? bundledRoot()
+    rmSync(target, { recursive: true, force: true })
+    mkdirSync(target, { recursive: true })
+    cpSync(join(bundled, 'pi'), target, { recursive: true })
+    cpSync(join(bundled, 'lib'), join(target, 'lib'), { recursive: true })
+
+    const source = options.source ?? target
+    pi(['install', source], env)
     const state = hostsState(env)
-    state.hosts.pi = { source: options.source ?? PI_SOURCE, installedAt: new Date().toISOString() }
+    state.hosts.pi = { version: VERSION, source, installedAt: new Date().toISOString() }
     saveHostsState(state, env)
-    return { host: 'pi', ok: true }
+    return { host: 'pi', version: VERSION, source, ok: true }
   }
   throw new Error(`unknown host ${JSON.stringify(host)}; expected ${HOSTS.join(', ')}`)
 }
@@ -226,7 +229,9 @@ export function installHost(host, env, options = {}) {
 export function uninstallHost(host, env, options = {}) {
   if (host === 'claude') return uninstallClaude(env)
   if (host === 'pi') {
-    pi(['remove', options.source ?? PI_SOURCE], env)
+    const state0 = hostsState(env)
+    pi(['remove', options.source ?? state0.hosts.pi?.source ?? PI_SOURCE], env)
+    rmSync(join(configRoot(env), 'hosts', 'pi'), { recursive: true, force: true })
     const state = hostsState(env)
     delete state.hosts.pi
     saveHostsState(state, env)
@@ -264,7 +269,7 @@ export function hostStatus(env) {
       installed: record !== undefined,
       present: via !== null,
       via,
-      commit: record?.commit,
+      version: record?.version,
       source: record?.source,
       files: record?.files?.length ?? 0,
     }

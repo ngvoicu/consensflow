@@ -28,6 +28,19 @@ v2 engine that had one was retired and deleted 2026-08-19).
 | `src/ui.js` | Ephemeral loopback roster editor (random bearer token, no daemon): roster CRUD, catalog quick-adds, and the skills panel (`GET /api/system`, `POST /api/skills/install`, `POST /api/skills/uninstall` — uninstall needs `confirm:true`). Named operations only: never an endpoint that executes a supplied command |
 | `skill/SKILL.md` | The hand-written v0 the generator's template mirrors |
 
+## The merged layout
+
+`hosts/lib` is THE engine — one copy, shared by both host payloads
+(`hosts/claude`, `hosts/pi`). It was two hand-synced copies in two repos
+until 2026-08-20; the parity test that guarded them is gone because the
+duplication is. Host deltas that existed then are resolved: the
+`CONSENSFLOW_CHILD` marker is set for every host, the packet's handoff
+wording is host-neutral, and cc's session helpers live in the shared
+`state.js` (pi simply does not call them).
+
+Payload files reference `${CONSENSFLOW_HOST_ROOT}`; `src/hosts.js` rewrites
+that to wherever it installed the payload.
+
 ## Load-bearing rules
 
 - **Modules never read `process.env`** — the environment is an explicit

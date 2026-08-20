@@ -139,7 +139,7 @@ function resolveAdd(name, values) {
 function hostsVerb() {
   for (const host of hostStatus(env)) {
     const detail = host.installed
-      ? `installed by consensflow${host.commit ? ` @ ${host.commit}` : ''}${host.files ? ` · ${host.files} files wired` : ''}`
+      ? `installed by consensflow${host.version ? ` (v${host.version})` : ''}${host.files ? ` · ${host.files} files wired` : ''}`
       : host.present
         ? `already present via ${host.via} — consensflow did not install it and will not remove it`
         : 'not installed'

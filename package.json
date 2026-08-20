@@ -14,6 +14,7 @@
   "files": [
     "bin",
     "src",
+    "hosts",
     "skill",
     "README.md"
   ],

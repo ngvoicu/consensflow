@@ -1,27 +1,37 @@
 import assert from 'node:assert/strict'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { hostStatus, installHost, uninstallHost } from '../src/hosts.js'
+
+const VERSION = createRequire(import.meta.url)('../package.json').version
+
 import { tempEnv } from './helpers.mjs'
 
-/** git is shimmed: clone copies a fixture payload shaped like consensflow-cc. */
-function stubGit(t, commit = 'cc123456') {
-  const fixture = join(t.root, 'cc-fixture')
+/** A fixture payload shaped like the bundled hosts/ tree. */
+function fixturePayload(t) {
+  const fixture = join(t.root, 'bundled')
   mkdirSync(join(fixture, 'lib'), { recursive: true })
-  mkdirSync(join(fixture, 'scripts'), { recursive: true })
-  mkdirSync(join(fixture, 'skills', 'consensflow'), { recursive: true })
-  mkdirSync(join(fixture, 'commands'), { recursive: true })
-  writeFileSync(join(fixture, 'bin-cf.mjs'), '// engine\n')
+  mkdirSync(join(fixture, 'claude', 'bin'), { recursive: true })
+  mkdirSync(join(fixture, 'pi'), { recursive: true })
+  mkdirSync(join(fixture, 'claude', 'scripts'), { recursive: true })
+  mkdirSync(join(fixture, 'claude', 'skills', 'consensflow'), { recursive: true })
+  mkdirSync(join(fixture, 'claude', 'commands'), { recursive: true })
+  writeFileSync(join(fixture, 'claude', 'scripts', 'session-start-hook.mjs'), '// hook\n')
+  writeFileSync(join(fixture, 'claude', 'bin', 'cf.mjs'), '// host cli\n')
   writeFileSync(join(fixture, 'lib', 'runners.js'), '// runners\n')
-  writeFileSync(join(fixture, 'scripts', 'session-start-hook.mjs'), '// hook\n')
+  writeFileSync(join(fixture, 'pi', 'index.ts'), '// pi extension\n')
   writeFileSync(
-    join(fixture, 'skills', 'consensflow', 'SKILL.md'),
-    'run: node "${CLAUDE_PLUGIN_ROOT}/bin/cf.mjs" status\n',
+    join(fixture, 'claude', 'skills', 'consensflow', 'SKILL.md'),
+    'run: node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" status\n',
   )
-  writeFileSync(join(fixture, 'commands', 'cf.md'), 'node "${CLAUDE_PLUGIN_ROOT}/bin/cf.mjs" run\n')
   writeFileSync(
-    join(fixture, 'hooks.json'),
+    join(fixture, 'claude', 'commands', 'cf.md'),
+    'node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" run\n',
+  )
+  writeFileSync(
+    join(fixture, 'claude', 'hooks.json'),
     JSON.stringify({
       hooks: {
         SessionStart: [
@@ -29,7 +39,7 @@ function stubGit(t, commit = 'cc123456') {
             hooks: [
               {
                 type: 'command',
-                command: 'node "${CLAUDE_PLUGIN_ROOT}/scripts/session-start-hook.mjs"',
+                command: 'node "${CONSENSFLOW_HOST_ROOT}/scripts/session-start-hook.mjs"',
                 timeout: 15,
               },
             ],
@@ -39,19 +49,7 @@ function stubGit(t, commit = 'cc123456') {
     }),
   )
 
-  mkdirSync(t.env.PATH, { recursive: true })
-  const git = join(t.env.PATH, 'git')
-  writeFileSync(
-    git,
-    `#!/bin/sh
-PATH=/usr/bin:/bin
-for last do :; done
-if [ "$1" = "clone" ]; then mkdir -p "$last"; cp -R "${fixture}/." "$last/"; exit 0; fi
-case "$*" in *rev-parse*) echo "${commit}"; exit 0 ;; esac
-exit 1
-`,
-  )
-  chmodSync(git, 0o755)
+  return fixture
 }
 
 /** A pi that records what it was asked to install. */
@@ -67,7 +65,7 @@ function stubPi(t) {
 describe('the manager installs the Claude Code side through user config', () => {
   const t = tempEnv()
   after(() => t.cleanup())
-  stubGit(t)
+  const bundled = fixturePayload(t)
 
   const skill = () => join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')
   const command = () => join(t.env.CLAUDE_CONFIG_DIR, 'commands', 'consensflow.md')
@@ -78,9 +76,9 @@ describe('the manager installs the Claude Code side through user config', () => 
   })
 
   it('installs the payload, the skill, the command and the hooks', () => {
-    const outcome = installHost('claude', t.env)
+    const outcome = installHost('claude', t.env, { bundled })
 
-    assert.equal(outcome.commit, 'cc123456')
+    assert.equal(outcome.version, VERSION)
     // The payload lands in our own directory, never inside Claude Code.
     const payload = join(t.env.CONSENSFLOW_HOME, 'hosts', 'claude', 'lib', 'runners.js')
     assert.ok(existsSync(payload), 'payload copied')
@@ -89,6 +87,7 @@ describe('the manager installs the Claude Code side through user config', () => 
     const skillText = readFileSync(skill(), 'utf8')
     assert.ok(!skillText.includes('CLAUDE_PLUGIN_ROOT'))
     assert.ok(skillText.includes(join(t.env.CONSENSFLOW_HOME, 'hosts', 'claude')))
+    assert.ok(!skillText.includes('CONSENSFLOW_HOST_ROOT'))
     assert.ok(existsSync(command()))
 
     const hooks = JSON.parse(readFileSync(settings(), 'utf8')).hooks
@@ -105,7 +104,7 @@ describe('the manager installs the Claude Code side through user config', () => 
       settings(),
       JSON.stringify({ ...before, model: 'opus', voiceEnabled: true }, null, 2),
     )
-    installHost('claude', t.env)
+    installHost('claude', t.env, { bundled })
 
     const after = JSON.parse(readFileSync(settings(), 'utf8'))
     assert.equal(after.model, 'opus')
@@ -113,14 +112,14 @@ describe('the manager installs the Claude Code side through user config', () => 
     assert.equal(after.hooks.SessionStart.length, 1, 'hooks are replaced, never duplicated')
   })
 
-  it('says it is installed, and at which commit', () => {
+  it('says it is installed, and at which version', () => {
     const claude = hostStatus(t.env).find((h) => h.id === 'claude')
     assert.equal(claude.installed, true)
-    assert.equal(claude.commit, 'cc123456')
+    assert.equal(claude.version, VERSION)
   })
 
   it('uninstalls exactly what it wrote, keeping the user settings', () => {
-    uninstallHost('claude', t.env)
+    uninstallHost('claude', t.env, { bundled })
 
     assert.equal(existsSync(skill()), false)
     assert.equal(existsSync(command()), false)
@@ -164,23 +163,29 @@ describe('the manager drives pi through its own supported CLI', () => {
   const t = tempEnv()
   after(() => t.cleanup())
   const log = stubPi(t)
+  const bundled = fixturePayload(t)
 
-  it('installs the extension with pi install, not by hand', () => {
-    const outcome = installHost('pi', t.env)
+  it('hands pi the bundled payload and lets pi install it', () => {
+    const outcome = installHost('pi', t.env, { bundled })
 
     assert.equal(outcome.ok, true)
-    assert.match(readFileSync(log, 'utf8'), /install .*consensflow-pi/)
+    // The payload is ours to place; adding it to pi's settings is pi's job.
+    const payload = join(t.env.CONSENSFLOW_HOME, 'hosts', 'pi')
+    assert.ok(existsSync(join(payload, 'index.ts')))
+    assert.ok(existsSync(join(payload, 'lib', 'runners.js')))
+    assert.match(readFileSync(log, 'utf8'), new RegExp(`install ${payload}`))
   })
 
-  it('removes it with pi remove', () => {
+  it('removes it with pi remove, and takes the payload with it', () => {
     uninstallHost('pi', t.env)
-    assert.match(readFileSync(log, 'utf8'), /remove .*consensflow-pi/)
+    assert.match(readFileSync(log, 'utf8'), /remove /)
+    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts', 'pi')), false)
   })
 
   it('says plainly when pi is not installed at all', () => {
     const bare = tempEnv()
     try {
-      assert.throws(() => installHost('pi', bare.env), /pi/)
+      assert.throws(() => installHost('pi', bare.env, { bundled }), /pi/)
     } finally {
       bare.cleanup()
     }

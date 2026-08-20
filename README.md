@@ -136,6 +136,24 @@ skill goes where nothing else provides one — codex and opencode, plus any
 host without the native integration. `--all` overrides if you want ours
 everywhere.
 
+## The engine, and what a consult looks like
+
+The host integrations share one engine (`hosts/lib`) — there is a single copy
+now, not one per host. What it guarantees:
+
+- **Streaming is foreground and non-optional.** A participant's thinking,
+  tool calls and answer stream into your session as they happen; runs are
+  never sent to the background, because a consult you cannot watch is a
+  consult you cannot trust. pi surfaces the same stream through its
+  `onUpdate` channel.
+- **A durable backstop.** Every run also lands in `transcript.md` inside the
+  workspace's ConsensFlow directory, so a closed pane or a lost scrollback
+  never loses the answer. `transcript-events.js` normalizes each engine's
+  event shapes into one vocabulary.
+- **The roster is shared.** Every host reads the same
+  `~/.consensflow/participants.json`, so participants defined once are
+  available everywhere.
+
 ## State
 
 The roster: `~/.consensflow/participants.json` (shared with cc/pi). The
