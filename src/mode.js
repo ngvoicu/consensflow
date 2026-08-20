@@ -164,7 +164,24 @@ export function applyMode(rawMode, env, options = {}) {
   // what it missed instead of losing the switch.
   const report = modeReport(mode, env)
   try {
-    const cmux = installCmuxSkills(env, { force: options.force })
+    // Pane control goes to whoever consults: one agent in a host mode, all
+    // of them in cmux mode. Telling an agent it gets nothing and then
+    // writing 77 files into it is not "nothing".
+    const agents = detectAgents(env)
+    const targets = mode === 'cmux' ? agents : agents.filter((agent) => agent.id === mode)
+
+    // An agent that no longer consults gives its pane-control skills back:
+    // a switch that only ever adds would leave every agent it ever touched
+    // carrying files it has no use for.
+    const keep = new Set(targets.map((agent) => agent.skillsDir))
+    changes.push(
+      ...uninstallSkills(env, {
+        filter: (path, recorded) =>
+          recorded.source.startsWith('cmux@') && ![...keep].some((dir) => path.startsWith(dir)),
+      }),
+    )
+
+    const cmux = installCmuxSkills(env, { force: options.force, targets })
     changes.push(...cmux.report)
   } catch (cause) {
     report.push(

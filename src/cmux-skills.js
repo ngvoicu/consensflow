@@ -8,6 +8,8 @@ const CMUX_REPO = 'https://github.com/manaflow-ai/cmux'
 
 /**
  * cmux publishes its agent skills in its own repository's `skills/` tree.
+ * `options.targets` narrows which agents receive them — in a host mode only
+ * the agent that consults does.
  * ConsensFlow fetches them with a shallow clone and installs every file of
  * every skill under the manifest, sourced `cmux@<commit>` — so `skills
  * status` can say exactly which cmux version each file came from, updates

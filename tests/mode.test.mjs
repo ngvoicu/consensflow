@@ -141,6 +141,20 @@ describe('the machine runs exactly one ConsensFlow path', () => {
     )
   })
 
+  it('gives the cmux skills only to the agent that consults', () => {
+    stubGit(t)
+    applyMode('claude', t.env, { bundled })
+
+    // In a host mode one agent consults; the others were told they get
+    // nothing, so they must not quietly receive 77 pane-control files.
+    assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'cmux-core', 'SKILL.md')))
+    assert.equal(existsSync(join(t.env.CODEX_HOME, 'skills', 'cmux-core', 'SKILL.md')), false)
+
+    // In cmux mode every agent consults, so every agent gets them.
+    applyMode('cmux', t.env, { bundled })
+    assert.ok(existsSync(join(t.env.CODEX_HOME, 'skills', 'cmux-core', 'SKILL.md')))
+  })
+
   it('does not fail the switch when the cmux skills cannot be fetched', () => {
     const offline = tempEnv()
     try {
