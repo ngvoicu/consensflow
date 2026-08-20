@@ -100,6 +100,24 @@ Ownership is a hash manifest (`~/.config/consensflow/skills-manifest.json`).
 A file you edited by hand is **drifted**: ConsensFlow refuses to overwrite or
 delete it without `--force`, and it never touches files it didn't write.
 
+## One mode at a time
+
+A machine runs exactly one ConsensFlow path, and `consensflow use` chooses it:
+
+```sh
+consensflow use standalone   # every agent can consult, via the generated skill
+consensflow use claude       # only Claude Code consults — with your conversation as context
+consensflow use pi           # only pi consults, the same way
+consensflow mode             # which one is active, and what it means
+```
+
+Switching removes what the previous mode installed, so two paths are never
+live at once. The trade is stated every time you switch and every time you
+ask: in `claude` mode, **codex and opencode have no ConsensFlow at all** —
+that's the price of the deeper path, and `standalone` is how you take it
+back. ConsensFlow only ever removes what it installed; an integration you
+put there another way is reported and left alone.
+
 ## Host integrations
 
 Two coding agents can do more than run a one-shot command: they can hand the

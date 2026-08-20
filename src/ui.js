@@ -8,6 +8,7 @@ import { detectAgents } from './agents.js'
 import { CATALOG, EFFORTS } from './catalog.js'
 import { installCmuxSkills } from './cmux-skills.js'
 import { installSkill, skillsStatus, uninstallSkills } from './install.js'
+import { applyMode, currentMode, MODES, modeReport } from './mode.js'
 import {
   addParticipant,
   editParticipant,
@@ -40,8 +41,14 @@ const VERSION = JSON.parse(
 function systemState(env) {
   const files = skillsStatus(env)
   const cmux = files.find((file) => file.source.startsWith('cmux@'))
+  const mode = currentMode(env)
   return {
     version: VERSION,
+    mode: {
+      current: mode,
+      available: MODES,
+      report: modeReport(mode ?? 'standalone', env),
+    },
     agents: detectAgents(env).map((agent) => ({
       id: agent.id,
       native: agent.native === true,
@@ -147,6 +154,14 @@ export async function startUiServer(env) {
       }
       if (request.method === 'GET' && url.pathname === '/api/system') {
         return send(200, systemState(env))
+      }
+      if (request.method === 'POST' && url.pathname === '/api/mode') {
+        const body = JSON.parse((await readBody(request)) || '{}')
+        if (!MODES.includes(body.mode)) {
+          return send(400, { error: `unknown mode; expected ${MODES.join(', ')}` })
+        }
+        const outcome = applyMode(body.mode, env, {})
+        return send(200, { ...outcome, system: systemState(env) })
       }
       if (request.method === 'POST' && url.pathname === '/api/skills/install') {
         const body = JSON.parse((await readBody(request)) || '{}')
@@ -327,6 +342,10 @@ const PAGE = (token) => `<!DOCTYPE html>
   <p class="eyebrow eyebrow--section">Ready-made</p>
   <div id="catalog"></div>
 
+  <p class="eyebrow eyebrow--section">Mode</p>
+  <p class="lede" id="mode-lede"></p>
+  <div class="actions" id="modes"></div>
+
   <p class="eyebrow eyebrow--section">Skills</p>
   <div id="system"></div>
   <div class="actions">
@@ -452,6 +471,22 @@ function showEfforts(efforts, runtime) {
   for (const e of efforts[runtime] ?? []) list.appendChild(new Option(e, e));
 }
 
+function renderMode(system) {
+  document.querySelector('#mode-lede').textContent =
+    (system.mode.current === null
+      ? 'No mode chosen yet — nothing is installed. '
+      : 'Running in ' + system.mode.current + ' mode. ') + system.mode.report.join(' · ');
+
+  const host = document.querySelector('#modes');
+  host.innerHTML = '';
+  for (const mode of system.mode.available) {
+    const btn = el('button', mode === system.mode.current ? 'primary' : null, mode);
+    btn.disabled = mode === system.mode.current;
+    btn.onclick = () => post('/api/mode', { mode }, 'Switching to ' + mode + '…');
+    host.append(btn);
+  }
+}
+
 function renderSystem(system) {
   const host = document.querySelector('#system');
   host.innerHTML = '';
@@ -492,9 +527,11 @@ async function post(path, body, note) {
   const data = await res.json();
   if (!res.ok) { el2.textContent = data.error; return; }
   const counts = {};
-  for (const row of data.report ?? []) counts[row.action] = (counts[row.action] ?? 0) + 1;
+  for (const row of data.changes ?? data.report ?? []) {
+    if (row && row.action) counts[row.action] = (counts[row.action] ?? 0) + 1;
+  }
   const summary = Object.entries(counts).map(([action, n]) => n + ' ' + action).join(' · ');
-  el2.textContent = summary.length > 0 ? summary : 'nothing to do';
+  el2.textContent = data.report ? data.report.join(' · ') : (summary.length > 0 ? summary : 'nothing to do');
   load();
 }
 
@@ -514,6 +551,7 @@ async function load() {
   renderCatalog(data);
   renderForm(data);
   renderSystem(system);
+  renderMode(system);
 }
 
 document.querySelector('#add').onsubmit = async (event) => {

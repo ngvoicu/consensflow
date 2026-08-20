@@ -139,6 +139,50 @@ describe('roster changes keep installed skills current', () => {
   })
 })
 
+describe('the machine runs one mode, and cf keeps it that way', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+  stubCli(t, 'claude')
+  stubCli(t, 'codex')
+
+  it('reports no mode before one is chosen', async () => {
+    const out = await cf(['mode'], t.env)
+    assert.equal(out.code, 0)
+    assert.match(out.stdout, /standalone/)
+    assert.match(out.stdout, /not set|none/i)
+  })
+
+  it('switches to standalone and says who can consult', async () => {
+    await cf(['participant', 'add', 'zeus'], t.env)
+    const out = await cf(['use', 'standalone'], t.env)
+
+    assert.equal(out.code, 0)
+    assert.match(out.stdout, /claude/)
+    assert.match(out.stdout, /codex/)
+    assert.ok(
+      existsSync(join(t.env.CODEX_HOME, 'skills', 'consensflow', 'SKILL.md')),
+      'codex got the generated skill',
+    )
+  })
+
+  it('refuses to hand-install the generated skill in a host mode', async () => {
+    // Force the mode file to claude without the payload: the guard is about
+    // the invariant, not about what happens to be on disk.
+    writeFileSync(join(t.env.CONSENSFLOW_HOME, 'mode.json'), JSON.stringify({ mode: 'claude' }))
+
+    const out = await cf(['skills', 'install'], t.env)
+    assert.notEqual(out.code, 0)
+    assert.match(out.stdout + out.stderr, /mode/)
+    assert.match(out.stdout + out.stderr, /use standalone/)
+  })
+
+  it('names the modes when given one it does not have', async () => {
+    const out = await cf(['use', 'emacs'], t.env)
+    assert.notEqual(out.code, 0)
+    assert.match(out.stdout + out.stderr, /claude, pi, standalone/)
+  })
+})
+
 describe('one command installs the host integrations', () => {
   const t = tempEnv()
   after(() => t.cleanup())

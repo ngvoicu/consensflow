@@ -17,6 +17,7 @@ import { CATALOG, catalogEntry } from '../src/catalog.js'
 import { installCmuxSkills } from '../src/cmux-skills.js'
 import { HOSTS, hostStatus, installHost, uninstallHost } from '../src/hosts.js'
 import { installSkill, skillsStatus, uninstallSkills } from '../src/install.js'
+import { applyMode, currentMode, MODES, modeReport } from '../src/mode.js'
 import {
   addParticipant,
   editParticipant,
@@ -51,6 +52,11 @@ Usage: cf <command> [options]
   setup [--no-cmux] [--all] [--force]          One command: install the cmux skills and, when the
                                                shared roster has participants, the consensflow skill
                                                into every detected coding agent
+  use <claude|pi|standalone>                   Choose the one path this machine runs:
+                                               claude / pi = that agent consults, with your
+                                               conversation as context, and no other agent has
+                                               ConsensFlow; standalone = every agent can consult
+  mode                                         Which one is active, and what it means
   install <claude|pi|all> [--force]            Install a host integration — the deeper path that hands
                                                the participant your live conversation
   uninstall <claude|pi>                        Remove one, exactly as it was installed
@@ -134,6 +140,31 @@ function resolveAdd(name, values) {
     effort: values.effort ?? entry?.effort,
     description: values.description ?? entry?.description,
   }
+}
+
+function modeVerb() {
+  const mode = currentMode(env)
+  out(`mode: ${mode ?? 'not set — nothing is installed yet'}`)
+  for (const line of modeReport(mode ?? 'standalone', env)) out(`  ${line}`)
+  if (mode === null) out('')
+  if (mode === null) out(`choose one with \`consensflow use <${MODES.join('|')}>\``)
+}
+
+function useVerb(rest) {
+  const wanted = rest[0]
+  if (!MODES.includes(wanted)) {
+    fail(`name a mode: ${MODES.join(', ')}`)
+    return
+  }
+  const outcome = applyMode(wanted, env, {})
+  for (const change of outcome.changes) {
+    if (change.action === 'removed' && change.host)
+      out(`removed          ${change.host} integration`)
+    else if (change.path) out(`${(change.action ?? 'changed').padEnd(16)} ${change.path}`)
+  }
+  out('')
+  out(`mode: ${outcome.mode}`)
+  for (const line of outcome.report) out(`  ${line}`)
 }
 
 function hostsVerb() {
@@ -277,6 +308,13 @@ function skillsVerb(rest) {
 
   switch (action) {
     case 'install': {
+      const mode = currentMode(env)
+      if (mode !== null && mode !== 'standalone') {
+        fail(
+          `this machine is in ${mode} mode, where only ${mode} consults — run \`consensflow use standalone\` to give every agent the generated skill`,
+        )
+        return
+      }
       const participants = listParticipants(env)
       if (participants.length === 0) {
         fail('the roster is empty — add a participant with `cf ui` or `cf participant add` first')
@@ -404,11 +442,17 @@ async function main() {
   // cc and pi write the shared roster without telling v3; any invocation is
   // an opportunity to notice and regenerate the installed skill. Skills
   // verbs manage installation explicitly, so they are exempt.
-  if (['participant', 'setup', 'ui', 'doctor'].includes(command)) {
+  if (['participant', 'setup', 'ui', 'doctor', 'mode'].includes(command)) {
     healSkillIfStale(env)
   }
 
   switch (command) {
+    case 'use':
+      useVerb(rest)
+      return
+    case 'mode':
+      modeVerb()
+      return
     case 'hosts':
       hostsVerb()
       return

@@ -25,7 +25,8 @@ v2 engine that had one was retired and deleted 2026-08-19).
 | `src/manifest.js` + `src/install.js` | Hash-manifest ownership: install/update/status/uninstall; drift is sacred |
 | `src/cmux-skills.js` | Shallow-clones manaflow-ai/cmux, installs its `skills/` tree as `cmux@<commit>` |
 | `src/hosts.js` | Installs/removes the host integrations: **claude** via documented user config (payload in `<config>/hosts/claude`, skill + `/consensflow` command + settings.json hook merge, all recorded in `hosts.json`), **pi** via its supported `pi install/remove` CLI. Never writes Claude Code's plugin registry — that is versioned internal state |
-| `src/ui.js` | Ephemeral loopback roster editor (random bearer token, no daemon): roster CRUD, catalog quick-adds, and the skills panel (`GET /api/system`, `POST /api/skills/install`, `POST /api/skills/uninstall` — uninstall needs `confirm:true`). Named operations only: never an endpoint that executes a supplied command |
+| `src/mode.js` | The one-path-per-machine invariant: modes, switching, and the plain-words report of what each mode costs |
+| `src/ui.js` | Ephemeral loopback roster editor (random bearer token, no daemon): roster CRUD, catalog quick-adds, the mode switcher (`POST /api/mode`), and the skills panel (`GET /api/system`, `POST /api/skills/install`, `POST /api/skills/uninstall` — uninstall needs `confirm:true`). Named operations only: never an endpoint that executes a supplied command |
 | `skill/SKILL.md` | The hand-written v0 the generator's template mirrors |
 
 ## The merged layout
@@ -42,6 +43,13 @@ Payload files reference `${CONSENSFLOW_HOST_ROOT}`; `src/hosts.js` rewrites
 that to wherever it installed the payload.
 
 ## Load-bearing rules
+
+- **One mode per machine** (`src/mode.js`): `claude` | `pi` | `standalone`,
+  recorded in `<config>/mode.json`. `applyMode` installs the chosen path and
+  removes the others' — so two ConsensFlow paths can never be live at once.
+  `cf skills install` refuses in a host mode rather than quietly breaking the
+  invariant. Every entry point states the cost of a host mode (codex and
+  opencode get nothing).
 
 - **Modules never read `process.env`** — the environment is an explicit
   argument everywhere. That is the whole test-isolation story

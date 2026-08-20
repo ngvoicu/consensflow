@@ -111,6 +111,33 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     assert.equal(system.participants, 1)
   })
 
+  it('reports the mode and what it means for the machine', async () => {
+    const res = await api('/api/system')
+    const system = await res.json()
+
+    assert.equal(system.mode.current, null)
+    assert.deepEqual([...system.mode.available].sort(), ['claude', 'pi', 'standalone'])
+    assert.ok(Array.isArray(system.mode.report))
+  })
+
+  it('switches mode from the page, saying who gains and loses access', async () => {
+    const res = await api('/api/mode', {
+      method: 'POST',
+      body: JSON.stringify({ mode: 'standalone' }),
+    })
+    assert.equal(res.status, 200)
+    const body = await res.json()
+
+    assert.equal(body.mode, 'standalone')
+    assert.match(body.report.join(' '), /claude/)
+    assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')))
+  })
+
+  it('refuses a mode that does not exist', async () => {
+    const res = await api('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'emacs' }) })
+    assert.equal(res.status, 400)
+  })
+
   it('installs and updates the skills from the page', async () => {
     const res = await api('/api/skills/install', { method: 'POST', body: JSON.stringify({}) })
     assert.equal(res.status, 200)
