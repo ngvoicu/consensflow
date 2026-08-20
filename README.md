@@ -1,4 +1,4 @@
-# consensflow-cmux
+# ConsensFlow
 
 Named AI participants for every coding agent on your machine.
 
@@ -26,7 +26,7 @@ manages the roster and keeps the skills current, including cmux's own skills.
 Node ≥ 20:
 
 ```sh
-npm install -g ngvoicu/consensflow-cmux
+npm install -g ngvoicu/consensflow
 cf setup
 ```
 
@@ -100,17 +100,34 @@ Ownership is a hash manifest (`~/.config/consensflow/skills-manifest.json`).
 A file you edited by hand is **drifted**: ConsensFlow refuses to overwrite or
 delete it without `--force`, and it never touches files it didn't write.
 
-## Which ConsensFlow?
+## Host integrations
 
-- **This repo (`consensflow-cmux`)** — the one to install: works with all
-  four agents, one npm command; also manages cmux's skills.
-- [`consensflow-cc`](https://github.com/ngvoicu/consensflow-cc) — a Claude
-  Code **plugin** (installed through Claude Code, not npm) that additionally
-  hands your *current conversation* to the participant as context.
-- [`consensflow-pi`](https://github.com/ngvoicu/consensflow-pi) — the same
-  idea as a **pi extension** (installed through pi, not npm).
+Two coding agents can do more than run a one-shot command: they can hand the
+participant **your live conversation** as context. That deeper path ships as
+a payload per host, and this manager installs it — you never install them
+separately:
 
-All three share the same participants file, so they always agree on who
+```sh
+consensflow install claude    # wires the Claude Code path through user config
+consensflow install pi        # drives pi's own `pi install`
+consensflow install all
+consensflow hosts             # what's installed where, at which commit
+consensflow uninstall claude  # removes exactly what it wrote
+```
+
+`install claude` puts the payload in `~/.config/consensflow/hosts/claude`
+(never inside Claude Code's own directories) and wires it up through
+documented user config: a skill, a `/consensflow` command, and hook entries
+merged into `settings.json` — your other settings and hooks are left alone,
+and the file is backed up before each write. `install pi` shells out to pi's
+supported CLI rather than editing pi's state by hand.
+
+The payload repos ([`consensflow-cc`](https://github.com/ngvoicu/consensflow-cc),
+[`consensflow-pi`](https://github.com/ngvoicu/consensflow-pi)) exist to be
+installed *by this manager*. Managing participants happens here, in one
+place, for all of them.
+
+Every host reads the same participants file, so they always agree on who
 your participants are — and they don't stack up on one agent. Where a host
 already ships its own ConsensFlow (Claude Code via the plugin, pi via the
 extension), `consensflow-cmux` leaves it alone rather than adding a second
@@ -124,4 +141,4 @@ everywhere.
 The roster: `~/.consensflow/participants.json` (shared with cc/pi). The
 manifest: `~/.config/consensflow/skills-manifest.json` (override with
 `CONSENSFLOW_HOME`). Leave completely with `cf skills uninstall &&
-npm uninstall -g consensflow-cmux`.
+npm uninstall -g consensflow`.

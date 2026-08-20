@@ -15,6 +15,7 @@ import { parseArgs } from 'node:util'
 import { detectAgents } from '../src/agents.js'
 import { CATALOG, catalogEntry } from '../src/catalog.js'
 import { installCmuxSkills } from '../src/cmux-skills.js'
+import { HOSTS, hostStatus, installHost, uninstallHost } from '../src/hosts.js'
 import { installSkill, skillsStatus, uninstallSkills } from '../src/install.js'
 import {
   addParticipant,
@@ -50,6 +51,10 @@ Usage: cf <command> [options]
   setup [--no-cmux] [--all] [--force]          One command: install the cmux skills and, when the
                                                shared roster has participants, the consensflow skill
                                                into every detected coding agent
+  install <claude|pi|all>                      Install a host integration — the deeper path that hands
+                                               the participant your live conversation
+  uninstall <claude|pi>                        Remove one, exactly as it was installed
+  hosts                                        What is installed where
   catalog [--runtime <r>] [--json]              The ready-made participants for each tool
   participant add <name>                       A catalog name is enough: cf participant add zeus
   participant add <name> --runtime <r> --model <m> [--effort <e>] [--description <d>]
@@ -128,6 +133,34 @@ function resolveAdd(name, values) {
     model: values.model ?? entry?.model,
     effort: values.effort ?? entry?.effort,
     description: values.description ?? entry?.description,
+  }
+}
+
+function hostsVerb() {
+  for (const host of hostStatus(env)) {
+    const detail = host.installed
+      ? `installed${host.commit ? ` @ ${host.commit}` : ''}${host.files ? ` · ${host.files} files wired` : ''}`
+      : 'not installed'
+    out(`${host.id.padEnd(8)}${detail}`)
+  }
+  out('')
+  out('install one with `consensflow install <host>`; the roster is shared with every host')
+}
+
+function installVerb(rest, remove = false) {
+  const wanted = rest[0]
+  if (wanted === undefined || (wanted !== 'all' && !HOSTS.includes(wanted))) {
+    fail(`name a host to ${remove ? 'uninstall' : 'install'}: ${HOSTS.join(', ')}`)
+    return
+  }
+  const targets = wanted === 'all' ? HOSTS : [wanted]
+  for (const host of targets) {
+    const outcome = remove ? uninstallHost(host, env) : installHost(host, env)
+    out(
+      remove
+        ? `${host}: removed`
+        : `${host}: installed${outcome.commit ? ` @ ${outcome.commit}` : ''}`,
+    )
   }
 }
 
@@ -367,6 +400,15 @@ async function main() {
   }
 
   switch (command) {
+    case 'hosts':
+      hostsVerb()
+      return
+    case 'install':
+      installVerb(rest)
+      return
+    case 'uninstall':
+      installVerb(rest, true)
+      return
     case 'catalog':
       catalogVerb(rest)
       return

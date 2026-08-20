@@ -139,6 +139,31 @@ describe('roster changes keep installed skills current', () => {
   })
 })
 
+describe('one command installs the host integrations', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+
+  it('lists the hosts and what is installed', async () => {
+    const out = await cf(['hosts'], t.env)
+    assert.equal(out.code, 0)
+    assert.match(out.stdout, /claude/)
+    assert.match(out.stdout, /pi/)
+    assert.match(out.stdout, /not installed/)
+  })
+
+  it('refuses a host it does not know, naming the ones it does', async () => {
+    const out = await cf(['install', 'emacs'], t.env)
+    assert.notEqual(out.code, 0)
+    assert.match(out.stdout + out.stderr, /claude, pi/)
+  })
+
+  it('reports a missing host CLI instead of pretending', async () => {
+    const out = await cf(['install', 'pi'], t.env)
+    assert.notEqual(out.code, 0)
+    assert.match(out.stdout + out.stderr, /pi/)
+  })
+})
+
 describe('cf explains where it stands aside for a host integration', () => {
   const t = tempEnv()
   after(() => t.cleanup())

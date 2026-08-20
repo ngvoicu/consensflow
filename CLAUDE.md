@@ -4,7 +4,7 @@ Byte-identical to `AGENTS.md` — keep both in sync (workspace convention).
 
 ## What this is
 
-consensflow-cmux (ConsensFlow v3): skills-first. A zero-dependency Node ESM npm package
+ConsensFlow (the manager, npm `consensflow`): skills-first. A zero-dependency Node ESM npm package
 (`cf`/`consensflow` bins, no build step) that manages a roster of named AI
 participants and generates/installs **one skill** teaching every coding agent
 (claude, codex, pi, opencode — all read the same Agent Skills `SKILL.md`
@@ -24,6 +24,7 @@ v2 engine that had one was retired and deleted 2026-08-19).
 | `src/agents.js` | Agent detection (CLI on PATH) + per-agent skills dir (honours `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`) |
 | `src/manifest.js` + `src/install.js` | Hash-manifest ownership: install/update/status/uninstall; drift is sacred |
 | `src/cmux-skills.js` | Shallow-clones manaflow-ai/cmux, installs its `skills/` tree as `cmux@<commit>` |
+| `src/hosts.js` | Installs/removes the host integrations: **claude** via documented user config (payload in `<config>/hosts/claude`, skill + `/consensflow` command + settings.json hook merge, all recorded in `hosts.json`), **pi** via its supported `pi install/remove` CLI. Never writes Claude Code's plugin registry — that is versioned internal state |
 | `src/ui.js` | Ephemeral loopback roster editor (random bearer token, no daemon): roster CRUD, catalog quick-adds, and the skills panel (`GET /api/system`, `POST /api/skills/install`, `POST /api/skills/uninstall` — uninstall needs `confirm:true`). Named operations only: never an endpoint that executes a supplied command |
 | `skill/SKILL.md` | The hand-written v0 the generator's template mirrors |
 

@@ -1,0 +1,258 @@
+import { spawnSync } from 'node:child_process'
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { dirname, join, relative } from 'node:path'
+import { configRoot } from './roster.js'
+
+/**
+ * Host integrations: the deeper ConsensFlow paths that live inside a coding
+ * agent and can hand it your live conversation.
+ *
+ * One manager installs them all, so there is a single place to install,
+ * update and remove — and a single roster behind them. Each host is driven
+ * through a surface it actually supports:
+ *
+ * - **pi** has a real CLI (`pi install <source>`), so we use it. Nothing is
+ *   written by hand into pi's state.
+ * - **Claude Code** has no install CLI, and its plugin registry is versioned
+ *   internal state. So the payload lives in OUR directory
+ *   (`<config>/hosts/claude`) and is wired up through documented user config:
+ *   a skill, a command, and hook entries in settings.json. Everything we
+ *   write is recorded, and uninstall removes exactly that.
+ */
+
+const CLAUDE_REPO = 'https://github.com/ngvoicu/consensflow-cc'
+const PI_SOURCE = 'github.com/ngvoicu/consensflow-pi'
+const HOOK_TAG = 'consensflow'
+
+export const HOSTS = ['claude', 'pi']
+
+function claudeConfigDir(env) {
+  return env.CLAUDE_CONFIG_DIR ?? join(env.HOME ?? homedir(), '.claude')
+}
+
+function payloadDir(env) {
+  return join(configRoot(env), 'hosts', 'claude')
+}
+
+function hostsState(env) {
+  const path = join(configRoot(env), 'hosts.json')
+  try {
+    return { path, ...JSON.parse(readFileSync(path, 'utf8')) }
+  } catch {
+    return { path, hosts: {} }
+  }
+}
+
+function saveHostsState(state, env) {
+  mkdirSync(configRoot(env), { recursive: true })
+  writeFileSync(state.path, `${JSON.stringify({ hosts: state.hosts }, null, 2)}\n`)
+}
+
+function readJson(path, fallback) {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'))
+  } catch {
+    return fallback
+  }
+}
+
+/** Our hook entries are tagged so we can find and remove exactly them. */
+function isOurs(entry) {
+  return JSON.stringify(entry).includes(HOOK_TAG)
+}
+
+function writeSettings(claudeDir, mutate) {
+  const path = join(claudeDir, 'settings.json')
+  const settings = readJson(path, {})
+  const next = mutate(settings)
+  mkdirSync(claudeDir, { recursive: true })
+  if (existsSync(path)) {
+    writeFileSync(`${path}.consensflow.bak`, readFileSync(path))
+  }
+  writeFileSync(path, `${JSON.stringify(next, null, 2)}\n`)
+}
+
+function everyFile(dir) {
+  const found = []
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name)
+    if (statSync(path).isDirectory()) found.push(...everyFile(path))
+    else found.push(path)
+  }
+  return found
+}
+
+function installClaude(env, options) {
+  const claudeDir = claudeConfigDir(env)
+  const target = payloadDir(env)
+  const checkout = mkdtempSync(join(tmpdir(), 'cf-cc-'))
+
+  try {
+    const repo = options.repo ?? CLAUDE_REPO
+    const clone = spawnSync('git', ['clone', '--depth', '1', repo, checkout], {
+      env,
+      encoding: 'utf8',
+    })
+    if (clone.error || clone.status !== 0) {
+      throw new Error(
+        `git clone of ${repo} failed — is git installed and the network up? (${clone.error?.message ?? clone.stderr?.trim()})`,
+      )
+    }
+    const rev = spawnSync('git', ['-C', checkout, 'rev-parse', 'HEAD'], { env, encoding: 'utf8' })
+    const commit = (rev.stdout ?? '').trim().slice(0, 12)
+
+    // The payload lives with us, never inside Claude Code's own directories.
+    rmSync(target, { recursive: true, force: true })
+    mkdirSync(dirname(target), { recursive: true })
+    cpSync(checkout, target, { recursive: true })
+    rmSync(join(target, '.git'), { recursive: true, force: true })
+
+    // Everything the payload says about ${CLAUDE_PLUGIN_ROOT} is true of the
+    // directory we just put it in.
+    const written = []
+    const rewrite = (text) => text.split('${CLAUDE_PLUGIN_ROOT}').join(target)
+
+    const skillSource = join(target, 'skills', 'consensflow', 'SKILL.md')
+    if (existsSync(skillSource)) {
+      const skillPath = join(claudeDir, 'skills', 'consensflow', 'SKILL.md')
+      mkdirSync(dirname(skillPath), { recursive: true })
+      writeFileSync(skillPath, rewrite(readFileSync(skillSource, 'utf8')))
+      written.push(skillPath)
+    }
+
+    const commandSource = join(target, 'commands', 'cf.md')
+    if (existsSync(commandSource)) {
+      const commandPath = join(claudeDir, 'commands', 'consensflow.md')
+      mkdirSync(dirname(commandPath), { recursive: true })
+      writeFileSync(commandPath, rewrite(readFileSync(commandSource, 'utf8')))
+      written.push(commandPath)
+    }
+
+    const hookSource = existsSync(join(target, 'hooks', 'hooks.json'))
+      ? join(target, 'hooks', 'hooks.json')
+      : join(target, 'hooks.json')
+    const hooks = readJson(hookSource, { hooks: {} }).hooks ?? {}
+    writeSettings(claudeDir, (settings) => {
+      const merged = { ...(settings.hooks ?? {}) }
+      for (const [event, entries] of Object.entries(hooks)) {
+        // Ours are replaced, never stacked; everyone else's are left alone.
+        const theirs = (merged[event] ?? []).filter((entry) => !isOurs(entry))
+        merged[event] = [...theirs, ...JSON.parse(rewrite(JSON.stringify(entries)))]
+      }
+      return { ...settings, hooks: merged }
+    })
+
+    const state = hostsState(env)
+    state.hosts.claude = {
+      commit,
+      payload: target,
+      files: written,
+      hookEvents: Object.keys(hooks),
+      installedAt: new Date().toISOString(),
+    }
+    saveHostsState(state, env)
+    return { host: 'claude', commit, files: written, payload: target }
+  } finally {
+    rmSync(checkout, { recursive: true, force: true })
+  }
+}
+
+function uninstallClaude(env) {
+  const state = hostsState(env)
+  const record = state.hosts.claude
+  const claudeDir = claudeConfigDir(env)
+
+  for (const path of record?.files ?? []) {
+    rmSync(path, { force: true })
+    try {
+      if (readdirSync(dirname(path)).length === 0) rmSync(dirname(path), { recursive: true })
+    } catch {
+      // Already gone, or someone else's files live there too.
+    }
+  }
+  rmSync(record?.payload ?? payloadDir(env), { recursive: true, force: true })
+
+  if (existsSync(join(claudeDir, 'settings.json'))) {
+    writeSettings(claudeDir, (settings) => {
+      const merged = { ...(settings.hooks ?? {}) }
+      for (const event of Object.keys(merged)) {
+        merged[event] = merged[event].filter((entry) => !isOurs(entry))
+      }
+      return { ...settings, hooks: merged }
+    })
+  }
+
+  delete state.hosts.claude
+  saveHostsState(state, env)
+  return { host: 'claude', removed: record?.files?.length ?? 0 }
+}
+
+function pi(args, env) {
+  const result = spawnSync('pi', args, { env, encoding: 'utf8' })
+  if (result.error !== undefined) {
+    throw new Error(
+      `pi is not installed, so its extension cannot be managed (${result.error.message})`,
+    )
+  }
+  if (result.status !== 0) {
+    throw new Error(`pi ${args.join(' ')} failed: ${(result.stderr || result.stdout || '').trim()}`)
+  }
+  return result.stdout ?? ''
+}
+
+export function installHost(host, env, options = {}) {
+  if (host === 'claude') return installClaude(env, options)
+  if (host === 'pi') {
+    pi(['install', options.source ?? PI_SOURCE], env)
+    const state = hostsState(env)
+    state.hosts.pi = { source: options.source ?? PI_SOURCE, installedAt: new Date().toISOString() }
+    saveHostsState(state, env)
+    return { host: 'pi', ok: true }
+  }
+  throw new Error(`unknown host ${JSON.stringify(host)}; expected ${HOSTS.join(', ')}`)
+}
+
+export function uninstallHost(host, env, options = {}) {
+  if (host === 'claude') return uninstallClaude(env)
+  if (host === 'pi') {
+    pi(['remove', options.source ?? PI_SOURCE], env)
+    const state = hostsState(env)
+    delete state.hosts.pi
+    saveHostsState(state, env)
+    return { host: 'pi', ok: true }
+  }
+  throw new Error(`unknown host ${JSON.stringify(host)}; expected ${HOSTS.join(', ')}`)
+}
+
+/** What is installed where, from our own record — never guessed. */
+export function hostStatus(env) {
+  const state = hostsState(env)
+  return HOSTS.map((id) => {
+    const record = state.hosts[id]
+    return {
+      id,
+      installed: record !== undefined,
+      commit: record?.commit,
+      source: record?.source,
+      files: record?.files?.length ?? 0,
+    }
+  })
+}
+
+/** Files the claude payload occupies, for reporting. */
+export function claudePayloadFiles(env) {
+  const target = payloadDir(env)
+  if (!existsSync(target)) return []
+  return everyFile(target).map((path) => relative(target, path))
+}
