@@ -102,7 +102,26 @@ const VERSION = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'),
 ).version
 
+function presence(id, env) {
+  if (id === 'claude') {
+    const cache = join(env.HOME ?? homedir(), '.claude', 'plugins', 'cache', 'consensflow-cc')
+    return existsSync(cache) ? 'the Claude Code plugin marketplace' : null
+  }
+  if (id === 'pi') {
+    const listed = spawnSync('pi', ['list'], { env, encoding: 'utf8' })
+    return (listed.stdout ?? '').includes('consensflow-pi') ? 'pi install' : null
+  }
+  return null
+}
+
 function installClaude(env, options) {
+  // Two ConsensFlow installs in one Claude Code means two skills with the
+  // same name and, worse, hooks that fire twice per session.
+  if (options.force !== true && presence('claude', env) !== null) {
+    throw new Error(
+      'ConsensFlow is already installed in Claude Code via the plugin marketplace — remove it there first (/plugin uninstall consensflow@consensflow-cc), or pass --force to install alongside it',
+    )
+  }
   const claudeDir = claudeConfigDir(env)
   const target = payloadDir(env)
   const bundled = options.bundled ?? bundledRoot()
@@ -247,18 +266,6 @@ export function uninstallHost(host, env, options = {}) {
  * not remove it, but saying "not installed" about a working integration
  * would be a lie.
  */
-function presence(id, env) {
-  if (id === 'claude') {
-    const cache = join(env.HOME ?? homedir(), '.claude', 'plugins', 'cache', 'consensflow-cc')
-    return existsSync(cache) ? 'the Claude Code plugin marketplace' : null
-  }
-  if (id === 'pi') {
-    const listed = spawnSync('pi', ['list'], { env, encoding: 'utf8' })
-    return (listed.stdout ?? '').includes('consensflow-pi') ? 'pi install' : null
-  }
-  return null
-}
-
 export function hostStatus(env) {
   const state = hostsState(env)
   return HOSTS.map((id) => {

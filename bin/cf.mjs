@@ -51,7 +51,7 @@ Usage: cf <command> [options]
   setup [--no-cmux] [--all] [--force]          One command: install the cmux skills and, when the
                                                shared roster has participants, the consensflow skill
                                                into every detected coding agent
-  install <claude|pi|all>                      Install a host integration — the deeper path that hands
+  install <claude|pi|all> [--force]            Install a host integration — the deeper path that hands
                                                the participant your live conversation
   uninstall <claude|pi>                        Remove one, exactly as it was installed
   hosts                                        What is installed where
@@ -150,18 +150,25 @@ function hostsVerb() {
 }
 
 function installVerb(rest, remove = false) {
-  const wanted = rest[0]
+  const { values, positionals } = parseArgs({
+    args: rest,
+    allowPositionals: true,
+    options: { force: { type: 'boolean', default: false } },
+  })
+  const wanted = positionals[0]
   if (wanted === undefined || (wanted !== 'all' && !HOSTS.includes(wanted))) {
     fail(`name a host to ${remove ? 'uninstall' : 'install'}: ${HOSTS.join(', ')}`)
     return
   }
   const targets = wanted === 'all' ? HOSTS : [wanted]
   for (const host of targets) {
-    const outcome = remove ? uninstallHost(host, env) : installHost(host, env)
+    const outcome = remove
+      ? uninstallHost(host, env)
+      : installHost(host, env, { force: values.force })
     out(
       remove
         ? `${host}: removed`
-        : `${host}: installed${outcome.commit ? ` @ ${outcome.commit}` : ''}`,
+        : `${host}: installed${outcome.version ? ` (v${outcome.version})` : ''}`,
     )
   }
 }

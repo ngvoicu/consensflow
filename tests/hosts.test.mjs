@@ -132,6 +132,33 @@ describe('the manager installs the Claude Code side through user config', () => 
   })
 })
 
+describe('it refuses to install alongside an integration already there', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+  const bundled = fixturePayload(t)
+
+  it('stops when the Claude Code plugin is already installed, and says how to fix it', () => {
+    mkdirSync(join(t.env.HOME, '.claude', 'plugins', 'cache', 'consensflow-cc'), {
+      recursive: true,
+    })
+
+    assert.throws(
+      () => installHost('claude', t.env, { bundled }),
+      /already installed .*plugin|--force/,
+    )
+    // Nothing was written: two installs would run their hooks twice.
+    assert.equal(
+      existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')),
+      false,
+    )
+  })
+
+  it('installs anyway when told to', () => {
+    const outcome = installHost('claude', t.env, { bundled, force: true })
+    assert.equal(outcome.host, 'claude')
+  })
+})
+
 describe('a host installed some other way is reported, not denied', () => {
   const t = tempEnv()
   after(() => t.cleanup())
