@@ -1,11 +1,11 @@
 import { spawn } from 'node:child_process'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createServer } from 'node:http'
+import { CATALOG, EFFORTS } from './catalog.js'
 import {
   addParticipant,
   editParticipant,
   listParticipants,
-  PERMISSIONS,
   RUNTIMES,
   removeParticipant,
 } from './roster.js'
@@ -62,7 +62,8 @@ export async function startUiServer(env) {
         return send(200, {
           participants: listParticipants(env),
           runtimes: RUNTIMES,
-          permissions: PERMISSIONS,
+          catalog: CATALOG,
+          efforts: EFFORTS,
         })
       }
       if (request.method === 'POST' && url.pathname === '/api/participants') {
@@ -126,18 +127,27 @@ const PAGE = (token) => `<!DOCTYPE html>
   .full { grid-column: 1 / -1; }
   .error { color: #d33; }
   .muted { opacity: .65; font-size: .85em; }
+  h2 { font-size: 1rem; margin-top: 1.6rem; }
+  h3 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; opacity: .7; margin: 1rem 0 .3rem; }
+  .catalog-row { display: flex; gap: .75rem; align-items: baseline; justify-content: space-between; padding: .3rem 0; border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent); }
+  .catalog-row span { font-size: .9em; }
 </style>
 </head>
 <body>
 <h1>ConsensFlow participants</h1>
 <p class="muted">Every change regenerates the skill installed into your coding agents.</p>
 <table id="roster"><thead><tr><th>Name</th><th>Runtime</th><th>Model</th><th>Effort</th><th>Permission</th><th></th></tr></thead><tbody></tbody></table>
+<h2>Ready-made</h2>
+<p class="muted">One click adds a curated participant for that tool.</p>
+<div id="catalog"></div>
+
+<h2>Custom</h2>
 <form id="add">
   <input name="name" placeholder="name (lowercase)" required>
   <select name="runtime"></select>
   <input name="model" placeholder="model (verbatim)" required class="full">
-  <input name="effort" placeholder="effort (optional)">
-  <select name="permission"></select>
+  <input name="effort" list="effort-options" placeholder="effort (optional)">
+  <datalist id="effort-options"></datalist>
   <button class="full">Add participant</button>
   <p id="error" class="error full"></p>
 </form>
@@ -168,10 +178,57 @@ async function load() {
     tbody.appendChild(tr);
   }
   const runtimeSelect = document.querySelector('select[name=runtime]');
-  const permissionSelect = document.querySelector('select[name=permission]');
   if (runtimeSelect.options.length === 0) {
     for (const r of data.runtimes) runtimeSelect.add(new Option(r, r));
-    for (const p of data.permissions) permissionSelect.add(new Option(p, p));
+    runtimeSelect.onchange = () => showEfforts(data.efforts, runtimeSelect.value);
+  }
+  showEfforts(data.efforts, runtimeSelect.value);
+  renderCatalog(data);
+}
+
+function showEfforts(efforts, runtime) {
+  const list = document.querySelector('#effort-options');
+  list.innerHTML = '';
+  for (const e of efforts[runtime] ?? []) list.appendChild(new Option(e, e));
+}
+
+/** The taken names decide which ready-made entries are still offerable. */
+function renderCatalog(data) {
+  const taken = new Set(data.participants.map((p) => p.name));
+  const host = document.querySelector('#catalog');
+  host.innerHTML = '';
+  for (const [runtime, entries] of Object.entries(data.catalog)) {
+    const available = entries.filter((e) => !taken.has(e.name));
+    if (available.length === 0) continue;
+    const section = document.createElement('section');
+    const h = document.createElement('h3');
+    h.textContent = runtime;
+    section.appendChild(h);
+    for (const entry of available) {
+      const row = document.createElement('div');
+      row.className = 'catalog-row';
+      const label = document.createElement('span');
+      label.innerHTML = '<strong>' + entry.name + '</strong> — ' + entry.description;
+      const btn = document.createElement('button');
+      btn.textContent = 'Add';
+      btn.onclick = async () => {
+        await fetch('/api/participants', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            name: entry.name,
+            runtime,
+            model: entry.model,
+            ...(entry.effort ? { effort: entry.effort } : {}),
+            description: entry.description,
+          }),
+        });
+        load();
+      };
+      row.append(label, btn);
+      section.appendChild(row);
+    }
+    host.appendChild(section);
   }
 }
 document.querySelector('#add').onsubmit = async (event) => {

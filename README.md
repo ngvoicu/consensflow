@@ -37,17 +37,25 @@ Participants are yours to create — nothing is seeded:
 cf ui
 ```
 
-opens a minimal browser editor (Ctrl-C to stop). Add a participant — name,
-runtime, model, optional effort — and **the skill installs itself into every
-agent the moment the first participant exists, and rewrites itself on every
-add, edit or remove after that.** No install step, no sync step.
+opens a minimal browser editor (Ctrl-C to stop). Each tool comes with a
+**list of ready-made participants** — one click adds `zeus` (Claude Opus 5 at
+max effort), `hyperion` (GPT 5.6 Sol at ultra), `endymion` (Kimi K3, 1M
+context), `prometheus` (GLM 5.3) … — or define a custom one with any model
+string its runtime accepts. **The skill installs itself into every agent the
+moment the first participant exists, and rewrites itself on every add, edit
+or remove after that.** No install step, no sync step.
 
 The CLI does the same job if you prefer it:
 
 ```sh
-cf participant add zeus --runtime claude --model claude-opus-5 --effort max
+cf catalog                  # the ready-made participants, per tool
+cf participant add zeus     # a catalog name is enough — model and effort come with it
+cf participant add nemo --runtime codex --model gpt-5.6-terra --effort xhigh   # or roll your own
 cf participant list | edit | remove …
 ```
+
+Model identifiers are passed through verbatim, so anything your CLI accepts
+works — the catalog is a convenience, never a constraint.
 
 **The roster is shared.** It lives at `~/.consensflow/participants.json` —
 the very file the `consensflow-cc` plugin and `consensflow-pi` extension
@@ -65,10 +73,10 @@ run `cf skills update` when a name is missing from its table.
 Two sources, one owner:
 
 - **`consensflow`** — generated from your roster: a table of exact commands,
-  one per participant, with model, effort and permission baked in.
-  `--dangerously-*` flags appear only on participants you explicitly stored
-  as `full-auto`. Participants run in the agent's working directory, so they
-  read project files themselves.
+  one per participant, with its model and effort baked in. Participants run
+  in the agent's working directory (so they read project files themselves)
+  with their own CLI's default permissions — ConsensFlow never generates a
+  permission-bypass flag.
 - **cmux's skills** — fetched by shallow-cloning
   [`manaflow-ai/cmux`](https://github.com/manaflow-ai/cmux) (its `skills/`
   tree: core, workspace, browser, settings, …) and installed the same way,

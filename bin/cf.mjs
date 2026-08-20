@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { detectAgents } from '../src/agents.js'
+import { CATALOG, catalogEntry } from '../src/catalog.js'
 import { installCmuxSkills } from '../src/cmux-skills.js'
 import { installSkill, skillsStatus, uninstallSkills } from '../src/install.js'
 import {
@@ -44,9 +45,11 @@ Usage: cf <command> [options]
   setup [--no-cmux] [--force]                  One command: install the cmux skills and, when the
                                                shared roster has participants, the consensflow skill
                                                into every detected coding agent
-  participant add <name> --runtime <r> --model <m> [--effort <e>] [--permission workspace-write|full-auto] [--description <d>]
+  catalog [--runtime <r>] [--json]              The ready-made participants for each tool
+  participant add <name>                       A catalog name is enough: cf participant add zeus
+  participant add <name> --runtime <r> --model <m> [--effort <e>] [--description <d>]
   participant list [--json]
-  participant edit <name> [--model <m>] [--effort <e>] [--permission <p>] [--description <d>]
+  participant edit <name> [--model <m>] [--effort <e>] [--description <d>]
   participant remove <name>
       the roster is the shared ~/.consensflow/participants.json — the same
       file the consensflow-cc plugin and consensflow-pi extension use
@@ -76,6 +79,53 @@ function printReport(report) {
   }
 }
 
+/**
+ * A catalog name is a whole participant: `cf participant add zeus` needs no
+ * flags. Anything passed explicitly wins over the catalog entry, and a name
+ * nobody knows still needs a runtime and a model.
+ */
+function resolveAdd(name, values) {
+  const entry = catalogEntry(name)
+  if (entry === undefined && (values.runtime === undefined || values.model === undefined)) {
+    throw new Error(
+      `${name} is not in the catalog, so it needs --runtime and --model (see \`cf catalog\`)`,
+    )
+  }
+  return {
+    name,
+    runtime: values.runtime ?? entry?.runtime,
+    model: values.model ?? entry?.model,
+    effort: values.effort ?? entry?.effort,
+    description: values.description ?? entry?.description,
+  }
+}
+
+function catalogVerb(rest) {
+  const { values } = parseArgs({
+    args: rest,
+    allowPositionals: true,
+    options: { runtime: { type: 'string' }, json: { type: 'boolean', default: false } },
+  })
+
+  const catalog =
+    values.runtime === undefined ? CATALOG : { [values.runtime]: CATALOG[values.runtime] ?? [] }
+
+  if (values.json) {
+    out(JSON.stringify({ catalog }, null, 2))
+    return
+  }
+  for (const [runtime, entries] of Object.entries(catalog)) {
+    out(`${runtime}:`)
+    for (const entry of entries) {
+      out(
+        `  ${entry.name.padEnd(12)}${entry.model.padEnd(34)}${(entry.effort ?? '-').padEnd(8)}${entry.description}`,
+      )
+    }
+    out('')
+  }
+  out('add one with `cf participant add <name>` — no other flags needed')
+}
+
 function participantVerb(rest) {
   const action = rest[0]
   const { values, positionals } = parseArgs({
@@ -85,7 +135,6 @@ function participantVerb(rest) {
       runtime: { type: 'string' },
       model: { type: 'string' },
       effort: { type: 'string' },
-      permission: { type: 'string' },
       description: { type: 'string' },
       from: { type: 'string' },
       presets: { type: 'string' },
@@ -96,17 +145,7 @@ function participantVerb(rest) {
 
   switch (action) {
     case 'add': {
-      const added = addParticipant(
-        {
-          name,
-          runtime: values.runtime,
-          model: values.model,
-          effort: values.effort,
-          permission: values.permission,
-          description: values.description,
-        },
-        env,
-      )
+      const added = addParticipant(resolveAdd(name, values), env)
       refreshSkill(env)
       out(`${added.name}  ${added.runtime}  ${added.model}`)
       return
@@ -122,9 +161,7 @@ function participantVerb(rest) {
         return
       }
       for (const p of participants) {
-        out(
-          `${p.name.padEnd(14)}${p.runtime.padEnd(10)}${p.model.padEnd(36)}${(p.effort ?? '-').padEnd(8)}${p.permission}`,
-        )
+        out(`${p.name.padEnd(14)}${p.runtime.padEnd(10)}${p.model.padEnd(36)}${p.effort ?? '-'}`)
       }
       return
     }
@@ -134,7 +171,6 @@ function participantVerb(rest) {
         {
           ...(values.model !== undefined ? { model: values.model } : {}),
           ...(values.effort !== undefined ? { effort: values.effort } : {}),
-          ...(values.permission !== undefined ? { permission: values.permission } : {}),
           ...(values.description !== undefined ? { description: values.description } : {}),
         },
         env,
@@ -294,6 +330,9 @@ async function main() {
   }
 
   switch (command) {
+    case 'catalog':
+      catalogVerb(rest)
+      return
     case 'participant':
       participantVerb(rest)
       return

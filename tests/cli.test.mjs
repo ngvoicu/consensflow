@@ -139,6 +139,55 @@ describe('roster changes keep installed skills current', () => {
   })
 })
 
+describe('the catalog turns a name into a working participant', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+
+  it('lists ready-made participants per tool', async () => {
+    const out = await cf(['catalog'], t.env)
+    assert.equal(out.code, 0)
+    assert.match(out.stdout, /claude/)
+    assert.match(out.stdout, /zeus/)
+    assert.match(out.stdout, /codex/)
+    assert.match(out.stdout, /hyperion/)
+    assert.match(out.stdout, /glm-5\.3/)
+  })
+
+  it('narrows to one tool on request, and answers JSON for scripts', async () => {
+    const out = await cf(['catalog', '--runtime', 'opencode'], t.env)
+    assert.match(out.stdout, /mani/)
+    assert.doesNotMatch(out.stdout, /hyperion/)
+
+    const json = await cf(['catalog', '--json'], t.env)
+    assert.ok(JSON.parse(json.stdout).catalog.pi.length > 0)
+  })
+
+  it('adds a catalog participant from its name alone', async () => {
+    const out = await cf(['participant', 'add', 'hyperion'], t.env)
+    assert.equal(out.code, 0)
+
+    const listed = JSON.parse((await cf(['participant', 'list', '--json'], t.env)).stdout)
+    const hyperion = listed.participants[0]
+    assert.equal(hyperion.runtime, 'codex')
+    assert.equal(hyperion.model, 'gpt-5.6-sol')
+    assert.equal(hyperion.effort, 'ultra')
+  })
+
+  it('still requires runtime and model for a name it does not know', async () => {
+    const out = await cf(['participant', 'add', 'nemo'], t.env)
+    assert.notEqual(out.code, 0)
+    assert.match(out.stdout + out.stderr, /cf catalog|--runtime/)
+  })
+
+  it('lets explicit flags override a catalog entry', async () => {
+    await cf(['participant', 'add', 'diana', '--effort', 'low'], t.env)
+    const listed = JSON.parse((await cf(['participant', 'list', '--json'], t.env)).stdout)
+    const diana = listed.participants.find((p) => p.name === 'diana')
+    assert.equal(diana.model, 'gpt-5.6-luna')
+    assert.equal(diana.effort, 'low')
+  })
+})
+
 describe('the skill heals itself when cc or pi edit the shared roster', () => {
   const t = tempEnv()
   after(() => t.cleanup())

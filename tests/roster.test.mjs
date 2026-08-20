@@ -34,7 +34,6 @@ describe('the roster IS the shared v1 file that cc and pi read', () => {
 
     assert.equal(byName.zeus.runtime, 'claude')
     assert.equal(byName.zeus.effort, 'max')
-    assert.equal(byName.zeus.permission, 'workspace-write')
     assert.equal(byName.endymion.runtime, 'pi')
     assert.equal(byName.endymion.effort, 'xhigh')
     assert.equal(byName.mani.runtime, 'opencode')
@@ -86,7 +85,6 @@ describe('writes are v1-faithful: cc and pi keep working on the same file', () =
     const freya = raw.participants.find((p) => p.id === 'freya')
     assert.equal(freya.kind, 'codex')
     assert.equal(freya.name, 'Freya')
-    assert.equal(freya.toolsPolicy, 'workspace-write')
     assert.equal(freya.effort, 'xhigh')
     assert.ok(freya.createdAt)
   })
@@ -105,7 +103,7 @@ describe('writes are v1-faithful: cc and pi keep working on the same file', () =
     )
   })
 
-  it('refuses effort or permission edits on an unsupported kind, plainly', () => {
+  it('refuses effort edits on an unsupported kind, plainly', () => {
     const raw = JSON.parse(readFileSync(rosterPath(t.env), 'utf8'))
     raw.participants.push({ id: 'img', name: 'Img', kind: 'image', model: 'gpt-5.5' })
     writeFileSync(rosterPath(t.env), JSON.stringify(raw, null, 2))

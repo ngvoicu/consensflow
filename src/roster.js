@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path'
  * edit it here and cc/pi see the change on their next invocation.
  *
  * That makes v1-schema fidelity a hard contract: reads map v1 rows to the
- * v3 view (kind→runtime, thinking/effort→effort, toolsPolicy→permission),
+ * v3 view (kind→runtime, thinking/effort→effort),
  * and writes touch only the mapped keys, preserving every field v3 does not
  * understand (display name, skillsPolicy, preset, anything future). Rows of
  * kinds v3 cannot render as commands (e.g. `image`) are listed and marked,
@@ -20,7 +20,6 @@ import { dirname, join } from 'node:path'
  */
 
 export const RUNTIMES = ['claude', 'codex', 'pi', 'opencode']
-export const PERMISSIONS = ['workspace-write', 'full-auto']
 
 const NAME_PATTERN = /^[a-z][a-z0-9-]*$/
 const KIND_TO_RUNTIME = { 'claude-code': 'claude', codex: 'codex', pi: 'pi', opencode: 'opencode' }
@@ -72,7 +71,6 @@ function toView(row) {
     runtime: runtime ?? row.kind,
     model: row.model,
     ...(effortOf(row) ? { effort: effortOf(row) } : {}),
-    permission: row.toolsPolicy === 'full-auto' ? 'full-auto' : 'workspace-write',
     ...(row.description ? { description: row.description } : {}),
     ...(runtime === undefined ? { unsupported: true } : {}),
   }
@@ -96,11 +94,6 @@ function validateAdd(input) {
   if (typeof input.model !== 'string' || input.model.length === 0) {
     throw new Error('a participant needs a model (any identifier its runtime accepts)')
   }
-  if (input.permission !== undefined && !PERMISSIONS.includes(input.permission)) {
-    throw new Error(
-      `unknown permission ${JSON.stringify(input.permission)}; expected ${PERMISSIONS.join(', ')}`,
-    )
-  }
 }
 
 export function addParticipant(input, env) {
@@ -116,7 +109,6 @@ export function addParticipant(input, env) {
     // The display name cc shows; capitalized to match its convention.
     name: input.name.charAt(0).toUpperCase() + input.name.slice(1),
     kind: RUNTIME_TO_KIND[input.runtime],
-    toolsPolicy: input.permission ?? 'workspace-write',
     skillsPolicy: 'default',
     createdAt: now,
     updatedAt: now,
@@ -144,9 +136,9 @@ export function editParticipant(name, patch, env) {
   const row = findRow(document, name)
   const supported = KIND_TO_RUNTIME[row.kind] !== undefined
 
-  if (!supported && (patch.effort !== undefined || patch.permission !== undefined)) {
+  if (!supported && patch.effort !== undefined) {
     throw new Error(
-      `${name} is a ${row.kind} participant, which v3 does not run; only its model and description can be edited here`,
+      `${name} is a ${row.kind} participant, which consensflow-cmux does not run; only its model and description can be edited here`,
     )
   }
 
@@ -157,14 +149,6 @@ export function editParticipant(name, patch, env) {
     row.model = patch.model
   }
   if (patch.description !== undefined) row.description = patch.description
-  if (patch.permission !== undefined) {
-    if (!PERMISSIONS.includes(patch.permission)) {
-      throw new Error(
-        `unknown permission ${JSON.stringify(patch.permission)}; expected ${PERMISSIONS.join(', ')}`,
-      )
-    }
-    row.toolsPolicy = patch.permission
-  }
   if (patch.effort !== undefined) {
     const key = row.kind === 'pi' ? 'thinking' : 'effort'
     if (patch.effort === '' || patch.effort === null) delete row[key]

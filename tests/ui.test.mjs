@@ -67,7 +67,11 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     assert.equal(listParticipants(t.env)[0].model, 'claude-fable-5')
 
     const listed = await api('/api/participants')
-    assert.equal((await listed.json()).participants.length, 1)
+    const payload = await listed.json()
+    assert.equal(payload.participants.length, 1)
+    // Permission is gone from the product: no select, no field, no API.
+    assert.equal(payload.permissions, undefined)
+    assert.ok(Array.isArray(payload.catalog.claude))
   })
 
   it('installs and regenerates the skill on every change — no separate step', async () => {

@@ -19,6 +19,7 @@ v2 engine that had one was retired and deleted 2026-08-19).
 |---|---|
 | `bin/cf.mjs` | All verbs: setup, participant …, skills …, ui, doctor. Setup never seeds participants; a machine that ran cc/pi already has the shared roster, so setup installs the skill straight from it. Every roster mutation installs-or-regenerates the skill — first add installs it everywhere |
 | `src/roster.js` | Roster = the SHARED v1 file `~/.consensflow/participants.json` (cc + pi read/write it too): v1-schema-faithful mapping (kind↔runtime, thinking/effort↔effort, toolsPolicy↔permission), unknown fields preserved, unsupported kinds listed+marked, never dropped. `configRoot` (manifest only): `CONSENSFLOW_HOME` → XDG → `~/.config/consensflow` |
+| `src/catalog.js` | Ready-made participants per runtime + each CLI's real effort levels (live-verified 2026-08-20); `cf participant add <name>` resolves through it |
 | `src/skill.js` | SKILL.md generation — the prose IS the product; template live-proven before the generator existed |
 | `src/agents.js` | Agent detection (CLI on PATH) + per-agent skills dir (honours `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`) |
 | `src/manifest.js` + `src/install.js` | Hash-manifest ownership: install/update/status/uninstall; drift is sacred |
@@ -34,6 +35,7 @@ v2 engine that had one was retired and deleted 2026-08-19).
 - **Drift is sacred.** A manifest-owned file whose hash changed was edited by
   the user: refuse without `--force`, never clobber. A file not in the
   manifest is never touched, installed over, or deleted.
+- **No permission concept anywhere.** Participants run with their CLI's own defaults; the generator never emits `--dangerously-*`. Removed 2026-08-20 across all three ConsensFlow projects.
 - **The generated commands carry `env -u ANTHROPIC_API_KEY` / `-u
   OPENAI_API_KEY`** — v1's dropEnv as prose; prevents subscription logins
   silently switching to API billing. `--dangerously-*` flags only on

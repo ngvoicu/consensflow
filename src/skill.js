@@ -21,14 +21,12 @@ const COMMANDS = {
       '--model',
       p.model,
       ...(p.effort ? ['--effort', p.effort] : []),
-      ...(p.permission === 'full-auto' ? ['--dangerously-skip-permissions'] : []),
     ].join(' '),
   codex: (p) =>
     [
       'env -u OPENAI_API_KEY codex exec --skip-git-repo-check -m',
       p.model,
       ...(p.effort ? ['-c', `model_reasoning_effort="${p.effort}"`] : []),
-      ...(p.permission === 'full-auto' ? ['--dangerously-bypass-approvals-and-sandbox'] : []),
       q,
     ].join(' '),
   pi: (p) =>
@@ -36,7 +34,6 @@ const COMMANDS = {
       'pi --no-session --model',
       p.model,
       ...(p.effort ? ['--thinking', p.effort] : []),
-      ...(p.permission === 'full-auto' ? ['--dangerously-skip-permissions'] : []),
       '-p',
       q,
     ].join(' '),
@@ -45,13 +42,7 @@ const COMMANDS = {
 }
 
 function row(p) {
-  const traits = [
-    p.description,
-    p.effort ? `${p.effort} effort` : null,
-    p.permission === 'full-auto' ? 'FULL-AUTO' : null,
-  ]
-    .filter(Boolean)
-    .join('; ')
+  const traits = [p.description, p.effort ? `${p.effort} effort` : null].filter(Boolean).join('; ')
   const label = traits.length > 0 ? `**${p.name}** — ${traits}` : `**${p.name}**`
   return `| ${label} | ${p.runtime} | \`${COMMANDS[p.runtime](p)}\` |`
 }
