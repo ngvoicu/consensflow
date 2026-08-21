@@ -17,7 +17,7 @@ export async function loadCodexAuth() {
   try {
     raw = await fs.readFile(authPath, "utf8");
   } catch {
-    throw new Error(`No Codex CLI login found (${authPath}). Run \`codex login\` (ChatGPT Plus/Pro) to use image participants.`);
+    throw new Error(`No Codex CLI login found (${authPath}). Run \`codex login\` (ChatGPT Plus/Pro) to use image agents.`);
   }
   let parsed;
   try {

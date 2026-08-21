@@ -1,5 +1,5 @@
 ---
-description: "ConsensFlow: show configured participants and the latest run"
+description: "ConsensFlow: show configured agents and the latest run"
 disable-model-invocation: true
 ---
 

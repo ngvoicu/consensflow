@@ -1,10 +1,10 @@
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { detectAgents } from './agents.js'
 import { installCmuxSkills } from './cmux-skills.js'
+import { detectHarnesses } from './harnesses.js'
 import { hostStatus, installHost, uninstallHost } from './hosts.js'
 import { installSkill, uninstallSkills } from './install.js'
-import { configRoot, listParticipants } from './roster.js'
+import { configRoot, listAgents } from './roster.js'
 import { generateSkill } from './skill.js'
 
 /**
@@ -12,11 +12,11 @@ import { generateSkill } from './skill.js'
  *
  * Three modes, named after the three things they are, mutually exclusive by
  * construction:
- * - `claude` — the Claude Code integration, which hands a participant the
+ * - `claude` — the Claude Code integration, which hands an agent the
  *              live conversation. Only Claude Code can consult.
  * - `pi`     — the same, inside pi. Only pi can consult.
- * - `cmux`   — the generated skill across every coding agent (pi, cc, codex,
- *              opencode). Every agent can consult; none gets the
+ * - `cmux`   — the generated skill across every coding harness (pi, cc, codex,
+ *              opencode). Every harness can consult; none gets the
  *              conversation. Called `standalone` until 2026-08-20; the old
  *              name is still accepted and normalizes to this one.
  *
@@ -34,11 +34,11 @@ export const MODES = ['claude', 'pi', 'cmux']
 /** What `cmux` mode was called before it was named after what it covers. */
 const ALIASES = { standalone: 'cmux' }
 
-/** Every agent the cmux path can teach — the parenthetical the UI shows. */
-const CMUX_AGENTS = ['pi', 'cc', 'codex', 'opencode']
+/** Every harness the cmux path can teach — the parenthetical the UI shows. */
+const CMUX_HARNESSES = ['pi', 'cc', 'codex', 'opencode']
 
 export function modeLabel(mode) {
-  return mode === 'cmux' ? `cmux (${CMUX_AGENTS.join(', ')})` : mode
+  return mode === 'cmux' ? `cmux (${CMUX_HARNESSES.join(', ')})` : mode
 }
 
 function canonical(mode) {
@@ -71,15 +71,15 @@ function rememberMode(mode, env) {
  * to the cmux path and only to it.
  *
  * They have nothing to do with consulting: a Claude Code install runs its
- * participants as subprocesses and never touches a pane. So the mode named
+ * agents as subprocesses and never touches a pane. So the mode named
  * after cmux carries them, and a host mode carries none. Anyone outside the
  * target set gives them back, because a rule that only ever added would
- * leave every agent it had once touched holding files it has no use for.
+ * leave every harness it had once touched holding files it has no use for.
  */
 export function syncCmuxSkills(env, options = {}) {
   const mode = options.mode ?? currentMode(env)
-  const targets = mode === 'cmux' ? detectAgents(env) : []
-  const keep = targets.map((agent) => agent.skillsDir)
+  const targets = mode === 'cmux' ? detectHarnesses(env) : []
+  const keep = targets.map((harness) => harness.skillsDir)
 
   const report = uninstallSkills(env, {
     filter: (path, recorded) =>
@@ -93,7 +93,7 @@ export function syncCmuxSkills(env, options = {}) {
   return { commit: cmux.commit, report: [...report, ...cmux.report] }
 }
 
-/** Removes the generated skill from every agent that has ours. */
+/** Removes the generated skill from every harness that has ours. */
 function dropGeneratedSkill(env) {
   return uninstallSkills(env, { filter: (_path, recorded) => recorded.source === 'consensflow' })
 }
@@ -111,13 +111,13 @@ function dropHost(host, env) {
  */
 export function modeReport(rawMode, env) {
   const mode = canonical(rawMode)
-  const agents = detectAgents(env).map((agent) => agent.id)
+  const harnesses = detectHarnesses(env).map((harness) => harness.id)
   if (mode === 'cmux') {
-    return agents.length > 0
-      ? [`every agent can consult: ${agents.join(', ')}`]
-      : ['no coding agent found on PATH yet']
+    return harnesses.length > 0
+      ? [`every harness can consult: ${harnesses.join(', ')}`]
+      : ['no coding harness found on PATH yet']
   }
-  const others = agents.filter((agent) => agent !== mode)
+  const others = harnesses.filter((harness) => harness !== mode)
   const lines = [`${mode} can consult, and gets your conversation as context`]
   if (others.length > 0) {
     lines.push(`${others.join(', ')}: no ConsensFlow in this mode — switch to cmux to include them`)
@@ -135,7 +135,7 @@ export function turnOff(env, options = {}) {
   for (const host of ['claude', 'pi']) changes.push(...dropHost(host, env))
   changes.push(...uninstallSkills(env, { force: options.force }))
   // Off means off: the bookkeeping goes too, so nothing is left claiming
-  // state that no longer exists. The roster is untouched — participants are
+  // state that no longer exists. The roster is untouched — agents are
   // the user's, shared with anything else that reads them.
   const root = configRoot(env)
   for (const name of ['mode.json', 'hosts.json', 'skills-manifest.json']) {
@@ -160,16 +160,16 @@ export function applyMode(rawMode, env, options = {}) {
   const changes = []
   if (mode === 'cmux') {
     for (const host of ['claude', 'pi']) changes.push(...dropHost(host, env))
-    const participants = listParticipants(env)
-    if (participants.length > 0) {
-      // A foreign integration still owns its agent; skip that one and say so
+    const agents = listAgents(env)
+    if (agents.length > 0) {
+      // A foreign integration still owns its harness; skip that one and say so
       // rather than stacking a second skill on it.
-      const targets = detectAgents(env).filter((agent) => agent.native !== true)
+      const targets = detectHarnesses(env).filter((harness) => harness.native !== true)
       changes.push(
         ...installSkill(
           {
             relPath: 'consensflow/SKILL.md',
-            content: generateSkill(participants),
+            content: generateSkill(agents),
             source: 'consensflow',
           },
           env,

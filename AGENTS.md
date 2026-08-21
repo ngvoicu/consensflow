@@ -6,7 +6,7 @@ Byte-identical to `AGENTS.md` — keep both in sync (workspace convention).
 
 ConsensFlow (the manager, npm `consensflow`): skills-first. A zero-dependency Node ESM npm package
 (`cf`/`consensflow` bins, no build step) that manages a roster of named AI
-participants and generates/installs **one skill** teaching every coding agent
+agents and generates/installs **one skill** teaching every harness
 (claude, codex, pi, opencode — all read the same Agent Skills `SKILL.md`
 format) how to consult them via exact one-shot CLI commands. In `cmux`
 mode it also installs and updates cmux's own skills. There is deliberately **no
@@ -17,9 +17,9 @@ v2 engine that had one was retired and deleted 2026-08-19).
 
 | Path | Owns |
 |---|---|
-| `bin/cf.mjs` | All verbs: setup, participant …, skills …, ui, doctor. Setup never seeds participants; a machine that ran cc/pi already has the shared roster, so setup installs the skill straight from it. Every roster mutation installs-or-regenerates the skill — first add installs it everywhere |
-| `src/roster.js` | Roster = the SHARED v1 file `~/.consensflow/participants.json` (cc + pi read/write it too): v1-schema-faithful mapping (kind↔runtime, thinking/effort↔effort, toolsPolicy↔permission), unknown fields preserved, unsupported kinds listed+marked, never dropped. `configRoot` (manifest only): `CONSENSFLOW_HOME` → XDG → `~/.config/consensflow` |
-| `src/catalog.js` | A **view over `hosts/lib/presets.js`** — one catalog, not two (they disagreed on five names until 2026-08-21) — plus each CLI's real effort levels. 49 of the 50 presets are offered; the image preset has no runtime to launch it. `cf participant add <name>` resolves through it and records `preset` on the row, which is what makes `cf participant sync` and the UI's Update button possible |
+| `bin/cf.mjs` | All verbs: setup, agent …, skills …, ui, doctor. Setup never seeds agents; a machine that ran cc/pi already has the shared roster, so setup installs the skill straight from it. Every roster mutation installs-or-regenerates the skill — first add installs it everywhere |
+| `src/roster.js` | Roster = the SHARED v1 file `~/.consensflow/agents.json` (cc + pi read/write it too): v1-schema-faithful mapping (kind↔runtime, thinking/effort↔effort, toolsPolicy↔permission), unknown fields preserved, unsupported kinds listed+marked, never dropped. `configRoot` (manifest only): `CONSENSFLOW_HOME` → XDG → `~/.config/consensflow` |
+| `src/catalog.js` | A **view over `hosts/lib/presets.js`** — one catalog, not two (they disagreed on five names until 2026-08-21) — plus each CLI's real effort levels. 49 of the 50 presets are offered; the image preset has no runtime to launch it. `cf agent add <name>` resolves through it and records `preset` on the row, which is what makes `cf agent sync` and the UI's Update button possible |
 | `src/skill.js` | SKILL.md generation — the prose IS the product; template live-proven before the generator existed |
 | `src/agents.js` | Agent detection (CLI on PATH) + per-agent skills dir (honours `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`) |
 | `src/manifest.js` + `src/install.js` | Hash-manifest ownership: install/update/status/uninstall; drift is sacred |
@@ -86,7 +86,7 @@ that to wherever it installed the payload.
   default: `--dangerously-skip-permissions` (claude),
   `--dangerously-bypass-approvals-and-sandbox` (codex, replacing the
   workspace-write sandbox), `--auto` (opencode), nothing for pi, whose tools
-  are on already. A participant is a helper you hand a task to, so it writes
+  are on already. A agent is a helper you hand a task to, so it writes
   anywhere and reaches the network; the approval gate on *keeping* its work is
   what protects the user, not a fence around the run. Asserted in
   `tests/skill.test.mjs` and both engine suites so no refactor re-fences it.
@@ -99,7 +99,7 @@ that to wherever it installed the payload.
   (typed-bootstrap verification is a minefield). Our skill says *what* to
   run; theirs say *how* to drive panes. It is also a different product from
   consulting, which is why only `cmux` mode carries it: a Claude Code install
-  runs its participants as subprocesses and never touches a pane.
+  runs its agents as subprocesses and never touches a pane.
 - **Tests spawn no live agent CLIs and no network** — agent CLIs are stub
   scripts on a fake PATH; git is a PATH shim copying a fixture tree.
 

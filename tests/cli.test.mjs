@@ -34,13 +34,13 @@ describe('cf manages the roster', () => {
   chooseCmuxMode(t)
   after(() => t.cleanup())
 
-  it('adds, lists, edits and removes a participant', async () => {
+  it('adds, lists, edits and removes an agent', async () => {
     const added = await cf(
       [
-        'participant',
+        'agent',
         'add',
         'zeus',
-        '--runtime',
+        '--harness',
         'claude',
         '--model',
         'claude-opus-5',
@@ -51,19 +51,19 @@ describe('cf manages the roster', () => {
     )
     assert.equal(added.code, 0)
 
-    const listed = await cf(['participant', 'list'], t.env)
+    const listed = await cf(['agent', 'list'], t.env)
     assert.match(listed.stdout, /zeus/)
     assert.match(listed.stdout, /claude-opus-5/)
 
-    const asJson = await cf(['participant', 'list', '--json'], t.env)
-    assert.equal(JSON.parse(asJson.stdout).participants[0].effort, 'max')
+    const asJson = await cf(['agent', 'list', '--json'], t.env)
+    assert.equal(JSON.parse(asJson.stdout).agents[0].effort, 'max')
 
-    const edited = await cf(['participant', 'edit', 'zeus', '--model', 'claude-fable-5'], t.env)
+    const edited = await cf(['agent', 'edit', 'zeus', '--model', 'claude-fable-5'], t.env)
     assert.equal(edited.code, 0)
 
-    const removed = await cf(['participant', 'remove', 'zeus'], t.env)
+    const removed = await cf(['agent', 'remove', 'zeus'], t.env)
     assert.equal(removed.code, 0)
-    assert.doesNotMatch((await cf(['participant', 'list'], t.env)).stdout, /zeus/)
+    assert.doesNotMatch((await cf(['agent', 'list'], t.env)).stdout, /zeus/)
   })
 
   it('fails an unknown verb loudly', async () => {
@@ -105,13 +105,10 @@ describe('roster changes keep installed skills current', () => {
   stubCli(t, 'claude')
   stubCli(t, 'codex')
 
-  it('skills install writes the generated skill into every detected agent', async () => {
+  it('skills install writes the generated skill into every detected harness', async () => {
     // No git on this fake PATH: the cmux fetch fails, which must not stop
     // the consensflow skill from installing.
-    await cf(
-      ['participant', 'add', 'zeus', '--runtime', 'claude', '--model', 'claude-opus-5'],
-      t.env,
-    )
+    await cf(['agent', 'add', 'zeus', '--harness', 'claude', '--model', 'claude-opus-5'], t.env)
     const out = await cf(['skills', 'install'], t.env)
     assert.equal(out.code, 0)
 
@@ -123,8 +120,8 @@ describe('roster changes keep installed skills current', () => {
     assert.match(installed, /claude-opus-5/)
   })
 
-  it('editing a participant regenerates the installed skill everywhere', async () => {
-    await cf(['participant', 'edit', 'zeus', '--model', 'claude-fable-5'], t.env)
+  it('editing an agent regenerates the installed skill everywhere', async () => {
+    await cf(['agent', 'edit', 'zeus', '--model', 'claude-fable-5'], t.env)
 
     for (const dir of [t.env.CLAUDE_CONFIG_DIR, t.env.CODEX_HOME]) {
       const installed = readFileSync(join(dir, 'skills', 'consensflow', 'SKILL.md'), 'utf8')
@@ -157,7 +154,7 @@ describe('the machine runs one mode, and cf keeps it that way', () => {
   })
 
   it('switches to cmux mode and says who can consult', async () => {
-    await cf(['participant', 'add', 'zeus'], t.env)
+    await cf(['agent', 'add', 'zeus'], t.env)
     const out = await cf(['use', 'cmux'], t.env)
 
     assert.equal(out.code, 0)
@@ -224,7 +221,7 @@ describe('cf explains where it stands aside for a host integration', () => {
     mkdirSync(join(t.env.HOME, '.claude', 'plugins', 'cache', 'consensflow-cc'), {
       recursive: true,
     })
-    await cf(['participant', 'add', 'zeus'], t.env)
+    await cf(['agent', 'add', 'zeus'], t.env)
 
     const out = await cf(['setup'], t.env)
     assert.equal(out.code, 0)
@@ -251,12 +248,12 @@ describe('cf explains where it stands aside for a host integration', () => {
   })
 })
 
-describe('the catalog turns a name into a working participant', () => {
+describe('the catalog turns a name into a working agent', () => {
   const t = tempEnv()
   chooseCmuxMode(t)
   after(() => t.cleanup())
 
-  it('lists ready-made participants per tool', async () => {
+  it('lists ready-made agents per tool', async () => {
     const out = await cf(['catalog'], t.env)
     assert.equal(out.code, 0)
     assert.match(out.stdout, /claude/)
@@ -267,7 +264,7 @@ describe('the catalog turns a name into a working participant', () => {
   })
 
   it('narrows to one tool on request, and answers JSON for scripts', async () => {
-    const out = await cf(['catalog', '--runtime', 'opencode'], t.env)
+    const out = await cf(['catalog', '--harness', 'opencode'], t.env)
     assert.match(out.stdout, /mani/)
     assert.doesNotMatch(out.stdout, /hyperion/)
 
@@ -275,27 +272,27 @@ describe('the catalog turns a name into a working participant', () => {
     assert.ok(JSON.parse(json.stdout).catalog.pi.length > 0)
   })
 
-  it('adds a catalog participant from its name alone', async () => {
-    const out = await cf(['participant', 'add', 'hyperion'], t.env)
+  it('adds a catalog agent from its name alone', async () => {
+    const out = await cf(['agent', 'add', 'hyperion'], t.env)
     assert.equal(out.code, 0)
 
-    const listed = JSON.parse((await cf(['participant', 'list', '--json'], t.env)).stdout)
-    const hyperion = listed.participants[0]
-    assert.equal(hyperion.runtime, 'codex')
+    const listed = JSON.parse((await cf(['agent', 'list', '--json'], t.env)).stdout)
+    const hyperion = listed.agents[0]
+    assert.equal(hyperion.harness, 'codex')
     assert.equal(hyperion.model, 'gpt-5.6-sol')
     assert.equal(hyperion.effort, 'ultra')
   })
 
-  it('still requires runtime and model for a name it does not know', async () => {
-    const out = await cf(['participant', 'add', 'nemo'], t.env)
+  it('still requires harness and model for a name it does not know', async () => {
+    const out = await cf(['agent', 'add', 'nemo'], t.env)
     assert.notEqual(out.code, 0)
-    assert.match(out.stdout + out.stderr, /cf catalog|--runtime/)
+    assert.match(out.stdout + out.stderr, /cf catalog|--harness/)
   })
 
   it('lets explicit flags override a catalog entry', async () => {
-    await cf(['participant', 'add', 'diana', '--effort', 'low'], t.env)
-    const listed = JSON.parse((await cf(['participant', 'list', '--json'], t.env)).stdout)
-    const diana = listed.participants.find((p) => p.name === 'diana')
+    await cf(['agent', 'add', 'diana', '--effort', 'low'], t.env)
+    const listed = JSON.parse((await cf(['agent', 'list', '--json'], t.env)).stdout)
+    const diana = listed.agents.find((p) => p.name === 'diana')
     assert.equal(diana.model, 'gpt-5.6-luna')
     assert.equal(diana.effort, 'low')
   })
@@ -308,15 +305,12 @@ describe('the skill heals itself when cc or pi edit the shared roster', () => {
   stubCli(t, 'claude')
 
   it('any cf invocation regenerates a skill the roster has outrun', async () => {
-    await cf(
-      ['participant', 'add', 'zeus', '--runtime', 'claude', '--model', 'claude-opus-5'],
-      t.env,
-    )
+    await cf(['agent', 'add', 'zeus', '--harness', 'claude', '--model', 'claude-opus-5'], t.env)
 
-    // cc adds a participant behind v3's back: a raw write to the shared file.
-    const rosterFile = join(t.env.HOME, '.consensflow', 'participants.json')
+    // cc adds an agent behind v3's back: a raw write to the shared file.
+    const rosterFile = join(t.env.HOME, '.consensflow', 'agents.json')
     const raw = JSON.parse(readFileSync(rosterFile, 'utf8'))
-    raw.participants.push({
+    raw.agents.push({
       id: 'apollo',
       name: 'Apollo',
       kind: 'codex',
@@ -339,9 +333,9 @@ describe('the skill heals itself when cc or pi edit the shared roster', () => {
   it('never resurrects a skill the user uninstalled', async () => {
     await cf(['skills', 'uninstall'], t.env)
 
-    const rosterFile = join(t.env.HOME, '.consensflow', 'participants.json')
+    const rosterFile = join(t.env.HOME, '.consensflow', 'agents.json')
     const raw = JSON.parse(readFileSync(rosterFile, 'utf8'))
-    raw.participants[0].model = 'changed-again'
+    raw.agents[0].model = 'changed-again'
     writeFileSync(rosterFile, JSON.stringify(raw, null, 2))
 
     await cf(['doctor'], t.env)
@@ -362,10 +356,7 @@ describe('cf setup readies a machine in one command', () => {
   it('a machine that already ran cc or pi gets its skill from the shared roster', async () => {
     // The cc/pi roster IS the roster: no import, no copy.
     mkdirSync(join(t.env.HOME, '.consensflow'), { recursive: true })
-    cpSync(
-      join(FIXTURES, 'v1-participants.json'),
-      join(t.env.HOME, '.consensflow', 'participants.json'),
-    )
+    cpSync(join(FIXTURES, 'v1-agents.json'), join(t.env.HOME, '.consensflow', 'agents.json'))
 
     const out = await cf(['setup'], t.env)
     assert.equal(out.code, 0)
@@ -375,17 +366,14 @@ describe('cf setup readies a machine in one command', () => {
       'utf8',
     )
     assert.match(installed, /hyperion/)
-    // The unsupported image participant is skipped by the skill, not the roster.
+    // The unsupported image agent is skipped by the skill, not the roster.
     assert.doesNotMatch(installed, /pygmalion/)
-    const listed = await cf(['participant', 'list'], t.env)
+    const listed = await cf(['agent', 'list'], t.env)
     assert.match(listed.stdout, /pygmalion/)
   })
 
-  it('a participant added on top regenerates the installed skill', async () => {
-    await cf(
-      ['participant', 'add', 'freya', '--runtime', 'claude', '--model', 'claude-opus-5'],
-      t.env,
-    )
+  it('an agent added on top regenerates the installed skill', async () => {
+    await cf(['agent', 'add', 'freya', '--harness', 'claude', '--model', 'claude-opus-5'], t.env)
 
     const installed = readFileSync(
       join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md'),
@@ -408,10 +396,7 @@ describe('the CLI can undo an install as completely as the app', () => {
 
   it('takes everything back but the roster', async () => {
     stubCli(t, 'claude')
-    await cf(
-      ['participant', 'add', 'zeus', '--runtime', 'claude', '--model', 'claude-opus-5'],
-      t.env,
-    )
+    await cf(['agent', 'add', 'zeus', '--harness', 'claude', '--model', 'claude-opus-5'], t.env)
     await cf(['install', 'claude'], t.env)
     assert.ok(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts', 'claude')))
 
@@ -423,8 +408,8 @@ describe('the CLI can undo an install as completely as the app', () => {
     assert.equal(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'commands', 'consensflow.md')), false)
     assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'mode.json')), false)
 
-    // Participants are the user's, and outlive any install.
-    const listed = await cf(['participant', 'list'], t.env)
+    // Agents are the user's, and outlive any install.
+    const listed = await cf(['agent', 'list'], t.env)
     assert.match(listed.stdout, /zeus/)
   })
 })

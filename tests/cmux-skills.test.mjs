@@ -50,7 +50,7 @@ describe('cmux skills are fetched with git and owned like our own', () => {
   stubGit(t, 'abc1234')
   stubCli(t, 'claude')
 
-  it('installs every fixture skill file into the detected agents', () => {
+  it('installs every fixture skill file into the detected harnesses', () => {
     const outcome = installCmuxSkills(t.env)
 
     assert.equal(outcome.commit, 'abc1234')

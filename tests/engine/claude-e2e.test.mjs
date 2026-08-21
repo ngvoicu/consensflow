@@ -223,8 +223,8 @@ async function runHook(script, payload, env) {
   })
 }
 
-async function addParticipant(dir, preset, env = {}) {
-  const result = await spawnWithInput(process.execPath, [CF, 'participants', 'add', preset], {
+async function addAgent(dir, preset, env = {}) {
+  const result = await spawnWithInput(process.execPath, [CF, 'agents', 'add', preset], {
     cwd: dir,
     env: hookEnv(dir, env),
     timeoutMs: 15000,
@@ -234,9 +234,9 @@ async function addParticipant(dir, preset, env = {}) {
 
 // A ConsensFlow update ships a new catalog while the roster keeps its old snapshot. The
 // session-start note is where the lead first sees that, so it must say so and name the fix.
-test('session-start hook flags participants left behind by a catalog update', async () => {
+test('session-start hook flags agents left behind by a catalog update', async () => {
   await withTempDir(async (dir) => {
-    await addParticipant(dir, 'zeus')
+    await addAgent(dir, 'zeus')
     const clean = await runHook(
       'session-start-hook.mjs',
       { cwd: dir, session_id: 's-0', transcript_path: '/tmp/tr.jsonl', source: 'startup' },
@@ -245,13 +245,13 @@ test('session-start hook flags participants left behind by a catalog update', as
     assert.doesNotMatch(
       clean.stdout,
       /behind the current preset catalog/,
-      'a freshly added participant is not flagged',
+      'a freshly added agent is not flagged',
     )
 
     // Rewind @zeus to the model it would have carried under an older catalog.
-    const rosterPath = path.join(dir, 'home', 'participants.json') // hookEnv points CONSENSFLOW_HOME straight at dir/home
+    const rosterPath = path.join(dir, 'home', 'agents.json') // hookEnv points CONSENSFLOW_HOME straight at dir/home
     const roster = JSON.parse(await readFile(rosterPath, 'utf8'))
-    roster.participants = roster.participants.map((p) =>
+    roster.agents = roster.agents.map((p) =>
       p.id === 'zeus' ? { ...p, model: 'claude-opus-4-8' } : p,
     )
     await writeFile(rosterPath, JSON.stringify(roster, null, 2))
@@ -262,14 +262,14 @@ test('session-start hook flags participants left behind by a catalog update', as
       hookEnv(dir),
     )
     assert.equal(stale.exitCode, 0)
-    assert.match(stale.stdout, /1 participant is behind the current preset catalog/)
-    assert.match(stale.stdout, /participants sync/)
+    assert.match(stale.stdout, /1 agent is behind the current preset catalog/)
+    assert.match(stale.stdout, /agents sync/)
   })
 })
 
 test('session-start hook stashes the transcript path and emits a roster context', async () => {
   await withTempDir(async (dir) => {
-    await addParticipant(dir, 'zeus')
+    await addAgent(dir, 'zeus')
     const result = await runHook(
       'session-start-hook.mjs',
       { cwd: dir, session_id: 's-1', transcript_path: '/tmp/tr.jsonl', source: 'startup' },
@@ -278,7 +278,7 @@ test('session-start hook stashes the transcript path and emits a roster context'
     assert.equal(result.exitCode, 0)
     assert.match(result.stdout, /ConsensFlow is available/)
     assert.match(result.stdout, /@zeus \(claude-code claude-opus-5\)/)
-    assert.match(result.stdout, /never apply a participant's advice/)
+    assert.match(result.stdout, /never apply an agent's advice/)
     assert.match(result.stdout, /bin\/cf\.mjs/)
     const oldHome = process.env.CONSENSFLOW_HOME
     process.env.CONSENSFLOW_HOME = path.join(dir, 'home')
@@ -295,7 +295,7 @@ test('session-start hook stashes the transcript path and emits a roster context'
 
 test('user-prompt hook routes a configured @mention to a run instruction with a stashed prompt file', async () => {
   await withTempDir(async (dir) => {
-    await addParticipant(dir, 'zeus')
+    await addAgent(dir, 'zeus')
     const result = await runHook(
       'user-prompt-hook.mjs',
       {
@@ -310,7 +310,7 @@ test('user-prompt hook routes a configured @mention to a run instruction with a 
     const output = JSON.parse(result.stdout)
     const context = output.hookSpecificOutput.additionalContext
     assert.equal(output.hookSpecificOutput.hookEventName, 'UserPromptSubmit')
-    assert.match(context, /addresses the participant @zeus/)
+    assert.match(context, /addresses the agent @zeus/)
     assert.match(context, /run @zeus --prompt-file/)
     assert.match(context, /streams the live.*automatically/i)
     assert.match(context, /foreground/i)
@@ -328,7 +328,7 @@ test('user-prompt hook routes a configured @mention to a run instruction with a 
 
 test('user-prompt hook stays silent for stray mentions, commands, and unknown names', async () => {
   await withTempDir(async (dir) => {
-    await addParticipant(dir, 'zeus')
+    await addAgent(dir, 'zeus')
     for (const prompt of [
       'install @types/node please',
       '/cf status',
@@ -344,8 +344,8 @@ test('user-prompt hook stays silent for stray mentions, commands, and unknown na
 
 test('user-prompt hook surfaces the one-at-a-time rule for multiple leading mentions', async () => {
   await withTempDir(async (dir) => {
-    await addParticipant(dir, 'zeus')
-    await addParticipant(dir, 'gaia')
+    await addAgent(dir, 'zeus')
+    await addAgent(dir, 'gaia')
     const result = await runHook(
       'user-prompt-hook.mjs',
       { cwd: dir, prompt: '@zeus @gaia what do you both think?' },
@@ -353,14 +353,14 @@ test('user-prompt hook surfaces the one-at-a-time rule for multiple leading ment
     )
     assert.equal(result.exitCode, 0)
     const context = JSON.parse(result.stdout).hookSpecificOutput.additionalContext
-    assert.match(context, /one participant at a time/)
+    assert.match(context, /one agent at a time/)
     assert.match(context, /do not fan out/)
   })
 })
 
-test('hooks bail out silently inside participant subprocesses (CONSENSFLOW_CHILD)', async () => {
+test('hooks bail out silently inside agent subprocesses (CONSENSFLOW_CHILD)', async () => {
   await withTempDir(async (dir) => {
-    await addParticipant(dir, 'zeus')
+    await addAgent(dir, 'zeus')
     for (const script of ['session-start-hook.mjs', 'user-prompt-hook.mjs']) {
       const result = await runHook(
         script,
@@ -383,7 +383,7 @@ test('hooks bail out silently inside participant subprocesses (CONSENSFLOW_CHILD
 })
 
 // --- CLI end-to-end with fake engine binaries -------------------------------
-// Per project policy, live agent CLIs are never invoked from tests. Each engine gets a PATH shim
+// Per project policy, live harness CLIs are never invoked from tests. Each engine gets a PATH shim
 // that dumps its argv/env/stdin to a file and prints engine-shaped output, so the full spawn →
 // packet → parse → artifact path is exercised for all four engines.
 
@@ -472,7 +472,7 @@ test('e2e: all four engines run, parse, and persist artifacts through the real s
     const fake = await makeFakeEngines(dir)
     const ctx = { ws, dir, fake }
     for (const preset of ['zeus', 'gaia', 'kronos', 'mani']) {
-      const add = await runCf(['participants', 'add', preset], ctx)
+      const add = await runCf(['agents', 'add', preset], ctx)
       assert.equal(add.exitCode, 0, add.stderr)
     }
 
@@ -575,7 +575,7 @@ test('e2e: streaming is the default (thinking always visible); --json is the onl
     await writeFile(piShimPath, piShim, 'utf8')
     await chmod(piShimPath, 0o755)
     const ctx = { ws, dir, fake: { bin, out: dir } }
-    await runCf(['participants', 'add', 'mani'], ctx)
+    await runCf(['agents', 'add', 'mani'], ctx)
 
     // --stream can appear before or after the prompt, and the parsed final reply is always printed
     // after the child exits so foreground runs have a durable answer section.
@@ -605,12 +605,8 @@ test('e2e: streaming is the default (thinking always visible); --json is the onl
     assert.doesNotMatch(quiet.stdout, /→ .*read|← .*read/, '--json is the only quiet mode')
 
     assert.equal(
-      (
-        await runCf(
-          ['participants', 'add', '--name', 'PiOnly', '--kind', 'pi', '--model', 'fake'],
-          ctx,
-        )
-      ).exitCode,
+      (await runCf(['agents', 'add', '--name', 'PiOnly', '--kind', 'pi', '--model', 'fake'], ctx))
+        .exitCode,
       0,
     )
     const fallback = await runCf(['run', '@pionly', 'go', '--stream'], ctx)
@@ -622,7 +618,7 @@ test('e2e: streaming is the default (thinking always visible); --json is the onl
   })
 })
 
-test('e2e: runParticipant writes a transcript.md backstop (event trail) and sets transcriptPath [STRM-19]', async () => {
+test('e2e: runAgent writes a transcript.md backstop (event trail) and sets transcriptPath [STRM-19]', async () => {
   await withTempDir(async (dir) => {
     const ws = path.join(dir, 'ws')
     await mkdir(ws, { recursive: true })
@@ -637,7 +633,7 @@ test('e2e: runParticipant writes a transcript.md backstop (event trail) and sets
     await writeFile(shimPath, shim, 'utf8')
     await chmod(shimPath, 0o755)
     const ctx = { ws, dir, fake: { bin, out: dir } }
-    await runCf(['participants', 'add', 'mani'], ctx)
+    await runCf(['agents', 'add', 'mani'], ctx)
 
     const run = await runCf(['run', '@mani', 'go', '--json'], ctx)
     const result = JSON.parse(run.stdout)
@@ -655,7 +651,7 @@ test('e2e: a run has full permissions, and there is still no knob to turn [STRM-
     await mkdir(ws, { recursive: true })
     const fake = await makeFakeEngines(dir)
     const ctx = { ws, dir, fake }
-    await runCf(['participants', 'add', 'zeus'], ctx) // claude-code
+    await runCf(['agents', 'add', 'zeus'], ctx) // claude-code
 
     // Every run is full-permission: no allowlist, no deny list, no prompts.
     await runCf(['run', '@zeus', 'go'], ctx)
@@ -684,7 +680,7 @@ test('e2e: the handoff from the session stash reaches the packet', async () => {
     await mkdir(ws, { recursive: true })
     const fake = await makeFakeEngines(dir)
     const ctx = { ws, dir, fake }
-    assert.equal((await runCf(['participants', 'add', 'zeus'], ctx)).exitCode, 0)
+    assert.equal((await runCf(['agents', 'add', 'zeus'], ctx)).exitCode, 0)
 
     // First run: no session stash -> no handoff section, and the output says so.
     const first = await runCf(['run', '@zeus', 'first', 'question'], ctx)
@@ -741,17 +737,17 @@ test('e2e: the handoff from the session stash reaches the packet', async () => {
   })
 })
 
-test('e2e: nested runs are refused and unknown participants error cleanly', async () => {
+test('e2e: nested runs are refused and unknown agents error cleanly', async () => {
   await withTempDir(async (dir) => {
     const ws = path.join(dir, 'ws')
     await mkdir(ws, { recursive: true })
     const fake = await makeFakeEngines(dir)
     const ctx = { ws, dir, fake }
-    assert.equal((await runCf(['participants', 'add', 'zeus'], ctx)).exitCode, 0)
+    assert.equal((await runCf(['agents', 'add', 'zeus'], ctx)).exitCode, 0)
 
     const unknown = await runCf(['run', '@ghost', 'hi'], ctx)
     assert.equal(unknown.exitCode, 1)
-    assert.match(unknown.stderr, /Unknown participant: @ghost/)
+    assert.match(unknown.stderr, /Unknown agent: @ghost/)
     assert.match(unknown.stderr, /@zeus/)
 
     const nested = await spawnWithInput(process.execPath, [CF, 'run', '@zeus', 'hi'], {
@@ -764,7 +760,7 @@ test('e2e: nested runs are refused and unknown participants error cleanly', asyn
   })
 })
 
-// --- Image participants (Codex backend) -------------------------------------
+// --- Image agents (Codex backend) -------------------------------------
 
 function fakeJwt(claims) {
   const payload = Buffer.from(JSON.stringify(claims)).toString('base64url')
@@ -952,7 +948,7 @@ test('e2e: @pygmalion without a Codex login errors cleanly before any network ca
     await mkdir(ws, { recursive: true })
     const fake = await makeFakeEngines(dir)
     const ctx = { ws, dir, fake }
-    assert.equal((await runCf(['participants', 'add', 'pygmalion'], ctx)).exitCode, 0)
+    assert.equal((await runCf(['agents', 'add', 'pygmalion'], ctx)).exitCode, 0)
     const run = await runCf(['run', '@pygmalion', 'a', 'minimalist', 'logo'], ctx, {
       CODEX_HOME: path.join(dir, 'empty-codex-home'),
     })

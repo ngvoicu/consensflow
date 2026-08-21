@@ -26,7 +26,7 @@ describe('the app can put its own CLI on your PATH', () => {
     const launcher = join(bin, 'consensflow')
     assert.ok(existsSync(launcher))
 
-    // It must point at the runtime and sources running right now, so the
+    // It must point at the harness and sources running right now, so the
     // terminal and the app can never drift apart.
     const script = readFileSync(launcher, 'utf8')
     assert.ok(script.includes(process.execPath))

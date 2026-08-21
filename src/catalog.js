@@ -1,21 +1,21 @@
-import { PARTICIPANT_PRESETS } from '../hosts/lib/presets.js'
+import { AGENT_PRESETS } from '../hosts/lib/presets.js'
 
 /**
- * Ready-made participants, per tool.
+ * Ready-made agents, per tool.
  *
  * Typing a model identifier and guessing an effort level is the friction
- * between installing this and using it, so every runtime ships a curated
- * list: pick a name, get a working participant. `cf participant add zeus`
+ * between installing this and using it, so every harness ships a curated
+ * list: pick a name, get a working agent. `cf agent add zeus`
  * needs no flags; the UI offers the same lists as one-click adds.
  *
  * **One list, derived.** These are the payload's own presets — the very
- * records that run a participant — reshaped into the manager's vocabulary
- * (kind→runtime, thinking/effort→effort). Until 2026-08-21 the manager kept
+ * records that run an agent — reshaped into the manager's vocabulary
+ * (kind→harness, thinking/effort→effort). Until 2026-08-21 the manager kept
  * a second, hand-written list of 22 names: the merge that brought the
  * payloads into this repo ended the duplicated engine but not the
  * duplicated catalog, and the two drifted until five names meant different
  * models on the two sides — `nike` was GPT-5.6-luna to the app and Gemini
- * 3.7 Flash to the runtime. A name must mean one model, so the runtime's
+ * 3.7 Flash to the harness. A name must mean one model, so the harness's
  * list won: it is the superset, and it is what actually launches the run.
  *
  * Verified live 2026-08-21: all 16 OpenRouter ids exist in
@@ -39,12 +39,12 @@ export const EFFORTS = {
 }
 
 /**
- * The payload speaks in kinds, the manager in runtimes. `image` has no
- * runtime here on purpose: an image participant is generated through the
+ * The payload speaks in kinds, the manager in harnesss. `image` has no
+ * harness here on purpose: an image agent is generated through the
  * Codex backend rather than launched as a CLI, so the roster cannot create
  * one and offering it as a quick-add would hand the user a dead button.
  */
-const KIND_TO_RUNTIME = { 'claude-code': 'claude', codex: 'codex', pi: 'pi', opencode: 'opencode' }
+const KIND_TO_HARNESS = { 'claude-code': 'claude', codex: 'codex', pi: 'pi', opencode: 'opencode' }
 
 function entryFor(preset) {
   const effort = preset.effort ?? preset.thinking
@@ -62,18 +62,18 @@ function entryFor(preset) {
   }
 }
 
-export const CATALOG = PARTICIPANT_PRESETS.reduce((catalog, preset) => {
-  const runtime = KIND_TO_RUNTIME[preset.kind]
-  if (runtime === undefined) return catalog
-  if (catalog[runtime] === undefined) catalog[runtime] = []
-  catalog[runtime].push(entryFor(preset))
+export const CATALOG = AGENT_PRESETS.reduce((catalog, preset) => {
+  const harness = KIND_TO_HARNESS[preset.kind]
+  if (harness === undefined) return catalog
+  if (catalog[harness] === undefined) catalog[harness] = []
+  catalog[harness].push(entryFor(preset))
   return catalog
 }, {})
 
 export function catalogEntry(name) {
-  for (const [runtime, entries] of Object.entries(CATALOG)) {
+  for (const [harness, entries] of Object.entries(CATALOG)) {
     const entry = entries.find((e) => e.name === name)
-    if (entry !== undefined) return { ...entry, runtime }
+    if (entry !== undefined) return { ...entry, harness }
   }
   return undefined
 }

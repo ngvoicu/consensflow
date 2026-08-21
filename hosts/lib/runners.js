@@ -6,12 +6,12 @@ import { ensureCfDirs, recordLatestRun, runsRoot } from "./state.js";
 import { adaptLine, pushEvents, renderTrail, surfaceOutput, OPENCODE_NO_ANSWER } from "./transcript-events.js";
 
 // Low-level safety net for direct spawnWithInput callers that pass no timeout (e.g. the doctor
-// `--version` liveness probe sets its own 5s cap). Participant runs pass timeoutMs: 0 and run
-// unbounded — cf never caps a participant; only the child or its upstream provider ends a run.
+// `--version` liveness probe sets its own 5s cap). Agent runs pass timeoutMs: 0 and run
+// unbounded — cf never caps an agent; only the child or its upstream provider ends a run.
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_CAPTURE_BYTES = 2 * 1024 * 1024;
 
-// Every participant subprocess gets this marker so ConsensFlow tooling running inside the child
+// Every agent subprocess gets this marker so ConsensFlow tooling running inside the child
 // (the Claude Code hooks, the pi extension, or cf.mjs itself) can detect the nesting and bail.
 // pi children additionally run with --no-extensions; the marker is the host-independent guard.
 export const CHILD_ENV = { CONSENSFLOW_CHILD: "1" };
@@ -25,8 +25,8 @@ export function toolsForPi() {
   return "read,grep,find,ls,bash,edit,write";
 }
 
-export function buildRunnerInvocation(participant, packetPath, cwd) {
-  const p = participant;
+export function buildRunnerInvocation(agent, packetPath, cwd) {
+  const p = agent;
   switch (p.kind) {
     case "pi": {
       const args = ["--mode", "json", "--no-session", "--no-extensions"];
@@ -56,7 +56,7 @@ export function buildRunnerInvocation(participant, packetPath, cwd) {
       if (p.effort) args.push("--effort", p.effort);
       if (p.maxTurns) args.push("--max-turns", String(p.maxTurns));
       // Without the env key, claude falls back to the subscription login; with it, it silently
-      // bills the API. Strip it so participant runs always ride the configured login.
+      // bills the API. Strip it so agent runs always ride the configured login.
       return { command: "claude", args, stdinMode: "packet", cwd, env: { ...CHILD_ENV }, dropEnv: ["ANTHROPIC_API_KEY"] };
     }
     case "codex": {
@@ -71,19 +71,19 @@ export function buildRunnerInvocation(participant, packetPath, cwd) {
       const args = ["run", "--auto", "--format", "json", "--dir", cwd, "--file", packetPath];
       if (p.model) args.push("--model", p.model);
       if (p.effort) args.push("--variant", p.effort);
-      if (p.agent) args.push("--agent", p.agent);
+      if (p.harness) args.push("--harness", p.harness);
       args.push("Follow the ConsensFlow packet attached as a file. Return only the requested output.");
       return { command: "opencode", args, stdinMode: "none", cwd, env: { ...CHILD_ENV } };
     }
     case "image":
-      throw new Error("image participants are generated via the Codex backend, not a CLI runner (bug: should be handled upstream in the image path)");
+      throw new Error("image agents are generated via the Codex backend, not a CLI runner (bug: should be handled upstream in the image path)");
     default:
-      throw new Error(`Unsupported participant kind: ${p.kind}`);
+      throw new Error(`Unsupported agent kind: ${p.kind}`);
   }
 }
 
-export async function runParticipant(input) {
-  const { cwd, participant, packet, kind = "ask", signal, onEvent } = input;
+export async function runAgent(input) {
+  const { cwd, agent, packet, kind = "ask", signal, onEvent } = input;
   await ensureCfDirs(cwd);
   const runId = input.runId ?? createId(kind);
   const runDir = path.join(runsRoot(cwd), runId);
@@ -91,8 +91,8 @@ export async function runParticipant(input) {
   const packetPath = path.join(runDir, "packet.md");
   await fs.writeFile(packetPath, packet, "utf8");
 
-  const invocationCwd = participant.cwd ? resolveInside(cwd, participant.cwd) : path.resolve(cwd);
-  const invocation = buildRunnerInvocation(participant, packetPath, invocationCwd);
+  const invocationCwd = agent.cwd ? resolveInside(cwd, agent.cwd) : path.resolve(cwd);
+  const invocation = buildRunnerInvocation(agent, packetPath, invocationCwd);
   // Build a bounded, normalized event trail as the run streams, and forward each event to onEvent
   // (live --stream / onUpdate). The trail feeds surfaceOutput's no-answer fallback and the
   // transcript backstop. tryParseJson tolerates non-JSONL lines (returns null → skipped); adaptLine never throws.
@@ -109,7 +109,7 @@ export async function runParticipant(input) {
       if (onEvent) onEvent({ kind: "delta", text: ame.delta });
       return;
     }
-    const adapted = adaptLine(participant.kind, parsed);
+    const adapted = adaptLine(agent.kind, parsed);
     if (adapted.length === 0) return;
     pushEvents(events, adapted);
     if (onEvent) for (const event of adapted) onEvent(event);
@@ -121,14 +121,14 @@ export async function runParticipant(input) {
     env: invocation.env,
     dropEnv: invocation.dropEnv,
     signal,
-    timeoutMs: 0, // unbounded: participant runs are never capped by cf — they end when the child does
+    timeoutMs: 0, // unbounded: agent runs are never capped by cf — they end when the child does
     onStdoutLine,
   });
   const endedAt = nowIso();
 
   await fs.writeFile(path.join(runDir, "stdout.txt"), procResult.stdout, "utf8");
   await fs.writeFile(path.join(runDir, "stderr.txt"), procResult.stderr, "utf8");
-  const normalized = normalizeProcessOutput(participant.kind, procResult.stdout, procResult.stderr);
+  const normalized = normalizeProcessOutput(agent.kind, procResult.stdout, procResult.stderr);
   // Surface the final answer when usable; on no answer, the bounded trail under a clear header —
   // never the raw JSONL stream, never a bare whitespace fragment.
   const output = surfaceOutput(normalized.output, events);
@@ -144,7 +144,7 @@ export async function runParticipant(input) {
     runDir,
     packetPath,
     kind,
-    participant,
+    agent,
     invocation: { command: invocation.command, args: invocation.args, cwd: invocation.cwd },
     startedAt,
     endedAt,
@@ -231,7 +231,7 @@ export async function spawnWithInput(command, args, options = {}) {
       else signal.addEventListener("abort", abortHandler, { once: true });
     }
 
-    // timeoutMs <= 0 means run unbounded — arm no timer (participant runs always pass 0).
+    // timeoutMs <= 0 means run unbounded — arm no timer (agent runs always pass 0).
     if (timeoutMs > 0) {
       timeout = setTimeout(() => {
         timedOut = true;

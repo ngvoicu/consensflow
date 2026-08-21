@@ -3,17 +3,17 @@
  * The `cf` executable — ConsensFlow v3.
  *
  * v3 is skills-first: there is no delegation engine here. `cf` manages the
- * roster of named participants, generates the consensflow skill from it, and
+ * roster of named agents, generates the consensflow skill from it, and
  * installs/updates that skill — plus cmux's own skills — into every coding
- * agent on the machine (claude, codex, pi, opencode). The skill teaches the
- * agents everything else.
+ * harness on the machine (claude, codex, pi, opencode). The skill teaches the
+ * harnesses everything else.
  */
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { detectAgents } from '../src/agents.js'
 import { CATALOG, catalogEntry } from '../src/catalog.js'
+import { detectHarnesses } from '../src/harnesses.js'
 import { HOSTS, hostStatus, installHost, uninstallHost } from '../src/hosts.js'
 import { installSkill, skillsStatus, uninstallSkills } from '../src/install.js'
 import {
@@ -25,13 +25,7 @@ import {
   syncCmuxSkills,
   turnOff,
 } from '../src/mode.js'
-import {
-  addParticipant,
-  editParticipant,
-  listParticipants,
-  removeParticipant,
-  syncParticipants,
-} from '../src/roster.js'
+import { addAgent, editAgent, listAgents, removeAgent, syncAgents } from '../src/roster.js'
 import { generateSkill } from '../src/skill.js'
 import {
   healSkillIfStale,
@@ -58,33 +52,34 @@ const USAGE = `consensflow ${PKG.version}
 Usage: cf <command> [options]
 
   setup [--all] [--force]                      One command: install the cmux skills and, when the
-                                               shared roster has participants, the consensflow skill
-                                               into every detected coding agent
+                                               shared roster has agents, the consensflow skill
+                                               into every detected coding harness
   use <claude|pi|cmux>                         Choose the one path this machine runs:
-                                               claude / pi = that agent consults, with your
-                                               conversation as context, and no other agent has
+                                               claude / pi = that harness consults, with your
+                                               conversation as context, and no other harness has
                                                ConsensFlow; cmux (pi, cc, codex, opencode) = every
-                                               agent can consult, and cmux's own pane-control skills
+                                               harness can consult, and cmux's own pane-control skills
                                                come with that mode and only that one
   mode                                         Which one is active, and what it means
   off [--force]                                Take it all back: both host payloads, every file the
-                                               manifest owns, and the mode. Participants are kept
+                                               manifest owns, and the mode. Agents are kept
   install <claude|pi|all> [--force]            Install a host integration — the deeper path that hands
-                                               the participant your live conversation
+                                               your live conversation to the agent
   uninstall <claude|pi>                        Remove one, exactly as it was installed
   hosts                                        What is installed where
-  catalog [--runtime <r>] [--json]              The ready-made participants for each tool
-  participant add <name>                       A catalog name is enough: cf participant add zeus
-  participant add <name> --runtime <r> --model <m> [--effort <e>] [--description <d>]
-  participant list [--json]
-  participant edit <name> [--model <m>] [--effort <e>] [--description <d>]
-  participant remove <name>
-  participant sync [<name>] [--dry-run]        Re-resolve catalog-backed participants against the
+  catalog [--harness <h>] [--json]             The ready-made agents, per harness
+  agent add <name>                             A catalog name is enough: cf agent add zeus
+  agent add <name> --harness <h> --model <m> [--effort <e>] [--description <d>]
+  agent list [--json]
+  agent edit <name> [--model <m>] [--effort <e>] [--description <d>]
+  agent remove <name>
+  agent sync [<name>] [--dry-run]              Re-resolve catalog-backed agents against the
                                                catalog: a preset that moved to a newer model reaches
                                                your roster. Your own definitions and descriptions
                                                are never touched
-      the roster is the shared ~/.consensflow/participants.json — the same
-      file the consensflow-cc plugin and consensflow-pi extension use
+      the roster is ~/.consensflow/agents.json, shared by every path this
+      machine can run (it was participants.json before 2026-08-21 and an
+      existing one is still read)
   skills install [--all] [--force]             Generate + install the consensflow skill, and cmux's
                                                own in cmux mode.
                                                Hosts with their own ConsensFlow (the cc plugin, the pi
@@ -95,7 +90,7 @@ Usage: cf <command> [options]
   skills uninstall [--force]                   Remove exactly what the manifest owns
   ui [--json] [--no-open]                      Ephemeral local roster editor (Ctrl-C to stop);
                                                --json prints a handle line for a host program
-  doctor                                       Agents detected, roster size, skills state
+  doctor                                       Harnesses detected, roster size, skills state
 
 Every roster change regenerates the installed consensflow skill. Drifted files
 are never overwritten without --force.
@@ -126,9 +121,9 @@ function reportNativeHosts(env, all) {
         : `kept (you edited it)  ${row.path}`,
     )
   }
-  for (const agent of detectAgents(env).filter((a) => a.native === true)) {
+  for (const harness of detectHarnesses(env).filter((a) => a.native === true)) {
     out(
-      `${agent.id}: left alone — ${NATIVE_OWNER[agent.id] ?? 'its own integration'} already provides a consensflow skill (--all to install ours too)`,
+      `${harness.id}: left alone — ${NATIVE_OWNER[harness.id] ?? 'its own integration'} already provides a consensflow skill (--all to install ours too)`,
     )
   }
 }
@@ -156,24 +151,24 @@ function printReport(report) {
 }
 
 /**
- * A catalog name is a whole participant: `cf participant add zeus` needs no
+ * A catalog name is a whole agent: `cf agent add zeus` needs no
  * flags. Anything passed explicitly wins over the catalog entry, and a name
- * nobody knows still needs a runtime and a model.
+ * nobody knows still needs a harness and a model.
  */
 function resolveAdd(name, values) {
   const entry = catalogEntry(name)
-  if (entry === undefined && (values.runtime === undefined || values.model === undefined)) {
+  if (entry === undefined && (values.harness === undefined || values.model === undefined)) {
     throw new Error(
-      `${name} is not in the catalog, so it needs --runtime and --model (see \`cf catalog\`)`,
+      `${name} is not in the catalog, so it needs --harness and --model (see \`cf catalog\`)`,
     )
   }
-  // Provenance only when the catalog actually decided the participant: an
+  // Provenance only when the catalog actually decided the agent: an
   // explicit --model or --effort makes this the user's own definition, and a
   // later sync must not drag it back to the preset.
   const pinned = values.model !== undefined || values.effort !== undefined
   return {
     name,
-    runtime: values.runtime ?? entry?.runtime,
+    harness: values.harness ?? entry?.harness,
     model: values.model ?? entry?.model,
     effort: values.effort ?? entry?.effort,
     description: values.description ?? entry?.description,
@@ -205,7 +200,7 @@ function offVerb(rest) {
     const what = change.path ?? `the ${change.host} integration`
     out(`${String(change.action ?? 'removed').padEnd(16)} ${what}`)
   }
-  out('ConsensFlow is off — participants are kept in ~/.consensflow/participants.json')
+  out('ConsensFlow is off — agents are kept in ~/.consensflow/agents.json')
 }
 
 function useVerb(rest) {
@@ -266,18 +261,18 @@ function catalogVerb(rest) {
   const { values } = parseArgs({
     args: rest,
     allowPositionals: true,
-    options: { runtime: { type: 'string' }, json: { type: 'boolean', default: false } },
+    options: { harness: { type: 'string' }, json: { type: 'boolean', default: false } },
   })
 
   const catalog =
-    values.runtime === undefined ? CATALOG : { [values.runtime]: CATALOG[values.runtime] ?? [] }
+    values.harness === undefined ? CATALOG : { [values.harness]: CATALOG[values.harness] ?? [] }
 
   if (values.json) {
     out(JSON.stringify({ catalog }, null, 2))
     return
   }
-  for (const [runtime, entries] of Object.entries(catalog)) {
-    out(`${runtime}:`)
+  for (const [harness, entries] of Object.entries(catalog)) {
+    out(`${harness}:`)
     for (const entry of entries) {
       out(
         `  ${entry.name.padEnd(12)}${entry.model.padEnd(34)}${(entry.effort ?? '-').padEnd(8)}${entry.description}`,
@@ -285,16 +280,16 @@ function catalogVerb(rest) {
     }
     out('')
   }
-  out('add one with `cf participant add <name>` — no other flags needed')
+  out('add one with `cf agent add <name>` — no other flags needed')
 }
 
-function participantVerb(rest) {
+function agentVerb(rest) {
   const action = rest[0]
   const { values, positionals } = parseArgs({
     args: rest.slice(1),
     allowPositionals: true,
     options: {
-      runtime: { type: 'string' },
+      harness: { type: 'string' },
       model: { type: 'string' },
       effort: { type: 'string' },
       description: { type: 'string' },
@@ -308,28 +303,28 @@ function participantVerb(rest) {
 
   switch (action) {
     case 'add': {
-      const added = addParticipant(resolveAdd(name, values), env)
+      const added = addAgent(resolveAdd(name, values), env)
       refreshSkill(env)
-      out(`${added.name}  ${added.runtime}  ${added.model}`)
+      out(`${added.name}  ${added.harness}  ${added.model}`)
       return
     }
     case 'list': {
-      const participants = listParticipants(env)
+      const agents = listAgents(env)
       if (values.json) {
-        out(JSON.stringify({ participants }, null, 2))
+        out(JSON.stringify({ agents }, null, 2))
         return
       }
-      if (participants.length === 0) {
-        out('no participants yet — add one with `cf ui` or `cf participant add`')
+      if (agents.length === 0) {
+        out('no agents yet — add one with `cf ui` or `cf agent add`')
         return
       }
-      for (const p of participants) {
-        out(`${p.name.padEnd(14)}${p.runtime.padEnd(10)}${p.model.padEnd(36)}${p.effort ?? '-'}`)
+      for (const p of agents) {
+        out(`${p.name.padEnd(14)}${p.harness.padEnd(10)}${p.model.padEnd(36)}${p.effort ?? '-'}`)
       }
       return
     }
     case 'edit': {
-      const edited = editParticipant(
+      const edited = editAgent(
         name,
         {
           ...(values.model !== undefined ? { model: values.model } : {}),
@@ -339,26 +334,26 @@ function participantVerb(rest) {
         env,
       )
       refreshSkill(env)
-      out(`${edited.name}  ${edited.runtime}  ${edited.model}`)
+      out(`${edited.name}  ${edited.harness}  ${edited.model}`)
       return
     }
     case 'remove': {
-      removeParticipant(name, env)
+      removeAgent(name, env)
       refreshSkill(env)
       out(`removed ${name}`)
       return
     }
     case 'sync': {
-      // Catalog-backed participants keep whatever model they were created
+      // Catalog-backed agents keep whatever model they were created
       // with; this is how a moved preset reaches them. Anything you defined
       // yourself, and any description you wrote, is left alone.
-      const applied = syncParticipants(env, { name, dryRun: values['dry-run'] })
+      const applied = syncAgents(env, { name, dryRun: values['dry-run'] })
       if (applied.length === 0) {
-        const backed = listParticipants(env).filter((p) => p.preset !== undefined).length
+        const backed = listAgents(env).filter((p) => p.preset !== undefined).length
         out(
           backed === 0
-            ? 'nothing to sync: no participant came from the catalog'
-            : `up to date: all ${backed} catalog-backed participants match the catalog`,
+            ? 'nothing to sync: no agent came from the catalog'
+            : `up to date: all ${backed} catalog-backed agents match the catalog`,
         )
         return
       }
@@ -374,7 +369,7 @@ function participantVerb(rest) {
       return
     }
     default:
-      fail('usage: cf participant add|list|edit|remove')
+      fail('usage: cf agent add|list|edit|remove')
   }
 }
 
@@ -394,26 +389,26 @@ function skillsVerb(rest) {
       // The generated skill belongs to cmux mode. The guard used to test for
       // the mode's old name, so it refused in cmux mode and allowed the one
       // case that should never install: no mode at all, which is how
-      // ConsensFlow appeared in agents nobody had chosen.
+      // ConsensFlow appeared in harnesses nobody had chosen.
       const mode = currentMode(env)
       if (mode !== 'cmux') {
         fail(
           mode === null
-            ? 'no path chosen yet — run `consensflow use cmux` to give every agent the generated skill, or `consensflow use claude|pi` for the deeper integration in one of them'
-            : `this machine is in ${mode} mode, where only ${mode} consults — run \`consensflow use cmux\` to give every agent the generated skill`,
+            ? 'no path chosen yet — run `consensflow use cmux` to give every harness the generated skill, or `consensflow use claude|pi` for the deeper integration in one of them'
+            : `this machine is in ${mode} mode, where only ${mode} consults — run \`consensflow use cmux\` to give every harness the generated skill`,
         )
         return
       }
-      const participants = listParticipants(env)
-      if (participants.length === 0) {
-        fail('the roster is empty — add a participant with `cf ui` or `cf participant add` first')
+      const agents = listAgents(env)
+      if (agents.length === 0) {
+        fail('the roster is empty — add an agent with `cf ui` or `cf agent add` first')
         return
       }
       printReport(
         installSkill(
           {
             relPath: 'consensflow/SKILL.md',
-            content: generateSkill(participants),
+            content: generateSkill(agents),
             source: 'consensflow',
           },
           env,
@@ -459,25 +454,25 @@ function setup(rest) {
     },
   })
 
-  const agents = detectAgents(env)
+  const harnesses = detectHarnesses(env)
   out(
-    agents.length > 0
-      ? `agents: ${agents.map((a) => a.id).join(', ')}`
-      : 'agents: none found on PATH — install claude, codex, pi or opencode and rerun',
+    harnesses.length > 0
+      ? `harnesses: ${harnesses.map((a) => a.id).join(', ')}`
+      : 'harnesses: none found on PATH — install claude, codex, pi or opencode and rerun',
   )
 
-  const participants = listParticipants(env)
-  if (participants.length === 0) {
-    // Participants are the user's to create; nothing is seeded for them.
+  const agents = listAgents(env)
+  if (agents.length === 0) {
+    // Agents are the user's to create; nothing is seeded for them.
     out(
-      'participants: none yet — create them with `cf ui` (or `cf participant add`); the skill installs itself on the first one',
+      'agents: none yet — create them with `cf ui` (or `cf agent add`); the skill installs itself on the first one',
     )
-  } else if (agents.length > 0) {
+  } else if (harnesses.length > 0) {
     printReport(
       installSkill(
         {
           relPath: 'consensflow/SKILL.md',
-          content: generateSkill(participants),
+          content: generateSkill(agents),
           source: 'consensflow',
         },
         env,
@@ -487,16 +482,16 @@ function setup(rest) {
     reportNativeHosts(env, values.all)
   }
 
-  if (agents.length > 0) syncCmux(env, values)
+  if (harnesses.length > 0) syncCmux(env, values)
 }
 
 function doctor() {
-  const agents = detectAgents(env)
+  const harnesses = detectHarnesses(env)
   out(`consensflow ${PKG.version}`)
   out(
-    `agents:       ${agents.length > 0 ? agents.map((a) => `${a.id}${a.native ? ' (has its own consensflow)' : ''}`).join(', ') : 'none on PATH'}`,
+    `harnesses:       ${harnesses.length > 0 ? harnesses.map((a) => `${a.id}${a.native ? ' (has its own consensflow)' : ''}`).join(', ') : 'none on PATH'}`,
   )
-  out(`participants: ${listParticipants(env).length}`)
+  out(`agents: ${listAgents(env).length}`)
   const rows = skillsStatus(env)
   const drifted = rows.filter((r) => r.state !== 'ok').length
   out(
@@ -519,7 +514,7 @@ async function main() {
   // cc and pi write the shared roster without telling v3; any invocation is
   // an opportunity to notice and regenerate the installed skill. Skills
   // verbs manage installation explicitly, so they are exempt.
-  if (['participant', 'setup', 'ui', 'doctor', 'mode'].includes(command)) {
+  if (['agent', 'setup', 'ui', 'doctor', 'mode'].includes(command)) {
     healSkillIfStale(env)
   }
 
@@ -545,8 +540,8 @@ async function main() {
     case 'catalog':
       catalogVerb(rest)
       return
-    case 'participant':
-      participantVerb(rest)
+    case 'agent':
+      agentVerb(rest)
       return
     case 'skills':
       skillsVerb(rest)

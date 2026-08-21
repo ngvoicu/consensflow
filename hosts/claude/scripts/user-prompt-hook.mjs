@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 // UserPromptSubmit hook: keep the session stash fresh, and when the typed prompt addresses
-// exactly one configured participant (`@zeus …`, `ask @zeus …`, `hi @zeus`), stash the prompt
+// exactly one configured agent (`@zeus …`, `ask @zeus …`, `hi @zeus`), stash the prompt
 // body to a file and inject routing instructions for the lead. The CC analog of the pi
 // extension's input interception — except the lead still sees the prompt, so unknown or
 // ambiguous mentions are simply left alone. Must never block the prompt — always exits 0.
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { cfRoot, ensureCfDirs, loadParticipants, saveSession } from "../../lib/state.js";
-import { parseParticipantPrompt, slugify, tokenize } from "../../lib/utils.js";
+import { cfRoot, ensureCfDirs, loadAgents, saveSession } from "../../lib/state.js";
+import { parseAgentPrompt, slugify, tokenize } from "../../lib/utils.js";
 import { readStdinText } from "./hook-io.mjs";
 
 const CLI_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "cf.mjs");
@@ -18,7 +18,7 @@ function emitContext(text) {
 }
 
 try {
-  // Inside a participant subprocess: never touch the lead session's stash, never route.
+  // Inside an agent subprocess: never touch the lead session's stash, never route.
   if (process.env.CONSENSFLOW_CHILD) process.exit(0);
   const input = JSON.parse((await readStdinText()) || "{}");
   const cwd = input.cwd || process.cwd();
@@ -30,27 +30,27 @@ try {
   const tokens = tokenize(prompt);
   if (!tokens.some((token) => token.startsWith("@"))) process.exit(0);
 
-  const participants = await loadParticipants(cwd).catch(() => []);
-  const known = new Set(participants.flatMap((p) => [p.id, slugify(p.name)]).filter(Boolean));
-  const parsed = parseParticipantPrompt(tokens, known);
+  const agents = await loadAgents(cwd).catch(() => []);
+  const known = new Set(agents.flatMap((p) => [p.id, slugify(p.name)]).filter(Boolean));
+  const parsed = parseAgentPrompt(tokens, known);
   if (!parsed) process.exit(0);
   if (parsed.error) {
-    emitContext(`ConsensFlow: ${parsed.error} Tell the user, and ask which participant to consult first — do not fan out to several.`);
+    emitContext(`ConsensFlow: ${parsed.error} Tell the user, and ask which agent to consult first — do not fan out to several.`);
     process.exit(0);
   }
-  const id = slugify(parsed.participant);
+  const id = slugify(parsed.agent);
   if (!known.has(id)) process.exit(0); // stray @token (e.g. @types/node): the lead handles the prompt normally
 
   const promptFile = path.join(cfRoot(cwd), "pending-prompt.md");
   await fs.writeFile(promptFile, parsed.prompt, "utf8");
   emitContext(
     [
-      `ConsensFlow routing: this prompt addresses the participant @${id}. Consult it now via the Bash tool:`,
+      `ConsensFlow routing: this prompt addresses the agent @${id}. Consult it now via the Bash tool:`,
       "",
       `  node "${CLI_PATH}" run @${id} --prompt-file "${promptFile}"`,
       "",
-      "Participants can take minutes: always run this in the FOREGROUND — NEVER in the background or detached — with a generous Bash timeout (600000 ms or more). It streams the live thinking/tool/answer trail automatically (no flag needed), so the user sees the reasoning as it arrives; never switch to --json to hide the trail. Then relay the participant's answer to the user faithfully — do not summarize the trail away.",
-      "Do not apply, commit, or keep the participant's advice or file changes without the user's approval, unless the user already authorized it.",
+      "Agents can take minutes: always run this in the FOREGROUND — NEVER in the background or detached — with a generous Bash timeout (600000 ms or more). It streams the live thinking/tool/answer trail automatically (no flag needed), so the user sees the reasoning as it arrives; never switch to --json to hide the trail. Then relay the agent's answer to the user faithfully — do not summarize the trail away.",
+      "Do not apply, commit, or keep the agent's advice or file changes without the user's approval, unless the user already authorized it.",
     ].join("\n"),
   );
 } catch {

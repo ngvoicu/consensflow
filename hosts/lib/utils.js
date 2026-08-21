@@ -14,7 +14,7 @@ export function slugify(value) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .replace(/-{2,}/g, "-");
-  return slug || "participant";
+  return slug || "agent";
 }
 
 export function createId(prefix = "run", date = new Date()) {
@@ -143,20 +143,20 @@ export function truncateText(text, maxBytes = 128 * 1024) {
   };
 }
 
-const ONE_PARTICIPANT_AT_A_TIME =
-  "ConsensFlow sends to one participant at a time. Use `@zeus ...`, wait for the answer, then ask another participant if needed.";
+const ONE_AGENT_AT_A_TIME =
+  "ConsensFlow sends to one agent at a time. Use `@zeus ...`, wait for the answer, then ask another agent if needed.";
 
-// Decide whether a typed prompt addresses exactly one named participant.
+// Decide whether a typed prompt addresses exactly one named agent.
 // - A leading mention (`@zeus ...`, or `ask @zeus ...`) is an explicit address: it routes
 //   regardless of whether the name is configured (an unknown name surfaces a helpful error
 //   downstream), and any other @names later in the prompt are kept verbatim so you can paste a
-//   prior participant's reply into the next prompt.
+//   prior agent's reply into the next prompt.
 // - A single mention elsewhere (`hi @zeus`) routes the same way — but ONLY when it resolves to a
-//   known participant, so a stray `@types/node` / `@Component` in a prompt to the lead is left
-//   alone. `known` is a Set of slugified participant ids/names (matching getParticipant's
+//   known agent, so a stray `@types/node` / `@Component` in a prompt to the lead is left
+//   alone. `known` is a Set of slugified agent ids/names (matching getAgent's
 //   resolution); omit it to disable non-leading routing.
-// Returns { participant, prompt } | { error } | null  (null = not a participant prompt).
-export function parseParticipantPrompt(tokens, known) {
+// Returns { agent, prompt } | { error } | null  (null = not an agent prompt).
+export function parseAgentPrompt(tokens, known) {
   if (!Array.isArray(tokens) || tokens.length === 0) return null;
 
   let body = tokens;
@@ -165,21 +165,21 @@ export function parseParticipantPrompt(tokens, known) {
   if (body.length === 0) return null;
 
   if (body[0].startsWith("@")) {
-    if (body[1]?.startsWith("@")) return { error: ONE_PARTICIPANT_AT_A_TIME };
-    const participant = stripMention(body[0]);
+    if (body[1]?.startsWith("@")) return { error: ONE_AGENT_AT_A_TIME };
+    const agent = stripMention(body[0]);
     const prompt = body.slice(1).join(" ").trim();
-    if (!prompt) return { error: `Prompt is required after @${participant}.` };
-    return { participant, prompt };
+    if (!prompt) return { error: `Prompt is required after @${agent}.` };
+    return { agent, prompt };
   }
 
   const mentions = body.filter((token) => token.startsWith("@"));
   if (mentions.length === 0) return null;
   const distinct = new Set(mentions.map((token) => slugify(stripMention(token))));
   if (distinct.size !== 1) return null; // 2+ different names, none leading -> ambiguous, lead handles
-  const participant = stripMention(mentions[0]);
+  const agent = stripMention(mentions[0]);
   const knownSet = known instanceof Set ? known : null;
-  if (!knownSet || !knownSet.has(slugify(participant))) return null; // unknown @token -> not a target
+  if (!knownSet || !knownSet.has(slugify(agent))) return null; // unknown @token -> not a target
   const prompt = body.filter((token) => !token.startsWith("@")).join(" ").trim();
   if (!prompt) return null;
-  return { participant, prompt };
+  return { agent, prompt };
 }

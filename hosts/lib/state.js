@@ -4,19 +4,19 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { nowIso, slugify, stripMention } from "./utils.js";
-import { isOrphanedPreset, syncParticipantWithPreset } from "./presets.js";
+import { isOrphanedPreset, syncAgentWithPreset } from "./presets.js";
 
 // "image" is a backend-based kind (Codex Responses → gpt-image-2 via the Codex CLI login), not a
 // CLI runner: it is handled upstream in cf.mjs, and buildRunnerInvocation keeps a loud backstop.
-export const PARTICIPANT_KINDS = ["pi", "claude-code", "codex", "opencode", "image"];
+export const AGENT_KINDS = ["pi", "claude-code", "codex", "opencode", "image"];
 export const SKILLS_POLICIES = ["default", "none", "explicit"];
 
 // Older builds kept per-tool rosters below the shared home. Keep a one-time migration path so
-// those users do not appear to lose participants when upgrading to the shared roster.
-const LEGACY_PARTICIPANT_DIRS = ["consensflow-cc", "consensflow-pi"];
+// those users do not appear to lose agents when upgrading to the shared roster.
+const LEGACY_AGENT_DIRS = ["consensflow-cc", "consensflow-pi"];
 
 // Config home shared by both host tools (~/.consensflow; CONSENSFLOW_HOME overrides it — tests
-// point it at a temp dir). Participant config and run artifacts all live directly under this
+// point it at a temp dir). Agent config and run artifacts all live directly under this
 // home; there are no per-tool config roots.
 export function configHome() {
   return process.env.CONSENSFLOW_HOME || path.join(os.homedir(), ".consensflow");
@@ -43,8 +43,14 @@ export function cfRoot(cwd) {
   return path.join(configRoot(), "workspaces", workspaceKey(cwd));
 }
 
-// Shared across both host tools so participants are defined once and usable from either.
-export function participantsPath(_cwd) {
+// Shared across both host tools so agents are defined once and usable from either.
+export function agentsPath(_cwd) {
+  return path.join(configHome(), "agents.json");
+}
+
+// The roster's name before the vocabulary settled (2026-08-21). A machine that
+// still has one is read from it; the next write lands in agents.json.
+export function legacyAgentsPath(_cwd) {
   return path.join(configHome(), "participants.json");
 }
 
@@ -90,120 +96,128 @@ async function writeJsonAtomic(filePath, value) {
   await fs.rename(tmp, filePath);
 }
 
-export async function loadParticipantsFile(cwd) {
-  const file = await readJsonIfExists(participantsPath(cwd));
-  if (file !== undefined) return normalizeParticipantsFileShape(file);
-  const migrated = await migrateLegacyParticipantsFile(cwd);
-  return migrated ?? { schemaVersion: 1, participants: [] };
+export async function loadAgentsFile(cwd) {
+  const file = await readJsonIfExists(agentsPath(cwd));
+  if (file !== undefined) return normalizeAgentsFileShape(file);
+  // The same roster under its old name, for a machine set up before the
+  // rename. Reading it is enough: the next write lands in agents.json.
+  const renamed = await readJsonIfExists(legacyAgentsPath(cwd));
+  if (renamed !== undefined) return normalizeAgentsFileShape(renamed);
+  const migrated = await migrateLegacyAgentsFile(cwd);
+  return migrated ?? { schemaVersion: 1, agents: [] };
 }
 
-function normalizeParticipantsFileShape(file) {
-  if (!file || typeof file !== "object" || Array.isArray(file)) return { schemaVersion: 1, participants: [] };
-  if (!Array.isArray(file.participants)) file.participants = [];
+function normalizeAgentsFileShape(file) {
+  if (!file || typeof file !== "object" || Array.isArray(file)) return { schemaVersion: 1, agents: [] };
+  if (!Array.isArray(file.agents)) {
+    // `participants` was this key's name until 2026-08-21.
+    file.agents = Array.isArray(file.participants) ? file.participants : [];
+  }
+  delete file.participants;
   return file;
 }
 
-function legacyParticipantsPaths() {
-  return LEGACY_PARTICIPANT_DIRS.map((dir) => path.join(configHome(), dir, "participants.json"));
+function legacyAgentsPaths() {
+  return LEGACY_AGENT_DIRS.map((dir) => path.join(configHome(), dir, "agents.json"));
 }
 
-async function migrateLegacyParticipantsFile(cwd) {
-  const participants = [];
-  for (const filePath of legacyParticipantsPaths()) {
+async function migrateLegacyAgentsFile(cwd) {
+  const agents = [];
+  for (const filePath of legacyAgentsPaths()) {
     const legacy = await readJsonIfExists(filePath);
-    if (legacy && Array.isArray(legacy.participants)) participants.push(...legacy.participants);
+    if (legacy && Array.isArray(legacy.agents)) agents.push(...legacy.agents);
   }
-  if (participants.length === 0) return null;
+  if (agents.length === 0) return null;
 
   const byId = new Map();
-  for (const raw of participants) {
-    const participant = normalizeParticipant(raw);
-    if (!byId.has(participant.id)) byId.set(participant.id, participant);
+  for (const raw of agents) {
+    const agent = normalizeAgent(raw);
+    if (!byId.has(agent.id)) byId.set(agent.id, agent);
   }
-  const migrated = { schemaVersion: 1, participants: [...byId.values()] };
-  assertUniqueParticipants(migrated.participants);
-  await writeJsonAtomic(participantsPath(cwd), migrated);
+  const migrated = { schemaVersion: 1, agents: [...byId.values()] };
+  assertUniqueAgents(migrated.agents);
+  await writeJsonAtomic(agentsPath(cwd), migrated);
   return migrated;
 }
 
-export async function saveParticipantsFile(cwd, file) {
+export async function saveAgentsFile(cwd, file) {
   const normalized = {
     schemaVersion: 1,
-    participants: file.participants.map((participant) => normalizeParticipant(participant)),
+    agents: file.agents.map((agent) => normalizeAgent(agent)),
   };
-  assertUniqueParticipants(normalized.participants);
-  await writeJsonAtomic(participantsPath(cwd), normalized);
+  assertUniqueAgents(normalized.agents);
+  await writeJsonAtomic(agentsPath(cwd), normalized);
   return normalized;
 }
 
-export async function loadParticipants(cwd) {
-  return (await loadParticipantsFile(cwd)).participants;
+export async function loadAgents(cwd) {
+  return (await loadAgentsFile(cwd)).agents;
 }
 
-export async function getParticipant(cwd, ref) {
+export async function getAgent(cwd, ref) {
   const id = slugify(stripMention(ref));
-  const participants = await loadParticipants(cwd);
-  return participants.find((participant) => participant.id === id || slugify(participant.name) === id) ?? null;
+  const agents = await loadAgents(cwd);
+  return agents.find((agent) => agent.id === id || slugify(agent.name) === id) ?? null;
 }
 
-export async function upsertParticipant(cwd, input) {
-  const file = await loadParticipantsFile(cwd);
+export async function upsertAgent(cwd, input) {
+  const file = await loadAgentsFile(cwd);
   const now = nowIso();
-  const participant = normalizeParticipant({ ...input, updatedAt: now, createdAt: input.createdAt ?? now });
-  const index = file.participants.findIndex((entry) => entry.id === participant.id);
+  const agent = normalizeAgent({ ...input, updatedAt: now, createdAt: input.createdAt ?? now });
+  const index = file.agents.findIndex((entry) => entry.id === agent.id);
   if (index >= 0) {
-    participant.createdAt = file.participants[index].createdAt ?? participant.createdAt;
-    file.participants[index] = participant;
+    agent.createdAt = file.agents[index].createdAt ?? agent.createdAt;
+    file.agents[index] = agent;
   } else {
-    file.participants.push(participant);
+    file.agents.push(agent);
   }
-  await saveParticipantsFile(cwd, file);
-  return participant;
+  await saveAgentsFile(cwd, file);
+  return agent;
 }
 
-// Re-resolve every preset-backed participant against the current catalog, so a ConsensFlow
-// update reaches participants that were added under an older one. Custom participants and
+// Re-resolve every preset-backed agent against the current catalog, so a ConsensFlow
+// update reaches agents that were added under an older one. Custom agents and
 // entries whose preset has left the catalog are reported, never rewritten.
-export async function syncParticipantsWithPresets(cwd, { dryRun = false } = {}) {
-  const file = await loadParticipantsFile(cwd);
+export async function syncAgentsWithPresets(cwd, { dryRun = false } = {}) {
+  const file = await loadAgentsFile(cwd);
   const now = nowIso();
   const synced = [];
-  file.participants = file.participants.map((entry) => {
-    const { participant, changes } = syncParticipantWithPreset(entry);
+  file.agents = file.agents.map((entry) => {
+    const { agent, changes } = syncAgentWithPreset(entry);
     if (changes.length === 0) return entry;
-    synced.push({ id: participant.id, name: participant.name, changes });
-    return { ...participant, updatedAt: now };
+    synced.push({ id: agent.id, name: agent.name, changes });
+    return { ...agent, updatedAt: now };
   });
-  if (synced.length > 0 && !dryRun) await saveParticipantsFile(cwd, file);
+  if (synced.length > 0 && !dryRun) await saveAgentsFile(cwd, file);
   return {
     synced,
     dryRun,
-    total: file.participants.length,
-    orphans: file.participants.filter(isOrphanedPreset).map((participant) => `@${participant.id}`),
+    total: file.agents.length,
+    orphans: file.agents.filter(isOrphanedPreset).map((agent) => `@${agent.id}`),
   };
 }
 
-export async function removeParticipant(cwd, ref) {
+export async function removeAgent(cwd, ref) {
   const id = slugify(stripMention(ref));
-  const file = await loadParticipantsFile(cwd);
-  const before = file.participants.length;
-  file.participants = file.participants.filter((participant) => participant.id !== id && slugify(participant.name) !== id);
-  await saveParticipantsFile(cwd, file);
-  return before !== file.participants.length;
+  const file = await loadAgentsFile(cwd);
+  const before = file.agents.length;
+  file.agents = file.agents.filter((agent) => agent.id !== id && slugify(agent.name) !== id);
+  await saveAgentsFile(cwd, file);
+  return before !== file.agents.length;
 }
 
-export function normalizeParticipant(input) {
+export function normalizeAgent(input) {
   const name = String(input.name ?? input.id ?? "").trim();
-  if (!name) throw new Error("Participant name is required");
+  if (!name) throw new Error("Agent name is required");
   const id = slugify(input.id ?? name);
   const kind = String(input.kind ?? "pi");
-  if (!PARTICIPANT_KINDS.includes(kind)) {
-    throw new Error(`Unsupported participant kind '${kind}'. Expected one of: ${PARTICIPANT_KINDS.join(", ")}`);
+  if (!AGENT_KINDS.includes(kind)) {
+    throw new Error(`Unsupported agent kind '${kind}'. Expected one of: ${AGENT_KINDS.join(", ")}`);
   }
 
   const skillsPolicy = normalizeEnum(input.skillsPolicy ?? input.skills, SKILLS_POLICIES, "default", "skillsPolicy");
 
-  const participant = {
+  const agent = {
     id,
     name,
     kind,
@@ -212,17 +226,17 @@ export function normalizeParticipant(input) {
     updatedAt: input.updatedAt ?? nowIso(),
   };
 
-  for (const key of ["model", "provider", "effort", "thinking", "agent", "cwd", "description", "preset"]) {
+  for (const key of ["model", "provider", "effort", "thinking", "harness", "cwd", "description", "preset"]) {
     if (input[key] !== undefined && input[key] !== true && String(input[key]).trim()) {
-      participant[key] = String(input[key]).trim();
+      agent[key] = String(input[key]).trim();
     }
   }
 
   const skillPaths = normalizeList(input.skillPaths ?? input.skillPath, []);
-  if (skillPaths.length > 0) participant.skillPaths = skillPaths;
+  if (skillPaths.length > 0) agent.skillPaths = skillPaths;
 
-  if (input.maxTurns !== undefined) participant.maxTurns = Number(input.maxTurns);
-  return participant;
+  if (input.maxTurns !== undefined) agent.maxTurns = Number(input.maxTurns);
+  return agent;
 }
 
 function normalizeList(value, fallback) {
@@ -239,14 +253,14 @@ function normalizeEnum(value, allowed, fallback, label) {
   return normalized;
 }
 
-// getParticipant resolves @refs by id OR slugified name, so both must be unique across the
-// roster — otherwise one participant's name slug could silently shadow another's id.
-function assertUniqueParticipants(participants) {
+// getAgent resolves @refs by id OR slugified name, so both must be unique across the
+// roster — otherwise one agent's name slug could silently shadow another's id.
+function assertUniqueAgents(agents) {
   const seen = new Map();
-  for (const participant of participants) {
-    for (const key of new Set([participant.id, slugify(participant.name)].filter(Boolean))) {
-      if (seen.has(key)) throw new Error(`Participant '@${participant.id}' collides with '@${seen.get(key)}' on '${key}': ids and slugified names must be unique.`);
-      seen.set(key, participant.id);
+  for (const agent of agents) {
+    for (const key of new Set([agent.id, slugify(agent.name)].filter(Boolean))) {
+      if (seen.has(key)) throw new Error(`Agent '@${agent.id}' collides with '@${seen.get(key)}' on '${key}': ids and slugified names must be unique.`);
+      seen.set(key, agent.id);
     }
   }
 }
@@ -266,7 +280,7 @@ export async function recordLatestRun(cwd, result) {
   await saveCurrent(cwd, {
     latestRunId: result.runId,
     latestRunDir: result.runDir,
-    latestParticipantId: result.participant?.id,
+    latestAgentId: result.agent?.id,
     latestKind: result.kind,
   });
 }

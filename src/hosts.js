@@ -16,7 +16,7 @@ import { configRoot } from './roster.js'
 
 /**
  * Host integrations: the deeper ConsensFlow paths that live inside a coding
- * agent and can hand it your live conversation.
+ * harness and can hand it your live conversation.
  *
  * One manager installs them all, so there is a single place to install,
  * update and remove — and a single roster behind them. Each host is driven

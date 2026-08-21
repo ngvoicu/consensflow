@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileS
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { applyMode, currentMode, MODES, modeLabel, modeReport, turnOff } from '../src/mode.js'
-import { addParticipant, removeParticipant } from '../src/roster.js'
+import { addAgent, removeAgent } from '../src/roster.js'
 import { refreshInstalledSkill } from '../src/sync.js'
 import { tempEnv } from './helpers.mjs'
 
@@ -61,7 +61,7 @@ describe('the machine runs exactly one ConsensFlow path', () => {
   after(() => t.cleanup())
   for (const cli of ['claude', 'codex', 'opencode', 'pi']) stubCli(t, cli)
   const bundled = bundle(t)
-  addParticipant({ name: 'zeus', runtime: 'claude', model: 'claude-opus-5' }, t.env)
+  addAgent({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }, t.env)
 
   const generated = (dir) => join(dir, 'skills', 'consensflow', 'SKILL.md')
 
@@ -70,7 +70,7 @@ describe('the machine runs exactly one ConsensFlow path', () => {
     assert.equal(currentMode(t.env), null)
   })
 
-  it('labels the cmux mode with the agents it covers', () => {
+  it('labels the cmux mode with the harnesses it covers', () => {
     assert.equal(modeLabel('cmux'), 'cmux (pi, cc, codex, opencode)')
     assert.equal(modeLabel('claude'), 'claude')
   })
@@ -80,7 +80,7 @@ describe('the machine runs exactly one ConsensFlow path', () => {
     assert.equal(currentMode(t.env), 'cmux')
   })
 
-  it('cmux mode puts the generated skill on every agent', () => {
+  it('cmux mode puts the generated skill on every harness', () => {
     applyMode('cmux', t.env, { bundled })
 
     assert.equal(currentMode(t.env), 'cmux')
@@ -101,7 +101,7 @@ describe('the machine runs exactly one ConsensFlow path', () => {
     assert.equal(existsSync(generated(join(t.env.XDG_CONFIG_HOME, 'opencode'))), false)
   })
 
-  it('says out loud which agents lose access in this mode', () => {
+  it('says out loud which harnesses lose access in this mode', () => {
     const report = modeReport('claude', t.env)
 
     assert.match(report.join('\n'), /codex/)
@@ -125,23 +125,23 @@ describe('the machine runs exactly one ConsensFlow path', () => {
     assert.ok(existsSync(generated(t.env.CODEX_HOME)))
   })
 
-  it('adding a participant in a host mode does not smuggle the skill back', () => {
+  it('adding an agent in a host mode does not smuggle the skill back', () => {
     applyMode('claude', t.env, { bundled })
     assert.equal(existsSync(generated(t.env.CODEX_HOME)), false)
 
     // The mutation path must obey the mode, or the invariant only holds
     // until the next roster edit.
-    addParticipant({ name: 'apollo', runtime: 'codex', model: 'gpt-5.6-terra' }, t.env)
+    addAgent({ name: 'apollo', harness: 'codex', model: 'gpt-5.6-terra' }, t.env)
     refreshInstalledSkill(t.env)
 
     assert.equal(existsSync(generated(t.env.CODEX_HOME)), false, 'codex stays out in claude mode')
-    removeParticipant('apollo', t.env)
+    removeAgent('apollo', t.env)
     applyMode('cmux', t.env, { bundled })
   })
 
   it('installs nothing until a mode is chosen', () => {
-    // Adding a participant before picking a path used to install the generated
-    // skill into every agent found — so ConsensFlow appeared in Claude Code
+    // Adding an agent before picking a path used to install the generated
+    // skill into every harness found — so ConsensFlow appeared in Claude Code
     // without anyone choosing Claude Code, and the one-path invariant was
     // broken before the user ever saw the switch.
     const fresh = tempEnv()
@@ -150,7 +150,7 @@ describe('the machine runs exactly one ConsensFlow path', () => {
       stubCli(fresh, 'codex')
       assert.equal(currentMode(fresh.env), null, 'no mode yet')
 
-      addParticipant({ name: 'zeus', runtime: 'claude', model: 'claude-opus-5' }, fresh.env)
+      addAgent({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }, fresh.env)
       refreshInstalledSkill(fresh.env)
 
       assert.equal(
@@ -221,7 +221,7 @@ describe('the machine runs exactly one ConsensFlow path', () => {
     const offline = tempEnv()
     try {
       stubCli(offline, 'codex')
-      addParticipant({ name: 'zeus', runtime: 'claude', model: 'claude-opus-5' }, offline.env)
+      addAgent({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }, offline.env)
 
       // No git on PATH at all: the mode still applies, and says what it missed.
       const outcome = applyMode('cmux', offline.env, { bundled })

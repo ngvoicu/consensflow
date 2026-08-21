@@ -5,31 +5,31 @@ import { generateSkill } from '../src/skill.js'
 const ROSTER = [
   {
     name: 'zeus',
-    runtime: 'claude',
+    harness: 'claude',
     model: 'claude-opus-5',
     effort: 'max',
     description: 'Deepest reviewer.',
   },
   {
     name: 'hyperion',
-    runtime: 'codex',
+    harness: 'codex',
     model: 'gpt-5.6-sol',
     effort: 'ultra',
   },
   {
     name: 'endymion',
-    runtime: 'pi',
+    harness: 'pi',
     model: 'openrouter/moonshotai/kimi-k3',
     effort: 'xhigh',
   },
   {
     name: 'mani',
-    runtime: 'opencode',
+    harness: 'opencode',
     model: 'openrouter/moonshotai/kimi-k3',
   },
   {
     name: 'loki',
-    runtime: 'codex',
+    harness: 'codex',
     model: 'gpt-5.6-luna',
     effort: 'xhigh',
   },
@@ -37,15 +37,15 @@ const ROSTER = [
 
 describe('one command builder serves the skill and the roster editor', () => {
   it('gives the exact line the skill table will contain', async () => {
-    const { participantCommand } = await import('../src/skill.js')
-    const command = participantCommand(ROSTER[0])
+    const { agentCommand } = await import('../src/skill.js')
+    const command = agentCommand(ROSTER[0])
     assert.ok(generateSkill(ROSTER).includes(command))
     assert.match(command, /claude -p --dangerously-skip-permissions "<question>"/)
   })
 
-  it('has nothing to show for a runtime it cannot run', async () => {
-    const { participantCommand } = await import('../src/skill.js')
-    assert.equal(participantCommand({ name: 'x', runtime: 'image', model: 'm' }), undefined)
+  it('has nothing to show for a harness it cannot run', async () => {
+    const { agentCommand } = await import('../src/skill.js')
+    assert.equal(agentCommand({ name: 'x', harness: 'image', model: 'm' }), undefined)
   })
 })
 
@@ -57,7 +57,7 @@ describe('the generated skill carries the live-verified command per engine', () 
     assert.match(md, /\n---\n/)
   })
 
-  it('lists every participant name in the description, so mentions trigger it', () => {
+  it('lists every agent name in the description, so mentions trigger it', () => {
     const description = md.slice(0, md.indexOf('\n---\n'))
     for (const p of ROSTER) assert.ok(description.includes(p.name), `${p.name} missing`)
   })
@@ -91,8 +91,8 @@ describe('the generated skill carries the live-verified command per engine', () 
     assert.ok(!md.includes('--variant undefined'))
   })
 
-  it('gives every participant full permissions, on every engine', () => {
-    // A participant is a helper you hand a task to, not a sandboxed reviewer:
+  it('gives every agent full permissions, on every engine', () => {
+    // An agent is a helper you hand a task to, not a sandboxed reviewer:
     // it may write outside the project and reach the network. The flags are
     // asserted here so a future refactor cannot quietly put a fence back.
     assert.ok(md.includes('claude -p --dangerously-skip-permissions'), 'claude')
@@ -105,14 +105,14 @@ describe('the generated skill carries the live-verified command per engine', () 
     assert.doesNotMatch(md, /pi [^\n]*--dangerously/)
   })
 
-  it('teaches the agent to self-heal when a name is missing from the table', () => {
+  it('teaches the harness to self-heal when a name is missing from the table', () => {
     assert.match(md, /cf skills update/)
     assert.match(md, /missing from (the|this) table/i)
   })
 
   it('keeps the etiquette that survived two product generations', () => {
-    assert.match(md, /One participant at a time/i)
-    assert.match(md, /Never apply a participant/i)
+    assert.match(md, /One agent at a time/i)
+    assert.match(md, /Never apply an agent/i)
     assert.match(md, /never edit this file by hand/i)
   })
 

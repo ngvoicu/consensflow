@@ -1,16 +1,16 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { presetDrift, syncParticipantWithPreset } from '../hosts/lib/presets.js'
+import { presetDrift, syncAgentWithPreset } from '../hosts/lib/presets.js'
 
 /**
  * The roster IS the shared ConsensFlow file that the v1 Claude Code plugin
  * (consensflow-cc) and the pi extension (consensflow-pi) already read and
- * write: `~/.consensflow/participants.json`. One roster, three consumers —
+ * write: `~/.consensflow/agents.json`. One roster, three consumers —
  * edit it here and cc/pi see the change on their next invocation.
  *
  * That makes v1-schema fidelity a hard contract: reads map v1 rows to the
- * v3 view (kind→runtime, thinking/effort→effort),
+ * v3 view (kind→harness, thinking/effort→effort),
  * and writes touch only the mapped keys, preserving every field v3 does not
  * understand (display name, skillsPolicy, preset, anything future). Rows of
  * kinds v3 cannot render as commands (e.g. `image`) are listed and marked,
@@ -20,11 +20,11 @@ import { presetDrift, syncParticipantWithPreset } from '../hosts/lib/presets.js'
  * process.env — so tests run against throwaway homes.
  */
 
-export const RUNTIMES = ['claude', 'codex', 'pi', 'opencode']
+export const HARNESSES = ['claude', 'codex', 'pi', 'opencode']
 
 const NAME_PATTERN = /^[a-z][a-z0-9-]*$/
-const KIND_TO_RUNTIME = { 'claude-code': 'claude', codex: 'codex', pi: 'pi', opencode: 'opencode' }
-const RUNTIME_TO_KIND = { claude: 'claude-code', codex: 'codex', pi: 'pi', opencode: 'opencode' }
+const KIND_TO_HARNESS = { 'claude-code': 'claude', codex: 'codex', pi: 'pi', opencode: 'opencode' }
+const HARNESS_TO_KIND = { claude: 'claude-code', codex: 'codex', pi: 'pi', opencode: 'opencode' }
 
 /** The manifest and other v3-only state; the roster deliberately not here. */
 export function configRoot(env) {
@@ -38,20 +38,41 @@ export function configRoot(env) {
 }
 
 export function rosterPath(env) {
+  return join(env?.HOME ?? homedir(), '.consensflow', 'agents.json')
+}
+
+/**
+ * What the roster was called before the vocabulary settled (2026-08-21):
+ * `participants.json`, with a `participants` key. A machine that has one keeps
+ * working — it is read as-is, and the next write lands in the new file.
+ */
+function legacyRosterPath(env) {
   return join(env?.HOME ?? homedir(), '.consensflow', 'participants.json')
 }
 
-function loadDocument(env) {
-  try {
-    const parsed = JSON.parse(readFileSync(rosterPath(env), 'utf8'))
-    return {
-      ...parsed,
-      schemaVersion: parsed.schemaVersion ?? 1,
-      participants: Array.isArray(parsed.participants) ? parsed.participants : [],
+function readRoster(env) {
+  for (const path of [rosterPath(env), legacyRosterPath(env)]) {
+    try {
+      return JSON.parse(readFileSync(path, 'utf8'))
+    } catch {
+      // Missing or unreadable: try the next spelling.
     }
-  } catch {
-    return { schemaVersion: 1, participants: [] }
   }
+  return undefined
+}
+
+function loadDocument(env) {
+  const parsed = readRoster(env)
+  if (parsed === undefined) return { schemaVersion: 1, agents: [] }
+  const rows = Array.isArray(parsed.agents)
+    ? parsed.agents
+    : Array.isArray(parsed.participants)
+      ? parsed.participants
+      : []
+  // The old key is dropped on the way out; everything else the file carried is
+  // preserved, because rows and fields we do not understand are not ours.
+  const { participants: _legacy, ...rest } = parsed
+  return { ...rest, schemaVersion: parsed.schemaVersion ?? 1, agents: rows }
 }
 
 function saveDocument(document, env) {
@@ -66,43 +87,43 @@ function effortOf(row) {
 }
 
 function toView(row) {
-  const runtime = KIND_TO_RUNTIME[row.kind]
+  const harness = KIND_TO_HARNESS[row.kind]
   return {
     name: row.id,
-    runtime: runtime ?? row.kind,
+    harness: harness ?? row.kind,
     model: row.model,
     ...(effortOf(row) ? { effort: effortOf(row) } : {}),
     ...(row.description ? { description: row.description } : {}),
     ...(row.preset ? { preset: row.preset } : {}),
-    ...(runtime === undefined ? { unsupported: true } : {}),
+    ...(harness === undefined ? { unsupported: true } : {}),
   }
 }
 
-export function listParticipants(env) {
-  return loadDocument(env).participants.map(toView)
+export function listAgents(env) {
+  return loadDocument(env).agents.map(toView)
 }
 
 function validateAdd(input) {
   if (typeof input.name !== 'string' || !NAME_PATTERN.test(input.name)) {
     throw new Error(
-      `participant names are lowercase [a-z0-9-] starting with a letter; got ${JSON.stringify(input.name)}`,
+      `agent names are lowercase [a-z0-9-] starting with a letter; got ${JSON.stringify(input.name)}`,
     )
   }
-  if (!RUNTIMES.includes(input.runtime)) {
+  if (!HARNESSES.includes(input.harness)) {
     throw new Error(
-      `unknown runtime ${JSON.stringify(input.runtime)}; expected ${RUNTIMES.join(', ')}`,
+      `unknown harness ${JSON.stringify(input.harness)}; expected ${HARNESSES.join(', ')}`,
     )
   }
   if (typeof input.model !== 'string' || input.model.length === 0) {
-    throw new Error('a participant needs a model (any identifier its runtime accepts)')
+    throw new Error('an agent needs a model (any identifier its harness accepts)')
   }
 }
 
-export function addParticipant(input, env) {
+export function addAgent(input, env) {
   validateAdd(input)
   const document = loadDocument(env)
-  if (document.participants.some((row) => row.id === input.name)) {
-    throw new Error(`a participant named ${input.name} already exists`)
+  if (document.agents.some((row) => row.id === input.name)) {
+    throw new Error(`an agent named ${input.name} already exists`)
   }
 
   const now = new Date().toISOString()
@@ -110,47 +131,47 @@ export function addParticipant(input, env) {
     id: input.name,
     // The display name cc shows; capitalized to match its convention.
     name: input.name.charAt(0).toUpperCase() + input.name.slice(1),
-    kind: RUNTIME_TO_KIND[input.runtime],
+    kind: HARNESS_TO_KIND[input.harness],
     skillsPolicy: 'default',
     createdAt: now,
     updatedAt: now,
     model: input.model,
     ...(input.effort
-      ? input.runtime === 'pi'
+      ? input.harness === 'pi'
         ? { thinking: input.effort }
         : { effort: input.effort }
       : {}),
     ...(input.description ? { description: input.description } : {}),
     // Which catalog entry this came from, when it came from one. The payload
     // has always read this field; the manager never wrote it, which is why a
-    // participant added in the app could never be told its model had moved.
+    // agent added in the app could never be told its model had moved.
     ...(input.preset ? { preset: input.preset } : {}),
   }
-  document.participants.push(row)
+  document.agents.push(row)
   saveDocument(document, env)
   return toView(row)
 }
 
 function findRow(document, name) {
-  const row = document.participants.find((p) => p.id === name)
-  if (row === undefined) throw new Error(`no participant named ${name}`)
+  const row = document.agents.find((p) => p.id === name)
+  if (row === undefined) throw new Error(`no agent named ${name}`)
   return row
 }
 
-export function editParticipant(name, patch, env) {
+export function editAgent(name, patch, env) {
   const document = loadDocument(env)
   const row = findRow(document, name)
-  const supported = KIND_TO_RUNTIME[row.kind] !== undefined
+  const supported = KIND_TO_HARNESS[row.kind] !== undefined
 
   if (!supported && patch.effort !== undefined) {
     throw new Error(
-      `${name} is a ${row.kind} participant, which consensflow-cmux does not run; only its model and description can be edited here`,
+      `${name} is a ${row.kind} agent, which consensflow-cmux does not run; only its model and description can be edited here`,
     )
   }
 
   if (patch.model !== undefined) {
     if (typeof patch.model !== 'string' || patch.model.length === 0) {
-      throw new Error('a participant needs a model (any identifier its runtime accepts)')
+      throw new Error('an agent needs a model (any identifier its harness accepts)')
     }
     row.model = patch.model
   }
@@ -168,46 +189,46 @@ export function editParticipant(name, patch, env) {
   return toView(row)
 }
 
-export function removeParticipant(name, env) {
+export function removeAgent(name, env) {
   const document = loadDocument(env)
   findRow(document, name)
-  document.participants = document.participants.filter((p) => p.id !== name)
+  document.agents = document.agents.filter((p) => p.id !== name)
   saveDocument(document, env)
 }
 
 /**
- * What the catalog would change on each participant that came from it.
+ * What the catalog would change on each agent that came from it.
  *
  * A preset moves — a family gets a new release, an effort level is renamed —
- * and a participant created from it keeps whatever it was created with. The
+ * and an agent created from it keeps whatever it was created with. The
  * comparison is the payload's own `presetDrift`, not a second implementation,
- * so the app and the running agent always agree about what has moved. Rows
+ * so the app and the running harness always agree about what has moved. Rows
  * with no provenance, and rows whose preset the catalog has since dropped,
  * report nothing: they are pinned, and pinned is a valid state.
  */
-export function participantDrift(env) {
-  return loadDocument(env).participants.flatMap((row) => {
+export function agentDrift(env) {
+  return loadDocument(env).agents.flatMap((row) => {
     const changes = presetDrift(row)
     return changes.length === 0 ? [] : [{ name: row.id, preset: row.preset, changes }]
   })
 }
 
 /**
- * Re-resolves preset-backed participants against the catalog. Only the fields
+ * Re-resolves preset-backed agents against the catalog. Only the fields
  * the preset owns move (kind, model, effort/thinking, skillsPolicy) — a
  * description you wrote is yours and is never overwritten.
  */
-export function syncParticipants(env, options = {}) {
+export function syncAgents(env, options = {}) {
   const { name, dryRun = false } = options
   const document = loadDocument(env)
   const applied = []
 
-  document.participants = document.participants.map((row) => {
+  document.agents = document.agents.map((row) => {
     if (name !== undefined && row.id !== name) return row
-    const { participant, changes } = syncParticipantWithPreset(row)
+    const { agent, changes } = syncAgentWithPreset(row)
     if (changes.length === 0) return row
     applied.push({ name: row.id, changes })
-    return dryRun ? row : { ...participant, updatedAt: new Date().toISOString() }
+    return dryRun ? row : { ...agent, updatedAt: new Date().toISOString() }
   })
 
   if (!dryRun && applied.length > 0) saveDocument(document, env)

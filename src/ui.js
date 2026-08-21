@@ -4,8 +4,8 @@ import { fstatSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { detectAgents } from './agents.js'
 import { CATALOG, EFFORTS } from './catalog.js'
+import { detectHarnesses } from './harnesses.js'
 import { hostStatus } from './hosts.js'
 import { installSkill, skillsStatus, uninstallSkills } from './install.js'
 import {
@@ -18,15 +18,15 @@ import {
   turnOff,
 } from './mode.js'
 import {
-  addParticipant,
-  editParticipant,
-  listParticipants,
-  participantDrift,
-  RUNTIMES,
-  removeParticipant,
-  syncParticipants,
+  addAgent,
+  agentDrift,
+  editAgent,
+  HARNESSES,
+  listAgents,
+  removeAgent,
+  syncAgents,
 } from './roster.js'
-import { generateSkill, participantCommand } from './skill.js'
+import { agentCommand, generateSkill } from './skill.js'
 import { refreshInstalledSkill, retireSkillFromNativeHosts, skillTargets } from './sync.js'
 import { installTerminalCommand, removeTerminalCommand, terminalCommandStatus } from './terminal.js'
 
@@ -56,16 +56,16 @@ const VERSION = JSON.parse(
 const INTEGRATIONS = {
   claude: {
     title: 'Claude Code',
-    summary: 'Claude Code consults, and the participant gets your live conversation as context.',
+    summary: 'Claude Code consults, and the agent gets your live conversation as context.',
   },
   pi: {
     title: 'pi',
-    summary: 'pi consults, and the participant gets your live pi session as context.',
+    summary: 'pi consults, and the agent gets your live pi session as context.',
   },
   cmux: {
     title: 'cmux (pi, cc, codex, opencode)',
     summary:
-      'Every coding agent can consult, through the generated skill, and each gets cmux’s pane-control skills. No conversation is shared.',
+      'Every coding harness can consult, through the generated skill, and each gets cmux’s pane-control skills. No conversation is shared.',
   },
 }
 
@@ -91,7 +91,7 @@ function integrations(env) {
       detail:
         id === 'cmux'
           ? generated.length > 0
-            ? `${generated.length} agents carry the skill`
+            ? `${generated.length} harnesses carry the skill`
             : 'not installed'
           : host?.installed === true
             ? `installed by ConsensFlow${host.version ? ` (v${host.version})` : ''}`
@@ -117,12 +117,12 @@ function systemState(env) {
     },
     integrations: integrations(env),
     terminal: terminalCommandStatus(env),
-    agents: detectAgents(env).map((agent) => ({
-      id: agent.id,
-      native: agent.native === true,
-      skillsDir: agent.skillsDir,
+    harnesses: detectHarnesses(env).map((harness) => ({
+      id: harness.id,
+      native: harness.native === true,
+      skillsDir: harness.skillsDir,
     })),
-    participants: listParticipants(env).length,
+    agents: listAgents(env).length,
     skills: {
       owned: files.length,
       drifted: files.filter((file) => file.state === 'drifted').length,
@@ -139,14 +139,14 @@ function systemState(env) {
  * is deliberately no endpoint that runs a command someone typed.
  */
 function installFromUi(body, env) {
-  const participants = listParticipants(env)
+  const agents = listAgents(env)
   const report = []
-  if (participants.length > 0) {
+  if (agents.length > 0) {
     report.push(
       ...installSkill(
         {
           relPath: 'consensflow/SKILL.md',
-          content: generateSkill(participants),
+          content: generateSkill(agents),
           source: 'consensflow',
         },
         env,
@@ -169,10 +169,10 @@ function installFromUi(body, env) {
   return { report, cmuxCommit, system: systemState(env) }
 }
 
-/** The line this participant becomes in the skill — shown verbatim in the UI. */
-function withCommand(participant) {
-  const command = participantCommand(participant)
-  return command === undefined ? participant : { ...participant, command }
+/** The line this agent becomes in the skill — shown verbatim in the UI. */
+function withCommand(agent) {
+  const command = agentCommand(agent)
+  return command === undefined ? agent : { ...agent, command }
 }
 
 function readBody(request) {
@@ -222,34 +222,34 @@ export async function startUiServer(env) {
       if (request.method === 'GET' && url.pathname === '/') {
         return send(200, PAGE(token), 'text/html; charset=utf-8')
       }
-      if (request.method === 'GET' && url.pathname === '/api/participants') {
+      if (request.method === 'GET' && url.pathname === '/api/agents') {
         return send(200, {
-          participants: listParticipants(env).map(withCommand),
-          drift: participantDrift(env),
-          runtimes: RUNTIMES,
+          agents: listAgents(env).map(withCommand),
+          drift: agentDrift(env),
+          harnesss: HARNESSES,
           catalog: Object.fromEntries(
-            Object.entries(CATALOG).map(([runtime, entries]) => [
-              runtime,
-              entries.map((entry) => withCommand({ ...entry, runtime })),
+            Object.entries(CATALOG).map(([harness, entries]) => [
+              harness,
+              entries.map((entry) => withCommand({ ...entry, harness })),
             ]),
           ),
           efforts: EFFORTS,
         })
       }
-      if (request.method === 'POST' && url.pathname === '/api/participants/sync') {
+      if (request.method === 'POST' && url.pathname === '/api/agents/sync') {
         // A named operation, like every other one here: it re-resolves
-        // catalog-backed participants and nothing else.
+        // catalog-backed agents and nothing else.
         const body = JSON.parse((await readBody(request)) || '{}')
-        const applied = syncParticipants(env, {
+        const applied = syncAgents(env, {
           ...(typeof body.name === 'string' ? { name: body.name } : {}),
         })
         if (applied.length > 0) refreshInstalledSkill(env)
-        return send(200, { applied, participants: listParticipants(env).map(withCommand) })
+        return send(200, { applied, agents: listAgents(env).map(withCommand) })
       }
-      if (request.method === 'POST' && url.pathname === '/api/participants') {
-        const added = addParticipant(JSON.parse(await readBody(request)), env)
+      if (request.method === 'POST' && url.pathname === '/api/agents') {
+        const added = addAgent(JSON.parse(await readBody(request)), env)
         refreshInstalledSkill(env)
-        return send(201, { participant: added })
+        return send(201, { agent: added })
       }
       if (request.method === 'GET' && url.pathname === '/api/system') {
         return send(200, systemState(env))
@@ -293,14 +293,14 @@ export async function startUiServer(env) {
         return send(200, { report: uninstallSkills(env, { force: body.force === true }) })
       }
 
-      const named = /^\/api\/participants\/([a-z][a-z0-9-]*)$/.exec(url.pathname)
+      const named = /^\/api\/agents\/([a-z][a-z0-9-]*)$/.exec(url.pathname)
       if (named !== null && request.method === 'PATCH') {
-        const edited = editParticipant(named[1], JSON.parse(await readBody(request)), env)
+        const edited = editAgent(named[1], JSON.parse(await readBody(request)), env)
         refreshInstalledSkill(env)
-        return send(200, { participant: edited })
+        return send(200, { agent: edited })
       }
       if (named !== null && request.method === 'DELETE') {
-        removeParticipant(named[1], env)
+        removeAgent(named[1], env)
         refreshInstalledSkill(env)
         reply.writeHead(204)
         return reply.end()
@@ -404,8 +404,8 @@ const PAGE = (token) => `<!DOCTYPE html>
   .eyebrow--tool { margin: 22px 0 4px; }
   .eyebrow--tool::after { display: none; }
 
-  /* A participant IS a command: the callsign names it, the line below is
-     exactly what lands in the skill and exactly what an agent will run. */
+  /* An agent IS a command: the callsign names it, the line below is
+     exactly what lands in the skill and exactly what an harness will run. */
   .member { border-top: 1px solid var(--line); padding: 14px 0; display: grid; gap: 8px; }
   /* Grid children default to min-width:auto, so a long command line would
      stretch the row and push the controls off the page instead of scrolling. */
@@ -496,8 +496,8 @@ const PAGE = (token) => `<!DOCTYPE html>
 <body>
 <main>
   <p class="mark"><span>consensflow</span> <span id="version"></span></p>
-  <h1>Your participants</h1>
-  <p class="lede" id="lede">Each one is a real coding-agent CLI. Every change here rewrites the skill installed in your agents, so they can consult it by name.</p>
+  <h1>Your agents</h1>
+  <p class="lede" id="lede">Each one is a real coding-harness CLI. Every change here rewrites the skill installed in your harnesses, so they can consult it by name.</p>
 
   <section id="roster"></section>
 
@@ -522,11 +522,11 @@ const PAGE = (token) => `<!DOCTYPE html>
   <p class="eyebrow eyebrow--section">Define your own</p>
   <form id="add">
     <input name="name" placeholder="callsign, lowercase" required>
-    <select name="runtime"></select>
-    <input class="full" name="model" placeholder="model — anything this runtime accepts" required>
+    <select name="harness"></select>
+    <input class="full" name="model" placeholder="model — anything this harness accepts" required>
     <input name="effort" list="effort-options" placeholder="effort (optional)">
     <datalist id="effort-options"></datalist>
-    <button class="primary">Add participant</button>
+    <button class="primary">Add agent</button>
     <p id="error" class="alert full"></p>
   </form>
 </main>
@@ -560,37 +560,37 @@ function renderCommand(entry) {
 function renderRoster(data) {
   const host = document.querySelector('#roster');
   host.innerHTML = '';
-  document.querySelector('#lede').textContent = data.participants.length === 0
-    ? 'Each one is a real coding-agent CLI. Add the first and the skill installs itself into every agent you have.'
-    : 'Each one is a real coding-agent CLI. Every change here rewrites the skill installed in your agents, so they can consult it by name.';
+  document.querySelector('#lede').textContent = data.agents.length === 0
+    ? 'Each one is a real coding-harness CLI. Add the first and the skill installs itself into every harness you have.'
+    : 'Each one is a real coding-harness CLI. Every change here rewrites the skill installed in your harnesses, so they can consult it by name.';
 
-  if (data.participants.length === 0) {
-    host.appendChild(el('p', 'empty', 'No participants yet. Take a ready-made one below, or define your own.'));
+  if (data.agents.length === 0) {
+    host.appendChild(el('p', 'empty', 'No agents yet. Take a ready-made one below, or define your own.'));
     return;
   }
   if ((data.drift ?? []).length > 1) {
     const all = el('div', 'member');
     const line = el('p', 'member__drift');
-    line.append(el('span', 'tag tag--moved', data.drift.length + ' participants moved'));
+    line.append(el('span', 'tag tag--moved', data.drift.length + ' agents moved'));
     line.append(el('span', null, ' the catalog has newer models for them '));
     const update = el('button', null, 'Update all');
-    update.onclick = () => post('/api/participants/sync', {}, 'Updating…');
+    update.onclick = () => post('/api/agents/sync', {}, 'Updating…');
     line.append(update);
     all.append(line);
     host.append(all);
   }
-  for (const p of data.participants) {
+  for (const p of data.agents) {
     const card = el('div', 'member');
     const head = el('div', 'member__head');
     head.append(el('span', 'callsign', p.name));
-    head.append(el('span', 'tag', p.runtime + (p.effort ? ' · ' + p.effort : '')));
+    head.append(el('span', 'tag', p.harness + (p.effort ? ' · ' + p.effort : '')));
     head.append(el('span', 'spacer'));
     const edit = el('button', null, 'Edit');
     edit.onclick = () => openEditor(card, p);
     head.append(edit);
     const remove = el('button', 'danger', 'Remove');
     remove.onclick = async () => {
-      await fetch('/api/participants/' + p.name, { method: 'DELETE', headers });
+      await fetch('/api/agents/' + p.name, { method: 'DELETE', headers });
       load();
     };
     head.append(remove);
@@ -602,25 +602,25 @@ function renderRoster(data) {
       note.append(el('span', null, ' ' + moved.changes
         .map((c) => c.field + ': ' + (c.from ?? '-') + ' → ' + (c.to ?? '-')).join(', ') + ' '));
       const update = el('button', null, 'Update');
-      update.onclick = () => post('/api/participants/sync', { name: p.name }, 'Updating ' + p.name + '…');
+      update.onclick = () => post('/api/agents/sync', { name: p.name }, 'Updating ' + p.name + '…');
       note.append(update);
       card.append(note);
     }
     if (p.description) card.append(el('p', 'member__desc', p.description));
     if (p.command) card.append(renderCommand(p));
-    else card.append(el('p', 'member__desc', p.runtime + ' participants are not run by this tool — it leaves them alone.'));
+    else card.append(el('p', 'member__desc', p.harness + ' agents are not run by this tool — it leaves them alone.'));
     host.append(card);
   }
 }
 
-/** Editing a participant is changing its model, effort or description. */
-function openEditor(card, participant) {
+/** Editing an agent is changing its model, effort or description. */
+function openEditor(card, agent) {
   if (card.querySelector('form')) return;
   const form = el('form', 'form');
   const fields = [
-    ['model', participant.model, 'model'],
-    ['effort', participant.effort ?? '', 'effort (blank for none)'],
-    ['description', participant.description ?? '', 'description'],
+    ['model', agent.model, 'model'],
+    ['effort', agent.effort ?? '', 'effort (blank for none)'],
+    ['description', agent.description ?? '', 'description'],
   ];
   for (const [name, value, placeholder] of fields) {
     const input = document.createElement('input');
@@ -639,7 +639,7 @@ function openEditor(card, participant) {
   form.onsubmit = async (event) => {
     event.preventDefault();
     const entries = Object.fromEntries(new FormData(form).entries());
-    const res = await fetch('/api/participants/' + participant.name, {
+    const res = await fetch('/api/agents/' + agent.name, {
       method: 'PATCH',
       headers,
       body: JSON.stringify(entries),
@@ -651,21 +651,21 @@ function openEditor(card, participant) {
 }
 
 function renderCatalog(data) {
-  const taken = new Set(data.participants.map((p) => p.name));
+  const taken = new Set(data.agents.map((p) => p.name));
   const host = document.querySelector('#catalog');
   const needle = (document.querySelector('#catalog-filter').value || '').trim().toLowerCase();
-  const matches = (entry, runtime) => needle.length === 0 ||
-    [entry.name, entry.model, entry.description, entry.detail, runtime]
+  const matches = (entry, harness) => needle.length === 0 ||
+    [entry.name, entry.model, entry.description, entry.detail, harness]
       .filter(Boolean).join(' ').toLowerCase().includes(needle);
   host.innerHTML = '';
   let shown = 0, free = 0;
-  for (const [runtime, entries] of Object.entries(data.catalog)) {
+  for (const [harness, entries] of Object.entries(data.catalog)) {
     free += entries.filter((e) => !taken.has(e.name)).length;
-    const available = entries.filter((e) => !taken.has(e.name) && matches(e, runtime));
+    const available = entries.filter((e) => !taken.has(e.name) && matches(e, harness));
     if (available.length === 0) continue;
     shown += available.length;
     const group = el('section');
-    group.append(el('p', 'eyebrow eyebrow--tool', runtime + ' · ' + available.length));
+    group.append(el('p', 'eyebrow eyebrow--tool', harness + ' · ' + available.length));
     for (const entry of available) {
       const row = el('div', 'offer');
       row.append(el('span', 'offer__name', entry.name));
@@ -675,10 +675,10 @@ function renderCatalog(data) {
       row.append(el('span', 'offer__model', entry.model + (entry.effort ? ' · ' + entry.effort : '')));
       const add = el('button', null, 'Add');
       add.onclick = async () => {
-        await fetch('/api/participants', {
+        await fetch('/api/agents', {
           method: 'POST', headers,
           body: JSON.stringify({
-            name: entry.name, runtime, model: entry.model,
+            name: entry.name, harness, model: entry.model,
             ...(entry.effort ? { effort: entry.effort } : {}),
             description: entry.description,
             preset: entry.preset,
@@ -696,23 +696,23 @@ function renderCatalog(data) {
     ? shown + ' of ' + free + ' shown'
     : free + ' available across every engine';
   if (shown === 0) host.append(el('p', 'note', needle.length > 0
-    ? 'No ready-made participant matches that.'
-    : 'Every ready-made participant is already on your roster.'));
+    ? 'No ready-made agent matches that.'
+    : 'Every ready-made agent is already on your roster.'));
 }
 
 function renderForm(data) {
-  const runtimeSelect = document.querySelector('select[name=runtime]');
-  if (runtimeSelect.options.length === 0) {
-    for (const r of data.runtimes) runtimeSelect.add(new Option(r, r));
-    runtimeSelect.onchange = () => showEfforts(data.efforts, runtimeSelect.value);
+  const harnessSelect = document.querySelector('select[name=harness]');
+  if (harnessSelect.options.length === 0) {
+    for (const r of data.harnesss) harnessSelect.add(new Option(r, r));
+    harnessSelect.onchange = () => showEfforts(data.efforts, harnessSelect.value);
   }
-  showEfforts(data.efforts, runtimeSelect.value);
+  showEfforts(data.efforts, harnessSelect.value);
 }
 
-function showEfforts(efforts, runtime) {
+function showEfforts(efforts, harness) {
   const list = document.querySelector('#effort-options');
   list.innerHTML = '';
-  for (const e of efforts[runtime] ?? []) list.appendChild(new Option(e, e));
+  for (const e of efforts[harness] ?? []) list.appendChild(new Option(e, e));
 }
 
 function renderMode(system) {
@@ -746,11 +746,11 @@ function renderMode(system) {
   }
 }
 
-/** What each agent has, given the path this machine runs. */
-function agentState(agent, mode) {
+/** What each harness has, given the path this machine runs. */
+function harnessState(harness, mode) {
   if (mode === null) return 'nothing yet';
   if (mode === 'cmux') return 'consults, via the generated skill';
-  if (agent.id === mode) return 'consults, with your conversation as context';
+  if (harness.id === mode) return 'consults, with your conversation as context';
   return 'nothing in ' + mode + ' mode';
 }
 
@@ -772,19 +772,19 @@ function renderSystem(system) {
   const list = el('dl', 'facts');
 
   const hosts = el('div');
-  for (const agent of system.agents) {
+  for (const harness of system.harnesses) {
     const line = el('div', 'host');
-    line.append(agent.id + ' ');
-    line.append(el('span', null, '— ' + agentState(agent, system.mode.current)));
+    line.append(harness.id + ' ');
+    line.append(el('span', null, '— ' + harnessState(harness, system.mode.current)));
     hosts.append(line);
   }
-  if (system.agents.length === 0) hosts.append(el('span', null, 'none on PATH'));
+  if (system.harnesses.length === 0) hosts.append(el('span', null, 'none on PATH'));
 
   const active = system.integrations.find((i) => i.active);
   const parts = [];
   if (active && active.files > 0) {
     parts.push(active.id === 'cmux'
-      ? active.files + ' agents carry the skill'
+      ? active.files + ' harnesses carry the skill'
       : active.title + ': ' + active.files + ' files wired + payload');
   }
   if (system.skills.owned > 0) parts.push(system.skills.owned + ' skill files');
@@ -793,7 +793,7 @@ function renderSystem(system) {
   if (system.skills.missing) parts.push(system.skills.missing + ' missing');
   const skills = parts.length > 0 ? parts.join(' · ') : 'nothing yet';
 
-  for (const [label, value] of [['Agents', hosts], ['Installed', skills]]) {
+  for (const [label, value] of [['Harnesses', hosts], ['Installed', skills]]) {
     const dt = el('dt', null, label);
     const dd = el('dd');
     if (typeof value === 'string') dd.textContent = value;
@@ -835,7 +835,7 @@ document.querySelector('#catalog-filter').addEventListener('input', () => {
 document.querySelector('#update').onclick = () =>
   post('/api/skills/install', {}, 'Updating…');
 document.querySelector('#off').onclick = () => {
-  if (!confirm('Turn ConsensFlow off? Every file it installed is removed and no agent will consult.')) return;
+  if (!confirm('Turn ConsensFlow off? Every file it installed is removed and no harness will consult.')) return;
   post('/api/off', { confirm: true }, 'Turning off…');
 };
 
@@ -844,7 +844,7 @@ let LAST = null;
 
 async function load() {
   const [data, system] = await Promise.all([
-    (await fetch('/api/participants', { headers })).json(),
+    (await fetch('/api/agents', { headers })).json(),
     (await fetch('/api/system', { headers })).json(),
   ]);
   LAST = data;
@@ -860,7 +860,7 @@ document.querySelector('#add').onsubmit = async (event) => {
   event.preventDefault();
   const form = new FormData(event.target);
   const body = Object.fromEntries([...form.entries()].filter(([, v]) => v !== ''));
-  const res = await fetch('/api/participants', { method: 'POST', headers, body: JSON.stringify(body) });
+  const res = await fetch('/api/agents', { method: 'POST', headers, body: JSON.stringify(body) });
   const data = await res.json();
   document.querySelector('#error').textContent = res.ok ? '' : data.error;
   if (res.ok) { event.target.reset(); load(); }

@@ -3,7 +3,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 /**
- * Every test runs against a throwaway CONSENSFLOW_HOME and throwaway agent
+ * Every test runs against a throwaway CONSENSFLOW_HOME and throwaway harness
  * homes. The env object is passed explicitly to every module call — modules
  * never read process.env on their own, which is what makes this guard airtight.
  */

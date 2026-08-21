@@ -4,7 +4,7 @@ import { slugify, stripMention } from "./utils.js";
 // Same catalog as consensflow-pi, image preset included: here pygmalion rides the Codex CLI's
 // ChatGPT login (lib/codex-auth.js) to the same gpt-image-2 backend pi reaches via its
 // openai-codex login.
-export const PARTICIPANT_PRESETS = [
+export const AGENT_PRESETS = [
   // --- Claude Fable 5 — Anthropic's most capable model (priced above Opus).
   // Muse names on claude-code; bard/storyteller names on the other engines.
   {
@@ -57,7 +57,7 @@ export const PARTICIPANT_PRESETS = [
     id: "hyperion",
     name: "Hyperion",
     label: "Codex GPT 5.6 Sol ULTRA",
-    description: "Titan of heavenly light: GPT 5.6 Sol — the flagship variant — at ultra effort (maximum reasoning with automatic task delegation), the deepest Codex participant in the catalog. Turns can run many minutes.",
+    description: "Titan of heavenly light: GPT 5.6 Sol — the flagship variant — at ultra effort (maximum reasoning with automatic task delegation), the deepest Codex agent in the catalog. Turns can run many minutes.",
     kind: "codex",
     model: "gpt-5.6-sol",
     effort: "ultra",
@@ -159,13 +159,13 @@ export const PARTICIPANT_PRESETS = [
     effort: "xhigh",
   },
 
-  // --- House team: strong default participants per engine --------------------
+  // --- House team: strong default agents per engine --------------------
   {
     preset: "zeus",
     id: "zeus",
     name: "Zeus",
     label: "Claude Code Opus 5 MAX",
-    description: "Deepest Opus-tier Claude Code participant for high-stakes architecture, implementation plans, and final checks; half the price of Fable 5, which stays the catalog ceiling (@calliope).",
+    description: "Deepest Opus-tier Claude Code agent for high-stakes architecture, implementation plans, and final checks; half the price of Fable 5, which stays the catalog ceiling (@calliope).",
     kind: "claude-code",
     model: "claude-opus-5",
     effort: "max",
@@ -175,7 +175,7 @@ export const PARTICIPANT_PRESETS = [
     id: "apollo",
     name: "Apollo",
     label: "Claude Code Opus 5 XHIGH",
-    description: "Deep but slightly cheaper/faster Claude Code participant for spec critique, design alternatives, and implementation plans.",
+    description: "Deep but slightly cheaper/faster Claude Code agent for spec critique, design alternatives, and implementation plans.",
     kind: "claude-code",
     model: "claude-opus-5",
     effort: "xhigh",
@@ -312,7 +312,7 @@ export const PARTICIPANT_PRESETS = [
     id: "hermod",
     name: "Hermod",
     label: "Claude Code Sonnet 5 MAX",
-    description: "Fast, cheap Claude Code participant (Haiku) for quick gut-checks.",
+    description: "Fast, cheap Claude Code agent (Haiku) for quick gut-checks.",
     kind: "claude-code",
     model: "claude-sonnet-5",
     effort: "max",
@@ -365,7 +365,7 @@ export const PARTICIPANT_PRESETS = [
     id: "hades",
     name: "Hades",
     label: "Pi DeepSeek V4 Pro",
-    description: "Pi-backed DeepSeek V4 Pro participant (via OpenRouter).",
+    description: "Pi-backed DeepSeek V4 Pro agent (via OpenRouter).",
     kind: "pi",
     model: "openrouter/deepseek/deepseek-v4-pro-0813",
     thinking: "high",
@@ -376,7 +376,7 @@ export const PARTICIPANT_PRESETS = [
     id: "helios",
     name: "Helios",
     label: "Pi Gemini 3.1 Pro",
-    description: "Pi-backed Google Gemini 3.1 Pro participant (via OpenRouter).",
+    description: "Pi-backed Google Gemini 3.1 Pro agent (via OpenRouter).",
     kind: "pi",
     model: "openrouter/google/gemini-3.1-pro-preview",
     thinking: "high",
@@ -387,7 +387,7 @@ export const PARTICIPANT_PRESETS = [
     id: "ares",
     name: "Ares",
     label: "Pi Grok 4.6",
-    description: "Pi-backed xAI Grok 4.6 participant (via OpenRouter).",
+    description: "Pi-backed xAI Grok 4.6 agent (via OpenRouter).",
     kind: "pi",
     model: "openrouter/x-ai/grok-4.6",
     thinking: "high",
@@ -398,7 +398,7 @@ export const PARTICIPANT_PRESETS = [
     id: "hephaestus",
     name: "Hephaestus",
     label: "Pi Qwen3.8 Max",
-    description: "Pi-backed Qwen3.8 Max participant (via OpenRouter).",
+    description: "Pi-backed Qwen3.8 Max agent (via OpenRouter).",
     kind: "pi",
     model: "openrouter/qwen/qwen3.8-max",
     thinking: "high",
@@ -409,7 +409,7 @@ export const PARTICIPANT_PRESETS = [
     id: "metis",
     name: "Metis",
     label: "Pi MiniMax M3",
-    description: "Pi-backed MiniMax M3 participant (via OpenRouter); goddess of cunning strategy for 'minimax'.",
+    description: "Pi-backed MiniMax M3 agent (via OpenRouter); goddess of cunning strategy for 'minimax'.",
     kind: "pi",
     model: "openrouter/minimax/minimax-m3",
     thinking: "high",
@@ -420,7 +420,7 @@ export const PARTICIPANT_PRESETS = [
     id: "prometheus",
     name: "Prometheus",
     label: "Pi GLM 5.3",
-    description: "Pi-backed Zhipu GLM 5.3 participant (via OpenRouter); the Titan who brought knowledge to mortals.",
+    description: "Pi-backed Zhipu GLM 5.3 agent (via OpenRouter); the Titan who brought knowledge to mortals.",
     kind: "pi",
     model: "openrouter/z-ai/glm-5.3",
     thinking: "high",
@@ -444,7 +444,7 @@ export const PARTICIPANT_PRESETS = [
     id: "odin",
     name: "Odin",
     label: "OpenCode DeepSeek V4 Pro",
-    description: "OpenCode-backed DeepSeek V4 Pro participant (via OpenRouter).",
+    description: "OpenCode-backed DeepSeek V4 Pro agent (via OpenRouter).",
     kind: "opencode",
     model: "openrouter/deepseek/deepseek-v4-pro-0813",
   },
@@ -453,7 +453,7 @@ export const PARTICIPANT_PRESETS = [
     id: "heimdall",
     name: "Heimdall",
     label: "OpenCode Gemini 3.1 Pro",
-    description: "OpenCode-backed Google Gemini 3.1 Pro participant at high variant (via OpenRouter).",
+    description: "OpenCode-backed Google Gemini 3.1 Pro agent at high variant (via OpenRouter).",
     kind: "opencode",
     model: "openrouter/google/gemini-3.1-pro-preview",
     effort: "high",
@@ -463,7 +463,7 @@ export const PARTICIPANT_PRESETS = [
     id: "thor",
     name: "Thor",
     label: "OpenCode Grok 4.6",
-    description: "OpenCode-backed xAI Grok 4.6 participant (via OpenRouter).",
+    description: "OpenCode-backed xAI Grok 4.6 agent (via OpenRouter).",
     kind: "opencode",
     model: "openrouter/x-ai/grok-4.6",
   },
@@ -472,7 +472,7 @@ export const PARTICIPANT_PRESETS = [
     id: "tyr",
     name: "Tyr",
     label: "OpenCode Qwen3.8 Max",
-    description: "OpenCode-backed Qwen3.8 Max participant (via OpenRouter).",
+    description: "OpenCode-backed Qwen3.8 Max agent (via OpenRouter).",
     kind: "opencode",
     model: "openrouter/qwen/qwen3.8-max",
   },
@@ -481,7 +481,7 @@ export const PARTICIPANT_PRESETS = [
     id: "mimir",
     name: "Mimir",
     label: "OpenCode MiniMax M3",
-    description: "OpenCode-backed MiniMax M3 participant (via OpenRouter); god of wisdom for 'minimax'.",
+    description: "OpenCode-backed MiniMax M3 agent (via OpenRouter); god of wisdom for 'minimax'.",
     kind: "opencode",
     model: "openrouter/minimax/minimax-m3",
   },
@@ -511,14 +511,14 @@ export const PARTICIPANT_PRESETS = [
 
 export function getPreset(ref) {
   const id = slugify(stripMention(ref));
-  return PARTICIPANT_PRESETS.find((preset) => preset.preset === id || preset.id === id || slugify(preset.name) === id) ?? null;
+  return AGENT_PRESETS.find((preset) => preset.preset === id || preset.id === id || slugify(preset.name) === id) ?? null;
 }
 
 export function listPresetIds() {
-  return PARTICIPANT_PRESETS.map((preset) => preset.preset);
+  return AGENT_PRESETS.map((preset) => preset.preset);
 }
 
-export function participantFromPreset(ref, overrides = {}) {
+export function agentFromPreset(ref, overrides = {}) {
   const preset = getPreset(ref);
   if (!preset) return null;
   const nameOverride = stringOverride(overrides.name);
@@ -527,7 +527,7 @@ export function participantFromPreset(ref, overrides = {}) {
   // Keep the preset's canonical id; only derive a new id when the caller renames (--name) or sets
   // an explicit id.
   const id = slugify(idOverride ?? nameOverride ?? preset.id);
-  const participant = {
+  const agent = {
     ...preset,
     ...allowedOverrides(overrides),
     preset: preset.preset,
@@ -539,15 +539,15 @@ export function participantFromPreset(ref, overrides = {}) {
     thinking: preset.thinking,
     skillsPolicy: preset.skillsPolicy,
   };
-  delete participant.label;
-  return participant;
+  delete agent.label;
+  return agent;
 }
 
 // --- Catalog drift -------------------------------------------------------
 // A roster entry snapshots its preset's engine fields, so a ConsensFlow update that ships a new
-// catalog (Opus 4.8 → Opus 5, say) does not reach participants that were already added. These
-// helpers re-resolve that: the fields below are decided entirely by the preset — participantFromPreset
-// lets only --name/--id/--cwd/--description through and there is no `participants edit` — so replacing
+// catalog (Opus 4.8 → Opus 5, say) does not reach agents that were already added. These
+// helpers re-resolve that: the fields below are decided entirely by the preset — agentFromPreset
+// lets only --name/--id/--cwd/--description through and there is no `agents edit` — so replacing
 // them with the catalog's current values is lossless.
 // `description` is deliberately NOT in this list, for two independent reasons: it is a documented
 // user override (`add <preset> --description …`), and the two hosts intentionally word a few
@@ -555,11 +555,11 @@ export function participantFromPreset(ref, overrides = {}) {
 // clobber the user's text and, worse, never converge: each host would forever see the other's
 // wording as drift and re-flag the nudge. Stale description text is cosmetic (it never reaches the
 // packet); a wrong model is not.
-// Participants with no `preset`, or whose preset has since left the catalog, are left alone.
+// Agents with no `preset`, or whose preset has since left the catalog, are left alone.
 export const PRESET_OWNED_FIELDS = ["kind", "model", "effort", "thinking", "skillsPolicy"];
 
-// normalizeParticipant() fills these in on save, so compare against the same defaults or every
-// non-pi participant reports a phantom skillsPolicy change.
+// normalizeAgent() fills these in on save, so compare against the same defaults or every
+// non-pi agent reports a phantom skillsPolicy change.
 const PRESET_FIELD_DEFAULTS = { skillsPolicy: "default" };
 
 function presetFieldValue(field, source) {
@@ -568,41 +568,41 @@ function presetFieldValue(field, source) {
   return value;
 }
 
-export function presetForParticipant(participant) {
-  return participant?.preset ? getPreset(participant.preset) : null;
+export function presetForAgent(agent) {
+  return agent?.preset ? getPreset(agent.preset) : null;
 }
 
 // True when the entry names a preset the catalog no longer carries (e.g. the GPT 5.5 presets
 // retired in 1.7.0). Those stay pinned to what they were created with — sync never touches them.
-export function isOrphanedPreset(participant) {
-  return Boolean(participant?.preset) && !getPreset(participant.preset);
+export function isOrphanedPreset(agent) {
+  return Boolean(agent?.preset) && !getPreset(agent.preset);
 }
 
-export function presetDrift(participant) {
-  const preset = presetForParticipant(participant);
+export function presetDrift(agent) {
+  const preset = presetForAgent(agent);
   if (!preset) return [];
   const changes = [];
   for (const field of PRESET_OWNED_FIELDS) {
-    const from = presetFieldValue(field, participant);
+    const from = presetFieldValue(field, agent);
     const to = presetFieldValue(field, preset);
     if (from !== to) changes.push({ field, from, to });
   }
   return changes;
 }
 
-export function syncParticipantWithPreset(participant) {
-  const changes = presetDrift(participant);
-  if (changes.length === 0) return { participant, changes };
-  const synced = { ...participant };
+export function syncAgentWithPreset(agent) {
+  const changes = presetDrift(agent);
+  if (changes.length === 0) return { agent, changes };
+  const synced = { ...agent };
   for (const { field, to } of changes) {
     if (to === undefined) delete synced[field];
     else synced[field] = to;
   }
-  return { participant: synced, changes };
+  return { agent: synced, changes };
 }
 
-export function driftedParticipants(participants) {
-  return (participants ?? []).filter((participant) => presetDrift(participant).length > 0);
+export function driftedAgents(agents) {
+  return (agents ?? []).filter((agent) => presetDrift(agent).length > 0);
 }
 
 function stringOverride(value) {
@@ -626,5 +626,5 @@ export function formatPresetLine(preset) {
 }
 
 export function formatPresets() {
-  return ["# ConsensFlow participant presets", "", ...PARTICIPANT_PRESETS.map(formatPresetLine), "", "Add one with `/consensflow:participants add <preset>`, or `/consensflow:participants add all`."].join("\n");
+  return ["# ConsensFlow agent presets", "", ...AGENT_PRESETS.map(formatPresetLine), "", "Add one with `/consensflow:agents add <preset>`, or `/consensflow:agents add all`."].join("\n");
 }

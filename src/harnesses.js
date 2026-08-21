@@ -3,9 +3,9 @@ import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
 /**
- * Where each coding agent keeps its skills, and whether it is installed here.
+ * Where each coding harness keeps its skills, and whether it is installed here.
  * Detection is "the CLI resolves on PATH" — the same test the generated
- * commands live or die by. Directories honour each agent's own override
+ * commands live or die by. Directories honour each harness's own override
  * variable, which is also what keeps tests off the real machine.
  */
 
@@ -14,15 +14,15 @@ import { delimiter, join } from 'node:path'
  * generated skill — consensflow-cc packets the live Claude Code conversation,
  * consensflow-pi does the same inside pi. Installing our skill there too
  * would put two entries with the same name and the same trigger in front of
- * one agent, competing for its skills budget. So we detect them and stand
+ * one harness, competing for its skills budget. So we detect them and stand
  * aside (`--all` overrides).
  */
 const NATIVE = {
   claude: (env) => join(home(env), '.claude', 'plugins', 'cache', 'consensflow-cc'),
-  pi: (env) => join(home(env), '.pi', 'agent', 'git', 'github.com', 'ngvoicu', 'consensflow-pi'),
+  pi: (env) => join(home(env), '.pi', 'harness', 'git', 'github.com', 'ngvoicu', 'consensflow-pi'),
 }
 
-const AGENTS = [
+const HARNESSES = [
   {
     id: 'claude',
     command: 'claude',
@@ -42,7 +42,7 @@ const AGENTS = [
   {
     id: 'pi',
     command: 'pi',
-    skillsDir: (env) => join(home(env), '.pi', 'agent', 'skills'),
+    skillsDir: (env) => join(home(env), '.pi', 'harness', 'skills'),
   },
 ]
 
@@ -65,11 +65,11 @@ function resolvesOnPath(command, env) {
   return false
 }
 
-export function detectAgents(env) {
-  return AGENTS.filter((agent) => resolvesOnPath(agent.command, env)).map((agent) => ({
-    id: agent.id,
-    command: agent.command,
-    skillsDir: agent.skillsDir(env),
-    native: NATIVE[agent.id] !== undefined && existsSync(NATIVE[agent.id](env)),
+export function detectHarnesses(env) {
+  return HARNESSES.filter((harness) => resolvesOnPath(harness.command, env)).map((harness) => ({
+    id: harness.id,
+    command: harness.command,
+    skillsDir: harness.skillsDir(env),
+    native: NATIVE[harness.id] !== undefined && existsSync(NATIVE[harness.id](env)),
   }))
 }

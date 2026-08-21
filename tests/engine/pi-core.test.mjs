@@ -13,33 +13,33 @@ import {
 } from '../../hosts/lib/image.js'
 import { createPacket } from '../../hosts/lib/packets.js'
 import {
-  driftedParticipants,
+  AGENT_PRESETS,
+  agentFromPreset,
+  driftedAgents,
   getPreset,
   listPresetIds,
-  PARTICIPANT_PRESETS,
   PRESET_OWNED_FIELDS,
-  participantFromPreset,
 } from '../../hosts/lib/presets.js'
 import {
   buildRunnerInvocation,
   normalizeProcessOutput,
-  runParticipant,
+  runAgent,
   spawnWithInput,
   toolsForPi,
 } from '../../hosts/lib/runners.js'
 import {
+  agentsPath,
   configRoot,
-  getParticipant,
-  loadParticipants,
-  normalizeParticipant,
-  participantsPath,
-  removeParticipant,
-  syncParticipantsWithPresets,
-  upsertParticipant,
+  getAgent,
+  loadAgents,
+  normalizeAgent,
+  removeAgent,
+  syncAgentsWithPresets,
+  upsertAgent,
 } from '../../hosts/lib/state.js'
 import {
+  parseAgentPrompt,
   parseOptions,
-  parseParticipantPrompt,
   resolveInside,
   slugify,
   tokenize,
@@ -84,32 +84,32 @@ test('slugify creates stable mentions', () => {
   assert.equal(slugify(' Isis  '), 'isis')
 })
 
-test('participant CRUD persists global user-level JSON', async () => {
+test('agent CRUD persists global user-level JSON', async () => {
   await withTempDir(async (cwd) => {
-    const athena = await upsertParticipant(cwd, {
+    const athena = await upsertAgent(cwd, {
       name: 'Athena',
       kind: 'codex',
       model: 'gpt-5.5',
       effort: 'xhigh',
     })
     assert.equal(athena.id, 'athena')
-    assert.equal((await getParticipant(cwd, '@athena')).model, 'gpt-5.5')
-    assert.equal((await loadParticipants(cwd)).length, 1)
-    assert.equal(await removeParticipant(cwd, 'athena'), true)
-    assert.equal((await loadParticipants(cwd)).length, 0)
+    assert.equal((await getAgent(cwd, '@athena')).model, 'gpt-5.5')
+    assert.equal((await loadAgents(cwd)).length, 1)
+    assert.equal(await removeAgent(cwd, 'athena'), true)
+    assert.equal((await loadAgents(cwd)).length, 0)
   })
 })
 
 test('createPacket is conversational, mode-aware, and carries handoff + diff', async () => {
   await withTempDir(async (cwd) => {
-    const participant = await upsertParticipant(cwd, {
+    const agent = await upsertAgent(cwd, {
       name: 'Zeus',
       kind: 'pi',
       model: 'openrouter/anthropic/claude-opus-4.7',
     })
     const packet = await createPacket({
       cwd,
-      participant,
+      agent,
       kind: 'ask',
       task: 'Review the latest changes',
       handoff: 'User:\nhi\n\nLead:\nworking on the packet',
@@ -127,15 +127,15 @@ test('createPacket is conversational, mode-aware, and carries handoff + diff', a
   })
 })
 
-test('createPacket gives write-capable participants a read-write mode line', async () => {
+test('createPacket gives write-capable agents a read-write mode line', async () => {
   await withTempDir(async (cwd) => {
-    const participant = await upsertParticipant(cwd, {
+    const agent = await upsertAgent(cwd, {
       name: 'Builder',
       kind: 'claude-code',
     })
     const packet = await createPacket({
       cwd,
-      participant,
+      agent,
       kind: 'ask',
       task: 'add a health check endpoint',
     })
@@ -145,7 +145,7 @@ test('createPacket gives write-capable participants a read-write mode line', asy
   })
 })
 
-test('participant presets expose the allowed creation list', () => {
+test('agent presets expose the allowed creation list', () => {
   assert.deepEqual(listPresetIds(), [
     'calliope',
     'clio',
@@ -198,10 +198,8 @@ test('participant presets expose the allowed creation list', () => {
   assert.equal(getPreset('gaia').model, 'gpt-5.6-terra')
   assert.equal(getPreset('endymion').thinking, 'xhigh')
   assert.equal(getPreset('pygmalion').kind, 'image')
-  // GPT 5.5 was retired in 1.7.0 — every GPT participant now runs a 5.6 variant.
-  assert.ok(
-    !PARTICIPANT_PRESETS.some((p) => p.kind !== 'image' && String(p.model).includes('gpt-5.5')),
-  )
+  // GPT 5.5 was retired in 1.7.0 — every GPT agent now runs a 5.6 variant.
+  assert.ok(!AGENT_PRESETS.some((p) => p.kind !== 'image' && String(p.model).includes('gpt-5.5')))
   // The frontier matrix: same model+effort family on every engine that runs it.
   assert.equal(getPreset('artemis').effort, 'medium')
   assert.equal(getPreset('hyperion').effort, 'ultra')
@@ -244,7 +242,7 @@ test('participant presets expose the allowed creation list', () => {
   assert.equal(getPreset('mani').model, 'openrouter/moonshotai/kimi-k3')
   assert.equal(getPreset('mani').effort, undefined)
   // Kimi K2.7 Code was retired in 1.9.0 (K3 supersedes it); Kimi is K3-only on both engines now.
-  assert.ok(!PARTICIPANT_PRESETS.some((p) => String(p.model).includes('kimi-k2')))
+  assert.ok(!AGENT_PRESETS.some((p) => String(p.model).includes('kimi-k2')))
   assert.equal(getPreset('endymion').model, 'openrouter/moonshotai/kimi-k3')
   assert.equal(getPreset('endymion').kind, 'pi')
   assert.equal(getPreset('mani').model, 'openrouter/moonshotai/kimi-k3')
@@ -269,22 +267,22 @@ test('participant presets expose the allowed creation list', () => {
   assert.equal(getPreset('euterpe').effort, 'high')
   assert.equal(getPreset('linus').thinking, 'high')
   assert.equal(getPreset('gunnlod').effort, 'high')
-  const mani = participantFromPreset('mani', { cwd: 'frontend' })
+  const mani = agentFromPreset('mani', { cwd: 'frontend' })
   assert.equal(mani.id, 'mani')
   assert.equal(mani.name, 'Mani')
   assert.equal(mani.cwd, 'frontend')
-  assert.equal(participantFromPreset('custom'), null)
+  assert.equal(agentFromPreset('custom'), null)
 })
 
 // The selene/daedalus duplicate (same engine + model + tier under two names) sat in the catalog
 // unnoticed until 1.9.0 retired it. Pin the structural invariants so the next one is caught here.
 test('catalog invariants: unique mentions, no duplicate backends', () => {
-  const ids = PARTICIPANT_PRESETS.map((preset) => preset.preset)
+  const ids = AGENT_PRESETS.map((preset) => preset.preset)
   assert.equal(new Set(ids).size, ids.length, 'preset ids are unique')
-  // getParticipant resolves an @ref by id OR slugified name, so one preset's name slug must never
-  // shadow another's id (same rule state.js enforces on the roster via assertUniqueParticipants).
+  // getAgent resolves an @ref by id OR slugified name, so one preset's name slug must never
+  // shadow another's id (same rule state.js enforces on the roster via assertUniqueAgents).
   const claimed = new Map()
-  for (const preset of PARTICIPANT_PRESETS) {
+  for (const preset of AGENT_PRESETS) {
     for (const mention of new Set([preset.id, slugify(preset.name)].filter(Boolean))) {
       assert.ok(
         !claimed.has(mention),
@@ -293,7 +291,7 @@ test('catalog invariants: unique mentions, no duplicate backends', () => {
       claimed.set(mention, preset.preset)
     }
   }
-  const backends = PARTICIPANT_PRESETS.map((preset) =>
+  const backends = AGENT_PRESETS.map((preset) =>
     [preset.kind, preset.model, preset.effort ?? '', preset.thinking ?? ''].join('|'),
   )
   assert.deepEqual(
@@ -302,28 +300,25 @@ test('catalog invariants: unique mentions, no duplicate backends', () => {
     'no two presets share an identical engine+model+tier',
   )
   assert.equal(
-    PARTICIPANT_PRESETS.length,
-    new Set(PARTICIPANT_PRESETS.map((p) => p.label)).size,
+    AGENT_PRESETS.length,
+    new Set(AGENT_PRESETS.map((p) => p.label)).size,
     'labels are unique too',
   )
 })
 
 test('every preset survives normalize + runner invocation with correct flags (all models × all engines)', () => {
   const KIND_COMMAND = { pi: 'pi', 'claude-code': 'claude', codex: 'codex', opencode: 'opencode' }
-  for (const preset of PARTICIPANT_PRESETS) {
-    const participant = normalizeParticipant(participantFromPreset(preset.preset))
-    assert.equal(participant.id, preset.id, `${preset.preset}: id survives the pipeline`)
-    assert.equal(participant.kind, preset.kind, `${preset.preset}: kind`)
-    assert.equal(participant.model, preset.model, `${preset.preset}: model`)
+  for (const preset of AGENT_PRESETS) {
+    const agent = normalizeAgent(agentFromPreset(preset.preset))
+    assert.equal(agent.id, preset.id, `${preset.preset}: id survives the pipeline`)
+    assert.equal(agent.kind, preset.kind, `${preset.preset}: kind`)
+    assert.equal(agent.model, preset.model, `${preset.preset}: model`)
 
     if (preset.kind === 'image') {
-      assert.throws(
-        () => buildRunnerInvocation(participant, '/tmp/packet.md', '/repo'),
-        /image participants/,
-      )
+      assert.throws(() => buildRunnerInvocation(agent, '/tmp/packet.md', '/repo'), /image agents/)
       continue
     }
-    const invocation = buildRunnerInvocation(participant, '/tmp/packet.md', '/repo')
+    const invocation = buildRunnerInvocation(agent, '/tmp/packet.md', '/repo')
     assert.equal(invocation.command, KIND_COMMAND[preset.kind], `${preset.preset}: engine command`)
     const modelIdx = invocation.args.indexOf(preset.model)
     assert.ok(modelIdx > 0, `${preset.preset}: model reaches the args`)
@@ -463,7 +458,7 @@ test('every engine runs with full permissions: no sandbox, no allowlist, no prom
       )
     }
   }
-  // Billing guard: participant runs ride the configured logins, not a stray env API key.
+  // Billing guard: agent runs ride the configured logins, not a stray env API key.
   assert.deepEqual(claude.dropEnv, ['ANTHROPIC_API_KEY'])
   assert.deepEqual(codex.dropEnv, ['OPENAI_API_KEY'])
 })
@@ -551,89 +546,88 @@ test('spawnWithInput streams complete stdout lines via onStdoutLine: carry acros
   })
 })
 
-test('a participant carries no permission field at all', () => {
-  // The permission concept was removed 2026-08-20: participants run with the
+test('an agent carries no permission field at all', () => {
+  // The permission concept was removed 2026-08-20: agents run with the
   // engine CLI's own defaults, so there is nothing to store and nothing to
   // escalate. A legacy value on an old roster row is simply not read.
-  const p = normalizeParticipant({ name: 'Y', kind: 'codex' })
+  const p = normalizeAgent({ name: 'Y', kind: 'codex' })
   assert.equal(p.toolsPolicy, undefined)
-  const legacy = normalizeParticipant({ name: 'Z', kind: 'codex', toolsPolicy: 'full-auto' })
+  const legacy = normalizeAgent({ name: 'Z', kind: 'codex', toolsPolicy: 'full-auto' })
   assert.equal(legacy.toolsPolicy, undefined)
 })
 
-test('participantsPath and artifact root live directly under the shared ConsensFlow home [STRM-27]', async () => {
+test('agentsPath and artifact root live directly under the shared ConsensFlow home [STRM-27]', async () => {
   await withTempDir(async (cwd) => {
     const home = process.env.CONSENSFLOW_HOME
     assert.equal(configRoot(), home)
-    assert.equal(participantsPath(cwd), path.join(home, 'participants.json'))
+    assert.equal(agentsPath(cwd), path.join(home, 'agents.json'))
     assert.ok(
-      !participantsPath(cwd).includes('consensflow-cc') &&
-        !participantsPath(cwd).includes('consensflow-pi'),
+      !agentsPath(cwd).includes('consensflow-cc') && !agentsPath(cwd).includes('consensflow-pi'),
       'roster not under a per-tool subdir',
     )
 
-    await upsertParticipant(cwd, { name: 'Shared', kind: 'codex', model: 'gpt-5.5' })
+    await upsertAgent(cwd, { name: 'Shared', kind: 'codex', model: 'gpt-5.5' })
     assert.equal(
-      JSON.parse(await readFile(path.join(home, 'participants.json'), 'utf8')).participants.length,
+      JSON.parse(await readFile(path.join(home, 'agents.json'), 'utf8')).agents.length,
       1,
     )
-    assert.equal((await getParticipant(cwd, '@shared')).model, 'gpt-5.5')
+    assert.equal((await getAgent(cwd, '@shared')).model, 'gpt-5.5')
   })
 })
 
-test('legacy per-tool participant files migrate once when the shared root file is missing [STRM-27]', async () => {
+test('legacy per-tool agent files migrate once when the shared root file is missing [STRM-27]', async () => {
   await withTempDir(async (cwd) => {
     const home = process.env.CONSENSFLOW_HOME
     await mkdir(path.join(home, 'consensflow-pi'), { recursive: true })
     await writeFile(
-      path.join(home, 'consensflow-pi', 'participants.json'),
+      path.join(home, 'consensflow-pi', 'agents.json'),
       JSON.stringify({
         schemaVersion: 1,
-        participants: [{ id: 'pi-only', name: 'Pi Only', kind: 'pi' }],
+        agents: [{ id: 'pi-only', name: 'Pi Only', kind: 'pi' }],
       }),
       'utf8',
     )
     await mkdir(path.join(home, 'consensflow-cc'), { recursive: true })
     await writeFile(
-      path.join(home, 'consensflow-cc', 'participants.json'),
+      path.join(home, 'consensflow-cc', 'agents.json'),
       JSON.stringify({
         schemaVersion: 1,
-        participants: [{ id: 'cc-only', name: 'CC Only', kind: 'claude-code' }],
+        agents: [{ id: 'cc-only', name: 'CC Only', kind: 'claude-code' }],
       }),
       'utf8',
     )
 
-    assert.deepEqual((await loadParticipants(cwd)).map((p) => p.id).sort(), ['cc-only', 'pi-only'])
-    const root = JSON.parse(await readFile(path.join(home, 'participants.json'), 'utf8'))
-    assert.deepEqual(root.participants.map((p) => p.id).sort(), ['cc-only', 'pi-only'])
-    assert.equal((await getParticipant(cwd, '@cc-only')).kind, 'claude-code')
+    assert.deepEqual((await loadAgents(cwd)).map((p) => p.id).sort(), ['cc-only', 'pi-only'])
+    const root = JSON.parse(await readFile(path.join(home, 'agents.json'), 'utf8'))
+    assert.deepEqual(root.agents.map((p) => p.id).sort(), ['cc-only', 'pi-only'])
+    assert.equal((await getAgent(cwd, '@cc-only')).kind, 'claude-code')
 
     // After the shared file exists, legacy files are ignored; root remains authoritative.
     await writeFile(
-      path.join(home, 'consensflow-cc', 'participants.json'),
+      path.join(home, 'consensflow-cc', 'agents.json'),
       JSON.stringify({
         schemaVersion: 1,
-        participants: [{ id: 'ghost', name: 'Ghost', kind: 'codex' }],
+        agents: [{ id: 'ghost', name: 'Ghost', kind: 'codex' }],
       }),
       'utf8',
     )
-    assert.equal(await getParticipant(cwd, '@ghost'), null)
-    await upsertParticipant(cwd, { name: 'Root Only', kind: 'opencode', model: 'openrouter/test' })
-    assert.deepEqual((await loadParticipants(cwd)).map((p) => p.id).sort(), [
+    assert.equal(await getAgent(cwd, '@ghost'), null)
+    await upsertAgent(cwd, { name: 'Root Only', kind: 'opencode', model: 'openrouter/test' })
+    assert.deepEqual((await loadAgents(cwd)).map((p) => p.id).sort(), [
       'cc-only',
       'pi-only',
       'root-only',
     ])
-    assert.equal((await getParticipant(cwd, '@root-only')).model, 'openrouter/test')
+    assert.equal((await getAgent(cwd, '@root-only')).model, 'openrouter/test')
   })
 })
 
-test('runParticipant rejects participant cwd that escapes workspace before spawning', async () => {
+test('runAgent rejects agent cwd that escapes workspace before spawning', async () => {
   await withTempDir(async (cwd) => {
     await assert.rejects(
-      runParticipant({
+      runAgent({
         cwd,
-        participant: { id: 'bad', name: 'Bad', kind: 'pi', cwd: '../outside' },
+        agent: { id: 'bad', name: 'Bad', kind: 'pi', cwd: '../outside' },
         packet: '# Packet',
         kind: 'ask',
       }),
@@ -664,7 +658,7 @@ test('normalizeProcessOutput parses Claude JSON event array result', () => {
   assert.equal(out.output, 'CLAUDE FINAL')
 })
 
-test('normalizeProcessOutput parses Codex JSONL agent message text', () => {
+test('normalizeProcessOutput parses Codex JSONL harness message text', () => {
   const stdout = [
     JSON.stringify({ type: 'thread.started', thread_id: 't' }),
     JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'draft' } }),
@@ -752,15 +746,15 @@ test('normalizeProcessOutput: OpenCode concats ordered text parts, never the tra
   assert.equal(normalizeProcessOutput('opencode', multi, '').output, 'Hello world')
 })
 
-test('participantFromPreset can rename while keeping the backend', () => {
-  const renamed = participantFromPreset('zeus', { name: 'Deepreview' })
+test('agentFromPreset can rename while keeping the backend', () => {
+  const renamed = agentFromPreset('zeus', { name: 'Deepreview' })
   assert.equal(renamed.id, 'deepreview')
   assert.equal(renamed.name, 'Deepreview')
   assert.equal(renamed.kind, 'claude-code')
   assert.equal(renamed.model, 'claude-opus-5')
   assert.equal(renamed.preset, 'zeus')
   // Without a rename, the canonical preset id and name are kept.
-  const mani = participantFromPreset('mani')
+  const mani = agentFromPreset('mani')
   assert.equal(mani.id, 'mani')
   assert.equal(mani.name, 'Mani')
 })
@@ -844,7 +838,7 @@ test('serializeTranscript honors the CONSENSFLOW_HANDOFF_MAX_BYTES env budget wh
   }
 })
 
-test('serializeTranscript surfaces prior ConsensFlow participant exchanges (cross-pollination)', () => {
+test('serializeTranscript surfaces prior ConsensFlow agent exchanges (cross-pollination)', () => {
   const branch = [
     { type: 'message', id: '0', message: { role: 'user', content: "let's design the cache" } },
     {
@@ -852,7 +846,7 @@ test('serializeTranscript surfaces prior ConsensFlow participant exchanges (cros
       id: '1-stream',
       customType: 'consensflow',
       content: '→ read({"path":"cache.ts"})',
-      details: { streamEvent: true, participant: { id: 'iris' } },
+      details: { streamEvent: true, agent: { id: 'iris' } },
     },
     {
       type: 'custom_message',
@@ -860,7 +854,7 @@ test('serializeTranscript surfaces prior ConsensFlow participant exchanges (cros
       customType: 'consensflow',
       content: '# @iris\n\nRun: ask-123\nExit: 0\n\nUse a write-through cache.',
       details: {
-        participant: { id: 'iris' },
+        agent: { id: 'iris' },
         prompt: 'which cache strategy?',
         output: 'Use a write-through cache.',
       },
@@ -870,12 +864,12 @@ test('serializeTranscript surfaces prior ConsensFlow participant exchanges (cros
   assert.match(text, /User → @iris: which cache strategy\?/)
   assert.match(text, /@iris replied:\nUse a write-through cache\./)
   // The run-metadata noise from the rendered message is not used when structured details exist;
-  // live stream crumbs are display-only and do not cross-pollinate later participant handoffs.
+  // live stream crumbs are display-only and do not cross-pollinate later agent handoffs.
   assert.doesNotMatch(text, /Run: ask-123/)
   assert.doesNotMatch(text, /cache\.ts/)
 })
 
-test('serializeTranscript keeps cf_run_participant tool results near-whole (lead-initiated cross-pollination)', () => {
+test('serializeTranscript keeps cf_run_agent tool results near-whole (lead-initiated cross-pollination)', () => {
   const reply = 'A'.repeat(5000)
   const branch = [
     {
@@ -883,7 +877,7 @@ test('serializeTranscript keeps cf_run_participant tool results near-whole (lead
       id: '1',
       message: {
         role: 'toolResult',
-        toolName: 'cf_run_participant',
+        toolName: 'cf_run_agent',
         content: [{ type: 'text', text: reply }],
       },
     },
@@ -899,43 +893,43 @@ test('serializeTranscript keeps cf_run_participant tool results near-whole (lead
   assert.match(text, /Tool result read:\nA{1500}…\[truncated\]/)
 })
 
-test('parseParticipantPrompt routes one mention anywhere, and never hijacks stray @tokens', () => {
+test('parseAgentPrompt routes one mention anywhere, and never hijacks stray @tokens', () => {
   const known = new Set(['zeus', 'athena'])
   // Leading and trailing single mention are equivalent (the headline fix).
-  assert.deepEqual(parseParticipantPrompt(['@zeus', 'hi'], known), {
-    participant: 'zeus',
+  assert.deepEqual(parseAgentPrompt(['@zeus', 'hi'], known), {
+    agent: 'zeus',
     prompt: 'hi',
   })
-  assert.deepEqual(parseParticipantPrompt(['hi', '@zeus'], known), {
-    participant: 'zeus',
+  assert.deepEqual(parseAgentPrompt(['hi', '@zeus'], known), {
+    agent: 'zeus',
     prompt: 'hi',
   })
-  assert.deepEqual(parseParticipantPrompt(['summarize', '@zeus', 'please'], known), {
-    participant: 'zeus',
+  assert.deepEqual(parseAgentPrompt(['summarize', '@zeus', 'please'], known), {
+    agent: 'zeus',
     prompt: 'summarize please',
   })
-  // "ask"/"to" verb prefix still addresses a leading participant.
-  assert.deepEqual(parseParticipantPrompt(['ask', '@athena', 'review'], known), {
-    participant: 'athena',
+  // "ask"/"to" verb prefix still addresses a leading agent.
+  assert.deepEqual(parseAgentPrompt(['ask', '@athena', 'review'], known), {
+    agent: 'athena',
     prompt: 'review',
   })
   // A leading mention wins and later @names stay as quoted text (paste-prior-output intact).
-  assert.deepEqual(parseParticipantPrompt(['@athena', 'agree', 'with', '@zeus?'], known), {
-    participant: 'athena',
+  assert.deepEqual(parseAgentPrompt(['@athena', 'agree', 'with', '@zeus?'], known), {
+    agent: 'athena',
     prompt: 'agree with @zeus?',
   })
   // Multiple leading mentions are rejected.
-  assert.ok(parseParticipantPrompt(['@zeus', '@athena', 'hi'], known)?.error)
-  // A stray non-leading @token that is not a participant goes to the lead, not a subprocess.
-  assert.equal(parseParticipantPrompt(['install', '@types/node', 'now'], known), null)
-  // Two different participants, none leading -> ambiguous, lead handles.
-  assert.equal(parseParticipantPrompt(['compare', '@zeus', 'and', '@athena'], known), null)
+  assert.ok(parseAgentPrompt(['@zeus', '@athena', 'hi'], known)?.error)
+  // A stray non-leading @token that is not an agent goes to the lead, not a subprocess.
+  assert.equal(parseAgentPrompt(['install', '@types/node', 'now'], known), null)
+  // Two different agents, none leading -> ambiguous, lead handles.
+  assert.equal(parseAgentPrompt(['compare', '@zeus', 'and', '@athena'], known), null)
   // No mention at all.
-  assert.equal(parseParticipantPrompt(['just', 'fix', 'the', 'bug'], known), null)
+  assert.equal(parseAgentPrompt(['just', 'fix', 'the', 'bug'], known), null)
   // Leading mention without a prompt errors helpfully.
-  assert.ok(parseParticipantPrompt(['@zeus'], known)?.error)
+  assert.ok(parseAgentPrompt(['@zeus'], known)?.error)
   // Without a known-set, a non-leading mention does not route (conservative default).
-  assert.equal(parseParticipantPrompt(['hi', '@zeus']), null)
+  assert.equal(parseAgentPrompt(['hi', '@zeus']), null)
 })
 
 test('image helpers: JWT account id, request body, SSE extraction, PNG save', async () => {
@@ -1022,23 +1016,23 @@ test('reference images: imageFileToDataUrl encodes by extension; rejects unknown
   })
 })
 
-test('parseParticipantPrompt: ask/to verb prefixes and the ask-noise boundary', () => {
+test('parseAgentPrompt: ask/to verb prefixes and the ask-noise boundary', () => {
   const known = new Set(['zeus', 'athena'])
-  // The "to" verb addresses a leading participant.
-  assert.deepEqual(parseParticipantPrompt(['to', '@zeus', 'hi'], known), {
-    participant: 'zeus',
+  // The "to" verb addresses a leading agent.
+  assert.deepEqual(parseAgentPrompt(['to', '@zeus', 'hi'], known), {
+    agent: 'zeus',
     prompt: 'hi',
   })
   // A leading address routes even when the name is not in the known set (explicit address wins).
-  assert.deepEqual(parseParticipantPrompt(['ask', '@ghost', 'hi'], known), {
-    participant: 'ghost',
+  assert.deepEqual(parseAgentPrompt(['ask', '@ghost', 'hi'], known), {
+    agent: 'ghost',
     prompt: 'hi',
   })
   // "ask <english-verb> @types/..." is not an address: the @token is unknown -> stays with the lead.
-  assert.equal(parseParticipantPrompt(['ask', 'fix', '@types/node', 'please'], known), null)
+  assert.equal(parseAgentPrompt(['ask', 'fix', '@types/node', 'please'], known), null)
 })
 
-test('the cf_run_participant consent gate and name-neutrality stay locked in the extension source', async () => {
+test('the cf_run_agent consent gate and name-neutrality stay locked in the extension source', async () => {
   const src = await readFile(new URL('../../hosts/pi/index.ts', import.meta.url), 'utf8')
   // The consent gate must stay in the tool description + promptSnippet (its load-bearing home).
   assert.match(src, /do NOT apply/)
@@ -1049,10 +1043,10 @@ test('the cf_run_participant consent gate and name-neutrality stay locked in the
   // No hidden-workflow commands should be registered (match the command registration form only).
   assert.doesNotMatch(src, /registerCommand\("(grill|spec-review|council|handoff)"/)
   // Pi intentionally matches Claude Code's slash surface: only /consensflow:* commands, no
-  // legacy /cf, /participants, or per-participant /<name> command registration.
+  // legacy /cf, /agents, or per-agent /<name> command registration.
   assert.doesNotMatch(src, /name:\s*"cf"/)
-  assert.doesNotMatch(src, /name:\s*"participants"/)
-  assert.doesNotMatch(src, /registerParticipantCommands/)
+  assert.doesNotMatch(src, /name:\s*"agents"/)
+  assert.doesNotMatch(src, /registerAgentCommands/)
   assert.match(src, /name:\s*"consensflow:cf"/)
 })
 
@@ -1080,10 +1074,10 @@ test('every lib symbol the extension imports is actually exported (boundary smok
 })
 
 test('image path safety: runner backstop throws and extractImageFromEvents handles failure/empty', () => {
-  // The runner must never spawn a CLI for an image participant.
+  // The runner must never spawn a CLI for an image agent.
   assert.throws(
     () => buildRunnerInvocation({ kind: 'image', model: 'gpt-5.5' }, '/tmp/packet.md', '/tmp'),
-    /image participants are generated/,
+    /image agents are generated/,
   )
   // response.failed surfaces the error message.
   assert.throws(
@@ -1118,12 +1112,12 @@ test('resolveInside rejects symlinked escapes, not just lexical ../ ones', async
 })
 
 // The roster snapshots a preset's engine fields, so a ConsensFlow update that ships a new catalog
-// (Opus 4.8 -> Opus 5) does not reach participants added under the old one. `participants sync`
+// (Opus 4.8 -> Opus 5) does not reach agents added under the old one. `agents sync`
 // re-resolves them; this pins down exactly what it may and may not touch.
-test('participants sync re-resolves preset-backed entries and leaves everything else pinned', async () => {
+test('agents sync re-resolves preset-backed entries and leaves everything else pinned', async () => {
   await withTempDir(async (dir) => {
     // Added under an older catalog: stale model + effort, plus a rename and a cwd to preserve.
-    await upsertParticipant(dir, {
+    await upsertAgent(dir, {
       name: 'Deepreview',
       id: 'deepreview',
       kind: 'claude-code',
@@ -1133,34 +1127,34 @@ test('participants sync re-resolves preset-backed entries and leaves everything 
       preset: 'zeus',
       description: 'stale text from an older catalog',
     })
-    // A hand-rolled participant: no preset, so sync must never rewrite it.
-    await upsertParticipant(dir, {
+    // A hand-rolled agent: no preset, so sync must never rewrite it.
+    await upsertAgent(dir, {
       name: 'Builder',
       kind: 'codex',
       model: 'my-own-model',
       effort: 'high',
     })
     // Names a preset the catalog no longer carries — stays pinned to what it was created with.
-    await upsertParticipant(dir, {
+    await upsertAgent(dir, {
       name: 'Ghost',
       kind: 'codex',
       model: 'gpt-5.5',
       effort: 'xhigh',
       preset: 'retired-preset',
     })
-    const current = await upsertParticipant(dir, participantFromPreset('nike'))
+    const current = await upsertAgent(dir, agentFromPreset('nike'))
 
-    const preview = await syncParticipantsWithPresets(dir, { dryRun: true })
+    const preview = await syncAgentsWithPresets(dir, { dryRun: true })
     assert.equal(preview.synced.length, 1, 'only the drifted preset-backed entry is reported')
     assert.equal(preview.synced[0].id, 'deepreview')
     assert.deepEqual(preview.orphans, ['@ghost'])
     assert.equal(
-      (await getParticipant(dir, '@deepreview')).model,
+      (await getAgent(dir, '@deepreview')).model,
       'claude-opus-4-8',
       'dry run writes nothing',
     )
 
-    const result = await syncParticipantsWithPresets(dir)
+    const result = await syncAgentsWithPresets(dir)
     assert.equal(result.synced.length, 1)
     const fields = result.synced[0].changes.map((change) => change.field).sort()
     assert.deepEqual(
@@ -1169,12 +1163,12 @@ test('participants sync re-resolves preset-backed entries and leaves everything 
       'engine fields only — description is a user override, never synced',
     )
 
-    const synced = await getParticipant(dir, '@deepreview')
+    const synced = await getAgent(dir, '@deepreview')
     assert.equal(synced.model, getPreset('zeus').model, 'model tracks the catalog')
     assert.equal(synced.effort, getPreset('zeus').effort, 'so does the effort tier')
     assert.equal(synced.name, 'Deepreview', 'a rename survives')
     assert.equal(synced.id, 'deepreview')
-    assert.equal(synced.cwd, 'backend', 'so does a per-participant cwd')
+    assert.equal(synced.cwd, 'backend', 'so does a per-agent cwd')
     assert.equal(synced.preset, 'zeus')
     // `add <preset> --description` is a documented override, so sync must leave the text alone —
     // and because the two hosts word a few descriptions differently while sharing one roster,
@@ -1185,39 +1179,39 @@ test('participants sync re-resolves preset-backed entries and leaves everything 
       'a user-authored description survives',
     )
 
-    const custom = await getParticipant(dir, '@builder')
-    assert.equal(custom.model, 'my-own-model', 'custom participants are never rewritten')
+    const custom = await getAgent(dir, '@builder')
+    assert.equal(custom.model, 'my-own-model', 'custom agents are never rewritten')
     assert.equal(custom.effort, 'high')
-    const ghost = await getParticipant(dir, '@ghost')
+    const ghost = await getAgent(dir, '@ghost')
     assert.equal(ghost.model, 'gpt-5.5', 'an orphaned preset stays pinned')
     assert.equal(
-      (await getParticipant(dir, '@nike')).updatedAt,
+      (await getAgent(dir, '@nike')).updatedAt,
       current.updatedAt,
       'up-to-date entries are left untouched',
     )
 
-    const second = await syncParticipantsWithPresets(dir)
+    const second = await syncAgentsWithPresets(dir)
     assert.equal(second.synced.length, 0, 'sync is idempotent')
     assert.deepEqual(
-      driftedParticipants(await loadParticipants(dir)),
+      driftedAgents(await loadAgents(dir)),
       [],
       'and the roster reports no drift after it',
     )
   })
 })
 
-test("upsertParticipant rejects a name slug that collides with another participant's id", async () => {
+test("upsertAgent rejects a name slug that collides with another agent's id", async () => {
   await withTempDir(async (dir) => {
-    await upsertParticipant(dir, { name: 'Zeus', kind: 'claude-code', model: 'claude-opus-4-8' })
-    await upsertParticipant(dir, { name: 'Athena', kind: 'codex', model: 'gpt-5.5' })
-    // getParticipant resolves by id OR name slug, so a second participant whose NAME slugifies
+    await upsertAgent(dir, { name: 'Zeus', kind: 'claude-code', model: 'claude-opus-4-8' })
+    await upsertAgent(dir, { name: 'Athena', kind: 'codex', model: 'gpt-5.5' })
+    // getAgent resolves by id OR name slug, so a second agent whose NAME slugifies
     // to an existing id would shadow it — must be rejected, not silently saved.
     await assert.rejects(
-      upsertParticipant(dir, { id: 'athena2', name: 'Zeus', kind: 'codex', model: 'gpt-5.5' }),
+      upsertAgent(dir, { id: 'athena2', name: 'Zeus', kind: 'codex', model: 'gpt-5.5' }),
       /collides/,
     )
-    // Updating the same participant in place stays allowed.
-    await upsertParticipant(dir, {
+    // Updating the same agent in place stays allowed.
+    await upsertAgent(dir, {
       name: 'Zeus',
       kind: 'claude-code',
       model: 'claude-opus-4-8',
@@ -1240,13 +1234,13 @@ test('parity: every preset-owned field matches the sibling catalog, so sync conv
     t.skip('consensflow-cc sibling checkout not present')
     return
   }
-  const theirs = new Map(sibling.PARTICIPANT_PRESETS.map((preset) => [preset.preset, preset]))
+  const theirs = new Map(sibling.AGENT_PRESETS.map((preset) => [preset.preset, preset]))
   assert.deepEqual(
-    PARTICIPANT_PRESETS.map((p) => p.preset),
-    sibling.PARTICIPANT_PRESETS.map((p) => p.preset),
+    AGENT_PRESETS.map((p) => p.preset),
+    sibling.AGENT_PRESETS.map((p) => p.preset),
     'both catalogs carry the same presets in the same order',
   )
-  for (const ours of PARTICIPANT_PRESETS) {
+  for (const ours of AGENT_PRESETS) {
     const other = theirs.get(ours.preset)
     for (const field of PRESET_OWNED_FIELDS) {
       assert.equal(
@@ -1279,9 +1273,9 @@ test('parity: shared lib files stay identical with the consensflow-cc sibling', 
 
 test('docs describe the stream-first observability surface, transcript backstop, and conventions [STRM-21]', async () => {
   const readme = await readFile(new URL('../../README.md', import.meta.url), 'utf8')
-  const agents = await readFile(new URL('../../AGENTS.md', import.meta.url), 'utf8')
-  const docs = `${readme}\n${agents}`
-  // Stream-first observability surface — pi streams normalized events via cf_run_participant's onUpdate.
+  const harnesses = await readFile(new URL('../../AGENTS.md', import.meta.url), 'utf8')
+  const docs = `${readme}\n${harnesses}`
+  // Stream-first observability surface — pi streams normalized events via cf_run_agent's onUpdate.
   assert.match(docs, /onUpdate/, 'docs mention the pi onUpdate streaming surface')
   assert.match(docs, /foreground/i, 'docs note streaming is foreground-incremental')
   assert.match(docs, /non-optional/i, 'docs lock streaming as non-optional')

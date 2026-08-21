@@ -1,11 +1,11 @@
 import { createPacket } from "./packets.js";
-import { getParticipant } from "./state.js";
-import { runParticipant } from "./runners.js";
+import { getAgent } from "./state.js";
+import { runAgent } from "./runners.js";
 
-export async function runNamedParticipant(input) {
-  const { cwd, participantRef, kind = "ask", task, signal, extraContext, handoff, onEvent } = input;
-  const participant = typeof participantRef === "object" ? participantRef : await getParticipant(cwd, participantRef);
-  if (!participant) throw new Error(`Unknown participant: ${participantRef}`);
-  const packet = await createPacket({ cwd, participant, kind, task, extraContext, handoff });
-  return await runParticipant({ cwd, participant, packet, kind, signal, onEvent });
+export async function runNamedAgent(input) {
+  const { cwd, agentRef, kind = "ask", task, signal, extraContext, handoff, onEvent } = input;
+  const agent = typeof agentRef === "object" ? agentRef : await getAgent(cwd, agentRef);
+  if (!agent) throw new Error(`Unknown agent: ${agentRef}`);
+  const packet = await createPacket({ cwd, agent, kind, task, extraContext, handoff });
+  return await runAgent({ cwd, agent, packet, kind, signal, onEvent });
 }

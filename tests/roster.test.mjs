@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict'
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import {
-  addParticipant,
-  editParticipant,
-  listParticipants,
-  participantDrift,
-  removeParticipant,
+  addAgent,
+  agentDrift,
+  editAgent,
+  listAgents,
+  removeAgent,
   rosterPath,
-  syncParticipants,
+  syncAgents,
 } from '../src/roster.js'
 import { assertOutsideRealHome, tempEnv } from './helpers.mjs'
 
@@ -17,33 +17,33 @@ const FIXTURES = join(import.meta.dirname, 'fixtures')
 
 function seedSharedRoster(t) {
   mkdirSync(join(t.env.HOME, '.consensflow'), { recursive: true })
-  cpSync(join(FIXTURES, 'v1-participants.json'), rosterPath(t.env))
+  cpSync(join(FIXTURES, 'v1-agents.json'), rosterPath(t.env))
 }
 
 describe('the roster IS the shared v1 file that cc and pi read', () => {
   const t = tempEnv()
   after(() => t.cleanup())
 
-  it('lives at ~/.consensflow/participants.json under the given HOME', () => {
+  it('lives at ~/.consensflow/agents.json under the given HOME', () => {
     const path = rosterPath(t.env)
     assertOutsideRealHome(path)
-    assert.equal(path, join(t.env.HOME, '.consensflow', 'participants.json'))
+    assert.equal(path, join(t.env.HOME, '.consensflow', 'agents.json'))
   })
 
-  it('reads v1 rows as participants: kind→runtime, thinking/effort→effort', () => {
+  it('reads v1 rows as agents: kind→harness, thinking/effort→effort', () => {
     seedSharedRoster(t)
-    const byName = Object.fromEntries(listParticipants(t.env).map((p) => [p.name, p]))
+    const byName = Object.fromEntries(listAgents(t.env).map((p) => [p.name, p]))
 
-    assert.equal(byName.zeus.runtime, 'claude')
+    assert.equal(byName.zeus.harness, 'claude')
     assert.equal(byName.zeus.effort, 'max')
-    assert.equal(byName.endymion.runtime, 'pi')
+    assert.equal(byName.endymion.harness, 'pi')
     assert.equal(byName.endymion.effort, 'xhigh')
-    assert.equal(byName.mani.runtime, 'opencode')
+    assert.equal(byName.mani.harness, 'opencode')
   })
 
   it('lists an unsupported kind rather than hiding it, marked as such', () => {
-    const pygmalion = listParticipants(t.env).find((p) => p.name === 'pygmalion')
-    assert.equal(pygmalion.runtime, 'image')
+    const pygmalion = listAgents(t.env).find((p) => p.name === 'pygmalion')
+    assert.equal(pygmalion.harness, 'image')
     assert.equal(pygmalion.unsupported, true)
   })
 })
@@ -54,10 +54,10 @@ describe('writes are v1-faithful: cc and pi keep working on the same file', () =
   seedSharedRoster(t)
 
   it('edit updates mapped fields in place and preserves everything else', () => {
-    editParticipant('zeus', { model: 'claude-fable-5', effort: 'xhigh' }, t.env)
+    editAgent('zeus', { model: 'claude-fable-5', effort: 'xhigh' }, t.env)
 
     const raw = JSON.parse(readFileSync(rosterPath(t.env), 'utf8'))
-    const zeus = raw.participants.find((p) => p.id === 'zeus')
+    const zeus = raw.agents.find((p) => p.id === 'zeus')
     // v1 keys the runner reads:
     assert.equal(zeus.model, 'claude-fable-5')
     assert.equal(zeus.effort, 'xhigh')
@@ -69,22 +69,19 @@ describe('writes are v1-faithful: cc and pi keep working on the same file', () =
     assert.equal(raw.schemaVersion, 1)
   })
 
-  it('a pi participant edit lands in `thinking`, the key the pi runner reads', () => {
-    editParticipant('endymion', { effort: 'high' }, t.env)
+  it('a pi agent edit lands in `thinking`, the key the pi runner reads', () => {
+    editAgent('endymion', { effort: 'high' }, t.env)
     const raw = JSON.parse(readFileSync(rosterPath(t.env), 'utf8'))
-    const endymion = raw.participants.find((p) => p.id === 'endymion')
+    const endymion = raw.agents.find((p) => p.id === 'endymion')
     assert.equal(endymion.thinking, 'high')
     assert.equal(endymion.effort, undefined)
   })
 
   it('add writes a complete v1-shaped row', () => {
-    addParticipant(
-      { name: 'freya', runtime: 'codex', model: 'gpt-5.6-terra', effort: 'xhigh' },
-      t.env,
-    )
+    addAgent({ name: 'freya', harness: 'codex', model: 'gpt-5.6-terra', effort: 'xhigh' }, t.env)
 
     const raw = JSON.parse(readFileSync(rosterPath(t.env), 'utf8'))
-    const freya = raw.participants.find((p) => p.id === 'freya')
+    const freya = raw.agents.find((p) => p.id === 'freya')
     assert.equal(freya.kind, 'codex')
     assert.equal(freya.name, 'Freya')
     assert.equal(freya.effort, 'xhigh')
@@ -92,27 +89,27 @@ describe('writes are v1-faithful: cc and pi keep working on the same file', () =
   })
 
   it('remove deletes exactly that row, any kind included', () => {
-    removeParticipant('freya', t.env)
-    removeParticipant('pygmalion', t.env)
+    removeAgent('freya', t.env)
+    removeAgent('pygmalion', t.env)
     const raw = JSON.parse(readFileSync(rosterPath(t.env), 'utf8'))
     assert.equal(
-      raw.participants.some((p) => p.id === 'freya'),
+      raw.agents.some((p) => p.id === 'freya'),
       false,
     )
     assert.equal(
-      raw.participants.some((p) => p.id === 'pygmalion'),
+      raw.agents.some((p) => p.id === 'pygmalion'),
       false,
     )
   })
 
   it('refuses effort edits on an unsupported kind, plainly', () => {
     const raw = JSON.parse(readFileSync(rosterPath(t.env), 'utf8'))
-    raw.participants.push({ id: 'img', name: 'Img', kind: 'image', model: 'gpt-5.5' })
+    raw.agents.push({ id: 'img', name: 'Img', kind: 'image', model: 'gpt-5.5' })
     writeFileSync(rosterPath(t.env), JSON.stringify(raw, null, 2))
 
-    assert.throws(() => editParticipant('img', { effort: 'high' }, t.env), /image/)
-    editParticipant('img', { description: 'still editable' }, t.env)
-    removeParticipant('img', t.env)
+    assert.throws(() => editAgent('img', { effort: 'high' }, t.env), /image/)
+    editAgent('img', { description: 'still editable' }, t.env)
+    removeAgent('img', t.env)
   })
 })
 
@@ -121,28 +118,28 @@ describe('an absent shared roster is simply empty, and add creates it', () => {
   after(() => t.cleanup())
 
   it('starts empty and creates the v1 file shape on first add', () => {
-    assert.deepEqual(listParticipants(t.env), [])
-    addParticipant({ name: 'zeus', runtime: 'claude', model: 'claude-opus-5' }, t.env)
+    assert.deepEqual(listAgents(t.env), [])
+    addAgent({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }, t.env)
 
     const raw = JSON.parse(readFileSync(rosterPath(t.env), 'utf8'))
     assert.equal(raw.schemaVersion, 1)
-    assert.equal(raw.participants[0].id, 'zeus')
+    assert.equal(raw.agents[0].id, 'zeus')
   })
 
-  it('validates adds: bad names, unknown runtimes, empty models, duplicates', () => {
-    assert.throws(() => addParticipant({ name: 'Bad Name', runtime: 'claude', model: 'm' }, t.env))
-    assert.throws(() => addParticipant({ name: 'ok', runtime: 'not-a-cli', model: 'm' }, t.env))
-    assert.throws(() => addParticipant({ name: 'ok', runtime: 'claude', model: '' }, t.env))
-    assert.throws(() => addParticipant({ name: 'zeus', runtime: 'codex', model: 'm' }, t.env))
+  it('validates adds: bad names, unknown harnesss, empty models, duplicates', () => {
+    assert.throws(() => addAgent({ name: 'Bad Name', harness: 'claude', model: 'm' }, t.env))
+    assert.throws(() => addAgent({ name: 'ok', harness: 'not-a-cli', model: 'm' }, t.env))
+    assert.throws(() => addAgent({ name: 'ok', harness: 'claude', model: '' }, t.env))
+    assert.throws(() => addAgent({ name: 'zeus', harness: 'codex', model: 'm' }, t.env))
   })
 
-  it('names the missing participant on edit and remove', () => {
-    assert.throws(() => editParticipant('nobody', { model: 'm' }, t.env), /nobody/)
-    assert.throws(() => removeParticipant('nobody', t.env), /nobody/)
+  it('names the missing agent on edit and remove', () => {
+    assert.throws(() => editAgent('nobody', { model: 'm' }, t.env), /nobody/)
+    assert.throws(() => removeAgent('nobody', t.env), /nobody/)
   })
 })
 
-describe('a catalog participant can be told its model moved', () => {
+describe('a catalog agent can be told its model moved', () => {
   const t = tempEnv()
   after(() => t.cleanup())
 
@@ -150,62 +147,83 @@ describe('a catalog participant can be told its model moved', () => {
   function pin(name, model, env) {
     const path = rosterPath(env)
     const document = JSON.parse(readFileSync(path, 'utf8'))
-    const row = document.participants.find((r) => r.id === name)
+    const row = document.agents.find((r) => r.id === name)
     row.model = model
     row.description = 'my own words'
     writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`)
   }
 
   it('records which catalog entry it came from, and only then', () => {
-    addParticipant(
-      { name: 'diana', runtime: 'codex', model: 'gpt-5.6-luna', effort: 'xhigh', preset: 'diana' },
+    addAgent(
+      { name: 'diana', harness: 'codex', model: 'gpt-5.6-luna', effort: 'xhigh', preset: 'diana' },
       t.env,
     )
-    addParticipant({ name: 'mine', runtime: 'codex', model: 'gpt-5.6-sol' }, t.env)
+    addAgent({ name: 'mine', harness: 'codex', model: 'gpt-5.6-sol' }, t.env)
 
-    const byName = Object.fromEntries(listParticipants(t.env).map((p) => [p.name, p]))
+    const byName = Object.fromEntries(listAgents(t.env).map((p) => [p.name, p]))
     assert.equal(byName.diana.preset, 'diana', 'a catalog add carries its provenance')
-    assert.equal(byName.mine.preset, undefined, 'a hand-made participant is nobody else’s to move')
+    assert.equal(byName.mine.preset, undefined, 'a hand-made agent is nobody else’s to move')
   })
 
   it('reports what the catalog would change, and nothing for pinned rows', () => {
     pin('diana', 'gpt-5.5', t.env)
     pin('mine', 'gpt-5.4', t.env)
 
-    const drift = participantDrift(t.env)
+    const drift = agentDrift(t.env)
     assert.equal(drift.length, 1, 'only the catalog-backed row drifts')
     assert.equal(drift[0].name, 'diana')
     assert.deepEqual(drift[0].changes, [{ field: 'model', from: 'gpt-5.5', to: 'gpt-5.6-luna' }])
   })
 
   it('a dry run says what would happen and writes nothing', () => {
-    const applied = syncParticipants(t.env, { dryRun: true })
+    const applied = syncAgents(t.env, { dryRun: true })
     assert.equal(applied.length, 1)
     assert.equal(
-      listParticipants(t.env).find((p) => p.name === 'diana').model,
+      listAgents(t.env).find((p) => p.name === 'diana').model,
       'gpt-5.5',
       'the roster is untouched',
     )
   })
 
   it('syncs the fields the preset owns, and never the words you wrote', () => {
-    const applied = syncParticipants(t.env, {})
+    const applied = syncAgents(t.env, {})
     assert.equal(applied.length, 1)
 
-    const byName = Object.fromEntries(listParticipants(t.env).map((p) => [p.name, p]))
+    const byName = Object.fromEntries(listAgents(t.env).map((p) => [p.name, p]))
     assert.equal(byName.diana.model, 'gpt-5.6-luna', 'the model caught up')
     assert.equal(byName.diana.description, 'my own words', 'the description is yours')
-    assert.equal(byName.mine.model, 'gpt-5.4', 'a pinned participant stays pinned')
-    assert.equal(participantDrift(t.env).length, 0, 'nothing left to do')
+    assert.equal(byName.mine.model, 'gpt-5.4', 'a pinned agent stays pinned')
+    assert.equal(agentDrift(t.env).length, 0, 'nothing left to do')
   })
 
   it('a name the catalog has dropped stays where it is', () => {
-    addParticipant(
-      { name: 'ghost', runtime: 'codex', model: 'gpt-5.4', preset: 'no-such-preset' },
-      t.env,
-    )
-    assert.equal(participantDrift(t.env).length, 0)
-    assert.equal(syncParticipants(t.env, {}).length, 0)
-    assert.equal(listParticipants(t.env).find((p) => p.name === 'ghost').model, 'gpt-5.4')
+    addAgent({ name: 'ghost', harness: 'codex', model: 'gpt-5.4', preset: 'no-such-preset' }, t.env)
+    assert.equal(agentDrift(t.env).length, 0)
+    assert.equal(syncAgents(t.env, {}).length, 0)
+    assert.equal(listAgents(t.env).find((p) => p.name === 'ghost').model, 'gpt-5.4')
+  })
+})
+
+describe('a roster written before the rename keeps working', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+
+  it('reads participants.json and its participants key, then writes agents.json', () => {
+    // Exactly what a machine set up before 2026-08-21 has on disk.
+    const legacy = join(t.env.HOME, '.consensflow', 'participants.json')
+    mkdirSync(dirname(legacy), { recursive: true })
+    cpSync(join(FIXTURES, 'v1-participants.json'), legacy)
+
+    const listed = listAgents(t.env)
+    assert.ok(listed.length > 0, 'the old file is read, not ignored')
+    assert.ok(listed.some((a) => a.name === 'zeus'))
+
+    // The first write moves the roster to its new name, rows intact.
+    addAgent({ name: 'newcomer', harness: 'codex', model: 'gpt-5.6-luna' }, t.env)
+    const written = JSON.parse(readFileSync(rosterPath(t.env), 'utf8'))
+    assert.ok(Array.isArray(written.agents), 'written under the agents key')
+    assert.equal(written.participants, undefined, 'the old key does not survive the write')
+    assert.equal(written.agents.length, listed.length + 1, 'nothing was dropped on the way')
+    assert.ok(written.agents.some((row) => row.id === 'zeus'))
   })
 })

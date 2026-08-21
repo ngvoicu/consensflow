@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, before, describe, it } from 'node:test'
-import { listParticipants } from '../src/roster.js'
+import { listAgents } from '../src/roster.js'
 import { startUiServer } from '../src/ui.js'
 import { chooseCmuxMode, tempEnv } from './helpers.mjs'
 
@@ -105,7 +105,7 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
 
   it('binds loopback only and refuses requests without the token', async () => {
     assert.match(server.url, /^http:\/\/127\.0\.0\.1:/)
-    const res = await fetch(`${server.url}/api/participants`)
+    const res = await fetch(`${server.url}/api/agents`)
     assert.equal(res.status, 401)
   })
 
@@ -136,27 +136,27 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     assert.equal(res.status, 200)
     const html = await res.text()
     assert.match(html, /ConsensFlow/i)
-    assert.match(html, /participant/i)
+    assert.match(html, /agent/i)
   })
 
-  it('adds, edits and removes participants through the API, persisting each', async () => {
-    const added = await api('/api/participants', {
+  it('adds, edits and removes agents through the API, persisting each', async () => {
+    const added = await api('/api/agents', {
       method: 'POST',
-      body: JSON.stringify({ name: 'zeus', runtime: 'claude', model: 'claude-opus-5' }),
+      body: JSON.stringify({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }),
     })
     assert.equal(added.status, 201)
-    assert.equal(listParticipants(t.env)[0].name, 'zeus')
+    assert.equal(listAgents(t.env)[0].name, 'zeus')
 
-    const edited = await api('/api/participants/zeus', {
+    const edited = await api('/api/agents/zeus', {
       method: 'PATCH',
       body: JSON.stringify({ model: 'claude-fable-5' }),
     })
     assert.equal(edited.status, 200)
-    assert.equal(listParticipants(t.env)[0].model, 'claude-fable-5')
+    assert.equal(listAgents(t.env)[0].model, 'claude-fable-5')
 
-    const listed = await api('/api/participants')
+    const listed = await api('/api/agents')
     const payload = await listed.json()
-    assert.equal(payload.participants.length, 1)
+    assert.equal(payload.agents.length, 1)
     // Permission is gone from the product: no select, no field, no API.
     assert.equal(payload.permissions, undefined)
     assert.ok(Array.isArray(payload.catalog.claude))
@@ -166,7 +166,7 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     // Choosing the path is what installs; from then on every roster change
     // keeps it current with no separate step.
     await api('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'cmux' }) })
-    await api('/api/participants/zeus', {
+    await api('/api/agents/zeus', {
       method: 'PATCH',
       body: JSON.stringify({ model: 'claude-opus-5' }),
     })
@@ -185,12 +185,12 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
 
     assert.match(system.version, /^3\./)
     assert.deepEqual(
-      system.agents.map((a) => a.id),
+      system.harnesses.map((a) => a.id),
       ['claude'],
     )
-    assert.equal(system.agents[0].native, false)
+    assert.equal(system.harnesses[0].native, false)
     assert.equal(typeof system.skills.owned, 'number')
-    assert.equal(system.participants, 1)
+    assert.equal(system.agents, 1)
   })
 
   it('reports the mode and what it means for the machine', async () => {
@@ -301,34 +301,34 @@ exit 1
 
   it('offers the catalog update from the page, as a named operation', async () => {
     // A quick-add carries provenance, so the page can later offer the update.
-    await api('/api/participants', {
+    await api('/api/agents', {
       method: 'POST',
       body: JSON.stringify({
         name: 'diana',
-        runtime: 'codex',
+        harness: 'codex',
         model: 'gpt-5.5',
         effort: 'xhigh',
         preset: 'diana',
       }),
     })
 
-    const before = await (await api('/api/participants')).json()
+    const before = await (await api('/api/agents')).json()
     const moved = before.drift.find((d) => d.name === 'diana')
     assert.ok(moved, 'the page is told the catalog moved')
     assert.deepEqual(moved.changes, [{ field: 'model', from: 'gpt-5.5', to: 'gpt-5.6-luna' }])
 
-    const synced = await api('/api/participants/sync', {
+    const synced = await api('/api/agents/sync', {
       method: 'POST',
       body: JSON.stringify({ name: 'diana' }),
     })
     assert.equal(synced.status, 200)
     const body = await synced.json()
     assert.equal(body.applied.length, 1)
-    assert.equal(body.participants.find((p) => p.name === 'diana').model, 'gpt-5.6-luna')
+    assert.equal(body.agents.find((p) => p.name === 'diana').model, 'gpt-5.6-luna')
 
-    const after = await (await api('/api/participants')).json()
+    const after = await (await api('/api/agents')).json()
     assert.equal(after.drift.length, 0)
-    await api('/api/participants/diana', { method: 'DELETE' })
+    await api('/api/agents/diana', { method: 'DELETE' })
   })
 
   it('can put the terminal command on PATH, and take it back', async () => {
@@ -389,17 +389,17 @@ exit 1
   })
 
   it('surfaces validation errors as JSON, not crashes', async () => {
-    const res = await api('/api/participants', {
+    const res = await api('/api/agents', {
       method: 'POST',
-      body: JSON.stringify({ name: 'Bad Name', runtime: 'claude', model: 'm' }),
+      body: JSON.stringify({ name: 'Bad Name', harness: 'claude', model: 'm' }),
     })
     assert.equal(res.status, 400)
     assert.match((await res.json()).error, /names/)
   })
 
-  it('removes a participant', async () => {
-    const res = await api('/api/participants/zeus', { method: 'DELETE' })
+  it('removes an agent', async () => {
+    const res = await api('/api/agents/zeus', { method: 'DELETE' })
     assert.equal(res.status, 204)
-    assert.deepEqual(listParticipants(t.env), [])
+    assert.deepEqual(listAgents(t.env), [])
   })
 })

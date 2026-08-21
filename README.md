@@ -1,16 +1,16 @@
 # ConsensFlow
 
-Named AI participants for every coding agent on your machine.
+Named AI agents for every harness on your machine.
 
 You create a roster — say `zeus` (Claude Opus, max effort) or `hyperion`
 (GPT 5.6, ultra) — and ConsensFlow generates one **skill** from it and
-installs that skill into every coding agent you have: Claude Code, codex, pi
+installs that skill into every harness you have: Claude Code, codex, pi
 and opencode all read the same Agent Skills format. From then on, any agent
 in any project understands "ask hyperion whether this migration is safe": it
 runs hyperion's exact one-shot command, waits, and reports the answer,
 attributed.
 
-**No accounts, no API keys.** Participants run through the agent CLIs you
+**No accounts, no API keys.** Agents run through the harness CLIs you
 already have installed and logged in — your Claude subscription, your ChatGPT
 login, whatever providers you configured in pi or opencode. ConsensFlow
 stores no credentials and asks for none. (The generated commands even strip
@@ -27,7 +27,7 @@ you run the cmux path.
 **The app is the installation.** Download or build `ConsensFlow.app`, drag it
 to Applications, open it — that is all. It carries its own Node runtime and
 its own copy of ConsensFlow, so nothing needs to be installed first, and
-everything else (participants, skills, host integrations, the mode this
+everything else (agents, skills, host integrations, the mode this
 machine runs) is done from its window.
 
 ```sh
@@ -51,37 +51,37 @@ consensflow use cmux
 
 `cf setup` detects your agents and, in cmux mode, installs the cmux skills
 (see below).
-Participants are yours to create — nothing is seeded:
+Agents are yours to create — nothing is seeded:
 
 ```sh
 cf ui
 ```
 
 opens a minimal browser editor (Ctrl-C to stop). Each tool comes with a
-**list of ready-made participants** — one click adds `zeus` (Claude Opus 5 at
+**list of ready-made agents** — one click adds `zeus` (Claude Opus 5 at
 max effort), `hyperion` (GPT 5.6 Sol at ultra), `endymion` (Kimi K3, 1M
 context), `prometheus` (GLM 5.3) … — or define a custom one with any model
 string its runtime accepts. **The skill installs itself into every agent the
-moment the first participant exists, and rewrites itself on every add, edit
+moment the first agent exists, and rewrites itself on every add, edit
 or remove after that.** No install step, no sync step.
 
 The CLI does the same job if you prefer it:
 
 ```sh
-cf catalog                  # the ready-made participants, per tool
-cf participant add zeus     # a catalog name is enough — model and effort come with it
-cf participant add nemo --runtime codex --model gpt-5.6-terra --effort xhigh   # or roll your own
-cf participant list | edit | remove …
+cf catalog                  # the ready-made agents, per tool
+cf agent add zeus     # a catalog name is enough — model and effort come with it
+cf agent add nemo --runtime codex --model gpt-5.6-terra --effort xhigh   # or roll your own
+cf agent list | edit | remove …
 ```
 
 Model identifiers are passed through verbatim, so anything your CLI accepts
 works — the catalog is a convenience, never a constraint.
 
-**The roster is shared.** It lives at `~/.consensflow/participants.json` —
+**The roster is shared.** It lives at `~/.consensflow/agents.json` —
 the very file the `consensflow-cc` plugin and `consensflow-pi` extension
 already use. One roster, three consumers: edit it here (UI or CLI) and cc
 and pi see the change on their next run; if you already used either, `cf
-setup` finds your participants and installs the skill immediately — nothing
+setup` finds your agents and installs the skill immediately — nothing
 to import. v3 preserves every field it doesn't understand, so cc/pi-specific
 settings survive round-trips. And it heals: if cc or pi change the roster
 behind v3's back, the next `cf` invocation notices (a stored roster hash)
@@ -93,18 +93,18 @@ run `cf skills update` when a name is missing from its table.
 Two sources, one owner:
 
 - **`consensflow`** — generated from your roster: a table of exact commands,
-  one per participant, with its model and effort baked in. Participants run
-  in the agent's working directory (so they read project files themselves)
+  one per agent, with its model and effort baked in. Agents run
+  in the harness's working directory (so they read project files themselves)
   with their own CLI's default permissions — ConsensFlow never generates a
   permission-bypass flag.
 - **cmux's skills** — fetched by shallow-cloning
   [`manaflow-ai/cmux`](https://github.com/manaflow-ai/cmux) (its `skills/`
   tree: core, workspace, browser, settings, …) and installed the same way,
-  recorded as `cmux@<commit>`. They teach agents pane control, so they come
+  recorded as `cmux@<commit>`. They teach harnesss pane control, so they come
   with `cmux` mode and only that one.
 
 ```sh
-cf off                # take it all back; participants are kept
+cf off                # take it all back; agents are kept
 cf skills status      # every file ConsensFlow owns: ok, drifted, missing
 cf skills update      # regenerate ours; re-fetch cmux's at the latest commit
 cf skills uninstall   # remove exactly what the manifest owns, nothing else
@@ -151,8 +151,8 @@ put there another way is reported and left alone.
 
 ## Host integrations
 
-Two coding agents can do more than run a one-shot command: they can hand the
-participant **your live conversation** as context. That deeper path ships as
+Two harnesss can do more than run a one-shot command: they can hand the
+agent **your live conversation** as context. That deeper path ships as
 a payload per host, and this manager installs it — you never install them
 separately:
 
@@ -175,8 +175,8 @@ Both payloads live in this repo (`hosts/claude`, `hosts/pi`) and share one
 engine (`hosts/lib`), so there is nothing to install from anywhere else and
 nothing to keep in sync.
 
-Every host reads the same participants file, so they always agree on who
-your participants are — and they don't stack up on one agent. Where a host
+Every host reads the same agents file, so they always agree on who
+your agents are — and they don't stack up on one agent. Where a host
 already ships its own ConsensFlow (Claude Code via the plugin, pi via the
 extension), `consensflow-cmux` leaves it alone rather than adding a second
 skill with the same name, and retires any copy it installed earlier. Its own
@@ -198,7 +198,7 @@ its stdin.
 About 148 MB installed, 48 MB as a dmg — nearly all of it the Node runtime
 that makes it standalone.
 
-The icon was generated by **pygmalion**, the image participant on the
+The icon was generated by **pygmalion**, the image agent on the
 roster, given the site's logo as reference — the roster designing its own
 app.
 
@@ -207,7 +207,7 @@ app.
 The host integrations share one engine (`hosts/lib`) — there is a single copy
 now, not one per host. What it guarantees:
 
-- **Streaming is foreground and non-optional.** A participant's thinking,
+- **Streaming is foreground and non-optional.** A agent's thinking,
   tool calls and answer stream into your session as they happen; runs are
   never sent to the background, because a consult you cannot watch is a
   consult you cannot trust. pi surfaces the same stream through its
@@ -217,7 +217,7 @@ now, not one per host. What it guarantees:
   never loses the answer. `transcript-events.js` normalizes each engine's
   event shapes into one vocabulary.
 - **The roster is shared.** Every host reads the same
-  `~/.consensflow/participants.json`, so participants defined once are
+  `~/.consensflow/agents.json`, so agents defined once are
   available everywhere.
 
 ## History
@@ -229,7 +229,7 @@ installs them. Nothing is maintained outside this repo.
 
 ## State
 
-The roster: `~/.consensflow/participants.json` (shared with cc/pi). The
+The roster: `~/.consensflow/agents.json` (shared with cc/pi). The
 manifest: `~/.config/consensflow/skills-manifest.json` (override with
 `CONSENSFLOW_HOME`). Leave completely with `cf skills uninstall &&
 npm uninstall -g consensflow`.

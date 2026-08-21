@@ -153,7 +153,7 @@ export function adaptLine(kind, parsed) {
 
 // Append events to a trail, capping its length at MAX_EVENTS. The buffered stdout (and the
 // transcript backstop) remain the complete record; the in-memory trail is bounded so a
-// long-running participant can't grow it without limit.
+// long-running agent can't grow it without limit.
 export function pushEvents(trail, events) {
   for (const event of events) {
     trail.push(event);

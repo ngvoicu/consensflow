@@ -3,7 +3,7 @@ import { nowIso } from "./utils.js";
 export async function createPacket(input) {
   const {
     cwd,
-    participant,
+    agent,
     task,
     extraContext = "",
     handoff = "",
@@ -16,11 +16,11 @@ export async function createPacket(input) {
   sections.push("");
 
   sections.push("## Who you are");
-  sections.push(`You are ${participant.name}, joining a coding session as a named participant.`);
-  const specs = [`kind=${participant.kind}`];
-  if (participant.model) specs.push(`model=${participant.model}`);
-  if (participant.effort) specs.push(`effort=${participant.effort}`);
-  if (participant.thinking) specs.push(`thinking=${participant.thinking}`);
+  sections.push(`You are ${agent.name}, joining a coding session as a named agent.`);
+  const specs = [`kind=${agent.kind}`];
+  if (agent.model) specs.push(`model=${agent.model}`);
+  if (agent.effort) specs.push(`effort=${agent.effort}`);
+  if (agent.thinking) specs.push(`thinking=${agent.thinking}`);
   sections.push(specs.join(" · "));
   sections.push("");
 
@@ -31,7 +31,7 @@ export async function createPacket(input) {
 
   if (handoff && String(handoff).trim()) {
     sections.push("## Handoff — current session");
-    sections.push("The conversation so far between the user and the lead coding agent, most recent last. You were not part of it; use it as context for the request below.");
+    sections.push("The conversation so far between the user and the lead coding harness, most recent last. You were not part of it; use it as context for the request below.");
     sections.push("");
     sections.push(String(handoff).trim());
     sections.push("");

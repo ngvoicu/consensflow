@@ -1,10 +1,10 @@
-// Handoff size is bounded so a long session's transcript can't bloat a participant packet to where
+// Handoff size is bounded so a long session's transcript can't bloat an agent packet to where
 // its model stops converging (a ~120 KB handoff made glm-5.2 at thinking=high stall instead of
 // answering). capTail keeps the most recent tail, so a smaller budget preserves recent context and
 // drops the oldest. Tunable via CONSENSFLOW_HANDOFF_MAX_BYTES without a reinstall.
 const DEFAULT_MAX_BYTES = 48 * 1024;
 const TOOL_RESULT_MAX_CHARS = 1500;
-// Lead-initiated consultations (cf_run_participant) live only as tool results — there is no
+// Lead-initiated consultations (cf_run_agent) live only as tool results — there is no
 // custom_message for them. Keep them generous so they cross-pollinate like @mention replies — but
 // bounded to a fraction of the default budget so one consultation can't crowd out the rest of the
 // recent conversation. Tunable via CONSENSFLOW_HANDOFF_CF_RESULT_MAX_CHARS.
@@ -20,7 +20,7 @@ function envPositiveInt(name, fallback) {
 }
 
 // Serialize the active session branch (as returned by sessionManager.getBranch(), which is ordered
-// root -> leaf / chronological) into readable text for a participant handoff. Honors the latest
+// root -> leaf / chronological) into readable text for an agent handoff. Honors the latest
 // compaction (drops the messages it summarized), flattens AgentMessage content, and caps the total
 // size keeping the most recent (tail) end.
 export function serializeTranscript(branch, options = {}) {
@@ -59,23 +59,23 @@ function serializeEntry(entry) {
   return serializeMessage(entry.message);
 }
 
-// ConsensFlow participant replies are persisted as custom_message entries (via sendMessage), not
-// normal messages — surface them so a later participant's handoff includes earlier @participant
+// ConsensFlow agent replies are persisted as custom_message entries (via sendMessage), not
+// normal messages — surface them so a later agent's handoff includes earlier @agent
 // exchanges (cross-pollination). The triggering prompt rides along in details (the @mention input
 // is "handled" by the extension and never recorded as a normal message).
 export function serializeCustomMessage(entry) {
   if (!entry || typeof entry !== "object") return null;
   const details = entry.details;
-  // Live participant stream crumbs are displayed in the main session for observability, but they
-  // are not durable participant replies. Keep later handoffs focused on the final response.
+  // Live agent stream crumbs are displayed in the main session for observability, but they
+  // are not durable agent replies. Keep later handoffs focused on the final response.
   if (details?.streamEvent) return null;
-  const participantId = details?.participant?.id;
-  if (entry.customType === "consensflow" && participantId) {
+  const agentId = details?.agent?.id;
+  if (entry.customType === "consensflow" && agentId) {
     const lines = [];
     const prompt = details.prompt && String(details.prompt).trim();
-    if (prompt) lines.push(`User → @${participantId}: ${prompt}`);
+    if (prompt) lines.push(`User → @${agentId}: ${prompt}`);
     const reply = String(details.output ?? flattenContent(entry.content) ?? "").trim();
-    if (reply) lines.push(`@${participantId} replied:\n${reply}`);
+    if (reply) lines.push(`@${agentId} replied:\n${reply}`);
     return lines.length ? lines.join("\n") : null;
   }
   const text = flattenContent(entry.content);
@@ -94,7 +94,7 @@ export function serializeMessage(message) {
       return text ? `Lead:\n${text}` : null;
     }
     case "toolResult": {
-      const maxChars = message.toolName === "cf_run_participant"
+      const maxChars = message.toolName === "cf_run_agent"
         ? envPositiveInt("CONSENSFLOW_HANDOFF_CF_RESULT_MAX_CHARS", DEFAULT_CF_TOOL_RESULT_MAX_CHARS)
         : TOOL_RESULT_MAX_CHARS;
       const body = truncate(flattenContent(message.content), maxChars);

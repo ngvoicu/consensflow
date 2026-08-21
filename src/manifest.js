@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { configRoot } from './roster.js'
 
 /**
- * The install manifest: every file ConsensFlow has written into an agent's
+ * The install manifest: every file ConsensFlow has written into an harness's
  * skills directory, with the hash it wrote. Ownership and drift both come
  * from here — a file we did not record is not ours to touch, and a recorded
  * file whose on-disk hash changed was edited by someone and is refused

@@ -91,7 +91,7 @@ const codexFixture = async () => {
     .map((line) => JSON.parse(line))
 }
 
-test('transcript-events: codex adapter maps exec tool calls, agent messages, and reasoning [STRM-09]', async () => {
+test('transcript-events: codex adapter maps exec tool calls, harness messages, and reasoning [STRM-09]', async () => {
   const events = (await codexFixture()).flatMap((parsed) => adaptLine('codex', parsed))
 
   // command_execution: item.started → tool_call(exec, command); item.completed → tool_result.
@@ -108,7 +108,7 @@ test('transcript-events: codex adapter maps exec tool calls, agent messages, and
   const texts = events.filter((e) => e.kind === 'text')
   assert.ok(
     texts.some((e) => /ship-with-changes/.test(e.text)),
-    'agent message text surfaces',
+    'harness message text surfaces',
   )
 
   // reasoning item (synthetic — absent in exec --json, present in some configs) → thinking.

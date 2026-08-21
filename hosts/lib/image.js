@@ -1,4 +1,4 @@
-// Image generation for `image`-kind participants.
+// Image generation for `image`-kind agents.
 //
 // Uses the OpenAI Codex ChatGPT "Responses" backend's native image_generation tool (which the
 // backend maps to gpt-image-2), riding the Codex CLI's existing ChatGPT login. No extra API key —

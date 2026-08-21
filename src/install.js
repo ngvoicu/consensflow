@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync, readdirSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import { detectAgents } from './agents.js'
+import { detectHarnesses } from './harnesses.js'
 import { fileState, loadManifest, saveManifest, sha256 } from './manifest.js'
 
 /**
- * Installs one skill file into every detected agent's skills directory,
+ * Installs one skill file into every detected harness's skills directory,
  * under the manifest's ownership rules:
  *
  * - a target we own and left unchanged is rewritten freely (that's an update);
@@ -12,25 +12,25 @@ import { fileState, loadManifest, saveManifest, sha256 } from './manifest.js'
  * - a target we never wrote is refused without force, always;
  * - force backs nothing up silently — the refusal message is the preview.
  *
- * `options.targets` narrows the agents written to; callers use it to leave a
+ * `options.targets` narrows the harnesses written to; callers use it to leave a
  * host's own ConsensFlow integration alone (see skillTargets).
  */
 export function installSkill({ relPath, content, source }, env, options = {}) {
   const manifest = loadManifest(env)
   const report = []
 
-  for (const agent of options.targets ?? detectAgents(env)) {
-    const path = join(agent.skillsDir, relPath)
+  for (const harness of options.targets ?? detectHarnesses(env)) {
+    const path = join(harness.skillsDir, relPath)
     const owned = manifest.files[path]
     const existed = existsSync(path)
 
     if (existed) {
       if (owned === undefined && options.force !== true) {
-        report.push({ agent: agent.id, path, action: 'refused-unowned' })
+        report.push({ harness: harness.id, path, action: 'refused-unowned' })
         continue
       }
       if (owned !== undefined && fileState(path, owned) === 'drifted' && options.force !== true) {
-        report.push({ agent: agent.id, path, action: 'refused-drifted' })
+        report.push({ harness: harness.id, path, action: 'refused-drifted' })
         continue
       }
     }
@@ -38,7 +38,11 @@ export function installSkill({ relPath, content, source }, env, options = {}) {
     mkdirSync(dirname(path), { recursive: true })
     writeFileSync(path, content)
     manifest.files[path] = { sha256: sha256(content), source }
-    report.push({ agent: agent.id, path, action: owned === undefined ? 'installed' : 'updated' })
+    report.push({
+      harness: harness.id,
+      path,
+      action: owned === undefined ? 'installed' : 'updated',
+    })
   }
 
   saveManifest(manifest, env)
@@ -75,9 +79,9 @@ export function uninstallSkills(env, options = {}) {
       continue
     }
     rmSync(path, { force: true })
-    // Climb away every directory the removal emptied, stopping at the agent's
+    // Climb away every directory the removal emptied, stopping at the harness's
     // skills root — a skill is a directory tree, and leaving hollow shells
-    // behind reads as "still installed" in every agent's skill picker.
+    // behind reads as "still installed" in every harness's skill picker.
     let parent = dirname(path)
     while (basename(parent) !== 'skills') {
       try {

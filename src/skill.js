@@ -44,66 +44,66 @@ const COMMANDS = {
 }
 
 /**
- * The exact command a participant becomes. Exported because the roster editor
+ * The exact command an agent becomes. Exported because the roster editor
  * shows it verbatim: what you see in the UI is the line that lands in the
- * skill, which is the line the agent runs.
+ * skill, which is the line the harness runs.
  */
-export function participantCommand(p) {
-  const build = COMMANDS[p.runtime]
+export function agentCommand(p) {
+  const build = COMMANDS[p.harness]
   return build === undefined ? undefined : build(p)
 }
 
 function row(p) {
   const traits = [p.description, p.effort ? `${p.effort} effort` : null].filter(Boolean).join('; ')
   const label = traits.length > 0 ? `**${p.name}** — ${traits}` : `**${p.name}**`
-  return `| ${label} | ${p.runtime} | \`${participantCommand(p)}\` |`
+  return `| ${label} | ${p.harness} | \`${agentCommand(p)}\` |`
 }
 
-export function generateSkill(participants) {
-  const supported = participants.filter((p) => COMMANDS[p.runtime] !== undefined)
+export function generateSkill(agents) {
+  const supported = agents.filter((p) => COMMANDS[p.harness] !== undefined)
   if (supported.length === 0) {
-    throw new Error('empty roster: add a participant before generating the skill')
+    throw new Error('empty roster: add an agent before generating the skill')
   }
   const names = supported.map((p) => p.name).join(', ')
 
   return `---
 name: consensflow
-description: Consult one of the user's named AI participants — ${names} — each a real coding-agent CLI (claude, codex, pi, opencode) run one-shot in the current directory. Use whenever the user says "ask <name> …", "what does <name> think", "consult <name>", "get a second opinion from <name>", or names any participant — and also when you yourself want an independent second opinion on a risky or debatable decision.
+description: Consult one of the user's named AI agents — ${names} — each a real coding-harness CLI (claude, codex, pi, opencode) run one-shot in the current directory. Use whenever the user says "ask <name> …", "what does <name> think", "consult <name>", "get a second opinion from <name>", or names any agent — and also when you yourself want an independent second opinion on a risky or debatable decision.
 ---
 
-# ConsensFlow participants
+# ConsensFlow agents
 
-The user keeps a roster of named AI participants. Each participant is a real,
-separately-installed coding-agent CLI with a fixed model and effort. Consulting
+The user keeps a roster of named AI agents. Each agent is a real,
+separately-installed coding-harness CLI with a fixed model and effort. Consulting
 one means running its one-shot command below with your question as the final
-argument. The participant runs in **your current working directory** — it can
+argument. The agent runs in **your current working directory** — it can
 read the project's files itself, so you do not need to paste file contents.
 
 ## How to consult
 
-1. Pick the participant the user named (or choose one yourself when you want
+1. Pick the agent the user named (or choose one yourself when you want
    a second opinion).
 2. Compose the question: one or two sentences of task context, then the
    concrete question. Name specific files with relative paths when relevant.
-3. Run the participant's exact command from the table below, replacing only
+3. Run the agent's exact command from the table below, replacing only
    \`<question>\`. Run it from the project directory. Turns can take minutes at
    high effort — use a generous timeout (10+ minutes for max/ultra).
 4. Report the answer to the user **verbatim or faithfully summarized, and
-   attributed** ("hyperion says: …"). Never present a participant's answer as
+   attributed** ("hyperion says: …"). Never present an agent's answer as
    your own.
 
 ## Rules
 
-- **One participant at a time.** Wait for one answer before asking another.
-- **Advice is free; acting is gated.** Never apply a participant's suggested
+- **One agent at a time.** Wait for one answer before asking another.
+- **Advice is free; acting is gated.** Never apply an agent's suggested
   changes, or keep files it created, without the user's explicit approval —
   unless the user already authorized it in this conversation.
-- **Do not retry a slow participant with a different one** unless the command
+- **Do not retry a slow agent with a different one** unless the command
   itself failed. Slow usually means thinking.
 
 ## Roster
 
-| Participant | Runs | Command (replace \`<question>\` only) |
+| Agent | Runs | Command (replace \`<question>\` only) |
 |---|---|---|
 ${supported.map(row).join('\n')}
 
@@ -113,17 +113,17 @@ logins from silently switching to API-key billing. Keep them.
 ## Visible pane (optional)
 
 By default, run the command inline and read its output. If the user asks to
-*watch* the participant work and the cmux skills are installed, open a split in
+*watch* the agent work and the cmux skills are installed, open a split in
 the current cmux workspace with those skills and run the same command there —
 this skill defines *what* to run; the cmux skills define pane control.
 
 ## Roster maintenance
 
 The roster above is generated by ConsensFlow. To change it, the user runs
-\`cf participant …\` or \`cf ui\` — never edit this file by hand; it will be
+\`cf agent …\` or \`cf ui\` — never edit this file by hand; it will be
 regenerated.
 
-If a participant the user names is missing from the table, the roster may
+If an agent the user names is missing from the table, the roster may
 have changed since this file was generated (it is shared with other
 ConsensFlow tools): run \`cf skills update\`, then re-read this file.
 `
