@@ -27,6 +27,17 @@ Use agents for all of these, one agent at a time. No preset is intrinsically rev
 - **Doing work / code-writing help.** The same agent can implement, refactor, or run commands by default — it runs with full permissions and no extra flag. Treat it like a temporary helper: after the run, inspect `git status` / `git diff` and relevant tests, then ask the user before keeping or building on the changes unless they pre-authorized it.
 - **Image generation.** `@pygmalion` (or any `kind=image` agent) uses **gpt-image-2** via the Codex backend / Codex CLI login. It receives the image prompt only — no session handoff — saves `image.png` in the ConsensFlow run dir under `~/.consensflow/workspaces/…`, and the lead can open/show that file with the Read tool. Optionally pass one or more **reference images** with `--image <path>` (repeatable) so gpt-image-2 edits/conditions on them — supply a file path (.png/.jpg/.jpeg/.webp/.gif); a pasted image with no path on disk can't be used.
 
+## Spawning, in the user's words
+
+The user will ask in plain language — "spawn diana as a good GDPR expert, give her our conversation, and ask her to review the export path". Compose that into one run:
+
+- **who** → the agent's name (`@diana`);
+- **as a …** → `--brief "You are reviewing this for GDPR: lawful basis, data minimisation, retention."`;
+- **give it / don't give it our history** → the handoff rides along by default; add `--no-handoff` when the user says not to share it, or when the task is self-contained;
+- **ask her to …** → the task itself, as the prompt.
+
+The same four pieces work in every harness ConsensFlow supports, so the phrasing the user learns here is the phrasing that works in a cmux pane or in pi.
+
 ## How to run it
 
 Everything the Claude Code lead does goes through the bundled CLI via the Bash tool. ConsensFlow never caps a run itself (runs are unbounded) — the only limit is your Bash tool timeout, so use a generous one for frontier models (often `600000` ms or more).
@@ -57,8 +68,9 @@ Always run agent calls in the FOREGROUND, NEVER in the background; the live reas
 
 Important run flags (flags may appear before or after the prompt/ref; `--prompt-file` may stand in for the prompt):
 
-- `--context <note>` — focused lead brief in addition to the auto-included handoff.
-- `--no-handoff` — skip the session handoff.
+- `--brief "<what this run is for>"` — what you want from THIS spawn: "review this for GDPR: lawful basis, retention", "you are checking the migration for rollback safety". The agent is told nothing about itself otherwise — no persona is assigned for it — so the brief is where the framing goes. It leads the packet, above the task.
+- `--context <note>` — a shorter note alongside the brief, for one run.
+- `--no-handoff` — spawn without the session history. Default is with it: the hooks keep the transcript stashed, so the agent sees the conversation unless you say not to.
 - `--image <path>` — reference image for an `image` agent; repeatable for multiple references. Ignored by text agents.
 - `--json` — print full run metadata instead of just the human answer.
 
