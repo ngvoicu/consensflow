@@ -58,6 +58,8 @@ In short: ask freely, apply only with a green light.
 
 Participants are configured in the shared roster `~/.consensflow/participants.json` (set up once, use from any project, Pi, and the Claude Code sibling). There are no per-tool config roots. Participants come from curated presets or fully custom definitions:
 
+**The names below are a menu, not your roster.** None of them exists until it is added. Your actual participants are the ones `participants list` prints — and the line at the top of this session already named them. `@zeus` and friends appear throughout this skill only as placeholders in examples; substitute a name you actually have, and if the user asks for one that is not on the roster, say so and offer to add it rather than guessing a substitute.
+
 ```text
 /consensflow:presets                            # list built-in presets
 /consensflow:participants add zeus              # add a preset            → @zeus

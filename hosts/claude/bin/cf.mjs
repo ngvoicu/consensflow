@@ -200,7 +200,7 @@ async function handleRun(tokens, cwd) {
   const positional = [...parsed.positional];
   const ref = positional.shift();
   if (!ref || !ref.startsWith("@")) {
-    throw new Error("Usage: /consensflow:cf @name <prompt> — or via the Bash tool: run @name <prompt> [--prompt-file <file>] [--context <note>] [--no-handoff] [--json]");
+    throw new Error("Usage: /consensflow @name <prompt> — or via the Bash tool: run @name <prompt> [--prompt-file <file>] [--context <note>] [--no-handoff] [--json]");
   }
   if (positional[0]?.startsWith("@")) {
     throw new Error("ConsensFlow sends to one participant at a time. Ask one, read its answer, then ask another.");

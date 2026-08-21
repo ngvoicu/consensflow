@@ -50,7 +50,7 @@ Important run flags (flags may appear before or after the prompt/ref; `--prompt-
 - `--image <path>` — reference image for an `image` participant; repeatable for multiple references. Ignored by text participants.
 - `--json` — print full run metadata instead of just the human answer.
 
-The handoff (a serialized snapshot of this session) is attached automatically from the transcript stash the plugin hooks maintain. If no transcript was stashed, the run warns `Handoff: empty` — the participant saw none of this session.
+The handoff (a serialized snapshot of this session) is attached automatically from the transcript stash the session hooks maintain. If no transcript was stashed, the run warns `Handoff: empty` — the participant saw none of this session.
 
 Artifacts land in the workspace's run dir under `~/.consensflow/workspaces/…` (`packet.md`, `stdout.txt`, `stderr.txt`, `result.json`, `transcript.md`) — never inside the project. `packet.md` is byte-for-byte what the participant received; `transcript.md` is the durable event-trail backstop.
 
@@ -97,6 +97,8 @@ In short: ask freely, apply only with a green light.
 
 Participants are configured in the shared roster `~/.consensflow/participants.json` (set up once, use from any project, Claude Code, and the Pi sibling). There are no per-tool config roots. Participants come from curated presets or fully custom definitions:
 
+**The names below are a menu, not your roster.** None of them exists until it is added. Your actual participants are the ones `participants list` prints — and the line at the top of this session already named them. `@zeus` and friends appear throughout this skill only as placeholders in examples; substitute a name you actually have, and if the user asks for one that is not on the roster, say so and offer to add it rather than guessing a substitute.
+
 ```bash
 node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" participants presets                    # list built-in presets
 node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" participants add zeus                   # add a preset → @zeus
@@ -136,7 +138,7 @@ node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" participants sync [--dry-run]   # re-
 node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" run @name <prompt> [--prompt-file <file>] [--context <note>] [--no-handoff] [--image <path> …] [--json]
 ```
 
-User-facing slash commands are thin wrappers around that CLI: `/consensflow:cf`, `/consensflow:status`, `/consensflow:doctor`, `/consensflow:presets`, and `/consensflow:participants …`.
+One user-facing slash command wraps that CLI: `/consensflow <args>` — it passes whatever follows straight through (`/consensflow status`, `/consensflow participants list`, `/consensflow @diana <prompt>`).
 
 
 - **Default and presets:** read-write, confined to the project workspace. Participants can read, plan, critique, explain, propose code, edit files, and run commands — exactly like running the CLI yourself.
@@ -145,7 +147,7 @@ User-facing slash commands are thin wrappers around that CLI: `/consensflow:cf`,
 
 ## How the user asks
 
-When the user's prompt addresses one configured participant — `@zeus What's the riskiest part of this design?` — the plugin's prompt hook detects it, stashes the prompt body, and injects the exact `run` command for you to execute. Run it, then relay the answer. The `/consensflow:cf` slash command is the explicit form (`/consensflow:cf @zeus <prompt>`, `/consensflow:cf doctor`, …). A stray `@token` that is not a participant (like `@types/node`) is ignored — handle the prompt normally.
+When the user's prompt addresses one configured participant — `@zeus What's the riskiest part of this design?` — the prompt hook detects it, stashes the prompt body, and injects the exact `run` command for you to execute. Run it, then relay the answer. The `/consensflow` slash command is the explicit form (`/consensflow @name <prompt>`, `/consensflow doctor`, …). A stray `@token` that is not a participant (like `@types/node`) is ignored — handle the prompt normally.
 
 ## Invariants
 
