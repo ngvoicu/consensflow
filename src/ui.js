@@ -21,8 +21,10 @@ import {
   addParticipant,
   editParticipant,
   listParticipants,
+  participantDrift,
   RUNTIMES,
   removeParticipant,
+  syncParticipants,
 } from './roster.js'
 import { generateSkill, participantCommand } from './skill.js'
 import { refreshInstalledSkill, retireSkillFromNativeHosts, skillTargets } from './sync.js'
@@ -223,6 +225,7 @@ export async function startUiServer(env) {
       if (request.method === 'GET' && url.pathname === '/api/participants') {
         return send(200, {
           participants: listParticipants(env).map(withCommand),
+          drift: participantDrift(env),
           runtimes: RUNTIMES,
           catalog: Object.fromEntries(
             Object.entries(CATALOG).map(([runtime, entries]) => [
@@ -232,6 +235,16 @@ export async function startUiServer(env) {
           ),
           efforts: EFFORTS,
         })
+      }
+      if (request.method === 'POST' && url.pathname === '/api/participants/sync') {
+        // A named operation, like every other one here: it re-resolves
+        // catalog-backed participants and nothing else.
+        const body = JSON.parse((await readBody(request)) || '{}')
+        const applied = syncParticipants(env, {
+          ...(typeof body.name === 'string' ? { name: body.name } : {}),
+        })
+        if (applied.length > 0) refreshInstalledSkill(env)
+        return send(200, { applied, participants: listParticipants(env).map(withCommand) })
       }
       if (request.method === 'POST' && url.pathname === '/api/participants') {
         const added = addParticipant(JSON.parse(await readBody(request)), env)
@@ -433,6 +446,8 @@ const PAGE = (token) => `<!DOCTYPE html>
   .offer__name { font-family: var(--mono); font-size: 13px; color: var(--foam); min-width: 96px; }
   .offer__what { color: var(--muted); font-size: 13px; flex: 1; }
   .offer__model { font-family: var(--mono); font-size: 11px; color: var(--muted); opacity: .8; }
+  .member__drift { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 6px 0 0; font-size: 13px; color: var(--muted); }
+  .tag--moved { background: var(--buoy); color: var(--ink); }
   .lede--tight { margin: 0 0 8px; }
   #catalog-filter {
     width: 100%; box-sizing: border-box; margin-bottom: 10px; padding: 8px 10px;
@@ -553,6 +568,17 @@ function renderRoster(data) {
     host.appendChild(el('p', 'empty', 'No participants yet. Take a ready-made one below, or define your own.'));
     return;
   }
+  if ((data.drift ?? []).length > 1) {
+    const all = el('div', 'member');
+    const line = el('p', 'member__drift');
+    line.append(el('span', 'tag tag--moved', data.drift.length + ' participants moved'));
+    line.append(el('span', null, ' the catalog has newer models for them '));
+    const update = el('button', null, 'Update all');
+    update.onclick = () => post('/api/participants/sync', {}, 'Updating…');
+    line.append(update);
+    all.append(line);
+    host.append(all);
+  }
   for (const p of data.participants) {
     const card = el('div', 'member');
     const head = el('div', 'member__head');
@@ -569,6 +595,17 @@ function renderRoster(data) {
     };
     head.append(remove);
     card.append(head);
+    const moved = (data.drift ?? []).find((d) => d.name === p.name);
+    if (moved) {
+      const note = el('p', 'member__drift');
+      note.append(el('span', 'tag tag--moved', 'catalog moved'));
+      note.append(el('span', null, ' ' + moved.changes
+        .map((c) => c.field + ': ' + (c.from ?? '-') + ' → ' + (c.to ?? '-')).join(', ') + ' '));
+      const update = el('button', null, 'Update');
+      update.onclick = () => post('/api/participants/sync', { name: p.name }, 'Updating ' + p.name + '…');
+      note.append(update);
+      card.append(note);
+    }
     if (p.description) card.append(el('p', 'member__desc', p.description));
     if (p.command) card.append(renderCommand(p));
     else card.append(el('p', 'member__desc', p.runtime + ' participants are not run by this tool — it leaves them alone.'));
@@ -644,6 +681,7 @@ function renderCatalog(data) {
             name: entry.name, runtime, model: entry.model,
             ...(entry.effort ? { effort: entry.effort } : {}),
             description: entry.description,
+            preset: entry.preset,
           }),
         });
         load();
@@ -778,7 +816,14 @@ async function post(path, body, note) {
     if (row && row.action) counts[row.action] = (counts[row.action] ?? 0) + 1;
   }
   const summary = Object.entries(counts).map(([action, n]) => n + ' ' + action).join(' · ');
-  el2.textContent = data.report ? data.report.join(' · ') : (summary.length > 0 ? summary : 'nothing to do');
+  if (Array.isArray(data.applied)) {
+    el2.textContent = data.applied.length === 0
+      ? 'already up to date'
+      : data.applied.map((a) => a.name + ': ' + a.changes
+          .map((c) => c.field + ' → ' + (c.to ?? '-')).join(', ')).join(' · ');
+  } else {
+    el2.textContent = data.report ? data.report.join(' · ') : (summary.length > 0 ? summary : 'nothing to do');
+  }
   load();
 }
 

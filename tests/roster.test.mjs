@@ -6,8 +6,10 @@ import {
   addParticipant,
   editParticipant,
   listParticipants,
+  participantDrift,
   removeParticipant,
   rosterPath,
+  syncParticipants,
 } from '../src/roster.js'
 import { assertOutsideRealHome, tempEnv } from './helpers.mjs'
 
@@ -137,5 +139,73 @@ describe('an absent shared roster is simply empty, and add creates it', () => {
   it('names the missing participant on edit and remove', () => {
     assert.throws(() => editParticipant('nobody', { model: 'm' }, t.env), /nobody/)
     assert.throws(() => removeParticipant('nobody', t.env), /nobody/)
+  })
+})
+
+describe('a catalog participant can be told its model moved', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+
+  /** Rewrites a row in place, standing in for a catalog that has moved on. */
+  function pin(name, model, env) {
+    const path = rosterPath(env)
+    const document = JSON.parse(readFileSync(path, 'utf8'))
+    const row = document.participants.find((r) => r.id === name)
+    row.model = model
+    row.description = 'my own words'
+    writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`)
+  }
+
+  it('records which catalog entry it came from, and only then', () => {
+    addParticipant(
+      { name: 'diana', runtime: 'codex', model: 'gpt-5.6-luna', effort: 'xhigh', preset: 'diana' },
+      t.env,
+    )
+    addParticipant({ name: 'mine', runtime: 'codex', model: 'gpt-5.6-sol' }, t.env)
+
+    const byName = Object.fromEntries(listParticipants(t.env).map((p) => [p.name, p]))
+    assert.equal(byName.diana.preset, 'diana', 'a catalog add carries its provenance')
+    assert.equal(byName.mine.preset, undefined, 'a hand-made participant is nobody else’s to move')
+  })
+
+  it('reports what the catalog would change, and nothing for pinned rows', () => {
+    pin('diana', 'gpt-5.5', t.env)
+    pin('mine', 'gpt-5.4', t.env)
+
+    const drift = participantDrift(t.env)
+    assert.equal(drift.length, 1, 'only the catalog-backed row drifts')
+    assert.equal(drift[0].name, 'diana')
+    assert.deepEqual(drift[0].changes, [{ field: 'model', from: 'gpt-5.5', to: 'gpt-5.6-luna' }])
+  })
+
+  it('a dry run says what would happen and writes nothing', () => {
+    const applied = syncParticipants(t.env, { dryRun: true })
+    assert.equal(applied.length, 1)
+    assert.equal(
+      listParticipants(t.env).find((p) => p.name === 'diana').model,
+      'gpt-5.5',
+      'the roster is untouched',
+    )
+  })
+
+  it('syncs the fields the preset owns, and never the words you wrote', () => {
+    const applied = syncParticipants(t.env, {})
+    assert.equal(applied.length, 1)
+
+    const byName = Object.fromEntries(listParticipants(t.env).map((p) => [p.name, p]))
+    assert.equal(byName.diana.model, 'gpt-5.6-luna', 'the model caught up')
+    assert.equal(byName.diana.description, 'my own words', 'the description is yours')
+    assert.equal(byName.mine.model, 'gpt-5.4', 'a pinned participant stays pinned')
+    assert.equal(participantDrift(t.env).length, 0, 'nothing left to do')
+  })
+
+  it('a name the catalog has dropped stays where it is', () => {
+    addParticipant(
+      { name: 'ghost', runtime: 'codex', model: 'gpt-5.4', preset: 'no-such-preset' },
+      t.env,
+    )
+    assert.equal(participantDrift(t.env).length, 0)
+    assert.equal(syncParticipants(t.env, {}).length, 0)
+    assert.equal(listParticipants(t.env).find((p) => p.name === 'ghost').model, 'gpt-5.4')
   })
 })

@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { presetDrift, syncParticipantWithPreset } from '../hosts/lib/presets.js'
 
 /**
  * The roster IS the shared ConsensFlow file that the v1 Claude Code plugin
@@ -72,6 +73,7 @@ function toView(row) {
     model: row.model,
     ...(effortOf(row) ? { effort: effortOf(row) } : {}),
     ...(row.description ? { description: row.description } : {}),
+    ...(row.preset ? { preset: row.preset } : {}),
     ...(runtime === undefined ? { unsupported: true } : {}),
   }
 }
@@ -119,6 +121,10 @@ export function addParticipant(input, env) {
         : { effort: input.effort }
       : {}),
     ...(input.description ? { description: input.description } : {}),
+    // Which catalog entry this came from, when it came from one. The payload
+    // has always read this field; the manager never wrote it, which is why a
+    // participant added in the app could never be told its model had moved.
+    ...(input.preset ? { preset: input.preset } : {}),
   }
   document.participants.push(row)
   saveDocument(document, env)
@@ -167,4 +173,43 @@ export function removeParticipant(name, env) {
   findRow(document, name)
   document.participants = document.participants.filter((p) => p.id !== name)
   saveDocument(document, env)
+}
+
+/**
+ * What the catalog would change on each participant that came from it.
+ *
+ * A preset moves — a family gets a new release, an effort level is renamed —
+ * and a participant created from it keeps whatever it was created with. The
+ * comparison is the payload's own `presetDrift`, not a second implementation,
+ * so the app and the running agent always agree about what has moved. Rows
+ * with no provenance, and rows whose preset the catalog has since dropped,
+ * report nothing: they are pinned, and pinned is a valid state.
+ */
+export function participantDrift(env) {
+  return loadDocument(env).participants.flatMap((row) => {
+    const changes = presetDrift(row)
+    return changes.length === 0 ? [] : [{ name: row.id, preset: row.preset, changes }]
+  })
+}
+
+/**
+ * Re-resolves preset-backed participants against the catalog. Only the fields
+ * the preset owns move (kind, model, effort/thinking, skillsPolicy) — a
+ * description you wrote is yours and is never overwritten.
+ */
+export function syncParticipants(env, options = {}) {
+  const { name, dryRun = false } = options
+  const document = loadDocument(env)
+  const applied = []
+
+  document.participants = document.participants.map((row) => {
+    if (name !== undefined && row.id !== name) return row
+    const { participant, changes } = syncParticipantWithPreset(row)
+    if (changes.length === 0) return row
+    applied.push({ name: row.id, changes })
+    return dryRun ? row : { ...participant, updatedAt: new Date().toISOString() }
+  })
+
+  if (!dryRun && applied.length > 0) saveDocument(document, env)
+  return applied
 }

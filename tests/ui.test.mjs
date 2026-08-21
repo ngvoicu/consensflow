@@ -293,6 +293,38 @@ exit 1
     assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')))
   })
 
+  it('offers the catalog update from the page, as a named operation', async () => {
+    // A quick-add carries provenance, so the page can later offer the update.
+    await api('/api/participants', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: 'diana',
+        runtime: 'codex',
+        model: 'gpt-5.5',
+        effort: 'xhigh',
+        preset: 'diana',
+      }),
+    })
+
+    const before = await (await api('/api/participants')).json()
+    const moved = before.drift.find((d) => d.name === 'diana')
+    assert.ok(moved, 'the page is told the catalog moved')
+    assert.deepEqual(moved.changes, [{ field: 'model', from: 'gpt-5.5', to: 'gpt-5.6-luna' }])
+
+    const synced = await api('/api/participants/sync', {
+      method: 'POST',
+      body: JSON.stringify({ name: 'diana' }),
+    })
+    assert.equal(synced.status, 200)
+    const body = await synced.json()
+    assert.equal(body.applied.length, 1)
+    assert.equal(body.participants.find((p) => p.name === 'diana').model, 'gpt-5.6-luna')
+
+    const after = await (await api('/api/participants')).json()
+    assert.equal(after.drift.length, 0)
+    await api('/api/participants/diana', { method: 'DELETE' })
+  })
+
   it('can put the terminal command on PATH, and take it back', async () => {
     const before = await (await api('/api/system')).json()
     assert.equal(before.terminal.installed, false)

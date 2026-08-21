@@ -30,6 +30,7 @@ import {
   editParticipant,
   listParticipants,
   removeParticipant,
+  syncParticipants,
 } from '../src/roster.js'
 import { generateSkill } from '../src/skill.js'
 import {
@@ -78,6 +79,10 @@ Usage: cf <command> [options]
   participant list [--json]
   participant edit <name> [--model <m>] [--effort <e>] [--description <d>]
   participant remove <name>
+  participant sync [<name>] [--dry-run]        Re-resolve catalog-backed participants against the
+                                               catalog: a preset that moved to a newer model reaches
+                                               your roster. Your own definitions and descriptions
+                                               are never touched
       the roster is the shared ~/.consensflow/participants.json — the same
       file the consensflow-cc plugin and consensflow-pi extension use
   skills install [--all] [--force]             Generate + install the consensflow skill, and cmux's
@@ -162,12 +167,17 @@ function resolveAdd(name, values) {
       `${name} is not in the catalog, so it needs --runtime and --model (see \`cf catalog\`)`,
     )
   }
+  // Provenance only when the catalog actually decided the participant: an
+  // explicit --model or --effort makes this the user's own definition, and a
+  // later sync must not drag it back to the preset.
+  const pinned = values.model !== undefined || values.effort !== undefined
   return {
     name,
     runtime: values.runtime ?? entry?.runtime,
     model: values.model ?? entry?.model,
     effort: values.effort ?? entry?.effort,
     description: values.description ?? entry?.description,
+    ...(entry !== undefined && !pinned ? { preset: entry.preset } : {}),
   }
 }
 
@@ -291,6 +301,7 @@ function participantVerb(rest) {
       from: { type: 'string' },
       presets: { type: 'string' },
       json: { type: 'boolean', default: false },
+      'dry-run': { type: 'boolean', default: false },
     },
   })
   const name = positionals[0]
@@ -335,6 +346,31 @@ function participantVerb(rest) {
       removeParticipant(name, env)
       refreshSkill(env)
       out(`removed ${name}`)
+      return
+    }
+    case 'sync': {
+      // Catalog-backed participants keep whatever model they were created
+      // with; this is how a moved preset reaches them. Anything you defined
+      // yourself, and any description you wrote, is left alone.
+      const applied = syncParticipants(env, { name, dryRun: values['dry-run'] })
+      if (applied.length === 0) {
+        const backed = listParticipants(env).filter((p) => p.preset !== undefined).length
+        out(
+          backed === 0
+            ? 'nothing to sync: no participant came from the catalog'
+            : `up to date: all ${backed} catalog-backed participants match the catalog`,
+        )
+        return
+      }
+      for (const { name: who, changes } of applied) {
+        for (const change of changes) {
+          out(
+            `${who.padEnd(14)}${change.field.padEnd(14)}${change.from ?? '-'} → ${change.to ?? '-'}`,
+          )
+        }
+      }
+      if (values['dry-run']) out('(dry run: nothing was written)')
+      else refreshSkill(env)
       return
     }
     default:
