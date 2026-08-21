@@ -1,3 +1,5 @@
+import { PARTICIPANT_PRESETS } from '../hosts/lib/presets.js'
+
 /**
  * Ready-made participants, per tool.
  *
@@ -6,11 +8,22 @@
  * list: pick a name, get a working participant. `cf participant add zeus`
  * needs no flags; the UI offers the same lists as one-click adds.
  *
- * Everything here was verified live on 2026-08-20 against the CLIs and the
- * OpenRouter catalog — model ids exist, effort levels are the ones each CLI
- * documents, and each family carries its newest release (glm-5.3 over 5.2,
- * qwen3.8-max over 3.7-max). Custom participants remain free-form: the
- * catalog is a convenience, never a constraint.
+ * **One list, derived.** These are the payload's own presets — the very
+ * records that run a participant — reshaped into the manager's vocabulary
+ * (kind→runtime, thinking/effort→effort). Until 2026-08-21 the manager kept
+ * a second, hand-written list of 22 names: the merge that brought the
+ * payloads into this repo ended the duplicated engine but not the
+ * duplicated catalog, and the two drifted until five names meant different
+ * models on the two sides — `nike` was GPT-5.6-luna to the app and Gemini
+ * 3.7 Flash to the runtime. A name must mean one model, so the runtime's
+ * list won: it is the superset, and it is what actually launches the run.
+ *
+ * Verified live 2026-08-21: all 16 OpenRouter ids exist in
+ * openrouter.ai/api/v1/models; claude-fable-5, claude-opus-5 and
+ * claude-haiku-4-5 each answered a real `claude -p`; pi lists every
+ * `openai-codex/gpt-5.6-*` id. The five `anthropic/claude-*` presets on pi
+ * (orpheus, linus, erato, kronos, atlas) are correct but need pi's
+ * anthropic provider configured — `pi auth check --provider anthropic`.
  */
 
 /** Effort levels each CLI accepts, quoted from its own help output. */
@@ -25,147 +38,38 @@ export const EFFORTS = {
   opencode: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
 }
 
-export const CATALOG = {
-  claude: [
-    {
-      name: 'zeus',
-      model: 'claude-opus-5',
-      effort: 'max',
-      description: 'Claude Opus 5 at full depth — high-stakes architecture and final checks',
-    },
-    {
-      name: 'calliope',
-      model: 'claude-fable-5',
-      effort: 'max',
-      description: 'Claude Fable 5 at full depth — the deepest reviewer on the roster',
-    },
-    {
-      name: 'apollo',
-      model: 'claude-opus-5',
-      effort: 'xhigh',
-      description: 'Claude Opus 5, a step faster — design alternatives and spec critique',
-    },
-    {
-      name: 'artemis',
-      model: 'claude-sonnet-5',
-      effort: 'medium',
-      description: 'Claude Sonnet 5 — quick, capable second opinions',
-    },
-    {
-      name: 'hermes',
-      model: 'claude-haiku-4-5-20251001',
-      effort: 'low',
-      description: 'Claude Haiku 4.5 — the fastest sanity check available',
-    },
-  ],
-  codex: [
-    {
-      name: 'hyperion',
-      model: 'gpt-5.6-sol',
-      effort: 'ultra',
-      description: 'GPT 5.6 Sol at ultra — maximum reasoning; turns can run many minutes',
-    },
-    {
-      name: 'gaia',
-      model: 'gpt-5.6-terra',
-      effort: 'xhigh',
-      description: 'GPT 5.6 Terra — the balanced Codex participant',
-    },
-    {
-      name: 'diana',
-      model: 'gpt-5.6-luna',
-      effort: 'xhigh',
-      description: 'GPT 5.6 Luna — compact and fast, still deep',
-    },
-    {
-      name: 'helios',
-      model: 'gpt-5.6-sol',
-      effort: 'high',
-      description: 'GPT 5.6 Sol at high — flagship reasoning without the ultra wait',
-    },
-    {
-      name: 'nike',
-      model: 'gpt-5.6-luna',
-      effort: 'minimal',
-      description: 'GPT 5.6 Luna at minimal — near-instant checks',
-    },
-  ],
-  pi: [
-    {
-      name: 'endymion',
-      model: 'openrouter/moonshotai/kimi-k3',
-      effort: 'xhigh',
-      description: 'Kimi K3 with a 1M-token window — for questions that span a whole repo',
-    },
-    {
-      name: 'prometheus',
-      model: 'openrouter/z-ai/glm-5.3',
-      effort: 'high',
-      description: 'GLM 5.3 via OpenRouter — a genuinely different lineage to check against',
-    },
-    {
-      name: 'hephaestus',
-      model: 'openrouter/qwen/qwen3.8-max',
-      effort: 'high',
-      description: 'Qwen 3.8 Max via OpenRouter — strong, independent implementation opinions',
-    },
-    {
-      name: 'aether',
-      model: 'openai-codex/gpt-5.6-sol',
-      effort: 'xhigh',
-      description: 'GPT 5.6 Sol through pi — Codex reasoning in pi’s harness',
-    },
-    {
-      name: 'rhea',
-      model: 'openai-codex/gpt-5.6-terra',
-      effort: 'xhigh',
-      description: 'GPT 5.6 Terra through pi — the balanced variant',
-    },
-    {
-      name: 'phoebe',
-      model: 'openai-codex/gpt-5.6-luna',
-      effort: 'xhigh',
-      description: 'GPT 5.6 Luna through pi — the fast variant',
-    },
-  ],
-  opencode: [
-    {
-      name: 'mani',
-      model: 'openrouter/moonshotai/kimi-k3',
-      description: 'Kimi K3 through opencode — 1M context, no effort control',
-    },
-    {
-      name: 'sunna',
-      model: 'openrouter/openai/gpt-5.6-sol',
-      effort: 'xhigh',
-      description: 'GPT 5.6 Sol through opencode',
-    },
-    {
-      name: 'jord',
-      model: 'openrouter/openai/gpt-5.6-terra',
-      effort: 'xhigh',
-      description: 'GPT 5.6 Terra through opencode',
-    },
-    {
-      name: 'bil',
-      model: 'openrouter/openai/gpt-5.6-luna',
-      effort: 'xhigh',
-      description: 'GPT 5.6 Luna through opencode',
-    },
-    {
-      name: 'saga',
-      model: 'openrouter/z-ai/glm-5.3',
-      description: 'GLM 5.3 through opencode',
-    },
-    {
-      name: 'kvasir',
-      model: 'openrouter/qwen/qwen3.8-max',
-      description: 'Qwen 3.8 Max through opencode',
-    },
-  ],
+/**
+ * The payload speaks in kinds, the manager in runtimes. `image` has no
+ * runtime here on purpose: an image participant is generated through the
+ * Codex backend rather than launched as a CLI, so the roster cannot create
+ * one and offering it as a quick-add would hand the user a dead button.
+ */
+const KIND_TO_RUNTIME = { 'claude-code': 'claude', codex: 'codex', pi: 'pi', opencode: 'opencode' }
+
+function entryFor(preset) {
+  const effort = preset.effort ?? preset.thinking
+  return {
+    name: preset.preset,
+    model: preset.model,
+    ...(effort ? { effort } : {}),
+    // `label` is the one-line headline ("Claude Code Fable 5 MAX"); the
+    // preset's own prose is kept alongside for the card that wants it.
+    description: preset.label ?? preset.description,
+    detail: preset.description,
+    // Provenance: what a roster row records so a later catalog change can be
+    // offered as an update instead of silently diverging.
+    preset: preset.preset,
+  }
 }
 
-/** The catalog entry with this name, whatever tool it belongs to. */
+export const CATALOG = PARTICIPANT_PRESETS.reduce((catalog, preset) => {
+  const runtime = KIND_TO_RUNTIME[preset.kind]
+  if (runtime === undefined) return catalog
+  if (catalog[runtime] === undefined) catalog[runtime] = []
+  catalog[runtime].push(entryFor(preset))
+  return catalog
+}, {})
+
 export function catalogEntry(name) {
   for (const [runtime, entries] of Object.entries(CATALOG)) {
     const entry = entries.find((e) => e.name === name)

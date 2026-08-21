@@ -543,7 +543,9 @@ export const PARTICIPANT_PRESETS = [
     label: "Image — gpt-image-2 (via Codex login)",
     description: "Generates images with gpt-image-2 through your existing Codex / openai-codex login. Accepts optional reference images (`--image <path>`, repeatable) to edit/condition on. The model field is only the trigger model; the image backend is always gpt-image-2.",
     kind: "image",
-    model: "gpt-5.5",
+    // The image path calls IMAGE_BACKEND (gpt-image-2) directly; this field is
+    // what the catalog displays, so it names the model that actually runs.
+    model: "gpt-image-2",
   },
 ];
 

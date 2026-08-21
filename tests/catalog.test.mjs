@@ -38,7 +38,7 @@ describe('every tool ships a list of ready-made participants', () => {
     }
   })
 
-  it('carries the models verified live on 2026-08-20, newest of each family', () => {
+  it('carries the models verified live on 2026-08-21, newest of each family', () => {
     const models = Object.values(CATALOG).flatMap((entries) => entries.map((e) => e.model))
     assert.ok(models.includes('openrouter/z-ai/glm-5.3'))
     assert.ok(models.includes('openrouter/qwen/qwen3.8-max'))
@@ -46,6 +46,31 @@ describe('every tool ships a list of ready-made participants', () => {
     // Superseded versions must not linger in a curated list.
     assert.ok(!models.some((m) => m.includes('glm-5.2')))
     assert.ok(!models.some((m) => m.includes('qwen3.7')))
+  })
+
+  it('is the payload presets and nothing else — one list, not two', async () => {
+    // A second hand-written list is how `nike` came to mean GPT-5.6-luna in the
+    // app and Gemini 3.7 Flash in the runtime. The catalog is now derived, so
+    // the two can no longer disagree.
+    const { PARTICIPANT_PRESETS } = await import('../hosts/lib/presets.js')
+    const byName = new Map(PARTICIPANT_PRESETS.map((preset) => [preset.preset, preset]))
+
+    for (const [runtime, entries] of Object.entries(CATALOG)) {
+      for (const entry of entries) {
+        const preset = byName.get(entry.name)
+        assert.ok(preset !== undefined, `${entry.name} exists as a preset`)
+        assert.equal(entry.model, preset.model, `${entry.name}: model matches the runtime`)
+        assert.equal(entry.effort, preset.effort ?? preset.thinking, `${entry.name}: effort`)
+        assert.equal(entry.preset, entry.name, `${entry.name}: records its provenance`)
+        assert.ok(RUNTIMES.includes(runtime))
+      }
+    }
+
+    // Every preset the manager can actually create is offered; the image
+    // preset is not, because the roster has no runtime that launches it.
+    const offered = Object.values(CATALOG).flat().length
+    const launchable = PARTICIPANT_PRESETS.filter((preset) => preset.kind !== 'image').length
+    assert.equal(offered, launchable, 'every launchable preset is offered')
   })
 
   it('finds an entry by name, whatever tool it belongs to', () => {

@@ -432,6 +432,14 @@ const PAGE = (token) => `<!DOCTYPE html>
   .offer:first-of-type { border-top: none; }
   .offer__name { font-family: var(--mono); font-size: 13px; color: var(--foam); min-width: 96px; }
   .offer__what { color: var(--muted); font-size: 13px; flex: 1; }
+  .offer__model { font-family: var(--mono); font-size: 11px; color: var(--muted); opacity: .8; }
+  .lede--tight { margin: 0 0 8px; }
+  #catalog-filter {
+    width: 100%; box-sizing: border-box; margin-bottom: 10px; padding: 8px 10px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+    color: var(--ink); font: inherit; font-size: 13px;
+  }
+  #catalog-filter:focus-visible { outline: 2px solid var(--seafoam); outline-offset: 1px; }
 
   form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
   input, select {
@@ -479,6 +487,8 @@ const PAGE = (token) => `<!DOCTYPE html>
   <section id="roster"></section>
 
   <p class="eyebrow eyebrow--section">Ready-made</p>
+  <p class="lede lede--tight">Pick a name and it is configured for you. <span id="catalog-count"></span></p>
+  <input id="catalog-filter" type="search" placeholder="Filter by name, model or engine…" autocomplete="off">
   <div id="catalog"></div>
 
   <p class="eyebrow eyebrow--section">How this machine consults</p>
@@ -606,16 +616,26 @@ function openEditor(card, participant) {
 function renderCatalog(data) {
   const taken = new Set(data.participants.map((p) => p.name));
   const host = document.querySelector('#catalog');
+  const needle = (document.querySelector('#catalog-filter').value || '').trim().toLowerCase();
+  const matches = (entry, runtime) => needle.length === 0 ||
+    [entry.name, entry.model, entry.description, entry.detail, runtime]
+      .filter(Boolean).join(' ').toLowerCase().includes(needle);
   host.innerHTML = '';
+  let shown = 0, free = 0;
   for (const [runtime, entries] of Object.entries(data.catalog)) {
-    const available = entries.filter((e) => !taken.has(e.name));
+    free += entries.filter((e) => !taken.has(e.name)).length;
+    const available = entries.filter((e) => !taken.has(e.name) && matches(e, runtime));
     if (available.length === 0) continue;
+    shown += available.length;
     const group = el('section');
-    group.append(el('p', 'eyebrow eyebrow--tool', runtime));
+    group.append(el('p', 'eyebrow eyebrow--tool', runtime + ' · ' + available.length));
     for (const entry of available) {
       const row = el('div', 'offer');
       row.append(el('span', 'offer__name', entry.name));
-      row.append(el('span', 'offer__what', entry.description));
+      const what = el('span', 'offer__what', entry.description);
+      if (entry.detail) what.title = entry.detail;
+      row.append(what);
+      row.append(el('span', 'offer__model', entry.model + (entry.effort ? ' · ' + entry.effort : '')));
       const add = el('button', null, 'Add');
       add.onclick = async () => {
         await fetch('/api/participants', {
@@ -633,6 +653,13 @@ function renderCatalog(data) {
     }
     host.append(group);
   }
+  const count = document.querySelector('#catalog-count');
+  count.textContent = needle.length > 0
+    ? shown + ' of ' + free + ' shown'
+    : free + ' available across every engine';
+  if (shown === 0) host.append(el('p', 'note', needle.length > 0
+    ? 'No ready-made participant matches that.'
+    : 'Every ready-made participant is already on your roster.'));
 }
 
 function renderForm(data) {
@@ -756,6 +783,10 @@ async function post(path, body, note) {
 }
 
 // Choosing an integration installs it; this only refreshes what is there.
+document.querySelector('#catalog-filter').addEventListener('input', () => {
+  if (LAST !== null) renderCatalog(LAST);
+});
+
 document.querySelector('#update').onclick = () =>
   post('/api/skills/install', {}, 'Updating…');
 document.querySelector('#off').onclick = () => {
@@ -763,11 +794,15 @@ document.querySelector('#off').onclick = () => {
   post('/api/off', { confirm: true }, 'Turning off…');
 };
 
+// The last roster payload, so filtering the catalog re-renders without a fetch.
+let LAST = null;
+
 async function load() {
   const [data, system] = await Promise.all([
     (await fetch('/api/participants', { headers })).json(),
     (await fetch('/api/system', { headers })).json(),
   ]);
+  LAST = data;
   renderRoster(data);
   renderCatalog(data);
   renderForm(data);
