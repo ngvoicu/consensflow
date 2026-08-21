@@ -116,7 +116,7 @@ test('createPacket is conversational, mode-aware, and carries handoff + diff', a
     })
     assert.match(packet, /## Message from the user/)
     assert.match(packet, /Review the latest changes/)
-    assert.match(packet, /Read-write: you can read and modify this workspace/)
+    assert.match(packet, /You can read and modify this workspace/)
     assert.match(packet, /work iteratively/i) // nudge that keeps glm-style models from one-shotting big analysis
     assert.match(packet, /## Handoff — current session/)
     assert.match(packet, /working on the packet/)
@@ -139,7 +139,7 @@ test('createPacket gives write-capable agents a read-write mode line', async () 
       kind: 'ask',
       task: 'add a health check endpoint',
     })
-    assert.match(packet, /Read-write: you can read and modify this workspace/)
+    assert.match(packet, /You can read and modify this workspace/)
     assert.match(packet, /work iteratively/i) // nudge that keeps glm-style models from one-shotting big analysis
     assert.doesNotMatch(packet, /Read-only:/)
   })

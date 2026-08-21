@@ -200,7 +200,7 @@ async function handleRun(tokens, cwd) {
   const positional = [...parsed.positional];
   const ref = positional.shift();
   if (!ref || !ref.startsWith("@")) {
-    throw new Error("Usage: /consensflow @name <prompt> — or via the Bash tool: run @name <prompt> [--prompt-file <file>] [--context <note>] [--no-handoff] [--json]");
+    throw new Error("Usage: /consensflow @name <prompt> — or via the Bash tool: run @name <prompt> [--brief <who this run is for>] [--prompt-file <file>] [--context <note>] [--no-handoff] [--json]");
   }
   if (positional[0]?.startsWith("@")) {
     throw new Error("ConsensFlow sends to one agent at a time. Ask one, read its answer, then ask another.");
@@ -234,7 +234,15 @@ async function handleRun(tokens, cwd) {
       : "empty — no session transcript stashed for this workspace (are the plugin hooks running?)";
   }
 
-  const packet = await createPacket({ cwd, agent, kind: "ask", task: prompt, extraContext: stringFlag(parsed.flags.context), handoff });
+  const packet = await createPacket({
+    cwd,
+    agent,
+    kind: "ask",
+    task: prompt,
+    brief: stringFlag(parsed.flags.brief),
+    extraContext: stringFlag(parsed.flags.context),
+    handoff,
+  });
   // PRIMARY observability path: streaming is ALWAYS on — the thinking must stay visible, never run a
   // agent without it (--stream/--no-stream are accepted but no longer gate this). Render
   // normalized events to stdout as they arrive so the lead relays the thinking / tool calls / answer
@@ -268,7 +276,7 @@ async function handleRun(tokens, cwd) {
 export function parseRunOptions(tokens) {
   const positional = [];
   const flags = {};
-  const valueFlags = new Set(["context", "prompt", "prompt-file", "handoff-file", "image"]);
+  const valueFlags = new Set(["brief", "context", "prompt", "prompt-file", "handoff-file", "image"]);
   const booleanFlags = new Set(["stream", "no-stream", "json", "rw", "handoff", "no-handoff"]);
   // Repeatable flags collect into an array: `--image a.png --image b.png` → ["a.png", "b.png"].
   const multiValueFlags = new Set(["image"]);

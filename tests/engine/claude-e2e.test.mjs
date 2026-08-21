@@ -494,7 +494,7 @@ test('e2e: all four engines run, parse, and persist artifacts through the real s
 
       const { packet, result } = await latestPacket(ws, dir)
       assert.match(packet, /# ConsensFlow Packet/)
-      assert.match(packet, /Read-write: you can read and modify this workspace/)
+      assert.match(packet, /You can read and modify this workspace/)
       assert.match(packet, /ping from the test/)
       assert.equal(result.output, expect)
       assert.equal(result.exitCode, 0)

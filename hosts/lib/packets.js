@@ -5,6 +5,7 @@ export async function createPacket(input) {
     cwd,
     agent,
     task,
+    brief = "",
     extraContext = "",
     handoff = "",
   } = input;
@@ -15,23 +16,24 @@ export async function createPacket(input) {
   sections.push(`Workspace: ${cwd}`);
   sections.push("");
 
-  sections.push("## Who you are");
-  sections.push(`You are ${agent.name}, joining a coding session as a named agent.`);
-  const specs = [`kind=${agent.kind}`];
-  if (agent.model) specs.push(`model=${agent.model}`);
-  if (agent.effort) specs.push(`effort=${agent.effort}`);
-  if (agent.thinking) specs.push(`thinking=${agent.thinking}`);
-  sections.push(specs.join(" · "));
-  sections.push("");
+  // No "who you are": the work decides what this run is, not a persona. A
+  // brief is the lead's own words about what it wants from THIS spawn — a
+  // GDPR review, a second opinion on a migration — so it leads the packet
+  // when there is one, and nothing stands in for it when there is not.
+  if (brief && String(brief).trim()) {
+    sections.push("## Your brief for this run");
+    sections.push(String(brief).trim());
+    sections.push("");
+  }
 
-  sections.push("## Mode");
-  sections.push("Read-write: you can read and modify this workspace — edit files and run commands as needed, like a normal coding session.");
-  sections.push("For any task that involves analyzing or changing code, work iteratively — read, grep, and run commands or tests to verify claims as you go, rather than reasoning out a long answer in a single pass. Explore first, then write.");
+  sections.push("## How to work");
+  sections.push("You can read and modify this workspace — edit files and run commands as needed.");
+  sections.push("When the task involves analyzing or changing anything here, work iteratively: read, grep, and run commands or tests to verify claims as you go, rather than reasoning out a long answer in one pass. Explore first, then answer.");
   sections.push("");
 
   if (handoff && String(handoff).trim()) {
     sections.push("## Handoff — current session");
-    sections.push("The conversation so far between the user and the lead coding harness, most recent last. You were not part of it; use it as context for the request below.");
+    sections.push("The conversation so far between the user and the lead, most recent last. You were not part of it; use it as context for the request below.");
     sections.push("");
     sections.push(String(handoff).trim());
     sections.push("");
@@ -46,7 +48,7 @@ export async function createPacket(input) {
   sections.push("## Message from the user");
   sections.push(taskForKind("ask", task));
   sections.push("");
-  sections.push("Respond directly and conversationally, the way you would in a normal coding session. There is no required format.");
+  sections.push("Respond directly and conversationally. There is no required format.");
   sections.push("");
   return sections.join("\n");
 }

@@ -91,7 +91,30 @@ test('agent CRUD persists global user-level JSON', async () => {
   })
 })
 
-test('createPacket is conversational, mode-aware, and carries handoff + diff', async () => {
+test('the brief leads the packet, and nothing stands in for it when absent', async () => {
+  const agent = normalizeAgent({ id: 'diana', name: 'Diana', kind: 'codex', model: 'gpt-5.6-luna' })
+
+  const withBrief = await createPacket({
+    cwd: '/repo',
+    agent,
+    task: 'check the export path',
+    brief: 'You are reviewing this for GDPR: lawful basis, data minimisation, retention.',
+  })
+  assert.match(withBrief, /## Your brief for this run/)
+  assert.match(withBrief, /lawful basis/)
+  assert.ok(
+    withBrief.indexOf('## Your brief') < withBrief.indexOf('## Message from the user'),
+    'the brief comes before the task',
+  )
+
+  const plain = await createPacket({ cwd: '/repo', agent, task: 'check the export path' })
+  assert.doesNotMatch(plain, /## Your brief/)
+  // No persona is invented in its place, and no run is called a coding session.
+  assert.doesNotMatch(plain, /You are Diana/)
+  assert.doesNotMatch(plain, /joining a coding session/)
+})
+
+test('createPacket is conversational and carries handoff + diff', async () => {
   await withTempDir(async (cwd) => {
     const agent = await upsertAgent(cwd, {
       name: 'Zeus',
@@ -107,14 +130,14 @@ test('createPacket is conversational, mode-aware, and carries handoff + diff', a
     })
     assert.match(packet, /## Message from the user/)
     assert.match(packet, /Review the latest changes/)
-    assert.match(packet, /Read-write: you can read and modify this workspace/)
+    assert.match(packet, /You can read and modify this workspace/)
     assert.match(packet, /work iteratively/i) // nudge that keeps glm-style models from one-shotting big analysis
     assert.match(packet, /## Handoff — current session/)
     assert.match(packet, /working on the packet/)
   })
 })
 
-test('createPacket gives write-capable agents a read-write mode line', async () => {
+test('createPacket tells every agent it can work in the project', async () => {
   await withTempDir(async (cwd) => {
     const agent = await upsertAgent(cwd, {
       name: 'Builder',
@@ -126,7 +149,7 @@ test('createPacket gives write-capable agents a read-write mode line', async () 
       kind: 'ask',
       task: 'add a health check endpoint',
     })
-    assert.match(packet, /Read-write: you can read and modify this workspace/)
+    assert.match(packet, /You can read and modify this workspace/)
     assert.match(packet, /work iteratively/i) // nudge that keeps glm-style models from one-shotting big analysis
     assert.doesNotMatch(packet, /Read-only:/)
   })
