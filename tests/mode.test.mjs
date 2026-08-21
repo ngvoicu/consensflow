@@ -139,6 +139,39 @@ describe('the machine runs exactly one ConsensFlow path', () => {
     applyMode('cmux', t.env, { bundled })
   })
 
+  it('installs nothing until a mode is chosen', () => {
+    // Adding a participant before picking a path used to install the generated
+    // skill into every agent found — so ConsensFlow appeared in Claude Code
+    // without anyone choosing Claude Code, and the one-path invariant was
+    // broken before the user ever saw the switch.
+    const fresh = tempEnv()
+    try {
+      stubCli(fresh, 'claude')
+      stubCli(fresh, 'codex')
+      assert.equal(currentMode(fresh.env), null, 'no mode yet')
+
+      addParticipant({ name: 'zeus', runtime: 'claude', model: 'claude-opus-5' }, fresh.env)
+      refreshInstalledSkill(fresh.env)
+
+      assert.equal(
+        existsSync(join(fresh.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')),
+        false,
+        'nothing is installed before a path is chosen',
+      )
+      assert.equal(
+        existsSync(join(fresh.env.CODEX_HOME, 'skills', 'consensflow', 'SKILL.md')),
+        false,
+      )
+
+      // Choosing the path is what installs it.
+      stubGit(fresh)
+      applyMode('cmux', fresh.env, { bundled })
+      assert.ok(existsSync(join(fresh.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')))
+    } finally {
+      fresh.cleanup()
+    }
+  })
+
   it('brings the cmux skills with it when cmux mode is chosen', () => {
     stubGit(t)
     applyMode('cmux', t.env, { bundled })

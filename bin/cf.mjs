@@ -391,10 +391,16 @@ function skillsVerb(rest) {
 
   switch (action) {
     case 'install': {
+      // The generated skill belongs to cmux mode. The guard used to test for
+      // the mode's old name, so it refused in cmux mode and allowed the one
+      // case that should never install: no mode at all, which is how
+      // ConsensFlow appeared in agents nobody had chosen.
       const mode = currentMode(env)
-      if (mode !== null && mode !== 'standalone') {
+      if (mode !== 'cmux') {
         fail(
-          `this machine is in ${mode} mode, where only ${mode} consults — run \`consensflow use cmux\` to give every agent the generated skill`,
+          mode === null
+            ? 'no path chosen yet — run `consensflow use cmux` to give every agent the generated skill, or `consensflow use claude|pi` for the deeper integration in one of them'
+            : `this machine is in ${mode} mode, where only ${mode} consults — run \`consensflow use cmux\` to give every agent the generated skill`,
         )
         return
       }

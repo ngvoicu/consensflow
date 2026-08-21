@@ -24,11 +24,15 @@ import { generateSkill } from './skill.js'
  * that already ship their own ConsensFlow. `all` installs regardless.
  */
 export function skillTargets(env, { all = false } = {}) {
-  // A host mode means one agent consults and the rest do not: the generated
-  // skill belongs nowhere until the machine is back in standalone. Without
-  // this, the next roster edit would quietly undo the mode.
+  // The generated skill belongs to cmux mode and nowhere else.
+  //
+  // A host mode means one agent consults and the rest do not, so a roster edit
+  // must not quietly undo it. No mode at all means the same thing for a
+  // different reason: nobody has chosen a path yet, and installing into every
+  // agent found would put ConsensFlow in Claude Code without anyone choosing
+  // Claude Code. Choosing the path is what installs it.
   const mode = currentMode(env)
-  if (mode !== null && mode !== 'cmux') return []
+  if (mode !== 'cmux') return []
 
   const agents = detectAgents(env)
   return all ? agents : agents.filter((agent) => agent.native !== true)

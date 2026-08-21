@@ -5,7 +5,7 @@ import { after, describe, it } from 'node:test'
 import { detectAgents } from '../src/agents.js'
 import { installSkill, skillsStatus, uninstallSkills } from '../src/install.js'
 import { retireSkillFromNativeHosts, skillTargets } from '../src/sync.js'
-import { tempEnv } from './helpers.mjs'
+import { chooseCmuxMode, tempEnv } from './helpers.mjs'
 
 function stubCli(env, name) {
   mkdirSync(env.PATH, { recursive: true })
@@ -16,6 +16,7 @@ function stubCli(env, name) {
 
 describe('agents are detected by their CLI on PATH, dirs from their own env', () => {
   const t = tempEnv()
+  chooseCmuxMode(t)
   after(() => t.cleanup())
 
   it('finds only the agents whose CLI resolves', () => {
@@ -43,6 +44,7 @@ describe('agents are detected by their CLI on PATH, dirs from their own env', ()
 
 describe('a host with its own ConsensFlow integration keeps it', () => {
   const t = tempEnv()
+  chooseCmuxMode(t)
   after(() => t.cleanup())
   stubCli(t.env, 'claude')
   stubCli(t.env, 'codex')
@@ -141,6 +143,7 @@ describe('a host with its own ConsensFlow integration keeps it', () => {
 
 describe('install writes owned files with a hash manifest; drift is sacred', () => {
   const t = tempEnv()
+  chooseCmuxMode(t)
   after(() => t.cleanup())
   stubCli(t.env, 'claude')
   stubCli(t.env, 'codex')

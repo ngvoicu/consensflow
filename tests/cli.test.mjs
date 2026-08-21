@@ -4,7 +4,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync }
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { promisify } from 'node:util'
-import { tempEnv } from './helpers.mjs'
+import { chooseCmuxMode, tempEnv } from './helpers.mjs'
 
 const run = promisify(execFile)
 const CF = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
@@ -31,6 +31,7 @@ function stubCli(t, name) {
 
 describe('cf manages the roster', () => {
   const t = tempEnv()
+  chooseCmuxMode(t)
   after(() => t.cleanup())
 
   it('adds, lists, edits and removes a participant', async () => {
@@ -99,6 +100,7 @@ describe('cf manages the roster', () => {
 
 describe('roster changes keep installed skills current', () => {
   const t = tempEnv()
+  chooseCmuxMode(t)
   after(() => t.cleanup())
   stubCli(t, 'claude')
   stubCli(t, 'codex')
@@ -187,6 +189,7 @@ describe('the machine runs one mode, and cf keeps it that way', () => {
 
 describe('one command installs the host integrations', () => {
   const t = tempEnv()
+  chooseCmuxMode(t)
   after(() => t.cleanup())
 
   it('lists the hosts and what is installed', async () => {
@@ -212,6 +215,7 @@ describe('one command installs the host integrations', () => {
 
 describe('cf explains where it stands aside for a host integration', () => {
   const t = tempEnv()
+  chooseCmuxMode(t)
   after(() => t.cleanup())
   stubCli(t, 'claude')
   stubCli(t, 'codex')
@@ -249,6 +253,7 @@ describe('cf explains where it stands aside for a host integration', () => {
 
 describe('the catalog turns a name into a working participant', () => {
   const t = tempEnv()
+  chooseCmuxMode(t)
   after(() => t.cleanup())
 
   it('lists ready-made participants per tool', async () => {
@@ -298,6 +303,7 @@ describe('the catalog turns a name into a working participant', () => {
 
 describe('the skill heals itself when cc or pi edit the shared roster', () => {
   const t = tempEnv()
+  chooseCmuxMode(t)
   after(() => t.cleanup())
   stubCli(t, 'claude')
 
@@ -349,6 +355,7 @@ describe('the skill heals itself when cc or pi edit the shared roster', () => {
 
 describe('cf setup readies a machine in one command', () => {
   const t = tempEnv()
+  chooseCmuxMode(t)
   after(() => t.cleanup())
   stubCli(t, 'claude')
 
@@ -396,6 +403,7 @@ describe('cf setup readies a machine in one command', () => {
 
 describe('the CLI can undo an install as completely as the app', () => {
   const t = tempEnv()
+  chooseCmuxMode(t)
   after(() => t.cleanup())
 
   it('takes everything back but the roster', async () => {

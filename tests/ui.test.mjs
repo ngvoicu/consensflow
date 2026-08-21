@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { after, before, describe, it } from 'node:test'
 import { listParticipants } from '../src/roster.js'
 import { startUiServer } from '../src/ui.js'
-import { tempEnv } from './helpers.mjs'
+import { chooseCmuxMode, tempEnv } from './helpers.mjs'
 
 function stubCli(t, name) {
   mkdirSync(t.env.PATH, { recursive: true })
@@ -16,6 +16,7 @@ function stubCli(t, name) {
 describe('a host program can start the editor and be told where it is', () => {
   it('prints one machine-readable line, then serves', async () => {
     const t = tempEnv()
+    chooseCmuxMode(t)
     const { spawn } = await import('node:child_process')
     const cf = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
     // No stdin at all: the editor serves until it is killed.
@@ -51,6 +52,7 @@ describe('a host program can start the editor and be told where it is', () => {
 
   it('shuts down when the program that started it goes away', async () => {
     const t = tempEnv()
+    chooseCmuxMode(t)
     const { spawn } = await import('node:child_process')
     const cf = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
     const child = spawn(process.execPath, [cf, 'ui', '--json', '--no-open'], {
@@ -161,7 +163,9 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
   })
 
   it('installs and regenerates the skill on every change — no separate step', async () => {
-    // The add in the previous test already installed it; the edit refreshes.
+    // Choosing the path is what installs; from then on every roster change
+    // keeps it current with no separate step.
+    await api('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'cmux' }) })
     await api('/api/participants/zeus', {
       method: 'PATCH',
       body: JSON.stringify({ model: 'claude-opus-5' }),
@@ -193,7 +197,9 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     const res = await api('/api/system')
     const system = await res.json()
 
-    assert.equal(system.mode.current, null)
+    // Whatever this suite has chosen by now, the report describes it: the
+    // no-mode case has its own test in the CLI suite.
+    assert.ok(system.mode.current === null || system.mode.available.includes(system.mode.current))
     assert.equal(system.mode.labels.cmux, 'cmux (pi, cc, codex, opencode)')
     assert.deepEqual([...system.mode.available].sort(), ['claude', 'cmux', 'pi'])
     assert.ok(Array.isArray(system.mode.report))
@@ -355,8 +361,9 @@ exit 1
   })
 
   it('removes them again, but only when the click was deliberate', async () => {
-    // Off cleared everything; put the skill back so removal has a target.
-    await api('/api/skills/install', { method: 'POST', body: JSON.stringify({}) })
+    // Off cleared everything, mode included: choosing a path again is what
+    // puts the skill back, so removal has a target.
+    await api('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'cmux' }) })
     assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')))
 
     const refused = await api('/api/skills/uninstall', { method: 'POST', body: JSON.stringify({}) })
