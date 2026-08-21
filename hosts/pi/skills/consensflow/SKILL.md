@@ -95,18 +95,24 @@ Presets run with full permissions; the same model+effort family exists on every 
 
 Run `/consensflow:presets` for the full list. Model and effort strings pass through to the engine verbatim, so any identifier the engine accepts works.
 
-## How to ask
+## How to spawn one
 
-Use `@name` anywhere in the line, or the explicit `/consensflow:cf` router:
+Typing `@zeus …` no longer runs anything by itself — pi used to intercept that line and run the agent behind the lead's back, which made it behave unlike every other harness. The lead composes the run now, from what the user said.
+
+**Prefer the `cf_run_agent` tool**, which takes the same four pieces as the CLI:
+
+- the agent's name;
+- `brief` — what this spawn is for ("you are reviewing this for GDPR: lawful basis, retention"). Nothing else tells the agent what it is here for; no persona is assigned for it.
+- `includeHandoff` — the session so far, attached by default; set it false when the user says not to share the conversation, or when the task stands alone.
+- the prompt — what you want done.
+
+The explicit router stays for driving a run by hand:
 
 ```text
-@zeus What's the riskiest part of this design?                  # mention, anywhere in the line
-/consensflow:cf @zeus What's the riskiest part of this design?  # explicit router
+/consensflow:cf @zeus What's the riskiest part of this design?
 ```
 
-Pi intentionally matches Claude Code's slash-command surface: only `/consensflow:*` slash commands are registered; no unnamespaced shortcuts or per-agent slash commands. A stray `@token` that is not an agent is ignored and goes to the lead as normal text.
-
-From the lead, **prefer the `cf_run_agent` tool.** Pass an optional `context` brief on top of the auto-included session handoff to focus the agent on exactly what you want assessed or done.
+Only `/consensflow:*` slash commands are registered — no unnamespaced shortcuts, no per-agent commands. A stray `@token` is ordinary text and goes to the lead.
 
 ## Full command reference
 
