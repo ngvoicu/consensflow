@@ -40,7 +40,7 @@ describe('one command builder serves the skill and the roster editor', () => {
     const { participantCommand } = await import('../src/skill.js')
     const command = participantCommand(ROSTER[0])
     assert.ok(generateSkill(ROSTER).includes(command))
-    assert.match(command, /claude -p "<question>"/)
+    assert.match(command, /claude -p --dangerously-skip-permissions "<question>"/)
   })
 
   it('has nothing to show for a runtime it cannot run', async () => {
@@ -65,7 +65,7 @@ describe('the generated skill carries the live-verified command per engine', () 
   it('emits the exact claude command with the billing guard and effort', () => {
     assert.ok(
       md.includes(
-        'env -u ANTHROPIC_API_KEY claude -p "<question>" --model claude-opus-5 --effort max',
+        'env -u ANTHROPIC_API_KEY claude -p --dangerously-skip-permissions "<question>" --model claude-opus-5 --effort max',
       ),
     )
   })
@@ -73,7 +73,7 @@ describe('the generated skill carries the live-verified command per engine', () 
   it('emits the exact codex command with the billing guard, trust skip and effort', () => {
     assert.ok(
       md.includes(
-        'env -u OPENAI_API_KEY codex exec --skip-git-repo-check -m gpt-5.6-sol -c model_reasoning_effort="ultra" "<question>"',
+        'env -u OPENAI_API_KEY codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -m gpt-5.6-sol -c model_reasoning_effort="ultra" "<question>"',
       ),
     )
   })
@@ -87,13 +87,22 @@ describe('the generated skill carries the live-verified command per engine', () 
   })
 
   it('emits the exact opencode command, effort-less when none is set', () => {
-    assert.ok(md.includes('opencode run --model openrouter/moonshotai/kimi-k3 "<question>"'))
+    assert.ok(md.includes('opencode run --auto --model openrouter/moonshotai/kimi-k3 "<question>"'))
     assert.ok(!md.includes('--variant undefined'))
   })
 
-  it('never emits a permission-bypass flag: participants run as their CLI defaults', () => {
-    assert.ok(!md.includes('--dangerously'))
-    assert.doesNotMatch(md, /full-auto/i)
+  it('gives every participant full permissions, on every engine', () => {
+    // A participant is a helper you hand a task to, not a sandboxed reviewer:
+    // it may write outside the project and reach the network. The flags are
+    // asserted here so a future refactor cannot quietly put a fence back.
+    assert.ok(md.includes('claude -p --dangerously-skip-permissions'), 'claude')
+    assert.ok(
+      md.includes('codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox'),
+      'codex',
+    )
+    assert.ok(md.includes('opencode run --auto'), 'opencode')
+    // pi enables its tools by default, so it needs no flag — and must not grow one.
+    assert.doesNotMatch(md, /pi [^\n]*--dangerously/)
   })
 
   it('teaches the agent to self-heal when a name is missing from the table', () => {

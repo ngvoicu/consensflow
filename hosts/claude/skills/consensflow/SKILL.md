@@ -5,14 +5,14 @@ description: Use ConsensFlow inside Claude Code to consult one named participant
 
 # ConsensFlow
 
-ConsensFlow lets the lead (this Claude Code session) consult one named participant at a time. A participant is an external coding-agent CLI (claude / codex / opencode / pi) run as an isolated one-shot subprocess: it receives a handoff of the current session plus a prompt, answers once, and does not persist between calls. A participant runs as a standard read-write CLI call — exactly like running claude / codex / pi / opencode yourself: by default it can read, edit files, and run commands, confined to the project workspace. Talking to a participant is like phoning an advisor/helper and briefly handing over a task. The lead stays the decision-maker and ConsensFlow never accepts or keeps participant work on its own — inspect `git status` / `git diff` after any run before keeping changes.
+ConsensFlow lets the lead (this Claude Code session) consult one named participant at a time. A participant is an external coding-agent CLI (claude / codex / opencode / pi) run as an isolated one-shot subprocess: it receives a handoff of the current session plus a prompt, answers once, and does not persist between calls. A participant runs with full permissions — exactly like running claude / codex / pi / opencode yourself with every approval already granted: it can read, edit files, run commands and reach the network, and it is not sandboxed to the project directory. Talking to a participant is like phoning an advisor/helper and briefly handing over a task. The lead stays the decision-maker and ConsensFlow never accepts or keeps participant work on its own — inspect `git status` / `git diff` after any run before keeping changes.
 
 ## What participants can do
 
 Use participants for all of these, one participant at a time. No preset is intrinsically review-only; the same participant can advise or do workspace work in the same read-write run:
 
 - **Advice / second opinion / design critique.** Ask a participant to inspect context, critique a plan, assess a pasted diff, identify risks, or suggest tests.
-- **Doing work / code-writing help.** The same participant can implement, refactor, or run commands by default — it runs read-write in the project workspace with no extra flag. Treat it like a temporary helper: after the run, inspect `git status` / `git diff` and relevant tests, then ask the user before keeping or building on the changes unless they pre-authorized it.
+- **Doing work / code-writing help.** The same participant can implement, refactor, or run commands by default — it runs with full permissions and no extra flag. Treat it like a temporary helper: after the run, inspect `git status` / `git diff` and relevant tests, then ask the user before keeping or building on the changes unless they pre-authorized it.
 - **Image generation.** `@pygmalion` (or any `kind=image` participant) uses **gpt-image-2** via the Codex backend / Codex CLI login. It receives the image prompt only — no session handoff — saves `image.png` in the ConsensFlow run dir under `~/.consensflow/workspaces/…`, and the lead can open/show that file with the Read tool. Optionally pass one or more **reference images** with `--image <path>` (repeatable) so gpt-image-2 edits/conditions on them — supply a file path (.png/.jpg/.jpeg/.webp/.gif); a pasted image with no path on disk can't be used.
 
 ## How to run it
@@ -20,7 +20,7 @@ Use participants for all of these, one participant at a time. No preset is intri
 Everything the Claude Code lead does goes through the bundled CLI via the Bash tool. ConsensFlow never caps a run itself (runs are unbounded) — the only limit is your Bash tool timeout, so use a generous one for frontier models (often `600000` ms or more).
 
 ```bash
-# Ask one participant (read-write by default) in the foreground; the live trail streams automatically
+# Ask one participant (full permissions by default) in the foreground; the live trail streams automatically
 node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" run @zeus "What's the riskiest part of this design?"
 
 # Add a focused brief on top of the automatic session handoff
@@ -141,8 +141,8 @@ node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" run @name <prompt> [--prompt-file <fi
 One user-facing slash command wraps that CLI: `/consensflow <args>` — it passes whatever follows straight through (`/consensflow status`, `/consensflow participants list`, `/consensflow @diana <prompt>`).
 
 
-- **Default and presets:** read-write, confined to the project workspace. Participants can read, plan, critique, explain, propose code, edit files, and run commands — exactly like running the CLI yourself.
-- **`--tools workspace-write`:** redundant; it just restates the default. No flag is needed to let a participant write.
+- **Default and presets:** full permissions, not sandboxed. Participants can read, plan, critique, explain, propose code, edit files anywhere, run any command, and use the network — exactly like running the CLI yourself with every prompt pre-approved.
+- **There is no permission flag to pass.** No tier, policy or `--tools` value changes anything: every run already has everything. What protects the user is the approval gate below on *keeping* the work, not a fence around the run.
 - **After any run:** run your own inspection (`git status`, `git diff`, relevant tests as needed), summarize what the participant changed, give your recommendation, and wait for user approval before keeping/building on/committing the changes unless the user pre-authorized that exact action.
 
 ## How the user asks

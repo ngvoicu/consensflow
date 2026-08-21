@@ -535,8 +535,11 @@ test('e2e: all four engines run, parse, and persist artifacts through the real s
     assert.equal(claude.argv[claude.argv.indexOf('--effort') + 1], 'max')
     assert.equal(claude.env.ANTHROPIC_API_KEY, null, 'billing guard strips ANTHROPIC_API_KEY')
     const codex = JSON.parse(await readFile(path.join(fake.out, 'codex.json'), 'utf8'))
-    assert.ok(codex.argv.includes('--sandbox'), 'codex sandbox flag')
-    assert.ok(codex.argv.includes('workspace-write'), 'codex workspace-write sandbox')
+    assert.equal(codex.argv.includes('--sandbox'), false, 'no sandbox policy is selected')
+    assert.ok(
+      codex.argv.includes('--dangerously-bypass-approvals-and-sandbox'),
+      'codex runs unsandboxed',
+    )
     assert.equal(codex.env.OPENAI_API_KEY, null, 'billing guard strips OPENAI_API_KEY')
     const piDump = JSON.parse(await readFile(path.join(fake.out, 'pi.json'), 'utf8'))
     assert.ok(piDump.argv.includes('--no-extensions'), 'pi child runs without extensions')
@@ -646,7 +649,7 @@ test('e2e: runParticipant writes a transcript.md backstop (event trail) and sets
   })
 })
 
-test('e2e: a run is read-write, and no bypass flag can be requested [STRM-25]', async () => {
+test('e2e: a run has full permissions, and there is still no knob to turn [STRM-25]', async () => {
   await withTempDir(async (dir) => {
     const ws = path.join(dir, 'ws')
     await mkdir(ws, { recursive: true })
@@ -654,22 +657,23 @@ test('e2e: a run is read-write, and no bypass flag can be requested [STRM-25]', 
     const ctx = { ws, dir, fake }
     await runCf(['participants', 'add', 'zeus'], ctx) // claude-code
 
-    // Default run: write capability already reaches the engine — no flag needed, no deny list.
+    // Every run is full-permission: no allowlist, no deny list, no prompts.
     await runCf(['run', '@zeus', 'go'], ctx)
     let claude = JSON.parse(await readFile(path.join(fake.out, 'claude.json'), 'utf8'))
-    const allowed = claude.argv[claude.argv.indexOf('--allowedTools') + 1]
-    assert.match(allowed, /Edit/, 'default run grants Edit')
-    assert.match(allowed, /Write/, 'default run grants Write')
-    assert.equal(claude.argv.includes('--disallowedTools'), false, 'no read-only deny list')
-    assert.equal(claude.argv.includes('--dangerously-skip-permissions'), false, 'no bypass flag')
+    assert.ok(
+      claude.argv.includes('--dangerously-skip-permissions'),
+      'default run bypasses prompts',
+    )
+    assert.equal(claude.argv.includes('--allowedTools'), false, 'no allowlist fences the tools')
+    assert.equal(claude.argv.includes('--disallowedTools'), false, 'no deny list')
 
-    // The permission knob is gone: even asking for it changes nothing.
+    // There is still no permission knob: asking for one changes nothing, because
+    // every run already has everything.
     await runCf(['run', '@zeus', 'go', '--tools', 'full-auto'], ctx)
     claude = JSON.parse(await readFile(path.join(fake.out, 'claude.json'), 'utf8'))
-    assert.equal(
+    assert.ok(
       claude.argv.includes('--dangerously-skip-permissions'),
-      false,
-      'no escalation exists',
+      'the flag is the default, not an escalation',
     )
   })
 })

@@ -25,10 +25,6 @@ export function toolsForPi() {
   return "read,grep,find,ls,bash,edit,write";
 }
 
-export function claudeAllowedTools() {
-  return "Read,Grep,Glob,Edit,Write,Bash";
-}
-
 export function buildRunnerInvocation(participant, packetPath, cwd) {
   const p = participant;
   switch (p.kind) {
@@ -55,7 +51,7 @@ export function buildRunnerInvocation(participant, packetPath, cwd) {
       // tool_use, text — which the adapter relays for --stream and the transcript. --verbose is
       // required for stream-json in -p mode; we deliberately omit --include-partial-messages (we
       // want complete blocks, not token-level deltas).
-      const args = ["-p", "Follow the ConsensFlow packet provided on stdin. Return only the requested output.", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--allowedTools", claudeAllowedTools()];
+      const args = ["-p", "Follow the ConsensFlow packet provided on stdin. Return only the requested output.", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--dangerously-skip-permissions"];
       if (p.model) args.push("--model", p.model);
       if (p.effort) args.push("--effort", p.effort);
       if (p.maxTurns) args.push("--max-turns", String(p.maxTurns));
@@ -64,7 +60,7 @@ export function buildRunnerInvocation(participant, packetPath, cwd) {
       return { command: "claude", args, stdinMode: "packet", cwd, env: { ...CHILD_ENV }, dropEnv: ["ANTHROPIC_API_KEY"] };
     }
     case "codex": {
-      const args = ["exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", "--sandbox", "workspace-write", "-C", cwd];
+      const args = ["exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", "--dangerously-bypass-approvals-and-sandbox", "-C", cwd];
       if (p.model) args.push("--model", p.model);
       if (p.effort) args.push("-c", `model_reasoning_effort=\"${p.effort}\"`);
       args.push("-");
@@ -72,7 +68,7 @@ export function buildRunnerInvocation(participant, packetPath, cwd) {
       return { command: "codex", args, stdinMode: "packet", cwd, env: { ...CHILD_ENV }, dropEnv: ["OPENAI_API_KEY"] };
     }
     case "opencode": {
-      const args = ["run", "--format", "json", "--dir", cwd, "--file", packetPath];
+      const args = ["run", "--auto", "--format", "json", "--dir", cwd, "--file", packetPath];
       if (p.model) args.push("--model", p.model);
       if (p.effort) args.push("--variant", p.effort);
       if (p.agent) args.push("--agent", p.agent);

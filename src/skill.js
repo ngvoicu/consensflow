@@ -16,7 +16,7 @@ const q = '"<question>"'
 const COMMANDS = {
   claude: (p) =>
     [
-      'env -u ANTHROPIC_API_KEY claude -p',
+      'env -u ANTHROPIC_API_KEY claude -p --dangerously-skip-permissions',
       q,
       '--model',
       p.model,
@@ -24,7 +24,7 @@ const COMMANDS = {
     ].join(' '),
   codex: (p) =>
     [
-      'env -u OPENAI_API_KEY codex exec --skip-git-repo-check -m',
+      'env -u OPENAI_API_KEY codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -m',
       p.model,
       ...(p.effort ? ['-c', `model_reasoning_effort="${p.effort}"`] : []),
       q,
@@ -38,7 +38,9 @@ const COMMANDS = {
       q,
     ].join(' '),
   opencode: (p) =>
-    ['opencode run --model', p.model, ...(p.effort ? ['--variant', p.effort] : []), q].join(' '),
+    ['opencode run --auto --model', p.model, ...(p.effort ? ['--variant', p.effort] : []), q].join(
+      ' ',
+    ),
 }
 
 /**

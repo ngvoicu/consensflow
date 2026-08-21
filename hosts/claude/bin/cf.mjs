@@ -494,7 +494,7 @@ function renderRunResult(result) {
     lines.push("", `Run failed: exit ${result.exitCode} — artifacts: ${result.runDir}`);
   }
   if (result.handoffSummary?.startsWith("empty")) lines.push("", `Handoff: ${result.handoffSummary}`);
-  lines.push("", "> Read-write run: this participant could edit files and run commands. Inspect what changed (e.g. `git status` / `git diff`) before keeping or building on it.");
+  lines.push("", "> Full-permission run: this participant ran unsandboxed — it could edit any file, run any command, and reach the network. Inspect what changed (e.g. `git status` / `git diff`) before keeping or building on it.");
   lines.push("", result.output);
   return lines.join("\n");
 }

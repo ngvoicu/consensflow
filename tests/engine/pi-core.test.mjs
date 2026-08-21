@@ -350,7 +350,10 @@ test('every preset survives normalize + runner invocation with correct flags (al
         invocation.args.includes(`model_reasoning_effort="${preset.effort}"`),
         `${preset.preset}: codex effort`,
       )
-      assert.ok(invocation.args.includes('workspace-write'), `${preset.preset}: codex sandbox`)
+      assert.ok(
+        invocation.args.includes('--dangerously-bypass-approvals-and-sandbox'),
+        `${preset.preset}: codex runs unsandboxed`,
+      )
     }
     if (preset.kind === 'opencode') {
       if (preset.effort)
@@ -416,7 +419,7 @@ test('runner invocation maps tool policies', () => {
     '/repo',
   )
   assert.equal(codex.command, 'codex')
-  assert.ok(codex.args.includes('workspace-write'))
+  assert.ok(codex.args.includes('--dangerously-bypass-approvals-and-sandbox'))
   assert.ok(codex.args.includes('--ephemeral'))
   assert.ok(codex.args.includes('--skip-git-repo-check'))
   assert.ok(codex.args.includes('--ignore-user-config'))
@@ -424,34 +427,45 @@ test('runner invocation maps tool policies', () => {
   assert.ok(codex.args.includes('model_reasoning_effort="xhigh"'))
 })
 
-test('every engine runs read-write with its own CLI defaults; no bypass flag is ever passed', () => {
-  // Claude: full tools, no deny list (no read-only tier, no danger tier).
+test('every engine runs with full permissions: no sandbox, no allowlist, no prompts', () => {
+  // Claude: every tool, no permission prompts.
   const claude = buildRunnerInvocation({ kind: 'claude-code' }, '/tmp/packet.md', '/repo')
-  const allowIdx = claude.args.indexOf('--allowedTools')
-  assert.match(claude.args[allowIdx + 1], /Edit/)
-  assert.match(claude.args[allowIdx + 1], /Bash/)
+  assert.ok(claude.args.includes('--dangerously-skip-permissions'))
+  assert.equal(claude.args.includes('--allowedTools'), false, 'no allowlist fences the tools')
   assert.equal(claude.args.includes('--disallowedTools'), false)
   // Regression guard (1.5.1): --bare forbids OAuth/keychain auth while ANTHROPIC_API_KEY is
   // stripped -> "Not logged in". Recursion/stomp is guarded by CONSENSFLOW_CHILD alone.
   assert.ok(!claude.args.includes('--bare'))
   assert.ok(claude.args.includes('--no-session-persistence'))
 
-  // Codex: always the workspace sandbox.
+  // Codex: no sandbox — full disk and network, like running codex yourself.
   const codex = buildRunnerInvocation({ kind: 'codex' }, '/tmp/packet.md', '/repo')
-  assert.ok(codex.args.includes('workspace-write'))
+  assert.ok(codex.args.includes('--dangerously-bypass-approvals-and-sandbox'))
 
-  // OpenCode: no permission overlay (it uses its own edit/bash allow).
+  // OpenCode: auto-approves anything not explicitly denied.
   const opencode = buildRunnerInvocation({ kind: 'opencode' }, '/tmp/packet.md', '/repo')
+  assert.ok(opencode.args.includes('--auto'))
   assert.equal(opencode.env?.OPENCODE_PERMISSION, undefined)
 
-  // The permission concept is gone: no engine may receive a bypass flag.
+  // Full permissions everywhere: the engines that fence by default are told
+  // not to. pi needs no flag (its tools are on by default) and must not grow
+  // one, so it is checked from the other side.
+  const FULL = {
+    'claude-code': '--dangerously-skip-permissions',
+    codex: '--dangerously-bypass-approvals-and-sandbox',
+    opencode: '--auto',
+  }
   for (const kind of ['pi', 'claude-code', 'codex', 'opencode']) {
     const invocation = buildRunnerInvocation({ kind }, '/tmp/packet.md', '/repo')
-    assert.equal(
-      invocation.args.some((a) => String(a).includes('--dangerously')),
-      false,
-      `${kind}: no bypass flag`,
-    )
+    if (FULL[kind] !== undefined) {
+      assert.ok(invocation.args.includes(FULL[kind]), `${kind}: ${FULL[kind]}`)
+    } else {
+      assert.equal(
+        invocation.args.some((a) => String(a).includes('--dangerously')),
+        false,
+        `${kind}: needs no bypass flag`,
+      )
+    }
   }
   // Billing guard: participant runs ride the configured logins, not a stray env API key.
   assert.deepEqual(claude.dropEnv, ['ANTHROPIC_API_KEY'])

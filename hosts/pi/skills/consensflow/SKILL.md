@@ -5,14 +5,14 @@ description: Use ConsensFlow inside Pi to consult one named participant (an exte
 
 # ConsensFlow
 
-ConsensFlow lets the lead (this Pi session) consult one named participant at a time. A participant is an external coding-agent CLI (claude / codex / opencode / pi) run as an isolated one-shot subprocess: it receives a handoff of the current session plus a prompt, answers once, and does not persist between calls. Each participant runs as a standard read-write CLI call — exactly like running claude/codex/pi/opencode yourself: by default it can read, edit files, and run commands inside the project workspace. Talking to a participant is like phoning an advisor/helper, and briefly handing over a task. The lead stays the decision-maker and ConsensFlow never accepts or keeps participant work on its own.
+ConsensFlow lets the lead (this Pi session) consult one named participant at a time. A participant is an external coding-agent CLI (claude / codex / opencode / pi) run as an isolated one-shot subprocess: it receives a handoff of the current session plus a prompt, answers once, and does not persist between calls. Each participant runs with full permissions — exactly like running claude/codex/pi/opencode yourself with every approval already granted: it can read, edit files, run commands and reach the network, and it is not sandboxed to the project directory. Talking to a participant is like phoning an advisor/helper, and briefly handing over a task. The lead stays the decision-maker and ConsensFlow never accepts or keeps participant work on its own.
 
 ## What participants can do
 
 Use participants for all of these, one participant at a time. No preset is intrinsically review-only; the same participant can advise or do workspace work — by default it can read, edit files, and run commands in the workspace:
 
 - **Advice / second opinion / design critique.** Ask a participant to inspect context, critique a plan, assess a pasted diff, identify risks, or suggest tests.
-- **Doing work / code-writing help.** The same participant can implement, refactor, or run commands by default — read-write in the workspace, like any normal CLI run. Treat it like a temporary helper: after the run, inspect `git status` / `git diff` and relevant tests, then ask the user before keeping or building on the changes unless they pre-authorized it.
+- **Doing work / code-writing help.** The same participant can implement, refactor, or run commands by default — full permissions, like a normal CLI run with every prompt pre-approved. Treat it like a temporary helper: after the run, inspect `git status` / `git diff` and relevant tests, then ask the user before keeping or building on the changes unless they pre-authorized it.
 - **Image generation.** `@pygmalion` (or any `kind=image` participant) uses **gpt-image-2** via Pi's `openai-codex` login. It receives the image prompt only — no session handoff — saves `image.png` in the ConsensFlow run dir under `~/.consensflow/workspaces/…`, and Pi shows the generated image inline. Optionally pass one or more **reference images** with `--image <path>` (repeatable, or the `cf_run_participant` tool's `images` param) so gpt-image-2 edits/conditions on them — supply a file path (.png/.jpg/.jpeg/.webp/.gif).
 
 ## The two rules that matter most
@@ -43,7 +43,7 @@ Then wait for the user to approve.
 This gate covers BOTH cases equally:
 
 - **(a) Advice in a text response.** Do not implement, refactor toward, or commit to a participant's suggestion until the user approves it.
-- **(b) Real changes a participant made.** A participant may have edited files or run commands in the workspace — it runs read-write by default. Do not treat that work as accepted: surface what changed (summary + recommendation) and get approval before keeping, building on, or committing it. If the user rejects it, revert it.
+- **(b) Real changes a participant made.** A participant may have edited files or run commands in the workspace — it runs with full permissions by default. Do not treat that work as accepted: surface what changed (summary + recommendation) and get approval before keeping, building on, or committing it. If the user rejects it, revert it.
 
 **The only exception:** the user has already explicitly told the lead to proceed — e.g. "get Zeus's take and apply what makes sense," or "run the builder and commit it." Pre-authorization scoped to that request stands in for the approval; do not re-ask. Absent such an instruction, never act on a participant's output on your own.
 
@@ -67,10 +67,10 @@ Participants are configured in the shared roster `~/.consensflow/participants.js
 /consensflow:participants add all               # add every preset
 /consensflow:participants add zeus --name Deepreview    # preset backend, renamed → @deepreview
 /consensflow:participants add --name Builder --kind codex --model gpt-5.6-sol --effort high
-                                                # fully custom; read-write (workspace-write) by default
+                                                # fully custom; full permissions like every participant
 ```
 
-Presets run read-write by default; the same model+effort family exists on every engine that runs it:
+Presets run with full permissions; the same model+effort family exists on every engine that runs it:
 
 - **Fable 5** (Anthropic's top model — use for the questions that really matter): `@calliope`/`@clio`/`@euterpe`/`@thalia` (Claude Code max/xhigh/high/medium), `@orpheus`/`@linus`/`@erato` (Pi xhigh/high/medium, Anthropic auth), `@saga`/`@gunnlod`/`@kvasir` (OpenCode xhigh/high/medium via OpenRouter).
 - **Opus 5**: `@zeus`/`@apollo`/`@artemis` (Claude Code max/xhigh/medium), `@kronos`/`@atlas` (Pi xhigh/medium, Anthropic auth), `@baldr`/`@vali` (OpenCode xhigh/medium via OpenRouter).
@@ -122,7 +122,7 @@ Pi exposes the same ConsensFlow slash commands as Claude Code:
 - `includeHandoff` — defaults to true; set false only when the participant should not see the current session snapshot.
 
 
-- **Default and presets:** `workspace-write` — read-write, confined to the project workspace, exactly like running the CLI yourself. They can plan, critique, explain, propose code, **and** edit files / run commands.
+- **Default and presets:** full permissions, not sandboxed — exactly like running the CLI yourself with every prompt pre-approved. They can plan, critique, explain, propose code, **and** edit files anywhere / run any command / reach the network.
 - **After any run:** inspect what changed yourself (`git status`, `git diff`, relevant tests as needed) — consulting is no longer sandboxed, so a consult can modify files. Summarize what the participant changed, give your recommendation, and wait for user approval before keeping/building on/committing the changes unless the user pre-authorized that exact action.
 
 ## Invariants
