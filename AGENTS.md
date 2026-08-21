@@ -20,7 +20,7 @@ v2 engine that had one was retired and deleted 2026-08-19).
 | `bin/cf.mjs` | All verbs: setup, agent …, skills …, ui, doctor. Setup never seeds agents; a machine that ran cc/pi already has the shared roster, so setup installs the skill straight from it. Every roster mutation installs-or-regenerates the skill — first add installs it everywhere |
 | `src/roster.js` | Roster = the SHARED v1 file `~/.consensflow/agents.json` (cc + pi read/write it too): v1-schema-faithful mapping (kind↔runtime, thinking/effort↔effort, toolsPolicy↔permission), unknown fields preserved, unsupported kinds listed+marked, never dropped. `configRoot` (manifest only): `CONSENSFLOW_HOME` → XDG → `~/.config/consensflow` |
 | `src/catalog.js` | A **view over `hosts/lib/presets.js`** — one catalog, not two (they disagreed on five names until 2026-08-21) — plus each CLI's real effort levels. 49 of the 50 presets are offered; the image preset has no runtime to launch it. `cf agent add <name>` resolves through it and records `preset` on the row, which is what makes `cf agent sync` and the UI's Update button possible |
-| `src/skill.js` | SKILL.md generation — the prose IS the product; template live-proven before the generator existed |
+| `src/skill.js` | SKILL.md generation — the prose IS the product. One command for every agent (`cf run @name "<task>"`), so the table says who each agent is rather than what to type |
 | `src/agents.js` | Agent detection (CLI on PATH) + per-agent skills dir (honours `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`) |
 | `src/manifest.js` + `src/install.js` | Hash-manifest ownership: install/update/status/uninstall; drift is sacred |
 | `src/cmux-skills.js` | Shallow-clones manaflow-ai/cmux, installs its `skills/` tree as `cmux@<commit>` |
@@ -73,6 +73,33 @@ that to wherever it installed the payload.
   installs none, takes back any it finds, and never clones. A failed fetch
   never costs the mode switch. Every entry point states the cost of a host mode (codex and
   opencode get nothing).
+
+- **One spawn verb, three modes.** `cf run @name "<task>"` builds the packet,
+  applies the billing guards and streams the run, whichever harness is behind
+  the name — the manager calls the same `hosts/lib` engine the payloads do.
+  Image agents included: `image` is a harness like the rest, and its run lives
+  in `hosts/lib/image-run.js` so no caller carries a second copy.
+
+- **Nobody assigns an agent a persona.** The packet has no "Who you are" and
+  never calls a run a coding session; `--brief` is the lead's own words about
+  what it wants from THIS spawn, and when there is none, nothing stands in for
+  it. Per-spawn rather than stored on the roster, because the same agent is a
+  reviewer in one call and a researcher in the next.
+
+- **The handoff is the lead's to give.** In a host mode the integration stashes
+  the session and passes it; anywhere else the lead passes `--handoff-file`,
+  because the lead IS the harness holding the conversation. No transcript
+  discovery, no per-harness adapters — that was the v2 engine.
+
+- **`cf` on PATH is part of cmux mode**, not an optional extra: the generated
+  skill tells four harnesses to run it, so `applyMode('cmux')` installs the
+  launcher and a host mode (whose skill names its payload CLI by absolute path)
+  takes it back. `off` removes ours, by the marker it writes.
+
+- **No harness intercepts a mention.** pi used to swallow `@zeus …` and run the
+  agent itself; the lead composes every run now, in all three modes. Claude
+  Code's hook still routes @mentions, but by injecting the command for the lead
+  to run — which is the behaviour pi moved toward.
 
 - **Modules never read `process.env`** — the environment is an explicit
   argument everywhere. That is the whole test-isolation story

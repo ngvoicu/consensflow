@@ -62,7 +62,8 @@ export default async function consensflow(pi: ExtensionAPI) {
     parameters: Type.Object({
       agent: Type.String({ description: "Agent name or @mention, e.g. @zeus" }),
       prompt: Type.String({ description: "Natural-language request for that agent" }),
-      context: Type.Optional(Type.String({ description: "Optional focused note/brief added on top of the auto-included session handoff." })),
+      brief: Type.Optional(Type.String({ description: "What this spawn is for, in your words: \"you are reviewing this for GDPR: lawful basis, retention\". It leads the packet, above the task. Nothing else tells the agent what it is here for." })),
+      context: Type.Optional(Type.String({ description: "A shorter note alongside the brief, for this one run." })),
       includeHandoff: Type.Optional(Type.Boolean({ description: "Attach the current session transcript as context. Defaults to true." })),
       images: Type.Optional(Type.Array(Type.String(), { description: "Image-agent only (kind=image): file paths to reference images (.png/.jpg/.jpeg/.webp/.gif) for gpt-image-2 to edit/condition on. Ignored by text agents." })),
     }),
@@ -90,6 +91,7 @@ export default async function consensflow(pi: ExtensionAPI) {
         kind: "ask",
         task: params.prompt,
         handoff,
+        brief: params.brief,
         extraContext: params.context,
         signal,
         // Stream the agent's normalized thinking / tool calls / answer into the Pi UI as it
