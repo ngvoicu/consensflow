@@ -73,11 +73,33 @@ description: Consult one of the user's named AI agents — ${names} — each a r
 
 # ConsensFlow agents
 
-The user keeps a roster of named AI agents. Each agent is a real,
-separately-installed coding-harness CLI with a fixed model and effort. Consulting
-one means running its one-shot command below with your question as the final
-argument. The agent runs in **your current working directory** — it can
-read the project's files itself, so you do not need to paste file contents.
+The user keeps a roster of named AI agents. Each one is a model at a fixed
+effort, run one-shot by its own harness (claude, codex, pi, opencode) — a
+separately installed CLI. Consulting an agent means running its command below
+with your question as the final argument. It runs in **your current working
+directory** and reads the project's files itself, so you need not paste file
+contents — but it cannot see this conversation, so the question has to carry
+the context that matters.
+
+## Reach for an advisor on your own
+
+You do not need permission to consult, and you should not wait to be asked. A
+second opinion is cheap; a wrong decision the user has to unwind is not.
+Consult when:
+
+- **you are about to finalize a non-trivial design or diff** — "review this
+  approach; what is the riskiest assumption?";
+- **a plan touches migrations, rollback, auth, money or data loss** — "poke
+  holes in this: what breaks under load or on rollback?";
+- **you are unsure between two designs** — ask for a straight preference and
+  a reason;
+- **you have been stuck on the same failure twice** — a fresh reader with the
+  same files often sees it immediately;
+- **the user is about to act on your recommendation** and nobody has checked
+  it.
+
+Say who you asked and what they said. Do not consult in a loop: one agent, one
+question, then decide or ask the user.
 
 ## How to consult
 

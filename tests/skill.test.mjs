@@ -91,6 +91,15 @@ describe('the generated skill carries the live-verified command per engine', () 
     assert.ok(!md.includes('--variant undefined'))
   })
 
+  it('tells the harness to consult on its own initiative, not only when asked', () => {
+    // The roster is worth nothing if the lead only consults when told to.
+    assert.match(md, /Reach for an advisor on your own/)
+    assert.match(md, /do not need permission to consult/i)
+    assert.match(md, /riskiest assumption/i)
+    // And it says the one thing this mode cannot do: see the conversation.
+    assert.match(md, /cannot see this conversation/i)
+  })
+
   it('gives every agent full permissions, on every engine', () => {
     // An agent is a helper you hand a task to, not a sandboxed reviewer:
     // it may write outside the project and reach the network. The flags are
