@@ -32,17 +32,13 @@ export default async function consensflow(pi: ExtensionAPI) {
     ctx.ui.setStatus(EXT, `CF ${agents.length} agent${agents.length === 1 ? "" : "s"}`);
   });
 
-  pi.on("input", async (event, ctx) => {
-    const parsed = await parseTypedPrompt(event.text, ctx);
-    if (!parsed) return;
-    try {
-      await ensureCfDirs(ctx.cwd);
-      await handleAgentPrompt(parsed, ctx, pi, ctx.signal);
-    } catch (error) {
-      reportCfError(pi, ctx, error);
-    }
-    return { action: "handled" as const };
-  });
+  // No @mention interception here. Typing `@zeus …` used to be swallowed by
+  // this extension, which ran the agent itself — so pi behaved differently
+  // from every other harness, and the lead never saw the request. The lead
+  // now spawns agents the same way everywhere: it reads the skill and runs
+  // the CLI. Say what you want in words — "spawn diana as a GDPR reviewer,
+  // give her our conversation, ask her to check the export path" — and the
+  // lead composes the run.
 
   registerCoreCommands(pi);
 
@@ -429,17 +425,6 @@ type AgentPrompt =
   | { agent: string; prompt: string; error?: undefined; context?: string; includeHandoff?: boolean; images?: string[] }
   | { agent?: undefined; prompt?: undefined; error: string };
 
-// Tokenize a typed line and decide whether it addresses one agent. When the line contains
-// any `@token`, load the configured agents so a single non-leading mention (`hi @zeus`)
-// routes only when it names a real agent — a stray `@types/node` is left for the lead.
-async function parseTypedPrompt(text: string, ctx: any): Promise<AgentPrompt | null> {
-  const trimmed = String(text ?? "").trim();
-  if (!trimmed || trimmed.startsWith("/")) return null;
-  const tokens = tokenize(trimmed);
-  if (!tokens.some((token) => token.startsWith("@"))) return null;
-  return parseRunPrompt(tokens, await knownAgentKeys(ctx.cwd));
-}
-
 const CF_SUBCOMMANDS = new Set(["status", "state", "doctor", "agents", "agent", "run", "ask", "to", "help"]);
 
 function parseRunPrompt(tokens: string[], known: Set<string>): AgentPrompt | null {
@@ -684,15 +669,16 @@ function reportCfError(pi: ExtensionAPI, ctx: any, error: unknown) {
 function helpText() {
   return `# ConsensFlow help
 
-Natural-language prompts to one agent at a time. Each agent gets the current
-session as a handoff plus your prompt, and answers conversationally.
+One agent at a time. Ask the lead in words — "spawn zeus as a reviewer, give
+him our conversation, and ask what breaks on rollback" — and it composes the
+run. The agent gets your brief, your task, and the session handoff when the
+lead passes one.
 
-Ask an agent:
+The explicit form, if you want to drive it yourself:
 
 \`\`\`text
-@zeus What do you think about this approach?                          # bare mention
-/consensflow:cf @zeus What do you think about this approach?          # explicit router
-/consensflow:cf @builder Make the minimal fix  # per-call write
+/consensflow:cf @zeus What do you think about this approach?
+/consensflow:cf @builder Make the minimal fix
 \`\`\`
 
 Add agents (shared across Pi and Claude Code, ${agentsPath(process.cwd())}):
