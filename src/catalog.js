@@ -44,7 +44,13 @@ export const EFFORTS = {
  * Codex backend rather than launched as a CLI, so the roster cannot create
  * one and offering it as a quick-add would hand the user a dead button.
  */
-const KIND_TO_HARNESS = { 'claude-code': 'claude', codex: 'codex', pi: 'pi', opencode: 'opencode' }
+const KIND_TO_HARNESS = {
+  'claude-code': 'claude',
+  codex: 'codex',
+  pi: 'pi',
+  opencode: 'opencode',
+  image: 'image',
+}
 
 function entryFor(preset) {
   const effort = preset.effort ?? preset.thinking

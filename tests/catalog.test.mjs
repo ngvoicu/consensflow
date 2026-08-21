@@ -4,10 +4,11 @@ import { CATALOG, catalogEntry, EFFORTS } from '../src/catalog.js'
 import { HARNESSES } from '../src/roster.js'
 
 describe('every tool ships a list of ready-made agents', () => {
-  it('covers all four harnesss, each with several entries', () => {
+  it('covers every harness, each with a real list (image has one)', () => {
     assert.deepEqual(Object.keys(CATALOG).sort(), [...HARNESSES].sort())
     for (const [harness, entries] of Object.entries(CATALOG)) {
-      assert.ok(entries.length >= 3, `${harness} needs a real list`)
+      const least = harness === 'image' ? 1 : 3
+      assert.ok(entries.length >= least, `${harness} needs a real list`)
     }
   })
 
@@ -69,8 +70,7 @@ describe('every tool ships a list of ready-made agents', () => {
     // Every preset the manager can actually create is offered; the image
     // preset is not, because the roster has no harness that launches it.
     const offered = Object.values(CATALOG).flat().length
-    const launchable = AGENT_PRESETS.filter((preset) => preset.kind !== 'image').length
-    assert.equal(offered, launchable, 'every launchable preset is offered')
+    assert.equal(offered, AGENT_PRESETS.length, 'every preset is offered, image included')
   })
 
   it('finds an entry by name, whatever tool it belongs to', () => {

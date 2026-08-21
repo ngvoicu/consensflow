@@ -20,11 +20,27 @@ import { presetDrift, syncAgentWithPreset } from '../hosts/lib/presets.js'
  * process.env — so tests run against throwaway homes.
  */
 
-export const HARNESSES = ['claude', 'codex', 'pi', 'opencode']
+// `image` is a harness in the sense that matters here: it is what runs the
+// agent. There is no CLI behind it — gpt-image-2 is reached through the Codex
+// login — but the roster, the catalog and `cf run` treat it like any other, so
+// @pygmalion works wherever the rest do.
+export const HARNESSES = ['claude', 'codex', 'pi', 'opencode', 'image']
 
 const NAME_PATTERN = /^[a-z][a-z0-9-]*$/
-const KIND_TO_HARNESS = { 'claude-code': 'claude', codex: 'codex', pi: 'pi', opencode: 'opencode' }
-const HARNESS_TO_KIND = { claude: 'claude-code', codex: 'codex', pi: 'pi', opencode: 'opencode' }
+const KIND_TO_HARNESS = {
+  'claude-code': 'claude',
+  codex: 'codex',
+  pi: 'pi',
+  opencode: 'opencode',
+  image: 'image',
+}
+const HARNESS_TO_KIND = {
+  claude: 'claude-code',
+  codex: 'codex',
+  pi: 'pi',
+  opencode: 'opencode',
+  image: 'image',
+}
 
 /** The manifest and other v3-only state; the roster deliberately not here. */
 export function configRoot(env) {
@@ -175,9 +191,14 @@ export function editAgent(name, patch, env) {
   const row = findRow(document, name)
   const supported = KIND_TO_HARNESS[row.kind] !== undefined
 
-  if (!supported && patch.effort !== undefined) {
+  // Two different refusals that used to be one: a kind this build cannot run
+  // at all, and `image`, which it runs but which has no effort to set —
+  // gpt-image-2 takes a prompt, not a thinking level.
+  if (patch.effort !== undefined && (!supported || row.kind === 'image')) {
     throw new Error(
-      `${name} is a ${row.kind} agent, which consensflow-cmux does not run; only its model and description can be edited here`,
+      supported
+        ? `${name} is an image agent: it has no effort level — only its model and description can be edited`
+        : `${name} is a ${row.kind} agent, which this build does not run; only its model and description can be edited here`,
     )
   }
 

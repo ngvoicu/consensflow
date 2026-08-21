@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { codexAuthPath, loadCodexAuth } from "../../lib/codex-auth.js";
-import { generateImage, imageFileToDataUrl, IMAGE_BACKEND, IMAGE_TRIGGER_DEFAULT, saveImagePng } from "../../lib/image.js";
+import { renderImageRun, runImageAgent as runImageRun } from "../../lib/image-run.js";
 import { driftedAgents, formatPresets, getPreset, listPresetIds, agentFromPreset } from "../../lib/presets.js";
 import {
   cfRoot,
@@ -321,52 +321,10 @@ export function parseRunOptions(tokens) {
 // (gpt-image-2) over HTTP, riding the Codex CLI's ChatGPT login. The image model gets the
 // prompt verbatim (no packet/handoff) — an image model can't use the transcript.
 async function runImageAgent(cwd, agent, prompt, flags) {
-  const { token, accountId } = await loadCodexAuth();
-  const runId = createId("image");
-  const runDir = path.join(runsRoot(cwd), runId);
-  await fs.mkdir(runDir, { recursive: true });
-  const triggerModel = agent.model || IMAGE_TRIGGER_DEFAULT;
-  // Optional reference images (`--image <path>`, repeatable) become input_image parts so gpt-image-2
-  // can edit/condition on them. Paths are read as given (relative to cwd, like --prompt-file).
   const imagePaths = Array.isArray(flags.image) ? flags.image : flags.image ? [flags.image] : [];
-  const images = await Promise.all(imagePaths.map((p) => imageFileToDataUrl(p)));
-  const image = await generateImage({ token, accountId, prompt, triggerModel, images });
-  const savedPath = await saveImagePng(image.base64, runDir, "image.png");
-  const result = {
-    schemaVersion: 1,
-    runId,
-    runDir,
-    savedPath,
-    kind: "image",
-    backend: IMAGE_BACKEND,
-    triggerModel,
-    referenceImages: imagePaths,
-    revisedPrompt: image.revisedPrompt,
-    responseId: image.responseId,
-    agent: { id: agent.id, kind: agent.kind },
-  };
-  await fs.writeFile(path.join(runDir, "result.json"), `${JSON.stringify(result, null, 2)}\n`, "utf8");
-  await recordLatestRun(cwd, { runId, runDir, agent, kind: "image" });
-  if (flags.json === true) {
-    console.log(JSON.stringify(result, null, 2));
-    return;
-  }
-  console.log(
-    [
-      `# @${agent.id}`,
-      "",
-      `Generated an image with **${IMAGE_BACKEND}** (via your Codex CLI login).`,
-      imagePaths.length ? `Reference image(s): ${imagePaths.join(", ")}` : undefined,
-      image.revisedPrompt ? `Revised prompt: ${image.revisedPrompt}` : undefined,
-      `Saved: ${savedPath}`,
-      "",
-      "View it with the Read tool if needed.",
-    ]
-      .filter(Boolean)
-      .join("\n"),
-  );
+  const result = await runImageRun({ cwd, agent, prompt, imagePaths });
+  console.log(flags.json === true ? JSON.stringify(result, null, 2) : renderImageRun(result));
 }
-
 // Tri-state flag pair: --<name> → true, --no-<name> → false, neither → undefined.
 function flagBool(flags, name) {
   if (flags[`no-${name}`] === true) return false;

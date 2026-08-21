@@ -41,10 +41,10 @@ describe('the roster IS the shared v1 file that cc and pi read', () => {
     assert.equal(byName.mani.harness, 'opencode')
   })
 
-  it('lists an unsupported kind rather than hiding it, marked as such', () => {
+  it('lists an image agent as a harness it runs, not as an oddity', () => {
     const pygmalion = listAgents(t.env).find((p) => p.name === 'pygmalion')
     assert.equal(pygmalion.harness, 'image')
-    assert.equal(pygmalion.unsupported, true)
+    assert.equal(pygmalion.unsupported, undefined, 'cf run spawns it like any other')
   })
 })
 
@@ -102,12 +102,12 @@ describe('writes are v1-faithful: cc and pi keep working on the same file', () =
     )
   })
 
-  it('refuses effort edits on an unsupported kind, plainly', () => {
+  it('refuses an effort edit on an image agent, which has none, plainly', () => {
     const raw = JSON.parse(readFileSync(rosterPath(t.env), 'utf8'))
     raw.agents.push({ id: 'img', name: 'Img', kind: 'image', model: 'gpt-5.5' })
     writeFileSync(rosterPath(t.env), JSON.stringify(raw, null, 2))
 
-    assert.throws(() => editAgent('img', { effort: 'high' }, t.env), /image/)
+    assert.throws(() => editAgent('img', { effort: 'high' }, t.env), /no effort level/)
     editAgent('img', { description: 'still editable' }, t.env)
     removeAgent('img', t.env)
   })

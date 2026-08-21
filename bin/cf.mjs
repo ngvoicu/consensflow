@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
+import { renderImageRun, runImageAgent } from '../hosts/lib/image-run.js'
 import { createPacket } from '../hosts/lib/packets.js'
 import { runAgent } from '../hosts/lib/runners.js'
 import { renderEvent } from '../hosts/lib/transcript-events.js'
@@ -74,6 +75,7 @@ Usage: cf <command> [options]
     [--brief <what this run is for>]            a brief for this spawn, your conversation as
     [--handoff-file <file>] [--no-handoff]      handoff when you pass one, a note alongside it
     [--context <note>] [--prompt-file <file>]
+    [--image <path>]                            (image agents: reference pictures)
   mode                                         Which one is active, and what it means
   off [--force]                                Take it all back: both host payloads, every file the
                                                manifest owns, and the mode. Agents are kept
@@ -208,6 +210,7 @@ async function runVerb(rest) {
       'prompt-file': { type: 'string' },
       'handoff-file': { type: 'string' },
       'no-handoff': { type: 'boolean', default: false },
+      image: { type: 'string', multiple: true },
       json: { type: 'boolean', default: false },
     },
   })
@@ -247,6 +250,20 @@ async function runVerb(rest) {
       : readFileSync(values['handoff-file'], 'utf8')
 
   const cwd = process.cwd()
+
+  // An image agent has no harness to launch and no packet to carry: the
+  // prompt goes straight to gpt-image-2 through the Codex login.
+  if (row.kind === 'image') {
+    const result = await runImageAgent({
+      cwd,
+      agent: row,
+      prompt: task,
+      imagePaths: values.image ?? [],
+    })
+    out(values.json ? JSON.stringify(result, null, 2) : renderImageRun(result))
+    return
+  }
+
   const packet = await createPacket({
     cwd,
     agent: row,
