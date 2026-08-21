@@ -374,8 +374,8 @@ describe('cf setup readies a machine in one command', () => {
       'utf8',
     )
     assert.match(installed, /hyperion/)
-    // The unsupported image agent is skipped by the skill, not the roster.
-    assert.doesNotMatch(installed, /pygmalion/)
+    // The image agent is in the skill too now: one verb spawns it like the rest.
+    assert.match(installed, /pygmalion/)
     const listed = await cf(['agent', 'list'], t.env)
     assert.match(listed.stdout, /pygmalion/)
   })

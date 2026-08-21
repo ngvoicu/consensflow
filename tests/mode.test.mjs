@@ -172,6 +172,19 @@ describe('the machine runs exactly one ConsensFlow path', () => {
     }
   })
 
+  it('puts `cf` on PATH for cmux mode, and takes it back for a host mode', () => {
+    // The generated skill tells four harnesses to run `cf run`; if `cf` does
+    // not resolve, every line in it is a lie.
+    stubGit(t)
+    applyMode('cmux', t.env, { bundled })
+    const launcher = join(t.env.CONSENSFLOW_BIN_DIR, 'cf')
+    assert.ok(existsSync(launcher), 'cmux mode installs the launcher')
+    assert.match(readFileSync(launcher, 'utf8'), /Installed by ConsensFlow/)
+
+    applyMode('claude', t.env, { bundled })
+    assert.equal(existsSync(launcher), false, 'a host mode names its own CLI instead')
+  })
+
   it('brings the cmux skills with it when cmux mode is chosen', () => {
     stubGit(t)
     applyMode('cmux', t.env, { bundled })

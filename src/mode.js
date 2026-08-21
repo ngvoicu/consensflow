@@ -6,6 +6,7 @@ import { hostStatus, installHost, uninstallHost } from './hosts.js'
 import { installSkill, uninstallSkills } from './install.js'
 import { configRoot, listAgents } from './roster.js'
 import { generateSkill } from './skill.js'
+import { installTerminalCommand, removeTerminalCommand } from './terminal.js'
 
 /**
  * One ConsensFlow path per machine.
@@ -134,6 +135,10 @@ export function turnOff(env, options = {}) {
   const changes = []
   for (const host of ['claude', 'pi']) changes.push(...dropHost(host, env))
   changes.push(...uninstallSkills(env, { force: options.force }))
+  // The launcher is ours when it says so; someone else's `cf` is left alone.
+  for (const path of removeTerminalCommand(env).removed) {
+    changes.push({ action: 'removed', path })
+  }
   // Off means off: the bookkeeping goes too, so nothing is left claiming
   // state that no longer exists. The roster is untouched — agents are
   // the user's, shared with anything else that reads them.
@@ -188,6 +193,19 @@ export function applyMode(rawMode, env, options = {}) {
   // A machine with no network still gets its mode — it is told what it
   // missed instead of losing the switch.
   const report = modeReport(mode, env)
+  // cmux mode teaches `cf run` to four harnesses, so `cf` has to exist for
+  // them: the launcher is part of that path, not an optional extra. A host
+  // mode does not need it — its skill names the payload's own CLI by absolute
+  // path — so choosing one takes ours back.
+  try {
+    if (mode === 'cmux') installTerminalCommand(env)
+    else removeTerminalCommand(env)
+  } catch (cause) {
+    report.push(
+      `the \`cf\` command could not be placed on PATH (${cause instanceof Error ? cause.message : cause}) — the skill's \`cf run\` lines will not resolve until it is`,
+    )
+  }
+
   try {
     changes.push(...syncCmuxSkills(env, { mode, force: options.force }).report)
   } catch (cause) {

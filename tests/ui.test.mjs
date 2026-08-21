@@ -332,6 +332,9 @@ exit 1
   })
 
   it('can put the terminal command on PATH, and take it back', async () => {
+    // cmux mode installs the launcher itself (its skill says `cf run`), so the
+    // page's own toggle is tested from a known state rather than an assumed one.
+    await api('/api/terminal-command', { method: 'POST', body: JSON.stringify({ remove: true }) })
     const before = await (await api('/api/system')).json()
     assert.equal(before.terminal.installed, false)
 

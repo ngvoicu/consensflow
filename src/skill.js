@@ -1,3 +1,4 @@
+import { HARNESSES } from './roster.js'
 /**
  * Generates the consensflow SKILL.md from the roster.
  *
@@ -11,56 +12,26 @@
  * as full-auto — the table is copy-paste commands a lead will run verbatim.
  */
 
-const q = '"<question>"'
-
-const COMMANDS = {
-  claude: (p) =>
-    [
-      'env -u ANTHROPIC_API_KEY claude -p --dangerously-skip-permissions',
-      q,
-      '--model',
-      p.model,
-      ...(p.effort ? ['--effort', p.effort] : []),
-    ].join(' '),
-  codex: (p) =>
-    [
-      'env -u OPENAI_API_KEY codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -m',
-      p.model,
-      ...(p.effort ? ['-c', `model_reasoning_effort="${p.effort}"`] : []),
-      q,
-    ].join(' '),
-  pi: (p) =>
-    [
-      'pi --no-session --model',
-      p.model,
-      ...(p.effort ? ['--thinking', p.effort] : []),
-      '-p',
-      q,
-    ].join(' '),
-  opencode: (p) =>
-    ['opencode run --auto --model', p.model, ...(p.effort ? ['--variant', p.effort] : []), q].join(
-      ' ',
-    ),
-}
-
 /**
- * The exact command an agent becomes. Exported because the roster editor
- * shows it verbatim: what you see in the UI is the line that lands in the
- * skill, which is the line the harness runs.
+ * The line that spawns this agent — the same line for every one of them.
+ *
+ * Each harness used to get its own hand-built command with its own flags and
+ * billing guards, which made the skill a lookup table and the UI a phrasebook.
+ * One verb replaced them: `cf run` builds the packet, applies the guards and
+ * streams the run, whichever harness is behind the name.
  */
 export function agentCommand(p) {
-  const build = COMMANDS[p.harness]
-  return build === undefined ? undefined : build(p)
+  return `cf run @${p.name} "<task>"`
 }
 
 function row(p) {
   const traits = [p.description, p.effort ? `${p.effort} effort` : null].filter(Boolean).join('; ')
   const label = traits.length > 0 ? `**${p.name}** — ${traits}` : `**${p.name}**`
-  return `| ${label} | ${p.harness} | \`${agentCommand(p)}\` |`
+  return `| ${label} | ${p.harness} | \`${p.model}\` |`
 }
 
 export function generateSkill(agents) {
-  const supported = agents.filter((p) => COMMANDS[p.harness] !== undefined)
+  const supported = agents.filter((p) => HARNESSES.includes(p.harness))
   if (supported.length === 0) {
     throw new Error('empty roster: add an agent before generating the skill')
   }
@@ -107,9 +78,27 @@ question, then decide or ask the user.
    a second opinion).
 2. Compose the question: one or two sentences of task context, then the
    concrete question. Name specific files with relative paths when relevant.
-3. Run the agent's exact command from the table below, replacing only
-   \`<question>\`. Run it from the project directory. Turns can take minutes at
-   high effort — use a generous timeout (10+ minutes for max/ultra).
+3. Spawn it from the project directory:
+
+   \`\`\`bash
+   cf run @<name> "<task>"
+   \`\`\`
+
+   Flags, all optional and combinable:
+
+   - \`--brief "<what this run is for>"\` — what you want from THIS spawn:
+     "review this for GDPR: lawful basis, retention", "you are checking the
+     migration for rollback safety". The agent is told nothing about itself
+     otherwise, so the brief is where the framing goes.
+   - \`--handoff-file <file>\` — your conversation so far, when the agent needs
+     it. You are the one holding it: write the relevant part to a file and
+     pass it. Without this flag the agent sees only the task.
+   - \`--context "<note>"\` — a short brief-alongside for one run.
+   - \`--prompt-file <file>\` — when the task is long.
+   - \`--image <path>\` — reference pictures for an image agent, repeatable.
+
+   Turns can take minutes at high effort — use a generous timeout (10+
+   minutes for max/ultra). The thinking streams as it goes.
 4. Report the answer to the user **verbatim or faithfully summarized, and
    attributed** ("hyperion says: …"). Never present an agent's answer as
    your own.
@@ -125,18 +114,20 @@ question, then decide or ask the user.
 
 ## Roster
 
-| Agent | Runs | Command (replace \`<question>\` only) |
+| Agent | Harness | Model |
 |---|---|---|
 ${supported.map(row).join('\n')}
 
-The \`env -u …_API_KEY\` prefixes are deliberate: they keep subscription
-logins from silently switching to API-key billing. Keep them.
+Every one of them is spawned the same way — \`cf run @<name> "<task>"\` — so
+picking an agent is a question of who you want, not of what to type. The
+command carries the billing guards for you: a run never switches a
+subscription login to API-key billing.
 
 ## Visible pane (optional)
 
-By default, run the command inline and read its output. If the user asks to
-*watch* the agent work and the cmux skills are installed, open a split in
-the current cmux workspace with those skills and run the same command there —
+By default, run \`cf run\` inline and read its output. If the user asks to
+*watch* the agent work and the cmux skills are installed, open a split in the
+current cmux workspace with those skills and run the same command there —
 this skill defines *what* to run; the cmux skills define pane control.
 
 ## Roster maintenance
