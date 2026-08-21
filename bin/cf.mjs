@@ -12,6 +12,9 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
+import { createPacket } from '../hosts/lib/packets.js'
+import { runAgent } from '../hosts/lib/runners.js'
+import { renderEvent } from '../hosts/lib/transcript-events.js'
 import { CATALOG, catalogEntry } from '../src/catalog.js'
 import { detectHarnesses } from '../src/harnesses.js'
 import { HOSTS, hostStatus, installHost, uninstallHost } from '../src/hosts.js'
@@ -25,7 +28,14 @@ import {
   syncCmuxSkills,
   turnOff,
 } from '../src/mode.js'
-import { addAgent, editAgent, listAgents, removeAgent, syncAgents } from '../src/roster.js'
+import {
+  addAgent,
+  agentRow,
+  editAgent,
+  listAgents,
+  removeAgent,
+  syncAgents,
+} from '../src/roster.js'
 import { generateSkill } from '../src/skill.js'
 import {
   healSkillIfStale,
@@ -60,6 +70,10 @@ Usage: cf <command> [options]
                                                ConsensFlow; cmux (pi, cc, codex, opencode) = every
                                                harness can consult, and cmux's own pane-control skills
                                                come with that mode and only that one
+  run <name> "<task>"                          Spawn one agent here and stream its work back:
+    [--brief <what this run is for>]            a brief for this spawn, your conversation as
+    [--handoff-file <file>] [--no-handoff]      handoff when you pass one, a note alongside it
+    [--context <note>] [--prompt-file <file>]
   mode                                         Which one is active, and what it means
   off [--force]                                Take it all back: both host payloads, every file the
                                                manifest owns, and the mode. Agents are kept
@@ -174,6 +188,105 @@ function resolveAdd(name, values) {
     description: values.description ?? entry?.description,
     ...(entry !== undefined && !pinned ? { preset: entry.preset } : {}),
   }
+}
+
+/**
+ * Spawn one agent, here, in whatever mode this machine runs.
+ *
+ * The host payloads have always had this; the cmux path had only a raw
+ * harness command in its skill, which meant no packet, no brief, no handoff
+ * and no artifacts. Same verb, same flags, same packet everywhere now — the
+ * runner and the packet builder are the shared engine, not a second copy.
+ */
+async function runVerb(rest) {
+  const { values, positionals } = parseArgs({
+    args: rest,
+    allowPositionals: true,
+    options: {
+      brief: { type: 'string' },
+      context: { type: 'string' },
+      'prompt-file': { type: 'string' },
+      'handoff-file': { type: 'string' },
+      'no-handoff': { type: 'boolean', default: false },
+      json: { type: 'boolean', default: false },
+    },
+  })
+
+  // An agent must not spawn agents: its own skill would otherwise invite it to.
+  if (env.CONSENSFLOW_CHILD === '1') {
+    fail('this is already an agent run — an agent does not spawn agents')
+    return
+  }
+
+  const name = String(positionals[0] ?? '').replace(/^@/, '')
+  const row = name.length > 0 ? agentRow(name, env) : undefined
+  if (row === undefined) {
+    const known = listAgents(env).map((a) => a.name)
+    fail(
+      known.length === 0
+        ? 'no agents yet — add one with `cf agent add <name>` or in the app'
+        : `no agent named ${JSON.stringify(name)}; you have: ${known.join(', ')}`,
+    )
+    return
+  }
+
+  const task =
+    values['prompt-file'] !== undefined
+      ? readFileSync(values['prompt-file'], 'utf8')
+      : positionals.slice(1).join(' ')
+  if (task.trim().length === 0) {
+    fail('give the agent something to do: cf run @name "<task>" (or --prompt-file <file>)')
+    return
+  }
+
+  // Handoff is the lead's to give: from a file it names, or not at all. In a
+  // host mode the integration stashes the session and passes it the same way.
+  const handoff =
+    values['no-handoff'] === true || values['handoff-file'] === undefined
+      ? ''
+      : readFileSync(values['handoff-file'], 'utf8')
+
+  const cwd = process.cwd()
+  const packet = await createPacket({
+    cwd,
+    agent: row,
+    kind: 'ask',
+    task,
+    brief: values.brief,
+    extraContext: values.context,
+    handoff,
+  })
+
+  // Streaming is the point: the thinking has to stay visible while it works.
+  let inDelta = false
+  let sawDelta = false
+  const onEvent = values.json
+    ? undefined
+    : (event) => {
+        if (event.kind === 'delta') {
+          process.stdout.write(event.text)
+          inDelta = true
+          sawDelta = true
+          return
+        }
+        if (sawDelta && (event.kind === 'thinking' || event.kind === 'text')) return
+        const line = renderEvent(event)
+        if (line) {
+          process.stdout.write(`${inDelta ? '\n' : ''}${line}\n`)
+          inDelta = false
+        }
+      }
+
+  const result = await runAgent({ cwd, agent: row, packet, kind: 'ask', onEvent })
+  if (inDelta) process.stdout.write('\n')
+  if (values.json) {
+    out(JSON.stringify(result, null, 2))
+    return
+  }
+  out('')
+  out(`# @${row.id}`)
+  out('')
+  out(result.output ?? '(no answer)')
 }
 
 function modeVerb() {
@@ -527,6 +640,9 @@ async function main() {
       return
     case 'off':
       offVerb(rest)
+      return
+    case 'run':
+      await runVerb(rest)
       return
     case 'hosts':
       hostsVerb()

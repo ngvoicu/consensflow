@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { promisify } from 'node:util'
@@ -411,5 +419,81 @@ describe('the CLI can undo an install as completely as the app', () => {
     // Agents are the user's, and outlive any install.
     const listed = await cf(['agent', 'list'], t.env)
     assert.match(listed.stdout, /zeus/)
+  })
+})
+
+describe('cf run spawns one agent, in whatever mode this machine runs', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+
+  /** A harness that answers instantly, so the test never touches a real CLI. */
+  function stubCodex() {
+    mkdirSync(t.env.PATH, { recursive: true })
+    const path = join(t.env.PATH, 'codex')
+    writeFileSync(
+      path,
+      `#!/bin/sh\necho '{"type":"item.completed","item":{"type":"agent_message","text":"answered"}}'\n`,
+    )
+    chmodSync(path, 0o755)
+  }
+
+  function packetOf() {
+    // The payload writes artifacts under CONSENSFLOW_HOME when it is set —
+    // the manager reads that variable as its state root, which is the known
+    // collision between the two halves.
+    const runs = join(t.env.CONSENSFLOW_HOME ?? join(t.env.HOME, '.consensflow'), 'workspaces')
+    const found = []
+    const walk = (dir) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name)
+        if (entry.isDirectory()) walk(full)
+        else if (entry.name === 'packet.md') found.push(full)
+      }
+    }
+    walk(runs)
+    return readFileSync(found[found.length - 1], 'utf8')
+  }
+
+  it('carries the brief and the task, and streams the answer back', async () => {
+    stubCodex()
+    await cf(['agent', 'add', 'diana'], t.env)
+
+    const out = await cf(
+      ['run', '@diana', '--brief', 'You are reviewing this for GDPR.', 'check the export path'],
+      t.env,
+    )
+    assert.equal(out.code, 0)
+    assert.match(out.stdout, /answered/)
+
+    const packet = packetOf()
+    assert.match(packet, /## Your brief for this run/)
+    assert.match(packet, /reviewing this for GDPR/)
+    assert.match(packet, /check the export path/)
+    // Nothing invents a persona, and no handoff is sent unless one is given.
+    assert.doesNotMatch(packet, /You are Diana/)
+    assert.doesNotMatch(packet, /## Handoff/)
+  })
+
+  it('sends the conversation only when the lead hands one over', async () => {
+    const handoff = join(t.root, 'history.md')
+    writeFileSync(handoff, 'user: we decided to drop the retention job\n')
+
+    await cf(['run', '@diana', '--handoff-file', handoff, 'is that safe?'], t.env)
+    const packet = packetOf()
+    assert.match(packet, /## Handoff — current session/)
+    assert.match(packet, /drop the retention job/)
+  })
+
+  it('names the agents you have when asked for one you do not', async () => {
+    const out = await cf(['run', '@nobody', 'hello'], t.env)
+    assert.equal(out.code, 1)
+    assert.match(out.stderr + out.stdout, /no agent named/)
+    assert.match(out.stderr + out.stdout, /diana/)
+  })
+
+  it('refuses to spawn from inside an agent run', async () => {
+    const out = await cf(['run', '@diana', 'recurse'], { ...t.env, CONSENSFLOW_CHILD: '1' })
+    assert.equal(out.code, 1)
+    assert.match(out.stderr + out.stdout, /does not spawn agents/)
   })
 })

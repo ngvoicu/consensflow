@@ -99,6 +99,18 @@ function toView(row) {
   }
 }
 
+/**
+ * The row as it sits in the file, not the manager's view of it.
+ *
+ * The runner and the packet builder are the payload's, and they speak the
+ * stored shape (`kind`, `thinking`) — handing them `listAgents()` output
+ * would quietly drop the fields they run on.
+ */
+export function agentRow(name, env) {
+  const wanted = String(name ?? '').replace(/^@/, '')
+  return loadDocument(env).agents.find((row) => row.id === wanted)
+}
+
 export function listAgents(env) {
   return loadDocument(env).agents.map(toView)
 }
