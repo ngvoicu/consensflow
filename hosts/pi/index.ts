@@ -17,6 +17,7 @@ import {
   recordLatestRun,
   removeAgent,
   runsRoot,
+  saveSession,
   syncAgentsWithPresets,
   upsertAgent,
 } from "../lib/state.js";
@@ -32,13 +33,19 @@ export default async function consensflow(pi: ExtensionAPI) {
     ctx.ui.setStatus(EXT, `CF ${agents.length} agent${agents.length === 1 ? "" : "s"}`);
   });
 
-  // No @mention interception here. Typing `@zeus …` used to be swallowed by
-  // this extension, which ran the agent itself — so pi behaved differently
-  // from every other harness, and the lead never saw the request. The lead
-  // now spawns agents the same way everywhere: it reads the skill and runs
-  // the CLI. Say what you want in words — "spawn diana as a GDPR reviewer,
-  // give her our conversation, ask her to check the export path" — and the
-  // lead composes the run.
+  // Input is watched, never intercepted. Typing `@zeus …` used to be swallowed
+  // here — the extension ran the agent itself, so pi behaved unlike every other
+  // harness and the lead never saw the request. What this does instead is stash
+  // the conversation the way Claude Code's hooks do, so `cf run` spawns with the
+  // same automatic handoff in pi as it does there. Returning nothing leaves the
+  // line to the lead, which is the point.
+  pi.on("input", async (_event, ctx) => {
+    try {
+      await stashSession(ctx);
+    } catch {
+      // A missing stash costs the handoff, never the turn.
+    }
+  });
 
   registerCoreCommands(pi);
 
@@ -413,6 +420,24 @@ async function runImageAgent(agent: any, prompt: string, ctx: any, pi: Extension
 // Pull the current resolved session transcript on-demand from the read-only session manager and
 // serialize it for the agent handoff. On-demand (not cached) so it stays correct across
 // fork / tree navigation / session switch. Degrades to "" if unavailable.
+/**
+ * Write the conversation where the CLI can find it.
+ *
+ * pi keeps its transcript in-process, so a `cf run` spawned from the lead's
+ * Bash tool cannot see it. Claude Code's hooks stash a path to the harness's
+ * own transcript file; pi has no such file, so this stashes the serialized
+ * branch itself and records where it went. Same stash, same reader, same
+ * automatic handoff in both.
+ */
+async function stashSession(ctx: any) {
+  const serialized = collectHandoff(ctx);
+  if (!serialized) return;
+  await ensureCfDirs(ctx.cwd);
+  const transcriptPath = path.join(cfRoot(ctx.cwd), "session-handoff.md");
+  await fs.writeFile(transcriptPath, serialized, "utf8");
+  await saveSession(ctx.cwd, { transcriptPath, source: "pi" });
+}
+
 function collectHandoff(ctx: any): string {
   try {
     const sessionManager = ctx?.sessionManager;

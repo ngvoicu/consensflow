@@ -163,6 +163,18 @@ export function applyMode(rawMode, env, options = {}) {
   }
 
   const changes = []
+  // Every mode teaches the same line — `cf run @name "<task>"` — so `cf` has
+  // to exist in every mode: it is part of the path, not an optional extra, and
+  // `off` takes it back. It goes in first because the host payload asks, while
+  // it is being written, whether `cf` is on PATH — and answers that question
+  // in the command it tells the lead to run.
+  let launcherProblem
+  try {
+    installTerminalCommand(env)
+  } catch (cause) {
+    launcherProblem = cause instanceof Error ? cause.message : String(cause)
+  }
+
   if (mode === 'cmux') {
     for (const host of ['claude', 'pi']) changes.push(...dropHost(host, env))
     const agents = listAgents(env)
@@ -193,19 +205,11 @@ export function applyMode(rawMode, env, options = {}) {
   // A machine with no network still gets its mode — it is told what it
   // missed instead of losing the switch.
   const report = modeReport(mode, env)
-  // cmux mode teaches `cf run` to four harnesses, so `cf` has to exist for
-  // them: the launcher is part of that path, not an optional extra. A host
-  // mode does not need it — its skill names the payload's own CLI by absolute
-  // path — so choosing one takes ours back.
-  try {
-    if (mode === 'cmux') installTerminalCommand(env)
-    else removeTerminalCommand(env)
-  } catch (cause) {
+  if (launcherProblem !== undefined) {
     report.push(
-      `the \`cf\` command could not be placed on PATH (${cause instanceof Error ? cause.message : cause}) — the skill's \`cf run\` lines will not resolve until it is`,
+      `\`cf\` could not be placed on PATH (${launcherProblem}) — the skill's \`cf run\` lines fall back to the payload's own CLI`,
     )
   }
-
   try {
     changes.push(...syncCmuxSkills(env, { mode, force: options.force }).report)
   } catch (cause) {

@@ -474,6 +474,29 @@ describe('cf run spawns one agent, in whatever mode this machine runs', () => {
     assert.doesNotMatch(packet, /## Handoff/)
   })
 
+  it('picks up a stashed session the way a host integration leaves one', async () => {
+    // Claude Code's hooks stash a transcript path; pi stashes the serialized
+    // conversation. `cf run` reads either without being told which.
+    const stash = join(t.env.CONSENSFLOW_HOME ?? join(t.env.HOME, '.consensflow'), 'workspaces')
+    mkdirSync(stash, { recursive: true })
+    await cf(['run', '@diana', 'warm the workspace up'], t.env)
+
+    const wsDir = readdirSync(stash)[0]
+    const transcript = join(stash, wsDir, 'stashed.md')
+    writeFileSync(transcript, '## user\nwe agreed to drop the retention job\n')
+    writeFileSync(
+      join(stash, wsDir, 'session.json'),
+      JSON.stringify({ transcriptPath: transcript, source: 'test' }, null, 2),
+    )
+
+    await cf(['run', '@diana', 'is that safe?'], t.env)
+    assert.match(packetOf(), /drop the retention job/, 'the stash rode along uninvited')
+
+    const off = await cf(['run', '@diana', '--no-handoff', 'and now?'], t.env)
+    assert.equal(off.code, 0)
+    assert.doesNotMatch(packetOf(), /drop the retention job/, '--no-handoff still wins')
+  })
+
   it('sends the conversation only when the lead hands one over', async () => {
     const handoff = join(t.root, 'history.md')
     writeFileSync(handoff, 'user: we decided to drop the retention job\n')

@@ -221,7 +221,12 @@ export async function collectHandoff(cwd, options = {}) {
     const transcriptPath = session?.transcriptPath;
     if (!transcriptPath) return "";
     const raw = await fs.readFile(transcriptPath, "utf8");
-    return serializeClaudeTranscript(parseTranscriptJsonl(raw), options);
+    // Two shapes of stash, one reader. Claude Code records a path to its own
+    // JSONL transcript; pi keeps its conversation in process and stashes the
+    // already-serialized text. Anything that parses as entries is serialized
+    // here, anything else was serialized by whoever wrote it.
+    const entries = parseTranscriptJsonl(raw);
+    return entries.length > 0 ? serializeClaudeTranscript(entries, options) : raw.trim();
   } catch {
     return "";
   }

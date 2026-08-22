@@ -13,6 +13,7 @@ import { homedir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { configRoot } from './roster.js'
+import { terminalCommandStatus } from './terminal.js'
 
 /**
  * Host integrations: the deeper ConsensFlow paths that live inside a coding
@@ -132,6 +133,29 @@ function presence(id, env) {
   return null
 }
 
+/** Every file of an installed payload, so a placeholder cannot hide in one. */
+/** The spelling of the CLI this machine should be told to run. */
+function cliCommand(env, target) {
+  return terminalCommandStatus(env).onPath ? 'cf' : `node "${join(target, 'bin', 'cf.mjs')}"`
+}
+
+function payloadFiles(root) {
+  const found = []
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) walk(full)
+      else if (/\.(mjs|js|ts|md|json)$/.test(entry.name)) found.push(full)
+    }
+  }
+  try {
+    walk(root)
+  } catch {
+    // Nothing installed yet; nothing to rewrite.
+  }
+  return found
+}
+
 function installClaude(env, options) {
   // Two ConsensFlow installs in one Claude Code means two skills with the
   // same name and, worse, hooks that fire twice per session.
@@ -155,7 +179,28 @@ function installClaude(env, options) {
   const written = []
   // Payload files address their own root symbolically; make it concrete.
   // biome-ignore lint/suspicious/noTemplateCurlyInString: the payload's own placeholder, not a template
-  const rewrite = (text) => text.split('${CONSENSFLOW_HOST_ROOT}').join(target)
+  const rewrite = (text) =>
+    text
+      .split('${CONSENSFLOW_HOST_ROOT}')
+      .join(target)
+      // What the lead types. `cf` when the launcher is on PATH — the same line
+      // every skill teaches — and this payload's own CLI when it is not, so a
+      // machine whose PATH lacks the launcher directory still works. Quoted
+      // occurrences are replaced as a whole, so the value lands as a valid JS
+      // string rather than nesting quotes inside one.
+      .split('"${CONSENSFLOW_CLI}"')
+      .join(JSON.stringify(cliCommand(env, target)))
+      .split('${CONSENSFLOW_CLI}')
+      .join(cliCommand(env, target))
+
+  // The payload is copied verbatim, so its own files still carry the
+  // placeholders. Rewrite them where they landed: a script that names the CLI
+  // symbolically is useless if the symbol survives the install.
+  for (const file of payloadFiles(target)) {
+    const before = readFileSync(file, 'utf8')
+    if (!before.includes('${CONSENSFLOW_')) continue
+    writeFileSync(file, rewrite(before))
+  }
 
   const skillSource = join(target, 'skills', 'consensflow', 'SKILL.md')
   if (existsSync(skillSource)) {

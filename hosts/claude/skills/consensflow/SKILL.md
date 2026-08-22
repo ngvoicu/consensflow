@@ -44,24 +44,24 @@ Everything the Claude Code lead does goes through the bundled CLI via the Bash t
 
 ```bash
 # Ask one agent (full permissions by default) in the foreground; the live trail streams automatically
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" run @zeus "What's the riskiest part of this design?"
+cf run @zeus "What's the riskiest part of this design?"
 
 # Add a focused brief on top of the automatic session handoff
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" run @zeus "Review the auth flow" --context "Focus on rollback and token expiry"
+cf run @zeus "Review the auth flow" --context "Focus on rollback and token expiry"
 
 # Use a prompt file when the hook stashes a user @mention, or when the prompt is large
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" run @zeus --prompt-file question.md
+cf run @zeus --prompt-file question.md
 
 # Normalized thinking / tool / answer events stream live automatically; the parsed final answer is printed at the end too
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" run @zeus "Review this diff"
+cf run @zeus "Review this diff"
 
 # Write is the default — no flag needed; the approval gate still applies afterward
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" run @builder "Make the minimal fix"
+cf run @builder "Make the minimal fix"
 
 
 # Image generation with optional reference image(s) (--image is repeatable; image agents only)
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" run @pygmalion "A watercolor of this house at sunset" --image /tmp/house.png
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" run @pygmalion "Blend these into one scene" --image a.png --image b.jpg
+cf run @pygmalion "A watercolor of this house at sunset" --image /tmp/house.png
+cf run @pygmalion "Blend these into one scene" --image a.png --image b.jpg
 ```
 
 Always run agent calls in the FOREGROUND, NEVER in the background; the live reasoning/tool/answer trail streams automatically — the only exception is an explicit `--json` for machine output.
@@ -124,12 +124,12 @@ Agents are configured in the shared roster `~/.consensflow/agents.json` (set up 
 **The names below are a menu, not your roster.** None of them exists until it is added. Your actual agents are the ones `agents list` prints — and the line at the top of this session already named them. `@zeus` and friends appear throughout this skill only as placeholders in examples; substitute a name you actually have, and if the user asks for one that is not on the roster, say so and offer to add it rather than guessing a substitute.
 
 ```bash
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" agents presets                    # list built-in presets
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" agents add zeus                   # add a preset → @zeus
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" agents add endymion               # Pi-backed Kimi K3 → @endymion
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" agents add all                    # add every preset
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" agents add zeus --name Deepreview # preset backend, renamed → @deepreview
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" agents add --name Builder --kind codex --model gpt-5.6-sol --effort high   # fully custom; read-write like every agent
+cf agents presets                    # list built-in presets
+cf agents add zeus                   # add a preset → @zeus
+cf agents add endymion               # Pi-backed Kimi K3 → @endymion
+cf agents add all                    # add every preset
+cf agents add zeus --name Deepreview # preset backend, renamed → @deepreview
+cf agents add --name Builder --kind codex --model gpt-5.6-sol --effort high   # fully custom; read-write like every agent
 ```
 
 Presets run read-write like any agent; the same model+effort family exists on every engine that runs it:
@@ -150,17 +150,17 @@ Model and effort strings pass through to the engine verbatim, so any identifier 
 Use the CLI directly from Bash:
 
 ```bash
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" status
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" doctor
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" agents list
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" agents presets
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" agents add <preset> [--name <name>] [--cwd <subdir>]
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" agents add all
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" agents add --name <name> --kind <pi|claude-code|codex|opencode|image> --model <model> [--effort <e>|--thinking <t>] [--cwd <subdir>]
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" agents show @name
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" agents remove @name
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" agents sync [--dry-run]   # re-resolve preset-backed agents against the current catalog
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" run @name <prompt> [--prompt-file <file>] [--context <note>] [--no-handoff] [--image <path> …] [--json]
+cf status
+cf doctor
+cf agents list
+cf agents presets
+cf agents add <preset> [--name <name>] [--cwd <subdir>]
+cf agents add all
+cf agents add --name <name> --kind <pi|claude-code|codex|opencode|image> --model <model> [--effort <e>|--thinking <t>] [--cwd <subdir>]
+cf agents show @name
+cf agents remove @name
+cf agents sync [--dry-run]   # re-resolve preset-backed agents against the current catalog
+cf run @name <prompt> [--prompt-file <file>] [--context <note>] [--no-handoff] [--image <path> …] [--json]
 ```
 
 One user-facing slash command wraps that CLI: `/consensflow <args>` — it passes whatever follows straight through (`/consensflow status`, `/consensflow agents list`, `/consensflow @diana <prompt>`).

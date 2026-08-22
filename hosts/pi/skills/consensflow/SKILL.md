@@ -99,7 +99,15 @@ Run `/consensflow:presets` for the full list. Model and effort strings pass thro
 
 Typing `@zeus …` no longer runs anything by itself — pi used to intercept that line and run the agent behind the lead's back, which made it behave unlike every other harness. The lead composes the run now, from what the user said.
 
-**Prefer the `cf_run_agent` tool**, which takes the same four pieces as the CLI:
+Spawn it exactly as you would in any other harness — the command is the same everywhere ConsensFlow is installed:
+
+```bash
+cf run @diana "review the export path" --brief "You are reviewing this for GDPR: lawful basis, retention."
+```
+
+The conversation rides along automatically: this extension stashes it after every prompt, the same way Claude Code's hooks do, so `cf run` picks it up without being handed anything. Add `--no-handoff` when the task stands alone or the user says not to share it.
+
+Inside pi you can also use the **`cf_run_agent` tool**, which takes the same four pieces:
 
 - the agent's name;
 - `brief` — what this spawn is for ("you are reviewing this for GDPR: lawful basis, retention"). Nothing else tells the agent what it is here for; no persona is assigned for it.

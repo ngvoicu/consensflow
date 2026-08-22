@@ -12,6 +12,11 @@ import { parseAgentPrompt, slugify, tokenize } from "../../lib/utils.js";
 import { readStdinText } from "./hook-io.mjs";
 
 const CLI_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "cf.mjs");
+// What the lead should type. The installer replaces the placeholder with `cf`
+// when the launcher is on PATH — the same line every skill teaches — and
+// leaves this payload's own CLI as the fallback when it is not.
+const RAW_CLI = "${CONSENSFLOW_CLI}";
+const CF_CLI = RAW_CLI.startsWith("$") ? `node "${CLI_PATH}"` : RAW_CLI;
 
 function emitContext(text) {
   console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: text } }));
@@ -47,7 +52,7 @@ try {
     [
       `ConsensFlow routing: this prompt addresses the agent @${id}. Consult it now via the Bash tool:`,
       "",
-      `  node "${CLI_PATH}" run @${id} --prompt-file "${promptFile}"`,
+      `  ${CF_CLI} run @${id} --prompt-file "${promptFile}"`,
       "",
       "Agents can take minutes: always run this in the FOREGROUND — NEVER in the background or detached — with a generous Bash timeout (600000 ms or more). It streams the live thinking/tool/answer trail automatically (no flag needed), so the user sees the reasoning as it arrives; never switch to --json to hide the trail. Then relay the agent's answer to the user faithfully — do not summarize the trail away.",
       "Do not apply, commit, or keep the agent's advice or file changes without the user's approval, unless the user already authorized it.",
