@@ -23,16 +23,34 @@ import { fileURLToPath } from 'node:url'
 
 const NAMES = ['consensflow', 'cf']
 
+/** The marker that says a launcher is ours to replace or remove. */
+const MARKER = 'Installed by ConsensFlow'
+
 /**
  * Where a user-installed command can go, best first. `/usr/local/bin` is on
  * everyone's PATH but often needs privileges; `~/.local/bin` always belongs
  * to the user. `CONSENSFLOW_BIN_DIR` overrides both — which is also what
  * keeps tests off the real machine.
  */
+function isWindows(env) {
+  return process.platform === 'win32' || (env.OS ?? '').toLowerCase().includes('windows')
+}
+
+function home(env) {
+  return env.HOME ?? env.USERPROFILE ?? homedir()
+}
+
 function defaultCandidates(env) {
   const explicit = env.CONSENSFLOW_BIN_DIR
   if (typeof explicit === 'string' && explicit.length > 0) return [explicit]
-  return ['/usr/local/bin', join(env.HOME ?? homedir(), '.local', 'bin')]
+  if (isWindows(env)) {
+    // There is no /usr/local/bin to fall back to: the per-user place Windows
+    // apps put their shims is under LOCALAPPDATA, and it is on PATH for
+    // anything installed the modern way.
+    const local = env.LOCALAPPDATA ?? join(home(env), 'AppData', 'Local')
+    return [join(local, 'Programs', 'ConsensFlow', 'bin')]
+  }
+  return ['/usr/local/bin', join(home(env), '.local', 'bin')]
 }
 
 function writable(dir) {
@@ -50,23 +68,33 @@ function selfPaths() {
   return { runtime: process.execPath, cli }
 }
 
-function launcher() {
+function launcher(env) {
   const { runtime, cli } = selfPaths()
+  if (isWindows(env)) {
+    // A .cmd shim, because Windows has no shebang: the same idea, spelled the
+    // way cmd.exe understands, and `%*` forwards the arguments.
+    return `@echo off\r\nREM ${MARKER}. Runs the app's own runtime and its own copy of\r\nREM the CLI, so the terminal and the window never drift apart.\r\n"${runtime}" "${cli}" %*\r\n`
+  }
   return `#!/bin/sh
-# Installed by ConsensFlow. Runs the app's own runtime and its own copy of
+# ${MARKER}. Runs the app's own runtime and its own copy of
 # the CLI, so the terminal and the window never drift apart.
 exec "${runtime}" "${cli}" "$@"
 `
 }
 
+/** What the launcher is called here: `cf` on POSIX, `cf.cmd` on Windows. */
+function launcherNames(env) {
+  return isWindows(env) ? NAMES.map((name) => `${name}.cmd`) : NAMES
+}
+
 export function terminalCommandStatus(env, options = {}) {
   const candidates = options.candidates ?? defaultCandidates(env)
   for (const dir of candidates) {
-    const path = join(dir, NAMES[0])
+    const path = join(dir, launcherNames(env)[0])
     if (!existsSync(path)) continue
     // Only ours: a `consensflow` someone else put there is not ours to report
     // as installed, and certainly not ours to remove.
-    if (!readFileSync(path, 'utf8').includes('Installed by ConsensFlow')) continue
+    if (!readFileSync(path, 'utf8').includes(MARKER)) continue
     const onPath = (env.PATH ?? '').split(delimiter).includes(dir)
     return { installed: true, path, dir, onPath }
   }
@@ -94,15 +122,15 @@ export function installTerminalCommand(env, options = {}) {
     )
   }
 
-  const script = launcher()
-  for (const name of NAMES) {
+  const script = launcher(env)
+  for (const name of launcherNames(env)) {
     const path = join(dir, name)
     // Someone else's `cf` is left alone; ours is replaced.
-    if (existsSync(path) && !readFileSync(path, 'utf8').includes('Installed by ConsensFlow')) {
+    if (existsSync(path) && !readFileSync(path, 'utf8').includes(MARKER)) {
       continue
     }
     writeFileSync(path, script)
-    chmodSync(path, 0o755)
+    if (!isWindows(env)) chmodSync(path, 0o755)
   }
 
   return terminalCommandStatus(env, options)
@@ -112,10 +140,10 @@ export function removeTerminalCommand(env, options = {}) {
   const candidates = options.candidates ?? defaultCandidates(env)
   const removed = []
   for (const dir of candidates) {
-    for (const name of NAMES) {
+    for (const name of launcherNames(env)) {
       const path = join(dir, name)
       if (!existsSync(path)) continue
-      if (!readFileSync(path, 'utf8').includes('Installed by ConsensFlow')) continue
+      if (!readFileSync(path, 'utf8').includes(MARKER)) continue
       rmSync(path, { force: true })
       removed.push(path)
     }

@@ -47,19 +47,39 @@ const HARNESSES = [
 ]
 
 function home(env) {
-  return env.HOME ?? homedir()
+  // Windows sets USERPROFILE, not HOME; homedir() knows that, but an explicit
+  // env (every test, and the app passing a login environment) may carry either.
+  return env.HOME ?? env.USERPROFILE ?? homedir()
+}
+
+/**
+ * What an executable is called, per platform.
+ *
+ * On Windows a CLI on PATH is `claude.cmd` or `claude.exe` — never the bare
+ * name — and there is no executable bit to test, so PATHEXT decides and
+ * "the file is there" is the whole check.
+ */
+function candidateNames(command, env) {
+  if ((env.OS ?? '').toLowerCase().includes('windows') || process.platform === 'win32') {
+    const exts = (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
+    return [command, ...exts.map((ext) => `${command}${ext.toLowerCase()}`)]
+  }
+  return [command]
 }
 
 function resolvesOnPath(command, env) {
+  const executable = process.platform !== 'win32'
   for (const dir of (env.PATH ?? '').split(delimiter)) {
     if (dir.length === 0) continue
-    const candidate = join(dir, command)
-    try {
-      if (!statSync(candidate).isFile()) continue
-      accessSync(candidate, constants.X_OK)
-      return true
-    } catch {
-      // Not here; keep looking.
+    for (const name of candidateNames(command, env)) {
+      const candidate = join(dir, name)
+      try {
+        if (!statSync(candidate).isFile()) continue
+        if (executable) accessSync(candidate, constants.X_OK)
+        return true
+      } catch {
+        // Not here; keep looking.
+      }
     }
   }
   return false

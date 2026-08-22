@@ -158,6 +158,23 @@ function payloadFiles(root) {
   return found
 }
 
+/**
+ * The same substitution, applied to a parsed value rather than to JSON text.
+ *
+ * Rewriting the serialized form breaks on Windows: `C:\\Users\\…\\node.exe`
+ * dropped into a JSON string leaves `\\U`, which is not a valid escape, and the
+ * hooks file stops parsing. Walking the structure and letting JSON.stringify
+ * escape at write time cannot get that wrong.
+ */
+function rewriteDeep(value, rewrite) {
+  if (typeof value === 'string') return rewrite(value)
+  if (Array.isArray(value)) return value.map((item) => rewriteDeep(item, rewrite))
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, rewriteDeep(v, rewrite)]))
+  }
+  return value
+}
+
 function installClaude(env, options) {
   // Two ConsensFlow installs in one Claude Code means two skills with the
   // same name and, worse, hooks that fire twice per session.
@@ -209,7 +226,12 @@ function installClaude(env, options) {
   for (const file of payloadFiles(target)) {
     const before = readFileSync(file, 'utf8')
     if (!before.includes('${CONSENSFLOW_')) continue
-    writeFileSync(file, rewrite(before))
+    if (file.endsWith('.json')) {
+      // Structurally, so a Windows path lands as data rather than as escapes.
+      writeFileSync(file, `${JSON.stringify(rewriteDeep(JSON.parse(before), rewrite), null, 2)}\n`)
+    } else {
+      writeFileSync(file, rewrite(before))
+    }
   }
 
   const skillSource = join(target, 'skills', 'consensflow', 'SKILL.md')
@@ -237,7 +259,7 @@ function installClaude(env, options) {
     for (const [event, entries] of Object.entries(hooks)) {
       // Ours are replaced, never stacked; everyone else's are left alone.
       const theirs = (merged[event] ?? []).filter((entry) => !isOurs(entry))
-      merged[event] = [...theirs, ...JSON.parse(rewrite(JSON.stringify(entries)))]
+      merged[event] = [...theirs, ...rewriteDeep(entries, rewrite)]
     }
     return { ...settings, hooks: merged }
   })
