@@ -33,8 +33,10 @@ import {
 import {
   addAgent,
   agentRow,
+  configRoot,
   editAgent,
   listAgents,
+  migrateStateRoot,
   removeAgent,
   syncAgents,
 } from '../src/roster.js'
@@ -621,6 +623,7 @@ function setup(rest) {
 function doctor() {
   const harnesses = detectHarnesses(env)
   out(`consensflow ${PKG.version}`)
+  out(`home:         ${configRoot(env)}`)
   out(
     `harnesses:       ${harnesses.length > 0 ? harnesses.map((a) => `${a.id}${a.native ? ' (has its own consensflow)' : ''}`).join(', ') : 'none on PATH'}`,
   )
@@ -645,6 +648,12 @@ function doctor() {
 
 async function main() {
   const [command, ...rest] = process.argv.slice(2)
+
+  // A machine set up before the roots were merged keeps its state — it just
+  // moves into the one directory, once, and silently: `cf --version` and
+  // `--json` are machine output, and a relocation the user cannot act on is
+  // not news. `cf doctor` says where things live.
+  migrateStateRoot(env)
 
   if (command === undefined || command === 'help' || command === '--help') {
     out(USAGE)

@@ -1,4 +1,12 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { presetDrift, syncAgentWithPreset } from '../hosts/lib/presets.js'
@@ -43,14 +51,57 @@ const HARNESS_TO_KIND = {
 }
 
 /** The manifest and other v3-only state; the roster deliberately not here. */
+/**
+ * Everything ConsensFlow owns, in one directory.
+ *
+ * The state used to live under XDG (`~/.config/consensflow`) while the roster
+ * and the run artifacts lived in `~/.consensflow` — two homes for one product,
+ * so "where is ConsensFlow on this machine" had two answers and an uninstall
+ * had two places to sweep. One root now: the same one the roster and the
+ * payload have always used.
+ */
 export function configRoot(env) {
-  if (typeof env?.CONSENSFLOW_HOME === 'string' && env.CONSENSFLOW_HOME.length > 0) {
-    return env.CONSENSFLOW_HOME
-  }
+  return rosterHome(env)
+}
+
+/** Where the state lived before the roots were merged (2026-08-22). */
+export function legacyConfigRoot(env) {
   const xdg = env?.XDG_CONFIG_HOME
   const base =
     typeof xdg === 'string' && xdg.length > 0 ? xdg : join(env?.HOME ?? homedir(), '.config')
   return join(base, 'consensflow')
+}
+
+/**
+ * Moves an older machine's state into the one root, once.
+ *
+ * A rename rather than a copy, and only when there is nothing to overwrite:
+ * a machine that already has the new root keeps it, and whatever sits in the
+ * old one is reported by `cf doctor` rather than merged behind the user's back.
+ */
+export function migrateStateRoot(env) {
+  const from = legacyConfigRoot(env)
+  const to = configRoot(env)
+  if (from === to || !existsSync(from) || existsSync(join(to, 'mode.json'))) return null
+  mkdirSync(dirname(to), { recursive: true })
+  if (!existsSync(to)) {
+    renameSync(from, to)
+    return { from, to, moved: 'all' }
+  }
+  // The roster already made the directory; move the state files into it.
+  const moved = []
+  for (const name of readdirSync(from)) {
+    const target = join(to, name)
+    if (existsSync(target)) continue
+    renameSync(join(from, name), target)
+    moved.push(name)
+  }
+  try {
+    if (readdirSync(from).length === 0) rmSync(from, { recursive: true, force: true })
+  } catch {
+    // Something else lives there; leaving it is the safe half of the trade.
+  }
+  return moved.length > 0 ? { from, to, moved } : null
 }
 
 /**

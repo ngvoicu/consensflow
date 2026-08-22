@@ -23,6 +23,7 @@ import {
   editAgent,
   HARNESSES,
   listAgents,
+  migrateStateRoot,
   removeAgent,
   syncAgents,
 } from './roster.js'
@@ -202,6 +203,10 @@ function isPipe(fd) {
 }
 
 export async function startUiServer(env) {
+  // The app is an entry point too: a machine from before the merge should not
+  // have to run the CLI once to be tidied up.
+  migrateStateRoot(env)
+
   const token = randomBytes(24).toString('hex')
 
   const server = createServer(async (request, reply) => {

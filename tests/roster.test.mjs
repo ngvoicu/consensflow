@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import {
@@ -7,7 +7,9 @@ import {
   agentDrift,
   configRoot,
   editAgent,
+  legacyConfigRoot,
   listAgents,
+  migrateStateRoot,
   removeAgent,
   rosterPath,
   syncAgents,
@@ -256,9 +258,50 @@ describe('CONSENSFLOW_HOME means one root, to both halves', () => {
     }
   })
 
-  it('leaves the defaults alone when it is not set', () => {
+  it('puts everything in one directory when it is not set', () => {
+    // One answer to "where is ConsensFlow on this machine", and one place for
+    // an uninstall to sweep.
     const bare = { HOME: '/home/someone' }
     assert.equal(rosterPath(bare), '/home/someone/.consensflow/agents.json')
-    assert.match(configRoot(bare), /\/home\/someone\/\.config\/consensflow$/)
+    assert.equal(configRoot(bare), '/home/someone/.consensflow')
+  })
+
+  it("moves an older machine's state into that directory, once", () => {
+    const t = tempEnv()
+    try {
+      // A machine from before the merge: state under XDG, roster beside it.
+      const legacy = legacyConfigRoot(t.env)
+      mkdirSync(legacy, { recursive: true })
+      writeFileSync(join(legacy, 'mode.json'), JSON.stringify({ mode: 'claude' }))
+      writeFileSync(join(legacy, 'hosts.json'), JSON.stringify({ hosts: {} }))
+
+      const moved = migrateStateRoot(t.env)
+      assert.ok(moved, 'it reports what it did')
+      assert.ok(existsSync(join(configRoot(t.env), 'mode.json')), 'the mode came along')
+      assert.ok(existsSync(join(configRoot(t.env), 'hosts.json')))
+      assert.equal(existsSync(legacy), false, 'and the old root is gone')
+
+      // Running again is a no-op, not a second move.
+      assert.equal(migrateStateRoot(t.env), null)
+    } finally {
+      t.cleanup()
+    }
+  })
+
+  it('never overwrites a machine that already has the new root', () => {
+    const t = tempEnv()
+    try {
+      mkdirSync(configRoot(t.env), { recursive: true })
+      writeFileSync(join(configRoot(t.env), 'mode.json'), JSON.stringify({ mode: 'cmux' }))
+      const legacy = legacyConfigRoot(t.env)
+      mkdirSync(legacy, { recursive: true })
+      writeFileSync(join(legacy, 'mode.json'), JSON.stringify({ mode: 'claude' }))
+
+      assert.equal(migrateStateRoot(t.env), null, 'nothing is merged behind the user')
+      const kept = JSON.parse(readFileSync(join(configRoot(t.env), 'mode.json'), 'utf8'))
+      assert.equal(kept.mode, 'cmux', 'the live state wins')
+    } finally {
+      t.cleanup()
+    }
   })
 })

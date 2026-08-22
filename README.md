@@ -117,7 +117,7 @@ which cmux commit, and offers **Install / update skills** and **Remove
 installed skills**. Those are named operations — the page has no endpoint
 that runs a command you type, by design.
 
-Ownership is a hash manifest (`~/.config/consensflow/skills-manifest.json`).
+Ownership is a hash manifest (`~/.consensflow/skills-manifest.json`).
 A file you edited by hand is **drifted**: ConsensFlow refuses to overwrite or
 delete it without `--force`, and it never touches files it didn't write.
 
@@ -164,7 +164,7 @@ consensflow hosts             # what's installed where, at which commit
 consensflow uninstall claude  # removes exactly what it wrote
 ```
 
-`install claude` puts the payload in `~/.config/consensflow/hosts/claude`
+`install claude` puts the payload in `~/.consensflow/hosts/claude`
 (never inside Claude Code's own directories) and wires it up through
 documented user config: a skill, a `/consensflow` command, and hook entries
 merged into `settings.json` — your other settings and hooks are left alone,
@@ -230,6 +230,6 @@ installs them. Nothing is maintained outside this repo.
 ## State
 
 The roster: `~/.consensflow/agents.json` (shared with cc/pi). The
-manifest: `~/.config/consensflow/skills-manifest.json` (override with
+manifest: `~/.consensflow/skills-manifest.json` (override with
 `CONSENSFLOW_HOME`). Leave completely with `cf skills uninstall &&
 npm uninstall -g consensflow`.
