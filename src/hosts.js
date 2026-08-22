@@ -178,9 +178,9 @@ function installClaude(env, options) {
 
   const written = []
   // Payload files address their own root symbolically; make it concrete.
-  // biome-ignore lint/suspicious/noTemplateCurlyInString: the payload's own placeholder, not a template
   const rewrite = (text) =>
     text
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the payload's own placeholder, not a template
       .split('${CONSENSFLOW_HOST_ROOT}')
       .join(target)
       // What the lead types. `cf` when the launcher is on PATH — the same line
@@ -188,8 +188,10 @@ function installClaude(env, options) {
       // machine whose PATH lacks the launcher directory still works. Quoted
       // occurrences are replaced as a whole, so the value lands as a valid JS
       // string rather than nesting quotes inside one.
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the payload's own placeholder, not a template
       .split('"${CONSENSFLOW_CLI}"')
       .join(JSON.stringify(cliCommand(env, target)))
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the payload's own placeholder, not a template
       .split('${CONSENSFLOW_CLI}')
       .join(cliCommand(env, target))
 
