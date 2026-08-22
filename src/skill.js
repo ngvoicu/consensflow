@@ -92,7 +92,11 @@ question, then decide or ask the user.
      otherwise, so the brief is where the framing goes.
    - \`--handoff-file <file>\` — your conversation so far, when the agent needs
      it. You are the one holding it: write the relevant part to a file and
-     pass it. Without this flag the agent sees only the task.
+     pass it.
+   - \`--no-handoff\` — spawn with the task alone. Only matters when a harness
+     has stashed the conversation for you (the Claude Code and pi
+     integrations do); here it is the default, and this flag makes it
+     explicit.
    - \`--context "<note>"\` — a short brief-alongside for one run.
    - \`--prompt-file <file>\` — when the task is long.
    - \`--image <path>\` — reference pictures for an image agent, repeatable.
