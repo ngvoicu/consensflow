@@ -53,8 +53,25 @@ export function configRoot(env) {
   return join(base, 'consensflow')
 }
 
+/**
+ * The roster, in the one place both halves look.
+ *
+ * `CONSENSFLOW_HOME` used to mean two different directories: the manager read
+ * it as its state root while the payload read it as the roster root — so
+ * setting it split the machine in half. `cf agent list` showed your agents and
+ * the session hook said "none configured", because each was reading a
+ * different file. Both now agree: when it is set, everything ConsensFlow owns
+ * lives under it; when it is not, the roster stays at `~/.consensflow`, which
+ * is where the payload has always kept it.
+ */
+export function rosterHome(env) {
+  const override = env?.CONSENSFLOW_HOME
+  if (typeof override === 'string' && override.length > 0) return override
+  return join(env?.HOME ?? homedir(), '.consensflow')
+}
+
 export function rosterPath(env) {
-  return join(env?.HOME ?? homedir(), '.consensflow', 'agents.json')
+  return join(rosterHome(env), 'agents.json')
 }
 
 /**
@@ -63,7 +80,7 @@ export function rosterPath(env) {
  * working — it is read as-is, and the next write lands in the new file.
  */
 function legacyRosterPath(env) {
-  return join(env?.HOME ?? homedir(), '.consensflow', 'participants.json')
+  return join(rosterHome(env), 'participants.json')
 }
 
 function readRoster(env) {

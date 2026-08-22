@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileS
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { applyMode, currentMode, MODES, modeLabel, modeReport, turnOff } from '../src/mode.js'
-import { addAgent, removeAgent } from '../src/roster.js'
+import { addAgent, removeAgent, rosterPath } from '../src/roster.js'
 import { refreshInstalledSkill } from '../src/sync.js'
 import { tempEnv } from './helpers.mjs'
 
@@ -259,10 +259,16 @@ describe('the machine runs exactly one ConsensFlow path', () => {
     assert.equal(existsSync(join(t.env.CODEX_HOME, 'skills', 'cmux-core', 'SKILL.md')), false)
     assert.ok(outcome.changes.length > 0)
 
-    // "Off" means off: no bookkeeping left claiming state that is gone.
+    // "Off" means off: no bookkeeping left claiming state that is gone. The
+    // roster is the one thing that stays — it is the user's, and it outlives
+    // any install. (With CONSENSFLOW_HOME set, as here, it sits in the same
+    // root as the state, which is the point of that variable.)
     const config = t.env.CONSENSFLOW_HOME
-    const leftovers = existsSync(config) ? readdirSync(config) : []
+    const leftovers = (existsSync(config) ? readdirSync(config) : []).filter(
+      (name) => name !== 'agents.json',
+    )
     assert.deepEqual(leftovers, [], `nothing should remain, found ${leftovers.join(', ')}`)
+    assert.ok(existsSync(rosterPath(t.env)), 'the roster survives being turned off')
   })
 
   it('refuses a mode it does not have, naming the ones it does', () => {

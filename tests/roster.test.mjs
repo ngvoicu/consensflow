@@ -5,6 +5,7 @@ import { after, describe, it } from 'node:test'
 import {
   addAgent,
   agentDrift,
+  configRoot,
   editAgent,
   listAgents,
   removeAgent,
@@ -16,7 +17,7 @@ import { assertOutsideRealHome, tempEnv } from './helpers.mjs'
 const FIXTURES = join(import.meta.dirname, 'fixtures')
 
 function seedSharedRoster(t) {
-  mkdirSync(join(t.env.HOME, '.consensflow'), { recursive: true })
+  mkdirSync(dirname(rosterPath(t.env)), { recursive: true })
   cpSync(join(FIXTURES, 'v1-agents.json'), rosterPath(t.env))
 }
 
@@ -27,7 +28,7 @@ describe('the roster IS the shared v1 file that cc and pi read', () => {
   it('lives at ~/.consensflow/agents.json under the given HOME', () => {
     const path = rosterPath(t.env)
     assertOutsideRealHome(path)
-    assert.equal(path, join(t.env.HOME, '.consensflow', 'agents.json'))
+    assert.equal(path, rosterPath(t.env))
   })
 
   it('reads v1 rows as agents: kind→harness, thinking/effort→effort', () => {
@@ -210,7 +211,7 @@ describe('a roster written before the rename keeps working', () => {
 
   it('reads participants.json and its participants key, then writes agents.json', () => {
     // Exactly what a machine set up before 2026-08-21 has on disk.
-    const legacy = join(t.env.HOME, '.consensflow', 'participants.json')
+    const legacy = join(dirname(rosterPath(t.env)), 'participants.json')
     mkdirSync(dirname(legacy), { recursive: true })
     cpSync(join(FIXTURES, 'v1-participants.json'), legacy)
 
@@ -225,5 +226,39 @@ describe('a roster written before the rename keeps working', () => {
     assert.equal(written.participants, undefined, 'the old key does not survive the write')
     assert.equal(written.agents.length, listed.length + 1, 'nothing was dropped on the way')
     assert.ok(written.agents.some((row) => row.id === 'zeus'))
+  })
+})
+
+describe('CONSENSFLOW_HOME means one root, to both halves', () => {
+  it('puts the roster where the payload looks for it', async () => {
+    // The manager read this variable as its state root and the payload read it
+    // as the roster root, so setting it split the machine in two: `cf agent
+    // list` showed your agents while the session hook said "none configured".
+    const t = tempEnv()
+    try {
+      addAgent({ name: 'diana', harness: 'codex', model: 'gpt-5.6-luna' }, t.env)
+
+      const { agentsPath } = await import('../hosts/lib/state.js')
+      const payloadEnv = process.env.CONSENSFLOW_HOME
+      process.env.CONSENSFLOW_HOME = t.env.CONSENSFLOW_HOME
+      try {
+        assert.equal(
+          rosterPath(t.env),
+          agentsPath(t.root),
+          'both halves resolve the roster to the same file',
+        )
+      } finally {
+        if (payloadEnv === undefined) delete process.env.CONSENSFLOW_HOME
+        else process.env.CONSENSFLOW_HOME = payloadEnv
+      }
+    } finally {
+      t.cleanup()
+    }
+  })
+
+  it('leaves the defaults alone when it is not set', () => {
+    const bare = { HOME: '/home/someone' }
+    assert.equal(rosterPath(bare), '/home/someone/.consensflow/agents.json')
+    assert.match(configRoot(bare), /\/home\/someone\/\.config\/consensflow$/)
   })
 })

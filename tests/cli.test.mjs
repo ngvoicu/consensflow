@@ -9,9 +9,10 @@ import {
   readFileSync,
   writeFileSync,
 } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { promisify } from 'node:util'
+import { rosterPath } from '../src/roster.js'
 import { chooseCmuxMode, tempEnv } from './helpers.mjs'
 
 const run = promisify(execFile)
@@ -316,7 +317,7 @@ describe('the skill heals itself when cc or pi edit the shared roster', () => {
     await cf(['agent', 'add', 'zeus', '--harness', 'claude', '--model', 'claude-opus-5'], t.env)
 
     // cc adds an agent behind v3's back: a raw write to the shared file.
-    const rosterFile = join(t.env.HOME, '.consensflow', 'agents.json')
+    const rosterFile = rosterPath(t.env)
     const raw = JSON.parse(readFileSync(rosterFile, 'utf8'))
     raw.agents.push({
       id: 'apollo',
@@ -341,7 +342,7 @@ describe('the skill heals itself when cc or pi edit the shared roster', () => {
   it('never resurrects a skill the user uninstalled', async () => {
     await cf(['skills', 'uninstall'], t.env)
 
-    const rosterFile = join(t.env.HOME, '.consensflow', 'agents.json')
+    const rosterFile = rosterPath(t.env)
     const raw = JSON.parse(readFileSync(rosterFile, 'utf8'))
     raw.agents[0].model = 'changed-again'
     writeFileSync(rosterFile, JSON.stringify(raw, null, 2))
@@ -363,8 +364,8 @@ describe('cf setup readies a machine in one command', () => {
 
   it('a machine that already ran cc or pi gets its skill from the shared roster', async () => {
     // The cc/pi roster IS the roster: no import, no copy.
-    mkdirSync(join(t.env.HOME, '.consensflow'), { recursive: true })
-    cpSync(join(FIXTURES, 'v1-agents.json'), join(t.env.HOME, '.consensflow', 'agents.json'))
+    mkdirSync(dirname(rosterPath(t.env)), { recursive: true })
+    cpSync(join(FIXTURES, 'v1-agents.json'), rosterPath(t.env))
 
     const out = await cf(['setup'], t.env)
     assert.equal(out.code, 0)
@@ -441,7 +442,7 @@ describe('cf run spawns one agent, in whatever mode this machine runs', () => {
     // The payload writes artifacts under CONSENSFLOW_HOME when it is set —
     // the manager reads that variable as its state root, which is the known
     // collision between the two halves.
-    const runs = join(t.env.CONSENSFLOW_HOME ?? join(t.env.HOME, '.consensflow'), 'workspaces')
+    const runs = join(t.env.CONSENSFLOW_HOME, 'workspaces')
     const found = []
     const walk = (dir) => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -477,7 +478,7 @@ describe('cf run spawns one agent, in whatever mode this machine runs', () => {
   it('picks up a stashed session the way a host integration leaves one', async () => {
     // Claude Code's hooks stash a transcript path; pi stashes the serialized
     // conversation. `cf run` reads either without being told which.
-    const stash = join(t.env.CONSENSFLOW_HOME ?? join(t.env.HOME, '.consensflow'), 'workspaces')
+    const stash = join(t.env.CONSENSFLOW_HOME, 'workspaces')
     mkdirSync(stash, { recursive: true })
     await cf(['run', '@diana', 'warm the workspace up'], t.env)
 
