@@ -91,6 +91,14 @@ describe('the skill teaches one verb, with the flags that make a spawn', () => {
     assert.doesNotMatch(md, /env -u ANTHROPIC_API_KEY/)
   })
 
+  it('makes the lead stop and discuss what came back', () => {
+    // The failure this prevents: an agent answers, the lead quietly acts on it,
+    // and the user never hears the second opinion they paid for.
+    assert.match(md, /Bring the answer back before anything else/)
+    assert.match(md, /do not\s+spawn a second agent/i)
+    assert.match(md, /not a decision/i)
+  })
+
   it('says the brief and the handoff are the lead to give', () => {
     assert.match(md, /--brief/)
     assert.match(md, /--handoff-file/)

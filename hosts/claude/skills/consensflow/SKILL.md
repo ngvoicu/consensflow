@@ -110,6 +110,12 @@ This gate covers BOTH cases equally:
 
 **The only exception:** the user has already explicitly told the lead to proceed — e.g. "get Zeus's take and apply what makes sense," or "run the builder and commit it." Pre-authorization scoped to that request stands in for the approval; do not re-ask. Absent such an instruction, never act on an agent's output on your own.
 
+### 3. When it answers, stop and talk to the user
+
+An agent's reply ends your turn, it does not continue it. Report what came back — attributed and faithful, not summarized away — say what you make of it, and then wait. Do not start implementing it, do not spawn a second agent for a tie-break, do not pick your plan back up where you left it. An answer the user has not read is not a decision the user has made.
+
+This holds even when the answer agrees with you, and even when acting on it would change nothing on disk: the point of consulting is that the user hears another voice, and they cannot hear it if you have already moved on.
+
 Do / Never, in one line each:
 
 - **Do** consult an agent whenever a second opinion would help — no permission needed.

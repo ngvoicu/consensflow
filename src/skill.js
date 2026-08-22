@@ -113,6 +113,11 @@ question, then decide or ask the user.
 - **Advice is free; acting is gated.** Never apply an agent's suggested
   changes, or keep files it created, without the user's explicit approval —
   unless the user already authorized it in this conversation.
+- **Bring the answer back before anything else.** When an agent replies,
+  stop. Report what it said — attributed and faithful, not summarized away —
+  and add what you make of it. Then wait. Do not start implementing, do not
+  spawn a second agent, do not resume your plan until the user has weighed in.
+  An answer they have not read is not a decision they have made.
 - **Do not retry a slow agent with a different one** unless the command
   itself failed. Slow usually means thinking.
 
