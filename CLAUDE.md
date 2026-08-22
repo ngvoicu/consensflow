@@ -86,10 +86,12 @@ that to wherever it installed the payload.
   it. Per-spawn rather than stored on the roster, because the same agent is a
   reviewer in one call and a researcher in the next.
 
-- **The handoff is the lead's to give.** In a host mode the integration stashes
-  the session and passes it; anywhere else the lead passes `--handoff-file`,
-  because the lead IS the harness holding the conversation. No transcript
-  discovery, no per-harness adapters — that was the v2 engine.
+- **The handoff is the lead's to give — everywhere, the same way.** Nothing
+  stashes a session and nothing attaches one: an agent sees the brief, the
+  task, and whatever came in on `--handoff-file`. Claude Code's hooks and pi's
+  input watcher existed only to stash, and were deleted 2026-08-22 because
+  that was the last behavioural difference between the three modes. Installing
+  or uninstalling still takes back hooks an older version wrote.
 
 - **`cf` on PATH is part of cmux mode**, not an optional extra: the generated
   skill tells four harnesses to run it, so `applyMode('cmux')` installs the
