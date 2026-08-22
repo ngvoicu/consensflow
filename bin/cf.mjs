@@ -15,7 +15,6 @@ import { parseArgs } from 'node:util'
 import { renderImageRun, runImageAgent } from '../hosts/lib/image-run.js'
 import { createPacket } from '../hosts/lib/packets.js'
 import { runAgent } from '../hosts/lib/runners.js'
-import { collectHandoff } from '../hosts/lib/transcript.js'
 import { renderEvent } from '../hosts/lib/transcript-events.js'
 import { CATALOG, catalogEntry } from '../src/catalog.js'
 import { detectHarnesses } from '../src/harnesses.js'
@@ -245,14 +244,13 @@ async function runVerb(rest) {
     return
   }
 
-  // The conversation reaches the agent the same way in every mode: from the
-  // stash when the harness keeps one (the host integrations do), from a file
-  // the lead names otherwise, and never when it says --no-handoff.
-  const handoff = values['no-handoff']
-    ? ''
-    : values['handoff-file'] !== undefined
-      ? readFileSync(values['handoff-file'], 'utf8')
-      : await collectHandoff(process.cwd()).catch(() => '')
+  // The conversation reaches the agent one way, in every mode: because the
+  // lead put it in a file and passed it. Nothing stashes it behind the scenes
+  // any more, so nothing differs between the harnesses.
+  const handoff =
+    values['no-handoff'] || values['handoff-file'] === undefined
+      ? ''
+      : readFileSync(values['handoff-file'], 'utf8')
 
   const cwd = process.cwd()
 

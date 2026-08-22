@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -14,7 +15,7 @@ import {
   saveImagePng,
 } from '../../hosts/lib/image.js'
 import { spawnWithInput } from '../../hosts/lib/runners.js'
-import { loadSession, saveSession, workspaceKey } from '../../hosts/lib/state.js'
+import { saveSession, workspaceKey } from '../../hosts/lib/state.js'
 import {
   collectHandoff,
   parseTranscriptJsonl,
@@ -215,7 +216,7 @@ function hookEnv(dir, extra = {}) {
   return { CONSENSFLOW_HOME: path.join(dir, 'home'), ...extra }
 }
 
-async function runHook(script, payload, env) {
+async function _runHook(script, payload, env) {
   return await spawnWithInput(process.execPath, [path.join(ROOT, 'scripts', script)], {
     input: JSON.stringify(payload),
     env,
@@ -223,7 +224,7 @@ async function runHook(script, payload, env) {
   })
 }
 
-async function addAgent(dir, preset, env = {}) {
+async function _addAgent(dir, preset, env = {}) {
   const result = await spawnWithInput(process.execPath, [CF, 'agents', 'add', preset], {
     cwd: dir,
     env: hookEnv(dir, env),
@@ -234,134 +235,6 @@ async function addAgent(dir, preset, env = {}) {
 
 // A ConsensFlow update ships a new catalog while the roster keeps its old snapshot. The
 // session-start note is where the lead first sees that, so it must say so and name the fix.
-test('session-start hook flags agents left behind by a catalog update', async () => {
-  await withTempDir(async (dir) => {
-    await addAgent(dir, 'zeus')
-    const clean = await runHook(
-      'session-start-hook.mjs',
-      { cwd: dir, session_id: 's-0', transcript_path: '/tmp/tr.jsonl', source: 'startup' },
-      hookEnv(dir),
-    )
-    assert.doesNotMatch(
-      clean.stdout,
-      /behind the current preset catalog/,
-      'a freshly added agent is not flagged',
-    )
-
-    // Rewind @zeus to the model it would have carried under an older catalog.
-    const rosterPath = path.join(dir, 'home', 'agents.json') // hookEnv points CONSENSFLOW_HOME straight at dir/home
-    const roster = JSON.parse(await readFile(rosterPath, 'utf8'))
-    roster.agents = roster.agents.map((p) =>
-      p.id === 'zeus' ? { ...p, model: 'claude-opus-4-8' } : p,
-    )
-    await writeFile(rosterPath, JSON.stringify(roster, null, 2))
-
-    const stale = await runHook(
-      'session-start-hook.mjs',
-      { cwd: dir, session_id: 's-1', transcript_path: '/tmp/tr.jsonl', source: 'startup' },
-      hookEnv(dir),
-    )
-    assert.equal(stale.exitCode, 0)
-    assert.match(stale.stdout, /1 agent is behind the current preset catalog/)
-    assert.match(stale.stdout, /agents sync/)
-  })
-})
-
-test('session-start hook stashes the transcript path and emits a roster context', async () => {
-  await withTempDir(async (dir) => {
-    await addAgent(dir, 'zeus')
-    const result = await runHook(
-      'session-start-hook.mjs',
-      { cwd: dir, session_id: 's-1', transcript_path: '/tmp/tr.jsonl', source: 'startup' },
-      hookEnv(dir),
-    )
-    assert.equal(result.exitCode, 0)
-    assert.match(result.stdout, /ConsensFlow is available/)
-    assert.match(result.stdout, /@zeus \(claude-code claude-opus-5\)/)
-    assert.match(result.stdout, /never apply an agent's advice/)
-    assert.match(result.stdout, /bin\/cf\.mjs/)
-    const oldHome = process.env.CONSENSFLOW_HOME
-    process.env.CONSENSFLOW_HOME = path.join(dir, 'home')
-    try {
-      const session = await loadSession(dir)
-      assert.equal(session.sessionId, 's-1')
-      assert.equal(session.transcriptPath, '/tmp/tr.jsonl')
-    } finally {
-      if (oldHome === undefined) delete process.env.CONSENSFLOW_HOME
-      else process.env.CONSENSFLOW_HOME = oldHome
-    }
-  })
-})
-
-test('user-prompt hook keeps the stash fresh and routes nothing', async () => {
-  await withTempDir(async (dir) => {
-    await addAgent(dir, 'zeus')
-    const transcript = path.join(dir, 'transcript.jsonl')
-    await writeFile(transcript, '', 'utf8')
-
-    const out = await runHook(
-      'user-prompt-hook.mjs',
-      {
-        cwd: dir,
-        session_id: 's-1',
-        transcript_path: transcript,
-        prompt: '@zeus what breaks on rollback?',
-      },
-      hookEnv(dir),
-    )
-
-    // Naming an agent is a message to the lead, which decides whether to spawn
-    // — the same as in pi and in a cmux pane. The hook injects nothing.
-    assert.equal(out.stdout.trim(), '', 'the hook says nothing back')
-    assert.doesNotMatch(out.stdout, /ConsensFlow routing/)
-
-    // What it does do is keep the conversation available to `cf run`.
-    const workspaces = path.join(dir, 'home', 'workspaces')
-    const [key] = await readdir(workspaces)
-    const session = JSON.parse(await readFile(path.join(workspaces, key, 'session.json'), 'utf8'))
-    assert.equal(session.transcriptPath, transcript, 'the stash points at this conversation')
-  })
-})
-test('user-prompt hook stays silent for stray mentions, commands, and unknown names', async () => {
-  await withTempDir(async (dir) => {
-    await addAgent(dir, 'zeus')
-    for (const prompt of [
-      'install @types/node please',
-      '/cf status',
-      'just fix the bug',
-      '@ghost are you there?',
-    ]) {
-      const result = await runHook('user-prompt-hook.mjs', { cwd: dir, prompt }, hookEnv(dir))
-      assert.equal(result.exitCode, 0, prompt)
-      assert.equal(result.stdout.trim(), '', `expected silence for: ${prompt}`)
-    }
-  })
-})
-
-test('hooks bail out silently inside agent subprocesses (CONSENSFLOW_CHILD)', async () => {
-  await withTempDir(async (dir) => {
-    await addAgent(dir, 'zeus')
-    for (const script of ['session-start-hook.mjs', 'user-prompt-hook.mjs']) {
-      const result = await runHook(
-        script,
-        { cwd: dir, session_id: 'child', transcript_path: '/tmp/child.jsonl', prompt: '@zeus hi' },
-        hookEnv(dir, { CONSENSFLOW_CHILD: '1' }),
-      )
-      assert.equal(result.exitCode, 0, script)
-      assert.equal(result.stdout.trim(), '', `${script} must not emit context in a child`)
-    }
-    // And the stash was never written by those child invocations.
-    const oldHome = process.env.CONSENSFLOW_HOME
-    process.env.CONSENSFLOW_HOME = path.join(dir, 'home')
-    try {
-      assert.equal((await loadSession(dir)).sessionId, undefined)
-    } finally {
-      if (oldHome === undefined) delete process.env.CONSENSFLOW_HOME
-      else process.env.CONSENSFLOW_HOME = oldHome
-    }
-  })
-})
-
 // --- CLI end-to-end with fake engine binaries -------------------------------
 // Per project policy, live harness CLIs are never invoked from tests. Each engine gets a PATH shim
 // that dumps its argv/env/stdin to a file and prints engine-shaped output, so the full spawn →
@@ -654,69 +527,6 @@ test('e2e: a run has full permissions, and there is still no knob to turn [STRM-
   })
 })
 
-test('e2e: the handoff from the session stash reaches the packet', async () => {
-  await withTempDir(async (dir) => {
-    const ws = path.join(dir, 'ws')
-    await mkdir(ws, { recursive: true })
-    const fake = await makeFakeEngines(dir)
-    const ctx = { ws, dir, fake }
-    assert.equal((await runCf(['agents', 'add', 'zeus'], ctx)).exitCode, 0)
-
-    // First run: no session stash -> no handoff section, and the output says so.
-    const first = await runCf(['run', '@zeus', 'first', 'question'], ctx)
-    assert.equal(first.exitCode, 0)
-    assert.match(first.stdout, /Handoff: empty/)
-    assert.doesNotMatch((await latestPacket(ws, dir)).packet, /## Handoff — current session/)
-
-    // Stash a transcript like the hooks would, then run again.
-    const transcriptPath = path.join(dir, 'session.jsonl')
-    await writeFile(
-      transcriptPath,
-      [
-        JSON.stringify({
-          type: 'user',
-          message: { role: 'user', content: "let's design the cache" },
-          isSidechain: false,
-        }),
-        JSON.stringify({
-          type: 'assistant',
-          message: {
-            role: 'assistant',
-            content: [{ type: 'text', text: 'I propose write-through' }],
-          },
-          isSidechain: false,
-        }),
-      ].join('\n'),
-      'utf8',
-    )
-    const oldHome = process.env.CONSENSFLOW_HOME
-    process.env.CONSENSFLOW_HOME = path.join(dir, 'home')
-    try {
-      await saveSession(ws, { sessionId: 's-1', transcriptPath })
-    } finally {
-      if (oldHome === undefined) delete process.env.CONSENSFLOW_HOME
-      else process.env.CONSENSFLOW_HOME = oldHome
-    }
-    const second = await runCf(['run', '@zeus', 'second', 'question'], ctx)
-    assert.equal(second.exitCode, 0, second.stderr)
-    // An attached handoff is the happy path — nothing about it appears in the output.
-    assert.doesNotMatch(second.stdout, /Handoff:/)
-    const { packet } = await latestPacket(ws, dir)
-    assert.match(packet, /## Handoff — current session/)
-    assert.match(packet, /User:\nlet's design the cache/)
-    assert.match(packet, /Lead:\nI propose write-through/)
-    // And --no-handoff suppresses it — even with the flag BEFORE the prompt: the parser must
-    // not swallow the prompt as the flag's value.
-    const third = await runCf(['run', '@zeus', '--no-handoff', 'third', 'question'], ctx)
-    assert.equal(third.exitCode, 0, third.stderr)
-    // An explicitly-skipped handoff is also quiet — the user asked for it.
-    assert.doesNotMatch(third.stdout, /Handoff:/)
-    const noHandoff = await latestPacket(ws, dir)
-    assert.doesNotMatch(noHandoff.packet, /## Handoff — current session/)
-    assert.match(noHandoff.packet, /third question/)
-  })
-})
-
 test('e2e: nested runs are refused and unknown agents error cleanly', async () => {
   await withTempDir(async (dir) => {
     const ws = path.join(dir, 'ws')
@@ -947,18 +757,13 @@ test('the consent gate and name-neutrality stay locked into the skill and comman
   assert.match(skill, /ask freely, apply only with a green light/)
   const command = await readFile(path.join(ROOT, 'commands', 'cf.md'), 'utf8')
   assert.match(command, /do not apply, commit, or keep its output/)
-  // The hook used to carry a copy of the gate because it injected instructions.
-  // It routes nothing now, so the gate has one home per surface: the skill the
-  // lead reads, and the command a user types.
-  const promptHook = await readFile(path.join(ROOT, 'scripts', 'user-prompt-hook.mjs'), 'utf8')
-  assert.doesNotMatch(promptHook, /ConsensFlow routing/)
-  assert.match(promptHook, /saveSession/, 'what it does keep doing is stash the conversation')
+  // There are no hooks left to carry a second copy of the gate: the skill the
+  // lead reads and the command a user types are the only two surfaces.
+  assert.equal(existsSync(path.join(ROOT, 'scripts')), false, 'no hook scripts ship')
+  assert.equal(existsSync(path.join(ROOT, 'hooks')), false, 'nothing is wired into settings.json')
 
   // The personal name must not appear in anything the plugin ships.
-  for (const base of [
-    ENGINE,
-    ...['bin', 'scripts', 'skills', 'commands', 'hooks'].map((d) => path.join(ROOT, d)),
-  ]) {
+  for (const base of [ENGINE, ...['bin', 'skills', 'commands'].map((d) => path.join(ROOT, d))]) {
     for (const file of await readdir(base, { recursive: true })) {
       const full = path.join(base, file)
       const content = await readFile(full, 'utf8').catch(() => '')
@@ -967,25 +772,8 @@ test('the consent gate and name-neutrality stay locked into the skill and comman
   }
 })
 
-test('hooks.json wires both hooks to scripts that exist, via the host root', async () => {
-  const hooks = JSON.parse(await readFile(path.join(ROOT, 'hooks', 'hooks.json'), 'utf8'))
-  for (const event of ['SessionStart', 'UserPromptSubmit']) {
-    const matchers = hooks.hooks[event]
-    assert.ok(Array.isArray(matchers) && matchers.length === 1, `${event} registered once`)
-    const command = matchers[0].hooks[0].command
-    assert.match(command, /\$\{CONSENSFLOW_HOST_ROOT\}/)
-    const script = command.match(/\$\{CONSENSFLOW_HOST_ROOT\}\/(\S+?\.mjs)/)?.[1]
-    assert.ok(script, `${event} command references a script`)
-    await readFile(path.join(ROOT, script), 'utf8') // throws if missing
-  }
-})
-
-test('every lib symbol the CLI and hooks import is actually exported (boundary smoke)', async () => {
-  const sources = [
-    path.join(ROOT, 'bin', 'cf.mjs'),
-    path.join(ROOT, 'scripts', 'session-start-hook.mjs'),
-    path.join(ROOT, 'scripts', 'user-prompt-hook.mjs'),
-  ]
+test('every lib symbol the CLI imports is actually exported (boundary smoke)', async () => {
+  const sources = [path.join(ROOT, 'bin', 'cf.mjs')]
   const importRe = /import\s+\{([^}]+)\}\s+from\s+"((?:\.\.\/)+lib\/[^"]+|\.\/hook-io\.mjs)"/g
   let checked = 0
   for (const source of sources) {

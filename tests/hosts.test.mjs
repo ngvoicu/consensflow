@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { after, describe, it } from 'node:test'
-import { hostRuntime, hostStatus, installHost, uninstallHost } from '../src/hosts.js'
+import { hostStatus, installHost, uninstallHost } from '../src/hosts.js'
 
 const VERSION = createRequire(import.meta.url)('../package.json').version
 
@@ -78,7 +78,7 @@ describe('the manager installs the Claude Code side through user config', () => 
     assert.equal(hostStatus(t.env).find((h) => h.id === 'claude').installed, false)
   })
 
-  it('installs the payload, the skill, the command and the hooks', () => {
+  it('installs the payload, the skill and the command — and nothing else', () => {
     const outcome = installHost('claude', t.env, { bundled })
 
     assert.equal(outcome.version, VERSION)
@@ -94,26 +94,42 @@ describe('the manager installs the Claude Code side through user config', () => 
     assert.ok(!skillText.includes('CONSENSFLOW_HOST_ROOT'))
     assert.ok(existsSync(command()))
 
-    const hooks = JSON.parse(readFileSync(settings(), 'utf8')).hooks
-    assert.equal(hooks.SessionStart.length, 1)
-    assert.ok(!JSON.stringify(hooks).includes('CLAUDE_PLUGIN_ROOT'))
+    // And it writes nothing into Claude Code's settings: there are no hooks
+    // any more, so an install is three files and no configuration change.
+    assert.equal(existsSync(settings()), false, 'settings.json is not even created')
   })
 
-  it('leaves the rest of settings.json exactly as it found it', () => {
-    const before = JSON.parse(readFileSync(settings(), 'utf8'))
-    assert.equal(before.model, undefined)
-
-    // A user setting written between installs must survive the next one.
+  it('leaves settings.json byte-identical, and takes back hooks it once wrote', () => {
+    // A machine upgrading from a version that installed hooks: ours go, the
+    // user's stay, and everything else is untouched.
+    const mine = {
+      type: 'command',
+      command: `node "${join(t.env.CONSENSFLOW_HOME, 'hosts', 'claude', 'scripts', 'session-start-hook.mjs')}"`,
+    }
+    const theirs = { type: 'command', command: 'echo hello' }
     writeFileSync(
       settings(),
-      JSON.stringify({ ...before, model: 'opus', voiceEnabled: true }, null, 2),
+      JSON.stringify(
+        {
+          model: 'opus',
+          voiceEnabled: true,
+          hooks: { SessionStart: [{ hooks: [mine] }, { hooks: [theirs] }] },
+        },
+        null,
+        2,
+      ),
     )
-    installHost('claude', t.env, { bundled })
+
+    installHost('claude', t.env, { bundled, force: true })
 
     const after = JSON.parse(readFileSync(settings(), 'utf8'))
-    assert.equal(after.model, 'opus')
+    assert.equal(after.model, 'opus', 'user settings survive')
     assert.equal(after.voiceEnabled, true)
-    assert.equal(after.hooks.SessionStart.length, 1, 'hooks are replaced, never duplicated')
+    assert.deepEqual(
+      after.hooks.SessionStart.flatMap((entry) => entry.hooks),
+      [theirs],
+      'ours is gone, theirs is kept',
+    )
   })
 
   it('says it is installed, and at which version', () => {
@@ -130,10 +146,10 @@ describe('the manager installs the Claude Code side through user config', () => 
     assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts', 'claude')), false)
     const after = JSON.parse(readFileSync(settings(), 'utf8'))
     assert.equal(after.model, 'opus', 'user settings survive')
-    assert.equal(
-      'SessionStart' in (after.hooks ?? {}),
-      false,
-      'an event that existed only for our hook goes with it, not as an empty husk',
+    assert.deepEqual(
+      (after.hooks?.SessionStart ?? []).flatMap((entry) => entry.hooks ?? []),
+      [{ type: 'command', command: 'echo hello' }],
+      'the foreign hook is still there; ConsensFlow left nothing of its own',
     )
     assert.equal(hostStatus(t.env).find((h) => h.id === 'claude').installed, false)
   })
@@ -235,11 +251,7 @@ describe('the payload that ships can actually run once installed', () => {
       // user installs, and its own import strings are the specification.
       installHost('claude', t.env)
       const root = join(t.env.CONSENSFLOW_HOME, 'hosts', 'claude')
-      const entries = [
-        join(root, 'bin', 'cf.mjs'),
-        join(root, 'scripts', 'session-start-hook.mjs'),
-        join(root, 'scripts', 'user-prompt-hook.mjs'),
-      ]
+      const entries = [join(root, 'bin', 'cf.mjs')]
 
       let checked = 0
       for (const entry of entries) {
@@ -260,55 +272,27 @@ describe('the payload that ships can actually run once installed', () => {
   })
 })
 
-describe('a machine without Node still runs the hooks', () => {
+describe('a machine without Node still runs what the payload installs', () => {
   const t = tempEnv()
   after(() => t.cleanup())
 
   it('names the runtime absolutely, never a bare `node`', () => {
     installHost('claude', t.env)
 
-    const settings = JSON.parse(
-      readFileSync(join(t.env.CLAUDE_CONFIG_DIR, 'settings.json'), 'utf8'),
-    )
-    const commands = Object.values(settings.hooks)
-      .flat()
-      .flatMap((entry) => entry.hooks)
-      .map((hook) => hook.command)
-    assert.ok(commands.length >= 2, 'both hooks are wired')
-
-    for (const command of commands) {
-      assert.doesNotMatch(command, /^node\b/, 'a bare `node` assumes a PATH the app does not need')
-      const [, runtime] = command.match(/^"([^"]+)"/) ?? []
-      assert.ok(runtime, `absolute runtime in: ${command}`)
-      assert.ok(existsSync(runtime), 'and it is the runtime doing the installing')
-    }
-
-    // The slash command it installs runs through the same runtime.
+    // No hooks any more, so the place a runtime is still named is the command
+    // file — and it must not gamble on Node being on PATH.
     const commandFile = readFileSync(
       join(t.env.CLAUDE_CONFIG_DIR, 'commands', 'consensflow.md'),
       'utf8',
     )
-    assert.doesNotMatch(commandFile, /^node "/m)
-  })
-
-  it('says so when that runtime walks away', () => {
-    const before = hostRuntime(t.env)
-    assert.ok(before.exists)
-
-    // Whatever provided the runtime is gone — the app moved, say.
-    const settingsPath = join(t.env.CLAUDE_CONFIG_DIR, 'settings.json')
-    const settings = JSON.parse(readFileSync(settingsPath, 'utf8'))
-    for (const entries of Object.values(settings.hooks)) {
-      for (const entry of entries) {
-        for (const hook of entry.hooks) {
-          hook.command = hook.command.replace(/^"[^"]+"/, '"/nowhere/bin/node"')
-        }
-      }
+    assert.doesNotMatch(
+      commandFile,
+      /^node "/m,
+      'a bare `node` assumes a PATH the app does not need',
+    )
+    const [, runtime] = commandFile.match(/"([^"]+)"\s+"[^"]*cf\.mjs"/) ?? []
+    if (runtime !== undefined) {
+      assert.ok(existsSync(runtime), 'the runtime it names is the one doing the installing')
     }
-    writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
-
-    const after = hostRuntime(t.env)
-    assert.equal(after.runtime, '/nowhere/bin/node')
-    assert.equal(after.exists, false, 'doctor has something to report')
   })
 })

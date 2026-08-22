@@ -14,7 +14,6 @@ import {
   getAgent,
   loadCurrent,
   loadAgents,
-  loadSession,
   agentsPath,
   recordLatestRun,
   removeAgent,
@@ -22,7 +21,6 @@ import {
   syncAgentsWithPresets,
   upsertAgent,
 } from "../../lib/state.js";
-import { collectHandoff } from "../../lib/transcript.js";
 import { createId, parseOptions, slugify } from "../../lib/utils.js";
 import { runAgent, spawnWithInput } from "../../lib/runners.js";
 import { renderEvent } from "../../lib/transcript-events.js";
@@ -56,7 +54,6 @@ async function main() {
 async function handleStatus(cwd) {
   const agents = await loadAgents(cwd);
   const current = await loadCurrent(cwd);
-  const session = await loadSession(cwd);
   console.log(
     [
       "# ConsensFlow status",
@@ -64,7 +61,7 @@ async function handleStatus(cwd) {
       `ConsensFlow home: ${configHome()}`,
       `Agents file: ${agentsPath(cwd)}`,
       `Artifact root for this workspace: ${cfRoot(cwd)}`,
-      `Session stash: ${session.transcriptPath ? `transcript tracked (${session.transcriptPath})` : "no transcript tracked yet — handoffs will be empty until the plugin hooks run"}`,
+      "Handoff: whatever you pass with --handoff-file; nothing is stashed or attached behind your back",
       `Agents: ${agents.length}${driftNote(agents)}`,
       `Latest run: ${current.latestRunId ?? "none"}`,
       "",
@@ -224,14 +221,13 @@ async function handleRun(tokens, cwd) {
   // Only an unexpectedly-empty handoff is surfaced in the run output — a silently-missing session
   // stash would otherwise look identical to a full handoff from the agent's answer alone.
   let handoff = "";
-  let handoffSummary = "skipped (--no-handoff)";
-  if (flagBool(parsed.flags, "handoff") ?? true) {
-    handoff = stringFlag(parsed.flags["handoff-file"]) !== undefined
-      ? await fs.readFile(String(parsed.flags["handoff-file"]), "utf8")
-      : await collectHandoff(cwd);
+  let handoffSummary = "not sent — pass --handoff-file to share the conversation";
+  const handoffFile = stringFlag(parsed.flags["handoff-file"]);
+  if ((flagBool(parsed.flags, "handoff") ?? true) && handoffFile !== undefined) {
+    handoff = await fs.readFile(String(handoffFile), "utf8");
     handoffSummary = handoff.trim()
       ? `attached (${Math.max(1, Math.round(Buffer.byteLength(handoff, "utf8") / 1024))} KB)`
-      : "empty — no session transcript stashed for this workspace (are the plugin hooks running?)";
+      : "empty — the file you passed had nothing in it";
   }
 
   const packet = await createPacket({

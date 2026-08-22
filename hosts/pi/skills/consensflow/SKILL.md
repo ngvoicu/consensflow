@@ -5,7 +5,7 @@ description: Use ConsensFlow inside pi to consult one of the user's named AI age
 
 # ConsensFlow
 
-ConsensFlow lets the lead (this pi session) consult one named agent at a time. An agent is a model at a fixed effort, run one-shot by its own harness (claude / codex / opencode / pi) as an isolated subprocess: it receives a handoff of the current session plus your prompt, answers once, and does not persist between calls. It runs with full permissions — exactly like running that harness yourself with every approval already granted: it can read, edit files, run commands and reach the network, and it is not sandboxed to the project directory. Consulting an agent is like phoning an advisor who can also pick up a task. The lead stays the decision-maker, and ConsensFlow never accepts or keeps an agent's work on its own — inspect `git status` / `git diff` after any run before keeping changes.
+ConsensFlow lets the lead (this pi session) consult one named agent at a time. An agent is a model at a fixed effort, run one-shot by its own harness (claude / codex / opencode / pi) as an isolated subprocess: it receives your prompt, whatever you hand it, and nothing else — it answers once and does not persist between calls. It runs with full permissions — exactly like running that harness yourself with every approval already granted: it can read, edit files, run commands and reach the network, and it is not sandboxed to the project directory. Consulting an agent is like phoning an advisor who can also pick up a task. The lead stays the decision-maker, and ConsensFlow never accepts or keeps an agent's work on its own — inspect `git status` / `git diff` after any run before keeping changes.
 
 ## Reach for an advisor on your own
 
@@ -111,13 +111,13 @@ Spawn it exactly as you would in any other harness — the command is the same e
 cf run @diana "review the export path" --brief "You are reviewing this for GDPR: lawful basis, retention."
 ```
 
-The conversation rides along automatically: this extension stashes it after every prompt, the same way Claude Code's hooks do, so `cf run` picks it up without being handed anything. Add `--no-handoff` when the task stands alone or the user says not to share it.
+Nothing rides along automatically. When the agent needs the conversation, write the part that matters to a file and pass `--handoff-file` — the same in every harness.
 
 Inside pi you can also use the **`cf_run_agent` tool**, which takes the same four pieces:
 
 - the agent's name;
 - `brief` — what this spawn is for ("you are reviewing this for GDPR: lawful basis, retention"). Nothing else tells the agent what it is here for; no persona is assigned for it.
-- `includeHandoff` — the session so far, attached by default; set it false when the user says not to share the conversation, or when the task stands alone.
+- the conversation — not attached by anything: hand over what matters, in the prompt or with `--handoff-file`.
 - the prompt — what you want done.
 
 The explicit router stays for driving a run by hand:
@@ -160,9 +160,9 @@ Pi exposes the same ConsensFlow slash commands as Claude Code:
 
 ## Invariants
 
-- **One at a time.** Send to exactly one agent per call. Multiple leading `@mentions` are rejected; never fan out to several agents automatically. If the user names several, ask which one first, or ask one and wait for its answer before asking the next.
+- **One at a time.** Send to exactly one agent per call. Never fan out to several agents automatically. If the user names several, ask which one first, or ask one and wait for its answer before asking the next.
 - **One-shot, no memory.** Each call is fresh. Continuity comes only from the handoff (re-sent each time), which already includes earlier `@agent` replies — so a later agent can build on an earlier one (cross-pollination). For a genuinely *independent* opinion, ask that agent **first**, before others have replied — otherwise its handoff carries the prior answers and colors it.
-- **Always run in the foreground — never in the background.** Run agent calls in the FOREGROUND, NEVER in the background or detached; the live reasoning/tool/answer trail streams automatically (no flag needed) — the only exception is an explicit `--json` for machine output. Every agent run streams its normalized thinking / tool-call / answer events into the Pi UI as it goes (via `cf_run_agent`'s `onUpdate`); this is structural — there is no flag or agent decision that can suppress it.
+- **Always run in the foreground — never in the background.** Run agent calls in the FOREGROUND, NEVER in the background or detached; the live reasoning/tool/answer trail streams automatically (no flag needed) — the only exception is an explicit `--json` for machine output. Every agent run streams its normalized thinking / tool-call / answer events into the Pi UI as it goes; this is structural — there is no flag or agent decision that can suppress it.
 - **The lead is always the decision-maker.** ConsensFlow routes a prompt and returns an answer; it never implements anything on its own. Acting on any answer goes through the gate above.
 - **No automatic git context.** Agents receive only the handoff and the prompt — paste a diff or name the files when you want them assessed or changed.
 - **No hidden workflows.** Do not assume ceremonies like spec review, implementation review, council, grill, or handoff-by-name. The skill routes one prompt to one agent; that is all.

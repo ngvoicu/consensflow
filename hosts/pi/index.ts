@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-harness";
 import { Type } from "typebox";
-import { serializeTranscript } from "../lib/handoff.js";
 import { decodeChatGptAccountId, generateImage, imageFileToDataUrl, IMAGE_TRIGGER_DEFAULT, saveImagePng } from "../lib/image.js";
 import { driftedAgents, formatPresets, getPreset, listPresetIds, agentFromPreset } from "../lib/presets.js";
 import {
@@ -33,19 +32,9 @@ export default async function consensflow(pi: ExtensionAPI) {
     ctx.ui.setStatus(EXT, `CF ${agents.length} agent${agents.length === 1 ? "" : "s"}`);
   });
 
-  // Input is watched, never intercepted. Typing `@zeus …` used to be swallowed
-  // here — the extension ran the agent itself, so pi behaved unlike every other
-  // harness and the lead never saw the request. What this does instead is stash
-  // the conversation the way Claude Code's hooks do, so `cf run` spawns with the
-  // same automatic handoff in pi as it does there. Returning nothing leaves the
-  // line to the lead, which is the point.
-  pi.on("input", async (_event, ctx) => {
-    try {
-      await stashSession(ctx);
-    } catch {
-      // A missing stash costs the handoff, never the turn.
-    }
-  });
+  // Nothing watches input. The extension used to stash the conversation here
+  // so a CLI spawn could attach it; the handoff is the lead's to pass now,
+  // with --handoff-file, which is the same in every harness.
 
   registerCoreCommands(pi);
 
@@ -281,8 +270,12 @@ async function handleAgentPrompt(parsed: AgentPrompt, ctx: any, pi: ExtensionAPI
   if (!agent) throw new Error(`Unknown agent: @${parsed.agent}`);
   if (agent.kind === "image") return await runImageAgent(agent, parsed.prompt, ctx, pi, signal, parsed.images);
   ctx.ui.notify(`Asking @${agent.id}...`, "info");
-  const includeHandoff = parsed.includeHandoff ?? true;
-  const handoff = includeHandoff ? collectHandoff(ctx) : "";
+  // No conversation unless one is handed over. pi could read its own session
+  // in process and used to, which made `/consensflow:cf` behave differently
+  // from `cf run` in the same window — and pi differently from every other
+  // harness. The lead passes what it wants shared, everywhere.
+  const includeHandoff = false;
+  const handoff = "";
   const result = await runNamedAgent({
     cwd: ctx.cwd,
     agentRef: agent,
@@ -357,37 +350,6 @@ async function runImageAgent(agent: any, prompt: string, ctx: any, pi: Extension
     display: true,
     details: { runId: r.runId, runDir: r.runDir, savedPath: r.savedPath, revisedPrompt: r.revisedPrompt, agent, prompt, kind: "image" },
   });
-}
-
-// Pull the current resolved session transcript on-demand from the read-only session manager and
-// serialize it for the agent handoff. On-demand (not cached) so it stays correct across
-// fork / tree navigation / session switch. Degrades to "" if unavailable.
-/**
- * Write the conversation where the CLI can find it.
- *
- * pi keeps its transcript in-process, so a `cf run` spawned from the lead's
- * Bash tool cannot see it. Claude Code's hooks stash a path to the harness's
- * own transcript file; pi has no such file, so this stashes the serialized
- * branch itself and records where it went. Same stash, same reader, same
- * automatic handoff in both.
- */
-async function stashSession(ctx: any) {
-  const serialized = collectHandoff(ctx);
-  if (!serialized) return;
-  await ensureCfDirs(ctx.cwd);
-  const transcriptPath = path.join(cfRoot(ctx.cwd), "session-handoff.md");
-  await fs.writeFile(transcriptPath, serialized, "utf8");
-  await saveSession(ctx.cwd, { transcriptPath, source: "pi" });
-}
-
-function collectHandoff(ctx: any): string {
-  try {
-    const sessionManager = ctx?.sessionManager;
-    if (!sessionManager || typeof sessionManager.getBranch !== "function") return "";
-    return serializeTranscript(sessionManager.getBranch()); // 48 KB default + CONSENSFLOW_HANDOFF_MAX_BYTES env, from handoff.js
-  } catch {
-    return "";
-  }
 }
 
 type AgentPrompt =

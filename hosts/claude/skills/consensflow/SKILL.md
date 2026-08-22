@@ -5,7 +5,7 @@ description: Use ConsensFlow inside Claude Code to consult one of the user's nam
 
 # ConsensFlow
 
-ConsensFlow lets the lead (this Claude Code session) consult one named agent at a time. An agent is a model at a fixed effort, run one-shot by its own harness (claude / codex / opencode / pi) as an isolated subprocess: it receives a handoff of the current session plus your prompt, answers once, and does not persist between calls. It runs with full permissions — exactly like running that harness yourself with every approval already granted: it can read, edit files, run commands and reach the network, and it is not sandboxed to the project directory. Consulting an agent is like phoning an advisor who can also pick up a task. The lead stays the decision-maker, and ConsensFlow never accepts or keeps an agent's work on its own — inspect `git status` / `git diff` after any run before keeping changes.
+ConsensFlow lets the lead (this Claude Code session) consult one named agent at a time. An agent is a model at a fixed effort, run one-shot by its own harness (claude / codex / opencode / pi) as an isolated subprocess: it receives your prompt, whatever you hand it, and nothing else — it answers once and does not persist between calls. It runs with full permissions — exactly like running that harness yourself with every approval already granted: it can read, edit files, run commands and reach the network, and it is not sandboxed to the project directory. Consulting an agent is like phoning an advisor who can also pick up a task. The lead stays the decision-maker, and ConsensFlow never accepts or keeps an agent's work on its own — inspect `git status` / `git diff` after any run before keeping changes.
 
 ## Reach for an advisor on your own
 
@@ -33,7 +33,7 @@ The user will ask in plain language — "spawn diana as a good GDPR expert, give
 
 - **who** → the agent's name (`@diana`);
 - **as a …** → `--brief "You are reviewing this for GDPR: lawful basis, data minimisation, retention."`;
-- **give it / don't give it our history** → the handoff rides along by default; add `--no-handoff` when the user says not to share it, or when the task is self-contained;
+- **give it / don't give it our history** → write the relevant part of the conversation to a file and pass `--handoff-file`; leave it out when the task stands alone;
 - **ask her to …** → the task itself, as the prompt.
 
 The same four pieces work in every harness ConsensFlow supports, so the phrasing the user learns here is the phrasing that works in a cmux pane or in pi.
@@ -49,7 +49,7 @@ cf run @zeus "What's the riskiest part of this design?"
 # Add a focused brief on top of the automatic session handoff
 cf run @zeus "Review the auth flow" --context "Focus on rollback and token expiry"
 
-# Use a prompt file when the hook stashes a user @mention, or when the prompt is large
+# Use a prompt file when the task is long or awkward to quote
 cf run @zeus --prompt-file question.md
 
 # Normalized thinking / tool / answer events stream live automatically; the parsed final answer is printed at the end too
@@ -70,11 +70,11 @@ Important run flags (flags may appear before or after the prompt/ref; `--prompt-
 
 - `--brief "<what this run is for>"` — what you want from THIS spawn: "review this for GDPR: lawful basis, retention", "you are checking the migration for rollback safety". The agent is told nothing about itself otherwise — no persona is assigned for it — so the brief is where the framing goes. It leads the packet, above the task.
 - `--context <note>` — a shorter note alongside the brief, for one run.
-- `--no-handoff` — spawn without the session history. Default is with it: the hooks keep the transcript stashed, so the agent sees the conversation unless you say not to.
+- `--handoff-file <file>` — the conversation, when the agent needs it. Nothing is attached behind your back: write the relevant part to a file and pass it, or leave it out and the agent sees only the task.
 - `--image <path>` — reference image for an `image` agent; repeatable for multiple references. Ignored by text agents.
 - `--json` — print full run metadata instead of just the human answer.
 
-The handoff (a serialized snapshot of this session) is attached automatically from the transcript stash the session hooks maintain. If no transcript was stashed, the run warns `Handoff: empty` — the agent saw none of this session.
+The conversation is yours to hand over: write the part that matters to a file and pass `--handoff-file`. Nothing is stashed or attached automatically — an agent sees the brief, the task, and whatever you gave it.
 
 Artifacts land in the workspace's run dir under `~/.consensflow/workspaces/…` (`packet.md`, `stdout.txt`, `stderr.txt`, `result.json`, `transcript.md`) — never inside the project. `packet.md` is byte-for-byte what the agent received; `transcript.md` is the durable event-trail backstop.
 

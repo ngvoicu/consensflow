@@ -175,6 +175,24 @@ function rewriteDeep(value, rewrite) {
   return value
 }
 
+/**
+ * Takes back the SessionStart / UserPromptSubmit entries ConsensFlow used to
+ * install. Nothing writes them any more; this exists so upgrading removes the
+ * old design rather than leaving it running against deleted scripts.
+ */
+function removeOurHooks(claudeDir) {
+  if (!existsSync(join(claudeDir, 'settings.json'))) return
+  writeSettings(claudeDir, (settings) => {
+    const merged = { ...(settings.hooks ?? {}) }
+    for (const event of Object.keys(merged)) {
+      const theirs = merged[event].filter((entry) => !isOurs(entry))
+      if (theirs.length === 0) delete merged[event]
+      else merged[event] = theirs
+    }
+    return { ...settings, hooks: merged }
+  })
+}
+
 function installClaude(env, options) {
   // Two ConsensFlow installs in one Claude Code means two skills with the
   // same name and, worse, hooks that fire twice per session.
@@ -217,6 +235,7 @@ function installClaude(env, options) {
       // the machine has Node on PATH — and the app exists precisely so that
       // bet is never needed: it carries its own, and that is the one running
       // this install.
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the payload's own placeholder, not a template
       .split('${CONSENSFLOW_NODE}')
       .join(process.execPath)
 
@@ -250,26 +269,17 @@ function installClaude(env, options) {
     written.push(commandPath)
   }
 
-  const hookSource = existsSync(join(target, 'hooks', 'hooks.json'))
-    ? join(target, 'hooks', 'hooks.json')
-    : join(target, 'hooks.json')
-  const hooks = readJson(hookSource, { hooks: {} }).hooks ?? {}
-  writeSettings(claudeDir, (settings) => {
-    const merged = { ...(settings.hooks ?? {}) }
-    for (const [event, entries] of Object.entries(hooks)) {
-      // Ours are replaced, never stacked; everyone else's are left alone.
-      const theirs = (merged[event] ?? []).filter((entry) => !isOurs(entry))
-      merged[event] = [...theirs, ...rewriteDeep(entries, rewrite)]
-    }
-    return { ...settings, hooks: merged }
-  })
+  // No hooks. They existed to stash the session for the handoff, and that
+  // is now the lead's to pass with --handoff-file — the same in every mode.
+  // A machine that has ours from an earlier version gets them taken away
+  // below, so an upgrade cleans up after the old design.
+  removeOurHooks(claudeDir)
 
   const state = hostsState(env)
   state.hosts.claude = {
     version: VERSION,
     payload: target,
     files: written,
-    hookEvents: Object.keys(hooks),
     installedAt: new Date().toISOString(),
   }
   saveHostsState(state, env)
@@ -291,19 +301,7 @@ function uninstallClaude(env) {
   }
   rmSync(record?.payload ?? payloadDir(env), { recursive: true, force: true })
 
-  if (existsSync(join(claudeDir, 'settings.json'))) {
-    writeSettings(claudeDir, (settings) => {
-      const merged = { ...(settings.hooks ?? {}) }
-      for (const event of Object.keys(merged)) {
-        const theirs = merged[event].filter((entry) => !isOurs(entry))
-        // An event that existed only to hold our hook goes with it; one that
-        // still holds someone else's stays, minus ours.
-        if (theirs.length === 0) delete merged[event]
-        else merged[event] = theirs
-      }
-      return { ...settings, hooks: merged }
-    })
-  }
+  removeOurHooks(claudeDir)
 
   delete state.hosts.claude
   saveHostsState(state, env)
@@ -381,13 +379,12 @@ export function uninstallHost(host, env, options = {}) {
 export function hostRuntime(env) {
   const record = hostsState(env).hosts.claude
   if (record === undefined) return null
-  const settings = readJson(join(claudeConfigDir(env), 'settings.json'), {})
-  const commands = Object.values(settings.hooks ?? {})
-    .flat()
-    .flatMap((entry) => entry?.hooks ?? [])
-    .map((hook) => String(hook?.command ?? ''))
-    .filter((command) => command.includes(record.payload))
-  const runtime = commands.map((command) => command.match(/^"([^"]+)"/)?.[1]).find(Boolean)
+  // The `/consensflow` command is the one installed file that still names a
+  // runtime — the hooks that used to are gone. If whatever provided it moved,
+  // the command breaks, and doctor should say so rather than let it fail.
+  const commandFile = join(claudeConfigDir(env), 'commands', 'consensflow.md')
+  if (!existsSync(commandFile)) return null
+  const runtime = readFileSync(commandFile, 'utf8').match(/"([^"]+)"\s+"[^"]*cf\.mjs"/)?.[1]
   if (runtime === undefined) return null
   return { runtime, exists: existsSync(runtime) }
 }
