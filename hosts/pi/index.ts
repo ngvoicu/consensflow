@@ -49,72 +49,14 @@ export default async function consensflow(pi: ExtensionAPI) {
 
   registerCoreCommands(pi);
 
-  pi.registerTool({
-    name: "cf_list_agents",
-    label: "CF Agents",
-    description: "List globally configured ConsensFlow named agents.",
-    promptSnippet: "List named ConsensFlow agents available for one-at-a-time natural-language prompts.",
-    parameters: Type.Object({}),
-    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      const agents = await loadAgents(ctx.cwd);
-      return { content: [{ type: "text", text: formatAgents(agents, ctx.cwd) }], details: { agents, ...storeDetails(ctx.cwd) } };
-    },
-  });
-
-  pi.registerTool({
-    name: "cf_run_agent",
-    label: "CF Ask Agent",
-    description: "Consult one named ConsensFlow agent as an advisor/helper. It receives the current session as a handoff plus your prompt, runs with its configured tools, and returns its answer. Use this freely and on your own initiative for second opinions, questions, implementation help, or design/code critique — you do not need the user's permission to consult. But do NOT apply, merge, commit, adopt, or otherwise act on what it returns — neither its advice nor a write-capable agent's file changes — without first showing the user (a summary plus your recommendation) and getting their approval, unless the user has already told you to proceed.",
-    promptSnippet: "Consult one named ConsensFlow agent as an advisor/helper (asking is free — no user permission needed). Then report its answer to the user and get approval before acting on it: never apply an agent's advice or changes unprompted unless the user already said to proceed.",
-    parameters: Type.Object({
-      agent: Type.String({ description: "Agent name or @mention, e.g. @zeus" }),
-      prompt: Type.String({ description: "Natural-language request for that agent" }),
-      brief: Type.Optional(Type.String({ description: "What this spawn is for, in your words: \"you are reviewing this for GDPR: lawful basis, retention\". It leads the packet, above the task. Nothing else tells the agent what it is here for." })),
-      context: Type.Optional(Type.String({ description: "A shorter note alongside the brief, for this one run." })),
-      includeHandoff: Type.Optional(Type.Boolean({ description: "Attach the current session transcript as context. Defaults to true." })),
-      images: Type.Optional(Type.Array(Type.String(), { description: "Image-agent only (kind=image): file paths to reference images (.png/.jpg/.jpeg/.webp/.gif) for gpt-image-2 to edit/condition on. Ignored by text agents." })),
-    }),
-    async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      const agent = await getAgent(ctx.cwd, params.agent);
-      if (!agent) throw new Error(`Unknown agent: ${params.agent}`);
-      if (agent.kind === "image") {
-        onUpdate?.({ content: [{ type: "text", text: `Generating image with @${agent.id} (gpt-image-2)...` }] });
-        const r = await generateImageArtifact(ctx, agent, params.prompt, signal, params.images);
-        return {
-          content: [
-            { type: "text", text: imageSummary(agent, r) },
-            { type: "image", data: r.base64, mimeType: r.mimeType },
-          ],
-          details: { runId: r.runId, savedPath: r.savedPath, revisedPrompt: r.revisedPrompt, agent: { id: agent.id, kind: agent.kind } },
-        };
-      }
-      onUpdate?.({ content: [{ type: "text", text: `Asking @${agent.id}...` }] });
-      const includeHandoff = params.includeHandoff ?? true;
-      const handoff = includeHandoff ? collectHandoff(ctx) : "";
-      let sawDelta = false;
-      const result = await runNamedAgent({
-        cwd: ctx.cwd,
-        agentRef: agent,
-        kind: "ask",
-        task: params.prompt,
-        handoff,
-        brief: params.brief,
-        extraContext: params.context,
-        signal,
-        // Stream the agent's normalized thinking / tool calls / answer into the Pi UI as it
-        // arrives — the pi analog of cc's always-on streaming (foreground-incremental observability).
-        onEvent: (event: any) => {
-          if (event.kind === "delta") { sawDelta = true; if (event.text) onUpdate?.({ content: [{ type: "text", text: event.text }] }); return; } // pi reasoning/text, flowing like its own UI
-          // Once deltas have streamed, the message_end thinking/text blocks are redundant — skip them.
-          if (sawDelta && (event.kind === "thinking" || event.kind === "text")) return;
-          const line = renderEvent(event);
-          if (line) onUpdate?.({ content: [{ type: "text", text: line }] });
-        },
-      });
-      result.handoffSummary = summarizeHandoff(handoff, includeHandoff);
-      return { content: [{ type: "text", text: renderRunResult(result) }], details: result };
-    },
-  });
+  // No ConsensFlow tools here.
+  //
+  // pi's lead used to have `cf_list_agents` and `cf_run_agent`, which Claude
+  // Code and a cmux pane never had — so the same request took a different
+  // shape depending on where it was made, and the tool's own description was
+  // a third place to keep the rules current. The lead reads the skill and runs
+  // `cf run` now, in every harness. `/consensflow:*` remains for driving a run
+  // by hand.
 
 }
 

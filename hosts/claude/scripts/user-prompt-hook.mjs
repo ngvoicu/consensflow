@@ -1,26 +1,14 @@
 #!/usr/bin/env node
-// UserPromptSubmit hook: keep the session stash fresh, and when the typed prompt addresses
-// exactly one configured agent (`@zeus …`, `ask @zeus …`, `hi @zeus`), stash the prompt
-// body to a file and inject routing instructions for the lead. The CC analog of the pi
-// extension's input interception — except the lead still sees the prompt, so unknown or
-// ambiguous mentions are simply left alone. Must never block the prompt — always exits 0.
-import fs from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { cfRoot, ensureCfDirs, loadAgents, saveSession } from "../../lib/state.js";
-import { parseAgentPrompt, slugify, tokenize } from "../../lib/utils.js";
+// UserPromptSubmit hook: keep the session stash fresh, and nothing else.
+//
+// It used to route as well — a prompt naming one agent was rewritten into
+// instructions for the lead — which made Claude Code behave unlike pi and
+// unlike a cmux pane. All three now do the same thing: watch input, stash the
+// conversation so `cf run` can attach it, and leave the turn to the lead.
+// Must never block the prompt — always exits 0.
+import { ensureCfDirs, saveSession } from "../../lib/state.js";
 import { readStdinText } from "./hook-io.mjs";
 
-const CLI_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "cf.mjs");
-// What the lead should type. The installer replaces the placeholder with `cf`
-// when the launcher is on PATH — the same line every skill teaches — and
-// leaves this payload's own CLI as the fallback when it is not.
-const RAW_CLI = "${CONSENSFLOW_CLI}";
-const CF_CLI = RAW_CLI.startsWith("$") ? `node "${CLI_PATH}"` : RAW_CLI;
-
-function emitContext(text) {
-  console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: text } }));
-}
 
 try {
   // Inside an agent subprocess: never touch the lead session's stash, never route.
@@ -30,34 +18,12 @@ try {
   await ensureCfDirs(cwd);
   await saveSession(cwd, { sessionId: input.session_id, transcriptPath: input.transcript_path });
 
-  const prompt = String(input.prompt ?? "");
-  if (!prompt.trim() || prompt.trimStart().startsWith("/")) process.exit(0);
-  const tokens = tokenize(prompt);
-  if (!tokens.some((token) => token.startsWith("@"))) process.exit(0);
-
-  const agents = await loadAgents(cwd).catch(() => []);
-  const known = new Set(agents.flatMap((p) => [p.id, slugify(p.name)]).filter(Boolean));
-  const parsed = parseAgentPrompt(tokens, known);
-  if (!parsed) process.exit(0);
-  if (parsed.error) {
-    emitContext(`ConsensFlow: ${parsed.error} Tell the user, and ask which agent to consult first — do not fan out to several.`);
-    process.exit(0);
-  }
-  const id = slugify(parsed.agent);
-  if (!known.has(id)) process.exit(0); // stray @token (e.g. @types/node): the lead handles the prompt normally
-
-  const promptFile = path.join(cfRoot(cwd), "pending-prompt.md");
-  await fs.writeFile(promptFile, parsed.prompt, "utf8");
-  emitContext(
-    [
-      `ConsensFlow routing: this prompt addresses the agent @${id}. Consult it now via the Bash tool:`,
-      "",
-      `  ${CF_CLI} run @${id} --prompt-file "${promptFile}"`,
-      "",
-      "Agents can take minutes: always run this in the FOREGROUND — NEVER in the background or detached — with a generous Bash timeout (600000 ms or more). It streams the live thinking/tool/answer trail automatically (no flag needed), so the user sees the reasoning as it arrives; never switch to --json to hide the trail. Then relay the agent's answer to the user faithfully — do not summarize the trail away.",
-      "Do not apply, commit, or keep the agent's advice or file changes without the user's approval, unless the user already authorized it.",
-    ].join("\n"),
-  );
+  // Nothing is routed here. Watching input is for the stash above — the same
+  // thing pi's extension does — so `cf run` spawns with the conversation
+  // already attached. Deciding to consult an agent, and composing the run, is
+  // the lead's job in every harness: it reads the skill and runs the command.
+  // A hook that quietly rewrote the turn made Claude Code the odd one out.
+  process.exit(0);
 } catch {
   // A broken hook must never block the user's prompt.
 }

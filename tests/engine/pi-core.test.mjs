@@ -1032,18 +1032,24 @@ test('parseAgentPrompt: ask/to verb prefixes and the ask-noise boundary', () => 
   assert.equal(parseAgentPrompt(['ask', 'fix', '@types/node', 'please'], known), null)
 })
 
-test('the cf_run_agent consent gate and name-neutrality stay locked in the extension source', async () => {
+test('the consent gate lives in the skill, and the extension registers no tools', async () => {
   const src = await readFile(new URL('../../hosts/pi/index.ts', import.meta.url), 'utf8')
-  // The consent gate must stay in the tool description + promptSnippet (its load-bearing home).
-  assert.match(src, /do NOT apply/)
-  assert.match(src, /without first showing the user/)
-  assert.match(src, /no user permission needed/)
+  const skill = await readFile(
+    new URL('../../hosts/pi/skills/consensflow/SKILL.md', import.meta.url),
+    'utf8',
+  )
+
+  // The gate's home is the skill — the same home it has in Claude Code, now
+  // that pi has no tool description to keep a second copy current in.
+  assert.match(skill, /MUST NOT apply|do NOT apply/i)
+  assert.match(skill, /without first (showing|surfacing)/i)
+  assert.doesNotMatch(src, /registerTool/, 'no private path pi has and the others do not')
+
   // The personal name must not reappear anywhere in the extension.
   assert.doesNotMatch(src, /Gabriel/)
-  // No hidden-workflow commands should be registered (match the command registration form only).
+  // No hidden-workflow commands should be registered.
   assert.doesNotMatch(src, /registerCommand\("(grill|spec-review|council|handoff)"/)
-  // Pi intentionally matches Claude Code's slash surface: only /consensflow:* commands, no
-  // legacy /cf, /agents, or per-agent /<name> command registration.
+  // Only /consensflow:* commands: no legacy /cf, /agents or per-agent commands.
   assert.doesNotMatch(src, /name:\s*"cf"/)
   assert.doesNotMatch(src, /name:\s*"agents"/)
   assert.doesNotMatch(src, /registerAgentCommands/)

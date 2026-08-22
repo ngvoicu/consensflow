@@ -293,39 +293,35 @@ test('session-start hook stashes the transcript path and emits a roster context'
   })
 })
 
-test('user-prompt hook routes a configured @mention to a run instruction with a stashed prompt file', async () => {
+test('user-prompt hook keeps the stash fresh and routes nothing', async () => {
   await withTempDir(async (dir) => {
     await addAgent(dir, 'zeus')
-    const result = await runHook(
+    const transcript = path.join(dir, 'transcript.jsonl')
+    await writeFile(transcript, '', 'utf8')
+
+    const out = await runHook(
       'user-prompt-hook.mjs',
       {
         cwd: dir,
         session_id: 's-1',
-        transcript_path: '/tmp/tr.jsonl',
-        prompt: '@zeus what about the cache?',
+        transcript_path: transcript,
+        prompt: '@zeus what breaks on rollback?',
       },
       hookEnv(dir),
     )
-    assert.equal(result.exitCode, 0)
-    const output = JSON.parse(result.stdout)
-    const context = output.hookSpecificOutput.additionalContext
-    assert.equal(output.hookSpecificOutput.hookEventName, 'UserPromptSubmit')
-    assert.match(context, /addresses the agent @zeus/)
-    assert.match(context, /run @zeus --prompt-file/)
-    assert.match(context, /streams the live.*automatically/i)
-    assert.match(context, /foreground/i)
-    assert.match(context, /never in the background/i) // the tool itself forbids backgrounding
-    assert.match(context, /without the user's approval/)
-    // The stash lives under the config home, keyed by workspace — never inside the project.
-    const promptFile = context.match(/--prompt-file "([^"]+)"/)[1]
-    assert.equal(
-      promptFile,
-      path.join(dir, 'home', 'workspaces', workspaceKey(dir), 'pending-prompt.md'),
-    )
-    assert.equal(await readFile(promptFile, 'utf8'), 'what about the cache?')
+
+    // Naming an agent is a message to the lead, which decides whether to spawn
+    // — the same as in pi and in a cmux pane. The hook injects nothing.
+    assert.equal(out.stdout.trim(), '', 'the hook says nothing back')
+    assert.doesNotMatch(out.stdout, /ConsensFlow routing/)
+
+    // What it does do is keep the conversation available to `cf run`.
+    const workspaces = path.join(dir, 'home', 'workspaces')
+    const [key] = await readdir(workspaces)
+    const session = JSON.parse(await readFile(path.join(workspaces, key, 'session.json'), 'utf8'))
+    assert.equal(session.transcriptPath, transcript, 'the stash points at this conversation')
   })
 })
-
 test('user-prompt hook stays silent for stray mentions, commands, and unknown names', async () => {
   await withTempDir(async (dir) => {
     await addAgent(dir, 'zeus')
@@ -339,22 +335,6 @@ test('user-prompt hook stays silent for stray mentions, commands, and unknown na
       assert.equal(result.exitCode, 0, prompt)
       assert.equal(result.stdout.trim(), '', `expected silence for: ${prompt}`)
     }
-  })
-})
-
-test('user-prompt hook surfaces the one-at-a-time rule for multiple leading mentions', async () => {
-  await withTempDir(async (dir) => {
-    await addAgent(dir, 'zeus')
-    await addAgent(dir, 'gaia')
-    const result = await runHook(
-      'user-prompt-hook.mjs',
-      { cwd: dir, prompt: '@zeus @gaia what do you both think?' },
-      hookEnv(dir),
-    )
-    assert.equal(result.exitCode, 0)
-    const context = JSON.parse(result.stdout).hookSpecificOutput.additionalContext
-    assert.match(context, /one agent at a time/)
-    assert.match(context, /do not fan out/)
   })
 })
 
@@ -960,15 +940,19 @@ test('e2e: @pygmalion without a Codex login errors cleanly before any network ca
 
 // --- Plugin packaging: consent gate, hooks wiring, import boundaries --------
 
-test('the consent gate and name-neutrality stay locked into the skill, command, and hook sources', async () => {
+test('the consent gate and name-neutrality stay locked into the skill and command', async () => {
   const skill = await readFile(path.join(ROOT, 'skills', 'consensflow', 'SKILL.md'), 'utf8')
   assert.match(skill, /MUST NOT apply, merge, commit/)
   assert.match(skill, /NO user permission needed/)
   assert.match(skill, /ask freely, apply only with a green light/)
   const command = await readFile(path.join(ROOT, 'commands', 'cf.md'), 'utf8')
   assert.match(command, /do not apply, commit, or keep its output/)
+  // The hook used to carry a copy of the gate because it injected instructions.
+  // It routes nothing now, so the gate has one home per surface: the skill the
+  // lead reads, and the command a user types.
   const promptHook = await readFile(path.join(ROOT, 'scripts', 'user-prompt-hook.mjs'), 'utf8')
-  assert.match(promptHook, /without the user's approval/)
+  assert.doesNotMatch(promptHook, /ConsensFlow routing/)
+  assert.match(promptHook, /saveSession/, 'what it does keep doing is stash the conversation')
 
   // The personal name must not appear in anything the plugin ships.
   for (const base of [

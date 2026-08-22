@@ -172,7 +172,11 @@ One user-facing slash command wraps that CLI: `/consensflow <args>` — it passe
 
 ## How the user asks
 
-When the user's prompt addresses one configured agent — `@zeus What's the riskiest part of this design?` — the prompt hook detects it, stashes the prompt body, and injects the exact `run` command for you to execute. Run it, then relay the answer. The `/consensflow` slash command is the explicit form (`/consensflow @name <prompt>`, `/consensflow doctor`, …). A stray `@token` that is not an agent (like `@types/node`) is ignored — handle the prompt normally.
+The request arrives in words, and it is yours to act on — nothing routes it for you. "Ask zeus what breaks on rollback", "@zeus what's the riskiest part of this design?", "spawn diana as a GDPR reviewer and give her our conversation": all of them mean compose one `cf run` and report what comes back.
+
+A name you do not recognise is not a spawn — a stray `@token` like `@types/node` is ordinary text. If the user names an agent that is not on the roster, say so and offer to add it rather than substituting a different one.
+
+The `/consensflow` slash command is the explicit form (`/consensflow @name <prompt>`, `/consensflow doctor`, …) for driving a run by hand.
 
 ## Invariants
 
