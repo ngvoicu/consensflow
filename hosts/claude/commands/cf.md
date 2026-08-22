@@ -6,7 +6,7 @@ argument-hint: "status | doctor | agents <…> | @name <prompt>"
 Run the ConsensFlow CLI with the user's arguments, via the Bash tool, and relay its output:
 
 ```bash
-node "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" $ARGUMENTS
+"${CONSENSFLOW_NODE}" "${CONSENSFLOW_HOST_ROOT}/bin/cf.mjs" $ARGUMENTS
 ```
 
 Compose the command carefully: keep flags and single words as-is, but shell-quote any argument containing spaces or shell metacharacters. For a multi-line or quote-heavy prompt, write it to a file first and pass `--prompt-file <path>` instead of inlining it. For agent runs, always run the call in the FOREGROUND, NEVER in the background; the live reasoning/tool/answer trail streams automatically (no flag needed) — the only exception is an explicit user request for `--json` (machine-readable output). The CLI still prints the parsed final answer at the end.

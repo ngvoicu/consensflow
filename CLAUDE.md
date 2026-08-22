@@ -101,6 +101,13 @@ that to wherever it installed the payload.
   Code's hook still routes @mentions, but by injecting the command for the lead
   to run — which is the behaviour pi moved toward.
 
+- **Nothing the app installs assumes Node on PATH.** The hooks and the
+  `/consensflow` command name their runtime absolutely — `${CONSENSFLOW_NODE}`,
+  rewritten at install to the runtime doing the installing, which from the app
+  is its own bundled Node. The cost is that moving or deleting whatever
+  provided it breaks the wiring, so `cf doctor` reports the runtime and says
+  MISSING when it is gone.
+
 - **Modules never read `process.env`** — the environment is an explicit
   argument everywhere. That is the whole test-isolation story
   (`tests/helpers.mjs` builds throwaway homes).

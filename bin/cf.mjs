@@ -19,7 +19,7 @@ import { collectHandoff } from '../hosts/lib/transcript.js'
 import { renderEvent } from '../hosts/lib/transcript-events.js'
 import { CATALOG, catalogEntry } from '../src/catalog.js'
 import { detectHarnesses } from '../src/harnesses.js'
-import { HOSTS, hostStatus, installHost, uninstallHost } from '../src/hosts.js'
+import { HOSTS, hostRuntime, hostStatus, installHost, uninstallHost } from '../src/hosts.js'
 import { installSkill, skillsStatus, uninstallSkills } from '../src/install.js'
 import {
   applyMode,
@@ -630,6 +630,17 @@ function doctor() {
   out(
     `skills:       ${rows.length} owned files${drifted > 0 ? `, ${drifted} drifted/missing` : ''}`,
   )
+
+  // The hooks name their runtime absolutely so a machine without Node still
+  // works. If whatever provided it has moved, every prompt would fail quietly.
+  const wiring = hostRuntime(env)
+  if (wiring !== null) {
+    out(
+      wiring.exists
+        ? `runtime:      ${wiring.runtime}`
+        : `runtime:      ${wiring.runtime} — MISSING. The hooks cannot run; reinstall from the app to point them at its runtime.`,
+    )
+  }
 }
 
 async function main() {

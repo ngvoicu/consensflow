@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { after, describe, it } from 'node:test'
-import { hostStatus, installHost, uninstallHost } from '../src/hosts.js'
+import { hostRuntime, hostStatus, installHost, uninstallHost } from '../src/hosts.js'
 
 const VERSION = createRequire(import.meta.url)('../package.json').version
 
@@ -257,5 +257,58 @@ describe('the payload that ships can actually run once installed', () => {
     } finally {
       t.cleanup()
     }
+  })
+})
+
+describe('a machine without Node still runs the hooks', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+
+  it('names the runtime absolutely, never a bare `node`', () => {
+    installHost('claude', t.env)
+
+    const settings = JSON.parse(
+      readFileSync(join(t.env.CLAUDE_CONFIG_DIR, 'settings.json'), 'utf8'),
+    )
+    const commands = Object.values(settings.hooks)
+      .flat()
+      .flatMap((entry) => entry.hooks)
+      .map((hook) => hook.command)
+    assert.ok(commands.length >= 2, 'both hooks are wired')
+
+    for (const command of commands) {
+      assert.doesNotMatch(command, /^node\b/, 'a bare `node` assumes a PATH the app does not need')
+      const [, runtime] = command.match(/^"([^"]+)"/) ?? []
+      assert.ok(runtime, `absolute runtime in: ${command}`)
+      assert.ok(existsSync(runtime), 'and it is the runtime doing the installing')
+    }
+
+    // The slash command it installs runs through the same runtime.
+    const commandFile = readFileSync(
+      join(t.env.CLAUDE_CONFIG_DIR, 'commands', 'consensflow.md'),
+      'utf8',
+    )
+    assert.doesNotMatch(commandFile, /^node "/m)
+  })
+
+  it('says so when that runtime walks away', () => {
+    const before = hostRuntime(t.env)
+    assert.ok(before.exists)
+
+    // Whatever provided the runtime is gone — the app moved, say.
+    const settingsPath = join(t.env.CLAUDE_CONFIG_DIR, 'settings.json')
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf8'))
+    for (const entries of Object.values(settings.hooks)) {
+      for (const entry of entries) {
+        for (const hook of entry.hooks) {
+          hook.command = hook.command.replace(/^"[^"]+"/, '"/nowhere/bin/node"')
+        }
+      }
+    }
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
+
+    const after = hostRuntime(t.env)
+    assert.equal(after.runtime, '/nowhere/bin/node')
+    assert.equal(after.exists, false, 'doctor has something to report')
   })
 })

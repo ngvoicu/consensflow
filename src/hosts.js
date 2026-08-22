@@ -136,7 +136,9 @@ function presence(id, env) {
 /** Every file of an installed payload, so a placeholder cannot hide in one. */
 /** The spelling of the CLI this machine should be told to run. */
 function cliCommand(env, target) {
-  return terminalCommandStatus(env).onPath ? 'cf' : `node "${join(target, 'bin', 'cf.mjs')}"`
+  return terminalCommandStatus(env).onPath
+    ? 'cf'
+    : `"${process.execPath}" "${join(target, 'bin', 'cf.mjs')}"`
 }
 
 function payloadFiles(root) {
@@ -194,6 +196,12 @@ function installClaude(env, options) {
       // biome-ignore lint/suspicious/noTemplateCurlyInString: the payload's own placeholder, not a template
       .split('${CONSENSFLOW_CLI}')
       .join(cliCommand(env, target))
+      // The runtime, named absolutely. A bare `node` in a hook is a bet that
+      // the machine has Node on PATH — and the app exists precisely so that
+      // bet is never needed: it carries its own, and that is the one running
+      // this install.
+      .split('${CONSENSFLOW_NODE}')
+      .join(process.execPath)
 
   // The payload is copied verbatim, so its own files still carry the
   // placeholders. Rewrite them where they landed: a script that names the CLI
@@ -340,6 +348,28 @@ export function uninstallHost(host, env, options = {}) {
  * not remove it, but saying "not installed" about a working integration
  * would be a lie.
  */
+/**
+ * The runtime an installed host payload was wired to.
+ *
+ * Hooks name it absolutely, so a machine with no Node still works — but the
+ * flip side is that moving or deleting whatever provided it (the app, usually)
+ * leaves the hooks pointing at nothing. Reporting that is cheaper than letting
+ * every prompt fail quietly.
+ */
+export function hostRuntime(env) {
+  const record = hostsState(env).hosts.claude
+  if (record === undefined) return null
+  const settings = readJson(join(claudeConfigDir(env), 'settings.json'), {})
+  const commands = Object.values(settings.hooks ?? {})
+    .flat()
+    .flatMap((entry) => entry?.hooks ?? [])
+    .map((hook) => String(hook?.command ?? ''))
+    .filter((command) => command.includes(record.payload))
+  const runtime = commands.map((command) => command.match(/^"([^"]+)"/)?.[1]).find(Boolean)
+  if (runtime === undefined) return null
+  return { runtime, exists: existsSync(runtime) }
+}
+
 export function hostStatus(env) {
   const state = hostsState(env)
   return HOSTS.map((id) => {
