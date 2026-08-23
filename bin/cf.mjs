@@ -302,6 +302,7 @@ async function runVerb(rest) {
       'no-thread': { type: 'boolean', default: false },
       new: { type: 'boolean', default: false },
       session: { type: 'string' },
+      attach: { type: 'boolean', default: false },
     },
   })
 
@@ -355,42 +356,6 @@ async function runVerb(rest) {
     return
   }
 
-  const packet = await createPacket({
-    cwd,
-    agent: row,
-    kind: 'ask',
-    task,
-    brief: values.brief,
-    extraContext: values.context,
-    handoff,
-  })
-
-  // Streaming is the point: the thinking has to stay visible while it works.
-  // What was streamed is remembered, so the answer is not printed twice when
-  // the harness already streamed it — some engines only reveal the answer in
-  // the terminal summary, and those still need the block below.
-  let inDelta = false
-  let sawDelta = false
-  let streamed = ''
-  const onEvent = values.json
-    ? undefined
-    : (event) => {
-        if (event.kind === 'delta') {
-          process.stdout.write(event.text)
-          streamed += event.text
-          inDelta = true
-          sawDelta = true
-          return
-        }
-        if (sawDelta && (event.kind === 'thinking' || event.kind === 'text')) return
-        const line = renderEvent(event)
-        if (line) {
-          process.stdout.write(`${inDelta ? '\n' : ''}${line}\n`)
-          streamed += `${line}\n`
-          inDelta = false
-        }
-      }
-
   // Threading: on by default in cmux mode, off in a host mode, and either
   // way overridable. `--session` and `--new` are themselves a request to
   // thread, so naming one is enough.
@@ -441,6 +406,47 @@ async function runVerb(rest) {
   const started = record === undefined
   if (wantsThread && started) out(`conversation: ${sessionName}`)
 
+  const packet = await createPacket({
+    cwd,
+    agent: row,
+    kind: 'ask',
+    task,
+    brief: values.brief,
+    extraContext: values.context,
+    handoff,
+    // A follow-up in a live conversation needs no scene-setting.
+    continuing: record?.sessionId !== undefined && record?.sessionId !== null,
+    // Threading is what makes a question worth asking: the reply comes back to
+    // the same agent rather than to a stranger.
+    conversational: wantsThread,
+  })
+
+  // Streaming is the point: the thinking has to stay visible while it works.
+  // What was streamed is remembered, so the answer is not printed twice when
+  // the harness already streamed it — some engines only reveal the answer in
+  // the terminal summary, and those still need the block below.
+  let inDelta = false
+  let sawDelta = false
+  let streamed = ''
+  const onEvent = values.json
+    ? undefined
+    : (event) => {
+        if (event.kind === 'delta') {
+          process.stdout.write(event.text)
+          streamed += event.text
+          inDelta = true
+          sawDelta = true
+          return
+        }
+        if (sawDelta && (event.kind === 'thinking' || event.kind === 'text')) return
+        const line = renderEvent(event)
+        if (line) {
+          process.stdout.write(`${inDelta ? '\n' : ''}${line}\n`)
+          streamed += `${line}\n`
+          inDelta = false
+        }
+      }
+
   let result = await runAgent({
     cwd,
     agent: row,
@@ -485,6 +491,15 @@ async function runVerb(rest) {
     })
   }
   if (inDelta) process.stdout.write('\n')
+
+  // `--attach` leaves the pane as a live agent window: the lead still gets the
+  // parsed answer above, and whoever is sitting there can carry on typing in
+  // the harness's own interface. Recorded first, so `cf last` works either way.
+  let handOverTo = null
+  if (values.attach && sessionName !== undefined) {
+    const fresh = (await loadThreads(cwd))[sessionName]
+    handOverTo = interactiveResume(row, fresh?.sessionId)
+  }
   if (values.json) {
     out(JSON.stringify(result, null, 2))
     return
@@ -501,12 +516,14 @@ async function runVerb(rest) {
   if (streamed.includes(answer)) {
     out('')
     out(`— @${row.id}`)
+    if (handOverTo !== null) await handOver(sessionName, row.id, handOverTo)
     return
   }
   out('')
   out(`# @${row.id}`)
   out('')
   out(answer)
+  if (handOverTo !== null) await handOver(sessionName, row.id, handOverTo)
 }
 
 function modeVerb() {
@@ -640,7 +657,14 @@ async function chatVerb(rest) {
       continue
     }
 
-    const packet = await createPacket({ cwd: cwdOf(), agent: row, task, kind: 'ask' })
+    const packet = await createPacket({
+      cwd: cwdOf(),
+      agent: row,
+      task,
+      kind: 'ask',
+      continuing: record?.sessionId !== undefined && record?.sessionId !== null,
+      conversational: true,
+    })
     const result = await runAgent({
       cwd: cwdOf(),
       agent: row,
@@ -682,13 +706,21 @@ async function attachVerb(rest) {
   const asked = String(positionals[0] ?? '')
   const threads = await loadThreads(cwdOf())
   const names = Object.keys(threads)
-  const name = asked.startsWith('@')
-    ? names
-        .filter((key) => threads[key].agent === asked.slice(1))
-        .sort((a, b) =>
-          String(threads[b].lastRunAt ?? '').localeCompare(String(threads[a].lastRunAt ?? '')),
-        )[0]
-    : asked
+  const newest = () =>
+    names.sort((a, b) =>
+      String(threads[b].lastRunAt ?? '').localeCompare(String(threads[a].lastRunAt ?? '')),
+    )[0]
+  // Bare `cf attach` means the obvious one: the conversation you were last in.
+  const name =
+    asked.length === 0
+      ? newest()
+      : asked.startsWith('@')
+        ? names
+            .filter((key) => threads[key].agent === asked.slice(1))
+            .sort((a, b) =>
+              String(threads[b].lastRunAt ?? '').localeCompare(String(threads[a].lastRunAt ?? '')),
+            )[0]
+        : asked
   const record = name === undefined ? undefined : threads[name]
   if (record === undefined) {
     fail(
@@ -716,7 +748,12 @@ async function attachVerb(rest) {
     return
   }
 
-  out(`${name} · @${record.agent} — handing this terminal to ${invocation.command}`)
+  await handOver(name, record.agent, invocation)
+}
+
+/** Replace this terminal with the harness's window and exit with its code. */
+async function handOver(name, agent, invocation) {
+  out(`${name} · @${agent} — handing this terminal to ${invocation.command}`)
   const child = spawn(invocation.command, invocation.args, { cwd: cwdOf(), stdio: 'inherit' })
   const code = await new Promise((resolve) => child.on('close', resolve))
   process.exitCode = code ?? 0

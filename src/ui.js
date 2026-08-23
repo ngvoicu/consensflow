@@ -122,7 +122,6 @@ function integrations(env) {
 /** Everything `cf doctor` and `cf skills status` would tell you, as data. */
 function systemState(env) {
   const files = skillsStatus(env)
-  const cmux = files.find((file) => file.source.startsWith('cmux@'))
   const mode = currentMode(env)
   return {
     version: VERSION,
@@ -442,6 +441,12 @@ const PAGE = (token) => `<!DOCTYPE html>
   .eyebrow::after { content: ""; flex: 1; height: 1px; background: var(--line); }
   /* The section head announces; the tool heads inside it only sort. */
   .eyebrow--section { color: var(--foam); font-size: 12px; margin-top: 46px; }
+  .cmds { margin: 14px 0 0; }
+  .cmds dt { margin-top: 14px; }
+  .cmds dt code { color: var(--seafoam); font-size: 13px; }
+  .cmds dd { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+  .cmds dd code { color: var(--seafoam); }
+  .cmds dd strong { color: var(--foam); }
   .eyebrow--tool { margin: 22px 0 4px; }
   .eyebrow--tool::after { display: none; }
 
@@ -561,6 +566,32 @@ const PAGE = (token) => `<!DOCTYPE html>
     <button id="reset" class="danger" title="Removes your agents, every run artifact (packets, transcripts, generated images), and every file ConsensFlow installed — including skill files you edited. The ConsensFlow.app bundle stays. This cannot be undone.">Reset everything</button>
   </div>
   <p id="skills-note" class="note"></p>
+
+  <p class="eyebrow eyebrow--section">Talking to an agent</p>
+  <p class="lede">Your coding agent runs these for you — you just say "ask hyperion…".
+  They are here so you can drive it yourself when you want to.</p>
+  <dl class="cmds">
+    <dt><code>cf run @name "&lt;task&gt;"</code></dt>
+    <dd>One consult. In cmux mode it continues that agent's current conversation,
+        so a follow-up remembers the last one.</dd>
+    <dt><code>cf run @name "&lt;task&gt;" --new</code></dt>
+    <dd>Start a fresh conversation instead, and print its name.</dd>
+    <dt><code>cf sessions</code></dt>
+    <dd>The conversations alive in this folder — name, agent, how many turns.</dd>
+    <dt><code>cf last &lt;name&gt;</code></dt>
+    <dd>The last answer in one, and where its full transcript is.</dd>
+    <dt><code>cf chat @name</code></dt>
+    <dd><strong>Type instead of command.</strong> One line is one turn of the same
+        conversation. Every turn is recorded, so your coding agent can still read
+        what was said with <code>cf last</code>.</dd>
+    <dt><code>cf attach &lt;name&gt;</code></dt>
+    <dd><strong>Take it over.</strong> Replaces the terminal with the agent's own
+        window — codex's, claude's — on that same conversation, whole history in
+        it. Richer, but your coding agent is <em>blind</em> to whatever you do
+        there until you come back: those turns are not recorded, only the
+        agent's own memory keeps them. Use <code>cf chat</code> when you want it
+        to keep up.</dd>
+  </dl>
 
   <p class="eyebrow eyebrow--section">Define your own</p>
   <form id="add">

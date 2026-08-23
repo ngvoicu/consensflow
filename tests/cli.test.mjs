@@ -930,3 +930,61 @@ fi
     assert.match(out.stdout + out.stderr, /already an agent run/)
   })
 })
+
+describe('a consult can leave the pane open for you to continue in', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+
+  function stubCodex() {
+    mkdirSync(t.env.PATH, { recursive: true })
+    const log = join(t.root, 'then-attach.log')
+    const path = join(t.env.PATH, 'codex')
+    writeFileSync(
+      path,
+      `#!/bin/sh
+echo "$@" >> "${log}"
+if [ "$1" = "exec" ]; then
+  echo '{"type":"thread.started","thread_id":"thread-open"}'
+  echo '{"type":"item.completed","item":{"type":"agent_message","text":"the consult answer"}}'
+fi
+`,
+    )
+    chmodSync(path, 0o755)
+    return log
+  }
+
+  it('answers the lead first, then hands the terminal over', async () => {
+    stubCli(t, 'claude')
+    const log = stubCodex()
+    await cf(['agent', 'add', 'hyperion'], t.env)
+    await cf(['use', 'cmux'], t.env)
+
+    const out = await cf(['run', '@hyperion', 'a question', '--attach'], t.env)
+
+    assert.equal(out.code, 0, out.stderr)
+    // The lead still gets a real, parsed answer — not a screen to read.
+    assert.match(out.stdout, /the consult answer/)
+    const argv = readFileSync(log, 'utf8')
+    assert.match(argv, /^exec /m, 'the consult ran one-shot')
+    assert.match(argv, /^resume thread-open/m, 'then the interactive window opened')
+  })
+
+  it('records the turn before handing over, so cf last works after', async () => {
+    const out = await cf(['sessions', '--json'], t.env)
+    const [name] = Object.keys(JSON.parse(out.stdout))
+
+    const last = await cf(['last', name], t.env)
+
+    assert.equal(last.code, 0, last.stderr)
+    assert.match(last.stdout, /the consult answer/)
+  })
+
+  it('is a no-op when there is nothing to attach to', async () => {
+    // A one-shot with threading off has no session, so --attach has no window
+    // to open. It must not fail the consult over it.
+    const out = await cf(['run', '@hyperion', 'quick one', '--no-thread', '--attach'], t.env)
+
+    assert.equal(out.code, 0, out.stderr)
+    assert.match(out.stdout, /the consult answer/)
+  })
+})
