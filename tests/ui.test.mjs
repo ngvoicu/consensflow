@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, before, describe, it } from 'node:test'
+import { Script } from 'node:vm'
 import { listAgents } from '../src/roster.js'
 import { startUiServer } from '../src/ui.js'
 import { chooseCmuxMode, tempEnv } from './helpers.mjs'
@@ -115,6 +116,36 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     // interpolates and the browser hits a syntax error before fetching data.
     assert.ok(html.includes(`const TOKEN = "${server.token}"`))
     assert.ok(!html.includes('${JSON.stringify'))
+  })
+
+  it('serves a page whose script is valid JavaScript', async () => {
+    // The page script is built inside a template literal, so nothing here ever
+    // parsed it as code — a stray backslash in one string shipped a window
+    // where every JS-rendered section (roster, catalog, mode cards) was blank
+    // while the static markup around them looked fine. Compile it, do not run it.
+    const html = await (await fetch(`${server.url}/?token=${server.token}`)).text()
+    const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1])
+
+    assert.ok(scripts.length > 0, 'the page ships at least one script')
+    for (const [index, source] of scripts.entries()) {
+      if (source.trim().length === 0) continue
+      assert.doesNotThrow(() => new Script(source), `script #${index} must parse`)
+    }
+  })
+
+  it('never asks the host for a dialog it does not implement', async () => {
+    // The app is a WKWebView with no dialog panels wired on the Rust side, so
+    // window.confirm returns false without showing anything — every
+    // confirm-gated button was silently dead there while working in a browser.
+    const html = await (await fetch(`${server.url}/?token=${server.token}`)).text()
+    const script = html.match(/<script\b[^>]*>([\s\S]*?)<\/script>/)[1]
+
+    for (const call of ['confirm(', 'alert(', 'prompt(']) {
+      assert.ok(!script.includes(call), `the page must not call ${call}`)
+    }
+    // Deliberate still, just in-page: arm on the first click, act on the second.
+    assert.match(script, /Click again to turn off/)
+    assert.match(script, /Click again to destroy/)
   })
 
   it('serves a page that can do the whole job, not half of it', async () => {
@@ -244,7 +275,15 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     assert.match(byId.cmux.summary, /every coding harness/i)
     for (const integration of system.integrations) {
       assert.doesNotMatch(integration.summary, /conversation/i, 'no promise nothing keeps')
+      // Every card says something about THIS machine — which harnesses the
+      // mode would reach, or that it would reach none. "not the active mode"
+      // next to a Use-this button tells the reader nothing they cannot see.
+      assert.ok(Array.isArray(integration.reach), 'each mode reports its reach')
+      assert.doesNotMatch(integration.detail, /not the active mode/)
     }
+    const claude = byId.claude
+    assert.deepEqual(claude.reach, ['claude'], 'a host mode reaches exactly its harness')
+    assert.ok(byId.cmux.reach.length >= claude.reach.length, 'cmux reaches at least as many')
   })
 
   it('counts a host integration as installed, not just skill files', async () => {
@@ -259,7 +298,13 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     assert.equal(res.status, 200)
     const body = await res.json()
 
-    assert.ok(body.report.some((r) => r.action === 'installed' || r.action === 'updated'))
+    // Installed, updated, or already exactly right — all three are success.
+    // An install that changes nothing reports `unchanged`, not a silent pass.
+    assert.ok(body.report.length > 0, 'the install reported on every target')
+    assert.ok(
+      body.report.every((r) => ['installed', 'updated', 'unchanged'].includes(r.action)),
+      'nothing was refused',
+    )
     assert.ok(
       existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')),
       'the generated skill is on disk',
@@ -442,10 +487,13 @@ describe('the page can reset the machine, and says what that destroys', () => {
     const page = await (await api('/')).text()
 
     assert.match(page, /id="reset"/)
-    // The confirm has to name what only this button destroys, or it reads as
-    // a louder "off" and someone loses a roster they typed by hand.
+    // It has to name what only this button destroys, or it reads as a louder
+    // "off" and someone loses a roster they typed by hand. The host cannot be
+    // asked for a dialog here, so the warning lives on the button itself and
+    // the arming label counts the cost before the second click.
     assert.match(page, /cannot be undone/i)
     assert.match(page, /run artifact/i)
+    assert.match(page, /Click again to destroy/)
   })
 
   it('refuses without a deliberate confirmation', async () => {

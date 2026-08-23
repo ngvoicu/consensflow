@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { detectHarnesses } from '../src/harnesses.js'
-import { installSkill, skillsStatus, uninstallSkills } from '../src/install.js'
-import { retireSkillFromNativeHosts, skillTargets } from '../src/sync.js'
+import { installSkill, skillsStatus, skillsSummary, uninstallSkills } from '../src/install.js'
+import { addAgent } from '../src/roster.js'
+import { retireSkillFromNativeHosts, skillGaps, skillTargets } from '../src/sync.js'
 import { chooseCmuxMode, tempEnv } from './helpers.mjs'
 
 function stubCli(env, name) {
@@ -231,5 +232,150 @@ describe('install writes owned files with a hash manifest; drift is sacred', () 
     // The skill's own directory must vanish with its files; the skills root stays.
     assert.equal(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'nested')), false)
     assert.equal(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills')), true)
+  })
+})
+
+describe('a harness in scope with no skill of ours is named, not left silent', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+
+  it('reports the harness whose install was refused', () => {
+    stubCli(t.env, 'claude')
+    stubCli(t.env, 'codex')
+    chooseCmuxMode(t)
+    addAgent({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }, t.env)
+
+    // Someone else's file at the path we would write: installSkill refuses it
+    // and records nothing — correct, but it means codex silently consults
+    // nothing while the install report scrolls past looking healthy.
+    const theirs = join(t.env.CODEX_HOME, 'skills', 'consensflow', 'SKILL.md')
+    mkdirSync(dirname(theirs), { recursive: true })
+    writeFileSync(theirs, 'a skill someone else put here\n')
+
+    installSkill(
+      { relPath: 'consensflow/SKILL.md', content: 'ours\n', source: 'consensflow' },
+      t.env,
+      { targets: skillTargets(t.env) },
+    )
+
+    assert.deepEqual(skillGaps(t.env), ['codex'], 'the refused harness is named')
+  })
+
+  it('names nobody once every harness in scope carries it', () => {
+    installSkill(
+      { relPath: 'consensflow/SKILL.md', content: 'ours\n', source: 'consensflow' },
+      t.env,
+      { targets: skillTargets(t.env), force: true },
+    )
+
+    assert.deepEqual(skillGaps(t.env), [])
+  })
+
+  it('names nobody when there is no roster to generate from', () => {
+    const fresh = tempEnv()
+    try {
+      stubCli(fresh.env, 'claude')
+      chooseCmuxMode(fresh)
+      assert.deepEqual(skillGaps(fresh.env), [], 'no agents, nothing owed')
+    } finally {
+      fresh.cleanup()
+    }
+  })
+})
+
+describe('an install that changes nothing says so, and writes nothing', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+  const skill = {
+    relPath: 'consensflow/SKILL.md',
+    content: 'the same bytes\n',
+    source: 'consensflow',
+  }
+
+  it('installs the first time', () => {
+    stubCli(t.env, 'claude')
+    const report = installSkill(skill, t.env, { targets: detectHarnesses(t.env) })
+
+    assert.deepEqual(
+      report.map((r) => r.action),
+      ['installed'],
+    )
+  })
+
+  it('reports unchanged, not updated, when the content is identical', () => {
+    const report = installSkill(skill, t.env, { targets: detectHarnesses(t.env) })
+
+    assert.deepEqual(
+      report.map((r) => r.action),
+      ['unchanged'],
+    )
+  })
+
+  it('does not rewrite the file it left alone', () => {
+    const path = join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')
+    const before = statSync(path).mtimeMs
+
+    installSkill(skill, t.env, { targets: detectHarnesses(t.env) })
+
+    assert.equal(statSync(path).mtimeMs, before, 'an identical install touches nothing')
+  })
+
+  it('still reports an update when the content really moved', () => {
+    const report = installSkill({ ...skill, content: 'different bytes now\n' }, t.env, {
+      targets: detectHarnesses(t.env),
+    })
+
+    assert.deepEqual(
+      report.map((r) => r.action),
+      ['updated'],
+    )
+    assert.equal(
+      readFileSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md'), 'utf8'),
+      'different bytes now\n',
+    )
+  })
+})
+
+describe('the count answers the question a reader actually asks', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+
+  it('separates skills from files, and ours from cmux', () => {
+    stubCli(t.env, 'claude')
+    stubCli(t.env, 'codex')
+    installSkill(
+      { relPath: 'consensflow/SKILL.md', content: 'ours\n', source: 'consensflow' },
+      t.env,
+      { targets: detectHarnesses(t.env) },
+    )
+    // A skill is a directory: this one is three files, like cmux-browser is
+    // eleven. Counting files alone is what made 312 read as 312 skills.
+    for (const rel of ['cmux-core/SKILL.md', 'cmux-core/reference.md', 'cmux-core/agents/x.yaml']) {
+      installSkill({ relPath: rel, content: rel, source: 'cmux@abc123' }, t.env, {
+        targets: detectHarnesses(t.env),
+      })
+    }
+
+    const s = skillsSummary(t.env)
+
+    assert.equal(s.files, 8, '4 files per harness, two harnesses')
+    assert.equal(s.ours, 2, 'one generated skill each')
+    assert.equal(s.cmux, 6)
+    assert.equal(s.cmuxCommit, 'abc123')
+    assert.equal(s.harnesses, 2)
+    assert.equal(s.perHarness, 2, 'consensflow + cmux-core, not four')
+  })
+
+  it('reports zeroes on a machine with nothing installed', () => {
+    const fresh = tempEnv()
+    try {
+      const s = skillsSummary(fresh.env)
+      assert.equal(s.files, 0)
+      assert.equal(s.skills, 0)
+      assert.equal(s.cmuxCommit, null)
+      assert.equal(s.perHarness, 0, 'no division by zero')
+    } finally {
+      fresh.cleanup()
+    }
   })
 })

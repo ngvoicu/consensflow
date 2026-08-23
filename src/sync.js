@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { detectHarnesses } from './harnesses.js'
 import { installSkill, uninstallSkills } from './install.js'
 import { loadManifest, saveManifest, sha256 } from './manifest.js'
-import { scopeTargets } from './mode.js'
+import { currentMode, scopeTargets } from './mode.js'
 import { HARNESSES, listAgents, rosterPath } from './roster.js'
 import { generateSkill } from './skill.js'
 
@@ -53,6 +54,29 @@ export function retireSkillFromNativeHosts(env) {
   }))
 }
 
+/**
+ * Harnesses the mode puts in scope that are carrying no skill of ours.
+ *
+ * `installSkill` refuses a path it does not own and records nothing — correct,
+ * because the file is someone else's. But the refusal is one row among
+ * hundreds in an install report, so a harness can end up silently with no
+ * skill while everything around it reports success. That is a positive check
+ * of who SHOULD have it against who DOES, so it catches the gap however it
+ * arose: a refusal, a hand-deleted file, an install that ran with a narrower
+ * PATH than the one you have now.
+ */
+export function skillGaps(env) {
+  const owned = new Set(
+    Object.entries(loadManifest(env).files)
+      .filter(([, recorded]) => recorded.source === 'consensflow')
+      .map(([path]) => path),
+  )
+  if (listAgents(env).length === 0) return []
+  return skillTargets(env)
+    .filter((harness) => !owned.has(join(harness.skillsDir, 'consensflow', 'SKILL.md')))
+    .map((harness) => harness.id)
+}
+
 export function refreshInstalledSkill(env) {
   const agents = listAgents(env)
   if (!agents.some((p) => HARNESSES.includes(p.harness))) return
@@ -61,7 +85,7 @@ export function refreshInstalledSkill(env) {
   installSkill(
     {
       relPath: 'consensflow/SKILL.md',
-      content: generateSkill(agents),
+      content: generateSkill(agents, { mode: currentMode(env) }),
       source: 'consensflow',
     },
     env,

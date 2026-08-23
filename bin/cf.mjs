@@ -19,7 +19,7 @@ import { renderEvent } from '../hosts/lib/transcript-events.js'
 import { CATALOG, catalogEntry } from '../src/catalog.js'
 import { detectHarnesses } from '../src/harnesses.js'
 import { staleClaudeHooks } from '../src/host-payloads.js'
-import { installSkill, skillsStatus, uninstallSkills } from '../src/install.js'
+import { installSkill, skillsStatus, skillsSummary, uninstallSkills } from '../src/install.js'
 import {
   applyMode,
   currentMode,
@@ -46,6 +46,7 @@ import {
   healSkillIfStale,
   refreshInstalledSkill as refreshSkill,
   retireSkillFromNativeHosts,
+  skillGaps,
   skillTargets,
 } from '../src/sync.js'
 import { terminalRuntime } from '../src/terminal.js'
@@ -565,7 +566,7 @@ function skillsVerb(rest) {
         installSkill(
           {
             relPath: 'consensflow/SKILL.md',
-            content: generateSkill(agents),
+            content: generateSkill(agents, { mode: currentMode(env) }),
             source: 'consensflow',
           },
           env,
@@ -629,7 +630,7 @@ function setup(rest) {
       installSkill(
         {
           relPath: 'consensflow/SKILL.md',
-          content: generateSkill(agents),
+          content: generateSkill(agents, { mode: currentMode(env) }),
           source: 'consensflow',
         },
         env,
@@ -647,14 +648,25 @@ function doctor() {
   out(`consensflow ${PKG.version}`)
   out(`home:         ${configRoot(env)}`)
   out(
-    `harnesses:       ${harnesses.length > 0 ? harnesses.map((a) => `${a.id}${a.native ? ' (has its own consensflow)' : ''}`).join(', ') : 'none on PATH'}`,
+    `harnesses:    ${harnesses.length > 0 ? harnesses.map((a) => `${a.id}${a.native ? ' (has its own consensflow)' : ''}`).join(', ') : 'none on PATH'}`,
   )
-  out(`agents: ${listAgents(env).length}`)
-  const rows = skillsStatus(env)
-  const drifted = rows.filter((r) => r.state !== 'ok').length
-  out(
-    `skills:       ${rows.length} owned files${drifted > 0 ? `, ${drifted} drifted/missing` : ''}`,
-  )
+  out(`agents:       ${listAgents(env).length}`)
+  // Files, not skills — a skill is a directory, and cmux-browser alone is
+  // eleven files. Say both, and say whose they are.
+  const skills = skillsSummary(env)
+  const parts = [`${skills.files} files`]
+  if (skills.files > 0) {
+    parts.push(
+      `${skills.ours} ours` +
+        (skills.cmux > 0 ? `, ${skills.cmux} from cmux@${skills.cmuxCommit}` : ''),
+    )
+    parts.push(
+      `${skills.perHarness} skill${skills.perHarness === 1 ? '' : 's'} in each of ${skills.harnesses} harness${skills.harnesses === 1 ? '' : 'es'}`,
+    )
+  }
+  const bad = skills.drifted + skills.missing
+  if (bad > 0) parts.push(`${bad} drifted/missing`)
+  out(`skills:       ${parts.join(' · ')}`)
 
   // The install records the runtime that performed it — from the app, its own
   // bundled Node. If that has moved, the wiring it left behind stops working,
@@ -665,6 +677,15 @@ function doctor() {
       wiring.exists
         ? `runtime:      ${wiring.runtime}`
         : `runtime:      ${wiring.runtime} — MISSING. Reinstall from the app to point the wiring at its runtime.`,
+    )
+  }
+
+  // A harness in scope with no skill of ours consults nothing, and every other
+  // line here would still look healthy. Name it.
+  const gaps = skillGaps(env)
+  if (gaps.length > 0) {
+    out(
+      `missing:      ${gaps.join(', ')} ${gaps.length === 1 ? 'is' : 'are'} in scope but carrying no skill — run \`cf skills install\``,
     )
   }
 

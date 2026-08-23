@@ -105,3 +105,48 @@ describe('the skill teaches one verb, with the flags that make a spawn', () => {
     assert.match(md, /You are the one holding it/)
   })
 })
+
+describe('cmux mode spawns into a pane; the host modes are untouched', () => {
+  const roster = [
+    { name: 'athena', harness: 'pi', model: 'openrouter/qwen/qwen3.8-27b', effort: 'max' },
+  ]
+
+  it('gives each agent its own reused pane, in cmux mode only', () => {
+    const cmux = generateSkill(roster, { mode: 'cmux' })
+
+    assert.match(cmux, /One pane per agent/)
+    assert.match(cmux, /reused for every consult/)
+    assert.match(cmux, /your cmux skills/i, 'the lead drives the pane, not us')
+    // The command itself is unchanged — ConsensFlow still never touches a pane.
+    assert.match(cmux, /cf run @<name> "<task>"/)
+  })
+
+  it('never lets a reused pane read as a conversation', () => {
+    const cmux = generateSkill(roster, { mode: 'cmux' })
+
+    // Every run is a fresh process: claude --no-session-persistence, codex
+    // --ephemeral, pi --no-session. A pane that collects answers must not be
+    // mistaken for an agent that remembers them, or the lead will stop
+    // carrying the context that is the only reason a follow-up makes sense.
+    assert.match(cmux, /a window, not a memory/i)
+    assert.match(cmux, /never heard of the last one/)
+    assert.match(cmux, /--handoff-file/)
+  })
+
+  it('says nothing about panes in claude or pi mode', () => {
+    for (const mode of ['claude', 'pi']) {
+      const skill = generateSkill(roster, { mode })
+      assert.doesNotMatch(skill, /pane/i, `${mode} mode must not mention panes`)
+    }
+  })
+
+  it('says nothing about panes when no mode is given', () => {
+    assert.doesNotMatch(generateSkill(roster), /pane/i)
+  })
+
+  it('still names the roster in every mode', () => {
+    for (const mode of ['claude', 'pi', 'cmux']) {
+      assert.match(generateSkill(roster, { mode }), /named AI agents — athena/)
+    }
+  })
+})

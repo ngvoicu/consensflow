@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import { detectHarnesses } from './harnesses.js'
+import { detectHarnesses, knownHarnesses } from './harnesses.js'
 import { fileState, loadManifest, saveManifest, sha256 } from './manifest.js'
 
 /**
@@ -35,9 +35,29 @@ export function installSkill({ relPath, content, source }, env, options = {}) {
       }
     }
 
+    // Already exactly this, byte for byte? Then say so rather than claiming an
+    // update. Reporting "312 updated" when nothing moved teaches the reader to
+    // ignore the number, which is the one thing it exists to be read for — and
+    // it meant every click rewrote 312 identical files.
+    const next = sha256(content)
+    if (
+      existed &&
+      owned !== undefined &&
+      owned.sha256 === next &&
+      fileState(path, owned) === 'ok'
+    ) {
+      // The bytes are already right, so nothing is written — but the record
+      // still moves: a cmux file identical across two commits must be recorded
+      // under the NEW one, or `skills status` reports a version we no longer
+      // carry.
+      manifest.files[path] = { sha256: next, source }
+      report.push({ harness: harness.id, path, action: 'unchanged' })
+      continue
+    }
+
     mkdirSync(dirname(path), { recursive: true })
     writeFileSync(path, content)
-    manifest.files[path] = { sha256: sha256(content), source }
+    manifest.files[path] = { sha256: next, source }
     report.push({
       harness: harness.id,
       path,
@@ -47,6 +67,48 @@ export function installSkill({ relPath, content, source }, env, options = {}) {
 
   saveManifest(manifest, env)
   return report
+}
+
+/**
+ * What is installed, counted the way a reader asks about it.
+ *
+ * The manifest counts FILES, because that is what ownership is tracked at — a
+ * skill is a directory, and cmux-browser alone is eleven files. Reporting the
+ * file count alone invited the obvious question ("312 skills?"), so this
+ * reports both, and splits ours from the ones we install on cmux's behalf.
+ */
+export function skillsSummary(env) {
+  const rows = skillsStatus(env)
+  const dirs = knownHarnesses(env)
+  const skills = new Set()
+  let ours = 0
+  let cmux = 0
+  let cmuxCommit = null
+
+  for (const row of rows) {
+    if (row.source === 'consensflow') ours += 1
+    else {
+      cmux += 1
+      cmuxCommit = row.source
+    }
+    const dir = dirs.find((harness) => row.path.startsWith(`${harness.skillsDir}/`))
+    if (dir === undefined) continue
+    const name = row.path.slice(dir.skillsDir.length + 1).split('/')[0]
+    skills.add(`${dir.id}/${name}`)
+  }
+
+  const harnesses = new Set([...skills].map((entry) => entry.split('/')[0]))
+  return {
+    files: rows.length,
+    ours,
+    cmux,
+    cmuxCommit: cmuxCommit === null ? null : cmuxCommit.slice('cmux@'.length),
+    skills: skills.size,
+    harnesses: harnesses.size,
+    perHarness: harnesses.size === 0 ? 0 : Math.round(skills.size / harnesses.size),
+    drifted: rows.filter((row) => row.state === 'drifted').length,
+    missing: rows.filter((row) => row.state === 'missing').length,
+  }
 }
 
 /** One row per manifest-owned file: where it is and whether it is intact. */

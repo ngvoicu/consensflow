@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { installCmuxSkills } from './cmux-skills.js'
-import { detectHarnesses } from './harnesses.js'
+import { detectHarnesses, knownHarnesses } from './harnesses.js'
 import { retireHostPayloads } from './host-payloads.js'
 import { installSkill, uninstallSkills } from './install.js'
 import { configRoot, listAgents } from './roster.js'
@@ -133,8 +133,14 @@ export function scopeTargets(env, options = {}) {
 }
 
 function syncGeneratedSkill(env, options = {}) {
-  const targets = scopeTargets(env, { mode: options.mode ?? currentMode(env) })
-  const keep = targets.map((harness) => harness.skillsDir)
+  const mode = options.mode ?? currentMode(env)
+  const targets = scopeTargets(env, { mode })
+  // What this mode covers, whether or not the CLI resolved on this run. Only a
+  // change of MODE should take a skill back — not a PATH that happened to be
+  // narrower this time, which is what made opencode flap in and out.
+  const keep = knownHarnesses(env)
+    .filter((harness) => mode === 'cmux' || harness.id === mode)
+    .map((harness) => harness.skillsDir)
 
   const report = uninstallSkills(env, {
     filter: (path, recorded) =>
@@ -149,7 +155,11 @@ function syncGeneratedSkill(env, options = {}) {
   return [
     ...report,
     ...installSkill(
-      { relPath: 'consensflow/SKILL.md', content: generateSkill(agents), source: 'consensflow' },
+      {
+        relPath: 'consensflow/SKILL.md',
+        content: generateSkill(agents, { mode }),
+        source: 'consensflow',
+      },
       env,
       { targets, force: options.force },
     ),

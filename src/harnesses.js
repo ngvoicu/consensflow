@@ -22,29 +22,56 @@ const NATIVE = {
   pi: (env) => join(home(env), '.pi', 'harness', 'git', 'github.com', 'ngvoicu', 'consensflow-pi'),
 }
 
+/**
+ * Where these CLIs install themselves, beyond whatever PATH we were handed.
+ *
+ * PATH alone is not a reliable answer to "is this harness on the machine". A
+ * .app from Finder inherits almost none, and the login shell we ask instead is
+ * NON-interactive — `zsh -lc` reads .zshenv/.zprofile/.zlogin but never
+ * .zshrc, which is where per-tool bin directories usually get added. So the
+ * app saw claude, codex and pi but not opencode, decided opencode was out of
+ * scope, and took its skill back on every mode apply — while a terminal put it
+ * straight back. Detection has to be the same answer wherever it runs.
+ */
+const HOMED = (parts) => (env) => join(home(env), ...parts)
+
 const HARNESSES = [
   {
     id: 'claude',
     command: 'claude',
+    locations: [HOMED(['.local', 'bin']), HOMED(['.claude', 'local'])],
     skillsDir: (env) => join(env.CLAUDE_CONFIG_DIR ?? join(home(env), '.claude'), 'skills'),
   },
   {
     id: 'codex',
     command: 'codex',
+    locations: [HOMED(['.codex', 'bin']), HOMED(['.local', 'bin'])],
     skillsDir: (env) => join(env.CODEX_HOME ?? join(home(env), '.codex'), 'skills'),
   },
   {
     id: 'opencode',
     command: 'opencode',
+    locations: [HOMED(['.opencode', 'bin']), HOMED(['.local', 'bin'])],
     skillsDir: (env) =>
       join(env.XDG_CONFIG_HOME ?? join(home(env), '.config'), 'opencode', 'skills'),
   },
   {
     id: 'pi',
     command: 'pi',
+    locations: [HOMED(['.pi', 'bin']), HOMED(['.local', 'bin'])],
     skillsDir: (env) => join(home(env), '.pi', 'harness', 'skills'),
   },
 ]
+
+/**
+ * Per-user bin directories any of them might land in.
+ *
+ * Deliberately all HOME-relative. System-wide places like /opt/homebrew/bin
+ * and /usr/local/bin are already on every login PATH, so adding them here
+ * would buy nothing — and would break the rule that a test with a throwaway
+ * HOME sees only the harnesses it stubbed, by finding the real machine's.
+ */
+const COMMON = [HOMED(['.bun', 'bin']), HOMED(['.npm-global', 'bin']), HOMED(['.volta', 'bin'])]
 
 function home(env) {
   // Windows sets USERPROFILE, not HOME; homedir() knows that, but an explicit
@@ -85,8 +112,38 @@ function resolvesOnPath(command, env) {
   return false
 }
 
+/** PATH first, then the places these CLIs actually install themselves. */
+function isInstalled(harness, env) {
+  if (resolvesOnPath(harness.command, env)) return true
+  for (const dir of [...(harness.locations ?? []), ...COMMON]) {
+    for (const name of candidateNames(harness.command, env)) {
+      const candidate = join(dir(env), name)
+      try {
+        if (!statSync(candidate).isFile()) continue
+        if (process.platform !== 'win32') accessSync(candidate, constants.X_OK)
+        return true
+      } catch {
+        // Not here either; keep looking.
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * Every harness we know of and where its skills live — installed or not.
+ *
+ * Scope decisions may narrow to what is detected, but REMOVAL must not: a
+ * harness that simply did not resolve on this run has not stopped existing,
+ * and taking its skill away on that basis is how the same skill flapped in
+ * and out on every mode apply.
+ */
+export function knownHarnesses(env) {
+  return HARNESSES.map((harness) => ({ id: harness.id, skillsDir: harness.skillsDir(env) }))
+}
+
 export function detectHarnesses(env) {
-  return HARNESSES.filter((harness) => resolvesOnPath(harness.command, env)).map((harness) => ({
+  return HARNESSES.filter((harness) => isInstalled(harness, env)).map((harness) => ({
     id: harness.id,
     command: harness.command,
     skillsDir: harness.skillsDir(env),

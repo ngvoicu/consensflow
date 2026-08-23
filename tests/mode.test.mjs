@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import {
@@ -177,6 +185,51 @@ describe('the machine runs exactly one ConsensFlow path', () => {
       addAgent({ name: 'gaia', harness: 'codex', model: 'gpt-5.6-terra' }, fresh.env)
       refreshInstalledSkill(fresh.env)
       assert.match(readFileSync(generated(fresh.env.CLAUDE_CONFIG_DIR), 'utf8'), /gaia/)
+    } finally {
+      fresh.cleanup()
+    }
+  })
+
+  it('keeps a skill when the harness CLI simply did not resolve this run', () => {
+    // The app asks a NON-interactive login shell for PATH, and zsh -lc never
+    // reads .zshrc — where per-tool bin dirs usually live. So the app saw a
+    // narrower set than the terminal, decided a harness was out of scope, and
+    // took its skill back on every mode apply while a terminal put it straight
+    // back. Only a change of MODE may remove; a narrower PATH may not.
+    const fresh = tempEnv()
+    try {
+      stubCli(fresh, 'claude')
+      stubCli(fresh, 'codex')
+      addAgent({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }, fresh.env)
+      applyMode('cmux', fresh.env, { bundled })
+      assert.ok(existsSync(generated(fresh.env.CODEX_HOME)), 'codex has it')
+
+      // Same mode, same machine — but codex is invisible on this run.
+      rmSync(join(fresh.env.PATH, 'codex'), { force: true })
+      applyMode('cmux', fresh.env, { bundled })
+
+      assert.ok(
+        existsSync(generated(fresh.env.CODEX_HOME)),
+        'a harness that did not resolve keeps what it has',
+      )
+    } finally {
+      fresh.cleanup()
+    }
+  })
+
+  it('still takes the skill back when the MODE stops covering a harness', () => {
+    const fresh = tempEnv()
+    try {
+      stubCli(fresh, 'claude')
+      stubCli(fresh, 'codex')
+      addAgent({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }, fresh.env)
+      applyMode('cmux', fresh.env, { bundled })
+      assert.ok(existsSync(generated(fresh.env.CODEX_HOME)))
+
+      applyMode('claude', fresh.env, { bundled })
+
+      assert.equal(existsSync(generated(fresh.env.CODEX_HOME)), false, 'scope really narrowed')
+      assert.ok(existsSync(generated(fresh.env.CLAUDE_CONFIG_DIR)), 'and claude still has it')
     } finally {
       fresh.cleanup()
     }

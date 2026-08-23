@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CATALOG, EFFORTS } from './catalog.js'
 import { detectHarnesses } from './harnesses.js'
-import { installSkill, skillsStatus, uninstallSkills } from './install.js'
+import { installSkill, skillsStatus, skillsSummary, uninstallSkills } from './install.js'
 import {
   applyMode,
   currentMode,
@@ -30,7 +30,12 @@ import {
   syncAgents,
 } from './roster.js'
 import { agentCommand, generateSkill } from './skill.js'
-import { refreshInstalledSkill, retireSkillFromNativeHosts, skillTargets } from './sync.js'
+import {
+  refreshInstalledSkill,
+  retireSkillFromNativeHosts,
+  skillGaps,
+  skillTargets,
+} from './sync.js'
 import {
   installTerminalCommand,
   removeTerminalCommand,
@@ -84,20 +89,34 @@ function integrations(env) {
   const mode = currentMode(env)
   const carried = skillsStatus(env).filter((file) => file.source === 'consensflow').length
 
-  return MODES.map((id) => ({
-    id,
-    title: INTEGRATIONS[id].title,
-    summary: INTEGRATIONS[id].summary,
-    active: mode === id,
-    files: mode === id ? carried : 0,
-    present: mode === id && carried > 0,
-    detail:
-      mode !== id
-        ? 'not the active mode'
-        : carried > 0
+  const detected = detectHarnesses(env)
+
+  return MODES.map((id) => {
+    // Who this mode would reach on THIS machine. A card offering `pi` on a
+    // machine with no pi is worth saying out loud, not leaving to be discovered
+    // after the switch.
+    const reach = id === 'cmux' ? detected : detected.filter((harness) => harness.id === id)
+    const active = mode === id
+
+    return {
+      id,
+      title: INTEGRATIONS[id].title,
+      summary: INTEGRATIONS[id].summary,
+      active,
+      files: active ? carried : 0,
+      present: active && carried > 0,
+      reach: reach.map((harness) => harness.id),
+      detail: active
+        ? carried > 0
           ? `${carried} harness${carried === 1 ? '' : 'es'} carry the skill`
-          : 'no agents yet — the first one installs it',
-  }))
+          : 'no agents yet — the first one installs it'
+        : reach.length === 0
+          ? id === 'cmux'
+            ? 'no coding harness found on PATH'
+            : `${id} is not on PATH`
+          : 'available',
+    }
+  })
 }
 
 /** Everything `cf doctor` and `cf skills status` would tell you, as data. */
@@ -128,12 +147,10 @@ function systemState(env) {
     // What a reset would destroy, so the page's dialog and `cf reset`'s
     // refusal quote the same two numbers.
     reset: resetPreview(env),
-    skills: {
-      owned: files.length,
-      drifted: files.filter((file) => file.state === 'drifted').length,
-      missing: files.filter((file) => file.state === 'missing').length,
-      cmuxCommit: cmux === undefined ? null : cmux.source.slice('cmux@'.length),
-    },
+    // In scope but carrying no skill — a silent refusal looks exactly like health.
+    gaps: skillGaps(env),
+    // Files, not skills: a skill is a directory. Report both, and whose.
+    skills: { owned: files.length, ...skillsSummary(env) },
   }
 }
 
@@ -151,7 +168,7 @@ function installFromUi(body, env) {
       ...installSkill(
         {
           relPath: 'consensflow/SKILL.md',
-          content: generateSkill(agents),
+          content: generateSkill(agents, { mode: currentMode(env) }),
           source: 'consensflow',
         },
         env,
@@ -461,6 +478,7 @@ const PAGE = (token) => `<!DOCTYPE html>
   }
   button:hover { border-color: var(--seafoam); color: var(--accent-text); }
   button.danger:hover { border-color: var(--buoy); color: var(--buoy); }
+  button[data-armed="true"] { border-color: var(--buoy); color: var(--buoy); font-weight: 600; }
   button.primary { background: var(--seafoam); border-color: var(--seafoam); color: #06171C; font-weight: 600; }
   button.primary:hover { filter: brightness(1.08); color: #06171C; }
   :focus-visible { outline: 2px solid var(--seafoam); outline-offset: 2px; }
@@ -540,7 +558,7 @@ const PAGE = (token) => `<!DOCTYPE html>
     <button id="update">Update skills</button>
     <button id="terminal"></button>
     <button id="off" class="danger">Turn ConsensFlow off</button>
-    <button id="reset" class="danger">Reset everything</button>
+    <button id="reset" class="danger" title="Removes your agents, every run artifact (packets, transcripts, generated images), and every file ConsensFlow installed — including skill files you edited. The ConsensFlow.app bundle stays. This cannot be undone.">Reset everything</button>
   </div>
   <p id="skills-note" class="note"></p>
 
@@ -808,14 +826,16 @@ function renderSystem(system) {
   const active = system.integrations.find((i) => i.active);
   const parts = [];
   if (active && active.files > 0) {
-    parts.push(active.id === 'cmux'
-      ? active.files + ' harnesses carry the skill'
-      : active.title + ': ' + active.files + ' files wired + payload');
+    parts.push(active.title + ': ' + active.detail);
   }
-  if (system.skills.owned > 0) parts.push(system.skills.owned + ' skill files');
-  if (system.skills.cmuxCommit) parts.push('cmux@' + system.skills.cmuxCommit);
-  if (system.skills.drifted) parts.push(system.skills.drifted + ' edited by you');
-  if (system.skills.missing) parts.push(system.skills.missing + ' missing');
+  const sk = system.skills;
+  if (sk.files > 0) {
+    parts.push(sk.perHarness + ' skills in each of ' + sk.harnesses + ' harnesses');
+    parts.push(sk.files + ' files: ' + sk.ours + ' ours'
+      + (sk.cmux > 0 ? ', ' + sk.cmux + ' from cmux@' + sk.cmuxCommit : ''));
+  }
+  if (sk.drifted) parts.push(sk.drifted + ' edited by you');
+  if (sk.missing) parts.push(sk.missing + ' missing');
   const skills = parts.length > 0 ? parts.join(' · ') : 'nothing yet';
 
   const runtime = system.runtime === null
@@ -826,6 +846,7 @@ function renderSystem(system) {
 
   const rows = [['Harnesses', hosts], ['Installed', skills]];
   if (runtime) rows.push(['Runtime', runtime]);
+  if (system.gaps.length > 0) rows.push(['Missing', system.gaps.join(', ') + ' — in scope but carrying no skill']);
   rows.push(['Home', system.home]);
 
   for (const [label, value] of rows) {
@@ -851,13 +872,31 @@ async function post(path, body, note) {
     if (row && row.action) counts[row.action] = (counts[row.action] ?? 0) + 1;
   }
   const summary = Object.entries(counts).map(([action, n]) => n + ' ' + action).join(' · ');
+  // The report is a list of sentences from some endpoints and a list of change
+  // ROWS from others. Joining rows printed [object Object] on every skills
+  // update; count those instead, and answer whatever shape did come back.
+  const sentences = Array.isArray(data.report) && data.report.every((r) => typeof r === 'string')
+    ? data.report
+    : null;
   if (Array.isArray(data.applied)) {
     el2.textContent = data.applied.length === 0
       ? 'already up to date'
       : data.applied.map((a) => a.name + ': ' + a.changes
           .map((c) => c.field + ' → ' + (c.to ?? '-')).join(', ')).join(' · ');
+  } else if (sentences !== null && sentences.length > 0) {
+    el2.textContent = sentences.join(' · ');
+  } else if (summary.length > 0) {
+    // All it did was confirm every file is already right — say that, do not
+    // make the reader parse a count to discover nothing happened.
+    const only = Object.keys(counts);
+    el2.textContent = only.length === 1 && only[0] === 'unchanged'
+      ? 'already up to date — ' + counts.unchanged + ' files checked'
+      : summary;
+  } else if (Array.isArray(data.removed)) {
+    const n = data.removed.length;
+    el2.textContent = n === 0 ? 'nothing to remove' : 'removed ' + n + ' file' + (n === 1 ? '' : 's');
   } else {
-    el2.textContent = data.report ? data.report.join(' · ') : (summary.length > 0 ? summary : 'nothing to do');
+    el2.textContent = 'nothing to do';
   }
   load();
 }
@@ -869,25 +908,49 @@ document.querySelector('#catalog-filter').addEventListener('input', () => {
 
 document.querySelector('#update').onclick = () =>
   post('/api/skills/install', {}, 'Updating…');
-document.querySelector('#off').onclick = () => {
-  if (!confirm('Turn ConsensFlow off? Every file it installed is removed and no harness will consult. Your agents are kept.')) return;
-  post('/api/off', { confirm: true }, 'Turning off…');
-};
-document.querySelector('#reset').onclick = () => {
-  // The one button that destroys what "off" protects, so it names what is
-  // going and counts it. A roster is typed by hand; a run artifact — the
-  // packet, the transcript, a generated image — exists nowhere else.
-  const counts = LAST_SYSTEM === null ? { agents: 0, runs: 0 } : LAST_SYSTEM.reset;
-  const say = (n, noun) => n + ' ' + noun + (n === 1 ? '' : 's');
-  if (!confirm(
-    'Reset everything?\n\nThis removes ' + say(counts.agents, 'agent') + ' and '
-    + say(counts.runs, 'run') + ' (packets, transcripts, generated images), '
-    + 'and every file ConsensFlow installed — including skill files you have edited yourself '
-    + 'and the app\\'s own caches. The ConsensFlow.app bundle itself stays; remove it in Finder.'
-    + '\n\nThis cannot be undone.'
-  )) return;
-  post('/api/reset', { confirm: true }, 'Resetting…');
-};
+/**
+ * A confirmation the host cannot swallow.
+ *
+ * window.confirm is a no-op in the app: it is a WKWebView and nothing on the
+ * Rust side implements the JS dialog panels, so the call returns false without
+ * showing anything and the button silently does nothing. Two deliberate clicks
+ * work in every webview and in a plain browser — the first arms the button and
+ * says what is about to happen, the second does it, and walking away disarms.
+ */
+function arming(button, resting, armedLabel, run) {
+  let timer = null;
+  const disarm = () => {
+    clearTimeout(timer);
+    timer = null;
+    button.textContent = resting;
+    button.dataset.armed = 'false';
+  };
+  disarm();
+  button.onclick = () => {
+    if (timer !== null) { disarm(); run(); return; }
+    button.textContent = armedLabel();
+    button.dataset.armed = 'true';
+    timer = setTimeout(disarm, 6000);
+  };
+}
+
+arming(
+  document.querySelector('#off'),
+  'Turn ConsensFlow off',
+  () => 'Click again to turn off — agents are kept',
+  () => post('/api/off', { confirm: true }, 'Turning off…'),
+);
+
+arming(
+  document.querySelector('#reset'),
+  'Reset everything',
+  () => {
+    const c = LAST_SYSTEM === null ? { agents: 0, runs: 0 } : LAST_SYSTEM.reset;
+    const say = (n, noun) => n + ' ' + noun + (n === 1 ? '' : 's');
+    return 'Click again to destroy ' + say(c.agents, 'agent') + ' and ' + say(c.runs, 'run');
+  },
+  () => post('/api/reset', { confirm: true }, 'Resetting…'),
+);
 
 // The last roster payload, so filtering the catalog re-renders without a fetch.
 let LAST = null;
