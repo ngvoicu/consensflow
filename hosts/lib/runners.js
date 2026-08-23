@@ -51,14 +51,22 @@ export function extractSessionId(kind, line) {
  */
 export function buildRunnerInvocation(agent, packetPath, cwd, session) {
   const p = agent;
+  // Three states, not two. `session === undefined` is a one-shot and refuses a
+  // session outright. A session object with no id is the FIRST run of a
+  // conversation: there is nothing to resume yet, but the harness must still
+  // SAVE it — passing --ephemeral here captured an id for a session that was
+  // never written, and the next run was told the conversation was gone.
+  const threading = session !== undefined;
   const sessionId = session?.sessionId;
   switch (p.kind) {
     case "pi": {
       // Order matters only to the tests that pin it, but keeping the one-shot
       // argv byte-identical means this change cannot perturb anything else.
       const args = ["--mode", "json"];
+      // pi hands nothing back, so its id is always one we minted: --session-id
+      // creates the session when it does not exist and resumes it when it does.
       if (sessionId) args.push("--session-id", sessionId);
-      else args.push("--no-session");
+      else if (!threading) args.push("--no-session");
       args.push("--no-extensions");
       if (p.skillsPolicy === "none" || p.skillsPolicy === "explicit") args.push("--no-skills");
       if (p.skillsPolicy === "explicit") {
@@ -83,7 +91,7 @@ export function buildRunnerInvocation(agent, packetPath, cwd, session) {
       // want complete blocks, not token-level deltas).
       const args = ["-p", "Follow the ConsensFlow packet provided on stdin. Return only the requested output.", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"];
       if (sessionId) args.push("--resume", sessionId);
-      else args.push("--no-session-persistence");
+      else if (!threading) args.push("--no-session-persistence");
       if (p.model) args.push("--model", p.model);
       if (p.effort) args.push("--effort", p.effort);
       if (p.maxTurns) args.push("--max-turns", String(p.maxTurns));
@@ -95,7 +103,7 @@ export function buildRunnerInvocation(agent, packetPath, cwd, session) {
       // `codex exec resume <id>` takes the id positionally, before the flags.
       const args = sessionId ? ["exec", "resume", sessionId] : ["exec"];
       args.push("--json");
-      if (!sessionId) args.push("--ephemeral");
+      if (!threading) args.push("--ephemeral");
       args.push("--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", "--dangerously-bypass-approvals-and-sandbox", "-C", cwd);
       if (p.model) args.push("--model", p.model);
       if (p.effort) args.push("-c", `model_reasoning_effort=\"${p.effort}\"`);

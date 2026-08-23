@@ -131,3 +131,43 @@ test('runner: an id is only read from the harness that uses that field', () => {
   assert.equal(extractSessionId('claude-code', { thread_id: 'codex-thread-1' }), null)
   assert.equal(extractSessionId('codex', { session_id: 'claude-sess-1' }), null)
 })
+
+// --- starting a conversation is not the same as refusing one --------------
+
+test('runner: the FIRST run of a conversation still persists its session', () => {
+  // The bug this pins: with threading on but no id yet, the code took the
+  // one-shot branch and passed --ephemeral / --no-session-persistence, which
+  // mean "do not save this session". We then captured an id for a session
+  // that was never written, and the next run got "that conversation is gone".
+  const starting = { sessionId: undefined }
+
+  const codex = build(AGENTS.codex, starting).args
+  assert.ok(!codex.includes('--ephemeral'), 'ephemeral discards the session we are starting')
+  assert.deepEqual(codex.slice(0, 2), ['exec', '--json'], 'nothing to resume yet')
+
+  const claude = build(AGENTS.claude, starting).args
+  assert.ok(!claude.includes('--no-session-persistence'), 'we need this session saved')
+  assert.ok(!claude.includes('--resume'), 'nothing to resume yet')
+
+  const opencode = build(AGENTS.opencode, starting).args
+  assert.ok(!opencode.includes('--session'), 'nothing to resume yet')
+})
+
+test('runner: pi is given the id we mint, on the very first run', () => {
+  // pi mints nothing back to us — `--session-id <id>` creates it if missing —
+  // so if we do not supply one on run 1, pi can never be resumed at all.
+  const args = build(AGENTS.pi, { sessionId: 'ember-ridge' }).args
+
+  assert.deepEqual(
+    [args[args.indexOf('--session-id')], args[args.indexOf('--session-id') + 1]],
+    ['--session-id', 'ember-ridge'],
+  )
+  assert.ok(!args.includes('--no-session'))
+})
+
+test('runner: a one-shot is still a one-shot', () => {
+  // session === undefined means the caller wants no conversation at all.
+  assert.ok(build(AGENTS.codex).args.includes('--ephemeral'))
+  assert.ok(build(AGENTS.claude).args.includes('--no-session-persistence'))
+  assert.ok(build(AGENTS.pi).args.includes('--no-session'))
+})

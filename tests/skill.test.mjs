@@ -139,6 +139,31 @@ describe('cmux mode teaches conversations, one pane each', () => {
     { name: 'ares', harness: 'pi', model: 'openrouter/x-ai/grok-4.6', effort: 'high' },
   ]
 
+  it('hands the lead the pane commands instead of making it explore', () => {
+    const cmux = generateSkill(roster, { mode: 'cmux' })
+
+    // A lead without these spent a minute dumping `cmux --help` twice before
+    // it could ask a question. The recipe is three commands; quote them.
+    assert.match(cmux, /cmux new-pane --type terminal --direction right --focus false/)
+    assert.match(cmux, /cmux send --surface surface:NN/)
+    assert.match(cmux, /cmux rename-tab --surface surface:NN/)
+  })
+
+  it('tells the lead to read the answer, not scrape the screen', () => {
+    const cmux = generateSkill(roster, { mode: 'cmux' })
+
+    // Reading screen text back is the typed-bootstrap minefield v3 was built
+    // to avoid — and `cf last` exists precisely so nobody has to.
+    assert.match(cmux, /cf last <name>/)
+    assert.match(cmux, /do not\s+scrape/i)
+  })
+
+  it('still says the commands belong to cmux, not to us', () => {
+    const cmux = generateSkill(roster, { mode: 'cmux' })
+
+    assert.match(cmux, /they\s+are cmux's, not ours/i)
+  })
+
   it('says one pane per conversation, not per agent', () => {
     const cmux = generateSkill(roster, { mode: 'cmux' })
 

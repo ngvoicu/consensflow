@@ -171,9 +171,16 @@ keep in step — the manager is the only caller.
   call `refreshInstalledSkill`); only where the manifest says it is installed.
 - **Pane control belongs to cmux's skills**, never ours — the v2 lesson
   (typed-bootstrap verification is a minefield). Our skill says *what* to
-  run; theirs say *how* to drive panes. It is also a different product from
-  consulting, which is why only `cmux` mode carries it: a Claude Code install
-  runs its agents as subprocesses and never touches a pane.
+  run; theirs say *how* to drive panes. One deliberate exception since
+  2026-08-23: the cmux-mode skill *quotes* three of cmux's commands
+  (`new-pane`, `send`, `rename-tab`) because a lead without them spent a
+  minute dumping `cmux --help` before it could ask a question. Quoting is not
+  implementing — we drive no pane, and the skill says outright that the
+  commands are cmux's and that its skills are the authority if they move. The
+  same section forbids reading the answer back off the screen: `cf last
+  <name>` exists so nobody has to. Pane control is also a different product
+  from consulting, which is why only `cmux` mode carries any of this: a Claude
+  Code install runs its agents as subprocesses and never touches a pane.
 - **Tests spawn no live agent CLIs and no network** — agent CLIs are stub
   scripts on a fake PATH; git is a PATH shim copying a fixture tree.
 

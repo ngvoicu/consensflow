@@ -97,15 +97,9 @@ question, then decide or ask the user.
 ${
   inCmux
     ? `
-   **In that conversation's pane, always.** This machine runs cmux, so a
-   consult never blocks the pane you are in. One pane per conversation, titled
-   with the conversation's name — \`cf run\` prints it the first time. Ask the
-   same agent again and it continues there; two conversations mean two panes,
-   so their answers never tangle.
-
-   Do not consult in this pane. If you cannot open one — no workspace, the
-   pane skills are missing, cmux is not running — say so and run it here
-   rather than silently doing something the user did not ask for.
+   **In that conversation's pane, always** — never in this one. See "One pane
+   per conversation" below for the three commands that open it; do not go
+   exploring cmux's CLI, the recipe is written out for you.
 `
     : ''
 }
@@ -162,13 +156,32 @@ ${
     ? `## One pane per conversation
 
 A consult here is a **conversation**, not a one-shot. The first \`cf run\` to an
-agent starts one and prints its name — \`bubble-sky\`, \`amber-moss\`. Ask that
+agent starts one and prints its name — \`ember-ridge\`, \`amber-moss\`. Ask that
 agent again and it continues: the harness resumes its own session, so the agent
 remembers what you already discussed and the provider's cache is still warm.
 
-Give each conversation its own pane, titled with its name, and open it with
-your cmux skills. "ask ares in bubble-sky about the retry path" means: the pane
-called bubble-sky.
+Give each conversation its own pane. Three commands, in this order — you do not
+need to explore cmux's CLI, and you must not run the consult in this pane:
+
+\`\`\`bash
+# 1. a pane beside you, without stealing focus. Prints: OK surface:NN pane:NN
+CMUX_QUIET=1 cmux new-pane --type terminal --direction right --focus false
+
+# 2. send the consult there. The trailing newline is what runs it.
+CMUX_QUIET=1 cmux send --surface surface:NN 'cf run @<name> "<task>" --brief "<why>"'$'\\n'
+
+# 3. once cf prints "conversation: <name>", title the tab to match
+CMUX_QUIET=1 cmux rename-tab --surface surface:NN '<name>'
+\`\`\`
+
+Then **read the answer with \`cf last <name>\` from your own pane** — do not
+scrape the other pane's screen. The pane is for the user to watch; the run
+directory is what you read. Screen text is not an answer, it is a picture of
+one.
+
+Later turns in that conversation go to the same pane: reuse its surface id, or
+find it by the tab name. Two conversations mean two panes, so their answers
+never tangle.
 
 \`\`\`bash
 cf run @<name> "<task>"                     # continues that agent's conversation here
@@ -182,9 +195,11 @@ Start a **new** conversation when the subject genuinely changes. Continuing one
 carries its whole history into every later turn, which is what makes the agent
 useful — and what makes an unrelated question expensive.
 
-Run the command in that pane and get on with your own work while it thinks;
-then read the pane, or \`cf last <name>\` from here, and report the answer
-attributed as usual.
+If you cannot open a pane — no workspace, cmux is not running — say so and run
+the consult here rather than silently doing something the user did not ask for.
+
+The cmux commands above are quoted so you need not go looking for them; they
+are cmux's, not ours, and your cmux skills are the authority if they have moved.
 
 This skill defines *what* to run; the cmux skills define pane control. Neither
 one reaches into the other.

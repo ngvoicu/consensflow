@@ -373,7 +373,12 @@ async function runVerb(rest) {
     packet,
     kind: 'ask',
     onEvent,
-    session: record?.sessionId ? { sessionId: record.sessionId } : undefined,
+    // An object (even an empty one) means "this run belongs to a conversation,
+    // so save the session". pi never reports an id back, so we mint one from
+    // the conversation's own name — `--session-id` creates it if missing.
+    session: wantsThread
+      ? { sessionId: record?.sessionId ?? (row.kind === 'pi' ? sessionName : undefined) }
+      : undefined,
   })
 
   // The harness owns the session store and may have pruned it. A conversation
@@ -381,7 +386,16 @@ async function runVerb(rest) {
   if (wantsThread && record?.sessionId && result.exitCode !== 0) {
     out('')
     out(`that conversation is gone from ${row.harness ?? row.kind}; starting a new conversation`)
-    result = await runAgent({ cwd, agent: row, packet, kind: 'ask', onEvent })
+    result = await runAgent({
+      cwd,
+      agent: row,
+      packet,
+      kind: 'ask',
+      onEvent,
+      // Still a conversation — just a new one. Dropping to a one-shot here
+      // would make the replacement unresumable too.
+      session: { sessionId: row.kind === 'pi' ? `${sessionName}-2` : undefined },
+    })
   }
 
   if (wantsThread && sessionName !== undefined) {
