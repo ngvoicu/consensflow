@@ -17,17 +17,18 @@ v2 engine that had one was retired and deleted 2026-08-19).
 
 | Path | Owns |
 |---|---|
-| `bin/cf.mjs` | All verbs: setup, agent …, skills …, ui, doctor. Setup never seeds agents; a machine that ran cc/pi already has the shared roster, so setup installs the skill straight from it. Every roster mutation installs-or-regenerates the skill — first add installs it everywhere |
+| `bin/cf.mjs` | All verbs: setup, use, run, mode, off, reset, agent …, skills …, ui, doctor. `reset` refuses without `--yes` and prints what it would destroy — the refusal is the preview. Setup never seeds agents; a machine that ran cc/pi already has the shared roster, so setup installs the skill straight from it. Every roster mutation installs-or-regenerates the skill, for whoever the mode puts in scope (`skillTargets` → `scopeTargets`) — the first add installs it, the rest regenerate it |
 | `src/roster.js` | Roster = the SHARED v1 file `~/.consensflow/agents.json` (cc + pi read/write it too): v1-schema-faithful mapping (kind↔runtime, thinking/effort↔effort, toolsPolicy↔permission), unknown fields preserved, unsupported kinds listed+marked, never dropped. **One root, one meaning**: roster, state and workspaces all live in `~/.consensflow`, or under `CONSENSFLOW_HOME` when it is set. The state used to sit under XDG while the roster sat here, and the variable meant a different directory to each half — a machine set up that way is moved into the one root on first run (`migrateStateRoot`) |
-| `src/catalog.js` | A **view over `hosts/lib/presets.js`** — one catalog, not two (they disagreed on five names until 2026-08-21) — plus each CLI's real effort levels. 49 of the 50 presets are offered; the image preset has no runtime to launch it. `cf agent add <name>` resolves through it and records `preset` on the row, which is what makes `cf agent sync` and the UI's Update button possible |
+| `src/catalog.js` | A **view over `hosts/lib/presets.js`** — one catalog, not two (they disagreed on five names until 2026-08-21) — plus each CLI's real effort levels. All 48 presets are offered, grouped by harness (claude 8, codex 4, pi 18, opencode 17, image 1). `cf agent add <name>` resolves through it and records `preset` on the row, which is what makes `cf agent sync` and the UI's Update button possible |
 | `src/skill.js` | SKILL.md generation — the prose IS the product. One command for every agent (`cf run @name "<task>"`), so the table says who each agent is rather than what to type |
-| `src/agents.js` | Agent detection (CLI on PATH) + per-agent skills dir (honours `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`) |
+| `src/harnesses.js` | Harness detection (CLI on PATH) + per-harness skills dir (honours `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`) |
+| `src/terminal.js` | The `cf`/`consensflow` launcher on PATH, in **every** mode — the skill teaches `cf run`, so it is part of the path, not a cmux extra. It is also the only installed file that names a runtime absolutely, which is what `terminalRuntime` reads for `cf doctor` |
 | `src/manifest.js` + `src/install.js` | Hash-manifest ownership: install/update/status/uninstall; drift is sacred |
-| `src/cmux-skills.js` | Shallow-clones manaflow-ai/cmux, installs its `skills/` tree as `cmux@<commit>` |
-| `src/hosts.js` | Installs/removes the host integrations: **claude** via documented user config (payload in `<config>/hosts/claude`, skill + `/consensflow` command + settings.json hook merge, all recorded in `hosts.json`), **pi** via its supported `pi install/remove` CLI. Never writes Claude Code's plugin registry — that is versioned internal state |
-| `src/mode.js` | The one-path-per-machine invariant: modes, switching, and the plain-words report of what each mode costs |
-| `src/ui.js` | Ephemeral loopback roster editor (random bearer token, no daemon): roster CRUD, catalog quick-adds, the mode switcher (`POST /api/mode`), and the skills panel (`GET /api/system`, `POST /api/skills/install`, `POST /api/skills/uninstall` — uninstall needs `confirm:true`). Named operations only: never an endpoint that executes a supplied command |
-| `skill/SKILL.md` | The hand-written v0 the generator's template mirrors |
+| `src/cmux-skills.js` | Fetches manaflow-ai/cmux into a cache under `<config>/cache/cmux` and installs its `skills/` tree as `cmux@<commit>`. A checkout it cannot update is thrown away and re-cloned, so a broken cache costs one slow run rather than every run after it |
+| `src/host-payloads.js` | **Take-back only, never installs.** Everything the payload era left on a machine: the recorded claude files, the `/consensflow` command (by its front-matter marker), the world-readable `settings.json.consensflow.bak`, the `<config>/hosts` payloads, `hosts.json`, and a pi extension removed through pi's own CLI. Claude Code's `settings.json` is never written — a hook an older version left is *reported* by `cf doctor` |
+| `src/mode.js` | The one-path-per-machine invariant. A mode is a **scope over one generated skill** — who gets it — plus whether cmux's pane skills come along. `syncGeneratedSkill` is the single install path for all three |
+| `src/ui.js` | Ephemeral loopback roster editor (random bearer token, no daemon): roster CRUD, catalog quick-adds, the mode switcher (`POST /api/mode`), and the skills panel (`GET /api/system`, `POST /api/skills/install`, `POST /api/skills/uninstall` — uninstall needs `confirm:true`), and the two danger buttons: `POST /api/off` and `POST /api/reset`, both gated on `confirm:true`. Named operations only: never an endpoint that executes a supplied command |
+| `skill/SKILL.md` | The hand-written v0 the generator's template mirrors. Reference only — nothing installs it; `src/skill.js` is what reaches a machine |
 
 ## The desktop app
 
@@ -51,24 +52,23 @@ Load-bearing facts, each learned by running the built bundle:
 
 ## The merged layout
 
-`hosts/lib` is THE engine — one copy, shared by both host payloads
-(`hosts/claude`, `hosts/pi`). It was two hand-synced copies in two repos
-until 2026-08-20; the parity test that guarded them is gone because the
-duplication is. Host deltas that existed then are resolved: the
-`CONSENSFLOW_CHILD` marker is set for every host, the packet's handoff
-wording is host-neutral, and cc's session helpers live in the shared
-`state.js` (pi simply does not call them).
-
-Payload files reference `${CONSENSFLOW_HOST_ROOT}`; `src/hosts.js` rewrites
-that to wherever it installed the payload.
+`hosts/lib` is THE engine, and now the only thing under `hosts/`. It was two
+hand-synced copies in two repos until 2026-08-20, then one copy shared by two
+payloads (`hosts/claude`, `hosts/pi`) until 2026-08-23, when the payloads went
+and `src/` began importing it directly. Nothing is copied anywhere at install
+time, so there is no `${CONSENSFLOW_HOST_ROOT}` to rewrite and no second CLI to
+keep in step — the manager is the only caller.
 
 ## Load-bearing rules
 
 - **One mode per machine** (`src/mode.js`): `claude` | `pi` | `cmux` (named after the three products; `standalone` is accepted as the old name for `cmux`),
-  recorded in `<config>/mode.json`. `applyMode` installs the chosen path and
-  removes the others' — so two ConsensFlow paths can never be live at once.
-  `cf skills install` refuses in a host mode rather than quietly breaking the
-  invariant. cmux's own skills belong to `cmux` mode alone (`syncCmuxSkills`,
+  recorded in `<config>/mode.json`. A mode is a **scope**, not an integration:
+  every mode installs the same generated skill through the same
+  `syncGeneratedSkill`, and differs only in which harnesses receive it. Anyone
+  out of scope gives it back, so two paths can never be live at once.
+  `cf skills install` follows the same scope; it refuses only when no mode has
+  been chosen, which is how ConsensFlow used to appear in harnesses nobody had
+  picked. cmux's own skills belong to `cmux` mode alone (`syncCmuxSkills`,
   the single rule the CLI, the UI and `applyMode` all call): a host mode
   installs none, takes back any it finds, and never clones. A failed fetch
   never costs the mode switch. Every entry point states the cost of a host mode (codex and
@@ -76,7 +76,7 @@ that to wherever it installed the payload.
 
 - **One spawn verb, three modes.** `cf run @name "<task>"` builds the packet,
   applies the billing guards and streams the run, whichever harness is behind
-  the name — the manager calls the same `hosts/lib` engine the payloads do.
+  the name — and the manager is the only caller of the `hosts/lib` engine now.
   Image agents included: `image` is a harness like the rest, and its run lives
   in `hosts/lib/image-run.js` so no caller carries a second copy.
 
@@ -93,22 +93,60 @@ that to wherever it installed the payload.
   that was the last behavioural difference between the three modes. Installing
   or uninstalling still takes back hooks an older version wrote.
 
-- **`cf` on PATH is part of cmux mode**, not an optional extra: the generated
-  skill tells four harnesses to run it, so `applyMode('cmux')` installs the
-  launcher and a host mode (whose skill names its payload CLI by absolute path)
-  takes it back. `off` removes ours, by the marker it writes.
+- **`cf` on PATH is part of every mode**, not an optional extra: the generated
+  skill teaches `cf run @name` whoever is in scope, so `applyMode` installs the
+  launcher first, in all three. `off` removes ours, by the marker it writes.
+  (This doc claimed for a while that a host mode took it back — the code never
+  did, and the skill would have named a command the machine did not have.)
 
 - **No harness intercepts a mention.** pi used to swallow `@zeus …` and run the
-  agent itself; the lead composes every run now, in all three modes. Claude
-  Code's hook still routes @mentions, but by injecting the command for the lead
-  to run — which is the behaviour pi moved toward.
+  agent itself; the lead composes every run now, in all three modes.
 
-- **Nothing the app installs assumes Node on PATH.** The hooks and the
-  `/consensflow` command name their runtime absolutely — `${CONSENSFLOW_NODE}`,
-  rewritten at install to the runtime doing the installing, which from the app
-  is its own bundled Node. The cost is that moving or deleting whatever
-  provided it breaks the wiring, so `cf doctor` reports the runtime and says
-  MISSING when it is gone.
+- **One surface, everywhere: the skill.** No harness has a private path into
+  ConsensFlow. pi's tools went first, then its input watcher, then (2026-08-23)
+  the slash commands — pi registered five `/consensflow:*`, Claude Code
+  installed one `/consensflow`, and codex and opencode had none, so the same
+  request took a different shape depending on where it was made. What is left
+  is the skill every harness reads and `cf run @name` that every harness runs.
+  Driving it by hand is the CLI's job and the roster UI's. Then (same day) the
+  host payloads themselves: `claude` and `pi` were integrations with a CLI and
+  a hand-written skill each, justified while a host could hand an agent the
+  live conversation — and nothing has stashed one since 2026-08-22. What was
+  left was a second copy of the skill that could not name the roster, which is
+  what makes a harness reach for it. `src/host-payloads.js` takes all of it
+  back; nothing installs it again.
+
+- **Nothing the app installs assumes Node on PATH.** One installed file still
+  names a runtime, and only one: the launcher, absolutely (`src/terminal.js`),
+  which from the app is its own bundled Node. `terminalRuntime` reads it back,
+  so `cf doctor` says MISSING when whatever provided it has moved — rather than
+  letting every `cf` the skill teaches fail one at a time.
+
+- **Claude Code's `settings.json` is never written.** It is the user's file,
+  and the rule that protects a skill they edited protects it too. A hook an
+  older version left there is *reported* by `cf doctor` (`staleClaudeHooks`)
+  and removed by the user. ConsensFlow used to rewrite the file on every
+  install and drop a world-readable `.consensflow.bak` beside a file Claude
+  Code deliberately keeps at 0600 — nothing ever read that copy or cleaned it
+  up, so the backup is now something we take back, not something we make.
+
+- **`off` and `reset` are different promises.** `off` removes every file
+  ConsensFlow installed and stops there: the roster survives, because agents
+  are the user's and the file is shared with anything else that reads it, and
+  so does `workspaces/`, where each run's packet, transcript and generated
+  image lives. `resetEverything` is the one operation that takes those too —
+  the whole config root, drifted skill files included — so it counts what it
+  is about to destroy. `resetPreview` is the one place those counts come from,
+  so `cf reset`'s refusal and the page's dialog quote the same two numbers —
+  and `cf reset` refuses without `--yes`, printing them while nothing has been
+  touched. Drift is not honoured there on purpose: the rule exists so an
+  install never clobbers an edit by accident, and a reset is not an accident.
+  It also clears the desktop app's own data — the `dev.ngvoicu.consensflow`
+  directories the OS gives the bundle, which live outside the root because the
+  OS decides where they go and which nothing else creates. The `.app` itself is
+  deliberately not in that set: an application deleting its own bundle mid-run
+  is a bad idea, and on macOS removing an application is a Finder gesture, so
+  both surfaces say so instead of doing it.
 
 - **Modules never read `process.env`** — the environment is an explicit
   argument everywhere. That is the whole test-isolation story
@@ -116,7 +154,7 @@ that to wherever it installed the payload.
 - **Drift is sacred.** A manifest-owned file whose hash changed was edited by
   the user: refuse without `--force`, never clobber. A file not in the
   manifest is never touched, installed over, or deleted.
-- **A host with its own ConsensFlow keeps it.** `detectAgents` marks `native` (cc plugin cache / pi extension checkout); `skillTargets` excludes those from the generated skill, `retireSkillFromNativeHosts` removes copies installed before the host had one (unedited only), and `--all` overrides. Without this, claude and pi see two same-named skills with the same trigger.
+- **A harness with its own ConsensFlow keeps it.** `detectHarnesses` marks `native` (cc plugin cache / pi extension checkout) and `syncGeneratedSkill` leaves those out of scope in every mode. Without this, claude and pi see two same-named skills with the same trigger, competing for one skills budget.
 - **Full permissions, no permission concept.** There is still no knob, tier or
   policy to choose — but the default is now everything, not the CLI's own
   default: `--dangerously-skip-permissions` (claude),
@@ -142,7 +180,7 @@ that to wherever it installed the payload.
 ## Commands
 
 ```sh
-npm test          # node --test (43 tests)
+npm test          # node --test (266 tests)
 npm run check     # biome + tests
 ```
 

@@ -18,7 +18,7 @@ import { runAgent } from '../hosts/lib/runners.js'
 import { renderEvent } from '../hosts/lib/transcript-events.js'
 import { CATALOG, catalogEntry } from '../src/catalog.js'
 import { detectHarnesses } from '../src/harnesses.js'
-import { HOSTS, hostRuntime, hostStatus, installHost, uninstallHost } from '../src/hosts.js'
+import { staleClaudeHooks } from '../src/host-payloads.js'
 import { installSkill, skillsStatus, uninstallSkills } from '../src/install.js'
 import {
   applyMode,
@@ -26,6 +26,8 @@ import {
   MODES,
   modeLabel,
   modeReport,
+  resetEverything,
+  resetPreview,
   syncCmuxSkills,
   turnOff,
 } from '../src/mode.js'
@@ -46,6 +48,7 @@ import {
   retireSkillFromNativeHosts,
   skillTargets,
 } from '../src/sync.js'
+import { terminalRuntime } from '../src/terminal.js'
 
 // `cf … | head` closes our stdout mid-stream; dying with an EPIPE stack for
 // that is a crash where a quiet exit is the whole contract of a CLI.
@@ -67,24 +70,22 @@ Usage: cf <command> [options]
   setup [--all] [--force]                      One command: install the cmux skills and, when the
                                                shared roster has agents, the consensflow skill
                                                into every detected coding harness
-  use <claude|pi|cmux>                         Choose the one path this machine runs:
-                                               claude / pi = that harness consults, with your
-                                               conversation as context, and no other harness has
-                                               ConsensFlow; cmux (pi, cc, codex, opencode) = every
-                                               harness can consult, and cmux's own pane-control skills
-                                               come with that mode and only that one
+  use <claude|pi|cmux>                         Who on this machine can consult:
+                                               claude / pi = only that harness gets the skill;
+                                               cmux (pi, cc, codex, opencode) = every harness gets
+                                               it, and cmux's own pane-control skills come with
+                                               that mode and only that one
   run <name> "<task>"                          Spawn one agent here and stream its work back:
     [--brief <what this run is for>]            a brief for this spawn, your conversation as
     [--handoff-file <file>] [--no-handoff]      handoff when you pass one, a note alongside it
     [--context <note>] [--prompt-file <file>]
     [--image <path>]                            (image agents: reference pictures)
   mode                                         Which one is active, and what it means
-  off [--force]                                Take it all back: both host payloads, every file the
-                                               manifest owns, and the mode. Agents are kept
-  install <claude|pi|all> [--force]            Install a host integration — the deeper path that hands
-                                               your live conversation to the agent
-  uninstall <claude|pi>                        Remove one, exactly as it was installed
-  hosts                                        What is installed where
+  off [--force]                                Take it all back: every file the manifest owns, the
+                                               launcher, and the mode. Agents are kept
+  reset [--yes]                                The clean slate: everything off removes, plus your
+                                               agents and every run artifact. Prints what it would
+                                               destroy and refuses without --yes. Cannot be undone
   catalog [--harness <h>] [--json]             The ready-made agents, per harness
   agent add <name>                             A catalog name is enough: cf agent add zeus
   agent add <name> --harness <h> --model <m> [--effort <e>] [--description <d>]
@@ -342,6 +343,45 @@ function modeVerb() {
  * file the manifest owns, and the mode itself. The roster is the user's and
  * survives — the same contract as the app's "Turn ConsensFlow off".
  */
+function resetVerb(rest) {
+  const { values } = parseArgs({
+    args: rest,
+    allowPositionals: true,
+    options: { yes: { type: 'boolean', default: false } },
+  })
+
+  // Counting before refusing makes the refusal the preview: the same two
+  // numbers the page puts in its dialog, printed while nothing has been
+  // touched. `off` needs no such ceremony — it is undone by choosing a path
+  // again. This is not: a roster is typed by hand, and a packet, a transcript
+  // or a generated image exists nowhere else.
+  const { agents, runs } = resetPreview(env)
+  if (!values.yes) {
+    out(`reset would remove ${plural(agents, 'agent')} and ${plural(runs, 'run')} (packets,`)
+    out('transcripts, generated images), every file ConsensFlow installed — including skill')
+    out("files you have edited yourself, the `cf` launcher, and the desktop app's own")
+    out('caches. The ConsensFlow.app bundle itself stays — remove it in Finder if you')
+    out('want it gone.')
+    out('')
+    fail('nothing was touched. Re-run with --yes if that is what you want')
+    return
+  }
+
+  const outcome = resetEverything(env)
+  for (const change of outcome.changes) {
+    const what = change.path ?? change.host
+    if (what !== undefined) out(`${String(change.action ?? 'removed').padEnd(16)} ${what}`)
+  }
+  out(
+    `ConsensFlow is reset — ${plural(outcome.removed.agents, 'agent')} and ${plural(outcome.removed.runs, 'run')} went with it`,
+  )
+  out('The ConsensFlow.app bundle is untouched; remove it in Finder if you want it gone.')
+}
+
+function plural(count, noun) {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`
+}
+
 function offVerb(rest) {
   const { values } = parseArgs({
     args: rest,
@@ -364,50 +404,14 @@ function useVerb(rest) {
   }
   const outcome = applyMode(wanted, env, {})
   for (const change of outcome.changes) {
-    if (change.action === 'removed' && change.host)
-      out(`removed          ${change.host} integration`)
-    else if (change.path) out(`${(change.action ?? 'changed').padEnd(16)} ${change.path}`)
+    // Name the file whenever there is one: several changes can share a host,
+    // and "removed claude integration" twice says less than either path does.
+    if (change.path) out(`${(change.action ?? 'changed').padEnd(16)} ${change.path}`)
+    else if (change.host) out(`${(change.action ?? 'changed').padEnd(16)} ${change.host}`)
   }
   out('')
   out(`mode: ${modeLabel(outcome.mode)}`)
   for (const line of outcome.report) out(`  ${line}`)
-}
-
-function hostsVerb() {
-  for (const host of hostStatus(env)) {
-    const detail = host.installed
-      ? `installed by consensflow${host.version ? ` (v${host.version})` : ''}${host.files ? ` · ${host.files} files wired` : ''}`
-      : host.present
-        ? `already present via ${host.via} — consensflow did not install it and will not remove it`
-        : 'not installed'
-    out(`${host.id.padEnd(8)}${detail}`)
-  }
-  out('')
-  out('install one with `consensflow install <host>`; the roster is shared with every host')
-}
-
-function installVerb(rest, remove = false) {
-  const { values, positionals } = parseArgs({
-    args: rest,
-    allowPositionals: true,
-    options: { force: { type: 'boolean', default: false } },
-  })
-  const wanted = positionals[0]
-  if (wanted === undefined || (wanted !== 'all' && !HOSTS.includes(wanted))) {
-    fail(`name a host to ${remove ? 'uninstall' : 'install'}: ${HOSTS.join(', ')}`)
-    return
-  }
-  const targets = wanted === 'all' ? HOSTS : [wanted]
-  for (const host of targets) {
-    const outcome = remove
-      ? uninstallHost(host, env)
-      : installHost(host, env, { force: values.force })
-    out(
-      remove
-        ? `${host}: removed`
-        : `${host}: installed${outcome.version ? ` (v${outcome.version})` : ''}`,
-    )
-  }
 }
 
 function catalogVerb(rest) {
@@ -539,16 +543,16 @@ function skillsVerb(rest) {
 
   switch (action) {
     case 'install': {
-      // The generated skill belongs to cmux mode. The guard used to test for
-      // the mode's old name, so it refused in cmux mode and allowed the one
-      // case that should never install: no mode at all, which is how
-      // ConsensFlow appeared in harnesses nobody had chosen.
+      // Installs for whoever the mode puts in scope. It used to refuse in a
+      // host mode, which was right while `claude` and `pi` installed a
+      // hand-written skill of their own — they are scopes over this same skill
+      // now, so refusing would deny them the only skill there is. No mode at
+      // all is still a refusal: that is how ConsensFlow used to appear in
+      // harnesses nobody had chosen.
       const mode = currentMode(env)
-      if (mode !== 'cmux') {
+      if (mode === null) {
         fail(
-          mode === null
-            ? 'no path chosen yet — run `consensflow use cmux` to give every harness the generated skill, or `consensflow use claude|pi` for the deeper integration in one of them'
-            : `this machine is in ${mode} mode, where only ${mode} consults — run \`consensflow use cmux\` to give every harness the generated skill`,
+          'no path chosen yet — run `consensflow use cmux` to give every harness the generated skill, or `consensflow use claude|pi` to give it to just that one',
         )
         return
       }
@@ -652,14 +656,24 @@ function doctor() {
     `skills:       ${rows.length} owned files${drifted > 0 ? `, ${drifted} drifted/missing` : ''}`,
   )
 
-  // The hooks name their runtime absolutely so a machine without Node still
-  // works. If whatever provided it has moved, every prompt would fail quietly.
-  const wiring = hostRuntime(env)
+  // The install records the runtime that performed it — from the app, its own
+  // bundled Node. If that has moved, the wiring it left behind stops working,
+  // and saying so here is cheaper than letting it fail quietly.
+  const wiring = terminalRuntime(env)
   if (wiring !== null) {
     out(
       wiring.exists
         ? `runtime:      ${wiring.runtime}`
-        : `runtime:      ${wiring.runtime} — MISSING. The hooks cannot run; reinstall from the app to point them at its runtime.`,
+        : `runtime:      ${wiring.runtime} — MISSING. Reinstall from the app to point the wiring at its runtime.`,
+    )
+  }
+
+  // Claude Code's settings are not ours to write, so a hook an older version
+  // left there is named rather than removed behind the user's back.
+  const stale = staleClaudeHooks(env)
+  if (stale.events.length > 0) {
+    out(
+      `hooks:        ${stale.events.join(', ')} in ${stale.path} still reference consensflow — no version answers them; remove those entries`,
     )
   }
 }
@@ -699,17 +713,11 @@ async function main() {
     case 'off':
       offVerb(rest)
       return
+    case 'reset':
+      resetVerb(rest)
+      return
     case 'run':
       await runVerb(rest)
-      return
-    case 'hosts':
-      hostsVerb()
-      return
-    case 'install':
-      installVerb(rest)
-      return
-    case 'uninstall':
-      installVerb(rest, true)
       return
     case 'catalog':
       catalogVerb(rest)

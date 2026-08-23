@@ -7,6 +7,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -175,15 +176,37 @@ describe('the machine runs one mode, and cf keeps it that way', () => {
     )
   })
 
-  it('refuses to hand-install the generated skill in a host mode', async () => {
-    // Force the mode file to claude without the payload: the guard is about
-    // the invariant, not about what happens to be on disk.
+  it('hand-installs the generated skill for the scope, in a host mode too', async () => {
+    // It used to refuse here, which was right while `claude` was an
+    // integration with a hand-written skill of its own. It is a scope over
+    // this same skill now, so refusing would leave that harness the only one
+    // that cannot have the only skill there is.
     writeFileSync(join(t.env.CONSENSFLOW_HOME, 'mode.json'), JSON.stringify({ mode: 'claude' }))
+    // Earlier tests in this env ran in cmux mode, which reaches every harness.
+    // Clear the out-of-scope one so this asserts what THIS install did.
+    rmSync(join(t.env.CODEX_HOME, 'skills', 'consensflow'), { recursive: true, force: true })
 
     const out = await cf(['skills', 'install'], t.env)
+
+    assert.equal(out.code, 0, out.stderr)
+    assert.ok(
+      existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')),
+      'the harness in scope gets it',
+    )
+    assert.equal(
+      existsSync(join(t.env.CODEX_HOME, 'skills', 'consensflow', 'SKILL.md')),
+      false,
+      'and nobody out of scope does',
+    )
+  })
+
+  it('still refuses to install before any path has been chosen', async () => {
+    rmSync(join(t.env.CONSENSFLOW_HOME, 'mode.json'), { force: true })
+
+    const out = await cf(['skills', 'install'], t.env)
+
     assert.notEqual(out.code, 0)
-    assert.match(out.stdout + out.stderr, /mode/)
-    assert.match(out.stdout + out.stderr, /use cmux/)
+    assert.match(out.stdout + out.stderr, /no path chosen yet/)
   })
 
   it('names the modes when given one it does not have', async () => {
@@ -193,29 +216,26 @@ describe('the machine runs one mode, and cf keeps it that way', () => {
   })
 })
 
-describe('one command installs the host integrations', () => {
+describe('the host-integration verbs are gone, not hidden', () => {
   const t = tempEnv()
   chooseCmuxMode(t)
   after(() => t.cleanup())
 
-  it('lists the hosts and what is installed', async () => {
-    const out = await cf(['hosts'], t.env)
-    assert.equal(out.code, 0)
-    assert.match(out.stdout, /claude/)
-    assert.match(out.stdout, /pi/)
-    assert.match(out.stdout, /not installed/)
-  })
+  // `claude` and `pi` are scopes over one generated skill now, and `cf use`
+  // is how you choose one. There is no separate integration to install, so
+  // the verbs that installed one do not linger as aliases.
+  for (const verb of ['hosts', 'install', 'uninstall']) {
+    it(`no longer answers \`${verb}\``, async () => {
+      const out = await cf([verb, 'claude'], t.env)
+      assert.notEqual(out.code, 0)
+      assert.match(out.stdout + out.stderr, /unknown command/)
+    })
+  }
 
-  it('refuses a host it does not know, naming the ones it does', async () => {
-    const out = await cf(['install', 'emacs'], t.env)
+  it('names the modes it does know when given one it does not', async () => {
+    const out = await cf(['use', 'emacs'], t.env)
     assert.notEqual(out.code, 0)
-    assert.match(out.stdout + out.stderr, /claude, pi/)
-  })
-
-  it('reports a missing host CLI instead of pretending', async () => {
-    const out = await cf(['install', 'pi'], t.env)
-    assert.notEqual(out.code, 0)
-    assert.match(out.stdout + out.stderr, /pi/)
+    assert.match(out.stdout + out.stderr, /claude, pi, cmux/)
   })
 })
 
@@ -406,14 +426,16 @@ describe('the CLI can undo an install as completely as the app', () => {
   it('takes everything back but the roster', async () => {
     stubCli(t, 'claude')
     await cf(['agent', 'add', 'zeus', '--harness', 'claude', '--model', 'claude-opus-5'], t.env)
-    await cf(['install', 'claude'], t.env)
-    assert.ok(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts', 'claude')))
+    await cf(['use', 'claude'], t.env)
+    const skill = join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')
+    assert.ok(existsSync(skill), 'the generated skill is installed for the chosen scope')
 
     const off = await cf(['off'], t.env)
     assert.equal(off.code, 0)
     assert.match(off.stdout, /off/i)
 
-    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts')), false, 'payloads gone')
+    assert.equal(existsSync(skill), false, 'the skill is taken back')
+    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts')), false, 'no payload survives')
     assert.equal(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'commands', 'consensflow.md')), false)
     assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'mode.json')), false)
 
@@ -507,5 +529,48 @@ describe('cf run spawns one agent, in whatever mode this machine runs', () => {
     const out = await cf(['run', '@diana', 'recurse'], { ...t.env, CONSENSFLOW_CHILD: '1' })
     assert.equal(out.code, 1)
     assert.match(out.stderr + out.stdout, /does not spawn agents/)
+  })
+})
+
+describe('cf reset is the clean slate, and refuses until you say so', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+
+  const skill = () => join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')
+
+  it('prints what it would destroy and touches nothing', async () => {
+    stubCli(t, 'claude')
+    await cf(['agent', 'add', 'zeus', '--harness', 'claude', '--model', 'claude-opus-5'], t.env)
+    await cf(['use', 'claude'], t.env)
+    mkdirSync(join(t.env.CONSENSFLOW_HOME, 'workspaces', 'proj', 'runs', 'ask-1'), {
+      recursive: true,
+    })
+    assert.ok(existsSync(skill()))
+
+    const out = await cf(['reset'], t.env)
+
+    // The refusal IS the preview — same two numbers the page puts in its
+    // dialog, printed while everything is still there.
+    assert.notEqual(out.code, 0, 'a destructive default is not a default')
+    assert.match(out.stdout + out.stderr, /1 agent and 1 run/)
+    assert.match(out.stdout + out.stderr, /nothing was touched/)
+    assert.ok(existsSync(skill()), 'the skill survives a refusal')
+    assert.ok(existsSync(rosterPath(t.env)), 'and so does the roster')
+  })
+
+  it('removes everything once told, and says what went', async () => {
+    const out = await cf(['reset', '--yes'], t.env)
+
+    assert.equal(out.code, 0, out.stderr)
+    assert.match(out.stdout, /1 agent and 1 run went with it/)
+    assert.equal(existsSync(skill()), false)
+    assert.equal(existsSync(t.env.CONSENSFLOW_HOME), false, 'the whole root is gone')
+  })
+
+  it('counts nothing, and still works, on a machine with nothing installed', async () => {
+    const out = await cf(['reset', '--yes'], t.env)
+
+    assert.equal(out.code, 0, out.stderr)
+    assert.match(out.stdout, /0 agents and 0 runs/)
   })
 })

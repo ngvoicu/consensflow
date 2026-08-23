@@ -5,7 +5,6 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { parseRunOptions } from '../../hosts/claude/bin/cf.mjs'
 import { codexAuthPath, loadCodexAuth } from '../../hosts/lib/codex-auth.js'
 import {
   buildImageRequestBody,
@@ -22,14 +21,10 @@ import {
   serializeClaudeTranscript,
 } from '../../hosts/lib/transcript.js'
 
-const ROOT = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '..',
-  '..',
-  'hosts',
-  'claude',
-)
-const ENGINE = path.resolve(ROOT, '..', 'lib')
+// The payload CLI these tests used to drive is gone: a mode installs the
+// generated skill and nothing else, so there is one CLI left — the manager's.
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
+const ENGINE = path.join(ROOT, 'hosts', 'lib')
 const CF = path.join(ROOT, 'bin', 'cf.mjs')
 
 async function withTempDir(fn) {
@@ -210,29 +205,6 @@ test('parseTranscriptJsonl tolerates garbage lines and collectHandoff degrades t
   })
 })
 
-// --- Hook scripts ----------------------------------------------------------
-
-function hookEnv(dir, extra = {}) {
-  return { CONSENSFLOW_HOME: path.join(dir, 'home'), ...extra }
-}
-
-async function _runHook(script, payload, env) {
-  return await spawnWithInput(process.execPath, [path.join(ROOT, 'scripts', script)], {
-    input: JSON.stringify(payload),
-    env,
-    timeoutMs: 15000,
-  })
-}
-
-async function _addAgent(dir, preset, env = {}) {
-  const result = await spawnWithInput(process.execPath, [CF, 'agents', 'add', preset], {
-    cwd: dir,
-    env: hookEnv(dir, env),
-    timeoutMs: 15000,
-  })
-  assert.equal(result.exitCode, 0, result.stderr)
-}
-
 // A ConsensFlow update ships a new catalog while the roster keeps its old snapshot. The
 // session-start note is where the lead first sees that, so it must say so and name the fix.
 // --- CLI end-to-end with fake engine binaries -------------------------------
@@ -325,7 +297,7 @@ test('e2e: all four engines run, parse, and persist artifacts through the real s
     const fake = await makeFakeEngines(dir)
     const ctx = { ws, dir, fake }
     for (const preset of ['zeus', 'gaia', 'kronos', 'mani']) {
-      const add = await runCf(['agents', 'add', preset], ctx)
+      const add = await runCf(['agent', 'add', preset], ctx)
       assert.equal(add.exitCode, 0, add.stderr)
     }
 
@@ -338,7 +310,9 @@ test('e2e: all four engines run, parse, and persist artifacts through the real s
     for (const { ref, engine, expect } of cases) {
       const run = await runCf(['run', ref, 'ping', 'from', 'the', 'test'], ctx)
       assert.equal(run.exitCode, 0, `${ref}: ${run.stderr}`)
-      assert.match(run.stdout, new RegExp(`# ${ref}`), `${ref}: header`)
+      // Attributed either way: `# @name` with the answer under it, or `— @name`
+      // alone when the answer already streamed and repeating it would be noise.
+      assert.match(run.stdout, new RegExp(`[#—] ${ref}`), `${ref}: attributed`)
       assert.ok(run.stdout.includes(expect), `${ref}: parsed engine output`)
       // Clean output: a successful read-only run shows just the answer — no run metadata, no
       // consent boilerplate. (The `Handoff: empty` warning IS expected here: this test never
@@ -428,21 +402,27 @@ test('e2e: streaming is the default (thinking always visible); --json is the onl
     await writeFile(piShimPath, piShim, 'utf8')
     await chmod(piShimPath, 0o755)
     const ctx = { ws, dir, fake: { bin, out: dir } }
-    await runCf(['agents', 'add', 'mani'], ctx)
+    await runCf(['agent', 'add', 'mani'], ctx)
 
-    // --stream can appear before or after the prompt, and the parsed final reply is always printed
-    // after the child exits so foreground runs have a durable answer section.
+    // Streaming needs no flag. The parsed final reply is still printed after the child exits,
+    // so a foreground run always ends with a durable, attributed answer section.
     const streamed = await runCf(
-      ['run', '@mani', '--stream', 'go', 'check', 'git', 'diff', '--stat'],
+      // One quoted task, the way the skill teaches it — so a `--stat` inside the
+      // prompt is text, not an option the manager's strict parser must guess at.
+      ['run', '@mani', 'go check git diff --stat'],
       ctx,
     )
     assert.match(streamed.stdout, /→ .*read/, 'the tool call is streamed live')
     assert.match(streamed.stdout, /the streamed answer/, 'the text is streamed live')
-    assert.match(streamed.stdout, /# @mani/, 'the final answer section is printed after the stream')
+    assert.match(
+      streamed.stdout,
+      /[#—] @mani/,
+      'the final answer section is printed after the stream',
+    )
     assert.match(
       (await latestPacket(ws, dir)).packet,
       /go check git diff --stat/,
-      'unknown prompt flags are preserved',
+      'flag-like text inside the task survives into the packet',
     )
 
     // Streaming is the default — thinking/tools are ALWAYS visible. A run without --stream still
@@ -458,15 +438,16 @@ test('e2e: streaming is the default (thinking always visible); --json is the onl
     assert.doesNotMatch(quiet.stdout, /→ .*read|← .*read/, '--json is the only quiet mode')
 
     assert.equal(
-      (await runCf(['agents', 'add', '--name', 'PiOnly', '--kind', 'pi', '--model', 'fake'], ctx))
-        .exitCode,
+      // The manager validates names rather than slugifying them, so it is spelled
+      // here exactly as `@pionly` refers to it below.
+      (await runCf(['agent', 'add', 'pionly', '--harness', 'pi', '--model', 'fake'], ctx)).exitCode,
       0,
     )
-    const fallback = await runCf(['run', '@pionly', 'go', '--stream'], ctx)
+    const fallback = await runCf(['run', '@pionly', 'go'], ctx)
     assert.match(
       fallback.stdout,
       /PI FALLBACK FINAL/,
-      '--stream still prints final output when no text event streamed',
+      'the final output is printed even when no text event streamed',
     )
   })
 })
@@ -486,7 +467,7 @@ test('e2e: runAgent writes a transcript.md backstop (event trail) and sets trans
     await writeFile(shimPath, shim, 'utf8')
     await chmod(shimPath, 0o755)
     const ctx = { ws, dir, fake: { bin, out: dir } }
-    await runCf(['agents', 'add', 'mani'], ctx)
+    await runCf(['agent', 'add', 'mani'], ctx)
 
     const run = await runCf(['run', '@mani', 'go', '--json'], ctx)
     const result = JSON.parse(run.stdout)
@@ -504,7 +485,7 @@ test('e2e: a run has full permissions, and there is still no knob to turn [STRM-
     await mkdir(ws, { recursive: true })
     const fake = await makeFakeEngines(dir)
     const ctx = { ws, dir, fake }
-    await runCf(['agents', 'add', 'zeus'], ctx) // claude-code
+    await runCf(['agent', 'add', 'zeus'], ctx) // claude-code
 
     // Every run is full-permission: no allowlist, no deny list, no prompts.
     await runCf(['run', '@zeus', 'go'], ctx)
@@ -533,12 +514,12 @@ test('e2e: nested runs are refused and unknown agents error cleanly', async () =
     await mkdir(ws, { recursive: true })
     const fake = await makeFakeEngines(dir)
     const ctx = { ws, dir, fake }
-    assert.equal((await runCf(['agents', 'add', 'zeus'], ctx)).exitCode, 0)
+    assert.equal((await runCf(['agent', 'add', 'zeus'], ctx)).exitCode, 0)
 
     const unknown = await runCf(['run', '@ghost', 'hi'], ctx)
     assert.equal(unknown.exitCode, 1)
-    assert.match(unknown.stderr, /Unknown agent: @ghost/)
-    assert.match(unknown.stderr, /@zeus/)
+    assert.match(unknown.stderr, /no agent named "ghost"/)
+    assert.match(unknown.stderr, /zeus/, 'it names who you do have')
 
     const nested = await spawnWithInput(process.execPath, [CF, 'run', '@zeus', 'hi'], {
       cwd: ws,
@@ -546,7 +527,7 @@ test('e2e: nested runs are refused and unknown agents error cleanly', async () =
       env: { CONSENSFLOW_HOME: path.join(dir, 'home'), CONSENSFLOW_CHILD: '1' },
     })
     assert.equal(nested.exitCode, 1)
-    assert.match(nested.stderr, /Nested ConsensFlow runs are disabled/)
+    assert.match(nested.stderr, /already an agent run — an agent does not spawn agents/)
   })
 })
 
@@ -662,22 +643,10 @@ test('reference images: imageFileToDataUrl encodes by extension; rejects unknown
   })
 })
 
-test('parseRunOptions: --image is repeatable and collects into an array (both forms)', () => {
-  // Space form, repeated.
-  const a = parseRunOptions(['@pygmalion', 'a cat', '--image', 'x.png', '--image', 'y.jpg'])
-  assert.deepEqual(a.positional, ['@pygmalion', 'a cat'])
-  assert.deepEqual(a.flags.image, ['x.png', 'y.jpg'])
-
-  // Equals form, mixed with another flag.
-  const b = parseRunOptions(['@pygmalion', '--image=x.png', '--stream', '--image=y.webp'])
-  assert.deepEqual(b.flags.image, ['x.png', 'y.webp'])
-  assert.equal(b.flags.stream, true)
-
-  // A single non-repeated value flag still scalar; no --image means undefined.
-  const c = parseRunOptions(['@pygmalion', 'hi', '--context', 'note'])
-  assert.equal(c.flags.image, undefined)
-  assert.equal(c.flags.context, 'note')
-})
+// `parseRunOptions` was the payload CLI's hand-rolled argument parser, and it
+// went with the payload. The manager parses with node's own `parseArgs`
+// (`image: { type: 'string', multiple: true }`, bin/cf.mjs), which is where
+// `--image x` / `--image=x` / repeats are handled now.
 
 test('loadCodexAuth reads the Codex CLI login (account_id field, JWT fallback, clear errors)', async () => {
   await withTempDir(async (dir) => {
@@ -738,7 +707,7 @@ test('e2e: @pygmalion without a Codex login errors cleanly before any network ca
     await mkdir(ws, { recursive: true })
     const fake = await makeFakeEngines(dir)
     const ctx = { ws, dir, fake }
-    assert.equal((await runCf(['agents', 'add', 'pygmalion'], ctx)).exitCode, 0)
+    assert.equal((await runCf(['agent', 'add', 'pygmalion'], ctx)).exitCode, 0)
     const run = await runCf(['run', '@pygmalion', 'a', 'minimalist', 'logo'], ctx, {
       CODEX_HOME: path.join(dir, 'empty-codex-home'),
     })
@@ -750,57 +719,28 @@ test('e2e: @pygmalion without a Codex login errors cleanly before any network ca
 
 // --- Plugin packaging: consent gate, hooks wiring, import boundaries --------
 
-test('the consent gate and name-neutrality stay locked into the skill and command', async () => {
-  const skill = await readFile(path.join(ROOT, 'skills', 'consensflow', 'SKILL.md'), 'utf8')
-  assert.match(skill, /MUST NOT apply, merge, commit/)
-  assert.match(skill, /NO user permission needed/)
-  assert.match(skill, /ask freely, apply only with a green light/)
-  const command = await readFile(path.join(ROOT, 'commands', 'cf.md'), 'utf8')
-  assert.match(command, /do not apply, commit, or keep its output/)
-  // There are no hooks left to carry a second copy of the gate: the skill the
-  // lead reads and the command a user types are the only two surfaces.
-  assert.equal(existsSync(path.join(ROOT, 'scripts')), false, 'no hook scripts ship')
-  assert.equal(existsSync(path.join(ROOT, 'hooks')), false, 'nothing is wired into settings.json')
+test('the consent gate and name-neutrality stay locked into the generated skill', async () => {
+  // There is one skill now, and it is generated — so the gate has to live in
+  // the generator, not in a hand-written copy per host. The payload skills
+  // that used to carry their own copy are gone.
+  const { generateSkill } = await import('../../src/skill.js')
+  const skill = generateSkill([
+    { name: 'zeus', harness: 'claude', model: 'claude-opus-5', effort: 'max' },
+  ])
+  assert.match(skill, /Advice is free; acting is gated/)
+  assert.match(skill, /without the user's explicit approval/)
+  assert.match(skill, /You do not need permission to consult/)
 
-  // The personal name must not appear in anything the plugin ships.
-  for (const base of [ENGINE, ...['bin', 'skills', 'commands'].map((d) => path.join(ROOT, d))]) {
+  // No host payload ships any more, so no second copy of the gate can drift.
+  assert.equal(existsSync(path.join(ROOT, 'hosts', 'claude')), false, 'no claude payload')
+  assert.equal(existsSync(path.join(ROOT, 'hosts', 'pi')), false, 'no pi payload')
+
+  // The personal name must not appear in anything that ships.
+  for (const base of [ENGINE, path.join(ROOT, 'bin'), path.join(ROOT, 'src')]) {
     for (const file of await readdir(base, { recursive: true })) {
       const full = path.join(base, file)
       const content = await readFile(full, 'utf8').catch(() => '')
       assert.doesNotMatch(content, /Gabriel/, `${base}/${file}`)
     }
   }
-})
-
-test('every lib symbol the CLI imports is actually exported (boundary smoke)', async () => {
-  const sources = [path.join(ROOT, 'bin', 'cf.mjs')]
-  const importRe = /import\s+\{([^}]+)\}\s+from\s+"((?:\.\.\/)+lib\/[^"]+|\.\/hook-io\.mjs)"/g
-  let checked = 0
-  for (const source of sources) {
-    const src = await readFile(source, 'utf8')
-    for (const match of src.matchAll(importRe)) {
-      const symbols = match[1]
-        .split(',')
-        .map((s) =>
-          s
-            .trim()
-            .split(/\s+as\s+/)[0]
-            .trim(),
-        )
-        .filter(Boolean)
-      const target = match[2].includes('lib/')
-        ? path.join(ENGINE, path.basename(match[2]))
-        : path.join(ROOT, 'scripts', 'hook-io.mjs')
-      const loaded = await import(target)
-      for (const symbol of symbols) {
-        assert.notEqual(
-          loaded[symbol],
-          undefined,
-          `${match[2]} must export ${symbol} (imported by ${path.basename(source)})`,
-        )
-        checked += 1
-      }
-    }
-  }
-  assert.ok(checked >= 15, `expected to verify several imports, got ${checked}`)
 })

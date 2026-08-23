@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -183,6 +184,7 @@ test('agent presets expose the allowed creation list', () => {
     'helios',
     'ares',
     'hephaestus',
+    'athena',
     'metis',
     'prometheus',
     'endymion',
@@ -190,6 +192,7 @@ test('agent presets expose the allowed creation list', () => {
     'heimdall',
     'thor',
     'tyr',
+    'bragi',
     'mimir',
     'mani',
     'pygmalion',
@@ -1032,52 +1035,24 @@ test('parseAgentPrompt: ask/to verb prefixes and the ask-noise boundary', () => 
   assert.equal(parseAgentPrompt(['ask', 'fix', '@types/node', 'please'], known), null)
 })
 
-test('the consent gate lives in the skill, and the extension registers no tools', async () => {
-  const src = await readFile(new URL('../../hosts/pi/index.ts', import.meta.url), 'utf8')
-  const skill = await readFile(
-    new URL('../../hosts/pi/skills/consensflow/SKILL.md', import.meta.url),
-    'utf8',
-  )
+test('pi has no private surface: no extension, no tools, no commands', async () => {
+  // pi used to ship an extension. It registered tools, then only commands,
+  // then only a status line — each removal for the same reason: a request that
+  // took a different shape in pi than in Claude Code or a cmux pane was three
+  // products wearing one name. pi reads the generated skill now, like the rest.
+  const root = new URL('../../', import.meta.url)
+  assert.equal(existsSync(new URL('hosts/pi', root)), false, 'no pi payload ships')
+  assert.equal(existsSync(new URL('hosts/claude', root)), false, 'nor a claude one')
 
-  // The gate's home is the skill — the same home it has in Claude Code, now
-  // that pi has no tool description to keep a second copy current in.
-  assert.match(skill, /MUST NOT apply|do NOT apply/i)
-  assert.match(skill, /without first (showing|surfacing)/i)
-  assert.doesNotMatch(src, /registerTool/, 'no private path pi has and the others do not')
-
-  // The personal name must not reappear anywhere in the extension.
-  assert.doesNotMatch(src, /Gabriel/)
-  // No hidden-workflow commands should be registered.
-  assert.doesNotMatch(src, /registerCommand\("(grill|spec-review|council|handoff)"/)
-  // Only /consensflow:* commands: no legacy /cf, /agents or per-agent commands.
-  assert.doesNotMatch(src, /name:\s*"cf"/)
-  assert.doesNotMatch(src, /name:\s*"agents"/)
-  assert.doesNotMatch(src, /registerAgentCommands/)
-  assert.match(src, /name:\s*"consensflow:cf"/)
+  // The gate it used to carry lives in the generator, the one place left.
+  const { generateSkill } = await import('../../src/skill.js')
+  const skill = generateSkill([{ name: 'zeus', harness: 'pi', model: 'fake', effort: 'high' }])
+  assert.match(skill, /Advice is free; acting is gated/)
+  assert.match(skill, /without the user's explicit approval/)
 })
 
-test('every lib symbol the extension imports is actually exported (boundary smoke)', async () => {
-  const src = await readFile(new URL('../../hosts/pi/index.ts', import.meta.url), 'utf8')
-  const importRe = /import\s+(?:type\s+)?\{([^}]+)\}\s+from\s+"(\.\.\/lib\/[^"]+)"/g
-  let checked = 0
-  for (const match of src.matchAll(importRe)) {
-    const symbols = match[1]
-      .split(',')
-      .map((s) =>
-        s
-          .trim()
-          .split(/\s+as\s+/)[0]
-          .trim(),
-      )
-      .filter(Boolean)
-    const loaded = await import(new URL(`../../hosts/pi/${match[2]}`, import.meta.url).href)
-    for (const symbol of symbols) {
-      assert.notEqual(loaded[symbol], undefined, `${match[2]} must export ${symbol}`)
-      checked += 1
-    }
-  }
-  assert.ok(checked >= 10, `expected to verify several lib imports, got ${checked}`)
-})
+// The extension/engine boundary test went with the extension: nothing imports
+// `hosts/lib` across a payload seam any more — `src/` imports it directly.
 
 test('image path safety: runner backstop throws and extractImageFromEvents handles failure/empty', () => {
   // The runner must never spawn a CLI for an image agent.

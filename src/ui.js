@@ -6,7 +6,6 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CATALOG, EFFORTS } from './catalog.js'
 import { detectHarnesses } from './harnesses.js'
-import { hostStatus } from './hosts.js'
 import { installSkill, skillsStatus, uninstallSkills } from './install.js'
 import {
   applyMode,
@@ -14,12 +13,15 @@ import {
   MODES,
   modeLabel,
   modeReport,
+  resetEverything,
+  resetPreview,
   syncCmuxSkills,
   turnOff,
 } from './mode.js'
 import {
   addAgent,
   agentDrift,
+  configRoot,
   editAgent,
   HARNESSES,
   listAgents,
@@ -29,7 +31,12 @@ import {
 } from './roster.js'
 import { agentCommand, generateSkill } from './skill.js'
 import { refreshInstalledSkill, retireSkillFromNativeHosts, skillTargets } from './sync.js'
-import { installTerminalCommand, removeTerminalCommand, terminalCommandStatus } from './terminal.js'
+import {
+  installTerminalCommand,
+  removeTerminalCommand,
+  terminalCommandStatus,
+  terminalRuntime,
+} from './terminal.js'
 
 /**
  * The minimal roster editor: one ephemeral loopback HTTP server, one inline
@@ -57,50 +64,40 @@ const VERSION = JSON.parse(
 const INTEGRATIONS = {
   claude: {
     title: 'Claude Code',
-    summary: 'Claude Code consults, and the agent gets your live conversation as context.',
+    summary: 'Only Claude Code gets the skill. Nothing else on this machine can consult.',
   },
   pi: {
     title: 'pi',
-    summary: 'pi consults, and the agent gets your live pi session as context.',
+    summary: 'Only pi gets the skill. Nothing else on this machine can consult.',
   },
   cmux: {
     title: 'cmux (pi, cc, codex, opencode)',
-    summary:
-      'Every coding harness can consult, through the generated skill, and each gets cmux’s pane-control skills. No conversation is shared.',
+    summary: 'Every coding harness gets the skill, and each also gets cmux’s pane-control skills.',
   },
 }
 
+/**
+ * One row per mode. Every mode installs the same generated skill and differs
+ * only in who gets it, so there is one thing to count and one way to say it.
+ */
 function integrations(env) {
   const mode = currentMode(env)
-  const hosts = Object.fromEntries(hostStatus(env).map((host) => [host.id, host]))
-  const owned = skillsStatus(env)
+  const carried = skillsStatus(env).filter((file) => file.source === 'consensflow').length
 
-  return MODES.map((id) => {
-    const host = hosts[id]
-    const generated = owned.filter((file) => file.source === 'consensflow')
-    return {
-      id,
-      title: INTEGRATIONS[id].title,
-      summary: INTEGRATIONS[id].summary,
-      active: mode === id,
-      files:
-        id === 'cmux' ? owned.filter((f) => f.source === 'consensflow').length : (host?.files ?? 0),
-      present:
-        id === 'cmux'
-          ? generated.length > 0
-          : (host?.installed ?? false) || (host?.present ?? false),
-      detail:
-        id === 'cmux'
-          ? generated.length > 0
-            ? `${generated.length} harnesses carry the skill`
-            : 'not installed'
-          : host?.installed === true
-            ? `installed by ConsensFlow${host.version ? ` (v${host.version})` : ''}`
-            : host?.present === true
-              ? `already present via ${host.via}`
-              : 'not installed',
-    }
-  })
+  return MODES.map((id) => ({
+    id,
+    title: INTEGRATIONS[id].title,
+    summary: INTEGRATIONS[id].summary,
+    active: mode === id,
+    files: mode === id ? carried : 0,
+    present: mode === id && carried > 0,
+    detail:
+      mode !== id
+        ? 'not the active mode'
+        : carried > 0
+          ? `${carried} harness${carried === 1 ? '' : 'es'} carry the skill`
+          : 'no agents yet — the first one installs it',
+  }))
 }
 
 /** Everything `cf doctor` and `cf skills status` would tell you, as data. */
@@ -124,6 +121,13 @@ function systemState(env) {
       skillsDir: harness.skillsDir,
     })),
     agents: listAgents(env).length,
+    // The two facts `cf doctor` prints that the panel used to omit. The runtime
+    // is the load-bearing one: move whatever provided it and the wiring stops.
+    home: configRoot(env),
+    runtime: terminalRuntime(env),
+    // What a reset would destroy, so the page's dialog and `cf reset`'s
+    // refusal quote the same two numbers.
+    reset: resetPreview(env),
     skills: {
       owned: files.length,
       drifted: files.filter((file) => file.state === 'drifted').length,
@@ -276,6 +280,21 @@ export async function startUiServer(env) {
         const outcome =
           body.remove === true ? removeTerminalCommand(env) : installTerminalCommand(env)
         return send(200, { ...outcome, system: systemState(env) })
+      }
+      if (request.method === 'POST' && url.pathname === '/api/reset') {
+        const body = JSON.parse((await readBody(request)) || '{}')
+        if (body.confirm !== true) {
+          return send(400, { error: 'confirm before resetting ConsensFlow' })
+        }
+        const outcome = resetEverything(env)
+        const { agents, runs } = outcome.removed
+        return send(200, {
+          ...outcome,
+          report: [
+            `Reset — ${agents} agent${agents === 1 ? '' : 's'}, ${runs} run${runs === 1 ? '' : 's'} and every installed file are gone`,
+          ],
+          system: systemState(env),
+        })
       }
       if (request.method === 'POST' && url.pathname === '/api/off') {
         const body = JSON.parse((await readBody(request)) || '{}')
@@ -521,6 +540,7 @@ const PAGE = (token) => `<!DOCTYPE html>
     <button id="update">Update skills</button>
     <button id="terminal"></button>
     <button id="off" class="danger">Turn ConsensFlow off</button>
+    <button id="reset" class="danger">Reset everything</button>
   </div>
   <p id="skills-note" class="note"></p>
 
@@ -755,7 +775,7 @@ function renderMode(system) {
 function harnessState(harness, mode) {
   if (mode === null) return 'nothing yet';
   if (mode === 'cmux') return 'consults, via the generated skill';
-  if (harness.id === mode) return 'consults, with your conversation as context';
+  if (harness.id === mode) return 'consults, via the generated skill';
   return 'nothing in ' + mode + ' mode';
 }
 
@@ -798,7 +818,17 @@ function renderSystem(system) {
   if (system.skills.missing) parts.push(system.skills.missing + ' missing');
   const skills = parts.length > 0 ? parts.join(' · ') : 'nothing yet';
 
-  for (const [label, value] of [['Harnesses', hosts], ['Installed', skills]]) {
+  const runtime = system.runtime === null
+    ? null
+    : system.runtime.exists
+      ? system.runtime.runtime
+      : system.runtime.runtime + ' — MISSING, reinstall from the app';
+
+  const rows = [['Harnesses', hosts], ['Installed', skills]];
+  if (runtime) rows.push(['Runtime', runtime]);
+  rows.push(['Home', system.home]);
+
+  for (const [label, value] of rows) {
     const dt = el('dt', null, label);
     const dd = el('dd');
     if (typeof value === 'string') dd.textContent = value;
@@ -840,12 +870,29 @@ document.querySelector('#catalog-filter').addEventListener('input', () => {
 document.querySelector('#update').onclick = () =>
   post('/api/skills/install', {}, 'Updating…');
 document.querySelector('#off').onclick = () => {
-  if (!confirm('Turn ConsensFlow off? Every file it installed is removed and no harness will consult.')) return;
+  if (!confirm('Turn ConsensFlow off? Every file it installed is removed and no harness will consult. Your agents are kept.')) return;
   post('/api/off', { confirm: true }, 'Turning off…');
+};
+document.querySelector('#reset').onclick = () => {
+  // The one button that destroys what "off" protects, so it names what is
+  // going and counts it. A roster is typed by hand; a run artifact — the
+  // packet, the transcript, a generated image — exists nowhere else.
+  const counts = LAST_SYSTEM === null ? { agents: 0, runs: 0 } : LAST_SYSTEM.reset;
+  const say = (n, noun) => n + ' ' + noun + (n === 1 ? '' : 's');
+  if (!confirm(
+    'Reset everything?\n\nThis removes ' + say(counts.agents, 'agent') + ' and '
+    + say(counts.runs, 'run') + ' (packets, transcripts, generated images), '
+    + 'and every file ConsensFlow installed — including skill files you have edited yourself '
+    + 'and the app\\'s own caches. The ConsensFlow.app bundle itself stays; remove it in Finder.'
+    + '\n\nThis cannot be undone.'
+  )) return;
+  post('/api/reset', { confirm: true }, 'Resetting…');
 };
 
 // The last roster payload, so filtering the catalog re-renders without a fetch.
 let LAST = null;
+// The last system payload, for the counts the reset dialog has to name.
+let LAST_SYSTEM = null;
 
 async function load() {
   const [data, system] = await Promise.all([
@@ -853,6 +900,7 @@ async function load() {
     (await fetch('/api/system', { headers })).json(),
   ]);
   LAST = data;
+  LAST_SYSTEM = system;
   renderRoster(data);
   renderCatalog(data);
   renderForm(data);

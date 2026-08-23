@@ -149,31 +149,42 @@ that's the price of the deeper path, and `cmux` mode is how you take it
 back. ConsensFlow only ever removes what it installed; an integration you
 put there another way is reported and left alone.
 
-## Host integrations
+## Scopes, not integrations
 
-Two harnesss can do more than run a one-shot command: they can hand the
-agent **your live conversation** as context. That deeper path ships as
-a payload per host, and this manager installs it — you never install them
-separately:
+`claude` and `pi` were once deeper integrations, each shipping a payload of
+its own that could hand an agent your live conversation. Nothing has stashed a
+conversation since 2026-08-22, so what remained was a second, worse copy of the
+skill — worse because it was written ahead of time and could not name the
+agents on your roster, and those names in the description are what make a
+harness reach for it.
+
+So there is one skill, generated from your roster, and the mode decides who
+gets it:
 
 ```sh
-consensflow install claude    # wires the Claude Code path through user config
-consensflow install pi        # drives pi's own `pi install`
-consensflow install all
-consensflow hosts             # what's installed where, at which commit
-consensflow uninstall claude  # removes exactly what it wrote
+consensflow use claude   # only Claude Code gets it
+consensflow use pi       # only pi gets it
+consensflow use cmux     # every detected harness, plus cmux's pane skills
+consensflow mode         # which one is active, and what it costs
+consensflow off          # take it all back; your agents are kept
+consensflow reset        # the clean slate — needs --yes; cannot be undone
 ```
 
-`install claude` puts the payload in `~/.consensflow/hosts/claude`
-(never inside Claude Code's own directories) and wires it up through
-documented user config: a skill, a `/consensflow` command, and hook entries
-merged into `settings.json` — your other settings and hooks are left alone,
-and the file is backed up before each write. `install pi` shells out to pi's
-supported CLI rather than editing pi's state by hand.
+The roster editor (`consensflow ui`) has both danger buttons. **Turn
+ConsensFlow off** removes every file it installed and keeps your agents and
+your run history. **Reset everything** is the clean slate: it removes those
+too — the roster, every run artifact (packets, transcripts, generated images),
+and skill files you have edited yourself — leaving the machine as if
+ConsensFlow had never been installed. It tells you how many agents and runs
+that is before you confirm, and it cannot be undone.
 
-Both payloads live in this repo (`hosts/claude`, `hosts/pi`) and share one
-engine (`hosts/lib`), so there is nothing to install from anywhere else and
-nothing to keep in sync.
+There is no separate thing to install, so there are no `install` / `uninstall`
+/ `hosts` verbs any more — `use` is the whole surface. A machine upgrading from
+the payload era has all of it taken back on the next run: the old skill, the
+`/consensflow` command, the payload directories, and a pi extension removed
+through pi's own CLI. Claude Code's `settings.json` is never written — a hook
+an older version left there is reported by `consensflow doctor` for you to
+remove.
 
 Every host reads the same agents file, so they always agree on who
 your agents are — and they don't stack up on one agent. Where a host

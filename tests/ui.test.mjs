@@ -237,7 +237,14 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
       assert.equal(typeof integration.present, 'boolean')
     }
     assert.match(byId.cmux.title, /cmux/)
-    assert.match(byId.claude.summary, /conversation/i)
+    // A mode is a scope, and the page says so. It used to promise Claude Code
+    // "your live conversation as context", which nothing has delivered since
+    // the session stashing was deleted.
+    assert.match(byId.claude.summary, /only claude code/i)
+    assert.match(byId.cmux.summary, /every coding harness/i)
+    for (const integration of system.integrations) {
+      assert.doesNotMatch(integration.summary, /conversation/i, 'no promise nothing keeps')
+    }
   })
 
   it('counts a host integration as installed, not just skill files', async () => {
@@ -404,5 +411,72 @@ exit 1
     const res = await api('/api/agents/zeus', { method: 'DELETE' })
     assert.equal(res.status, 204)
     assert.deepEqual(listAgents(t.env), [])
+  })
+})
+
+describe('the page can reset the machine, and says what that destroys', () => {
+  const t = tempEnv()
+  let server
+
+  before(async () => {
+    stubCli(t, 'claude')
+    server = await startUiServer(t.env)
+  })
+  after(async () => {
+    await server.close()
+    t.cleanup()
+  })
+
+  function api(path, options = {}) {
+    return fetch(`${server.url}${path}`, {
+      ...options,
+      headers: {
+        authorization: `Bearer ${server.token}`,
+        'content-type': 'application/json',
+        ...options.headers,
+      },
+    })
+  }
+
+  it('offers the reset as its own button, not a variant of off', async () => {
+    const page = await (await api('/')).text()
+
+    assert.match(page, /id="reset"/)
+    // The confirm has to name what only this button destroys, or it reads as
+    // a louder "off" and someone loses a roster they typed by hand.
+    assert.match(page, /cannot be undone/i)
+    assert.match(page, /run artifact/i)
+  })
+
+  it('refuses without a deliberate confirmation', async () => {
+    const refused = await api('/api/reset', { method: 'POST', body: JSON.stringify({}) })
+
+    assert.equal(refused.status, 400)
+    assert.match((await refused.json()).error, /confirm/)
+  })
+
+  it('removes everything and reports what it counted', async () => {
+    await api('/api/agents', {
+      method: 'POST',
+      body: JSON.stringify({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }),
+    })
+    await api('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'claude' }) })
+    assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')))
+
+    const done = await api('/api/reset', {
+      method: 'POST',
+      body: JSON.stringify({ confirm: true }),
+    })
+
+    assert.equal(done.status, 200)
+    const body = await done.json()
+    assert.equal(body.removed.agents, 1)
+    assert.match(body.report.join(' '), /1 agent/)
+    assert.equal(body.system.mode.current, null)
+    assert.equal(
+      existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')),
+      false,
+    )
+    assert.equal(existsSync(t.env.CONSENSFLOW_HOME), false, 'the whole root is gone')
   })
 })

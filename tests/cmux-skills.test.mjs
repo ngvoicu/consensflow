@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict'
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
-import { installCmuxSkills } from '../src/cmux-skills.js'
+import { cmuxCacheDir, installCmuxSkills } from '../src/cmux-skills.js'
 import { skillsStatus } from '../src/install.js'
 import { tempEnv } from './helpers.mjs'
 
 /**
- * git is PATH-shimmed: `clone` copies a local fixture tree, `rev-parse`
- * prints a fixed commit. No network, no real git history.
+ * git is PATH-shimmed: `clone` copies a local fixture tree and leaves a `.git`
+ * behind so the next run takes the cache path, `fetch`/`reset` re-copy it, and
+ * `rev-parse` prints a fixed commit. Every invocation is appended to a log so a
+ * test can assert which path was taken. No network, no real git history.
  */
 function stubGit(t, commit) {
   const fixture = join(t.root, 'cmux-fixture')
@@ -24,13 +26,21 @@ function stubGit(t, commit) {
     git,
     `#!/bin/sh
 PATH=/usr/bin:/bin
+echo "$*" >> "${join(t.root, 'git-calls.log')}"
+if [ "$1" = "-C" ]; then dir="$2"; shift 2; else dir=""; fi
 for last do :; done
-if [ "$1" = "clone" ]; then
-  mkdir -p "$last"
-  cp -R "${fixture}/." "$last/"
-  exit 0
-fi
-case "$*" in *rev-parse*) echo "${commit}"; exit 0 ;; esac
+case "$1" in
+  clone)
+    mkdir -p "$last"
+    cp -R "${fixture}/." "$last/"
+    mkdir -p "$last/.git"
+    exit 0 ;;
+  fetch) exit 0 ;;
+  reset)
+    cp -R "${fixture}/." "$dir/"
+    exit 0 ;;
+  rev-parse) echo "${commit}"; exit 0 ;;
+esac
 exit 1
 `,
   )
@@ -96,5 +106,49 @@ describe('cmux skills are fetched with git and owned like our own', () => {
     } finally {
       bare.cleanup()
     }
+  })
+})
+
+describe('the cmux checkout is a cache in the one root, not a temp directory', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+  stubGit(t, 'cache001')
+  stubCli(t, 'claude')
+
+  const calls = () =>
+    existsSync(join(t.root, 'git-calls.log'))
+      ? readFileSync(join(t.root, 'git-calls.log'), 'utf8')
+      : ''
+
+  it('keeps it under CONSENSFLOW_HOME, where everything else lives', () => {
+    assert.ok(
+      cmuxCacheDir(t.env).startsWith(t.env.CONSENSFLOW_HOME),
+      'a checkout outside the root is state ConsensFlow cannot account for',
+    )
+  })
+
+  it('clones once, then updates that checkout instead of cloning again', () => {
+    installCmuxSkills(t.env)
+    assert.match(calls(), /^clone /m, 'the first run has nothing to reuse')
+    assert.ok(existsSync(cmuxCacheDir(t.env)), 'and the checkout is kept')
+
+    rmSync(join(t.root, 'git-calls.log'), { force: true })
+    installCmuxSkills(t.env)
+
+    assert.match(calls(), /fetch/, 'the second run fetches')
+    assert.doesNotMatch(calls(), /^clone /m, 'and does not clone the whole repository again')
+  })
+
+  it('throws a checkout it cannot update away and clones a fresh one', () => {
+    // A cache left half-written — an interrupted run, a directory someone else
+    // touched. `fetch` fails against it, so it costs one slow run, not every
+    // run after it.
+    rmSync(join(cmuxCacheDir(t.env), '.git'), { recursive: true, force: true })
+    rmSync(join(t.root, 'git-calls.log'), { force: true })
+
+    const outcome = installCmuxSkills(t.env)
+
+    assert.equal(outcome.commit, 'cache001')
+    assert.match(calls(), /^clone /m, 'a checkout with no .git is replaced, not trusted')
   })
 })

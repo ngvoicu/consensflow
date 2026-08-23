@@ -101,6 +101,24 @@ export function terminalCommandStatus(env, options = {}) {
   return { installed: false, onPath: false }
 }
 
+/**
+ * The runtime the launcher names, and whether it is still there.
+ *
+ * Nothing ConsensFlow installs assumes Node on PATH, and after the host
+ * payloads went the launcher is the only installed file that names a runtime
+ * at all — absolutely, so a machine without Node still works. The cost is that
+ * moving or deleting whatever provided it (from the app, its own bundled Node)
+ * breaks every `cf` the skill teaches, so `cf doctor` says so rather than
+ * letting it fail one command at a time.
+ */
+export function terminalRuntime(env, options = {}) {
+  const status = terminalCommandStatus(env, options)
+  if (!status.installed) return null
+  const runtime = readFileSync(status.path, 'utf8').match(/"([^"]+)"\s+"[^"]*cf\.mjs"/)?.[1]
+  if (runtime === undefined) return null
+  return { runtime, exists: existsSync(runtime) }
+}
+
 export function installTerminalCommand(env, options = {}) {
   const candidates = options.candidates ?? defaultCandidates(env)
   // A user-owned directory is created rather than reported missing; a

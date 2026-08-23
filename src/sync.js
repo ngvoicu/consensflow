@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { detectHarnesses } from './harnesses.js'
 import { installSkill, uninstallSkills } from './install.js'
 import { loadManifest, saveManifest, sha256 } from './manifest.js'
-import { currentMode } from './mode.js'
+import { scopeTargets } from './mode.js'
 import { HARNESSES, listAgents, rosterPath } from './roster.js'
 import { generateSkill } from './skill.js'
 
@@ -20,22 +20,16 @@ import { generateSkill } from './skill.js'
  */
 
 /**
- * Where the generated skill belongs: every detected harness except the ones
- * that already ship their own ConsensFlow. `all` installs regardless.
+ * Where the generated skill belongs: exactly who the mode puts in scope.
+ *
+ * This used to answer "cmux mode, or nobody", which was right while `claude`
+ * and `pi` were integrations installing a hand-written skill of their own.
+ * They are scopes over this same skill now, so a roster edit in a host mode
+ * has to reach that one harness — otherwise choosing `claude` and adding the
+ * first agent leaves the machine with no skill anywhere.
  */
 export function skillTargets(env, { all = false } = {}) {
-  // The generated skill belongs to cmux mode and nowhere else.
-  //
-  // A host mode means one harness consults and the rest do not, so a roster edit
-  // must not quietly undo it. No mode at all means the same thing for a
-  // different reason: nobody has chosen a path yet, and installing into every
-  // harness found would put ConsensFlow in Claude Code without anyone choosing
-  // Claude Code. Choosing the path is what installs it.
-  const mode = currentMode(env)
-  if (mode !== 'cmux') return []
-
-  const harnesses = detectHarnesses(env)
-  return all ? harnesses : harnesses.filter((harness) => harness.native !== true)
+  return scopeTargets(env, { all })
 }
 
 /**

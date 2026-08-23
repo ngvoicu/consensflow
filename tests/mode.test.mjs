@@ -2,7 +2,15 @@ import assert from 'node:assert/strict'
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
-import { applyMode, currentMode, MODES, modeLabel, modeReport, turnOff } from '../src/mode.js'
+import {
+  applyMode,
+  currentMode,
+  MODES,
+  modeLabel,
+  modeReport,
+  resetEverything,
+  turnOff,
+} from '../src/mode.js'
 import { addAgent, removeAgent, rosterPath } from '../src/roster.js'
 import { refreshInstalledSkill } from '../src/sync.js'
 import { tempEnv } from './helpers.mjs'
@@ -46,11 +54,9 @@ function bundle(t) {
   const root = join(t.root, 'bundled')
   mkdirSync(join(root, 'lib'), { recursive: true })
   mkdirSync(join(root, 'claude', 'skills', 'consensflow'), { recursive: true })
-  mkdirSync(join(root, 'claude', 'commands'), { recursive: true })
   mkdirSync(join(root, 'pi'), { recursive: true })
   writeFileSync(join(root, 'lib', 'runners.js'), '// engine\n')
   writeFileSync(join(root, 'claude', 'skills', 'consensflow', 'SKILL.md'), 'cc skill\n')
-  writeFileSync(join(root, 'claude', 'commands', 'cf.md'), 'cc command\n')
   writeFileSync(join(root, 'claude', 'hooks.json'), JSON.stringify({ hooks: {} }))
   writeFileSync(join(root, 'pi', 'index.ts'), '// pi\n')
   return root
@@ -93,9 +99,11 @@ describe('the machine runs exactly one ConsensFlow path', () => {
     applyMode('claude', t.env, { bundled })
 
     assert.equal(currentMode(t.env), 'claude')
-    // The Claude Code payload is in place …
-    assert.ok(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts', 'lib', 'runners.js')))
-    assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'commands', 'consensflow.md')))
+    // Claude Code has the generated skill — the same one every mode installs …
+    assert.ok(existsSync(generated(t.env.CLAUDE_CONFIG_DIR)))
+    // … and nothing beside it: no payload, no command, no hook …
+    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts')), false)
+    assert.equal(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'commands', 'consensflow.md')), false)
     // … and nothing else has a ConsensFlow path any more.
     assert.equal(existsSync(generated(t.env.CODEX_HOME)), false)
     assert.equal(existsSync(generated(join(t.env.XDG_CONFIG_HOME, 'opencode'))), false)
@@ -109,13 +117,15 @@ describe('the machine runs exactly one ConsensFlow path', () => {
     assert.match(report.join('\n'), /no ConsensFlow|nothing/i)
   })
 
-  it('switching to pi removes the Claude Code wiring it installed', () => {
+  it('switching to pi takes the skill back from Claude Code and gives it to pi', () => {
     applyMode('pi', t.env, { bundled })
 
     assert.equal(currentMode(t.env), 'pi')
+    // A mode is a scope: the same skill, a different set of harnesses.
+    assert.ok(existsSync(generated(join(t.env.HOME, '.pi', 'harness'))))
+    assert.equal(existsSync(generated(t.env.CLAUDE_CONFIG_DIR)), false, 'claude gives it back')
     assert.equal(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'commands', 'consensflow.md')), false)
-    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts', 'claude')), false)
-    assert.ok(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts', 'pi', 'index.ts')))
+    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts')), false, 'no payloads anywhere')
   })
 
   it('going back to cmux mode removes the pi payload again', () => {
@@ -137,6 +147,39 @@ describe('the machine runs exactly one ConsensFlow path', () => {
     assert.equal(existsSync(generated(t.env.CODEX_HOME)), false, 'codex stays out in claude mode')
     removeAgent('apollo', t.env)
     applyMode('cmux', t.env, { bundled })
+  })
+
+  it('the first agent in a host mode installs the skill for that harness', () => {
+    // A scope decides WHO gets the skill, not WHETHER anyone does. This path
+    // returned early for every host mode while `claude` and `pi` installed a
+    // hand-written skill through a payload of their own — so once they became
+    // scopes, choosing `claude` and adding the first agent left the machine
+    // with ConsensFlow on and no skill anywhere.
+    const fresh = tempEnv()
+    try {
+      stubCli(fresh, 'claude')
+      stubCli(fresh, 'codex')
+      applyMode('claude', fresh.env, { bundled })
+      assert.equal(
+        existsSync(generated(fresh.env.CLAUDE_CONFIG_DIR)),
+        false,
+        'an empty roster installs nothing — there is no skill to generate yet',
+      )
+
+      addAgent({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }, fresh.env)
+      refreshInstalledSkill(fresh.env)
+
+      assert.ok(existsSync(generated(fresh.env.CLAUDE_CONFIG_DIR)), 'the chosen harness gets it')
+      assert.equal(existsSync(generated(fresh.env.CODEX_HOME)), false, 'and nobody else does')
+
+      // And every change after regenerates it, so the description keeps naming
+      // the whole roster — which is what makes a harness reach for the skill.
+      addAgent({ name: 'gaia', harness: 'codex', model: 'gpt-5.6-terra' }, fresh.env)
+      refreshInstalledSkill(fresh.env)
+      assert.match(readFileSync(generated(fresh.env.CLAUDE_CONFIG_DIR), 'utf8'), /gaia/)
+    } finally {
+      fresh.cleanup()
+    }
   })
 
   it('installs nothing until a mode is chosen', () => {
@@ -273,5 +316,89 @@ describe('the machine runs exactly one ConsensFlow path', () => {
 
   it('refuses a mode it does not have, naming the ones it does', () => {
     assert.throws(() => applyMode('emacs', t.env, { bundled }), /claude, pi, cmux/)
+  })
+})
+
+describe('reset leaves the machine as if ConsensFlow had never been installed', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+  const bundled = bundle(t)
+  const generated = (dir) => join(dir, 'skills', 'consensflow', 'SKILL.md')
+
+  it('removes what off keeps: the roster and every run artifact', () => {
+    stubCli(t, 'claude')
+    addAgent({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }, t.env)
+    applyMode('claude', t.env, { bundled })
+    assert.ok(existsSync(generated(t.env.CLAUDE_CONFIG_DIR)), 'installed first')
+
+    // A run artifact, of the kind that exists nowhere else.
+    const runDir = join(t.env.CONSENSFLOW_HOME, 'workspaces', 'proj-abc', 'runs', 'ask-1')
+    mkdirSync(runDir, { recursive: true })
+    writeFileSync(join(runDir, 'packet.md'), '# ConsensFlow Packet\n')
+
+    const outcome = resetEverything(t.env)
+
+    assert.equal(outcome.removed.agents, 1, 'it counts what it destroyed')
+    assert.equal(outcome.removed.runs, 1)
+    assert.equal(existsSync(t.env.CONSENSFLOW_HOME), false, 'the whole root is gone')
+    assert.equal(existsSync(generated(t.env.CLAUDE_CONFIG_DIR)), false, 'and the skill with it')
+    assert.equal(currentMode(t.env), null, 'no mode survives')
+  })
+
+  it('off keeps the roster; reset is the only thing that does not', () => {
+    stubCli(t, 'claude')
+    addAgent({ name: 'apollo', harness: 'claude', model: 'claude-opus-5' }, t.env)
+    applyMode('claude', t.env, { bundled })
+
+    turnOff(t.env)
+    assert.ok(existsSync(rosterPath(t.env)), "off is not a reset — agents are the user's")
+
+    resetEverything(t.env)
+    assert.equal(existsSync(rosterPath(t.env)), false, 'reset is')
+  })
+
+  it('takes a skill the user edited too, which off refuses to', () => {
+    stubCli(t, 'claude')
+    addAgent({ name: 'hermes', harness: 'claude', model: 'claude-opus-5' }, t.env)
+    applyMode('claude', t.env, { bundled })
+    writeFileSync(generated(t.env.CLAUDE_CONFIG_DIR), 'my own notes on top of the skill\n')
+
+    // Drift is sacred so an install never clobbers an edit by accident. A
+    // reset is not an accident — it is the operation that leaves nothing.
+    resetEverything(t.env)
+
+    assert.equal(existsSync(generated(t.env.CLAUDE_CONFIG_DIR)), false)
+  })
+
+  it("takes the desktop app's own data, but never the app bundle", () => {
+    // These carry ConsensFlow's bundle identifier, so nothing else creates
+    // them — a reset that left them would be leaving something behind. The
+    // .app is deliberately not in that set: an application deleting its own
+    // bundle mid-run is a bad idea, and on macOS that is a Finder gesture.
+    const appData = join(t.env.HOME, 'Library', 'Caches', 'dev.ngvoicu.consensflow')
+    const webkit = join(t.env.HOME, 'Library', 'WebKit', 'dev.ngvoicu.consensflow')
+    const bundle = join(t.env.HOME, 'Applications', 'ConsensFlow.app')
+    for (const dir of [appData, webkit, bundle]) mkdirSync(dir, { recursive: true })
+    writeFileSync(join(appData, 'cached.bin'), 'webview cache\n')
+
+    const outcome = resetEverything(t.env)
+
+    assert.equal(existsSync(appData), false, 'the app cache goes')
+    assert.equal(existsSync(webkit), false, 'and its webview data')
+    assert.ok(existsSync(bundle), 'the bundle itself is not ours to delete')
+    assert.ok(
+      outcome.changes.some((change) => change.path === appData),
+      'and it says so, rather than removing it silently',
+    )
+  })
+
+  it('survives a machine with nothing installed', () => {
+    const fresh = tempEnv()
+    try {
+      assert.doesNotThrow(() => resetEverything(fresh.env))
+      assert.deepEqual(resetEverything(fresh.env).removed, { agents: 0, runs: 0 })
+    } finally {
+      fresh.cleanup()
+    }
   })
 })
