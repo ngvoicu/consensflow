@@ -48,16 +48,27 @@ export function generateSkill(agents, options = {}) {
   const names = supported.map((p) => p.name).join(', ')
   const inCmux = options.mode === 'cmux'
 
+  // The description is the only part of this file a lead reads before deciding
+  // whether to open the rest. In cmux mode it must not sound complete: a lead
+  // that read "run one-shot in the current directory" concluded there was
+  // nothing further to learn and ran the consult in its own pane (2026-08-24).
+  const shape = inCmux
+    ? 'working in the current directory. A consult here is a named conversation that runs in its own cmux pane, so read this skill before starting one — the exact commands are in it.'
+    : 'run one-shot in the current directory.'
+
   return `---
 name: consensflow
-description: Consult one of the user's named AI agents — ${names} — each a real coding-harness CLI (claude, codex, pi, opencode) run one-shot in the current directory. Use whenever the user says "ask <name> …", "what does <name> think", "consult <name>", "get a second opinion from <name>", or names any agent — and also when you yourself want an independent second opinion on a risky or debatable decision.
+description: Consult one of the user's named AI agents — ${names} — each a real coding-harness CLI (claude, codex, pi, opencode) ${shape} Use whenever the user says "ask <name> …", "what does <name> think", "consult <name>", "get a second opinion from <name>", or names any agent — and also when you yourself want an independent second opinion on a risky or debatable decision.
 ---
 
 # ConsensFlow agents
 
 The user keeps a roster of named AI agents. Each one is a model at a fixed
-effort, run one-shot by its own harness (claude, codex, pi, opencode) — a
-separately installed CLI. Consulting an agent means running its command below
+${
+  inCmux
+    ? 'effort, run by its own harness (claude, codex, pi, opencode) — a separately\ninstalled CLI.'
+    : 'effort, run one-shot by its own harness (claude, codex, pi, opencode) — a\nseparately installed CLI.'
+} Consulting an agent means running its command below
 with your question as the final argument. It runs in **your current working
 directory** and reads the project's files itself, so you need not paste file
 contents — but it cannot see this conversation, so the question has to carry
@@ -89,20 +100,18 @@ question, then decide or ask the user.
    a second opinion).
 2. Compose the question: one or two sentences of task context, then the
    concrete question. Name specific files with relative paths when relevant.
-3. Spawn it from the project directory:
+3. ${
+    inCmux
+      ? `**Open a pane for that conversation and send the consult there** — never
+   run it in this one. The three commands are written out under "One pane per
+   conversation" below; do not go exploring cmux's CLI.`
+      : `Spawn it from the project directory:
 
    \`\`\`bash
    cf run @<name> "<task>"
-   \`\`\`
-${
-  inCmux
-    ? `
-   **In that conversation's pane, always** — never in this one. See "One pane
-   per conversation" below for the three commands that open it; do not go
-   exploring cmux's CLI, the recipe is written out for you.
-`
-    : ''
-}
+   \`\`\``
+  }
+
    Flags, all optional and combinable:
 
    - \`--brief "<what this run is for>"\` — what you want from THIS spawn:
@@ -159,6 +168,14 @@ A consult here is a **conversation**, not a one-shot. The first \`cf run\` to an
 agent starts one and prints its name — \`ember-ridge\`, \`amber-moss\`. Ask that
 agent again and it continues: the harness resumes its own session, so the agent
 remembers what you already discussed and the provider's cache is still warm.
+
+**A conversation belongs to the session that started it.** You are a new
+session, so your first consult with an agent opens a new one — you never
+inherit what another lead left in this directory, however recent it looks.
+Every run tells you which conversation it is in and whether it just started
+it, so you always have the name to hand. Conversations someone else started
+are still reachable when you mean them: \`cf sessions\` lists what is here, and
+\`--session <name>\` continues one by name.
 
 Give each conversation its own pane. Three commands, in this order — you do not
 need to explore cmux's CLI, and you must not run the consult in this pane:

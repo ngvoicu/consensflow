@@ -81,8 +81,13 @@ $ cf run @hyperion "what would you change about the timeout?"
 One agent can hold several conversations at once, which is why they have names:
 *"ask ares in bubble-sky about the migration"*. Each gets its own pane.
 
+**A conversation belongs to the session that started it.** Open a new coding
+session and its first consult starts a fresh conversation — it never picks up
+what the last one left in that directory, however recent. Ones somebody else
+started stay reachable by name, which is what `--session` is for.
+
 ```sh
-cf run @name "<task>"                  # continues that agent's conversation here
+cf run @name "<task>"                  # continues THIS session's conversation with it
 cf run @name "<task>" --new            # start a fresh one, print its name
 cf run @name "<task>" --session <name> # aim at a specific one
 cf sessions                            # what is alive in this folder

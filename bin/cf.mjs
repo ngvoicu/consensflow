@@ -19,7 +19,7 @@ import { renderImageRun, runImageAgent } from '../hosts/lib/image-run.js'
 import { createPacket } from '../hosts/lib/packets.js'
 import { interactiveResume, runAgent } from '../hosts/lib/runners.js'
 import { runsRoot } from '../hosts/lib/state.js'
-import { loadThreads, newSessionName, saveThread } from '../hosts/lib/threads.js'
+import { leadId, loadThreads, newSessionName, saveThread } from '../hosts/lib/threads.js'
 import { renderEvent } from '../hosts/lib/transcript-events.js'
 import { CATALOG, catalogEntry } from '../src/catalog.js'
 import { detectHarnesses } from '../src/harnesses.js'
@@ -228,13 +228,31 @@ function resolveAdd(name, values) {
 /**
  * Which conversation a consult belongs to, and what to hand the runner.
  *
- * Shared by `cf run` and `cf chat` so the rule lives once: a named session, a
- * deliberately new one, or the agent's most recent conversation here. Returns
- * `undefined` for `name` when threading is off.
+ * The one rule for `cf run` and `cf chat` both — it used to be written twice,
+ * and only one copy learned anything. A named session, a deliberately new one,
+ * or this lead's own conversation with that agent. Returns `undefined` for
+ * `name` when threading is off.
+ *
+ * `join` is what separates spawning from joining. A consult (`cf run`) takes
+ * only what this lead started: standing in a directory where somebody else
+ * left a conversation is not a reason to continue it, which is exactly how
+ * "ask hyperion for a joke" became turn 4 of an unrelated one. Joining a
+ * conversation you can see (`cf chat`, `cf last`, `cf attach`) falls back to
+ * the agent's most recent one whoever started it — the user typing in an
+ * agent's pane is a different lead by every measure we have, and refusing them
+ * their own conversation would be absurd.
+ *
+ * Naming a session is never scoped: explicit is the user saying which one they
+ * mean, and no rule of ours overrules that.
  */
-async function resolveConversation(agentRow, { wantsThread, session, fresh }) {
+async function resolveConversation(agentRow, { wantsThread, session, fresh, join = false }) {
   if (!wantsThread) return { threads: {}, name: undefined, record: undefined }
   const threads = await loadThreads(cwdOf())
+  const nextName = () =>
+    newSessionName(
+      Object.keys(threads),
+      listAgents(env).map((a) => a.name),
+    )
   if (session !== undefined) {
     if (threads[session] === undefined) {
       const known = Object.keys(threads)
@@ -247,25 +265,18 @@ async function resolveConversation(agentRow, { wantsThread, session, fresh }) {
     }
     return { threads, name: session, record: threads[session] }
   }
-  if (fresh) {
-    const name = newSessionName(
-      Object.keys(threads),
-      listAgents(env).map((a) => a.name),
-    )
-    return { threads, name, record: undefined }
-  }
-  const mine = Object.entries(threads)
+  if (fresh) return { threads, name: nextName(), record: undefined }
+
+  const lead = leadId(env)
+  const theirs = Object.entries(threads)
     .filter(([, row]) => row.agent === agentRow.id)
     .sort((a, b) => String(b[1].lastRunAt ?? '').localeCompare(String(a[1].lastRunAt ?? '')))
-  if (mine.length > 0) return { threads, name: mine[0][0], record: mine[0][1] }
-  return {
-    threads,
-    name: newSessionName(
-      Object.keys(threads),
-      listAgents(env).map((a) => a.name),
-    ),
-    record: undefined,
-  }
+  // A lead we cannot name is nobody, not everybody: `lead === null` matches no
+  // row, so two unidentified shells never share a conversation by accident.
+  const mine = lead === null ? [] : theirs.filter(([, row]) => row.lead === lead)
+  const picked = mine[0] ?? (join ? theirs[0] : undefined)
+  if (picked !== undefined) return { threads, name: picked[0], record: picked[1] }
+  return { threads, name: nextName(), record: undefined }
 }
 
 /** What to pass runAgent: an object means "this belongs to a conversation". */
@@ -280,6 +291,11 @@ async function recordTurn(name, agentRow, record, result) {
   await saveThread(cwdOf(), name, {
     agent: agentRow.id,
     kind: agentRow.kind,
+    // Whoever started it keeps it. A later turn can come from the user typing
+    // in the agent's own pane — a different lead by every measure we have —
+    // and rewriting the owner there would take the conversation away from the
+    // lead that is still holding it.
+    lead: record === undefined ? leadId(env) : (record.lead ?? null),
     sessionId: result.sessionId ?? null,
     runs: (record?.runs ?? 0) + 1,
     createdAt: record?.createdAt ?? now,
@@ -371,44 +387,31 @@ async function runVerb(rest) {
         values.new === true ||
         currentMode(env) === 'cmux'
 
-  const existing = wantsThread ? await loadThreads(cwd) : {}
-  let sessionName
-  if (wantsThread) {
-    if (values.session !== undefined) {
-      sessionName = values.session
-      if (existing[sessionName] === undefined) {
-        const known = Object.keys(existing)
-        fail(
-          known.length === 0
-            ? `no conversation named ${JSON.stringify(sessionName)} here — omit --session to start one`
-            : `no conversation named ${JSON.stringify(sessionName)} here; you have: ${known.join(', ')}`,
-        )
-        return
-      }
-    } else if (values.new === true) {
-      sessionName = newSessionName(
-        Object.keys(existing),
-        listAgents(env).map((a) => a.name),
-      )
-    } else {
-      // The agent's current conversation in this workspace: the most recently
-      // used one that belongs to it, or a new one if it has none.
-      const mine = Object.entries(existing)
-        .filter(([, row2]) => row2.agent === row.id)
-        .sort((a, b) => String(b[1].lastRunAt ?? '').localeCompare(String(a[1].lastRunAt ?? '')))
-      sessionName =
-        mine.length > 0
-          ? mine[0][0]
-          : newSessionName(
-              Object.keys(existing),
-              listAgents(env).map((a) => a.name),
-            )
-    }
+  const resolved = await resolveConversation(row, {
+    wantsThread,
+    session: values.session,
+    fresh: values.new === true,
+  })
+  if (resolved.error !== undefined) {
+    fail(resolved.error)
+    return
   }
-
-  const record = sessionName === undefined ? undefined : existing[sessionName]
+  const sessionName = resolved.name
+  const record = resolved.record
   const started = record === undefined
-  if (wantsThread && started) out(`conversation: ${sessionName}`)
+
+  // Say which conversation this is on EVERY turn, not only the first. The
+  // lead needs the name to read the answer back (`cf last`), to catch up on
+  // turns the user took (`cf catchup`) and to find the pane again — and being
+  // told it is continuing is what lets it notice the subject has moved on far
+  // enough to want `--new`. `--json` is a machine's channel, so it stays clean.
+  if (wantsThread && !values.json) {
+    out(
+      started
+        ? `conversation: ${sessionName} (new)`
+        : `conversation: ${sessionName} (continuing, turn ${(record.runs ?? 0) + 1})`,
+    )
+  }
 
   const packet = await createPacket({
     cwd,
@@ -482,18 +485,7 @@ async function runVerb(rest) {
     })
   }
 
-  if (wantsThread && sessionName !== undefined) {
-    const now = new Date().toISOString()
-    await saveThread(cwd, sessionName, {
-      agent: row.id,
-      kind: row.kind,
-      sessionId: result.sessionId ?? null,
-      runs: (record?.runs ?? 0) + 1,
-      createdAt: record?.createdAt ?? now,
-      lastRunAt: now,
-      lastRunId: result.runId,
-    })
-  }
+  await recordTurn(sessionName, row, record, result)
   if (inDelta) process.stdout.write('\n')
 
   // `--attach` leaves the pane as a live agent window: the lead still gets the
@@ -631,6 +623,10 @@ async function chatVerb(rest) {
     wantsThread: true,
     session: asked.startsWith('@') ? undefined : asked,
     fresh: values.new === true,
+    // Typing into an agent's own pane is a join, not a spawn: the user is a
+    // different lead by every measure we have, and `cf chat @hyperion` there
+    // must reach the conversation in front of them, not open a second one.
+    join: true,
   })
   if (resolved.error !== undefined) {
     fail(resolved.error)

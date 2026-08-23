@@ -572,8 +572,9 @@ const PAGE = (token) => `<!DOCTYPE html>
   They are here so you can drive it yourself when you want to.</p>
   <dl class="cmds">
     <dt><code>cf run @name "&lt;task&gt;"</code></dt>
-    <dd>One consult. In cmux mode it continues that agent's current conversation,
-        so a follow-up remembers the last one.</dd>
+    <dd>One consult. In cmux mode it continues the conversation THIS coding
+        session has with that agent, so a follow-up remembers the last one.
+        A different session starts its own rather than inheriting yours.</dd>
     <dt><code>cf run @name "&lt;task&gt;" --new</code></dt>
     <dd>Start a fresh conversation instead, and print its name.</dd>
     <dt><code>cf sessions</code></dt>

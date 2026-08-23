@@ -197,3 +197,61 @@ describe('cmux mode teaches conversations, one pane each', () => {
     }
   })
 })
+
+describe('the description is all a lead reads before it decides to look inside', () => {
+  const description = (skill) => skill.slice(0, skill.indexOf('\n---\n'))
+  const roster = ROSTER
+
+  it('does not call a cmux consult one-shot, because it is not one', () => {
+    // The transcript that started this (2026-08-24): a lead read "run one-shot
+    // in the current directory", concluded there was nothing further to learn,
+    // and ran the consult in its own pane without ever opening the body. The
+    // description is the only text it sees before that decision, so a sentence
+    // that sounds complete is a sentence that keeps the body shut.
+    const d = description(generateSkill(roster, { mode: 'cmux' }))
+
+    assert.doesNotMatch(d, /one-shot/i)
+    assert.match(d, /conversation/i)
+    assert.match(d, /pane/i)
+  })
+
+  it('pulls the lead into the body rather than standing in for it', () => {
+    const d = description(generateSkill(roster, { mode: 'cmux' }))
+
+    assert.match(d, /this skill/i, 'it says to read the skill')
+    // A runnable command here is an invitation to skip everything after it.
+    assert.doesNotMatch(d, /cf run/)
+  })
+
+  it('still says one-shot in the host modes, where it is true', () => {
+    for (const mode of ['claude', 'pi']) {
+      const d = description(generateSkill(roster, { mode }))
+      assert.match(d, /one-shot/i, `${mode} really is one-shot`)
+      assert.doesNotMatch(d, /pane/i)
+    }
+  })
+
+  it('does not tell a cmux lead in the body either that its run is one-shot', () => {
+    const cmux = generateSkill(roster, { mode: 'cmux' })
+
+    assert.doesNotMatch(cmux, /run one-shot by its own harness/)
+  })
+
+  it('gives a cmux lead no bare consult command to copy out of the steps', () => {
+    // Step 3 used to be a fenced `cf run @<name> "<task>"` with the pane rule
+    // as prose underneath it. A lead skimming for the thing to run copies the
+    // fence and never reaches the sentence.
+    const cmux = generateSkill(roster, { mode: 'cmux' })
+
+    const fenced = /```bash\n\s*cf run @<name> "<task>"\n\s*```/
+    assert.doesNotMatch(cmux, fenced)
+    // The host modes keep it: there is no pane to send it to.
+    assert.match(generateSkill(roster, { mode: 'claude' }), fenced)
+  })
+
+  it('tells a cmux lead that the conversations here are not all its own', () => {
+    const cmux = generateSkill(roster, { mode: 'cmux' })
+
+    assert.match(cmux, /belongs to the session that started it/i)
+  })
+})

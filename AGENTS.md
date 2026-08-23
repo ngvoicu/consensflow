@@ -20,7 +20,7 @@ v2 engine that had one was retired and deleted 2026-08-19).
 | `bin/cf.mjs` | All verbs: setup, use, run, mode, off, reset, agent …, skills …, ui, doctor. `reset` refuses without `--yes` and prints what it would destroy — the refusal is the preview. Setup never seeds agents; a machine that ran cc/pi already has the shared roster, so setup installs the skill straight from it. Every roster mutation installs-or-regenerates the skill, for whoever the mode puts in scope (`skillTargets` → `scopeTargets`) — the first add installs it, the rest regenerate it |
 | `src/roster.js` | Roster = the SHARED v1 file `~/.consensflow/agents.json` (cc + pi read/write it too): v1-schema-faithful mapping (kind↔runtime, thinking/effort↔effort, toolsPolicy↔permission), unknown fields preserved, unsupported kinds listed+marked, never dropped. **One root, one meaning**: roster, state and workspaces all live in `~/.consensflow`, or under `CONSENSFLOW_HOME` when it is set. The state used to sit under XDG while the roster sat here, and the variable meant a different directory to each half — a machine set up that way is moved into the one root on first run (`migrateStateRoot`) |
 | `src/catalog.js` | A **view over `hosts/lib/presets.js`** — one catalog, not two (they disagreed on five names until 2026-08-21) — plus each CLI's real effort levels. All 48 presets are offered, grouped by harness (claude 8, codex 4, pi 18, opencode 17, image 1). `cf agent add <name>` resolves through it and records `preset` on the row, which is what makes `cf agent sync` and the UI's Update button possible |
-| `src/skill.js` | SKILL.md generation — the prose IS the product. One command for every agent (`cf run @name "<task>"`), so the table says who each agent is rather than what to type |
+| `src/skill.js` | SKILL.md generation — the prose IS the product. One command for every agent (`cf run @name "<task>"`), so the table says who each agent is rather than what to type. The front-matter `description` is mode-aware, because it is the only part a lead reads before deciding whether to open the rest |
 | `src/harnesses.js` | Harness detection (CLI on PATH) + per-harness skills dir (honours `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`) |
 | `src/terminal.js` | The `cf`/`consensflow` launcher on PATH, in **every** mode — the skill teaches `cf run`, so it is part of the path, not a cmux extra. It is also the only installed file that names a runtime absolutely, which is what `terminalRuntime` reads for `cf doctor` |
 | `src/manifest.js` + `src/install.js` | Hash-manifest ownership: install/update/status/uninstall; drift is sacred |
@@ -37,7 +37,7 @@ v2 engine that had one was retired and deleted 2026-08-19).
 |---|---|
 | `runners.js` | `buildRunnerInvocation` (per-harness argv, one-shot vs conversation), `runAgent` (spawn, stream, capture the session id, write the run dir), `extractSessionId`, `interactiveResume` (the harness's OWN window — `codex resume`, not `codex exec resume`), and the unconditional `CMUX_SOCKET*` strip |
 | `packets.js` | The packet. No persona, ever. `continuing` drops the scene-setting for a follow-up; `conversational` invites the agent to ask rather than guess |
-| `threads.js` | Named conversations per workspace (`threads.json`), and the two-word name generator whose vocabulary is deliberately not mythological so a session can never be mistaken for an agent |
+| `threads.js` | Named conversations per workspace (`threads.json`), the two-word name generator whose vocabulary is deliberately not mythological so a session can never be mistaken for an agent, and `leadId` — who a conversation belongs to, read from the environment and never from `process.env` directly |
 | `harness-transcript.js` | Reads each harness's OWN session store so a conversation the user took over is still visible. Read-only; empty rather than throwing when a layout moves |
 | `state.js` | The one root, workspace keys, run dirs, `writeJsonAtomic` (shared, one copy) |
 | `transcript.js` + `transcript-events.js` | Normalising four engines' event shapes into one vocabulary |
@@ -118,6 +118,33 @@ keep in step — the manager is the only caller.
   environment's own injected `<…>` blocks and unwraps our packet to the
   question inside, because a transcript should show what a person would say was
   said. The screen is never read: it is a picture, not the conversation.
+
+- **A conversation belongs to the lead that started it.** Continuing only
+  helps when the one continuing is the one who was there. "The agent's most
+  recent conversation in this directory" was everybody's, so a brand-new
+  Claude Code session asking for a joke became turn 4 of an unrelated one
+  (live, 2026-08-24). Every row now records a `lead`, and a consult takes only
+  its own. `leadId(env)` reads it from the environment: the harness's own
+  session id first (`CLAUDE_CODE_SESSION_ID`), then the window
+  (`CMUX_SURFACE_ID`, `ITERM_SESSION_ID`, `TERM_SESSION_ID`) — the harness id
+  wins because a new session in the SAME pane is a new lead and the pane id
+  would not have moved. A lead it cannot name is `null`, which matches no row:
+  unidentified is nobody, never everybody, so being wrong costs one fresh
+  conversation instead of handing over a stranger's. Rows written before this
+  carry no `lead` and are never adopted — reachable by name, owned by nobody.
+  **Spawning is scoped, joining is not**: `cf chat`, `cf last`, `cf catchup`
+  and bare `cf attach` fall back to the agent's most recent conversation
+  whoever started it, because the user typing in an agent's pane is a different
+  lead by every measure we have and refusing them their own conversation would
+  be absurd. `--session <name>` is never scoped either: explicit is the user
+  saying which one they mean. `resolveConversation` is the single rule — `cf
+  run` carried a second copy of it that never learned anything, which is how
+  one path could change and the other not.
+
+- **Every threaded run says which conversation it is in**, not only the run
+  that starts one. The name is what `cf last`, `cf catchup` and finding the
+  pane again all need, and `(continuing, turn N)` is what lets a lead notice
+  the subject has moved far enough to want `--new`. `--json` stays clean.
 
 - **One spawn verb, three modes.** `cf run @name "<task>"` builds the packet,
   applies the billing guards and streams the run, whichever harness is behind

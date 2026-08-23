@@ -624,18 +624,23 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"answered"}
   }
 
   const argv = (log) => (existsSync(log) ? readFileSync(log, 'utf8') : '')
-  const threads = () =>
-    JSON.parse(
-      readFileSync(
-        join(
-          t.env.CONSENSFLOW_HOME,
-          'workspaces',
-          readdirSync(join(t.env.CONSENSFLOW_HOME, 'workspaces'))[0],
-          'threads.json',
-        ),
-        'utf8',
-      ),
+  const threadsFile = () =>
+    join(
+      t.env.CONSENSFLOW_HOME,
+      'workspaces',
+      readdirSync(join(t.env.CONSENSFLOW_HOME, 'workspaces'))[0],
+      'threads.json',
     )
+  const threads = () => JSON.parse(readFileSync(threadsFile(), 'utf8'))
+
+  /** A consult always comes from some lead session; these tests say which. */
+  const asLead = (id) => ({ ...t.env, CLAUDE_CODE_SESSION_ID: id })
+  const conversationIn = (text) => /conversation: ([a-z]+-[a-z]+)/.exec(text)?.[1]
+  const stripLeads = () => {
+    const all = threads()
+    for (const row of Object.values(all)) delete row.lead
+    writeFileSync(threadsFile(), JSON.stringify(all, null, 2))
+  }
 
   it('names a new conversation on the first run and resumes it on the second', async () => {
     stubCli(t, 'claude')
@@ -643,7 +648,7 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"answered"}
     await cf(['agent', 'add', 'hyperion'], t.env)
     await cf(['use', 'cmux'], t.env)
 
-    const first = await cf(['run', '@hyperion', 'hello', '--thread'], t.env)
+    const first = await cf(['run', '@hyperion', 'hello', '--thread'], asLead('lead-first'))
     assert.equal(first.code, 0, first.stderr)
     const names = Object.keys(threads())
     assert.equal(names.length, 1, 'one conversation exists')
@@ -651,7 +656,7 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"answered"}
     assert.match(first.stdout, new RegExp(names[0]), 'which the run tells you')
 
     rmSync(log, { force: true })
-    const second = await cf(['run', '@hyperion', 'again', '--thread'], t.env)
+    const second = await cf(['run', '@hyperion', 'again', '--thread'], asLead('lead-first'))
 
     assert.equal(second.code, 0, second.stderr)
     assert.match(argv(log), /exec resume thread-alpha/, 'the child was told to continue')
@@ -714,6 +719,89 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"answered"}
     assert.match(argv(log), /exec resume/, 'it tried to resume first')
     assert.match(out.stdout + out.stderr, /new conversation/i, 'and said what it did instead')
     assert.equal(threads()[name].sessionId, 'thread-fresh', 'the stale id was replaced')
+  })
+
+  it('a new lead starts its own conversation instead of joining what it finds', async () => {
+    // Live 2026-08-24: a brand-new Claude Code session asked hyperion for a
+    // joke and it silently became turn 4 of a conversation about something
+    // else. The agent's most recent conversation in a directory was
+    // everybody's; a conversation belongs to the lead that started it.
+    stubCodex(['thread-alpha'])
+
+    const first = await cf(['run', '@hyperion', 'hello', '--thread', '--new'], asLead('lead-A'))
+    const mine = conversationIn(first.stdout)
+    assert.ok(mine, `the first run names its conversation: ${first.stdout}`)
+
+    const same = await cf(['run', '@hyperion', 'and again', '--thread'], asLead('lead-A'))
+    assert.equal(conversationIn(same.stdout), mine, 'the same lead continues its own')
+
+    const stranger = await cf(['run', '@hyperion', 'tell me a joke', '--thread'], asLead('lead-B'))
+
+    assert.equal(stranger.code, 0, stranger.stderr)
+    assert.ok(conversationIn(stranger.stdout), 'the new lead names one too')
+    assert.notEqual(conversationIn(stranger.stdout), mine, 'but not the one it found here')
+  })
+
+  it('a lead it cannot identify starts fresh rather than joining', async () => {
+    // Unidentified is nobody, not everybody. Two anonymous shells sharing one
+    // conversation is the same bug, for the leads least able to notice it.
+    stubCodex(['thread-alpha'])
+
+    const first = await cf(['run', '@hyperion', 'anonymous', '--thread'], t.env)
+    const second = await cf(['run', '@hyperion', 'anonymous again', '--thread'], t.env)
+
+    assert.equal(second.code, 0, second.stderr)
+    const [before, after] = [conversationIn(first.stdout), conversationIn(second.stdout)]
+    assert.ok(before && after, 'both runs name a conversation')
+    assert.notEqual(after, before, 'no identity means nothing to continue')
+  })
+
+  it('a conversation from before anyone recorded a lead is not inherited', async () => {
+    // Rows an older version wrote carry no lead. They stay the user's, and
+    // reachable by name — but nobody adopts one by standing next to it.
+    stubCodex(['thread-alpha'])
+    const orphaned = Object.keys(threads())
+    stripLeads()
+
+    const out = await cf(['run', '@hyperion', 'whose is this?', '--thread'], asLead('lead-C'))
+
+    assert.equal(out.code, 0, out.stderr)
+    const name = conversationIn(out.stdout)
+    assert.ok(name, 'it named one')
+    assert.ok(!orphaned.includes(name), 'and it was not one of the unowned ones')
+  })
+
+  it('--session reaches another lead conversation, because it was asked for', async () => {
+    // Implicit is scoped, explicit is not: naming a conversation is the user
+    // saying which one they mean, and no rule of ours overrules that.
+    const log = stubCodex(['thread-alpha'])
+    const started = await cf(['run', '@hyperion', 'ours', '--thread', '--new'], asLead('lead-D'))
+    const name = conversationIn(started.stdout)
+    rmSync(log, { force: true })
+
+    const out = await cf(
+      ['run', '@hyperion', 'yours', '--thread', '--session', name],
+      asLead('lead-E'),
+    )
+
+    assert.equal(out.code, 0, out.stderr)
+    assert.match(argv(log), /exec resume thread-alpha/, 'it resumed the conversation it was given')
+  })
+
+  it('names the conversation on every run, not only when it starts', async () => {
+    // `cf last <name>`, `cf catchup <name>` and reusing that conversation's
+    // pane all need the name. A lead told it only on run 1 has lost it by run
+    // 2, and cannot tell it is continuing anything at all.
+    stubCodex(['thread-alpha'])
+
+    const first = await cf(['run', '@hyperion', 'one', '--thread', '--new'], asLead('lead-F'))
+    const name = conversationIn(first.stdout)
+
+    const second = await cf(['run', '@hyperion', 'two', '--thread'], asLead('lead-F'))
+
+    assert.equal(second.code, 0, second.stderr)
+    assert.match(second.stdout, new RegExp(`conversation: ${name}`), 'it says which one it joined')
+    assert.match(second.stdout, /continu/i, 'and that it is continuing, not starting')
   })
 })
 

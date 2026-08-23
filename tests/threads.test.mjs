@@ -229,3 +229,37 @@ test('threads: it gives up loudly rather than looping forever', () => {
 
   assert.throws(() => newSessionName(everything, []), /no unused session name/i)
 })
+
+// --- who a conversation belongs to ---------------------------------------
+
+test('lead: the harness session wins over the pane it sits in', async () => {
+  const { leadId } = await import('../hosts/lib/threads.js')
+
+  // Same pane, new Claude Code session: the pane id has not changed, so a
+  // pane-first rule would hand the new lead the previous one's conversations.
+  assert.equal(leadId({ CLAUDE_CODE_SESSION_ID: 'sess-1', CMUX_SURFACE_ID: 'pane-A' }), 'sess-1')
+  assert.notEqual(
+    leadId({ CLAUDE_CODE_SESSION_ID: 'sess-2', CMUX_SURFACE_ID: 'pane-A' }),
+    leadId({ CLAUDE_CODE_SESSION_ID: 'sess-1', CMUX_SURFACE_ID: 'pane-A' }),
+  )
+})
+
+test('lead: a harness that names no session is identified by its window', async () => {
+  const { leadId } = await import('../hosts/lib/threads.js')
+
+  // codex, pi and opencode publish no session id to their children. The pane
+  // or terminal window they run in is one lead for as long as it is open.
+  assert.equal(leadId({ CMUX_SURFACE_ID: 'pane-A' }), 'pane-A')
+  assert.equal(leadId({ ITERM_SESSION_ID: 'w0t0p0:UUID' }), 'w0t0p0:UUID')
+  assert.equal(leadId({ TERM_SESSION_ID: 'abc' }), 'abc')
+})
+
+test('lead: unidentified is nobody, never everybody', async () => {
+  const { leadId } = await import('../hosts/lib/threads.js')
+
+  // Two anonymous shells must not count as one lead — that is the reuse this
+  // exists to stop, for the leads least able to notice it happening.
+  assert.equal(leadId({}), null)
+  assert.equal(leadId({ CLAUDE_CODE_SESSION_ID: '' }), null)
+  assert.equal(leadId(), null)
+})

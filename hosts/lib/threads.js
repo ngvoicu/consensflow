@@ -110,3 +110,37 @@ export function newSessionName(taken = [], reserved = []) {
 function pick(list) {
   return list[crypto.randomInt(list.length)];
 }
+
+/**
+ * The environment keys that identify a lead, most specific first.
+ *
+ * The harness's own session id wins over the pane it sits in: start a new
+ * Claude Code session in the SAME cmux pane and the pane id has not changed,
+ * so the pane would hand the new lead the previous one's conversations —
+ * exactly what this is here to stop.
+ */
+const LEAD_KEYS = ["CLAUDE_CODE_SESSION_ID", "CMUX_SURFACE_ID", "ITERM_SESSION_ID", "TERM_SESSION_ID"];
+
+/**
+ * Who is asking — the lead session, not the machine and not the directory.
+ *
+ * A conversation belongs to the lead that started it. Without this, the most
+ * recent conversation in a directory was everybody's: a brand-new Claude Code
+ * session asking for a joke became turn 4 of whatever the previous lead had
+ * been discussing there (live, 2026-08-24). Continuing only helps when the one
+ * continuing is the one who was there.
+ *
+ * `null` means we could not tell, and a caller starting a consult must then
+ * open a fresh conversation rather than join one. Two unidentified shells are
+ * not the same lead, and treating them as one recreates the bug for precisely
+ * the leads least able to notice it. The cost is the opposite direction —
+ * a lead we cannot recognise never continues anything — which is the safe way
+ * to be wrong.
+ */
+export function leadId(env = {}) {
+  for (const key of LEAD_KEYS) {
+    const value = env[key];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return null;
+}
