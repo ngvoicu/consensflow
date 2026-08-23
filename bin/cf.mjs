@@ -14,6 +14,7 @@ import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
+import { harnessTurns } from '../hosts/lib/harness-transcript.js'
 import { renderImageRun, runImageAgent } from '../hosts/lib/image-run.js'
 import { createPacket } from '../hosts/lib/packets.js'
 import { interactiveResume, runAgent } from '../hosts/lib/runners.js'
@@ -95,6 +96,9 @@ Usage: cf <command> [options]
                                                it: one typed line is one turn, /exit or
                                                Ctrl-D leaves, the conversation stays
   sessions [--json]                            The conversations alive in this workspace
+  catchup [<name|@agent>] [--last <n>]         Everything said in a conversation, read from
+                                               the harness's own session — including turns
+                                               you typed yourself after cf attach
   last <name|@agent> [--json]                  The last answer from one of them, and where
                                                its transcript is — how the main pane reads
                                                what happened in an agent's pane
@@ -759,6 +763,67 @@ async function handOver(name, agent, invocation) {
   process.exitCode = code ?? 0
 }
 
+/**
+ * What was said in a conversation, including turns we never ran.
+ *
+ * `cf last` reads OUR record of a run. This reads the harness's own session,
+ * so a conversation the user took over with `cf attach` is visible too — the
+ * lead is no longer blind to it. Read-only, and empty rather than broken if a
+ * harness has moved its files.
+ */
+async function catchupVerb(rest) {
+  const { values, positionals } = parseArgs({
+    args: rest,
+    allowPositionals: true,
+    options: { json: { type: 'boolean', default: false }, last: { type: 'string' } },
+  })
+  const asked = String(positionals[0] ?? '')
+  const threads = await loadThreads(cwdOf())
+  const names = Object.keys(threads)
+  const newest = () =>
+    names.sort((a, b) =>
+      String(threads[b].lastRunAt ?? '').localeCompare(String(threads[a].lastRunAt ?? '')),
+    )[0]
+  const name =
+    asked.length === 0
+      ? newest()
+      : asked.startsWith('@')
+        ? names
+            .filter((key) => threads[key].agent === asked.slice(1))
+            .sort((a, b) =>
+              String(threads[b].lastRunAt ?? '').localeCompare(String(threads[a].lastRunAt ?? '')),
+            )[0]
+        : asked
+  const record = name === undefined ? undefined : threads[name]
+  if (record === undefined) {
+    fail(
+      names.length === 0
+        ? 'no conversations here yet — `cf run @name "<task>"` starts one'
+        : `no conversation ${JSON.stringify(asked)} here; you have: ${names.join(', ')}`,
+    )
+    return
+  }
+
+  const turns = await harnessTurns(record.kind, record.sessionId, env)
+  if (values.json) {
+    out(JSON.stringify({ session: name, agent: record.agent, turns }, null, 2))
+    return
+  }
+  if (turns.length === 0) {
+    out(`${name} · @${record.agent} — ${record.kind} keeps no readable transcript for this one`)
+    out(`its own runs are still here: cf last ${name}`)
+    return
+  }
+  const limit = Number.parseInt(values.last ?? '0', 10)
+  const shown = limit > 0 ? turns.slice(-limit) : turns
+  out(`${name} · @${record.agent} · ${turns.length} turns`)
+  for (const turn of shown) {
+    out('')
+    out(turn.role === 'user' ? '› asked' : `• @${record.agent}`)
+    out(turn.text)
+  }
+}
+
 async function sessionsVerb(rest) {
   const { values } = parseArgs({
     args: rest,
@@ -1198,6 +1263,9 @@ async function main() {
       return
     case 'mode':
       modeVerb()
+      return
+    case 'catchup':
+      await catchupVerb(rest)
       return
     case 'attach':
       await attachVerb(rest)

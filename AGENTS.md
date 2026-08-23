@@ -94,7 +94,15 @@ keep in step — the manager is the only caller.
   repeating them buried the question. And because the reply now reaches the
   same agent, a conversational packet tells it to ASK when the task is
   ambiguous instead of guessing, which a one-shot could never do: there, a
-  question reached a stranger who had never heard it.
+  question reached a stranger who had never heard it. `cf catchup` closes the
+  last gap: turns the user takes in an attached window leave no run of ours, so
+  `hosts/lib/harness-transcript.js` READS each harness's own session store
+  (codex rollout jsonl, claude's file named for the session, pi's uuid-suffixed
+  jsonl, opencode's message+part pair) — never writes, and returns an empty
+  list rather than throwing when a harness has moved its files. It strips the
+  environment's own injected `<…>` blocks and unwraps our packet to the
+  question inside, because a transcript should show what a person would say was
+  said. The screen is never read: it is a picture, not the conversation.
 
 - **One spawn verb, three modes.** `cf run @name "<task>"` builds the packet,
   applies the billing guards and streams the run, whichever harness is behind
@@ -209,7 +217,7 @@ keep in step — the manager is the only caller.
 ## Commands
 
 ```sh
-npm test          # node --test (350 tests)
+npm test          # node --test (357 tests)
 npm run check     # biome + tests
 ```
 

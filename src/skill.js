@@ -192,6 +192,7 @@ cf run @<name> "<task>" --new               # starts a fresh one, prints its nam
 cf run @<name> "<task>" --session <name>    # continues a specific one
 cf sessions                                 # what is alive in this workspace
 cf last <name>                              # read an answer from your own pane
+cf catchup <name>                           # everything said in it, including their turns
 \`\`\`
 
 The user can type in that pane too: \`cf chat <name>\` turns it into a prompt
@@ -214,7 +215,10 @@ CMUX_QUIET=1 cmux send --surface surface:NN "$(cf attach <name> --print)"$'\\n'
 
 From that point the user is talking to the agent directly and you are not in
 the middle. Their turns still land in the same session and the same run
-directory, so \`cf last <name>\` catches you up when they ask.
+directory, so \`cf last <name>\` catches you up when they ask. And if they take
+it over with \`cf attach\`, their turns leave no run of ours at all — \`cf
+catchup <name>\` reads the harness's own session so you can still see what was
+said. Never read the pane's screen for it.
 
 Start a **new** conversation when the subject genuinely changes. Continuing one
 carries its whole history into every later turn, which is what makes the agent
