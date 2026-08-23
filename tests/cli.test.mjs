@@ -863,3 +863,70 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"reply to: 
     assert.match(out.stdout + out.stderr, /already an agent run/)
   })
 })
+
+describe('cf attach hands the pane to the harness own window', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+
+  function stubHarness(name) {
+    mkdirSync(t.env.PATH, { recursive: true })
+    const log = join(t.root, `${name}-attach.log`)
+    const path = join(t.env.PATH, name)
+    writeFileSync(
+      path,
+      name === 'codex'
+        ? `#!/bin/sh
+echo "$@" >> "${log}"
+if [ "$1" = "exec" ]; then
+  echo '{"type":"thread.started","thread_id":"thread-attach"}'
+  echo '{"type":"item.completed","item":{"type":"agent_message","text":"hi"}}'
+fi
+`
+        : '#!/bin/sh\nexit 0\n',
+    )
+    chmodSync(path, 0o755)
+    return log
+  }
+
+  it('prints the harness own interactive command for a conversation', async () => {
+    stubHarness('claude')
+    const log = stubHarness('codex')
+    await cf(['agent', 'add', 'hyperion'], t.env)
+    await cf(['use', 'cmux'], t.env)
+    await cf(['run', '@hyperion', 'start it'], t.env)
+    rmSync(log, { force: true })
+
+    const out = await cf(['attach', '@hyperion', '--print'], t.env)
+
+    assert.equal(out.code, 0, out.stderr)
+    // `codex resume <id>` is the INTERACTIVE side of the same session — not
+    // `exec resume`, which is the one-shot we use for a consult.
+    assert.match(out.stdout, /codex resume thread-attach/)
+    assert.doesNotMatch(out.stdout, /exec resume/)
+    assert.equal(existsSync(log), false, '--print runs nothing')
+  })
+
+  it('actually hands the terminal over when not printing', async () => {
+    const log = stubHarness('codex')
+    rmSync(log, { force: true })
+
+    const out = await cf(['attach', '@hyperion'], t.env)
+
+    assert.equal(out.code, 0, out.stderr)
+    assert.match(readFileSync(log, 'utf8'), /^resume thread-attach/m)
+  })
+
+  it('refuses a conversation that has no session yet', async () => {
+    const out = await cf(['attach', 'no-such-talk'], t.env)
+
+    assert.notEqual(out.code, 0)
+    assert.match(out.stdout + out.stderr, /no-such-talk/)
+  })
+
+  it('an agent may not attach to anything', async () => {
+    const out = await cf(['attach', '@hyperion'], { ...t.env, CONSENSFLOW_CHILD: '1' })
+
+    assert.notEqual(out.code, 0)
+    assert.match(out.stdout + out.stderr, /already an agent run/)
+  })
+})

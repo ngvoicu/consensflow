@@ -84,7 +84,11 @@ keep in step — the manager is the only caller.
   resumes. `codex exec resume` takes no `-C` — it filters by the process's own
   cwd. `cf chat` is the same machinery behind a prompt: one typed line, one
   turn, no daemon. Nothing pushes: a turn the user types is visible to the lead
-  only when it looks (`cf sessions`, `cf last`).
+  only when it looks (`cf sessions`, `cf last`). `cf attach` goes further and
+  hands the terminal to the harness's OWN window on that session
+  (`interactiveResume` — `codex resume`, not `codex exec resume`; the first is
+  the interface, the second the one-shot), so the user can take the
+  conversation over directly and ConsensFlow is no longer in the middle.
 
 - **One spawn verb, three modes.** `cf run @name "<task>"` builds the packet,
   applies the billing guards and streams the run, whichever harness is behind
@@ -199,7 +203,7 @@ keep in step — the manager is the only caller.
 ## Commands
 
 ```sh
-npm test          # node --test (337 tests)
+npm test          # node --test (341 tests)
 npm run check     # biome + tests
 ```
 

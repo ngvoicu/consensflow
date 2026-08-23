@@ -444,3 +444,37 @@ function contentToText(content) {
     .filter(Boolean)
     .join("\n");
 }
+
+/**
+ * The harness's OWN interactive command for a conversation we started.
+ *
+ * A consult is one-shot by construction — `codex exec`, `claude -p`. But the
+ * session it leaves behind is the same one each harness's TUI can open, so a
+ * conversation ConsensFlow began can be handed straight to the real agent
+ * window with its whole history. That is `codex resume`, not `codex exec
+ * resume`: the first is the interface, the second is the one-shot.
+ *
+ * Returns null when the harness has no interactive resume, or when there is no
+ * session id yet.
+ */
+export function interactiveResume(agent, sessionId) {
+  if (!sessionId) return null;
+  switch (agent.kind) {
+    case "codex":
+      return { command: "codex", args: ["resume", sessionId] };
+    case "claude-code": {
+      const args = ["--resume", sessionId];
+      if (agent.model) args.push("--model", agent.model);
+      return { command: "claude", args };
+    }
+    case "pi": {
+      const args = ["--session-id", sessionId];
+      if (agent.model) args.push("--model", agent.model);
+      return { command: "pi", args };
+    }
+    case "opencode":
+      return { command: "opencode", args: ["--session", sessionId] };
+    default:
+      return null;
+  }
+}

@@ -203,6 +203,19 @@ they mention it.
 cf chat @<name>                             # or: cf chat <conversation>
 \`\`\`
 
+Better still, when the user wants to take over: \`cf attach <name>\` replaces
+that terminal with the harness's OWN window — codex's TUI, claude's, pi's —
+opened on the very session the consult started, whole history in it. Use
+\`cf attach <name> --print\` to get the command and send it into the pane:
+
+\`\`\`bash
+CMUX_QUIET=1 cmux send --surface surface:NN "$(cf attach <name> --print)"$'\\n'
+\`\`\`
+
+From that point the user is talking to the agent directly and you are not in
+the middle. Their turns still land in the same session and the same run
+directory, so \`cf last <name>\` catches you up when they ask.
+
 Start a **new** conversation when the subject genuinely changes. Continuing one
 carries its whole history into every later turn, which is what makes the agent
 useful — and what makes an unrelated question expensive.

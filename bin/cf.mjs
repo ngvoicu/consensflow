@@ -8,6 +8,7 @@
  * harness on the machine (claude, codex, pi, opencode). The skill teaches the
  * harnesses everything else.
  */
+import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -15,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { renderImageRun, runImageAgent } from '../hosts/lib/image-run.js'
 import { createPacket } from '../hosts/lib/packets.js'
-import { runAgent } from '../hosts/lib/runners.js'
+import { interactiveResume, runAgent } from '../hosts/lib/runners.js'
 import { runsRoot } from '../hosts/lib/state.js'
 import { loadThreads, newSessionName, saveThread } from '../hosts/lib/threads.js'
 import { renderEvent } from '../hosts/lib/transcript-events.js'
@@ -86,6 +87,10 @@ Usage: cf <command> [options]
     [--image <path>]                            (image agents: reference pictures)
     [--new] [--session <name>]                  a conversation continues by default in cmux
     [--thread] [--no-thread]                    mode; --new starts a fresh one
+  attach <@name|conversation> [--print]        Open the harness's OWN window on that
+                                               conversation — the real codex/claude/pi
+                                               interface, whole history in it. --print
+                                               emits the command instead of running it
   chat <@name|conversation> [--new]            Talk to a conversation instead of commanding
                                                it: one typed line is one turn, /exit or
                                                Ctrl-D leaves, the conversation stays
@@ -655,6 +660,68 @@ async function chatVerb(rest) {
   out(`left ${name} — \`cf chat ${name}\` picks it up again`)
 }
 
+/**
+ * Hand this terminal to the harness's own window, on the same conversation.
+ *
+ * `cf chat` is our prompt around one-shot runs; this is the real thing — codex's
+ * TUI, claude's, pi's — opened on the session a consult started, with the whole
+ * history already in it. We spawn it with the terminal inherited and exit with
+ * its code, so from here on ConsensFlow is not in the way at all.
+ */
+async function attachVerb(rest) {
+  const { values, positionals } = parseArgs({
+    args: rest,
+    allowPositionals: true,
+    options: { print: { type: 'boolean', default: false } },
+  })
+  if (env.CONSENSFLOW_CHILD === '1') {
+    fail('this is already an agent run — an agent does not spawn agents')
+    return
+  }
+
+  const asked = String(positionals[0] ?? '')
+  const threads = await loadThreads(cwdOf())
+  const names = Object.keys(threads)
+  const name = asked.startsWith('@')
+    ? names
+        .filter((key) => threads[key].agent === asked.slice(1))
+        .sort((a, b) =>
+          String(threads[b].lastRunAt ?? '').localeCompare(String(threads[a].lastRunAt ?? '')),
+        )[0]
+    : asked
+  const record = name === undefined ? undefined : threads[name]
+  if (record === undefined) {
+    fail(
+      names.length === 0
+        ? `no conversation ${JSON.stringify(asked)} here — start one with \`cf run @name "<task>"\``
+        : `no conversation ${JSON.stringify(asked)} here; you have: ${names.join(', ')}`,
+    )
+    return
+  }
+
+  const row = agentRow(record.agent, env)
+  const invocation = interactiveResume(row ?? { kind: record.kind }, record.sessionId)
+  if (invocation === null) {
+    fail(
+      record.sessionId
+        ? `${record.kind} has no interactive session to open`
+        : `${name} has no session yet — ask something in it first`,
+    )
+    return
+  }
+
+  const line = [invocation.command, ...invocation.args].join(' ')
+  if (values.print) {
+    out(line)
+    return
+  }
+
+  out(`${name} · @${record.agent} — handing this terminal to ${invocation.command}`)
+  const child = spawn(invocation.command, invocation.args, { cwd: cwdOf(), stdio: 'inherit' })
+  const code = await new Promise((resolve) => child.on('close', resolve))
+  process.exitCode = code ?? 0
+}
+
 async function sessionsVerb(rest) {
   const { values } = parseArgs({
     args: rest,
@@ -1094,6 +1161,9 @@ async function main() {
       return
     case 'mode':
       modeVerb()
+      return
+    case 'attach':
+      await attachVerb(rest)
       return
     case 'chat':
       await chatVerb(rest)
