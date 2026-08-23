@@ -25,11 +25,41 @@ export function toolsForPi() {
   return "read,grep,find,ls,bash,edit,write";
 }
 
-export function buildRunnerInvocation(agent, packetPath, cwd) {
+/**
+ * Where each harness keeps the id of the conversation it just held.
+ *
+ * Read only from the harness that actually uses that field: codex emits
+ * `thread_id` and claude emits `session_id`, and accepting either from either
+ * would cross-wire two conversations on a mixed roster. pi is absent on
+ * purpose — we mint its id, so there is nothing to capture.
+ */
+const SESSION_ID_FIELD = { "claude-code": "session_id", codex: "thread_id", opencode: "sessionID" };
+
+export function extractSessionId(kind, line) {
+  const field = SESSION_ID_FIELD[kind];
+  if (field === undefined) return null;
+  if (line === null || typeof line !== "object") return null;
+  const value = line[field];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+/**
+ * `session` is `{ sessionId }` when this run continues a conversation, and
+ * undefined when it is a one-shot. Resuming REPLACES the flag that refuses a
+ * session rather than sitting beside it — asking for a session and discarding
+ * it at once is the kind of contradiction a CLI resolves silently and wrongly.
+ */
+export function buildRunnerInvocation(agent, packetPath, cwd, session) {
   const p = agent;
+  const sessionId = session?.sessionId;
   switch (p.kind) {
     case "pi": {
-      const args = ["--mode", "json", "--no-session", "--no-extensions"];
+      // Order matters only to the tests that pin it, but keeping the one-shot
+      // argv byte-identical means this change cannot perturb anything else.
+      const args = ["--mode", "json"];
+      if (sessionId) args.push("--session-id", sessionId);
+      else args.push("--no-session");
+      args.push("--no-extensions");
       if (p.skillsPolicy === "none" || p.skillsPolicy === "explicit") args.push("--no-skills");
       if (p.skillsPolicy === "explicit") {
         for (const skillPath of p.skillPaths ?? []) args.push("--skill", skillPath);
@@ -51,7 +81,9 @@ export function buildRunnerInvocation(agent, packetPath, cwd) {
       // tool_use, text — which the adapter relays for --stream and the transcript. --verbose is
       // required for stream-json in -p mode; we deliberately omit --include-partial-messages (we
       // want complete blocks, not token-level deltas).
-      const args = ["-p", "Follow the ConsensFlow packet provided on stdin. Return only the requested output.", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--dangerously-skip-permissions"];
+      const args = ["-p", "Follow the ConsensFlow packet provided on stdin. Return only the requested output.", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"];
+      if (sessionId) args.push("--resume", sessionId);
+      else args.push("--no-session-persistence");
       if (p.model) args.push("--model", p.model);
       if (p.effort) args.push("--effort", p.effort);
       if (p.maxTurns) args.push("--max-turns", String(p.maxTurns));
@@ -60,7 +92,11 @@ export function buildRunnerInvocation(agent, packetPath, cwd) {
       return { command: "claude", args, stdinMode: "packet", cwd, env: { ...CHILD_ENV }, dropEnv: ["ANTHROPIC_API_KEY"] };
     }
     case "codex": {
-      const args = ["exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", "--dangerously-bypass-approvals-and-sandbox", "-C", cwd];
+      // `codex exec resume <id>` takes the id positionally, before the flags.
+      const args = sessionId ? ["exec", "resume", sessionId] : ["exec"];
+      args.push("--json");
+      if (!sessionId) args.push("--ephemeral");
+      args.push("--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", "--dangerously-bypass-approvals-and-sandbox", "-C", cwd);
       if (p.model) args.push("--model", p.model);
       if (p.effort) args.push("-c", `model_reasoning_effort=\"${p.effort}\"`);
       args.push("-");
@@ -69,6 +105,7 @@ export function buildRunnerInvocation(agent, packetPath, cwd) {
     }
     case "opencode": {
       const args = ["run", "--auto", "--format", "json", "--dir", cwd, "--file", packetPath];
+      if (sessionId) args.push("--session", sessionId);
       if (p.model) args.push("--model", p.model);
       if (p.effort) args.push("--variant", p.effort);
       if (p.harness) args.push("--harness", p.harness);
@@ -83,7 +120,7 @@ export function buildRunnerInvocation(agent, packetPath, cwd) {
 }
 
 export async function runAgent(input) {
-  const { cwd, agent, packet, kind = "ask", signal, onEvent } = input;
+  const { cwd, agent, packet, kind = "ask", signal, onEvent, session } = input;
   await ensureCfDirs(cwd);
   const runId = input.runId ?? createId(kind);
   const runDir = path.join(runsRoot(cwd), runId);
@@ -92,14 +129,17 @@ export async function runAgent(input) {
   await fs.writeFile(packetPath, packet, "utf8");
 
   const invocationCwd = agent.cwd ? resolveInside(cwd, agent.cwd) : path.resolve(cwd);
-  const invocation = buildRunnerInvocation(agent, packetPath, invocationCwd);
+  const invocation = buildRunnerInvocation(agent, packetPath, invocationCwd, session);
   // Build a bounded, normalized event trail as the run streams, and forward each event to onEvent
   // (live --stream / onUpdate). The trail feeds surfaceOutput's no-answer fallback and the
   // transcript backstop. tryParseJson tolerates non-JSONL lines (returns null → skipped); adaptLine never throws.
   const events = [];
+  // The id the harness gives this conversation, so the next run can resume it.
+  let capturedSessionId = null;
   const onStdoutLine = (line) => {
     const parsed = tryParseJson(line);
     if (!parsed) return;
+    if (capturedSessionId === null) capturedSessionId = extractSessionId(agent.kind, parsed);
     // Pi streams assistant reasoning/text incrementally as message_update deltas. Surface them
     // live (the way pi's own UI does) so a long thinking phase shows flowing progress instead of a
     // silent hang. Deltas are stream-only — the bounded trail keeps the complete message_end blocks.
@@ -151,6 +191,9 @@ export async function runAgent(input) {
     exitCode: procResult.exitCode,
     signal: procResult.signal,
     output,
+    // What to store so this conversation can continue. pi mints nothing, so
+    // the id we were given stands.
+    sessionId: capturedSessionId ?? session?.sessionId ?? null,
     transcriptPath,
     rawOutputTruncated: procResult.truncated,
     stderr: truncateText(procResult.stderr, 64 * 1024).text,

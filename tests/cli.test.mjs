@@ -574,3 +574,203 @@ describe('cf reset is the clean slate, and refuses until you say so', () => {
     assert.match(out.stdout, /0 agents and 0 runs/)
   })
 })
+
+describe('cf run continues a conversation instead of starting a new one', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+
+  /**
+   * A codex that emits a thread id, records the argv it was given, and fails
+   * when asked to resume a thread it does not know — the three behaviours the
+   * threading path has to cope with.
+   */
+  function stubCodex(known = [], emits = 'thread-alpha') {
+    mkdirSync(t.env.PATH, { recursive: true })
+    const log = join(t.root, 'codex-argv.log')
+    const path = join(t.env.PATH, 'codex')
+    writeFileSync(
+      path,
+      `#!/bin/sh
+echo "$@" >> "${log}"
+for a in "$@"; do case "$a" in resume) IS_RESUME=1;; esac; done
+if [ -n "$IS_RESUME" ]; then
+  WANTED=$3
+  case "${known.join(' ')} " in *"$WANTED "*) : ;; *) echo "no such session" >&2; exit 3 ;; esac
+fi
+echo '{"type":"thread.started","thread_id":"${emits}"}'
+echo '{"type":"item.completed","item":{"type":"agent_message","text":"answered"}}'
+`,
+    )
+    chmodSync(path, 0o755)
+    return log
+  }
+
+  const argv = (log) => (existsSync(log) ? readFileSync(log, 'utf8') : '')
+  const threads = () =>
+    JSON.parse(
+      readFileSync(
+        join(
+          t.env.CONSENSFLOW_HOME,
+          'workspaces',
+          readdirSync(join(t.env.CONSENSFLOW_HOME, 'workspaces'))[0],
+          'threads.json',
+        ),
+        'utf8',
+      ),
+    )
+
+  it('names a new conversation on the first run and resumes it on the second', async () => {
+    stubCli(t, 'claude')
+    const log = stubCodex(['thread-alpha'])
+    await cf(['agent', 'add', 'hyperion'], t.env)
+    await cf(['use', 'cmux'], t.env)
+
+    const first = await cf(['run', '@hyperion', 'hello', '--thread'], t.env)
+    assert.equal(first.code, 0, first.stderr)
+    const names = Object.keys(threads())
+    assert.equal(names.length, 1, 'one conversation exists')
+    assert.match(names[0], /^[a-z]+-[a-z]+$/, 'and it has a sayable name')
+    assert.match(first.stdout, new RegExp(names[0]), 'which the run tells you')
+
+    rmSync(log, { force: true })
+    const second = await cf(['run', '@hyperion', 'again', '--thread'], t.env)
+
+    assert.equal(second.code, 0, second.stderr)
+    assert.match(argv(log), /exec resume thread-alpha/, 'the child was told to continue')
+    assert.equal(Object.keys(threads()).length, 1, 'still one conversation, not two')
+    assert.equal(threads()[names[0]].runs, 2)
+  })
+
+  it('--new starts a second conversation with its own name', async () => {
+    const log = stubCodex(['thread-alpha'])
+    rmSync(log, { force: true })
+    const before = Object.keys(threads())
+
+    const out = await cf(['run', '@hyperion', 'fresh start', '--thread', '--new'], t.env)
+
+    assert.equal(out.code, 0, out.stderr)
+    const after = Object.keys(threads())
+    assert.equal(after.length, before.length + 1, 'a new conversation, not a reuse')
+    assert.doesNotMatch(argv(log), /resume/, 'a new conversation does not resume anything')
+  })
+
+  it('--session targets one conversation by name', async () => {
+    const log = stubCodex(['thread-alpha'])
+    const [first] = Object.keys(threads())
+    rmSync(log, { force: true })
+
+    const out = await cf(['run', '@hyperion', 'to you', '--thread', '--session', first], t.env)
+
+    assert.equal(out.code, 0, out.stderr)
+    assert.match(argv(log), /exec resume thread-alpha/)
+  })
+
+  it('names the conversations you have when asked for one you do not', async () => {
+    const out = await cf(['run', '@hyperion', 'hi', '--thread', '--session', 'no-such'], t.env)
+
+    assert.notEqual(out.code, 0)
+    assert.match(out.stdout + out.stderr, /no-such/)
+  })
+
+  it('--no-thread runs one-shot even in cmux mode', async () => {
+    const log = stubCodex(['thread-alpha'])
+    rmSync(log, { force: true })
+
+    const out = await cf(['run', '@hyperion', 'once', '--no-thread'], t.env)
+
+    assert.equal(out.code, 0, out.stderr)
+    assert.match(argv(log), /--ephemeral/, 'one-shot keeps the session-refusing flag')
+    assert.doesNotMatch(argv(log), /resume/)
+  })
+
+  it('a session the harness has forgotten starts a fresh one instead of failing', async () => {
+    // The harness owns the session store; we never touch it. So a pruned or
+    // cleared session is normal, and must cost one fresh start, not the run.
+    const log = stubCodex([], 'thread-fresh') // knows nothing — every resume exits 3
+    const [name] = Object.keys(threads())
+    rmSync(log, { force: true })
+
+    const out = await cf(['run', '@hyperion', 'still there?', '--thread', '--session', name], t.env)
+
+    assert.equal(out.code, 0, `a forgotten session must not fail the run: ${out.stderr}`)
+    assert.match(argv(log), /exec resume/, 'it tried to resume first')
+    assert.match(out.stdout + out.stderr, /new conversation/i, 'and said what it did instead')
+    assert.equal(threads()[name].sessionId, 'thread-fresh', 'the stale id was replaced')
+  })
+})
+
+describe('the lead reads a conversation that happened in another pane', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+
+  function stubCodex() {
+    mkdirSync(t.env.PATH, { recursive: true })
+    const path = join(t.env.PATH, 'codex')
+    writeFileSync(
+      path,
+      `#!/bin/sh
+echo '{"type":"thread.started","thread_id":"thread-alpha"}'
+echo '{"type":"item.completed","item":{"type":"agent_message","text":"the answer you wanted"}}'
+`,
+    )
+    chmodSync(path, 0o755)
+  }
+
+  it('lists nothing before anything has been asked', async () => {
+    stubCli(t, 'claude')
+    stubCodex()
+    await cf(['agent', 'add', 'hyperion'], t.env)
+    await cf(['use', 'cmux'], t.env)
+
+    const out = await cf(['sessions'], t.env)
+
+    assert.equal(out.code, 0, out.stderr)
+    assert.match(out.stdout, /no conversations/i)
+  })
+
+  it('lists each conversation with its agent and run count', async () => {
+    await cf(['run', '@hyperion', 'first question', '--thread'], t.env)
+
+    const out = await cf(['sessions'], t.env)
+
+    assert.equal(out.code, 0, out.stderr)
+    assert.match(out.stdout, /hyperion/)
+    assert.match(out.stdout, /[a-z]+-[a-z]+/, 'the conversation is named')
+    assert.match(out.stdout, /\b1\b/, 'and counted')
+  })
+
+  it('cf last prints the answer and where the transcript is', async () => {
+    const listed = await cf(['sessions', '--json'], t.env)
+    const [name] = Object.keys(JSON.parse(listed.stdout))
+
+    const out = await cf(['last', name], t.env)
+
+    assert.equal(out.code, 0, out.stderr)
+    assert.match(out.stdout, /the answer you wanted/)
+    assert.match(out.stdout, /transcript\.md/, 'so the lead can read the whole run if it wants')
+  })
+
+  it('cf last @agent resolves that agent current conversation', async () => {
+    const out = await cf(['last', '@hyperion'], t.env)
+
+    assert.equal(out.code, 0, out.stderr)
+    assert.match(out.stdout, /the answer you wanted/)
+  })
+
+  it('cf last --json is machine readable', async () => {
+    const out = await cf(['last', '@hyperion', '--json'], t.env)
+
+    assert.equal(out.code, 0, out.stderr)
+    const payload = JSON.parse(out.stdout)
+    assert.equal(payload.agent, 'hyperion')
+    assert.match(payload.output, /the answer you wanted/)
+    assert.ok(payload.transcriptPath.endsWith('transcript.md'))
+  })
+
+  it('names the conversations you have when asked for one you do not', async () => {
+    const out = await cf(['last', 'never-happened'], t.env)
+
+    assert.notEqual(out.code, 0)
+    assert.match(out.stdout + out.stderr, /never-happened/)
+  })
+})

@@ -111,27 +111,10 @@ describe('cmux mode spawns into a pane; the host modes are untouched', () => {
     { name: 'athena', harness: 'pi', model: 'openrouter/qwen/qwen3.8-27b', effort: 'max' },
   ]
 
-  it('gives each agent its own reused pane, in cmux mode only', () => {
-    const cmux = generateSkill(roster, { mode: 'cmux' })
-
-    assert.match(cmux, /One pane per agent/)
-    assert.match(cmux, /reused for every consult/)
-    assert.match(cmux, /your cmux skills/i, 'the lead drives the pane, not us')
-    // The command itself is unchanged — ConsensFlow still never touches a pane.
-    assert.match(cmux, /cf run @<name> "<task>"/)
-  })
-
-  it('never lets a reused pane read as a conversation', () => {
-    const cmux = generateSkill(roster, { mode: 'cmux' })
-
-    // Every run is a fresh process: claude --no-session-persistence, codex
-    // --ephemeral, pi --no-session. A pane that collects answers must not be
-    // mistaken for an agent that remembers them, or the lead will stop
-    // carrying the context that is the only reason a follow-up makes sense.
-    assert.match(cmux, /a window, not a memory/i)
-    assert.match(cmux, /never heard of the last one/)
-    assert.match(cmux, /--handoff-file/)
-  })
+  // Superseded by spec cmux-agent-threads [TEST-THR-15]: a pane is now one
+  // CONVERSATION, not one agent, and threading makes the old "a window, not a
+  // memory" caveat false in cmux mode. Both assertions moved to the
+  // conversation describe block below rather than being softened here.
 
   it('says nothing about panes in claude or pi mode', () => {
     for (const mode of ['claude', 'pi']) {
@@ -147,6 +130,41 @@ describe('cmux mode spawns into a pane; the host modes are untouched', () => {
   it('still names the roster in every mode', () => {
     for (const mode of ['claude', 'pi', 'cmux']) {
       assert.match(generateSkill(roster, { mode }), /named AI agents — athena/)
+    }
+  })
+})
+
+describe('cmux mode teaches conversations, one pane each', () => {
+  const roster = [
+    { name: 'ares', harness: 'pi', model: 'openrouter/x-ai/grok-4.6', effort: 'high' },
+  ]
+
+  it('says one pane per conversation, not per agent', () => {
+    const cmux = generateSkill(roster, { mode: 'cmux' })
+
+    assert.match(cmux, /one pane per conversation/i)
+    // Named conversations are why an agent can have more than one pane, which
+    // is exactly what the pane-per-agent wording could not express.
+    assert.match(cmux, /--new/)
+    assert.match(cmux, /--session/)
+  })
+
+  it('teaches that a follow-up continues rather than restarts', () => {
+    const cmux = generateSkill(roster, { mode: 'cmux' })
+
+    assert.match(cmux, /continues/i)
+    assert.doesNotMatch(
+      cmux,
+      /a window, not a memory/i,
+      'that caveat described the un-threaded world; threading makes it false here',
+    )
+  })
+
+  it('leaves the host modes one-shot and pane-free', () => {
+    for (const mode of ['claude', 'pi']) {
+      const skill = generateSkill(roster, { mode })
+      assert.doesNotMatch(skill, /pane/i, `${mode} must not mention panes`)
+      assert.doesNotMatch(skill, /--session/, `${mode} is one-shot`)
     }
   })
 })

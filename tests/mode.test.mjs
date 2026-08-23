@@ -455,3 +455,17 @@ describe('reset leaves the machine as if ConsensFlow had never been installed', 
     }
   })
 })
+
+describe('threading follows the mode, and can be overridden anywhere', () => {
+  // The default lives in the run verb (`currentMode(env) === 'cmux'`), which
+  // the CLI suite exercises end to end. This pins the rule itself so a future
+  // refactor cannot quietly flip which modes converse.
+  it('cmux is the mode that converses', () => {
+    assert.equal(MODES.includes('cmux'), true)
+    assert.deepEqual(
+      MODES.filter((mode) => mode !== 'cmux'),
+      ['claude', 'pi'],
+      'the host modes stay one-shot; only cmux threads by default',
+    )
+  })
+})

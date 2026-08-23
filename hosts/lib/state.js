@@ -89,7 +89,7 @@ async function readJson(filePath, fallback) {
   return value === undefined ? fallback : value;
 }
 
-async function writeJsonAtomic(filePath, value) {
+export async function writeJsonAtomic(filePath, value) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`;
   await fs.writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, "utf8");

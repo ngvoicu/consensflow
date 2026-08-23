@@ -97,10 +97,11 @@ question, then decide or ask the user.
 ${
   inCmux
     ? `
-   **In that agent's pane, always.** This machine runs cmux, so a consult
-   never blocks the pane you are in. One pane per agent: if @<name> already
-   has a pane, run there; if not, open one with your cmux skills and title it
-   for the agent. Two agents means two panes, so their answers never tangle.
+   **In that conversation's pane, always.** This machine runs cmux, so a
+   consult never blocks the pane you are in. One pane per conversation, titled
+   with the conversation's name — \`cf run\` prints it the first time. Ask the
+   same agent again and it continues there; two conversations mean two panes,
+   so their answers never tangle.
 
    Do not consult in this pane. If you cannot open one — no workspace, the
    pane skills are missing, cmux is not running — say so and run it here
@@ -158,23 +159,32 @@ subscription login to API-key billing.
 
 ${
   inCmux
-    ? `## One pane per agent
+    ? `## One pane per conversation
 
-Each agent on the roster gets its own pane, reused for every consult you send
-it. Ask @<name> three times and all three answers stack up in that agent's
-pane, in order, where the user can read them together. Open the pane the first
-time with your cmux skills, title it for the agent, and target it by that title
-afterwards. If the pane is gone or busy with another run, open a fresh one.
+A consult here is a **conversation**, not a one-shot. The first \`cf run\` to an
+agent starts one and prints its name — \`bubble-sky\`, \`amber-moss\`. Ask that
+agent again and it continues: the harness resumes its own session, so the agent
+remembers what you already discussed and the provider's cache is still warm.
 
-Run \`cf run\` there and get on with your own work while it thinks; then read
-the pane, or the run's \`transcript.md\`, and report the answer attributed as
-usual.
+Give each conversation its own pane, titled with its name, and open it with
+your cmux skills. "ask ares in bubble-sky about the retry path" means: the pane
+called bubble-sky.
 
-**A pane is a window, not a memory.** Reusing it changes nothing about the
-agent: every \`cf run\` is a new process that has never heard of the last one.
-If your second question builds on the first, you must carry that yourself —
-put what matters in the task, or pass it with \`--handoff-file\`. The stacked
-answers are for the user to read, not context the agent can see.
+\`\`\`bash
+cf run @<name> "<task>"                     # continues that agent's conversation here
+cf run @<name> "<task>" --new               # starts a fresh one, prints its name
+cf run @<name> "<task>" --session <name>    # continues a specific one
+cf sessions                                 # what is alive in this workspace
+cf last <name>                              # read an answer from your own pane
+\`\`\`
+
+Start a **new** conversation when the subject genuinely changes. Continuing one
+carries its whole history into every later turn, which is what makes the agent
+useful — and what makes an unrelated question expensive.
+
+Run the command in that pane and get on with your own work while it thinks;
+then read the pane, or \`cf last <name>\` from here, and report the answer
+attributed as usual.
 
 This skill defines *what* to run; the cmux skills define pane control. Neither
 one reaches into the other.

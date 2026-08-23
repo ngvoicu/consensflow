@@ -15,6 +15,8 @@ import { parseArgs } from 'node:util'
 import { renderImageRun, runImageAgent } from '../hosts/lib/image-run.js'
 import { createPacket } from '../hosts/lib/packets.js'
 import { runAgent } from '../hosts/lib/runners.js'
+import { runsRoot } from '../hosts/lib/state.js'
+import { loadThreads, newSessionName, saveThread } from '../hosts/lib/threads.js'
 import { renderEvent } from '../hosts/lib/transcript-events.js'
 import { CATALOG, catalogEntry } from '../src/catalog.js'
 import { detectHarnesses } from '../src/harnesses.js'
@@ -216,6 +218,10 @@ async function runVerb(rest) {
       'no-handoff': { type: 'boolean', default: false },
       image: { type: 'string', multiple: true },
       json: { type: 'boolean', default: false },
+      thread: { type: 'boolean' },
+      'no-thread': { type: 'boolean', default: false },
+      new: { type: 'boolean', default: false },
+      session: { type: 'string' },
     },
   })
 
@@ -305,7 +311,85 @@ async function runVerb(rest) {
         }
       }
 
-  const result = await runAgent({ cwd, agent: row, packet, kind: 'ask', onEvent })
+  // Threading: on by default in cmux mode, off in a host mode, and either
+  // way overridable. `--session` and `--new` are themselves a request to
+  // thread, so naming one is enough.
+  const wantsThread =
+    values['no-thread'] === true
+      ? false
+      : (values.thread ?? values.new === true ?? false) ||
+        values.session !== undefined ||
+        values.new === true ||
+        currentMode(env) === 'cmux'
+
+  const existing = wantsThread ? await loadThreads(cwd) : {}
+  let sessionName
+  if (wantsThread) {
+    if (values.session !== undefined) {
+      sessionName = values.session
+      if (existing[sessionName] === undefined) {
+        const known = Object.keys(existing)
+        fail(
+          known.length === 0
+            ? `no conversation named ${JSON.stringify(sessionName)} here — omit --session to start one`
+            : `no conversation named ${JSON.stringify(sessionName)} here; you have: ${known.join(', ')}`,
+        )
+        return
+      }
+    } else if (values.new === true) {
+      sessionName = newSessionName(
+        Object.keys(existing),
+        listAgents(env).map((a) => a.name),
+      )
+    } else {
+      // The agent's current conversation in this workspace: the most recently
+      // used one that belongs to it, or a new one if it has none.
+      const mine = Object.entries(existing)
+        .filter(([, row2]) => row2.agent === row.id)
+        .sort((a, b) => String(b[1].lastRunAt ?? '').localeCompare(String(a[1].lastRunAt ?? '')))
+      sessionName =
+        mine.length > 0
+          ? mine[0][0]
+          : newSessionName(
+              Object.keys(existing),
+              listAgents(env).map((a) => a.name),
+            )
+    }
+  }
+
+  const record = sessionName === undefined ? undefined : existing[sessionName]
+  const started = record === undefined
+  if (wantsThread && started) out(`conversation: ${sessionName}`)
+
+  let result = await runAgent({
+    cwd,
+    agent: row,
+    packet,
+    kind: 'ask',
+    onEvent,
+    session: record?.sessionId ? { sessionId: record.sessionId } : undefined,
+  })
+
+  // The harness owns the session store and may have pruned it. A conversation
+  // it no longer knows costs one fresh start, never the run.
+  if (wantsThread && record?.sessionId && result.exitCode !== 0) {
+    out('')
+    out(`that conversation is gone from ${row.harness ?? row.kind}; starting a new conversation`)
+    result = await runAgent({ cwd, agent: row, packet, kind: 'ask', onEvent })
+  }
+
+  if (wantsThread && sessionName !== undefined) {
+    const now = new Date().toISOString()
+    await saveThread(cwd, sessionName, {
+      agent: row.id,
+      kind: row.kind,
+      sessionId: result.sessionId ?? null,
+      runs: (record?.runs ?? 0) + 1,
+      createdAt: record?.createdAt ?? now,
+      lastRunAt: now,
+      lastRunId: result.runId,
+    })
+  }
   if (inDelta) process.stdout.write('\n')
   if (values.json) {
     out(JSON.stringify(result, null, 2))
@@ -381,6 +465,106 @@ function resetVerb(rest) {
 
 function plural(count, noun) {
   return `${count} ${noun}${count === 1 ? '' : 's'}`
+}
+
+/**
+ * What conversations exist here, and what the last one said.
+ *
+ * In cmux mode a consult happens in its own pane, so the answer lands in a run
+ * directory rather than in the lead's scrollback. These two verbs are how the
+ * main pane reads it — the run directory IS the shared state, which is what
+ * stands in for a daemon.
+ */
+async function sessionsVerb(rest) {
+  const { values } = parseArgs({
+    args: rest,
+    allowPositionals: true,
+    options: { json: { type: 'boolean', default: false } },
+  })
+  const cwd = process.cwd()
+  const threads = await loadThreads(cwd)
+  if (values.json) {
+    out(JSON.stringify(threads, null, 2))
+    return
+  }
+  const names = Object.keys(threads)
+  if (names.length === 0) {
+    out('no conversations here yet — `cf run @name "<task>"` starts one')
+    return
+  }
+  for (const name of names.sort()) {
+    const row = threads[name]
+    const runs = `${row.runs} run${row.runs === 1 ? '' : 's'}`
+    out(`${name.padEnd(18)}@${String(row.agent).padEnd(12)}${runs.padEnd(9)}${row.lastRunAt ?? ''}`)
+  }
+}
+
+async function lastVerb(rest) {
+  const { values, positionals } = parseArgs({
+    args: rest,
+    allowPositionals: true,
+    options: { json: { type: 'boolean', default: false } },
+  })
+  const cwd = process.cwd()
+  const wanted = String(positionals[0] ?? '')
+  const threads = await loadThreads(cwd)
+  const names = Object.keys(threads)
+
+  // Either a conversation name or an @agent — the agent form resolves to that
+  // agent's most recent conversation here.
+  let name
+  if (wanted.startsWith('@')) {
+    const agent = wanted.slice(1)
+    const mine = names
+      .filter((key) => threads[key].agent === agent)
+      .sort((a, b) =>
+        String(threads[b].lastRunAt ?? '').localeCompare(String(threads[a].lastRunAt ?? '')),
+      )
+    name = mine[0]
+    if (name === undefined) {
+      fail(
+        `no conversation with @${agent} here${names.length > 0 ? `; you have: ${names.join(', ')}` : ''}`,
+      )
+      return
+    }
+  } else {
+    name = wanted
+    if (threads[name] === undefined) {
+      fail(
+        names.length === 0
+          ? `no conversation named ${JSON.stringify(wanted)} here — there are none yet`
+          : `no conversation named ${JSON.stringify(wanted)} here; you have: ${names.join(', ')}`,
+      )
+      return
+    }
+  }
+
+  const row = threads[name]
+  const runDir = join(runsRoot(cwd), String(row.lastRunId))
+  const result = readJsonFile(join(runDir, 'result.json'))
+  if (result === undefined) {
+    fail(`the run for ${name} left no result.json at ${runDir}`)
+    return
+  }
+  if (values.json) {
+    // Spread first: result.json carries the whole agent row under `agent`,
+    // and the caller asked for the conversation's agent NAME.
+    out(JSON.stringify({ ...result, session: name, agent: row.agent }, null, 2))
+    return
+  }
+  out(`# ${name} · @${row.agent}`)
+  out('')
+  out(String(result.output ?? '').trim() || '(no answer)')
+  out('')
+  out(`transcript: ${join(runDir, 'transcript.md')}`)
+}
+
+function readJsonFile(path) {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'))
+  } catch {
+    return undefined
+  }
 }
 
 function offVerb(rest) {
@@ -730,6 +914,12 @@ async function main() {
       return
     case 'mode':
       modeVerb()
+      return
+    case 'sessions':
+      await sessionsVerb(rest)
+      return
+    case 'last':
+      await lastVerb(rest)
       return
     case 'off':
       offVerb(rest)
