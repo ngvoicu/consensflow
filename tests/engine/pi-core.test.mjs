@@ -1256,8 +1256,11 @@ test('docs describe the stream-first observability surface, transcript backstop,
   const readme = await readFile(new URL('../../README.md', import.meta.url), 'utf8')
   const harnesses = await readFile(new URL('../../AGENTS.md', import.meta.url), 'utf8')
   const docs = `${readme}\n${harnesses}`
-  // Stream-first observability surface — pi streams normalized events via cf_run_agent's onUpdate.
-  assert.match(docs, /onUpdate/, 'docs mention the pi onUpdate streaming surface')
+  // `onUpdate` was pi's `cf_run_agent` tool, and the pi extension went with the
+  // rest of the host payloads. Requiring the docs to describe it would mean
+  // documenting a surface that no longer exists — the same error as the
+  // README's old "never generates a permission-bypass flag". What is still
+  // true is the property itself, asserted below.
   assert.match(docs, /foreground/i, 'docs note streaming is foreground-incremental')
   assert.match(docs, /non-optional/i, 'docs lock streaming as non-optional')
   // Durability backstop + the new parity-locked event module.

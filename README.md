@@ -119,10 +119,17 @@ convenience, not something the product depends on.
 
 ## What a consult actually does
 
-Every run spawns one harness CLI in your working directory, streams its
-thinking and tool calls back as they happen, and writes its artifacts under
-`~/.consensflow/workspaces/<key>/runs/<id>/` — `packet.md`, `transcript.md`,
-`result.json`. Nothing is written inside your project.
+Every run spawns one harness CLI in your working directory and writes its
+artifacts under `~/.consensflow/workspaces/<key>/runs/<id>/` — `packet.md`,
+`transcript.md`, `result.json`. Nothing is written inside your project.
+
+**Streaming is foreground and non-optional.** An agent's thinking, tool calls
+and answer arrive as they happen; runs are never sent to the background,
+because a consult you cannot watch is a consult you cannot trust. There is no
+flag to quiet it — only `--json`, which asks for machine-readable output
+instead. `transcript-events.js` normalises four engines' event shapes into one
+vocabulary, and `transcript.md` is the durable backstop so a closed pane or a
+lost scrollback never costs you the answer.
 
 Two things are worth being explicit about:
 

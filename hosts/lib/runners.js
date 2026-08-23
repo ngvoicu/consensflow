@@ -143,7 +143,7 @@ export async function runAgent(input) {
   const invocationCwd = agent.cwd ? resolveInside(cwd, agent.cwd) : path.resolve(cwd);
   const invocation = buildRunnerInvocation(agent, packetPath, invocationCwd, session);
   // Build a bounded, normalized event trail as the run streams, and forward each event to onEvent
-  // (live --stream / onUpdate). The trail feeds surfaceOutput's no-answer fallback and the
+  // (the live stream). The trail feeds surfaceOutput's no-answer fallback and the
   // transcript backstop. tryParseJson tolerates non-JSONL lines (returns null → skipped); adaptLine never throws.
   const events = [];
   // The id the harness gives this conversation, so the next run can resume it.
