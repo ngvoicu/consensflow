@@ -104,7 +104,11 @@ export function buildRunnerInvocation(agent, packetPath, cwd, session) {
       const args = sessionId ? ["exec", "resume", sessionId] : ["exec"];
       args.push("--json");
       if (!threading) args.push("--ephemeral");
-      args.push("--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", "--dangerously-bypass-approvals-and-sandbox", "-C", cwd);
+      args.push("--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", "--dangerously-bypass-approvals-and-sandbox");
+      // `exec resume` accepts no -C: it filters sessions by the process's own
+      // cwd, which is why it offers --all to turn that off. The child is
+      // spawned with the right cwd either way, so this is only for a fresh run.
+      if (!sessionId) args.push("-C", cwd);
       if (p.model) args.push("--model", p.model);
       if (p.effort) args.push("-c", `model_reasoning_effort=\"${p.effort}\"`);
       args.push("-");

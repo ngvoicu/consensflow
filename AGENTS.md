@@ -74,6 +74,18 @@ keep in step — the manager is the only caller.
   never costs the mode switch. Every entry point states the cost of a host mode (codex and
   opencode get nothing).
 
+- **A conversation is the harness's, we only remember which one.** In cmux
+  mode a consult resumes the harness's own session (`--resume`, `exec resume`,
+  `--session-id`, `--session`) instead of the one-shot flags, keyed by a named
+  conversation per (workspace, agent) in `<config>/workspaces/<key>/threads.json`.
+  Three states, not two: no session object is a one-shot and REFUSES a session;
+  an object with no id is the first run and must still SAVE one (passing
+  `--ephemeral` there captured an id for a session never written); an id
+  resumes. `codex exec resume` takes no `-C` — it filters by the process's own
+  cwd. `cf chat` is the same machinery behind a prompt: one typed line, one
+  turn, no daemon. Nothing pushes: a turn the user types is visible to the lead
+  only when it looks (`cf sessions`, `cf last`).
+
 - **One spawn verb, three modes.** `cf run @name "<task>"` builds the packet,
   applies the billing guards and streams the run, whichever harness is behind
   the name — and the manager is the only caller of the `hosts/lib` engine now.
@@ -187,7 +199,7 @@ keep in step — the manager is the only caller.
 ## Commands
 
 ```sh
-npm test          # node --test (266 tests)
+npm test          # node --test (337 tests)
 npm run check     # biome + tests
 ```
 

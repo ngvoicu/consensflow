@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import {
   chmodSync,
   cpSync,
@@ -30,6 +30,24 @@ async function cf(args, env) {
   } catch (cause) {
     return { code: cause.code ?? 1, stdout: cause.stdout ?? '', stderr: cause.stderr ?? '' }
   }
+}
+
+/** Like `cf`, but types into it — a REPL needs stdin. */
+function cfTyping(args, env, lines) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [CF, ...args], { env, stdio: ['pipe', 'pipe', 'pipe'] })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk
+    })
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk
+    })
+    child.on('close', (code) => resolve({ code: code ?? 0, stdout, stderr }))
+    child.stdin.end(lines.map((line) => `${line}\n`).join(''))
+    setTimeout(() => child.kill(), 30_000).unref()
+  })
 }
 
 function stubCli(t, name) {
@@ -772,5 +790,76 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"the answer
 
     assert.notEqual(out.code, 0)
     assert.match(out.stdout + out.stderr, /never-happened/)
+  })
+})
+
+describe('cf chat is the conversation, typed rather than commanded', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+
+  function stubCodex() {
+    mkdirSync(t.env.PATH, { recursive: true })
+    const log = join(t.root, 'chat-argv.log')
+    const path = join(t.env.PATH, 'codex')
+    writeFileSync(
+      path,
+      `#!/bin/sh
+echo "$@" >> "${log}"
+echo '{"type":"thread.started","thread_id":"thread-chat"}'
+echo '{"type":"item.completed","item":{"type":"agent_message","text":"reply to: '"$(cat)"'"}}'
+`,
+    )
+    chmodSync(path, 0o755)
+    return log
+  }
+
+  it('answers a line you type and names the conversation', async () => {
+    stubCli(t, 'claude')
+    stubCodex()
+    await cf(['agent', 'add', 'hyperion'], t.env)
+    await cf(['use', 'cmux'], t.env)
+
+    const out = await cfTyping(['chat', '@hyperion'], t.env, ['tell me a joke', '/exit'])
+
+    assert.equal(out.code, 0, out.stderr)
+    assert.match(out.stdout, /[a-z]+-[a-z]+/, 'the conversation is named in the header')
+    assert.match(out.stdout, /@hyperion/)
+    assert.match(out.stdout, /reply to:/, 'the answer came back')
+  })
+
+  it('a second line continues the same conversation', async () => {
+    const log = stubCodex()
+    rmSync(log, { force: true })
+
+    const out = await cfTyping(['chat', '@hyperion'], t.env, ['first', 'second', '/exit'])
+
+    assert.equal(out.code, 0, out.stderr)
+    const argv = readFileSync(log, 'utf8')
+    assert.match(argv, /exec resume thread-chat/, 'the second turn resumed, not restarted')
+    assert.equal((argv.match(/reply|exec/g) ?? []).length >= 2, true, 'two turns ran')
+  })
+
+  it('leaves on EOF as well as /exit', async () => {
+    stubCodex()
+
+    const out = await cfTyping(['chat', '@hyperion'], t.env, ['just one'])
+
+    assert.equal(out.code, 0, 'closing stdin ends the chat cleanly')
+  })
+
+  it('ignores blank lines rather than consulting on nothing', async () => {
+    const log = stubCodex()
+    rmSync(log, { force: true })
+
+    await cfTyping(['chat', '@hyperion'], t.env, ['', '   ', '/exit'])
+
+    assert.equal(existsSync(log), false, 'an empty line must not spawn an agent')
+  })
+
+  it('an agent may not open a chat of its own', async () => {
+    const out = await cfTyping(['chat', '@hyperion'], { ...t.env, CONSENSFLOW_CHILD: '1' }, ['hi'])
+
+    assert.notEqual(out.code, 0)
+    assert.match(out.stdout + out.stderr, /already an agent run/)
   })
 })

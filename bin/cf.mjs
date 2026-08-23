@@ -10,6 +10,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { renderImageRun, runImageAgent } from '../hosts/lib/image-run.js'
@@ -85,6 +86,9 @@ Usage: cf <command> [options]
     [--image <path>]                            (image agents: reference pictures)
     [--new] [--session <name>]                  a conversation continues by default in cmux
     [--thread] [--no-thread]                    mode; --new starts a fresh one
+  chat <@name|conversation> [--new]            Talk to a conversation instead of commanding
+                                               it: one typed line is one turn, /exit or
+                                               Ctrl-D leaves, the conversation stays
   sessions [--json]                            The conversations alive in this workspace
   last <name|@agent> [--json]                  The last answer from one of them, and where
                                                its transcript is — how the main pane reads
@@ -212,6 +216,71 @@ function resolveAdd(name, values) {
  * and no artifacts. Same verb, same flags, same packet everywhere now — the
  * runner and the packet builder are the shared engine, not a second copy.
  */
+/**
+ * Which conversation a consult belongs to, and what to hand the runner.
+ *
+ * Shared by `cf run` and `cf chat` so the rule lives once: a named session, a
+ * deliberately new one, or the agent's most recent conversation here. Returns
+ * `undefined` for `name` when threading is off.
+ */
+async function resolveConversation(agentRow, { wantsThread, session, fresh }) {
+  if (!wantsThread) return { threads: {}, name: undefined, record: undefined }
+  const threads = await loadThreads(cwdOf())
+  if (session !== undefined) {
+    if (threads[session] === undefined) {
+      const known = Object.keys(threads)
+      return {
+        error:
+          known.length === 0
+            ? `no conversation named ${JSON.stringify(session)} here — omit --session to start one`
+            : `no conversation named ${JSON.stringify(session)} here; you have: ${known.join(', ')}`,
+      }
+    }
+    return { threads, name: session, record: threads[session] }
+  }
+  if (fresh) {
+    const name = newSessionName(
+      Object.keys(threads),
+      listAgents(env).map((a) => a.name),
+    )
+    return { threads, name, record: undefined }
+  }
+  const mine = Object.entries(threads)
+    .filter(([, row]) => row.agent === agentRow.id)
+    .sort((a, b) => String(b[1].lastRunAt ?? '').localeCompare(String(a[1].lastRunAt ?? '')))
+  if (mine.length > 0) return { threads, name: mine[0][0], record: mine[0][1] }
+  return {
+    threads,
+    name: newSessionName(
+      Object.keys(threads),
+      listAgents(env).map((a) => a.name),
+    ),
+    record: undefined,
+  }
+}
+
+/** What to pass runAgent: an object means "this belongs to a conversation". */
+function sessionFor(agentRow, name, record) {
+  if (name === undefined) return undefined
+  return { sessionId: record?.sessionId ?? (agentRow.kind === 'pi' ? name : undefined) }
+}
+
+async function recordTurn(name, agentRow, record, result) {
+  if (name === undefined) return
+  const now = new Date().toISOString()
+  await saveThread(cwdOf(), name, {
+    agent: agentRow.id,
+    kind: agentRow.kind,
+    sessionId: result.sessionId ?? null,
+    runs: (record?.runs ?? 0) + 1,
+    createdAt: record?.createdAt ?? now,
+    lastRunAt: now,
+    lastRunId: result.runId,
+  })
+}
+
+const cwdOf = () => process.cwd()
+
 async function runVerb(rest) {
   const { values, positionals } = parseArgs({
     args: rest,
@@ -495,6 +564,97 @@ function plural(count, noun) {
  * main pane reads it — the run directory IS the shared state, which is what
  * stands in for a daemon.
  */
+/**
+ * A conversation you type into, rather than one you command.
+ *
+ * The pane an agent runs in is otherwise a place a consult HAPPENED: to ask
+ * again you retype `cf run @name "…"` with its quoting. This is the same
+ * machinery behind a prompt — each line is one turn in one conversation, the
+ * harness session is resumed between them, and every turn still leaves its own
+ * run directory. No daemon: the loop is the process you are sitting in, and
+ * closing it ends nothing but the typing.
+ */
+async function chatVerb(rest) {
+  const { values, positionals } = parseArgs({
+    args: rest,
+    allowPositionals: true,
+    options: { new: { type: 'boolean', default: false } },
+  })
+
+  if (env.CONSENSFLOW_CHILD === '1') {
+    fail('this is already an agent run — an agent does not spawn agents')
+    return
+  }
+
+  const asked = String(positionals[0] ?? '')
+  const threads = await loadThreads(cwdOf())
+  // Either @agent or a conversation name; a name tells us the agent itself.
+  const agentName = asked.startsWith('@') ? asked.slice(1) : (threads[asked]?.agent ?? '')
+  const row = agentName.length > 0 ? agentRow(agentName, env) : undefined
+  if (row === undefined) {
+    const known = listAgents(env).map((a) => a.name)
+    fail(
+      known.length === 0
+        ? 'no agents yet — add one with `cf agent add <name>` or in the app'
+        : `name an agent or a conversation; you have: ${known.join(', ')}`,
+    )
+    return
+  }
+
+  const resolved = await resolveConversation(row, {
+    wantsThread: true,
+    session: asked.startsWith('@') ? undefined : asked,
+    fresh: values.new === true,
+  })
+  if (resolved.error !== undefined) {
+    fail(resolved.error)
+    return
+  }
+
+  let { name, record } = resolved
+  out(`${name} · @${row.id}`)
+  out('one line is one turn — /exit or Ctrl-D to leave, the conversation stays')
+  out('')
+
+  const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: '> ' })
+  // A piped stdin can end while a turn is still running, so readline may
+  // already be closed by the time we ask for the next line.
+  let open = true
+  rl.on('close', () => {
+    open = false
+  })
+  const prompt = () => {
+    if (open) rl.prompt()
+  }
+  prompt()
+  for await (const line of rl) {
+    const task = line.trim()
+    if (task === '/exit' || task === '/quit') break
+    if (task.length === 0) {
+      prompt()
+      continue
+    }
+
+    const packet = await createPacket({ cwd: cwdOf(), agent: row, task, kind: 'ask' })
+    const result = await runAgent({
+      cwd: cwdOf(),
+      agent: row,
+      packet,
+      kind: 'ask',
+      session: sessionFor(row, name, record),
+    })
+    out('')
+    out(String(result.output ?? '').trim() || '(no answer)')
+    out('')
+    await recordTurn(name, row, record, result)
+    record = (await loadThreads(cwdOf()))[name]
+    prompt()
+  }
+  if (open) rl.close()
+  out('')
+  out(`left ${name} — \`cf chat ${name}\` picks it up again`)
+}
+
 async function sessionsVerb(rest) {
   const { values } = parseArgs({
     args: rest,
@@ -934,6 +1094,9 @@ async function main() {
       return
     case 'mode':
       modeVerb()
+      return
+    case 'chat':
+      await chatVerb(rest)
       return
     case 'sessions':
       await sessionsVerb(rest)

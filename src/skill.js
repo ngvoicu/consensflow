@@ -167,8 +167,11 @@ need to explore cmux's CLI, and you must not run the consult in this pane:
 # 1. a pane beside you, without stealing focus. Prints: OK surface:NN pane:NN
 CMUX_QUIET=1 cmux new-pane --type terminal --direction right --focus false
 
-# 2. send the consult there. The trailing newline is what runs it.
-CMUX_QUIET=1 cmux send --surface surface:NN 'cf run @<name> "<task>" --brief "<why>"'$'\\n'
+# 2. send the consult there. cd FIRST: a new pane does not inherit your
+#    directory, and a conversation belongs to the directory it started in —
+#    a pane sitting in ~ would open a different one you could not read back.
+#    The trailing newline is what runs it.
+CMUX_QUIET=1 cmux send --surface surface:NN 'cd "'"$PWD"'" && cf run @<name> "<task>" --brief "<why>"'$'\\n'
 
 # 3. once cf prints "conversation: <name>", title the tab to match
 CMUX_QUIET=1 cmux rename-tab --surface surface:NN '<name>'
@@ -189,6 +192,15 @@ cf run @<name> "<task>" --new               # starts a fresh one, prints its nam
 cf run @<name> "<task>" --session <name>    # continues a specific one
 cf sessions                                 # what is alive in this workspace
 cf last <name>                              # read an answer from your own pane
+\`\`\`
+
+The user can type in that pane too: \`cf chat <name>\` turns it into a prompt
+where one line is one turn of the same conversation. Turns they take land in
+the same session and the same run directory, so \`cf last\` shows you their
+answer as readily as your own — nothing tells you it happened, so look when
+they mention it.
+\`\`\`bash
+cf chat @<name>                             # or: cf chat <conversation>
 \`\`\`
 
 Start a **new** conversation when the subject genuinely changes. Continuing one

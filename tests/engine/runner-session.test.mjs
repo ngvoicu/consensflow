@@ -171,3 +171,17 @@ test('runner: a one-shot is still a one-shot', () => {
   assert.ok(build(AGENTS.claude).args.includes('--no-session-persistence'))
   assert.ok(build(AGENTS.pi).args.includes('--no-session'))
 })
+
+test('runner: codex resume is not given -C, which it does not accept', () => {
+  // `codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]` has no -C: resuming
+  // filters by the process's own cwd (hence its --all "disables cwd
+  // filtering"). Passing it made every real follow-up die with
+  // "unexpected argument '-C' found" — invisible to a stub that accepts
+  // anything, which is why only a live run caught it.
+  const resumed = build(AGENTS.codex, { sessionId: 'thread-xyz' }).args
+  assert.ok(!resumed.includes('-C'), 'resume takes no -C')
+
+  // A fresh run still needs it, and the child is spawned with cwd either way.
+  assert.ok(build(AGENTS.codex).args.includes('-C'))
+  assert.ok(build(AGENTS.codex, { sessionId: undefined }).args.includes('-C'))
+})

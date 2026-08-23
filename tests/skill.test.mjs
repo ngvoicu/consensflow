@@ -146,6 +146,10 @@ describe('cmux mode teaches conversations, one pane each', () => {
     // it could ask a question. The recipe is three commands; quote them.
     assert.match(cmux, /cmux new-pane --type terminal --direction right --focus false/)
     assert.match(cmux, /cmux send --surface surface:NN/)
+    // A new pane does not inherit the lead's directory, and conversations are
+    // keyed by directory — without the cd, the consult lands in a namespace
+    // the lead cannot read back with `cf last`.
+    assert.match(cmux, /cd "'"\$PWD"'"/, 'the send must cd first')
     assert.match(cmux, /cmux rename-tab --surface surface:NN/)
   })
 
