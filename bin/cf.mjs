@@ -83,6 +83,12 @@ Usage: cf <command> [options]
     [--handoff-file <file>] [--no-handoff]      handoff when you pass one, a note alongside it
     [--context <note>] [--prompt-file <file>]
     [--image <path>]                            (image agents: reference pictures)
+    [--new] [--session <name>]                  a conversation continues by default in cmux
+    [--thread] [--no-thread]                    mode; --new starts a fresh one
+  sessions [--json]                            The conversations alive in this workspace
+  last <name|@agent> [--json]                  The last answer from one of them, and where
+                                               its transcript is — how the main pane reads
+                                               what happened in an agent's pane
   mode                                         Which one is active, and what it means
   off [--force]                                Take it all back: every file the manifest owns, the
                                                launcher, and the mode. Agents are kept
