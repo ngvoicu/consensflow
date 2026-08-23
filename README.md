@@ -1,246 +1,213 @@
 # ConsensFlow
 
-Named AI agents for every harness on your machine.
+Named AI agents your coding agent can consult, in every harness on your machine.
 
-You create a roster — say `zeus` (Claude Opus, max effort) or `hyperion`
-(GPT 5.6, ultra) — and ConsensFlow generates one **skill** from it and
-installs that skill into every harness you have: Claude Code, codex, pi
-and opencode all read the same Agent Skills format. From then on, any agent
-in any project understands "ask hyperion whether this migration is safe": it
-runs hyperion's exact one-shot command, waits, and reports the answer,
-attributed.
+You keep a roster — `zeus` is Claude Opus at max effort, `hyperion` is GPT 5.6
+Sol at ultra. ConsensFlow generates **one skill** from it and installs that skill
+into Claude Code, codex, pi and opencode, which all read the same Agent Skills
+format. From then on you say *"ask hyperion whether this migration is safe"* and
+your coding agent does the rest: it runs hyperion, waits, and reports the answer
+attributed. You never type a command.
 
-**No accounts, no API keys.** Agents run through the harness CLIs you
-already have installed and logged in — your Claude subscription, your ChatGPT
-login, whatever providers you configured in pi or opencode. ConsensFlow
-stores no credentials and asks for none. (The generated commands even strip
-stray `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` shell variables for the one
-command they run, so a leftover export can't silently switch a subscription
-login to per-token API billing.)
+**No accounts, no API keys.** Agents run through the harness CLIs you already
+have installed and logged in — your Claude subscription, your ChatGPT login,
+whatever you configured in pi or opencode. ConsensFlow stores no credentials and
+asks for none. The generated commands strip stray `ANTHROPIC_API_KEY` /
+`OPENAI_API_KEY` for the one command they run, so a leftover export cannot
+silently move a subscription login onto per-token API billing.
 
-There is no daemon and no database — the skill *is* the product. ConsensFlow
-manages the roster and keeps the skills current — plus cmux's own skills, if
-you run the cmux path.
+There is no daemon and no database. The skill is the product.
 
 ## Install
 
-**The app is the installation.** Download or build `ConsensFlow.app`, drag it
-to Applications, open it — that is all. It carries its own Node runtime and
-its own copy of ConsensFlow, so nothing needs to be installed first, and
-everything else (agents, skills, host integrations, the mode this
-machine runs) is done from its window.
+**The app is the installation.** Build it, drag it to Applications, open it.
+It carries its own Node runtime and its own copy of ConsensFlow, so nothing has
+to be installed first, and everything else — agents, which harnesses consult,
+the skills — happens in its window.
 
 ```sh
 cd app && npm install && npm run build
 # → app/src-tauri/target/release/bundle/dmg/ConsensFlow_<version>_aarch64.dmg
 ```
 
-It is unsigned for now, so the first launch needs right-click → **Open**.
+Unsigned for now, so the first launch needs right-click → **Open**.
 
-<details>
-<summary>Prefer the terminal?</summary>
+Nothing is seeded. Open the app, pick from the ready-made list — `zeus`,
+`hyperion`, `athena`, `endymion` … — or define your own with any model string
+its harness accepts. **The skill installs itself the moment your first agent
+exists, and rewrites itself on every change after.** No install step, no sync
+step.
 
-The same tool is an npm package — this is the developer path, not the one a
-new machine needs:
+The roster lives at `~/.consensflow/agents.json` and is shared by everything
+that reads it.
 
-```sh
-npm install -g ngvoicu/consensflow    # Node ≥ 20
-consensflow use cmux
-```
-</details>
+## Who can consult
 
-`cf setup` detects your agents and, in cmux mode, installs the cmux skills
-(see below).
-Agents are yours to create — nothing is seeded:
+A machine runs one path, and choosing it is the install:
 
 ```sh
-cf ui
+cf use cmux     # every harness (claude, codex, pi, opencode), plus cmux's pane skills
+cf use claude   # only Claude Code
+cf use pi       # only pi
+cf mode         # which one is active, and what it costs
 ```
 
-opens a minimal browser editor (Ctrl-C to stop). Each tool comes with a
-**list of ready-made agents** — one click adds `zeus` (Claude Opus 5 at
-max effort), `hyperion` (GPT 5.6 Sol at ultra), `endymion` (Kimi K3, 1M
-context), `prometheus` (GLM 5.3) … — or define a custom one with any model
-string its runtime accepts. **The skill installs itself into every agent the
-moment the first agent exists, and rewrites itself on every add, edit
-or remove after that.** No install step, no sync step.
+A mode is a **scope**, not a different product: all three install the same
+generated skill and differ only in who receives it. Switching takes the skill
+back from whoever is no longer in scope, so two paths are never live at once. A
+harness that ships its own ConsensFlow is left alone rather than given a second
+skill with the same name.
 
-The CLI does the same job if you prefer it:
+`cmux` mode also installs cmux's own pane-control skills, because that is where
+panes exist. `cf doctor` names any harness that is in scope but carrying no
+skill.
+
+## A consult is a conversation
+
+In cmux mode a consult is not a one-shot. The first question starts a
+conversation with a short name; the next one continues it, because the harness's
+own session is resumed — so the agent remembers, and the provider's cache stays
+warm.
+
+```
+$ cf run @hyperion "is the retry path sound?"
+conversation: silver-waves
+…
+
+$ cf run @hyperion "what would you change about the timeout?"
+# same conversation — hyperion remembers the first answer
+```
+
+One agent can hold several conversations at once, which is why they have names:
+*"ask ares in bubble-sky about the migration"*. Each gets its own pane.
 
 ```sh
-cf catalog                  # the ready-made agents, per tool
-cf agent add zeus     # a catalog name is enough — model and effort come with it
-cf agent add nemo --runtime codex --model gpt-5.6-terra --effort xhigh   # or roll your own
-cf agent list | edit | remove …
+cf run @name "<task>"                  # continues that agent's conversation here
+cf run @name "<task>" --new            # start a fresh one, print its name
+cf run @name "<task>" --session <name> # aim at a specific one
+cf sessions                            # what is alive in this folder
+cf last <name>                         # the last answer, and its transcript path
 ```
 
-Model identifiers are passed through verbatim, so anything your CLI accepts
-works — the catalog is a convenience, never a constraint.
+**The harness owns the session; ConsensFlow only remembers which one.** That is
+the whole mechanism — no daemon, no database, no long-lived child. Session ids
+live in `<config>/workspaces/<key>/threads.json`, beside the run artifacts.
 
-**The roster is shared.** It lives at `~/.consensflow/agents.json` —
-the very file the `consensflow-cc` plugin and `consensflow-pi` extension
-already use. One roster, three consumers: edit it here (UI or CLI) and cc
-and pi see the change on their next run; if you already used either, `cf
-setup` finds your agents and installs the skill immediately — nothing
-to import. v3 preserves every field it doesn't understand, so cc/pi-specific
-settings survive round-trips. And it heals: if cc or pi change the roster
-behind v3's back, the next `cf` invocation notices (a stored roster hash)
-and regenerates the installed skill — and the skill itself tells agents to
-run `cf skills update` when a name is missing from its table.
+## Joining in yourself
+
+Your coding agent runs all of the above for you. These are for when you want to
+drive it directly:
+
+```sh
+cf chat @hyperion          # type prose — one line is one turn of the conversation
+cf attach silver-waves     # hand the terminal to codex's OWN window, history intact
+cf catchup silver-waves    # everything said in it, whoever said it
+```
+
+The trade between the middle two matters:
+
+- **`cf chat`** is a prompt around the same machinery. Every turn is a real run,
+  so it leaves a transcript and your coding agent can read it with `cf last`.
+- **`cf attach`** gives you the agent's real interface — codex's TUI, claude's —
+  opened on that conversation. Richer, but those turns leave no run of ours, so
+  your coding agent is blind to them until it runs `cf catchup`.
+
+`cf catchup` reads the harness's own session store — codex's rollout file,
+claude's session jsonl, pi's, opencode's — **read-only, never written**, and it
+returns nothing rather than failing if a harness has moved its files. It is a
+convenience, not something the product depends on.
+
+## What a consult actually does
+
+Every run spawns one harness CLI in your working directory, streams its
+thinking and tool calls back as they happen, and writes its artifacts under
+`~/.consensflow/workspaces/<key>/runs/<id>/` — `packet.md`, `transcript.md`,
+`result.json`. Nothing is written inside your project.
+
+Two things are worth being explicit about:
+
+**Agents run with full permissions.** `--dangerously-skip-permissions` for
+claude, `--dangerously-bypass-approvals-and-sandbox` for codex, `--auto` for
+opencode. An agent is a helper you hand a task to: it reads and writes files and
+reaches the network. There is no knob, and that is deliberate — **the protection
+is the approval gate on *keeping* its work, not a fence around the run.** The
+skill tells your coding agent never to apply or keep an agent's changes without
+asking you first.
+
+**Nothing rides along.** An agent sees the brief, the task, and whatever you
+hand it with `--handoff-file`. No conversation is stashed or attached
+automatically, in any mode.
 
 ## The skills ConsensFlow manages
 
 Two sources, one owner:
 
-- **`consensflow`** — generated from your roster: a table of exact commands,
-  one per agent, with its model and effort baked in. Agents run
-  in the harness's working directory (so they read project files themselves)
-  with their own CLI's default permissions — ConsensFlow never generates a
-  permission-bypass flag.
-- **cmux's skills** — fetched by shallow-cloning
-  [`manaflow-ai/cmux`](https://github.com/manaflow-ai/cmux) (its `skills/`
-  tree: core, workspace, browser, settings, …) and installed the same way,
-  recorded as `cmux@<commit>`. They teach harnesss pane control, so they come
-  with `cmux` mode and only that one.
+- **`consensflow`** — generated from your roster. Its description names your
+  actual agents, which is what makes a harness reach for it when you say a name.
+- **cmux's skills** — fetched from [`manaflow-ai/cmux`](https://github.com/manaflow-ai/cmux)
+  into a cache under `<config>/cache/cmux` and installed as `cmux@<commit>`.
+  They teach pane control, so they come with `cmux` mode and only that one.
 
 ```sh
-cf off                # take it all back; agents are kept
 cf skills status      # every file ConsensFlow owns: ok, drifted, missing
-cf skills update      # regenerate ours; re-fetch cmux's at the latest commit
-cf skills uninstall   # remove exactly what the manifest owns, nothing else
-cf doctor
+cf skills update      # regenerate ours; re-fetch cmux's
+cf doctor             # harnesses, agents, skills, runtime
 ```
 
-`cf ui` does this part too: it shows which agents were found (and which
-already have their own ConsensFlow), how many files are installed and at
-which cmux commit, and offers **Install / update skills** and **Remove
-installed skills**. Those are named operations — the page has no endpoint
-that runs a command you type, by design.
+Ownership is a hash manifest (`~/.consensflow/skills-manifest.json`). A file you
+edited by hand is **drifted**: ConsensFlow refuses to overwrite or delete it
+without `--force`, and never touches a file it did not write. Claude Code's
+`settings.json` is never written at all — a hook an older version left there is
+reported by `cf doctor` for you to remove.
 
-Ownership is a hash manifest (`~/.consensflow/skills-manifest.json`).
-A file you edited by hand is **drifted**: ConsensFlow refuses to overwrite or
-delete it without `--force`, and it never touches files it didn't write.
-
-## One mode at a time
-
-A machine runs exactly one ConsensFlow path, and `consensflow use` chooses it:
+## Leaving
 
 ```sh
-consensflow use cmux     # cmux (pi, cc, codex, opencode) — every agent can consult
-consensflow use claude   # only Claude Code consults — with your conversation as context
-consensflow use pi       # only pi consults, the same way
-consensflow mode         # which one is active, and what it means
+cf off            # remove every file it installed. Your agents and runs are kept
+cf reset --yes    # the clean slate: those too, and the app's own caches
 ```
 
-The modes are named after the three things they are: the Claude Code
-integration, the pi extension, and the cmux-wide path that teaches every
-agent at once. **cmux's own skills — the ones that let an agent drive panes,
-workspaces and browser surfaces — come with `cmux` mode and only that one**;
-there they are part of the install, not an option. Consulting through a host
-runs a subprocess and never touches a pane, so `claude` and `pi` install none
-and take back any they find. If you are offline when you switch to cmux, the
-mode still applies and says the cmux skills are pending (`consensflow skills
-update` fetches them later).
+`cf reset` prints what it will destroy and refuses without `--yes`. It does not
+delete `ConsensFlow.app` — removing an application is a Finder gesture — and it
+never touches a harness's own session store.
 
-Switching removes what the previous mode installed, so two paths are never
-live at once. The trade is stated every time you switch and every time you
-ask: in `claude` mode, **codex and opencode have no ConsensFlow at all** —
-that's the price of the deeper path, and `cmux` mode is how you take it
-back. ConsensFlow only ever removes what it installed; an integration you
-put there another way is reported and left alone.
+## Inside the app
 
-## Scopes, not integrations
+A window around the same roster editor, never a second implementation. The
+bundle carries an official Node build and ConsensFlow's own sources, and on
+launch runs *its own* copy and points the window at it. Nothing on the machine
+is consulted, which is what makes it self-sufficient: an app opened from Finder
+inherits almost no PATH.
 
-`claude` and `pi` were once deeper integrations, each shipping a payload of
-its own that could hand an agent your live conversation. Nothing has stashed a
-conversation since 2026-08-22, so what remained was a second, worse copy of the
-skill — worse because it was written ahead of time and could not name the
-agents on your roster, and those names in the description are what make a
-harness reach for it.
+About 148 MB installed, 48 MB as a dmg — nearly all of it the Node runtime.
 
-So there is one skill, generated from your roster, and the mode decides who
-gets it:
-
-```sh
-consensflow use claude   # only Claude Code gets it
-consensflow use pi       # only pi gets it
-consensflow use cmux     # every detected harness, plus cmux's pane skills
-consensflow mode         # which one is active, and what it costs
-consensflow off          # take it all back; your agents are kept
-consensflow reset        # the clean slate — needs --yes; cannot be undone
-```
-
-The roster editor (`consensflow ui`) has both danger buttons. **Turn
-ConsensFlow off** removes every file it installed and keeps your agents and
-your run history. **Reset everything** is the clean slate: it removes those
-too — the roster, every run artifact (packets, transcripts, generated images),
-and skill files you have edited yourself — leaving the machine as if
-ConsensFlow had never been installed. It tells you how many agents and runs
-that is before you confirm, and it cannot be undone.
-
-There is no separate thing to install, so there are no `install` / `uninstall`
-/ `hosts` verbs any more — `use` is the whole surface. A machine upgrading from
-the payload era has all of it taken back on the next run: the old skill, the
-`/consensflow` command, the payload directories, and a pi extension removed
-through pi's own CLI. Claude Code's `settings.json` is never written — a hook
-an older version left there is reported by `consensflow doctor` for you to
-remove.
-
-Every host reads the same agents file, so they always agree on who
-your agents are — and they don't stack up on one agent. Where a host
-already ships its own ConsensFlow (Claude Code via the plugin, pi via the
-extension), `consensflow-cmux` leaves it alone rather than adding a second
-skill with the same name, and retires any copy it installed earlier. Its own
-skill goes where nothing else provides one — codex and opencode, plus any
-host without the native integration. `--all` overrides if you want ours
-everywhere.
-
-## What is inside the app
-
-It is a window around the same editor, never a second implementation. The
-bundle carries an official Node build (a Tauri sidecar) and ConsensFlow's own
-sources, and on launch it runs *its own* copy — `node cf.mjs ui --json
---no-open` — then points the window at it. Nothing on the machine is
-consulted, which is what makes the app self-sufficient: a .app opened from
-Finder inherits almost no PATH, so depending on an installed CLI was fragile
-anyway. The editor exits when the app does, because the app holds a pipe to
-its stdin.
-
-About 148 MB installed, 48 MB as a dmg — nearly all of it the Node runtime
-that makes it standalone.
-
-The icon was generated by **pygmalion**, the image agent on the
-roster, given the site's logo as reference — the roster designing its own
-app.
-
-## The engine, and what a consult looks like
-
-The host integrations share one engine (`hosts/lib`) — there is a single copy
-now, not one per host. What it guarantees:
-
-- **Streaming is foreground and non-optional.** A agent's thinking,
-  tool calls and answer stream into your session as they happen; runs are
-  never sent to the background, because a consult you cannot watch is a
-  consult you cannot trust. pi surfaces the same stream through its
-  `onUpdate` channel.
-- **A durable backstop.** Every run also lands in `transcript.md` inside the
-  workspace's ConsensFlow directory, so a closed pane or a lost scrollback
-  never loses the answer. `transcript-events.js` normalizes each engine's
-  event shapes into one vocabulary.
-- **The roster is shared.** Every host reads the same
-  `~/.consensflow/agents.json`, so agents defined once are
-  available everywhere.
-
-## History
-
-`consensflow-cc` (the Claude Code plugin) and `consensflow-pi` (the pi
-extension) were separate repositories until 2026-08-20. They are archived:
-their payloads live here under `hosts/`, sharing one engine, and this app
-installs them. Nothing is maintained outside this repo.
+The icon was generated by **pygmalion**, the image agent on the roster, from the
+site's logo: the roster designing its own app.
 
 ## State
 
-The roster: `~/.consensflow/agents.json` (shared with cc/pi). The
-manifest: `~/.consensflow/skills-manifest.json` (override with
-`CONSENSFLOW_HOME`). Leave completely with `cf skills uninstall &&
-npm uninstall -g consensflow`.
+| | |
+|---|---|
+| Roster | `~/.consensflow/agents.json` |
+| Conversations | `~/.consensflow/workspaces/<key>/threads.json` |
+| Run artifacts | `~/.consensflow/workspaces/<key>/runs/<id>/` |
+| Skill manifest | `~/.consensflow/skills-manifest.json` |
+| Mode | `~/.consensflow/mode.json` |
+
+One root; `CONSENSFLOW_HOME` moves all of it. The only things written outside
+are the generated skill in each harness's own skills directory and the
+`cf`/`consensflow` launcher on PATH.
+
+## Development
+
+```sh
+npm test        # node --test
+npm run check   # biome + tests
+```
+
+Tests spawn no live agent CLIs and reach no network: harness CLIs are stub
+scripts on a fake PATH, git is a shim copying a fixture tree, and every test
+runs against a throwaway home.
+
+Specs live in `.specs/`. `CLAUDE.md` (byte-identical to `AGENTS.md`) holds the
+load-bearing rules and the reasons behind them.
