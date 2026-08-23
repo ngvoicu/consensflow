@@ -278,13 +278,18 @@ async function runVerb(rest) {
   })
 
   // Streaming is the point: the thinking has to stay visible while it works.
+  // What was streamed is remembered, so the answer is not printed twice when
+  // the harness already streamed it — some engines only reveal the answer in
+  // the terminal summary, and those still need the block below.
   let inDelta = false
   let sawDelta = false
+  let streamed = ''
   const onEvent = values.json
     ? undefined
     : (event) => {
         if (event.kind === 'delta') {
           process.stdout.write(event.text)
+          streamed += event.text
           inDelta = true
           sawDelta = true
           return
@@ -293,6 +298,7 @@ async function runVerb(rest) {
         const line = renderEvent(event)
         if (line) {
           process.stdout.write(`${inDelta ? '\n' : ''}${line}\n`)
+          streamed += `${line}\n`
           inDelta = false
         }
       }
@@ -303,10 +309,24 @@ async function runVerb(rest) {
     out(JSON.stringify(result, null, 2))
     return
   }
+  const answer = (result.output ?? '').trim()
+  if (answer.length === 0) {
+    out('')
+    out(`# @${row.id}`)
+    out('')
+    out('(no answer)')
+    return
+  }
+  // Already on screen? Then say who it was and stop repeating yourself.
+  if (streamed.includes(answer)) {
+    out('')
+    out(`— @${row.id}`)
+    return
+  }
   out('')
   out(`# @${row.id}`)
   out('')
-  out(result.output ?? '(no answer)')
+  out(answer)
 }
 
 function modeVerb() {

@@ -475,6 +475,17 @@ describe('cf run spawns one agent, in whatever mode this machine runs', () => {
     assert.doesNotMatch(packet, /## Handoff/)
   })
 
+  it('prints the answer once, not once streamed and once again', async () => {
+    stubCodex()
+    const out = await cf(['run', '@diana', 'how are you'], t.env)
+
+    const answer = 'answered'
+    const times = out.stdout.split(answer).length - 1
+    assert.equal(times, 1, `the answer appears ${times} times:\n${out.stdout}`)
+    // Attribution still happens — it just stops repeating the text.
+    assert.match(out.stdout, /@diana/)
+  })
+
   it('sends the conversation only when the lead hands one over', async () => {
     const handoff = join(t.root, 'history.md')
     writeFileSync(handoff, 'user: we decided to drop the retention job\n')

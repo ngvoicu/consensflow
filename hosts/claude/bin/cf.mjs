@@ -245,14 +245,15 @@ async function handleRun(tokens, cwd) {
   // live. Suppressed ONLY under --json, where streamed lines would corrupt the machine output.
   let inDelta = false;
   let sawDelta = false;
+  let streamed = "";
   const onEvent = parsed.flags.json !== true
     ? (event) => {
-      if (event.kind === "delta") { process.stdout.write(event.text); inDelta = true; sawDelta = true; return; } // pi reasoning/text, flowing like its own UI
+      if (event.kind === "delta") { process.stdout.write(event.text); streamed += event.text; inDelta = true; sawDelta = true; return; } // pi reasoning/text, flowing like its own UI
       // Once pi has streamed deltas, its message_end thinking/text blocks are redundant with what
       // already flowed — skip them live (tool calls still render; the trail keeps them for timeouts).
       if (sawDelta && (event.kind === "thinking" || event.kind === "text")) return;
       const line = renderEvent(event);
-      if (line) { process.stdout.write(`${inDelta ? "\n" : ""}${line}\n`); inDelta = false; }
+      if (line) { process.stdout.write(`${inDelta ? "\n" : ""}${line}\n`); streamed += `${line}\n`; inDelta = false; }
     }
     : undefined;
   const result = await runAgent({ cwd, agent, packet, kind: "ask", onEvent });
@@ -263,10 +264,15 @@ async function handleRun(tokens, cwd) {
     console.log(JSON.stringify(result, null, 2));
     return;
   }
-  // Always print the parsed final result after the child exits, even while streaming. Some engine
-  // streams omit answer text until the terminal summary. This mirrors Pi: live crumbs are
-  // best-effort; the final reply is durable.
-  console.log(renderRunResult(result));
+  // The final result is still printed after the child exits — some engine
+  // streams omit answer text until the terminal summary — but its answer is
+  // left out when the trail above already carried it.
+  const answer = String(result.output ?? "").trim();
+  console.log(
+    renderRunResult(result, {
+      answerAlreadyShown: answer.length > 0 && streamed.includes(answer),
+    }),
+  );
 }
 
 export function parseRunOptions(tokens) {
@@ -450,14 +456,16 @@ function formatAgentLine(p) {
 // Just the answer on a clean run. Diagnostics appear only when they matter: the run failed or the
 // handoff was unexpectedly empty. Every agent now runs read-write, so the inspect-your-repo
 // nudge always shows. Full metadata stays in result.json (and `--json`).
-function renderRunResult(result) {
+function renderRunResult(result, options = {}) {
   const lines = [`# @${result.agent.id}`];
   if (result.exitCode !== 0) {
     lines.push("", `Run failed: exit ${result.exitCode} — artifacts: ${result.runDir}`);
   }
   if (result.handoffSummary?.startsWith("empty")) lines.push("", `Handoff: ${result.handoffSummary}`);
   lines.push("", "> Full-permission run: this agent ran unsandboxed — it could edit any file, run any command, and reach the network. Inspect what changed (e.g. `git status` / `git diff`) before keeping or building on it.");
-  lines.push("", result.output);
+  // The answer is skipped when the trail already streamed it: printing it a
+  // second time is noise, and for a one-line reply it reads like a stutter.
+  if (options.answerAlreadyShown !== true) lines.push("", result.output);
   return lines.join("\n");
 }
 
