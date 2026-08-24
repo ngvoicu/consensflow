@@ -138,3 +138,37 @@ test('discovery: the newest opencode session in this directory, born since the s
 test('discovery: a missing store is null, never an error', async () => {
   assert.equal(await discoverOpencodeSession('/tmp/ws', 0, { HOME: '/nonexistent-cf' }), null)
 })
+
+// --- the seed is a message, not a packet -----------------------------------
+
+test('seed: a bare task travels bare — the window needs no scene-setting', async () => {
+  const { createWindowSeed } = await import('../../hosts/lib/packets.js')
+
+  const seed = createWindowSeed({ task: 'Tell me a joke.' })
+
+  assert.equal(seed, 'Tell me a joke.')
+})
+
+test('seed: no packet scaffolding, whatever rides along', async () => {
+  const { createWindowSeed } = await import('../../hosts/lib/packets.js')
+
+  const seed = createWindowSeed({ task: 'review this', brief: 'GDPR pass', handoff: 'we said X' })
+
+  // The window is a full interactive session: it knows how to work, and its
+  // seed is the first thing the USER sees in their pane.
+  assert.doesNotMatch(seed, /How to work/)
+  assert.doesNotMatch(seed, /ConsensFlow Packet/)
+  assert.doesNotMatch(seed, /Respond directly and conversationally/)
+  assert.match(seed, /GDPR pass/)
+  assert.match(seed, /we said X/)
+})
+
+test('seed: the message marker survives sections, so catchup unwraps to the question', async () => {
+  const { createWindowSeed } = await import('../../hosts/lib/packets.js')
+
+  const seed = createWindowSeed({ task: 'the actual question', brief: 'a brief' })
+
+  const marker = seed.indexOf('## Message from the user')
+  assert.ok(marker > 0, 'sections present → marker present')
+  assert.equal(seed.slice(marker + '## Message from the user'.length).trim(), 'the actual question')
+})

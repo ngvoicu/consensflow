@@ -323,43 +323,24 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     )
   })
 
-  it('does not hand out cmux pane skills outside cmux mode', async () => {
-    // A git that would clone happily: the button must still not install them,
-    // because it is the mode that decides, never the click.
-    const fixture = join(t.root, 'cmux-repo')
-    mkdirSync(join(fixture, 'skills', 'cmux-core'), { recursive: true })
-    writeFileSync(join(fixture, 'skills', 'cmux-core', 'SKILL.md'), 'pane control\n')
+  it('installs no cmux skills from any button — ConsensFlow ships one skill', async () => {
+    // The cloning era installed cmux's skills tree here; the buttons now only
+    // take back what it left. A git on PATH that would clone happily proves
+    // nothing reaches for it.
     const git = join(t.env.PATH, 'git')
-    writeFileSync(
-      git,
-      `#!/bin/sh
-PATH=/usr/bin:/bin
-for last do :; done
-if [ "$1" = "clone" ]; then mkdir -p "$last"; cp -R "${fixture}/." "$last/"; exit 0; fi
-case "$*" in *rev-parse*) echo cmux9999; exit 0 ;; esac
-exit 1
-`,
-    )
+    writeFileSync(git, '#!/bin/sh\necho "git should never run" >&2\nexit 1\n')
     chmodSync(git, 0o755)
 
-    // In cmux mode they belong here.
-    await api('/api/skills/install', { method: 'POST', body: JSON.stringify({}) })
-    assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'cmux-core', 'SKILL.md')))
-
-    await api('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'claude' }) })
     const body = await (
       await api('/api/skills/install', { method: 'POST', body: JSON.stringify({}) })
     ).json()
 
-    assert.equal(body.cmuxCommit, null, 'a host mode installs from no cmux clone')
+    assert.equal(body.cmuxCommit, null, 'there is no cmux clone to report')
     assert.equal(
       existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'cmux-core', 'SKILL.md')),
       false,
-      'updating the ConsensFlow skill must not smuggle pane control back in',
+      'no pane-control tree appears',
     )
-
-    // Leave the machine as this suite found it.
-    await api('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'cmux' }) })
     assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')))
   })
 

@@ -1,6 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { installCmuxSkills } from './cmux-skills.js'
 import { detectHarnesses, knownHarnesses } from './harnesses.js'
 import { retireHostPayloads } from './host-payloads.js'
 import { installSkill, uninstallSkills } from './install.js'
@@ -73,30 +72,31 @@ function rememberMode(mode, env) {
 }
 
 /**
- * cmux's own skills — pane control, browser surfaces, its settings — belong
- * to the cmux path and only to it.
+ * Take-back only, never installs — like the host payloads before it.
  *
- * They have nothing to do with consulting: a Claude Code install runs its
- * agents as subprocesses and never touches a pane. So the mode named
- * after cmux carries them, and a host mode carries none. Anyone outside the
- * target set gives them back, because a rule that only ever added would
- * leave every harness it had once touched holding files it has no use for.
+ * ConsensFlow used to clone cmux's whole skills tree and install it into
+ * every harness in cmux mode: 20 skills, ~300 files, of which 18 were docs
+ * for developing cmux itself — billing, release, localization. A consulting
+ * lead needs three pane commands and a way to find the pane again, and the
+ * generated skill quotes all four. Shipping a fifth of a repo into four
+ * skills budgets for that was the tail wagging the dog.
+ *
+ * So ConsensFlow ships ONE skill — its own — and this takes back what the
+ * cloning era installed: every manifest-owned file whose source is a cmux
+ * commit, plus the checkout cache. Drift is still sacred: a cmux skill the
+ * user edited is refused without force, exactly like ours.
  */
 export function syncCmuxSkills(env, options = {}) {
-  const mode = options.mode ?? currentMode(env)
-  const targets = mode === 'cmux' ? detectHarnesses(env) : []
-  const keep = targets.map((harness) => harness.skillsDir)
-
   const report = uninstallSkills(env, {
-    filter: (path, recorded) =>
-      recorded.source.startsWith('cmux@') && !keep.some((dir) => path.startsWith(dir)),
+    force: options.force,
+    filter: (_path, recorded) => recorded.source.startsWith('cmux@'),
   })
-  // No target, no clone: a host mode should not reach the network for files
-  // it has already decided nobody gets.
-  if (targets.length === 0) return { commit: null, report }
-
-  const cmux = installCmuxSkills(env, { force: options.force, targets })
-  return { commit: cmux.commit, report: [...report, ...cmux.report] }
+  const cache = join(configRoot(env), 'cache', 'cmux')
+  if (existsSync(cache)) {
+    rmSync(cache, { recursive: true, force: true })
+    report.push({ action: 'removed', path: cache })
+  }
+  return { commit: null, report }
 }
 
 /**
@@ -346,13 +346,9 @@ export function applyMode(rawMode, env, options = {}) {
       `\`cf\` could not be placed on PATH (${launcherProblem}) — the skill's \`cf run\` lines will not work until it is`,
     )
   }
-  try {
-    changes.push(...syncCmuxSkills(env, { mode, force: options.force }).report)
-  } catch (cause) {
-    report.push(
-      `cmux skills were not fetched (${cause instanceof Error ? cause.message.split('(')[0].trim() : cause}) — run \`consensflow skills update\` when you are online`,
-    )
-  }
+  // Nothing to fetch any more: the only cmux-skills work left is taking back
+  // what the cloning era installed, and that never needs the network.
+  changes.push(...syncCmuxSkills(env, { force: options.force }).report)
 
   rememberMode(mode, env)
   return { mode, changes, report }

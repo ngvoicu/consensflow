@@ -10,6 +10,7 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
+import { installSkill } from '../src/install.js'
 import {
   applyMode,
   currentMode,
@@ -281,32 +282,33 @@ describe('the machine runs exactly one ConsensFlow path', () => {
     assert.ok(existsSync(launcher), 'a host mode teaches the same line, so it keeps cf too')
   })
 
-  it('brings the cmux skills with it when cmux mode is chosen', () => {
-    stubGit(t)
+  it('installs no cmux skills in any mode — ConsensFlow ships one skill', () => {
+    // The cloning era shipped ~300 files of cmux-development docs into every
+    // harness for the sake of three pane commands the generated skill now
+    // quotes itself. cmux mode is a scope over OUR skill, nothing more.
     applyMode('cmux', t.env, { bundled })
 
-    assert.ok(
-      existsSync(join(t.env.CODEX_HOME, 'skills', 'cmux-core', 'SKILL.md')),
-      'cmux skills install without being asked for',
-    )
+    assert.equal(cmuxFiles(t), 0, 'no cmux-sourced files in cmux mode either')
+    assert.equal(existsSync(join(t.env.CODEX_HOME, 'skills', 'cmux-core')), false)
   })
 
-  it('keeps cmux pane skills out of a host mode entirely', () => {
-    stubGit(t)
-    applyMode('cmux', t.env, { bundled })
-    // cmux mode is the path named after cmux, so pane control comes with it.
-    assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'cmux-core', 'SKILL.md')))
-    assert.ok(existsSync(join(t.env.CODEX_HOME, 'skills', 'cmux-core', 'SKILL.md')))
-
-    // Choosing Claude Code takes them back everywhere: consulting through the
-    // host runs a subprocess and never touches a pane, so nobody needs them.
-    applyMode('claude', t.env, { bundled })
-    assert.equal(cmuxFiles(t), 0, 'a cc-only install should own no cmux files')
-    assert.equal(
-      existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'cmux-core', 'SKILL.md')),
-      false,
+  it('takes back what the cloning era installed, whichever mode is chosen', () => {
+    // A machine upgraded from the cloning era still holds cmux@… files; any
+    // mode switch retires them, cache included.
+    const planted = join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'cmux-core', 'SKILL.md')
+    installSkill(
+      { relPath: 'cmux-core/SKILL.md', content: 'pane control\n', source: 'cmux@abc1234' },
+      t.env,
     )
-    assert.equal(existsSync(join(t.env.CODEX_HOME, 'skills', 'cmux-core', 'SKILL.md')), false)
+    assert.ok(existsSync(planted), 'fixture: the cloning era file is there')
+    const cache = join(t.env.CONSENSFLOW_HOME, 'cache', 'cmux')
+    mkdirSync(cache, { recursive: true })
+
+    applyMode('cmux', t.env, { bundled })
+
+    assert.equal(cmuxFiles(t), 0)
+    assert.equal(existsSync(planted), false)
+    assert.equal(existsSync(cache), false, 'the checkout cache goes with them')
   })
 
   it('does not reach for cmux at all in a host mode', () => {
@@ -326,18 +328,18 @@ describe('the machine runs exactly one ConsensFlow path', () => {
     )
   })
 
-  it('does not fail the switch when the cmux skills cannot be fetched', () => {
+  it('needs no git and no network to switch modes', () => {
+    // The cloning era fetched cmux's skills on every switch; nothing fetches
+    // anything now, so an offline machine with no git still gets its mode.
     const offline = tempEnv()
     try {
       stubCli(offline, 'codex')
       addAgent({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }, offline.env)
 
-      // No git on PATH at all: the mode still applies, and says what it missed.
-      const outcome = applyMode('cmux', offline.env, { bundled })
+      applyMode('cmux', offline.env, { bundled })
 
       assert.equal(currentMode(offline.env), 'cmux')
       assert.ok(existsSync(join(offline.env.CODEX_HOME, 'skills', 'consensflow', 'SKILL.md')))
-      assert.match(outcome.report.join(' '), /cmux skills/i)
     } finally {
       offline.cleanup()
     }

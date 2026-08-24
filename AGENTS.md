@@ -9,9 +9,10 @@ ConsensFlow (the manager, npm `consensflow`): skills-first. A zero-dependency No
 agents and generates/installs **one skill** teaching every harness
 (claude, codex, pi, opencode — all read the same Agent Skills `SKILL.md`
 format) how to consult them via exact CLI commands — one-shot in the host
-modes, named resumable conversations in `cmux` mode. In `cmux`
-mode it also installs and updates cmux's own skills. There is deliberately **no
-delegation engine** — no daemon, no SQLite, no panes, no state machine (the
+modes, named resumable conversations in each agent's own window in `cmux`
+mode. ConsensFlow ships exactly ONE skill — its own; the cmux-skills cloning
+era is over and `syncCmuxSkills` only takes its leftovers back. There is
+deliberately **no delegation engine** — no daemon, no SQLite, no panes, no state machine (the
 v2 engine that had one was retired and deleted 2026-08-19).
 
 ## Consulting agents while working here
@@ -28,14 +29,13 @@ license to skip the skill.
 
 | Path | Owns |
 |---|---|
-| `bin/cf.mjs` | All verbs: setup, use, run, mode, off, reset, agent …, skills …, ui, doctor. `reset` refuses without `--yes` and prints what it would destroy — the refusal is the preview. Setup never seeds agents; a machine that ran cc/pi already has the shared roster, so setup installs the skill straight from it. Every roster mutation installs-or-regenerates the skill, for whoever the mode puts in scope (`skillTargets` → `scopeTargets`) — the first add installs it, the rest regenerate it |
+| `bin/cf.mjs` | All verbs: setup, use, run, mint, chat, attach, catchup, sessions, last, mode, off, reset, agent …, skills …, ui, doctor. `reset` refuses without `--yes` and prints what it would destroy — the refusal is the preview. Setup never seeds agents; a machine that ran cc/pi already has the shared roster, so setup installs the skill straight from it. Every roster mutation installs-or-regenerates the skill, for whoever the mode puts in scope (`skillTargets` → `scopeTargets`) — the first add installs it, the rest regenerate it |
 | `src/roster.js` | Roster = the SHARED v1 file `~/.consensflow/agents.json` (cc + pi read/write it too): v1-schema-faithful mapping (kind↔runtime, thinking/effort↔effort, toolsPolicy↔permission), unknown fields preserved, unsupported kinds listed+marked, never dropped. **One root, one meaning**: roster, state and workspaces all live in `~/.consensflow`, or under `CONSENSFLOW_HOME` when it is set. The state used to sit under XDG while the roster sat here, and the variable meant a different directory to each half — a machine set up that way is moved into the one root on first run (`migrateStateRoot`) |
 | `src/catalog.js` | A **view over `hosts/lib/presets.js`** — one catalog, not two (they disagreed on five names until 2026-08-21) — plus each CLI's real effort levels. All 48 presets are offered, grouped by harness (claude 8, codex 4, pi 18, opencode 17, image 1). `cf agent add <name>` resolves through it and records `preset` on the row, which is what makes `cf agent sync` and the UI's Update button possible |
 | `src/skill.js` | SKILL.md generation — the prose IS the product. One command for every agent (`cf run @name "<task>"`), so the table says who each agent is rather than what to type. The front-matter `description` is mode-aware, because it is the only part a lead reads before deciding whether to open the rest |
 | `src/harnesses.js` | Harness detection (CLI on PATH) + per-harness skills dir (honours `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`) |
 | `src/terminal.js` | The `cf`/`consensflow` launcher on PATH, in **every** mode — the skill teaches `cf run`, so it is part of the path, not a cmux extra. It is also the only installed file that names a runtime absolutely, which is what `terminalRuntime` reads for `cf doctor` |
 | `src/manifest.js` + `src/install.js` | Hash-manifest ownership: install/update/status/uninstall; drift is sacred |
-| `src/cmux-skills.js` | Fetches manaflow-ai/cmux into a cache under `<config>/cache/cmux` and installs its `skills/` tree as `cmux@<commit>`. A checkout it cannot update is thrown away and re-cloned, so a broken cache costs one slow run rather than every run after it |
 | `src/host-payloads.js` | **Take-back only, never installs.** Everything the payload era left on a machine: the recorded claude files, the `/consensflow` command (by its front-matter marker), the world-readable `settings.json.consensflow.bak`, the `<config>/hosts` payloads, `hosts.json`, and a pi extension removed through pi's own CLI. Claude Code's `settings.json` is never written — a hook an older version left is *reported* by `cf doctor` |
 | `src/sync.js` | The roster→skill path: `skillTargets` (delegates to `scopeTargets`, so one rule decides scope), `refreshInstalledSkill` on every mutation, `healSkillIfStale` when another tool edits the roster behind us, and `skillGaps` — a POSITIVE check of who should carry the skill against who does, because `installSkill` refuses an unowned path and records nothing, which once left opencode silently consulting nothing while everything else looked healthy |
 | `src/mode.js` | The one-path-per-machine invariant. A mode is a **scope over one generated skill** — who gets it — plus whether cmux's pane skills come along. `syncGeneratedSkill` is the single install path for all three |
@@ -94,11 +94,13 @@ keep in step — the manager is the only caller.
   out of scope gives it back, so two paths can never be live at once.
   `cf skills install` follows the same scope; it refuses only when no mode has
   been chosen, which is how ConsensFlow used to appear in harnesses nobody had
-  picked. cmux's own skills belong to `cmux` mode alone (`syncCmuxSkills`,
-  the single rule the CLI, the UI and `applyMode` all call): a host mode
-  installs none, takes back any it finds, and never clones. A failed fetch
-  never costs the mode switch. Every entry point states the cost of a host mode (codex and
-  opencode get nothing).
+  picked. No mode installs cmux's skills any more: the cloning era shipped ~300
+  files of cmux-development docs into four skills budgets for the sake of
+  three pane commands, and the generated skill now quotes everything a lead
+  needs (four commands). `syncCmuxSkills` is take-back only — it retires
+  cmux-sourced manifest files and the checkout cache, in every mode, never
+  touches the network, and honours drift like any owned file. Every entry
+  point states the cost of a host mode (codex and opencode get nothing).
 
 - **A conversation is the harness's, we only remember which one.** In cmux
   mode a consult resumes the harness's own session (`--resume`, `exec resume`,
@@ -171,10 +173,27 @@ keep in step — the manager is the only caller.
   before — that is physics, not a mode. Terminal-ness is injectable
   (`CONSENSFLOW_TTY`) so tests can stand on either side. Window turns are not
   runs of ours: `runs` does not grow, `lastRunId` stays null, and `cf last`
-  points at `cf catchup`, whose `--wait` polls the harness's store until the
-  next assistant turn and prints only what is new. Every window spawn goes
-  through `childEnv` — for a while `cf attach` inherited the full environment,
-  which meant every attached turn could silently bill an API key.
+  points at `cf catchup`. Every window spawn goes through `childEnv` — for a
+  while `cf attach` inherited the full environment, which meant every attached
+  turn could silently bill an API key.
+
+- **The lead names the conversation before the pane exists.** The run prints
+  its conversation name into a pane the lead cannot read, so the recipe is
+  `NAME=$(cf mint)` first, then `cf run … --new --session "$NAME"` — creation
+  under an explicit name, refused for agent names (the disjoint-vocabulary
+  rule), taken names and non-slug shapes. The window's seed is
+  `createWindowSeed`, not a packet: no header, no "How to work", no format
+  footer — a window is a full interactive session and the seed is the first
+  thing the USER sees; the `## Message from the user` marker survives whenever
+  a brief/handoff rides along, because `cf catchup` unwraps on it.
+
+- **`cf catchup --wait` survives both of its races.** A fast agent can answer
+  BEFORE `--wait` starts (this hung live, twice): a conversation ending in an
+  assistant turn is a standing answer, returned. A fast lead can start
+  `--wait` before its just-sent question reaches the store: a short grace
+  (`CONSENSFLOW_WAIT_GRACE_MS`, default 4s) watches for a newer user turn
+  first, and only then settles for the standing exchange. It always prints
+  from the last user turn, so a stale answer is recognisable by its question.
 
 - **One spawn verb, three modes.** `cf run @name "<task>"` builds the packet,
   applies the billing guards and streams the run, whichever harness is behind
@@ -271,17 +290,16 @@ keep in step — the manager is the only caller.
   silently switching to API billing.
 - **Every roster mutation regenerates the installed skill** (CLI and UI both
   call `refreshInstalledSkill`); only where the manifest says it is installed.
-- **Pane control belongs to cmux's skills**, never ours — the v2 lesson
-  (typed-bootstrap verification is a minefield). Our skill says *what* to
-  run; theirs say *how* to drive panes. One deliberate exception since
-  2026-08-23: the cmux-mode skill *quotes* three of cmux's commands
-  (`new-pane`, `send`, `rename-tab`) because a lead without them spent a
+- **Pane control belongs to cmux**, never to us — the v2 lesson
+  (typed-bootstrap verification is a minefield). Our skill says *what* to run
+  and *quotes* the four cmux commands a lead needs (`new-pane`, `send`,
+  `rename-tab`, `list-pane-surfaces`), because a lead without them spent a
   minute dumping `cmux --help` before it could ask a question. Quoting is not
   implementing — we drive no pane, and the skill says outright that the
-  commands are cmux's and that its skills are the authority if they move. The
-  same section forbids reading the answer back off the screen: `cf last
-  <name>` exists so nobody has to. Pane control is also a different product
-  from consulting, which is why only `cmux` mode carries any of this: a Claude
+  commands are cmux's and `cmux --help` is the authority if they move. The
+  same section forbids reading the answer back off the screen: `cf catchup`
+  exists so nobody has to. Pane control is also a different product from
+  consulting, which is why only `cmux` mode carries any of this: a Claude
   Code install runs its agents as subprocesses and never touches a pane.
 - **Tests spawn no live agent CLIs and no network** — agent CLIs are stub
   scripts on a fake PATH; git is a PATH shim copying a fixture tree.

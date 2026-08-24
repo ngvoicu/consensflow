@@ -4,7 +4,7 @@
  *
  * v3 is skills-first: there is no delegation engine here. `cf` manages the
  * roster of named agents, generates the consensflow skill from it, and
- * installs/updates that skill — plus cmux's own skills — into every coding
+ * installs/updates that skill into every coding
  * harness on the machine (claude, codex, pi, opencode). The skill teaches the
  * harnesses everything else.
  */
@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { discoverOpencodeSession, harnessTurns } from '../hosts/lib/harness-transcript.js'
 import { renderImageRun, runImageAgent } from '../hosts/lib/image-run.js'
-import { createPacket } from '../hosts/lib/packets.js'
+import { createPacket, createWindowSeed } from '../hosts/lib/packets.js'
 import { childEnv, interactiveResume, interactiveStart, runAgent } from '../hosts/lib/runners.js'
 import { runsRoot } from '../hosts/lib/state.js'
 import { leadId, loadThreads, newSessionName, saveThread } from '../hosts/lib/threads.js'
@@ -74,21 +74,25 @@ const USAGE = `consensflow ${PKG.version}
 
 Usage: cf <command> [options]
 
-  setup [--all] [--force]                      One command: install the cmux skills and, when the
-                                               shared roster has agents, the consensflow skill
-                                               into every detected coding harness
+  setup [--all] [--force]                      One command: when the shared roster has agents,
+                                               install the consensflow skill into every detected
+                                               coding harness
   use <claude|pi|cmux>                         Who on this machine can consult:
                                                claude / pi = only that harness gets the skill;
                                                cmux (pi, cc, codex, opencode) = every harness gets
-                                               it, and cmux's own pane-control skills come with
-                                               that mode and only that one
+                                               it, and a consult opens the agent's own window in
+                                               its cmux pane
   run <name> "<task>"                          Spawn one agent here and stream its work back:
     [--brief <what this run is for>]            a brief for this spawn, your conversation as
     [--handoff-file <file>] [--no-handoff]      handoff when you pass one, a note alongside it
     [--context <note>] [--prompt-file <file>]
     [--image <path>]                            (image agents: reference pictures)
     [--new] [--session <name>]                  a conversation continues by default in cmux
-    [--thread] [--no-thread]                    mode; --new starts a fresh one
+    [--thread] [--no-thread]                    mode; --new starts a fresh one, and with
+                                               --session it starts under that exact name
+  mint                                         A fresh conversation name, printed before
+                                               anything exists under it — name first, then
+                                               run with --new --session <name>
   attach <@name|conversation> [--print]        Open the harness's OWN window on that
                                                conversation — the real codex/claude/pi
                                                interface, whole history in it. --print
@@ -122,12 +126,12 @@ Usage: cf <command> [options]
       the roster is ~/.consensflow/agents.json, shared by every path this
       machine can run (it was participants.json before 2026-08-21 and an
       existing one is still read)
-  skills install [--all] [--force]             Generate + install the consensflow skill, and cmux's
-                                               own in cmux mode.
+  skills install [--all] [--force]             Generate + install the consensflow skill — the one
+                                               skill ConsensFlow ships.
                                                Hosts with their own ConsensFlow (the cc plugin, the pi
                                                extension) are left alone unless --all
-  skills update [--force]                      Regenerate ours; re-fetch cmux's in cmux mode, take
-                                               them back in any other
+  skills update [--force]                      Regenerate ours; take back any cmux skills an older
+                                               version installed
   skills status                                Every owned file: ok, drifted (user-edited) or missing
   skills uninstall [--force]                   Remove exactly what the manifest owns
   ui [--json] [--no-open]                      Ephemeral local roster editor (Ctrl-C to stop);
@@ -171,19 +175,12 @@ function reportNativeHosts(env, all) {
 }
 
 /**
- * cmux's own skills, wherever the mode says they belong — which in a host
- * mode is nowhere, so this quietly takes back any that are left over.
+ * ConsensFlow ships one skill — its own. This takes back what the cloning
+ * era installed: cmux-sourced files and the checkout cache. Local disk work
+ * only; it cannot fail on the network because it never touches one.
  */
 function syncCmux(env, values) {
-  try {
-    const cmux = syncCmuxSkills(env, { force: values.force })
-    if (cmux.commit !== null) out(`cmux skills @ ${cmux.commit}`)
-    printReport(cmux.report)
-  } catch (cause) {
-    out(
-      `cmux skills were not fetched (${cause instanceof Error ? cause.message.split('(')[0].trim() : cause})`,
-    )
-  }
+  printReport(syncCmuxSkills(env, { force: values.force }).report)
 }
 
 function printReport(report) {
@@ -255,6 +252,28 @@ async function resolveConversation(agentRow, { wantsThread, session, fresh, join
       listAgents(env).map((a) => a.name),
     )
   if (session !== undefined) {
+    // `--new --session <name>` names the conversation up front. The lead
+    // composing a pane command needs the name BEFORE the run prints it —
+    // there is no other way to title the tab or read the answer back without
+    // guessing from `cf sessions`.
+    if (fresh) {
+      if (!/^[a-z0-9][a-z0-9-]*$/.test(session)) {
+        return {
+          error: `a conversation name is lowercase words and hyphens: ${JSON.stringify(session)}`,
+        }
+      }
+      if (listAgents(env).some((a) => a.name === session)) {
+        return {
+          error: `${session} is an agent's name — a conversation cannot share it ("ask ${session} in ${session}" would read as two agents)`,
+        }
+      }
+      if (threads[session] !== undefined) {
+        return {
+          error: `conversation ${JSON.stringify(session)} already exists here — omit --new to continue it`,
+        }
+      }
+      return { threads, name: session, record: undefined }
+    }
     if (threads[session] === undefined) {
       const known = Object.keys(threads)
       return {
@@ -371,11 +390,7 @@ async function saveWindowRow(name, agentRow, record, sessionId) {
  * the window on the id that streaming captured.
  */
 async function openWindow(row, name, record, packetInput) {
-  const seed = await createPacket({
-    ...packetInput,
-    continuing: record?.sessionId != null,
-    conversational: true,
-  })
+  const seed = createWindowSeed(packetInput)
 
   if (record?.sessionId) {
     const invocation = interactiveResume(row, record.sessionId, seed)
@@ -932,36 +947,58 @@ async function catchupVerb(rest) {
 
   let turns = await harnessTurns(record.kind, record.sessionId, env)
 
-  // --wait: the lead's way to sit out an answer being written in the agent's
-  // own window. Poll the harness's store until an assistant turn newer than
-  // what we have already seen arrives, then show only what is new. The row is
-  // re-read each round because an opencode session id can land moments after
-  // the window opened.
+  // --wait: the answer to the question most recently asked, waited for if it
+  // is still being written. Two races live here and the shape below survives
+  // both. A fast agent can answer BEFORE --wait starts (a warm window, a
+  // trivial question): a baseline of "everything so far" would then wait
+  // forever for an answer that already stands — this hung live, twice. And a
+  // fast LEAD can start --wait before its just-sent question reaches the
+  // store: returning the standing answer immediately would hand back the
+  // PREVIOUS one as if it were new. So: a conversation ending in a user turn
+  // is pending — wait for its answer. One ending in an assistant turn gets a
+  // short grace for a just-sent question to land; if none does, that standing
+  // answer IS the answer. Printing from the last user turn keeps the question
+  // visible, so a stale answer is recognisable as one.
   if (values.wait) {
-    const already = turns.length
-    const deadline = Date.now() + 15 * 60_000
     let current = record
-    let fresh = []
-    while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 2000))
+    const readTurns = async () => {
+      // Re-read the row each round: an opencode session id can land moments
+      // after the window opened.
       current = (await loadThreads(cwdOf()))[name] ?? current
-      const now = await harnessTurns(current.kind, current.sessionId, env)
-      fresh = now.slice(already)
-      if (fresh.some((turn) => turn.role === 'assistant')) {
-        turns = now
-        break
+      return await harnessTurns(current.kind, current.sessionId, env)
+    }
+    const pending = (list) => list.length === 0 || list.at(-1).role === 'user'
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+    if (!pending(turns)) {
+      const baseline = turns.length
+      const grace = Number.parseInt(env.CONSENSFLOW_WAIT_GRACE_MS ?? '4000', 10)
+      const graceEnd = Date.now() + grace
+      while (Date.now() < graceEnd) {
+        await sleep(Math.min(500, grace))
+        turns = await readTurns()
+        if (turns.length > baseline) break
       }
     }
-    if (!fresh.some((turn) => turn.role === 'assistant')) {
-      fail(`no new answer in ${name} after 15 minutes — is the window still working?`)
+
+    const deadline = Date.now() + 15 * 60_000
+    while (pending(turns) && Date.now() < deadline) {
+      await sleep(2000)
+      turns = await readTurns()
+    }
+    if (pending(turns)) {
+      fail(`no answer in ${name} after 15 minutes — is the window still working?`)
       return
     }
+
+    const at = turns.findLastIndex((turn) => turn.role === 'user')
+    const exchange = turns.slice(Math.max(at, 0))
     if (values.json) {
-      out(JSON.stringify({ session: name, agent: current.agent, turns: fresh }, null, 2))
+      out(JSON.stringify({ session: name, agent: current.agent, turns: exchange }, null, 2))
       return
     }
-    out(`${name} · @${current.agent} · ${fresh.length} new turn${fresh.length === 1 ? '' : 's'}`)
-    for (const turn of fresh) {
+    out(`${name} · @${current.agent}`)
+    for (const turn of exchange) {
       out('')
       out(turn.role === 'user' ? '› asked' : `• @${current.agent}`)
       out(turn.text)
@@ -986,6 +1023,25 @@ async function catchupVerb(rest) {
     out(turn.role === 'user' ? '› asked' : `• @${record.agent}`)
     out(turn.text)
   }
+}
+
+/**
+ * A fresh conversation name, before anything exists under it.
+ *
+ * The lead composing a pane command is the one who needs the name — for the
+ * tab title, for `cf catchup` — and the only voice it has is its own shell.
+ * So it mints first, then sends `cf run … --new --session <name>`. Nothing is
+ * reserved: the name is only taken when the run creates it, and the vocabulary
+ * is roomy enough that a collision costs one retry.
+ */
+async function mintVerb() {
+  const threads = await loadThreads(cwdOf())
+  out(
+    newSessionName(
+      Object.keys(threads),
+      listAgents(env).map((a) => a.name),
+    ),
+  )
 }
 
 async function sessionsVerb(rest) {
@@ -1433,6 +1489,9 @@ async function main() {
       return
     case 'sessions':
       await sessionsVerb(rest)
+      return
+    case 'mint':
+      await mintVerb()
       return
     case 'last':
       await lastVerb(rest)

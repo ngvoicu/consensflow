@@ -772,6 +772,38 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"answered"}
     assert.ok(!orphaned.includes(name), 'and it was not one of the unowned ones')
   })
 
+  it('cf mint names a conversation before it exists, so the lead can plan around it', async () => {
+    // The lead composing a pane command needs the name for the tab title and
+    // the read-back BEFORE the run prints it in a pane it cannot read.
+    const minted = await cf(['mint'], t.env)
+    assert.equal(minted.code, 0, minted.stderr)
+    const name = minted.stdout.trim()
+    assert.match(name, /^[a-z]+-[a-z]+$/, 'a sayable vocabulary name')
+
+    stubCodex(['thread-alpha'])
+    const run = await cf(
+      ['run', '@hyperion', 'planned', '--thread', '--new', '--session', name],
+      asLead('lead-M'),
+    )
+
+    assert.equal(run.code, 0, run.stderr)
+    assert.match(run.stdout, new RegExp(`conversation: ${name} \\(new\\)`))
+    assert.ok(threads()[name], 'created under exactly that name')
+  })
+
+  it('--new --session refuses an agent name, a taken name, and a shell-hostile one', async () => {
+    const taken = Object.keys(threads())[0]
+    for (const [bad, why] of [
+      ['hyperion', /agent's name/],
+      [taken, /already exists/],
+      ['Has Spaces', /lowercase words and hyphens/],
+    ]) {
+      const out = await cf(['run', '@hyperion', 'x', '--thread', '--new', '--session', bad], t.env)
+      assert.notEqual(out.code, 0, `${bad} must be refused`)
+      assert.match(out.stdout + out.stderr, why)
+    }
+  })
+
   it('--session reaches another lead conversation, because it was asked for', async () => {
     // Implicit is scoped, explicit is not: naming a conversation is the user
     // saying which one they mean, and no rule of ours overrules that.
@@ -1205,47 +1237,88 @@ printf '{"id":"ses_window1","directory":"%s","time":{"created":99999999999999}}'
     assert.match(out.stdout, /env -u OPENAI_API_KEY codex resume/)
   })
 
-  it('cf catchup --wait sits out an answer being written in the window', async () => {
-    // Window turns reach no stream of ours: the lead's way to wait for an
-    // answer is to watch the harness's own store until a new assistant turn
-    // lands. Only what is new is printed — the lead has seen the rest.
-    const listed = await cf(['sessions', '--json'], t.env)
-    const name = Object.entries(JSON.parse(listed.stdout)).find(
-      ([, r]) => r.agent === 'hyperion' && r.sessionId === 'thread-open',
-    )[0]
-    const dir = join(t.env.CODEX_HOME, 'sessions', '2026', '08', '24')
-    mkdirSync(dir, { recursive: true })
-    const file = join(dir, 'rollout-2026-08-24T00-00-00-thread-open.jsonl')
-    writeFileSync(
-      file,
-      `${JSON.stringify({
-        type: 'response_item',
-        payload: { role: 'user', content: [{ text: 'a question' }] },
-      })}\n`,
-    )
-
-    const child = spawn(process.execPath, [CF, 'catchup', name, '--wait'], { env: t.env })
+  const catchupWait = (name, extraEnv = {}) => {
+    const child = spawn(process.execPath, [CF, 'catchup', name, '--wait'], {
+      env: { ...t.env, CONSENSFLOW_WAIT_GRACE_MS: '600', ...extraEnv },
+    })
     let stdout = ''
     child.stdout.on('data', (chunk) => {
       stdout += chunk
     })
     const guard = setTimeout(() => child.kill(), 20_000)
     guard.unref()
-    setTimeout(() => {
-      appendFileSync(
-        file,
-        `${JSON.stringify({
-          type: 'response_item',
-          payload: { role: 'assistant', content: [{ text: 'the late answer' }] },
-        })}\n`,
-      )
-    }, 500).unref()
-    const code = await new Promise((resolve) => child.on('close', resolve))
-    clearTimeout(guard)
+    return new Promise((resolve) =>
+      child.on('close', (code) => {
+        clearTimeout(guard)
+        resolve({ code, stdout })
+      }),
+    )
+  }
+
+  const rolloutFor = (id) => {
+    const dir = join(t.env.CODEX_HOME, 'sessions', '2026', '08', '24')
+    mkdirSync(dir, { recursive: true })
+    return join(dir, `rollout-2026-08-24T00-00-00-${id}.jsonl`)
+  }
+  const turnLine = (role, text) =>
+    `${JSON.stringify({ type: 'response_item', payload: { role, content: [{ text }] } })}\n`
+
+  it('cf catchup --wait sits out an answer still being written', async () => {
+    const listed = await cf(['sessions', '--json'], t.env)
+    const name = Object.entries(JSON.parse(listed.stdout)).find(
+      ([, r]) => r.agent === 'hyperion' && r.sessionId === 'thread-open',
+    )[0]
+    const file = rolloutFor('thread-open')
+    writeFileSync(file, turnLine('user', 'a question'))
+    setTimeout(() => appendFileSync(file, turnLine('assistant', 'the late answer')), 500).unref()
+
+    const { code, stdout } = await catchupWait(name)
 
     assert.equal(code, 0, stdout)
     assert.match(stdout, /the late answer/)
-    assert.doesNotMatch(stdout, /a question/, 'only what is new is shown')
+    assert.match(stdout, /a question/, 'the question stays visible above its answer')
+  })
+
+  it('cf catchup --wait returns an answer that already landed, instead of hanging', async () => {
+    // The race that bit live: a fast agent answered BEFORE --wait started, so
+    // a baseline of "everything so far" contained the answer and --wait sat
+    // out its whole timeout while the window plainly showed it.
+    const listed = await cf(['sessions', '--json'], t.env)
+    const name = Object.entries(JSON.parse(listed.stdout)).find(
+      ([, r]) => r.agent === 'hyperion' && r.sessionId === 'thread-open',
+    )[0]
+    writeFileSync(
+      rolloutFor('thread-open'),
+      turnLine('user', 'a quick question') + turnLine('assistant', 'already answered'),
+    )
+
+    const started = Date.now()
+    const { code, stdout } = await catchupWait(name)
+
+    assert.equal(code, 0, stdout)
+    assert.match(stdout, /already answered/)
+    assert.ok(Date.now() - started < 10_000, 'the standing answer returns within the grace')
+  })
+
+  it('cf catchup --wait prefers a question that lands during the grace over the stale answer', async () => {
+    // The mirror-image race: the lead chains send-and-wait in one breath, so
+    // --wait can start before the just-sent question reaches the store.
+    // Returning the standing answer immediately would hand back the PREVIOUS
+    // answer as if it were new.
+    const listed = await cf(['sessions', '--json'], t.env)
+    const name = Object.entries(JSON.parse(listed.stdout)).find(
+      ([, r]) => r.agent === 'hyperion' && r.sessionId === 'thread-open',
+    )[0]
+    const file = rolloutFor('thread-open')
+    writeFileSync(file, turnLine('user', 'old question') + turnLine('assistant', 'old answer'))
+    setTimeout(() => appendFileSync(file, turnLine('user', 'new question')), 200).unref()
+    setTimeout(() => appendFileSync(file, turnLine('assistant', 'the new answer')), 900).unref()
+
+    const { code, stdout } = await catchupWait(name, { CONSENSFLOW_WAIT_GRACE_MS: '2000' })
+
+    assert.equal(code, 0, stdout)
+    assert.match(stdout, /the new answer/)
+    assert.doesNotMatch(stdout, /old answer/, 'the stale exchange is not what was asked for')
   })
 
   it('cf last on a window-only conversation points at catchup instead of failing', async () => {

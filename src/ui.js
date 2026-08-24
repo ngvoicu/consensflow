@@ -77,7 +77,8 @@ const INTEGRATIONS = {
   },
   cmux: {
     title: 'cmux (pi, cc, codex, opencode)',
-    summary: 'Every coding harness gets the skill, and each also gets cmux’s pane-control skills.',
+    summary:
+      'Every coding harness gets the skill, and a consult opens the agent’s own window in its cmux pane.',
   },
 }
 
@@ -176,18 +177,10 @@ function installFromUi(body, env) {
     )
     if (body.all !== true) report.push(...retireSkillFromNativeHosts(env))
   }
-  // cmux's own skills follow the mode, never the button: in a host mode this
-  // takes them back rather than handing them out.
-  let cmuxCommit = null
-  try {
-    const cmux = syncCmuxSkills(env, { force: body.force === true })
-    cmuxCommit = cmux.commit
-    report.push(...cmux.report)
-  } catch {
-    // Offline: the consensflow skill still installed, and skills update
-    // will fetch cmux's later.
-  }
-  return { report, cmuxCommit, system: systemState(env) }
+  // The only cmux-skills work left is taking back what an older version
+  // installed — local disk only, so it cannot fail on the network.
+  report.push(...syncCmuxSkills(env, { force: body.force === true }).report)
+  return { report, cmuxCommit: null, system: systemState(env) }
 }
 
 /** The line this agent becomes in the skill — shown verbatim in the UI. */

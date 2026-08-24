@@ -255,6 +255,17 @@ describe('the description is all a lead reads before it decides to look inside',
     assert.match(cmux, /belongs to the session that started it/i)
   })
 
+  it('names the conversation before the pane, with cf mint', () => {
+    const cmux = generateSkill(roster, { mode: 'cmux' })
+
+    // The run prints its conversation name into a pane the lead cannot read;
+    // minting first is what makes the tab title and the read-back possible.
+    assert.match(cmux, /NAME=\$\(cf mint\)/)
+    assert.match(cmux, /--new --session /)
+    // And finding the pane again is a quoted command, not an exploration.
+    assert.match(cmux, /cmux list-pane-surfaces/)
+  })
+
   it('teaches that the pane becomes the agent own window, not a stream', () => {
     const cmux = generateSkill(roster, { mode: 'cmux' })
 

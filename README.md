@@ -58,9 +58,10 @@ back from whoever is no longer in scope, so two paths are never live at once. A
 harness that ships its own ConsensFlow is left alone rather than given a second
 skill with the same name.
 
-`cmux` mode also installs cmux's own pane-control skills, because that is where
-panes exist. `cf doctor` names any harness that is in scope but carrying no
-skill.
+ConsensFlow ships exactly one skill — its own. It used to clone cmux's whole
+skills tree into every harness too; that era is over, and switching modes now
+takes those leftovers back. `cf doctor` names any harness that is in scope but
+carrying no skill.
 
 ## A consult IS the agent's window
 
@@ -88,9 +89,11 @@ what the last one left in that directory, however recent. Ones somebody else
 started stay reachable by name, which is what `--session` is for.
 
 ```sh
+cf mint                                # a fresh conversation name, before anything exists under it
 cf run @name "<task>"                  # opens (or reopens) THIS session's conversation with it
 cf run @name "<task>" --new            # a fresh conversation, its own window
-cf run @name "<task>" --session <name> # a specific one, by name
+cf run @name "<task>" --new --session <name>  # a fresh one, under the name you minted
+cf run @name "<task>" --session <name> # a specific existing one, by name
 cf sessions                            # what is alive in this folder
 cf catchup <name> [--wait]             # what was said; --wait sits out the next answer
 cf attach <name>                       # reopen a conversation's window later, anywhere
@@ -144,19 +147,16 @@ asking you first.
 hand it with `--handoff-file`. No conversation is stashed or attached
 automatically, in any mode.
 
-## The skills ConsensFlow manages
+## The one skill ConsensFlow manages
 
-Two sources, one owner:
-
-- **`consensflow`** — generated from your roster. Its description names your
-  actual agents, which is what makes a harness reach for it when you say a name.
-- **cmux's skills** — fetched from [`manaflow-ai/cmux`](https://github.com/manaflow-ai/cmux)
-  into a cache under `<config>/cache/cmux` and installed as `cmux@<commit>`.
-  They teach pane control, so they come with `cmux` mode and only that one.
+**`consensflow`** — generated from your roster. Its description names your
+actual agents, which is what makes a harness reach for it when you say a name.
+In cmux mode it also quotes the four cmux pane commands a lead needs, so
+nothing else has to be installed to open, address and find panes.
 
 ```sh
 cf skills status      # every file ConsensFlow owns: ok, drifted, missing
-cf skills update      # regenerate ours; re-fetch cmux's
+cf skills update      # regenerate ours; retire anything the cmux-cloning era left
 cf doctor             # harnesses, agents, skills, runtime
 ```
 

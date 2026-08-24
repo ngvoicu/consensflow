@@ -77,3 +77,41 @@ export async function createPacket(input) {
 export function taskForKind(_kind, baseTask) {
   return String(baseTask ?? "").trim() || "Respond to the user's message.";
 }
+
+/**
+ * The first message of a window — not a packet.
+ *
+ * The packet's scene-setting exists for one-shot runs: the header timestamps
+ * an artifact, and "How to work" keeps a one-shot model from reasoning out a
+ * long answer instead of exploring. A window needs neither — it is a full
+ * interactive session that already knows how to work, and its seed is the
+ * first thing the USER sees in their pane. Three screens of scaffolding above
+ * one line of question is exactly what `continuing` was invented to stop.
+ *
+ * So a bare task travels bare. When a brief, note or handoff rides along, the
+ * "## Message from the user" marker stays — `cf catchup` unwraps on it, and
+ * without it the scaffolding would read back as "you asked".
+ */
+export function createWindowSeed(input) {
+  const { task, brief = "", extraContext = "", handoff = "" } = input;
+  const sections = [];
+  if (brief && String(brief).trim()) {
+    sections.push("## Your brief for this run", String(brief).trim(), "");
+  }
+  if (handoff && String(handoff).trim()) {
+    sections.push(
+      "## Handoff — current session",
+      "The conversation so far between the user and the lead, most recent last. You were not part of it; use it as context for the request below.",
+      "",
+      String(handoff).trim(),
+      "",
+    );
+  }
+  if (extraContext && String(extraContext).trim()) {
+    sections.push("## Note from the lead", String(extraContext).trim(), "");
+  }
+  const message = String(task ?? "").trim() || "Respond to the user's message.";
+  if (sections.length === 0) return message;
+  sections.push("## Message from the user", message);
+  return sections.join("\n");
+}

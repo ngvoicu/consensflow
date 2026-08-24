@@ -180,22 +180,28 @@ Conversations someone else started are still reachable when you mean them:
 \`cf sessions\` lists what is here, and \`--session <name>\` continues one
 by name.
 
-Give each conversation its own pane. Three commands, in this order — you do not
+Give each conversation its own pane. Four commands, in this order — you do not
 need to explore cmux's CLI, and you must not run the consult in this pane:
 
 \`\`\`bash
-# 1. a pane beside you, without stealing focus. Prints: OK surface:NN pane:NN
+# 1. name the conversation FIRST — the run will print its name into a pane
+#    you cannot read, so you mint it here and hand it in
+NAME=$(cf mint)
+
+# 2. a pane beside you, without stealing focus. Prints: OK surface:NN pane:NN
 CMUX_QUIET=1 cmux new-pane --type terminal --direction right --focus false
 
-# 2. send the consult there. cd FIRST: a new pane does not inherit your
-#    directory, and a conversation belongs to the directory it started in —
-#    a pane sitting in ~ would open a different one you could not read back.
-#    The trailing newline is what runs it.
-CMUX_QUIET=1 cmux send --surface surface:NN 'cd "'"$PWD"'" && cf run @<name> "<task>" --brief "<why>"'$'\\n'
+# 3. send the consult there, under your name. cd FIRST: a new pane does not
+#    inherit your directory, and a conversation belongs to the directory it
+#    started in. The trailing newline is what runs it.
+CMUX_QUIET=1 cmux send --surface surface:NN 'cd "'"$PWD"'" && cf run @<name> "<task>" --brief "<why>" --new --session '"$NAME"''$'\\n'
 
-# 3. title the tab with the conversation's name (cf prints it as it opens)
-CMUX_QUIET=1 cmux rename-tab --surface surface:NN '<name>'
+# 4. title the tab to match, so the pane can be found again
+CMUX_QUIET=1 cmux rename-tab --surface surface:NN "$NAME"
 \`\`\`
+
+Lost track of which pane is which? \`CMUX_QUIET=1 cmux list-pane-surfaces\`
+lists every surface with its tab title.
 
 **Read the answer with \`cf catchup <name>\` from your own pane.** Plain
 first — a quick question may already be answered — and \`--wait\` when it is
@@ -236,10 +242,10 @@ the consult in your own context instead: without a terminal it streams the
 answer back to you and is recorded, exactly like a host-mode consult.
 
 The cmux commands above are quoted so you need not go looking for them; they
-are cmux's, not ours, and your cmux skills are the authority if they have moved.
+are cmux's, not ours, and \`cmux --help\` is the authority if they have moved.
 
-This skill defines *what* to run; the cmux skills define pane control. Neither
-one reaches into the other.
+This skill defines *what* to run; pane control stays cmux's own business — the
+four commands are quoted, and nothing here drives a pane beyond them.
 
 `
     : ''
