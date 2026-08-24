@@ -86,7 +86,7 @@ describe('the machine runs exactly one ConsensFlow path', () => {
   })
 
   it('labels the cmux mode with the harnesses it covers', () => {
-    assert.equal(modeLabel('cmux'), 'cmux (pi, cc, codex, opencode)')
+    assert.equal(modeLabel('cmux'), 'cmux (pi, cc, codex, opencode, kimi)')
     assert.equal(modeLabel('claude'), 'claude')
   })
 

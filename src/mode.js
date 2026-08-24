@@ -14,7 +14,7 @@ import { installTerminalCommand, removeTerminalCommand } from './terminal.js'
  * consult, and nothing else:
  * - `claude` — only Claude Code gets the skill.
  * - `pi`     — only pi gets it.
- * - `cmux`   — every detected harness gets it (pi, cc, codex, opencode), plus
+ * - `cmux`   — every detected harness gets it (pi, cc, codex, opencode, kimi), plus
  *              cmux's own pane-control skills. Called `standalone` until
  *              2026-08-20; the old name still normalizes to this one.
  *
@@ -40,7 +40,7 @@ export const MODES = ['claude', 'pi', 'cmux']
 const ALIASES = { standalone: 'cmux' }
 
 /** Every harness the cmux path can teach — the parenthetical the UI shows. */
-const CMUX_HARNESSES = ['pi', 'cc', 'codex', 'opencode']
+const CMUX_HARNESSES = ['pi', 'cc', 'codex', 'opencode', 'kimi']
 
 export function modeLabel(mode) {
   return mode === 'cmux' ? `cmux (${CMUX_HARNESSES.join(', ')})` : mode

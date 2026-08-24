@@ -76,7 +76,7 @@ const INTEGRATIONS = {
     summary: 'Only pi gets the skill. Nothing else on this machine can consult.',
   },
   cmux: {
-    title: 'cmux (pi, cc, codex, opencode)',
+    title: 'cmux (pi, cc, codex, opencode, kimi)',
     summary:
       'Every coding harness gets the skill, and a consult opens the agent’s own window in its cmux pane.',
   },

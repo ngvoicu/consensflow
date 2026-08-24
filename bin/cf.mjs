@@ -79,7 +79,7 @@ Usage: cf <command> [options]
                                                coding harness
   use <claude|pi|cmux>                         Who on this machine can consult:
                                                claude / pi = only that harness gets the skill;
-                                               cmux (pi, cc, codex, opencode) = every harness gets
+                                               cmux (pi, cc, codex, opencode, kimi) = every harness
                                                it, and a consult opens the agent's own window in
                                                its cmux pane
   run <name> "<task>"                          Spawn one agent here and stream its work back:

@@ -243,7 +243,7 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     // Whatever this suite has chosen by now, the report describes it: the
     // no-mode case has its own test in the CLI suite.
     assert.ok(system.mode.current === null || system.mode.available.includes(system.mode.current))
-    assert.equal(system.mode.labels.cmux, 'cmux (pi, cc, codex, opencode)')
+    assert.equal(system.mode.labels.cmux, 'cmux (pi, cc, codex, opencode, kimi)')
     assert.deepEqual([...system.mode.available].sort(), ['claude', 'cmux', 'pi'])
     assert.ok(Array.isArray(system.mode.report))
   })
