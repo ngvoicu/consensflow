@@ -365,3 +365,53 @@ async function collectFiles(root, matches, into, depth = 6) {
     else if (entry.isDirectory()) await collectFiles(full, matches, into, depth - 1);
   }
 }
+
+/**
+ * The session a kimi run created — found, not told.
+ *
+ * Kimi Code prints its id in a `session.resume_hint` at the END of the stream,
+ * which means a run that dies before finishing takes the id with it. That is
+ * not hypothetical: a 24-minute rebuild hit the provider's rate limit on its
+ * last step and left a conversation nobody could resume, with all its work
+ * intact on disk (live, 2026-08-24).
+ *
+ * Its store knows regardless. Each session's `state.json` records the `cwd` it
+ * belongs to and when it was created, so the caller can ask afterwards which
+ * session appeared in this directory — the same recovery opencode and codex
+ * already have, and the reason none of the three depends on a stream surviving.
+ */
+export async function discoverKimiSession(cwd, since, env = process.env) {
+  const root = kimiRoot(env);
+  let workspaces;
+  try {
+    workspaces = await fs.readdir(root, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+
+  let best = null;
+  for (const workspace of workspaces) {
+    if (!workspace.isDirectory()) continue;
+    let sessions;
+    try {
+      sessions = await fs.readdir(path.join(root, workspace.name), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const session of sessions) {
+      if (!session.isDirectory()) continue;
+      let state;
+      try {
+        state = JSON.parse(
+          await fs.readFile(path.join(root, workspace.name, session.name, "state.json"), "utf8"),
+        );
+      } catch {
+        continue;
+      }
+      const created = state?.createdAt ?? 0;
+      if (state?.cwd !== cwd || created < since) continue;
+      if (best === null || created > best.created) best = { id: state.id ?? session.name, created };
+    }
+  }
+  return best?.id ?? null;
+}

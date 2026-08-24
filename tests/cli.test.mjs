@@ -1178,6 +1178,35 @@ fi
     assert.match(out.stdout, /kimi streams its first answer/, 'and it names the right harness')
   })
 
+  it('a kimi run that dies before printing its id is still resumable', async () => {
+    // Live 2026-08-24: a 24-minute rebuild hit the provider's rate limit on
+    // its last step. kimi prints its id LAST, so the conversation was left
+    // unresumable with all its work on disk. The store still knew.
+    mkdirSync(t.env.PATH, { recursive: true })
+    const sessions = join(t.env.HOME, '.kimi-code', 'sessions', 'wd_x', 'session_rescued')
+    mkdirSync(sessions, { recursive: true })
+    const path = join(t.env.PATH, 'kimi')
+    writeFileSync(
+      path,
+      `#!/bin/sh
+printf '%s' '{"id":"session_rescued","cwd":"'"$PWD"'","createdAt":99999999999999}' > "${join(sessions, 'state.json')}"
+echo '{"role":"assistant","content":"got some of it done"}'
+exit 1
+`,
+    )
+    chmodSync(path, 0o755)
+
+    const out = await cf(
+      ['run', '@ilmarinen', 'a long job', '--thread', '--new'],
+      asReader('lead-k'),
+    )
+
+    // `--new` means this is its own conversation; take the one it just named.
+    const name = /conversation: ([a-z]+-[a-z]+)/.exec(out.stdout)?.[1]
+    assert.ok(name, `the run named its conversation: ${out.stdout}`)
+    assert.equal(threadRows()[name].sessionId, 'session_rescued', 'recovered from kimi own store')
+  })
+
   it('codex opens its own window cold, and finds the id in its own store', async () => {
     // `codex [PROMPT]` opens the real window seeded with the packet. It
     // announces no id the way `exec --json` does, so the id is read back from

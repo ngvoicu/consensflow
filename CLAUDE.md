@@ -170,7 +170,12 @@ keep in step — the manager is the only caller.
   rollout FILENAME, because a forked session's metadata names a different
   one). kimi is the only harness that cannot be seeded at all — `-p` is
   defined as non-interactive and it has no positional prompt — so it streams
-  its first answer and the pane becomes its window after. The row is saved BEFORE the window where we mint the id,
+  its first answer and the pane becomes its window after. Because kimi prints
+  its id LAST, a run that dies mid-work takes the id with it: `cf run` falls
+  back to `discoverKimiSession` whenever a kimi run ends without one, so a
+  conversation survives a rate limit or a closed pane with its work intact.
+  All three discoveries read the harness's own store and return null rather
+  than throwing. The row is saved BEFORE the window where we mint the id,
   so a crash mid-window still resumes. A pipe cannot host a TUI: without a
   terminal (the lead's tool call, tests, `--json`) the run streams exactly as
   before — that is physics, not a mode. Terminal-ness is injectable

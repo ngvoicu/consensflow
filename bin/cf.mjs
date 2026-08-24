@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import {
   discoverCodexSession,
+  discoverKimiSession,
   discoverOpencodeSession,
   harnessTurns,
 } from '../hosts/lib/harness-transcript.js'
@@ -647,6 +648,8 @@ async function runVerb(rest) {
   // The conversation is real from here on: a long consult must be findable
   // while it runs, not only after it answers.
   await markRunning(sessionName, row, record)
+  // A little clock slack: a store's timestamps and ours need not agree.
+  const runStartedAt = Date.now() - 2000
 
   const packet = await createPacket({
     cwd,
@@ -717,6 +720,15 @@ async function runVerb(rest) {
       // would make the replacement unresumable too.
       session: { sessionId: row.kind === 'pi' ? `${sessionName}-2` : undefined },
     })
+  }
+
+  // A stream that never reached its end took the session id with it. kimi
+  // prints its id last of all, so a run that dies mid-work — a provider rate
+  // limit, a closed pane — leaves a conversation nobody can resume, with all
+  // its work on disk. Its store still knows: ask, and the conversation is
+  // recoverable no matter how the run ended.
+  if (wantsThread && !result.sessionId && row.kind === 'kimi') {
+    result = { ...result, sessionId: await discoverKimiSession(cwd, runStartedAt, env) }
   }
 
   await recordTurn(sessionName, row, record, result)
