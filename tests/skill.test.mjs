@@ -266,6 +266,24 @@ describe('the description is all a lead reads before it decides to look inside',
     assert.match(cmux, /cmux list-pane-surfaces/)
   })
 
+  it('makes look-before-you-answer a RULE, because buried prose got skimmed', () => {
+    // Live 2026-08-24: asked "did you see her last joke?", the lead answered
+    // from memory while the user's direct pane turns sat unread in catchup.
+    // The Rules section has empirical compliance; mid-paragraph prose does not.
+    const cmux = generateSkill(roster, { mode: 'cmux' })
+    const rules = cmux.slice(cmux.indexOf('## Rules'), cmux.indexOf('## Roster'))
+
+    assert.match(rules, /Look before you answer/i)
+    assert.match(rules, /cf catchup/)
+
+    // Host modes have no windows and no direct user turns: the rule would be
+    // false there.
+    for (const mode of ['claude', 'pi']) {
+      const host = generateSkill(roster, { mode })
+      assert.doesNotMatch(host, /Look before you answer/i, `${mode} has no panes to look at`)
+    }
+  })
+
   it('teaches that the pane becomes the agent own window, not a stream', () => {
     const cmux = generateSkill(roster, { mode: 'cmux' })
 

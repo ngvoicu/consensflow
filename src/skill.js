@@ -147,7 +147,17 @@ question, then decide or ask the user.
   spawn a second agent, do not resume your plan until the user has weighed in.
   An answer they have not read is not a decision they have made.
 - **Do not retry a slow agent with a different one** unless the command
-  itself failed. Slow usually means thinking.
+  itself failed. Slow usually means thinking.${
+    inCmux
+      ? `
+- **Look before you answer for a conversation — or act on one.** The user
+  types straight into agent panes, so your memory of a conversation is only
+  as fresh as your last look. "Did you see her last answer?", "what did he
+  say?", "do what she suggested" — every one of these means \`cf catchup
+  <name>\` FIRST, then answer or act from what it shows, never from what you
+  remember.`
+      : ''
+  }
 
 ## Roster
 
@@ -220,8 +230,8 @@ cf catchup <name> --wait     # started BEFORE the answer can land, it waits it o
 \`\`\`
 
 The user can type in that pane too — it is a normal agent window, and their
-turns land in the same conversation. Nothing tells you it happened, so
-\`cf catchup <name>\` when they mention it.
+turns land in the same conversation. Nothing tells you it happened, which is
+why the rule above says to look before you answer for one.
 
 \`\`\`bash
 cf run @<name> "<task>"                     # opens (or reopens) that agent's conversation here
