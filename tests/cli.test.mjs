@@ -1274,7 +1274,13 @@ fi
     chmodSync(join(t.env.PATH, 'cmux'), 0o755)
 
     const name = await cf(['mint'], t.env).then((r) => r.stdout.trim())
-    writeThreadRow(name, { agent: 'ilmarinen', kind: 'kimi', sessionId: id, runs: 1, lead: 'lead-r' })
+    writeThreadRow(name, {
+      agent: 'ilmarinen',
+      kind: 'kimi',
+      sessionId: id,
+      runs: 1,
+      lead: 'lead-r',
+    })
 
     const out = await cf(['run', '@ilmarinen', 'the follow-up', '--session', name], {
       ...tty(),
