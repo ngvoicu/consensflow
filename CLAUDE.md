@@ -49,7 +49,7 @@ license to skip the skill.
 | `runners.js` | `buildRunnerInvocation` (per-harness argv, one-shot vs conversation), `runAgent` (spawn, stream, capture the session id, write the run dir), `extractSessionId`, `interactiveStart`/`interactiveResume` (the harness's OWN window, fresh or resumed, optionally seeded with a first message), and `childEnv` — the one rule for what an agent process may see (billing keys and `CMUX_SOCKET*` stripped, child marker set), applied to windows and one-shots alike |
 | `packets.js` | The packet. No persona, ever. `continuing` drops the scene-setting for a follow-up; `conversational` invites the agent to ask rather than guess |
 | `threads.js` | Named conversations per workspace (`threads.json`), the name generator — `ilmarinen-quartz-valley`: the agent, then two everyday words, so a pane tab says whose window it is and "ask ares in ares-bubble-sky" cannot read as two agents — and `leadId` — who a conversation belongs to, read from the environment and never from `process.env` directly |
-| `harness-transcript.js` | Reads each harness's OWN session store so window turns are visible to the lead. Read-only; empty rather than throwing when a layout moves. Also `discoverOpencodeSession` — the id opencode minted, found by directory and birth time, because it is the one harness that neither takes an id nor prints one |
+| `harness-transcript.js` | Reads each harness's OWN session store so window turns are visible to the lead. Read-only; empty rather than throwing when a layout moves — **and a layout did move**: opencode migrated into `opencode.db` on 2026-01-06, so both its readers try SQLite (`node:sqlite`, read-only, opened per call) before the frozen JSON tree. The file reader had been passing its tests against old-shape fixtures while returning nothing for any real conversation. Also `discoverOpencodeSession` — the id opencode minted, found by directory and birth time, because it is the one harness that neither takes an id nor prints one |
 | `state.js` | The one root, workspace keys, run dirs, `writeJsonAtomic` (shared, one copy) |
 | `transcript.js` + `transcript-events.js` | Normalising four engines' event shapes into one vocabulary |
 | `presets.js` | The 57 catalog presets — the single source `src/catalog.js` is a view over |
@@ -202,6 +202,14 @@ keep in step — the manager is the only caller.
   directory gets one line telling the lead why nothing may come back until
   somebody answers in the pane. Writing it would be the settings.json rule
   broken for our own convenience.
+
+- **A harness's store is not a fixture.** opencode moved its sessions into
+  SQLite in January and our reader kept passing — green tests over a dead
+  format, returning nothing for every real conversation, unnoticed until an
+  opencode window was opened and looked at (2026-08-24). Fixtures prove the
+  parse; only a live harness proves the LOCATION. So each reader tries what
+  the harness writes today and falls back to what it wrote before, and a
+  fixture in this suite is a copy of something real, dated in its comment.
 
 - **A lead reads what is new, not everything.** `cf catchup <name> --unread`
   is only what has been said since THIS lead last looked — a turn count per

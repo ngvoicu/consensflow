@@ -217,10 +217,112 @@ function flatten(content) {
 }
 
 /**
- * opencode keeps the turn and its text apart: `message/<session>/<msg>.json`
- * holds the role, `part/<msg>/*.json` holds what was said.
+ * opencode's store moved into SQLite, and the files we used to read froze.
+ *
+ * `storage/session|message|part` stopped being written on 2026-01-06 — there
+ * is a `migration` marker beside them from the day before — and everything
+ * since lives in `opencode.db`. The file reader kept passing its tests against
+ * fixtures in the old shape while returning nothing for any real conversation,
+ * which is the quiet way a reader dies: green tests over a dead format. Found
+ * by opening a live opencode and looking for the turn (2026-08-24).
+ *
+ * Database first, old files second — a machine that has not run opencode since
+ * January still reads correctly, and every failure degrades to empty.
  */
+function opencodeDb(env) {
+  return path.join(
+    env.XDG_DATA_HOME ?? path.join(home(env), ".local", "share"),
+    "opencode",
+    "opencode.db",
+  );
+}
+
+/**
+ * Read-only, opened and closed per call. This is somebody else's live database
+ * with a write-ahead log beside it: take no lock we do not need, hold nothing
+ * open between reads, and never write.
+ */
+async function withOpencodeDb(env, fn) {
+  const file = opencodeDb(env);
+  try {
+    await fs.access(file);
+  } catch {
+    return null;
+  }
+  let sqlite;
+  try {
+    sqlite = await import("node:sqlite");
+  } catch {
+    // A runtime without node:sqlite falls back rather than throwing.
+    return null;
+  }
+  let db;
+  try {
+    db = new sqlite.DatabaseSync(file, { readOnly: true });
+    return fn(db);
+  } catch {
+    return null;
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      // closing what we could not open is not an error worth having
+    }
+  }
+}
+
+async function readOpencodeDb(env, sessionId) {
+  return await withOpencodeDb(env, (db) => {
+    const messages = db
+      .prepare("select id, data from message where session_id = ? order by time_created, id")
+      .all(sessionId);
+    if (messages.length === 0) return null;
+    const parts = db
+      .prepare("select message_id, data from part where session_id = ? order by time_created, id")
+      .all(sessionId);
+
+    const textByMessage = new Map();
+    for (const row of parts) {
+      let parsed;
+      try {
+        parsed = JSON.parse(row.data);
+      } catch {
+        continue;
+      }
+      if (parsed?.type !== "text" || !parsed.text) continue;
+      const existing = textByMessage.get(row.message_id) ?? [];
+      existing.push(String(parsed.text));
+      textByMessage.set(row.message_id, existing);
+    }
+
+    const turns = [];
+    for (const message of messages) {
+      let parsed;
+      try {
+        parsed = JSON.parse(message.data);
+      } catch {
+        continue;
+      }
+      const role = parsed?.role;
+      if (role !== "user" && role !== "assistant") continue;
+      const text = readable((textByMessage.get(message.id) ?? []).join("\n").trim());
+      if (text.length > 0) turns.push({ role, text });
+    }
+    return turns;
+  });
+}
+
 async function readOpencode(env, sessionId) {
+  const fromDb = await readOpencodeDb(env, sessionId);
+  if (fromDb !== null) return fromDb;
+  return await readOpencodeFiles(env, sessionId);
+}
+
+/**
+ * The pre-migration layout: `message/<session>/<msg>.json` holds the role,
+ * `part/<msg>/*.json` holds what was said.
+ */
+async function readOpencodeFiles(env, sessionId) {
   const store = opencodeRoot(env);
   const dir = path.join(store, "message", sessionId);
   let names;
@@ -277,6 +379,20 @@ async function readOpencode(env, sessionId) {
  * else in this file, and null rather than an error when nothing matches yet.
  */
 export async function discoverOpencodeSession(cwd, since, env = process.env) {
+  const fromDb = await withOpencodeDb(env, (db) => {
+    const row = db
+      .prepare(
+        "select id from session where directory = ? and time_created >= ? order by time_created desc limit 1",
+      )
+      .get(cwd, since);
+    return row?.id ?? null;
+  });
+  if (fromDb !== null) return fromDb;
+  return await discoverOpencodeSessionFiles(cwd, since, env);
+}
+
+/** The frozen JSON layout, for a machine that has not run opencode since January. */
+async function discoverOpencodeSessionFiles(cwd, since, env) {
   const root = path.join(opencodeRoot(env), "session");
   let projects;
   try {
@@ -570,8 +686,13 @@ export async function codexTrustsDirectory(cwd, env = process.env) {
       current = null;
       continue;
     }
-    // A trusted root covers the directories inside it.
-    if (resolved === current || resolved.startsWith(`${current}${path.sep}`)) return true;
+    // Exact paths only. codex records one entry per directory it was asked
+    // about, and asks again for a subdirectory of a trusted one — proven on
+    // this machine, where `/private/tmp` was already trusted and codex still
+    // stopped to ask about `/private/tmp/cf-tui-probe/codex` and wrote its own
+    // entry. Treating a parent as cover would report "no prompt" for a
+    // directory that prompts.
+    if (resolved === current) return true;
     current = null;
   }
   return false;

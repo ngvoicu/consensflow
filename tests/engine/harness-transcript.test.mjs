@@ -301,3 +301,70 @@ test('harness transcript: a kimi session we cannot find is empty, never an error
     assert.deepEqual(await harnessTurns('kimi', 'session_nope', env), [])
   })
 })
+
+test('harness transcript: opencode is read from its database, not the frozen files', async () => {
+  // opencode migrated its store into SQLite on 2026-01-06 and the JSON tree
+  // stopped being written. The file reader kept passing against fixtures in
+  // the old shape while returning nothing for any real conversation — green
+  // tests over a dead format. This one uses the shape opencode writes today.
+  const { DatabaseSync } = await import('node:sqlite')
+  await withStores(async (env) => {
+    const dir = path.join(env.XDG_DATA_HOME, 'opencode')
+    await mkdir(dir, { recursive: true })
+    const db = new DatabaseSync(path.join(dir, 'opencode.db'))
+    db.exec(`
+      create table session (id text primary key, directory text, time_created integer);
+      create table message (id text primary key, session_id text, time_created integer, data text);
+      create table part (id text primary key, message_id text, session_id text, time_created integer, data text);
+    `)
+    db.exec(`insert into session values ('ses_new', '/work/here', 5000)`)
+    db.exec(
+      `insert into message values ('m1', 'ses_new', 1, '${JSON.stringify({ role: 'user' })}')`,
+    )
+    db.exec(
+      `insert into message values ('m2', 'ses_new', 2, '${JSON.stringify({ role: 'assistant' })}')`,
+    )
+    db.exec(
+      `insert into part values ('p1', 'm1', 'ses_new', 1, '${JSON.stringify({ type: 'text', text: 'is it safe?' })}')`,
+    )
+    // One answer, many parts — joined per message, as the store splits them.
+    db.exec(
+      `insert into part values ('p2', 'm2', 'ses_new', 2, '${JSON.stringify({ type: 'text', text: 'yes,' })}')`,
+    )
+    db.exec(
+      `insert into part values ('p3', 'm2', 'ses_new', 3, '${JSON.stringify({ type: 'text', text: 'with a caveat' })}')`,
+    )
+    db.close()
+
+    assert.deepEqual(await harnessTurns('opencode', 'ses_new', env), [
+      { role: 'user', text: 'is it safe?' },
+      { role: 'assistant', text: 'yes,\nwith a caveat' },
+    ])
+
+    const { discoverOpencodeSession } = await import('../../hosts/lib/harness-transcript.js')
+    assert.equal(await discoverOpencodeSession('/work/here', 4000, env), 'ses_new')
+    assert.equal(await discoverOpencodeSession('/work/here', 6000, env), null, 'nothing since')
+    assert.equal(await discoverOpencodeSession('/work/elsewhere', 0, env), null)
+  })
+})
+
+test('harness transcript: a conversation older than the migration still reads', async () => {
+  // No database on this machine at all: the frozen JSON layout is still the
+  // record for anything from before 2026-01-06.
+  await withStores(async (env) => {
+    const id = 'ses_before_migration'
+    const store = path.join(env.XDG_DATA_HOME, 'opencode', 'storage')
+    await write(
+      path.join(store, 'message', id, 'msg_a.json'),
+      JSON.stringify({ id: 'msg_a', sessionID: id, role: 'user', time: { created: 1 } }),
+    )
+    await write(
+      path.join(store, 'part', 'msg_a', 'prt_1.json'),
+      JSON.stringify({ type: 'text', text: 'from the old days' }),
+    )
+
+    assert.deepEqual(await harnessTurns('opencode', id, env), [
+      { role: 'user', text: 'from the old days' },
+    ])
+  })
+})

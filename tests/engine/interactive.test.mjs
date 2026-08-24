@@ -314,8 +314,10 @@ test('trust: codex trust is read from its config, exact or by an ancestor', asyn
     )
 
     assert.equal(await codexTrustsDirectory('/work/trusted-root', env), true)
-    // A trusted root covers what is inside it.
-    assert.equal(await codexTrustsDirectory('/work/trusted-root/sub', env), true)
+    // codex asks per directory: a trusted parent does NOT cover a child.
+    // Proven live — `/private/tmp` was trusted and codex still asked about
+    // `/private/tmp/cf-tui-probe/codex`, then wrote its own entry for it.
+    assert.equal(await codexTrustsDirectory('/work/trusted-root/sub', env), false)
     assert.equal(await codexTrustsDirectory('/work/declined', env), false)
     assert.equal(await codexTrustsDirectory('/work/never-seen', env), false)
     // The prefix must be a path boundary, not a string one.

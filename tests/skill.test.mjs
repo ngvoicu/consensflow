@@ -302,10 +302,26 @@ describe('the description is all a lead reads before it decides to look inside',
     const cmux = generateSkill(roster, { mode: 'cmux' })
 
     assert.match(cmux, /the pane IS the agent's window/i)
-    assert.match(cmux, /codex/, 'the one exception is named')
-    // Follow-ups are typed into the window, not wrapped in a command.
-    assert.match(cmux, /plain text/)
+    assert.match(cmux, /kimi is the one exception/i, 'the one that cannot be seeded')
     // And the read is the harness's own store, waited on.
     assert.match(cmux, /cf catchup <name> --wait/)
+  })
+
+  it('sends follow-ups as another cf run, never as keystrokes at a TUI', () => {
+    // Probed 2026-08-24: `cmux send` reaches a TUI as a PASTE, where a newline
+    // is a newline rather than Enter. claude and pi submit anyway; kimi and
+    // codex do not — the text sits in the input box, no answer comes, and the
+    // pane looks perfectly alive. `cf run --session` delivers the question as
+    // an argument, which every harness accepts.
+    const cmux = generateSkill(roster, { mode: 'cmux' })
+
+    assert.match(cmux, /cf run @<name> "<follow-up>" --session <name>/)
+    // Probed one harness at a time (2026-08-24): claude, codex, pi and
+    // opencode all submit a `cmux send`; kimi alone does not, because its TUI
+    // takes it as a paste where a newline is a newline rather than Enter.
+    assert.match(cmux, /not on a kimi agent/i, 'the one exception is named')
+    // A person's keystrokes are real keystrokes; only the programmatic send is
+    // the problem, and the lead must not conclude the pane is off limits.
+    assert.match(cmux, /The user can type in that pane/i)
   })
 })

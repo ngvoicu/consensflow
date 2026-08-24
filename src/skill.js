@@ -240,19 +240,27 @@ stopped. Do not scrape the other pane's screen: the pane is for the user to
 watch, the harness's own session store is what you read. Screen text is not
 an answer, it is a picture of one.
 
-**A follow-up goes into the pane as plain text** — the pane is the agent's own
-prompt now, so there is no command to wrap it in:
+**A follow-up is another \`cf run\`, naming the conversation** — send it into
+a pane the same way you sent the first one:
 
 \`\`\`bash
 cf catchup <name> --unread   # FIRST: the conversation may have moved without you
-CMUX_QUIET=1 cmux send --surface surface:NN 'your follow-up question'$'\\n'
+CMUX_QUIET=1 cmux send --surface surface:NN 'cd "'"$PWD"'" && cf run @<name> "<follow-up>" --session <name>'$'\\n'
 cf catchup <name> --wait     # started BEFORE the answer can land, it waits it out
 \`\`\`
 
-The user can type in that pane too — it is a normal agent window, and their
-turns land in the same conversation. Nothing tells you it happened, which is
-why \`--unread\` exists and why the rules say to look before you answer for a
-conversation or add to one.
+That is the safe form everywhere. Typing the question straight into the pane
+with \`cmux send\` also works on claude, codex, pi and opencode — all four
+probed — but **not on a kimi agent**: a send reaches its TUI as a paste, where
+a newline is a newline rather than Enter, so the text lands in the input box
+and is never submitted. No answer comes, and the pane looks perfectly alive.
+Check the roster above for the harness before you type at a pane; \`cf run
+--session\` needs no such check.
+
+The user can type in that pane, though — a person's keystrokes are real
+keystrokes, and their turns land in the same conversation. Nothing tells you
+it happened, which is why \`--unread\` exists and why the rules say to look
+before you answer for a conversation or add to one.
 
 \`\`\`bash
 cf run @<name> "<task>"                     # opens (or reopens) that agent's conversation here
