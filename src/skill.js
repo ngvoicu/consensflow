@@ -53,7 +53,7 @@ export function generateSkill(agents, options = {}) {
   // that read "run one-shot in the current directory" concluded there was
   // nothing further to learn and ran the consult in its own pane (2026-08-24).
   const shape = inCmux
-    ? 'working in the current directory. A consult here is a named conversation that runs in its own cmux pane, so read this skill before starting one — the exact commands are in it.'
+    ? "working in the current directory. A consult here opens the agent's own window in a cmux pane — a named conversation — so read this skill before starting one; the exact commands are in it."
     : 'run one-shot in the current directory.'
 
   return `---
@@ -162,20 +162,23 @@ subscription login to API-key billing.
 
 ${
   inCmux
-    ? `## One pane per conversation
+    ? `## One pane per conversation — and the pane IS the agent's window
 
-A consult here is a **conversation**, not a one-shot. The first \`cf run\` to an
-agent starts one and prints its name — \`ember-ridge\`, \`amber-moss\`. Ask that
-agent again and it continues: the harness resumes its own session, so the agent
-remembers what you already discussed and the provider's cache is still warm.
+A consult here is a **conversation** in the agent's own interface. \`cf run
+@<name> "<task>"\` in a pane does not print an answer and exit: it opens
+claude's, pi's or opencode's real window on that conversation, seeded with
+your task, and stays. codex is the one exception — it streams its first
+answer, then the same pane becomes \`codex resume\` on that session. Either
+way the conversation has a short name — \`ember-ridge\`, \`amber-moss\` — and
+asking again continues it: the agent remembers, and the provider's cache
+stays warm.
 
 **A conversation belongs to the session that started it.** You are a new
 session, so your first consult with an agent opens a new one — you never
 inherit what another lead left in this directory, however recent it looks.
-Every run tells you which conversation it is in and whether it just started
-it, so you always have the name to hand. Conversations someone else started
-are still reachable when you mean them: \`cf sessions\` lists what is here, and
-\`--session <name>\` continues one by name.
+Conversations someone else started are still reachable when you mean them:
+\`cf sessions\` lists what is here, and \`--session <name>\` continues one
+by name.
 
 Give each conversation its own pane. Three commands, in this order — you do not
 need to explore cmux's CLI, and you must not run the consult in this pane:
@@ -190,59 +193,45 @@ CMUX_QUIET=1 cmux new-pane --type terminal --direction right --focus false
 #    The trailing newline is what runs it.
 CMUX_QUIET=1 cmux send --surface surface:NN 'cd "'"$PWD"'" && cf run @<name> "<task>" --brief "<why>"'$'\\n'
 
-# 3. once cf prints "conversation: <name>", title the tab to match
+# 3. title the tab with the conversation's name (cf prints it as it opens)
 CMUX_QUIET=1 cmux rename-tab --surface surface:NN '<name>'
 \`\`\`
 
-Then **read the answer with \`cf last <name>\` from your own pane** — do not
-scrape the other pane's screen. The pane is for the user to watch; the run
-directory is what you read. Screen text is not an answer, it is a picture of
-one.
+**Read the answer with \`cf catchup <name> --wait\` from your own pane** — it
+blocks until the agent's next answer lands in its session and prints only what
+is new. Do not scrape the other pane's screen: the pane is for the user to
+watch, the harness's own session store is what you read. Screen text is not an
+answer, it is a picture of one.
 
-Later turns in that conversation go to the same pane: reuse its surface id, or
-find it by the tab name. Two conversations mean two panes, so their answers
-never tangle.
+**A follow-up goes into the pane as plain text** — the pane is the agent's own
+prompt now, so there is no command to wrap it in:
 
 \`\`\`bash
-cf run @<name> "<task>"                     # continues that agent's conversation here
-cf run @<name> "<task>" --new               # starts a fresh one, prints its name
-cf run @<name> "<task>" --session <name>    # continues a specific one
+CMUX_QUIET=1 cmux send --surface surface:NN 'your follow-up question'$'\\n'
+cf catchup <name> --wait     # then wait for the answer, from your own pane
+\`\`\`
+
+The user can type in that pane too — it is a normal agent window, and their
+turns land in the same conversation. Nothing tells you it happened, so
+\`cf catchup <name>\` when they mention it.
+
+\`\`\`bash
+cf run @<name> "<task>"                     # opens (or reopens) that agent's conversation here
+cf run @<name> "<task>" --new               # a fresh conversation, its own pane
+cf run @<name> "<task>" --session <name>    # a specific one, by name
 cf sessions                                 # what is alive in this workspace
-cf last <name>                              # read an answer from your own pane
-cf catchup <name>                           # everything said in it, including their turns
+cf catchup <name> [--wait]                  # what was said; --wait sits out the next answer
+cf last <name>                              # the last answer a streamed run left (codex turn 1)
+cf attach <name>                            # reopen a conversation's window later, anywhere
 \`\`\`
-
-The user can type in that pane too: \`cf chat <name>\` turns it into a prompt
-where one line is one turn of the same conversation. Turns they take land in
-the same session and the same run directory, so \`cf last\` shows you their
-answer as readily as your own — nothing tells you it happened, so look when
-they mention it.
-\`\`\`bash
-cf chat @<name>                             # or: cf chat <conversation>
-\`\`\`
-
-Better still, when the user wants to take over: \`cf attach <name>\` replaces
-that terminal with the harness's OWN window — codex's TUI, claude's, pi's —
-opened on the very session the consult started, whole history in it. Use
-\`cf attach <name> --print\` to get the command and send it into the pane:
-
-\`\`\`bash
-CMUX_QUIET=1 cmux send --surface surface:NN "$(cf attach <name> --print)"$'\\n'
-\`\`\`
-
-From that point the user is talking to the agent directly and you are not in
-the middle. Their turns still land in the same session and the same run
-directory, so \`cf last <name>\` catches you up when they ask. And if they take
-it over with \`cf attach\`, their turns leave no run of ours at all — \`cf
-catchup <name>\` reads the harness's own session so you can still see what was
-said. Never read the pane's screen for it.
 
 Start a **new** conversation when the subject genuinely changes. Continuing one
 carries its whole history into every later turn, which is what makes the agent
 useful — and what makes an unrelated question expensive.
 
 If you cannot open a pane — no workspace, cmux is not running — say so and run
-the consult here rather than silently doing something the user did not ask for.
+the consult in your own context instead: without a terminal it streams the
+answer back to you and is recorded, exactly like a host-mode consult.
 
 The cmux commands above are quoted so you need not go looking for them; they
 are cmux's, not ours, and your cmux skills are the authority if they have moved.

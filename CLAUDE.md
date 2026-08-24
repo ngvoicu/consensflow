@@ -16,9 +16,11 @@ v2 engine that had one was retired and deleted 2026-08-19).
 
 ## Consulting agents while working here
 
-This machine runs `cmux` mode: a consult is a named conversation in its own
-pane. When you consult an agent, go through the **consensflow skill** — open a
-pane per conversation as it says, never run `cf run` in your own pane. The
+This machine runs `cmux` mode: a consult opens the agent's OWN window in its
+own pane. When you consult an agent, go through the **consensflow skill** —
+open a pane per conversation as it says, send follow-ups into it as plain
+text, read with `cf catchup <name> --wait`, and never run `cf run` in your own
+pane (in a terminal it would replace it with the agent's window). The
 `cf run @name "<task>"` lines below document the product; they are not a
 license to skip the skill.
 
@@ -44,10 +46,10 @@ license to skip the skill.
 
 | Path | Owns |
 |---|---|
-| `runners.js` | `buildRunnerInvocation` (per-harness argv, one-shot vs conversation), `runAgent` (spawn, stream, capture the session id, write the run dir), `extractSessionId`, `interactiveResume` (the harness's OWN window — `codex resume`, not `codex exec resume`), and the unconditional `CMUX_SOCKET*` strip |
+| `runners.js` | `buildRunnerInvocation` (per-harness argv, one-shot vs conversation), `runAgent` (spawn, stream, capture the session id, write the run dir), `extractSessionId`, `interactiveStart`/`interactiveResume` (the harness's OWN window, fresh or resumed, optionally seeded with a first message), and `childEnv` — the one rule for what an agent process may see (billing keys and `CMUX_SOCKET*` stripped, child marker set), applied to windows and one-shots alike |
 | `packets.js` | The packet. No persona, ever. `continuing` drops the scene-setting for a follow-up; `conversational` invites the agent to ask rather than guess |
 | `threads.js` | Named conversations per workspace (`threads.json`), the two-word name generator whose vocabulary is deliberately not mythological so a session can never be mistaken for an agent, and `leadId` — who a conversation belongs to, read from the environment and never from `process.env` directly |
-| `harness-transcript.js` | Reads each harness's OWN session store so a conversation the user took over is still visible. Read-only; empty rather than throwing when a layout moves |
+| `harness-transcript.js` | Reads each harness's OWN session store so window turns are visible to the lead. Read-only; empty rather than throwing when a layout moves. Also `discoverOpencodeSession` — the id opencode minted, found by directory and birth time, because it is the one harness that neither takes an id nor prints one |
 | `state.js` | The one root, workspace keys, run dirs, `writeJsonAtomic` (shared, one copy) |
 | `transcript.js` + `transcript-events.js` | Normalising four engines' event shapes into one vocabulary |
 | `presets.js` | The 48 catalog presets — the single source `src/catalog.js` is a view over |
@@ -108,11 +110,11 @@ keep in step — the manager is the only caller.
   resumes. `codex exec resume` takes no `-C` — it filters by the process's own
   cwd. `cf chat` is the same machinery behind a prompt: one typed line, one
   turn, no daemon. Nothing pushes: a turn the user types is visible to the lead
-  only when it looks (`cf sessions`, `cf last`). `cf attach` goes further and
-  hands the terminal to the harness's OWN window on that session
+  only when it looks (`cf sessions`, `cf last`). `cf attach` reopens a
+  conversation's window later, anywhere
   (`interactiveResume` — `codex resume`, not `codex exec resume`; the first is
-  the interface, the second the one-shot), so the user can take the
-  conversation over directly and ConsensFlow is no longer in the middle. A
+  the interface, the second the one-shot), and its `--print` form carries the
+  billing guard as prose because the line runs in someone else's shell. A
   follow-up in a live conversation sends only the new message (`continuing`) —
   the agent already has the workspace and the how-to-work from turn one, and
   repeating them buried the question. And because the reply now reaches the
@@ -154,6 +156,25 @@ keep in step — the manager is the only caller.
   that starts one. The name is what `cf last`, `cf catchup` and finding the
   pane again all need, and `(continuing, turn N)` is what lets a lead notice
   the subject has moved far enough to want `--new`. `--json` stays clean.
+
+- **In a terminal in cmux mode, the consult IS the agent's window.** `cf run`
+  does not stream and exit there: it opens the harness's own interface on the
+  conversation, seeded with the packet (bare message on later turns), and
+  stays — attach is the default and only behaviour, so the `--attach` flag is
+  gone. claude opens on a uuid we mint (`--session-id`), pi on the
+  conversation's name, opencode on an id its store reveals just after launch
+  (`discoverOpencodeSession`), and codex — which cannot pre-set an interactive
+  id — streams its first answer, then the pane becomes `codex resume` on the
+  captured thread id. The row is saved BEFORE the window where we mint the id,
+  so a crash mid-window still resumes. A pipe cannot host a TUI: without a
+  terminal (the lead's tool call, tests, `--json`) the run streams exactly as
+  before — that is physics, not a mode. Terminal-ness is injectable
+  (`CONSENSFLOW_TTY`) so tests can stand on either side. Window turns are not
+  runs of ours: `runs` does not grow, `lastRunId` stays null, and `cf last`
+  points at `cf catchup`, whose `--wait` polls the harness's store until the
+  next assistant turn and prints only what is new. Every window spawn goes
+  through `childEnv` — for a while `cf attach` inherited the full environment,
+  which meant every attached turn could silently bill an API key.
 
 - **One spawn verb, three modes.** `cf run @name "<task>"` builds the packet,
   applies the billing guards and streams the run, whichever harness is behind

@@ -62,21 +62,21 @@ skill with the same name.
 panes exist. `cf doctor` names any harness that is in scope but carrying no
 skill.
 
-## A consult is a conversation
+## A consult IS the agent's window
 
-In cmux mode a consult is not a one-shot. The first question starts a
-conversation with a short name; the next one continues it, because the harness's
-own session is resumed — so the agent remembers, and the provider's cache stays
-warm.
+In cmux mode, in a terminal, `cf run` does not print an answer and exit. It
+opens the harness's **own interface** — claude's, pi's, opencode's — on a named
+conversation, seeded with your task, and stays. You watch the agent work in its
+real window; you type follow-ups straight into it; your coding agent follows
+along by reading the harness's own session. codex is the one exception: it has
+no way to pre-set an interactive session id, so it streams its first answer,
+then the same pane becomes `codex resume` on that session.
 
 ```
 $ cf run @hyperion "is the retry path sound?"
 conversation: silver-waves (new)
-…
-
-$ cf run @hyperion "what would you change about the timeout?"
-conversation: silver-waves (continuing, turn 2)
-# same conversation — hyperion remembers the first answer
+read it back with: cf catchup silver-waves
+…the pane is now hyperion's own window…
 ```
 
 One agent can hold several conversations at once, which is why they have names:
@@ -88,54 +88,47 @@ what the last one left in that directory, however recent. Ones somebody else
 started stay reachable by name, which is what `--session` is for.
 
 ```sh
-cf run @name "<task>"                  # continues THIS session's conversation with it
-cf run @name "<task>" --new            # start a fresh one, print its name
-cf run @name "<task>" --session <name> # aim at a specific one
+cf run @name "<task>"                  # opens (or reopens) THIS session's conversation with it
+cf run @name "<task>" --new            # a fresh conversation, its own window
+cf run @name "<task>" --session <name> # a specific one, by name
 cf sessions                            # what is alive in this folder
-cf last <name>                         # the last answer, and its transcript path
+cf catchup <name> [--wait]             # what was said; --wait sits out the next answer
+cf attach <name>                       # reopen a conversation's window later, anywhere
+cf last <name>                         # the last answer a streamed run left
 ```
 
 **The harness owns the session; ConsensFlow only remembers which one.** That is
 the whole mechanism — no daemon, no database, no long-lived child. Session ids
-live in `<config>/workspaces/<key>/threads.json`, beside the run artifacts.
+live in `<config>/workspaces/<key>/threads.json`. claude opens on a uuid we
+mint, pi on the conversation's name, opencode tells its store and we read it
+there, codex hands its id back on the streamed first turn.
 
-## Joining in yourself
+## How your coding agent follows along
 
-Your coding agent runs all of the above for you. These are for when you want to
-drive it directly:
+Window turns leave no stream for the lead to parse — and it never reads the
+pane's screen, because screen text is a picture of an answer, not an answer.
+Instead `cf catchup` reads the harness's **own session store** — codex's
+rollout file, claude's session jsonl, pi's, opencode's — **read-only, never
+written** — and returns nothing rather than failing if a harness has moved its
+files. `cf catchup <name> --wait` blocks until the agent's next answer lands
+and prints only what is new: that is the lead's way to wait out a thinking
+agent. `cf chat` still exists for typing turns through our own machinery, and
+every window runs with the same environment guards a one-shot does: billing
+keys stripped, cmux control stripped.
 
-```sh
-cf chat @hyperion          # type prose — one line is one turn of the conversation
-cf attach silver-waves     # hand the terminal to codex's OWN window, history intact
-cf catchup silver-waves    # everything said in it, whoever said it
-```
+## When there is no terminal
 
-The trade between the middle two matters:
-
-- **`cf chat`** is a prompt around the same machinery. Every turn is a real run,
-  so it leaves a transcript and your coding agent can read it with `cf last`.
-- **`cf attach`** gives you the agent's real interface — codex's TUI, claude's —
-  opened on that conversation. Richer, but those turns leave no run of ours, so
-  your coding agent is blind to them until it runs `cf catchup`.
-
-`cf catchup` reads the harness's own session store — codex's rollout file,
-claude's session jsonl, pi's, opencode's — **read-only, never written**, and it
-returns nothing rather than failing if a harness has moved its files. It is a
-convenience, not something the product depends on.
-
-## What a consult actually does
-
-Every run spawns one harness CLI in your working directory and writes its
-artifacts under `~/.consensflow/workspaces/<key>/runs/<id>/` — `packet.md`,
-`transcript.md`, `result.json`. Nothing is written inside your project.
-
-**Streaming is foreground and non-optional.** An agent's thinking, tool calls
-and answer arrive as they happen; runs are never sent to the background,
-because a consult you cannot watch is a consult you cannot trust. There is no
-flag to quiet it — only `--json`, which asks for machine-readable output
-instead. `transcript-events.js` normalises four engines' event shapes into one
-vocabulary, and `transcript.md` is the durable backstop so a closed pane or a
-lost scrollback never costs you the answer.
+A pipe cannot host a TUI. When a program runs the consult — your coding
+agent's tool call, a test, `--json` — it streams instead, and streaming is
+**foreground and non-optional**: thinking, tool calls and the answer arrive
+as they happen, runs are never sent to the background, and there is no flag
+to quiet it — only `--json`, which asks for machine-readable output instead.
+The run writes its artifacts under
+`~/.consensflow/workspaces/<key>/runs/<id>/` — `packet.md`, `transcript.md`,
+`result.json`. Nothing is written inside your project. Host modes work this
+way for every consult. `transcript-events.js` normalises four engines' event
+shapes into one vocabulary, and `transcript.md` is the durable backstop so a
+lost scrollback never costs the answer.
 
 Two things are worth being explicit about:
 

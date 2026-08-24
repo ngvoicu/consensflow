@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
 import {
+  appendFileSync,
   chmodSync,
   cpSync,
   existsSync,
@@ -1029,13 +1030,41 @@ fi
   })
 })
 
-describe('a consult can leave the pane open for you to continue in', () => {
+describe('in a terminal, a cmux consult IS the agent own window', () => {
   const t = tempEnv()
   after(() => t.cleanup())
+  // CONSENSFLOW_TTY stands in for a real terminal: pipes are all a test has.
+  const tty = (extra = {}) => ({
+    ...t.env,
+    CONSENSFLOW_TTY: '1',
+    CLAUDE_CODE_SESSION_ID: 'lead-w',
+    ...extra,
+  })
+  const argvOf = (log) => (existsSync(log) ? readFileSync(log, 'utf8') : '')
+  const threadRows = () =>
+    JSON.parse(
+      readFileSync(
+        join(
+          t.env.CONSENSFLOW_HOME,
+          'workspaces',
+          readdirSync(join(t.env.CONSENSFLOW_HOME, 'workspaces'))[0],
+          'threads.json',
+        ),
+        'utf8',
+      ),
+    )
 
-  function stubCodex() {
+  function recordingStub(name) {
     mkdirSync(t.env.PATH, { recursive: true })
-    const log = join(t.root, 'then-attach.log')
+    const log = join(t.root, `${name}-window.log`)
+    writeFileSync(join(t.env.PATH, name), `#!/bin/sh\necho "$@" >> "${log}"\n`)
+    chmodSync(join(t.env.PATH, name), 0o755)
+    return log
+  }
+
+  function stubCodexWindow() {
+    mkdirSync(t.env.PATH, { recursive: true })
+    const log = join(t.root, 'codex-window.log')
     const path = join(t.env.PATH, 'codex')
     writeFileSync(
       path,
@@ -1051,25 +1080,34 @@ fi
     return log
   }
 
-  it('answers the lead first, then hands the terminal over', async () => {
+  it('codex streams its first answer, then the pane becomes its window', async () => {
+    // codex cannot pre-set an interactive session id, so turn 1 runs through
+    // the one-shot machinery (which captures the thread id) and the window
+    // opens on it. The lead still gets a parsed answer, never a screen.
     stubCli(t, 'claude')
-    const log = stubCodex()
+    recordingStub('pi')
+    recordingStub('opencode')
+    const log = stubCodexWindow()
     await cf(['agent', 'add', 'hyperion'], t.env)
+    await cf(['agent', 'add', 'zeus'], t.env)
+    await cf(['agent', 'add', 'aether'], t.env)
+    await cf(['agent', 'add', 'sunna'], t.env)
     await cf(['use', 'cmux'], t.env)
 
-    const out = await cf(['run', '@hyperion', 'a question', '--attach'], t.env)
+    const out = await cf(['run', '@hyperion', 'a question'], tty())
 
     assert.equal(out.code, 0, out.stderr)
-    // The lead still gets a real, parsed answer — not a screen to read.
     assert.match(out.stdout, /the consult answer/)
-    const argv = readFileSync(log, 'utf8')
-    assert.match(argv, /^exec /m, 'the consult ran one-shot')
-    assert.match(argv, /^resume thread-open/m, 'then the interactive window opened')
+    const argv = argvOf(log)
+    assert.match(argv, /^exec /m, 'turn 1 streamed')
+    assert.match(argv, /^resume thread-open/m, 'then the window opened on the captured id')
   })
 
   it('records the turn before handing over, so cf last works after', async () => {
-    const out = await cf(['sessions', '--json'], t.env)
-    const [name] = Object.keys(JSON.parse(out.stdout))
+    const listed = await cf(['sessions', '--json'], t.env)
+    const name = Object.entries(JSON.parse(listed.stdout)).find(
+      ([, r]) => r.agent === 'hyperion',
+    )[0]
 
     const last = await cf(['last', name], t.env)
 
@@ -1077,12 +1115,146 @@ fi
     assert.match(last.stdout, /the consult answer/)
   })
 
-  it('is a no-op when there is nothing to attach to', async () => {
-    // A one-shot with threading off has no session, so --attach has no window
-    // to open. It must not fail the consult over it.
-    const out = await cf(['run', '@hyperion', 'quick one', '--no-thread', '--attach'], t.env)
+  it('claude opens fresh as its own window, on a uuid we minted and saved first', async () => {
+    const log = recordingStub('claude')
+
+    const out = await cf(['run', '@zeus', 'review the retry path'], tty())
+
+    assert.equal(out.code, 0, out.stderr)
+    const argv = argvOf(log)
+    const uuid = /--session-id ([0-9a-f-]{36})/.exec(argv)?.[1]
+    assert.ok(uuid, `claude was given a minted session id: ${argv}`)
+    assert.match(argv, /review the retry path/, 'seeded with the task')
+    const row = Object.values(threadRows()).find((r) => r.agent === 'zeus')
+    assert.equal(row.sessionId, uuid, 'saved BEFORE the window, so a crash still resumes')
+    assert.equal(row.runs, 0, 'window turns are not runs of ours')
+    assert.match(out.stdout, /cf catchup/, 'and the lead is told how to read it')
+  })
+
+  it('the same lead follow-up resumes the window, seeded with only the new message', async () => {
+    const log = recordingStub('claude')
+    rmSync(log, { force: true })
+
+    const out = await cf(['run', '@zeus', 'and the timeout?'], tty())
+
+    assert.equal(out.code, 0, out.stderr)
+    const argv = argvOf(log)
+    assert.match(argv, /--resume /, 'the same session, resumed')
+    assert.match(argv, /and the timeout\?/)
+    assert.doesNotMatch(argv, /How to work/, 'no scene-setting on a follow-up')
+  })
+
+  it('pi opens fresh on the conversation own name', async () => {
+    const log = recordingStub('pi')
+
+    const out = await cf(['run', '@aether', 'hello'], tty())
+
+    assert.equal(out.code, 0, out.stderr)
+    const row = Object.entries(threadRows()).find(([, r]) => r.agent === 'aether')
+    assert.match(argvOf(log), new RegExp(`--session-id ${row[0]}`), 'the name IS the id')
+    assert.equal(row[1].sessionId, row[0])
+  })
+
+  it('opencode opens without an id, and the store tells us which one it minted', async () => {
+    mkdirSync(t.env.PATH, { recursive: true })
+    const dataHome = join(t.root, 'data')
+    const store = join(dataHome, 'opencode', 'storage', 'session', 'proj')
+    const path = join(t.env.PATH, 'opencode')
+    // The stub plays the TUI: it mints its own session file, like the real one.
+    // The stub's PATH is the stub dir alone, so external commands are out:
+    // the store dir is made here, and the timestamp is any moment after the
+    // spawn — the discovery only asks "born since?", so far-future is fine.
+    mkdirSync(store, { recursive: true })
+    writeFileSync(
+      path,
+      `#!/bin/sh
+printf '{"id":"ses_window1","directory":"%s","time":{"created":99999999999999}}' "$PWD" > "${store}/ses_window1.json"
+`,
+    )
+    chmodSync(path, 0o755)
+
+    const out = await cf(['run', '@sunna', 'hello'], tty({ XDG_DATA_HOME: dataHome }))
+
+    assert.equal(out.code, 0, out.stderr)
+    const row = Object.values(threadRows()).find((r) => r.agent === 'sunna')
+    assert.equal(row.sessionId, 'ses_window1', 'discovered from the store after launch')
+  })
+
+  it('a pipe cannot host a TUI: without a terminal the consult streams as before', async () => {
+    const log = stubCodexWindow()
+    rmSync(log, { force: true })
+
+    const out = await cf(['run', '@hyperion', 'again', '--new'], t.env)
 
     assert.equal(out.code, 0, out.stderr)
     assert.match(out.stdout, /the consult answer/)
+    assert.doesNotMatch(argvOf(log), /^resume/m, 'no window opened for a pipe')
+  })
+
+  it('cf attach --print carries the billing guard as prose', async () => {
+    const listed = await cf(['sessions', '--json'], t.env)
+    const name = Object.entries(JSON.parse(listed.stdout)).find(
+      ([, r]) => r.agent === 'hyperion',
+    )[0]
+
+    const out = await cf(['attach', name, '--print'], t.env)
+
+    assert.equal(out.code, 0, out.stderr)
+    // The printed line runs in someone else's shell, where our spawn-time
+    // guard cannot reach — the guard has to travel inside the command.
+    assert.match(out.stdout, /env -u OPENAI_API_KEY codex resume/)
+  })
+
+  it('cf catchup --wait sits out an answer being written in the window', async () => {
+    // Window turns reach no stream of ours: the lead's way to wait for an
+    // answer is to watch the harness's own store until a new assistant turn
+    // lands. Only what is new is printed — the lead has seen the rest.
+    const listed = await cf(['sessions', '--json'], t.env)
+    const name = Object.entries(JSON.parse(listed.stdout)).find(
+      ([, r]) => r.agent === 'hyperion' && r.sessionId === 'thread-open',
+    )[0]
+    const dir = join(t.env.CODEX_HOME, 'sessions', '2026', '08', '24')
+    mkdirSync(dir, { recursive: true })
+    const file = join(dir, 'rollout-2026-08-24T00-00-00-thread-open.jsonl')
+    writeFileSync(
+      file,
+      `${JSON.stringify({
+        type: 'response_item',
+        payload: { role: 'user', content: [{ text: 'a question' }] },
+      })}\n`,
+    )
+
+    const child = spawn(process.execPath, [CF, 'catchup', name, '--wait'], { env: t.env })
+    let stdout = ''
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk
+    })
+    const guard = setTimeout(() => child.kill(), 20_000)
+    guard.unref()
+    setTimeout(() => {
+      appendFileSync(
+        file,
+        `${JSON.stringify({
+          type: 'response_item',
+          payload: { role: 'assistant', content: [{ text: 'the late answer' }] },
+        })}\n`,
+      )
+    }, 500).unref()
+    const code = await new Promise((resolve) => child.on('close', resolve))
+    clearTimeout(guard)
+
+    assert.equal(code, 0, stdout)
+    assert.match(stdout, /the late answer/)
+    assert.doesNotMatch(stdout, /a question/, 'only what is new is shown')
+  })
+
+  it('cf last on a window-only conversation points at catchup instead of failing', async () => {
+    const listed = await cf(['sessions', '--json'], t.env)
+    const name = Object.entries(JSON.parse(listed.stdout)).find(([, r]) => r.agent === 'zeus')[0]
+
+    const out = await cf(['last', name], t.env)
+
+    assert.equal(out.code, 0, out.stderr)
+    assert.match(out.stdout, /cf catchup/)
   })
 })

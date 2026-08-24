@@ -254,4 +254,15 @@ describe('the description is all a lead reads before it decides to look inside',
 
     assert.match(cmux, /belongs to the session that started it/i)
   })
+
+  it('teaches that the pane becomes the agent own window, not a stream', () => {
+    const cmux = generateSkill(roster, { mode: 'cmux' })
+
+    assert.match(cmux, /the pane IS the agent's window/i)
+    assert.match(cmux, /codex/, 'the one exception is named')
+    // Follow-ups are typed into the window, not wrapped in a command.
+    assert.match(cmux, /plain text/)
+    // And the read is the harness's own store, waited on.
+    assert.match(cmux, /cf catchup <name> --wait/)
+  })
 })

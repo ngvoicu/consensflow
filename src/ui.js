@@ -572,26 +572,24 @@ const PAGE = (token) => `<!DOCTYPE html>
   They are here so you can drive it yourself when you want to.</p>
   <dl class="cmds">
     <dt><code>cf run @name "&lt;task&gt;"</code></dt>
-    <dd>One consult. In cmux mode it continues the conversation THIS coding
-        session has with that agent, so a follow-up remembers the last one.
-        A different session starts its own rather than inheriting yours.</dd>
+    <dd>One consult. In cmux mode, in a terminal, this IS the agent's own
+        window: the pane becomes claude's, pi's or opencode's interface on that
+        conversation, seeded with your task, and you just talk. codex streams
+        its first answer, then the pane becomes its window too. Each coding
+        session gets its own conversation — nobody inherits yours.</dd>
     <dt><code>cf run @name "&lt;task&gt;" --new</code></dt>
     <dd>Start a fresh conversation instead, and print its name.</dd>
     <dt><code>cf sessions</code></dt>
     <dd>The conversations alive in this folder — name, agent, how many turns.</dd>
+    <dt><code>cf catchup &lt;name&gt;</code></dt>
+    <dd>Everything said in one, read from the harness's own session — whoever
+        said it, window or not. <code>--wait</code> sits out the next answer and
+        prints only what is new; it is how your coding agent follows along.</dd>
     <dt><code>cf last &lt;name&gt;</code></dt>
-    <dd>The last answer in one, and where its full transcript is.</dd>
-    <dt><code>cf chat @name</code></dt>
-    <dd><strong>Type instead of command.</strong> One line is one turn of the same
-        conversation. Every turn is recorded, so your coding agent can still read
-        what was said with <code>cf last</code>.</dd>
+    <dd>The last answer a streamed run left, and where its transcript is.</dd>
     <dt><code>cf attach &lt;name&gt;</code></dt>
-    <dd><strong>Take it over.</strong> Replaces the terminal with the agent's own
-        window — codex's, claude's — on that same conversation, whole history in
-        it. Richer, but your coding agent is <em>blind</em> to whatever you do
-        there until you come back: those turns are not recorded, only the
-        agent's own memory keeps them. Use <code>cf chat</code> when you want it
-        to keep up.</dd>
+    <dd>Reopen a conversation's window later, in any terminal — whole history
+        in it. Your coding agent still follows with <code>cf catchup</code>.</dd>
   </dl>
 
   <p class="eyebrow eyebrow--section">Define your own</p>

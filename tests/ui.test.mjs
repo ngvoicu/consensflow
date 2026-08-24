@@ -148,16 +148,16 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     assert.match(script, /Click again to destroy/)
   })
 
-  it('explains the commands, including what attach costs', async () => {
+  it('explains the commands, and how the lead follows a window', async () => {
     const html = await (await fetch(`${server.url}/?token=${server.token}`)).text()
 
-    for (const verb of ['cf run @name', 'cf sessions', 'cf last', 'cf chat', 'cf attach']) {
+    for (const verb of ['cf run @name', 'cf sessions', 'cf catchup', 'cf last', 'cf attach']) {
       assert.ok(html.includes(verb), `the page should explain ${verb}`)
     }
-    // The one trade a reader must not discover by surprise: attaching gives
-    // the richer window but the lead cannot see what happens in it.
-    assert.match(html, /blind/i)
-    assert.match(html, /not recorded/i)
+    // The one thing a reader must know: a consult IS the agent's window now,
+    // and the coding agent follows it through the harness's own session.
+    assert.match(html, /own\s+window/i)
+    assert.match(html, /--wait/)
   })
 
   it('serves a page that can do the whole job, not half of it', async () => {

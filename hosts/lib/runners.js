@@ -215,16 +215,29 @@ export async function runAgent(input) {
   return result;
 }
 
-export async function spawnWithInput(command, args, options = {}) {
-  const { cwd = process.cwd(), input, signal, timeoutMs = DEFAULT_TIMEOUT_MS, env: envOverrides, dropEnv, onStdoutLine } = options;
-  // cmux hands every descendant a bearer token for its control socket (CMUX_SOCKET_CAPABILITY);
-  // a child holding it could type into any pane, including the lead's. No ConsensFlow child
-  // ever needs cmux control, so these are stripped unconditionally, like the billing guard.
-  const env = { ...process.env, ...(envOverrides ?? {}) };
+/**
+ * The environment every agent process gets — one-shot or window, same guards.
+ *
+ * cmux hands every descendant a bearer token for its control socket
+ * (CMUX_SOCKET_CAPABILITY); a child holding it could type into any pane,
+ * including the lead's. No agent process ever needs cmux control, so these are
+ * stripped unconditionally, like the billing guard in `dropEnv`. Attached
+ * windows go through here too: a window is the same agent with a screen, and
+ * for a while `cf attach` skipped the guards — every attached turn could
+ * silently bill an API key the one-shot path was stripping.
+ */
+export function childEnv(base, { env: envOverrides, dropEnv } = {}) {
+  const env = { ...base, ...(envOverrides ?? {}) };
   for (const key of dropEnv ?? []) delete env[key];
   for (const key of Object.keys(env)) {
     if (key.startsWith("CMUX_SOCKET") || key === "CMUX_CLAUDE_HOOK_CMUX_BIN") delete env[key];
   }
+  return env;
+}
+
+export async function spawnWithInput(command, args, options = {}) {
+  const { cwd = process.cwd(), input, signal, timeoutMs = DEFAULT_TIMEOUT_MS, env: envOverrides, dropEnv, onStdoutLine } = options;
+  const env = childEnv(process.env, { env: envOverrides, dropEnv });
   return await new Promise((resolve) => {
     const child = spawn(command, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], shell: false });
     let stdout = "";
@@ -445,36 +458,93 @@ function contentToText(content) {
     .join("\n");
 }
 
+/** The billing guard a window carries — the same one the one-shot run does. */
+function interactiveGuards(kind) {
+  if (kind === "claude-code") return ["ANTHROPIC_API_KEY"];
+  if (kind === "codex") return ["OPENAI_API_KEY"];
+  return [];
+}
+
 /**
  * The harness's OWN interactive command for a conversation we started.
  *
- * A consult is one-shot by construction — `codex exec`, `claude -p`. But the
- * session it leaves behind is the same one each harness's TUI can open, so a
- * conversation ConsensFlow began can be handed straight to the real agent
- * window with its whole history. That is `codex resume`, not `codex exec
- * resume`: the first is the interface, the second is the one-shot.
+ * The session a run leaves behind is the same one each harness's TUI can
+ * open, so a conversation ConsensFlow began can be handed straight to the
+ * real agent window with its whole history. That is `codex resume`, not
+ * `codex exec resume`: the first is the interface, the second is the
+ * one-shot. `seed` is an optional first message the window opens with — every
+ * TUI takes one, so a follow-up can travel INSIDE the hand-over instead of
+ * needing a run before it.
  *
- * Returns null when the harness has no interactive resume, or when there is no
- * session id yet.
+ * Returns null when the harness has no interactive resume, or when there is
+ * no session id yet.
  */
-export function interactiveResume(agent, sessionId) {
+export function interactiveResume(agent, sessionId, seed) {
   if (!sessionId) return null;
+  const withSeed = (args) => (seed ? [...args, seed] : args);
   switch (agent.kind) {
     case "codex":
-      return { command: "codex", args: ["resume", sessionId] };
+      return { command: "codex", args: withSeed(["resume", sessionId]), env: { ...CHILD_ENV }, dropEnv: interactiveGuards("codex") };
     case "claude-code": {
       const args = ["--resume", sessionId];
       if (agent.model) args.push("--model", agent.model);
-      return { command: "claude", args };
+      return { command: "claude", args: withSeed(args), env: { ...CHILD_ENV }, dropEnv: interactiveGuards("claude-code") };
     }
     case "pi": {
       const args = ["--session-id", sessionId];
       if (agent.model) args.push("--model", agent.model);
-      return { command: "pi", args };
+      return { command: "pi", args: withSeed(args), env: { ...CHILD_ENV }, dropEnv: [] };
     }
-    case "opencode":
-      return { command: "opencode", args: ["--session", sessionId] };
+    case "opencode": {
+      const args = ["--session", sessionId];
+      if (seed) args.push("--prompt", seed);
+      return { command: "opencode", args, env: { ...CHILD_ENV }, dropEnv: [] };
+    }
     default:
+      return null;
+  }
+}
+
+/**
+ * The harness's OWN window on a conversation that does not exist yet.
+ *
+ * Two harnesses take the id from us — claude (`--session-id`, a uuid the
+ * caller mints) and pi (`--session-id` creates if missing). opencode mints
+ * its own after launch, so its invocation carries no id and the caller
+ * discovers it from the store. codex has no way to pre-set an interactive
+ * session id at all: this returns null, and the caller streams the first
+ * turn through the one-shot machinery (which captures the thread id) and
+ * resumes the window on it.
+ *
+ * The seed is the first message — the packet, on turn one. The window gets
+ * the same model and effort the one-shot would send, and the same guards.
+ */
+export function interactiveStart(agent, sessionId, seed) {
+  switch (agent.kind) {
+    case "claude-code": {
+      if (!sessionId) return null;
+      const args = ["--session-id", sessionId];
+      if (agent.model) args.push("--model", agent.model);
+      if (agent.effort) args.push("--effort", agent.effort);
+      if (seed) args.push(seed);
+      return { command: "claude", args, env: { ...CHILD_ENV }, dropEnv: interactiveGuards("claude-code") };
+    }
+    case "pi": {
+      if (!sessionId) return null;
+      const args = ["--session-id", sessionId];
+      if (agent.model) args.push("--model", agent.model);
+      if (agent.thinking) args.push("--thinking", agent.thinking);
+      if (seed) args.push(seed);
+      return { command: "pi", args, env: { ...CHILD_ENV }, dropEnv: [] };
+    }
+    case "opencode": {
+      const args = [];
+      if (agent.model) args.push("--model", agent.model);
+      if (seed) args.push("--prompt", seed);
+      return { command: "opencode", args, env: { ...CHILD_ENV }, dropEnv: [] };
+    }
+    default:
+      // codex must stream its first turn; image agents hold no window.
       return null;
   }
 }

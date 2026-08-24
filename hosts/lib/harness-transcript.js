@@ -188,3 +188,46 @@ async function readOpencode(env, sessionId) {
   }
   return turns;
 }
+
+/**
+ * The session an opencode window just created — found, not told.
+ *
+ * opencode is the one harness that neither takes a session id at interactive
+ * start nor prints the one it minted. Its store does know: every session file
+ * records the directory it belongs to and when it was created. So the caller
+ * spawns the window, remembers the clock, and asks the store afterwards for
+ * the newest session in that directory born since. Read-only like everything
+ * else in this file, and null rather than an error when nothing matches yet.
+ */
+export async function discoverOpencodeSession(cwd, since, env = process.env) {
+  const root = path.join(opencodeRoot(env), "session");
+  let projects;
+  try {
+    projects = await fs.readdir(root, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  let best = null;
+  for (const project of projects) {
+    if (!project.isDirectory()) continue;
+    let names;
+    try {
+      names = await fs.readdir(path.join(root, project.name));
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      if (!name.endsWith(".json")) continue;
+      let session;
+      try {
+        session = JSON.parse(await fs.readFile(path.join(root, project.name, name), "utf8"));
+      } catch {
+        continue;
+      }
+      const created = session?.time?.created ?? 0;
+      if (session?.directory !== cwd || created < since) continue;
+      if (best === null || created > best.created) best = { id: session.id, created };
+    }
+  }
+  return best?.id ?? null;
+}

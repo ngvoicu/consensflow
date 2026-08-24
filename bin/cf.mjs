@@ -9,15 +9,16 @@
  * harnesses everything else.
  */
 import { spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { harnessTurns } from '../hosts/lib/harness-transcript.js'
+import { discoverOpencodeSession, harnessTurns } from '../hosts/lib/harness-transcript.js'
 import { renderImageRun, runImageAgent } from '../hosts/lib/image-run.js'
 import { createPacket } from '../hosts/lib/packets.js'
-import { interactiveResume, runAgent } from '../hosts/lib/runners.js'
+import { childEnv, interactiveResume, interactiveStart, runAgent } from '../hosts/lib/runners.js'
 import { runsRoot } from '../hosts/lib/state.js'
 import { leadId, loadThreads, newSessionName, saveThread } from '../hosts/lib/threads.js'
 import { renderEvent } from '../hosts/lib/transcript-events.js'
@@ -327,6 +328,102 @@ async function recordTurn(name, agentRow, record, result) {
   })
 }
 
+/**
+ * Whether this cf is talking to a person. A pipe cannot host a TUI: the
+ * lead's tool call, a test, `--json` all read our stdout as data, and an
+ * interactive window there would hang them. `CONSENSFLOW_TTY` exists so tests
+ * can stand on either side of the line without owning a real terminal.
+ */
+function isTerminal() {
+  if (env.CONSENSFLOW_TTY !== undefined) return env.CONSENSFLOW_TTY === '1'
+  return process.stdout.isTTY === true
+}
+
+/**
+ * Record a conversation whose turns happen in the harness's own window.
+ *
+ * Window turns are not runs of ours — `runs` stays what it was and there is
+ * no run id to record. What must be saved is the session id (before the
+ * window opens, where we mint it: a crash mid-window must still resume) and
+ * the lead, which stays with whoever started the conversation.
+ */
+async function saveWindowRow(name, agentRow, record, sessionId) {
+  const now = new Date().toISOString()
+  await saveThread(cwdOf(), name, {
+    agent: agentRow.id,
+    kind: agentRow.kind,
+    lead: record === undefined ? leadId(env) : (record.lead ?? null),
+    sessionId,
+    runs: record?.runs ?? 0,
+    createdAt: record?.createdAt ?? now,
+    lastRunAt: now,
+    lastRunId: record?.lastRunId ?? null,
+  })
+}
+
+/**
+ * The consult as the agent's own window, from its very first turn.
+ *
+ * claude opens on a uuid we mint, pi on the conversation's name, opencode on
+ * an id its store tells us just after launch. Returns false for the two kinds
+ * that cannot open cold — codex (no way to pre-set an interactive session id)
+ * and image — and the caller streams the first turn instead, then resumes
+ * the window on the id that streaming captured.
+ */
+async function openWindow(row, name, record, packetInput) {
+  const seed = await createPacket({
+    ...packetInput,
+    continuing: record?.sessionId != null,
+    conversational: true,
+  })
+
+  if (record?.sessionId) {
+    const invocation = interactiveResume(row, record.sessionId, seed)
+    if (invocation === null) return false
+    await saveWindowRow(name, row, record, record.sessionId)
+    out(`read it back with: cf catchup ${name}`)
+    await handOver(name, row.id, invocation)
+    return true
+  }
+
+  if (row.kind === 'claude-code' || row.kind === 'pi') {
+    const sessionId = row.kind === 'pi' ? name : randomUUID()
+    const invocation = interactiveStart(row, sessionId, seed)
+    if (invocation === null) return false
+    await saveWindowRow(name, row, record, sessionId)
+    out(`read it back with: cf catchup ${name}`)
+    await handOver(name, row.id, invocation)
+    return true
+  }
+
+  if (row.kind === 'opencode') {
+    const invocation = interactiveStart(row, null, seed)
+    // A little clock slack: the store's timestamps and ours need not agree
+    // to the millisecond.
+    const since = Date.now() - 2000
+    await saveWindowRow(name, row, record, null)
+    out(`read it back with: cf catchup ${name}`)
+    // The window and the search run together: opencode only mints the id
+    // after launch, and its store is where it says so.
+    const found = (async () => {
+      const deadline = Date.now() + 60_000
+      while (Date.now() < deadline) {
+        const id = await discoverOpencodeSession(cwdOf(), since, env)
+        if (id !== null) {
+          await saveWindowRow(name, row, (await loadThreads(cwdOf()))[name], id)
+          return
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500))
+      }
+    })()
+    await handOver(name, row.id, invocation)
+    await found
+    return true
+  }
+
+  return false
+}
+
 const cwdOf = () => process.cwd()
 
 async function runVerb(rest) {
@@ -345,7 +442,6 @@ async function runVerb(rest) {
       'no-thread': { type: 'boolean', default: false },
       new: { type: 'boolean', default: false },
       session: { type: 'string' },
-      attach: { type: 'boolean', default: false },
     },
   })
 
@@ -436,6 +532,27 @@ async function runVerb(rest) {
     )
   }
 
+  // In a terminal in cmux mode, the consult IS the agent's own window — this
+  // pane becomes claude's, pi's, opencode's interface on that conversation,
+  // seeded with the task. A pipe cannot host a TUI, so a program calling
+  // `cf run` (the lead's tool call, a test, `--json`) streams as before.
+  const wantsWindow = wantsThread && currentMode(env) === 'cmux' && !values.json && isTerminal()
+  if (wantsWindow) {
+    const opened = await openWindow(row, sessionName, record, {
+      cwd,
+      agent: row,
+      kind: 'ask',
+      task,
+      brief: values.brief,
+      extraContext: values.context,
+      handoff,
+    })
+    if (opened) return
+    // codex cannot open cold: stream the first turn (it captures the thread
+    // id), then the pane becomes `codex resume` on it, below.
+    out('codex streams its first answer, then this pane becomes its window')
+  }
+
   const packet = await createPacket({
     cwd,
     agent: row,
@@ -510,11 +627,11 @@ async function runVerb(rest) {
   await recordTurn(sessionName, row, record, result)
   if (inDelta) process.stdout.write('\n')
 
-  // `--attach` leaves the pane as a live agent window: the lead still gets the
-  // parsed answer above, and whoever is sitting there can carry on typing in
-  // the harness's own interface. Recorded first, so `cf last` works either way.
+  // The streamed turn was only the opening move: in a terminal the pane still
+  // ends as the agent's own window on the session the stream just captured.
+  // Recorded first, so `cf last` works either way.
   let handOverTo = null
-  if (values.attach && sessionName !== undefined) {
+  if (wantsWindow && sessionName !== undefined) {
     const fresh = (await loadThreads(cwd))[sessionName]
     handOverTo = interactiveResume(row, fresh?.sessionId)
   }
@@ -750,7 +867,11 @@ async function attachVerb(rest) {
     return
   }
 
-  const line = [invocation.command, ...invocation.args].join(' ')
+  // The printed form runs in someone else's shell, where our spawn-time env
+  // guard cannot reach — so the guard travels as prose, same as the skill's
+  // generated commands.
+  const guard = (invocation.dropEnv ?? []).map((key) => `-u ${key} `).join('')
+  const line = `${guard ? `env ${guard}` : ''}${[invocation.command, ...invocation.args].join(' ')}`
   if (values.print) {
     out(line)
     return
@@ -759,10 +880,21 @@ async function attachVerb(rest) {
   await handOver(name, record.agent, invocation)
 }
 
-/** Replace this terminal with the harness's window and exit with its code. */
+/**
+ * Replace this terminal with the harness's window and exit with its code.
+ *
+ * The window is the same agent with a screen, so it gets the same environment
+ * guards a run does — billing keys stripped, cmux control stripped, the child
+ * marker set. For a while this spawned with the full inherited environment,
+ * which meant every attached turn could silently bill an API key.
+ */
 async function handOver(name, agent, invocation) {
   out(`${name} · @${agent} — handing this terminal to ${invocation.command}`)
-  const child = spawn(invocation.command, invocation.args, { cwd: cwdOf(), stdio: 'inherit' })
+  const child = spawn(invocation.command, invocation.args, {
+    cwd: cwdOf(),
+    stdio: 'inherit',
+    env: childEnv(process.env, invocation),
+  })
   const code = await new Promise((resolve) => child.on('close', resolve))
   process.exitCode = code ?? 0
 }
@@ -779,7 +911,11 @@ async function catchupVerb(rest) {
   const { values, positionals } = parseArgs({
     args: rest,
     allowPositionals: true,
-    options: { json: { type: 'boolean', default: false }, last: { type: 'string' } },
+    options: {
+      json: { type: 'boolean', default: false },
+      last: { type: 'string' },
+      wait: { type: 'boolean', default: false },
+    },
   })
   const asked = String(positionals[0] ?? '')
   const threads = await loadThreads(cwdOf())
@@ -794,7 +930,45 @@ async function catchupVerb(rest) {
     return
   }
 
-  const turns = await harnessTurns(record.kind, record.sessionId, env)
+  let turns = await harnessTurns(record.kind, record.sessionId, env)
+
+  // --wait: the lead's way to sit out an answer being written in the agent's
+  // own window. Poll the harness's store until an assistant turn newer than
+  // what we have already seen arrives, then show only what is new. The row is
+  // re-read each round because an opencode session id can land moments after
+  // the window opened.
+  if (values.wait) {
+    const already = turns.length
+    const deadline = Date.now() + 15 * 60_000
+    let current = record
+    let fresh = []
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+      current = (await loadThreads(cwdOf()))[name] ?? current
+      const now = await harnessTurns(current.kind, current.sessionId, env)
+      fresh = now.slice(already)
+      if (fresh.some((turn) => turn.role === 'assistant')) {
+        turns = now
+        break
+      }
+    }
+    if (!fresh.some((turn) => turn.role === 'assistant')) {
+      fail(`no new answer in ${name} after 15 minutes — is the window still working?`)
+      return
+    }
+    if (values.json) {
+      out(JSON.stringify({ session: name, agent: current.agent, turns: fresh }, null, 2))
+      return
+    }
+    out(`${name} · @${current.agent} · ${fresh.length} new turn${fresh.length === 1 ? '' : 's'}`)
+    for (const turn of fresh) {
+      out('')
+      out(turn.role === 'user' ? '› asked' : `• @${current.agent}`)
+      out(turn.text)
+    }
+    return
+  }
+
   if (values.json) {
     out(JSON.stringify({ session: name, agent: record.agent, turns }, null, 2))
     return
@@ -860,6 +1034,17 @@ async function lastVerb(rest) {
           ? 'no conversations here yet — `cf run @name "<task>"` starts one'
           : `no conversation named ${JSON.stringify(wanted)} here; you have: ${names.join(', ')}`,
     )
+    return
+  }
+  // A conversation whose turns all happened in the agent's own window has no
+  // runs of ours to read — the harness's session store is the record.
+  if (row.lastRunId == null) {
+    if (values.json) {
+      out(JSON.stringify({ session: name, agent: row.agent, window: true }, null, 2))
+      return
+    }
+    out(`${name} · @${row.agent} — its turns live in the agent's own window`)
+    out(`read them with: cf catchup ${name}`)
     return
   }
   const runDir = join(runsRoot(cwd), String(row.lastRunId))
