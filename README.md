@@ -70,9 +70,11 @@ opens the harness's **own interface** — claude's, pi's, opencode's, codex's �
 on a named conversation, seeded with your task, and stays. You watch the agent
 work in its real window; you type follow-ups straight into it; your coding
 agent follows along by reading the harness's own session. Kimi Code is the one
-exception: its CLI has no way to seed an interactive session (`-p` is defined
-as non-interactive and there is no positional prompt), so it streams its first
-answer and the same pane becomes its window after.
+exception: its CLI takes no starting task at all (`-p` is defined as
+non-interactive and there is no positional prompt), so its window opens
+**empty** and ConsensFlow types the task into it — then waits for kimi to
+write the session, which is the receipt proving the keystrokes landed, and
+types again if they did not.
 
 ```
 $ cf run @hyperion "is the retry path sound?"
@@ -106,8 +108,8 @@ cf last <name>                         # the last answer a streamed run left
 the whole mechanism — no daemon, no database, no long-lived child. Session ids
 live in `<config>/workspaces/<key>/threads.json`. claude opens on a uuid we
 mint, pi on the conversation's name, opencode and codex each mint one at launch
-and say so only in their own store, and kimi hands its id back on the streamed
-first turn.
+and say so only in their own store, and kimi writes one the instant its first
+typed message lands — which is exactly what makes that message verifiable.
 
 ## How your coding agent follows along
 

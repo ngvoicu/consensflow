@@ -168,9 +168,17 @@ keep in step — the manager is the only caller.
   prompt and have their id read back out of their own store afterwards
   (`discoverOpencodeSession`, `discoverCodexSession` — codex's comes from the
   rollout FILENAME, because a forked session's metadata names a different
-  one). kimi is the only harness that cannot be seeded at all — `-p` is
-  defined as non-interactive and it has no positional prompt — so it streams
-  its first answer and the pane becomes its window after. Because kimi prints
+  one). kimi is the only harness that cannot be seeded at
+  all — `-p` is defined as non-interactive and a positional prompt is refused
+  as an unknown command (both probed). Its window therefore opens EMPTY and
+  the task is TYPED in through `cmux send`, which is the one place this
+  project types at a TUI rather than a shell. The rule that makes it safe is
+  that nothing trusts the send: kimi writes its session the instant a message
+  lands (verified — an idle TUI writes nothing for as long as it sits there),
+  so that file is the RECEIPT. No receipt, no delivery, type it again, six
+  attempts. A multi-line seed is written to `<config>/…/seeds/<name>.md` and
+  the typed line points at it, because `cmux send` submits at every newline
+  and a packet sent raw would arrive as a dozen half-questions. Because kimi prints
   its id LAST, a run that dies mid-work takes the id with it: `cf run` falls
   back to `discoverKimiSession` whenever a kimi run ends without one, so a
   conversation survives a rate limit or a closed pane with its work intact.

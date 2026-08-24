@@ -1178,6 +1178,57 @@ fi
     assert.match(out.stdout, /kimi streams its first answer/, 'and it names the right harness')
   })
 
+  it('kimi opens an EMPTY window at once, then types the task and checks it landed', async () => {
+    // kimi takes no seeded start, so its window opens empty — the TUI is there
+    // from the first moment — and the task is typed in after. A keystroke that
+    // arrives before the TUI listens vanishes silently, so nothing trusts the
+    // send: kimi writes its session when a message lands, and that IS the
+    // receipt. This stub only writes one on the SECOND attempt.
+    mkdirSync(t.env.PATH, { recursive: true })
+    const sessions = join(t.env.HOME, '.kimi-code', 'sessions', 'wd_y', 'session_typed')
+    mkdirSync(sessions, { recursive: true })
+    const sends = join(t.root, 'cmux-typed.log')
+    const kimiLog = join(t.root, 'kimi-empty.log')
+
+    writeFileSync(join(t.env.PATH, 'kimi'), `#!/bin/sh\necho "[$@]" >> "${kimiLog}"\n`)
+    chmodSync(join(t.env.PATH, 'kimi'), 0o755)
+    // A cmux whose first send is eaten, exactly like a TUI still booting: it
+    // writes the receipt only from the second delivery on. Shell built-ins
+    // only — the fake PATH holds the stubs and nothing else.
+    const seen = join(t.root, 'cmux-seen')
+    writeFileSync(
+      join(t.env.PATH, 'cmux'),
+      `#!/bin/sh
+echo "$@" >> "${sends}"
+if [ -f "${seen}2" ]; then
+  printf '%s' '{"id":"session_typed","cwd":"'"$PWD"'","createdAt":99999999999999}' > "${join(sessions, 'state.json')}"
+elif [ -f "${seen}1" ]; then
+  : > "${seen}2"
+else
+  : > "${seen}1"
+fi
+`,
+    )
+    chmodSync(join(t.env.PATH, 'cmux'), 0o755)
+
+    const out = await cf(['run', '@ilmarinen', 'the typed task', '--new'], {
+      ...tty(),
+      CMUX_SURFACE_ID: 'surface:7',
+      CONSENSFLOW_TYPE_MS: '60',
+    })
+
+    assert.equal(out.code, 0, out.stderr)
+    assert.equal(readFileSync(kimiLog, 'utf8').trim(), '[]', 'the window opened EMPTY, at once')
+    const typed = readFileSync(sends, 'utf8')
+    assert.match(typed, /the typed task/, 'the task was typed in')
+    assert.ok(
+      typed.split('\n').filter((l) => l.includes('the typed task')).length >= 2,
+      'and typed again when the first attempt left no receipt',
+    )
+    const name = /conversation: ([a-z]+-[a-z]+)/.exec(out.stdout)?.[1]
+    assert.equal(threadRows()[name].sessionId, 'session_typed', 'the receipt names the session')
+  })
+
   it('a kimi run that dies before printing its id is still resumable', async () => {
     // Live 2026-08-24: a 24-minute rebuild hit the provider's rate limit on
     // its last step. kimi prints its id LAST, so the conversation was left

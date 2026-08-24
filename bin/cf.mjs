@@ -10,7 +10,7 @@
  */
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
@@ -23,8 +23,14 @@ import {
 } from '../hosts/lib/harness-transcript.js'
 import { renderImageRun, runImageAgent } from '../hosts/lib/image-run.js'
 import { createPacket, createWindowSeed } from '../hosts/lib/packets.js'
-import { childEnv, interactiveResume, interactiveStart, runAgent } from '../hosts/lib/runners.js'
-import { runsRoot } from '../hosts/lib/state.js'
+import {
+  CHILD_ENV,
+  childEnv,
+  interactiveResume,
+  interactiveStart,
+  runAgent,
+} from '../hosts/lib/runners.js'
+import { cfRoot, runsRoot } from '../hosts/lib/state.js'
 import { leadId, loadThreads, newSessionName, saveThread } from '../hosts/lib/threads.js'
 import { renderEvent } from '../hosts/lib/transcript-events.js'
 import { CATALOG, catalogEntry } from '../src/catalog.js'
@@ -452,6 +458,38 @@ async function saveWindowRow(name, agentRow, record, sessionId) {
 }
 
 /**
+ * A seed that survives being typed at a prompt.
+ *
+ * `cmux send` turns every newline into Enter, so a multi-line packet typed
+ * into a TUI arrives as a series of half-questions, each one answered. When
+ * the seed does not fit on one line it is written down instead and the agent
+ * is asked to read it — one line, one question, nothing lost.
+ */
+function oneLineSeed(seed, name) {
+  const flat = String(seed).trim()
+  if (!flat.includes('\n')) return flat
+  const file = join(cfRoot(cwdOf()), 'seeds', `${name}.md`)
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(file, `${flat}\n`, 'utf8')
+  return `Read ${file} and do what it asks.`
+}
+
+/** Type a line at whatever is listening in this pane, then press Enter. */
+async function typeIntoPane(surface, line) {
+  const send = (text) =>
+    new Promise((resolve) => {
+      const child = spawn('cmux', ['send', '--surface', surface, '--', text], {
+        stdio: 'ignore',
+        env: { ...process.env, CMUX_QUIET: '1' },
+      })
+      child.on('close', () => resolve())
+      child.on('error', () => resolve())
+    })
+  await send(line)
+  await send('\n')
+}
+
+/**
  * The consult as the agent's own window, from its very first turn.
  *
  * claude opens on a uuid we mint, pi on the conversation's name, opencode on
@@ -479,6 +517,51 @@ async function openWindow(row, name, record, packetInput) {
     await saveWindowRow(name, row, record, sessionId)
     out(`read it back with: cf catchup ${name}`)
     await handOver(name, row.id, invocation)
+    return true
+  }
+
+  // kimi cannot be handed a task at all: `-p` is non-interactive and there is
+  // no positional prompt (both verified against the CLI). So its window opens
+  // EMPTY — which is what the user asked for, a TUI from the first moment —
+  // and the task is typed into it afterwards, the same way every follow-up
+  // already travels.
+  //
+  // The danger in typing at a TUI is that a keystroke arriving before it is
+  // listening vanishes without a sound, and the pane looks perfectly fine. So
+  // nothing here trusts the send: kimi writes its session the moment a message
+  // lands, and that file IS the receipt. No receipt, no delivery — send again.
+  if (row.kind === 'kimi') {
+    const surface = env.CMUX_SURFACE_ID
+    if (!surface) return false
+    const since = Date.now() - 2000
+    await saveWindowRow(name, row, record, null)
+    out(`read it back with: cf catchup ${name}`)
+
+    const delivered = (async () => {
+      // One line, always: `cmux send` submits at every newline, so a packet
+      // sent raw would arrive as a dozen half-questions. Anything that does
+      // not fit on one line is handed over as a file for the agent to read.
+      const line = oneLineSeed(seed, name)
+      // How long to let the TUI come up, and how long to wait for its receipt.
+      // Injectable so tests can run the whole loop in milliseconds.
+      const beat = Number.parseInt(env.CONSENSFLOW_TYPE_MS ?? '2500', 10)
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? beat : beat * 1.6))
+        await typeIntoPane(surface, line)
+        for (let waited = 0; waited < 10; waited += 1) {
+          await new Promise((resolve) => setTimeout(resolve, beat / 2.5))
+          const id = await discoverKimiSession(cwdOf(), since, env)
+          if (id !== null) {
+            await saveWindowRow(name, row, (await loadThreads(cwdOf()))[name], id)
+            return true
+          }
+        }
+      }
+      return false
+    })()
+
+    await handOver(name, row.id, { command: 'kimi', args: [], env: { ...CHILD_ENV }, dropEnv: [] })
+    await delivered
     return true
   }
 
