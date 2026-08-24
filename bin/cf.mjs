@@ -361,11 +361,13 @@ async function markRead(name, record, lead, turnCount) {
 async function recordTurn(name, agentRow, record, result) {
   if (name === undefined) return
   const now = new Date().toISOString()
+  // Read the row back rather than spreading the pre-run snapshot: it carries
+  // fields this writer does not own — the read marks `cf catchup` keeps, the
+  // `startedAt` marker, and whatever a later version adds. Rebuilding from a
+  // literal silently wiped them.
+  const { startedAt, ...current } = (await loadThreads(cwdOf()))[name] ?? record ?? {}
   await saveThread(cwdOf(), name, {
-    // Spread first: a row carries fields this writer does not own — the read
-    // marks `cf catchup` keeps, and whatever a later version adds. Rebuilding
-    // from a literal silently wiped them on the next run.
-    ...record,
+    ...current,
     agent: agentRow.id,
     kind: agentRow.kind,
     // Whoever started it keeps it. A later turn can come from the user typing
@@ -390,6 +392,35 @@ async function recordTurn(name, agentRow, record, result) {
 function isTerminal() {
   if (env.CONSENSFLOW_TTY !== undefined) return env.CONSENSFLOW_TTY === '1'
   return process.stdout.isTTY === true
+}
+
+/**
+ * A conversation exists the moment its first run starts, not when it ends.
+ *
+ * The row used to be written only after the run returned, so a long consult
+ * was invisible: `cf sessions` showed nothing and `cf catchup <name>` said
+ * there was no such conversation — for the whole time the lead most wanted to
+ * follow it. Writing it up front costs nothing and makes `--wait` work on a
+ * run that is still going.
+ *
+ * `startedAt` is what marks it running; `recordTurn` clears it when the answer
+ * lands.
+ */
+async function markRunning(name, agentRow, record) {
+  if (name === undefined) return
+  const now = new Date().toISOString()
+  await saveThread(cwdOf(), name, {
+    ...record,
+    agent: agentRow.id,
+    kind: agentRow.kind,
+    lead: record === undefined ? leadId(env) : (record.lead ?? null),
+    sessionId: record?.sessionId ?? null,
+    runs: record?.runs ?? 0,
+    createdAt: record?.createdAt ?? now,
+    lastRunAt: record?.lastRunAt ?? null,
+    lastRunId: record?.lastRunId ?? null,
+    startedAt: now,
+  })
 }
 
 /**
@@ -600,8 +631,14 @@ async function runVerb(rest) {
     if (opened) return
     // codex cannot open cold: stream the first turn (it captures the thread
     // id), then the pane becomes `codex resume` on it, below.
-    out('codex streams its first answer, then this pane becomes its window')
+    // codex and kimi are the two that cannot open a window cold; say which
+    // one this is, because "codex" in front of a kimi agent reads as a bug.
+    out(`${row.harness ?? row.kind} streams its first answer, then this pane becomes its window`)
   }
+
+  // The conversation is real from here on: a long consult must be findable
+  // while it runs, not only after it answers.
+  await markRunning(sessionName, row, record)
 
   const packet = await createPacket({
     cwd,
@@ -1132,7 +1169,9 @@ async function sessionsVerb(rest) {
   for (const name of names.sort()) {
     const row = threads[name]
     const runs = `${row.runs} run${row.runs === 1 ? '' : 's'}`
-    out(`${name.padEnd(18)}@${String(row.agent).padEnd(12)}${runs.padEnd(9)}${row.lastRunAt ?? ''}`)
+    // A row still carrying `startedAt` is one whose run has not come back.
+    const when = row.startedAt ? `working since ${row.startedAt}` : (row.lastRunAt ?? '')
+    out(`${name.padEnd(18)}@${String(row.agent).padEnd(12)}${runs.padEnd(9)}${when}`)
   }
 }
 

@@ -147,7 +147,11 @@ question, then decide or ask the user.
   spawn a second agent, do not resume your plan until the user has weighed in.
   An answer they have not read is not a decision they have made.
 - **Do not retry a slow agent with a different one** unless the command
-  itself failed. Slow usually means thinking.${
+  itself failed. Slow usually means thinking.
+- **Do not block on long work.** \`--wait\` is for an answer that is seconds
+  away. When you have handed over something substantial, report that it is
+  running and which conversation it is in, then take the user's next message.
+  A lead the user cannot reach is worse than an answer that arrives late.${
     inCmux
       ? `
 - **Reading a conversation and adding to it are different acts.** "What did
@@ -217,6 +221,13 @@ CMUX_QUIET=1 cmux rename-tab --surface surface:NN "$NAME"
 
 Lost track of which pane is which? \`CMUX_QUIET=1 cmux list-pane-surfaces\`
 lists every surface with its tab title.
+
+**Match how you wait to how long the work is.** A question answers in
+seconds; a refactor, a review or a rewrite runs for many minutes, and blocking
+on it means the user cannot reach you the whole time. For anything substantial:
+send it, say plainly that it is running and in which conversation, and stop —
+the user watches it live in its own pane, and \`cf sessions\` says what is
+still working. Look again when they ask, or when they come back.
 
 **Read the answer with \`cf catchup <name> --unread\` from your own pane** —
 everything said since your last look, which is what you want nearly every

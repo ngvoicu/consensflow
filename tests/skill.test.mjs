@@ -288,6 +288,16 @@ describe('the description is all a lead reads before it decides to look inside',
     }
   })
 
+  it('tells a lead not to block on long work', () => {
+    // Live 2026-08-24: a site rebuild ran for ten minutes behind a `--wait`,
+    // and the user could not reach their own lead for any of it.
+    const cmux = generateSkill(roster, { mode: 'cmux' })
+    const rules = cmux.slice(cmux.indexOf('## Rules'), cmux.indexOf('## Roster'))
+
+    assert.match(rules, /Do not block on long work/i)
+    assert.match(cmux, /cf sessions.* says what is\s+still working|still working/i)
+  })
+
   it('teaches that the pane becomes the agent own window, not a stream', () => {
     const cmux = generateSkill(roster, { mode: 'cmux' })
 

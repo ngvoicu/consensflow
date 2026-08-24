@@ -1324,6 +1324,43 @@ printf '{"id":"ses_window1","directory":"%s","time":{"created":99999999999999}}'
     assert.doesNotMatch(stdout, /old answer/, 'the stale exchange is not what was asked for')
   })
 
+  it('a long consult is findable while it runs, not only after it answers', async () => {
+    // Live 2026-08-24: a site rebuild ran for ten minutes and `cf sessions`
+    // showed nothing while `cf catchup <name>` said there was no such
+    // conversation — for exactly the stretch the lead most wanted to follow.
+    mkdirSync(t.env.PATH, { recursive: true })
+    const slow = join(t.env.PATH, 'codex')
+    const marker = join(t.root, 'slow-started')
+    writeFileSync(
+      slow,
+      `#!/bin/sh
+echo started > "${marker}"
+while [ ! -f "${join(t.root, 'slow-release')}" ]; do :; done
+echo '{"type":"thread.started","thread_id":"thread-slow"}'
+echo '{"type":"item.completed","item":{"type":"agent_message","text":"eventually"}}'
+`,
+    )
+    chmodSync(slow, 0o755)
+
+    const run = cf(['run', '@hyperion', 'a long task', '--thread', '--new'], asReader('lead-slow'))
+    // Wait for the child to be underway, then look: the conversation must
+    // already be there.
+    for (let i = 0; i < 200 && !existsSync(marker); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    const listed = await cf(['sessions'], t.env)
+    assert.match(listed.stdout, /working since/, 'sessions says which one is still working')
+    const running = Object.entries(threadRows()).find(([, r]) => r.startedAt !== undefined)
+    assert.ok(running, 'the row exists mid-run')
+    assert.equal(running[1].sessionId, null, 'with no session id yet — it has not been given one')
+
+    writeFileSync(join(t.root, 'slow-release'), '')
+    const out = await run
+    assert.equal(out.code, 0, out.stderr)
+    assert.equal(threadRows()[running[0]].startedAt, undefined, 'and stops being marked running')
+    assert.equal(threadRows()[running[0]].sessionId, 'thread-slow')
+  })
+
   it('cf catchup --unread is only what was said since this lead last looked', async () => {
     // Live 2026-08-24: asked "can you see what other jokes he said?", the lead
     // had no way to ask for what was NEW, so it sent another request and
