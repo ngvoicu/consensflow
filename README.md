@@ -74,7 +74,10 @@ exception: its CLI takes no starting task at all (`-p` is defined as
 non-interactive and there is no positional prompt), so its window opens
 **empty** and ConsensFlow types the task into it — then waits for kimi to
 write the session, which is the receipt proving the keystrokes landed, and
-types again if they did not.
+types again if they did not. In a directory kimi has not been trusted it
+opens on a confirmation prompt instead, so there ConsensFlow streams and tells
+you to trust the folder once; it will never type at a prompt it did not
+expect.
 
 ```
 $ cf run @hyperion "is the retry path sound?"

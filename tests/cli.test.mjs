@@ -1187,6 +1187,11 @@ fi
     mkdirSync(t.env.PATH, { recursive: true })
     const sessions = join(t.env.HOME, '.kimi-code', 'sessions', 'wd_y', 'session_typed')
     mkdirSync(sessions, { recursive: true })
+    // kimi opens on a "Trust this folder?" modal in a directory it does not
+    // know, so a window is only offered where it will not stop to ask.
+    const trust = join(t.env.HOME, '.kimi-code', 'workspace-trust')
+    mkdirSync(trust, { recursive: true })
+    writeFileSync(join(trust, 'wd_here'), JSON.stringify({ root: process.cwd(), trustedAt: 1 }))
     const sends = join(t.root, 'cmux-typed.log')
     const kimiLog = join(t.root, 'kimi-empty.log')
 
@@ -1227,6 +1232,29 @@ fi
     )
     const name = /conversation: ([a-z]+-[a-z]+)/.exec(out.stdout)?.[1]
     assert.equal(threadRows()[name].sessionId, 'session_typed', 'the receipt names the session')
+  })
+
+  it('an untrusted directory gets the stream, never keystrokes into a modal', async () => {
+    // Live 2026-08-24: opening kimi in an unknown folder shows "Trust this
+    // folder?" with "Don't trust" preselected — and "Don't trust" EXITS. Typed
+    // characters navigate that menu and the Enter after them chooses it, so
+    // asking a question would close the agent. Trusting is the user's call.
+    rmSync(join(t.env.HOME, '.kimi-code', 'workspace-trust'), { recursive: true, force: true })
+    const kimiLog = join(t.root, 'kimi-untrusted.log')
+    writeFileSync(join(t.env.PATH, 'kimi'), `#!/bin/sh\necho "[$@]" >> "${kimiLog}"\n`)
+    chmodSync(join(t.env.PATH, 'kimi'), 0o755)
+
+    const out = await cf(['run', '@ilmarinen', 'careful now', '--new'], {
+      ...tty(),
+      CMUX_SURFACE_ID: 'surface:9',
+      CONSENSFLOW_TYPE_MS: '60',
+    })
+
+    assert.equal(out.code, 0, out.stderr)
+    assert.match(out.stdout, /has not been trusted/i, 'it says why there is no window')
+    assert.match(out.stdout, /choose Trust/i, 'and what to do about it')
+    const opened = readFileSync(kimiLog, 'utf8')
+    assert.doesNotMatch(opened, /^\[\]$/m, 'no empty window was opened for a modal to fill')
   })
 
   it('a kimi run that dies before printing its id is still resumable', async () => {

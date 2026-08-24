@@ -176,7 +176,15 @@ keep in step — the manager is the only caller.
   that nothing trusts the send: kimi writes its session the instant a message
   lands (verified — an idle TUI writes nothing for as long as it sits there),
   so that file is the RECEIPT. No receipt, no delivery, type it again, six
-  attempts. A multi-line seed is written to `<config>/…/seeds/<name>.md` and
+  attempts. **A window is only offered where kimi will not stop to ask**: an
+  untrusted directory opens on a "Trust this folder?" modal whose preselected
+  answer is "Don't trust", and that one EXITS — typed characters would
+  navigate the menu and the Enter after them would choose it, so a question
+  would close the agent. `kimiTrustsDirectory` READS `workspace-trust/` and
+  never writes it: trusting a folder is the user's decision about their own
+  machine, the same rule that protects Claude Code's settings.json. Untrusted
+  falls back to the streamed path, which needs no trust because the modal
+  gates the interface, not the engine. A multi-line seed is written to `<config>/…/seeds/<name>.md` and
   the typed line points at it, because `cmux send` submits at every newline
   and a packet sent raw would arrive as a dozen half-questions. Because kimi prints
   its id LAST, a run that dies mid-work takes the id with it: `cf run` falls

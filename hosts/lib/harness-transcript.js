@@ -415,3 +415,46 @@ export async function discoverKimiSession(cwd, since, env = process.env) {
   }
   return best?.id ?? null;
 }
+
+/**
+ * Whether Kimi Code will open a window here without stopping to ask.
+ *
+ * An interactive kimi in an untrusted directory opens on a modal — "Trust
+ * this folder?" — with "Don't trust" preselected, and "Don't trust" EXITS.
+ * Typing a task into that is worse than losing it: the characters navigate
+ * the menu and the Enter that follows chooses whatever is highlighted, so an
+ * attempt to ask a question closes the agent instead.
+ *
+ * The answer lives in `workspace-trust/`, one small file per trusted root.
+ * This only ever READS it. Trusting a directory is the user's decision about
+ * their own machine — the same reason Claude Code's settings.json is never
+ * written — so a consult in an untrusted folder falls back to the streamed
+ * path and says what to do, rather than quietly answering the question for
+ * them.
+ *
+ * Note that `-p` needs no trust: the modal gates the interface, not the
+ * engine. So the fallback genuinely works.
+ */
+export async function kimiTrustsDirectory(cwd, env = process.env) {
+  const root = path.join(env.KIMI_CODE_HOME ?? path.join(home(env), ".kimi-code"), "workspace-trust");
+  let names;
+  try {
+    names = await fs.readdir(root);
+  } catch {
+    // No store at all: kimi has never been asked, so assume it will ask.
+    return false;
+  }
+  for (const name of names) {
+    let record;
+    try {
+      record = JSON.parse(await fs.readFile(path.join(root, name), "utf8"));
+    } catch {
+      continue;
+    }
+    const trusted = record?.root;
+    if (typeof trusted !== "string" || trusted.length === 0) continue;
+    // kimi trusts a workspace root, which covers the directories inside it.
+    if (cwd === trusted || cwd.startsWith(`${trusted}${path.sep}`)) return true;
+  }
+  return false;
+}

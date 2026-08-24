@@ -20,6 +20,7 @@ import {
   discoverKimiSession,
   discoverOpencodeSession,
   harnessTurns,
+  kimiTrustsDirectory,
 } from '../hosts/lib/harness-transcript.js'
 import { renderImageRun, runImageAgent } from '../hosts/lib/image-run.js'
 import { createPacket, createWindowSeed } from '../hosts/lib/packets.js'
@@ -533,6 +534,17 @@ async function openWindow(row, name, record, packetInput) {
   if (row.kind === 'kimi') {
     const surface = env.CMUX_SURFACE_ID
     if (!surface) return false
+    // An untrusted directory opens kimi on a modal whose preselected answer
+    // is "Don't trust", which EXITS. Typed characters would navigate that
+    // menu and the Enter after them would choose it, so a question would
+    // close the agent instead of asking anything. Trusting a folder is the
+    // user's decision about their own machine, never ours to make for them —
+    // so this steps back to the streamed path, which needs no trust.
+    if (!(await kimiTrustsDirectory(cwdOf(), env))) {
+      out(`kimi has not been trusted in this directory, so its window would open on a prompt`)
+      out(`run \`kimi\` here once and choose Trust to get the window; streaming this one`)
+      return false
+    }
     const since = Date.now() - 2000
     await saveWindowRow(name, row, record, null)
     out(`read it back with: cf catchup ${name}`)
