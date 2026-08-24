@@ -103,7 +103,7 @@ question, then decide or ask the user.
 3. ${
     inCmux
       ? `**Open a pane for that conversation and send the consult there** — never
-   run it in this one. The three commands are written out under "One pane per
+   run it in this one. The four commands are written out under "One pane per
    conversation" below; do not go exploring cmux's CLI.`
       : `Spawn it from the project directory:
 
