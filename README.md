@@ -70,18 +70,8 @@ opens the harness's **own interface** — claude's, pi's, opencode's, codex's �
 on a named conversation, seeded with your task, and stays. You watch the agent
 work in its real window; you type follow-ups straight into it; your coding
 agent follows along by reading the harness's own session. Kimi Code is the one
-exception: its CLI takes no starting task at all (`-p` is defined as
-non-interactive and there is no positional prompt), so its window opens
-**empty** and ConsensFlow types the task into it — then waits for kimi to
-write the session, which is the receipt proving the keystrokes landed, and
-types again if they did not. In a directory kimi has not seen, it
-opens on a confirmation prompt instead — and that prompt gates exactly one
-thing: MCP servers the project itself declares. Where a directory declares
-none, trusting it starts nothing, so ConsensFlow records the trust and opens
-the window. Where one is declared, trusting would run a command the repo's
-author chose, so that stays your decision and the consult streams instead.
-It will never type at a prompt it did not expect.
-
+exception: its CLI takes no starting task at all, so it streams its first
+answer and the same pane becomes its window after.
 ```
 $ cf run @hyperion "is the retry path sound?"
 conversation: silver-waves (new)

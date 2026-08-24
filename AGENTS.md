@@ -169,53 +169,21 @@ keep in step — the manager is the only caller.
   (`discoverOpencodeSession`, `discoverCodexSession` — codex's comes from the
   rollout FILENAME, because a forked session's metadata names a different
   one). kimi is the only harness that cannot be seeded at
-  all — `-p` is defined as non-interactive and a positional prompt is refused
-  as an unknown command (both probed). Its window therefore opens EMPTY and
-  the task is TYPED in through `cmux send`, which is the one place this
-  project types at a TUI rather than a shell. The rule that makes it safe is
-  that nothing trusts the send: kimi writes its session the instant a message
-  lands (verified — an idle TUI writes nothing for as long as it sits there),
-  so that file is the RECEIPT. No receipt, no delivery, type it again, six
-  attempts. **A window is only offered where kimi will not stop to ask**: an
-  untrusted directory opens on a "Trust this folder?" modal whose preselected
-  answer is "Don't trust", and that one EXITS — typed characters would
-  navigate the menu and the Enter after them would choose it, so a question
-  would close the agent. The prompt gates ONE thing and says
-  so: the project's own MCP servers, declared in `.kimi-code/mcp.json` or
-  `.mcp.json`. So the answer splits on whether trusting would start anything
-  (`kimiTrustWouldStartServers`, climbing to the repo root). A directory that
-  declares none grants nothing by being trusted, so ConsensFlow answers the
-  formality itself (`kimiTrustDirectory`, kimi's own shape in kimi's own store,
-  0600) and the window opens. A directory that DOES declare one is asking to
-  run a command its author chose — a question about the user's machine, left
-  to them, the same rule that protects Claude Code's settings.json — and the
-  consult streams instead, which needs no trust because the modal gates the
-  interface, not the engine. A multi-line seed is written to `<config>/…/seeds/<name>.md` and
-  the typed line points at it, because `cmux send` submits at every newline
-  and a packet sent raw would arrive as a dozen half-questions. Because kimi prints
-  its id LAST, a run that dies mid-work takes the id with it: `cf run` falls
-  back to `discoverKimiSession` whenever a kimi run ends without one, so a
+  all — `-p` is documented non-interactive and a positional prompt comes back
+  as `unknown command` (both probed) — so it streams its first turn and the
+  pane becomes its window after, the shape codex used to have. Opening the
+  window EMPTY and typing the task in was built and then removed the same day:
+  `cmux send` reaches a TUI as a PASTE, and in a paste a newline is a newline,
+  so Enter never submits. The text sits in the input box, no answer arrives,
+  and the delivery check — waiting for a reply that cannot come — pastes
+  another copy on every retry. Six overlapping questions in a pane that looks
+  alive: the typed-bootstrap minefield in its exact original form, which is
+  why nothing here types at a TUI. Because kimi prints its id LAST, a run that
+  dies mid-work takes the id with it: `cf run` falls back to
+  `discoverKimiSession` whenever a kimi run ends without one, so a
   conversation survives a rate limit or a closed pane with its work intact.
   All three discoveries read the harness's own store and return null rather
-  than throwing. The row is saved BEFORE the window where we mint the id,
-  so a crash mid-window still resumes. A pipe cannot host a TUI: without a
-  terminal (the lead's tool call, tests, `--json`) the run streams exactly as
-  before — that is physics, not a mode. Terminal-ness is injectable
-  (`CONSENSFLOW_TTY`) so tests can stand on either side. Window turns are not
-  runs of ours: `runs` does not grow, `lastRunId` stays null, and `cf last`
-  points at `cf catchup`. Every window spawn goes through `childEnv` — for a
-  while `cf attach` inherited the full environment, which meant every attached
-  turn could silently bill an API key.
-
-- **The lead names the conversation before the pane exists.** The run prints
-  its conversation name into a pane the lead cannot read, so the recipe is
-  `NAME=$(cf mint)` first, then `cf run … --new --session "$NAME"` — creation
-  under an explicit name, refused for agent names (the disjoint-vocabulary
-  rule), taken names and non-slug shapes. The window's seed is
-  `createWindowSeed`, not a packet: no header, no "How to work", no format
-  footer — a window is a full interactive session and the seed is the first
-  thing the USER sees; the `## Message from the user` marker survives whenever
-  a brief/handoff rides along, because `cf catchup` unwraps on it.
+  than throwing.
 
 - **A lead reads what is new, not everything.** `cf catchup <name> --unread`
   is only what has been said since THIS lead last looked — a turn count per
