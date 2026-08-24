@@ -1248,6 +1248,46 @@ fi
     assert.equal(threadRows()[name].sessionId, 'session_typed', 'the receipt names the session')
   })
 
+  it('resuming a kimi conversation types the follow-up too, proved by its turns growing', async () => {
+    // The window for a RESUMED kimi opens on `-S <id>` and still takes no
+    // task, so the follow-up has to be typed as well. A new session cannot be
+    // the receipt this time — the session already exists — so the proof is
+    // the conversation getting longer.
+    const id = 'session_resumed'
+    const dir = join(t.env.HOME, '.kimi-code', 'sessions', 'wd_r', id, 'agents', 'main')
+    mkdirSync(dir, { recursive: true })
+    const wire = join(dir, 'wire.jsonl')
+    const turn = (role, text) =>
+      role === 'user'
+        ? `${JSON.stringify({ type: 'turn.prompt', input: [{ type: 'text', text }], origin: { kind: 'user' } })}\n`
+        : `${JSON.stringify({ type: 'context.append_loop_event', event: { type: 'content.part', turnId: '0', part: { type: 'text', text } } })}\n`
+    writeFileSync(wire, turn('user', 'first') + turn('assistant', 'answered'))
+
+    const kimiLog = join(t.root, 'kimi-resume.log')
+    writeFileSync(join(t.env.PATH, 'kimi'), `#!/bin/sh\necho "[$@]" >> "${kimiLog}"\n`)
+    chmodSync(join(t.env.PATH, 'kimi'), 0o755)
+    // The cmux that "delivers" by appending the turn kimi would have written.
+    writeFileSync(
+      join(t.env.PATH, 'cmux'),
+      `#!/bin/sh\nprintf '%s' '${turn('user', 'the follow-up').trim()}\n' >> "${wire}"\n`,
+    )
+    chmodSync(join(t.env.PATH, 'cmux'), 0o755)
+
+    const name = await cf(['mint'], t.env).then((r) => r.stdout.trim())
+    writeThreadRow(name, { agent: 'ilmarinen', kind: 'kimi', sessionId: id, runs: 1, lead: 'lead-r' })
+
+    const out = await cf(['run', '@ilmarinen', 'the follow-up', '--session', name], {
+      ...tty(),
+      CLAUDE_CODE_SESSION_ID: 'lead-r',
+      CMUX_SURFACE_ID: 'surface:11',
+      CONSENSFLOW_TYPE_MS: '40',
+    })
+
+    assert.equal(out.code, 0, out.stderr)
+    assert.match(readFileSync(kimiLog, 'utf8'), new RegExp(`-S ${id}`), 'the window resumed it')
+    assert.match(readFileSync(wire, 'utf8'), /the follow-up/, 'and the follow-up was typed in')
+  })
+
   it('a directory that declares MCP servers is the user to answer, not us', async () => {
     // Live 2026-08-24: opening kimi in an unknown folder shows "Trust this
     // folder?" with "Don't trust" preselected — and "Don't trust" EXITS. Typed
@@ -1471,6 +1511,19 @@ printf '{"id":"ses_window1","directory":"%s","time":{"created":99999999999999}}'
 
   /** A lead reading a conversation — its own identity, its own read mark. */
   const asReader = (id) => ({ ...t.env, CLAUDE_CODE_SESSION_ID: id })
+
+  /** Plant a conversation row, for the states a run cannot reach on its own. */
+  const writeThreadRow = (name, row) => {
+    const file = join(
+      t.env.CONSENSFLOW_HOME,
+      'workspaces',
+      readdirSync(join(t.env.CONSENSFLOW_HOME, 'workspaces'))[0],
+      'threads.json',
+    )
+    const all = threadRows()
+    all[name] = { createdAt: '2026-08-24T00:00:00.000Z', lastRunAt: null, lastRunId: null, ...row }
+    writeFileSync(file, JSON.stringify(all, null, 2))
+  }
 
   const rolloutFor = (id) => {
     const dir = join(t.env.CODEX_HOME, 'sessions', '2026', '08', '24')

@@ -493,6 +493,77 @@ async function typeIntoPane(surface, line) {
 }
 
 /**
+ * kimi's window, opened and then TYPED into — the one harness that takes no
+ * task on the command line at all: `-p` is documented non-interactive and a
+ * positional prompt comes back as `unknown command`. So the window opens (the
+ * TUI is there from the first moment, which is the point) and the task
+ * follows as keystrokes, exactly the way every follow-up already travels.
+ *
+ * Typing at a TUI is the one thing this project otherwise refuses to do, and
+ * the reason it is safe here is that nothing trusts the send. A keystroke
+ * arriving before the interface listens vanishes without a sound, so every
+ * delivery is checked against kimi's own store: a new conversation is proved
+ * by the session appearing, a resumed one by its turns growing. No proof, no
+ * delivery — type it again.
+ */
+async function openKimiWindow(row, name, record, seed) {
+  const surface = env.CMUX_SURFACE_ID
+  if (!surface) return false
+
+  // kimi's prompt gates one thing and says so: the project's own MCP servers.
+  // Where a directory declares none, answering it grants nothing and
+  // ConsensFlow answers it. Where one IS declared, trusting would run a
+  // command the repo's author chose — the user's question, and theirs to keep.
+  if (!(await kimiTrustsDirectory(cwdOf(), env))) {
+    if (await kimiTrustWouldStartServers(cwdOf())) {
+      out('this directory declares its own MCP servers, which kimi starts only once you trust it')
+      out(`that is your call, not ours: run \`kimi\` here and choose Trust for a window`)
+      return false
+    }
+    await kimiTrustDirectory(cwdOf(), env)
+  }
+
+  const resuming = record?.sessionId ?? null
+  const since = Date.now() - 2000
+  const before = resuming === null ? 0 : (await harnessTurns('kimi', resuming, env)).length
+  await saveWindowRow(name, row, record, resuming)
+  out(`read it back with: cf catchup ${name}`)
+
+  const delivered = (async () => {
+    // One line, always: `cmux send` presses Enter at every newline, so a
+    // packet sent raw would arrive as a dozen half-questions.
+    const line = oneLineSeed(seed, name)
+    const beat = Number.parseInt(env.CONSENSFLOW_TYPE_MS ?? '2500', 10)
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? beat : beat * 1.6))
+      await typeIntoPane(surface, line)
+      for (let waited = 0; waited < 10; waited += 1) {
+        await new Promise((resolve) => setTimeout(resolve, beat / 2.5))
+        if (resuming === null) {
+          const id = await discoverKimiSession(cwdOf(), since, env)
+          if (id !== null) {
+            await saveWindowRow(name, row, (await loadThreads(cwdOf()))[name], id)
+            return true
+          }
+        } else if ((await harnessTurns('kimi', resuming, env)).length > before) {
+          return true
+        }
+      }
+    }
+    return false
+  })()
+
+  await handOver(name, row.id, {
+    command: 'kimi',
+    args: resuming === null ? [] : ['-S', resuming],
+    env: { ...CHILD_ENV },
+    dropEnv: [],
+  })
+  await delivered
+  return true
+}
+
+/**
  * The consult as the agent's own window, from its very first turn.
  *
  * claude opens on a uuid we mint, pi on the conversation's name, opencode on
@@ -503,6 +574,10 @@ async function typeIntoPane(surface, line) {
  */
 async function openWindow(row, name, record, packetInput) {
   const seed = createWindowSeed(packetInput)
+
+  // kimi first, fresh or resumed: it is the one harness that takes no task on
+  // the command line either way, so both cases open a window and type.
+  if (row.kind === 'kimi') return await openKimiWindow(row, name, record, seed)
 
   if (record?.sessionId) {
     const invocation = interactiveResume(row, record.sessionId, seed)
@@ -520,70 +595,6 @@ async function openWindow(row, name, record, packetInput) {
     await saveWindowRow(name, row, record, sessionId)
     out(`read it back with: cf catchup ${name}`)
     await handOver(name, row.id, invocation)
-    return true
-  }
-
-  // kimi cannot be handed a task at all: `-p` is non-interactive and there is
-  // no positional prompt (both verified against the CLI). So its window opens
-  // EMPTY — which is what the user asked for, a TUI from the first moment —
-  // and the task is typed into it afterwards, the same way every follow-up
-  // already travels.
-  //
-  // The danger in typing at a TUI is that a keystroke arriving before it is
-  // listening vanishes without a sound, and the pane looks perfectly fine. So
-  // nothing here trusts the send: kimi writes its session the moment a message
-  // lands, and that file IS the receipt. No receipt, no delivery — send again.
-  if (row.kind === 'kimi') {
-    const surface = env.CMUX_SURFACE_ID
-    if (!surface) return false
-    // An untrusted directory opens kimi on a modal whose preselected answer
-    // is "Don't trust", which EXITS. Typed characters would navigate that
-    // menu and the Enter after them would choose it, so a question would
-    // close the agent instead of asking anything. Trusting a folder is the
-    // user's decision about their own machine, never ours to make for them —
-    // so this steps back to the streamed path, which needs no trust.
-    if (!(await kimiTrustsDirectory(cwdOf(), env))) {
-      // kimi's prompt gates one thing and says so: the project's own MCP
-      // servers. Where a directory declares none, answering it grants nothing
-      // and ConsensFlow answers it. Where one IS declared, trusting would run
-      // a command the repo's author chose — a question about the user's
-      // machine, and theirs to answer.
-      if (await kimiTrustWouldStartServers(cwdOf())) {
-        out('this directory declares its own MCP servers, which kimi starts only once you trust it')
-        out(`that is your call, not ours: run \`kimi\` here and choose Trust for a window`)
-        return false
-      }
-      await kimiTrustDirectory(cwdOf(), env)
-    }
-    const since = Date.now() - 2000
-    await saveWindowRow(name, row, record, null)
-    out(`read it back with: cf catchup ${name}`)
-
-    const delivered = (async () => {
-      // One line, always: `cmux send` submits at every newline, so a packet
-      // sent raw would arrive as a dozen half-questions. Anything that does
-      // not fit on one line is handed over as a file for the agent to read.
-      const line = oneLineSeed(seed, name)
-      // How long to let the TUI come up, and how long to wait for its receipt.
-      // Injectable so tests can run the whole loop in milliseconds.
-      const beat = Number.parseInt(env.CONSENSFLOW_TYPE_MS ?? '2500', 10)
-      for (let attempt = 0; attempt < 6; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? beat : beat * 1.6))
-        await typeIntoPane(surface, line)
-        for (let waited = 0; waited < 10; waited += 1) {
-          await new Promise((resolve) => setTimeout(resolve, beat / 2.5))
-          const id = await discoverKimiSession(cwdOf(), since, env)
-          if (id !== null) {
-            await saveWindowRow(name, row, (await loadThreads(cwdOf()))[name], id)
-            return true
-          }
-        }
-      }
-      return false
-    })()
-
-    await handOver(name, row.id, { command: 'kimi', args: [], env: { ...CHILD_ENV }, dropEnv: [] })
-    await delivered
     return true
   }
 
