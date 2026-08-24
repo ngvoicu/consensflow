@@ -307,3 +307,61 @@ export async function discoverOpencodeSession(cwd, since, env = process.env) {
   }
   return best?.id ?? null;
 }
+
+/**
+ * The session a fresh interactive codex just created — found, not told.
+ *
+ * `codex "<prompt>"` opens its own window seeded with that prompt, but unlike
+ * `exec --json` it announces no thread id: an interactive codex talks to a
+ * person, not to us. Its rollout file knows, though — the first line is a
+ * `session_meta` carrying the `cwd`, written when the file is created. So the
+ * caller spawns the window, remembers the clock, and asks the store which
+ * session appeared in that directory since.
+ *
+ * The id comes from the FILENAME rather than the payload, because that is what
+ * `harnessTurns` matches on and what `codex resume` accepts — a forked session
+ * carries a different `session_id` in its metadata than the file it lives in.
+ */
+export async function discoverCodexSession(cwd, since, env = process.env) {
+  const root = codexRoot(env);
+  const files = [];
+  await collectFiles(root, (name) => name.startsWith("rollout-") && name.endsWith(".jsonl"), files);
+
+  let best = null;
+  for (const file of files) {
+    let stat;
+    try {
+      stat = await fs.stat(file);
+    } catch {
+      continue;
+    }
+    if (stat.mtimeMs < since) continue;
+    let meta;
+    try {
+      const raw = await fs.readFile(file, "utf8");
+      meta = JSON.parse(raw.slice(0, raw.indexOf("\n")));
+    } catch {
+      continue;
+    }
+    if (meta?.type !== "session_meta" || meta.payload?.cwd !== cwd) continue;
+    // rollout-<timestamp>-<uuid>.jsonl — the uuid is the last 36 characters.
+    const id = path.basename(file, ".jsonl").slice(-36);
+    if (best === null || stat.mtimeMs > best.at) best = { id, at: stat.mtimeMs };
+  }
+  return best?.id ?? null;
+}
+
+async function collectFiles(root, matches, into, depth = 6) {
+  if (depth < 0) return;
+  let entries;
+  try {
+    entries = await fs.readdir(root, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const full = path.join(root, entry.name);
+    if (entry.isFile() && matches(entry.name)) into.push(full);
+    else if (entry.isDirectory()) await collectFiles(full, matches, into, depth - 1);
+  }
+}

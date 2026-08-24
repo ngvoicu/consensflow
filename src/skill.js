@@ -185,9 +185,10 @@ ${
 
 A consult here is a **conversation** in the agent's own interface. \`cf run
 @<name> "<task>"\` in a pane does not print an answer and exit: it opens
-claude's, pi's or opencode's real window on that conversation, seeded with
-your task, and stays. codex is the one exception — it streams its first
-answer, then the same pane becomes \`codex resume\` on that session. Either
+the agent's real window on that conversation, seeded with your task, and stays
+— claude's, pi's, opencode's and codex's alike. kimi is the one exception: its
+CLI has no way to seed an interactive session, so it streams its first answer
+and the same pane becomes its window after. Either
 way the conversation has a short name — \`ember-ridge\`, \`amber-moss\` — and
 asking again continues it: the agent remembers, and the provider's cache
 stays warm.

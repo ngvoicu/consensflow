@@ -45,10 +45,24 @@ test('window: opencode opens without an id — the store will tell us later', ()
   assert.equal(w.args[at + 1], 'the packet text', 'the seed rides --prompt')
 })
 
-test('window: codex cannot pre-set an interactive id — stream first, then resume', () => {
-  // No flag exists. The caller runs turn 1 through the one-shot machinery
-  // (which captures thread_id) and opens `codex resume <id>` on it.
-  assert.equal(interactiveStart(AGENTS.codex, 'anything', 'seed'), null)
+test('window: codex opens cold on a positional prompt, id found afterwards', () => {
+  // `codex [PROMPT]` opens the real window seeded with it. Unlike `exec
+  // --json` it announces no id — an interactive codex talks to a person — so
+  // the caller finds the session in codex's own rollout store, as for opencode.
+  const w = interactiveStart(AGENTS.codex, null, 'the packet text')
+
+  assert.equal(w.command, 'codex')
+  assert.ok(!w.args.includes('exec'), 'the window is the interface, not the one-shot')
+  assert.ok(!w.args.some((a) => String(a).startsWith('--session')), 'no id to give yet')
+  assert.equal(w.args.at(-1), 'the packet text', 'the seed is the last positional')
+  assert.ok(w.args.includes('--dangerously-bypass-approvals-and-sandbox'))
+  assert.deepEqual(w.dropEnv, ['OPENAI_API_KEY'], 'the billing guard holds in a window too')
+})
+
+test('window: kimi is the one that cannot be seeded, and image has no window', () => {
+  // `-p` is defined as non-interactive and kimi has no positional prompt, so
+  // no flag it owns can open a seeded window. It streams turn one instead.
+  assert.equal(interactiveStart({ id: 'ilmarinen', kind: 'kimi' }, 'anything', 'seed'), null)
   assert.equal(interactiveStart({ kind: 'image' }, 'x', 'seed'), null)
 })
 

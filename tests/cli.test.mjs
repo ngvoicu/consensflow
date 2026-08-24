@@ -1094,6 +1094,46 @@ describe('in a terminal, a cmux consult IS the agent own window', () => {
     return log
   }
 
+  const COLD_CODEX_ID = '01a03068-3530-7173-a123-009f15591007'
+
+  /** A kimi that streams a prompt-mode answer and hands its id back at the end. */
+  function stubKimiWindow() {
+    mkdirSync(t.env.PATH, { recursive: true })
+    const log = join(t.root, 'kimi-window.log')
+    const path = join(t.env.PATH, 'kimi')
+    writeFileSync(
+      path,
+      `#!/bin/sh
+echo "$@" >> "${log}"
+if [ "$1" = "-p" ]; then
+  echo '{"role":"assistant","content":"the consult answer"}'
+  echo '{"role":"meta","type":"session.resume_hint","session_id":"session-open"}'
+fi
+`,
+    )
+    chmodSync(path, 0o755)
+    return log
+  }
+
+  /** A codex whose interactive form writes the rollout its id is read from. */
+  function stubCodexCold() {
+    mkdirSync(t.env.PATH, { recursive: true })
+    const log = join(t.root, 'codex-cold.log')
+    const dir = join(t.env.CODEX_HOME, 'sessions', '2026', '08', '24')
+    mkdirSync(dir, { recursive: true })
+    const rollout = join(dir, `rollout-2026-08-24T00-00-00-${COLD_CODEX_ID}.jsonl`)
+    const path = join(t.env.PATH, 'codex')
+    writeFileSync(
+      path,
+      `#!/bin/sh
+echo "$@" >> "${log}"
+printf '%s\\n' '{"type":"session_meta","payload":{"cwd":"'"$PWD"'"}}' > "${rollout}"
+`,
+    )
+    chmodSync(path, 0o755)
+    return log
+  }
+
   function stubCodexWindow() {
     mkdirSync(t.env.PATH, { recursive: true })
     const log = join(t.root, 'codex-window.log')
@@ -1112,33 +1152,52 @@ fi
     return log
   }
 
-  it('codex streams its first answer, then the pane becomes its window', async () => {
-    // codex cannot pre-set an interactive session id, so turn 1 runs through
-    // the one-shot machinery (which captures the thread id) and the window
-    // opens on it. The lead still gets a parsed answer, never a screen.
+  it('kimi streams its first answer, then the pane becomes its window', async () => {
+    // kimi is the one harness that cannot be seeded: `-p` is non-interactive
+    // and it has no positional prompt. So turn 1 runs through the one-shot
+    // machinery — which captures its id — and the window opens on that. The
+    // lead still gets a parsed answer, never a screen.
     stubCli(t, 'claude')
     recordingStub('pi')
     recordingStub('opencode')
-    const log = stubCodexWindow()
+    const log = stubKimiWindow()
+    await cf(['agent', 'add', 'ilmarinen'], t.env)
     await cf(['agent', 'add', 'hyperion'], t.env)
     await cf(['agent', 'add', 'zeus'], t.env)
     await cf(['agent', 'add', 'aether'], t.env)
     await cf(['agent', 'add', 'sunna'], t.env)
     await cf(['use', 'cmux'], t.env)
 
-    const out = await cf(['run', '@hyperion', 'a question'], tty())
+    const out = await cf(['run', '@ilmarinen', 'a question'], tty())
 
     assert.equal(out.code, 0, out.stderr)
     assert.match(out.stdout, /the consult answer/)
     const argv = argvOf(log)
-    assert.match(argv, /^exec /m, 'turn 1 streamed')
-    assert.match(argv, /^resume thread-open/m, 'then the window opened on the captured id')
+    assert.match(argv, /^-p /m, 'turn 1 streamed')
+    assert.match(argv, /^-S session-open/m, 'then the window opened on the captured id')
+    assert.match(out.stdout, /kimi streams its first answer/, 'and it names the right harness')
+  })
+
+  it('codex opens its own window cold, and finds the id in its own store', async () => {
+    // `codex [PROMPT]` opens the real window seeded with the packet. It
+    // announces no id the way `exec --json` does, so the id is read back from
+    // the rollout file it writes on the way up.
+    const log = stubCodexCold()
+
+    const out = await cf(['run', '@hyperion', 'review this'], tty())
+
+    assert.equal(out.code, 0, out.stderr)
+    const argv = argvOf(log)
+    assert.doesNotMatch(argv, /^exec/m, 'nothing streamed — the window IS turn one')
+    assert.match(argv, /review this/, 'seeded with the task')
+    const row = Object.values(threadRows()).find((r) => r.agent === 'hyperion')
+    assert.equal(row.sessionId, COLD_CODEX_ID, 'discovered from codex own rollout store')
   })
 
   it('records the turn before handing over, so cf last works after', async () => {
     const listed = await cf(['sessions', '--json'], t.env)
     const name = Object.entries(JSON.parse(listed.stdout)).find(
-      ([, r]) => r.agent === 'hyperion',
+      ([, r]) => r.agent === 'ilmarinen',
     )[0]
 
     const last = await cf(['last', name], t.env)

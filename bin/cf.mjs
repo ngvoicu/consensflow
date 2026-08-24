@@ -15,7 +15,11 @@ import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { discoverOpencodeSession, harnessTurns } from '../hosts/lib/harness-transcript.js'
+import {
+  discoverCodexSession,
+  discoverOpencodeSession,
+  harnessTurns,
+} from '../hosts/lib/harness-transcript.js'
 import { renderImageRun, runImageAgent } from '../hosts/lib/image-run.js'
 import { createPacket, createWindowSeed } from '../hosts/lib/packets.js'
 import { childEnv, interactiveResume, interactiveStart, runAgent } from '../hosts/lib/runners.js'
@@ -477,19 +481,23 @@ async function openWindow(row, name, record, packetInput) {
     return true
   }
 
-  if (row.kind === 'opencode') {
+  // opencode and codex both open their real window cold but announce no id:
+  // each mints one at launch and says so only in its own store, so the window
+  // and the search run together.
+  const DISCOVER = { opencode: discoverOpencodeSession, codex: discoverCodexSession }
+  const discover = DISCOVER[row.kind]
+  if (discover !== undefined) {
     const invocation = interactiveStart(row, null, seed)
+    if (invocation === null) return false
     // A little clock slack: the store's timestamps and ours need not agree
     // to the millisecond.
     const since = Date.now() - 2000
     await saveWindowRow(name, row, record, null)
     out(`read it back with: cf catchup ${name}`)
-    // The window and the search run together: opencode only mints the id
-    // after launch, and its store is where it says so.
     const found = (async () => {
       const deadline = Date.now() + 60_000
       while (Date.now() < deadline) {
-        const id = await discoverOpencodeSession(cwdOf(), since, env)
+        const id = await discover(cwdOf(), since, env)
         if (id !== null) {
           await saveWindowRow(name, row, (await loadThreads(cwdOf()))[name], id)
           return

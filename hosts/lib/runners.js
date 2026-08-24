@@ -569,8 +569,22 @@ export function interactiveStart(agent, sessionId, seed) {
       if (seed) args.push("--prompt", seed);
       return { command: "opencode", args, env: { ...CHILD_ENV }, dropEnv: [] };
     }
+    case "codex": {
+      // `codex [PROMPT]` opens the real window seeded with that prompt. It
+      // announces no id the way `exec --json` does — an interactive codex is
+      // talking to a person — so the caller finds the session in codex's own
+      // rollout store afterwards, exactly as it does for opencode.
+      const args = [];
+      if (agent.model) args.push("--model", agent.model);
+      if (agent.effort) args.push("-c", `model_reasoning_effort="${agent.effort}"`);
+      args.push("--dangerously-bypass-approvals-and-sandbox");
+      if (seed) args.push(seed);
+      return { command: "codex", args, env: { ...CHILD_ENV }, dropEnv: interactiveGuards("codex") };
+    }
     default:
-      // codex must stream its first turn; image agents hold no window.
+      // kimi must stream its first turn: `-p` is defined as non-interactive
+      // and it has no positional prompt, so no flag it owns can seed a window.
+      // image agents hold no window at all.
       return null;
   }
 }

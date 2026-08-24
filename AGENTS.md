@@ -164,10 +164,13 @@ keep in step — the manager is the only caller.
   conversation, seeded with the packet (bare message on later turns), and
   stays — attach is the default and only behaviour, so the `--attach` flag is
   gone. claude opens on a uuid we mint (`--session-id`), pi on the
-  conversation's name, opencode on an id its store reveals just after launch
-  (`discoverOpencodeSession`), and codex — which cannot pre-set an interactive
-  id — streams its first answer, then the pane becomes `codex resume` on the
-  captured thread id. The row is saved BEFORE the window where we mint the id,
+  conversation's name, and opencode and codex each open cold on a seeded
+  prompt and have their id read back out of their own store afterwards
+  (`discoverOpencodeSession`, `discoverCodexSession` — codex's comes from the
+  rollout FILENAME, because a forked session's metadata names a different
+  one). kimi is the only harness that cannot be seeded at all — `-p` is
+  defined as non-interactive and it has no positional prompt — so it streams
+  its first answer and the pane becomes its window after. The row is saved BEFORE the window where we mint the id,
   so a crash mid-window still resumes. A pipe cannot host a TUI: without a
   terminal (the lead's tool call, tests, `--json`) the run streams exactly as
   before — that is physics, not a mode. Terminal-ness is injectable

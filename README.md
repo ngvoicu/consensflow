@@ -66,12 +66,13 @@ carrying no skill.
 ## A consult IS the agent's window
 
 In cmux mode, in a terminal, `cf run` does not print an answer and exit. It
-opens the harness's **own interface** — claude's, pi's, opencode's — on a named
-conversation, seeded with your task, and stays. You watch the agent work in its
-real window; you type follow-ups straight into it; your coding agent follows
-along by reading the harness's own session. codex is the one exception: it has
-no way to pre-set an interactive session id, so it streams its first answer,
-then the same pane becomes `codex resume` on that session.
+opens the harness's **own interface** — claude's, pi's, opencode's, codex's —
+on a named conversation, seeded with your task, and stays. You watch the agent
+work in its real window; you type follow-ups straight into it; your coding
+agent follows along by reading the harness's own session. Kimi Code is the one
+exception: its CLI has no way to seed an interactive session (`-p` is defined
+as non-interactive and there is no positional prompt), so it streams its first
+answer and the same pane becomes its window after.
 
 ```
 $ cf run @hyperion "is the retry path sound?"
@@ -104,8 +105,9 @@ cf last <name>                         # the last answer a streamed run left
 **The harness owns the session; ConsensFlow only remembers which one.** That is
 the whole mechanism — no daemon, no database, no long-lived child. Session ids
 live in `<config>/workspaces/<key>/threads.json`. claude opens on a uuid we
-mint, pi on the conversation's name, opencode tells its store and we read it
-there, codex hands its id back on the streamed first turn.
+mint, pi on the conversation's name, opencode and codex each mint one at launch
+and say so only in their own store, and kimi hands its id back on the streamed
+first turn.
 
 ## How your coding agent follows along
 
