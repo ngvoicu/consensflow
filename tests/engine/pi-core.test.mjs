@@ -188,6 +188,9 @@ test('agent presets expose the allowed creation list', () => {
     'metis',
     'prometheus',
     'endymion',
+    'nyx',
+    'oceanus',
+    'triton',
     'odin',
     'heimdall',
     'thor',
@@ -195,6 +198,9 @@ test('agent presets expose the allowed creation list', () => {
     'bragi',
     'mimir',
     'mani',
+    'nott',
+    'ymir',
+    'aegir',
     'pygmalion',
   ])
   assert.equal(getPreset('zeus').kind, 'claude-code')

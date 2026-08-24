@@ -197,6 +197,9 @@ test('agent presets mirror consensflow-pi exactly (image preset included)', () =
     'metis',
     'prometheus',
     'endymion',
+    'nyx',
+    'oceanus',
+    'triton',
     'odin',
     'heimdall',
     'thor',
@@ -204,6 +207,9 @@ test('agent presets mirror consensflow-pi exactly (image preset included)', () =
     'bragi',
     'mimir',
     'mani',
+    'nott',
+    'ymir',
+    'aegir',
     'pygmalion',
   ])
   // All four engines are integrated, same as consensflow-pi — plus the Codex-backend image kind.

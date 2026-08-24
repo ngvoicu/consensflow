@@ -449,6 +449,41 @@ export const AGENT_PRESETS = [
     skillsPolicy: "default",
   },
 
+  // --- Three OpenRouter models added 2026-08-24, each verified present in
+  // `pi --list-models` and `opencode models` before it was written down. Two
+  // ride OpenRouter's free tier; ox-alpha is an unbadged stealth model. All
+  // three report thinking support, so all three sit at the ceiling.
+  {
+    preset: "nyx",
+    id: "nyx",
+    name: "Nyx",
+    label: "Pi Ox Alpha MAX",
+    description: "Primordial goddess of night: the unbadged stealth/ox-alpha on Pi at max thinking (via OpenRouter) — 1M context, images and reasoning, and nobody says whose model it is.",
+    kind: "pi",
+    model: "openrouter/stealth/ox-alpha",
+    thinking: "max",
+  },
+  {
+    preset: "oceanus",
+    id: "oceanus",
+    name: "Oceanus",
+    label: "Pi Nemotron 3 Ultra 550B FREE MAX",
+    description: "Titan of the world-encircling river: NVIDIA's 550B-parameter Nemotron 3 Ultra on Pi at max thinking, on OpenRouter's free tier (1M context there).",
+    kind: "pi",
+    model: "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+    thinking: "max",
+  },
+  {
+    preset: "triton",
+    id: "triton",
+    name: "Triton",
+    label: "Pi Laguna S 2.1 FREE MAX",
+    description: "Herald of the deep, for a model named after a lagoon: Poolside's Laguna S 2.1 on Pi at max thinking, on OpenRouter's free tier.",
+    kind: "pi",
+    model: "openrouter/poolside/laguna-s-2.1:free",
+    thinking: "max",
+  },
+
   // --- opencode model zoo (Norse names) — same models via OpenCode --------
   {
     preset: "odin",
@@ -514,6 +549,36 @@ export const AGENT_PRESETS = [
     description: "Norse moon god: OpenCode-backed Kimi K3 — Moonshot's 1M-context flagship reasoner (via OpenRouter). Runs at K3's default max thinking; the catalog defines no effort variants for it.",
     kind: "opencode",
     model: "openrouter/moonshotai/kimi-k3",
+  },
+  {
+    preset: "nott",
+    id: "nott",
+    name: "Nott",
+    label: "OpenCode Ox Alpha MAX",
+    description: "Norse night personified, sister in spirit to Pi's Nyx: the unbadged stealth/ox-alpha through OpenCode at max effort (via OpenRouter).",
+    kind: "opencode",
+    model: "openrouter/stealth/ox-alpha",
+    effort: "max",
+  },
+  {
+    preset: "ymir",
+    id: "ymir",
+    name: "Ymir",
+    label: "OpenCode Nemotron 3 Ultra 550B FREE MAX",
+    description: "The primordial giant the world was built from: NVIDIA's 550B-parameter Nemotron 3 Ultra through OpenCode at max effort, on OpenRouter's free tier.",
+    kind: "opencode",
+    model: "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+    effort: "max",
+  },
+  {
+    preset: "aegir",
+    id: "aegir",
+    name: "Aegir",
+    label: "OpenCode Laguna S 2.1 FREE MAX",
+    description: "Norse giant of the sea, for a model named after a lagoon: Poolside's Laguna S 2.1 through OpenCode at max effort, on OpenRouter's free tier.",
+    kind: "opencode",
+    model: "openrouter/poolside/laguna-s-2.1:free",
+    effort: "max",
   },
 
   // --- Image generation (Codex backend → gpt-image-2) ---------------------

@@ -44,6 +44,23 @@ describe('every tool ships a list of ready-made agents', () => {
     assert.ok(models.includes('openrouter/z-ai/glm-5.3'))
     assert.ok(models.includes('openrouter/qwen/qwen3.8-max'))
     assert.ok(models.includes('openrouter/moonshotai/kimi-k3'))
+    // Added 2026-08-24, each confirmed present in `pi --list-models` and
+    // `opencode models` before it was written down — two free tiers and one
+    // unbadged stealth model, on both open-model harnesses.
+    for (const model of [
+      'openrouter/stealth/ox-alpha',
+      'openrouter/nvidia/nemotron-3-ultra-550b-a55b:free',
+      'openrouter/poolside/laguna-s-2.1:free',
+    ]) {
+      assert.ok(
+        CATALOG.pi.some((e) => e.model === model),
+        `pi is missing ${model}`,
+      )
+      assert.ok(
+        CATALOG.opencode.some((e) => e.model === model),
+        `opencode is missing ${model}`,
+      )
+    }
     // Superseded versions must not linger in a curated list.
     assert.ok(!models.some((m) => m.includes('glm-5.2')))
     assert.ok(!models.some((m) => m.includes('qwen3.7')))
