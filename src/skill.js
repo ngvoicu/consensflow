@@ -197,18 +197,20 @@ CMUX_QUIET=1 cmux send --surface surface:NN 'cd "'"$PWD"'" && cf run @<name> "<t
 CMUX_QUIET=1 cmux rename-tab --surface surface:NN '<name>'
 \`\`\`
 
-**Read the answer with \`cf catchup <name> --wait\` from your own pane** — it
-blocks until the agent's next answer lands in its session and prints only what
-is new. Do not scrape the other pane's screen: the pane is for the user to
-watch, the harness's own session store is what you read. Screen text is not an
-answer, it is a picture of one.
+**Read the answer with \`cf catchup <name>\` from your own pane.** Plain
+first — a quick question may already be answered — and \`--wait\` when it is
+not: it blocks until the agent's NEXT answer lands and prints only what is
+new, so only reach for it while the answer is still being written. Do not
+scrape the other pane's screen: the pane is for the user to watch, the
+harness's own session store is what you read. Screen text is not an answer,
+it is a picture of one.
 
 **A follow-up goes into the pane as plain text** — the pane is the agent's own
 prompt now, so there is no command to wrap it in:
 
 \`\`\`bash
 CMUX_QUIET=1 cmux send --surface surface:NN 'your follow-up question'$'\\n'
-cf catchup <name> --wait     # then wait for the answer, from your own pane
+cf catchup <name> --wait     # started BEFORE the answer can land, it waits it out
 \`\`\`
 
 The user can type in that pane too — it is a normal agent window, and their
