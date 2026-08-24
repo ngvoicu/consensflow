@@ -285,6 +285,29 @@ function sessionFor(agentRow, name, record) {
   return { sessionId: record?.sessionId ?? (agentRow.kind === 'pi' ? name : undefined) }
 }
 
+/**
+ * Which conversation a read verb means — `attach`, `catchup` and `last` all
+ * answer it the same way, and each used to carry its own copy of this.
+ *
+ * Joining is deliberately NOT lead-scoped (spawning is): whoever is reading
+ * gets the newest conversation when they name nothing, that agent's newest for
+ * `@agent`, and exactly the one they named otherwise. `record` is undefined
+ * when nothing matches — the verbs keep their own error text.
+ */
+function pickConversation(threads, asked) {
+  const byRecency = (names) =>
+    [...names].sort((a, b) =>
+      String(threads[b].lastRunAt ?? '').localeCompare(String(threads[a].lastRunAt ?? '')),
+    )[0]
+  const name =
+    asked.length === 0
+      ? byRecency(Object.keys(threads))
+      : asked.startsWith('@')
+        ? byRecency(Object.keys(threads).filter((key) => threads[key].agent === asked.slice(1)))
+        : asked
+  return { name, record: name === undefined ? undefined : threads[name] }
+}
+
 async function recordTurn(name, agentRow, record, result) {
   if (name === undefined) return
   const now = new Date().toISOString()
@@ -461,11 +484,10 @@ async function runVerb(rest) {
     kind: 'ask',
     onEvent,
     // An object (even an empty one) means "this run belongs to a conversation,
-    // so save the session". pi never reports an id back, so we mint one from
-    // the conversation's own name — `--session-id` creates it if missing.
-    session: wantsThread
-      ? { sessionId: record?.sessionId ?? (row.kind === 'pi' ? sessionName : undefined) }
-      : undefined,
+    // so save the session" — sessionFor mints pi's id from the conversation's
+    // own name, because pi never reports one back. `cf chat` runs through the
+    // same helper, so the two paths cannot drift.
+    session: sessionFor(row, sessionName, record),
   })
 
   // The harness owns the session store and may have pruned it. A conversation
@@ -706,22 +728,8 @@ async function attachVerb(rest) {
   const asked = String(positionals[0] ?? '')
   const threads = await loadThreads(cwdOf())
   const names = Object.keys(threads)
-  const newest = () =>
-    names.sort((a, b) =>
-      String(threads[b].lastRunAt ?? '').localeCompare(String(threads[a].lastRunAt ?? '')),
-    )[0]
   // Bare `cf attach` means the obvious one: the conversation you were last in.
-  const name =
-    asked.length === 0
-      ? newest()
-      : asked.startsWith('@')
-        ? names
-            .filter((key) => threads[key].agent === asked.slice(1))
-            .sort((a, b) =>
-              String(threads[b].lastRunAt ?? '').localeCompare(String(threads[a].lastRunAt ?? '')),
-            )[0]
-        : asked
-  const record = name === undefined ? undefined : threads[name]
+  const { name, record } = pickConversation(threads, asked)
   if (record === undefined) {
     fail(
       names.length === 0
@@ -776,21 +784,7 @@ async function catchupVerb(rest) {
   const asked = String(positionals[0] ?? '')
   const threads = await loadThreads(cwdOf())
   const names = Object.keys(threads)
-  const newest = () =>
-    names.sort((a, b) =>
-      String(threads[b].lastRunAt ?? '').localeCompare(String(threads[a].lastRunAt ?? '')),
-    )[0]
-  const name =
-    asked.length === 0
-      ? newest()
-      : asked.startsWith('@')
-        ? names
-            .filter((key) => threads[key].agent === asked.slice(1))
-            .sort((a, b) =>
-              String(threads[b].lastRunAt ?? '').localeCompare(String(threads[a].lastRunAt ?? '')),
-            )[0]
-        : asked
-  const record = name === undefined ? undefined : threads[name]
+  const { name, record } = pickConversation(threads, asked)
   if (record === undefined) {
     fail(
       names.length === 0
@@ -855,36 +849,19 @@ async function lastVerb(rest) {
   const threads = await loadThreads(cwd)
   const names = Object.keys(threads)
 
-  // Either a conversation name or an @agent — the agent form resolves to that
-  // agent's most recent conversation here.
-  let name
-  if (wanted.startsWith('@')) {
-    const agent = wanted.slice(1)
-    const mine = names
-      .filter((key) => threads[key].agent === agent)
-      .sort((a, b) =>
-        String(threads[b].lastRunAt ?? '').localeCompare(String(threads[a].lastRunAt ?? '')),
-      )
-    name = mine[0]
-    if (name === undefined) {
-      fail(
-        `no conversation with @${agent} here${names.length > 0 ? `; you have: ${names.join(', ')}` : ''}`,
-      )
-      return
-    }
-  } else {
-    name = wanted
-    if (threads[name] === undefined) {
-      fail(
-        names.length === 0
-          ? `no conversation named ${JSON.stringify(wanted)} here — there are none yet`
+  // A conversation name, an @agent (that agent's most recent conversation
+  // here), or nothing — the newest one, same as bare `cf attach`.
+  const { name, record: row } = pickConversation(threads, wanted)
+  if (row === undefined) {
+    fail(
+      wanted.startsWith('@')
+        ? `no conversation with ${wanted} here${names.length > 0 ? `; you have: ${names.join(', ')}` : ''}`
+        : names.length === 0
+          ? 'no conversations here yet — `cf run @name "<task>"` starts one'
           : `no conversation named ${JSON.stringify(wanted)} here; you have: ${names.join(', ')}`,
-      )
-      return
-    }
+    )
+    return
   }
-
-  const row = threads[name]
   const runDir = join(runsRoot(cwd), String(row.lastRunId))
   const result = readJsonFile(join(runDir, 'result.json'))
   if (result === undefined) {

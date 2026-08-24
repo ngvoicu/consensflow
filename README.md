@@ -71,10 +71,11 @@ warm.
 
 ```
 $ cf run @hyperion "is the retry path sound?"
-conversation: silver-waves
+conversation: silver-waves (new)
 …
 
 $ cf run @hyperion "what would you change about the timeout?"
+conversation: silver-waves (continuing, turn 2)
 # same conversation — hyperion remembers the first answer
 ```
 

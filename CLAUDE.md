@@ -8,10 +8,19 @@ ConsensFlow (the manager, npm `consensflow`): skills-first. A zero-dependency No
 (`cf`/`consensflow` bins, no build step) that manages a roster of named AI
 agents and generates/installs **one skill** teaching every harness
 (claude, codex, pi, opencode — all read the same Agent Skills `SKILL.md`
-format) how to consult them via exact one-shot CLI commands. In `cmux`
+format) how to consult them via exact CLI commands — one-shot in the host
+modes, named resumable conversations in `cmux` mode. In `cmux`
 mode it also installs and updates cmux's own skills. There is deliberately **no
 delegation engine** — no daemon, no SQLite, no panes, no state machine (the
 v2 engine that had one was retired and deleted 2026-08-19).
+
+## Consulting agents while working here
+
+This machine runs `cmux` mode: a consult is a named conversation in its own
+pane. When you consult an agent, go through the **consensflow skill** — open a
+pane per conversation as it says, never run `cf run` in your own pane. The
+`cf run @name "<task>"` lines below document the product; they are not a
+license to skip the skill.
 
 ## Source map
 

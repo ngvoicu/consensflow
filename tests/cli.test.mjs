@@ -856,6 +856,16 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"the answer
     assert.match(out.stdout, /transcript\.md/, 'so the lead can read the whole run if it wants')
   })
 
+  it('bare cf last means the newest conversation, like bare attach', async () => {
+    // The three read verbs answer "which conversation?" through one rule now;
+    // `cf last` was the odd one out, failing on an empty name.
+    const out = await cf(['last'], t.env)
+
+    assert.equal(out.code, 0, out.stderr)
+    assert.match(out.stdout, /@hyperion/)
+    assert.match(out.stdout, /transcript: /, 'a full answer, with its transcript path')
+  })
+
   it('cf last @agent resolves that agent current conversation', async () => {
     const out = await cf(['last', '@hyperion'], t.env)
 
