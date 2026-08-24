@@ -95,9 +95,10 @@ Usage: cf <command> [options]
     [--new] [--session <name>]                  a conversation continues by default in cmux
     [--thread] [--no-thread]                    mode; --new starts a fresh one, and with
                                                --session it starts under that exact name
-  mint                                         A fresh conversation name, printed before
+  mint [<@name>]                               A fresh conversation name, printed before
                                                anything exists under it — name first, then
-                                               run with --new --session <name>
+                                               run with --new --session <name>. Give it the
+                                               agent and the name says whose it is
   attach <@name|conversation> [--print]        Open the harness's OWN window on that
                                                conversation — the real codex/claude/pi
                                                interface, whole history in it. --print
@@ -257,6 +258,7 @@ async function resolveConversation(agentRow, { wantsThread, session, fresh, join
     newSessionName(
       Object.keys(threads),
       listAgents(env).map((a) => a.name),
+      agentRow.id,
     )
   if (session !== undefined) {
     // `--new --session <name>` names the conversation up front. The lead
@@ -1177,12 +1179,22 @@ async function catchupVerb(rest) {
  * reserved: the name is only taken when the run creates it, and the vocabulary
  * is roomy enough that a collision costs one retry.
  */
-async function mintVerb() {
+async function mintVerb(rest) {
+  const asked = String(rest[0] ?? '').replace(/^@/, '')
+  // A name says whose conversation it is, so minting one asks who for. Without
+  // an agent it still mints — the two-word half alone — because a name the
+  // caller then hands to `--session` is still a name.
+  if (asked.length > 0 && agentRow(asked, env) === undefined) {
+    const known = listAgents(env).map((a) => a.name)
+    fail(`no agent named ${JSON.stringify(asked)}; you have: ${known.join(', ')}`)
+    return
+  }
   const threads = await loadThreads(cwdOf())
   out(
     newSessionName(
       Object.keys(threads),
       listAgents(env).map((a) => a.name),
+      asked,
     ),
   )
 }
@@ -1636,7 +1648,7 @@ async function main() {
       await sessionsVerb(rest)
       return
     case 'mint':
-      await mintVerb()
+      await mintVerb(rest)
       return
     case 'last':
       await lastVerb(rest)

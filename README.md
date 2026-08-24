@@ -79,8 +79,9 @@ read it back with: cf catchup silver-waves
 …the pane is now hyperion's own window…
 ```
 
-One agent can hold several conversations at once, which is why they have names:
-*"ask ares in bubble-sky about the migration"*. Each gets its own pane.
+One agent can hold several conversations at once, which is why they have names
+— and the name carries the agent, so a row of panes says whose each one is:
+*"ask ares in ares-bubble-sky about the migration"*. Each gets its own pane.
 
 **A conversation belongs to the session that started it.** Open a new coding
 session and its first consult starts a fresh conversation — it never picks up
@@ -88,7 +89,7 @@ what the last one left in that directory, however recent. Ones somebody else
 started stay reachable by name, which is what `--session` is for.
 
 ```sh
-cf mint                                # a fresh conversation name, before anything exists under it
+cf mint @name                          # a fresh conversation name — `name-quartz-valley`
 cf run @name "<task>"                  # opens (or reopens) THIS session's conversation with it
 cf run @name "<task>" --new            # a fresh conversation, its own window
 cf run @name "<task>" --new --session <name>  # a fresh one, under the name you minted

@@ -85,22 +85,38 @@ export function allSessionNames() {
 }
 
 /**
- * A fresh, sayable name for a conversation in this workspace.
+ * A fresh, sayable name for a conversation — the agent's name, then two words.
+ *
+ * `ilmarinen-quartz-valley` rather than `quartz-valley`: a conversation is
+ * always somebody's, and the name is what a lead types into `cf catchup`, what
+ * a pane tab carries, and what the user reads across a row of panes. Without
+ * the agent in it, none of those say whose window they are, and a workspace
+ * with four conversations is four two-word names to keep straight in your head.
+ *
+ * It also settles the ambiguity the disjoint vocabulary used to guard: "ask
+ * ares in athena" could read as two agents, so the second word list is
+ * deliberately everyday rather than mythological. Prefixing the owner makes
+ * the grammar unambiguous by construction — `ares-bubble-sky` is one thing,
+ * and obviously ares's.
  *
  * `taken` is the names already live here; `reserved` is the roster's agent
- * names. Random rather than sequential so two names sitting next to each other
- * in a pane list are not mistaken for a sequence.
+ * names, so a conversation can never be exactly an agent's name. Random rather
+ * than sequential so two names side by side in a pane list are not mistaken
+ * for a sequence.
  */
-export function newSessionName(taken = [], reserved = []) {
+export function newSessionName(taken = [], reserved = [], agent = "") {
   const used = new Set([...taken, ...reserved]);
+  const prefix = String(agent).trim().length > 0 ? `${String(agent).trim()}-` : "";
   // Try at random first: cheap, and avoids always handing out the same name
   // after a collision.
   for (let attempt = 0; attempt < 64; attempt += 1) {
-    const name = `${pick(FIRST)}-${pick(SECOND)}`;
+    const name = `${prefix}${pick(FIRST)}-${pick(SECOND)}`;
     if (!used.has(name)) return name;
   }
   // Crowded workspace: fall back to a scan so a real answer is still found.
-  const free = allSessionNames().filter((name) => !used.has(name));
+  const free = allSessionNames()
+    .map((name) => `${prefix}${name}`)
+    .filter((name) => !used.has(name));
   if (free.length > 0) return free[crypto.randomInt(free.length)];
   throw new Error(
     `no unused session name is left in this workspace (${used.size} taken) — end one with \`cf run --new\` or remove it`,

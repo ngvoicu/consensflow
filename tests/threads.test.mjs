@@ -187,7 +187,7 @@ test('threads: a corrupt store is repaired by the next save', async () => {
 test('threads: a new name is two hyphenated words', async () => {
   const name = newSessionName([], [])
 
-  assert.match(name, /^[a-z]+-[a-z]+$/, 'two lowercase words, one hyphen')
+  assert.match(name, /^[a-z]+-[a-z]+$/, 'two lowercase words when no agent is named')
 })
 
 test('threads: a new name never collides with one already in the workspace', () => {

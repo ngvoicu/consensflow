@@ -650,7 +650,7 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"answered"}
 
   /** A consult always comes from some lead session; these tests say which. */
   const asLead = (id) => ({ ...t.env, CLAUDE_CODE_SESSION_ID: id })
-  const conversationIn = (text) => /conversation: ([a-z]+-[a-z]+)/.exec(text)?.[1]
+  const conversationIn = (text) => /conversation: ([a-z][a-z-]*)/.exec(text)?.[1]
   const stripLeads = () => {
     const all = threads()
     for (const row of Object.values(all)) delete row.lead
@@ -667,7 +667,7 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"answered"}
     assert.equal(first.code, 0, first.stderr)
     const names = Object.keys(threads())
     assert.equal(names.length, 1, 'one conversation exists')
-    assert.match(names[0], /^[a-z]+-[a-z]+$/, 'and it has a sayable name')
+    assert.match(names[0], /^hyperion-[a-z]+-[a-z]+$/, 'whose it is, then two sayable words')
     assert.match(first.stdout, new RegExp(names[0]), 'which the run tells you')
 
     rmSync(log, { force: true })
@@ -789,10 +789,10 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"answered"}
   it('cf mint names a conversation before it exists, so the lead can plan around it', async () => {
     // The lead composing a pane command needs the name for the tab title and
     // the read-back BEFORE the run prints it in a pane it cannot read.
-    const minted = await cf(['mint'], t.env)
+    const minted = await cf(['mint', '@hyperion'], t.env)
     assert.equal(minted.code, 0, minted.stderr)
     const name = minted.stdout.trim()
-    assert.match(name, /^[a-z]+-[a-z]+$/, 'a sayable vocabulary name')
+    assert.match(name, /^hyperion-[a-z]+-[a-z]+$/, 'the agent, then two sayable words')
 
     stubCodex(['thread-alpha'])
     const run = await cf(
@@ -888,7 +888,7 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"the answer
 
     assert.equal(out.code, 0, out.stderr)
     assert.match(out.stdout, /hyperion/)
-    assert.match(out.stdout, /[a-z]+-[a-z]+/, 'the conversation is named')
+    assert.match(out.stdout, /[a-z]+-[a-z]+-[a-z]+/, 'the conversation is named')
     assert.match(out.stdout, /\b1\b/, 'and counted')
   })
 
@@ -1216,7 +1216,7 @@ exit 1
     )
 
     // `--new` means this is its own conversation; take the one it just named.
-    const name = /conversation: ([a-z]+-[a-z]+)/.exec(out.stdout)?.[1]
+    const name = /conversation: ([a-z][a-z-]*)/.exec(out.stdout)?.[1]
     assert.ok(name, `the run named its conversation: ${out.stdout}`)
     assert.equal(threadRows()[name].sessionId, 'session_rescued', 'recovered from kimi own store')
   })
