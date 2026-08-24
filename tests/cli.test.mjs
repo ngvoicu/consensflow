@@ -1255,6 +1255,9 @@ printf '{"id":"ses_window1","directory":"%s","time":{"created":99999999999999}}'
     )
   }
 
+  /** A lead reading a conversation — its own identity, its own read mark. */
+  const asReader = (id) => ({ ...t.env, CLAUDE_CODE_SESSION_ID: id })
+
   const rolloutFor = (id) => {
     const dir = join(t.env.CODEX_HOME, 'sessions', '2026', '08', '24')
     mkdirSync(dir, { recursive: true })
@@ -1319,6 +1322,81 @@ printf '{"id":"ses_window1","directory":"%s","time":{"created":99999999999999}}'
     assert.equal(code, 0, stdout)
     assert.match(stdout, /the new answer/)
     assert.doesNotMatch(stdout, /old answer/, 'the stale exchange is not what was asked for')
+  })
+
+  it('cf catchup --unread is only what was said since this lead last looked', async () => {
+    // Live 2026-08-24: asked "can you see what other jokes he said?", the lead
+    // had no way to ask for what was NEW, so it sent another request and
+    // invented a third round instead of reading the second.
+    const listed = await cf(['sessions', '--json'], t.env)
+    const name = Object.entries(JSON.parse(listed.stdout)).find(
+      ([, r]) => r.agent === 'hyperion' && r.sessionId === 'thread-open',
+    )[0]
+    const file = rolloutFor('thread-open')
+    writeFileSync(file, turnLine('user', 'round one?') + turnLine('assistant', 'first answer'))
+
+    const first = await cf(['catchup', name], asReader('reader-1'))
+    assert.equal(first.code, 0, first.stderr)
+    assert.match(first.stdout, /first answer/)
+
+    // The user then talks to the agent directly in its pane.
+    appendFileSync(file, turnLine('user', 'more?') + turnLine('assistant', 'second answer'))
+
+    const unread = await cf(['catchup', name, '--unread'], asReader('reader-1'))
+
+    assert.equal(unread.code, 0, unread.stderr)
+    assert.match(unread.stdout, /second answer/)
+    assert.doesNotMatch(unread.stdout, /first answer/, 'what it already read is not new')
+    assert.match(unread.stdout, /2 new turns/)
+
+    // Reading is seeing: asking again shows nothing new.
+    const again = await cf(['catchup', name, '--unread'], asReader('reader-1'))
+    assert.match(again.stdout, /nothing new since you last looked/)
+  })
+
+  it('a full cf catchup marks where this lead memory stopped', async () => {
+    const listed = await cf(['sessions', '--json'], t.env)
+    const name = Object.entries(JSON.parse(listed.stdout)).find(
+      ([, r]) => r.agent === 'hyperion' && r.sessionId === 'thread-open',
+    )[0]
+    appendFileSync(
+      rolloutFor('thread-open'),
+      turnLine('user', 'and again?') + turnLine('assistant', 'third answer'),
+    )
+
+    const out = await cf(['catchup', name], asReader('reader-1'))
+
+    assert.equal(out.code, 0, out.stderr)
+    assert.match(out.stdout, /first answer/, 'the whole conversation is still there')
+    assert.match(out.stdout, /you had not seen/, 'with a line where its memory stopped')
+  })
+
+  it('another lead reads the same conversation with its own mark', async () => {
+    const listed = await cf(['sessions', '--json'], t.env)
+    const name = Object.entries(JSON.parse(listed.stdout)).find(
+      ([, r]) => r.agent === 'hyperion' && r.sessionId === 'thread-open',
+    )[0]
+
+    const other = await cf(['catchup', name, '--unread'], asReader('reader-2'))
+
+    assert.equal(other.code, 0, other.stderr)
+    assert.match(other.stdout, /first answer/, 'a lead that never looked has read nothing')
+  })
+
+  it('a read mark survives the next run — writers keep fields they do not own', async () => {
+    // recordTurn and saveWindowRow used to rebuild rows from a literal, which
+    // silently wiped the marks the moment a consult followed a catchup.
+    const listed = await cf(['sessions', '--json'], t.env)
+    const name = Object.entries(JSON.parse(listed.stdout)).find(
+      ([, r]) => r.agent === 'hyperion' && r.sessionId === 'thread-open',
+    )[0]
+    const before = threadRows()[name].seen
+    assert.ok(before && Object.keys(before).length > 0, 'fixture: marks exist')
+
+    stubCodexWindow()
+    await cf(['run', '@hyperion', 'a consult', '--thread', '--session', name], asReader('reader-1'))
+
+    assert.deepEqual(threadRows()[name].seen, before, 'the marks are still there')
   })
 
   it('cf last on a window-only conversation points at catchup instead of failing', async () => {

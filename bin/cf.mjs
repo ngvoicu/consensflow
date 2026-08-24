@@ -102,8 +102,10 @@ Usage: cf <command> [options]
                                                Ctrl-D leaves, the conversation stays
   sessions [--json]                            The conversations alive in this workspace
   catchup [<name|@agent>] [--last <n>]         Everything said in a conversation, read from
-                                               the harness's own session — including turns
-                                               you typed yourself after cf attach
+    [--unread] [--wait]                        the harness's own session — including turns
+                                               the user typed in its pane. --unread is only
+                                               what has been said since you last looked;
+                                               --wait blocks for the next answer
   last <name|@agent> [--json]                  The last answer from one of them, and where
                                                its transcript is — how the main pane reads
                                                what happened in an agent's pane
@@ -328,10 +330,42 @@ function pickConversation(threads, asked) {
   return { name, record: name === undefined ? undefined : threads[name] }
 }
 
+/**
+ * How much of a conversation this lead has already read.
+ *
+ * A lead asked "can you see what other jokes he said?" and, having no way to
+ * ask for what was new, SENT another request instead — inventing a third
+ * round rather than reading the second (live, 2026-08-24). `cf catchup` could
+ * only show everything or the last exchange; "since I last looked" is the
+ * thing it was actually being asked for.
+ *
+ * The mark is a turn count per lead, kept on the row. A lead we cannot name
+ * gets no mark at all — a shared `null` key would merge every anonymous shell
+ * into one reader — so for them `--unread` shows everything, which is the
+ * harmless direction for a verb that only reads.
+ */
+function readMark(record, lead) {
+  if (lead === null) return 0
+  return record?.seen?.[lead] ?? 0
+}
+
+async function markRead(name, record, lead, turnCount) {
+  if (lead === null || record === undefined) return
+  if (record.seen?.[lead] === turnCount) return
+  await saveThread(cwdOf(), name, {
+    ...record,
+    seen: { ...record.seen, [lead]: turnCount },
+  })
+}
+
 async function recordTurn(name, agentRow, record, result) {
   if (name === undefined) return
   const now = new Date().toISOString()
   await saveThread(cwdOf(), name, {
+    // Spread first: a row carries fields this writer does not own — the read
+    // marks `cf catchup` keeps, and whatever a later version adds. Rebuilding
+    // from a literal silently wiped them on the next run.
+    ...record,
     agent: agentRow.id,
     kind: agentRow.kind,
     // Whoever started it keeps it. A later turn can come from the user typing
@@ -369,6 +403,7 @@ function isTerminal() {
 async function saveWindowRow(name, agentRow, record, sessionId) {
   const now = new Date().toISOString()
   await saveThread(cwdOf(), name, {
+    ...record,
     agent: agentRow.id,
     kind: agentRow.kind,
     lead: record === undefined ? leadId(env) : (record.lead ?? null),
@@ -930,6 +965,7 @@ async function catchupVerb(rest) {
       json: { type: 'boolean', default: false },
       last: { type: 'string' },
       wait: { type: 'boolean', default: false },
+      unread: { type: 'boolean', default: false },
     },
   })
   const asked = String(positionals[0] ?? '')
@@ -993,6 +1029,7 @@ async function catchupVerb(rest) {
 
     const at = turns.findLastIndex((turn) => turn.role === 'user')
     const exchange = turns.slice(Math.max(at, 0))
+    await markRead(name, current, leadId(env), turns.length)
     if (values.json) {
       out(JSON.stringify({ session: name, agent: current.agent, turns: exchange }, null, 2))
       return
@@ -1006,8 +1043,22 @@ async function catchupVerb(rest) {
     return
   }
 
+  // What this lead has not read yet — the answer to "what did he say while I
+  // was not looking", which is what a lead asks for far more often than the
+  // whole history.
+  const lead = leadId(env)
+  const mark = Math.min(readMark(record, lead), turns.length)
+  const unread = turns.slice(mark)
+  await markRead(name, record, lead, turns.length)
+
   if (values.json) {
-    out(JSON.stringify({ session: name, agent: record.agent, turns }, null, 2))
+    out(
+      JSON.stringify(
+        { session: name, agent: record.agent, turns: values.unread ? unread : turns },
+        null,
+        2,
+      ),
+    )
     return
   }
   if (turns.length === 0) {
@@ -1015,14 +1066,31 @@ async function catchupVerb(rest) {
     out(`its own runs are still here: cf last ${name}`)
     return
   }
+  if (values.unread && unread.length === 0) {
+    out(`${name} · @${record.agent} — nothing new since you last looked`)
+    return
+  }
+
   const limit = Number.parseInt(values.last ?? '0', 10)
-  const shown = limit > 0 ? turns.slice(-limit) : turns
-  out(`${name} · @${record.agent} · ${turns.length} turns`)
-  for (const turn of shown) {
+  const base = values.unread ? unread : turns
+  const shown = limit > 0 ? base.slice(-limit) : base
+  out(
+    values.unread
+      ? `${name} · @${record.agent} · ${unread.length} new turn${unread.length === 1 ? '' : 's'}`
+      : `${name} · @${record.agent} · ${turns.length} turns`,
+  )
+  // In a full read, say where this lead's memory stopped: the turns below the
+  // line are the ones it has never reported to the user.
+  const boundary = values.unread ? -1 : turns.length - unread.length
+  shown.forEach((turn, index) => {
+    if (index === boundary && unread.length > 0 && boundary > 0) {
+      out('')
+      out(`— ${unread.length} below here you had not seen —`)
+    }
     out('')
     out(turn.role === 'user' ? '› asked' : `• @${record.agent}`)
     out(turn.text)
-  }
+  })
 }
 
 /**

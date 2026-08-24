@@ -95,7 +95,8 @@ cf run @name "<task>" --new            # a fresh conversation, its own window
 cf run @name "<task>" --new --session <name>  # a fresh one, under the name you minted
 cf run @name "<task>" --session <name> # a specific existing one, by name
 cf sessions                            # what is alive in this folder
-cf catchup <name> [--wait]             # what was said; --wait sits out the next answer
+cf catchup <name> --unread             # what has been said since you last looked
+cf catchup <name> [--wait]             # the whole conversation; --wait sits out the next answer
 cf attach <name>                       # reopen a conversation's window later, anywhere
 cf last <name>                         # the last answer a streamed run left
 ```
@@ -110,7 +111,9 @@ there, codex hands its id back on the streamed first turn.
 
 Window turns leave no stream for the lead to parse — and it never reads the
 pane's screen, because screen text is a picture of an answer, not an answer.
-Instead `cf catchup` reads the harness's **own session store** — codex's
+Instead `cf catchup <name> --unread` gives it exactly what has been said
+since its last look — the question it actually has. `cf catchup` reads the
+harness's **own session store** — codex's
 rollout file, claude's session jsonl, pi's, opencode's — **read-only, never
 written** — and returns nothing rather than failing if a harness has moved its
 files. `cf catchup <name> --wait` blocks until the agent's next answer lands

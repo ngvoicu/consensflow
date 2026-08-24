@@ -273,14 +273,18 @@ describe('the description is all a lead reads before it decides to look inside',
     const cmux = generateSkill(roster, { mode: 'cmux' })
     const rules = cmux.slice(cmux.indexOf('## Rules'), cmux.indexOf('## Roster'))
 
-    assert.match(rules, /Look before you answer/i)
-    assert.match(rules, /cf catchup/)
+    assert.match(rules, /different acts/i, 'reading and adding are separated')
+    assert.match(rules, /cf catchup <name> --unread/)
+    // The failure that followed: asked to READ, the lead sent another request
+    // and invented a new answer rather than finding the existing one.
+    assert.match(rules, /Send\s+nothing/i)
+    assert.match(rules, /Look\s+before\s+you\s+send/i)
 
-    // Host modes have no windows and no direct user turns: the rule would be
+    // Host modes have no windows and no direct user turns: the rules would be
     // false there.
     for (const mode of ['claude', 'pi']) {
       const host = generateSkill(roster, { mode })
-      assert.doesNotMatch(host, /Look before you answer/i, `${mode} has no panes to look at`)
+      assert.doesNotMatch(host, /Look\s+before\s+you\s+send/i, `${mode} has no panes to look at`)
     }
   })
 

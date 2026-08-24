@@ -187,6 +187,21 @@ keep in step — the manager is the only caller.
   thing the USER sees; the `## Message from the user` marker survives whenever
   a brief/handoff rides along, because `cf catchup` unwraps on it.
 
+- **A lead reads what is new, not everything.** `cf catchup <name> --unread`
+  is only what has been said since THIS lead last looked — a turn count per
+  lead, kept as `seen` on the conversation row; plain `cf catchup` still shows
+  the whole thing with a line marking where that memory stopped, and every
+  read (plain, `--json`, `--wait`) moves the mark, because reading is seeing.
+  A lead we cannot name gets no mark — a shared `null` key would merge every
+  anonymous shell into one reader — so `--unread` shows it everything, the
+  harmless direction for a verb that only reads. Both row writers spread the
+  existing record: they do not own `seen`, and rebuilding a row from a literal
+  wiped it on the next run. Without this the lead had no way to ask "what did
+  he say while I was not looking", so asked to READ a conversation it SENT
+  another question and invented a third round instead of finding the second
+  (live, 2026-08-24) — which is also why the skill's rules now separate
+  reading a conversation from adding to one, and require a look before both.
+
 - **`cf catchup --wait` survives both of its races.** A fast agent can answer
   BEFORE `--wait` starts (this hung live, twice): a conversation ending in an
   assistant turn is a standing answer, returned. A fast lead can start

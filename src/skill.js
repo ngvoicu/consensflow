@@ -150,12 +150,17 @@ question, then decide or ask the user.
   itself failed. Slow usually means thinking.${
     inCmux
       ? `
-- **Look before you answer for a conversation — or act on one.** The user
-  types straight into agent panes, so your memory of a conversation is only
-  as fresh as your last look. "Did you see her last answer?", "what did he
-  say?", "do what she suggested" — every one of these means \`cf catchup
-  <name>\` FIRST, then answer or act from what it shows, never from what you
-  remember.`
+- **Reading a conversation and adding to it are different acts.** "What did
+  he say?", "can you see what she answered?", "did he reply?" ask you to
+  READ: run \`cf catchup <name> --unread\` and report what it shows. Send
+  nothing. Asking the agent again invents a new answer instead of finding the
+  one that already exists — and the user was asking about theirs, not yours.
+  "Ask him X", "another one", "tell her Y" are the other act: those you send.
+- **Look before you send, too.** The user types straight into agent panes, so
+  your memory of a conversation is only as fresh as your last look. Run
+  \`cf catchup <name> --unread\` before every follow-up and before acting on
+  anything an agent said — the conversation may have moved without you, and a
+  follow-up composed against a stale view asks the wrong question.`
       : ''
   }
 
@@ -213,32 +218,37 @@ CMUX_QUIET=1 cmux rename-tab --surface surface:NN "$NAME"
 Lost track of which pane is which? \`CMUX_QUIET=1 cmux list-pane-surfaces\`
 lists every surface with its tab title.
 
-**Read the answer with \`cf catchup <name>\` from your own pane.** Plain
-first — a quick question may already be answered — and \`--wait\` when it is
-not: it blocks until the agent's NEXT answer lands and prints only what is
-new, so only reach for it while the answer is still being written. Do not
-scrape the other pane's screen: the pane is for the user to watch, the
-harness's own session store is what you read. Screen text is not an answer,
-it is a picture of one.
+**Read the answer with \`cf catchup <name> --unread\` from your own pane** —
+everything said since your last look, which is what you want nearly every
+time. \`--wait\` is for the moment after you send a question and the answer is
+still being written; it blocks until the next one lands. Plain \`cf catchup
+<name>\` gives the whole conversation with a line marking where your memory
+stopped. Do not scrape the other pane's screen: the pane is for the user to
+watch, the harness's own session store is what you read. Screen text is not
+an answer, it is a picture of one.
 
 **A follow-up goes into the pane as plain text** — the pane is the agent's own
 prompt now, so there is no command to wrap it in:
 
 \`\`\`bash
+cf catchup <name> --unread   # FIRST: the conversation may have moved without you
 CMUX_QUIET=1 cmux send --surface surface:NN 'your follow-up question'$'\\n'
 cf catchup <name> --wait     # started BEFORE the answer can land, it waits it out
 \`\`\`
 
 The user can type in that pane too — it is a normal agent window, and their
 turns land in the same conversation. Nothing tells you it happened, which is
-why the rule above says to look before you answer for one.
+why \`--unread\` exists and why the rules say to look before you answer for a
+conversation or add to one.
 
 \`\`\`bash
 cf run @<name> "<task>"                     # opens (or reopens) that agent's conversation here
 cf run @<name> "<task>" --new               # a fresh conversation, its own pane
 cf run @<name> "<task>" --session <name>    # a specific one, by name
 cf sessions                                 # what is alive in this workspace
-cf catchup <name> [--wait]                  # what was said; --wait sits out the next answer
+cf catchup <name> --unread                  # what has been said since you last looked
+cf catchup <name>                           # the whole conversation, marked where you stopped
+cf catchup <name> --wait                    # sit out the answer to a question just sent
 cf last <name>                              # the last answer a streamed run left (codex turn 1)
 cf attach <name>                            # reopen a conversation's window later, anywhere
 \`\`\`
