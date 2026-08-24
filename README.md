@@ -74,10 +74,13 @@ exception: its CLI takes no starting task at all (`-p` is defined as
 non-interactive and there is no positional prompt), so its window opens
 **empty** and ConsensFlow types the task into it — then waits for kimi to
 write the session, which is the receipt proving the keystrokes landed, and
-types again if they did not. In a directory kimi has not been trusted it
-opens on a confirmation prompt instead, so there ConsensFlow streams and tells
-you to trust the folder once; it will never type at a prompt it did not
-expect.
+types again if they did not. In a directory kimi has not seen, it
+opens on a confirmation prompt instead — and that prompt gates exactly one
+thing: MCP servers the project itself declares. Where a directory declares
+none, trusting it starts nothing, so ConsensFlow records the trust and opens
+the window. Where one is declared, trusting would run a command the repo's
+author chose, so that stays your decision and the consult streams instead.
+It will never type at a prompt it did not expect.
 
 ```
 $ cf run @hyperion "is the retry path sound?"

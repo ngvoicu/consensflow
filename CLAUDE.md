@@ -180,11 +180,17 @@ keep in step — the manager is the only caller.
   untrusted directory opens on a "Trust this folder?" modal whose preselected
   answer is "Don't trust", and that one EXITS — typed characters would
   navigate the menu and the Enter after them would choose it, so a question
-  would close the agent. `kimiTrustsDirectory` READS `workspace-trust/` and
-  never writes it: trusting a folder is the user's decision about their own
-  machine, the same rule that protects Claude Code's settings.json. Untrusted
-  falls back to the streamed path, which needs no trust because the modal
-  gates the interface, not the engine. A multi-line seed is written to `<config>/…/seeds/<name>.md` and
+  would close the agent. The prompt gates ONE thing and says
+  so: the project's own MCP servers, declared in `.kimi-code/mcp.json` or
+  `.mcp.json`. So the answer splits on whether trusting would start anything
+  (`kimiTrustWouldStartServers`, climbing to the repo root). A directory that
+  declares none grants nothing by being trusted, so ConsensFlow answers the
+  formality itself (`kimiTrustDirectory`, kimi's own shape in kimi's own store,
+  0600) and the window opens. A directory that DOES declare one is asking to
+  run a command its author chose — a question about the user's machine, left
+  to them, the same rule that protects Claude Code's settings.json — and the
+  consult streams instead, which needs no trust because the modal gates the
+  interface, not the engine. A multi-line seed is written to `<config>/…/seeds/<name>.md` and
   the typed line points at it, because `cmux send` submits at every newline
   and a packet sent raw would arrive as a dozen half-questions. Because kimi prints
   its id LAST, a run that dies mid-work takes the id with it: `cf run` falls

@@ -20,7 +20,9 @@ import {
   discoverKimiSession,
   discoverOpencodeSession,
   harnessTurns,
+  kimiTrustDirectory,
   kimiTrustsDirectory,
+  kimiTrustWouldStartServers,
 } from '../hosts/lib/harness-transcript.js'
 import { renderImageRun, runImageAgent } from '../hosts/lib/image-run.js'
 import { createPacket, createWindowSeed } from '../hosts/lib/packets.js'
@@ -541,9 +543,17 @@ async function openWindow(row, name, record, packetInput) {
     // user's decision about their own machine, never ours to make for them —
     // so this steps back to the streamed path, which needs no trust.
     if (!(await kimiTrustsDirectory(cwdOf(), env))) {
-      out(`kimi has not been trusted in this directory, so its window would open on a prompt`)
-      out(`run \`kimi\` here once and choose Trust to get the window; streaming this one`)
-      return false
+      // kimi's prompt gates one thing and says so: the project's own MCP
+      // servers. Where a directory declares none, answering it grants nothing
+      // and ConsensFlow answers it. Where one IS declared, trusting would run
+      // a command the repo's author chose — a question about the user's
+      // machine, and theirs to answer.
+      if (await kimiTrustWouldStartServers(cwdOf())) {
+        out('this directory declares its own MCP servers, which kimi starts only once you trust it')
+        out(`that is your call, not ours: run \`kimi\` here and choose Trust for a window`)
+        return false
+      }
+      await kimiTrustDirectory(cwdOf(), env)
     }
     const since = Date.now() - 2000
     await saveWindowRow(name, row, record, null)

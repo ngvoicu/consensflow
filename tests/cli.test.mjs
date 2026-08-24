@@ -8,6 +8,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -20,6 +21,19 @@ import { chooseCmuxMode, tempEnv } from './helpers.mjs'
 const run = promisify(execFile)
 const CF = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
 const FIXTURES = join(import.meta.dirname, 'fixtures')
+
+async function cfIn(cwd, args, env) {
+  try {
+    const { stdout, stderr } = await run(process.execPath, [CF, ...args], {
+      env,
+      cwd,
+      timeout: 30_000,
+    })
+    return { code: 0, stdout, stderr }
+  } catch (cause) {
+    return { code: cause.code ?? 1, stdout: cause.stdout ?? '', stderr: cause.stderr ?? '' }
+  }
+}
 
 async function cf(args, env) {
   try {
@@ -1234,27 +1248,60 @@ fi
     assert.equal(threadRows()[name].sessionId, 'session_typed', 'the receipt names the session')
   })
 
-  it('an untrusted directory gets the stream, never keystrokes into a modal', async () => {
+  it('a directory that declares MCP servers is the user to answer, not us', async () => {
     // Live 2026-08-24: opening kimi in an unknown folder shows "Trust this
     // folder?" with "Don't trust" preselected — and "Don't trust" EXITS. Typed
     // characters navigate that menu and the Enter after them chooses it, so
-    // asking a question would close the agent. Trusting is the user's call.
+    // asking a question would close the agent. Where trusting would actually
+    // start something the repo declared, the answer stays the user's.
     rmSync(join(t.env.HOME, '.kimi-code', 'workspace-trust'), { recursive: true, force: true })
+    const declared = join(t.root, 'declares-mcp')
+    mkdirSync(declared, { recursive: true })
+    writeFileSync(join(declared, '.mcp.json'), '{"mcpServers":{"x":{"command":"whatever"}}}')
     const kimiLog = join(t.root, 'kimi-untrusted.log')
     writeFileSync(join(t.env.PATH, 'kimi'), `#!/bin/sh\necho "[$@]" >> "${kimiLog}"\n`)
     chmodSync(join(t.env.PATH, 'kimi'), 0o755)
 
-    const out = await cf(['run', '@ilmarinen', 'careful now', '--new'], {
+    const out = await cfIn(declared, ['run', '@ilmarinen', 'careful now', '--new'], {
       ...tty(),
       CMUX_SURFACE_ID: 'surface:9',
       CONSENSFLOW_TYPE_MS: '60',
     })
 
     assert.equal(out.code, 0, out.stderr)
-    assert.match(out.stdout, /has not been trusted/i, 'it says why there is no window')
-    assert.match(out.stdout, /choose Trust/i, 'and what to do about it')
-    const opened = readFileSync(kimiLog, 'utf8')
-    assert.doesNotMatch(opened, /^\[\]$/m, 'no empty window was opened for a modal to fill')
+    assert.match(out.stdout, /declares its own MCP servers/i, 'it says why there is no window')
+    assert.match(out.stdout, /your call/i, 'and whose decision it is')
+    assert.doesNotMatch(readFileSync(kimiLog, 'utf8'), /^\[\]$/m, 'no window for a modal to fill')
+  })
+
+  it('a directory that declares nothing is trusted for you, because it grants nothing', async () => {
+    // kimi's prompt gates project MCP servers and says so. Where none are
+    // declared, answering it starts nothing — so ConsensFlow answers it and
+    // the window opens, which is the whole point of having one.
+    rmSync(join(t.env.HOME, '.kimi-code', 'workspace-trust'), { recursive: true, force: true })
+    const plain = join(t.root, 'declares-nothing')
+    mkdirSync(join(plain, '.git'), { recursive: true })
+    const kimiLog = join(t.root, 'kimi-plain.log')
+    writeFileSync(join(t.env.PATH, 'kimi'), `#!/bin/sh\necho "[$@]" >> "${kimiLog}"\n`)
+    chmodSync(join(t.env.PATH, 'kimi'), 0o755)
+    writeFileSync(join(t.env.PATH, 'cmux'), '#!/bin/sh\nexit 0\n')
+    chmodSync(join(t.env.PATH, 'cmux'), 0o755)
+
+    const out = await cfIn(plain, ['run', '@ilmarinen', 'go ahead', '--new'], {
+      ...tty(),
+      CMUX_SURFACE_ID: 'surface:9',
+      CONSENSFLOW_TYPE_MS: '40',
+    })
+
+    assert.equal(out.code, 0, out.stderr)
+    assert.match(readFileSync(kimiLog, 'utf8'), /^\[\]$/m, 'the window opened')
+    const record = readdirSync(join(t.env.HOME, '.kimi-code', 'workspace-trust'))[0]
+    const trusted = JSON.parse(
+      readFileSync(join(t.env.HOME, '.kimi-code', 'workspace-trust', record), 'utf8'),
+    )
+    // macOS hands /var/folders back as /private/var/folders — compare what
+    // the child actually resolved, not the symlinked path the test built.
+    assert.equal(trusted.root, realpathSync(plain), 'recorded in kimi own store, in kimi own shape')
   })
 
   it('a kimi run that dies before printing its id is still resumable', async () => {

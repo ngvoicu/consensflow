@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -436,7 +437,7 @@ export async function discoverKimiSession(cwd, since, env = process.env) {
  * engine. So the fallback genuinely works.
  */
 export async function kimiTrustsDirectory(cwd, env = process.env) {
-  const root = path.join(env.KIMI_CODE_HOME ?? path.join(home(env), ".kimi-code"), "workspace-trust");
+  const root = kimiTrustRoot(env);
   let names;
   try {
     names = await fs.readdir(root);
@@ -457,4 +458,66 @@ export async function kimiTrustsDirectory(cwd, env = process.env) {
     if (cwd === trusted || cwd.startsWith(`${trusted}${path.sep}`)) return true;
   }
   return false;
+}
+
+const kimiTrustRoot = (env) =>
+  path.join(env.KIMI_CODE_HOME ?? path.join(home(env), ".kimi-code"), "workspace-trust");
+
+/** The two files a project uses to declare MCP servers to Kimi Code. */
+const PROJECT_MCP = [path.join(".kimi-code", "mcp.json"), ".mcp.json"];
+
+/**
+ * Whether trusting this directory would actually grant anything.
+ *
+ * Kimi's prompt gates one thing, and says so: project-level MCP servers. A
+ * directory that declares none is a directory where trust starts nothing — so
+ * answering it is a formality, and ConsensFlow can answer it. A directory that
+ * DOES declare one is asking to run a command its author chose, which is a
+ * question about the user's machine and stays theirs.
+ *
+ * The search climbs to the repo root, because that is the scope kimi trusts
+ * and a declaration one level up is just as live.
+ */
+export async function kimiTrustWouldStartServers(cwd) {
+  let dir = path.resolve(cwd);
+  for (;;) {
+    for (const relative of PROJECT_MCP) {
+      try {
+        await fs.access(path.join(dir, relative));
+        return true;
+      } catch {
+        // not here
+      }
+    }
+    try {
+      await fs.access(path.join(dir, ".git"));
+      return false; // the repo root: kimi looks no further up than this
+    } catch {
+      // keep climbing
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) return false;
+    dir = parent;
+  }
+}
+
+/**
+ * Record this directory as trusted — only ever called where trusting grants
+ * nothing (see `kimiTrustWouldStartServers`).
+ *
+ * The file is kimi's own shape and lives in kimi's own store, so kimi treats a
+ * folder ConsensFlow opened exactly as one the user opened by hand. Written
+ * 0600 like the records kimi writes itself: it names a directory somebody
+ * works in, and that is nobody else's business.
+ */
+export async function kimiTrustDirectory(cwd, env = process.env) {
+  const root = kimiTrustRoot(env);
+  const resolved = path.resolve(cwd);
+  const key = `wd_${path.basename(resolved)}_${crypto.createHash("sha256").update(resolved).digest("hex").slice(0, 12)}`;
+  await fs.mkdir(root, { recursive: true, mode: 0o700 });
+  await fs.writeFile(
+    path.join(root, key),
+    JSON.stringify({ root: resolved, trustedAt: Date.now() }),
+    { encoding: "utf8", mode: 0o600 },
+  );
 }
