@@ -322,9 +322,19 @@ keep in step — the manager is the only caller.
 ## Commands
 
 ```sh
-npm test          # node --test (357 tests)
+npm test          # node --test — what the skill SAYS, no live CLI, no network
 npm run check     # biome + tests
+npm run eval      # what a lead DOES with it — real lead, real skill, stubbed cf/cmux
 ```
+
+`evals/` is the answer to a question the unit tests cannot ask. Three
+behavioural failures in one day (2026-08-24) were each answered with more
+prose and none was measured, so the eval runs a REAL lead against the REAL
+installed skill with `cf` and `cmux` replaced by recording stubs, and asserts
+which commands it chose. It spends real tokens and is deliberately outside
+`npm test`. Scenarios are the failures themselves; a check that passes 4/5 is
+a failing check. Baseline 2026-08-24 (claude): 13/13, and 3/3 on repeat for
+both read-versus-write scenarios.
 
 ## Spec
 

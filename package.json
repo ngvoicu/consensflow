@@ -22,7 +22,8 @@
     "test": "node --test",
     "lint": "biome check .",
     "format": "biome format --write .",
-    "check": "npm run lint && npm test"
+    "check": "npm run lint && npm test",
+    "eval": "node evals/run.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.8"
