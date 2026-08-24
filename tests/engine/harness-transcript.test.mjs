@@ -230,3 +230,74 @@ test('harness transcript: our own packet is shown as the question inside it', as
     assert.deepEqual(turns, [{ role: 'user', text: 'Tell me a joke.' }])
   })
 })
+
+test('harness transcript: kimi is assembled from its wire log, parts joined per turn', async () => {
+  await withStores(async (env) => {
+    const id = 'session_ba239627-2ddf-40b9-9a57-b9ae8a33fd30'
+    // The shape below is copied from a real Kimi Code 0.38.0 session
+    // (probed 2026-08-24): the id names a DIRECTORY, and the log is events.
+    await write(
+      path.join(
+        env.HOME,
+        '.kimi-code',
+        'sessions',
+        'wd_proj_abc',
+        id,
+        'agents',
+        'main',
+        'wire.jsonl',
+      ),
+      [
+        JSON.stringify({ type: 'metadata' }),
+        JSON.stringify({
+          type: 'turn.prompt',
+          input: [{ type: 'text', text: 'Reply with exactly: pong' }],
+          origin: { kind: 'user' },
+        }),
+        JSON.stringify({
+          type: 'context.append_loop_event',
+          event: { type: 'content.part', turnId: '0', part: { type: 'think', think: 'simple' } },
+        }),
+        // One answer arriving as several parts — counting each as a turn would
+        // inflate the number `--unread` and `--wait` both key on.
+        JSON.stringify({
+          type: 'context.append_loop_event',
+          event: { type: 'content.part', turnId: '0', part: { type: 'text', text: 'po' } },
+        }),
+        JSON.stringify({
+          type: 'context.append_loop_event',
+          event: { type: 'content.part', turnId: '0', part: { type: 'text', text: 'ng' } },
+        }),
+        // The environment's own injected block arrives under a user role.
+        JSON.stringify({
+          type: 'context.append_message',
+          message: { role: 'user', content: [{ type: 'text', text: '<system-reminder>…' }] },
+        }),
+        JSON.stringify({
+          type: 'turn.prompt',
+          input: [{ type: 'text', text: 'and again?' }],
+          origin: { kind: 'user' },
+        }),
+        JSON.stringify({
+          type: 'context.append_loop_event',
+          event: { type: 'content.part', turnId: '1', part: { type: 'text', text: 'pong again' } },
+        }),
+      ].join('\n'),
+    )
+
+    const turns = await harnessTurns('kimi', id, env)
+
+    assert.deepEqual(turns, [
+      { role: 'user', text: 'Reply with exactly: pong' },
+      { role: 'assistant', text: 'pong' },
+      { role: 'user', text: 'and again?' },
+      { role: 'assistant', text: 'pong again' },
+    ])
+  })
+})
+
+test('harness transcript: a kimi session we cannot find is empty, never an error', async () => {
+  await withStores(async (env) => {
+    assert.deepEqual(await harnessTurns('kimi', 'session_nope', env), [])
+  })
+})

@@ -581,6 +581,46 @@ export const AGENT_PRESETS = [
     effort: "max",
   },
 
+  // --- Kimi Code (Finnish names, so a kimi agent is recognisable as one at a
+  // glance — Greek, Norse and muse names are all spoken for). Added 2026-08-24.
+  //
+  // K2.6 is left out: K3 supersedes it outright, and this list carries the
+  // newest of each family — the rule that keeps glm-5.2 and qwen3.7 out too.
+  // The K2.7 *code* models stay, because K3 is a general flagship and has no
+  // code-specialist counterpart: they are the newest of a different family,
+  // not an older version of this one.
+  //
+  // This bills MOONSHOT DIRECTLY through Kimi Code's own key, unlike endymion
+  // and mani, which reach the same K3 through OpenRouter: same model, different
+  // account and different rate limits. No effort field, because Kimi Code has
+  // no effort flag — `default_effort` lives in that config file (max for K3).
+  {
+    preset: "ilmarinen",
+    id: "ilmarinen",
+    name: "Ilmarinen",
+    label: "Kimi K3",
+    description: "The eternal smith who forged the sky: Kimi K3 on Kimi Code — 1M context, billed to Moonshot directly rather than through OpenRouter. Effort comes from your kimi config (max by default).",
+    kind: "kimi",
+    model: "moonshot-ai/kimi-k3",
+  },
+  {
+    preset: "seppo",
+    id: "seppo",
+    name: "Seppo",
+    label: "Kimi K2.7 Code",
+    description: "The smith at his anvil: Kimi K2.7 Code on Kimi Code — the code-specialist Ilmarinen's general K3 does not replace. 262K context, billed to Moonshot directly.",
+    kind: "kimi",
+    model: "moonshot-ai/kimi-k2.7-code",
+  },
+  {
+    preset: "ahti",
+    id: "ahti",
+    name: "Ahti",
+    label: "Kimi K2.7 Code Highspeed",
+    description: "God of swift water: the same code-specialist tuned for speed — for a quick read or a second pair of eyes, where Seppo is for the careful pass.",
+    kind: "kimi",
+    model: "moonshot-ai/kimi-k2.7-code-highspeed",
+  },
   // --- Image generation (Codex backend → gpt-image-2) ---------------------
   {
     preset: "pygmalion",

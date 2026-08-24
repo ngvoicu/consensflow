@@ -31,6 +31,8 @@ export async function harnessTurns(kind, sessionId, env = process.env) {
         return await readJsonl(await findFile(piRoot(env), (name) => name.includes(sessionId)), piTurn);
       case "opencode":
         return await readOpencode(env, sessionId);
+      case "kimi":
+        return await readKimi(env, sessionId);
       default:
         // image agents hold no conversation, and an unknown kind is not ours.
         return [];
@@ -44,6 +46,7 @@ const home = (env) => env.HOME ?? env.USERPROFILE ?? os.homedir();
 const codexRoot = (env) => path.join(env.CODEX_HOME ?? path.join(home(env), ".codex"), "sessions");
 const claudeRoot = (env) => path.join(env.CLAUDE_CONFIG_DIR ?? path.join(home(env), ".claude"), "projects");
 const piRoot = (env) => path.join(home(env), ".pi", "agent", "sessions");
+const kimiRoot = (env) => path.join(env.KIMI_CODE_HOME ?? path.join(home(env), ".kimi-code"), "sessions");
 const opencodeRoot = (env) =>
   path.join(env.XDG_DATA_HOME ?? path.join(home(env), ".local", "share"), "opencode", "storage");
 
@@ -65,6 +68,79 @@ async function findFile(root, matches, depth = 6) {
     }
   }
   return null;
+}
+
+/** Like findFile, but the session id names a DIRECTORY — which is kimi's shape. */
+async function findDir(root, name, depth = 4) {
+  if (depth < 0) return null;
+  let entries;
+  try {
+    entries = await fs.readdir(root, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name === name) return path.join(root, entry.name);
+    const found = await findDir(path.join(root, entry.name), name, depth - 1);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+/**
+ * Kimi Code keeps an event log, not a message list.
+ *
+ * `sessions/wd_<name>_<hash>/<sessionId>/agents/main/wire.jsonl` records what
+ * the loop did: `turn.prompt` is what the user sent, and an answer arrives as
+ * a run of `content.part` events carrying `text` (and `think`, which is the
+ * agent reasoning to itself and not part of what was said).
+ *
+ * The parts of one answer MUST be joined by their `turnId`. A one-word reply
+ * is a single part and a real one is many — counting each as a turn would
+ * inflate the number that `cf catchup --unread` and `--wait` both key on.
+ *
+ * `session_index.jsonl` maps ids to directories, but it is a cache beside the
+ * store rather than the store: the tree is what the harness actually writes.
+ */
+async function readKimi(env, sessionId) {
+  const dir = await findDir(kimiRoot(env), sessionId);
+  if (dir === null) return [];
+  const raw = await fs.readFile(path.join(dir, "agents", "main", "wire.jsonl"), "utf8");
+
+  const turns = [];
+  let answer = null;
+  const flush = () => {
+    if (answer === null) return;
+    const text = readable(answer.parts.join("").trim());
+    if (text.length > 0) turns.push({ role: "assistant", text });
+    answer = null;
+  };
+
+  for (const line of raw.split("\n")) {
+    if (line.trim().length === 0) continue;
+    let record;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    if (record?.type === "turn.prompt" && record.origin?.kind === "user") {
+      flush();
+      const text = readable(flatten(record.input));
+      if (text.length > 0) turns.push({ role: "user", text });
+      continue;
+    }
+
+    const event = record?.type === "context.append_loop_event" ? record.event : null;
+    if (event?.type !== "content.part" || event.part?.type !== "text") continue;
+    if (answer !== null && answer.turnId !== event.turnId) flush();
+    if (answer === null) answer = { turnId: event.turnId, parts: [] };
+    answer.parts.push(String(event.part.text ?? ""));
+  }
+  flush();
+  return turns;
 }
 
 async function readJsonl(file, toTurn) {

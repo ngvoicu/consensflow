@@ -135,8 +135,20 @@ function claudeResultText(content) {
   return JSON.stringify(content ?? "");
 }
 
+/**
+ * Kimi Code's prompt-mode stream is the plainest of the five: a version line,
+ * the answer as one `{"role":"assistant","content":"…"}`, and a resume hint
+ * carrying the session id (probed live 2026-08-24). The hint is plumbing, not
+ * something said, so it never becomes an event.
+ */
+function kimiAdapter(event) {
+  if (event?.role !== "assistant") return [];
+  const text = typeof event.content === "string" ? event.content : "";
+  return text.trim() ? [{ kind: "text", text }] : [];
+}
+
 // Adapters are added per engine as their TDD cycle lands (opencode, then pi, codex, claude-code).
-const ADAPTERS = { opencode: opencodeAdapter, codex: codexAdapter, pi: piAdapter, "claude-code": claudeAdapter };
+const ADAPTERS = { opencode: opencodeAdapter, codex: codexAdapter, pi: piAdapter, "claude-code": claudeAdapter, kimi: kimiAdapter };
 
 // Map one parsed JSONL event to zero or more normalized events. Never throws: an unknown engine,
 // unknown shape, or adapter bug yields [] so a single odd line can't break a whole run. Each

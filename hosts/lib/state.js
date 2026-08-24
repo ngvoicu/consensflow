@@ -8,7 +8,7 @@ import { isOrphanedPreset, syncAgentWithPreset } from "./presets.js";
 
 // "image" is a backend-based kind (Codex Responses → gpt-image-2 via the Codex CLI login), not a
 // CLI runner: it is handled upstream in cf.mjs, and buildRunnerInvocation keeps a loud backstop.
-export const AGENT_KINDS = ["pi", "claude-code", "codex", "opencode", "image"];
+export const AGENT_KINDS = ["pi", "claude-code", "codex", "opencode", "kimi", "image"];
 export const SKILLS_POLICIES = ["default", "none", "explicit"];
 
 // Older builds kept per-tool rosters below the shared home. Keep a one-time migration path so

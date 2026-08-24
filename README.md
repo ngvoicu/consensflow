@@ -4,7 +4,7 @@ Named AI agents your coding agent can consult, in every harness on your machine.
 
 You keep a roster — `zeus` is Claude Opus at max effort, `hyperion` is GPT 5.6
 Sol at ultra. ConsensFlow generates **one skill** from it and installs that skill
-into Claude Code, codex, pi and opencode, which all read the same Agent Skills
+into Claude Code, codex, pi, opencode and Kimi Code, which all read the same Agent Skills
 format. From then on you say *"ask hyperion whether this migration is safe"* and
 your coding agent does the rest: it runs hyperion, waits, and reports the answer
 attributed. You never type a command.
@@ -46,7 +46,7 @@ that reads it.
 A machine runs one path, and choosing it is the install:
 
 ```sh
-cf use cmux     # every harness (claude, codex, pi, opencode), plus cmux's pane skills
+cf use cmux     # every harness found: claude, codex, pi, opencode, kimi
 cf use claude   # only Claude Code
 cf use pi       # only pi
 cf mode         # which one is active, and what it costs

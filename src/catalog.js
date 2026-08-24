@@ -36,6 +36,11 @@ export const EFFORTS = {
   pi: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
   // opencode --help: "provider-specific reasoning effort, e.g., high, max, minimal"
   opencode: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+  // Kimi Code has NO effort flag: `support_efforts` and `default_effort` are
+  // per-model keys in the user's own config.toml, which is theirs to edit and
+  // carries their API key. An empty list is the honest answer — the UI then
+  // offers no effort for a kimi agent rather than a choice that goes nowhere.
+  kimi: [],
 }
 
 /**
@@ -49,6 +54,7 @@ const KIND_TO_HARNESS = {
   codex: 'codex',
   pi: 'pi',
   opencode: 'opencode',
+  kimi: 'kimi',
   image: 'image',
 }
 

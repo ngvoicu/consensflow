@@ -7,7 +7,7 @@ Byte-identical to `AGENTS.md` — keep both in sync (workspace convention).
 ConsensFlow (the manager, npm `consensflow`): skills-first. A zero-dependency Node ESM npm package
 (`cf`/`consensflow` bins, no build step) that manages a roster of named AI
 agents and generates/installs **one skill** teaching every harness
-(claude, codex, pi, opencode — all read the same Agent Skills `SKILL.md`
+(claude, codex, pi, opencode, kimi — all read the same Agent Skills `SKILL.md`
 format) how to consult them via exact CLI commands — one-shot in the host
 modes, named resumable conversations in each agent's own window in `cmux`
 mode. ConsensFlow ships exactly ONE skill — its own; the cmux-skills cloning
@@ -31,9 +31,9 @@ license to skip the skill.
 |---|---|
 | `bin/cf.mjs` | All verbs: setup, use, run, mint, chat, attach, catchup, sessions, last, mode, off, reset, agent …, skills …, ui, doctor. `reset` refuses without `--yes` and prints what it would destroy — the refusal is the preview. Setup never seeds agents; a machine that ran cc/pi already has the shared roster, so setup installs the skill straight from it. Every roster mutation installs-or-regenerates the skill, for whoever the mode puts in scope (`skillTargets` → `scopeTargets`) — the first add installs it, the rest regenerate it |
 | `src/roster.js` | Roster = the SHARED v1 file `~/.consensflow/agents.json` (cc + pi read/write it too): v1-schema-faithful mapping (kind↔runtime, thinking/effort↔effort, toolsPolicy↔permission), unknown fields preserved, unsupported kinds listed+marked, never dropped. **One root, one meaning**: roster, state and workspaces all live in `~/.consensflow`, or under `CONSENSFLOW_HOME` when it is set. The state used to sit under XDG while the roster sat here, and the variable meant a different directory to each half — a machine set up that way is moved into the one root on first run (`migrateStateRoot`) |
-| `src/catalog.js` | A **view over `hosts/lib/presets.js`** — one catalog, not two (they disagreed on five names until 2026-08-21) — plus each CLI's real effort levels. All 54 presets are offered, grouped by harness (claude 8, codex 4, pi 21, opencode 20, image 1). `cf agent add <name>` resolves through it and records `preset` on the row, which is what makes `cf agent sync` and the UI's Update button possible |
+| `src/catalog.js` | A **view over `hosts/lib/presets.js`** — one catalog, not two (they disagreed on five names until 2026-08-21) — plus each CLI's real effort levels. All 57 presets are offered, grouped by harness (claude 8, codex 4, pi 21, opencode 20, kimi 3, image 1). `cf agent add <name>` resolves through it and records `preset` on the row, which is what makes `cf agent sync` and the UI's Update button possible |
 | `src/skill.js` | SKILL.md generation — the prose IS the product. One command for every agent (`cf run @name "<task>"`), so the table says who each agent is rather than what to type. The front-matter `description` is mode-aware, because it is the only part a lead reads before deciding whether to open the rest |
-| `src/harnesses.js` | Harness detection (CLI on PATH) + per-harness skills dir (honours `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`) |
+| `src/harnesses.js` | Harness detection (CLI on PATH) + per-harness skills dir (honours `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`, `KIMI_CODE_HOME`). Five harnesses since 2026-08-24: kimi's CLI is `kimi` but its home is `.kimi-code` |
 | `src/terminal.js` | The `cf`/`consensflow` launcher on PATH, in **every** mode — the skill teaches `cf run`, so it is part of the path, not a cmux extra. It is also the only installed file that names a runtime absolutely, which is what `terminalRuntime` reads for `cf doctor` |
 | `src/manifest.js` + `src/install.js` | Hash-manifest ownership: install/update/status/uninstall; drift is sacred |
 | `src/host-payloads.js` | **Take-back only, never installs.** Everything the payload era left on a machine: the recorded claude files, the `/consensflow` command (by its front-matter marker), the world-readable `settings.json.consensflow.bak`, the `<config>/hosts` payloads, `hosts.json`, and a pi extension removed through pi's own CLI. Claude Code's `settings.json` is never written — a hook an older version left is *reported* by `cf doctor` |
@@ -52,7 +52,7 @@ license to skip the skill.
 | `harness-transcript.js` | Reads each harness's OWN session store so window turns are visible to the lead. Read-only; empty rather than throwing when a layout moves. Also `discoverOpencodeSession` — the id opencode minted, found by directory and birth time, because it is the one harness that neither takes an id nor prints one |
 | `state.js` | The one root, workspace keys, run dirs, `writeJsonAtomic` (shared, one copy) |
 | `transcript.js` + `transcript-events.js` | Normalising four engines' event shapes into one vocabulary |
-| `presets.js` | The 54 catalog presets — the single source `src/catalog.js` is a view over |
+| `presets.js` | The 57 catalog presets — the single source `src/catalog.js` is a view over |
 | `image.js` + `image-run.js` | The image path: gpt-image-2 via the Codex login, no CLI runner |
 | `handoff.js` · `workflows.js` · `utils.js` · `codex-auth.js` | Transcript serialisation, the run entry point, ids/parsing, the ChatGPT token |
 
@@ -201,6 +201,26 @@ keep in step — the manager is the only caller.
   another question and invented a third round instead of finding the second
   (live, 2026-08-24) — which is also why the skill's rules now separate
   reading a conversation from adding to one, and require a look before both.
+
+- **Kimi Code is the fifth harness, and the second that cannot open cold.**
+  It meets every requirement (`.specs/kimi-harness/research-01.md`, all
+  live-probed): skills at `$KIMI_CODE_HOME/skills`, one-shot `kimi -p …
+  --output-format stream-json`, resume `-S <id>`, window `kimi -S <id>`,
+  store `sessions/wd_*/<id>/agents/main/wire.jsonl`. Three things are unlike
+  the other four and each is a finding, not a gap: **the packet rides in
+  argv** (no `--prompt-file`, and `-p -` is a literal dash, so `stdinMode` is
+  `none`); **full permissions are IMPLIED by `-p`** — `--auto` and `--yolo`
+  are both REFUSED alongside it, so the missing danger flag is the correct
+  shape; and **`dropEnv` is empty** because kimi authenticates from its own
+  `config.toml` and has no env var whose presence switches billing. `-S`
+  resumes but cannot mint, so kimi takes the codex path: stream turn one, read
+  the id off `session.resume_hint` (which arrives at the END of the stream),
+  then the pane becomes the window. It has no effort flag at all —
+  `default_effort` is per-model in that same config file, which is the user's
+  and holds their API key, so `EFFORTS.kimi` is empty and a row's effort is
+  ignored rather than invented. Its transcript reader joins `content.part`
+  events **per `turnId`**: one answer is many parts, and one turn per part
+  would inflate the count `--unread` and `--wait` both key on.
 
 - **`cf catchup --wait` survives both of its races.** A fast agent can answer
   BEFORE `--wait` starts (this hung live, twice): a conversation ending in an

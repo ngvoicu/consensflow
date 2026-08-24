@@ -58,7 +58,7 @@ export function generateSkill(agents, options = {}) {
 
   return `---
 name: consensflow
-description: Consult one of the user's named AI agents — ${names} — each a real coding-harness CLI (claude, codex, pi, opencode) ${shape} Use whenever the user says "ask <name> …", "what does <name> think", "consult <name>", "get a second opinion from <name>", or names any agent — and also when you yourself want an independent second opinion on a risky or debatable decision.
+description: Consult one of the user's named AI agents — ${names} — each a real coding-harness CLI (claude, codex, pi, opencode, kimi) ${shape} Use whenever the user says "ask <name> …", "what does <name> think", "consult <name>", "get a second opinion from <name>", or names any agent — and also when you yourself want an independent second opinion on a risky or debatable decision.
 ---
 
 # ConsensFlow agents
@@ -66,8 +66,8 @@ description: Consult one of the user's named AI agents — ${names} — each a r
 The user keeps a roster of named AI agents. Each one is a model at a fixed
 ${
   inCmux
-    ? 'effort, run by its own harness (claude, codex, pi, opencode) — a separately\ninstalled CLI.'
-    : 'effort, run one-shot by its own harness (claude, codex, pi, opencode) — a\nseparately installed CLI.'
+    ? 'effort, run by its own harness (claude, codex, pi, opencode, kimi) — a\nseparately installed CLI.'
+    : 'effort, run one-shot by its own harness (claude, codex, pi, opencode,\nkimi) — a separately installed CLI.'
 } Consulting an agent means running its command below
 with your question as the final argument. It runs in **your current working
 directory** and reads the project's files itself, so you need not paste file

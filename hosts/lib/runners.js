@@ -33,7 +33,7 @@ export function toolsForPi() {
  * would cross-wire two conversations on a mixed roster. pi is absent on
  * purpose — we mint its id, so there is nothing to capture.
  */
-const SESSION_ID_FIELD = { "claude-code": "session_id", codex: "thread_id", opencode: "sessionID" };
+const SESSION_ID_FIELD = { "claude-code": "session_id", codex: "thread_id", opencode: "sessionID", kimi: "session_id" };
 
 export function extractSessionId(kind, line) {
   const field = SESSION_ID_FIELD[kind];
@@ -49,7 +49,7 @@ export function extractSessionId(kind, line) {
  * session rather than sitting beside it — asking for a session and discarding
  * it at once is the kind of contradiction a CLI resolves silently and wrongly.
  */
-export function buildRunnerInvocation(agent, packetPath, cwd, session) {
+export function buildRunnerInvocation(agent, packetPath, cwd, session, packetText) {
   const p = agent;
   // Three states, not two. `session === undefined` is a one-shot and refuses a
   // session outright. A session object with no id is the FIRST run of a
@@ -115,6 +115,26 @@ export function buildRunnerInvocation(agent, packetPath, cwd, session) {
       // Same billing guard as claude: a set OPENAI_API_KEY would switch codex off the ChatGPT login.
       return { command: "codex", args, stdinMode: "packet", cwd, env: { ...CHILD_ENV }, dropEnv: ["OPENAI_API_KEY"] };
     }
+    case "kimi": {
+      // Kimi Code takes its prompt in argv and nowhere else: there is no
+      // --prompt-file, and `-p -` is a literal "-" rather than stdin (probed
+      // 2026-08-24). So the packet travels as the argument, and stdin is idle.
+      const args = ["-p", packetText ?? ""];
+      // `-S` RESUMES only — it cannot mint a session the way pi's does, so a
+      // first turn passes nothing and reads its id off the stream instead.
+      // kimi also has no way to refuse a session, so a one-shot still leaves
+      // one behind; it simply never records which.
+      if (sessionId) args.push("-S", sessionId);
+      args.push("--output-format", "stream-json");
+      if (p.model) args.push("-m", p.model);
+      // No effort flag exists: kimi reads `default_effort` per model from the
+      // user's own config.toml. A row's effort is deliberately not forced in
+      // here — that file is theirs, and inventing a flag would fail the run.
+      // No dropEnv either: claude and codex have an env var whose presence
+      // silently switches billing, and kimi has none — it authenticates from
+      // that same config. The empty guard is a finding, not an omission.
+      return { command: "kimi", args, stdinMode: "none", cwd, env: { ...CHILD_ENV }, dropEnv: [] };
+    }
     case "opencode": {
       const args = ["run", "--auto", "--format", "json", "--dir", cwd, "--file", packetPath];
       if (sessionId) args.push("--session", sessionId);
@@ -141,7 +161,7 @@ export async function runAgent(input) {
   await fs.writeFile(packetPath, packet, "utf8");
 
   const invocationCwd = agent.cwd ? resolveInside(cwd, agent.cwd) : path.resolve(cwd);
-  const invocation = buildRunnerInvocation(agent, packetPath, invocationCwd, session);
+  const invocation = buildRunnerInvocation(agent, packetPath, invocationCwd, session, packet);
   // Build a bounded, normalized event trail as the run streams, and forward each event to onEvent
   // (the live stream). The trail feeds surfaceOutput's no-answer fallback and the
   // transcript backstop. tryParseJson tolerates non-JSONL lines (returns null → skipped); adaptLine never throws.
@@ -499,6 +519,12 @@ export function interactiveResume(agent, sessionId, seed) {
       const args = ["--session", sessionId];
       if (seed) args.push("--prompt", seed);
       return { command: "opencode", args, env: { ...CHILD_ENV }, dropEnv: [] };
+    }
+    case "kimi": {
+      // `-S <id>` without `-p` IS the interactive window on that session.
+      // There is no way to seed the first message of an interactive kimi, so
+      // a follow-up sent this way arrives as a pane the user types into.
+      return { command: "kimi", args: ["-S", sessionId], env: { ...CHILD_ENV }, dropEnv: [] };
     }
     default:
       return null;

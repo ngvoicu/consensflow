@@ -61,6 +61,15 @@ const HARNESSES = [
     locations: [HOMED(['.pi', 'bin']), HOMED(['.local', 'bin'])],
     skillsDir: (env) => join(home(env), '.pi', 'harness', 'skills'),
   },
+  {
+    // The CLI is `kimi`; the product is Kimi Code, which is why its home is
+    // `.kimi-code`. `KIMI_CODE_HOME` moves the whole thing, its own importer
+    // skill says so, and skills sit at User scope directly under it.
+    id: 'kimi',
+    command: 'kimi',
+    locations: [HOMED(['.kimi-code', 'bin']), HOMED(['.local', 'bin'])],
+    skillsDir: (env) => join(env.KIMI_CODE_HOME ?? join(home(env), '.kimi-code'), 'skills'),
+  },
 ]
 
 /**

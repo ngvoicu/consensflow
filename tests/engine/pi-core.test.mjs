@@ -201,6 +201,9 @@ test('agent presets expose the allowed creation list', () => {
     'nott',
     'ymir',
     'aegir',
+    'ilmarinen',
+    'seppo',
+    'ahti',
     'pygmalion',
   ])
   assert.equal(getPreset('zeus').kind, 'claude-code')
@@ -250,8 +253,16 @@ test('agent presets expose the allowed creation list', () => {
   assert.equal(getPreset('mani').kind, 'opencode')
   assert.equal(getPreset('mani').model, 'openrouter/moonshotai/kimi-k3')
   assert.equal(getPreset('mani').effort, undefined)
-  // Kimi K2.7 Code was retired in 1.9.0 (K3 supersedes it); Kimi is K3-only on both engines now.
-  assert.ok(!AGENT_PRESETS.some((p) => String(p.model).includes('kimi-k2')))
+  // Kimi K2.7 Code was retired from the OpenRouter list in 1.9.0 — K3
+  // supersedes it there, and that path is K3-only. On the kimi harness itself
+  // the code-specialist K2.7 models stay: K3 is a general flagship with no
+  // code counterpart, so they are the newest of a different family, and K2.6
+  // (which K3 does supersede) is the one left out.
+  assert.ok(!AGENT_PRESETS.some((p) => String(p.model).includes('openrouter/moonshotai/kimi-k2')))
+  assert.ok(!AGENT_PRESETS.some((p) => String(p.model).includes('kimi-k2.6')))
+  assert.equal(getPreset('ilmarinen').kind, 'kimi')
+  assert.equal(getPreset('ilmarinen').model, 'moonshot-ai/kimi-k3')
+  assert.equal(getPreset('ilmarinen').effort, undefined, 'kimi has no effort flag')
   assert.equal(getPreset('endymion').model, 'openrouter/moonshotai/kimi-k3')
   assert.equal(getPreset('endymion').kind, 'pi')
   assert.equal(getPreset('mani').model, 'openrouter/moonshotai/kimi-k3')
@@ -316,7 +327,13 @@ test('catalog invariants: unique mentions, no duplicate backends', () => {
 })
 
 test('every preset survives normalize + runner invocation with correct flags (all models × all engines)', () => {
-  const KIND_COMMAND = { pi: 'pi', 'claude-code': 'claude', codex: 'codex', opencode: 'opencode' }
+  const KIND_COMMAND = {
+    pi: 'pi',
+    'claude-code': 'claude',
+    codex: 'codex',
+    opencode: 'opencode',
+    kimi: 'kimi',
+  }
   for (const preset of AGENT_PRESETS) {
     const agent = normalizeAgent(agentFromPreset(preset.preset))
     assert.equal(agent.id, preset.id, `${preset.preset}: id survives the pipeline`)
@@ -331,7 +348,12 @@ test('every preset survives normalize + runner invocation with correct flags (al
     assert.equal(invocation.command, KIND_COMMAND[preset.kind], `${preset.preset}: engine command`)
     const modelIdx = invocation.args.indexOf(preset.model)
     assert.ok(modelIdx > 0, `${preset.preset}: model reaches the args`)
-    assert.equal(invocation.args[modelIdx - 1], '--model', `${preset.preset}: model flag`)
+    // Kimi Code spells it `-m`; every other engine spells it `--model`.
+    assert.equal(
+      invocation.args[modelIdx - 1],
+      preset.kind === 'kimi' ? '-m' : '--model',
+      `${preset.preset}: model flag`,
+    )
 
     if (preset.kind === 'claude-code') {
       assert.equal(

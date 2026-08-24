@@ -172,3 +172,108 @@ test('seed: the message marker survives sections, so catchup unwraps to the ques
   assert.ok(marker > 0, 'sections present → marker present')
   assert.equal(seed.slice(marker + '## Message from the user'.length).trim(), 'the actual question')
 })
+
+// --- kimi: the fifth harness, and the second that cannot open cold ---------
+
+test('kimi: a one-shot carries the packet in argv, because nothing else works', async () => {
+  const { buildRunnerInvocation } = await import('../../hosts/lib/runners.js')
+  const agent = { id: 'ilmarinen', kind: 'kimi', model: 'moonshot-ai/kimi-k3' }
+
+  const cold = buildRunnerInvocation(agent, '/tmp/packet.md', '/repo', undefined, 'THE PACKET')
+
+  assert.equal(cold.command, 'kimi')
+  assert.deepEqual(cold.args.slice(0, 2), ['-p', 'THE PACKET'])
+  assert.equal(cold.stdinMode, 'none', 'there is no --prompt-file, and `-p -` is a literal dash')
+  assert.ok(cold.args.includes('--output-format') && cold.args.includes('stream-json'))
+  assert.deepEqual(
+    [cold.args[cold.args.indexOf('-m')], cold.args[cold.args.indexOf('-m') + 1]],
+    ['-m', 'moonshot-ai/kimi-k3'],
+  )
+  assert.ok(!cold.args.includes('-S'), 'a first turn has nothing to resume')
+})
+
+test('kimi: full permissions are IMPLIED by -p, so no flag is the correct shape', () => {
+  // Probed 2026-08-24: `--auto` and `--yolo` are both REFUSED alongside `-p`,
+  // and the session log records "Auto permission mode is active". A missing
+  // danger flag here is the verified answer, not an omission.
+  const agent = { id: 'ilmarinen', kind: 'kimi', model: 'moonshot-ai/kimi-k3' }
+  const args = interactiveStart(agent, 'x', 's')
+
+  assert.equal(args, null, 'kimi cannot open a window on an id it was given')
+})
+
+test('kimi: effort is ignored, because Kimi Code has no effort flag', async () => {
+  const { buildRunnerInvocation } = await import('../../hosts/lib/runners.js')
+  // `default_effort` lives per-model in the user's own config.toml — the file
+  // that also holds their API key. Inventing a flag would fail the run.
+  const args = buildRunnerInvocation(
+    { id: 'ilmarinen', kind: 'kimi', model: 'moonshot-ai/kimi-k3', effort: 'max' },
+    '/tmp/packet.md',
+    '/repo',
+    undefined,
+    'p',
+  ).args
+
+  assert.ok(!args.some((a) => String(a).includes('effort')))
+  assert.ok(!args.includes('max'))
+})
+
+test('kimi: no billing guard exists to carry — its key is in a config file', async () => {
+  const { buildRunnerInvocation } = await import('../../hosts/lib/runners.js')
+  const invocation = buildRunnerInvocation(
+    { id: 'ilmarinen', kind: 'kimi', model: 'moonshot-ai/kimi-k3' },
+    '/tmp/packet.md',
+    '/repo',
+    undefined,
+    'p',
+  )
+
+  // claude and codex strip an env var whose presence silently switches
+  // billing. Kimi Code authenticates from config.toml, so there is nothing to
+  // strip: the empty guard is a finding, and this pins it as one.
+  assert.deepEqual(invocation.dropEnv, [])
+  assert.equal(invocation.env.CONSENSFLOW_CHILD, '1')
+})
+
+test('kimi: resuming replaces nothing and adds -S', async () => {
+  const { buildRunnerInvocation } = await import('../../hosts/lib/runners.js')
+  const args = buildRunnerInvocation(
+    { id: 'ilmarinen', kind: 'kimi', model: 'moonshot-ai/kimi-k3' },
+    '/tmp/packet.md',
+    '/repo',
+    { sessionId: 'session_abc' },
+    'follow up',
+  ).args
+
+  assert.deepEqual([args[args.indexOf('-S')], args[args.indexOf('-S') + 1]], ['-S', 'session_abc'])
+})
+
+test('kimi: the session id is read from its resume hint', async () => {
+  const { extractSessionId } = await import('../../hosts/lib/runners.js')
+
+  assert.equal(
+    extractSessionId('kimi', {
+      role: 'meta',
+      type: 'session.resume_hint',
+      session_id: 'session_1',
+    }),
+    'session_1',
+  )
+  // It arrives at the END of kimi's stream, unlike codex's, so a run killed
+  // early simply records none — never a wrong one.
+  assert.equal(extractSessionId('kimi', { role: 'assistant', content: 'hi' }), null)
+})
+
+test('kimi: the window is its own interactive session, resumed', async () => {
+  const { interactiveResume } = await import('../../hosts/lib/runners.js')
+  const window = interactiveResume({ id: 'ilmarinen', kind: 'kimi' }, 'session_abc')
+
+  assert.equal(window.command, 'kimi')
+  assert.deepEqual(window.args, ['-S', 'session_abc'])
+  // No seed: an interactive kimi takes no first message, so a follow-up sent
+  // this way arrives as a pane the user types into.
+  assert.deepEqual(interactiveResume({ kind: 'kimi' }, 'session_abc', 'seed').args, [
+    '-S',
+    'session_abc',
+  ])
+})

@@ -32,7 +32,7 @@ import { presetDrift, syncAgentWithPreset } from '../hosts/lib/presets.js'
 // agent. There is no CLI behind it — gpt-image-2 is reached through the Codex
 // login — but the roster, the catalog and `cf run` treat it like any other, so
 // @pygmalion works wherever the rest do.
-export const HARNESSES = ['claude', 'codex', 'pi', 'opencode', 'image']
+export const HARNESSES = ['claude', 'codex', 'pi', 'opencode', 'kimi', 'image']
 
 const NAME_PATTERN = /^[a-z][a-z0-9-]*$/
 const KIND_TO_HARNESS = {
@@ -40,6 +40,7 @@ const KIND_TO_HARNESS = {
   codex: 'codex',
   pi: 'pi',
   opencode: 'opencode',
+  kimi: 'kimi',
   image: 'image',
 }
 const HARNESS_TO_KIND = {
@@ -47,6 +48,7 @@ const HARNESS_TO_KIND = {
   codex: 'codex',
   pi: 'pi',
   opencode: 'opencode',
+  kimi: 'kimi',
   image: 'image',
 }
 
