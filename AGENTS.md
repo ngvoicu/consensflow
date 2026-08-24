@@ -185,6 +185,24 @@ keep in step — the manager is the only caller.
   All three discoveries read the harness's own store and return null rather
   than throwing.
 
+- **Two harnesses stop to ask before a window opens, and they need opposite
+  treatment.** kimi's prompt gates ONE thing and says so: the project's own MCP
+  servers, declared in `.kimi-code/mcp.json` or `.mcp.json`. A directory
+  declaring none grants nothing by being trusted, so ConsensFlow answers that
+  formality itself — `kimiTrustDirectory` writes kimi's own shape into kimi's
+  own store at 0600, and the key is `wd_<basename>_<sha256(path)[0..12]>`,
+  verified against a key kimi generated for the same directory. A directory
+  that DOES declare a server is asking to run a command its author chose, so
+  that answer stays the user's. codex is the reverse: its window is seeded
+  through argv, so the prompt costs nothing — it waits with the question in
+  hand — but its trust lives in `config.toml`, the USER'S file, alongside their
+  model, approvals and MCP servers. `codexTrustsDirectory` therefore only
+  READS (a deliberately narrow parse: `[projects."<path>"]` headers and the
+  `trust_level` under each, matching exactly or by ancestor), and an untrusted
+  directory gets one line telling the lead why nothing may come back until
+  somebody answers in the pane. Writing it would be the settings.json rule
+  broken for our own convenience.
+
 - **A lead reads what is new, not everything.** `cf catchup <name> --unread`
   is only what has been said since THIS lead last looked — a turn count per
   lead, kept as `seen` on the conversation row; plain `cf catchup` still shows

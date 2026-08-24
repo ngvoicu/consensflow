@@ -291,3 +291,42 @@ test('kimi: the window is its own interactive session, resumed', async () => {
     'session_abc',
   ])
 })
+
+// --- who will stop to ask before opening -----------------------------------
+
+test('trust: codex trust is read from its config, exact or by an ancestor', async () => {
+  const { codexTrustsDirectory } = await import('../../hosts/lib/harness-transcript.js')
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-trust-'))
+  try {
+    const env = { HOME: dir, CODEX_HOME: path.join(dir, '.codex') }
+    await mkdir(env.CODEX_HOME, { recursive: true })
+    await writeFile(
+      path.join(env.CODEX_HOME, 'config.toml'),
+      [
+        'model = "gpt-5.6-sol"',
+        '[projects."/work/trusted-root"]',
+        'trust_level = "trusted"',
+        '[projects."/work/declined"]',
+        'trust_level = "untrusted"',
+        '[shell_environment_policy]',
+        'inherit = "all"',
+      ].join('\n'),
+    )
+
+    assert.equal(await codexTrustsDirectory('/work/trusted-root', env), true)
+    // A trusted root covers what is inside it.
+    assert.equal(await codexTrustsDirectory('/work/trusted-root/sub', env), true)
+    assert.equal(await codexTrustsDirectory('/work/declined', env), false)
+    assert.equal(await codexTrustsDirectory('/work/never-seen', env), false)
+    // The prefix must be a path boundary, not a string one.
+    assert.equal(await codexTrustsDirectory('/work/trusted-rootless', env), false)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('trust: no codex config at all means it will ask', async () => {
+  const { codexTrustsDirectory } = await import('../../hosts/lib/harness-transcript.js')
+
+  assert.equal(await codexTrustsDirectory('/anywhere', { HOME: '/nonexistent-cf' }), false)
+})

@@ -521,3 +521,58 @@ export async function kimiTrustDirectory(cwd, env = process.env) {
     { encoding: "utf8", mode: 0o600 },
   );
 }
+
+/**
+ * Whether codex will open here without stopping to ask.
+ *
+ * An interactive codex in a directory it does not know opens on "Do you trust
+ * the contents of this directory?", which gates project-local config, hooks
+ * and exec policies. Unlike kimi, the task is not lost when this appears — a
+ * codex window is seeded through argv, so it waits with the question in hand.
+ * What IS lost is the lead's understanding: it sits on `cf catchup --wait` for
+ * an answer that cannot come until somebody presses a key in the pane.
+ *
+ * So this is READ, and only read. Codex records trust in `config.toml`, which
+ * is the USER'S file — the same file their model, their approvals and their
+ * MCP servers live in — and this project does not write another tool's
+ * config. (kimi was different: a dedicated store, one small file per root.)
+ *
+ * The parse is deliberately narrow: the `[projects."<path>"]` headers and the
+ * `trust_level` under each. A TOML document has far more in it than that, and
+ * reading only what the question needs cannot misinterpret the rest.
+ */
+export async function codexTrustsDirectory(cwd, env = process.env) {
+  const file = path.join(env.CODEX_HOME ?? path.join(home(env), ".codex"), "config.toml");
+  let raw;
+  try {
+    raw = await fs.readFile(file, "utf8");
+  } catch {
+    // No config at all: codex has never been told, so assume it will ask.
+    return false;
+  }
+
+  const resolved = path.resolve(cwd);
+  let current = null;
+  for (const line of raw.split("\n")) {
+    const header = /^\s*\[projects\."(.+)"\]\s*$/.exec(line);
+    if (header !== null) {
+      current = header[1];
+      continue;
+    }
+    if (current === null) continue;
+    if (/^\s*\[/.test(line)) {
+      current = null;
+      continue;
+    }
+    const trust = /^\s*trust_level\s*=\s*"([^"]*)"/.exec(line);
+    if (trust === null) continue;
+    if (trust[1] !== "trusted") {
+      current = null;
+      continue;
+    }
+    // A trusted root covers the directories inside it.
+    if (resolved === current || resolved.startsWith(`${current}${path.sep}`)) return true;
+    current = null;
+  }
+  return false;
+}
