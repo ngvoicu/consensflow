@@ -601,9 +601,18 @@ async function runVerb(rest) {
 
   const cwd = process.cwd()
 
-  // An image agent has no harness to launch and no packet to carry: the
-  // prompt goes straight to gpt-image-2 through the Codex login.
+  // An image agent draws and stops: there is no conversation to continue and
+  // no window to open, so it never joins the threading below. Say so rather
+  // than accepting a flag and ignoring it — a lead asked for `--session` here
+  // and then hunted for a conversation that was never going to exist (live,
+  // 2026-08-24).
   if (row.kind === 'image') {
+    for (const flag of ['session', 'new', 'thread']) {
+      if (values[flag] !== undefined && values[flag] !== false) {
+        fail(`@${row.id} draws images; it holds no conversation, so --${flag} means nothing here`)
+        return
+      }
+    }
     const result = await runImageAgent({
       cwd,
       agent: row,
@@ -611,6 +620,9 @@ async function runVerb(rest) {
       imagePaths: values.image ?? [],
     })
     out(values.json ? JSON.stringify(result, null, 2) : renderImageRun(result))
+    // A failed generation must fail the command, or a caller that only checks
+    // the exit code believes it has a picture.
+    if (!result.ok) process.exitCode = 1
     return
   }
 

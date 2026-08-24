@@ -53,7 +53,7 @@ license to skip the skill.
 | `state.js` | The one root, workspace keys, run dirs, `writeJsonAtomic` (shared, one copy) |
 | `transcript.js` + `transcript-events.js` | Normalising four engines' event shapes into one vocabulary |
 | `presets.js` | The 57 catalog presets — the single source `src/catalog.js` is a view over |
-| `image.js` + `image-run.js` | The image path: gpt-image-2 via the Codex login, no CLI runner |
+| `image.js` + `image-run.js` | The image path: gpt-image-2, drawn by ASKING codex rather than imitating it. Calling the responses endpoint ourselves is refused now — a ChatGPT login is never handed the image tool — but codex's own sessions still are, so `runImageAgent` is one `codex exec` with an instruction and a path. The file on disk is the proof: a run that wrote none is `ok: false` with the reason recorded, because an empty run directory used to look exactly like work in progress |
 | `handoff.js` · `workflows.js` · `utils.js` · `codex-auth.js` | Transcript serialisation, the run entry point, ids/parsing, the ChatGPT token |
 
 ## The desktop app
@@ -245,6 +245,16 @@ keep in step — the manager is the only caller.
   (`CONSENSFLOW_WAIT_GRACE_MS`, default 4s) watches for a newer user turn
   first, and only then settles for the standing exchange. It always prints
   from the last user turn, so a stale answer is recognisable by its question.
+
+- **An image agent draws and stops.** It holds no conversation and opens no
+  window, so `--session`, `--new` and `--thread` are REFUSED there rather than
+  accepted and ignored — a lead passed one, was told a conversation name, and
+  hunted for a conversation that never existed (live, 2026-08-24). And a
+  generation that produced no file fails the command: `ok: false`, the reason
+  in `result.json`, codex's own words in `codex.log`, exit 1. The old path
+  left an empty directory and no record at all, which is why the same lead
+  reported "it is running" about a run that had already died with a 400 in
+  its face.
 
 - **One spawn verb, three modes.** `cf run @name "<task>"` builds the packet,
   applies the billing guards and streams the run, whichever harness is behind

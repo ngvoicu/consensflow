@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import fsp, { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -329,4 +329,55 @@ test('trust: no codex config at all means it will ask', async () => {
   const { codexTrustsDirectory } = await import('../../hosts/lib/harness-transcript.js')
 
   assert.equal(await codexTrustsDirectory('/anywhere', { HOME: '/nonexistent-cf' }), false)
+})
+
+// --- image agents draw, and say so when they do not ------------------------
+
+test('image: a run that produced no file is a failure, and leaves a record', async () => {
+  const { runImageAgent } = await import('../../hosts/lib/image-run.js')
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-img-'))
+  const previousHome = process.env.CONSENSFLOW_HOME
+  const previousPath = process.env.PATH
+  const previousCodex = process.env.CODEX_HOME
+  try {
+    process.env.CONSENSFLOW_HOME = path.join(dir, 'home')
+    process.env.CODEX_HOME = path.join(dir, 'codex')
+    await mkdir(process.env.CODEX_HOME, { recursive: true })
+    await writeFile(
+      path.join(process.env.CODEX_HOME, 'auth.json'),
+      JSON.stringify({ tokens: { access_token: 't', account_id: 'a' } }),
+    )
+    // A codex that answers cheerfully and draws nothing — the exact shape the
+    // old path could not tell from success, because it left an empty run
+    // directory and no result at all.
+    const bin = path.join(dir, 'bin')
+    await mkdir(bin, { recursive: true })
+    const stub = path.join(bin, 'codex')
+    await writeFile(stub, '#!/bin/sh\necho "all done!"\n')
+    await fsp.chmod(stub, 0o755)
+    process.env.PATH = `${bin}:${process.env.PATH}`
+
+    const ws = path.join(dir, 'ws')
+    await mkdir(ws, { recursive: true })
+    const result = await runImageAgent({
+      cwd: ws,
+      agent: { id: 'pygmalion', kind: 'image' },
+      prompt: 'anything',
+    })
+
+    assert.equal(result.ok, false, 'no file on disk means no image, whatever codex said')
+    assert.ok(result.error, 'and the failure is named')
+    const written = JSON.parse(await fsp.readFile(path.join(result.runDir, 'result.json'), 'utf8'))
+    assert.equal(written.ok, false, 'the record survives the failure')
+    assert.ok(
+      (await fsp.readFile(path.join(result.runDir, 'codex.log'), 'utf8')).includes('all done'),
+    )
+  } finally {
+    if (previousHome === undefined) delete process.env.CONSENSFLOW_HOME
+    else process.env.CONSENSFLOW_HOME = previousHome
+    if (previousCodex === undefined) delete process.env.CODEX_HOME
+    else process.env.CODEX_HOME = previousCodex
+    process.env.PATH = previousPath
+    await rm(dir, { recursive: true, force: true })
+  }
 })
