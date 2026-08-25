@@ -23,7 +23,9 @@ export const SCENARIOS = [
       {
         say: 'ask nyx for a joke',
         expect: [
-          ['names the conversation first', (log) => ran(log, 'cf mint')],
+          // With the agent, not bare: a tab titled `quartz-valley` does not say
+          // whose window the pane holds, which is the reason names carry one.
+          ['names the conversation first, with the agent', (log) => ran(log, 'cf mint @nyx')],
           ['opens a pane', (log) => ran(log, 'cmux new-pane')],
           ['sends the consult into that pane', (log) => sent(log, 'cf run @nyx')],
           ['does NOT consult in its own pane', (log) => !ran(log, 'cf run')],

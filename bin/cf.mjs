@@ -524,8 +524,13 @@ async function openWindow(row, name, record, packetInput) {
     const since = Date.now() - 2000
     await saveWindowRow(name, row, record, null)
     out(`read it back with: cf catchup ${name}`)
+    // The search runs alongside the window because the id exists only once the
+    // harness has written its own store. A window that ends early — quit, or a
+    // codex trust prompt answered "no" — has nothing left to announce, so its
+    // close pulls the deadline in. Not to zero: a harness may still be writing
+    // on the way out, which is the whole reason kimi's id is recovered at all.
+    let deadline = Date.now() + 60_000
     const found = (async () => {
-      const deadline = Date.now() + 60_000
       while (Date.now() < deadline) {
         const id = await discover(cwdOf(), since, env)
         if (id !== null) {
@@ -536,6 +541,7 @@ async function openWindow(row, name, record, packetInput) {
       }
     })()
     await handOver(name, row.id, invocation)
+    deadline = Math.min(deadline, Date.now() + 3000)
     await found
     return true
   }
@@ -1645,7 +1651,11 @@ async function main() {
   // cc and pi write the shared roster without telling v3; any invocation is
   // an opportunity to notice and regenerate the installed skill. Skills
   // verbs manage installation explicitly, so they are exempt.
-  if (['agent', 'setup', 'ui', 'doctor', 'mode'].includes(command)) {
+  //
+  // `run` belongs here most of all: a lead that only ever consults would
+  // otherwise read a skill generated from the old roster until some other
+  // verb happened to run. The check is one hash compare on the common path.
+  if (['agent', 'setup', 'ui', 'doctor', 'mode', 'run', 'catalog'].includes(command)) {
     healSkillIfStale(env)
   }
 

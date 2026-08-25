@@ -260,7 +260,11 @@ describe('the description is all a lead reads before it decides to look inside',
 
     // The run prints its conversation name into a pane the lead cannot read;
     // minting first is what makes the tab title and the read-back possible.
-    assert.match(cmux, /NAME=\$\(cf mint\)/)
+    // It mints WITH the agent: `cf mint` alone returns the bare two-word half,
+    // so the tab would read `quartz-valley` and say nothing about whose window
+    // it holds — the whole point of prefixing a conversation with its agent.
+    assert.match(cmux, /NAME=\$\(cf mint @<name>\)/)
+    assert.doesNotMatch(cmux, /NAME=\$\(cf mint\)/)
     assert.match(cmux, /--new --session /)
     // And finding the pane again is a quoted command, not an exploration.
     assert.match(cmux, /cmux list-pane-surfaces/)

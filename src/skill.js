@@ -206,8 +206,10 @@ need to explore cmux's CLI, and you must not run the consult in this pane:
 
 \`\`\`bash
 # 1. name the conversation FIRST — the run will print its name into a pane
-#    you cannot read, so you mint it here and hand it in
-NAME=$(cf mint)
+#    you cannot read, so you mint it here and hand it in. Give it the agent:
+#    the name then says whose window the pane holds (ares-bubble-sky), which
+#    is what step 4 titles the tab with.
+NAME=$(cf mint @<name>)
 
 # 2. a pane beside you, without stealing focus. Prints: OK surface:NN pane:NN
 CMUX_QUIET=1 cmux new-pane --type terminal --direction right --focus false
