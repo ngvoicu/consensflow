@@ -25,8 +25,9 @@ It carries its own Node runtime and its own copy of ConsensFlow, so nothing has
 to be installed first, and everything else — agents, which harnesses consult,
 the skills — happens in its window.
 
-Latest build: **[releases](https://github.com/ngvoicu/consensflow/releases/latest)**
-— `ConsensFlow_<version>_aarch64.dmg`, Apple silicon.
+Latest build: **[releases](https://github.com/ngvoicu/consensflow/releases)**
+— `ConsensFlow_<version>_aarch64.dmg`, Apple silicon. (Not `/latest`: every
+build so far is a prerelease, and GitHub's `latest` skips those.)
 
 Or build your own, which is the same artifact:
 
