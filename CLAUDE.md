@@ -66,6 +66,19 @@ Load-bearing facts, each learned by running the built bundle:
   copies `bin/ src/ hosts/ skill/` into `src-tauri/resources/cli`. The Rust
   side runs that pair and consults nothing on the machine. Never copy the
   system Node: package-manager builds link machine-local dylibs.
+- **Self-contained cuts both ways: the machine runs the BUNDLE's copy.** `cf` on
+  PATH execs the app's node and the app's `Contents/Resources/cli`, so an edit to
+  `bin/ src/ hosts/ skill/` reaches nothing on this machine until the app is
+  rebuilt — and a skill regenerated in between is regenerated from the OLD
+  template. That is how a fixed recipe stayed broken for a day (2026-08-25): the
+  fix was in the repo, the lead was reading a skill written by the bundle. After
+  a CLI change: `cd app && npm run build`, or `npm run prepare-sidecar` plus a
+  mirror of `src-tauri/resources/cli/` onto the bundle's `Contents/Resources/cli/`
+  (adhoc-signed, `Sealed Resources=none`, so nothing is invalidated), then
+  `cf skills install`.
+- **The app's version is the CLI's version** (`tauri.conf.json` and `Cargo.toml`
+  track `package.json`), so `ConsensFlow_<version>_aarch64.dmg` says which
+  ConsensFlow is inside it and a release tag names one thing, not two.
 - macOS ATS blocks cleartext http in WKWebView → `bundle.macOS.exceptionDomain
   = "localhost"` and the URL must say `localhost`, not `127.0.0.1`.
 - Build the window AT the address (`WebviewUrl::External`); navigating after

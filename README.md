@@ -20,17 +20,22 @@ There is no daemon and no database. The skill is the product.
 
 ## Install
 
-**The app is the installation.** Build it, drag it to Applications, open it.
+**The app is the installation.** Download it, drag it to Applications, open it.
 It carries its own Node runtime and its own copy of ConsensFlow, so nothing has
 to be installed first, and everything else — agents, which harnesses consult,
 the skills — happens in its window.
+
+Latest build: **[releases](https://github.com/ngvoicu/consensflow/releases/latest)**
+— `ConsensFlow_<version>_aarch64.dmg`, Apple silicon.
+
+Or build your own, which is the same artifact:
 
 ```sh
 cd app && npm install && npm run build
 # → app/src-tauri/target/release/bundle/dmg/ConsensFlow_<version>_aarch64.dmg
 ```
 
-Unsigned for now, so the first launch needs right-click → **Open**.
+Unsigned either way, so the first launch needs right-click → **Open**.
 
 Nothing is seeded. Open the app, pick from the ready-made list — `zeus`,
 `hyperion`, `athena`, `endymion` … — or define your own with any model string
