@@ -36,7 +36,10 @@ cd app && npm install && npm run build
 # → app/src-tauri/target/release/bundle/dmg/ConsensFlow_<version>_aarch64.dmg
 ```
 
-Unsigned either way, so the first launch needs right-click → **Open**.
+Unsigned either way, so macOS blocks the first launch. Right-click → **Open**
+still works on older systems; since Sequoia, Gatekeeper no longer offers it for
+unnotarized apps — open it once, let it be refused, then **System Settings →
+Privacy & Security → Open Anyway**.
 
 Nothing is seeded. Open the app, pick from the ready-made list — `zeus`,
 `hyperion`, `athena`, `endymion` … — or define your own with any model string
