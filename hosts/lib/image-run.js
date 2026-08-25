@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { loadCodexAuth } from "./codex-auth.js";
-import { IMAGE_BACKEND } from "./image.js";
 import { childEnv } from "./runners.js";
 import { recordLatestRun, runsRoot } from "./state.js";
 import { createId } from "./utils.js";
@@ -30,6 +29,11 @@ import { spawn } from "node:child_process";
  * What it buys is a product with one fewer API client in it — an image agent
  * is now a harness we hand a task to, like every other agent here.
  */
+// The model codex is asked to draw with. It lived in image.js next to the HTTP
+// client that called it directly; that client is gone, and this is all of
+// image.js that any caller ever wanted.
+export const IMAGE_BACKEND = "gpt-image-2";
+
 const IMAGE_TIMEOUT_MS = 10 * 60_000;
 
 export async function runImageAgent(input) {

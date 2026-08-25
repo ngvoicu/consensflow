@@ -989,7 +989,7 @@ test("upsertAgent rejects a name slug that collides with another agent's id", as
 
 test('parity: shared lib files stay identical with the consensflow-pi sibling', async (t) => {
   const siblingLib = new URL('../../consensflow-pi/extensions/consensflow/lib/', import.meta.url)
-  for (const file of ['utils.js', 'workflows.js', 'transcript-events.js']) {
+  for (const file of ['utils.js', 'transcript-events.js']) {
     let sibling
     try {
       sibling = await readFile(new URL(file, siblingLib), 'utf8')

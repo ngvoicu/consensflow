@@ -4,7 +4,30 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { decodeChatGptAccountId } from "./image.js";
+
+const JWT_AUTH_CLAIM = "https://api.openai.com/auth";
+
+// Extract the chatgpt_account_id claim from a ChatGPT OAuth JWT. It lived in
+// image.js beside the direct-API client that sent it as a header; that client
+// is gone, and the only caller left is the login reader below.
+export function decodeChatGptAccountId(token) {
+  const parts = String(token ?? "").split(".");
+  if (parts.length !== 3 || !parts[1]) {
+    throw new Error("Codex token is not a JWT — run `codex login` (ChatGPT Plus/Pro).");
+  }
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+  } catch (error) {
+    throw new Error(`Failed to decode Codex token: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const claims = payload?.[JWT_AUTH_CLAIM];
+  const accountId = claims && typeof claims === "object" ? claims.chatgpt_account_id : undefined;
+  if (typeof accountId !== "string" || !accountId) {
+    throw new Error("Codex token has no chatgpt_account_id — run `codex login` again.");
+  }
+  return accountId;
+}
 
 export function codexAuthPath() {
   return path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "auth.json");

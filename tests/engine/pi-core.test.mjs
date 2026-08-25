@@ -4,14 +4,6 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { serializeTranscript } from '../../hosts/lib/handoff.js'
-import {
-  buildImageRequestBody,
-  decodeChatGptAccountId,
-  extractImageFromEvents,
-  imageFileToDataUrl,
-  saveImagePng,
-} from '../../hosts/lib/image.js'
 import { createPacket } from '../../hosts/lib/packets.js'
 import {
   AGENT_PRESETS,
@@ -790,140 +782,6 @@ test('agentFromPreset can rename while keeping the backend', () => {
   assert.equal(mani.name, 'Mani')
 })
 
-test('serializeTranscript preserves chronological (root->leaf) order with role labels and tool calls', () => {
-  // getBranch() returns entries root -> leaf (oldest first); serialization keeps that order.
-  const branch = [
-    { type: 'message', id: '0', message: { role: 'user', content: 'first question' } },
-    {
-      type: 'message',
-      id: '1',
-      message: { role: 'assistant', content: [{ type: 'text', text: 'First reply' }] },
-    },
-    { type: 'message', id: '2', message: { role: 'user', content: 'second question' } },
-    {
-      type: 'message',
-      id: '3',
-      message: {
-        role: 'assistant',
-        content: [
-          { type: 'text', text: 'Second reply' },
-          { type: 'toolCall', name: 'read', arguments: { path: 'a.ts' } },
-        ],
-      },
-    },
-  ]
-  const text = serializeTranscript(branch, { maxBytes: 10000 })
-  assert.match(text, /User:\nfirst question/)
-  assert.match(text, /Lead:\nFirst reply/)
-  assert.match(text, /→ read\(/)
-  assert.ok(text.indexOf('first question') < text.indexOf('second question'), 'chronological order')
-})
-
-test('serializeTranscript honors the latest compaction summary', () => {
-  // root -> leaf order: the dropped message precedes the compaction, kept messages follow it.
-  const branch = [
-    { type: 'message', id: 'old', message: { role: 'user', content: 'ancient dropped question' } },
-    { type: 'compaction', id: 'c1', summary: 'the earlier stuff', firstKeptEntryId: 'k1' },
-    { type: 'message', id: 'k1', message: { role: 'user', content: 'kept question' } },
-    {
-      type: 'message',
-      id: 'k2',
-      message: { role: 'assistant', content: [{ type: 'text', text: 'after compaction reply' }] },
-    },
-  ]
-  const text = serializeTranscript(branch)
-  assert.match(text, /\[Earlier conversation summary\]\nthe earlier stuff/)
-  assert.match(text, /kept question/)
-  assert.doesNotMatch(text, /ancient dropped question/)
-})
-
-test('serializeTranscript caps bytes keeping the tail, and handles empty input', () => {
-  const long = Array.from({ length: 50 }, (_, i) => ({
-    type: 'message',
-    id: String(i),
-    message: { role: 'user', content: 'x'.repeat(500) },
-  }))
-  const text = serializeTranscript(long, { maxBytes: 2000 })
-  assert.ok(Buffer.byteLength(text, 'utf8') <= 2000)
-  assert.match(text, /\[earlier handoff truncated\]/)
-  assert.equal(serializeTranscript([]), '')
-  assert.equal(serializeTranscript(null), '')
-})
-
-test('serializeTranscript honors the CONSENSFLOW_HANDOFF_MAX_BYTES env budget when no maxBytes is passed', () => {
-  // ~25 KB of entries: under the 48 KB default (no truncation), so the marker proves the env took effect.
-  const long = Array.from({ length: 50 }, (_, i) => ({
-    type: 'message',
-    id: String(i),
-    message: { role: 'user', content: 'x'.repeat(500) },
-  }))
-  const prev = process.env.CONSENSFLOW_HANDOFF_MAX_BYTES
-  try {
-    process.env.CONSENSFLOW_HANDOFF_MAX_BYTES = '2000'
-    const text = serializeTranscript(long) // no options -> env budget applies
-    assert.ok(Buffer.byteLength(text, 'utf8') <= 2000)
-    assert.match(text, /\[earlier handoff truncated\]/)
-  } finally {
-    if (prev === undefined) delete process.env.CONSENSFLOW_HANDOFF_MAX_BYTES
-    else process.env.CONSENSFLOW_HANDOFF_MAX_BYTES = prev
-  }
-})
-
-test('serializeTranscript surfaces prior ConsensFlow agent exchanges (cross-pollination)', () => {
-  const branch = [
-    { type: 'message', id: '0', message: { role: 'user', content: "let's design the cache" } },
-    {
-      type: 'custom_message',
-      id: '1-stream',
-      customType: 'consensflow',
-      content: '→ read({"path":"cache.ts"})',
-      details: { streamEvent: true, agent: { id: 'iris' } },
-    },
-    {
-      type: 'custom_message',
-      id: '1',
-      customType: 'consensflow',
-      content: '# @iris\n\nRun: ask-123\nExit: 0\n\nUse a write-through cache.',
-      details: {
-        agent: { id: 'iris' },
-        prompt: 'which cache strategy?',
-        output: 'Use a write-through cache.',
-      },
-    },
-  ]
-  const text = serializeTranscript(branch)
-  assert.match(text, /User → @iris: which cache strategy\?/)
-  assert.match(text, /@iris replied:\nUse a write-through cache\./)
-  // The run-metadata noise from the rendered message is not used when structured details exist;
-  // live stream crumbs are display-only and do not cross-pollinate later agent handoffs.
-  assert.doesNotMatch(text, /Run: ask-123/)
-  assert.doesNotMatch(text, /cache\.ts/)
-})
-
-test('serializeTranscript keeps cf_run_agent tool results near-whole (lead-initiated cross-pollination)', () => {
-  const reply = 'A'.repeat(5000)
-  const branch = [
-    {
-      type: 'message',
-      id: '1',
-      message: {
-        role: 'toolResult',
-        toolName: 'cf_run_agent',
-        content: [{ type: 'text', text: reply }],
-      },
-    },
-    {
-      type: 'message',
-      id: '2',
-      message: { role: 'toolResult', toolName: 'read', content: [{ type: 'text', text: reply }] },
-    },
-  ]
-  const text = serializeTranscript(branch)
-  // The consultation survives beyond the generic cap; ordinary tool results stay tightly truncated.
-  assert.ok(text.includes(reply))
-  assert.match(text, /Tool result read:\nA{1500}…\[truncated\]/)
-})
-
 test('parseAgentPrompt routes one mention anywhere, and never hijacks stray @tokens', () => {
   const known = new Set(['zeus', 'athena'])
   // Leading and trailing single mention are equivalent (the headline fix).
@@ -963,90 +821,6 @@ test('parseAgentPrompt routes one mention anywhere, and never hijacks stray @tok
   assert.equal(parseAgentPrompt(['hi', '@zeus']), null)
 })
 
-test('image helpers: JWT account id, request body, SSE extraction, PNG save', async () => {
-  // decodeChatGptAccountId pulls the claim out of the openai-codex JWT.
-  const payload = Buffer.from(
-    JSON.stringify({ 'https://api.openai.com/auth': { chatgpt_account_id: 'acc_42' } }),
-  ).toString('base64url')
-  assert.equal(decodeChatGptAccountId(`h.${payload}.sig`), 'acc_42')
-  assert.throws(() => decodeChatGptAccountId('not-a-jwt'), /JWT/)
-
-  // buildImageRequestBody triggers exactly one image_generation call with the prompt.
-  const body = buildImageRequestBody('a red cat', 'gpt-5.5')
-  assert.equal(body.model, 'gpt-5.5')
-  assert.equal(body.tools[0].type, 'image_generation')
-  assert.equal(body.input[0].content[0].text, 'a red cat')
-  // Without references the content is text-only — regression guard.
-  assert.equal(body.input[0].content.length, 1)
-  assert.equal(
-    body.input[0].content.some((part) => part.type === 'input_image'),
-    false,
-  )
-
-  // With reference images, each becomes an input_image part (image_url is a plain string), after the text.
-  const refs = ['data:image/png;base64,AAA', 'data:image/jpeg;base64,BBB']
-  const refBody = buildImageRequestBody('blend these', 'gpt-5.5', refs)
-  assert.equal(refBody.input[0].content[0].type, 'input_text')
-  const imageParts = refBody.input[0].content.filter((part) => part.type === 'input_image')
-  assert.deepEqual(
-    imageParts.map((part) => part.image_url),
-    refs,
-  )
-  assert.match(refBody.instructions, /reference image/i)
-
-  // extractImageFromEvents finds the base64 image + metadata across SSE events.
-  const img = extractImageFromEvents([
-    { type: 'response.created', response: { id: 'r1' } },
-    {
-      type: 'response.output_item.done',
-      item: {
-        type: 'image_generation_call',
-        id: 'i1',
-        status: 'completed',
-        result: 'QkFTRTY0',
-        revised_prompt: 'a bright red cat',
-      },
-    },
-    { type: 'response.completed', response: { id: 'r1' } },
-  ])
-  assert.equal(img.base64, 'QkFTRTY0')
-  assert.equal(img.revisedPrompt, 'a bright red cat')
-  assert.equal(img.responseId, 'r1')
-  assert.throws(() => extractImageFromEvents([{ type: 'error', message: 'boom' }]), /boom/)
-
-  // saveImagePng decodes base64 and writes the file.
-  await withTempDir(async (cwd) => {
-    const b64 = Buffer.from('PNGDATA').toString('base64')
-    const saved = await saveImagePng(b64, path.join(cwd, 'runs', 'img1'), 'image.png')
-    assert.equal((await readFile(saved)).toString(), 'PNGDATA')
-  })
-})
-
-test('reference images: imageFileToDataUrl encodes by extension; rejects unknown/missing', async () => {
-  await withTempDir(async (dir) => {
-    const pngPath = path.join(dir, 'ref.png')
-    await writeFile(pngPath, Buffer.from('PNGBYTES'))
-    assert.equal(
-      await imageFileToDataUrl(pngPath),
-      `data:image/png;base64,${Buffer.from('PNGBYTES').toString('base64')}`,
-    )
-
-    const jpgPath = path.join(dir, 'ref.JPG')
-    await writeFile(jpgPath, Buffer.from('JPGBYTES'))
-    assert.match(await imageFileToDataUrl(jpgPath), /^data:image\/jpeg;base64,/)
-
-    await writeFile(path.join(dir, 'ref.txt'), 'nope')
-    await assert.rejects(
-      () => imageFileToDataUrl(path.join(dir, 'ref.txt')),
-      /Unsupported reference image/,
-    )
-    await assert.rejects(
-      () => imageFileToDataUrl(path.join(dir, 'missing.png')),
-      /ENOENT|no such file/,
-    )
-  })
-})
-
 test('parseAgentPrompt: ask/to verb prefixes and the ask-noise boundary', () => {
   const known = new Set(['zeus', 'athena'])
   // The "to" verb addresses a leading agent.
@@ -1082,26 +856,11 @@ test('pi has no private surface: no extension, no tools, no commands', async () 
 // The extension/engine boundary test went with the extension: nothing imports
 // `hosts/lib` across a payload seam any more — `src/` imports it directly.
 
-test('image path safety: runner backstop throws and extractImageFromEvents handles failure/empty', () => {
-  // The runner must never spawn a CLI for an image agent.
+test('image path safety: the runner never spawns a CLI for an image agent', () => {
   assert.throws(
     () => buildRunnerInvocation({ kind: 'image', model: 'gpt-5.5' }, '/tmp/packet.md', '/tmp'),
     /image agents are generated/,
   )
-  // response.failed surfaces the error message.
-  assert.throws(
-    () =>
-      extractImageFromEvents([
-        { type: 'response.failed', response: { error: { message: 'content blocked' } } },
-      ]),
-    /content blocked/,
-  )
-  // A text-only / empty stream yields no image rather than a bogus base64.
-  assert.equal(
-    extractImageFromEvents([{ type: 'response.output_text.delta', delta: 'hi' }]).base64,
-    undefined,
-  )
-  assert.equal(extractImageFromEvents([]).base64, undefined)
 })
 
 test('resolveInside rejects symlinked escapes, not just lexical ../ ones', async () => {
@@ -1263,7 +1022,7 @@ test('parity: every preset-owned field matches the sibling catalog, so sync conv
 
 test('parity: shared lib files stay identical with the consensflow-cc sibling', async (t) => {
   const siblingLib = new URL('../../consensflow-cc/lib/', import.meta.url)
-  for (const file of ['utils.js', 'workflows.js', 'transcript-events.js']) {
+  for (const file of ['utils.js', 'transcript-events.js']) {
     let sibling
     try {
       sibling = await readFile(new URL(file, siblingLib), 'utf8')

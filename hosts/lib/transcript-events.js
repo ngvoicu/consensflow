@@ -2,8 +2,9 @@
 // Event = { kind: "thinking" | "tool_call" | "tool_result" | "text" | "final",
 //           text?, tool?, args?, result? }
 //
-// This file is parity-locked: it must stay byte-identical between consensflow-cc and
-// consensflow-pi (enforced by the parity test). It is pure — no I/O, no host imports.
+// This file was parity-locked against a second copy in consensflow-pi. The merge deleted
+// that copy, so the invariant is structural now: there is one engine. It is pure — no I/O,
+// no host imports.
 
 export const MAX_EVENTS = 2000;            // cap the retained trail (mirrors the 2MB stdout cap)
 export const MAX_EVENT_CHARS = 8 * 1024;   // truncate any single oversized event's text/result

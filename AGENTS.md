@@ -51,10 +51,10 @@ license to skip the skill.
 | `threads.js` | Named conversations per workspace (`threads.json`), the name generator — `ilmarinen-quartz-valley`: the agent, then two everyday words, so a pane tab says whose window it is and "ask ares in ares-bubble-sky" cannot read as two agents — and `leadId` — who a conversation belongs to, read from the environment and never from `process.env` directly |
 | `harness-transcript.js` | Reads each harness's OWN session store so window turns are visible to the lead. Read-only; empty rather than throwing when a layout moves — **and a layout did move**: opencode migrated into `opencode.db` on 2026-01-06, so both its readers try SQLite (`node:sqlite`, read-only, opened per call) before the frozen JSON tree. The file reader had been passing its tests against old-shape fixtures while returning nothing for any real conversation. Also `discoverOpencodeSession` — the id opencode minted, found by directory and birth time, because it is the one harness that neither takes an id nor prints one |
 | `state.js` | The one root, workspace keys, run dirs, `writeJsonAtomic` (shared, one copy) |
-| `transcript.js` + `transcript-events.js` | Normalising four engines' event shapes into one vocabulary |
+| `transcript-events.js` | Normalising four engines' event shapes into one vocabulary |
 | `presets.js` | The 57 catalog presets — the single source `src/catalog.js` is a view over |
-| `image.js` + `image-run.js` | The image path: gpt-image-2, drawn by ASKING codex rather than imitating it. Calling the responses endpoint ourselves is refused now — a ChatGPT login is never handed the image tool — but codex's own sessions still are, so `runImageAgent` is one `codex exec` with an instruction and a path. The file on disk is the proof: a run that wrote none is `ok: false` with the reason recorded, because an empty run directory used to look exactly like work in progress |
-| `handoff.js` · `workflows.js` · `utils.js` · `codex-auth.js` | Transcript serialisation, the run entry point, ids/parsing, the ChatGPT token |
+| `image-run.js` | The image path: gpt-image-2, drawn by ASKING codex rather than imitating it. Calling the responses endpoint ourselves is refused now — a ChatGPT login is never handed the image tool — but codex's own sessions still are, so `runImageAgent` is one `codex exec` with an instruction and a path. The file on disk is the proof: a run that wrote none is `ok: false` with the reason recorded, because an empty run directory used to look exactly like work in progress |
+| `utils.js` · `codex-auth.js` | ids/parsing, and the ChatGPT login the image path preflights. `handoff.js`, `transcript.js` and `workflows.js` stood beside them until 2026-08-24: the first two served the session stash that went on 2026-08-22, the third a run entry point the manager had already replaced. All three were reachable from no entry point and alive only in tests that imported them directly — the deletion took ~600 lines of engine and ~300 of tests, and the live suite did not move |
 
 ## The desktop app
 
@@ -193,7 +193,17 @@ keep in step — the manager is the only caller.
   own store at 0600, and the key is `wd_<basename>_<sha256(path)[0..12]>`,
   verified against a key kimi generated for the same directory. A directory
   that DOES declare a server is asking to run a command its author chose, so
-  that answer stays the user's. codex is the reverse: its window is seeded
+  that answer stays the user's.
+  **Currently unwired, and the decision is open.** The three
+  `kimiTrust*` functions have had no caller since `3a53a09` removed the
+  typed-bootstrap mechanism they had been added beside — collateral, not a
+  decision. What a live probe settles (2026-08-24, fresh untrusted temp
+  directory): `kimi -p` NEVER asks. It went straight to the provider and wrote
+  no trust entry, so the streamed first turn needs none of this. The window
+  half (`kimi -S <id>`) is the half that asks, which is where a caller would go
+  back if one goes back at all. Nothing is deleted until that is decided,
+  because the code writes to the user's own store and where it fires is the
+  whole question. codex is the reverse: its window is seeded
   through argv, so the prompt costs nothing — it waits with the question in
   hand — but its trust lives in `config.toml`, the USER'S file, alongside their
   model, approvals and MCP servers. `codexTrustsDirectory` therefore only
@@ -340,7 +350,15 @@ keep in step — the manager is the only caller.
 
 - **Modules never read `process.env`** — the environment is an explicit
   argument everywhere. That is the whole test-isolation story
-  (`tests/helpers.mjs` builds throwaway homes).
+  (`tests/helpers.mjs` builds throwaway homes). Two modules predate the rule
+  and are its only sanctioned exceptions: `hosts/lib/state.js` (`configHome`
+  reads `CONSENSFLOW_HOME`) and `hosts/lib/codex-auth.js` (`codexAuthPath`
+  reads `CODEX_HOME`). The cost is visible and should stay visible:
+  `tests/engine/claude-e2e.test.mjs` has to mutate the global
+  `process.env.CONSENSFLOW_HOME` around each case, and says so in a comment,
+  because a direct lib call would otherwise write into the developer's real
+  home. Threading `env` through them is the fix; documenting them is the
+  honest interim.
 - **Drift is sacred.** A manifest-owned file whose hash changed was edited by
   the user: refuse without `--force`, never clobber. A file not in the
   manifest is never touched, installed over, or deleted.
