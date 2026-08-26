@@ -292,47 +292,6 @@ test('kimi: the window is its own interactive session, resumed', async () => {
   ])
 })
 
-// --- who will stop to ask before opening -----------------------------------
-
-test('trust: codex trust is read from its config, exact or by an ancestor', async () => {
-  const { codexTrustsDirectory } = await import('../../hosts/lib/harness-transcript.js')
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-trust-'))
-  try {
-    const env = { HOME: dir, CODEX_HOME: path.join(dir, '.codex') }
-    await mkdir(env.CODEX_HOME, { recursive: true })
-    await writeFile(
-      path.join(env.CODEX_HOME, 'config.toml'),
-      [
-        'model = "gpt-5.6-sol"',
-        '[projects."/work/trusted-root"]',
-        'trust_level = "trusted"',
-        '[projects."/work/declined"]',
-        'trust_level = "untrusted"',
-        '[shell_environment_policy]',
-        'inherit = "all"',
-      ].join('\n'),
-    )
-
-    assert.equal(await codexTrustsDirectory('/work/trusted-root', env), true)
-    // codex asks per directory: a trusted parent does NOT cover a child.
-    // Proven live — `/private/tmp` was trusted and codex still asked about
-    // `/private/tmp/cf-tui-probe/codex`, then wrote its own entry for it.
-    assert.equal(await codexTrustsDirectory('/work/trusted-root/sub', env), false)
-    assert.equal(await codexTrustsDirectory('/work/declined', env), false)
-    assert.equal(await codexTrustsDirectory('/work/never-seen', env), false)
-    // The prefix must be a path boundary, not a string one.
-    assert.equal(await codexTrustsDirectory('/work/trusted-rootless', env), false)
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-test('trust: no codex config at all means it will ask', async () => {
-  const { codexTrustsDirectory } = await import('../../hosts/lib/harness-transcript.js')
-
-  assert.equal(await codexTrustsDirectory('/anywhere', { HOME: '/nonexistent-cf' }), false)
-})
-
 // --- image agents draw, and say so when they do not ------------------------
 
 test('image: a run that produced no file is a failure, and leaves a record', async () => {

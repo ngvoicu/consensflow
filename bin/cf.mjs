@@ -16,7 +16,6 @@ import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import {
-  codexTrustsDirectory,
   discoverCodexSession,
   discoverKimiSession,
   discoverOpencodeSession,
@@ -511,14 +510,6 @@ async function openWindow(row, name, record, packetInput) {
   if (discover !== undefined) {
     const invocation = interactiveStart(row, null, seed)
     if (invocation === null) return false
-    // codex asks before it opens in a directory it does not know. The task is
-    // not lost — a codex window is seeded through argv, so it waits with the
-    // question in hand — but a lead sitting on `cf catchup --wait` would wait
-    // for an answer that cannot come until somebody presses a key. Say so.
-    // Read only: codex keeps this in config.toml, which is the user's file.
-    if (row.kind === 'codex' && !(await codexTrustsDirectory(cwdOf(), env))) {
-      out('codex will ask you to trust this directory before it starts — answer it in the pane')
-    }
     // A little clock slack: the store's timestamps and ours need not agree
     // to the millisecond.
     const since = Date.now() - 2000

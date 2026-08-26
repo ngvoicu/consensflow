@@ -198,33 +198,22 @@ keep in step — the manager is the only caller.
   All three discoveries read the harness's own store and return null rather
   than throwing.
 
-- **Two harnesses stop to ask before a window opens, and they need opposite
-  treatment.** kimi's prompt gates ONE thing and says so: the project's own MCP
-  servers, declared in `.kimi-code/mcp.json` or `.mcp.json`. A directory
-  declaring none grants nothing by being trusted, so ConsensFlow answers that
-  formality itself — `kimiTrustDirectory` writes kimi's own shape into kimi's
-  own store at 0600, and the key is `wd_<basename>_<sha256(path)[0..12]>`,
-  verified against a key kimi generated for the same directory. A directory
-  that DOES declare a server is asking to run a command its author chose, so
-  that answer stays the user's.
-  **Currently unwired, and the decision is open.** The three
-  `kimiTrust*` functions have had no caller since `3a53a09` removed the
-  typed-bootstrap mechanism they had been added beside — collateral, not a
-  decision. What a live probe settles (2026-08-24, fresh untrusted temp
-  directory): `kimi -p` NEVER asks. It went straight to the provider and wrote
-  no trust entry, so the streamed first turn needs none of this. The window
-  half (`kimi -S <id>`) is the half that asks, which is where a caller would go
-  back if one goes back at all. Nothing is deleted until that is decided,
-  because the code writes to the user's own store and where it fires is the
-  whole question. codex is the reverse: its window is seeded
-  through argv, so the prompt costs nothing — it waits with the question in
-  hand — but its trust lives in `config.toml`, the USER'S file, alongside their
-  model, approvals and MCP servers. `codexTrustsDirectory` therefore only
-  READS (a deliberately narrow parse: `[projects."<path>"]` headers and the
-  `trust_level` under each, matching exactly or by ancestor), and an untrusted
-  directory gets one line telling the lead why nothing may come back until
-  somebody answers in the pane. Writing it would be the settings.json rule
-  broken for our own convenience.
+- **A prompt in a pane is the user's to answer, and we do not know it is
+  there.** kimi asks about a folder before its window opens, codex asks about
+  the directory, and a pane can sit on either — the consult is not lost
+  (codex's task rides in argv; kimi's first turn is streamed before any window
+  exists), it is waiting for a person. ConsensFlow used to meet both halfway:
+  `kimiTrustDirectory` wrote kimi's own shape into kimi's own store when the
+  directory declared no MCP servers, and `codexTrustsDirectory` parsed
+  `config.toml` to warn a lead that an answer might not come. Both are gone
+  (2026-08-26, Gabriel's call): the write was answering a security question on
+  the user's behalf, the read was a hand-rolled parse of another tool's private
+  file that would rot the day codex moved a key, and the person who answers the
+  prompt is sitting in front of the pane and does not need telling. So no
+  adapter reads or writes a trust store, and the harness's own prompt is left
+  to do its job. The same rule covers kimi's other prompt — a `cmux send`
+  reaches its TUI as a paste and never submits, so its window waits on a
+  keypress the user makes.
 
 - **A harness's store is not a fixture.** opencode moved its sessions into
   SQLite in January and our reader kept passing — green tests over a dead
