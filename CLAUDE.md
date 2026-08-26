@@ -72,10 +72,11 @@ Load-bearing facts, each learned by running the built bundle:
   rebuilt — and a skill regenerated in between is regenerated from the OLD
   template. That is how a fixed recipe stayed broken for a day (2026-08-25): the
   fix was in the repo, the lead was reading a skill written by the bundle. After
-  a CLI change: `cd app && npm run build`, or `npm run prepare-sidecar` plus a
-  mirror of `src-tauri/resources/cli/` onto the bundle's `Contents/Resources/cli/`
-  (adhoc-signed, `Sealed Resources=none`, so nothing is invalidated), then
-  `cf skills install`.
+  a CLI change: `cd app && npm run sync-cli` (re-stages the resources and
+  mirrors them into the built bundle — a mirror, so a deleted file leaves too;
+  adhoc-signed with `Sealed Resources=none`, so the signature is untouched),
+  then `cf skills install`, which is deliberately separate because it writes to
+  the user's harnesses. `npm run build` does the same and recompiles Rust.
 - **The app's version is the CLI's version** (`tauri.conf.json` and `Cargo.toml`
   track `package.json`), so `ConsensFlow_<version>_aarch64.dmg` says which
   ConsensFlow is inside it and a release tag names one thing, not two.
