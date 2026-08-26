@@ -219,11 +219,20 @@ test('threads: a new name is never a roster agent name', () => {
   // An agent is WHO answers; a session is WHICH conversation. If the two could
   // share a name, "ask ares in ares" would be ambiguous to a reader and to the
   // lead composing the command.
-  const agents = ['ares', 'athena', 'bubble-sky']
+  //
+  // Now that every name carries its agent, the only reachable collision is an
+  // agent NAMED like a conversation — and drawing at random until one turns up
+  // is a coin flip, not a check. So take every name but one, reserve the one
+  // that is left, and demand the refusal: a generator that ignored `reserved`
+  // would hand back that exact name instead.
+  const all = allSessionNames().map((name) => `ares-${name}`)
+  const lastFree = all[all.length - 1]
 
-  for (let i = 0; i < 100; i += 1) {
-    assert.ok(!agents.includes(newSessionName([], agents, 'ares')))
-  }
+  assert.throws(
+    () => newSessionName(all.slice(0, -1), [lastFree], 'ares'),
+    /no unused session name/i,
+    'the one name left was an agent name and was handed out anyway',
+  )
 })
 
 test('threads: the vocabulary is concrete, not mythological', async () => {
