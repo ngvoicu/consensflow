@@ -925,6 +925,23 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"the answer
     }
   })
 
+  it('an empty workspace is told how to start one, whatever was asked for', async () => {
+    // Emptiness answers first: "no conversation with @nyx here" is a true
+    // sentence that leaves a reader with nothing to do.
+    const empty = tempEnv()
+    try {
+      for (const asked of ['@hyperion', 'anything', undefined]) {
+        const out = await cf(['catchup', ...(asked === undefined ? [] : [asked])], empty.env)
+
+        assert.equal(out.code, 1, `${asked} must refuse`)
+        assert.match(out.stdout + out.stderr, /no conversations here yet/, String(asked))
+        assert.match(out.stdout + out.stderr, /cf run @name/, 'and says what starts one')
+      }
+    } finally {
+      empty.cleanup()
+    }
+  })
+
   it('cf last @agent resolves that agent current conversation', async () => {
     const out = await cf(['last', '@hyperion'], t.env)
 

@@ -347,10 +347,12 @@ function pickConversation(threads, asked) {
  * conversation named X"); they share one now, and it names the missing `@`.
  */
 function noConversationHere(asked, names, env) {
-  if (asked.startsWith('@')) {
-    return `no conversation with ${asked} here${names.length > 0 ? `; you have: ${names.join(', ')}` : ''}`
-  }
+  // Emptiness first, whatever was asked for: a workspace with nothing in it
+  // wants the sentence that starts one, not a report about the name.
   if (names.length === 0) return 'no conversations here yet — `cf run @name "<task>"` starts one'
+  if (asked.startsWith('@')) {
+    return `no conversation with ${asked} here; you have: ${names.join(', ')}`
+  }
   if (agentRow(asked, env) !== undefined) {
     return `no conversation named ${JSON.stringify(asked)} here — ${asked} is an agent, so \`@${asked}\` takes its most recent one; conversations here: ${names.join(', ')}`
   }
