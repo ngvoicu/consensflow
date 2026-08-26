@@ -1306,9 +1306,27 @@ async function lastVerb(rest) {
   }
   out(`# ${name} · @${row.agent}`)
   out('')
-  out(String(result.output ?? '').trim() || '(no answer)')
+  out(boundedAnswer(String(result.output ?? '').trim() || '(no answer)'))
   out('')
   out(`transcript: ${join(runDir, 'transcript.md')}`)
+}
+
+/**
+ * A backstop, not a substitute for extracting the answer properly.
+ *
+ * `result.output` is whatever the run recorded, and a harness whose stream we
+ * cannot parse records ALL of it: a kimi run measured 493,390 characters, and
+ * `cf last` pasted every one of them into the lead that asked (2026-08-26 —
+ * kimi has its own extractor now). The fix for that is upstream, in
+ * `findFinalJsonOutput`; this is the wall that stops the NEXT harness doing it
+ * before anyone notices. `--json` is untouched: a program asked for the record
+ * and can hold it.
+ */
+const ANSWER_LIMIT = 8000
+function boundedAnswer(answer) {
+  if (answer.length <= ANSWER_LIMIT) return answer
+  const rest = answer.length - ANSWER_LIMIT
+  return `${answer.slice(0, ANSWER_LIMIT)}\n\n[…${rest} more characters — this run's answer was never extracted; the whole record is in transcript.md and result.json]`
 }
 
 function readJsonFile(path) {

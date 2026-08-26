@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createId, nowIso, resolveInside, truncateText } from "./utils.js";
 import { ensureCfDirs, recordLatestRun, runsRoot } from "./state.js";
-import { adaptLine, pushEvents, renderTrail, surfaceOutput, OPENCODE_NO_ANSWER } from "./transcript-events.js";
+import { adaptLine, pushEvents, renderTrail, surfaceOutput, NO_ANSWER } from "./transcript-events.js";
 
 // Low-level safety net for direct spawnWithInput callers that pass no timeout (e.g. the doctor
 // `--version` liveness probe sets its own 5s cap). Agent runs pass timeoutMs: 0 and run
@@ -431,6 +431,26 @@ function findFinalJsonOutput(kind, events) {
     }
   }
 
+  if (kind === "kimi") {
+    // kimi's prompt-mode stream is the chat shape, one object per line: a
+    // version line, assistant turns as {role:"assistant", content:"…"} —
+    // sometimes carrying tool_calls with empty content — and tool results as
+    // {role:"tool"}. None of them has `result`, `output` or `text`, so before
+    // this branch existed the generic scan below found nothing and the whole
+    // 500KB stream was handed back as "the answer". A lead that ran `cf last`
+    // on a kimi conversation got the protocol log pasted into its context
+    // (found 2026-08-26, on a real run from 2026-08-24).
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const event = events[i];
+      if (event?.role !== "assistant") continue;
+      const text = typeof event.content === "string" ? event.content.trim() : contentToText(event.content);
+      if (text) return text;
+    }
+    // Understood the stream, found no answer in it — a run that died among its
+    // tool calls. Say so; never fall through to the raw dump.
+    return NO_ANSWER;
+  }
+
   if (kind === "opencode") {
     // Concatenate ALL text parts in order — not just the last, which on a timed-out run is a
     // trailing whitespace fragment (the blank-output bug). OpenCode carries answer text in
@@ -441,7 +461,7 @@ function findFinalJsonOutput(kind, events) {
       .map((event) => event.part.text)
       .join("")
       .trim();
-    return answer || OPENCODE_NO_ANSWER;
+    return answer || NO_ANSWER;
   }
 
   for (let i = events.length - 1; i >= 0; i -= 1) {

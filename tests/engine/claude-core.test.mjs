@@ -757,11 +757,46 @@ test('normalizeProcessOutput parses Pi JSON mode from a truncated tail', () => {
   assert.equal(out.output, 'TAIL FINAL')
 })
 
+// [STRM-02] Kimi Code's stream is the chat shape — {role, content} — which carries none of
+// the keys the generic extractor looks for (`result`, `output`, `text`). Without a branch of
+// its own, every kimi run handed back its ENTIRE stream as "the answer": a real one measured
+// 493,390 characters, and `cf last` pasted all of it into the lead that asked (found
+// 2026-08-26 on a run captured 2026-08-24, the fixture below).
+test('normalizeProcessOutput: kimi returns the last thing said, never the protocol log [STRM-02]', async () => {
+  const fixture = await readFile(
+    new URL('./fixtures/kimi-cutoff.sample.jsonl', import.meta.url),
+    'utf8',
+  )
+
+  const real = normalizeProcessOutput('kimi', fixture, '').output
+
+  assert.match(real, /Evals are solid/, 'the last assistant turn that actually said something')
+  assert.doesNotMatch(real, /"role":\s*"tool"|system\.version/, 'never the raw stream')
+  assert.ok(real.length < 500, `an answer, not a log (got ${real.length} chars)`)
+
+  // A run that died among its tool calls understood its stream and found no answer in it:
+  // that is a short placeholder, never the log and never empty.
+  const noAnswer = [
+    JSON.stringify({ role: 'meta', type: 'system.version', version: '0.38.0' }),
+    JSON.stringify({
+      role: 'assistant',
+      content: '',
+      tool_calls: [{ type: 'function', id: 'Bash_0' }],
+    }),
+    JSON.stringify({ role: 'tool', tool_call_id: 'Bash_0', content: 'output' }),
+  ].join('\n')
+
+  const empty = normalizeProcessOutput('kimi', noAnswer, '').output
+
+  assert.ok(empty.trim().length > 0 && empty.length < 200, 'short placeholder')
+  assert.doesNotMatch(empty, /system\.version/, 'never the raw stream')
+})
+
 // [STRM-01] OpenCode answer text rides in `part.text` on `type:"text"` events (never a
 // top-level `{text}` — that shape was a fiction; the real captured fixture disproves it).
 // The blank-output bug returned only the LAST text part, which on a timed-out run is a
 // trailing whitespace fragment. The fix concatenates all text parts in order and falls
-// back to a short placeholder (OPENCODE_NO_ANSWER) — never the raw JSONL stream.
+// back to a short placeholder (NO_ANSWER) — never the raw JSONL stream.
 test('normalizeProcessOutput: OpenCode concats ordered text parts, never the trailing fragment or raw JSONL [STRM-01]', async () => {
   // (1) Real captured timeout fixture: the bug returned the trailing " " fragment and
   // discarded the substantive first text part.

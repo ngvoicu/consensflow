@@ -901,6 +901,34 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"the answer
     assert.match(out.stdout, /transcript\.md/, 'so the lead can read the whole run if it wants')
   })
 
+  it('an answer that was never extracted is bounded, not pasted whole', async () => {
+    // A harness whose stream we cannot parse records the whole stream as its
+    // answer — a real kimi run measured 493,390 characters, and `cf last`
+    // handed every one to the lead that asked (2026-08-26). kimi parses now;
+    // this is the wall for whichever harness is next.
+    const listed = await cf(['sessions', '--json'], t.env)
+    const [name] = Object.keys(JSON.parse(listed.stdout))
+    const meta = JSON.parse((await cf(['last', name, '--json'], t.env)).stdout)
+    const file = join(meta.runDir, 'result.json')
+    const original = readFileSync(file, 'utf8')
+    try {
+      writeFileSync(file, JSON.stringify({ ...JSON.parse(original), output: 'x'.repeat(200_000) }))
+
+      const out = await cf(['last', name], t.env)
+
+      assert.equal(out.code, 0, out.stderr)
+      assert.ok(out.stdout.length < 20_000, `bounded, got ${out.stdout.length} characters`)
+      assert.match(out.stdout, /more characters/, 'and says what it kept back')
+      assert.match(out.stdout, /transcript/, 'pointing at the whole record')
+
+      // A program asked for the record and can hold it.
+      const json = await cf(['last', name, '--json'], t.env)
+      assert.equal(JSON.parse(json.stdout).output.length, 200_000, '--json stays complete')
+    } finally {
+      writeFileSync(file, original)
+    }
+  })
+
   it('bare cf last means the newest conversation, like bare attach', async () => {
     // The three read verbs answer "which conversation?" through one rule now;
     // `cf last` was the odd one out, failing on an empty name.

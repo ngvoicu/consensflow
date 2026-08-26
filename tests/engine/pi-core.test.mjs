@@ -730,7 +730,7 @@ test('normalizeProcessOutput parses Pi JSON mode from a truncated tail', () => {
 // top-level `{text}` — that shape was a fiction; the real captured fixture disproves it).
 // The blank-output bug returned only the LAST text part, which on a timed-out run is a
 // trailing whitespace fragment. The fix concatenates all text parts in order and falls
-// back to a short placeholder (OPENCODE_NO_ANSWER) — never the raw JSONL stream.
+// back to a short placeholder (NO_ANSWER) — never the raw JSONL stream.
 test('normalizeProcessOutput: OpenCode concats ordered text parts, never the trailing fragment or raw JSONL [STRM-01]', async () => {
   // (1) Real captured timeout fixture: the bug returned the trailing " " fragment and
   // discarded the substantive first text part.

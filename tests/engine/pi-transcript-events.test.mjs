@@ -6,7 +6,7 @@ import {
   adaptLine,
   MAX_EVENT_CHARS,
   MAX_EVENTS,
-  OPENCODE_NO_ANSWER,
+  NO_ANSWER,
   pushEvents,
   surfaceOutput,
 } from '../../hosts/lib/transcript-events.js'
@@ -211,7 +211,7 @@ test('surfaceOutput: usable answer passes through; no answer → bounded trail u
   // Usable answer → returned verbatim.
   assert.equal(surfaceOutput('The answer is 42.', events), 'The answer is 42.')
   // No usable answer (the opencode placeholder) → the bounded trail under the no-answer header.
-  const trail = surfaceOutput(OPENCODE_NO_ANSWER, events)
+  const trail = surfaceOutput(NO_ANSWER, events)
   assert.match(trail, /no final answer/i)
   assert.match(trail, /read/, 'tool call surfaced in the trail')
   assert.match(trail, /let me look/, 'thinking surfaced in the trail')

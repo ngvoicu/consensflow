@@ -12,7 +12,11 @@ export const MAX_EVENT_CHARS = 8 * 1024;   // truncate any single oversized even
 // Placeholder for a run that produced no usable answer text (timeout / empty). A non-empty,
 // non-JSONL string so the opencode normalizer can't fall through to the raw-stream dump and
 // surfaceOutput can detect "no answer" and render the trail instead.
-export const OPENCODE_NO_ANSWER = "[no answer text returned — see the run's reasoning/tool trail]";
+// What an extractor returns when it understood the stream and there was no answer in it.
+// Never null: null falls through to dumping the raw JSONL at the lead. opencode found
+// this first; kimi needs it for the same reason, which is why it is no longer named
+// after one of them.
+export const NO_ANSWER = "[no answer text returned — see the run's reasoning/tool trail]";
 
 const clampText = (value) =>
   typeof value === "string" && value.length > MAX_EVENT_CHARS ? value.slice(0, MAX_EVENT_CHARS) + "…" : value;
@@ -213,7 +217,7 @@ export function renderTrail(events) {
 // clear no-answer header — the trail carries the partial text AND the reasoning/tool-call context.
 // Never the raw JSONL stream, never a bare whitespace fragment.
 export function surfaceOutput(answer, events) {
-  const usable = typeof answer === "string" && answer.trim() !== "" && answer !== OPENCODE_NO_ANSWER;
+  const usable = typeof answer === "string" && answer.trim() !== "" && answer !== NO_ANSWER;
   if (usable) return answer;
   const header = "⚠ no final answer — partial trail below";
   const body = renderTrail(events) || "";
