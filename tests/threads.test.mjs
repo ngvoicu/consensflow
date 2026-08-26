@@ -184,19 +184,33 @@ test('threads: a corrupt store is repaired by the next save', async () => {
 
 // --- [TEST-THR-03] naming -------------------------------------------------
 
-test('threads: a new name is two hyphenated words', async () => {
-  const name = newSessionName([], [])
+test('threads: a new name is its agent and two hyphenated words', async () => {
+  const name = newSessionName([], [], 'ares')
 
-  assert.match(name, /^[a-z]+-[a-z]+$/, 'two lowercase words when no agent is named')
+  assert.match(name, /^ares-[a-z]+-[a-z]+$/, 'whose it is, then two lowercase words')
+})
+
+test('threads: a name without an agent is refused, not shortened', () => {
+  // The generator used to fall back to the two-word half, and bare `cf mint`
+  // took that option — which is how `yellow-meadow` came to title panes that
+  // could have said `ares-yellow-meadow`. There is one generator, so the rule
+  // that a conversation is always somebody's belongs in it, not in its callers.
+  for (const blank of [undefined, '', '   ', null]) {
+    assert.throws(
+      () => newSessionName([], [], blank),
+      /needs the agent/i,
+      `${JSON.stringify(blank)} minted a name`,
+    )
+  }
 })
 
 test('threads: a new name never collides with one already in the workspace', () => {
   // Exhaust nearly everything: whatever is left must still be fresh.
   const taken = []
   for (let i = 0; i < 200; i += 1) {
-    const name = newSessionName(taken, [])
+    const name = newSessionName(taken, [], 'ares')
     assert.ok(!taken.includes(name), `draw ${i} repeated ${name}`)
-    assert.match(name, /^[a-z]+-[a-z]+$/)
+    assert.match(name, /^ares-[a-z]+-[a-z]+$/)
     taken.push(name)
   }
 })
@@ -208,7 +222,7 @@ test('threads: a new name is never a roster agent name', () => {
   const agents = ['ares', 'athena', 'bubble-sky']
 
   for (let i = 0; i < 100; i += 1) {
-    assert.ok(!agents.includes(newSessionName([], agents)))
+    assert.ok(!agents.includes(newSessionName([], agents, 'ares')))
   }
 })
 
@@ -217,7 +231,8 @@ test('threads: the vocabulary is concrete, not mythological', async () => {
   const mythological = new Set(listPresetIds())
 
   for (let i = 0; i < 100; i += 1) {
-    for (const word of newSessionName([], []).split('-')) {
+    // Past the agent's own name, which is mythological on purpose.
+    for (const word of newSessionName([], [], 'ares').split('-').slice(1)) {
       assert.ok(!mythological.has(word), `${word} is a preset name — too easy to confuse`)
     }
   }
@@ -225,9 +240,9 @@ test('threads: the vocabulary is concrete, not mythological', async () => {
 
 test('threads: it gives up loudly rather than looping forever', () => {
   // A caller that has somehow taken every name must get an error, not a hang.
-  const everything = allSessionNames()
+  const everything = allSessionNames().map((name) => `ares-${name}`)
 
-  assert.throws(() => newSessionName(everything, []), /no unused session name/i)
+  assert.throws(() => newSessionName(everything, [], 'ares'), /no unused session name/i)
 })
 
 // --- who a conversation belongs to ---------------------------------------

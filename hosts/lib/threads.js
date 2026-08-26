@@ -103,10 +103,20 @@ export function allSessionNames() {
  * names, so a conversation can never be exactly an agent's name. Random rather
  * than sequential so two names side by side in a pane list are not mistaken
  * for a sequence.
+ *
+ * `agent` is REQUIRED, and blank throws rather than falling back to the
+ * two-word half. It was optional once, and the one caller that took the option
+ * — bare `cf mint` — is what put `yellow-meadow` on every pane tab a lead ever
+ * titled. A generator that can still produce a nameless name is a door someone
+ * walks through again; there is one generator here, so the rule lives in it.
  */
-export function newSessionName(taken = [], reserved = [], agent = "") {
+export function newSessionName(taken = [], reserved = [], agent) {
+  const owner = String(agent ?? "").trim();
+  if (owner.length === 0) {
+    throw new Error("a conversation name needs the agent it belongs to: newSessionName(taken, reserved, agent)");
+  }
   const used = new Set([...taken, ...reserved]);
-  const prefix = String(agent).trim().length > 0 ? `${String(agent).trim()}-` : "";
+  const prefix = `${owner}-`;
   // Try at random first: cheap, and avoids always handing out the same name
   // after a collision.
   for (let attempt = 0; attempt < 64; attempt += 1) {

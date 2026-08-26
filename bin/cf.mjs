@@ -96,10 +96,10 @@ Usage: cf <command> [options]
     [--new] [--session <name>]                  a conversation continues by default in cmux
     [--thread] [--no-thread]                    mode; --new starts a fresh one, and with
                                                --session it starts under that exact name
-  mint [<@name>]                               A fresh conversation name, printed before
+  mint <@name>                                 A fresh conversation name, printed before
                                                anything exists under it — name first, then
-                                               run with --new --session <name>. Give it the
-                                               agent and the name says whose it is
+                                               run with --new --session <name>. The agent is
+                                               required: the name says whose it is
   attach <@name|conversation> [--print]        Open the harness's OWN window on that
                                                conversation — the real codex/claude/pi
                                                interface, whole history in it. --print
@@ -1208,12 +1208,18 @@ async function catchupVerb(rest) {
  */
 async function mintVerb(rest) {
   const asked = String(rest[0] ?? '').replace(/^@/, '')
-  // A name says whose conversation it is, so minting one asks who for. Without
-  // an agent it still mints — the two-word half alone — because a name the
-  // caller then hands to `--session` is still a name.
-  if (asked.length > 0 && agentRow(asked, env) === undefined) {
-    const known = listAgents(env).map((a) => a.name)
-    fail(`no agent named ${JSON.stringify(asked)}; you have: ${known.join(', ')}`)
+  // A name says whose conversation it is, so minting one asks who for — and
+  // the agent is required, not encouraged. Bare `cf mint` used to hand back
+  // the two-word half, and every lead that ran it titled a pane `yellow-meadow`.
+  const known = () => listAgents(env).map((a) => a.name)
+  if (asked.length === 0) {
+    fail(
+      `cf mint needs an agent: cf mint @<name> — a conversation's name says whose it is; you have: ${known().join(', ')}`,
+    )
+    return
+  }
+  if (agentRow(asked, env) === undefined) {
+    fail(`no agent named ${JSON.stringify(asked)}; you have: ${known().join(', ')}`)
     return
   }
   const threads = await loadThreads(cwdOf())

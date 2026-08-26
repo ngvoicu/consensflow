@@ -805,6 +805,18 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"answered"}
     assert.ok(threads()[name], 'created under exactly that name')
   })
 
+  it('cf mint refuses to name a conversation nobody owns', async () => {
+    // Bare `cf mint` was the last door to an agent-less name, and the skill's
+    // own recipe walked through it for a day: every pane a lead titled read
+    // `yellow-meadow` instead of `nyx-yellow-meadow`. The refusal names the
+    // roster, because a lead that got this wrong needs the agent, not a rule.
+    const bare = await cf(['mint'], t.env)
+
+    assert.notEqual(bare.code, 0, 'a nameless mint must fail')
+    assert.match(bare.stdout + bare.stderr, /needs an agent/i)
+    assert.match(bare.stdout + bare.stderr, /hyperion/, 'and says who is available')
+  })
+
   it('--new --session refuses an agent name, a taken name, and a shell-hostile one', async () => {
     const taken = Object.keys(threads())[0]
     for (const [bad, why] of [
