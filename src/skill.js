@@ -223,8 +223,10 @@ CMUX_QUIET=1 cmux send --surface surface:NN 'cd "'"$PWD"'" && cf run @<name> "<t
 CMUX_QUIET=1 cmux rename-tab --surface surface:NN "$NAME"
 \`\`\`
 
-Lost track of which pane is which? \`CMUX_QUIET=1 cmux list-pane-surfaces\`
-lists every surface with its tab title.
+Lost track of which pane is which? \`CMUX_QUIET=1 cmux tree\` draws every pane
+in the workspace with its tab title, so the one titled with your conversation
+is the one you sent it to. (\`list-pane-surfaces\` sounds like the right
+command and is not: it lists only the pane you are in.)
 
 **Match how you wait to how long the work is.** A question answers in
 seconds; a refactor, a review or a rewrite runs for many minutes, and blocking

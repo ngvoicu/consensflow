@@ -267,7 +267,11 @@ describe('the description is all a lead reads before it decides to look inside',
     assert.doesNotMatch(cmux, /NAME=\$\(cf mint\)/)
     assert.match(cmux, /--new --session /)
     // And finding the pane again is a quoted command, not an exploration.
-    assert.match(cmux, /cmux list-pane-surfaces/)
+    // `tree`, not `list-pane-surfaces`: the latter lists only the lead's own
+    // pane, so a lead hunting for the pane it just opened would find nothing
+    // (probed live, two panes open, 2026-08-26).
+    assert.match(cmux, /cmux tree/)
+    assert.doesNotMatch(cmux, /lists every surface with its tab title/)
   })
 
   it('makes look-before-you-answer a RULE, because buried prose got skimmed', () => {

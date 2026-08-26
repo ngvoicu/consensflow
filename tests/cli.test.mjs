@@ -8,7 +8,6 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
-  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -21,19 +20,6 @@ import { chooseCmuxMode, tempEnv } from './helpers.mjs'
 const run = promisify(execFile)
 const CF = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
 const FIXTURES = join(import.meta.dirname, 'fixtures')
-
-async function cfIn(cwd, args, env) {
-  try {
-    const { stdout, stderr } = await run(process.execPath, [CF, ...args], {
-      env,
-      cwd,
-      timeout: 30_000,
-    })
-    return { code: 0, stdout, stderr }
-  } catch (cause) {
-    return { code: cause.code ?? 1, stdout: cause.stdout ?? '', stderr: cause.stderr ?? '' }
-  }
-}
 
 async function cf(args, env) {
   try {
@@ -925,6 +911,20 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"the answer
     assert.match(out.stdout, /transcript: /, 'a full answer, with its transcript path')
   })
 
+  it('an agent name without its @ is answered with the @, not a list to search', async () => {
+    // `@name` is an agent and a bare name is a conversation, so `cf last
+    // hyperion` is a one-character mistake — and the three read verbs used to
+    // answer it with the same list of conversations the reader was already
+    // looking at. They share one message now, and it names the fix.
+    for (const verb of ['last', 'catchup', 'attach']) {
+      const out = await cf([verb, 'hyperion'], t.env)
+
+      assert.equal(out.code, 1, `${verb} must refuse an agent name`)
+      assert.match(out.stdout + out.stderr, /hyperion is an agent/, verb)
+      assert.match(out.stdout + out.stderr, /`@hyperion`/, `${verb} names the fix`)
+    }
+  })
+
   it('cf last @agent resolves that agent current conversation', async () => {
     const out = await cf(['last', '@hyperion'], t.env)
 
@@ -1371,19 +1371,6 @@ printf '{"id":"ses_window1","directory":"%s","time":{"created":99999999999999}}'
 
   /** A lead reading a conversation — its own identity, its own read mark. */
   const asReader = (id) => ({ ...t.env, CLAUDE_CODE_SESSION_ID: id })
-
-  /** Plant a conversation row, for the states a run cannot reach on its own. */
-  const writeThreadRow = (name, row) => {
-    const file = join(
-      t.env.CONSENSFLOW_HOME,
-      'workspaces',
-      readdirSync(join(t.env.CONSENSFLOW_HOME, 'workspaces'))[0],
-      'threads.json',
-    )
-    const all = threadRows()
-    all[name] = { createdAt: '2026-08-24T00:00:00.000Z', lastRunAt: null, lastRunId: null, ...row }
-    writeFileSync(file, JSON.stringify(all, null, 2))
-  }
 
   const rolloutFor = (id) => {
     const dir = join(t.env.CODEX_HOME, 'sessions', '2026', '08', '24')

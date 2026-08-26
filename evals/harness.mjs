@@ -41,7 +41,11 @@ case "$1" in
   new-pane) echo "OK surface:99 pane:99 workspace:1" ;;
   send) echo "OK surface:99 workspace:1" ;;
   rename-tab) echo "OK action=rename tab=tab:99 workspace=workspace:1" ;;
-  list-pane-surfaces) echo "* surface:28  the lead  [selected]"; echo "  surface:99  amber-tide" ;;
+  tree) echo "window window:1 [current]"; echo "\\_ workspace workspace:1"; echo "   |- pane pane:28"; echo "   |   \\_ surface surface:28 [terminal] \\"the lead\\" [selected] <- here"; echo "   \\_ pane pane:99"; echo "       \\_ surface surface:99 [terminal] \\"amber-tide\\" [selected]" ;;
+  # The real one lists ONLY the caller's own pane, whatever you pass it
+  # (probed live, two panes open, 2026-08-26). A stub that helpfully listed
+  # both would let a lead pass the eval with a command that finds nothing.
+  list-pane-surfaces) echo "* surface:28  the lead  [selected]" ;;
   list-panes) echo "* pane:28  [1 surface]  [focused]"; echo "  pane:99  [1 surface]" ;;
   *) : ;;
 esac

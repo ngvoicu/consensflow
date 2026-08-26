@@ -54,7 +54,7 @@ license to skip the skill.
 | `transcript-events.js` | Normalising four engines' event shapes into one vocabulary |
 | `presets.js` | The 57 catalog presets — the single source `src/catalog.js` is a view over |
 | `image-run.js` | The image path: gpt-image-2, drawn by ASKING codex rather than imitating it. Calling the responses endpoint ourselves is refused now — a ChatGPT login is never handed the image tool — but codex's own sessions still are, so `runImageAgent` is one `codex exec` with an instruction and a path. The file on disk is the proof: a run that wrote none is `ok: false` with the reason recorded, because an empty run directory used to look exactly like work in progress |
-| `utils.js` · `codex-auth.js` | ids/parsing, and the ChatGPT login the image path preflights. `handoff.js`, `transcript.js` and `workflows.js` stood beside them until 2026-08-24: the first two served the session stash that went on 2026-08-22, the third a run entry point the manager had already replaced. All three were reachable from no entry point and alive only in tests that imported them directly — the deletion took ~600 lines of engine and ~300 of tests, and the live suite did not move |
+| `utils.js` · `codex-auth.js` | ids/parsing, and the ChatGPT login the image path preflights. `handoff.js`, `transcript.js` and `workflows.js` stood beside them until 2026-08-24: the first two served the session stash that went on 2026-08-22, the third a run entry point the manager had already replaced. All three were reachable from no entry point and alive only in tests that imported them directly — the deletion took 597 lines of engine and 525 of tests, and the live suite did not move |
 
 ## The desktop app
 
@@ -382,7 +382,7 @@ keep in step — the manager is the only caller.
 - **Pane control belongs to cmux**, never to us — the v2 lesson
   (typed-bootstrap verification is a minefield). Our skill says *what* to run
   and *quotes* the four cmux commands a lead needs (`new-pane`, `send`,
-  `rename-tab`, `list-pane-surfaces`), because a lead without them spent a
+  `rename-tab`, `tree`), because a lead without them spent a
   minute dumping `cmux --help` before it could ask a question. Quoting is not
   implementing — we drive no pane, and the skill says outright that the
   commands are cmux's and `cmux --help` is the authority if they move. The

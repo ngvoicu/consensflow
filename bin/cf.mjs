@@ -338,6 +338,26 @@ function pickConversation(threads, asked) {
 }
 
 /**
+ * Why nothing matched, said so that the next attempt works.
+ *
+ * `@name` is an agent and a bare name is a conversation, everywhere in this
+ * CLI — which makes `cf last triton` a one-character mistake, and one the
+ * answer used to leave the reader to spot in a list. The three read verbs
+ * each carried their own wording of this ("no conversation X" against "no
+ * conversation named X"); they share one now, and it names the missing `@`.
+ */
+function noConversationHere(asked, names, env) {
+  if (asked.startsWith('@')) {
+    return `no conversation with ${asked} here${names.length > 0 ? `; you have: ${names.join(', ')}` : ''}`
+  }
+  if (names.length === 0) return 'no conversations here yet — `cf run @name "<task>"` starts one'
+  if (agentRow(asked, env) !== undefined) {
+    return `no conversation named ${JSON.stringify(asked)} here — ${asked} is an agent, so \`@${asked}\` takes its most recent one; conversations here: ${names.join(', ')}`
+  }
+  return `no conversation named ${JSON.stringify(asked)} here; you have: ${names.join(', ')}`
+}
+
+/**
  * How much of a conversation this lead has already read.
  *
  * A lead asked "can you see what other jokes he said?" and, having no way to
@@ -993,11 +1013,7 @@ async function attachVerb(rest) {
   // Bare `cf attach` means the obvious one: the conversation you were last in.
   const { name, record } = pickConversation(threads, asked)
   if (record === undefined) {
-    fail(
-      names.length === 0
-        ? `no conversation ${JSON.stringify(asked)} here — start one with \`cf run @name "<task>"\``
-        : `no conversation ${JSON.stringify(asked)} here; you have: ${names.join(', ')}`,
-    )
+    fail(noConversationHere(asked, names, env))
     return
   }
 
@@ -1068,11 +1084,7 @@ async function catchupVerb(rest) {
   const names = Object.keys(threads)
   const { name, record } = pickConversation(threads, asked)
   if (record === undefined) {
-    fail(
-      names.length === 0
-        ? 'no conversations here yet — `cf run @name "<task>"` starts one'
-        : `no conversation ${JSON.stringify(asked)} here; you have: ${names.join(', ')}`,
-    )
+    fail(noConversationHere(asked, names, env))
     return
   }
 
@@ -1264,13 +1276,7 @@ async function lastVerb(rest) {
   // here), or nothing — the newest one, same as bare `cf attach`.
   const { name, record: row } = pickConversation(threads, wanted)
   if (row === undefined) {
-    fail(
-      wanted.startsWith('@')
-        ? `no conversation with ${wanted} here${names.length > 0 ? `; you have: ${names.join(', ')}` : ''}`
-        : names.length === 0
-          ? 'no conversations here yet — `cf run @name "<task>"` starts one'
-          : `no conversation named ${JSON.stringify(wanted)} here; you have: ${names.join(', ')}`,
-    )
+    fail(noConversationHere(wanted, names, env))
     return
   }
   // A conversation whose turns all happened in the agent's own window has no
