@@ -244,6 +244,18 @@ stopped. Do not scrape the other pane's screen: the pane is for the user to
 watch, the harness's own session store is what you read. Screen text is not
 an answer, it is a picture of one.
 
+**A long answer is read from the TOP, never from the end.** \`cf catchup\`
+prints every turn in full and holds nothing back, so a real review runs to
+tens of thousands of characters — and an agent puts its verdict first, then
+its working. Piping that through \`tail\` hands you the end of the reasoning
+without the conclusion it was reasoning towards, and you will report it as the
+answer (live, 2026-08-27: a lead read \`| tail -60\`, said that was the
+answer, and had to be told it had only read the tail). \`--last N\` is the same
+mistake in turns rather than bytes: it is still the end. If one look really is
+too much, walk it in order from the first line and keep going until you have
+all of it. Length is a reason to read in more passes, never a reason to start
+from the bottom.
+
 **A follow-up is another \`cf run\`, naming the conversation** — send it into
 a pane the same way you sent the first one:
 

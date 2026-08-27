@@ -162,6 +162,22 @@ describe('cmux mode teaches conversations, one pane each', () => {
     assert.match(cmux, /do not\s+scrape/i)
   })
 
+  it('says a long answer is read from the top, never from the end', () => {
+    // Live 2026-08-27: a 53,000-character review came back, and the lead piped
+    // `cf catchup` through `tail -60`, reported the tail, and had to be told it
+    // had read only the end — the verdict was in the first line. cf holds
+    // nothing back, so the only place this can be prevented is the prose.
+    const cmux = generateSkill(roster, { mode: 'cmux' })
+
+    assert.match(cmux, /from the TOP, never from the end/)
+    assert.match(cmux, /tail/)
+    // `--last N` is the same mistake in turns rather than bytes — the rule has
+    // to say so, or a lead reaches for the flag the skill itself documents.
+    assert.match(cmux, /--last N. is the same\s+mistake/)
+    // And it must say what to do instead, not only what not to do.
+    assert.match(cmux, /walk it in order from the first line/)
+  })
+
   it('still says the commands belong to cmux, not to us', () => {
     const cmux = generateSkill(roster, { mode: 'cmux' })
 
