@@ -957,8 +957,8 @@ test('agents sync re-resolves preset-backed entries and leaves everything else p
     const fields = result.synced[0].changes.map((change) => change.field).sort()
     assert.deepEqual(
       fields,
-      ['effort', 'model'],
-      'engine fields only — description is a user override, never synced',
+      ['description', 'effort', 'model'],
+      'every field the preset owns, the label included since 2026-08-27',
     )
 
     const synced = await getAgent(dir, '@deepreview')
@@ -968,13 +968,14 @@ test('agents sync re-resolves preset-backed entries and leaves everything else p
     assert.equal(synced.id, 'deepreview')
     assert.equal(synced.cwd, 'backend', 'so does a per-agent cwd')
     assert.equal(synced.preset, 'zeus')
-    // `add <preset> --description` is a documented override, so sync must leave the text alone —
-    // and because the two hosts word a few descriptions differently while sharing one roster,
-    // syncing it would also mean the drift nudge could never be cleared.
+    // The description follows the catalog now (2026-08-27): it is the line the generated skill
+    // prints to say who an agent is, so text naming a model the agent no longer runs is a wrong
+    // answer, not a cosmetic one. The cost is real and accepted — `add <preset> --description` is
+    // overwritten on the next catalog move; an agent pinned by an explicit --model keeps its own.
     assert.equal(
       synced.description,
-      'stale text from an older catalog',
-      'a user-authored description survives',
+      getPreset('zeus').label,
+      'the label the catalog carries today, not the text an older one left',
     )
 
     const custom = await getAgent(dir, '@builder')

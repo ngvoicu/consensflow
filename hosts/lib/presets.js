@@ -707,6 +707,10 @@ export function agentFromPreset(ref, overrides = {}) {
   const id = slugify(idOverride ?? nameOverride ?? preset.id);
   const agent = {
     ...preset,
+    // The label, not the catalog card's paragraph: a roster row's description is the
+    // one-liner the skill table prints, and sync now keeps it current — a row created
+    // with the paragraph would drift the moment it was written.
+    description: preset.label ?? preset.description,
     ...allowedOverrides(overrides),
     preset: preset.preset,
     id,
@@ -727,14 +731,29 @@ export function agentFromPreset(ref, overrides = {}) {
 // helpers re-resolve that: the fields below are decided entirely by the preset — agentFromPreset
 // lets only --name/--id/--cwd/--description through and there is no `agents edit` — so replacing
 // them with the catalog's current values is lossless.
-// `description` is deliberately NOT in this list, for two independent reasons: it is a documented
-// user override (`add <preset> --description …`), and the two hosts intentionally word a few
-// descriptions differently (pygmalion's login wording) while sharing ONE roster — syncing it would
-// clobber the user's text and, worse, never converge: each host would forever see the other's
-// wording as drift and re-flag the nudge. Stale description text is cosmetic (it never reaches the
-// packet); a wrong model is not.
+// `description` joined the list on 2026-08-27, the maintainer's call, after a live update: nyx moved
+// the retired stealth/ox-alpha to z-ai/glm-5.3-flash and the roster — and with it the skill table
+// every lead reads — went on saying "Pi Ox Alpha MAX" beside the new model. It was called cosmetic
+// while it was only a roster field; it is not, now that the generated skill prints it as the line
+// that says WHO an agent is. A label naming a model the agent no longer runs is a wrong answer to
+// the only question the table exists to answer.
+// It was kept out for two reasons, and both were weighed before it went in. The one that expired:
+// two hosts sharing ONE roster worded some descriptions differently (pygmalion's login wording), so
+// syncing would never converge — each host re-flagging the other's text forever. The host payloads
+// went on 2026-08-23 and nothing but the manager writes a description now. The one that stands:
+// `add <preset> --description …` is a real override, and this rewrites it on the next catalog move
+// without asking. The escape hatch is provenance, not wording — an agent added with an explicit
+// --model or --effort carries no `preset` and is never synced at all.
 // Agents with no `preset`, or whose preset has since left the catalog, are left alone.
-export const PRESET_OWNED_FIELDS = ["kind", "model", "effort", "thinking", "skillsPolicy"];
+export const PRESET_OWNED_FIELDS = ["kind", "model", "effort", "thinking", "skillsPolicy", "description"];
+
+// The roster's `description` is the preset's one-line LABEL ("Pi GLM 5.3 Flash MAX") — what an add
+// writes and what the generated skill prints beside the agent's name. The preset's own
+// `description` is the catalog card's paragraph and belongs to the UI, not to a roster row.
+function presetOwnedValue(field, preset) {
+  if (field === "description") return preset.label ?? preset.description;
+  return presetFieldValue(field, preset);
+}
 
 // normalizeAgent() fills these in on save, so compare against the same defaults or every
 // non-pi agent reports a phantom skillsPolicy change.
@@ -762,7 +781,7 @@ export function presetDrift(agent) {
   const changes = [];
   for (const field of PRESET_OWNED_FIELDS) {
     const from = presetFieldValue(field, agent);
-    const to = presetFieldValue(field, preset);
+    const to = presetOwnedValue(field, preset);
     if (from !== to) changes.push({ field, from, to });
   }
   return changes;

@@ -317,9 +317,10 @@ export function agentDrift(env) {
 }
 
 /**
- * Re-resolves preset-backed agents against the catalog. Only the fields
- * the preset owns move (kind, model, effort/thinking, skillsPolicy) — a
- * description you wrote is yours and is never overwritten.
+ * Re-resolves preset-backed agents against the catalog. Every field the preset
+ * owns moves — kind, model, effort/thinking, skillsPolicy, and since
+ * 2026-08-27 the description, because a label naming the wrong model is what
+ * the skill table shows a lead. A row with no `preset` is never touched.
  */
 export function syncAgents(env, options = {}) {
   const { name, dryRun = false } = options

@@ -360,7 +360,11 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     const before = await (await api('/api/agents')).json()
     const moved = before.drift.find((d) => d.name === 'diana')
     assert.ok(moved, 'the page is told the catalog moved')
-    assert.deepEqual(moved.changes, [{ field: 'model', from: 'gpt-5.5', to: 'gpt-5.6-luna' }])
+    assert.deepEqual(moved.changes, [
+      { field: 'model', from: 'gpt-5.5', to: 'gpt-5.6-luna' },
+      // JSON drops an undefined `from`: this row was added with no description.
+      { field: 'description', to: 'Codex GPT 5.6 Luna XHIGH' },
+    ])
 
     const synced = await api('/api/agents/sync', {
       method: 'POST',

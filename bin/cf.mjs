@@ -1457,8 +1457,10 @@ function agentVerb(rest) {
     }
     case 'sync': {
       // Catalog-backed agents keep whatever model they were created
-      // with; this is how a moved preset reaches them. Anything you defined
-      // yourself, and any description you wrote, is left alone.
+      // with; this is how a moved preset reaches them — the description
+      // included, so the skill table never names a model the agent dropped.
+      // Anything you defined yourself (an explicit --model or --effort at add
+      // time records no preset) is left alone.
       const applied = syncAgents(env, { name, dryRun: values['dry-run'] })
       if (applied.length === 0) {
         const backed = listAgents(env).filter((p) => p.preset !== undefined).length

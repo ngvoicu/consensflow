@@ -175,7 +175,10 @@ describe('a catalog agent can be told its model moved', () => {
     const drift = agentDrift(t.env)
     assert.equal(drift.length, 1, 'only the catalog-backed row drifts')
     assert.equal(drift[0].name, 'diana')
-    assert.deepEqual(drift[0].changes, [{ field: 'model', from: 'gpt-5.5', to: 'gpt-5.6-luna' }])
+    assert.deepEqual(drift[0].changes, [
+      { field: 'model', from: 'gpt-5.5', to: 'gpt-5.6-luna' },
+      { field: 'description', from: 'my own words', to: 'Codex GPT 5.6 Luna XHIGH' },
+    ])
   })
 
   it('a dry run says what would happen and writes nothing', () => {
@@ -188,13 +191,17 @@ describe('a catalog agent can be told its model moved', () => {
     )
   })
 
-  it('syncs the fields the preset owns, and never the words you wrote', () => {
+  it('syncs every field the preset owns, the label included', () => {
     const applied = syncAgents(t.env, {})
     assert.equal(applied.length, 1)
 
     const byName = Object.fromEntries(listAgents(t.env).map((p) => [p.name, p]))
     assert.equal(byName.diana.model, 'gpt-5.6-luna', 'the model caught up')
-    assert.equal(byName.diana.description, 'my own words', 'the description is yours')
+    assert.equal(
+      byName.diana.description,
+      'Codex GPT 5.6 Luna XHIGH',
+      'the label follows the catalog too: a name for a model it no longer runs is what the skill table would print',
+    )
     assert.equal(byName.mine.model, 'gpt-5.4', 'a pinned agent stays pinned')
     assert.equal(agentDrift(t.env).length, 0, 'nothing left to do')
   })
