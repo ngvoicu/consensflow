@@ -4,6 +4,32 @@ import { slugify, stripMention } from "./utils.js";
 // Same catalog as consensflow-pi, image preset included: here pygmalion rides the Codex CLI's
 // ChatGPT login (lib/codex-auth.js) to the same gpt-image-2 backend pi reaches via its
 // openai-codex login.
+// --- Effort ceilings (audited 2026-08-27) --------------------------------
+// Every preset names the HIGHEST level its model actually takes, and no preset names a level the
+// model does not have. Both facts come from the harnesses' own catalogs, which each publish the
+// per-model list: pi's `thinkingLevelMap` (~/.pi/agent/models-store.json, non-null entries) and
+// models.dev's `reasoning_options` (opencode's models.json). They were compared across all 287
+// models both carry: 281 agree. That agreement is why one name can mean one thing on both
+// harnesses — a pi preset and its opencode twin sit at the same level by rule, asserted in
+// tests/catalog.test.mjs.
+//
+// The audit found five presets naming a level their model has never had — `max` on Qwen3.8 27B and
+// on Nemotron 3 Ultra, `xhigh` on Kimi K3, and an effort at all on MiniMax M3 and Laguna S 2.1.
+// None of them errored: pi maps an unknown level to null and sends nothing, and opencode validates
+// nothing at all (a deliberately bogus `--variant` was probed and ran). So the run quietly used the
+// model's default while the label promised MAX — the failure mode this comment exists to prevent.
+// Three models take no effort parameter at all (MiniMax M3, Laguna S 2.1 free, and gpt-image-2):
+// their presets name no level, because a level nothing honours is worse than a blank one.
+//
+// The one disagreement that touches this catalog is DeepSeek V4 (all variants): pi says
+// {high, xhigh}, models.dev says {low, high, max}. Probing could not settle it — pi returns
+// reasoning tokens at both of its levels, and opencode reports zero reasoning on this model at
+// every variant, including the `high` both catalogs confirm. So zephyros/hades/freya/odin sit at
+// `high`, the only level both sources agree exists. Raise it when one of them is proven right.
+//
+// The GPT 5.6 trio through OpenCode (sunna/jord/bil) is deliberately NOT at its ceiling: it holds
+// the xhigh tier that the same three models occupy on codex and pi, so the trio means the same
+// thing on every harness. A tier ladder is a choice; a level the model lacks is a bug.
 export const AGENT_PRESETS = [
   // --- Claude Fable 5 — Anthropic's most capable model (priced above Opus).
   // Muse names on claude-code; bard/storyteller names on the other engines.
@@ -321,42 +347,43 @@ export const AGENT_PRESETS = [
     preset: "nike",
     id: "nike",
     name: "Nike",
-    label: "Pi Gemini 3.7 Flash (fast)",
-    description: "Swift, cheap Pi-backed Gemini 3.7 Flash for quick second opinions.",
+    label: "Pi Gemini 3.7 Flash HIGH (fast)",
+    description: "Swift, cheap Pi-backed Gemini 3.7 Flash at high thinking — its ceiling — for quick second opinions.",
     kind: "pi",
     model: "openrouter/google/gemini-3.7-flash",
-    thinking: "low",
+    thinking: "high",
     skillsPolicy: "default",
   },
   {
     preset: "freya",
     id: "freya",
     name: "Freya",
-    label: "OpenCode DeepSeek V4 Flash (fast)",
-    description: "Cheap, fast OpenCode-backed DeepSeek V4 Flash (via OpenRouter).",
+    label: "OpenCode DeepSeek V4 Flash HIGH (fast)",
+    description: "Cheap, fast OpenCode-backed DeepSeek V4 Flash at high variant (via OpenRouter) — the one level both harness catalogs agree this model has.",
     kind: "opencode",
     model: "openrouter/deepseek/deepseek-v4-flash-0731",
+    effort: "high",
   },
   {
     preset: "zephyros",
     id: "zephyros",
     name: "Zephyros",
-    label: "Pi DeepSeek V4 Flash (fast)",
-    description: "Swift west wind: Pi-backed DeepSeek V4 Flash (via OpenRouter).",
+    label: "Pi DeepSeek V4 Flash HIGH (fast)",
+    description: "Swift west wind: Pi-backed DeepSeek V4 Flash at high thinking (via OpenRouter) — `low` was not a level this model has.",
     kind: "pi",
     model: "openrouter/deepseek/deepseek-v4-flash-0731",
-    thinking: "low",
+    thinking: "high",
     skillsPolicy: "default",
   },
   {
     preset: "sif",
     id: "sif",
     name: "Sif",
-    label: "OpenCode Gemini 3.7 Flash (fast)",
-    description: "Swift, cheap OpenCode-backed Gemini 3.7 Flash at low variant (via OpenRouter).",
+    label: "OpenCode Gemini 3.7 Flash HIGH (fast)",
+    description: "Swift, cheap OpenCode-backed Gemini 3.7 Flash at high variant — its ceiling (via OpenRouter).",
     kind: "opencode",
     model: "openrouter/google/gemini-3.7-flash",
-    effort: "low",
+    effort: "high",
   },
 
   // --- pi model zoo (Greek names) — popular OpenRouter models via Pi -------
@@ -386,33 +413,33 @@ export const AGENT_PRESETS = [
     preset: "ares",
     id: "ares",
     name: "Ares",
-    label: "Pi Grok 4.6",
-    description: "Pi-backed xAI Grok 4.6 agent (via OpenRouter).",
+    label: "Pi Grok 4.6 XHIGH",
+    description: "Pi-backed xAI Grok 4.6 agent at xhigh thinking — its ceiling (via OpenRouter).",
     kind: "pi",
     model: "openrouter/x-ai/grok-4.6",
-    thinking: "high",
+    thinking: "xhigh",
     skillsPolicy: "default",
   },
   {
     preset: "hephaestus",
     id: "hephaestus",
     name: "Hephaestus",
-    label: "Pi Qwen3.8 Max",
-    description: "Pi-backed Qwen3.8 Max agent (via OpenRouter).",
+    label: "Pi Qwen3.8 Max XHIGH",
+    description: "Pi-backed Qwen3.8 Max agent at xhigh thinking — its ceiling (via OpenRouter).",
     kind: "pi",
     model: "openrouter/qwen/qwen3.8-max",
-    thinking: "high",
+    thinking: "xhigh",
     skillsPolicy: "default",
   },
   {
     preset: "athena",
     id: "athena",
     name: "Athena",
-    label: "Pi Qwen3.8 27B MAX",
-    description: "Pi-backed Qwen3.8 27B at max thinking (via OpenRouter); the dense sibling of Hephaestus's Max.",
+    label: "Pi Qwen3.8 27B XHIGH",
+    description: "Pi-backed Qwen3.8 27B at xhigh thinking — its ceiling; `max` is not a level this model has (via OpenRouter). The dense sibling of Hephaestus's Max.",
     kind: "pi",
     model: "openrouter/qwen/qwen3.8-27b",
-    thinking: "max",
+    thinking: "xhigh",
     skillsPolicy: "default",
   },
   {
@@ -420,79 +447,100 @@ export const AGENT_PRESETS = [
     id: "metis",
     name: "Metis",
     label: "Pi MiniMax M3",
-    description: "Pi-backed MiniMax M3 agent (via OpenRouter); goddess of cunning strategy for 'minimax'.",
+    description: "Pi-backed MiniMax M3 agent (via OpenRouter); goddess of cunning strategy for 'minimax'. M3 reasons, but no harness can steer how hard: it takes no effort parameter, so this preset names no level.",
     kind: "pi",
     model: "openrouter/minimax/minimax-m3",
-    thinking: "high",
     skillsPolicy: "default",
   },
   {
     preset: "prometheus",
     id: "prometheus",
     name: "Prometheus",
-    label: "Pi GLM 5.3",
-    description: "Pi-backed Zhipu GLM 5.3 agent (via OpenRouter); the Titan who brought knowledge to mortals.",
+    label: "Pi GLM 5.3 MAX",
+    description: "Pi-backed Zhipu GLM 5.3 at max thinking — its ceiling (via OpenRouter); the Titan who brought knowledge to mortals.",
     kind: "pi",
     model: "openrouter/z-ai/glm-5.3",
-    thinking: "high",
+    thinking: "max",
     skillsPolicy: "default",
   },
   {
     preset: "endymion",
     id: "endymion",
     name: "Endymion",
-    label: "Pi Kimi K3 XHIGH",
-    description: "Beloved of the moon goddess: Pi-backed Kimi K3 — Moonshot's 1M-context flagship reasoner — at xhigh thinking, OpenRouter's effort ceiling (needs the kimi-k3 entry in ~/.pi/agent/models.json for sane token limits and xhigh support).",
+    label: "Pi Kimi K3 MAX",
+    description: "Beloved of the moon goddess: Pi-backed Kimi K3 — Moonshot's 1M-context flagship reasoner — at max thinking, its ceiling. K3 takes low/high/max and never had `xhigh`; the kimi-k3 entry in ~/.pi/agent/models.json is still worth having for sane token limits, but the level no longer depends on it (probed 2026-08-27: max returns reasoning tokens).",
     kind: "pi",
     model: "openrouter/moonshotai/kimi-k3",
-    thinking: "xhigh",
+    thinking: "max",
     skillsPolicy: "default",
   },
 
   // --- Three OpenRouter models added 2026-08-24, each verified present in
   // `pi --list-models` and `opencode models` before it was written down. Two
-  // ride OpenRouter's free tier; ox-alpha is an unbadged stealth model. All
-  // three report thinking support, so all three sit at the ceiling.
+  // ride OpenRouter's free tier; the third was stealth/ox-alpha, whose testing
+  // period ended 2026-08-27 — the endpoint now 404s and names its own model:
+  // ZAI's GLM 5.3 Flash. nyx and nott follow it there rather than keep a name
+  // that answers nothing. That id is NEWER than either harness's catalog:
+  // neither `pi --list-models` (refreshed) nor `opencode models` carries
+  // z-ai/glm-5.3-flash yet, so it was verified another way on 2026-08-27 —
+  // present in OpenRouter's own /api/v1/models with reasoning support, and
+  // live one-shot probes on both CLIs answered through it as a custom model
+  // id. pi says so out loud ("Using custom model id") and still forwards the
+  // thinking level: at max the run reports reasoning tokens, at off it reports
+  // none. A `~/.pi/agent/models.json` entry (the endymion pattern) is what
+  // buys sane token limits until models.dev catches up. All three report
+  // thinking support, so all three sit at the ceiling.
   {
     preset: "nyx",
     id: "nyx",
     name: "Nyx",
-    label: "Pi Ox Alpha MAX",
-    description: "Primordial goddess of night: the unbadged stealth/ox-alpha on Pi at max thinking (via OpenRouter) — 1M context, images and reasoning, and nobody says whose model it is.",
+    label: "Pi GLM 5.3 Flash MAX",
+    description: "Primordial goddess of night: ZAI's GLM 5.3 Flash on Pi at max thinking (via OpenRouter) — 1.3M context and reasoning; the stealth model that ran here as ox-alpha, now under its own name.",
     kind: "pi",
-    model: "openrouter/stealth/ox-alpha",
+    model: "openrouter/z-ai/glm-5.3-flash",
     thinking: "max",
   },
   {
     preset: "oceanus",
     id: "oceanus",
     name: "Oceanus",
-    label: "Pi Nemotron 3 Ultra 550B FREE MAX",
-    description: "Titan of the world-encircling river: NVIDIA's 550B-parameter Nemotron 3 Ultra on Pi at max thinking, on OpenRouter's free tier (1M context there).",
+    label: "Pi Nemotron 3 Ultra 550B FREE HIGH",
+    description: "Titan of the world-encircling river: NVIDIA's 550B-parameter Nemotron 3 Ultra on Pi at high thinking — its ceiling, `max` is not a level it has — on OpenRouter's free tier (1M context there).",
     kind: "pi",
     model: "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
-    thinking: "max",
+    thinking: "high",
   },
   {
     preset: "triton",
     id: "triton",
     name: "Triton",
-    label: "Pi Laguna S 2.1 FREE MAX",
-    description: "Herald of the deep, for a model named after a lagoon: Poolside's Laguna S 2.1 on Pi at max thinking, on OpenRouter's free tier.",
+    label: "Pi Laguna S 2.1 FREE",
+    description: "Herald of the deep, for a model named after a lagoon: Poolside's Laguna S 2.1 on Pi, on OpenRouter's free tier. It reasons, but takes no effort parameter, so this preset names no level.",
     kind: "pi",
     model: "openrouter/poolside/laguna-s-2.1:free",
-    thinking: "max",
   },
 
   // --- opencode model zoo (Norse names) — same models via OpenCode --------
+  //
+  // Same model AND same effort as the pi twin. A name here is a model plus how
+  // hard it thinks, so a pair that agreed on the model and not on the level
+  // (ares/thor, hades/odin, hephaestus/tyr, zephyros/freya) was two different
+  // agents wearing one description — and it showed: an entry with no effort
+  // draws a bare harness tag in the roster UI, which reads as a gap because it
+  // was one. Filled in 2026-08-27 against OpenRouter's own
+  // supported_parameters: each of those four models lists reasoning_effort, so
+  // opencode's `--variant` reaches something. opencode validates nothing here
+  // (a bogus variant was probed and ran), which is exactly why the catalog
+  // must. Two entries below still carry no effort on purpose — each says why.
   {
     preset: "odin",
     id: "odin",
     name: "Odin",
-    label: "OpenCode DeepSeek V4 Pro",
-    description: "OpenCode-backed DeepSeek V4 Pro agent (via OpenRouter).",
+    label: "OpenCode DeepSeek V4 Pro HIGH",
+    description: "OpenCode-backed DeepSeek V4 Pro agent at high variant (via OpenRouter).",
     kind: "opencode",
     model: "openrouter/deepseek/deepseek-v4-pro-0813",
+    effort: "high",
   },
   {
     preset: "heimdall",
@@ -508,30 +556,34 @@ export const AGENT_PRESETS = [
     preset: "thor",
     id: "thor",
     name: "Thor",
-    label: "OpenCode Grok 4.6",
-    description: "OpenCode-backed xAI Grok 4.6 agent (via OpenRouter).",
+    label: "OpenCode Grok 4.6 XHIGH",
+    description: "OpenCode-backed xAI Grok 4.6 agent at xhigh variant — its ceiling (via OpenRouter).",
     kind: "opencode",
     model: "openrouter/x-ai/grok-4.6",
+    effort: "xhigh",
   },
   {
     preset: "tyr",
     id: "tyr",
     name: "Tyr",
-    label: "OpenCode Qwen3.8 Max",
-    description: "OpenCode-backed Qwen3.8 Max agent (via OpenRouter).",
+    label: "OpenCode Qwen3.8 Max XHIGH",
+    description: "OpenCode-backed Qwen3.8 Max agent at xhigh variant — its ceiling (via OpenRouter).",
     kind: "opencode",
     model: "openrouter/qwen/qwen3.8-max",
+    effort: "xhigh",
   },
   {
     preset: "bragi",
     id: "bragi",
     name: "Bragi",
-    label: "OpenCode Qwen3.8 27B MAX",
-    description: "OpenCode-backed Qwen3.8 27B at max effort (via OpenRouter); the dense sibling of Tyr's Max.",
+    label: "OpenCode Qwen3.8 27B XHIGH",
+    description: "OpenCode-backed Qwen3.8 27B at xhigh effort — its ceiling; `max` is not a level this model has (via OpenRouter). The dense sibling of Tyr's Max.",
     kind: "opencode",
     model: "openrouter/qwen/qwen3.8-27b",
-    effort: "max",
+    effort: "xhigh",
   },
+  // No effort, deliberately — one of the three models in this catalog that take none.
+  // See "Effort ceilings" at the top of the file.
   {
     preset: "mimir",
     id: "mimir",
@@ -545,40 +597,40 @@ export const AGENT_PRESETS = [
     preset: "mani",
     id: "mani",
     name: "Mani",
-    label: "OpenCode Kimi K3",
-    description: "Norse moon god: OpenCode-backed Kimi K3 — Moonshot's 1M-context flagship reasoner (via OpenRouter). Runs at K3's default max thinking; the catalog defines no effort variants for it.",
+    label: "OpenCode Kimi K3 MAX",
+    description: "Norse moon god: OpenCode-backed Kimi K3 — Moonshot's 1M-context flagship reasoner — at max effort, its ceiling (via OpenRouter).",
     kind: "opencode",
     model: "openrouter/moonshotai/kimi-k3",
+    effort: "max",
   },
   {
     preset: "nott",
     id: "nott",
     name: "Nott",
-    label: "OpenCode Ox Alpha MAX",
-    description: "Norse night personified, sister in spirit to Pi's Nyx: the unbadged stealth/ox-alpha through OpenCode at max effort (via OpenRouter).",
+    label: "OpenCode GLM 5.3 Flash MAX",
+    description: "Norse night personified, sister in spirit to Pi's Nyx: ZAI's GLM 5.3 Flash through OpenCode at max effort (via OpenRouter) — the model that was stealth/ox-alpha until it was named.",
     kind: "opencode",
-    model: "openrouter/stealth/ox-alpha",
+    model: "openrouter/z-ai/glm-5.3-flash",
     effort: "max",
   },
   {
     preset: "ymir",
     id: "ymir",
     name: "Ymir",
-    label: "OpenCode Nemotron 3 Ultra 550B FREE MAX",
-    description: "The primordial giant the world was built from: NVIDIA's 550B-parameter Nemotron 3 Ultra through OpenCode at max effort, on OpenRouter's free tier.",
+    label: "OpenCode Nemotron 3 Ultra 550B FREE HIGH",
+    description: "The primordial giant the world was built from: NVIDIA's 550B-parameter Nemotron 3 Ultra through OpenCode at high effort — its ceiling, `max` is not a level it has — on OpenRouter's free tier.",
     kind: "opencode",
     model: "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
-    effort: "max",
+    effort: "high",
   },
   {
     preset: "aegir",
     id: "aegir",
     name: "Aegir",
-    label: "OpenCode Laguna S 2.1 FREE MAX",
-    description: "Norse giant of the sea, for a model named after a lagoon: Poolside's Laguna S 2.1 through OpenCode at max effort, on OpenRouter's free tier.",
+    label: "OpenCode Laguna S 2.1 FREE",
+    description: "Norse giant of the sea, for a model named after a lagoon: Poolside's Laguna S 2.1 through OpenCode, on OpenRouter's free tier. It reasons, but takes no effort parameter, so this preset names no level.",
     kind: "opencode",
     model: "openrouter/poolside/laguna-s-2.1:free",
-    effort: "max",
   },
 
   // --- Kimi Code (Finnish names, so a kimi agent is recognisable as one at a

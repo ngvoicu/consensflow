@@ -39,6 +39,45 @@ describe('every tool ships a list of ready-made agents', () => {
     }
   })
 
+  // An entry with no effort draws a bare harness tag in the roster UI, so a
+  // level nobody chose looks exactly like a level the catalog forgot. Where the
+  // harness HAS levels, every entry names one — unless it is listed here, and
+  // the file says why beside it.
+  it('names an effort wherever its harness has one, or is a listed exception', () => {
+    // The three models that take no effort parameter at all — see "Effort ceilings"
+    // in hosts/lib/presets.js for how that was established.
+    const blankOnPurpose = new Set([
+      'metis', // MiniMax M3, on pi
+      'mimir', // MiniMax M3, on opencode
+      'triton', // Laguna S 2.1 free, on pi
+      'aegir', // Laguna S 2.1 free, on opencode
+    ])
+    for (const [harness, entries] of Object.entries(CATALOG)) {
+      if ((EFFORTS[harness] ?? []).length === 0) continue
+      for (const entry of entries) {
+        assert.ok(
+          entry.effort !== undefined || blankOnPurpose.has(entry.name),
+          `${entry.name}: ${harness} has effort levels, so this one must name one`,
+        )
+      }
+    }
+  })
+
+  // The zoo is the same models through OpenCode: a pair that shares a model
+  // must share the level too, or one name means two different agents.
+  it("keeps each opencode twin at its pi twin's effort", () => {
+    const level = (entry) => entry.effort
+    for (const entry of CATALOG.opencode) {
+      const twin = CATALOG.pi.find((p) => p.model === entry.model)
+      if (twin === undefined || level(entry) === undefined) continue
+      assert.equal(
+        level(entry),
+        level(twin),
+        `${entry.name} and ${twin.name} share ${entry.model} but not the effort`,
+      )
+    }
+  })
+
   it('carries the models verified live on 2026-08-21, newest of each family', () => {
     const models = Object.values(CATALOG).flatMap((entries) => entries.map((e) => e.model))
     assert.ok(models.includes('openrouter/z-ai/glm-5.3'))
@@ -46,9 +85,13 @@ describe('every tool ships a list of ready-made agents', () => {
     assert.ok(models.includes('openrouter/moonshotai/kimi-k3'))
     // Added 2026-08-24, each confirmed present in `pi --list-models` and
     // `opencode models` before it was written down — two free tiers and one
-    // unbadged stealth model, on both open-model harnesses.
+    // unbadged stealth model, on both open-model harnesses. The stealth one
+    // ended its testing period on 2026-08-27 (404 naming its own model), so
+    // nyx and nott moved to it under its real name: z-ai/glm-5.3-flash,
+    // verified that day in OpenRouter's /api/v1/models and by a live one-shot
+    // on each CLI — neither harness catalog lists it yet, both run it.
     for (const model of [
-      'openrouter/stealth/ox-alpha',
+      'openrouter/z-ai/glm-5.3-flash',
       'openrouter/nvidia/nemotron-3-ultra-550b-a55b:free',
       'openrouter/poolside/laguna-s-2.1:free',
     ]) {
@@ -61,9 +104,11 @@ describe('every tool ships a list of ready-made agents', () => {
         `opencode is missing ${model}`,
       )
     }
-    // Superseded versions must not linger in a curated list.
+    // Superseded versions must not linger in a curated list — and a retired
+    // endpoint is superseded twice over: stealth/ox-alpha answers 404 now.
     assert.ok(!models.some((m) => m.includes('glm-5.2')))
     assert.ok(!models.some((m) => m.includes('qwen3.7')))
+    assert.ok(!models.some((m) => m.includes('ox-alpha')))
   })
 
   it('is the payload presets and nothing else — one list, not two', async () => {

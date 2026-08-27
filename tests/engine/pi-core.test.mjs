@@ -200,7 +200,8 @@ test('agent presets expose the allowed creation list', () => {
   ])
   assert.equal(getPreset('zeus').kind, 'claude-code')
   assert.equal(getPreset('gaia').model, 'gpt-5.6-terra')
-  assert.equal(getPreset('endymion').thinking, 'xhigh')
+  // max, not xhigh: K3 takes low/high/max — see "Effort ceilings" in hosts/lib/presets.js.
+  assert.equal(getPreset('endymion').thinking, 'max')
   assert.equal(getPreset('pygmalion').kind, 'image')
   // GPT 5.5 was retired in 1.7.0 — every GPT agent now runs a 5.6 variant.
   assert.ok(!AGENT_PRESETS.some((p) => p.kind !== 'image' && String(p.model).includes('gpt-5.5')))
@@ -211,10 +212,12 @@ test('agent presets expose the allowed creation list', () => {
   assert.equal(getPreset('baldr').model, 'openrouter/anthropic/claude-opus-5')
   assert.equal(getPreset('saga').model, 'openrouter/anthropic/claude-fable-5')
   // Effort vocabularies are engine-real: claude-code tops out at "max", Codex's GPT 5.6 ladder
-  // adds "ultra" above xhigh, the OpenRouter-backed presets stay at xhigh, and models without
-  // catalog variants (e.g. the Kimi family on opencode) carry no effort at all.
+  // adds "ultra" above xhigh, and a model whose catalog declares no effort parameter at all
+  // (MiniMax M3, Laguna S 2.1) carries none — see "Effort ceilings" in hosts/lib/presets.js.
   assert.equal(getPreset('baldr').effort, 'xhigh')
-  assert.equal(getPreset('mani').effort, undefined)
+  assert.equal(getPreset('mani').effort, 'max')
+  assert.equal(getPreset('mimir').effort, undefined)
+  assert.equal(getPreset('aegir').effort, undefined)
   // GPT 5.6 celestial trio on Codex: Sol (flagship) gets ultra + xhigh, Terra and Luna get xhigh.
   assert.equal(getPreset('hyperion').kind, 'codex')
   assert.equal(getPreset('hyperion').model, 'gpt-5.6-sol')
@@ -241,10 +244,12 @@ test('agent presets expose the allowed creation list', () => {
   // and mani (opencode, no catalog variants → no effort flag).
   assert.equal(getPreset('endymion').kind, 'pi')
   assert.equal(getPreset('endymion').model, 'openrouter/moonshotai/kimi-k3')
-  assert.equal(getPreset('endymion').thinking, 'xhigh')
+  // max, not xhigh: K3 takes low/high/max — see "Effort ceilings" in hosts/lib/presets.js.
+  assert.equal(getPreset('endymion').thinking, 'max')
   assert.equal(getPreset('mani').kind, 'opencode')
   assert.equal(getPreset('mani').model, 'openrouter/moonshotai/kimi-k3')
-  assert.equal(getPreset('mani').effort, undefined)
+  // The twin of endymion, so the same level: one name, one meaning, both harnesses.
+  assert.equal(getPreset('mani').effort, 'max')
   // Kimi K2.7 Code was retired from the OpenRouter list in 1.9.0 — K3
   // supersedes it there, and that path is K3-only. On the kimi harness itself
   // the code-specialist K2.7 models stay: K3 is a general flagship with no
@@ -264,12 +269,13 @@ test('agent presets expose the allowed creation list', () => {
   assert.equal(getPreset('thor').model, 'openrouter/x-ai/grok-4.6')
   assert.equal(getPreset('nike').model, 'openrouter/google/gemini-3.7-flash')
   assert.equal(getPreset('sif').model, 'openrouter/google/gemini-3.7-flash')
-  // GLM 5.3 on pi (Greek model zoo, high thinking).
+  // GLM 5.3 on pi (Greek model zoo), at the model's ceiling like every other single-tier preset.
   assert.equal(getPreset('prometheus').kind, 'pi')
   assert.equal(getPreset('prometheus').model, 'openrouter/z-ai/glm-5.3')
-  assert.equal(getPreset('prometheus').thinking, 'high')
+  assert.equal(getPreset('prometheus').thinking, 'max')
+  // Gemini 3.1 Pro and 3.7 Flash both stop at high — there is nothing above it to ask for.
   assert.equal(getPreset('heimdall').effort, 'high')
-  assert.equal(getPreset('sif').effort, 'low')
+  assert.equal(getPreset('sif').effort, 'high')
   // Fable 5 family follows the same rules: claude-code gets max, the rest cap at xhigh.
   assert.equal(getPreset('calliope').effort, 'max')
   assert.equal(getPreset('calliope').model, 'claude-fable-5')
