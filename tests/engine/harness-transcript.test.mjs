@@ -177,14 +177,25 @@ test('harness transcript: the harness own injected context is not a turn', async
       path.join(env.HOME, '.codex', 'sessions', '2026', '08', '24', `rollout-${id}.jsonl`),
       [
         // codex injects these as `user` messages. They are the environment
-        // talking to itself, and showing them as "you asked" is a lie.
+        // talking to itself, and showing them as "you asked" is a lie. Shape
+        // copied from a real rollout on 2026-08-27, closing tag included —
+        // the abbreviated version this fixture used to carry was what made
+        // "starts with <" look like a safe test for "is injected context".
         JSON.stringify({
           type: 'response_item',
-          payload: { role: 'user', content: [{ text: '<recommended_plugins>\nAirtable…' }] },
+          payload: {
+            role: 'user',
+            content: [
+              { text: '<recommended_plugins>\nHere is a list of plugins…\n</recommended_plugins>' },
+            ],
+          },
         }),
         JSON.stringify({
           type: 'response_item',
-          payload: { role: 'user', content: [{ text: '<skills_instructions>\n## Skills' }] },
+          payload: {
+            role: 'user',
+            content: [{ text: '<skills_instructions>\n## Skills\n</skills_instructions>' }],
+          },
         }),
         JSON.stringify({
           type: 'response_item',
@@ -365,6 +376,47 @@ test('harness transcript: a conversation older than the migration still reads', 
 
     assert.deepEqual(await harnessTurns('opencode', id, env), [
       { role: 'user', text: 'from the old days' },
+    ])
+  })
+})
+
+test('harness transcript: a tag is not injected context — real text starting with < survives', async () => {
+  // Live 2026-08-27: `readable` dropped ANY turn whose text began with `<`,
+  // for both roles. So a question about markup vanished, and so did an answer
+  // that opened with one — while our own packet tells the agent to "return
+  // only the requested output", which is exactly how an agent asked for HTML
+  // replies. What is stripped now is a COMPLETE <tag>…</tag> block, which is
+  // what an environment injects; a lone opening tag is somebody talking.
+  await withStores(async (env) => {
+    const id = 'markup-test'
+    await write(
+      path.join(env.HOME, '.codex', 'sessions', '2026', '08', '24', `rollout-${id}.jsonl`),
+      [
+        JSON.stringify({
+          type: 'response_item',
+          payload: { role: 'user', content: [{ text: '<div> tags are escaping wrong, why?' }] },
+        }),
+        JSON.stringify({
+          type: 'response_item',
+          payload: { role: 'assistant', content: [{ text: '<!doctype html>\n<html>…</html>' }] },
+        }),
+        // A block with a real question after it keeps the question.
+        JSON.stringify({
+          type: 'response_item',
+          payload: {
+            role: 'user',
+            content: [{ text: '<skills_instructions>\nx\n</skills_instructions>\nand now mine' }],
+          },
+        }),
+      ].join('\n'),
+    )
+
+    const turns = await harnessTurns('codex', id, env)
+
+    assert.deepEqual(turns, [
+      { role: 'user', text: '<div> tags are escaping wrong, why?' },
+      { role: 'assistant', text: '<!doctype html>\n<html>…</html>' },
+      { role: 'user', text: 'and now mine' },
     ])
   })
 })

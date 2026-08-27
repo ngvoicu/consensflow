@@ -112,7 +112,7 @@ async function readKimi(env, sessionId) {
   let answer = null;
   const flush = () => {
     if (answer === null) return;
-    const text = readable(answer.parts.join("").trim());
+    const text = readable(answer.parts.join("").trim(), "assistant");
     if (text.length > 0) turns.push({ role: "assistant", text });
     answer = null;
   };
@@ -128,7 +128,7 @@ async function readKimi(env, sessionId) {
 
     if (record?.type === "turn.prompt" && record.origin?.kind === "user") {
       flush();
-      const text = readable(flatten(record.input));
+      const text = readable(flatten(record.input), "user");
       if (text.length > 0) turns.push({ role: "user", text });
       continue;
     }
@@ -181,28 +181,55 @@ function piTurn(record) {
 /** Every harness spells a turn as a role plus content that is text or parts. */
 function messageTurn(role, content) {
   if (role !== "user" && role !== "assistant") return null;
-  const text = readable(flatten(content));
+  const text = readable(flatten(content), role);
   return text.length === 0 ? null : { role, text };
 }
 
 /**
  * What a person would say was said.
  *
- * Two kinds of noise sit in these files under a `user` role. The harness's own
- * injected context — codex opens with `<recommended_plugins>` and
- * `<skills_instructions>` — is the environment talking to itself, and showing
- * it as "you asked" would be a lie. And our own packet wraps the question in
- * scaffolding the reader already knows; the question is the part they wanted.
+ * Two kinds of noise sit in these files, and — as the paragraph below always
+ * said — both arrive under a `user` role. The harness's own injected context
+ * (codex opens with `<recommended_plugins>` and `<skills_instructions>`) is
+ * the environment talking to itself, and showing it as "you asked" would be a
+ * lie. And our own packet wraps the question in scaffolding the reader
+ * already knows; the question is the part they wanted.
+ *
+ * An ANSWER passes through untouched. It used to be filtered too, and the
+ * filter was `startsWith("<")` — so an agent that opened with markup had its
+ * whole answer dropped from every catchup, leaving the question standing
+ * alone. Our own packet asks agents to "return only the requested output",
+ * which is precisely how one asked for HTML replies (live, 2026-08-27).
  */
-function readable(text) {
-  if (text.startsWith("<")) return "";
+function readable(text, role) {
+  if (role !== "user") return text;
+  const body = withoutInjectedBlocks(text);
   const marker = "## Message from the user";
-  const at = text.indexOf(marker);
-  if (at === -1) return text;
-  const body = text.slice(at + marker.length).trim();
+  const at = body.indexOf(marker);
+  if (at === -1) return body;
+  const question = body.slice(at + marker.length).trim();
   // The packet closes with a formatting instruction that is ours, not theirs.
-  const end = body.indexOf("\nRespond directly and conversationally");
-  return (end === -1 ? body : body.slice(0, end)).trim();
+  const end = question.indexOf("\nRespond directly and conversationally");
+  return (end === -1 ? question : question.slice(0, end)).trim();
+}
+
+/**
+ * Injected blocks off the front, whatever a person wrote left standing.
+ *
+ * A COMPLETE `<tag>…</tag>` is what an environment injects — verified against
+ * a real codex rollout on 2026-08-27, closing tag and all. A lone opening tag
+ * is somebody talking: `<div> tags are escaping wrong` is a question, and
+ * `<!doctype html>` is an answer. Repeated, because one turn can carry more
+ * than one block. If a harness ever injects a block it does not close, this
+ * shows it rather than hiding it — the harmless direction for a reader whose
+ * job is to lose nothing.
+ */
+const INJECTED_BLOCK = /^\s*<([a-z][a-z0-9_-]*)>[\s\S]*?<\/\1>\s*/i;
+
+function withoutInjectedBlocks(text) {
+  let rest = text;
+  while (INJECTED_BLOCK.test(rest)) rest = rest.replace(INJECTED_BLOCK, "");
+  return rest.trim();
 }
 
 function flatten(content) {
@@ -304,7 +331,7 @@ async function readOpencodeDb(env, sessionId) {
       }
       const role = parsed?.role;
       if (role !== "user" && role !== "assistant") continue;
-      const text = readable((textByMessage.get(message.id) ?? []).join("\n").trim());
+      const text = readable((textByMessage.get(message.id) ?? []).join("\n").trim(), role);
       if (text.length > 0) turns.push({ role, text });
     }
     return turns;

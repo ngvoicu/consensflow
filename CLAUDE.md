@@ -142,9 +142,15 @@ keep in step — the manager is the only caller.
   (codex rollout jsonl, claude's file named for the session, pi's uuid-suffixed
   jsonl, opencode's message+part pair) — never writes, and returns an empty
   list rather than throwing when a harness has moved its files. It strips the
-  environment's own injected `<…>` blocks and unwraps our packet to the
-  question inside, because a transcript should show what a person would say was
-  said. The screen is never read: it is a picture, not the conversation.
+  environment's own injected `<…>` blocks — a COMPLETE `<tag>…</tag>`, and only
+  under a `user` role — and unwraps our packet to the question inside, because
+  a transcript should show what a person would say was said. Both narrowings
+  were paid for: the rule used to be "the text starts with `<`", applied to
+  every role, so a question about markup vanished and so did an answer that
+  opened with a tag — while our own packet asks agents to "return only the
+  requested output", which is exactly how an agent asked for HTML replies
+  (live, 2026-08-27). An unclosed block is now shown rather than hidden: the
+  harmless direction for a reader whose job is to lose nothing. The screen is never read: it is a picture, not the conversation.
 
 - **A conversation belongs to the lead that started it.** Continuing only
   helps when the one continuing is the one who was there. "The agent's most
