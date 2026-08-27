@@ -49,7 +49,7 @@ const note = (scenario, check, ok) => {
 for (const scenario of chosen) {
   for (let pass = 0; pass < repeat; pass += 1) {
     const label = repeat > 1 ? `${scenario.id} (${pass + 1}/${repeat})` : scenario.id
-    const stage = makeStage()
+    const stage = makeStage(scenario.stage)
     const nextTurn = leadSession(values.lead)
     let thread = null
     let broke = null
@@ -66,7 +66,10 @@ for (const scenario of chosen) {
         }
         const log = stage.read().slice(before)
         for (const [check, holds] of turn.expect) {
-          const ok = holds(log)
+          // What the lead DID, and what it then told the user: some failures are
+          // only visible in the report — a lead that read the tail of a long
+          // answer ran exactly the right command and still reported the wrong thing.
+          const ok = holds(log, result.stdout)
           note(scenario.id, check, ok)
           if (!ok) failures.push(check)
         }

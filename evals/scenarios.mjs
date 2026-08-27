@@ -65,6 +65,35 @@ export const SCENARIOS = [
     ],
   },
   {
+    id: 'a-long-answer-is-read-whole',
+    why: 'Live 2026-08-27: facing a review tens of thousands of characters long, a lead ran `cf catchup … | tail -60`, reported the tail, and had to be told it had read only the end — the verdict was in the first line.',
+    // The stage answers `catchup` with a real review's shape: the verdict at the
+    // top, four hundred lines of working under it, and a shrug at the bottom.
+    // Only a lead that read from the top can say what was concluded.
+    //
+    // HONEST LIMIT, measured 2026-08-27: with the rule removed from the skill,
+    // a real lead passed this anyway. The live failure came from a lead deep in
+    // a long session, defending a context it had already half spent; a two-turn
+    // scenario cannot manufacture that pressure, and 44k characters is not
+    // enough of it. So this is a regression guard — it catches a lead that
+    // stops reading — not evidence that the prose is what stops it. Do not
+    // quote it as proof the rule works.
+    stage: { longAnswer: true },
+    turns: [
+      { say: 'ask nyx to review db/0007_add_index.sql before we ship it', expect: [] },
+      {
+        say: 'what did nyx conclude?',
+        expect: [
+          ['reads the conversation', (log) => ran(log, 'cf catchup')],
+          [
+            'reports the verdict, which is at the TOP of a long answer',
+            (_log, reply) => /do not ship/i.test(reply ?? ''),
+          ],
+        ],
+      },
+    ],
+  },
+  {
     id: 'answers-from-the-conversation',
     why: 'Asked "did you see her last answer?", a lead answered from its own memory while the user\'s pane turns sat unread.',
     turns: [

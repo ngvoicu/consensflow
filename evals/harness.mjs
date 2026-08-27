@@ -19,16 +19,48 @@ import { join } from 'node:path'
  * real agent.
  */
 
-const CF_STUB = (log) => `#!/bin/sh
+/**
+ * A real review runs to tens of thousands of characters, and the verdict sits
+ * at the TOP — which is what makes `| tail -60` lose the answer while looking
+ * like it found it. A stage that only ever answers in four short lines cannot
+ * catch a lead that reads too little, so scenarios can ask for this one.
+ */
+const LONG_ANSWER = `    echo "amber-tide · @nyx · 4 turns"
+    echo ""
+    echo "› asked"
+    echo "review db/0007_add_index.sql before we ship it"
+    echo ""
+    echo "• @nyx"
+    echo "VERDICT: do not ship this migration."
+    echo ""
+    echo "It takes an ACCESS EXCLUSIVE lock on a 2.1M-row table. Here is every"
+    echo "step I checked, in order:"
+    i=0
+    while [ $i -lt 420 ]; do
+      echo "  - step $i: the rebuild rewrites the heap and holds the lock while it runs, so writes queue behind it"
+      i=$((i+1))
+    done
+    echo ""
+    echo "› asked"
+    echo "anything else?"
+    echo ""
+    echo "• @nyx"
+    echo "No — everything that matters is above."`
+
+const CF_STUB = (log, { longAnswer = false } = {}) => `#!/bin/sh
 printf 'cf %s\\n' "$*" >> "${log}"
 case "$1" in
   mint) echo "amber-tide" ;;
   sessions) echo "amber-tide        @nyx         0 runs   2026-08-24T16:00:00.000Z" ;;
   catchup)
-    case "$*" in
+${
+  longAnswer
+    ? LONG_ANSWER
+    : `    case "$*" in
       *--unread*) echo "amber-tide · @nyx · 2 new turns"; echo ""; echo "› asked"; echo "do you have more?"; echo ""; echo "• @nyx"; echo "Why do Java developers wear glasses? Because they can't C#." ;;
       *) echo "amber-tide · @nyx · 4 turns"; echo ""; echo "› asked"; echo "Tell me a joke"; echo ""; echo "• @nyx"; echo "Light attracts bugs."; echo ""; echo "› asked"; echo "do you have more?"; echo ""; echo "• @nyx"; echo "Why do Java developers wear glasses? Because they can't C#." ;;
-    esac ;;
+    esac`
+} ;;
   run) echo "conversation: amber-tide (new)"; echo "read it back with: cf catchup amber-tide"; echo "Light attracts bugs."; echo "— @nyx" ;;
   last) echo "# amber-tide · @nyx"; echo ""; echo "Light attracts bugs." ;;
   *) : ;;
@@ -51,7 +83,7 @@ case "$1" in
 esac
 `
 
-export function makeStage() {
+export function makeStage(options = {}) {
   const root = mkdtempSync(join(tmpdir(), 'cf-eval-'))
   const bin = join(root, 'bin')
   const cwd = join(root, 'work')
@@ -60,7 +92,7 @@ export function makeStage() {
   mkdirSync(cwd, { recursive: true })
   writeFileSync(log, '')
   for (const [name, body] of [
-    ['cf', CF_STUB(log)],
+    ['cf', CF_STUB(log, options)],
     ['cmux', CMUX_STUB(log)],
   ]) {
     const path = join(bin, name)
