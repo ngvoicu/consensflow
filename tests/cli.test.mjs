@@ -1483,6 +1483,67 @@ printf '{"id":"ses_window1","directory":"%s","time":{"created":99999999999999}}'
     assert.doesNotMatch(stdout, /old answer/, 'the stale exchange is not what was asked for')
   })
 
+  // Two ways the read mark ran ahead of what a lead was actually shown. Both
+  // ended the same way: `--unread` answered "nothing new" about turns that had
+  // never been printed, so the lead stopped looking (proved live 2026-08-27).
+  it('--last shows the tail without marking the head read', async () => {
+    const listed = await cf(['sessions', '--json'], t.env)
+    const name = Object.entries(JSON.parse(listed.stdout)).find(
+      ([, r]) => r.agent === 'hyperion' && r.sessionId === 'thread-open',
+    )[0]
+    writeFileSync(
+      rolloutFor('thread-open'),
+      turnLine('user', 'Q1') +
+        turnLine('assistant', 'A1 never printed') +
+        turnLine('user', 'Q2') +
+        turnLine('assistant', 'A2 the tail'),
+    )
+
+    const tail = await cf(['catchup', name, '--last', '2'], asReader('lead-tail'))
+    assert.match(tail.stdout, /A2 the tail/)
+    assert.doesNotMatch(tail.stdout, /A1 never printed/, '--last showed only the tail')
+
+    const after = await cf(['catchup', name, '--unread'], asReader('lead-tail'))
+    assert.match(after.stdout, /A1 never printed/, 'what was never printed is still unread')
+  })
+
+  it('--wait shows the last exchange without marking earlier turns read', async () => {
+    // The everyday shape: the lead sends into the pane and waits, while the
+    // user has been typing in that same pane. --wait prints from the last
+    // question down; everything above it is still unseen.
+    const listed = await cf(['sessions', '--json'], t.env)
+    const name = Object.entries(JSON.parse(listed.stdout)).find(
+      ([, r]) => r.agent === 'hyperion' && r.sessionId === 'thread-open',
+    )[0]
+    writeFileSync(
+      rolloutFor('thread-open'),
+      turnLine('user', 'Q1') +
+        turnLine('assistant', 'A1 typed while away') +
+        turnLine('user', 'Q2') +
+        turnLine('assistant', 'A2 the answer'),
+    )
+
+    const waited = await catchupWait(name, { CLAUDE_CODE_SESSION_ID: 'lead-wait' })
+    assert.match(waited.stdout, /A2 the answer/)
+    assert.doesNotMatch(waited.stdout, /A1 typed while away/, '--wait prints one exchange')
+
+    const after = await cf(['catchup', name, '--unread'], asReader('lead-wait'))
+    assert.match(after.stdout, /A1 typed while away/, 'the turns it never printed stay unread')
+  })
+
+  it('a full read does move the mark — showing is seeing', async () => {
+    const listed = await cf(['sessions', '--json'], t.env)
+    const name = Object.entries(JSON.parse(listed.stdout)).find(
+      ([, r]) => r.agent === 'hyperion' && r.sessionId === 'thread-open',
+    )[0]
+    writeFileSync(rolloutFor('thread-open'), turnLine('user', 'Q1') + turnLine('assistant', 'A1'))
+
+    await cf(['catchup', name], asReader('lead-full'))
+    const after = await cf(['catchup', name, '--unread'], asReader('lead-full'))
+
+    assert.match(after.stdout, /nothing new/, 'everything printed is everything seen')
+  })
+
   it('a long consult is findable while it runs, not only after it answers', async () => {
     // Live 2026-08-24: a site rebuild ran for ten minutes and `cf sessions`
     // showed nothing while `cf catchup <name>` said there was no such

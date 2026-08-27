@@ -1137,8 +1137,15 @@ async function catchupVerb(rest) {
     }
 
     const at = turns.findLastIndex((turn) => turn.role === 'user')
-    const exchange = turns.slice(Math.max(at, 0))
-    await markRead(name, current, leadId(env), turns.length)
+    const from = Math.max(at, 0)
+    const exchange = turns.slice(from)
+    // Only what is printed counts as seen. --wait shows the last exchange, so
+    // anything above it — turns the user took in the pane while the lead was
+    // away — is still unread, and the mark stays where it was.
+    const waiting = leadId(env)
+    if (from <= Math.min(readMark(current, waiting), turns.length)) {
+      await markRead(name, current, waiting, turns.length)
+    }
     if (values.json) {
       out(JSON.stringify({ session: name, agent: current.agent, turns: exchange }, null, 2))
       return
@@ -1158,9 +1165,19 @@ async function catchupVerb(rest) {
   const lead = leadId(env)
   const mark = Math.min(readMark(record, lead), turns.length)
   const unread = turns.slice(mark)
-  await markRead(name, record, lead, turns.length)
+  // Showing is seeing — and only what is SHOWN. The mark used to jump to the
+  // end of the conversation on every read, including the reads that print a
+  // slice of it: `--last` prints the tail, `--wait` prints one exchange. Both
+  // then told the same lead "nothing new since you last looked" about turns
+  // they had never printed, which is the one answer that makes a lead stop
+  // looking (live, 2026-08-27). So it moves only when what we print starts at
+  // or before it — and when it cannot, the cost is re-showing, not silence.
+  const markShown = async (from) => {
+    if (from <= mark) await markRead(name, record, lead, turns.length)
+  }
 
   if (values.json) {
+    await markShown(values.unread ? mark : 0)
     out(
       JSON.stringify(
         { session: name, agent: record.agent, turns: values.unread ? unread : turns },
@@ -1183,6 +1200,7 @@ async function catchupVerb(rest) {
   const limit = Number.parseInt(values.last ?? '0', 10)
   const base = values.unread ? unread : turns
   const shown = limit > 0 ? base.slice(-limit) : base
+  await markShown((values.unread ? mark : 0) + (base.length - shown.length))
   out(
     values.unread
       ? `${name} · @${record.agent} · ${unread.length} new turn${unread.length === 1 ? '' : 's'}`

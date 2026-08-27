@@ -233,8 +233,14 @@ keep in step — the manager is the only caller.
 - **A lead reads what is new, not everything.** `cf catchup <name> --unread`
   is only what has been said since THIS lead last looked — a turn count per
   lead, kept as `seen` on the conversation row; plain `cf catchup` still shows
-  the whole thing with a line marking where that memory stopped, and every
-  read (plain, `--json`, `--wait`) moves the mark, because reading is seeing.
+  the whole thing with a line marking where that memory stopped, and a read
+  moves the mark because **showing** is seeing — only as far as what it
+  actually printed. `--last` prints the tail and `--wait` prints one exchange,
+  and both used to jump the mark to the end: the same lead was then told
+  "nothing new since you last looked" about turns it had never been shown,
+  which is the one answer that makes a lead stop looking (live, 2026-08-27).
+  The mark advances only when what was printed starts at or before it, so the
+  cost of being unsure is re-showing, never silence.
   A lead we cannot name gets no mark — a shared `null` key would merge every
   anonymous shell into one reader — so `--unread` shows it everything, the
   harmless direction for a verb that only reads. Both row writers spread the
