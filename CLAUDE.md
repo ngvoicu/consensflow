@@ -31,7 +31,7 @@ license to skip the skill.
 |---|---|
 | `bin/cf.mjs` | All verbs: setup, use, run, mint, chat, attach, catchup, sessions, last, mode, off, reset, agent …, skills …, ui, doctor. `reset` refuses without `--yes` and prints what it would destroy — the refusal is the preview. Setup never seeds agents; a machine that ran cc/pi already has the shared roster, so setup installs the skill straight from it. Every roster mutation installs-or-regenerates the skill, for whoever the mode puts in scope (`skillTargets` → `scopeTargets`) — the first add installs it, the rest regenerate it |
 | `src/roster.js` | Roster = the SHARED v1 file `~/.consensflow/agents.json` (cc + pi read/write it too): v1-schema-faithful mapping (kind↔runtime, thinking/effort↔effort, toolsPolicy↔permission), unknown fields preserved, unsupported kinds listed+marked, never dropped. **One root, one meaning**: roster, state and workspaces all live in `~/.consensflow`, or under `CONSENSFLOW_HOME` when it is set. The state used to sit under XDG while the roster sat here, and the variable meant a different directory to each half — a machine set up that way is moved into the one root on first run (`migrateStateRoot`) |
-| `src/catalog.js` | A **view over `hosts/lib/presets.js`** — one catalog, not two (they disagreed on five names until 2026-08-21) — plus each CLI's real effort levels. All 57 presets are offered, grouped by harness (claude 8, codex 4, pi 21, opencode 20, kimi 3, image 1). `cf agent add <name>` resolves through it and records `preset` on the row, which is what makes `cf agent sync` and the UI's Update button possible |
+| `src/catalog.js` | A **view over `hosts/lib/presets.js`** — one catalog, not two (they disagreed on five names until 2026-08-21) — plus each CLI's real effort levels. All 57 presets are offered, grouped by harness (claude 8, codex 4, pi 21, opencode 20, kimi 3, image 1). `cf agent add <name>` resolves through it and records `preset` on the row, which is what makes `cf agent sync` and the UI's Update button possible. Every preset names the highest level its model actually takes, and none names a level the model lacks — see **Effort ceilings** below |
 | `src/skill.js` | SKILL.md generation — the prose IS the product. One command for every agent (`cf run @name "<task>"`), so the table says who each agent is rather than what to type. The front-matter `description` is mode-aware, because it is the only part a lead reads before deciding whether to open the rest |
 | `src/harnesses.js` | Harness detection (CLI on PATH) + per-harness skills dir (honours `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`, `KIMI_CODE_HOME`). Five harnesses since 2026-08-24: kimi's CLI is `kimi` but its home is `.kimi-code` |
 | `src/terminal.js` | The `cf`/`consensflow` launcher on PATH, in **every** mode — the skill teaches `cf run`, so it is part of the path, not a cmux extra. It is also the only installed file that names a runtime absolutely, which is what `terminalRuntime` reads for `cf doctor` |
@@ -380,6 +380,43 @@ keep in step — the manager is the only caller.
   silently switching to API billing.
 - **Every roster mutation regenerates the installed skill** (CLI and UI both
   call `refreshInstalledSkill`); only where the manifest says it is installed.
+
+- **A moved preset moves the label too** (`PRESET_OWNED_FIELDS`, 2026-08-27).
+  `cf agent sync` and the UI's Update button rewrite every field the preset
+  owns — kind, model, effort/thinking, skillsPolicy **and description**. The
+  description was held back while it was only a roster field; it is the line
+  the generated skill prints to say WHO an agent is, and it went on reading
+  "Pi Ox Alpha MAX" beside `z-ai/glm-5.3-flash` after a live update. A label
+  naming a model the agent no longer runs is a wrong answer to the only
+  question the table exists to answer. The roster's `description` is the
+  preset's one-line **label**, never the catalog card's paragraph
+  (`presetOwnedValue`), and every path that creates a row writes the label. The
+  cost is real and was accepted: `add <preset> --description …` is overwritten
+  on the next catalog move, and until then the agent reads as drifted. An agent
+  added with an explicit `--model` or `--effort` records no `preset` and is
+  never synced at all — provenance is the escape hatch, not wording.
+
+- **Effort ceilings: every preset names the highest level its model has, and
+  never one it lacks** (audited 2026-08-27; the record and its sources live at
+  the top of `hosts/lib/presets.js`). The harnesses publish this themselves —
+  pi's `thinkingLevelMap` and models.dev's `reasoning_options` — and they agree
+  on 281 of the 287 models both carry, which is what lets one name mean one
+  thing on both harnesses: an opencode preset sits at its pi twin's level, and
+  `tests/catalog.test.mjs` asserts both that and "an effort wherever the
+  harness has one". The audit found five presets naming a level their model
+  never had (`max` on Qwen3.8 27B and Nemotron 3 Ultra, `xhigh` on Kimi K3, an
+  effort at all on MiniMax M3 and Laguna S 2.1). None errored: pi maps an
+  unknown level to null and sends nothing, and opencode validates nothing
+  whatsoever — a deliberately bogus `--variant` was probed and ran. So the run
+  used the model's default while the label promised MAX, which is the failure
+  this rule exists to prevent. Three models take no effort parameter at all;
+  their presets name none, because a level nothing honours is worse than a
+  blank one. Where the two catalogs disagree (DeepSeek V4, and probing could
+  not settle it) the four presets sit at `high` — the only level both confirm,
+  and therefore BELOW each catalog's own claimed top (pi says xhigh, models.dev
+  says max). That is the one place this rule's opening sentence is knowingly
+  not met; raise them when one of the two sources is proven right.
+
 - **Pane control belongs to cmux**, never to us — the v2 lesson
   (typed-bootstrap verification is a minefield). Our skill says *what* to run
   and *quotes* the four cmux commands a lead needs (`new-pane`, `send`,
