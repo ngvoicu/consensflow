@@ -77,6 +77,47 @@ export function skillGaps(env) {
     .map((harness) => harness.id)
 }
 
+/**
+ * Installed skill files whose text this version would no longer write.
+ *
+ * A new ConsensFlow reaches the machine as a new app bundle, and the skill it
+ * would generate can differ from the one already sitting in the harnesses —
+ * the template changed. Nothing regenerated it: `refreshInstalledSkill` runs
+ * on a roster mutation and `healSkillIfStale` compares the ROSTER hash, so an
+ * upgrade with an untouched roster left every lead reading the previous
+ * version's prose while `cf skills status` said `ok` and `cf doctor` counted
+ * the files and called them ours. Both were true and neither was the answer.
+ *
+ * A file the user edited is NOT stale — it is theirs, and drift stays sacred.
+ * This only reports; refreshing is `cf skills install` or the page's button,
+ * because it writes into someone else's harness.
+ */
+export function staleSkills(env) {
+  const agents = listAgents(env)
+  if (!agents.some((p) => HARNESSES.includes(p.harness))) return []
+  let content
+  try {
+    content = generateSkill(agents, { mode: currentMode(env) })
+  } catch {
+    return []
+  }
+  const manifest = loadManifest(env)
+  return Object.entries(manifest.files)
+    .filter(([, recorded]) => recorded.source === 'consensflow')
+    .filter(([path, recorded]) => {
+      let onDisk
+      try {
+        onDisk = readFileSync(path, 'utf8')
+      } catch {
+        return false
+      }
+      // Edited by the user, so not ours to call out of date.
+      if (sha256(onDisk) !== recorded.sha256) return false
+      return onDisk !== content
+    })
+    .map(([path]) => path)
+}
+
 export function refreshInstalledSkill(env) {
   const agents = listAgents(env)
   if (!agents.some((p) => HARNESSES.includes(p.harness))) return

@@ -5,7 +5,13 @@ import { after, describe, it } from 'node:test'
 import { detectHarnesses } from '../src/harnesses.js'
 import { installSkill, skillsStatus, skillsSummary, uninstallSkills } from '../src/install.js'
 import { addAgent } from '../src/roster.js'
-import { retireSkillFromNativeHosts, skillGaps, skillTargets } from '../src/sync.js'
+import {
+  refreshInstalledSkill,
+  retireSkillFromNativeHosts,
+  skillGaps,
+  skillTargets,
+  staleSkills,
+} from '../src/sync.js'
 import { chooseCmuxMode, tempEnv } from './helpers.mjs'
 
 function stubCli(env, name) {
@@ -269,6 +275,37 @@ describe('a harness in scope with no skill of ours is named, not left silent', (
     )
 
     assert.deepEqual(skillGaps(t.env), [])
+  })
+
+  it('names a file that carries an older version of the skill', () => {
+    // What an app upgrade does: the template moves, the installed files do not.
+    // Every other count still calls them healthy — they are ours and unedited —
+    // so this is the only thing that can say the lead is reading last version's
+    // prose (live 2026-08-27: five harnesses, 738 characters behind, all `ok`).
+    const paths = skillTargets(t.env).map((h) => join(h.skillsDir, 'consensflow', 'SKILL.md'))
+    installSkill(
+      {
+        relPath: 'consensflow/SKILL.md',
+        content: 'an older ConsensFlow wrote this\n',
+        source: 'consensflow',
+      },
+      t.env,
+      { targets: skillTargets(t.env), force: true },
+    )
+
+    assert.deepEqual(staleSkills(t.env).sort(), paths.sort(), 'every installed copy is behind')
+
+    // Regenerated: nothing is behind any more.
+    refreshInstalledSkill(t.env)
+    assert.deepEqual(staleSkills(t.env), [])
+
+    // And an edit of the user's is not staleness: drift is theirs, and stays.
+    writeFileSync(paths[0], 'my own notes\n')
+    assert.deepEqual(
+      staleSkills(t.env),
+      [],
+      'a file the user edited is not out of date, it is theirs',
+    )
   })
 
   it('names nobody when there is no roster to generate from', () => {

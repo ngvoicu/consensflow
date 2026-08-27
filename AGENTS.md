@@ -393,6 +393,19 @@ keep in step — the manager is the only caller.
 - **Every roster mutation regenerates the installed skill** (CLI and UI both
   call `refreshInstalledSkill`); only where the manifest says it is installed.
 
+- **A new app does not rewrite the installed skill — it says it is behind**
+  (`staleSkills`, 2026-08-27). An upgrade brings a new template, and nothing
+  regenerated the files already sitting in the harnesses: `refreshInstalledSkill`
+  runs on a roster mutation, and `healSkillIfStale` compares the ROSTER hash, so
+  an upgrade with an untouched roster left every lead reading the previous
+  version's prose while `cf skills status` said `ok` for all five and `cf doctor`
+  counted them as ours. Both were true; neither was the answer. `staleSkills`
+  compares what is on disk against what this version would generate — skipping
+  any file the user edited, because drift is theirs and stays — and `cf doctor`,
+  `cf skills status` and the app's system panel all report it. None of them fix
+  it: refreshing writes into someone else's harness, so it stays a deliberate
+  `cf skills install`, or the page's existing **Update skills** button.
+
 - **A moved preset moves the label too** (`PRESET_OWNED_FIELDS`, 2026-08-27).
   `cf agent sync` and the UI's Update button rewrite every field the preset
   owns — kind, model, effort/thinking, skillsPolicy **and description**. The

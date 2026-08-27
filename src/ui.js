@@ -35,6 +35,7 @@ import {
   retireSkillFromNativeHosts,
   skillGaps,
   skillTargets,
+  staleSkills,
 } from './sync.js'
 import {
   installTerminalCommand,
@@ -149,8 +150,11 @@ function systemState(env) {
     reset: resetPreview(env),
     // In scope but carrying no skill — a silent refusal looks exactly like health.
     gaps: skillGaps(env),
-    // Files, not skills: a skill is a directory. Report both, and whose.
-    skills: { owned: files.length, ...skillsSummary(env) },
+    // Files, not skills: a skill is a directory. Report both, and whose —
+    // plus how many carry an older ConsensFlow's text, which an app upgrade
+    // creates and nothing else reports: the files are ours and unedited, so
+    // every other count calls them healthy.
+    skills: { owned: files.length, ...skillsSummary(env), stale: staleSkills(env).length },
   }
 }
 
@@ -870,6 +874,9 @@ function renderSystem(system) {
   const rows = [['Harnesses', hosts], ['Installed', skills]];
   if (runtime) rows.push(['Runtime', runtime]);
   if (system.gaps.length > 0) rows.push(['Missing', system.gaps.join(', ') + ' — in scope but carrying no skill']);
+  // An upgrade brings a new skill; the installed files stay as they are until
+  // something rewrites them. Say which button does that.
+  if (sk.stale > 0) rows.push(['Out of date', sk.stale + ' file' + (sk.stale === 1 ? '' : 's') + " carry an older ConsensFlow's text — press “Update skills” below"]);
   rows.push(['Home', system.home]);
 
   for (const [label, value] of rows) {

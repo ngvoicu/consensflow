@@ -59,6 +59,7 @@ import {
   retireSkillFromNativeHosts,
   skillGaps,
   skillTargets,
+  staleSkills,
 } from '../src/sync.js'
 import { terminalRuntime } from '../src/terminal.js'
 
@@ -1565,7 +1566,19 @@ function skillsVerb(rest) {
         out('no skills installed')
         return
       }
-      for (const row of rows) out(`${row.state.padEnd(9)} ${row.source.padEnd(20)} ${row.path}`)
+      const behind = new Set(staleSkills(env))
+      for (const row of rows) {
+        // `ok` used to mean two things at once: ours and unedited — and
+        // current. The first two survive an app upgrade; the third does not.
+        const state = behind.has(row.path) ? 'behind' : row.state
+        out(`${state.padEnd(9)} ${row.source.padEnd(20)} ${row.path}`)
+      }
+      if (behind.size > 0) {
+        out('')
+        out(
+          `${behind.size} file${behind.size === 1 ? '' : 's'} carry an older ConsensFlow's text — refresh with: cf skills install`,
+        )
+      }
       return
     }
     case 'uninstall':
@@ -1640,6 +1653,11 @@ function doctor() {
   }
   const bad = skills.drifted + skills.missing
   if (bad > 0) parts.push(`${bad} drifted/missing`)
+  // An upgrade brings a new skill template; nothing rewrites the installed
+  // files until the roster moves, so say it here rather than let a lead read
+  // the previous version's prose.
+  const behind = staleSkills(env).length
+  if (behind > 0) parts.push(`${behind} behind this version`)
   out(`skills:       ${parts.join(' · ')}`)
 
   // The install records the runtime that performed it — from the app, its own
