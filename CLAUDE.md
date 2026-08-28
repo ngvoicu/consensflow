@@ -382,11 +382,21 @@ keep in step — the manager is the only caller.
   which is what a machine holding two — an app in `/Applications` beside a repo
   build — leaves behind when the new one is not the one on PATH. Only a copy
   that is not the launcher's can notice, because `cf` is by definition whatever
-  the launcher started, so the app's own page is where it shows and the button
-  there becomes **Point the command at this app**. That button also stopped
-  calling itself optional: the skill this app installs teaches `cf run @name`,
-  so the command IS the consult, and offering removal as its only other move
-  was the page contradicting the product.
+  the launcher started, so the app's own page is where it shows — on the
+  Runtime row, beside the other thing that row now says: a launcher whose
+  directory is not on PATH, which resolves to nothing however healthy it looks.
+
+- **The page offers no button for the command at all** (2026-08-28). It had
+  two, and both became lies on the same day. "Install terminal command
+  (optional)" called optional the command the skill teaches — `cf run @name` is
+  the consult — and "Remove terminal command" undid itself, because the app now
+  claims the launcher every time it opens: press remove, reopen, it is back. A
+  button that cannot deliver what it promises is worse than none, so both are
+  gone. Taking the command away is what **Turn ConsensFlow off** does, with the
+  rest of the install. And off is not a one-way door — it clears `mode.json`,
+  so the three mode cards offer **Use this** again — which the page now says in
+  the line it prints after turning off, because the way back was a section
+  further up that nobody was looking at.
 
 - **Claude Code's `settings.json` is never written.** It is the user's file,
   and the rule that protects a skill they edited protects it too. A hook an

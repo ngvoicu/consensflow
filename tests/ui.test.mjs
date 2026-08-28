@@ -163,13 +163,7 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
   it('serves a page that can do the whole job, not half of it', async () => {
     const html = await (await fetch(`${server.url}/?token=${server.token}`)).text()
     // Everything the CLI can do has an affordance here.
-    for (const marker of [
-      'id="integrations"',
-      'id="update"',
-      'id="terminal"',
-      'id="off"',
-      'Edit',
-    ]) {
+    for (const marker of ['id="integrations"', 'id="update"', 'id="off"', 'Edit']) {
       assert.ok(html.includes(marker), `the page is missing ${marker}`)
     }
   })
@@ -380,39 +374,23 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     await api('/api/agents/diana', { method: 'DELETE' })
   })
 
-  it('can put the terminal command on PATH, and take it back', async () => {
-    // cmux mode installs the launcher itself (its skill says `cf run`), so the
-    // page's own toggle is tested from a known state rather than an assumed one.
-    await api('/api/terminal-command', { method: 'POST', body: JSON.stringify({ remove: true }) })
-    const before = await (await api('/api/system')).json()
-    assert.equal(before.terminal.installed, false)
-
-    const installed = await (
-      await api('/api/terminal-command', { method: 'POST', body: JSON.stringify({}) })
-    ).json()
-    assert.equal(installed.system.terminal.installed, true)
-    assert.match(installed.system.terminal.path, /consensflow$/)
-
-    const removed = await (
-      await api('/api/terminal-command', { method: 'POST', body: JSON.stringify({ remove: true }) })
-    ).json()
-    assert.equal(removed.system.terminal.installed, false)
-  })
-
-  it('can tell the command runs another ConsensFlow, and offers to claim it', async () => {
-    // A launcher naming a runtime that EXISTS passes every other check while
-    // running an older install's code. Only a copy that is not the launcher's
-    // can notice, so the app's own page is where it has to show.
-    await api('/api/terminal-command', { method: 'POST', body: JSON.stringify({}) })
-    const system = await (await api('/api/system')).json()
-    assert.equal(system.runtime.mine, true, 'the page just installed it, so it points here')
-
+  it('offers no button for the terminal command — opening the app owns it', async () => {
+    // The page used to install and remove the launcher. Removing it is a button
+    // that undoes itself now: the app claims the command every time it opens,
+    // so the next launch brings it straight back. Taking the command away is
+    // what "Turn ConsensFlow off" is for, and nothing else.
     const html = await (await fetch(`${server.url}/?token=${server.token}`)).text()
-    assert.ok(html.includes('Point the command at this app'), 'the repair is offered')
-    // The skill this app installs teaches `cf run @name`, so the command is
-    // the consult. Calling it optional was the page contradicting the product.
-    assert.ok(!html.includes('Nothing here needs it'), 'no longer called unnecessary')
-    assert.ok(!html.includes('Install terminal command (optional)'))
+    assert.ok(!html.includes('id="terminal"'), 'no command button')
+    assert.ok(!html.includes('Remove terminal command'))
+    assert.ok(!html.includes('Nothing here needs it'), 'nor the copy that called it optional')
+
+    const gone = await api('/api/terminal-command', { method: 'POST', body: JSON.stringify({}) })
+    assert.equal(gone.status, 404, 'and no endpoint behind it')
+
+    // The facts it used to carry in a tooltip stay, on the panel that reports.
+    const system = await (await api('/api/system')).json()
+    assert.equal(typeof system.runtime.mine, 'boolean')
+    assert.equal(typeof system.terminal.onPath, 'boolean')
   })
 
   it('turns everything off from the page, deliberately', async () => {

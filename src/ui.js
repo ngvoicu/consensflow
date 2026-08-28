@@ -38,12 +38,7 @@ import {
   skillTargets,
   staleSkills,
 } from './sync.js'
-import {
-  installTerminalCommand,
-  removeTerminalCommand,
-  terminalCommandStatus,
-  terminalRuntime,
-} from './terminal.js'
+import { terminalCommandStatus, terminalRuntime } from './terminal.js'
 
 /**
  * The minimal roster editor: one ephemeral loopback HTTP server, one inline
@@ -298,12 +293,6 @@ export async function startUiServer(env) {
         const body = JSON.parse((await readBody(request)) || '{}')
         return send(200, installFromUi(body, env))
       }
-      if (request.method === 'POST' && url.pathname === '/api/terminal-command') {
-        const body = JSON.parse((await readBody(request)) || '{}')
-        const outcome =
-          body.remove === true ? removeTerminalCommand(env) : installTerminalCommand(env)
-        return send(200, { ...outcome, system: systemState(env) })
-      }
       if (request.method === 'POST' && url.pathname === '/api/reset') {
         const body = JSON.parse((await readBody(request)) || '{}')
         if (body.confirm !== true) {
@@ -327,7 +316,11 @@ export async function startUiServer(env) {
         const outcome = turnOff(env, { force: body.force === true })
         return send(200, {
           ...outcome,
-          report: ['ConsensFlow is off — nothing is installed'],
+          // Off is not a one-way door, and the way back is a section further
+          // up this page: say so here, where the reader is looking.
+          report: [
+            'ConsensFlow is off — nothing is installed. Pick a path above to switch it back on.',
+          ],
           system: systemState(env),
         })
       }
@@ -571,7 +564,6 @@ const PAGE = (token) => `<!DOCTYPE html>
   <div id="system"></div>
   <div class="actions">
     <button id="update">Update skills</button>
-    <button id="terminal"></button>
     <button id="off" class="danger">Turn ConsensFlow off</button>
     <button id="reset" class="danger" title="Removes your agents, every run artifact (packets, transcripts, generated images), and every file ConsensFlow installed — including skill files you edited. The ConsensFlow.app bundle stays. This cannot be undone.">Reset everything</button>
   </div>
@@ -837,28 +829,6 @@ function harnessState(harness, mode) {
   return 'nothing in ' + mode + ' mode';
 }
 
-function renderTerminal(system) {
-  const btn = document.querySelector('#terminal');
-  const installed = system.terminal.installed;
-  // The command is not a convenience. The skill this app installs teaches
-  // cf run @name, so a consult IS this command — it used to call itself
-  // optional and offer removal as the only other move, beside a skill that
-  // depends on it. What it offers now depends on where it points: nowhere,
-  // at another ConsensFlow, or here.
-  const elsewhere = installed && system.runtime !== null && system.runtime.mine === false;
-  btn.textContent = !installed
-    ? 'Install terminal command'
-    : elsewhere ? 'Point the command at this app' : 'Remove terminal command';
-  btn.title = !installed
-    ? 'The skill teaches cf run @name, so every consult goes through this command.'
-    : elsewhere
-      ? system.terminal.path + ' runs ' + system.runtime.runtime
-      : system.terminal.path + (system.terminal.onPath ? '' : ' (not on your PATH)');
-  btn.onclick = () =>
-    post('/api/terminal-command', { remove: installed && !elsewhere },
-      installed && !elsewhere ? 'Removing…' : 'Installing…');
-}
-
 function renderSystem(system) {
   document.querySelector('#version').textContent = 'v' + system.version;
   const host = document.querySelector('#system');
@@ -895,7 +865,9 @@ function renderSystem(system) {
       ? system.runtime.runtime + ' — MISSING, reinstall from the app'
       : system.runtime.mine === false
         ? system.runtime.runtime + ' — another ConsensFlow: the cf command runs that one, not this app'
-        : system.runtime.runtime;
+        : system.terminal.installed && !system.terminal.onPath
+          ? system.runtime.runtime + ' — but ' + system.terminal.path + ' is not on your PATH, so cf resolves to nothing'
+          : system.runtime.runtime;
 
   const rows = [['Harnesses', hosts], ['Installed', skills]];
   if (runtime) rows.push(['Runtime', runtime]);
@@ -1034,7 +1006,6 @@ async function load() {
   renderForm(data);
   renderSystem(system);
   renderMode(system);
-  renderTerminal(system);
 }
 
 document.querySelector('#add').onsubmit = async (event) => {
