@@ -208,5 +208,10 @@ export function healOnOpen(env) {
   const drifted = skillsSummary(env).drifted
   const behind = staleSkills(env).length + skillGaps(env).length + drifted
   if (behind > 0) refreshInstalledSkill(env)
-  return { mode, command, skills: behind }
+  // `replaced` is counted apart from the rest on purpose: bringing a file up to
+  // date is the app doing its job and needs no announcement — the panel already
+  // shows where the command points and that nothing is behind. Overwriting an
+  // edit is the one thing here a user could regret, so it is the one thing
+  // said out loud.
+  return { mode, command, skills: behind, replaced: drifted }
 }

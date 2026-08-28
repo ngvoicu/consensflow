@@ -163,7 +163,9 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
   it('serves a page that can do the whole job, not half of it', async () => {
     const html = await (await fetch(`${server.url}/?token=${server.token}`)).text()
     // Everything the CLI can do has an affordance here.
-    for (const marker of ['id="integrations"', 'id="update"', 'id="off"', 'Edit']) {
+    // Turning off lives on the active mode card now, built when the page
+    // renders — so its affordance is the call, not a static id.
+    for (const marker of ['id="integrations"', 'id="update"', "post('/api/off'", 'Edit']) {
       assert.ok(html.includes(marker), `the page is missing ${marker}`)
     }
   })

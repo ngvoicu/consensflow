@@ -466,6 +466,7 @@ describe('opening the app puts right what its own buttons would', () => {
     const done = healOnOpen(t.env)
 
     assert.equal(done.skills, 1, 'an edited copy is one of the things opening the app puts right')
+    assert.equal(done.replaced, 1, 'and the one thing it says out loud — an edit was overwritten')
     assert.notEqual(readFileSync(path, 'utf8'), 'my own notes, over the generated skill\n')
   })
 

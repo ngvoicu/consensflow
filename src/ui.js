@@ -564,7 +564,6 @@ const PAGE = (token) => `<!DOCTYPE html>
   <div id="system"></div>
   <div class="actions">
     <button id="update">Update skills</button>
-    <button id="off" class="danger">Turn ConsensFlow off</button>
     <button id="reset" class="danger" title="Removes your agents, every run artifact (packets, transcripts, generated images), and every file ConsensFlow installed — including skill files you edited. The ConsensFlow.app bundle stays. This cannot be undone.">Reset everything</button>
   </div>
   <p id="skills-note" class="note"></p>
@@ -806,7 +805,15 @@ function renderMode(system) {
     head.append(el('span', 'integration__title', integration.title));
     head.append(el('span', 'integration__state', integration.active ? 'active' : integration.detail));
     head.append(el('span', 'spacer'));
-    if (!integration.active) {
+    // The mode's own card is where the mode lives, so turning it off belongs
+    // here too — beside the button that turned it on, not in a row of unrelated
+    // danger buttons at the far end of the page.
+    if (integration.active) {
+      const off = el('button', 'danger', 'Turn off');
+      arming(off, 'Turn off', () => 'Click again to turn off — agents are kept',
+        () => post('/api/off', { confirm: true }, 'Turning off…'));
+      head.append(off);
+    } else {
       const use = el('button', null, 'Use this');
       use.onclick = () =>
         post('/api/mode', { mode: integration.id }, 'Switching to ' + integration.title + '…');
@@ -878,11 +885,9 @@ function renderSystem(system) {
   // Opening the app repairs what it can. Say so: a silent write is worse than
   // no write, and the one thing it deliberately does NOT do belongs here too.
   const on = system.opened;
-  if (on && on.mode !== null) {
-    const did = [];
-    if (on.command === 'claimed') did.push('pointed the cf command at this app');
-    if (on.skills > 0) did.push('brought ' + on.skills + ' skill' + (on.skills === 1 ? '' : 's') + ' up to date, edited copies included');
-    if (did.length > 0) rows.push(['On open', did.join(' · ')]);
+  if (on && on.replaced > 0) {
+    rows.push(['On open', 'replaced ' + on.replaced + ' skill file' + (on.replaced === 1 ? '' : 's')
+      + ' you had edited — the generated skill is what the agents read']);
   }
   rows.push(['Home', system.home]);
 
@@ -970,13 +975,6 @@ function arming(button, resting, armedLabel, run) {
     timer = setTimeout(disarm, 6000);
   };
 }
-
-arming(
-  document.querySelector('#off'),
-  'Turn ConsensFlow off',
-  () => 'Click again to turn off — agents are kept',
-  () => post('/api/off', { confirm: true }, 'Turning off…'),
-);
 
 arming(
   document.querySelector('#reset'),

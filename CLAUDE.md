@@ -393,10 +393,14 @@ keep in step — the manager is the only caller.
   claims the launcher every time it opens: press remove, reopen, it is back. A
   button that cannot deliver what it promises is worse than none, so both are
   gone. Taking the command away is what **Turn ConsensFlow off** does, with the
-  rest of the install. And off is not a one-way door — it clears `mode.json`,
-  so the three mode cards offer **Use this** again — which the page now says in
-  the line it prints after turning off, because the way back was a section
-  further up that nobody was looking at.
+  rest of the install — and that button now lives on the ACTIVE mode's card,
+  where the mode itself lives, in the place the inactive cards keep **Use
+  this**. Turning it on and turning it off are the same decision, so they are
+  the same button in the same place, not a row of danger buttons at the far end
+  of the page. Off is not a one-way door either: it clears `mode.json`, so the
+  three cards offer **Use this** again — which the line printed after turning
+  off now says, because the way back was a section further up that nobody was
+  looking at.
 
 - **Claude Code's `settings.json` is never written.** It is the user's file,
   and the rule that protects a skill they edited protects it too. A hook an
@@ -490,9 +494,11 @@ keep in step — the manager is the only caller.
   one ConsensFlow, and the app you opened is the one that should answer `cf
   run`. The single limit is the one that costs nothing to keep: **nothing at
   all before a mode is chosen** — an app opened on a machine that has not
-  picked a path still installs nothing. What healing did is reported on the
-  page, because a write nobody mentioned is the quiet this rule exists to
-  end.
+  picked a path still installs nothing. Of what it did, the page reports one
+  thing: a skill file it REPLACED because you had edited it. The rest — the
+  command claimed, a stale copy refreshed — is the app doing its job, and the
+  panel already shows where the command points and that nothing is behind; only
+  the write a user could regret is said out loud.
 
 - **A moved preset moves the label too** (`PRESET_OWNED_FIELDS`, 2026-08-27).
   `cf agent sync` and the UI's Update button rewrite every field the preset
