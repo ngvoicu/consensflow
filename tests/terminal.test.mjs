@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import {
   installTerminalCommand,
   removeTerminalCommand,
   terminalCommandStatus,
+  terminalRuntime,
 } from '../src/terminal.js'
 import { tempEnv } from './helpers.mjs'
 
@@ -42,6 +43,30 @@ describe('the app can put its own CLI on your PATH', () => {
 
     const elsewhere = terminalCommandStatus({ ...t.env, PATH: '/nowhere' }, { candidates: [bin] })
     assert.equal(elsewhere.onPath, false)
+  })
+
+  it('says whether the command runs THIS copy, or another ConsensFlow', () => {
+    installTerminalCommand(t.env, { candidates: [bin] })
+    const ours = terminalRuntime(t.env, { candidates: [bin] })
+    assert.equal(ours.runtime, process.execPath)
+    assert.equal(ours.exists, true)
+    assert.equal(ours.mine, true)
+
+    // Two ConsensFlows on one machine — an app beside a repo build — and the
+    // command names the other one. It exists, so every other check calls this
+    // healthy while every `cf` the skill teaches runs the other one's code.
+    const other = join(t.root, 'Other.app', 'node')
+    mkdirSync(dirname(other), { recursive: true })
+    writeFileSync(other, '')
+    writeFileSync(
+      join(bin, 'consensflow'),
+      `#!/bin/sh\n# Installed by ConsensFlow.\nexec "${other}" "${join(t.root, 'Other.app', 'cf.mjs')}" "$@"\n`,
+    )
+
+    const theirs = terminalRuntime(t.env, { candidates: [bin] })
+
+    assert.equal(theirs.exists, true, 'it is there — which is what made this invisible')
+    assert.equal(theirs.mine, false)
   })
 
   it('removes it again', () => {

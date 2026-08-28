@@ -399,6 +399,22 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     assert.equal(removed.system.terminal.installed, false)
   })
 
+  it('can tell the command runs another ConsensFlow, and offers to claim it', async () => {
+    // A launcher naming a runtime that EXISTS passes every other check while
+    // running an older install's code. Only a copy that is not the launcher's
+    // can notice, so the app's own page is where it has to show.
+    await api('/api/terminal-command', { method: 'POST', body: JSON.stringify({}) })
+    const system = await (await api('/api/system')).json()
+    assert.equal(system.runtime.mine, true, 'the page just installed it, so it points here')
+
+    const html = await (await fetch(`${server.url}/?token=${server.token}`)).text()
+    assert.ok(html.includes('Point the command at this app'), 'the repair is offered')
+    // The skill this app installs teaches `cf run @name`, so the command is
+    // the consult. Calling it optional was the page contradicting the product.
+    assert.ok(!html.includes('Nothing here needs it'), 'no longer called unnecessary')
+    assert.ok(!html.includes('Install terminal command (optional)'))
+  })
+
   it('turns everything off from the page, deliberately', async () => {
     const refused = await api('/api/off', { method: 'POST', body: JSON.stringify({}) })
     assert.equal(refused.status, 400)

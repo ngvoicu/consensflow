@@ -1741,10 +1741,18 @@ function doctor() {
   // and saying so here is cheaper than letting it fail quietly.
   const wiring = terminalRuntime(env)
   if (wiring !== null) {
+    // Three states, not two. A runtime that exists but belongs to ANOTHER
+    // ConsensFlow looks healthy from every count on this page while every `cf`
+    // the skill teaches runs the other one's code — which is what a second
+    // install (an app beside a repo build) leaves behind. Run through the
+    // launcher this can never fire, because `cf` IS whatever the launcher
+    // started; run from a bundle directly, it is the only thing that can say.
     out(
-      wiring.exists
-        ? `runtime:      ${wiring.runtime}`
-        : `runtime:      ${wiring.runtime} — MISSING. Reinstall from the app to point the wiring at its runtime.`,
+      !wiring.exists
+        ? `runtime:      ${wiring.runtime} — MISSING. Reinstall from the app to point the wiring at its runtime.`
+        : wiring.mine
+          ? `runtime:      ${wiring.runtime}`
+          : `runtime:      ${wiring.runtime} — another ConsensFlow. \`cf\` runs that one; \`cf use <mode>\` from this one claims the command.`,
     )
   }
 

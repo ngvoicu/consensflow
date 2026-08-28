@@ -376,7 +376,17 @@ keep in step — the manager is the only caller.
   names a runtime, and only one: the launcher, absolutely (`src/terminal.js`),
   which from the app is its own bundled Node. `terminalRuntime` reads it back,
   so `cf doctor` says MISSING when whatever provided it has moved — rather than
-  letting every `cf` the skill teaches fail one at a time.
+  letting every `cf` the skill teaches fail one at a time. It also says whose
+  runtime it is (`mine`, 2026-08-28): a launcher naming a runtime that still
+  EXISTS passes every count on the page while running an OLDER ConsensFlow,
+  which is what a machine holding two — an app in `/Applications` beside a repo
+  build — leaves behind when the new one is not the one on PATH. Only a copy
+  that is not the launcher's can notice, because `cf` is by definition whatever
+  the launcher started, so the app's own page is where it shows and the button
+  there becomes **Point the command at this app**. That button also stopped
+  calling itself optional: the skill this app installs teaches `cf run @name`,
+  so the command IS the consult, and offering removal as its only other move
+  was the page contradicting the product.
 
 - **Claude Code's `settings.json` is never written.** It is the user's file,
   and the rule that protects a skill they edited protects it too. A hook an

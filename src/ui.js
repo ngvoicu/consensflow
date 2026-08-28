@@ -827,12 +827,23 @@ function harnessState(harness, mode) {
 function renderTerminal(system) {
   const btn = document.querySelector('#terminal');
   const installed = system.terminal.installed;
-  btn.textContent = installed ? 'Remove terminal command' : 'Install terminal command (optional)';
-  btn.title = installed
-    ? system.terminal.path + (system.terminal.onPath ? '' : ' (not on your PATH)')
-    : 'Optional: puts the consensflow command on your PATH for scripting. Nothing here needs it.';
+  // The command is not a convenience. The skill this app installs teaches
+  // cf run @name, so a consult IS this command — it used to call itself
+  // optional and offer removal as the only other move, beside a skill that
+  // depends on it. What it offers now depends on where it points: nowhere,
+  // at another ConsensFlow, or here.
+  const elsewhere = installed && system.runtime !== null && system.runtime.mine === false;
+  btn.textContent = !installed
+    ? 'Install terminal command'
+    : elsewhere ? 'Point the command at this app' : 'Remove terminal command';
+  btn.title = !installed
+    ? 'The skill teaches cf run @name, so every consult goes through this command.'
+    : elsewhere
+      ? system.terminal.path + ' runs ' + system.runtime.runtime
+      : system.terminal.path + (system.terminal.onPath ? '' : ' (not on your PATH)');
   btn.onclick = () =>
-    post('/api/terminal-command', { remove: installed }, installed ? 'Removing…' : 'Installing…');
+    post('/api/terminal-command', { remove: installed && !elsewhere },
+      installed && !elsewhere ? 'Removing…' : 'Installing…');
 }
 
 function renderSystem(system) {
@@ -867,9 +878,11 @@ function renderSystem(system) {
 
   const runtime = system.runtime === null
     ? null
-    : system.runtime.exists
-      ? system.runtime.runtime
-      : system.runtime.runtime + ' — MISSING, reinstall from the app';
+    : !system.runtime.exists
+      ? system.runtime.runtime + ' — MISSING, reinstall from the app'
+      : system.runtime.mine === false
+        ? system.runtime.runtime + ' — another ConsensFlow: the cf command runs that one, not this app'
+        : system.runtime.runtime;
 
   const rows = [['Harnesses', hosts], ['Installed', skills]];
   if (runtime) rows.push(['Runtime', runtime]);

@@ -102,7 +102,8 @@ export function terminalCommandStatus(env, options = {}) {
 }
 
 /**
- * The runtime the launcher names, and whether it is still there.
+ * The runtime the launcher names, whether it is still there, and whether it is
+ * the copy asking.
  *
  * Nothing ConsensFlow installs assumes Node on PATH, and after the host
  * payloads went the launcher is the only installed file that names a runtime
@@ -110,13 +111,21 @@ export function terminalCommandStatus(env, options = {}) {
  * moving or deleting whatever provided it (from the app, its own bundled Node)
  * breaks every `cf` the skill teaches, so `cf doctor` says so rather than
  * letting it fail one command at a time.
+ *
+ * `mine` is the other half of that, and the one nothing reported: a launcher
+ * naming a runtime that still EXISTS looks healthy from every angle while
+ * running an older ConsensFlow. It happens whenever a machine holds two — an
+ * app in /Applications and a build in a repo — and the newer one is not the
+ * one on PATH. Only a copy that is not the launcher's can notice, which is
+ * why the app's own page is where this shows: `cf` itself is, by definition,
+ * whatever the launcher started.
  */
 export function terminalRuntime(env, options = {}) {
   const status = terminalCommandStatus(env, options)
   if (!status.installed) return null
   const runtime = readFileSync(status.path, 'utf8').match(/"([^"]+)"\s+"[^"]*cf\.mjs"/)?.[1]
   if (runtime === undefined) return null
-  return { runtime, exists: existsSync(runtime) }
+  return { runtime, exists: existsSync(runtime), mine: runtime === selfPaths().runtime }
 }
 
 export function installTerminalCommand(env, options = {}) {
