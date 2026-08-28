@@ -908,10 +908,8 @@ function renderSystem(system) {
   const on = system.opened;
   if (on && on.mode !== null) {
     const did = [];
-    if (on.command === 'installed') did.push('put the cf command on your PATH');
-    if (on.command === 'repaired') did.push('pointed the cf command back at this app');
-    if (on.skills > 0) did.push('brought ' + on.skills + ' skill' + (on.skills === 1 ? '' : 's') + ' up to date');
-    if (on.command === 'elsewhere') did.push('left the cf command where it is — it runs another ConsensFlow');
+    if (on.command === 'claimed') did.push('pointed the cf command at this app');
+    if (on.skills > 0) did.push('brought ' + on.skills + ' skill' + (on.skills === 1 ? '' : 's') + ' up to date, edited copies included');
     if (did.length > 0) rows.push(['On open', did.join(' · ')]);
   }
   rows.push(['Home', system.home]);

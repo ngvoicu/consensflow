@@ -425,9 +425,20 @@ keep in step — the manager is the only caller.
   because a direct lib call would otherwise write into the developer's real
   home. Threading `env` through them is the fix; documenting them is the
   honest interim.
-- **Drift is sacred.** A manifest-owned file whose hash changed was edited by
-  the user: refuse without `--force`, never clobber. A file not in the
-  manifest is never touched, installed over, or deleted.
+- **The generated skill always wins; a stranger's file never loses**
+  (2026-08-28). Drift used to be sacred in both directions: a manifest-owned
+  file whose hash changed was refused without `--force`. It is still sacred on
+  the way OUT — `uninstallSkills` and `cf off` refuse to DELETE a file you
+  edited — but not on the way in. The skill is generated from the roster, not a
+  document the user keeps: an edited copy is an agent answering for a roster
+  that has moved, and reporting that forever while nothing fixes it was the
+  same "report and wait" that `healOnOpen` ended. So `installSkill` rewrites
+  what it owns and reports the action as `replaced` rather than `updated`,
+  because losing an edit in silence is the only part of this that would be
+  wrong, and `cf skills install` no longer takes `--force` at all: there is
+  nothing left for it to force. A file NOT in the manifest is still refused,
+  always — that one is somebody else's, and `skillGaps` is the only thing that
+  says it is sitting at our path.
 - **A harness with its own ConsensFlow keeps it.** `detectHarnesses` marks `native` (cc plugin cache / pi extension checkout) and `syncGeneratedSkill` leaves those out of scope in every mode. Without this, claude and pi see two same-named skills with the same trigger, competing for one skills budget.
 - **Full permissions, no permission concept.** There is still no knob, tier or
   policy to choose — but the default is now everything, not the CLI's own
@@ -462,18 +473,16 @@ keep in step — the manager is the only caller.
   makes differently — while not pressing it means every lead keeps reading the
   previous version's prose, which is a wrong answer nobody can see. So the
   editor the app opens now does what its own buttons do, before the page is
-  served, under three limits that keep it from being a surprise: nothing at all
-  before a mode is chosen; a launcher naming ANOTHER ConsensFlow is left alone,
-  because two installs is a legitimate state and "whichever window opened last"
-  is no reason to take the command from the other one; and a skill file the
-  user edited is never rewritten — `staleSkills` excludes drift and
-  `installSkill` refuses it, two guards that agree on purpose. It also installs
-  the `cf` launcher when nothing answers `cf run` — the command IS the consult,
-  so a machine carrying the skill without it has a product that answers
-  nothing. What it did is reported on the page, because a write nobody
-  mentioned is the quiet this rule exists to end. `cf skills install` and the
-  **Update skills** button stay: they are how you force what healing declines
-  to touch.
+  served: it claims the `cf` launcher and it brings the installed skill up to
+  what this version generates — behind, missing from a harness in scope, or
+  edited, all three being the same thing said differently. The command is
+  claimed outright, including from another install: a machine is meant to hold
+  one ConsensFlow, and the app you opened is the one that should answer `cf
+  run`. The single limit is the one that costs nothing to keep: **nothing at
+  all before a mode is chosen** — an app opened on a machine that has not
+  picked a path still installs nothing. What healing did is reported on the
+  page, because a write nobody mentioned is the quiet this rule exists to
+  end.
 
 - **A moved preset moves the label too** (`PRESET_OWNED_FIELDS`, 2026-08-27).
   `cf agent sync` and the UI's Update button rewrite every field the preset

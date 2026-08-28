@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { detectHarnesses } from './harnesses.js'
-import { installSkill, uninstallSkills } from './install.js'
+import { installSkill, skillsSummary, uninstallSkills } from './install.js'
 import { loadManifest, saveManifest, sha256 } from './manifest.js'
 import { currentMode, scopeTargets } from './mode.js'
 import { HARNESSES, listAgents, rosterPath } from './roster.js'
@@ -178,13 +178,13 @@ function recordRosterSha(env) {
  *
  * - nothing before a mode is chosen. An app opened on a machine that has not
  *   picked a path still installs nothing at all.
- * - a launcher that names ANOTHER ConsensFlow is left alone. Two installs is a
- *   legitimate state — an app beside a repo build — and "whichever window
- *   opened last" is not a reason to take the command from the other one. The
- *   page offers the button instead, and says where it currently points.
- * - a skill file the user edited is never rewritten. `staleSkills` already
- *   excludes drift and `installSkill` refuses it, so healing cannot clobber an
- *   edit; the two guards agree on purpose.
+ * - the command is claimed outright. It names one ConsensFlow absolutely, and
+ *   the app you opened is the one you want answering `cf run` — including when
+ *   it currently names another install. This machine is meant to hold one.
+ * - a skill file is rewritten even where it was edited, because the skill is
+ *   generated from the roster rather than kept by the user, and an edited copy
+ *   makes every agent reading it answer for a roster that has moved. A file we
+ *   never installed is still refused: that one is somebody else's.
  *
  * Returns what it did, so the page can say it out loud. A write nobody
  * reported is exactly the kind of quiet this function exists to end.
@@ -193,20 +193,20 @@ export function healOnOpen(env) {
   const mode = currentMode(env)
   if (mode === null) return { mode: null, command: 'no mode chosen', skills: 0 }
 
-  let command = 'ok'
   const wiring = terminalRuntime(env)
-  if (wiring === null || !wiring.exists) {
+  let command = wiring !== null && wiring.exists && wiring.mine ? 'ok' : 'claimed'
+  if (command === 'claimed') {
     try {
       installTerminalCommand(env)
-      command = wiring === null ? 'installed' : 'repaired'
     } catch (cause) {
       command = cause instanceof Error ? cause.message : String(cause)
     }
-  } else if (!wiring.mine) {
-    command = 'elsewhere'
   }
 
-  const behind = staleSkills(env).length + skillGaps(env).length
+  // Behind this version, missing from a harness in scope, or edited — all
+  // three are the installed skill not saying what this ConsensFlow says.
+  const drifted = skillsSummary(env).drifted
+  const behind = staleSkills(env).length + skillGaps(env).length + drifted
   if (behind > 0) refreshInstalledSkill(env)
   return { mode, command, skills: behind }
 }

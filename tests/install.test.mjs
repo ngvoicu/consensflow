@@ -152,7 +152,7 @@ describe('a host with its own ConsensFlow integration keeps it', () => {
   })
 })
 
-describe('install writes owned files with a hash manifest; drift is sacred', () => {
+describe('install writes owned files with a hash manifest; ours to replace, a stranger file is not', () => {
   const t = tempEnv()
   chooseCmuxMode(t)
   after(() => t.cleanup())
@@ -182,23 +182,20 @@ describe('install writes owned files with a hash manifest; drift is sacred', () 
     assert.equal(report.filter((r) => r.action === 'updated').length, 2)
   })
 
-  it('refuses to clobber a file the user edited, unless forced', () => {
+  it('replaces a copy the user edited, and calls it replaced', () => {
+    // The skill is generated from the roster, not a document the user keeps:
+    // an edited copy makes every agent reading it answer for a roster that has
+    // moved. So it is rewritten — and reported as `replaced`, because losing an
+    // edit in silence is the only part of this that would be wrong.
     const target = join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')
     writeFileSync(target, 'USER EDITED\n')
 
-    const refused = installSkill(
+    const report = installSkill(
       { relPath: 'consensflow/SKILL.md', content: 'SKILL V3\n', source: 'consensflow' },
       t.env,
     )
-    assert.equal(refused.find((r) => r.path === target).action, 'refused-drifted')
-    assert.equal(readFileSync(target, 'utf8'), 'USER EDITED\n')
 
-    const forced = installSkill(
-      { relPath: 'consensflow/SKILL.md', content: 'SKILL V3\n', source: 'consensflow' },
-      t.env,
-      { force: true },
-    )
-    assert.equal(forced.find((r) => r.path === target).action, 'updated')
+    assert.equal(report.find((r) => r.path === target).action, 'replaced')
     assert.equal(readFileSync(target, 'utf8'), 'SKILL V3\n')
   })
 
@@ -439,7 +436,7 @@ describe('opening the app puts right what its own buttons would', () => {
 
     const done = healOnOpen(t.env)
 
-    assert.equal(done.command, 'installed')
+    assert.equal(done.command, 'claimed')
     assert.ok(existsSync(launcher()), 'the skill teaches `cf run`; now something answers it')
   })
 
@@ -462,28 +459,31 @@ describe('opening the app puts right what its own buttons would', () => {
     assert.deepEqual(staleSkills(t.env), [], 'and current after')
   })
 
-  it('never rewrites a skill file the user edited', () => {
+  it('rewrites a skill file that was edited — the roster owns what it says', () => {
     const path = join(skillTargets(t.env)[0].skillsDir, 'consensflow', 'SKILL.md')
-    writeFileSync(path, 'my own notes, deliberately\n')
-
-    healOnOpen(t.env)
-
-    assert.equal(readFileSync(path, 'utf8'), 'my own notes, deliberately\n', 'drift is sacred')
-  })
-
-  it('leaves a command that runs another ConsensFlow where it is', () => {
-    // Two installs on one machine is legitimate — an app beside a repo build —
-    // and whichever window was opened last is no reason to take the command
-    // from the other one. The page offers the button instead.
-    const other = join(t.root, 'Other.app', 'node')
-    mkdirSync(dirname(other), { recursive: true })
-    writeFileSync(other, '')
-    const theirs = `#!/bin/sh\n# Installed by ConsensFlow.\nexec "${other}" "${join(t.root, 'Other.app', 'cf.mjs')}" "$@"\n`
-    writeFileSync(launcher(), theirs)
+    writeFileSync(path, 'my own notes, over the generated skill\n')
 
     const done = healOnOpen(t.env)
 
-    assert.equal(done.command, 'elsewhere')
-    assert.equal(readFileSync(launcher(), 'utf8'), theirs, 'not claimed behind the user back')
+    assert.equal(done.skills, 1, 'an edited copy is one of the things opening the app puts right')
+    assert.notEqual(readFileSync(path, 'utf8'), 'my own notes, over the generated skill\n')
+  })
+
+  it('claims the command even when it runs another ConsensFlow', () => {
+    // A machine is meant to hold one install. The app you just opened is the
+    // one that should answer `cf run`, so it takes the command rather than
+    // reporting that something else holds it.
+    const other = join(t.root, 'Other.app', 'node')
+    mkdirSync(dirname(other), { recursive: true })
+    writeFileSync(other, '')
+    writeFileSync(
+      launcher(),
+      `#!/bin/sh\n# Installed by ConsensFlow.\nexec "${other}" "${join(t.root, 'Other.app', 'cf.mjs')}" "$@"\n`,
+    )
+
+    const done = healOnOpen(t.env)
+
+    assert.equal(done.command, 'claimed')
+    assert.ok(readFileSync(launcher(), 'utf8').includes(process.execPath), 'points here now')
   })
 })

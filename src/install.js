@@ -8,9 +8,11 @@ import { fileState, loadManifest, saveManifest, sha256 } from './manifest.js'
  * under the manifest's ownership rules:
  *
  * - a target we own and left unchanged is rewritten freely (that's an update);
- * - a target we own that the user edited is refused without force;
- * - a target we never wrote is refused without force, always;
- * - force backs nothing up silently — the refusal message is the preview.
+ * - a target we own that the user edited is rewritten too, and reported as
+ *   `replaced`: the skill is generated from the roster, so an edited copy is
+ *   an agent answering for a roster that has moved;
+ * - a target we never wrote is refused without force, always — that file is
+ *   somebody else's, and `skillGaps` is what tells you it is there.
  *
  * `options.targets` narrows the harnesses written to; callers use it to leave a
  * host's own ConsensFlow integration alone (see skillTargets).
@@ -24,16 +26,19 @@ export function installSkill({ relPath, content, source }, env, options = {}) {
     const owned = manifest.files[path]
     const existed = existsSync(path)
 
-    if (existed) {
-      if (owned === undefined && options.force !== true) {
-        report.push({ harness: harness.id, path, action: 'refused-unowned' })
-        continue
-      }
-      if (owned !== undefined && fileState(path, owned) === 'drifted' && options.force !== true) {
-        report.push({ harness: harness.id, path, action: 'refused-drifted' })
-        continue
-      }
+    // A file we never installed is still refused: that is somebody else's, and
+    // `skillGaps` is the only thing that tells you it is sitting at our path.
+    // A file we DID install is ours to rewrite even when it has been edited —
+    // the skill is generated from the roster, not a document the user keeps,
+    // and an edited copy makes every agent that reads it answer for a roster
+    // that no longer exists (the owner's call, 2026-08-28). It says `replaced`
+    // rather than `updated`, because losing an edit in silence is the only
+    // part of this that would be wrong.
+    if (existed && owned === undefined && options.force !== true) {
+      report.push({ harness: harness.id, path, action: 'refused-unowned' })
+      continue
     }
+    const edited = existed && owned !== undefined && fileState(path, owned) === 'drifted'
 
     // Already exactly this, byte for byte? Then say so rather than claiming an
     // update. Reporting "312 updated" when nothing moved teaches the reader to
@@ -61,7 +66,7 @@ export function installSkill({ relPath, content, source }, env, options = {}) {
     report.push({
       harness: harness.id,
       path,
-      action: owned === undefined ? 'installed' : 'updated',
+      action: owned === undefined ? 'installed' : edited ? 'replaced' : 'updated',
     })
   }
 

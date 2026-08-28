@@ -135,8 +135,9 @@ Usage: cf <command> [options]
       the roster is ~/.consensflow/agents.json, shared by every path this
       machine can run (it was participants.json before 2026-08-21 and an
       existing one is still read)
-  skills install [--all] [--force]             Generate + install the consensflow skill — the one
-                                               skill ConsensFlow ships.
+  skills install [--all]                       Generate + install the consensflow skill — the one
+                                               skill ConsensFlow ships. It replaces an installed copy
+                                               you edited; a file we never installed is left alone.
                                                Hosts with their own ConsensFlow (the cc plugin, the pi
                                                extension) are left alone unless --all
   skills update [--force]                      Regenerate ours; take back any cmux skills an older
@@ -1621,7 +1622,7 @@ function skillsVerb(rest) {
             source: 'consensflow',
           },
           env,
-          { force: values.force, targets: skillTargets(env, { all: values.all }) },
+          { targets: skillTargets(env, { all: values.all }) },
         ),
       )
       reportNativeHosts(env, values.all)
@@ -1697,7 +1698,7 @@ function setup(rest) {
           source: 'consensflow',
         },
         env,
-        { force: values.force, targets: skillTargets(env, { all: values.all }) },
+        { targets: skillTargets(env, { all: values.all }) },
       ),
     )
     reportNativeHosts(env, values.all)
