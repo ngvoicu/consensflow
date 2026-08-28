@@ -74,9 +74,26 @@ Load-bearing facts, each learned by running the built bundle:
   fix was in the repo, the lead was reading a skill written by the bundle. After
   a CLI change: `cd app && npm run sync-cli` (re-stages the resources and
   mirrors them into the built bundle — a mirror, so a deleted file leaves too;
-  adhoc-signed with `Sealed Resources=none`, so the signature is untouched),
+  it BREAKS the signed bundle's seal, which is harmless here and never shipped),
   then `cf skills install`, which is deliberately separate because it writes to
   the user's harnesses. `npm run build` does the same and recompiles Rust.
+- **A release DMG is signed; a synced bundle is not shippable** (3.0.0-alpha.7).
+  `signingIdentity: "-"` makes Tauri sign the sidecar, then the binary, then the
+  bundle — and it does so BEFORE cutting the DMG, which is exactly why this is
+  Tauri's job and not a post-build script: a script would sign an app the DMG had
+  already been made from. Until then the DMG was not merely unsigned but
+  MALFORMED — `Sealed Resources=none` under a signature claiming resources — so
+  another Mac refused it as "damaged and can't be opened" rather than offering
+  Open Anyway. Signing also turns hardened runtime on, and hardened runtime
+  denies V8 the executable memory it needs: the first signed build's node died at
+  startup with `Failed to reserve virtual memory for CodeRange` (exit 133).
+  `entitlements.plist` gives it back — allow-jit and
+  allow-unsigned-executable-memory, neither of which needs Apple provisioning,
+  so both hold under an adhoc signature. **Verify a release by RUNNING the
+  bundled node, never by reading codesign's verdict**: the malformed build and
+  the JIT-broken build both signed cleanly. Gatekeeper still rejects the app —
+  adhoc is valid-but-untrusted, and only a Developer ID plus notarization
+  changes that. Neither is free.
 - **The app's version is the CLI's version** (`tauri.conf.json` and `Cargo.toml`
   track `package.json`), so `ConsensFlow_<version>_aarch64.dmg` says which
   ConsensFlow is inside it and a release tag names one thing, not two.

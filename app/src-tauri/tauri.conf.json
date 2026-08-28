@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "ConsensFlow",
-  "version": "3.0.0-alpha.6",
+  "version": "3.0.0-alpha.7",
   "identifier": "dev.ngvoicu.consensflow",
   "build": {
     "frontendDist": "../ui"
@@ -40,7 +40,9 @@
       "debugApplicationIdSuffix": ".debug"
     },
     "macOS": {
-      "exceptionDomain": "localhost"
+      "exceptionDomain": "localhost",
+      "signingIdentity": "-",
+      "entitlements": "entitlements.plist"
     },
     "externalBin": [
       "binaries/node"

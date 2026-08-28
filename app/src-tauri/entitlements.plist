@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Signing turns hardened runtime on, and hardened runtime blocks the
+    executable memory V8 needs: the bundled node dies at startup with
+    "Failed to reserve virtual memory for CodeRange" (exit 133, proven on
+    3.0.0-alpha.7's first build). These two entitlements give it back. They
+    need no Apple provisioning, so they work with an adhoc signature.
+  -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+</dict>
+</plist>
