@@ -528,7 +528,6 @@ async function openWindow(row, name, record, packetInput) {
   // opencode and codex both open their real window cold but announce no id:
   // each mints one at launch and says so only in its own store, so the window
   // and the search run together.
-  const DISCOVER = { opencode: discoverOpencodeSession, codex: discoverCodexSession }
   const discover = DISCOVER[row.kind]
   if (discover !== undefined) {
     const invocation = interactiveStart(row, null, seed)
@@ -539,28 +538,88 @@ async function openWindow(row, name, record, packetInput) {
     await saveWindowRow(name, row, record, null)
     out(`read it back with: cf catchup ${name}`)
     // The search runs alongside the window because the id exists only once the
-    // harness has written its own store. A window that ends early — quit, or a
-    // codex trust prompt answered "no" — has nothing left to announce, so its
-    // close pulls the deadline in. Not to zero: a harness may still be writing
-    // on the way out, which is the whole reason kimi's id is recovered at all.
-    let deadline = Date.now() + 60_000
+    // harness has written its own store — and it has to outlast a person. The
+    // search used to give up after 60 seconds, which is fine for opencode (its
+    // session exists a second after launch) and far too short for codex: it
+    // asks "trust this directory?" before opening a session at all, and that
+    // prompt is the user's to answer. One was answered 32 minutes later (live,
+    // 2026-08-28) — long after the search had stopped, and nothing ever looked
+    // again, so the conversation stayed unreadable while its rollout sat on
+    // disk. So the search lasts as long as the window does, and while the
+    // window is up it takes only the session carrying the text we seeded:
+    // waiting costs nothing, and everything else appearing in that directory
+    // meanwhile is somebody else's, the lead's own codex very much included.
+    let windowUp = true
+    let closingAt = Number.POSITIVE_INFINITY
+    const searching = () => windowUp || Date.now() < closingAt
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+    const save = async (id) =>
+      await saveWindowRow(name, row, (await loadThreads(cwdOf()))[name], id)
     const found = (async () => {
-      while (Date.now() < deadline) {
-        const id = await discover(cwdOf(), since, env)
-        if (id !== null) {
-          await saveWindowRow(name, row, (await loadThreads(cwdOf()))[name], id)
-          return
-        }
-        await new Promise((resolve) => setTimeout(resolve, 500))
+      let wait = 500
+      while (searching()) {
+        const id = await discover(cwdOf(), since, env, { seed })
+        if (id !== null) return await save(id)
+        // Unhurried on purpose: a poll walks the harness's store, and what it
+        // is waiting for is measured in minutes. The wait is spent in slices
+        // so the window closing still ends this promptly.
+        const until = Date.now() + wait
+        while (searching() && Date.now() < until) await sleep(250)
+        wait = Math.min(wait * 2, 5000)
       }
+      // The window is gone. One last exact look — a store written on the way
+      // out still counts — and then the best guess left: the earliest session
+      // that appeared in this directory since we opened it, which is the same
+      // guess `cf catchup` makes when it heals a row later.
+      const id =
+        (await discover(cwdOf(), since, env, { seed })) ?? (await discover(cwdOf(), since, env))
+      if (id !== null) await save(id)
     })()
     await handOver(name, row.id, invocation)
-    deadline = Math.min(deadline, Date.now() + 3000)
+    windowUp = false
+    // A harness may still be writing on the way out, which is the whole reason
+    // kimi's id is recovered at all.
+    closingAt = Date.now() + 3000
     await found
     return true
   }
 
   return false
+}
+
+/** The two harnesses that mint a session id and tell only their own store. */
+const DISCOVER = { opencode: discoverOpencodeSession, codex: discoverCodexSession }
+
+/**
+ * A window conversation whose id was never captured, given its session back.
+ *
+ * The id is discovered while the window is up. A window that outlasted that
+ * search — codex sitting on its trust prompt — left the row with no id at all,
+ * and nothing looked again: `cf catchup` said the harness kept no transcript
+ * and pointed at `cf last`, which pointed back at `cf catchup`, a closed loop
+ * around a conversation whose file was on disk the whole time (live,
+ * 2026-08-28). So a read looks once more, bounded by when the row was created:
+ * the earliest session that appeared in this directory after we opened the
+ * window. That is a guess where the search was exact, so it says out loud
+ * which session it took, and it saves it — a guess made twice is a guess that
+ * can disagree with itself.
+ */
+async function healWindowSession(name, record, { quiet = false } = {}) {
+  if (record?.sessionId) return record
+  const discover = DISCOVER[record?.kind]
+  const createdAt = Date.parse(record?.createdAt ?? '')
+  if (discover === undefined || !Number.isFinite(createdAt)) return record
+  const id = await discover(cwdOf(), createdAt - 2000, env)
+  if (id === null) return record
+  const healed = { ...record, sessionId: id }
+  // Written field by field over what is there: a read is not a run, so
+  // `lastRunAt`, the read marks and the lead all stay exactly as they were.
+  await saveThread(cwdOf(), name, healed)
+  if (!quiet) {
+    out(`${name} · @${record.agent} — no id was captured when this window opened;`)
+    out(`taking the ${record.kind} session started here right after it: ${id}`)
+  }
+  return healed
 }
 
 const cwdOf = () => process.cwd()
@@ -1014,11 +1073,14 @@ async function attachVerb(rest) {
   const threads = await loadThreads(cwdOf())
   const names = Object.keys(threads)
   // Bare `cf attach` means the obvious one: the conversation you were last in.
-  const { name, record } = pickConversation(threads, asked)
-  if (record === undefined) {
+  const { name, record: known } = pickConversation(threads, asked)
+  if (known === undefined) {
     fail(noConversationHere(asked, names, env))
     return
   }
+  // Same look as `cf catchup`: a window whose id was never captured can still
+  // be reopened, once we work out which session it was.
+  const record = await healWindowSession(name, known)
 
   const row = agentRow(record.agent, env)
   const invocation = interactiveResume(row ?? { kind: record.kind }, record.sessionId)
@@ -1085,11 +1147,14 @@ async function catchupVerb(rest) {
   const asked = String(positionals[0] ?? '')
   const threads = await loadThreads(cwdOf())
   const names = Object.keys(threads)
-  const { name, record } = pickConversation(threads, asked)
-  if (record === undefined) {
+  const { name, record: known } = pickConversation(threads, asked)
+  if (known === undefined) {
     fail(noConversationHere(asked, names, env))
     return
   }
+  // A conversation whose window outlasted the search for its id is unreadable
+  // until somebody looks again. This is that look.
+  const record = await healWindowSession(name, known, { quiet: values.json })
 
   let turns = await harnessTurns(record.kind, record.sessionId, env)
 
@@ -1189,8 +1254,19 @@ async function catchupVerb(rest) {
     return
   }
   if (turns.length === 0) {
-    out(`${name} · @${record.agent} — ${record.kind} keeps no readable transcript for this one`)
-    out(`its own runs are still here: cf last ${name}`)
+    // `cf last` is the right place to send a lead only when there IS a run of
+    // ours to read. On a window conversation there is none, and sending them
+    // there was a closed loop: `cf last` answers "its turns live in the
+    // agent's own window — read them with cf catchup" (live, 2026-08-28).
+    if (record.lastRunId != null) {
+      out(`${name} · @${record.agent} — ${record.kind} keeps no readable transcript for this one`)
+      out(`its own runs are still here: cf last ${name}`)
+      return
+    }
+    out(`${name} · @${record.agent} — nothing to read: no ${record.kind} session was captured`)
+    out(
+      `if its window is open, answer whatever ${record.kind} is asking in that pane, then read again`,
+    )
     return
   }
   if (values.unread && unread.length === 0) {

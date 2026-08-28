@@ -420,3 +420,82 @@ test('harness transcript: a tag is not injected context — real text starting w
     ])
   })
 })
+
+// --- finding the session codex minted --------------------------------------
+
+/** A rollout as codex writes one: metadata first, then the turns. */
+const rollout = (created, cwd, turns = []) =>
+  [
+    JSON.stringify({ type: 'session_meta', payload: { cwd, timestamp: created } }),
+    ...turns.map((text) =>
+      JSON.stringify({
+        type: 'response_item',
+        payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
+      }),
+    ),
+  ].join('\n')
+
+test('discovery: codex is matched on when its session was created, not when its file was written', async () => {
+  // The lead asking for an agent is often itself a codex in the same
+  // directory. The moment it takes a turn its rollout is the most recently
+  // WRITTEN file there, and ranking by mtime named the lead's own conversation
+  // as the agent's (live, 2026-08-28). Both files here are written now; only
+  // the age of the sessions inside them differs.
+  await withStores(async (env) => {
+    const { discoverCodexSession } = await import('../../hosts/lib/harness-transcript.js')
+    const dir = path.join(env.HOME, '.codex', 'sessions', '2026', '08', '28')
+    const lead = '01a048fa-9c3d-7941-9860-00000000lead'
+    const ours = '01a048fa-9c3d-7941-9860-00000000ours'
+    const iso = (offset) => new Date(Date.now() + offset).toISOString()
+    await write(path.join(dir, `rollout-x-${lead}.jsonl`), rollout(iso(-3_600_000), '/work/here'))
+    await write(path.join(dir, `rollout-x-${ours}.jsonl`), rollout(iso(0), '/work/here'))
+
+    const since = Date.now() - 60_000
+    assert.equal(await discoverCodexSession('/work/here', since, env), ours)
+    assert.equal(await discoverCodexSession('/work/elsewhere', since, env), null)
+    assert.equal(
+      await discoverCodexSession('/work/here', Date.now() + 60_000, env),
+      null,
+      'nothing created since',
+    )
+  })
+})
+
+test('discovery: with a seed, ours is the session carrying it — whatever else appeared', async () => {
+  // codex can sit half an hour on its trust prompt before a session exists, so
+  // the search has to outlast a person, and anything else that shows up in the
+  // directory meanwhile belongs to somebody else. The stranger here is the
+  // EARLIER of the two, so no ordering rule alone would tell them apart.
+  await withStores(async (env) => {
+    const { discoverCodexSession } = await import('../../hosts/lib/harness-transcript.js')
+    const dir = path.join(env.HOME, '.codex', 'sessions', '2026', '08', '28')
+    const stranger = '01a048fa-9c3d-7941-9860-00000000them'
+    const ours = '01a048fa-9c3d-7941-9860-00000000ours'
+    const iso = (offset) => new Date(Date.now() + offset).toISOString()
+    await write(
+      path.join(dir, `rollout-x-${stranger}.jsonl`),
+      rollout(iso(-1000), '/work/here', ['what the lead was already talking about']),
+    )
+    await write(
+      path.join(dir, `rollout-x-${ours}.jsonl`),
+      rollout(iso(0), '/work/here', ['## Your brief\nreview the retry path']),
+    )
+
+    const since = Date.now() - 60_000
+    const seeded = await discoverCodexSession('/work/here', since, env, {
+      // Wrapped by the window, but the same text — whitespace is not identity.
+      seed: '## Your brief    review the retry path',
+    })
+    assert.equal(seeded, ours)
+    assert.equal(
+      await discoverCodexSession('/work/here', since, env),
+      stranger,
+      'without a seed, the earliest session created since is the best guess left',
+    )
+    assert.equal(
+      await discoverCodexSession('/work/here', since, env, { seed: 'a question nobody asked' }),
+      null,
+      'and an exact search that matches nothing takes nothing',
+    )
+  })
+})

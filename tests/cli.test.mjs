@@ -1186,7 +1186,17 @@ fi
     return log
   }
 
-  /** A codex whose interactive form writes the rollout its id is read from. */
+  /**
+   * A codex whose interactive form writes the rollout its id is read from.
+   *
+   * Shaped after a real one (copied 2026-08-28): the metadata line carries the
+   * directory AND when the session was created, and the prompt it was launched
+   * with is recorded as an ordinary user turn. Both are what the search reads —
+   * the creation time so a session that predates the spawn is not mistaken for
+   * this one, the prompt so OUR window is told apart from anyone else's in the
+   * same directory. The timestamp is far-future for the same reason the
+   * opencode stub's is: the search only asks "created since?".
+   */
   function stubCodexCold() {
     mkdirSync(t.env.PATH, { recursive: true })
     const log = join(t.root, 'codex-cold.log')
@@ -1198,11 +1208,29 @@ fi
       path,
       `#!/bin/sh
 echo "$@" >> "${log}"
-printf '%s\\n' '{"type":"session_meta","payload":{"cwd":"'"$PWD"'"}}' > "${rollout}"
+for arg in "$@"; do prompt="$arg"; done
+printf '%s\\n' '{"type":"session_meta","payload":{"cwd":"'"$PWD"'","timestamp":"2999-01-02T00:00:00.000Z"}}' > "${rollout}"
+printf '%s\\n' '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"'"$prompt"'"}]}}' >> "${rollout}"
 `,
     )
     chmodSync(path, 0o755)
     return log
+  }
+
+  /** Somebody else's codex, in the same directory, started before ours. */
+  function foreignCodexSession(id, text) {
+    const dir = join(t.env.CODEX_HOME, 'sessions', '2026', '08', '24')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      join(dir, `rollout-2026-08-24T00-00-00-${id}.jsonl`),
+      `${JSON.stringify({
+        type: 'session_meta',
+        payload: { cwd: process.cwd(), timestamp: '2999-01-01T00:00:00.000Z' },
+      })}\n${JSON.stringify({
+        type: 'response_item',
+        payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
+      })}\n`,
+    )
   }
 
   function stubCodexWindow() {
@@ -1293,6 +1321,101 @@ exit 1
     const row = Object.values(threadRows()).find((r) => r.agent === 'hyperion')
     assert.equal(row.sessionId, COLD_CODEX_ID, 'discovered from codex own rollout store')
   })
+
+  it('takes the session it seeded, not whatever else appeared in this directory', async () => {
+    // The lead asking for an agent is very often a codex in the same directory:
+    // same store, same cwd, and its rollout keeps being written. What tells the
+    // two apart is the text we seeded the window with, which codex records as
+    // an ordinary user turn. Here the stranger is even the OLDER of the two, so
+    // neither "newest" nor "earliest" would pick ours.
+    stubCodexCold()
+    foreignCodexSession('01a03068-3530-7173-a123-00000000dead', 'the lead own conversation')
+
+    const out = await cf(['run', '@hyperion', 'a seeded question', '--new'], tty())
+
+    assert.equal(out.code, 0, out.stderr)
+    const row = Object.values(threadRows()).find(
+      (one) => one.agent === 'hyperion' && one.lastRunAt === newestThreadAt(),
+    )
+    assert.equal(row.sessionId, COLD_CODEX_ID, 'the session carrying our seed')
+  })
+
+  it('a window that announced no id says so, instead of naming a verb that points back', async () => {
+    // codex asks "trust this directory?" before it opens a session at all, so a
+    // window can outlast the search and leave the row with no id. `cf catchup`
+    // used to answer "no readable transcript — its own runs are still here: cf
+    // last", and `cf last` answered "read them with cf catchup": a closed loop
+    // around a conversation nobody could read (live, 2026-08-28).
+    rmSync(join(t.env.CODEX_HOME, 'sessions'), { recursive: true, force: true })
+    recordingStub('codex')
+
+    await cf(['run', '@hyperion', 'the question that waited', '--new'], tty())
+    const name = nullSessionRow()
+    const read = await cf(['catchup', name], t.env)
+
+    assert.equal(read.code, 0, read.stderr)
+    assert.match(read.stdout, /no codex session was captured/)
+    assert.doesNotMatch(read.stdout, /cf last/, 'the loop is broken at this end')
+  })
+
+  it('a conversation whose session arrived late is healed by the next read', async () => {
+    // The prompt answered half an hour on: the session exists now, and the id
+    // it minted is still discoverable from when this conversation was opened.
+    rmSync(join(t.env.CODEX_HOME, 'sessions'), { recursive: true, force: true })
+    recordingStub('codex')
+    await cf(['run', '@hyperion', 'the question that waited', '--new'], tty())
+    const name = nullSessionRow()
+    const late = '01a03068-3530-7173-a123-00000000late'
+    writeFileSync(
+      rolloutFor(late),
+      `${JSON.stringify({
+        type: 'session_meta',
+        payload: { cwd: process.cwd(), timestamp: '2999-01-01T00:00:00.000Z' },
+      })}\n${turnLine('user', 'the question that waited')}${turnLine(
+        'assistant',
+        'the answer that was there all along',
+      )}`,
+    )
+
+    const read = await cf(['catchup', name], t.env)
+
+    assert.equal(read.code, 0, read.stderr)
+    assert.match(read.stdout, /the answer that was there all along/)
+    assert.match(read.stdout, /no id was captured/, 'and it says which session it took')
+    assert.equal(threadRows()[name].sessionId, late, 'saved, so the guess is made once')
+  })
+
+  it('cf attach heals too, instead of refusing a window it could still open', async () => {
+    rmSync(join(t.env.CODEX_HOME, 'sessions'), { recursive: true, force: true })
+    recordingStub('codex')
+    await cf(['run', '@hyperion', 'the question that waited', '--new'], tty())
+    const name = nullSessionRow()
+    const late = '01a03068-3530-7173-a123-attach000000'
+    writeFileSync(
+      rolloutFor(late),
+      `${JSON.stringify({
+        type: 'session_meta',
+        payload: { cwd: process.cwd(), timestamp: '2999-01-01T00:00:00.000Z' },
+      })}\n`,
+    )
+
+    const out = await cf(['attach', name, '--print'], t.env)
+
+    assert.equal(out.code, 0, out.stderr)
+    assert.match(out.stdout, new RegExp(`codex resume ${late}`), 'reopened, not refused')
+  })
+
+  /** The conversation the run under test just opened. */
+  const newestThreadAt = () =>
+    Object.values(threadRows())
+      .map((row) => row.lastRunAt)
+      .sort()
+      .at(-1)
+  const nullSessionRow = () => {
+    const found = Object.entries(threadRows()).find(([, row]) => row.sessionId === null)
+    assert.ok(found, 'the window announced no id, which is the case under test')
+    return found[0]
+  }
 
   it('records the turn before handing over, so cf last works after', async () => {
     const listed = await cf(['sessions', '--json'], t.env)

@@ -464,13 +464,31 @@ async function discoverOpencodeSessionFiles(cwd, since, env) {
  * The id comes from the FILENAME rather than the payload, because that is what
  * `harnessTurns` matches on and what `codex resume` accepts — a forked session
  * carries a different `session_id` in its metadata than the file it lives in.
+ *
+ * Two rules here were paid for live (2026-08-28), and both are about not
+ * handing back a session that belongs to somebody else:
+ *
+ * A candidate is judged on when its session was CREATED, never on when its
+ * file was last written. The lead asking for this is often itself a codex in
+ * the same directory: the moment it takes a turn, its rollout becomes the most
+ * recently modified file in that cwd, and ranking by mtime would name the
+ * lead's own conversation as the agent's.
+ *
+ * And when the caller knows what it seeded the window with, that text decides
+ * — nothing else can. codex asks "trust this directory?" before it opens a
+ * session at all, so the search may have to outlast a person answering it (32
+ * minutes, in the run that taught us this), and anything else appearing in
+ * that directory meanwhile is not ours. Without a seed the earliest session
+ * created since is the best guess available, which is what a caller falls back
+ * to once the window is gone and no better answer is coming.
  */
-export async function discoverCodexSession(cwd, since, env = process.env) {
+export async function discoverCodexSession(cwd, since, env = process.env, options = {}) {
+  const { seed = null } = options;
   const root = codexRoot(env);
   const files = [];
   await collectFiles(root, (name) => name.startsWith("rollout-") && name.endsWith(".jsonl"), files);
 
-  let best = null;
+  const candidates = [];
   for (const file of files) {
     let stat;
     try {
@@ -478,20 +496,82 @@ export async function discoverCodexSession(cwd, since, env = process.env) {
     } catch {
       continue;
     }
+    // A file untouched since `since` cannot hold a session created after it —
+    // the cheap test that keeps this off every rollout ever recorded.
     if (stat.mtimeMs < since) continue;
+    const head = await readHead(file);
     let meta;
     try {
-      const raw = await fs.readFile(file, "utf8");
-      meta = JSON.parse(raw.slice(0, raw.indexOf("\n")));
+      meta = JSON.parse(head[0] ?? "");
     } catch {
       continue;
     }
     if (meta?.type !== "session_meta" || meta.payload?.cwd !== cwd) continue;
+    const created = Date.parse(meta.payload?.timestamp ?? meta.timestamp ?? "");
+    if (!Number.isFinite(created) || created < since) continue;
     // rollout-<timestamp>-<uuid>.jsonl — the uuid is the last 36 characters.
-    const id = path.basename(file, ".jsonl").slice(-36);
-    if (best === null || stat.mtimeMs > best.at) best = { id, at: stat.mtimeMs };
+    candidates.push({ id: path.basename(file, ".jsonl").slice(-36), created, head });
   }
-  return best?.id ?? null;
+  candidates.sort((a, b) => a.created - b.created);
+  const ours = seed === null ? candidates[0] : candidates.find((one) => carriesSeed(one.head, seed));
+  return ours?.id ?? null;
+}
+
+/**
+ * The opening of a session file, in lines.
+ *
+ * Bounded, because a live rollout runs to megabytes and this is read in a
+ * poll: the metadata is the first line and the seeded prompt is among the
+ * first few turns, so the opening is all this ever needs. A packet longer than
+ * the window simply does not match, which costs a guess, never a wrong answer.
+ */
+async function readHead(file, bytes = 512 * 1024) {
+  let handle;
+  try {
+    handle = await fs.open(file, "r");
+    const buffer = Buffer.alloc(bytes);
+    const { bytesRead } = await handle.read(buffer, 0, bytes, 0);
+    const lines = buffer.subarray(0, bytesRead).toString("utf8").split("\n");
+    // A full read stopped mid-file, so the last line is a fragment.
+    if (bytesRead === bytes) lines.pop();
+    return lines;
+  } catch {
+    return [];
+  } finally {
+    try {
+      await handle?.close();
+    } catch {
+      // closing what we could not open is not an error worth having
+    }
+  }
+}
+
+/**
+ * Is this the session we seeded? codex records the prompt it was launched with
+ * as an ordinary user turn, so our own text is in the file verbatim. Compared
+ * with whitespace collapsed, because the only difference a TUI is entitled to
+ * make to text it echoes is how it wraps it.
+ */
+function carriesSeed(lines, seed) {
+  const squash = (text) => String(text).replace(/\s+/g, " ").trim();
+  const wanted = squash(seed);
+  if (wanted.length === 0) return false;
+  for (const line of lines) {
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const payload = event?.payload ?? {};
+    if (payload.role !== "user" && payload.type !== "user_message") continue;
+    const text =
+      typeof payload.message === "string"
+        ? payload.message
+        : (payload.content ?? []).map((part) => part?.text ?? "").join("\n");
+    if (squash(text).includes(wanted)) return true;
+  }
+  return false;
 }
 
 async function collectFiles(root, matches, into, depth = 6) {

@@ -239,6 +239,30 @@ keep in step — the manager is the only caller.
   reaches its TUI as a paste and never submits, so its window waits on a
   keypress the user makes.
 
+- **The search for a window's id outlasts the person answering that prompt,
+  and takes only the session it seeded** (2026-08-28). codex and opencode both
+  open cold and announce no id, so `cf run` searches their store while the
+  window runs — for 60 seconds, until a codex trust prompt was answered 32
+  minutes later. The session appeared long after the search had stopped,
+  nothing ever looked again, and the conversation was unreadable forever with
+  its rollout on disk: `cf catchup` said the harness kept no transcript and
+  sent the lead to `cf last`, which sent it back to `cf catchup` — a closed
+  loop reported live, with a finished audit inside it. So the search now lasts
+  as long as the window does, backing off as it waits, and three things keep a
+  long wait from adopting a stranger. A candidate is matched on when its
+  session was CREATED, never on when its file was last written — the lead is
+  often a codex in the same directory, and the moment it takes a turn its
+  rollout is the newest file there. While the window is up, only the session
+  carrying the text we seeded counts, because waiting costs nothing and
+  everything else appearing meanwhile is somebody else's. And once the window
+  is gone, the earliest session created since is the best guess left — the
+  same guess `healWindowSession` makes when `cf catchup` or `cf attach` finds
+  a row with no id, which is what un-breaks the conversations the old search
+  already lost. It is a guess where the search was exact, so it says out loud
+  which session it took, and it saves it: a guess made twice can disagree with
+  itself. `cf catchup` also stopped naming `cf last` when there is no run of
+  ours to read — that was the other half of the loop.
+
 - **A harness's store is not a fixture.** opencode moved its sessions into
   SQLite in January and our reader kept passing — green tests over a dead
   format, returning nothing for every real conversation, unnoticed until an
