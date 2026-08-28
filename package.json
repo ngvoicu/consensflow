@@ -1,6 +1,6 @@
 {
   "name": "consensflow",
-  "version": "3.0.0-alpha.7",
+  "version": "3.0.0-alpha.8",
   "description": "One manager for named AI participants: a shared roster, and the one skill that teaches every coding agent to consult them.",
   "license": "MIT",
   "type": "module",
