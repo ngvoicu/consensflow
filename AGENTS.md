@@ -453,9 +453,27 @@ keep in step — the manager is the only caller.
   counted them as ours. Both were true; neither was the answer. `staleSkills`
   compares what is on disk against what this version would generate — skipping
   any file the user edited, because drift is theirs and stays — and `cf doctor`,
-  `cf skills status` and the app's system panel all report it. None of them fix
-  it: refreshing writes into someone else's harness, so it stays a deliberate
-  `cf skills install`, or the page's existing **Update skills** button.
+  `cf skills status` and the app's system panel all report it. Reporting was all
+  it did for a day, on the grounds that refreshing writes into someone else's
+  harness and so must be deliberate.
+
+- **Opening the app IS the deliberate act** (`healOnOpen`, 2026-08-28). Reading
+  a number on a panel and pressing a button beside it is not a decision anyone
+  makes differently — while not pressing it means every lead keeps reading the
+  previous version's prose, which is a wrong answer nobody can see. So the
+  editor the app opens now does what its own buttons do, before the page is
+  served, under three limits that keep it from being a surprise: nothing at all
+  before a mode is chosen; a launcher naming ANOTHER ConsensFlow is left alone,
+  because two installs is a legitimate state and "whichever window opened last"
+  is no reason to take the command from the other one; and a skill file the
+  user edited is never rewritten — `staleSkills` excludes drift and
+  `installSkill` refuses it, two guards that agree on purpose. It also installs
+  the `cf` launcher when nothing answers `cf run` — the command IS the consult,
+  so a machine carrying the skill without it has a product that answers
+  nothing. What it did is reported on the page, because a write nobody
+  mentioned is the quiet this rule exists to end. `cf skills install` and the
+  **Update skills** button stay: they are how you force what healing declines
+  to touch.
 
 - **A moved preset moves the label too** (`PRESET_OWNED_FIELDS`, 2026-08-27).
   `cf agent sync` and the UI's Update button rewrite every field the preset

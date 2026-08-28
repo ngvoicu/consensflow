@@ -6,6 +6,7 @@ import { detectHarnesses } from '../src/harnesses.js'
 import { installSkill, skillsStatus, skillsSummary, uninstallSkills } from '../src/install.js'
 import { addAgent } from '../src/roster.js'
 import {
+  healOnOpen,
   refreshInstalledSkill,
   retireSkillFromNativeHosts,
   skillGaps,
@@ -414,5 +415,75 @@ describe('the count answers the question a reader actually asks', () => {
     } finally {
       fresh.cleanup()
     }
+  })
+})
+
+describe('opening the app puts right what its own buttons would', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+  const launcher = () => join(t.env.CONSENSFLOW_BIN_DIR, 'consensflow')
+
+  it('touches nothing before a mode is chosen', () => {
+    stubCli(t.env, 'claude')
+
+    const done = healOnOpen(t.env)
+
+    assert.equal(done.mode, null)
+    assert.equal(done.skills, 0)
+    assert.equal(existsSync(launcher()), false, 'a machine that picked no path stays untouched')
+  })
+
+  it('installs the command the skill teaches, and says it did', () => {
+    chooseCmuxMode(t)
+    addAgent({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }, t.env)
+
+    const done = healOnOpen(t.env)
+
+    assert.equal(done.command, 'installed')
+    assert.ok(existsSync(launcher()), 'the skill teaches `cf run`; now something answers it')
+  })
+
+  it('brings a skill left behind by an app upgrade up to date', () => {
+    // The upgrade shape: the template moved, the installed file did not.
+    installSkill(
+      {
+        relPath: 'consensflow/SKILL.md',
+        content: 'an older ConsensFlow wrote this\n',
+        source: 'consensflow',
+      },
+      t.env,
+      { targets: skillTargets(t.env), force: true },
+    )
+    assert.equal(staleSkills(t.env).length, 1, 'behind, before the app was opened')
+
+    const done = healOnOpen(t.env)
+
+    assert.equal(done.skills, 1)
+    assert.deepEqual(staleSkills(t.env), [], 'and current after')
+  })
+
+  it('never rewrites a skill file the user edited', () => {
+    const path = join(skillTargets(t.env)[0].skillsDir, 'consensflow', 'SKILL.md')
+    writeFileSync(path, 'my own notes, deliberately\n')
+
+    healOnOpen(t.env)
+
+    assert.equal(readFileSync(path, 'utf8'), 'my own notes, deliberately\n', 'drift is sacred')
+  })
+
+  it('leaves a command that runs another ConsensFlow where it is', () => {
+    // Two installs on one machine is legitimate — an app beside a repo build —
+    // and whichever window was opened last is no reason to take the command
+    // from the other one. The page offers the button instead.
+    const other = join(t.root, 'Other.app', 'node')
+    mkdirSync(dirname(other), { recursive: true })
+    writeFileSync(other, '')
+    const theirs = `#!/bin/sh\n# Installed by ConsensFlow.\nexec "${other}" "${join(t.root, 'Other.app', 'cf.mjs')}" "$@"\n`
+    writeFileSync(launcher(), theirs)
+
+    const done = healOnOpen(t.env)
+
+    assert.equal(done.command, 'elsewhere')
+    assert.equal(readFileSync(launcher(), 'utf8'), theirs, 'not claimed behind the user back')
   })
 })

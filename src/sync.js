@@ -6,6 +6,7 @@ import { loadManifest, saveManifest, sha256 } from './manifest.js'
 import { currentMode, scopeTargets } from './mode.js'
 import { HARNESSES, listAgents, rosterPath } from './roster.js'
 import { generateSkill } from './skill.js'
+import { installTerminalCommand, terminalRuntime } from './terminal.js'
 
 /**
  * The one place the roster becomes the installed skill.
@@ -158,4 +159,54 @@ function recordRosterSha(env) {
     return
   }
   saveManifest(manifest, env)
+}
+
+/**
+ * What opening the app puts right, without being asked.
+ *
+ * Both halves used to be buttons and nothing else, and both went wrong
+ * silently. A new app brings a new skill template and rewrites nothing, so
+ * every lead kept reading the previous version's prose until somebody noticed
+ * a number on a panel (2026-08-27). The command is worse: the skill it
+ * installs teaches `cf run @name`, so a machine with the skill and no launcher
+ * has a product that answers nothing, and the page showed a mute Install
+ * button beside it.
+ *
+ * Opening the app is a deliberate act — the same act as pressing the button —
+ * so it now does what the buttons do, under three limits that keep it from
+ * being a surprise:
+ *
+ * - nothing before a mode is chosen. An app opened on a machine that has not
+ *   picked a path still installs nothing at all.
+ * - a launcher that names ANOTHER ConsensFlow is left alone. Two installs is a
+ *   legitimate state — an app beside a repo build — and "whichever window
+ *   opened last" is not a reason to take the command from the other one. The
+ *   page offers the button instead, and says where it currently points.
+ * - a skill file the user edited is never rewritten. `staleSkills` already
+ *   excludes drift and `installSkill` refuses it, so healing cannot clobber an
+ *   edit; the two guards agree on purpose.
+ *
+ * Returns what it did, so the page can say it out loud. A write nobody
+ * reported is exactly the kind of quiet this function exists to end.
+ */
+export function healOnOpen(env) {
+  const mode = currentMode(env)
+  if (mode === null) return { mode: null, command: 'no mode chosen', skills: 0 }
+
+  let command = 'ok'
+  const wiring = terminalRuntime(env)
+  if (wiring === null || !wiring.exists) {
+    try {
+      installTerminalCommand(env)
+      command = wiring === null ? 'installed' : 'repaired'
+    } catch (cause) {
+      command = cause instanceof Error ? cause.message : String(cause)
+    }
+  } else if (!wiring.mine) {
+    command = 'elsewhere'
+  }
+
+  const behind = staleSkills(env).length + skillGaps(env).length
+  if (behind > 0) refreshInstalledSkill(env)
+  return { mode, command, skills: behind }
 }

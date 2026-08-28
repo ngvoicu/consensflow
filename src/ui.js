@@ -31,6 +31,7 @@ import {
 } from './roster.js'
 import { agentCommand, generateSkill } from './skill.js'
 import {
+  healOnOpen,
   refreshInstalledSkill,
   retireSkillFromNativeHosts,
   skillGaps,
@@ -155,8 +156,17 @@ function systemState(env) {
     // creates and nothing else reports: the files are ours and unedited, so
     // every other count calls them healthy.
     skills: { owned: files.length, ...skillsSummary(env), stale: staleSkills(env).length },
+    // What opening the app put right before this page was served. A write
+    // nobody reported is the quiet this whole feature exists to end.
+    opened,
   }
 }
+
+/**
+ * Set once, by the editor the app opens — never by `startUiServer` on its own,
+ * which is what tests and other callers use.
+ */
+let opened = null
 
 /**
  * The install the page can trigger: the generated skill everywhere it
@@ -366,6 +376,9 @@ export async function startUiServer(env) {
  * scraping prose. `open: false` leaves the browser alone for the same reason.
  */
 export async function serveUi(env, { onOut, json = false, open = true }) {
+  // Opening the app IS the act: it does what its own buttons do, before the
+  // page is served, so the first render already tells the truth.
+  opened = healOnOpen(env)
   const server = await startUiServer(env)
   const url = `${server.url}/?token=${server.token}`
 
@@ -890,6 +903,17 @@ function renderSystem(system) {
   // An upgrade brings a new skill; the installed files stay as they are until
   // something rewrites them. Say which button does that.
   if (sk.stale > 0) rows.push(['Out of date', sk.stale + ' file' + (sk.stale === 1 ? '' : 's') + " carry an older ConsensFlow's text — press “Update skills” below"]);
+  // Opening the app repairs what it can. Say so: a silent write is worse than
+  // no write, and the one thing it deliberately does NOT do belongs here too.
+  const on = system.opened;
+  if (on && on.mode !== null) {
+    const did = [];
+    if (on.command === 'installed') did.push('put the cf command on your PATH');
+    if (on.command === 'repaired') did.push('pointed the cf command back at this app');
+    if (on.skills > 0) did.push('brought ' + on.skills + ' skill' + (on.skills === 1 ? '' : 's') + ' up to date');
+    if (on.command === 'elsewhere') did.push('left the cf command where it is — it runs another ConsensFlow');
+    if (did.length > 0) rows.push(['On open', did.join(' · ')]);
+  }
   rows.push(['Home', system.home]);
 
   for (const [label, value] of rows) {
