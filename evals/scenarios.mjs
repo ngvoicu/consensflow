@@ -60,6 +60,17 @@ export const SCENARIOS = [
           ['looks first', (log) => ran(log, 'cf catchup')],
           ['sends the follow-up into the pane', (log) => ran(log, 'cmux send')],
           ['does not restart the conversation', (log) => !log.some((l) => l.includes('--new'))],
+          // Live 2026-08-31: the send landed, and it carried `cd … && cf run
+          // @nyx … --session <name>` — a shell line pasted into nyx's own
+          // window, where it reads as nyx being told to consult nyx. It counts
+          // as a send by every check above, which is why the shape is checked.
+          [
+            'sends words, not a shell line',
+            (log) =>
+              log
+                .filter((l) => l.startsWith('cmux send'))
+                .every((l) => !l.includes('cf run') && !l.includes('cd ')),
+          ],
         ],
       },
     ],

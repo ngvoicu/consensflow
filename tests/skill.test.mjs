@@ -331,19 +331,39 @@ describe('the description is all a lead reads before it decides to look inside',
     assert.match(cmux, /cf catchup <name> --wait/)
   })
 
-  it('sends follow-ups as another cf run, never as keystrokes at a TUI', () => {
-    // Probed 2026-08-24: `cmux send` reaches a TUI as a PASTE, where a newline
-    // is a newline rather than Enter. claude and pi submit anyway; kimi and
-    // codex do not — the text sits in the input box, no answer comes, and the
-    // pane looks perfectly alive. `cf run --session` delivers the question as
-    // an argument, which every harness accepts.
+  it('sends a follow-up as the question itself, never a shell line at a window', () => {
+    // Live 2026-08-31: this page used to lead with `cmux send 'cd … && cf run
+    // @<name> … --session <name>'` as "the safe form everywhere". A pane that
+    // has run a consult is the agent's WINDOW, not a shell, so that line was
+    // pasted into the agent's input box — where it reads as the agent being
+    // told to consult itself. A codex lead sent exactly it at a claude agent
+    // and the follow-up was never asked.
     const cmux = generateSkill(roster, { mode: 'cmux' })
 
-    assert.match(cmux, /cf run @<name> "<follow-up>" --session <name>/)
-    // Probed one harness at a time (2026-08-24): claude, codex, pi and
-    // opencode all submit a `cmux send`; kimi alone does not, because its TUI
-    // takes it as a paste where a newline is a newline rather than Enter.
-    assert.match(cmux, /not on a kimi agent/i, 'the one exception is named')
+    // The follow-up is the words, sent at the window.
+    assert.match(cmux, /A follow-up is the question itself/)
+    assert.match(cmux, /cmux send --surface surface:NN '<your follow-up, in plain words>'/)
+    assert.match(cmux, /Never send a shell line at a window/)
+    assert.match(cmux, /an agent does not spawn agents/)
+
+    // `cf run --session` still exists, and only where a shell is listening:
+    // every place the skill shows it is preceded by opening a pane for it.
+    for (const line of cmux.split('\n')) {
+      if (!line.includes('cmux send') || !line.includes('cf run')) continue
+      const at = cmux.indexOf(line)
+      const before = cmux.slice(Math.max(0, at - 700), at)
+      assert.ok(
+        before.includes('cmux new-pane'),
+        `a \`cf run\` send with no new pane above it: ${line}`,
+      )
+    }
+
+    // Probed one harness at a time (2026-08-24, corrected the same day: the
+    // probe that cleared codex had looked in too narrow a time window).
+    // claude, codex, pi and opencode all submit a `cmux send`; kimi alone does
+    // not, because its TUI takes it as a paste where a newline is a newline
+    // rather than Enter — so kimi is the one follow-up that needs a new pane.
+    assert.match(cmux, /a kimi agent/i, 'the one exception is named')
     // A person's keystrokes are real keystrokes; only the programmatic send is
     // the problem, and the lead must not conclude the pane is off limits.
     assert.match(cmux, /The user can type in that pane/i)

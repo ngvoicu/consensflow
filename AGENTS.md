@@ -222,6 +222,22 @@ keep in step — the manager is the only caller.
   All three discoveries read the harness's own store and return null rather
   than throwing.
 
+- **And because the pane is a window, a follow-up is the QUESTION, not a
+  command** (2026-08-31). The skill led with `cmux send 'cd … && cf run @<name>
+  … --session <name>'` and called it "the safe form everywhere". It is safe
+  nowhere: aimed at the conversation's pane — the reading the recipe invites —
+  it pastes a shell line into the agent's input box, where the agent reads it
+  as being told to consult ITSELF; aimed at a fresh pane it opens a SECOND
+  window on one session. The `cd` is the tell: it only makes sense in a shell,
+  and after `cf run` no shell is there. A codex lead sent it verbatim at
+  calliope and the follow-up was never asked — the paste sat unsubmitted, and
+  nothing said so. So the skill now sends plain words at a live window (claude,
+  codex, pi and opencode all submit a send), and keeps `cf run --session` for
+  the two cases that need a fresh pane: a kimi agent, whose TUI takes a send as
+  a paste, and a window that is gone. Blast radius was bounded by the one guard
+  that held: `CONSENSFLOW_CHILD` refuses `cf run` inside an agent. The eval
+  missed it because it asserted a send HAPPENED, never its shape.
+
 - **A prompt in a pane is the user's to answer, and we do not know it is
   there.** kimi asks about a folder before its window opens, codex asks about
   the directory, and a pane can sit on either — the consult is not lost

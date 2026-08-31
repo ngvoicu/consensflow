@@ -164,7 +164,10 @@ question, then decide or ask the user.
   your memory of a conversation is only as fresh as your last look. Run
   \`cf catchup <name> --unread\` before every follow-up and before acting on
   anything an agent said — the conversation may have moved without you, and a
-  follow-up composed against a stale view asks the wrong question.`
+  follow-up composed against a stale view asks the wrong question.
+- **A pane holding a window is a chat box, not a shell.** Everything you send
+  into it reaches the agent as a message, so a follow-up is your question in
+  plain words. A \`cf run\` line sent there asks the agent to consult itself.`
       : ''
   }
 
@@ -256,22 +259,43 @@ too much, walk it in order from the first line and keep going until you have
 all of it. Length is a reason to read in more passes, never a reason to start
 from the bottom.
 
-**A follow-up is another \`cf run\`, naming the conversation** — send it into
-a pane the same way you sent the first one:
+**A follow-up is the question itself, typed into that pane.** The pane stopped
+being a shell the moment the consult ran — it holds the agent's window now, so
+whatever you send lands in its input box and is read as a message. Send your
+words, nothing else:
 
 \`\`\`bash
 cf catchup <name> --unread   # FIRST: the conversation may have moved without you
-CMUX_QUIET=1 cmux send --surface surface:NN 'cd "'"$PWD"'" && cf run @<name> "<follow-up>" --session <name>'$'\\n'
+CMUX_QUIET=1 cmux send --surface surface:NN '<your follow-up, in plain words>'$'\\n'
 cf catchup <name> --wait     # started BEFORE the answer can land, it waits it out
 \`\`\`
 
-That is the safe form everywhere. Typing the question straight into the pane
-with \`cmux send\` also works on claude, codex, pi and opencode — all four
-probed — but **not on a kimi agent**: a send reaches its TUI as a paste, where
-a newline is a newline rather than Enter, so the text lands in the input box
-and is never submitted. No answer comes, and the pane looks perfectly alive.
-Check the roster above for the harness before you type at a pane; \`cf run
---session\` needs no such check.
+Probed one harness at a time (2026-08-24): claude, codex, pi and opencode all
+submit a sent line. **Never send a shell line at a window** — no \`cd\`, no
+\`cf run\`, nothing with an \`&&\` in it. Nothing there would run it: the agent
+reads \`cf run @<name> "…"\` as being asked to consult ITSELF, and would be
+refused if it tried, because an agent does not spawn agents. Live,
+2026-08-31: a lead sent exactly that line into an agent's own window, off this
+page's previous wording, and its follow-up was never asked.
+
+**Two cases need a new pane instead**, and both use \`cf run --session\`, which
+carries the follow-up in as an argument — so it goes where a shell is
+listening, never at a window:
+
+- **a kimi agent** — a send reaches its TUI as a paste, where a newline is a
+  newline rather than Enter, so the text lands in the input box and is never
+  submitted. No answer comes, and the pane looks perfectly alive. Check the
+  roster above for the harness before you type at a pane.
+- **the window is gone** — its pane was closed, or the run ended.
+
+\`\`\`bash
+CMUX_QUIET=1 cmux new-pane --type terminal --direction right --focus false
+CMUX_QUIET=1 cmux send --surface surface:NN 'cd "'"$PWD"'" && cf run @<name> "<follow-up>" --session <name>'$'\\n'
+CMUX_QUIET=1 cmux rename-tab --surface surface:NN "<name>"
+\`\`\`
+
+It is the same conversation, carrying its whole history; the new pane is where
+it continues, and the old one is finished.
 
 The user can type in that pane, though — a person's keystrokes are real
 keystrokes, and their turns land in the same conversation. Nothing tells you
