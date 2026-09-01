@@ -87,7 +87,7 @@ describe('cf manages the roster', () => {
     const asJson = await cf(['agent', 'list', '--json'], t.env)
     assert.equal(JSON.parse(asJson.stdout).agents[0].effort, 'max')
 
-    const edited = await cf(['agent', 'edit', 'zeus', '--model', 'claude-fable-5'], t.env)
+    const edited = await cf(['agent', 'edit', 'zeus', '--model', 'claude-fable-5-1'], t.env)
     assert.equal(edited.code, 0)
 
     const removed = await cf(['agent', 'remove', 'zeus'], t.env)
@@ -150,11 +150,11 @@ describe('roster changes keep installed skills current', () => {
   })
 
   it('editing an agent regenerates the installed skill everywhere', async () => {
-    await cf(['agent', 'edit', 'zeus', '--model', 'claude-fable-5'], t.env)
+    await cf(['agent', 'edit', 'zeus', '--model', 'claude-fable-5-1'], t.env)
 
     for (const dir of [t.env.CLAUDE_CONFIG_DIR, t.env.CODEX_HOME]) {
       const installed = readFileSync(join(dir, 'skills', 'consensflow', 'SKILL.md'), 'utf8')
-      assert.match(installed, /claude-fable-5/)
+      assert.match(installed, /claude-fable-5-1/)
     }
   })
 

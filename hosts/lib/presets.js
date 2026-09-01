@@ -30,47 +30,64 @@ import { slugify, stripMention } from "./utils.js";
 // The GPT 5.6 trio through OpenCode (sunna/jord/bil) is deliberately NOT at its ceiling: it holds
 // the xhigh tier that the same three models occupy on codex and pi, so the trio means the same
 // thing on every harness. A tier ladder is a choice; a level the model lacks is a bug.
+//
+// --- Fable 5.1 (2026-09-01) ----------------------------------------------
+// The Fable rows moved to Claude Fable 5.1 on the two harnesses that carry it. Sources, all read
+// that day: models.dev lists `reasoning_options` low..max for BOTH `anthropic/claude-fable-5-1`
+// and `openrouter/anthropic/claude-fable-5.1`; OpenRouter's /api/v1/models carries the dotted id;
+// the Claude Code binary (2.1.257) carries the dashed one. Both ids were then LIVE-PROBED on the
+// CLI that will run them — `claude -p --model claude-fable-5-1 --effort low` and `opencode run
+// --model openrouter/anthropic/claude-fable-5.1` both answered — because a catalog listing proves
+// the id and only a run proves the harness. Same price as Fable 5 ($10/$50 per MTok), so the
+// ladder did not move: claude-code keeps max/xhigh/high/medium and OpenCode keeps
+// xhigh/high/medium. pi is the exception and the comment above the pi rows says why.
+//
+// One finding this audit did NOT act on, recorded so the next one starts from it: pi-ai's
+// thinkingLevelMap for `claude-fable-5` is {off, xhigh, max} today — no `high`, no `medium` — so
+// linus (high) and erato (medium) already run at the model's default while their labels promise a
+// tier. That is the exact failure this record exists to prevent, and fixing it means choosing a
+// new shape for those two rows (raise, blank, or retire), not editing a string.
 export const AGENT_PRESETS = [
-  // --- Claude Fable 5 — Anthropic's most capable model (priced above Opus).
+  // --- Claude Fable 5.1 — Anthropic's most capable model (priced above Opus).
   // Muse names on claude-code; bard/storyteller names on the other engines.
   {
     preset: "calliope",
     id: "calliope",
     name: "Calliope",
-    label: "Claude Code Fable 5 MAX",
-    description: "Chief muse: Claude Fable 5 at max effort — the deepest Claude-powered collaborator in the catalog. Turns can run many minutes.",
+    label: "Claude Code Fable 5.1 MAX",
+    description: "Chief muse: Claude Fable 5.1 at max effort — the deepest Claude-powered collaborator in the catalog. Turns can run many minutes.",
     kind: "claude-code",
-    model: "claude-fable-5",
+    model: "claude-fable-5-1",
     effort: "max",
   },
   {
     preset: "clio",
     id: "clio",
     name: "Clio",
-    label: "Claude Code Fable 5 XHIGH",
-    description: "Muse of history: Claude Fable 5 at xhigh effort, the recommended tier for coding, planning, and agentic work.",
+    label: "Claude Code Fable 5.1 XHIGH",
+    description: "Muse of history: Claude Fable 5.1 at xhigh effort, the recommended tier for coding, planning, and agentic work.",
     kind: "claude-code",
-    model: "claude-fable-5",
+    model: "claude-fable-5-1",
     effort: "xhigh",
   },
   {
     preset: "euterpe",
     id: "euterpe",
     name: "Euterpe",
-    label: "Claude Code Fable 5 HIGH",
-    description: "Muse of music: Claude Fable 5 at high effort — strong reasoning without the xhigh wait.",
+    label: "Claude Code Fable 5.1 HIGH",
+    description: "Muse of music: Claude Fable 5.1 at high effort — strong reasoning without the xhigh wait.",
     kind: "claude-code",
-    model: "claude-fable-5",
+    model: "claude-fable-5-1",
     effort: "high",
   },
   {
     preset: "thalia",
     id: "thalia",
     name: "Thalia",
-    label: "Claude Code Fable 5 MEDIUM",
-    description: "Muse of comedy: Claude Fable 5 at medium effort for quicker takes from the top model.",
+    label: "Claude Code Fable 5.1 MEDIUM",
+    description: "Muse of comedy: Claude Fable 5.1 at medium effort for quicker takes from the top model.",
     kind: "claude-code",
-    model: "claude-fable-5",
+    model: "claude-fable-5-1",
     effort: "medium",
   },
 
@@ -191,7 +208,7 @@ export const AGENT_PRESETS = [
     id: "zeus",
     name: "Zeus",
     label: "Claude Code Opus 5 MAX",
-    description: "Deepest Opus-tier Claude Code agent for high-stakes architecture, implementation plans, and final checks; half the price of Fable 5, which stays the catalog ceiling (@calliope).",
+    description: "Deepest Opus-tier Claude Code agent for high-stakes architecture, implementation plans, and final checks; half the price of Fable 5.1, which stays the catalog ceiling (@calliope).",
     kind: "claude-code",
     model: "claude-opus-5",
     effort: "max",
@@ -218,7 +235,14 @@ export const AGENT_PRESETS = [
   },
 
   // --- Frontier models on the other engines that run them ------------------
-  // Fable 5 on pi (anthropic provider) and OpenCode (OpenRouter). Both cap at xhigh.
+  // OpenCode reaches Fable 5.1 through OpenRouter, whose id spells the version with a DOT
+  // (anthropic/claude-fable-5.1) where Anthropic's own API spells it with a dash
+  // (claude-fable-5-1) — one model, two spellings, and the wrong one is a 404.
+  // pi stays on Fable 5: pi-ai 0.84.4 (the newest release on 2026-09-01) carries no 5.1 entry for
+  // the anthropic provider, and its fallback for an unknown id copies the provider's DEFAULT model
+  // (claude-opus-4-8) and swaps the name — so the label would promise a Fable 5.1 tier while the
+  // thinking level was mapped through another model's table. Move orpheus/linus/erato the day
+  // pi-ai lists the model. The trio keeps xhigh as its tier so calliope stays the catalog ceiling.
   {
     preset: "orpheus",
     id: "orpheus",
@@ -256,30 +280,30 @@ export const AGENT_PRESETS = [
     preset: "saga",
     id: "saga",
     name: "Saga",
-    label: "OpenCode Fable 5 XHIGH",
-    description: "Norse goddess of storytelling: OpenCode-backed Claude Fable 5 at xhigh variant (via OpenRouter).",
+    label: "OpenCode Fable 5.1 XHIGH",
+    description: "Norse goddess of storytelling: OpenCode-backed Claude Fable 5.1 at xhigh variant (via OpenRouter).",
     kind: "opencode",
-    model: "openrouter/anthropic/claude-fable-5",
+    model: "openrouter/anthropic/claude-fable-5.1",
     effort: "xhigh",
   },
   {
     preset: "gunnlod",
     id: "gunnlod",
     name: "Gunnlod",
-    label: "OpenCode Fable 5 HIGH",
-    description: "Guardian of the mead of poetry: OpenCode-backed Claude Fable 5 at high variant (via OpenRouter).",
+    label: "OpenCode Fable 5.1 HIGH",
+    description: "Guardian of the mead of poetry: OpenCode-backed Claude Fable 5.1 at high variant (via OpenRouter).",
     kind: "opencode",
-    model: "openrouter/anthropic/claude-fable-5",
+    model: "openrouter/anthropic/claude-fable-5.1",
     effort: "high",
   },
   {
     preset: "kvasir",
     id: "kvasir",
     name: "Kvasir",
-    label: "OpenCode Fable 5 MEDIUM",
-    description: "Source of the mead of poetry: OpenCode-backed Claude Fable 5 at medium variant (via OpenRouter).",
+    label: "OpenCode Fable 5.1 MEDIUM",
+    description: "Source of the mead of poetry: OpenCode-backed Claude Fable 5.1 at medium variant (via OpenRouter).",
     kind: "opencode",
-    model: "openrouter/anthropic/claude-fable-5",
+    model: "openrouter/anthropic/claude-fable-5.1",
     effort: "medium",
   },
   // Opus 5 on pi (anthropic provider). pi's model layer gained a "max" thinking level in

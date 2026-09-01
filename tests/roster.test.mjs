@@ -57,12 +57,12 @@ describe('writes are v1-faithful: cc and pi keep working on the same file', () =
   seedSharedRoster(t)
 
   it('edit updates mapped fields in place and preserves everything else', () => {
-    editAgent('zeus', { model: 'claude-fable-5', effort: 'xhigh' }, t.env)
+    editAgent('zeus', { model: 'claude-fable-5-1', effort: 'xhigh' }, t.env)
 
     const raw = JSON.parse(readFileSync(rosterPath(t.env), 'utf8'))
     const zeus = raw.agents.find((p) => p.id === 'zeus')
     // v1 keys the runner reads:
-    assert.equal(zeus.model, 'claude-fable-5')
+    assert.equal(zeus.model, 'claude-fable-5-1')
     assert.equal(zeus.effort, 'xhigh')
     assert.equal(zeus.kind, 'claude-code')
     // v1 keys v3 does not understand must survive untouched:

@@ -210,7 +210,7 @@ test('agent presets expose the allowed creation list', () => {
   assert.equal(getPreset('hyperion').effort, 'ultra')
   assert.equal(getPreset('kronos').model, 'anthropic/claude-opus-5')
   assert.equal(getPreset('baldr').model, 'openrouter/anthropic/claude-opus-5')
-  assert.equal(getPreset('saga').model, 'openrouter/anthropic/claude-fable-5')
+  assert.equal(getPreset('saga').model, 'openrouter/anthropic/claude-fable-5.1')
   // Effort vocabularies are engine-real: claude-code tops out at "max", Codex's GPT 5.6 ladder
   // adds "ultra" above xhigh, and a model whose catalog declares no effort parameter at all
   // (MiniMax M3, Laguna S 2.1) carries none — see "Effort ceilings" in hosts/lib/presets.js.
@@ -276,11 +276,14 @@ test('agent presets expose the allowed creation list', () => {
   // Gemini 3.1 Pro and 3.7 Flash both stop at high — there is nothing above it to ask for.
   assert.equal(getPreset('heimdall').effort, 'high')
   assert.equal(getPreset('sif').effort, 'high')
-  // Fable 5 family follows the same rules: claude-code gets max, the rest cap at xhigh.
+  // The Fable family follows the same rules: claude-code gets max, the rest hold xhigh. It runs
+  // Fable 5.1 wherever the harness carries it — and the id is spelled differently in each place:
+  // Anthropic's own API uses a dash, OpenRouter a dot. pi keeps Fable 5 until pi-ai lists 5.1
+  // (see "Fable 5.1" in hosts/lib/presets.js), which is why one preset here still names it.
   assert.equal(getPreset('calliope').effort, 'max')
-  assert.equal(getPreset('calliope').model, 'claude-fable-5')
+  assert.equal(getPreset('calliope').model, 'claude-fable-5-1')
   assert.equal(getPreset('orpheus').model, 'anthropic/claude-fable-5')
-  assert.equal(getPreset('saga').model, 'openrouter/anthropic/claude-fable-5')
+  assert.equal(getPreset('saga').model, 'openrouter/anthropic/claude-fable-5.1')
   assert.equal(getPreset('saga').effort, 'xhigh')
   assert.equal(getPreset('euterpe').effort, 'high')
   assert.equal(getPreset('linus').thinking, 'high')

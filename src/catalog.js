@@ -64,7 +64,7 @@ function entryFor(preset) {
     name: preset.preset,
     model: preset.model,
     ...(effort ? { effort } : {}),
-    // `label` is the one-line headline ("Claude Code Fable 5 MAX"); the
+    // `label` is the one-line headline ("Claude Code Fable 5.1 MAX"); the
     // preset's own prose is kept alongside for the card that wants it.
     description: preset.label ?? preset.description,
     detail: preset.description,

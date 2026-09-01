@@ -188,10 +188,10 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
 
     const edited = await api('/api/agents/zeus', {
       method: 'PATCH',
-      body: JSON.stringify({ model: 'claude-fable-5' }),
+      body: JSON.stringify({ model: 'claude-fable-5-1' }),
     })
     assert.equal(edited.status, 200)
-    assert.equal(listAgents(t.env)[0].model, 'claude-fable-5')
+    assert.equal(listAgents(t.env)[0].model, 'claude-fable-5-1')
 
     const listed = await api('/api/agents')
     const payload = await listed.json()

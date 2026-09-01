@@ -38,7 +38,7 @@ read the project's files itself, so you do not need to paste file contents.
 | Participant | Runs | Command (replace `<question>` only) |
 |---|---|---|
 | **zeus** — Claude Opus 5, max effort; high-stakes architecture and review | claude | `env -u ANTHROPIC_API_KEY claude -p "<question>" --model claude-opus-5 --effort max` |
-| **calliope** — Claude Fable 5, max effort; the deepest reviewer on the roster | claude | `env -u ANTHROPIC_API_KEY claude -p "<question>" --model claude-fable-5 --effort max` |
+| **calliope** — Claude Fable 5.1, max effort; the deepest reviewer on the roster | claude | `env -u ANTHROPIC_API_KEY claude -p "<question>" --model claude-fable-5-1 --effort max` |
 | **hyperion** — GPT 5.6 Sol, ultra effort; deepest Codex participant | codex | `env -u OPENAI_API_KEY codex exec --skip-git-repo-check -m gpt-5.6-sol -c model_reasoning_effort="ultra" "<question>"` |
 | **gaia** — GPT 5.6 Terra, xhigh; balanced Codex | codex | `env -u OPENAI_API_KEY codex exec --skip-git-repo-check -m gpt-5.6-terra -c model_reasoning_effort="xhigh" "<question>"` |
 | **diana** — GPT 5.6 Luna, xhigh; fast Codex checks | codex | `env -u OPENAI_API_KEY codex exec --skip-git-repo-check -m gpt-5.6-luna -c model_reasoning_effort="xhigh" "<question>"` |
