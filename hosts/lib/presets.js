@@ -47,6 +47,25 @@ import { slugify, stripMention } from "./utils.js";
 // linus (high) and erato (medium) already run at the model's default while their labels promise a
 // tier. That is the exact failure this record exists to prevent, and fixing it means choosing a
 // new shape for those two rows (raise, blank, or retire), not editing a string.
+//
+// --- Gemini 3.8 Flash (2026-09-03) ---------------------------------------
+// nike and sif moved from Gemini 3.7 Flash to 3.8. The ceiling did NOT move and neither did the
+// price ($0.75/$3.75 per MTok on both), so `high` stands and the labels' "its ceiling" stays true:
+// pi's refreshed thinkingLevelMap gives {low, medium, high} non-null and models.dev gives
+// reasoning_options {low, medium, high} — the same three, on the same day. `max` is not a level
+// this model has, on either catalog, which is why "put it at maximum effort" lands on `high` here.
+// Both ids were LIVE-PROBED at that level on the CLI that will run them — `pi -p --model
+// openrouter/google/gemini-3.8-flash:high` and `opencode run --model
+// openrouter/google/gemini-3.8-flash --variant high` — because a catalog listing proves the id and
+// only a run proves the harness.
+//
+// Muse Spark 1.3 was meant to join them and did not, for a reason no catalog could show. Both
+// catalogs list `meta/muse-spark-1.3` with reasoning_options {minimal, low, medium, high, xhigh}
+// (so its ceiling would be `xhigh`, not `max`), and OpenRouter's /api/v1/models carries it — but
+// the probe came back 403 on BOTH harnesses: "This model requires you to complete the following
+// before use: 18+ age confirmation." That is an account attestation, not a harness or an id
+// problem, and until it is granted the preset would 403 on every consult. It goes in when a probe
+// answers, not when a catalog lists it.
 export const AGENT_PRESETS = [
   // --- Claude Fable 5.1 — Anthropic's most capable model (priced above Opus).
   // Muse names on claude-code; bard/storyteller names on the other engines.
@@ -371,10 +390,10 @@ export const AGENT_PRESETS = [
     preset: "nike",
     id: "nike",
     name: "Nike",
-    label: "Pi Gemini 3.7 Flash HIGH (fast)",
-    description: "Swift, cheap Pi-backed Gemini 3.7 Flash at high thinking — its ceiling — for quick second opinions.",
+    label: "Pi Gemini 3.8 Flash HIGH (fast)",
+    description: "Swift, cheap Pi-backed Gemini 3.8 Flash at high thinking — its ceiling — for quick second opinions.",
     kind: "pi",
-    model: "openrouter/google/gemini-3.7-flash",
+    model: "openrouter/google/gemini-3.8-flash",
     thinking: "high",
     skillsPolicy: "default",
   },
@@ -403,10 +422,10 @@ export const AGENT_PRESETS = [
     preset: "sif",
     id: "sif",
     name: "Sif",
-    label: "OpenCode Gemini 3.7 Flash HIGH (fast)",
-    description: "Swift, cheap OpenCode-backed Gemini 3.7 Flash at high variant — its ceiling (via OpenRouter).",
+    label: "OpenCode Gemini 3.8 Flash HIGH (fast)",
+    description: "Swift, cheap OpenCode-backed Gemini 3.8 Flash at high variant — its ceiling (via OpenRouter).",
     kind: "opencode",
-    model: "openrouter/google/gemini-3.7-flash",
+    model: "openrouter/google/gemini-3.8-flash",
     effort: "high",
   },
 

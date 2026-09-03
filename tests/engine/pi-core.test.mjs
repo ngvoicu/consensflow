@@ -264,16 +264,16 @@ test('agent presets expose the allowed creation list', () => {
   assert.equal(getPreset('endymion').kind, 'pi')
   assert.equal(getPreset('mani').model, 'openrouter/moonshotai/kimi-k3')
   assert.equal(getPreset('mani').kind, 'opencode')
-  // Grok and Gemini Flash track the current generation too (4.3 -> 4.5, 3.5 -> 3.6).
+  // Grok and Gemini Flash track the current generation too (4.3 -> 4.6, 3.5 -> 3.8).
   assert.equal(getPreset('ares').model, 'openrouter/x-ai/grok-4.6')
   assert.equal(getPreset('thor').model, 'openrouter/x-ai/grok-4.6')
-  assert.equal(getPreset('nike').model, 'openrouter/google/gemini-3.7-flash')
-  assert.equal(getPreset('sif').model, 'openrouter/google/gemini-3.7-flash')
+  assert.equal(getPreset('nike').model, 'openrouter/google/gemini-3.8-flash')
+  assert.equal(getPreset('sif').model, 'openrouter/google/gemini-3.8-flash')
   // GLM 5.3 on pi (Greek model zoo), at the model's ceiling like every other single-tier preset.
   assert.equal(getPreset('prometheus').kind, 'pi')
   assert.equal(getPreset('prometheus').model, 'openrouter/z-ai/glm-5.3')
   assert.equal(getPreset('prometheus').thinking, 'max')
-  // Gemini 3.1 Pro and 3.7 Flash both stop at high — there is nothing above it to ask for.
+  // Gemini 3.1 Pro and 3.8 Flash both stop at high — there is nothing above it to ask for.
   assert.equal(getPreset('heimdall').effort, 'high')
   assert.equal(getPreset('sif').effort, 'high')
   // The Fable family follows the same rules: claude-code gets max, the rest hold xhigh. It runs

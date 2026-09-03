@@ -90,10 +90,17 @@ describe('every tool ships a list of ready-made agents', () => {
     // nyx and nott moved to it under its real name: z-ai/glm-5.3-flash,
     // verified that day in OpenRouter's /api/v1/models and by a live one-shot
     // on each CLI — neither harness catalog lists it yet, both run it.
+    // Gemini 3.8 Flash added 2026-09-03: both catalogs give it {low, medium,
+    // high} — the same ceiling 3.7 had, at the same price — and both ids were
+    // probed live at `high` before the rows moved. Muse Spark 1.3 was meant to
+    // land beside it and is deliberately absent: the catalogs list it, and the
+    // probe answered 403 on both harnesses ("18+ age confirmation"), which is
+    // an account attestation no catalog can show. See presets.js.
     for (const model of [
       'openrouter/z-ai/glm-5.3-flash',
       'openrouter/nvidia/nemotron-3-ultra-550b-a55b:free',
       'openrouter/poolside/laguna-s-2.1:free',
+      'openrouter/google/gemini-3.8-flash',
     ]) {
       assert.ok(
         CATALOG.pi.some((e) => e.model === model),
@@ -109,6 +116,9 @@ describe('every tool ships a list of ready-made agents', () => {
     assert.ok(!models.some((m) => m.includes('glm-5.2')))
     assert.ok(!models.some((m) => m.includes('qwen3.7')))
     assert.ok(!models.some((m) => m.includes('ox-alpha')))
+    assert.ok(!models.some((m) => m.includes('gemini-3.7')))
+    // Not here until a probe answers: it 403s on this account today.
+    assert.ok(!models.some((m) => m.includes('muse-spark')))
   })
 
   it('is the payload presets and nothing else — one list, not two', async () => {
