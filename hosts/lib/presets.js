@@ -59,13 +59,16 @@ import { slugify, stripMention } from "./utils.js";
 // openrouter/google/gemini-3.8-flash --variant high` — because a catalog listing proves the id and
 // only a run proves the harness.
 //
-// Muse Spark 1.3 was meant to join them and did not, for a reason no catalog could show. Both
-// catalogs list `meta/muse-spark-1.3` with reasoning_options {minimal, low, medium, high, xhigh}
-// (so its ceiling would be `xhigh`, not `max`), and OpenRouter's /api/v1/models carries it — but
-// the probe came back 403 on BOTH harnesses: "This model requires you to complete the following
-// before use: 18+ age confirmation." That is an account attestation, not a harness or an id
-// problem, and until it is granted the preset would 403 on every consult. It goes in when a probe
-// answers, not when a catalog lists it.
+// Muse Spark 1.3 (eos on pi, logi on opencode) went in the same day, and only on the second
+// attempt — which is the finding worth keeping. Both catalogs list `meta/muse-spark-1.3` with
+// reasoning_options {minimal, low, medium, high, xhigh}, so its ceiling is `xhigh` and not `max`;
+// OpenRouter's /api/v1/models carries it; every source said ship it. The probe came back 403 on
+// BOTH harnesses: "This model requires you to complete the following before use: 18+ age
+// confirmation." An account attestation is invisible to every catalog there is, and a preset
+// written on the catalogs alone would have 403'd on every consult. Once the attestation was
+// granted the same two probes answered `ok`, and the rows went in — at `xhigh`, the level both
+// catalogs give and both CLIs ran. A catalog listing proves the id; only a run proves the account
+// can reach it.
 export const AGENT_PRESETS = [
   // --- Claude Fable 5.1 — Anthropic's most capable model (priced above Opus).
   // Muse names on claude-code; bard/storyteller names on the other engines.
@@ -563,6 +566,18 @@ export const AGENT_PRESETS = [
     model: "openrouter/poolside/laguna-s-2.1:free",
   },
 
+  {
+    preset: "eos",
+    id: "eos",
+    name: "Eos",
+    label: "Pi Muse Spark 1.3 XHIGH",
+    description: "Goddess of the dawn, for a model named for the first spark: Meta's Muse Spark 1.3 on Pi at xhigh thinking — its ceiling, `max` is not a level it has (via OpenRouter).",
+    kind: "pi",
+    model: "openrouter/meta/muse-spark-1.3",
+    thinking: "xhigh",
+    skillsPolicy: "default",
+  },
+
   // --- opencode model zoo (Norse names) — same models via OpenCode --------
   //
   // Same model AND same effort as the pi twin. A name here is a model plus how
@@ -674,6 +689,17 @@ export const AGENT_PRESETS = [
     description: "Norse giant of the sea, for a model named after a lagoon: Poolside's Laguna S 2.1 through OpenCode, on OpenRouter's free tier. It reasons, but takes no effort parameter, so this preset names no level.",
     kind: "opencode",
     model: "openrouter/poolside/laguna-s-2.1:free",
+  },
+
+  {
+    preset: "logi",
+    id: "logi",
+    name: "Logi",
+    label: "OpenCode Muse Spark 1.3 XHIGH",
+    description: "Fire itself, given a name: Meta's Muse Spark 1.3 through OpenCode at xhigh variant — its ceiling, and the level its Pi twin Eos holds (via OpenRouter).",
+    kind: "opencode",
+    model: "openrouter/meta/muse-spark-1.3",
+    effort: "xhigh",
   },
 
   // --- Kimi Code (Finnish names, so a kimi agent is recognisable as one at a
