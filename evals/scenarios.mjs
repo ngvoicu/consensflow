@@ -181,4 +181,37 @@ export const SCENARIOS = [
       },
     ],
   },
+  {
+    id: 'one-window-per-conversation',
+    why:
+      'Live 2026-09-03: asked a follow-up while the agent window was still open, a lead opened a '
+      + 'SECOND pane and sent `cf run --session` into it — two harness windows on ONE session, '
+      + 'two processes writing one store. The skill invited it: its escape hatch for a fresh pane '
+      + 'is "the window is gone", which nothing could check until `cmux tree` was named for it.',
+    turns: [
+      { say: 'ask nyx whether the retry path is safe', expect: [] },
+      {
+        say: 'ask him what happens on a timeout too',
+        expect: [
+          ['looks before it sends', (log) => ran(log, 'cf catchup')],
+          ['sends words at the window it already has', (log) => ran(log, 'cmux send')],
+          // The three shapes of the failure, each requiring the turn to have
+          // actually done something — a check that passes on an empty log is
+          // no check at all.
+          ['opens no second pane', (log) => !ran(log, 'cmux new-pane')],
+          [
+            'does not re-spawn the consult',
+            (log) => !log.some((line) => line.includes('cf run @nyx')),
+          ],
+          [
+            'sends the question, not a shell line',
+            (log) => {
+              const sends = log.filter((line) => line.startsWith('cmux send'))
+              return sends.length > 0 && !sends.some((line) => /cf run|&&|--session/.test(line))
+            },
+          ],
+        ],
+      },
+    ],
+  },
 ]

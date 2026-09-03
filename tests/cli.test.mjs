@@ -1532,6 +1532,110 @@ printf '{"id":"ses_window1","directory":"%s","time":{"created":99999999999999}}'
     assert.equal(row.sessionId, 'ses_window1', 'discovered from the store after launch')
   })
 
+  /**
+   * A cmux whose `tree` prints exactly the surfaces it is told about, in the
+   * shape the real one uses: `surface surface:N <uuid> [terminal] "title"`.
+   * The test PATH holds nothing else, so no real cmux is ever reached.
+   */
+  function stubCmuxTree(...surfaces) {
+    mkdirSync(t.env.PATH, { recursive: true })
+    const path = join(t.env.PATH, 'cmux')
+    const lines = surfaces
+      .map((id, i) => `echo '    surface surface:${i + 7} ${id} [terminal] "a pane"'`)
+      .join('\n')
+    writeFileSync(path, `#!/bin/sh\nif [ "$1" = "tree" ]; then\n${lines}\nfi\n`)
+    chmodSync(path, 0o755)
+    return path
+  }
+
+  /** A claude window on its own conversation, and the name it was given. */
+  async function openedWindow(surface) {
+    const log = recordingStub('claude')
+    rmSync(log, { force: true })
+    const out = await cf(['run', '@zeus', 'turn one', '--new'], tty({ CMUX_SURFACE_ID: surface }))
+    assert.equal(out.code, 0, out.stderr)
+    return { name: /conversation: ([a-z][a-z-]*)/.exec(out.stdout)?.[1], log }
+  }
+
+  it('the window records the pane it opened in', async () => {
+    const { name } = await openedWindow('SURFACE-A')
+    assert.equal(threadRows()[name].surface, 'SURFACE-A', 'so a second window can be noticed')
+  })
+
+  it('refuses a second window on a conversation whose first one is still open', async () => {
+    // Live 2026-09-03: a lead sent `cf run --session` into a FRESH pane while
+    // the window was still up, and got two harnesses on one session — two
+    // processes writing one store. The skill invites it, because its escape
+    // hatch ("the window is gone") was a condition nothing could check.
+    const { name, log } = await openedWindow('SURFACE-LIVE')
+    stubCmuxTree('SURFACE-LIVE')
+    rmSync(log, { force: true })
+
+    const out = await cf(
+      ['run', '@zeus', 'a follow-up', '--session', name],
+      tty({ CMUX_SURFACE_ID: 'SURFACE-OTHER' }),
+    )
+
+    assert.notEqual(out.code, 0, 'refused')
+    assert.match(out.stderr, /already has a window/, 'and says why')
+    assert.match(out.stderr, /surface:7/, 'naming the pane it is open in')
+    assert.match(out.stderr, /cmux send/, 'and what to do instead')
+    assert.equal(existsSync(log), false, 'no second harness was started')
+  })
+
+  it('cf attach refuses the same way, since it resumes by the same path', async () => {
+    const { name, log } = await openedWindow('SURFACE-LIVE')
+    stubCmuxTree('SURFACE-LIVE')
+    rmSync(log, { force: true })
+
+    const out = await cf(['attach', name], tty({ CMUX_SURFACE_ID: 'SURFACE-OTHER' }))
+
+    assert.notEqual(out.code, 0, 'refused')
+    assert.match(out.stderr, /already has a window/)
+    assert.equal(existsSync(log), false, 'nothing was opened')
+  })
+
+  it('the same pane is never a live window: it is the shell you are typing in', async () => {
+    // Re-running where the window WAS is the ordinary way to reopen one, and it
+    // must stay silent — the pane is at its prompt, so whatever it held ended.
+    const { name } = await openedWindow('SURFACE-SAME')
+    stubCmuxTree('SURFACE-SAME')
+
+    const out = await cf(
+      ['run', '@zeus', 'again', '--session', name],
+      tty({ CMUX_SURFACE_ID: 'SURFACE-SAME' }),
+    )
+
+    assert.equal(out.code, 0, out.stderr)
+  })
+
+  it('a pane cmux no longer lists is gone, and the window reopens', async () => {
+    const { name } = await openedWindow('SURFACE-CLOSED')
+    stubCmuxTree('SOMEBODY-ELSE') // that pane was closed; cmux lists others
+
+    const out = await cf(
+      ['run', '@zeus', 'again', '--session', name],
+      tty({ CMUX_SURFACE_ID: 'SURFACE-OTHER' }),
+    )
+
+    assert.equal(out.code, 0, out.stderr)
+  })
+
+  it('no cmux to ask means proceed, never refuse: the check only ever prevents', async () => {
+    // It fails open in every direction — a cmux that cannot be reached, an exit
+    // code, an output that has moved. That is the whole reason this coupling is
+    // acceptable where driving a pane would not be.
+    const { name } = await openedWindow('SURFACE-LIVE')
+    rmSync(join(t.env.PATH, 'cmux'), { force: true })
+
+    const out = await cf(
+      ['run', '@zeus', 'again', '--session', name],
+      tty({ CMUX_SURFACE_ID: 'SURFACE-OTHER' }),
+    )
+
+    assert.equal(out.code, 0, out.stderr)
+  })
+
   it('a pipe cannot host a TUI, so in cmux mode it is refused rather than streamed', async () => {
     // It used to stream instead, quietly. That is the shape `--no-thread` was
     // deleted for — a conversation with no window, unreadable while it works

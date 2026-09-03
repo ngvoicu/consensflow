@@ -146,6 +146,28 @@ keep in step — the manager is the only caller.
   touches the network, and honours drift like any owned file. Every entry
   point states the cost of a host mode (codex and opencode get nothing).
 
+- **One window per conversation, and the row remembers which pane holds it**
+  (2026-09-03). Resuming a session opened a window on it unconditionally, and
+  nothing noticed that one was already up: `cf run --session <name>` sent into
+  a fresh pane, or `cf attach` run anywhere, put a SECOND harness window on one
+  session — two processes writing one store, two screens each showing half a
+  conversation. The skill INVITED it, which is the part worth keeping: its
+  escape hatch for opening a fresh pane is "the window is gone", and that was a
+  condition a lead had no way to check, because `cf sessions` prints the same
+  row whether the pane is alive or closed. So `saveWindowRow` records the
+  `CMUX_SURFACE_ID` the window opened in — cmux exports a uuid there, not the
+  `surface:N` ref its own output leads with — and `liveWindowElsewhere` asks
+  `cmux tree --all --id-format both` whether that pane still exists, refusing
+  with the short ref and the `cmux send` that belongs there instead. The pane
+  you are standing in never counts: you are at its shell, so whatever window it
+  held has ended, which is what keeps a re-run in the same pane and a first
+  open silent. Reading cmux is not driving it — the v2 lesson is about typing
+  at panes — and the read fails OPEN in every direction: no cmux, a non-zero
+  exit, an output that has moved, an id absent, all mean proceed as before. A
+  check that can only ever prevent a mistake and never invent one is worth the
+  coupling; the reverse would not be. The skill's second case now names
+  `cmux tree` as the way to answer it.
+
 - **A conversation is the harness's, we only remember which one.** In cmux
   mode a consult resumes the harness's own session (`--resume`, `exec resume`,
   `--session-id`, `--session`) instead of the one-shot flags, keyed by a named

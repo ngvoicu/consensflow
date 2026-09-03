@@ -8,7 +8,7 @@
  * harness on the machine (claude, codex, pi, opencode). The skill teaches the
  * harnesses everything else.
  */
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -470,12 +470,76 @@ async function saveWindowRow(name, agentRow, record, sessionId) {
     agent: agentRow.id,
     kind: agentRow.kind,
     lead: record === undefined ? leadId(env) : (record.lead ?? null),
+    // Where the window went. A conversation is one harness session, and two
+    // windows on one session are two processes writing one store — so the row
+    // has to remember the pane, or nothing can tell that asking for a second
+    // one is a mistake. cmux exports a UUID here, not the `surface:N` ref its
+    // own output leads with; `liveWindowElsewhere` turns one into the other.
+    surface:
+      typeof env.CMUX_SURFACE_ID === 'string' ? env.CMUX_SURFACE_ID : (record?.surface ?? null),
     sessionId,
     runs: record?.runs ?? 0,
     createdAt: record?.createdAt ?? now,
     lastRunAt: now,
     lastRunId: record?.lastRunId ?? null,
   })
+}
+
+/**
+ * The conversation's own window, if it is still open in some OTHER pane.
+ *
+ * Resuming a session opens a window on it unconditionally, and nothing used to
+ * notice that one was already up: `cf run --session <name>` sent into a fresh
+ * pane, or `cf attach` run anywhere, put a SECOND harness window on one session
+ * — two processes writing one session store, and two screens showing halves of
+ * one conversation. The skill even invites it, because its escape hatch for a
+ * dead window ("the window is gone") is a condition a lead had no way to check:
+ * `cf sessions` prints the same row whether the pane is alive or closed.
+ *
+ * The pane we are standing in never counts: we are at its shell, so whatever
+ * window it held has ended. That is what makes a re-run in the same pane
+ * silent, and the first open of a conversation silent too.
+ *
+ * Reading cmux is not driving it — the v2 lesson is about typing at panes, not
+ * asking what exists — and this READ fails open in every direction: no cmux, a
+ * non-zero exit, an output that has moved, an id that is absent, all mean
+ * "proceed as before". A check that can only ever prevent a mistake, never
+ * invent one, is worth the coupling; the reverse would not be.
+ */
+function liveWindowElsewhere(record, currentEnv) {
+  const surface = record?.surface
+  if (typeof surface !== 'string' || surface.length === 0) return null
+  if (surface === currentEnv.CMUX_SURFACE_ID) return null
+  let tree = ''
+  try {
+    tree = execFileSync('cmux', ['tree', '--all', '--id-format', 'both'], {
+      encoding: 'utf8',
+      env: { ...currentEnv, CMUX_QUIET: '1' },
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+  } catch {
+    return null
+  }
+  const line = tree.split('\n').find((row) => row.includes(surface))
+  if (line === undefined) return null
+  // The short ref is what a `cmux send` takes; fall back to the uuid, which
+  // cmux also accepts, rather than losing the finding over a format change.
+  return { ref: /\b(surface:\d+)\b/.exec(line)?.[1] ?? surface }
+}
+
+/**
+ * What to say when a conversation already has a window. Named once because
+ * two verbs refuse with it, and a lead that reads two different sentences for
+ * one situation learns two rules.
+ */
+function windowAlreadyOpen(name, live) {
+  return [
+    `${name} already has a window open at ${live.ref} — a second one would put two harnesses on one session.`,
+    `  say it there:      cmux send --surface ${live.ref} '<your words>'`,
+    `  read it back:      cf catchup ${name} --unread`,
+    '  window really gone? close that pane, then run this again.',
+  ].join('\n')
 }
 
 /**
@@ -509,6 +573,11 @@ async function openWindow(row, name, record, packetInput) {
   if (row.kind === 'kimi') return false
 
   if (record?.sessionId) {
+    const live = liveWindowElsewhere(record, env)
+    if (live !== null) {
+      fail(windowAlreadyOpen(name, live))
+      return true
+    }
     const invocation = interactiveResume(row, record.sessionId, seed)
     if (invocation === null) return false
     await saveWindowRow(name, row, record, record.sessionId)
@@ -1124,6 +1193,12 @@ async function attachVerb(rest) {
   // Same look as `cf catchup`: a window whose id was never captured can still
   // be reopened, once we work out which session it was.
   const record = await healWindowSession(name, known)
+
+  const live = liveWindowElsewhere(record, env)
+  if (live !== null && !values.print) {
+    fail(windowAlreadyOpen(name, live))
+    return
+  }
 
   const row = agentRow(record.agent, env)
   const invocation = interactiveResume(row ?? { kind: record.kind }, record.sessionId)

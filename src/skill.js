@@ -302,7 +302,12 @@ listening, never at a window:
   newline rather than Enter, so the text lands in the input box and is never
   submitted. No answer comes, and the pane looks perfectly alive. Check the
   roster above for the harness before you type at a pane.
-- **the window is gone** — its pane was closed, or the run ended.
+- **the window is gone** — its pane was closed, or the run ended. Check it
+  rather than assume it: \`CMUX_QUIET=1 cmux tree\` shows no tab named after
+  the conversation (step 4 titled it exactly so this is answerable, and
+  \`cf sessions\` cannot answer it — the row reads the same either way). A
+  consult aimed at a conversation whose window is still open is refused: a
+  second window would put two harnesses on one session.
 
 \`\`\`bash
 CMUX_QUIET=1 cmux new-pane --type terminal --direction right --focus false
