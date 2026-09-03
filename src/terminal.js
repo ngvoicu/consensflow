@@ -123,9 +123,16 @@ export function terminalCommandStatus(env, options = {}) {
 export function terminalRuntime(env, options = {}) {
   const status = terminalCommandStatus(env, options)
   if (!status.installed) return null
-  const runtime = readFileSync(status.path, 'utf8').match(/"([^"]+)"\s+"[^"]*cf\.mjs"/)?.[1]
-  if (runtime === undefined) return null
-  return { runtime, exists: existsSync(runtime), mine: runtime === selfPaths().runtime }
+  // Both halves of the line, because both answer a question. The runtime is
+  // what `cf doctor` reports; `entry` is the cf.mjs the command actually runs,
+  // which is how a developer finds which COPY of ConsensFlow is on PATH —
+  // `app/scripts/sync-cli.mjs` mirrored only the repo's own bundle until
+  // 2026-09-02, and reported five untouched skills as success. Reported as
+  // written, not interpreted: what a path means is the caller's business.
+  const line = readFileSync(status.path, 'utf8').match(/"([^"]+)"\s+"([^"]+cf\.mjs)"/)
+  if (line === null) return null
+  const [, runtime, entry] = line
+  return { runtime, entry, exists: existsSync(runtime), mine: runtime === selfPaths().runtime }
 }
 
 export function installTerminalCommand(env, options = {}) {

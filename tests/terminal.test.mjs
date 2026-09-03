@@ -67,6 +67,9 @@ describe('the app can put its own CLI on your PATH', () => {
 
     assert.equal(theirs.exists, true, 'it is there — which is what made this invisible')
     assert.equal(theirs.mine, false)
+    // And it says WHICH copy, because a developer syncing a build has to
+    // write into the one the command runs, not the one they just built.
+    assert.equal(theirs.entry, join(t.root, 'Other.app', 'cf.mjs'))
   })
 
   it('removes it again', () => {

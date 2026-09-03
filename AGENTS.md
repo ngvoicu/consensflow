@@ -73,10 +73,23 @@ Load-bearing facts, each learned by running the built bundle:
   template. That is how a fixed recipe stayed broken for a day (2026-08-25): the
   fix was in the repo, the lead was reading a skill written by the bundle. After
   a CLI change: `cd app && npm run sync-cli` (re-stages the resources and
-  mirrors them into the built bundle — a mirror, so a deleted file leaves too;
-  it BREAKS the signed bundle's seal, which is harmless here and never shipped),
-  then `cf skills install`, which is deliberately separate because it writes to
-  the user's harnesses. `npm run build` does the same and recompiles Rust.
+  mirrors them into every bundle that matters — a mirror, so a deleted file
+  leaves too), then `cf skills install`, which is deliberately separate because
+  it writes to the user's harnesses. `npm run build` does the same and
+  recompiles Rust. **Every bundle that matters is two of them** (2026-09-02):
+  the one this repo built, and the one `cf` on PATH actually runs, which on a
+  machine with the app installed is `/Applications`. Syncing only the first
+  looked exactly like success — the repo bundle refreshed, `cf skills install`
+  printing five `unchanged` lines, every one of them correct — while the
+  machine went on running the old CLI. The script had the blind spot its own
+  header describes; `terminalRuntime` already knew which copy was on PATH and
+  nothing had asked it, so it now reports the `entry` the launcher names and
+  `sync-cli` follows it. It also stopped claiming the seal survives: that holds
+  for a bundle `tauri build` left here and is FALSE for one installed from a
+  release DMG (`Sealed Resources version=2`), where mirroring breaks
+  `codesign --verify` — proven the same day. The app still runs; only
+  `npm run build` puts a real signature back, and the script says so as it
+  happens.
 - **A release DMG is signed; a synced bundle is not shippable** (3.0.0-alpha.7).
   `signingIdentity: "-"` makes Tauri sign the sidecar, then the binary, then the
   bundle — and it does so BEFORE cutting the DMG, which is exactly why this is
