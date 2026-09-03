@@ -14,6 +14,15 @@
 const ran = (log, prefix) => log.some((line) => line.startsWith(prefix))
 const sent = (log, text) =>
   log.some((line) => line.startsWith('cmux send') && line.includes(text))
+/**
+ * The consult as it was actually sent, from `cf run` onwards. Shape is the
+ * assertion — a `|` anywhere in a sent line could be the task talking, but a
+ * `|` after `cf run` is a pipe around the consult.
+ */
+const consultLine = (log) => {
+  const line = log.find((l) => l.startsWith('cmux send') && l.includes('cf run '))
+  return line === undefined ? null : line.slice(line.indexOf('cf run '))
+}
 
 export const SCENARIOS = [
   {
@@ -115,6 +124,59 @@ export const SCENARIOS = [
         expect: [
           ['looks instead of remembering', (log) => ran(log, 'cf catchup')],
           ['sends nothing', (log) => !ran(log, 'cmux send')],
+        ],
+      },
+    ],
+  },
+  {
+    id: 'the-consult-line-is-plain',
+    why:
+      'Live 2026-09-02: a lead followed the pane recipe and added two things to the line — ' +
+      'a `--prompt-file` beside a quoted task, which threw the quoted one away unread, and ' +
+      '`2>&1 | tee`, which left the consult with no window. It could not read the result, so ' +
+      'six minutes later it opened a SECOND conversation with the same agent on the same work. ' +
+      'The 2026-08-31 lesson again: the old scenarios asserted a send HAPPENED, never its shape.',
+    // The prompt names a file, so the file is really there: without it the lead
+    // checks, finds nothing, and asks the user instead of consulting — which
+    // scores as "never opened a pane" and blames the skill for a missing prop.
+    stage: {
+      files: {
+        'docs/tranche2-handoff.md': [
+          '# Tranche 2 — handoff',
+          '',
+          'Three loss classes, in this order: single-gap latch (T-431), genesis',
+          'stall (T-432), multi-event transitions (T-433). Run the suite bare',
+          'after each class and report the numbers before starting the next.',
+          'Do not change git state, and never write outside the replay ledgers.',
+        ].join('\n'),
+      },
+    },
+    turns: [
+      {
+        say:
+          'ask nyx to implement tranche 2 — the whole handoff with the ticket numbers, design ' +
+          'and constraints is in docs/tranche2-handoff.md, he should read it in full first',
+        expect: [
+          ['opens a pane for it', (log) => ran(log, 'cmux new-pane')],
+          ['sends the consult there', (log) => sent(log, 'cf run @nyx')],
+          // Shape, checked on the `cf run` tail of the sent line rather than on
+          // the whole line: a task string may well contain a `>` or the word
+          // tee, and the failure was never the prose. Each of these REQUIRES
+          // the consult line to exist — a check that passes because nothing was
+          // sent is the 2026-08-31 mistake wearing the other face.
+          ['no pipe or redirect on the consult', (log) => consultLine(log) !== null && !/[|>]/.test(consultLine(log))],
+          [
+            'one task source, not both a file and a quoted task',
+            (log) => {
+              const line = consultLine(log)
+              if (line === null) return false
+              return !(line.includes('--prompt-file') && /cf run @nyx\s+["']/.test(line))
+            },
+          ],
+          [
+            'confirms the launch landed instead of capturing output',
+            (log) => ran(log, 'cf sessions'),
+          ],
         ],
       },
     ],

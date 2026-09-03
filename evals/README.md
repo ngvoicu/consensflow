@@ -42,6 +42,7 @@ Each one happened live, and the fix it guards is in the skill:
 | `reading-is-not-writing` | asked to READ a conversation, it SENT another request and invented a new answer |
 | `look-before-you-send` | a follow-up composed against a stale view asks the wrong question |
 | `answers-from-the-conversation` | answered "did she say anything else?" from memory, with the user's pane turns unread |
+| `the-consult-line-is-plain` | piped the consult through `tee` and passed a `--prompt-file` beside a quoted task; could not read the result, and started a second conversation on the same work |
 
 ## Baseline (2026-08-24, lead: claude)
 
@@ -49,3 +50,22 @@ Each one happened live, and the fix it guards is in the skill:
 3/3 each on repeat. That is the number to compare against when the skill's
 prose is next cut or rearranged — particularly if the Rules section is
 tightened, since these rules were added to it while it was still short.
+
+## What one pass is worth (2026-09-02, lead: claude)
+
+Two full passes over the SAME skill, minutes apart, disagreed:
+`reading-is-not-writing` held 4/4 then 3/4, and `look-before-you-send` 3/4
+then 4/4 — each dropping a check the other pass held. So the 13/13 above is a
+single sample, not a grade, and the README's own rule applies to it: use
+`--repeat` before concluding anything about a prose change.
+
+Two failures that looked like regressions were neither:
+
+- **A SIGKILL reads as a failed scenario.** The default timeout was 180s and
+  three runs were killed mid-turn; every one of them held all its checks once
+  given time. The default is 420s now.
+- **`a-long-answer-is-read-whole` failed 0/2 across both passes** and looked
+  like the one real regression — until it was run against the skill at HEAD
+  and against the changed skill, back to back: 2/2 both times. Consistent
+  twice is still not consistent. A/B against HEAD is the cheap way to settle
+  it, and it settles it in one pass per arm.

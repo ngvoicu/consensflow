@@ -549,6 +549,36 @@ describe('cf run spawns one agent, in whatever mode this machine runs', () => {
     assert.equal(out.code, 1)
     assert.match(out.stderr + out.stdout, /does not spawn agents/)
   })
+
+  it('refuses a task in a file AND a task in quotes, rather than dropping one', async () => {
+    // Live 2026-09-02: a lead passed both. `--prompt-file` replaced the quoted
+    // task silently, so the sentence naming which files to read first and in
+    // what order never reached the agent. Two sources for one field is a
+    // contradiction, and a CLI that resolves it quietly resolves it wrongly.
+    const file = join(t.root, 'long-task.md')
+    writeFileSync(file, 'the whole handoff, in a file')
+    const log = join(t.env.PATH, 'claude-argv.log')
+    rmSync(log, { force: true })
+
+    const out = await cf(
+      ['run', '@diana', 'read it in full, then AGENTS.md', '--prompt-file', file],
+      t.env,
+    )
+
+    assert.equal(out.code, 1, 'refused')
+    assert.match(out.stderr, /two tasks/, 'and says what the contradiction is')
+    assert.match(out.stderr, /--brief/, 'and where short framing belongs instead')
+    assert.equal(existsSync(log), false, 'no agent ran')
+  })
+
+  it('a task in a file alone is still the task', async () => {
+    const file = join(t.root, 'only-task.md')
+    writeFileSync(file, 'the whole handoff, in a file')
+
+    const out = await cf(['run', '@diana', '--prompt-file', file], t.env)
+
+    assert.equal(out.code, 0, out.stderr)
+  })
 })
 
 describe('cf reset is the clean slate, and refuses until you say so', () => {
@@ -647,7 +677,7 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"answered"}
     stubCli(t, 'claude')
     const log = stubCodex(['thread-alpha'])
     await cf(['agent', 'add', 'hyperion'], t.env)
-    await cf(['use', 'cmux'], t.env)
+    await cf(['use', 'claude'], t.env)
 
     const first = await cf(['run', '@hyperion', 'hello', '--thread'], asLead('lead-first'))
     assert.equal(first.code, 0, first.stderr)
@@ -696,15 +726,19 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"answered"}
     assert.match(out.stdout + out.stderr, /no-such/)
   })
 
-  it('--no-thread runs one-shot even in cmux mode', async () => {
+  it('--no-thread is gone: in cmux mode a consult is a conversation, never a one-shot', async () => {
+    // A one-shot in cmux mode was a run with no window and no conversation —
+    // a host-mode run in the wrong mode. Refused, not accepted and ignored.
     const log = stubCodex(['thread-alpha'])
     rmSync(log, { force: true })
+    const before = Object.keys(threads())
 
     const out = await cf(['run', '@hyperion', 'once', '--no-thread'], t.env)
 
-    assert.equal(out.code, 0, out.stderr)
-    assert.match(argv(log), /--ephemeral/, 'one-shot keeps the session-refusing flag')
-    assert.doesNotMatch(argv(log), /resume/)
+    assert.notEqual(out.code, 0, 'refused')
+    assert.match(out.stderr, /no-thread/, 'and it says which flag')
+    assert.equal(existsSync(log), false, 'no agent ran')
+    assert.deepEqual(Object.keys(threads()), before, 'and no conversation was touched')
   })
 
   it('a session the harness has forgotten starts a fresh one instead of failing', async () => {
@@ -871,7 +905,7 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"the answer
     stubCli(t, 'claude')
     stubCodex()
     await cf(['agent', 'add', 'hyperion'], t.env)
-    await cf(['use', 'cmux'], t.env)
+    await cf(['use', 'claude'], t.env)
 
     const out = await cf(['sessions'], t.env)
 
@@ -1094,8 +1128,8 @@ fi
     stubHarness('claude')
     const log = stubHarness('codex')
     await cf(['agent', 'add', 'hyperion'], t.env)
-    await cf(['use', 'cmux'], t.env)
-    await cf(['run', '@hyperion', 'start it'], t.env)
+    await cf(['use', 'claude'], t.env)
+    await cf(['run', '@hyperion', 'start it', '--thread'], t.env)
     rmSync(log, { force: true })
 
     const out = await cf(['attach', '@hyperion', '--print'], t.env)
@@ -1295,9 +1329,13 @@ exit 1
     )
     chmodSync(path, 0o755)
 
+    // A kimi consult in cmux mode is a TERMINAL consult that streams its first
+    // turn: kimi is the one harness whose window cannot be opened cold, so the
+    // pane becomes its window afterwards — which is exactly the run that dies
+    // here, before the id is printed.
     const out = await cf(
       ['run', '@ilmarinen', 'a long job', '--thread', '--new'],
-      asReader('lead-k'),
+      tty({ CLAUDE_CODE_SESSION_ID: 'lead-k' }),
     )
 
     // `--new` means this is its own conversation; take the one it just named.
@@ -1494,14 +1532,34 @@ printf '{"id":"ses_window1","directory":"%s","time":{"created":99999999999999}}'
     assert.equal(row.sessionId, 'ses_window1', 'discovered from the store after launch')
   })
 
-  it('a pipe cannot host a TUI: without a terminal the consult streams as before', async () => {
+  it('a pipe cannot host a TUI, so in cmux mode it is refused rather than streamed', async () => {
+    // It used to stream instead, quietly. That is the shape `--no-thread` was
+    // deleted for — a conversation with no window, unreadable while it works
+    // and unjoinable — and the price was measured (live, 2026-09-02): a lead
+    // piped a consult through `tee`, could not read it, and six minutes later
+    // opened a SECOND conversation with the same agent on the same work.
     const log = stubCodexWindow()
     rmSync(log, { force: true })
+    const before = Object.keys(threadRows())
 
     const out = await cf(['run', '@hyperion', 'again', '--new'], t.env)
 
+    assert.notEqual(out.code, 0, 'refused')
+    assert.match(out.stderr, /needs a terminal/, 'and says why')
+    assert.match(out.stderr, /cmux new-pane/, 'and where the consult belongs instead')
+    assert.match(out.stderr, /--json/, 'and how a program reads a run')
+    assert.equal(existsSync(log), false, 'no agent ran')
+    assert.deepEqual(Object.keys(threadRows()), before, 'and no row was left behind')
+  })
+
+  it('--json is the channel that still streams without a terminal', async () => {
+    // The refusal must not close the door on a program reading a run as data.
+    const log = stubCodexWindow()
+    rmSync(log, { force: true })
+
+    const out = await cf(['run', '@hyperion', 'as data', '--new', '--json'], t.env)
+
     assert.equal(out.code, 0, out.stderr)
-    assert.match(out.stdout, /the consult answer/)
     assert.doesNotMatch(argvOf(log), /^resume/m, 'no window opened for a pipe')
   })
 
@@ -1685,7 +1743,10 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"eventually
     )
     chmodSync(slow, 0o755)
 
-    const run = cf(['run', '@hyperion', 'a long task', '--thread', '--new'], asReader('lead-slow'))
+    const run = cf(
+      ['run', '@hyperion', 'a long task', '--thread', '--new', '--json'],
+      asReader('lead-slow'),
+    )
     // Wait for the child to be underway, then look: the conversation must
     // already be there.
     for (let i = 0; i < 200 && !existsSync(marker); i += 1) {
@@ -1774,7 +1835,10 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"eventually
     assert.ok(before && Object.keys(before).length > 0, 'fixture: marks exist')
 
     stubCodexWindow()
-    await cf(['run', '@hyperion', 'a consult', '--thread', '--session', name], asReader('reader-1'))
+    await cf(
+      ['run', '@hyperion', 'a consult', '--thread', '--session', name, '--json'],
+      asReader('reader-1'),
+    )
 
     assert.deepEqual(threadRows()[name].seen, before, 'the marks are still there')
   })

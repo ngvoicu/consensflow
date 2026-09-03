@@ -200,7 +200,26 @@ keep in step — the manager is the only caller.
   does not stream and exit there: it opens the harness's own interface on the
   conversation, seeded with the packet (bare message on later turns), and
   stays — attach is the default and only behaviour, so the `--attach` flag is
-  gone. claude opens on a uuid we mint (`--session-id`), pi on the
+  gone. So is `--no-thread` (2026-09-02): a one-shot in cmux mode was a run
+  with no window and no conversation, a host-mode run in the wrong mode, and
+  outside cmux the flag only ever contradicted a `--session` on the same
+  line. **And so is a pipe**, the same day and the same shape without a flag:
+  a `cf run` whose stdout is not a terminal is REFUSED in cmux mode rather
+  than streamed into it. It used to degrade in silence, and the price was
+  measured — a lead piped a consult through `tee`, could not read what came
+  back (only the window path writes a session id up front, so `cf catchup`
+  had nothing until the run ENDED), and six minutes later opened a SECOND
+  conversation with the same agent on the same work in the same repo. The
+  first one's row still said `working since` long after its process had died,
+  because a run that never finishes never clears its own mark. Nothing
+  legitimate was behind the old behaviour: `--json` is the channel for a
+  program and the refusal names it, beside the pane the consult belonged in
+  and the `cf catchup` that reads it afterwards. The skill gained the rung
+  whose absence made `tee` look reasonable — a fifth command in the pane
+  recipe, `cf sessions`, which lists the conversation once the launch is real
+  and writes no row at all when it is not — and `evals/scenarios.mjs` now
+  checks the SHAPE of the line a lead sends, not merely that it sent one.
+  claude opens on a uuid we mint (`--session-id`), pi on the
   conversation's name, and opencode and codex each open cold on a seeded
   prompt and have their id read back out of their own store afterwards
   (`discoverOpencodeSession`, `discoverCodexSession` — codex's comes from the
@@ -237,6 +256,14 @@ keep in step — the manager is the only caller.
   a paste, and a window that is gone. Blast radius was bounded by the one guard
   that held: `CONSENSFLOW_CHILD` refuses `cf run` inside an agent. The eval
   missed it because it asserted a send HAPPENED, never its shape.
+
+- **Two sources for one task is refused, not resolved** (2026-09-02).
+  `--prompt-file` used to REPLACE a quoted task through a silent `?:`, so a
+  lead that passed both had its own sentence — which files to read first and
+  in what order — thrown away without a word. Short framing beside a long
+  body is what `--brief` and `--context` are for, and the skill says so; the
+  file also keeps the sent line short, which is the line a pane has to
+  receive intact.
 
 - **A prompt in a pane is the user's to answer, and we do not know it is
   there.** kimi asks about a folder before its window opens, codex asks about

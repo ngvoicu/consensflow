@@ -126,7 +126,10 @@ question, then decide or ask the user.
      integrations do); here it is the default, and this flag makes it
      explicit.
    - \`--context "<note>"\` — a short brief-alongside for one run.
-   - \`--prompt-file <file>\` — when the task is long.
+   - \`--prompt-file <file>\` — when the task is long. It IS the task: pass it
+     INSTEAD of the quoted one, never beside it, and put your framing in
+     \`--brief\`. Both together is refused, because the file would otherwise
+     replace what you quoted without a word.
    - \`--image <path>\` — reference pictures for an image agent, repeatable.
 
    Turns can take minutes at high effort — use a generous timeout (10+
@@ -204,7 +207,7 @@ Conversations someone else started are still reachable when you mean them:
 \`cf sessions\` lists what is here, and \`--session <name>\` continues one
 by name.
 
-Give each conversation its own pane. Four commands, in this order — you do not
+Give each conversation its own pane. Five commands, in this order — you do not
 need to explore cmux's CLI, and you must not run the consult in this pane:
 
 \`\`\`bash
@@ -219,11 +222,24 @@ CMUX_QUIET=1 cmux new-pane --type terminal --direction right --focus false
 
 # 3. send the consult there, under your name. cd FIRST: a new pane does not
 #    inherit your directory, and a conversation belongs to the directory it
-#    started in. The trailing newline is what runs it.
+#    started in. The trailing newline is what runs it. Keep this line short —
+#    a long task belongs in --prompt-file, not in the quotes, because this is
+#    one line a pane has to receive intact.
 CMUX_QUIET=1 cmux send --surface surface:NN 'cd "'"$PWD"'" && cf run @<name> "<task>" --brief "<why>" --new --session '"$NAME"''$'\\n'
 
 # 4. title the tab to match, so the pane can be found again
 CMUX_QUIET=1 cmux rename-tab --surface surface:NN "$NAME"
+
+# 5. confirm it landed. This is the check — you cannot read the pane, and you
+#    do not need to: cf sessions lists $NAME once the consult is real. Not
+#    listed YET means wait, not failed: the paste has to land, the shell has
+#    to run it, the agent has to start. Look again a few seconds later. A name
+#    that never appears means the line did not run — find the pane with
+#    cmux tree, or tell the user. Never send the consult a second time on a
+#    name you have not seen, and never redirect the run to a file to watch it
+#    instead: cf run in a pipe has no window to open, and is refused for
+#    exactly that reason.
+cf sessions
 \`\`\`
 
 Lost track of which pane is which? \`CMUX_QUIET=1 cmux tree\` draws every pane

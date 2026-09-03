@@ -19,7 +19,12 @@ const { values } = parseArgs({
     lead: { type: 'string', default: 'claude' },
     repeat: { type: 'string', default: '1' },
     scenario: { type: 'string' },
-    timeout: { type: 'string', default: '180' },
+    // 180s was the default until 2026-09-02, and it reported a SIGKILL as a
+    // scenario failure: three runs "failed" checks they hold comfortably when
+    // given time, and one of them read as a prose regression until it was
+    // measured against HEAD and came back identical. A measurement tool that
+    // manufactures failures is worse than a slow one.
+    timeout: { type: 'string', default: '420' },
   },
 })
 

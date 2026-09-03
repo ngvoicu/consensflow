@@ -94,7 +94,8 @@ Usage: cf <command> [options]
     [--context <note>] [--prompt-file <file>]
     [--image <path>]                            (image agents: reference pictures)
     [--new] [--session <name>]                  a conversation continues by default in cmux
-    [--thread] [--no-thread]                    mode; --new starts a fresh one, and with
+    [--thread]                                  mode, and --thread asks for one in a host
+                                               mode; --new starts a fresh one, and with
                                                --session it starts under that exact name
   mint <@name>                                 A fresh conversation name, printed before
                                                anything exists under it — name first, then
@@ -638,7 +639,6 @@ async function runVerb(rest) {
       image: { type: 'string', multiple: true },
       json: { type: 'boolean', default: false },
       thread: { type: 'boolean' },
-      'no-thread': { type: 'boolean', default: false },
       new: { type: 'boolean', default: false },
       session: { type: 'string' },
     },
@@ -662,10 +662,22 @@ async function runVerb(rest) {
     return
   }
 
+  // Two sources for one field is a contradiction, and the old `?:` resolved it
+  // silently and wrongly: `--prompt-file` REPLACED the quoted task, so a lead
+  // that passed both had its own sentence thrown away without a word. Live,
+  // 2026-09-02: the quoted task named the files to read first and the order to
+  // work in, and none of it ever reached the agent. Short framing beside a
+  // long body is what `--brief` and `--context` are for.
+  const quoted = positionals.slice(1).join(' ')
+  if (values['prompt-file'] !== undefined && quoted.trim().length > 0) {
+    fail(
+      'a task in a file and a task in quotes are two tasks, and --prompt-file replaces the quoted one. ' +
+        'Keep the file, and put the framing in --brief "<why>" or --context "<note>".',
+    )
+    return
+  }
   const task =
-    values['prompt-file'] !== undefined
-      ? readFileSync(values['prompt-file'], 'utf8')
-      : positionals.slice(1).join(' ')
+    values['prompt-file'] !== undefined ? readFileSync(values['prompt-file'], 'utf8') : quoted
   if (task.trim().length === 0) {
     fail('give the agent something to do: cf run @name "<task>" (or --prompt-file <file>)')
     return
@@ -706,16 +718,46 @@ async function runVerb(rest) {
     return
   }
 
-  // Threading: on by default in cmux mode, off in a host mode, and either
-  // way overridable. `--session` and `--new` are themselves a request to
-  // thread, so naming one is enough.
+  // Threading: always on in cmux mode, where the consult IS the agent's
+  // window — a one-shot there would be a run with no window and no
+  // conversation, a host-mode run in the wrong mode, which is why
+  // `--no-thread` is gone (2026-09-02). Off by default in a host mode, where
+  // `--thread` asks for one; `--session` and `--new` are themselves a
+  // request to thread, so naming one is enough.
   const wantsThread =
-    values['no-thread'] === true
-      ? false
-      : (values.thread ?? values.new === true ?? false) ||
-        values.session !== undefined ||
-        values.new === true ||
-        currentMode(env) === 'cmux'
+    values.thread === true ||
+    values.session !== undefined ||
+    values.new === true ||
+    currentMode(env) === 'cmux'
+
+  // A consult in cmux mode IS the agent's own window, and a window needs a
+  // terminal. Redirect our stdout and there is no window to open: the run
+  // streamed into the pipe instead — the exact shape `--no-thread` was deleted
+  // for, a conversation with no window, unreadable while it works (`cf catchup`
+  // has no session id until the run ENDS) and unjoinable. It used to degrade in
+  // silence, and the price was measured (live, 2026-09-02): a lead piped a
+  // consult through `tee`, could not read it, and six minutes later opened a
+  // SECOND conversation with the same agent on the same work in the same repo.
+  // The first one's row still said `working since` long after its process had
+  // died, because a run that never finishes never clears its own mark.
+  //
+  // So it is refused rather than reported. Nothing legitimate is behind it:
+  // `--json` is the channel for a program, a pane is where a lead sends a
+  // consult, and a lead running `cf run` in its own pane is the failure the
+  // first eval scenario exists for. Refused HERE, before the name is resolved,
+  // so a run that cannot happen leaves no row behind either.
+  if (wantsThread && currentMode(env) === 'cmux' && !values.json && !isTerminal()) {
+    fail(
+      [
+        "cf run needs a terminal in cmux mode: the consult is the agent's own window, and a pipe cannot hold one.",
+        '  send it into a pane:   cmux new-pane --type terminal --direction right --focus false',
+        '                         cmux send --surface surface:NN \'cd "$PWD" && cf run @name "<task>" --new --session <name>\'',
+        '  the run as data:       cf run @name "<task>" --json',
+        '  read it afterwards:    cf catchup <name>',
+      ].join('\n'),
+    )
+    return
+  }
 
   const resolved = await resolveConversation(row, {
     wantsThread,

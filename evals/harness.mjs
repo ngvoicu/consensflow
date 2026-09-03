@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 /**
  * A real lead, a real installed skill, and no real side effects.
@@ -91,6 +91,15 @@ export function makeStage(options = {}) {
   mkdirSync(bin, { recursive: true })
   mkdirSync(cwd, { recursive: true })
   writeFileSync(log, '')
+  // A scenario whose prompt names a file needs that file to be there. Without
+  // it the lead reasonably checks, finds nothing, and asks the user instead of
+  // consulting — which reads in the tally as "never opened a pane" and blames
+  // the skill for the scenario's own missing prop.
+  for (const [rel, body] of Object.entries(options.files ?? {})) {
+    const path = join(cwd, rel)
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, body)
+  }
   for (const [name, body] of [
     ['cf', CF_STUB(log, options)],
     ['cmux', CMUX_STUB(log)],
