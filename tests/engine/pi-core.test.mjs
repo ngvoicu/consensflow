@@ -148,6 +148,8 @@ test('agent presets expose the allowed creation list', () => {
     'phoebus',
     'gaia',
     'diana',
+    'astraeus',
+    'asteria',
     'aether',
     'rhea',
     'phoebe',

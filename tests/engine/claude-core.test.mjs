@@ -165,6 +165,8 @@ test('agent presets mirror consensflow-pi exactly (image preset included)', () =
     'phoebus',
     'gaia',
     'diana',
+    'astraeus',
+    'asteria',
     'aether',
     'rhea',
     'phoebe',

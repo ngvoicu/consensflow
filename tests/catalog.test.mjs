@@ -83,6 +83,10 @@ describe('every tool ships a list of ready-made agents', () => {
     assert.ok(models.includes('openrouter/z-ai/glm-5.3'))
     assert.ok(models.includes('openrouter/qwen/qwen3.8-max'))
     assert.ok(models.includes('openrouter/moonshotai/kimi-k3'))
+    // GPT 6 Astra, probed 2026-09-05: the id answers on codex where `gpt-6`,
+    // `gpt-6-sol`, `gpt-6-pro` and `gpt-5.6-pro` are all refused, and its
+    // ladder was walked level by level (minimal refused; low..ultra answer).
+    assert.ok(models.includes('gpt-6-astra'))
     // Added 2026-08-24, each confirmed present in `pi --list-models` and
     // `opencode models` before it was written down — two free tiers and one
     // unbadged stealth model, on both open-model harnesses. The stealth one

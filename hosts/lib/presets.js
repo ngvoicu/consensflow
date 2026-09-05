@@ -69,6 +69,21 @@ import { slugify, stripMention } from "./utils.js";
 // granted the same two probes answered `ok`, and the rows went in — at `xhigh`, the level both
 // catalogs give and both CLIs ran. A catalog listing proves the id; only a run proves the account
 // can reach it.
+// --- GPT 6 Astra (2026-09-05) --------------------------------------------
+// The first GPT 6 row in the catalog, on codex only: `gpt-6-astra` answers there, and
+// `gpt-6`, `gpt-6-sol` and `gpt-6-pro` are all refused on a ChatGPT login, as is `gpt-5.6-pro`
+// even though codex's own history carries that name. The refusal is worth knowing because it is
+// USELESS as evidence: "The '<id>' model is not supported when using Codex with a ChatGPT
+// account" comes back identically for a deliberately invented id, so it never distinguishes a
+// model that does not exist from one this plan cannot reach. Only an id that ANSWERS proves
+// anything.
+//
+// The effort ladder was probed level by level rather than assumed, and codex — unlike opencode —
+// really validates: a bogus `model_reasoning_effort` is a 400, which is what makes each probe
+// mean something. `minimal` is refused; low, medium, high, xhigh, max and ultra all answer. So
+// the model's ceiling is ULTRA and these two rows deliberately sit below it, the way the GPT 5.6
+// OpenCode trio does: a tier ladder is a choice, and asteria/astraeus were asked for as xhigh and
+// max. Add an ultra row when someone wants the top; the level is there and proven.
 export const AGENT_PRESETS = [
   // --- Claude Fable 5.1 — Anthropic's most capable model (priced above Opus).
   // Muse names on claude-code; bard/storyteller names on the other engines.
@@ -155,6 +170,27 @@ export const AGENT_PRESETS = [
     description: "Roman moon goddess: GPT 5.6 Luna — the compact, fast variant — at xhigh effort for quick, sharp takes.",
     kind: "codex",
     model: "gpt-5.6-luna",
+    effort: "xhigh",
+  },
+
+  {
+    preset: "astraeus",
+    id: "astraeus",
+    name: "Astraeus",
+    label: "Codex GPT 6 Astra MAX",
+    description: "Titan of the stars and of dusk: GPT 6 Astra at max effort — the deepest reasoning tier this model takes without ultra's task delegation. Turns can run many minutes.",
+    kind: "codex",
+    model: "gpt-6-astra",
+    effort: "max",
+  },
+  {
+    preset: "asteria",
+    id: "asteria",
+    name: "Asteria",
+    label: "Codex GPT 6 Astra XHIGH",
+    description: "Titaness of the falling stars: GPT 6 Astra at xhigh effort — the tier its GPT 5.6 siblings hold, for strong work without the max wait.",
+    kind: "codex",
+    model: "gpt-6-astra",
     effort: "xhigh",
   },
 
