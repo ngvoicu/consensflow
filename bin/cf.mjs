@@ -1598,9 +1598,12 @@ function catalogVerb(rest) {
   }
   for (const [harness, entries] of Object.entries(catalog)) {
     out(`${harness}:`)
+    // Width from the rows, not a guess: the OpenCode Go and Zen ids added on
+    // 2026-09-06 run to 40 characters and ran straight into the effort column.
+    const modelWidth = Math.max(34, ...entries.map((entry) => entry.model.length + 2))
     for (const entry of entries) {
       out(
-        `  ${entry.name.padEnd(12)}${entry.model.padEnd(34)}${(entry.effort ?? '-').padEnd(8)}${entry.description}`,
+        `  ${entry.name.padEnd(12)}${entry.model.padEnd(modelWidth)}${(entry.effort ?? '-').padEnd(8)}${entry.description}`,
       )
     }
     out('')

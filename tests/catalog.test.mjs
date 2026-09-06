@@ -51,6 +51,14 @@ describe('every tool ships a list of ready-made agents', () => {
       'mimir', // MiniMax M3, on opencode
       'triton', // Laguna S 2.1 free, on pi
       'aegir', // Laguna S 2.1 free, on opencode
+      // Added 2026-09-06 with the OpenCode Go and Zen roads — same rule, new
+      // route. MiniMax M3 takes a reasoning toggle and no levels on Go too, and
+      // Zen's Nemotron 3 Ultra entry publishes no reasoning options at all,
+      // where OpenRouter's does: that is why ymir names `high` and audhumla,
+      // the same model on the other road, names nothing.
+      'kairos', // MiniMax M3 on OpenCode Go, through pi
+      'andvari', // MiniMax M3 on OpenCode Go, through opencode
+      'audhumla', // Nemotron 3 Ultra free on OpenCode Zen
     ])
     for (const [harness, entries] of Object.entries(CATALOG)) {
       if ((EFFORTS[harness] ?? []).length === 0) continue
@@ -122,6 +130,77 @@ describe('every tool ships a list of ready-made agents', () => {
     assert.ok(!models.some((m) => m.includes('ox-alpha')))
     assert.ok(!models.some((m) => m.includes('gemini-3.7')))
     assert.ok(!models.some((m) => m.includes('muse-spark-1.2')))
+  })
+
+  // Added 2026-09-06. Two new roads to models this catalog already carried, and
+  // one new road for GPT 6 Astra. Every id below was probed on the CLI that
+  // runs it, at the level its row names, before it was written down.
+  it('reaches the OpenCode Go models on both harnesses, at one shared level', () => {
+    // Go's ids are identical on pi and opencode — `opencode-go/<model>`, byte
+    // for byte — so each of these must appear on BOTH, and the twin rule above
+    // then holds them to the same level. That pairing is the whole reason a
+    // name means one thing here.
+    for (const model of [
+      'opencode-go/deepseek-v4-flash',
+      'opencode-go/deepseek-v4-pro',
+      'opencode-go/grok-4.6',
+      'opencode-go/qwen3.8-max',
+      'opencode-go/minimax-m3',
+      'opencode-go/glm-5.3',
+      'opencode-go/glm-5.3-flash',
+      'opencode-go/kimi-k3',
+      'opencode-go/muse-spark-1.3-contributor',
+      'opencode-go/gpt-5.6-luna',
+    ]) {
+      assert.ok(
+        CATALOG.pi.some((e) => e.model === model),
+        `pi is missing ${model}`,
+      )
+      assert.ok(
+        CATALOG.opencode.some((e) => e.model === model),
+        `opencode is missing ${model}`,
+      )
+    }
+    // The OpenRouter twins were NOT retired: Go is the cheap road, OpenRouter
+    // the fallback. A Go row that quietly replaced one would be a route change
+    // wearing a name the roster already trusts.
+    const models = Object.values(CATALOG).flatMap((entries) => entries.map((e) => e.model))
+    assert.ok(models.includes('openrouter/x-ai/grok-4.6'))
+    assert.ok(models.includes('openrouter/moonshotai/kimi-k3'))
+  })
+
+  it('carries OpenCode Zen only where the account can actually reach it', () => {
+    // Zen lists 102 models on models.dev and offers 7 through the CLI, because
+    // this account has no Zen credential. Only reachable ids belong here, and
+    // both of these were probed. pi has no Zen provider at all, so these rows
+    // are opencode-only by necessity, not by preference.
+    const zen = CATALOG.opencode.filter((e) => e.model.startsWith('opencode/'))
+    assert.deepEqual(zen.map((e) => e.model).sort(), [
+      'opencode/muse-spark-1.3-contributor-free',
+      'opencode/nemotron-3-ultra-free',
+    ])
+    assert.equal(
+      CATALOG.pi.filter((e) => e.model.startsWith('opencode/')).length,
+      0,
+      'pi has no Zen provider — a Zen row there would never run',
+    )
+  })
+
+  it('reaches GPT 6 Astra on all three engines that answer for it', () => {
+    // codex through the ChatGPT login (astraeus/asteria), pi through its own
+    // copy of that login, opencode through OpenRouter — three roads, three
+    // model strings, so no twin rule couples them. `ultra` stays codex-only:
+    // neither of the new roads publishes it.
+    assert.ok(CATALOG.codex.some((e) => e.model === 'gpt-6-astra'))
+    assert.ok(CATALOG.pi.some((e) => e.model === 'openai-codex/gpt-6-astra'))
+    assert.ok(CATALOG.opencode.some((e) => e.model === 'openrouter/openai/gpt-6-astra'))
+    for (const harness of ['pi', 'opencode']) {
+      const efforts = CATALOG[harness]
+        .filter((e) => e.model.includes('gpt-6-astra'))
+        .map((e) => e.effort)
+        .sort()
+      assert.deepEqual(efforts, ['max', 'xhigh'], `${harness}: both Astra tiers, and no ultra`)
+    }
   })
 
   it('is the payload presets and nothing else — one list, not two', async () => {

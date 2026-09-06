@@ -194,6 +194,58 @@ export const AGENT_PRESETS = [
     effort: "xhigh",
   },
 
+  // --- GPT 6 Astra on the other engines that reach it ----------------------
+  // Probed 2026-09-06, each id on the CLI that will run it, at both levels.
+  // Pi rides the same ChatGPT (Codex) login the codex trio uses — the id there
+  // is `openai-codex/gpt-6-astra`, and pi's own catalog is the reason it is not
+  // the OpenRouter one: pi's openrouter store carries no gpt-6 row at all,
+  // while opencode's does. So the two harnesses reach Astra by different roads,
+  // and the model strings differ, which is why no twin rule couples them.
+  //
+  // Neither road has codex's `ultra`: pi's thinkingLevelMap tops out at max for
+  // this model and OpenRouter's catalog lists low…max. Hyperion's ultra tier is
+  // a codex-CLI level, and it stays there.
+  {
+    preset: "phosphoros",
+    id: "phosphoros",
+    name: "Phosphoros",
+    label: "Pi GPT 6 Astra MAX",
+    description: "The morning star, bringer of light: GPT 6 Astra at max thinking on Pi, riding your ChatGPT (Codex) login — the same road Aether's GPT 5.6 Sol takes. Turns can run many minutes.",
+    kind: "pi",
+    model: "openai-codex/gpt-6-astra",
+    thinking: "max",
+  },
+  {
+    preset: "hesperos",
+    id: "hesperos",
+    name: "Hesperos",
+    label: "Pi GPT 6 Astra XHIGH",
+    description: "The evening star — the same planet as Phosphoros under its other name, and the same model one tier down: GPT 6 Astra at xhigh thinking on Pi via your ChatGPT (Codex) login, the tier its GPT 5.6 siblings hold.",
+    kind: "pi",
+    model: "openai-codex/gpt-6-astra",
+    thinking: "xhigh",
+  },
+  {
+    preset: "aurvandil",
+    id: "aurvandil",
+    name: "Aurvandil",
+    label: "OpenCode GPT 6 Astra MAX",
+    description: "The frozen toe Thor threw into the sky, where it became a star: GPT 6 Astra through OpenCode at max effort — its ceiling on OpenRouter, which lists no `ultra` for it. Turns can run many minutes.",
+    kind: "opencode",
+    model: "openrouter/openai/gpt-6-astra",
+    effort: "max",
+  },
+  {
+    preset: "delling",
+    id: "delling",
+    name: "Delling",
+    label: "OpenCode GPT 6 Astra XHIGH",
+    description: "The shining one who fathers the day: GPT 6 Astra through OpenCode at xhigh effort (via OpenRouter) — strong work without the max wait, and the tier its GPT 5.6 siblings hold.",
+    kind: "opencode",
+    model: "openrouter/openai/gpt-6-astra",
+    effort: "xhigh",
+  },
+
   // --- GPT 5.6 on the other engines that reach it --------------------------
   // Pi rides the same ChatGPT (Codex) login the codex trio uses — no OpenRouter
   // credits; OpenCode reaches the same three variants through OpenRouter, whose
@@ -735,6 +787,291 @@ export const AGENT_PRESETS = [
     description: "Fire itself, given a name: Meta's Muse Spark 1.3 through OpenCode at xhigh variant — its ceiling, and the level its Pi twin Eos holds (via OpenRouter).",
     kind: "opencode",
     model: "openrouter/meta/muse-spark-1.3",
+    effort: "xhigh",
+  },
+
+  // --- OpenCode Go route (2026-09-06) --------------------------------------
+  // Ten models this catalog already carries, reached a second way. OpenCode Go
+  // is a $10/month subscription metered in DOLLARS OF USAGE rather than tokens
+  // ($12 per 5 hours, $30 per week, $60 per month), so these rows are the cheap
+  // road and their OpenRouter twins stay as the fallback for when Go is
+  // throttled or down. Nothing was retired to make room: same model, two roads,
+  // two names.
+  //
+  // The id is identical on both harnesses — `opencode-go/<model>`, byte for
+  // byte — which is what lets a pi row and its opencode twin sit at the same
+  // level by rule, the pairing tests/catalog.test.mjs asserts.
+  //
+  // All twenty rows were probed on the CLI that will run them, at the level
+  // each one names: `pi -p --model opencode-go/<id> --thinking <level>` and
+  // `opencode run --model opencode-go/<id> --variant <level>`. What that proves
+  // is bounded, and the bound is the point — opencode validates no variant at
+  // all and pi maps an unknown level to null and sends nothing, so a passing
+  // probe proves the ID AND THE ACCOUNT, never the level. The levels come from
+  // the two catalogs agreeing: pi's thinkingLevelMap (~/.pi/agent/models-store.json)
+  // and models.dev's reasoning_options, which agree on all ten models here.
+  //
+  // Two deliberate departures from "name the ceiling":
+  //   * gpt-5.6-luna could take `max` on this road — both catalogs list it —
+  //     and holds `xhigh` anyway, the tier the whole GPT 5.6 family holds on
+  //     every harness. A ladder is a choice, and that one is already made.
+  //   * minimax-m3 names no level at all: pi lists none, and models.dev gives
+  //     it a reasoning TOGGLE with no effort values. A level nothing honours is
+  //     worse than a blank one.
+  //
+  // DeepSeek runs the other way, and it is worth recording because the
+  // OpenRouter rows sit LOWER: zephyros/hades/freya/odin hold `high` because pi
+  // and models.dev disagreed about that road. On Go the two agree — {low, high,
+  // max} for Flash, {high, max} for Pro — so these rows take `max`, and both
+  // were probed there on both harnesses. Same model, different road, different
+  // evidence, different ceiling.
+  //
+  // PRIVACY, because it differs row by row. Go's own model table says "Not
+  // used" for training on every model here except Muse Spark: the `-contributor`
+  // tier costs $0.10/$0.20 per MTok against $1.25/$4.25 for the standard model
+  // precisely because you grant permission to use your prompts and completions
+  // to train future Meta models. Grok 4.6 and GPT 5.6 Luna keep 30 days of logs
+  // for abuse monitoring; the rest keep none. Urania and Odrerir say so in their
+  // own descriptions — a row that spends your privacy should not read like one
+  // that does not.
+  {
+    preset: "boreas",
+    id: "boreas",
+    name: "Boreas",
+    label: "Pi DeepSeek V4 Flash MAX (OpenCode Go)",
+    description: "The north wind: DeepSeek V4 Flash at max thinking on Pi through the OpenCode Go subscription. A tier above its OpenRouter twin Zephyros on purpose — on this road pi and models.dev agree the model has `max`, and on that one they never did.",
+    kind: "pi",
+    model: "opencode-go/deepseek-v4-flash",
+    thinking: "max",
+  },
+  {
+    preset: "nereus",
+    id: "nereus",
+    name: "Nereus",
+    label: "Pi DeepSeek V4 Pro MAX (OpenCode Go)",
+    description: "The old man of the sea, all depth and no drama: DeepSeek V4 Pro at max thinking on Pi through OpenCode Go — a tier above its OpenRouter twin Hades, for the same reason Boreas is.",
+    kind: "pi",
+    model: "opencode-go/deepseek-v4-pro",
+    thinking: "max",
+  },
+  {
+    preset: "eris",
+    id: "eris",
+    name: "Eris",
+    label: "Pi Grok 4.6 XHIGH (OpenCode Go)",
+    description: "Goddess of strife, for the model that argues back: Grok 4.6 at xhigh thinking — its ceiling — on Pi through OpenCode Go, where Ares reaches the same model on OpenRouter. Go keeps 30 days of Grok logs for abuse monitoring.",
+    kind: "pi",
+    model: "opencode-go/grok-4.6",
+    thinking: "xhigh",
+  },
+  {
+    preset: "coeus",
+    id: "coeus",
+    name: "Coeus",
+    label: "Pi Qwen3.8 Max XHIGH (OpenCode Go)",
+    description: "Titan of the inquiring mind: Qwen3.8 Max at xhigh thinking on Pi through OpenCode Go — its ceiling, and note that `high` is not a level this model has at all ({low, medium, xhigh}). Hephaestus is the same model on OpenRouter.",
+    kind: "pi",
+    model: "opencode-go/qwen3.8-max",
+    thinking: "xhigh",
+  },
+  // No thinking level, deliberately — the model takes a reasoning toggle and no
+  // levels, on both catalogs. See the section note above.
+  {
+    preset: "kairos",
+    id: "kairos",
+    name: "Kairos",
+    label: "Pi MiniMax M3 (OpenCode Go)",
+    description: "The fleeting right moment: MiniMax M3 on Pi through OpenCode Go. It reasons, but takes no effort parameter, so this preset names no level — exactly like its OpenRouter twin Metis.",
+    kind: "pi",
+    model: "opencode-go/minimax-m3",
+  },
+  {
+    preset: "hecate",
+    id: "hecate",
+    name: "Hecate",
+    label: "Pi GLM 5.3 MAX (OpenCode Go)",
+    description: "Three-formed goddess of the crossroads: ZAI's GLM 5.3 at max thinking on Pi through OpenCode Go — the same model Prometheus runs on OpenRouter, on the cheaper road.",
+    kind: "pi",
+    model: "opencode-go/glm-5.3",
+    thinking: "max",
+  },
+  {
+    preset: "hermes",
+    id: "hermes",
+    name: "Hermes",
+    label: "Pi GLM 5.3 Flash MAX (OpenCode Go)",
+    description: "The swift messenger: GLM 5.3 Flash at max thinking on Pi through OpenCode Go — the cheapest fast model on the subscription ($0.075/$0.25 per MTok), twin to Nyx on OpenRouter.",
+    kind: "pi",
+    model: "opencode-go/glm-5.3-flash",
+    thinking: "max",
+  },
+  {
+    preset: "mnemosyne",
+    id: "mnemosyne",
+    name: "Mnemosyne",
+    label: "Pi Kimi K3 MAX (OpenCode Go)",
+    description: "Titaness of memory, for the 1M-context reasoner: Kimi K3 at max — the only level it has — on Pi through OpenCode Go. Endymion reaches the same model on OpenRouter and Ilmarinen on Moonshot's own key: three accounts, one model.",
+    kind: "pi",
+    model: "opencode-go/kimi-k3",
+    thinking: "max",
+  },
+  {
+    preset: "urania",
+    id: "urania",
+    name: "Urania",
+    label: "Pi Muse Spark 1.3 Contributor XHIGH (OpenCode Go)",
+    description: "Muse of the stars: Meta's Muse Spark 1.3 at xhigh thinking on Pi through OpenCode Go — the CONTRIBUTOR tier, priced far under the standard model ($0.10/$0.20 per MTok against $1.25/$4.25) because you grant permission to use your prompts and completions to train future Meta models. Eos is the same model on OpenRouter's paid tier: send private code there, not here.",
+    kind: "pi",
+    model: "opencode-go/muse-spark-1.3-contributor",
+    thinking: "xhigh",
+  },
+  {
+    preset: "selene",
+    id: "selene",
+    name: "Selene",
+    label: "Pi GPT 5.6 Luna XHIGH (OpenCode Go)",
+    description: "The moon herself: GPT 5.6 Luna at xhigh thinking on Pi through OpenCode Go — deliberately not the `max` this road allows, because the whole GPT 5.6 family holds xhigh across the catalog. Go keeps 30 days of Luna logs for abuse monitoring.",
+    kind: "pi",
+    model: "opencode-go/gpt-5.6-luna",
+    thinking: "xhigh",
+  },
+  {
+    preset: "dvalin",
+    id: "dvalin",
+    name: "Dvalin",
+    label: "OpenCode Go DeepSeek V4 Flash MAX",
+    description: "The dwarf whose name means 'the dormant one' and who works anything but: DeepSeek V4 Flash at max effort through OpenCode Go — a tier above its OpenRouter twin Freya, and level-matched to Pi's Boreas.",
+    kind: "opencode",
+    model: "opencode-go/deepseek-v4-flash",
+    effort: "max",
+  },
+  {
+    preset: "durin",
+    id: "durin",
+    name: "Durin",
+    label: "OpenCode Go DeepSeek V4 Pro MAX",
+    description: "First of the dwarves, the deep delver: DeepSeek V4 Pro at max effort through OpenCode Go, where Odin runs the same model on OpenRouter at high.",
+    kind: "opencode",
+    model: "opencode-go/deepseek-v4-pro",
+    effort: "max",
+  },
+  {
+    preset: "loki",
+    id: "loki",
+    name: "Loki",
+    label: "OpenCode Go Grok 4.6 XHIGH",
+    description: "The trickster, for the model that argues back: Grok 4.6 at xhigh effort — its ceiling — through OpenCode Go; Thor is the OpenRouter twin. Go keeps 30 days of Grok logs for abuse monitoring.",
+    kind: "opencode",
+    model: "opencode-go/grok-4.6",
+    effort: "xhigh",
+  },
+  {
+    preset: "alviss",
+    id: "alviss",
+    name: "Alviss",
+    label: "OpenCode Go Qwen3.8 Max XHIGH",
+    description: "The all-wise dwarf who answered every question until dawn caught him: Qwen3.8 Max at xhigh effort through OpenCode Go — its ceiling, and `high` is not a level this model has. Tyr is the OpenRouter twin.",
+    kind: "opencode",
+    model: "opencode-go/qwen3.8-max",
+    effort: "xhigh",
+  },
+  // No effort, deliberately — same reason as Kairos above.
+  {
+    preset: "andvari",
+    id: "andvari",
+    name: "Andvari",
+    label: "OpenCode Go MiniMax M3",
+    description: "The dwarf guarding his hoard behind the waterfall: MiniMax M3 through OpenCode Go. No effort here — the model takes a reasoning toggle and no levels — exactly like its OpenRouter twin Mimir.",
+    kind: "opencode",
+    model: "opencode-go/minimax-m3",
+  },
+  {
+    preset: "brokkr",
+    id: "brokkr",
+    name: "Brokkr",
+    label: "OpenCode Go GLM 5.3 MAX",
+    description: "The dwarf smith who forged Mjolnir while a fly bit his eyelid: ZAI's GLM 5.3 at max effort through OpenCode Go. The only GLM 5.3 row on this harness — OpenCode reaches the full model nowhere else in this catalog, only its Flash sibling.",
+    kind: "opencode",
+    model: "opencode-go/glm-5.3",
+    effort: "max",
+  },
+  {
+    preset: "sindri",
+    id: "sindri",
+    name: "Sindri",
+    label: "OpenCode Go GLM 5.3 Flash MAX",
+    description: "Brokkr's brother at the same forge: GLM 5.3 Flash at max effort through OpenCode Go — the subscription's cheapest fast model; Nott is the OpenRouter twin.",
+    kind: "opencode",
+    model: "opencode-go/glm-5.3-flash",
+    effort: "max",
+  },
+  {
+    preset: "regin",
+    id: "regin",
+    name: "Regin",
+    label: "OpenCode Go Kimi K3 MAX",
+    description: "Smith, tutor and keeper of old lore: Kimi K3 at max — its only level — through OpenCode Go, where Mani reaches the same 1M-context model on OpenRouter.",
+    kind: "opencode",
+    model: "opencode-go/kimi-k3",
+    effort: "max",
+  },
+  {
+    preset: "odrerir",
+    id: "odrerir",
+    name: "Odrerir",
+    label: "OpenCode Go Muse Spark 1.3 Contributor XHIGH",
+    description: "The vessel that holds the mead of poetry: Meta's Muse Spark 1.3 at xhigh effort through OpenCode Go — the CONTRIBUTOR tier, priced far under the standard model ($0.10/$0.20 per MTok against $1.25/$4.25) because you grant permission to use your prompts and completions to train future Meta models. Logi is the same model on OpenRouter's paid tier: keep private code on that one.",
+    kind: "opencode",
+    model: "opencode-go/muse-spark-1.3-contributor",
+    effort: "xhigh",
+  },
+  {
+    preset: "hjuki",
+    id: "hjuki",
+    name: "Hjuki",
+    label: "OpenCode Go GPT 5.6 Luna XHIGH",
+    description: "Bil's brother, the other child the moon carries across the sky: GPT 5.6 Luna at xhigh effort through OpenCode Go — the family tier, not the `max` this road would allow. Bil is the same model on OpenRouter. Go keeps 30 days of Luna logs for abuse monitoring.",
+    kind: "opencode",
+    model: "opencode-go/gpt-5.6-luna",
+    effort: "xhigh",
+  },
+
+  // --- OpenCode Zen (2026-09-06) -------------------------------------------
+  // Zen is OpenCode's own pay-as-you-go gateway, and on this account it is
+  // almost entirely out of reach: models.dev lists 102 Zen models — Fable 5.1,
+  // Opus 5 and GPT 6 Astra among them — while `opencode models` offers 7 and
+  // `opencode auth list` holds no Zen credential. The other 95 need Zen billing
+  // switched on. That gap IS the finding, and it is the same lesson the Muse
+  // Spark 403 taught three days earlier: a catalog listing is not access.
+  //
+  // Of the seven that are reachable, two are models this catalog already
+  // carries, and both were probed here on 2026-09-06. Being free, they are a
+  // second road for when OpenRouter's free tier is rate-limited — which is the
+  // one thing a free tier does reliably.
+  //
+  // No pi twins exist and none can: pi has no Zen provider at all (its auth
+  // carries openai-codex, openrouter and opencode-go), so these two rows are
+  // opencode-only by necessity and the twin rule has nothing to pair them with.
+  // No effort on the Nemotron row — Zen's entry for it publishes no reasoning
+  // options, where OpenRouter's does, which is why Ymir names `high` and this
+  // one names nothing.
+  {
+    preset: "audhumla",
+    id: "audhumla",
+    name: "Audhumla",
+    label: "OpenCode Zen Nemotron 3 Ultra 550B FREE",
+    description: "The primordial cow whose milk fed Ymir: NVIDIA's 550B Nemotron 3 Ultra free through OpenCode Zen — the same model Ymir reaches on OpenRouter's free tier, on a second free road for when the first is rate-limited.",
+    kind: "opencode",
+    model: "opencode/nemotron-3-ultra-free",
+  },
+  {
+    preset: "gefjon",
+    id: "gefjon",
+    name: "Gefjon",
+    label: "OpenCode Zen Muse Spark 1.3 Contributor FREE XHIGH",
+    description: "The giver, who ploughed an island out of a king's promise: Meta's Muse Spark 1.3 free through OpenCode Zen at xhigh effort, its ceiling on this tier. Free because it is the CONTRIBUTOR tier — your prompts and completions may be used to train future Meta models. Logi is the same model on OpenRouter's paid tier: keep private code there.",
+    kind: "opencode",
+    model: "opencode/muse-spark-1.3-contributor-free",
     effort: "xhigh",
   },
 
