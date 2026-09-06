@@ -195,3 +195,13 @@ exit evidence recorded as he listed it.
 A process note: the message announcing revision 4 reached astraeus
 before the commit existed — the edit script had failed on an anchor and
 nothing had been written. A correction followed with the real commit.
+
+## Round 5 — READY (2026-09-06)
+
+astraeus, quoted: "READY for phases 1 and 2 at `d1b8ef2`, reread from
+disk." One correction before Phase 3, applied the same day: a `cf read`
+part is covered only when its complete framing appears in the lead's
+model-visible tool result and the digest of the observed body equals the
+immutable part — an end marker alone never establishes coverage, because a
+receiver keeping only the tail keeps the marker and drops the text. Phase
+2 records attempts without granting coverage, so neither phase is blocked.

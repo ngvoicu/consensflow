@@ -25,7 +25,8 @@ it prints.
 
 **Authority.** This revision (3, 2026-09-06) and Gabriel's round-2 answers
 govern implementation. Where `research-01.md` or `research-02.md` say
-otherwise, they record an earlier design. Revision 4 absorbs the third
+otherwise, they record an earlier design. Revision 4 (with astraeus's READY verdict at `d1b8ef2` and his one
+pre-Phase-3 correction on part coverage applied) absorbs the third
 co-lead review by astraeus (`astraeus-lilac-dune`: four narrower findings
 on revision 3 plus two guards), revision 3 the second (twelve findings on
 revision 2), and one scope decision: **macOS first** — Windows and Linux
@@ -85,8 +86,10 @@ no Unix-only assumption added).
       is safely representable, else through `cf read <id>`, which prints
       the complete answer in numbered parts sized under the lead harness's
       verified tool-output budget, each closed by an end-of-part marker;
-      coverage is recorded only when every part's marker is found in the
-      lead's own transcript — printing is an attempt, not coverage. No
+      a part is covered only when its complete framing appears in the
+      lead's model-visible tool result and the digest of the body observed
+      there equals the part on disk — printing is an attempt, a marker
+      alone is not coverage. No
       cap on the answer, no truncation, no notice
 - [ ] A delivery is submitted only when the lead is ready: its own
       transcript shows its last turn settled with no tool in flight, and no
@@ -245,11 +248,15 @@ numbered parts, each under the lead harness's verified tool-output budget
 rest aside — the lead would see the tail and believe it read all), each
 part opened by `[part k of N]` and closed by `[end of part k of N —
 delivery <id>]`, and tells the lead the next `--part`. A part printed is an
-attempt; **coverage** is recorded only when every part's end marker is
-found in the lead's own transcript (its tool results) after the cursor — an
-`EPIPE`, an early stdout close or a truncating receiver leaves ranges
-uncovered, and `cf`'s deliberate exit-0 on `EPIPE` (`bin/cf.mjs:66`) is
-therefore never evidence. There is no cap on the answer.
+attempt; a part is **covered** only when its complete framing (opening and
+end marker) appears in the lead's model-visible tool result after the
+cursor AND the digest computed from the part body observed there equals
+the digest of the immutable part on disk — an end marker alone never
+establishes coverage, because a receiver that keeps only the tail keeps
+the marker and drops the text. An `EPIPE`, an early stdout close or a
+truncating receiver therefore leaves ranges uncovered, and `cf`'s
+deliberate exit-0 on `EPIPE` (`bin/cf.mjs:66`) is never evidence. There is
+no cap on the answer.
 
 **Drafts and clears.** Rust stamps every human `\r` with the pane's input
 epoch and reports `pane.enter {epoch}`; when the matching user turn appears
@@ -575,15 +582,17 @@ replacement fails closed; an interrupted read creates no coverage.
       delivery id and digest (two workers both answering "Done." produce
       two distinct acceptances; an older matching turn, or an unrelated
       identical user message after the cursor, does not); for `cf-read`,
-      `coverage` is recorded only when every part's end marker is found in
-      the lead's transcript after the cursor — a missing part leaves its
-      range uncovered; `uncertain` after `receiptMs`, or
+      a part is `covered` only when its full framing appears in the lead's
+      tool result after the cursor and the digest of the observed body
+      equals the immutable part's — a fixture that keeps every end marker
+      but drops answer text covers nothing; a missing part leaves its range
+      uncovered; `uncertain` after `receiptMs`, or
       on crash recovery from `submitting`; `failed` only before any byte
       was written, and only then re-planned; `cancelled` terminal and never
       re-planned; the target stays reserved until accepted or uncertain;
       `coverage` maps delivery → item ids; `seen` advances only over
       covered-or-printed items contiguous with the mark; a file delivery
-      covers nothing until every part's marker is seen.
+      covers nothing until every part is covered by framing AND digest.
 - [ ] [IMPL-PANE-30] `hosts/lib/deliveries.js`; `src/store.js`
       `delivery.upsert`; standalone `catchup` bookkeeping by item ids.
       -> satisfies [TEST-PANE-29]
@@ -679,12 +688,14 @@ replacement fails closed; an interrupted read creates no coverage.
       records the paste → `accepted` → `cf catchup --unread` shows nothing
       new for that answer; `cf run` without flags continues into the live
       pane; a 60 000-character answer goes `cf-read` and every `cf read` part's
-      marker in the fake lead's transcript records coverage; two concurrent `cf run --new`; two leads
+      framing plus body digest in the fake lead's transcript records
+      coverage; two concurrent `cf run --new`; two leads
       in one directory with identical tasks bind separately; a draft
       latched in the lead pane holds delivery until the submission covering
       it clears it, and a draft typed after that submission stays latched;
-      a `cf read` whose stdout is closed early, and one whose receiver
-      keeps only the tail, leave ranges uncovered and the page shows them;
+      a `cf read` whose stdout is closed early, one whose receiver keeps only
+      the tail, and one whose receiver keeps every end marker but drops
+      text, all leave ranges uncovered and the page shows them;
       a fake lead whose native session is replaced in place suspends
       delivery;
       policy switched to `manual` while queued; bridge killed between paste
@@ -760,7 +771,7 @@ replacement fails closed; an interrupted read creates no coverage.
 | 2026-09-06 | Every pane is in the app; a tab = directory + one lead + policy; humans open shell or agent panes | User's calls |
 | 2026-09-06 | PTY silence is a polling hint, never a readiness condition; readiness = lead transcript settled + no draft latched + fresh input epoch | astraeus round-2 finding 1 resolved in the direction that keeps `auto` working for redrawing TUIs; the paste is atomic under the arbiter |
 | 2026-09-06 | A draft latch is cleared only by the observed submission that covers it (epoch-stamped Enter → matching user turn), never by time, never past newer input | astraeus round-2 finding 1 and round-3 finding 2; an abandoned draft holds delivery visibly until the human submits — Deliver now cannot bypass a latched draft, and the blocked button says why; there is no other honest signal for claude and codex |
-| 2026-09-06 | File delivery is `cf read <id>`: prints everything in parts; a part is an attempt, coverage needs every end marker in the lead's transcript | Gives the file path a receipt without reading the screen (astraeus round-2 finding 8); pi keeps only the tail of a large tool output and `cf` exits 0 on EPIPE (round-3 finding 1) |
+| 2026-09-06 | File delivery is `cf read <id>`: prints everything in parts; a part is an attempt, coverage needs its full framing and a matching body digest in the lead's tool result — a marker alone is never coverage | Gives the file path a receipt without reading the screen (astraeus round-2 finding 8); pi keeps only the tail of a large tool output and `cf` exits 0 on EPIPE (round-3 finding 1) |
 | 2026-09-06 | App-owned lead identity `tab:<id>:<generation>`; native sessions bound by preallocated id, reported id, or a launch nonce — never task text | astraeus round-2 finding 3 |
 | 2026-09-06 | The `--in-pane` controller redeems a ticket for ownership plus a launch-scoped capability; Rust launches the bundle's absolute node and cf.mjs; the lead's PATH starts with the bundle's bin | astraeus round-2 finding 2 |
 | 2026-09-06 | Consult follows today's continuation rule; every op carries an `opId`; a timeout after a possible launch is `unknown` and blocks a retry | astraeus round-2 finding 4 |
