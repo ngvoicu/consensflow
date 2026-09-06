@@ -903,6 +903,21 @@ replacement fails closed; an interrupted read creates no coverage.
 
 ## Resume Context
 
+> 2026-09-06 23:45 EEST — state of play. Committed: Phase 1, the binding unit
+> (21–22), probes. Uncommitted and in review or in work: store + tabs (11–14)
+> — asteria BLOCK twice, round 3 now with zeus in `zeus-kelp-valley` (O_EXCL
+> claim, rename-based stale reclaim, one pane allocator, degraded state on
+> failed compensation, release by launch id); launch roles (15–16) by hyperion,
+> green, under review by zeus in `zeus-copper-island`; readiness + policy
+> (25–28) by zeus, green, under review by asteria; completion model (23–24)
+> by gefjon, green with the markers table in findings-01, under review by
+> hyperion in `hyperion-ember-fern`, layout (37–38) by zeus queued behind it;
+> deliveries (29–30) in work by gefjon in `gefjon-lilac-waves`. Open for
+> astraeus at the Phase 3 exit: whether derived "settled" (claude, pi,
+> opencode: complete + no open tool) may enable automatic delivery without
+> a native settled signal; pi conflating cancel with provider error; kimi
+> cancel reasons unobserved.
+>
 > 2026-09-06 22:10 EEST — **Phase 1 committed**: every unit approved by
 > asteria after five hyperion batches and two gefjon rounds; the one open
 > clause is B8/C7 (a hidden pane keeps acking), deferred to Phase 4's real
