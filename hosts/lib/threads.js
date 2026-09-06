@@ -140,12 +140,25 @@ function pick(list) {
 /**
  * The environment keys that identify a lead, most specific first.
  *
- * The harness's own session id wins over the pane it sits in: start a new
- * Claude Code session in the SAME cmux pane and the pane id has not changed,
- * so the pane would hand the new lead the previous one's conversations —
- * exactly what this is here to stop.
+ * `CONSENSFLOW_LEAD_ID` sits above them all: it is the app's identity for
+ * a lead it launched (`tab:<id>:<generation>`), and the app's identity for
+ * a lead it launched wins over the harness's own — the app owns the pane
+ * and its generation, so a native session replaced in place (`/new`,
+ * `/resume`, a fork) must not quietly hand the new session the previous
+ * lead's conversations.
+ *
+ * Below it, the harness's own session id still wins over the pane it sits
+ * in: start a new Claude Code session in the SAME cmux pane and the pane id
+ * has not changed, so the pane would hand the new lead the previous one's
+ * conversations — exactly what this is here to stop.
  */
-const LEAD_KEYS = ["CLAUDE_CODE_SESSION_ID", "CMUX_SURFACE_ID", "ITERM_SESSION_ID", "TERM_SESSION_ID"];
+const LEAD_KEYS = [
+  "CONSENSFLOW_LEAD_ID",
+  "CLAUDE_CODE_SESSION_ID",
+  "CMUX_SURFACE_ID",
+  "ITERM_SESSION_ID",
+  "TERM_SESSION_ID",
+];
 
 /**
  * Who is asking — the lead session, not the machine and not the directory.

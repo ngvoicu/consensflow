@@ -10,6 +10,14 @@ import { adaptLine, pushEvents, renderTrail, surfaceOutput, NO_ANSWER } from "./
 // unbounded — cf never caps an agent; only the child or its upstream provider ends a run.
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_CAPTURE_BYTES = 2 * 1024 * 1024;
+const STRIPPED_CONTROL_ENV = new Set([
+  "CONSENSFLOW_APP",
+  "CONSENSFLOW_APP_TOKEN",
+  "CONSENSFLOW_TAB",
+  "CONSENSFLOW_PANE_ID",
+  "CONSENSFLOW_LEAD_ID",
+  "CONSENSFLOW_LAUNCH",
+]);
 
 // Every agent subprocess gets this marker so ConsensFlow tooling running inside the child
 // (the Claude Code hooks, the pi extension, or cf.mjs itself) can detect the nesting and bail.
@@ -250,7 +258,13 @@ export function childEnv(base, { env: envOverrides, dropEnv } = {}) {
   const env = { ...base, ...(envOverrides ?? {}) };
   for (const key of dropEnv ?? []) delete env[key];
   for (const key of Object.keys(env)) {
-    if (key.startsWith("CMUX_SOCKET") || key === "CMUX_CLAUDE_HOOK_CMUX_BIN") delete env[key];
+    if (
+      key.startsWith("CMUX_SOCKET") ||
+      key === "CMUX_CLAUDE_HOOK_CMUX_BIN" ||
+      STRIPPED_CONTROL_ENV.has(key)
+    ) {
+      delete env[key];
+    }
   }
   return env;
 }

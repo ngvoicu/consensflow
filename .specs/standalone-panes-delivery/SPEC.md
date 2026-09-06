@@ -557,7 +557,7 @@ P1/P2 recorded through this path for each harness being enabled.
 
 ## Phase 2: Tabs, identity, launch authority and the store [in-progress] — gates P1, P2 passed on all five harnesses
 
-- [ ] [TEST-PANE-11] ← current (brokkr built it green, gefjon finishing the gate in `gefjon-copper-sky`) `tests/store.test.mjs` — `Store(home)`: ONE app-wide
+- [x] [TEST-PANE-11] `tests/store.test.mjs` — `Store(home)`: ONE app-wide
       queue — two mutations on one row, two on different rows, two tabs
       created in different directories, 50 concurrent mixed mutations: none
       lost; an **instance lock** at `<root>/app/instance.lock` (pid, start
@@ -567,18 +567,18 @@ P1/P2 recorded through this path for each harness being enabled.
       pane is released); named ops `conversation.create`, `session.bind`,
       `sent.record`, `policy.set`, `seen.set`, `delivery.upsert`,
       `tab.*`; harness stores never opened for writing.
-- [ ] [IMPL-PANE-12] `src/store.js` — the queue, the lock, the ops over
+- [x] [IMPL-PANE-12] `src/store.js` — the queue, the lock, the ops over
       `writeJsonAtomic`. -> satisfies [TEST-PANE-11]
-- [ ] [TEST-PANE-13] `tests/tabs.test.mjs` — `tab.create(dir, harness)`
+- [x] [TEST-PANE-13] `tests/tabs.test.mjs` — `tab.create(dir, harness)`
       returns `{id, generation: 1, leadId: 'tab:<id>:1'}`; two tabs may
       share a directory without sharing a lead; `addPane`, `removePane`,
       order; `suspend`, `resume` (generation +1, new `leadId`); a restart
       reads every tab `closed`; a pane id with a new generation is not the
       old pane; `leadId({CONSENSFLOW_LEAD_ID:'tab:1:2'})` is `'tab:1:2'`
       and wins over `CLAUDE_CODE_SESSION_ID`.
-- [ ] [IMPL-PANE-14] `src/tabs.js`; `hosts/lib/threads.js` `LEAD_KEYS`
+- [x] [IMPL-PANE-14] `src/tabs.js`; `hosts/lib/threads.js` `LEAD_KEYS`
       gains `CONSENSFLOW_LEAD_ID` first. -> satisfies [TEST-PANE-13]
-- [ ] [TEST-PANE-15] `tests/launch.test.mjs` — roles and tickets: the lead
+- [x] [TEST-PANE-15] `tests/launch.test.mjs` — roles and tickets: the lead
       env (`CONSENSFLOW_APP`, tab-scoped token, `CONSENSFLOW_LEAD_ID`,
       `_TAB`, `_PANE_ID`, `PATH` starting with the bundle's `bin`, no
       `CONSENSFLOW_CHILD`); the controller env (`CONSENSFLOW_APP`,
@@ -592,10 +592,10 @@ P1/P2 recorded through this path for each harness being enabled.
       is refused; any body carrying `by`, `lead`, `owner` or a foreign
       `tab` is 400; Rust's launch argv names the bundle's absolute node and
       `cf.mjs`.
-- [ ] [IMPL-PANE-16] `src/launch.js`, `src/ui.js` scoping middleware,
+- [x] [IMPL-PANE-16] `src/launch.js`, `src/ui.js` scoping middleware,
       `hosts/lib/runners.js` `childEnv` strip list, `lib.rs` absolute
       launch paths. -> satisfies [TEST-PANE-15]
-- [ ] [TEST-PANE-17] `tests/ui-panes.test.mjs` — against the REAL server
+- [ ] [TEST-PANE-17] ← current `tests/ui-panes.test.mjs` — against the REAL server
       (the test on the pipe as Rust): `POST /api/panes/consult {agent, task,
       brief?, context?, handoffFile?, session?, fresh?, notify?, opId}`
       applies the continuation rule — `fresh` creates (name minted), a
@@ -903,6 +903,19 @@ replacement fails closed; an interrupted read creates no coverage.
 
 ## Resume Context
 
+> 2026-09-07 01:40 EEST — **store, tabs, launch committed** (11–16) after
+> asteria's round-6 approve (95/95 across store, tabs, binding, launch).
+> In work: completion round 3 by hyperion in `hyperion-ivory-sky` (asteria's
+> CM1–CM10; decisions: Pi settlement derived from Pi's own retry backoff
+> unless a post-run record exists, OpenCode claims no cancellation until a
+> supported-version fixture, cursors opaque with `itemsAfter(cursor)` on
+> every adapter); deliveries round 2 by apollo in `apollo-hazy-lagoon`
+> (gefjon's window died after two silent hours on the rate-limited free
+> model; the eight DEL findings and decisions went to apollo in a prompt
+> file); page unit by hyperion in `hyperion-jade-willows` (RED confirmed,
+> GREEN in progress). Next tasks: 17–20 (`tests/ui-panes.test.mjs` against
+> the real server, then the `cf` side). Registry 26/52.
+>
 > 2026-09-06 23:45 EEST — state of play. Committed: Phase 1, the binding unit
 > (21–22), probes. Uncommitted and in review or in work: store + tabs (11–14)
 > — asteria BLOCK twice, round 3 now with zeus in `zeus-kelp-valley` (O_EXCL
@@ -1016,6 +1029,7 @@ replacement fails closed; an interrupted read creates no coverage.
 | 2026-09-07 | A unit is committed only when `npm run check` on an export of the exact staged tree exits 0, and the commit is gated on that exit code, never chained after it | The launch unit was committed while its `src/ui.js` imported the uncommitted store; `cf ui` at that HEAD could not load. Reverted in `1cc0b13`; the unit returns with the store |
 | 2026-09-07 | The store's ownership is a kernel-held exclusive lock: the lock file opened with `O_RDWR|O_CREAT|O_EXLOCK|O_NONBLOCK` and the fd held for the store's lifetime; no pid, start time, tombstone or reclaim | asteria's S1 survived four rounds of file-primitive designs (a third contender, an admitted mutation writing after displacement) and S6 fell to time zones and DST; a live probe on this Mac showed Node honours the raw `O_EXLOCK` flag (EAGAIN in-process and cross-process, released with the fd, so released on a crash). BSD/macOS only; Linux and Windows get their lock in the packaging spec |
 | 2026-09-06 | Rename, skill and evals in the LAST phase | risk 17 |
+| 2026-09-07 | A transcript cursor is an opaque token minted by the completion adapter, and only that adapter compares it; every adapter exposes an items-after-cursor function, and no consumer (deliveries included) indexes an array with a cursor | asteria, completion round 2 (CM4): two real OpenCode tool results share one timestamp while their native completion events are sequence 47 and 48, so a timestamp is not a total order — and `deliveries.js` was reading numeric cursors as array indexes, which matches no adapter's native positions |
 
 ## TDD Log
 
@@ -1040,6 +1054,11 @@ replacement fails closed; an interrupted read creates no coverage.
 | [IMPL-PANE-28] | — | 13/13, then 19/19 with `recordLeadPreference` exercising the `--notify` write clause; lead re-ran | asteria: **approve with edits** (the write clause was unproven) → done |
 | [IMPL-PANE-06] (Node half) | — | `node --test tests/bridge.test.mjs`: 17 passed, 0 failed; lead re-ran: 17/17, `tests/ui.test.mjs` 29/29 | biome format + two assignment-in-expression lints fixed; one self-inflicted test sizing (a 64-byte budget could not fit the refusal frame) corrected in the TEST, noted as a test bug not an assertion change |
 | [TEST-PANE-15] | `node --test tests/launch.test.mjs`: exit 1, 1 test, 1 failed — `ERR_MODULE_NOT_FOUND src/launch.js` | — | — |
+| [IMPL-PANE-16] | — | `node --test tests/launch.test.mjs`: 18 passed, 0 failed (hyperion; zeus: approve, on condition it lands with the store) | tab-scoped tokens, single-use tickets, `childEnv` strips the six control variables |
+| [TEST-PANE-11] | brokkr, `node --test tests/store.test.mjs`: exit 1 — `ERR_MODULE_NOT_FOUND src/store.js` | — | — |
+| [IMPL-PANE-12] | — | brokkr 11/11; after six asteria rounds (S1–S6 and the lock give-back, zeus rounds 3–6): 40/40; asteria: **approve**, 95/95 across store, tabs, binding, launch | file primitives replaced by the kernel `O_EXLOCK` lock (Decision Log 2026-09-07) |
+| [TEST-PANE-13] | brokkr, `node --test tests/tabs.test.mjs`: exit 1 — module missing, and the `leadId` clause demonstrably returning `sess-9` | — | — |
+| [IMPL-PANE-14] | — | 14/14 (persisted pane allocator, generation-checked removal after asteria's T1/T2); asteria: **approve** | `CONSENSFLOW_LEAD_ID` first in `LEAD_KEYS` |
 
 ## Deviations
 

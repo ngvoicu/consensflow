@@ -9,6 +9,15 @@ import { CATALOG, EFFORTS } from './catalog.js'
 import { detectHarnesses } from './harnesses.js'
 import { installSkill, skillsStatus, skillsSummary, uninstallSkills } from './install.js'
 import {
+  controllerEnv as buildControllerEnv,
+  leadEnv as buildLeadEnv,
+  checkScope,
+  issueTicket,
+  LaunchTicketError,
+  redeem,
+  scopeOf,
+} from './launch.js'
+import {
   applyMode,
   currentMode,
   MODES,
@@ -31,6 +40,7 @@ import {
   syncAgents,
 } from './roster.js'
 import { agentCommand, generateSkill } from './skill.js'
+import { Store } from './store.js'
 import {
   healOnOpen,
   refreshInstalledSkill,
@@ -39,6 +49,7 @@ import {
   skillTargets,
   staleSkills,
 } from './sync.js'
+import { leadIdentity, Tabs } from './tabs.js'
 import { terminalCommandStatus, terminalRuntime } from './terminal.js'
 
 /**
@@ -211,6 +222,26 @@ function readBody(request) {
   })
 }
 
+const FORBIDDEN_IDENTITY_FIELDS = ['by', 'lead', 'owner']
+
+class InternalInvariantError extends Error {
+  constructor(message) {
+    super(message)
+    this.name = 'InternalInvariantError'
+  }
+}
+
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function paneOperation(method, pathname) {
+  if (method === 'GET' && pathname === '/api/panes') return 'panes'
+  if (method !== 'POST' || !pathname.startsWith('/api/panes/')) return null
+  const operation = pathname.slice('/api/panes/'.length)
+  return operation.length > 0 && !operation.includes('/') ? operation : null
+}
+
 /**
  * True when this descriptor is the parent's end of a pipe. Node's `'pipe'`
  * stdio is a socketpair on macOS and a FIFO elsewhere, so both count; a
@@ -246,7 +277,15 @@ export async function startUiServer(env) {
   // have to run the CLI once to be tidied up.
   migrateStateRoot(env)
 
+  const store = new Store(configRoot(env))
+  const tabs = new Tabs(store)
+  let storePromise
+  const storeReady = () => {
+    storePromise ??= store.open()
+    return storePromise
+  }
   const token = randomBytes(24).toString('hex')
+  let app = null
 
   const server = createServer(async (request, reply) => {
     const url = new URL(request.url, 'http://127.0.0.1')
@@ -254,17 +293,118 @@ export async function startUiServer(env) {
       reply.writeHead(status, { 'content-type': type })
       reply.end(typeof body === 'string' ? body : JSON.stringify(body))
     }
-
-    const presented =
-      (request.headers.authorization ?? '').replace(/^Bearer /, '') ||
-      (url.searchParams.get('token') ?? '')
-    if (presented.length === 0 || !tokenMatches(presented, token)) {
-      return send(401, { error: 'unauthorized' })
+    let bodyPromise
+    const jsonBody = () => {
+      bodyPromise ??= readBody(request).then((body) => JSON.parse(body || '{}'))
+      return bodyPromise
     }
 
     try {
+      let body
+      if (!['GET', 'HEAD'].includes(request.method)) {
+        body = await jsonBody()
+        if (!isRecord(body)) return send(400, { error: 'request body must be an object' })
+        if (FORBIDDEN_IDENTITY_FIELDS.some((field) => Object.hasOwn(body, field))) {
+          return send(400, { error: 'request bodies cannot supply identity' })
+        }
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/launch/redeem') {
+        return send(200, redeem(body.ticket))
+      }
+
+      const bearer = (request.headers.authorization ?? '').replace(/^Bearer /, '')
+      const pageToken = bearer || (url.searchParams.get('token') ?? '')
+      const uiAuthorized = pageToken.length > 0 && tokenMatches(pageToken, token)
+      const scoped = scopeOf(bearer)
+      if (!uiAuthorized && !scoped) return send(401, { error: 'unauthorized' })
+
+      if (scoped && body !== undefined) {
+        if (Object.hasOwn(body, 'tab') && scoped.tab !== body.tab) {
+          return send(400, { error: 'request tab does not match the token' })
+        }
+        for (const field of ['launch', 'generation']) {
+          if (Object.hasOwn(body, field) && scoped[field] !== body[field]) {
+            return send(403, { error: 'forbidden' })
+          }
+        }
+      }
+
+      const panesPath = url.pathname === '/api/panes' || url.pathname.startsWith('/api/panes/')
+      if (panesPath) {
+        if (uiAuthorized) return send(403, { error: 'forbidden' })
+        const op = paneOperation(request.method, url.pathname)
+        const dimensions = {}
+        if (scoped.tab !== undefined) {
+          if (request.method !== 'GET' && !Object.hasOwn(body, 'tab')) {
+            return send(403, { error: 'forbidden' })
+          }
+          dimensions.tab = body === undefined ? scoped.tab : body.tab
+        }
+        if (scoped.launch !== undefined || scoped.generation !== undefined) {
+          if (
+            body === undefined ||
+            !Object.hasOwn(body, 'launch') ||
+            !Object.hasOwn(body, 'generation')
+          ) {
+            return send(403, { error: 'forbidden' })
+          }
+          dimensions.launch = body.launch
+          dimensions.generation = body.generation
+        }
+        if (op === null || !checkScope(bearer, { ...dimensions, op })) {
+          return send(403, { error: 'forbidden' })
+        }
+        return send(501, { error: 'not yet' })
+      }
+
+      if (!uiAuthorized) return send(403, { error: 'forbidden' })
+
       if (request.method === 'GET' && url.pathname === '/') {
         return send(200, PAGE(token), 'text/html; charset=utf-8')
+      }
+      if (request.method === 'POST' && url.pathname === '/api/tabs') {
+        await storeReady()
+        const created = await tabs.create(body.dir, body.harness)
+        const tab = await tabs.get(created.id)
+        const pane = tab?.panes?.find((candidate) => candidate.kind === 'lead')
+        if (tab === null || pane === undefined) {
+          throw new InternalInvariantError('the new tab has no lead pane')
+        }
+        return send(201, {
+          tab,
+          leadEnv: buildLeadEnv({
+            tab: tab.id,
+            pane: pane.id,
+            leadId: created.leadId,
+            app,
+            path: env?.PATH,
+          }),
+        })
+      }
+      if (request.method === 'POST' && url.pathname === '/api/launch') {
+        await storeReady()
+        const tab = await tabs.get(body.tab)
+        if (tab === null) throw new Error(`no tab ${body.tab}`)
+        if (tab.closed === true) throw new Error(`the tab ${tab.id} is closed`)
+        const pane = tab.panes.find((candidate) => candidate.id === body.pane)
+        if (pane === undefined) throw new Error(`no pane ${body.pane} in tab ${tab.id}`)
+        const requester = tab.panes.find((candidate) => candidate.kind === 'lead')
+        if (requester === undefined) {
+          throw new InternalInvariantError(`the tab ${tab.id} has no lead pane`)
+        }
+        const ticket = issueTicket({
+          tab: tab.id,
+          pane: pane.id,
+          lead: leadIdentity(tab),
+          requester: requester.id,
+          conversation: body.conversation,
+          generation: pane.generation,
+        })
+        return send(201, {
+          ticket,
+          controllerEnv: buildControllerEnv({ pane: pane.id, app, ticket }),
+        })
       }
       if (request.method === 'GET' && url.pathname === '/api/agents') {
         return send(200, {
@@ -283,7 +423,6 @@ export async function startUiServer(env) {
       if (request.method === 'POST' && url.pathname === '/api/agents/sync') {
         // A named operation, like every other one here: it re-resolves
         // catalog-backed agents and nothing else.
-        const body = JSON.parse((await readBody(request)) || '{}')
         const applied = syncAgents(env, {
           ...(typeof body.name === 'string' ? { name: body.name } : {}),
         })
@@ -291,7 +430,7 @@ export async function startUiServer(env) {
         return send(200, { applied, agents: listAgents(env).map(withCommand) })
       }
       if (request.method === 'POST' && url.pathname === '/api/agents') {
-        const added = addAgent(JSON.parse(await readBody(request)), env)
+        const added = addAgent(body, env)
         refreshInstalledSkill(env)
         return send(201, { agent: added })
       }
@@ -299,7 +438,6 @@ export async function startUiServer(env) {
         return send(200, systemState(env))
       }
       if (request.method === 'POST' && url.pathname === '/api/mode') {
-        const body = JSON.parse((await readBody(request)) || '{}')
         if (!MODES.includes(body.mode)) {
           return send(400, { error: `unknown mode; expected ${MODES.join(', ')}` })
         }
@@ -307,11 +445,9 @@ export async function startUiServer(env) {
         return send(200, { ...outcome, system: systemState(env) })
       }
       if (request.method === 'POST' && url.pathname === '/api/skills/install') {
-        const body = JSON.parse((await readBody(request)) || '{}')
         return send(200, installFromUi(body, env))
       }
       if (request.method === 'POST' && url.pathname === '/api/reset') {
-        const body = JSON.parse((await readBody(request)) || '{}')
         if (body.confirm !== true) {
           return send(400, { error: 'confirm before resetting ConsensFlow' })
         }
@@ -326,7 +462,6 @@ export async function startUiServer(env) {
         })
       }
       if (request.method === 'POST' && url.pathname === '/api/off') {
-        const body = JSON.parse((await readBody(request)) || '{}')
         if (body.confirm !== true) {
           return send(400, { error: 'confirm before turning ConsensFlow off' })
         }
@@ -342,7 +477,6 @@ export async function startUiServer(env) {
         })
       }
       if (request.method === 'POST' && url.pathname === '/api/skills/uninstall') {
-        const body = JSON.parse((await readBody(request)) || '{}')
         // A click that removes 300 files says so first; the flag is the say-so.
         if (body.confirm !== true) {
           return send(400, { error: 'confirm the removal before it runs' })
@@ -352,7 +486,7 @@ export async function startUiServer(env) {
 
       const named = /^\/api\/agents\/([a-z][a-z0-9-]*)$/.exec(url.pathname)
       if (named !== null && request.method === 'PATCH') {
-        const edited = editAgent(named[1], JSON.parse(await readBody(request)), env)
+        const edited = editAgent(named[1], body, env)
         refreshInstalledSkill(env)
         return send(200, { agent: edited })
       }
@@ -364,17 +498,33 @@ export async function startUiServer(env) {
       }
       return send(404, { error: 'not found' })
     } catch (cause) {
+      if (cause instanceof LaunchTicketError) return send(401, { error: 'unauthorized' })
+      if (cause instanceof InternalInvariantError) return send(500, { error: 'internal_error' })
       return send(400, { error: cause instanceof Error ? cause.message : String(cause) })
     }
   })
 
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  } catch (cause) {
+    await store.close()
+    throw cause
+  }
   const { port } = server.address()
+  app = { url: `http://127.0.0.1:${port}/`, token }
 
   return {
     url: `http://127.0.0.1:${port}`,
     token,
-    close: () => new Promise((resolve) => server.close(resolve)),
+    close: async () => {
+      try {
+        await new Promise((resolve, reject) => {
+          server.close((error) => (error === undefined ? resolve() : reject(error)))
+        })
+      } finally {
+        await store.close()
+      }
+    },
   }
 }
 
