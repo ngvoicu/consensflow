@@ -104,6 +104,16 @@ other two follow in their own spec.
       process is kept and a focused-pane view with navigation is offered
 - [ ] Every pane has a title: conversation name · agent · effective policy
       and its source; a shell pane is titled `shell`
+- [ ] The sidebar is a tree: **session** (the tab, shown by its name) →
+      one level down **lead** (its name) → one level further down each
+      worker (`w1 <name>`, `w2 <name>`, …) and each shell; clicking the
+      session shows the grid of all its panes, clicking the lead shows the
+      lead's pane alone, clicking a worker shows that worker's pane alone;
+      every session ever opened stays listed, live or closed, and a closed
+      one is **resumable from the sidebar**: Resume reopens the lead in a new
+      generation, and clicking a closed worker conversation reopens it
+      through the attach path — a session manager, not a list of what is
+      currently running
 - [ ] A human opens panes in a tab beside the ones consults open: a shell
       pane, or an agent pane that becomes a conversation whose lead is the
       tab's lead
@@ -347,6 +357,20 @@ delivering `sendUserMessage(…, {deliverAs: 'followUp'})` on
 `agent_settled`) are enabled independently when P5/P6 pass their whole
 path, and gate nothing else.
 
+**The sidebar.** What the spec calls a tab, the page calls a **session**,
+by name. The sidebar is a tree, always: session → lead → workers and shells,
+each by name, workers numbered in the order they opened (`w1 nyx-coral-lane`,
+`w2 ares-amber-moss`). Selection decides the pane area: the session node
+shows the grid (`gridTemplate(n)`), the lead node shows the lead's pane
+alone, a worker node shows that worker's pane alone — the same single-pane
+view the focused mode uses when nothing fits, with next/previous. Sessions
+are persisted (`tabs.json`) and stay listed after they close; a closed
+session shows greyed with **Resume**, which reopens its lead in a new
+generation, and a closed worker conversation under it reopens through the
+attach path when clicked. Nothing about a closed session is forgotten by
+the page: its conversations, their policies and their held deliveries are
+read from the store, not from what is running.
+
 **Layouts, counted with the lead** (totals 1–6 special; beyond: `rows =
 ceil(sqrt(n))`, `cols = ceil(n / rows)`, row-major):
 
@@ -554,7 +578,7 @@ P1/P2 recorded through this path for each harness being enabled.
       and wins over `CLAUDE_CODE_SESSION_ID`.
 - [ ] [IMPL-PANE-14] `src/tabs.js`; `hosts/lib/threads.js` `LEAD_KEYS`
       gains `CONSENSFLOW_LEAD_ID` first. -> satisfies [TEST-PANE-13]
-- [x] [TEST-PANE-15] `tests/launch.test.mjs` — roles and tickets: the lead
+- [ ] [TEST-PANE-15] `tests/launch.test.mjs` — roles and tickets: the lead
       env (`CONSENSFLOW_APP`, tab-scoped token, `CONSENSFLOW_LEAD_ID`,
       `_TAB`, `_PANE_ID`, `PATH` starting with the bundle's `bin`, no
       `CONSENSFLOW_CHILD`); the controller env (`CONSENSFLOW_APP`,
@@ -744,8 +768,12 @@ replacement fails closed; an interrupted read creates no coverage.
       shim) — first launch maximized, later launches restore geometry; the
       roster panel (the `cf ui` iframe) collapses upward and expands; the
       sidebar (collapsible left) and the pane area; four and five
-      panes render their templates; a worker opening keeps focus on the
-      lead; titles `name · @agent · policy (source)`, `shell`; right-click
+      panes render their templates; the sidebar renders the tree session →
+      lead → `w1 …`, `w2 …`, shells; clicking the session node shows the
+      grid, the lead node the lead's pane alone, a worker node that pane
+      alone; a closed session is listed greyed with **Resume**, which calls
+      `tab_resume`, and a closed worker under it calls `attach` when
+      clicked; a worker opening keeps focus on the lead; titles `name · @agent · policy (source)`, `shell`; right-click
       **Send reply to lead…** lists answers with delivered/uncertain marks
       and resend; **Auto / Manual / Inherit** per pane; tab policy in the
       tab header; a waiting delivery shows its reason (`draft open`, `lead
@@ -969,6 +997,7 @@ replacement fails closed; an interrupted read creates no coverage.
 | 2026-09-06 | The Sol preset moves from `ultra` to `max` everywhere; `ultra` stays a codex level nobody's preset names | User's call (2026-09-06): "Sol ultra becomes max everywhere in ConsensFlow". A deliberate seat below the proven ceiling, like the DeepSeek rows — recorded so the effort-ceilings audit does not "fix" it back |
 | 2026-09-06 | The launch nonce may sit in any of the session's first five user turns, as the first non-empty line after injected blocks | zeus's review of tasks 21–22: codex puts `AGENTS.md` before the seed; the fixture that began at the seed hid it |
 | 2026-09-06 | The store's `session.bind` calls `bindEvidence` against its launch record; every binding decision records its generation | zeus F7: an evidence string anyone can send is vocabulary, not proof |
+| 2026-09-06 | The sidebar is a session → lead → workers tree; a node click narrows the pane area to that node; closed sessions stay listed and resume from the sidebar | User's requirement (2026-09-06): "resumable like a session manager; session, then lead a level down, then w1, w2 …; click the lead to see only its pane, a worker only its pane, the session the grid" |
 | 2026-09-06 | Rename, skill and evals in the LAST phase | risk 17 |
 
 ## TDD Log
