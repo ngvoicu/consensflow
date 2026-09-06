@@ -1013,6 +1013,7 @@ replacement fails closed; an interrupted read creates no coverage.
 | 2026-09-06 | The launch nonce may sit in any of the session's first five user turns, as the first non-empty line after injected blocks | zeus's review of tasks 21–22: codex puts `AGENTS.md` before the seed; the fixture that began at the seed hid it |
 | 2026-09-06 | The store's `session.bind` calls `bindEvidence` against its launch record; every binding decision records its generation | zeus F7: an evidence string anyone can send is vocabulary, not proof |
 | 2026-09-06 | The sidebar is a session → lead → workers tree; a node click narrows the pane area to that node; closed sessions stay listed and resume from the sidebar | User's requirement (2026-09-06): "resumable like a session manager; session, then lead a level down, then w1, w2 …; click the lead to see only its pane, a worker only its pane, the session the grid" |
+| 2026-09-07 | A unit is committed only when `npm run check` on an export of the exact staged tree exits 0, and the commit is gated on that exit code, never chained after it | The launch unit was committed while its `src/ui.js` imported the uncommitted store; `cf ui` at that HEAD could not load. Reverted in `1cc0b13`; the unit returns with the store |
 | 2026-09-06 | Rename, skill and evals in the LAST phase | risk 17 |
 
 ## TDD Log
