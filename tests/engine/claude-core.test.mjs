@@ -1082,9 +1082,9 @@ test('parity: shared lib files stay identical with the consensflow-pi sibling', 
 })
 
 test('docs describe the stream-first observability surface, transcript backstop, and conventions [STRM-21]', async () => {
-  const readme = await readFile(new URL('../../README.md', import.meta.url), 'utf8')
-  const harnesses = await readFile(new URL('../../AGENTS.md', import.meta.url), 'utf8')
-  const docs = `${readme}\n${harnesses}`
+  // AGENTS.md was deleted on 2026-09-06 (its rules moved into the active
+  // spec); the README carries every property asserted below on its own.
+  const docs = await readFile(new URL('../../README.md', import.meta.url), 'utf8')
   // Stream-first observability surface (primary), foreground-incremental.
   assert.match(docs, /stream/i, 'docs describe the automatic live stream')
   assert.match(docs, /foreground/i, 'docs note runs are foreground')

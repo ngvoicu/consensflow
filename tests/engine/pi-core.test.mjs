@@ -1080,9 +1080,9 @@ test('parity: shared lib files stay identical with the consensflow-cc sibling', 
 })
 
 test('docs describe the stream-first observability surface, transcript backstop, and conventions [STRM-21]', async () => {
-  const readme = await readFile(new URL('../../README.md', import.meta.url), 'utf8')
-  const harnesses = await readFile(new URL('../../AGENTS.md', import.meta.url), 'utf8')
-  const docs = `${readme}\n${harnesses}`
+  // AGENTS.md was deleted on 2026-09-06 (its rules moved into the active
+  // spec); the README carries every property asserted below on its own.
+  const docs = await readFile(new URL('../../README.md', import.meta.url), 'utf8')
   // `onUpdate` was pi's `cf_run_agent` tool, and the pi extension went with the
   // rest of the host payloads. Requiring the docs to describe it would mean
   // documenting a surface that no longer exists — the same error as the
