@@ -214,4 +214,87 @@ export const SCENARIOS = [
       },
     ],
   },
+  {
+    id: 'an-independent-task-gets-its-own-pane',
+    // Not a live failure — the first scenario written before one. Every check
+    // above rewards sending into the pane the lead already has, and the skill's
+    // only word on starting fresh was one sentence after all the mechanics, so
+    // nothing measured the other direction. Added 2026-09-05 as its
+    // counterweight, with `a-dependent-task-stays-in-its-pane` below.
+    why:
+      'Independent work belongs in its own pane: it runs in parallel and inherits nothing. A lead '
+      + 'with a live joke conversation must not send an unrelated review into it.',
+    stage: {
+      files: {
+        'scripts/backup.sh': [
+          '#!/bin/sh',
+          'set -e',
+          'tar czf /backups/site-$(date +%F).tgz /var/www/site',
+          'rm -rf /var/www/site/tmp/*',
+          '',
+        ].join('\n'),
+      },
+    },
+    turns: [
+      { say: 'ask nyx for a joke', expect: [] },
+      {
+        say: 'ask nyx to review scripts/backup.sh — can it lose data if it is interrupted halfway?',
+        expect: [
+          ['mints a fresh name', (log) => ran(log, 'cf mint @nyx')],
+          ['opens a new pane', (log) => ran(log, 'cmux new-pane')],
+          ['sends a fresh consult there', (log) => consultLine(log) !== null && consultLine(log).includes('--new')],
+          [
+            'sends no bare words into the joke window',
+            (log) => log.filter((l) => l.startsWith('cmux send')).every((l) => l.includes('cf run ')),
+          ],
+        ],
+      },
+    ],
+  },
+  {
+    id: 'a-dependent-task-stays-in-its-pane',
+    // The guard against the rule above over-correcting: a task phrased as new
+    // work that still leans on what the agent found. No "too", no "another
+    // one" — the dependence is in "the case he flagged", and only the
+    // conversation knows which case that is. Added 2026-09-05.
+    why:
+      'A task that needs what the agent already read and decided goes into the window it has. '
+      + 'Opened in a new pane, "the case he flagged" reaches an agent that flagged nothing.',
+    // The conversation has to hold the case, or a lead that looks first finds
+    // jokes and rightly sends nothing.
+    stage: {
+      transcript: [
+        'amber-tide · @nyx · 2 turns',
+        '',
+        '› asked',
+        'whether the retry path is safe',
+        '',
+        '• @nyx',
+        'Mostly, with one exception. A retry after a partial write duplicates the',
+        'row: the idempotency key is minted AFTER the insert in src/retry.js, so a',
+        'crash between the two leaves no key and the retry inserts again. Everything',
+        'else on the path is safe to run twice.',
+        '',
+      ].join('\n'),
+    },
+    turns: [
+      { say: 'ask nyx whether the retry path is safe', expect: [] },
+      {
+        say: 'ask nyx to write a test for the case he flagged',
+        expect: [
+          ['looks before it sends', (log) => ran(log, 'cf catchup')],
+          ['sends words at the window it already has', (log) => ran(log, 'cmux send')],
+          ['opens no second pane', (log) => !ran(log, 'cmux new-pane')],
+          ['does not re-spawn the consult', (log) => !log.some((line) => line.includes('cf run @nyx'))],
+          [
+            'sends the question, not a shell line',
+            (log) => {
+              const sends = log.filter((line) => line.startsWith('cmux send'))
+              return sends.length > 0 && !sends.some((line) => /cf run|&&|--session/.test(line))
+            },
+          ],
+        ],
+      },
+    ],
+  },
 ]

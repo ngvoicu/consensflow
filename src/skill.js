@@ -170,7 +170,15 @@ question, then decide or ask the user.
   follow-up composed against a stale view asks the wrong question.
 - **A pane holding a window is a chat box, not a shell.** Everything you send
   into it reaches the agent as a message, so a follow-up is your question in
-  plain words. A \`cf run\` line sent there asks the agent to consult itself.`
+  plain words. A \`cf run\` line sent there asks the agent to consult itself.
+- **A task that leans on a conversation stays in its pane; only an independent
+  one gets a new pane.** "Write the test for it", "what about the timeout
+  too", "fix what you found" all need what the agent has already read and
+  decided, so they go into the window it has — never a new pane, which would
+  hand the same words to an agent that saw none of it. Independent is the
+  task you could hand a stranger in full, its own files named, without a word
+  about what that conversation said: that one starts fresh, in its own pane.
+  Unsure means continue.`
       : ''
   }
 
@@ -275,6 +283,27 @@ too much, walk it in order from the first line and keep going until you have
 all of it. Length is a reason to read in more passes, never a reason to start
 from the bottom.
 
+**Before you send into a pane, decide whether this is a follow-up at all.**
+By default it is. A conversation carries everything the agent has read,
+decided and answered, and a task that leans on any of it — "now write the test
+for it", "what about the timeout path too", "fix what you found" — belongs in
+the pane it already has: the agent remembers, and the provider's cache is
+warm. Opened elsewhere, the same words reach an agent that has never seen the
+files or the reasoning they point at, and the answer is worse. One test tells
+the two apart: could you hand this task to a stranger in full, naming its own
+files, without a word about what that conversation said? Only then is it
+independent, and an independent task starts its own conversation, because a
+history it does not need costs tokens on every turn and leans the answer
+towards the old subject, and because two independent tasks in two panes run
+at the same time while two in one pane wait on each other. Starting one is
+the five commands above, all five: a fresh \`cf mint\`, a new pane, the
+\`cf run … --new --session\` line SENT into that pane, the tab titled,
+\`cf sessions\` to confirm. \`cf run\` never runs in this pane — not on the
+second consult any more than on the first (measured, 2026-09-05: a lead that
+had opened the pane correctly then ran the consult here, off a reference
+line that called \`--new\` "its own pane"). Unsure means continue: an
+unrelated turn costs some tokens, a cold agent costs the context it needed.
+
 **A follow-up is the question itself, typed into that pane.** The pane stopped
 being a shell the moment the consult ran — it holds the agent's window now, so
 whatever you send lands in its input box and is read as a message. Send your
@@ -324,8 +353,11 @@ it happened, which is why \`--unread\` exists and why the rules say to look
 before you answer for a conversation or add to one.
 
 \`\`\`bash
-cf run @<name> "<task>"                     # opens (or reopens) that agent's conversation here
-cf run @<name> "<task>" --new               # a fresh conversation, its own pane
+# The three cf run lines are what you SEND into a pane (steps 1–5): run by
+# you here they are refused, a lead has no terminal for the window to open
+# in. Everything after them runs here.
+cf run @<name> "<task>"                     # continues that agent's conversation
+cf run @<name> "<task>" --new               # a fresh conversation, sent into a NEW pane
 cf run @<name> "<task>" --session <name>    # a specific one, by name
 cf sessions                                 # what is alive in this workspace
 cf catchup <name> --unread                  # what has been said since you last looked
@@ -334,10 +366,6 @@ cf catchup <name> --wait                    # sit out the answer to a question j
 cf last <name>                              # the last answer a streamed run left (codex turn 1)
 cf attach <name>                            # reopen a conversation's window later, anywhere
 \`\`\`
-
-Start a **new** conversation when the subject genuinely changes. Continuing one
-carries its whole history into every later turn, which is what makes the agent
-useful — and what makes an unrelated question expensive.
 
 If you cannot open a pane — no workspace, cmux is not running — say so and run
 the consult in your own context instead: without a terminal it streams the

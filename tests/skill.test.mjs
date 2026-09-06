@@ -331,6 +331,33 @@ describe('the description is all a lead reads before it decides to look inside',
     assert.match(cmux, /cf catchup <name> --wait/)
   })
 
+  it('keeps a dependent task in its pane and gives only an independent one a new pane', () => {
+    // 2026-09-05: every scenario rewarded sending into the pane a lead already
+    // had, and the skill's only word on starting fresh was one sentence after
+    // all the mechanics. The decision has to sit where it is made — before the
+    // follow-up recipe — with continuing as the default and a test that says
+    // which task is independent, or a lead either drags unrelated work into a
+    // conversation or, over-corrected, opens a cold pane for a follow-up.
+    const cmux = generateSkill(roster, { mode: 'cmux' })
+    const rules = cmux.slice(cmux.indexOf('## Rules'), cmux.indexOf('## Roster'))
+
+    assert.match(rules, /only an independent\s+one gets a new pane/i)
+    assert.match(rules, /Unsure means continue/)
+    const decision = cmux.indexOf('decide whether this is a follow-up at all')
+    const recipe = cmux.indexOf('A follow-up is the question itself')
+    assert.ok(decision > 0 && decision < recipe, 'the decision comes before the follow-up recipe')
+    assert.match(cmux, /hand this task to a stranger in full/)
+    // Measured 2026-09-05: with the decision right, 2 of 3 leads then ran the
+    // fresh consult in their OWN pane, off a reference line that called
+    // `--new` "its own pane". The reference block has to say those lines are
+    // sent, and the paragraph has to say it again at the moment of starting.
+    assert.match(cmux, /never runs in this pane/)
+    assert.match(cmux, /what you SEND into a pane/)
+    assert.doesNotMatch(cmux, /a fresh conversation, its own pane/)
+    // One copy of the rule, where it is read — not a second at the tail.
+    assert.doesNotMatch(cmux, /when the subject genuinely changes/)
+  })
+
   it('sends a follow-up as the question itself, never a shell line at a window', () => {
     // Live 2026-08-31: this page used to lead with `cmux send 'cd … && cf run
     // @<name> … --session <name>'` as "the safe form everywhere". A pane that

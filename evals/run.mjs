@@ -59,6 +59,12 @@ for (const scenario of chosen) {
     let thread = null
     let broke = null
     const failures = []
+    const evidence = []
+    // Every turn's commands, kept so a miss on turn 3 can show turns 1 and
+    // 2 as well: a lead that sends into a pane it never opened THIS turn
+    // opened it (or two) on a turn with no checks, and that is where the
+    // explanation was (2026-09-06).
+    const turnLogs = []
     try {
       for (const turn of scenario.turns) {
         const before = stage.read().length
@@ -70,13 +76,35 @@ for (const scenario of chosen) {
           break
         }
         const log = stage.read().slice(before)
+        turnLogs.push({ say: turn.say, log })
+        let missedHere = false
         for (const [check, holds] of turn.expect) {
           // What the lead DID, and what it then told the user: some failures are
           // only visible in the report — a lead that read the tail of a long
           // answer ran exactly the right command and still reported the wrong thing.
           const ok = holds(log, result.stdout)
           note(scenario.id, check, ok)
-          if (!ok) failures.push(check)
+          if (!ok) {
+            failures.push(check)
+            missedHere = true
+          }
+        }
+        // The stage is thrown away below, so a missed check is the last chance
+        // to see WHAT the lead ran — a rate says a fix did not work, only the
+        // commands say why (2026-09-05: two checks missed on a turn that ran
+        // no `cmux send` at all, and nothing said whether it had asked the
+        // user instead or sent something the check did not count).
+        if (missedHere && evidence.length === 0) {
+          for (const { say, log: ran } of turnLogs) {
+            const mark = say === turn.say ? ' (missed)' : ''
+            evidence.push(`    turn ${JSON.stringify(say.slice(0, 60))} ran${mark}:`)
+            for (const line of ran) evidence.push(`      $ ${line}`)
+            if (ran.length === 0) evidence.push('      (nothing)')
+          }
+        } else if (missedHere) {
+          evidence.push(`    turn ${JSON.stringify(turn.say.slice(0, 60))} ran (missed):`)
+          for (const line of log) evidence.push(`      $ ${line}`)
+          if (log.length === 0) evidence.push('      (nothing)')
         }
       }
     } finally {
@@ -91,6 +119,7 @@ for (const scenario of chosen) {
         ? `  ${label}: all checks held`
         : `  ${label}: ${failures.join('; ')}`,
     )
+    for (const line of evidence) console.log(line)
   }
 }
 

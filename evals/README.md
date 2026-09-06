@@ -43,6 +43,8 @@ Each one happened live, and the fix it guards is in the skill:
 | `look-before-you-send` | a follow-up composed against a stale view asks the wrong question |
 | `answers-from-the-conversation` | answered "did she say anything else?" from memory, with the user's pane turns unread |
 | `the-consult-line-is-plain` | piped the consult through `tee` and passed a `--prompt-file` beside a quoted task; could not read the result, and started a second conversation on the same work |
+| `an-independent-task-gets-its-own-pane` | not live yet — the counterweight to every row above, added 2026-09-05: an unrelated task sent into a live conversation inherits a history it does not need and queues behind it |
+| `a-dependent-task-stays-in-its-pane` | the guard against that rule over-correcting: "a test for the case he flagged" only means something in the conversation that flagged it |
 
 ## Baseline (2026-08-24, lead: claude)
 
@@ -69,3 +71,29 @@ Two failures that looked like regressions were neither:
   and against the changed skill, back to back: 2/2 both times. Consistent
   twice is still not consistent. A/B against HEAD is the cheap way to settle
   it, and it settles it in one pass per arm.
+
+## Both directions of one decision (2026-09-05/06, lead: claude)
+
+Two scenarios were added for the "continue or start fresh" decision, one per
+direction, and measuring them found more wrong with the stage than with the
+prose. Four stub lies were fixed, each one seen in a lead's log:
+
+- `cf mint` handed out a name that was already taken on a second call;
+- `cf run` always said `amber-tide`, so a lead that had just started a second
+  conversation was sent back to read the first;
+- `cf catchup` answered with jokes whatever the conversation was about, so
+  "a test for the case he flagged" met a conversation that flagged nothing —
+  scenarios can now supply a `transcript`;
+- `cmux new-pane` returned `surface:99` every time and `cmux tree` showed it
+  titled with the FIRST conversation, so a lead's new pane arrived already
+  wearing the old conversation's name.
+
+The runner now prints every command a lead ran when a check misses. What held
+across every honest run: `a-dependent-task-stays-in-its-pane` 5/5 checks on
+5/5 runs, and the independent scenario's decision (a fresh name, a new pane,
+nothing sent into the old window) 3/3 in every round before the pane stub was
+fixed. What is NOT yet measured: whether the fresh consult is then sent into
+the new pane rather than run in the lead's own — every earlier miss on that
+check happened under one of the stub lies above, and the first run against the
+honest stage was cut short by the Claude session limit. Measure it with
+`--repeat 3` when the limit resets, before reading anything into the prose.

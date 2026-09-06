@@ -47,21 +47,34 @@ const LONG_ANSWER = `    echo "amber-tide · @nyx · 4 turns"
     echo "• @nyx"
     echo "No — everything that matters is above."`
 
-const CF_STUB = (log, { longAnswer = false } = {}) => `#!/bin/sh
+const CF_STUB = (log, { longAnswer = false, transcriptPath = null } = {}) => `#!/bin/sh
 printf 'cf %s\\n' "$*" >> "${log}"
 case "$1" in
-  mint) echo "amber-tide" ;;
-  sessions) echo "amber-tide        @nyx         0 runs   2026-08-24T16:00:00.000Z" ;;
+  # The real mint never hands out a name that is taken. The log already holds
+  # this call, so a count of 2 is the second mint — a second conversation,
+  # which is what the independent-task scenario asks for.
+  mint) if [ "$(grep -c '^cf mint' "${log}")" -ge 2 ]; then echo "nyx-coral-lane"; else echo "amber-tide"; fi ;;
+  sessions)
+    echo "amber-tide        @nyx         0 runs   2026-08-24T16:00:00.000Z"
+    if [ "$(grep -c '^cf mint' "${log}")" -ge 2 ]; then echo "nyx-coral-lane    @nyx         0 runs   2026-08-24T16:05:00.000Z"; fi ;;
   catchup)
 ${
-  longAnswer
+  transcriptPath
+    ? `    cat "${transcriptPath}"`
+    : longAnswer
     ? LONG_ANSWER
     : `    case "$*" in
       *--unread*) echo "amber-tide · @nyx · 2 new turns"; echo ""; echo "› asked"; echo "do you have more?"; echo ""; echo "• @nyx"; echo "Why do Java developers wear glasses? Because they can't C#." ;;
       *) echo "amber-tide · @nyx · 4 turns"; echo ""; echo "› asked"; echo "Tell me a joke"; echo ""; echo "• @nyx"; echo "Light attracts bugs."; echo ""; echo "› asked"; echo "do you have more?"; echo ""; echo "• @nyx"; echo "Why do Java developers wear glasses? Because they can't C#." ;;
     esac`
 } ;;
-  run) echo "conversation: amber-tide (new)"; echo "read it back with: cf catchup amber-tide"; echo "Light attracts bugs."; echo "— @nyx" ;;
+  # The real run names the conversation it was given. A stub that always
+  # said amber-tide sent a lead that had just started nyx-coral-lane back to
+  # read the OLD one (seen 2026-09-05).
+  run)
+    name="amber-tide"; prev=""
+    for a in "$@"; do if [ "$prev" = "--session" ]; then name="$a"; fi; prev="$a"; done
+    echo "conversation: $name (new)"; echo "read it back with: cf catchup $name"; echo "Light attracts bugs."; echo "— @nyx" ;;
   last) echo "# amber-tide · @nyx"; echo ""; echo "Light attracts bugs." ;;
   *) : ;;
 esac
@@ -70,10 +83,26 @@ esac
 const CMUX_STUB = (log) => `#!/bin/sh
 printf 'cmux %s\\n' "$*" >> "${log}"
 case "$1" in
-  new-pane) echo "OK surface:99 pane:99 workspace:1" ;;
-  send) echo "OK surface:99 workspace:1" ;;
-  rename-tab) echo "OK action=rename tab=tab:99 workspace=workspace:1" ;;
-  tree) echo "window window:1 [current]"; echo "\\_ workspace workspace:1"; echo "   |- pane pane:28"; echo "   |   \\_ surface surface:28 [terminal] \\"the lead\\" [selected] <- here"; echo "   \\_ pane pane:99"; echo "       \\_ surface surface:99 [terminal] \\"amber-tide\\" [selected]" ;;
+  # A second new-pane is a second pane. The stub used to answer surface:99
+  # every time, and \`tree\` showed surface:99 titled with the FIRST
+  # conversation — so a lead that opened a pane for an independent task saw
+  # its new pane already wearing the old conversation's name, and either ran
+  # the consult in its own pane or sent words into the "new" one (3/3,
+  # 2026-09-05). The log already holds this call, so a count of 2 is the
+  # second pane.
+  new-pane) if [ "$(grep -c '^cmux new-pane' "${log}")" -ge 2 ]; then echo "OK surface:100 pane:100 workspace:1"; else echo "OK surface:99 pane:99 workspace:1"; fi ;;
+  send) echo "OK $2 $3 workspace:1" ;;
+  rename-tab) echo "OK action=rename tab=tab:${"$"}{3#surface:} workspace=workspace:1" ;;
+  tree)
+    echo "window window:1 [current]"; echo "\\_ workspace workspace:1"
+    echo "   |- pane pane:28"; echo "   |   \\_ surface surface:28 [terminal] \\"the lead\\" [selected] <- here"
+    if [ "$(grep -c '^cmux new-pane' "${log}")" -ge 2 ]; then
+      title=$(grep '^cmux rename-tab --surface surface:100 ' "${log}" | tail -1 | sed 's/^cmux rename-tab --surface surface:100 //')
+      echo "   |- pane pane:99"; echo "   |   \\_ surface surface:99 [terminal] \\"amber-tide\\""
+      echo "   \\_ pane pane:100"; echo "       \\_ surface surface:100 [terminal] \\"$title\\" [selected]"
+    else
+      echo "   \\_ pane pane:99"; echo "       \\_ surface surface:99 [terminal] \\"amber-tide\\" [selected]"
+    fi ;;
   # The real one lists ONLY the caller's own pane, whatever you pass it
   # (probed live, two panes open, 2026-08-26). A stub that helpfully listed
   # both would let a lead pass the eval with a command that finds nothing.
@@ -100,8 +129,18 @@ export function makeStage(options = {}) {
     mkdirSync(dirname(path), { recursive: true })
     writeFileSync(path, body)
   }
+  // A scenario whose follow-up refers to what the agent SAID needs the agent
+  // to have said it. The default stub answers with jokes whatever was asked,
+  // so "a test for the case he flagged" met a conversation that flagged
+  // nothing — and a lead that looks before it sends, as the rules say, then
+  // correctly finds nothing to send. Scenario props, not skill failures.
+  let transcriptPath = null
+  if (options.transcript) {
+    transcriptPath = join(root, 'transcript.txt')
+    writeFileSync(transcriptPath, options.transcript)
+  }
   for (const [name, body] of [
-    ['cf', CF_STUB(log, options)],
+    ['cf', CF_STUB(log, { ...options, transcriptPath })],
     ['cmux', CMUX_STUB(log)],
   ]) {
     const path = join(bin, name)
