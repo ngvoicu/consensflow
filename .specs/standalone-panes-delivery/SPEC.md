@@ -371,9 +371,18 @@ wrong.
       multi-line body as one bracketed paste, then a separate `\r`,
       submits; the conservative inline budget holds intact — gates Phase 2
       (`cf say` is the first feature that submits text); the cmux note of
-      2026-09-06 stays as evidence, not as a pass
+      2026-09-06 stays as evidence, not as a pass **PASSED 2026-09-06 for codex, pi, opencode, kimi**
+      (brokkr, `brokkr-lilac-thicket`, through `consensflow-bridge`): 600,
+      4 000 and 20 000 bytes each intact and byte-exact, all newlines kept,
+      stored ~0.4 s after the `\r`; first-turn store latency up to ~3 s on pi
+      and ~1 s on codex. Inline budget ≥ 20 000 B on all four; the default
+      of 4 000 stays as the conservative setting. claude pending (session
+      limit resets 22:20 Europe/Athens).
 - [ ] P2 — kitty keyboard protocol on; a raw `\r` still submits; a
-      newline inside the paste survives — Phase 2
+      newline inside the paste survives — Phase 2 **PASSED 2026-09-06 for codex, pi, opencode, kimi**:
+      codex `ESC[>5u`, pi and kimi `ESC[>7u`, opencode only the `ESC[?u`
+      query; a raw `\r` submitted everywhere; newlines survived everywhere.
+      claude pending.
 - [ ] P3 — an `http://localhost:<port>` iframe loads inside a `tauri://`
       page under the existing ATS exception — Phase 4
 - [ ] P5 — opencode's TUI server admits a message into the running
@@ -932,9 +941,12 @@ replacement fails closed; an interrupted read creates no coverage.
 | [TEST-PANE-05] (Node half) | gefjon, `node --test tests/bridge.test.mjs`: 1 fail — `ERR_MODULE_NOT_FOUND src/bridge.js` (17 tests written first) | — | — |
 | [TEST-PANE-51] | gefjon, `npm test` after moving the pins: 5 failed — `'ultra' !== 'max'` in catalog, cli (add + sync), claude-core, pi-core | — | — |
 | [IMPL-PANE-52] | — | `npm run check`: exit 0, 461 tests, 458 pass; lead re-ran: exit 0, 458 pass | the Astra comment that named "Hyperion's ultra tier" reworded; `skill/SKILL.md` (the checked-in v0 reference) patched by the lead to say max |
+| review fixes A (01–04) + B-Rust (05–10) | hyperion, one failing test per finding (18 findings over two batches; (8), B3, B5-partial, B6 moot after earlier fixes; B8 hidden consumer left unproven by design); RED captured for every non-moot fix except (9), whose RED link step died on `ENOSPC` | `cargo test`: 42 unit + 5 headless passed; Node bridge 26/26; lead re-ran 2026-09-06 19:05 EEST: 42 + 5, clippy clean | PTY tests serialised against `openpty` exhaustion; per-pane writers; bounded delimiter-aware reader; serialized writer queue |
 | [IMPL-PANE-06] (Node half) | — | `node --test tests/bridge.test.mjs`: 17 passed, 0 failed; lead re-ran: 17/17, `tests/ui.test.mjs` 29/29 | biome format + two assignment-in-expression lints fixed; one self-inflicted test sizing (a 64-byte budget could not fit the refusal frame) corrected in the TEST, noted as a test bug not an assertion change |
 
 ## Deviations
 
 | Task | Spec Said | Actually Did | Why |
 |---|---|---|---|
+| review fix (9) idle tracking | RED before GREEN, always | GREEN without a captured RED | the RED build's link step failed with `No space left on device`; hyperion freed ~1.2 GB (cargo artifacts, Homebrew cache) and continued; the test exists and passes — recorded here rather than hidden |
+| B8 hidden consumer | a hidden pane keeps acking | left unproven in Phase 1 | the consumer is the page's emulator (Phase 4); asteria's finding 8: crediting a fixture that asserts a local flag would prove nothing |
