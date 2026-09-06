@@ -90,3 +90,89 @@ _not run_
 ## P6 — a pi extension delivers a follow-up when the agent is idle
 
 _not run_
+
+## Completion markers per harness (Phase 3, TEST-PANE-23 / IMPL-PANE-24)
+
+Re-verified 2026-09-06–07 against the exact native stores named below. The
+adapter supports only the recorded protocol/schema versions in this table;
+any other or missing version returns
+`{unknown:true, reason:"unsupported version …"}`.
+
+Every successful result exposes a native total-order `cursor`, and every
+item carries `at` plus `seq`. Model-visible tool results are lossless
+`role:"tool"` items, so a later receipt reader can search strictly after a
+delivery cursor. Settlement is reported independently:
+
+```
+settlement = {
+  state: "settled" | "in-flight" | "unknown",
+  provenance: "native" | "derived" | "unknown",
+  cursor,
+  boundary,
+  evidence: { complete, openTools: [], queuedTurns: [], hooksInFlight: [] }
+}
+```
+
+A derived result is settled only when `complete` is true, all three evidence
+arrays are empty, and `boundary` names the observed post-turn record.
+Provider failure is `failed` with its message, never cancellation. A native
+terminal failure may therefore be settled while `evidence.complete` is
+false; readiness still has no completed answer to deliver.
+
+| Harness | Supported store version | Completed-answer evidence | Settlement boundary record | Provenance | Verified real store |
+|---|---|---|---|---|---|
+| Codex | `session_meta.cli_version = 0.153.4` | Only `event_msg.item_completed.item.type = AgentMessage` with `phase:final_answer`. A successful boundary must also carry an exact, non-null `task_complete.last_agent_message` equal to that item. | `event_msg task_complete`, after its error/last-message fields are checked and all tool/sub-agent activity is closed. The error fixture's boundary is ordinal 2056, but settlement cannot be observed until the sub-agent completion appended at ordinal 2057. | Native | `/Users/gabrielvoicu/.codex/sessions/2026/09/06/rollout-2026-09-06T07-14-10-01a074ec-7aff-74b0-8cf6-aa00d8e451cb.jsonl`, especially ordinals 2017–2018 and 2045–2057; successful comparison at ordinals 2481–2485. |
+| Claude Code | `2.1.241`, `2.1.247`, `2.1.250` | Assistant fragments are grouped by native `message.id`; physical `stop_reason:end_turn` records are fragment markers, not completion. The grouped item becomes complete only at the non-continuing post-turn hook. | Completion: `system subtype:stop_hook_summary` with `preventedContinuation:false`, after queue enqueue/dequeue/remove, queued user turns, `server_tool_use`/advisor results, ordinary tools, and hooks on the current frontier are clear. Failure: `assistant isApiErrorMessage:true`. Cancellation: user `[Request interrupted by user]`. | Derived completion; native failure/cancellation | Fragments, advisor, interrupt recovery, and 2.1.247→2.1.250 upgrade: `/Users/gabrielvoicu/.claude/projects/-Users-gabrielvoicu-Projects-ngvoicu-consensflow/15fba934-d727-4777-8791-123675a63649.jsonl`, lines 91, 93, 107, 117–121, 128, 238, 246, and 690–692. Queue/hook ordering and interrupt: `/Users/gabrielvoicu/.claude/projects/-Users-gabrielvoicu-Projects-ngvoicu-consensflow/1b09fb15-feb1-4595-9f47-5eb9ff768191.jsonl`, lines 2219–2232 and 3261. Provider failure: `/Users/gabrielvoicu/.claude/projects/-Users-gabrielvoicu-Projects-ngvoicu-consensflow/33383216-87a0-4e6d-a273-07c4b229cdb1.jsonl`, line 1040. |
+| Pi | Session protocol `3` (Pi `0.85.1`) | Terminal assistant `stopReason:stop`. A user message opens the turn; `toolResult` only closes its exact `toolCallId` and never closes the turn. | Completion: terminal assistant `message` with `stopReason:stop` and no open call IDs; Pi has no separate stored settlement event. Failure: terminal assistant `message` with `stopReason:error`. | Derived completion; native failure | Completion: `/Users/gabrielvoicu/.pi/agent/sessions/--Users-gabrielvoicu-Projects-ngvoicu-consensflow--/2026-08-24T18-00-00-703Z_hazy-ridge.jsonl`, lines 4–8 (no-open-tool gap) and 114 (terminal stop). Provider failure: `/Users/gabrielvoicu/.pi/agent/sessions/--Users-gabrielvoicu-Projects-ngvoicu-consensflow--/2026-08-26T10-14-49-150Z_triton-jade-fern.jsonl`, line 7. |
+| Kimi | Wire protocol `1.5` | The assistant item is keyed by native step UUID; `step.end finishReason:end_turn` marks that step complete. Tool calls/results close through the call UUID or `toolCallId`, even though results carry no `turnId`. | `turn.ended {reason:completed}` after every call belonging to the turn is closed; `turn.ended {reason:failed}` is native terminal failure, never cancellation. | Native | `/Users/gabrielvoicu/.kimi-code/sessions/wd_consensflow-site_ed8b7a271238/session_11c123b3-dd33-4f21-8862-beabdc50cd18/agents/main/wire.jsonl`, especially lines 315–318, 747–759, and 861–868. |
+| OpenCode | Session schema/CLI `1.18.27`, `1.18.29` | Native message `data.time.completed` is required; `data.finish:stop` is complete, while `length` and provider errors are terminal but incomplete. A `step-finish` part alone is insufficient. | The assistant message's native `time.completed` together with its terminal `finish` or `error`, read with messages and parts under one SQLite read transaction. | Native | `/Users/gabrielvoicu/.local/share/opencode/opencode.db`: message `msg_0773f385a001oy2xD1d5J3DNge`, event seq 12/13/15 (92 ms stop-to-completed window); `msg_0779166e7001sYP03lgChIzdvh` (`finish:length`); `msg_066fa2779001GkIYu5W7ugNXUR` (`APIError`). |
+
+Cancellation and failure evidence:
+
+- Codex cancellation is native `event_msg turn_aborted`, verified in
+  `rollout-2026-09-06T21-23-51-01a077f6-6663-7bc2-81cd-e287ccaabdbd.jsonl`
+  ordinal 764.
+- Claude cancellation is the native user record
+  `[Request interrupted by user]`, verified at line 3261 of the queue source
+  above.
+- Claude provider failure is native `assistant isApiErrorMessage:true`,
+  verified at line 1040 of
+  `/Users/gabrielvoicu/.claude/projects/-Users-gabrielvoicu-Projects-ngvoicu-consensflow/33383216-87a0-4e6d-a273-07c4b229cdb1.jsonl`;
+  it is `failed`, not `cancelled`.
+- Pi has no captured user-cancellation marker. The real
+  `triton-jade-fern` `stopReason:error` record is provider 429 and is
+  `failed`, not `cancelled`.
+- Kimi has no captured user-cancellation reason; none is synthesised or
+  inferred. Its native `turn.ended {reason:failed}` provider 429 at line 318
+  of the table's protocol-1.5 source is `failed`, not `cancelled`.
+- OpenCode `APIError` and `UnknownError` are provider failures.
+  `MessageAbortedError` remains the native cancellation discriminator if it
+  occurs in a supported schema, but no supported-version cancellation row is
+  claimed by these fixtures.
+
+Unsupported/identity notes:
+
+- Codex preserves both different native user IDs even when their text is
+  identical; response/event mirrors sharing one assistant ID are one item.
+- Claude assistant identity is `message.id`, never the physical record UUID.
+- Real Kimi protocol-1.5 `turn.prompt` has neither UUID nor `promptId`;
+  its stable fallback is the native timestamp. Assistant IDs are native step
+  UUIDs and tool-result IDs are native call `parentUuid` values.
+- Kimi protocol 1.4 is explicitly unsupported. The real
+  `/Users/gabrielvoicu/.kimi-code/sessions/wd_btb_3cabe80dc1f7/session_159aa36f-e114-4bef-a9d2-144efdb84c10/agents/main/wire.jsonl`
+  ends at line 1590 with `step.end/end_turn` and no `turn.ended`; it now
+  returns unknown instead of busy forever.
+- Readiness invalidates a fork/replacement even though its historical items
+  remain readable. Malformed interior JSONL fails closed; only an unterminated
+  malformed final append is tolerated.
+
+## P7 — a crash-released exclusive lock from Node on macOS (probed 2026-09-07, lead)
+
+`fs.openSync(path, O_RDWR | O_CREAT | 0x20 /* O_EXLOCK */ | O_NONBLOCK, 0o600)`
+on macOS 25.5 with Node 26.8.1: a second open with the same flags in the
+SAME process fails with `EAGAIN`; a child process opening the same file
+fails with `EAGAIN` while the parent holds the fd; closing the fd lets the
+next open succeed. Node passes the raw flag through to `open(2)`, whose
+BSD `O_EXLOCK` takes a `flock`-style exclusive lock released with the
+descriptor — so a crashed owner releases it. This is the store's ownership
+primitive from round 5 on; Linux has no `O_EXLOCK` (later spec).
