@@ -862,6 +862,18 @@ replacement fails closed; an interrupted read creates no coverage.
 
 ## Resume Context
 
+> 2026-09-06 19:40 EEST — hyperion reports both review batches GREEN (42 unit
+> + 5 headless, Node bridge 26/26; lead re-ran); asteria's round-3 Rust
+> re-review is running in `asteria-velvet-brook` (her window had ended —
+> resumed with `cf run --session` in the same pane; the monitor now
+> reports a gone window). gefjon is on the five Node findings in
+> `gefjon-frosty-tide` and was told hyperion touched `src/bridge.js` and
+> its test. brokkr passed P1/P2 for codex, pi, opencode, kimi (committed)
+> and now holds Phase 2 tasks 11–14 (store + tabs) in `brokkr-rusty-pine`
+> — Node-only, gated only by P1/P2, started to use idle capacity while
+> Phase 1 is in re-review. Phase 1 stays uncommitted until asteria's
+> re-verdict.
+>
 > 2026-09-06 17:55 EEST — Gabriel's standing instruction (goal): the lead
 > checks the workers itself, tests, and continues; he is told when the new
 > ConsensFlow can be installed clean (section "Clean install on macOS").
