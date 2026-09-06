@@ -25,9 +25,10 @@ it prints.
 
 **Authority.** This revision (3, 2026-09-06) and Gabriel's round-2 answers
 govern implementation. Where `research-01.md` or `research-02.md` say
-otherwise, they record an earlier design. Revision 3 absorbs the second
-co-lead review by astraeus (`astraeus-lilac-dune`, twelve findings on
-revision 2) and one scope decision: **macOS first** — Windows and Linux
+otherwise, they record an earlier design. Revision 4 absorbs the third
+co-lead review by astraeus (`astraeus-lilac-dune`: four narrower findings
+on revision 3 plus two guards), revision 3 the second (twelve findings on
+revision 2), and one scope decision: **macOS first** — Windows and Linux
 packaging are deferred to a later spec, while every choice here stays
 compatible with them (a PTY crate that covers ConPTY, Tauri, a JS emulator,
 no Unix-only assumption added).
@@ -57,7 +58,12 @@ no Unix-only assumption added).
 - [ ] Ownership and read marks in standalone mode use the app-owned lead
       identity (`tab:<id>:<generation>`); a native session is bound to a
       lead or a worker only with launch-unique evidence; an ambiguous
-      binding is visibly `unbound` and never drives automatic delivery
+      binding is visibly `unbound` and never drives automatic delivery; a
+      native session replaced inside a running TUI (`/new`, `/resume`, a
+      fork) invalidates the binding, the readiness evidence, the receipt
+      cursor and every pending decision — automatic delivery suspends, the
+      page offers reopening through the app's own new/resume path with a
+      new generation, and the previous transcript never authorises a write
 - [ ] The page opens maximized on first launch and restores its geometry
       after; a collapsible mode selector; claude and pi show the roster
       editor; standalone shows the sidebar (tabs, their conversations) and
@@ -77,20 +83,30 @@ no Unix-only assumption added).
       — is delivered WHOLE into the lead's pane when the effective policy is
       `auto`: inline when its envelope fits the verified inline budget and
       is safely representable, else through `cf read <id>`, which prints
-      the complete answer and records that it was read. No cap, no
-      truncation, no notice
+      the complete answer in numbered parts sized under the lead harness's
+      verified tool-output budget, each closed by an end-of-part marker;
+      coverage is recorded only when every part's marker is found in the
+      lead's own transcript — printing is an attempt, not coverage. No
+      cap on the answer, no truncation, no notice
 - [ ] A delivery is submitted only when the lead is ready: its own
       transcript shows its last turn settled with no tool in flight, and no
-      human draft is latched in that pane — a draft is cleared by an
-      observed submission, never by time; human input arriving between the
-      readiness decision and the write invalidates the decision; PTY
-      silence is a polling hint only. Otherwise the delivery waits, visibly,
-      and **Deliver now** bypasses policy — never readiness
+      human draft is latched in that pane — a draft is cleared only by the
+      observed submission that covers it (Rust stamps the epoch of the
+      human's Enter; Node clears up to that epoch once the matching user
+      turn appears), never by time and never past newer input; human input
+      arriving between the readiness decision and the write invalidates the
+      decision; PTY silence is a polling hint only. Otherwise the delivery
+      waits, visibly, with its reason; **Deliver now** bypasses policy —
+      never readiness, never a latched draft, and the blocked button says
+      why
 - [ ] Every delivery is a record: id, source answer, target session and
       generation, payload digest, pre-submission transcript cursor, state
       `pending | submitting | accepted | uncertain | failed | cancelled`;
-      `accepted` needs a receipt after the cursor that identifies THIS
-      delivery; the target stays reserved until accepted or uncertain; the
+      what is submitted is an ENVELOPE carrying the delivery id, the source
+      ids and the complete answer, and its digest covers the canonical
+      envelope; `accepted` needs that id and digest found after the cursor
+      in the target session and generation — answer-text equality is never
+      a receipt; the target stays reserved until accepted or uncertain; the
       next automatic delivery needs fresh readiness after the submitted
       turn; `uncertain` is never replayed automatically; `cancelled` is
       terminal and never recreated by polling
@@ -211,18 +227,52 @@ representation. `readiness.leadReady` is `ready` only when the lead's own
 transcript ends settled with no tool in flight AND the pane's draft latch is
 clear; the decision carries the pane's **input epoch**, and Rust refuses the
 write if human bytes arrived since. PTY silence schedules a read; it never
-authorises a write. A delivery is a record with a digest and a
-pre-submission cursor; `accepted` needs a receipt after the cursor that
-identifies this delivery (inline: a user turn carrying the digest's body;
-file: the `cf read <id>` call recorded by Node). The target is reserved
-until accepted or uncertain; the next automatic delivery needs fresh
-readiness after the submitted turn. Channel: `pty-inline` when the
-serialised envelope fits the conservative inline budget P1 verifies
-(default 4 000 bytes) and contains no control byte beyond LF and TAB;
-otherwise `cf-read` — the whole answer written immutable to
-`<workspace>/deliveries/<id>.md` and one line pasted: `@nyx answered in
-<name> — run: cf read <id>  (it prints everything; read all of it)`. There
-is no cap. Native channels (opencode's server, a ConsensFlow pi extension
+authorises a write. A delivery is a record whose wire form is
+an **envelope**: a header line `[consensflow delivery <id> from <name>
+#<item>]`, the complete answer, a trailer `[end of delivery <id>]`; the
+digest covers the canonical envelope, and `accepted` needs the embedded id
+and that digest found after the pre-submission cursor in the target session
+and generation — two answers reading `Done.` are two envelopes. The target
+is reserved until accepted or uncertain; the next automatic delivery needs
+fresh readiness after the submitted turn. Channel: `pty-inline` when the
+envelope fits the conservative inline budget P1 verifies (default 4 000
+bytes) and contains no control byte beyond LF and TAB; otherwise `cf-read`
+— the whole answer written immutable to `<workspace>/deliveries/<id>.md`
+and one line pasted: `@nyx answered in <name> — run: cf read <id>  (it
+prints everything; read all of it)`. `cf read` prints the answer in
+numbered parts, each under the lead harness's verified tool-output budget
+(pi keeps the last 2 000 lines or 50 KiB of a command's output and saves the
+rest aside — the lead would see the tail and believe it read all), each
+part opened by `[part k of N]` and closed by `[end of part k of N —
+delivery <id>]`, and tells the lead the next `--part`. A part printed is an
+attempt; **coverage** is recorded only when every part's end marker is
+found in the lead's own transcript (its tool results) after the cursor — an
+`EPIPE`, an early stdout close or a truncating receiver leaves ranges
+uncovered, and `cf`'s deliberate exit-0 on `EPIPE` (`bin/cf.mjs:66`) is
+therefore never evidence. There is no cap on the answer.
+
+**Drafts and clears.** Rust stamps every human `\r` with the pane's input
+epoch and reports `pane.enter {epoch}`; when the matching user turn appears
+in that pane's transcript, Node calls `draft.clear(pane, generation,
+submittedEpoch, submissionId)` and Rust clears only the input that
+submission accounted for — input typed after that epoch stays latched, a
+stale clear is rejected under the same arbiter that rejects stale writes.
+This holds for worker panes receiving `cf say` exactly as for the lead.
+
+**Session replacement.** A harness can replace its native session without
+replacing its process or pane (`/new`, `/resume`, a fork; pi has explicit
+session-replacement events). The completion adapter reports it; the binding,
+the readiness evidence, the receipt cursor and every pending decision for
+that pane are invalidated; automatic delivery for it suspends with the
+reason shown; the page offers reopening through the app's own new/resume
+path with a new generation. This release does not follow a session switch
+in place.
+
+**Completion extraction never passes through the bounded display
+normaliser.** `transcript-events.js` lends its vocabulary only: its
+`adaptLine` clamps text to 8 KiB and its adapters read execution streams,
+not durable session evidence. The 60 000-character assertion holds at
+extraction as well as at delivery. Native channels (opencode's server, a ConsensFlow pi extension
 delivering `sendUserMessage(…, {deliverAs: 'followUp'})` on
 `agent_settled`) are enabled independently when P5/P6 pass their whole
 path, and gate nothing else.
@@ -339,9 +389,13 @@ ceil(sqrt(n))`, `cols = ceil(n / rows)`, row-major):
       then after `enter_delay_ms` a lone `0d`, as two writes; human bytes
       set the **draft latch** and bump the **input epoch**; a paste with a
       stale epoch is refused `Stale`; a paste while the latch is set is
-      refused `Draft` — and the latch is cleared ONLY by `draft.clear(pane)`
-      (Node calls it when the lead's transcript shows a submission after
-      the latch), never by elapsed time (a fixture waits 10× any timer);
+      refused `Draft`; a human `\r` emits `pane.enter {epoch}`; the latch
+      is cleared ONLY by `draft.clear(pane, generation, submittedEpoch,
+      submissionId)` and only for input up to `submittedEpoch` — the
+      counterexample is a test: the human submits A (epoch 7), types draft
+      B (epoch 9), Node's delayed clear for A arrives and B stays latched;
+      a clear with a stale generation is rejected; never by elapsed time (a
+      fixture waits 10× any timer);
       human bytes arriving between the paste and the `\r` are queued behind
       the `\r`, never interleaved; `sanitize` normalises CRLF to LF and
       refuses any control byte beyond LF and TAB.
@@ -373,6 +427,12 @@ ceil(sqrt(n))`, `cols = ceil(n / rows)`, row-major):
       reaps.
 - [ ] [IMPL-PANE-10] `app/src-tauri/src/bin/consensflow-bridge.rs` sharing
       the lib crate's modules. -> satisfies [TEST-PANE-09]
+
+**Phase 1 exit evidence:** exact paste-then-separate-CR bytes through the
+real PTY; stale writes and stale clears rejected; newer drafts preserved;
+human input serialised behind an in-flight `\r`; bounded output with
+responsive input; nested bridge requests; EOF and process-group cleanup;
+P1/P2 recorded through this path for each harness being enabled.
 
 ## Phase 2: Tabs, identity, launch authority and the store [pending] — gated by P1, P2
 
@@ -426,8 +486,10 @@ ceil(sqrt(n))`, `cols = ceil(n / rows)`, row-major):
       'unknown', launch}` and a retry with a new `opId` is refused while the
       launch is unresolved; `POST /api/panes/say {session, text, opId}`
       pastes on the live pane and records `sent`; `attach {session, opId}`
-      resumes under a fresh ticket; `read {deliveryId}` returns the whole
-      file and records coverage; `seen {session, items}` by item id; `GET
+      resumes under a fresh ticket; `read {deliveryId, part}` returns that
+      part with its markers and records an ATTEMPT, never coverage — the
+      part size comes from the lead harness's verified tool-output budget;
+      `seen {session, items}` by item id; `GET
       /api/panes` lists the caller's tab; controller ops `session.bind
       {evidence}`, `progress.set`, `sent.record` under a capability.
 - [ ] [IMPL-PANE-18] `src/ui.js` + `src/panes.js`. -> satisfies [TEST-PANE-17]
@@ -454,13 +516,22 @@ ceil(sqrt(n))`, `cols = ceil(n / rows)`, row-major):
       own launches; no nonce → `unbound`, shown by `cf catchup` and
       `shouldDeliver` false; a LEAD binds the same way at `open_lead` (the
       nonce rides in the lead's first seeded line for harnesses we cannot
-      preallocate, and `unbound` leaves its readiness `unknown`).
+      preallocate, and `unbound` leaves its readiness `unknown`); a fixture
+      where the process and pane stay alive but the native session changes
+      (`/new`, `/resume`, a fork) yields `replaced`, which invalidates the
+      binding and every dependent decision.
 - [ ] [IMPL-PANE-22] `hosts/lib/harness-transcript.js` discoverers take a
       `nonce`; `hosts/lib/packets.js` emits and the reader strips
       `[consensflow launch <nonce>]`; `src/store.js` `session.bind` refuses
       without evidence. -> satisfies [TEST-PANE-21]
 
-## Phase 3: Completion, readiness and delivery [pending]
+**Phase 2 exit evidence:** real `cf` → real Node → headless Rust →
+controller → fake harness; correct credentials per role and native
+binding by nonce; continuation without a second process; duplicate and
+timed-out launches handled; concurrent mutations preserved; session
+replacement fails closed; an interrupted read creates no coverage.
+
+## Phase 3: Completion, readiness and delivery [pending] — its first harness needs its versioned lifecycle and receipt fixtures before automatic delivery is enabled
 
 - [ ] [TEST-PANE-23] `tests/engine/completion.test.mjs` —
       `answers(kind, session)` returns `{items: [{id, role, text, complete,
@@ -470,7 +541,9 @@ ceil(sqrt(n))`, `cols = ceil(n / rows)`, row-major):
       receipt representation, unsupported states, version) is asserted
       against dated fixtures: partial text then tool work, text growing
       with an unchanged turn count (kimi), cancellation, compaction, a
-      codex fork; unreadable or unlisted → `{unknown: true}`.
+      codex fork, and a session replaced in place → `{replaced: true}`;
+      unreadable or unlisted → `{unknown: true}`; extraction never calls
+      `adaptLine` and a 60 000-character answer comes back whole.
 - [ ] [IMPL-PANE-24] `hosts/lib/completion.js`, one adapter per harness;
       `findings-01.md` gets the table per harness before that harness is
       enabled. -> satisfies [TEST-PANE-23]
@@ -495,16 +568,22 @@ ceil(sqrt(n))`, `cols = ceil(n / rows)`, row-major):
       the immutable file), never a truncated body (a 60 000-character
       fixture and a fixture with an ESC byte both go `cf-read`); a file
       write failure stays `pending` with the reason; `submit` stores the
-      target session, generation and the pre-submission cursor; `receipt`
-      accepts only an item after the cursor whose body matches THIS digest
-      (two workers both answering "Done." produce two distinct acceptances;
-      an older matching turn does not); `uncertain` after `receiptMs`, or
+      target session, generation and the pre-submission cursor; the wire
+      form is the envelope (header with delivery id and source ids, the
+      complete answer, trailer) and `digest` covers the canonical envelope;
+      `receipt` accepts only an item after the cursor carrying THIS
+      delivery id and digest (two workers both answering "Done." produce
+      two distinct acceptances; an older matching turn, or an unrelated
+      identical user message after the cursor, does not); for `cf-read`,
+      `coverage` is recorded only when every part's end marker is found in
+      the lead's transcript after the cursor — a missing part leaves its
+      range uncovered; `uncertain` after `receiptMs`, or
       on crash recovery from `submitting`; `failed` only before any byte
       was written, and only then re-planned; `cancelled` terminal and never
       re-planned; the target stays reserved until accepted or uncertain;
       `coverage` maps delivery → item ids; `seen` advances only over
       covered-or-printed items contiguous with the mark; a file delivery
-      covers nothing until `cf read` records it.
+      covers nothing until every part's marker is seen.
 - [ ] [IMPL-PANE-30] `hosts/lib/deliveries.js`; `src/store.js`
       `delivery.upsert`; standalone `catchup` bookkeeping by item ids.
       -> satisfies [TEST-PANE-29]
@@ -523,7 +602,10 @@ ceil(sqrt(n))`, `cols = ceil(n / rows)`, row-major):
       fresh readiness after the submitted turn; bridge EOF between paste and
       `\r` → `uncertain`; a resumed lead (new generation) holds pending
       records for the old one and offers **Send held answers to this
-      lead**, which creates new records; the `--wait` grace is honoured.
+      lead**, which creates new records; a `replaced` report from
+      completion suspends automatic delivery for that pane, invalidates its
+      cursor and pending decisions, and tells the page; the `--wait` grace
+      is honoured.
 - [ ] [IMPL-PANE-32] `src/delivery-watch.js`, started by the app process
       at launch (not by mode). -> satisfies [TEST-PANE-31]
 - [ ] [TEST-PANE-33] `tests/channels.test.mjs` — `deliver(channel, target,
@@ -534,9 +616,12 @@ ceil(sqrt(n))`, `cols = ceil(n / rows)`, row-major):
       and reports admission from the extension's ack file; a channel not
       enabled for the lead's harness is never chosen; an enabled channel
       carries its launch configuration (extension path, endpoint discovery).
-- [ ] [IMPL-PANE-34] `src/channels/{pty.js, opencode.js, pi.js}` and the
-      `consensflow-delivery` pi extension under `hosts/pi-extension/`.
-      -> satisfies [TEST-PANE-33]
+- [ ] [IMPL-PANE-34] `src/channels/pty.js` always; `src/channels/opencode.js`
+      only once P5 is recorded as passed; `src/channels/pi.js` and the
+      `consensflow-delivery` pi extension under `hosts/pi-extension/` only
+      once P6 is recorded as passed — and P6 must include an inbox arrival
+      while the agent is ALREADY idle (delivered at once, not stranded until
+      the next `agent_settled`). -> satisfies [TEST-PANE-33]
 - [ ] [TEST-PANE-35] `tests/ui-panes.test.mjs` — page ops: `answers.list`
       (ids, previews, `delivered`, `uncertain` marked distinctly);
       `deliver.now {answerId}` creates a `manual` record (policy bypassed,
@@ -593,10 +678,15 @@ ceil(sqrt(n))`, `cols = ceil(n / rows)`, row-major):
       fake worker completes → delivery into the lead pane → the fake lead
       records the paste → `accepted` → `cf catchup --unread` shows nothing
       new for that answer; `cf run` without flags continues into the live
-      pane; a 60 000-character answer goes `cf-read` and `cf read` prints it
-      whole and records coverage; two concurrent `cf run --new`; two leads
+      pane; a 60 000-character answer goes `cf-read` and every `cf read` part's
+      marker in the fake lead's transcript records coverage; two concurrent `cf run --new`; two leads
       in one directory with identical tasks bind separately; a draft
-      latched in the lead pane holds delivery until a submission clears it;
+      latched in the lead pane holds delivery until the submission covering
+      it clears it, and a draft typed after that submission stays latched;
+      a `cf read` whose stdout is closed early, and one whose receiver
+      keeps only the tail, leave ranges uncovered and the page shows them;
+      a fake lead whose native session is replaced in place suspends
+      delivery;
       policy switched to `manual` while queued; bridge killed between paste
       and `\r` → `uncertain`, never replayed; a worker completing and
       exiting before the next tick still delivers; lead closed and resumed
@@ -642,8 +732,9 @@ ceil(sqrt(n))`, `cols = ceil(n / rows)`, row-major):
       (`consult-opens-a-pane` → `cf run --new`, no harness; `look-before-
       you-send` → `cf catchup` then `cf say`; the dependent/independent
       pair; new: `a-delivered-answer-is-read-whole`, `a-delivered-file-is-
-      read` (the lead runs `cf read` and its report contains the file's last
-      section), `manual-is-the-humans`); `evals/README.md`. -> satisfies [TEST-PANE-49]
+      read` (the lead runs every `cf read` part and its report contains
+      content from the beginning, the middle AND the end of the file, with
+      every range covered), `manual-is-the-humans`); `evals/README.md`. -> satisfies [TEST-PANE-49]
 
 ---
 
@@ -668,8 +759,8 @@ ceil(sqrt(n))`, `cols = ceil(n / rows)`, row-major):
 | 2026-09-06 | Roster editor stays in an iframe | User's call: "whatever is cleaner" |
 | 2026-09-06 | Every pane is in the app; a tab = directory + one lead + policy; humans open shell or agent panes | User's calls |
 | 2026-09-06 | PTY silence is a polling hint, never a readiness condition; readiness = lead transcript settled + no draft latched + fresh input epoch | astraeus round-2 finding 1 resolved in the direction that keeps `auto` working for redrawing TUIs; the paste is atomic under the arbiter |
-| 2026-09-06 | A draft latch is cleared by an observed submission, never by time | astraeus round-2 finding 1; an abandoned draft holds delivery visibly until the human sends or presses Deliver now — there is no other honest signal for claude and codex |
-| 2026-09-06 | File delivery is `cf read <id>`: prints everything, records coverage | Gives the file path a receipt without reading the screen (astraeus round-2 finding 8) |
+| 2026-09-06 | A draft latch is cleared only by the observed submission that covers it (epoch-stamped Enter → matching user turn), never by time, never past newer input | astraeus round-2 finding 1 and round-3 finding 2; an abandoned draft holds delivery visibly until the human submits — Deliver now cannot bypass a latched draft, and the blocked button says why; there is no other honest signal for claude and codex |
+| 2026-09-06 | File delivery is `cf read <id>`: prints everything in parts; a part is an attempt, coverage needs every end marker in the lead's transcript | Gives the file path a receipt without reading the screen (astraeus round-2 finding 8); pi keeps only the tail of a large tool output and `cf` exits 0 on EPIPE (round-3 finding 1) |
 | 2026-09-06 | App-owned lead identity `tab:<id>:<generation>`; native sessions bound by preallocated id, reported id, or a launch nonce — never task text | astraeus round-2 finding 3 |
 | 2026-09-06 | The `--in-pane` controller redeems a ticket for ownership plus a launch-scoped capability; Rust launches the bundle's absolute node and cf.mjs; the lead's PATH starts with the bundle's bin | astraeus round-2 finding 2 |
 | 2026-09-06 | Consult follows today's continuation rule; every op carries an `opId`; a timeout after a possible launch is `unknown` and blocks a retry | astraeus round-2 finding 4 |
@@ -681,6 +772,9 @@ ceil(sqrt(n))`, `cols = ceil(n / rows)`, row-major):
 | 2026-09-06 | A conservative inline budget, not a search for the largest paste; native channels enable independently | astraeus round-2 finding 11 ("over-built") |
 | 2026-09-06 | P1/P2 gate Phase 2 (`cf say` is the first submission); P3 gates Phase 4; P5/P6 gate only their channels | astraeus finding 16 |
 | 2026-09-06 | Codex is native on Windows; WSL out of scope | verified 2026-09-06; user's call |
+| 2026-09-06 | The delivery wire form is an envelope with the delivery id; the digest covers the envelope | astraeus round-3 finding 4: identical answer text cannot identify a delivery |
+| 2026-09-06 | A native session replaced in place invalidates everything for that pane; reopening goes through the app's own path | astraeus round-3 finding 3; no seamless in-place switching in this release |
+| 2026-09-06 | Native adapters are built only after their probe passes; P6 covers an inbox arrival while already idle | astraeus round-3 guard |
 | 2026-09-06 | Rename, skill and evals in the LAST phase | risk 17 |
 
 ## TDD Log

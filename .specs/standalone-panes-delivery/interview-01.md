@@ -174,3 +174,24 @@ records coverage.
 
 Gabriel: "no Windows machine; we'll do it later; macOS for now." Windows
 and Linux packaging move to a later spec; every choice stays compatible.
+
+## Round 4 — astraeus's third review (2026-09-06)
+
+Third verdict, quoted: "BLOCKED — revision 3 is close, but not
+implementation-ready as written. Eight of the twelve findings are closed;
+four remain partially open." And: "After those four contract edits, I
+would proceed with the first two phases." The four, all in revision 4:
+`cf read` records an attempt, coverage needs every part's end marker in
+the lead's transcript (pi keeps only the tail of a large tool output);
+`draft.clear` carries generation and the submitted epoch so a delayed
+clear cannot erase a newer draft, and Deliver now never bypasses a latched
+draft; an in-place native session replacement invalidates the binding and
+suspends delivery; the receipt digest covers an envelope that embeds the
+delivery id. Two guards: completion extraction never passes through the
+8 KiB display normaliser; native adapters are built only after their probe
+passes, and P6 covers an inbox arrival while already idle. Phase 1 and 2
+exit evidence recorded as he listed it.
+
+A process note: the message announcing revision 4 reached astraeus
+before the commit existed — the edit script had failed on an anchor and
+nothing had been written. A correction followed with the real commit.
