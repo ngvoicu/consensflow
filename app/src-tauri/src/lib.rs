@@ -4,6 +4,10 @@ use std::sync::Mutex;
 
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
+pub mod pty;
+pub mod arbiter;
+pub mod bridge;
+
 /// The desktop window around ConsensFlow's roster editor.
 ///
 /// The editor itself stays exactly what it is on the command line: a
@@ -163,7 +167,7 @@ pub fn run() {
                 Err(explanation) => {
                     // A blank window explains nothing; say what went wrong and
                     // what to do about it, in the window itself.
-                    window.eval(&format!(
+                    window.eval(format!(
                         "document.body.dataset.error = {};",
                         serde_json::to_string(&explanation).unwrap_or_default()
                     ))?;

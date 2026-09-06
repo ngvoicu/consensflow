@@ -1981,7 +1981,13 @@ async function main() {
           'no-open': { type: 'boolean', default: false },
         },
       })
-      await serveUi(env, { onOut: out, json: values.json, open: !values['no-open'] })
+      await serveUi(env, {
+        onOut: out,
+        json: values.json,
+        open: !values['no-open'],
+        stdin: process.stdin,
+        stdout: process.stdout,
+      })
       return
     }
     case 'doctor':

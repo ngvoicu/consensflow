@@ -4,6 +4,7 @@ import { fstatSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { Bridge } from './bridge.js'
 import { CATALOG, EFFORTS } from './catalog.js'
 import { detectHarnesses } from './harnesses.js'
 import { installSkill, skillsStatus, skillsSummary, uninstallSkills } from './install.js'
@@ -224,6 +225,22 @@ function isPipe(fd) {
   }
 }
 
+/**
+ * True when this stream is the parent's end of a pipe. A stream carrying a
+ * real fd is checked the way `isPipe` always did; a stream without one (a
+ * test double) counts as a pipe unless it says it is a TTY. No stream at all
+ * falls back to the historical check on fd 0. Exported for the bridge
+ * activation tests; `serveUi` is the real caller.
+ */
+export function stdinIsPipe(stream) {
+  if (stream !== null && stream !== undefined) {
+    if (typeof stream.fd === 'number') return isPipe(stream.fd)
+    if (stream.isTTY === true) return false
+    return true
+  }
+  return isPipe(0)
+}
+
 export async function startUiServer(env) {
   // The app is an entry point too: a machine from before the merge should not
   // have to run the CLI once to be tidied up.
@@ -368,7 +385,10 @@ export async function startUiServer(env) {
  * (the desktop app) can start the editor and point a window at it instead of
  * scraping prose. `open: false` leaves the browser alone for the same reason.
  */
-export async function serveUi(env, { onOut, json = false, open = true }) {
+export async function serveUi(
+  env,
+  { onOut, json = false, open = true, stdin = null, stdout = null },
+) {
   // Opening the app IS the act: it does what its own buttons do, before the
   // page is served, so the first render already tells the truth.
   opened = healOnOpen(env)
@@ -386,11 +406,24 @@ export async function serveUi(env, { onOut, json = false, open = true }) {
   // A parent that holds a pipe to our stdin is telling us it wants to own
   // this editor's lifetime: when that pipe closes the parent is gone, and an
   // editor nobody can see must not keep serving. A stdin that is a terminal
-  // or /dev/null says nothing of the sort, so it is left alone.
-  if (isPipe(0)) {
-    process.stdin.on('end', () => process.exit(0))
-    process.stdin.on('close', () => process.exit(0))
-    process.stdin.resume()
+  // or /dev/null says nothing of the sort, so it is left alone. A piped
+  // stdin additionally speaks the JSON-lines bridge (Phase 1), but only in
+  // --json mode: prose and frames must never share one stdout. The streams
+  // arrive the way `env` does, from the entry point, so this module owns no
+  // stdio of its own.
+  const input = stdin ?? process.stdin
+  const output = stdout ?? process.stdout
+  if (stdinIsPipe(input)) {
+    if (json) {
+      // A fatal bridge failure ends the session the way stdin EOF does: the
+      // parent is gone or the pipe is broken, and an editor nobody can read
+      // must not keep serving.
+      const bridge = new Bridge({ input, output, onFatal: () => process.exit(0) })
+      bridge.on('ping', () => ({ ok: true }))
+    }
+    input.on('end', () => process.exit(0))
+    input.on('close', () => process.exit(0))
+    input.resume()
   }
   await new Promise(() => {})
 }

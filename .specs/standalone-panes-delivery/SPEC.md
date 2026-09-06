@@ -467,9 +467,9 @@ wrong.
 | Native channels | opencode server API; a pi extension | PTY only | admission as a harness fact where P5/P6 prove it |
 | Page tests | Playwright in `app/` | none | the root package stays zero-dependency |
 
-## Phase 1: Bridge protocol and PTY transport [in-progress]
+## Phase 1: Bridge protocol and PTY transport [completed]
 
-- [ ] [TEST-PANE-01] ← current (green, review BLOCK — fixes pending) `app/src-tauri/src/pty.rs` `#[cfg(test)]` — `open`
+- [x] [TEST-PANE-01] `app/src-tauri/src/pty.rs` `#[cfg(test)]` — `open`
       spawns `sh -c 'printf hello'` and the reader yields `hello` then EOF;
       `resize(24, 80)` is seen by `sh -c 'stty size'`; `kill` ends the
       reader and the whole process group (`sh -c 'sleep 1000 & sleep
@@ -477,11 +477,11 @@ wrong.
       recorder child (`stty raw -echo; od -An -tx1`) echoes exactly the
       bytes written, as hex; `open` takes absolute `argv[0]` and refuses a
       bare name.
-- [ ] [IMPL-PANE-02] `pty.rs` — `PaneTable` keyed by `(id, generation)`;
+- [x] [IMPL-PANE-02] `pty.rs` — `PaneTable` keyed by `(id, generation)`;
       `open(cwd, argv, env, size)` spawning in its own process group,
       `write`, `resize`, `kill`, `list() -> [PaneInfo{id, generation, alive,
       idle_ms}]`; `Cargo.toml` gains `portable-pty = "0.9"`. -> satisfies [TEST-PANE-01]
-- [ ] [TEST-PANE-03] `arbiter.rs` tests — `write_paste(pane, epoch, body)`
+- [x] [TEST-PANE-03] `arbiter.rs` tests — `write_paste(pane, epoch, body)`
       produces on the raw recorder `1b5b3230307e` + body + `1b5b3230317e`,
       then after `enter_delay_ms` a lone `0d`, as two writes; human bytes
       set the **draft latch** and bump the **input epoch**; a paste with a
@@ -496,10 +496,10 @@ wrong.
       human bytes arriving between the paste and the `\r` are queued behind
       the `\r`, never interleaved; `sanitize` normalises CRLF to LF and
       refuses any control byte beyond LF and TAB.
-- [ ] [IMPL-PANE-04] `arbiter.rs` (per-pane lock from paste to `\r`, latch,
+- [x] [IMPL-PANE-04] `arbiter.rs` (per-pane lock from paste to `\r`, latch,
       epoch, queued human bytes); `pty.rs` `write_paste`; `sanitize`.
       -> satisfies [TEST-PANE-03]
-- [ ] [TEST-PANE-05] `tests/bridge.test.mjs` + `bridge.rs` tests — the
+- [x] [TEST-PANE-05] `tests/bridge.test.mjs` + `bridge.rs` tests — the
       protocol: the first stdout line is the handle line (assertion reused
       from `tests/ui.test.mjs:17-50`), then frames `{v:1, id, kind:
       'req'|'res'|'evt', op, body}`; ids namespaced `n-`/`r-`; `deadlineMs`
@@ -509,20 +509,20 @@ wrong.
       `pane.open`); handle line and first frame in ONE read keep the
       buffered bytes; stdout carries frames only; the bridge is inert when
       stdin is not a pipe.
-- [ ] [IMPL-PANE-06] `src/bridge.js` and `app/src-tauri/src/bridge.rs`.
+- [x] [IMPL-PANE-06] `src/bridge.js` and `app/src-tauri/src/bridge.rs`.
       -> satisfies [TEST-PANE-05]
-- [ ] [TEST-PANE-07] `pty.rs` tests — backpressure: with `yes` as the
+- [x] [TEST-PANE-07] `pty.rs` tests — backpressure: with `yes` as the
       child, unacked output is bounded at `backlogBytes`; the reader pauses
       and resumes on acks; input stays responsive; a pane whose consumer is
       HIDDEN still acks (the consumer is the page's per-pane emulator, alive
       whether or not it is displayed — asserted in Phase 4 too); `kill` ends
       everything.
-- [ ] [IMPL-PANE-08] `pty.rs` ack-gated reader with `seq`. -> satisfies [TEST-PANE-07]
-- [ ] [TEST-PANE-09] `app/src-tauri/tests/headless.rs` — the
+- [x] [IMPL-PANE-08] `pty.rs` ack-gated reader with `seq`. -> satisfies [TEST-PANE-07]
+- [x] [TEST-PANE-09] `app/src-tauri/tests/headless.rs` — the
       `consensflow-bridge` binary speaks the protocol over stdio: open the
       raw recorder, `write_paste`, observe the hex, `list`, `kill`, EOF
       reaps.
-- [ ] [IMPL-PANE-10] `app/src-tauri/src/bin/consensflow-bridge.rs` sharing
+- [x] [IMPL-PANE-10] `app/src-tauri/src/bin/consensflow-bridge.rs` sharing
       the lib crate's modules. -> satisfies [TEST-PANE-09]
 
 **Phase 1 exit evidence:** exact paste-then-separate-CR bytes through the
@@ -531,9 +531,9 @@ human input serialised behind an in-flight `\r`; bounded output with
 responsive input; nested bridge requests; EOF and process-group cleanup;
 P1/P2 recorded through this path for each harness being enabled.
 
-## Phase 2: Tabs, identity, launch authority and the store [pending] — gated by P1, P2
+## Phase 2: Tabs, identity, launch authority and the store [in-progress] — gates P1, P2 passed on all five harnesses
 
-- [ ] [TEST-PANE-11] `tests/store.test.mjs` — `Store(home)`: ONE app-wide
+- [ ] [TEST-PANE-11] ← current (brokkr built it green, gefjon finishing the gate in `gefjon-copper-sky`) `tests/store.test.mjs` — `Store(home)`: ONE app-wide
       queue — two mutations on one row, two on different rows, two tabs
       created in different directories, 50 concurrent mixed mutations: none
       lost; an **instance lock** at `<root>/app/instance.lock` (pid, start
@@ -875,6 +875,20 @@ replacement fails closed; an interrupted read creates no coverage.
 
 ## Resume Context
 
+> 2026-09-06 22:10 EEST — **Phase 1 committed**: every unit approved by
+> asteria after five hyperion batches and two gefjon rounds; the one open
+> clause is B8/C7 (a hidden pane keeps acking), deferred to Phase 4's real
+> emulator by decision. Phase 1 exit evidence held: exact paste-then-CR bytes
+> through the real PTY (raw recorder), stale writes and stale clears rejected,
+> newer drafts preserved, human input serialised behind an in-flight CR,
+> bounded output with responsive input, nested bridge requests, EOF and
+> process-group cleanup, interruptible transport shutdown, P1/P2 recorded on
+> all five harnesses through this path. Phase 2 in progress: brokkr built
+> the store and tabs green then hit his usage limit at the biome gate; gefjon
+> finishes it in `gefjon-copper-sky`. gefjon's binding unit (21–22) is
+> green after zeus's BLOCK (F1–F8 fixed) and awaits zeus's re-verdict in
+> `zeus-copper-island`; it is committed only after that.
+>
 > 2026-09-06 19:40 EEST — hyperion reports both review batches GREEN (42 unit
 > + 5 headless, Node bridge 26/26; lead re-ran); asteria's round-3 Rust
 > re-review is running in `asteria-velvet-brook` (her window had ended —
@@ -969,6 +983,7 @@ replacement fails closed; an interrupted read creates no coverage.
 | [TEST-PANE-51] | gefjon, `npm test` after moving the pins: 5 failed — `'ultra' !== 'max'` in catalog, cli (add + sync), claude-core, pi-core | — | — |
 | [IMPL-PANE-52] | — | `npm run check`: exit 0, 461 tests, 458 pass; lead re-ran: exit 0, 458 pass | the Astra comment that named "Hyperion's ultra tier" reworded; `skill/SKILL.md` (the checked-in v0 reference) patched by the lead to say max |
 | review fixes A (01–04) + B-Rust (05–10) | hyperion, one failing test per finding (18 findings over two batches; (8), B3, B5-partial, B6 moot after earlier fixes; B8 hidden consumer left unproven by design); RED captured for every non-moot fix except (9), whose RED link step died on `ENOSPC` | `cargo test`: 42 unit + 5 headless passed; Node bridge 26/26; lead re-ran 2026-09-06 19:05 EEST: 42 + 5, clippy clean | PTY tests serialised against `openpty` exhaustion; per-pane writers; bounded delimiter-aware reader; serialized writer queue |
+| Phase 1 review loop | asteria: unit A BLOCK (12 findings) → hyperion batches 1–2; Rust units BLOCK (10) → batch 2; round 3 (7) → batch 3; round 4: PTY+arbiter APPROVE, backpressure APPROVE (C7 deferred), headless approve-with-edit, bridge BLOCK on C2 → batches 4–5; Node: BLOCK (5) → gefjon N1–N5, BLOCK on N2 → N2a/b, then APPROVE. Final: Rust bridge APPROVE 2026-09-06 22:05 EEST | lead re-ran after every batch; last: `cargo test` 52 unit + 6 headless, `cargo clippy -D warnings` clean, `node --test tests/bridge.test.mjs` 43/43, `npm run check` on the exact staged tree exit 0, 489 pass | per batch, under green |
 | [IMPL-PANE-06] (Node half) | — | `node --test tests/bridge.test.mjs`: 17 passed, 0 failed; lead re-ran: 17/17, `tests/ui.test.mjs` 29/29 | biome format + two assignment-in-expression lints fixed; one self-inflicted test sizing (a 64-byte budget could not fit the refusal frame) corrected in the TEST, noted as a test bug not an assertion change |
 
 ## Deviations
