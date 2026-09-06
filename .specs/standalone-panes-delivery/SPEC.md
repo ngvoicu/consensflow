@@ -810,11 +810,19 @@ replacement fails closed; an interrupted read creates no coverage.
 
 ## Resume Context
 
-> Revision 3 written 2026-09-06 after astraeus's second review and Gabriel's
-> scope decision (macOS first). Nothing implemented. TDD phase: RED on
-> [TEST-PANE-01]. Before the first task: revision 3 goes back to astraeus
-> in `astraeus-lilac-dune` for a third look; P1/P2 for claude wait for the
-> session limit reset (22:20 Europe/Athens).
+> Phase 1 started 2026-09-06 16:14 EEST, delegated by the lead (PM):
+> **hyperion** holds TEST-PANE-01 → IMPL-PANE-04 (Rust `pty.rs` +
+> `arbiter.rs`) in conversation `hyperion-willow-orchard` (pane
+> surface:66); **gefjon** holds the Node half of TEST-PANE-05 / IMPL-PANE-06
+> (`src/bridge.js`, `tests/bridge.test.mjs`, the `serveUi` wiring) in
+> `gefjon-frosty-tide` (surface:67). Briefs carry the verbatim task text
+> and the TDD gates; both were told to paste `cargo test` / `node --test`
+> output and never edit a test to pass. The Rust half of the bridge
+> (`bridge.rs`, tasks 05–06) and tasks 07–10 are unassigned until these
+> land. The lead verifies every claim by running the suites itself before
+> ticking a box or writing a TDD-log row; a reviewer (asteria now, zeus
+> after the claude limit resets at 22:20) reads each unit before it is
+> committed. Claude probes P1/P2 wait for that reset.
 
 ## Decision Log
 
