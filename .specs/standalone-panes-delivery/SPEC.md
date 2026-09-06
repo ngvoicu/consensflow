@@ -554,7 +554,7 @@ P1/P2 recorded through this path for each harness being enabled.
       and wins over `CLAUDE_CODE_SESSION_ID`.
 - [ ] [IMPL-PANE-14] `src/tabs.js`; `hosts/lib/threads.js` `LEAD_KEYS`
       gains `CONSENSFLOW_LEAD_ID` first. -> satisfies [TEST-PANE-13]
-- [ ] [TEST-PANE-15] `tests/launch.test.mjs` — roles and tickets: the lead
+- [x] [TEST-PANE-15] `tests/launch.test.mjs` — roles and tickets: the lead
       env (`CONSENSFLOW_APP`, tab-scoped token, `CONSENSFLOW_LEAD_ID`,
       `_TAB`, `_PANE_ID`, `PATH` starting with the bundle's `bin`, no
       `CONSENSFLOW_CHILD`); the controller env (`CONSENSFLOW_APP`,
@@ -987,6 +987,7 @@ replacement fails closed; an interrupted read creates no coverage.
 | [TEST-PANE-21] | gefjon, `node --test tests/engine/session-binding.test.mjs`: `ERR_MODULE_NOT_FOUND hosts/lib/session-binding.js` (13 tests first); after zeus's BLOCK: 13 RED on the rebuilt real-rollout fixtures; after his edits E1/E2: 7 RED | — | — |
 | [IMPL-PANE-22] | — | 23 binding tests green; lead re-ran 51/51 across binding, transcript and store; `npm run check` on the exact staged tree exit 0, 514 pass | zeus review: BLOCK (F1–F9: the codex seed is the SECOND user turn on real rollouts; replacement failed open without `alive`; marker matched any line) → fixed → approve with edits (E1 discovery returns the matching turn; E2 reported-vs-preallocated agreement) → **approve** 2026-09-06 22:50 EEST |
 | [IMPL-PANE-06] (Node half) | — | `node --test tests/bridge.test.mjs`: 17 passed, 0 failed; lead re-ran: 17/17, `tests/ui.test.mjs` 29/29 | biome format + two assignment-in-expression lints fixed; one self-inflicted test sizing (a 64-byte budget could not fit the refusal frame) corrected in the TEST, noted as a test bug not an assertion change |
+| [TEST-PANE-15] | `node --test tests/launch.test.mjs`: exit 1, 1 test, 1 failed — `ERR_MODULE_NOT_FOUND src/launch.js` | — | — |
 
 ## Deviations
 
