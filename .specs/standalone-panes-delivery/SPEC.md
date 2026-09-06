@@ -366,7 +366,7 @@ wrong.
 
 ## Probes — gates, recorded in `findings-01.md`
 
-- [ ] P1 — per lead harness (claude, codex, pi, opencode, kimi), through
+- [x] P1 — per lead harness (claude, codex, pi, opencode, kimi), through
       the REAL PTY write path (`consensflow-bridge`, not cmux): a
       multi-line body as one bracketed paste, then a separate `\r`,
       submits; the conservative inline budget holds intact — gates Phase 2
@@ -376,13 +376,18 @@ wrong.
       4 000 and 20 000 bytes each intact and byte-exact, all newlines kept,
       stored ~0.4 s after the `\r`; first-turn store latency up to ~3 s on pi
       and ~1 s on codex. Inline budget ≥ 20 000 B on all four; the default
-      of 4 000 stays as the conservative setting. claude pending (session
-      limit resets 22:20 Europe/Athens).
-- [ ] P2 — kitty keyboard protocol on; a raw `\r` still submits; a
+      of 4 000 stays as the conservative setting. **claude PASSED too**
+      (2026-09-06, same method): byte-exact at 600, 4 000 and 20 000 bytes,
+      newlines kept, while the TUI showed only a `[Pasted text #1 +5 lines]`
+      chip — screen ≠ store. The login was expired at the time ("Login
+      expired · run /login"), which does not affect submission evidence.
+- [x] P2 — kitty keyboard protocol on; a raw `\r` still submits; a
       newline inside the paste survives — Phase 2 **PASSED 2026-09-06 for codex, pi, opencode, kimi**:
       codex `ESC[>5u`, pi and kimi `ESC[>7u`, opencode only the `ESC[?u`
       query; a raw `\r` submitted everywhere; newlines survived everywhere.
-      claude pending.
+      claude: no set request — it emits `ESC[<u`, the kitty clear-all-flags
+      form (explicitly disengages), raw `\r` submitted, newlines survived.
+      All five harnesses pass; the Phase 2 gate is open.
 - [ ] P3 — an `http://localhost:<port>` iframe loads inside a `tauri://`
       page under the existing ATS exception — Phase 4
 - [ ] P5 — opencode's TUI server admits a message into the running

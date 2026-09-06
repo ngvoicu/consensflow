@@ -34,16 +34,17 @@ by the reader's `trim()` — noted where it appeared, never a mid-body loss).
 | pi, `0.85.1` — argv `["/opt/homebrew/bin/pi"]`, no flags | 2026-09-06 | Marker `probe-p1-pi-z5xftg`. No prompt; first output 521 ms, quiet idle after 6.1 s. 600 B: **intact** (599 stored — trailing space trimmed; 5/5 newlines), appeared 3 249 ms after the `\r`: the FIRST turn of a fresh pi session reached its store up to ~3 s after submit — every following turn was sub-second, so this is first-turn latency, not size latency. 4 000 B: **intact**, byte-exact, 402 ms. 20 000 B: **intact**, byte-exact, 405 ms. Session `01a0773e-6dcb-7033-a5dc-f36b5ac1e228`. Kitty at startup: `ESC[>7u` + `ESC[?u` (P2). Inline budget: ≥ 20 000 B. |
 | opencode, `1.18.29` — argv `["/Users/gabrielvoicu/.opencode/bin/opencode"]`, no flags | 2026-09-06 | Marker `probe-p1-opencode-4goyvp`. No prompt; first output 1 920 ms, quiet idle after 8.1 s. 600 B: **intact**, byte-exact, 426 ms. 4 000 B: **intact** (3 999 stored — trailing space trimmed, 5/5 newlines), 411 ms. 20 000 B: **intact** (19 999 stored — trailing space trimmed, 5/5 newlines), 407 ms. Session `ses_f88c0c7cdffeANJRVLwiBceADi`, read from `opencode.db` through `node:sqlite` (the file store is frozen). Kitty at startup: **no `CSI > … u`** — only the query `ESC[?u` (P2). Inline budget: ≥ 20 000 B. |
 | kimi, `0.41.0` — argv `["/Users/gabrielvoicu/.kimi-code/bin/kimi"]`, no flags | 2026-09-06 | Marker `probe-p1-kimi-ilk467`. No prompt; first output 1 014 ms, quiet idle after 7.5 s. 600 B, 4 000 B and 20 000 B: **all three byte-exact**, 5/5 newlines each, appeared 433 / 406 / 412 ms after the `\r` — no trim, no loss at any size. Session `session_e4517114-9dc0-4a60-8546-8a2f2c794b0b`. Kitty at startup: `ESC[>7u` + `ESC[?u` (P2). Inline budget: ≥ 20 000 B. |
-| claude | 2026-09-06 | **not run** — claude is rate-limited until 22:20 Europe/Athens today; its probes wait for that reset |
+| claude, `2.1.263 (Claude Code)` — argv `["/Users/gabrielvoicu/.local/bin/claude"]`, no flags (the real binary; `which claude` is a cmux shim) | 2026-09-06 | Marker `probe-p1-claude-kv3ve4`. No trust prompt; first output 886 ms after open, quiet idle after 8.6 s; a non-blocking banner "⚠ 1 MCP server needs authentication · run /mcp" (later "⚠ 4 MCP servers need authentication"). The login is **expired** — every submitted turn got the assistant reply `⏺ Login expired · Please run /login` (nothing about the usage limit was printed; the blocker was auth, and `/login` needs a browser OAuth the probe cannot run). The user turn is stored regardless: 600 B **byte-exact** (600/600, 5/5 newlines), 4 000 B **byte-exact**, 20 000 B **byte-exact** (20 000/20 000, 5/5 newlines) — the stored `user` record carries the whole multi-line body as one plain string. Times to appear are from the store record's own timestamp against the `\r` write: ~48 ms (600 B), ~19 ms (4 kB), ~39 ms (20 kB) — measured tighter than the 400 ms poll resolution of the rows above. Odd: the TUI **display** collapses a multi-line paste into a `[Pasted text #1 +5 lines] · paste again to expand` chip while the **store** keeps the full text with newlines — the screen is not the evidence, the store is. All three turns in session `62fe5b8f-19a1-463e-bfec-cdd4051e2e71`. Kitty at startup: no set request — claude sends the kitty CLEAR form `ESC[<u` and modifyOtherKeys off (P2). Inline budget: ≥ 20 000 B — the largest size tried submitted intact, byte-exact at every size. |
 
 Reading (2026-09-06, the live bridge path): the separate-`\r` write shape
-submits at every size tried for all four harnesses — the swallow recorded
+submits at every size tried for all five harnesses — the swallow recorded
 below for a cmux paste whose Enter rode INSIDE the send does not appear
 when the `\r` is its own write: 20 000 bytes pasted as one bracketed
 paste submitted in ~0.4 s and stored whole. First-turn store latency is
 the one wrinkle: pi took up to ~3 s to write its first turn, codex ~1 s
-(includes discovery); opencode and kimi were sub-half-second from the
-first turn. A store poller needs to outlive that.
+(includes discovery); opencode, kimi and claude were fast from the first
+turn (claude's store record is timestamped within ~50 ms of the `\r`).
+A store poller needs to outlive that.
 
 Reading (the earlier cmux note): the swallow described in research-01 §5.3
 (claude-code#43169, #30239) is real for codex too, and it is
@@ -53,7 +54,9 @@ a separate `\r` as a second write) is the right one; the current cmux-era
 skill's follow-up recipe (words and newline in one send) is wrong for long
 follow-ups and should say so until Phase 6 retires it.
 
-Still to run for P1: claude (after 22:20 Europe/Athens, 2026-09-06).
+Nothing left to run for P1: all five harnesses have rows through the real
+bridge path. (The claude row was run with its login expired — the user
+turn is stored at submit regardless, which is what P1 measures.)
 
 ## P2 — kitty keyboard protocol
 
@@ -70,7 +73,7 @@ count of every stored turn at every size, none collapsed.
 | pi, `0.85.1` | 2026-09-06 | `ESC[>7u` at byte 202, immediately after `ESC[?2004h` (bracketed paste enable); kitty query `ESC[?u` at byte 207. Raw `\r` submitted; newlines survived, no collapsing. |
 | opencode, `1.18.29` | 2026-09-06 | **No `CSI > … u` set request in the captured startup bytes.** opencode emits the kitty QUERY `ESC[?u` at byte 104, right after `ESC[?2026$p` (synchronized-output DECRQM), and nothing matching `1b 5b 3e … 75` before the first idle. Raw `\r` submitted; newlines survived, no collapsing. |
 | kimi, `0.41.0` | 2026-09-06 | `ESC[>7u` at byte 161, immediately after `ESC[?2004h`; kitty query `ESC[?u` at byte 166. Raw `\r` submitted; newlines survived, no collapsing. |
-| claude | 2026-09-06 | **not run** — session limit resets 22:20 Europe/Athens today |
+| claude, `2.1.263 (Claude Code)` | 2026-09-06 | **No `CSI > … u` set request at startup.** The `u`-final sequence claude emits is `ESC[<u` (bytes `1b 5b 3c 75`) — the kitty protocol's clear-all-flags form, i.e. it explicitly DISENGAGES kitty — alongside `ESC[>4m` (modifyOtherKeys off; `CSI > 4 m` is not a kitty form). Startup also enables bracketed paste (`ESC[?2004h`) and focus reporting (`ESC[?1004h`), queries cursor style (`ESC[>0q`), and sends `ESC c`. A raw `\r` still submitted — all three pastes were submitted by the lone `\r` (the turns are in the store; only the model reply failed, on the expired login). Newlines inside the pasted body survived as newlines in the stored turns — 5/5 at every size, no collapsing, despite the on-screen paste chip. |
 
 ## P3 — `http://localhost` iframe inside a `tauri://` page
 
