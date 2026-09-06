@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util'
-import { leadSession, makeStage, runLead, threadFrom } from './harness.mjs'
+import { existsSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { AGENT, leadSession, makeStage, runLead, threadFrom } from './harness.mjs'
 import { SCENARIOS } from './scenarios.mjs'
 
 /**
@@ -38,7 +41,14 @@ if (chosen.length === 0) {
   process.exit(2)
 }
 
-console.log(`lead: ${values.lead} · ${chosen.length} scenarios × ${repeat}`)
+// The lead consults only names it finds in the installed skill's roster.
+const skillPath = join(homedir(), values.lead === 'codex' ? '.codex' : '.claude', 'skills', 'consensflow', 'SKILL.md')
+if (!existsSync(skillPath) || !readFileSync(skillPath, 'utf8').includes(`**${AGENT}**`)) {
+  console.error(`the installed skill at ${skillPath} does not list ${AGENT}; set CF_EVAL_AGENT to a roster name (cf agent list)`)
+  process.exit(2)
+}
+
+console.log(`lead: ${values.lead} · ${chosen.length} scenarios × ${repeat} · agent @${AGENT}`)
 console.log('this spends real tokens on a real lead, and touches nothing real')
 console.log('')
 

@@ -97,3 +97,27 @@ the new pane rather than run in the lead's own — every earlier miss on that
 check happened under one of the stub lies above, and the first run against the
 honest stage was cut short by the Claude session limit. Measure it with
 `--repeat 3` when the limit resets, before reading anything into the prose.
+
+## The agent has to be real (2026-09-06, evening)
+
+Every scenario consulted `nyx`, a name no roster carries, on the theory
+that the stub `cf` answers for anyone. The lead is the one that has to
+believe it: a fresh Claude Code (2.1.263) read the installed skill's
+roster, found no `nyx`, and refused — "There's no agent named nyx" — in
+3/3 runs, every check 0/3, the prose untouched. The scenarios now consult
+`AGENT` (`CF_EVAL_AGENT`, default `zeus`) and the runner refuses to start
+when the installed skill does not list that name.
+
+Measured with the real agent, `--repeat 3`, one lead at a time:
+
+| Scenario | Result |
+|---|---|
+| `a-dependent-task-stays-in-its-pane` | 5/5 checks, 1/1 run (5/5 on 5/5 runs earlier in the day) |
+| `an-independent-task-gets-its-own-pane` — mints, opens a pane, sends the fresh consult there | 3/3 each |
+| `an-independent-task-gets-its-own-pane` — sends no bare words into the old window | 2/3: one lead first typed the unrelated task into the joke window, waited, then minted and opened its own pane |
+
+By this README's rule the last row is a failing check. It is left as
+measured: the cmux recipe it exercises is retired in the standalone
+switch-over (spec `standalone-panes-delivery`, Phase 6), where the
+scenario is re-expressed over `cf run --new`; the decision rule the
+scenario guards held in every run once the lead looked.

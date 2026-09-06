@@ -11,6 +11,8 @@
  * `cmux` are recording stubs, so its choices are the observation.
  */
 
+import { AGENT } from './harness.mjs'
+
 const ran = (log, prefix) => log.some((line) => line.startsWith(prefix))
 const sent = (log, text) =>
   log.some((line) => line.startsWith('cmux send') && line.includes(text))
@@ -30,13 +32,13 @@ export const SCENARIOS = [
     why: 'A lead ran `cf run` in its own pane, because it never opened the skill body at all.',
     turns: [
       {
-        say: 'ask nyx for a joke',
+        say: `ask ${AGENT} for a joke`,
         expect: [
           // With the agent, not bare: a tab titled `quartz-valley` does not say
           // whose window the pane holds, which is the reason names carry one.
-          ['names the conversation first, with the agent', (log) => ran(log, 'cf mint @nyx')],
+          ['names the conversation first, with the agent', (log) => ran(log, `cf mint @${AGENT}`)],
           ['opens a pane', (log) => ran(log, 'cmux new-pane')],
-          ['sends the consult into that pane', (log) => sent(log, 'cf run @nyx')],
+          ['sends the consult into that pane', (log) => sent(log, `cf run @${AGENT}`)],
           ['does NOT consult in its own pane', (log) => !ran(log, 'cf run')],
         ],
       },
@@ -46,7 +48,7 @@ export const SCENARIOS = [
     id: 'reading-is-not-writing',
     why: 'Asked "can you see what other jokes he said?", a lead SENT another request and invented a new answer instead of reading the existing one.',
     turns: [
-      { say: 'ask nyx for a joke', expect: [] },
+      { say: `ask ${AGENT} for a joke`, expect: [] },
       {
         say: 'can you see what other jokes he said?',
         expect: [
@@ -62,7 +64,7 @@ export const SCENARIOS = [
     id: 'look-before-you-send',
     why: 'A follow-up composed against a stale view asks the wrong question — the user may have moved the conversation in its pane.',
     turns: [
-      { say: 'ask nyx for a joke', expect: [] },
+      { say: `ask ${AGENT} for a joke`, expect: [] },
       {
         say: 'ask him for another one',
         expect: [
@@ -70,7 +72,7 @@ export const SCENARIOS = [
           ['sends the follow-up into the pane', (log) => ran(log, 'cmux send')],
           ['does not restart the conversation', (log) => !log.some((l) => l.includes('--new'))],
           // Live 2026-08-31: the send landed, and it carried `cd … && cf run
-          // @nyx … --session <name>` — a shell line pasted into nyx's own
+          // @${AGENT} … --session <name>` — a shell line pasted into nyx's own
           // window, where it reads as nyx being told to consult nyx. It counts
           // as a send by every check above, which is why the shape is checked.
           [
@@ -100,9 +102,9 @@ export const SCENARIOS = [
     // quote it as proof the rule works.
     stage: { longAnswer: true },
     turns: [
-      { say: 'ask nyx to review db/0007_add_index.sql before we ship it', expect: [] },
+      { say: `ask ${AGENT} to review db/0007_add_index.sql before we ship it`, expect: [] },
       {
-        say: 'what did nyx conclude?',
+        say: `what did ${AGENT} conclude?`,
         expect: [
           ['reads the conversation', (log) => ran(log, 'cf catchup')],
           [
@@ -117,10 +119,10 @@ export const SCENARIOS = [
     id: 'answers-from-the-conversation',
     why: 'Asked "did you see her last answer?", a lead answered from its own memory while the user\'s pane turns sat unread.',
     turns: [
-      { say: 'ask nyx for a joke', expect: [] },
+      { say: `ask ${AGENT} for a joke`, expect: [] },
       { say: 'thanks', expect: [] },
       {
-        say: 'did nyx say anything else after that?',
+        say: `did ${AGENT} say anything else after that?`,
         expect: [
           ['looks instead of remembering', (log) => ran(log, 'cf catchup')],
           ['sends nothing', (log) => !ran(log, 'cmux send')],
@@ -154,11 +156,11 @@ export const SCENARIOS = [
     turns: [
       {
         say:
-          'ask nyx to implement tranche 2 — the whole handoff with the ticket numbers, design ' +
+          `ask ${AGENT} to implement tranche 2 — the whole handoff with the ticket numbers, design ` +
           'and constraints is in docs/tranche2-handoff.md, he should read it in full first',
         expect: [
           ['opens a pane for it', (log) => ran(log, 'cmux new-pane')],
-          ['sends the consult there', (log) => sent(log, 'cf run @nyx')],
+          ['sends the consult there', (log) => sent(log, `cf run @${AGENT}`)],
           // Shape, checked on the `cf run` tail of the sent line rather than on
           // the whole line: a task string may well contain a `>` or the word
           // tee, and the failure was never the prose. Each of these REQUIRES
@@ -170,7 +172,7 @@ export const SCENARIOS = [
             (log) => {
               const line = consultLine(log)
               if (line === null) return false
-              return !(line.includes('--prompt-file') && /cf run @nyx\s+["']/.test(line))
+              return !(line.includes('--prompt-file') && new RegExp(`cf run @${AGENT}\\s+["']`).test(line))
             },
           ],
           [
@@ -189,7 +191,7 @@ export const SCENARIOS = [
       + 'two processes writing one store. The skill invited it: its escape hatch for a fresh pane '
       + 'is "the window is gone", which nothing could check until `cmux tree` was named for it.',
     turns: [
-      { say: 'ask nyx whether the retry path is safe', expect: [] },
+      { say: `ask ${AGENT} whether the retry path is safe`, expect: [] },
       {
         say: 'ask him what happens on a timeout too',
         expect: [
@@ -201,7 +203,7 @@ export const SCENARIOS = [
           ['opens no second pane', (log) => !ran(log, 'cmux new-pane')],
           [
             'does not re-spawn the consult',
-            (log) => !log.some((line) => line.includes('cf run @nyx')),
+            (log) => !log.some((line) => line.includes(`cf run @${AGENT}`)),
           ],
           [
             'sends the question, not a shell line',
@@ -236,11 +238,11 @@ export const SCENARIOS = [
       },
     },
     turns: [
-      { say: 'ask nyx for a joke', expect: [] },
+      { say: `ask ${AGENT} for a joke`, expect: [] },
       {
-        say: 'ask nyx to review scripts/backup.sh — can it lose data if it is interrupted halfway?',
+        say: `ask ${AGENT} to review scripts/backup.sh — can it lose data if it is interrupted halfway?`,
         expect: [
-          ['mints a fresh name', (log) => ran(log, 'cf mint @nyx')],
+          ['mints a fresh name', (log) => ran(log, `cf mint @${AGENT}`)],
           ['opens a new pane', (log) => ran(log, 'cmux new-pane')],
           ['sends a fresh consult there', (log) => consultLine(log) !== null && consultLine(log).includes('--new')],
           [
@@ -264,12 +266,12 @@ export const SCENARIOS = [
     // jokes and rightly sends nothing.
     stage: {
       transcript: [
-        'amber-tide · @nyx · 2 turns',
+        `amber-tide · @${AGENT} · 2 turns`,
         '',
         '› asked',
         'whether the retry path is safe',
         '',
-        '• @nyx',
+        `• @${AGENT}`,
         'Mostly, with one exception. A retry after a partial write duplicates the',
         'row: the idempotency key is minted AFTER the insert in src/retry.js, so a',
         'crash between the two leaves no key and the retry inserts again. Everything',
@@ -278,14 +280,14 @@ export const SCENARIOS = [
       ].join('\n'),
     },
     turns: [
-      { say: 'ask nyx whether the retry path is safe', expect: [] },
+      { say: `ask ${AGENT} whether the retry path is safe`, expect: [] },
       {
-        say: 'ask nyx to write a test for the case he flagged',
+        say: `ask ${AGENT} to write a test for the case he flagged`,
         expect: [
           ['looks before it sends', (log) => ran(log, 'cf catchup')],
           ['sends words at the window it already has', (log) => ran(log, 'cmux send')],
           ['opens no second pane', (log) => !ran(log, 'cmux new-pane')],
-          ['does not re-spawn the consult', (log) => !log.some((line) => line.includes('cf run @nyx'))],
+          ['does not re-spawn the consult', (log) => !log.some((line) => line.includes(`cf run @${AGENT}`))],
           [
             'sends the question, not a shell line',
             (log) => {

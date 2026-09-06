@@ -5,6 +5,16 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 /**
+ * The agent every scenario consults. It has to be a name the INSTALLED
+ * skill's roster carries: the lead reads that roster before it consults, and
+ * a name that is not there is refused, not tried — `nyx` was refused by a
+ * lead on 2026-09-06 ("no agent named nyx") and every check read as 0/3
+ * while the prose was fine. The stub `cf` answers for any name; the lead
+ * is the one that has to believe it. `run.mjs` checks the roster at start.
+ */
+export const AGENT = process.env.CF_EVAL_AGENT ?? 'zeus'
+
+/**
  * A real lead, a real installed skill, and no real side effects.
  *
  * The point of an eval is that nothing here is simulated except the
@@ -25,12 +35,12 @@ import { dirname, join } from 'node:path'
  * like it found it. A stage that only ever answers in four short lines cannot
  * catch a lead that reads too little, so scenarios can ask for this one.
  */
-const LONG_ANSWER = `    echo "amber-tide · @nyx · 4 turns"
+const LONG_ANSWER = `    echo "amber-tide · @${AGENT} · 4 turns"
     echo ""
     echo "› asked"
     echo "review db/0007_add_index.sql before we ship it"
     echo ""
-    echo "• @nyx"
+    echo "• @${AGENT}"
     echo "VERDICT: do not ship this migration."
     echo ""
     echo "It takes an ACCESS EXCLUSIVE lock on a 2.1M-row table. Here is every"
@@ -44,7 +54,7 @@ const LONG_ANSWER = `    echo "amber-tide · @nyx · 4 turns"
     echo "› asked"
     echo "anything else?"
     echo ""
-    echo "• @nyx"
+    echo "• @${AGENT}"
     echo "No — everything that matters is above."`
 
 const CF_STUB = (log, { longAnswer = false, transcriptPath = null } = {}) => `#!/bin/sh
@@ -53,10 +63,10 @@ case "$1" in
   # The real mint never hands out a name that is taken. The log already holds
   # this call, so a count of 2 is the second mint — a second conversation,
   # which is what the independent-task scenario asks for.
-  mint) if [ "$(grep -c '^cf mint' "${log}")" -ge 2 ]; then echo "nyx-coral-lane"; else echo "amber-tide"; fi ;;
+  mint) if [ "$(grep -c '^cf mint' "${log}")" -ge 2 ]; then echo "${AGENT}-coral-lane"; else echo "amber-tide"; fi ;;
   sessions)
-    echo "amber-tide        @nyx         0 runs   2026-08-24T16:00:00.000Z"
-    if [ "$(grep -c '^cf mint' "${log}")" -ge 2 ]; then echo "nyx-coral-lane    @nyx         0 runs   2026-08-24T16:05:00.000Z"; fi ;;
+    echo "amber-tide        @${AGENT}         0 runs   2026-08-24T16:00:00.000Z"
+    if [ "$(grep -c '^cf mint' "${log}")" -ge 2 ]; then echo "${AGENT}-coral-lane    @${AGENT}         0 runs   2026-08-24T16:05:00.000Z"; fi ;;
   catchup)
 ${
   transcriptPath
@@ -64,18 +74,18 @@ ${
     : longAnswer
     ? LONG_ANSWER
     : `    case "$*" in
-      *--unread*) echo "amber-tide · @nyx · 2 new turns"; echo ""; echo "› asked"; echo "do you have more?"; echo ""; echo "• @nyx"; echo "Why do Java developers wear glasses? Because they can't C#." ;;
-      *) echo "amber-tide · @nyx · 4 turns"; echo ""; echo "› asked"; echo "Tell me a joke"; echo ""; echo "• @nyx"; echo "Light attracts bugs."; echo ""; echo "› asked"; echo "do you have more?"; echo ""; echo "• @nyx"; echo "Why do Java developers wear glasses? Because they can't C#." ;;
+      *--unread*) echo "amber-tide · @${AGENT} · 2 new turns"; echo ""; echo "› asked"; echo "do you have more?"; echo ""; echo "• @${AGENT}"; echo "Why do Java developers wear glasses? Because they can't C#." ;;
+      *) echo "amber-tide · @${AGENT} · 4 turns"; echo ""; echo "› asked"; echo "Tell me a joke"; echo ""; echo "• @${AGENT}"; echo "Light attracts bugs."; echo ""; echo "› asked"; echo "do you have more?"; echo ""; echo "• @${AGENT}"; echo "Why do Java developers wear glasses? Because they can't C#." ;;
     esac`
 } ;;
   # The real run names the conversation it was given. A stub that always
-  # said amber-tide sent a lead that had just started nyx-coral-lane back to
+  # said amber-tide sent a lead that had just started ${AGENT}-coral-lane back to
   # read the OLD one (seen 2026-09-05).
   run)
     name="amber-tide"; prev=""
     for a in "$@"; do if [ "$prev" = "--session" ]; then name="$a"; fi; prev="$a"; done
-    echo "conversation: $name (new)"; echo "read it back with: cf catchup $name"; echo "Light attracts bugs."; echo "— @nyx" ;;
-  last) echo "# amber-tide · @nyx"; echo ""; echo "Light attracts bugs." ;;
+    echo "conversation: $name (new)"; echo "read it back with: cf catchup $name"; echo "Light attracts bugs."; echo "— @${AGENT}" ;;
+  last) echo "# amber-tide · @${AGENT}"; echo ""; echo "Light attracts bugs." ;;
   *) : ;;
 esac
 `
