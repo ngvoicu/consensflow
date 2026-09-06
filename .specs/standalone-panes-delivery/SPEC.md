@@ -34,7 +34,33 @@ packaging are deferred to a later spec, while every choice here stays
 compatible with them (a PTY crate that covers ConPTY, Tauri, a JS emulator,
 no Unix-only assumption added).
 
+**Scope correction (2026-09-06, Gabriel):** the claude and pi modes go
+with cmux. ConsensFlow has ONE shape after this spec — standalone, the app
+owning the panes — installed into every detected harness. The mode
+selector from the round-1 requirement goes with the modes; the roster
+editor becomes a collapsible panel at the top of the standalone page. The
+target stays macOS, Windows and Linux; this spec tests on macOS and the
+other two follow in their own spec.
+
 50 tasks across 6 phases; five live probes gate three of them.
+
+## Team
+
+- **Gabriel** — owner: answers, tests, starts the app to see it. Asked when
+  needed, not polled.
+- **Lead** (this session) — architect, project manager, keeper of this
+  spec: assigns work, reviews, keeps the TDD log and the registry.
+- **astraeus** — co-lead: consulted on every contract change and every
+  phase exit, in `astraeus-lilac-dune`.
+- **hyperion**, **zeus** — workers and reviewers of first rank (codex ultra;
+  claude max — claude is rate-limited until 22:20 Europe/Athens today).
+- **gefjon** — free worker (opencode), used often and for repetitive work.
+- **brokkr**, **mnemosyne**, **coeus** — workers.
+- **Pane policy** (the skill's own rule): one conversation per work
+  stream, continued for everything that leans on it; a task independent of
+  what a conversation holds gets a new conversation in a new pane; unsure
+  means continue. Every consult carries the spec path, the task ids, and
+  the TDD gates; nothing is applied without the lead reading it whole.
 
 ## Acceptance Criteria
 
@@ -66,10 +92,11 @@ no Unix-only assumption added).
       page offers reopening through the app's own new/resume path with a
       new generation, and the previous transcript never authorises a write
 - [ ] The page opens maximized on first launch and restores its geometry
-      after; a collapsible mode selector; claude and pi show the roster
-      editor; standalone shows the sidebar (tabs, their conversations) and
-      the pane area; switching the displayed mode neither stops pane
-      services nor changes a running lead's `cf` semantics
+      after; the roster editor is a collapsible panel at the top (the
+      `cf ui` page in an iframe); below it the sidebar (tabs, their
+      conversations, collapsible left) and the pane area; collapsing or
+      expanding a panel neither stops pane services nor changes a running
+      lead's `cf` semantics
 - [ ] Panes tile in the user's progression counted WITH the lead: 1 alone;
       2 beside; 3 lead full-height and two stacked; 4 a 2×2; 5 lead
       full-height and a 2×2; 6 a 3×2; beyond, `rows = ceil(sqrt(n))`,
@@ -136,10 +163,11 @@ no Unix-only assumption added).
       the packaged smoke launches the REAL app bundle on macOS in a
       self-test mode that opens a pane, renders output, takes input, acks
       and shuts down
-- [ ] `standalone` is a mode; `mode.json` holding `cmux` reads as
-      `standalone`; the generated skill names no cmux command; the evals
-      hold both directions of "continue or start fresh" and the delivery
-      rules
+- [ ] There are no modes: `cf use` and `cf mode` are gone (a leftover
+      `mode.json` is ignored and reported once by `cf doctor`), the
+      generated skill is installed into every detected harness without a
+      native ConsensFlow, it names no cmux command, and the evals hold both
+      directions of "continue or start fresh" and the delivery rules
 - [ ] The standalone skill teaches the lead to **send and return, never
       wait**: after a consult or a follow-up it reports what is running and
       takes the user's next message; an answer arrives in its pane on its
@@ -164,14 +192,13 @@ covers ConPTY, the bridge is stdio, xterm is JS, paths go through Node's
 
 ```
  ┌──────────────────────── ConsensFlow.app window (tauri:// origin) ─────────────────────┐
- │ [ claude | pi | standalone ]  ◄ collapsible upward                                     │
+ │ [ roster editor ▾ ]  ◄ the cf ui page in an iframe, collapsible upward                 │
  │ ┌ sidebar ┐ ┌──── pane area: one tab = one directory + one lead pane + policy ───────┐ │
  │ │ tab ~/x  │ │ ┌ lead: claude ────┐ ┌ nyx-coral-lane · @nyx · auto (tab) ───────────┐ │ │
  │ │  nyx-…   │ │ │ xterm ◄─Channel  │ │ xterm (right-click: Send reply to lead…)       │ │ │
  │ │  shell   │ │ │        ack──►    │ ├ shell ────────────────────────────────────────┤ │ │
  │ │ tab ~/y  │ │ │ [1 waiting: draft open — Deliver now]                              │ │ │
  │ └──────────┘ └─┴──────────────────┴─┴───────────────────────────────────────────────┴─┘ │
- │ [ roster editor: <iframe src="http://localhost:PORT/?token=UI"> ]  ◄ cf ui, unchanged  │
  └────────────────────────────────────────────────────────────────────────────────────────┘
         │ Tauri IPC: invoke + Channel<bytes> + acks     (the page never fetches Node)
         ▼
@@ -666,9 +693,9 @@ replacement fails closed; an interrupted read creates no coverage.
       always `lead`.
 - [ ] [IMPL-PANE-38] `src/layout.js`. -> satisfies [TEST-PANE-37]
 - [ ] [TEST-PANE-39] `app/tests/page.spec.mjs` (Playwright, `__TAURI__`
-      shim) — first launch maximized, later launches restore geometry;
-      selector collapses upward; claude/pi show the roster iframe; standalone
-      shows the sidebar (collapsible left) and pane area; four and five
+      shim) — first launch maximized, later launches restore geometry; the
+      roster panel (the `cf ui` iframe) collapses upward and expands; the
+      sidebar (collapsible left) and the pane area; four and five
       panes render their templates; a worker opening keeps focus on the
       lead; titles `name · @agent · policy (source)`, `shell`; right-click
       **Send reply to lead…** lists answers with delivered/uncertain marks
@@ -678,7 +705,8 @@ replacement fails closed; an interrupted read creates no coverage.
       answers to this lead**; **New conversation**, **New pane** (Shell /
       Agent); when panes cannot fit, the focused-pane view with next/prev;
       a HIDDEN tab's emulators keep consuming and acking (a canned flood on
-      a hidden pane drains); no request leaves the origin.
+      a hidden pane drains); no request leaves the origin except the roster
+      iframe's own.
 - [ ] [IMPL-PANE-40] `app/ui/` (`index.html`, `panes.js`, `term.js` with
       the `Emulator` interface and per-pane xterm instances that live while
       the pane does, `menus.js`), `app/scripts/bundle-ui.mjs`; `lib.rs`
@@ -693,10 +721,9 @@ replacement fails closed; an interrupted read creates no coverage.
 - [ ] [TEST-PANE-41] `app/src-tauri` + `tests/lifecycle.test.mjs` — closing
       a lead stops its process tree and suspends the tab; app exit reaps
       every tree; restart reads tabs closed; `tab.resume` → generation +1;
-      held deliveries stay held and visible; switching the displayed mode
-      keeps every pane and the watcher running; an authenticated lead's
-      `cf` keeps standalone routing while its tab exists, whatever
-      `mode.json` says.
+      held deliveries stay held and visible; collapsing the roster panel or
+      switching tabs keeps every pane and the watcher running; an
+      authenticated lead's `cf` keeps its routing while its tab exists.
 - [ ] [IMPL-PANE-42] `pty.rs` process groups, `src/tabs.js` lifecycle,
       `lib.rs` exit hook, routing by tab existence. -> satisfies [TEST-PANE-41]
 - [ ] [TEST-PANE-43] `tests/integration/*.test.mjs` — real `cf`, real
@@ -734,18 +761,24 @@ replacement fails closed; an interrupted read creates no coverage.
 - [ ] [IMPL-PANE-46] `lib.rs` self-test mode and `app/ui/selftest.js`;
       `npm run smoke`. -> satisfies [TEST-PANE-45]
 
-## Phase 6: Switch-over — standalone replaces cmux [pending]
+## Phase 6: Switch-over — one shape, no modes [pending]
 
-- [ ] [TEST-PANE-47] `tests/mode.test.mjs` — `MODES` is `['claude', 'pi',
-      'standalone']`; `mode.json` holding `cmux` reads as `standalone`;
-      `cf use cmux` records `standalone` and says the name moved;
-      `applyMode` installs the same generated skill; `syncCmuxSkills` stays
-      take-back only; standalone without `CONSENSFLOW_APP` now refuses
-      naming the app; `liveWindowElsewhere`, `cmux tree`, the
-      `CMUX_SURFACE_ID` fallbacks and `cf`'s direct `threads.json` writes
-      are gone.
-- [ ] [IMPL-PANE-48] `src/mode.js`, `bin/cf.mjs`, `hosts/lib/threads.js`.
-      -> satisfies [TEST-PANE-47]
+- [ ] [TEST-PANE-47] `tests/mode.test.mjs` → `tests/install.test.mjs` —
+      there is no mode: `cf use` and `cf mode` exit with "ConsensFlow has
+      one shape now" and the verb list; a leftover `mode.json` (`cmux`,
+      `claude`, `pi`, `standalone`) is ignored, and `cf doctor` reports it
+      once as removable; `installEverywhere` (replacing `applyMode`) puts
+      the one generated skill into every detected harness without a native
+      ConsensFlow and claims the launcher; `cf off` still takes everything
+      back; `syncCmuxSkills` stays take-back only; `cf run` without
+      `CONSENSFLOW_APP` now refuses naming the app; `liveWindowElsewhere`,
+      `cmux tree`, the `CMUX_SURFACE_ID` fallbacks, `cf`'s direct
+      `threads.json` writes, and the claude/pi host-mode skill prose are
+      gone.
+- [ ] [IMPL-PANE-48] `src/mode.js` → `src/install.js` (`installEverywhere`,
+      `turnOff`), `bin/cf.mjs`, `hosts/lib/threads.js`, `src/skill.js`
+      (one prose), `src/ui.js` (no mode switcher; the page's system panel
+      loses the three cards). -> satisfies [TEST-PANE-47]
 - [ ] [TEST-PANE-49] `tests/skill.test.mjs` — the standalone skill: no
       `cmux`; the consult is `cf run @<name> "<task>"` with today's
       continuation rule, `--new` for an independent task, the name printed
@@ -792,7 +825,7 @@ replacement fails closed; an interrupted read creates no coverage.
 | 2026-09-06 | `auto` = every completed worker reply, including replies to the human | User's call; `sent` is provenance only |
 | 2026-09-06 | Two policy scopes — tab and pane — precedence tab-manual > pane-human > tab-auto > lead preference > default auto | User's call |
 | 2026-09-06 | Layouts counted with the lead; 1–6 special, beyond a `ceil(sqrt(n))` grid; focused-pane view when nothing fits | User's call; astraeus finding 12 |
-| 2026-09-06 | `standalone` replaces `cmux`; support ends with Phase 6 | User's call |
+| 2026-09-06 | ONE shape: the claude and pi modes go with cmux; no `mode.json`, no `cf use`; the skill goes into every detected harness | User's call (2026-09-06 goal): "only ConsensFlow standalone remains, for Windows, Mac and Linux; for now we test on Mac". Supersedes "standalone replaces cmux" |
 | 2026-09-06 | Roster editor stays in an iframe | User's call: "whatever is cleaner" |
 | 2026-09-06 | Every pane is in the app; a tab = directory + one lead + policy; humans open shell or agent panes | User's calls |
 | 2026-09-06 | PTY silence is a polling hint, never a readiness condition; readiness = lead transcript settled + no draft latched + fresh input epoch | astraeus round-2 finding 1 resolved in the direction that keeps `auto` working for redrawing TUIs; the paste is atomic under the arbiter |
@@ -813,6 +846,8 @@ replacement fails closed; an interrupted read creates no coverage.
 | 2026-09-06 | A native session replaced in place invalidates everything for that pane; reopening goes through the app's own path | astraeus round-3 finding 3; no seamless in-place switching in this release |
 | 2026-09-06 | Native adapters are built only after their probe passes; P6 covers an inbox arrival while already idle | astraeus round-3 guard |
 | 2026-09-06 | The standalone skill teaches send-and-return: no `--wait`, no polling; answers arrive under `auto`, the human says when to read under `manual` | User's call (2026-09-06): "answers come automatically, or the owner asks when to read" — a lead blocked in `--wait` is a lead the user cannot reach |
+| 2026-09-06 | Team: lead = architect + PM; astraeus co-lead; hyperion, zeus workers and reviewers; gefjon free repetitive worker; brokkr, mnemosyne, coeus workers; Gabriel answers, tests, runs the app; one conversation per work stream, new pane only for independent work | User's call (2026-09-06 goal) |
+| 2026-09-06 | Tag `end-of-cmux-era` at `3e485ba` on origin (NAS) and upstream (GitHub) | User's call: mark where the three-mode era ends |
 | 2026-09-06 | Rename, skill and evals in the LAST phase | risk 17 |
 
 ## TDD Log
