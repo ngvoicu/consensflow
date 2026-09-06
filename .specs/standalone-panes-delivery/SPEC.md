@@ -258,8 +258,12 @@ read marks in standalone mode. A **conversation** is a worker row. A
 bound to a lead or a worker only with launch-unique evidence: an id we
 preallocated (claude `--session-id`, pi's name), an id the harness reported
 on our stream, or a non-secret launch nonce in the seed's first line
-(`[consensflow launch <nonce>]`, which the display reader strips) found in
-the session's first user turn — never task text alone. Two identical
+(`[consensflow launch <nonce>]`, which the display reader strips) found as
+the first non-empty line, after injected blocks, of one of the session's
+first five user turns — never task text alone. Five, not one: on a real
+codex rollout the seed is the SECOND user turn, after the `AGENTS.md`
+instructions block (zeus, 2026-09-06), and a fixture that started at the
+seed passed while every real session bound to nothing. Two identical
 prompts in one directory bind to their own launches or stay `unbound`.
 
 **Launch roles.** The app launches a lead directly with `CONSENSFLOW_APP`, a
@@ -602,9 +606,13 @@ P1/P2 recorded through this path for each harness being enabled.
       first-turn path takes ownership from redemption. -> satisfies [TEST-PANE-19]
 - [ ] [TEST-PANE-21] `tests/engine/session-binding.test.mjs` —
       `bindEvidence(kind, candidate, launch)`: claude and pi bind on the
-      preallocated id; codex, opencode and kimi bind when the candidate's
-      first user turn carries the launch nonce (dated fixtures), or when
-      the harness reported the id on our stream; two candidates in one
+      preallocated id; codex, opencode and kimi bind when the launch nonce is the first
+      non-empty line of one of the candidate's first five user turns
+      (fixtures copied from REAL rollout heads, including codex's
+      `AGENTS.md` first turn and an attributed-tag first turn), or when the
+      harness reported the id as a structured line on our own stream;
+      a `replaced` result carries `bound:false` and a reason; replacement
+      never fails open when liveness is unknown; two candidates in one
       directory with identical task text and different nonces bind to their
       own launches; no nonce → `unbound`, shown by `cf catchup` and
       `shouldDeliver` false; a LEAD binds the same way at `open_lead` (the
@@ -945,6 +953,8 @@ replacement fails closed; an interrupted read creates no coverage.
 | 2026-09-06 | Team: lead = architect + PM; astraeus co-lead; hyperion, zeus workers and reviewers; gefjon free repetitive worker; brokkr, mnemosyne, coeus workers; Gabriel answers, tests, runs the app; one conversation per work stream, new pane only for independent work | User's call (2026-09-06 goal) |
 | 2026-09-06 | Tag `end-of-cmux-era` at `3e485ba` on origin (NAS) and upstream (GitHub) | User's call: mark where the three-mode era ends |
 | 2026-09-06 | The Sol preset moves from `ultra` to `max` everywhere; `ultra` stays a codex level nobody's preset names | User's call (2026-09-06): "Sol ultra becomes max everywhere in ConsensFlow". A deliberate seat below the proven ceiling, like the DeepSeek rows — recorded so the effort-ceilings audit does not "fix" it back |
+| 2026-09-06 | The launch nonce may sit in any of the session's first five user turns, as the first non-empty line after injected blocks | zeus's review of tasks 21–22: codex puts `AGENTS.md` before the seed; the fixture that began at the seed hid it |
+| 2026-09-06 | The store's `session.bind` calls `bindEvidence` against its launch record; every binding decision records its generation | zeus F7: an evidence string anyone can send is vocabulary, not proof |
 | 2026-09-06 | Rename, skill and evals in the LAST phase | risk 17 |
 
 ## TDD Log
