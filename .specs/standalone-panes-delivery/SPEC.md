@@ -578,7 +578,7 @@ P1/P2 recorded through this path for each harness being enabled.
       and wins over `CLAUDE_CODE_SESSION_ID`.
 - [ ] [IMPL-PANE-14] `src/tabs.js`; `hosts/lib/threads.js` `LEAD_KEYS`
       gains `CONSENSFLOW_LEAD_ID` first. -> satisfies [TEST-PANE-13]
-- [ ] [TEST-PANE-15] `tests/launch.test.mjs` — roles and tickets: the lead
+- [x] [TEST-PANE-15] `tests/launch.test.mjs` — roles and tickets: the lead
       env (`CONSENSFLOW_APP`, tab-scoped token, `CONSENSFLOW_LEAD_ID`,
       `_TAB`, `_PANE_ID`, `PATH` starting with the bundle's `bin`, no
       `CONSENSFLOW_CHILD`); the controller env (`CONSENSFLOW_APP`,
@@ -592,7 +592,7 @@ P1/P2 recorded through this path for each harness being enabled.
       is refused; any body carrying `by`, `lead`, `owner` or a foreign
       `tab` is 400; Rust's launch argv names the bundle's absolute node and
       `cf.mjs`.
-- [ ] [IMPL-PANE-16] `src/launch.js`, `src/ui.js` scoping middleware,
+- [x] [IMPL-PANE-16] `src/launch.js`, `src/ui.js` scoping middleware,
       `hosts/lib/runners.js` `childEnv` strip list, `lib.rs` absolute
       launch paths. -> satisfies [TEST-PANE-15]
 - [ ] [TEST-PANE-17] `tests/ui-panes.test.mjs` — against the REAL server
@@ -1032,6 +1032,7 @@ replacement fails closed; an interrupted read creates no coverage.
 | [IMPL-PANE-22] | — | 23 binding tests green; lead re-ran 51/51 across binding, transcript and store; `npm run check` on the exact staged tree exit 0, 514 pass | zeus review: BLOCK (F1–F9: the codex seed is the SECOND user turn on real rollouts; replacement failed open without `alive`; marker matched any line) → fixed → approve with edits (E1 discovery returns the matching turn; E2 reported-vs-preallocated agreement) → **approve** 2026-09-06 22:50 EEST |
 | [TEST-PANE-37] | zeus, `node --test tests/layout.test.mjs`: `ERR_MODULE_NOT_FOUND src/layout.js` (15 tests first) | — | — |
 | [IMPL-PANE-38] | — | 15/15; lead re-ran 15/15 and printed the six pictures; `npm run check` on the exact staged tree exit 0 | hyperion review: APPROVE, no findings — the six literal pictures match the spec, the beyond-6 rule, `fits` at the pixel boundary, lead-first focus order |
+| [IMPL-PANE-16] | — | 12 launch tests + 29 ui tests green; after zeus's edits 47/47; lead re-ran; `npm run check` on the exact staged tree exit 0 | zeus review: approve with edits (scope bound to the credential's own tab/launch/generation, non-object bodies 400, ticket separated from the public launch id, POST redemption, 401/400/500) → **approve** 2026-09-07 00:20 EEST |
 | [IMPL-PANE-06] (Node half) | — | `node --test tests/bridge.test.mjs`: 17 passed, 0 failed; lead re-ran: 17/17, `tests/ui.test.mjs` 29/29 | biome format + two assignment-in-expression lints fixed; one self-inflicted test sizing (a 64-byte budget could not fit the refusal frame) corrected in the TEST, noted as a test bug not an assertion change |
 | [TEST-PANE-15] | `node --test tests/launch.test.mjs`: exit 1, 1 test, 1 failed — `ERR_MODULE_NOT_FOUND src/launch.js` | — | — |
 
