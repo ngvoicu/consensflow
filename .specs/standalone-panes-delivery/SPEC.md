@@ -758,12 +758,12 @@ replacement fails closed; an interrupted read creates no coverage.
 
 ## Phase 4: The page — selector, sidebar, panes, layouts, menus [pending] — gated by P3
 
-- [ ] [TEST-PANE-37] `tests/layout.test.mjs` — `gridTemplate(n)` for 1–6
+- [x] [TEST-PANE-37] `tests/layout.test.mjs` — `gridTemplate(n)` for 1–6
       matches the six pictures; beyond 6 `rows = ceil(sqrt(n))`, `cols =
       ceil(n / rows)`, row-major; `fits(n, area, minPane)` false → the page
       shows the focused-pane view (asserted in TEST-39); the lead cell is
       always `lead`.
-- [ ] [IMPL-PANE-38] `src/layout.js`. -> satisfies [TEST-PANE-37]
+- [x] [IMPL-PANE-38] `src/layout.js`. -> satisfies [TEST-PANE-37]
 - [ ] [TEST-PANE-39] `app/tests/page.spec.mjs` (Playwright, `__TAURI__`
       shim) — first launch maximized, later launches restore geometry; the
       roster panel (the `cf ui` iframe) collapses upward and expands; the
@@ -1030,6 +1030,8 @@ replacement fails closed; an interrupted read creates no coverage.
 | Phase 1 review loop | asteria: unit A BLOCK (12 findings) → hyperion batches 1–2; Rust units BLOCK (10) → batch 2; round 3 (7) → batch 3; round 4: PTY+arbiter APPROVE, backpressure APPROVE (C7 deferred), headless approve-with-edit, bridge BLOCK on C2 → batches 4–5; Node: BLOCK (5) → gefjon N1–N5, BLOCK on N2 → N2a/b, then APPROVE. Final: Rust bridge APPROVE 2026-09-06 22:05 EEST | lead re-ran after every batch; last: `cargo test` 52 unit + 6 headless, `cargo clippy -D warnings` clean, `node --test tests/bridge.test.mjs` 43/43, `npm run check` on the exact staged tree exit 0, 489 pass | per batch, under green |
 | [TEST-PANE-21] | gefjon, `node --test tests/engine/session-binding.test.mjs`: `ERR_MODULE_NOT_FOUND hosts/lib/session-binding.js` (13 tests first); after zeus's BLOCK: 13 RED on the rebuilt real-rollout fixtures; after his edits E1/E2: 7 RED | — | — |
 | [IMPL-PANE-22] | — | 23 binding tests green; lead re-ran 51/51 across binding, transcript and store; `npm run check` on the exact staged tree exit 0, 514 pass | zeus review: BLOCK (F1–F9: the codex seed is the SECOND user turn on real rollouts; replacement failed open without `alive`; marker matched any line) → fixed → approve with edits (E1 discovery returns the matching turn; E2 reported-vs-preallocated agreement) → **approve** 2026-09-06 22:50 EEST |
+| [TEST-PANE-37] | zeus, `node --test tests/layout.test.mjs`: `ERR_MODULE_NOT_FOUND src/layout.js` (15 tests first) | — | — |
+| [IMPL-PANE-38] | — | 15/15; lead re-ran 15/15 and printed the six pictures; `npm run check` on the exact staged tree exit 0 | hyperion review: APPROVE, no findings — the six literal pictures match the spec, the beyond-6 rule, `fits` at the pixel boundary, lead-first focus order |
 | [IMPL-PANE-06] (Node half) | — | `node --test tests/bridge.test.mjs`: 17 passed, 0 failed; lead re-ran: 17/17, `tests/ui.test.mjs` 29/29 | biome format + two assignment-in-expression lints fixed; one self-inflicted test sizing (a 64-byte budget could not fit the refusal frame) corrected in the TEST, noted as a test bug not an assertion change |
 | [TEST-PANE-15] | `node --test tests/launch.test.mjs`: exit 1, 1 test, 1 failed — `ERR_MODULE_NOT_FOUND src/launch.js` | — | — |
 
