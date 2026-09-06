@@ -672,20 +672,20 @@ replacement fails closed; an interrupted read creates no coverage.
 - [ ] [IMPL-PANE-24] `hosts/lib/completion.js`, one adapter per harness;
       `findings-01.md` gets the table per harness before that harness is
       enabled. -> satisfies [TEST-PANE-23]
-- [ ] [TEST-PANE-25] `tests/engine/readiness.test.mjs` —
+- [x] [TEST-PANE-25] `tests/engine/readiness.test.mjs` —
       `leadReady({items, inFlight, draftLatched, epoch})` is `ready` only
       when the lead's items end settled with no tool in flight and the
       latch is clear, returning the epoch the decision was made at; `busy`
       on an in-flight turn; `draft` while latched (with the reason for the
       page); `unknown` on an unreadable store; a periodically redrawing idle
       pane is `ready` — silence is not a condition.
-- [ ] [IMPL-PANE-26] `hosts/lib/readiness.js`. -> satisfies [TEST-PANE-25]
-- [ ] [TEST-PANE-27] `tests/engine/policy.test.mjs` —
+- [x] [IMPL-PANE-26] `hosts/lib/readiness.js`. -> satisfies [TEST-PANE-25]
+- [x] [TEST-PANE-27] `tests/engine/policy.test.mjs` —
       `effectivePolicy(tab, pane, row)`: tab `manual` vetoes; else pane
       human setting; else tab `auto`; else lead preference; else `auto`;
       `inherit` falls through; the result names its source; `--notify`
       writes only `notifyPreference`.
-- [ ] [IMPL-PANE-28] `hosts/lib/policy.js`. -> satisfies [TEST-PANE-27]
+- [x] [IMPL-PANE-28] `hosts/lib/policy.js`. -> satisfies [TEST-PANE-27]
 - [ ] [TEST-PANE-29] `tests/engine/deliveries.test.mjs` — records: `plan`
       yields one `pending` per completed, uncovered answer under `auto`,
       with `digest`, `channel` (`pty-inline` when the serialised envelope
@@ -1033,6 +1033,10 @@ replacement fails closed; an interrupted read creates no coverage.
 | [IMPL-PANE-22] | — | 23 binding tests green; lead re-ran 51/51 across binding, transcript and store; `npm run check` on the exact staged tree exit 0, 514 pass | zeus review: BLOCK (F1–F9: the codex seed is the SECOND user turn on real rollouts; replacement failed open without `alive`; marker matched any line) → fixed → approve with edits (E1 discovery returns the matching turn; E2 reported-vs-preallocated agreement) → **approve** 2026-09-06 22:50 EEST |
 | [TEST-PANE-37] | zeus, `node --test tests/layout.test.mjs`: `ERR_MODULE_NOT_FOUND src/layout.js` (15 tests first) | — | — |
 | [IMPL-PANE-38] | — | 15/15; lead re-ran 15/15 and printed the six pictures; `npm run check` on the exact staged tree exit 0 | hyperion review: APPROVE, no findings — the six literal pictures match the spec, the beyond-6 rule, `fits` at the pixel boundary, lead-first focus order |
+| [TEST-PANE-25] | zeus, `ERR_MODULE_NOT_FOUND hosts/lib/readiness.js` (16 tests); after asteria's BLOCK and the settlement-proof contract: 21 RED against the old module (30 tests) | — | — |
+| [IMPL-PANE-26] | — | 30/30, then 33/33 after her two test-gap edits; lead re-ran 52/52 with policy; isolated staged-tree check exit 0 | asteria: BLOCK (a bare `settled` boolean authorised delivery; missing evidence permitted ready; no native freshness boundary) → rebuilt to consume `{state, provenance, cursor, boundary, evidence}` → **approve with edits** → edits done |
+| [TEST-PANE-27] | zeus, `ERR_MODULE_NOT_FOUND hosts/lib/policy.js` (13 tests; a 36-combination precedence table) | — | — |
+| [IMPL-PANE-28] | — | 13/13, then 19/19 with `recordLeadPreference` exercising the `--notify` write clause; lead re-ran | asteria: **approve with edits** (the write clause was unproven) → done |
 | [IMPL-PANE-06] (Node half) | — | `node --test tests/bridge.test.mjs`: 17 passed, 0 failed; lead re-ran: 17/17, `tests/ui.test.mjs` 29/29 | biome format + two assignment-in-expression lints fixed; one self-inflicted test sizing (a 64-byte budget could not fit the refusal frame) corrected in the TEST, noted as a test bug not an assertion change |
 | [TEST-PANE-15] | `node --test tests/launch.test.mjs`: exit 1, 1 test, 1 failed — `ERR_MODULE_NOT_FOUND src/launch.js` | — | — |
 
