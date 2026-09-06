@@ -159,3 +159,18 @@ backed "Send reply to lead…" list, tab persistence and process-tree
 lifecycle, a versioned bridge protocol, xterm bundled with acks, an offline
 end-to-end suite, and codex native on Windows (verified against OpenAI's
 docs the same day).
+
+## Round 3 — astraeus's second review, and the scope decision (2026-09-06)
+
+Second verdict, quoted: "BLOCKED — revision 2 is substantially stronger,
+but still has contradictions that could produce duplicate launches, unsafe
+submissions, or silently missed answers." Of the sixteen: 7 closed, 8
+partial, 1 open; twelve new findings with edits. All twelve are in
+revision 3. Two resolutions are the implementer's, logged in the Decision
+Log: PTY silence is no longer a readiness condition (the lead's transcript
+and the draft latch decide, and the latch clears only on an observed
+submission); file delivery is `cf read <id>`, which prints everything and
+records coverage.
+
+Gabriel: "no Windows machine; we'll do it later; macOS for now." Windows
+and Linux packaging move to a later spec; every choice stays compatible.

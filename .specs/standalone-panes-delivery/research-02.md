@@ -1,5 +1,15 @@
 # Research 02 — what the round-1 answers commit us to (2026-09-06)
 
+> **Authority:** SPEC.md revision 3 and the round-2 answers govern. Sections
+> marked SUPERSEDED or AMENDED below record the first design; where any other
+> line here disagrees with SPEC.md, SPEC.md wins. Known stale points after
+> revision 3: §5 says the app's variables are "stripped by `childEnv` for
+> every agent it spawns" — true for workers' harness children, but a LEAD
+> keeps its credentials (launch roles, SPEC.md); §6's "Node is the only
+> reader/writer" became one app-wide queue with an instance lock; §7's
+> phase numbers refer to revision 1 (P1/P2 now gate Phase 2, P3 Phase 4,
+> P4 is deferred with Windows, P5/P6 gate only their channels).
+
 Round 1 answers, verbatim in `interview-01.md`. This note records what each
 one forces, so the spec's tasks can be read against a reason.
 
