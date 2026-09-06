@@ -140,6 +140,12 @@ no Unix-only assumption added).
       `standalone`; the generated skill names no cmux command; the evals
       hold both directions of "continue or start fresh" and the delivery
       rules
+- [ ] The standalone skill teaches the lead to **send and return, never
+      wait**: after a consult or a follow-up it reports what is running and
+      takes the user's next message; an answer arrives in its pane on its
+      own when the conversation is `auto`, and when it is `manual` the human
+      says when to read (`cf catchup <name> --unread`); `--wait` and polling
+      are not taught, and the eval holds it
 - [ ] `npm run check:all` exits 0 on macOS with no live agent CLI and no
       network: biome, Node tests, `cargo test` + clippy, page tests, the
       integration suite, the packaged smoke
@@ -291,6 +297,19 @@ ceil(sqrt(n))`, `cols = ceil(n / rows)`, row-major):
 1: [lead]    2: [lead|w1]    3: [lead|w1]    4: [lead|w1]    5: [lead|w1|w2]    6: [lead|w1|w2]
                                 [lead|w2]       [ w2 |w3]       [lead|w3|w4]       [ w3 |w4|w5]
 ```
+
+**The lead does not wait.** In cmux mode the skill taught `cf catchup
+--wait` for the moment after a question, and a lead sat blocked while a
+worker thought — the user could not reach it. In standalone mode the
+answer comes to the lead: under `auto` it arrives in the lead's pane as a
+user turn from ConsensFlow (after the lead's own turn has settled, so it
+opens the next one), and under `manual` the human decides when the lead
+reads and says so. So the skill teaches send-and-return: report what is
+running and in which conversation, take the user's next message, and read
+only when an answer arrives or the human asks. `--wait` stays a `cf` flag
+for people and scripts; the skill does not name it, and polling
+(`cf catchup` in a loop, `cf sessions` every few seconds) is called out as
+wrong.
 
 ## Probes — gates, recorded in `findings-01.md`
 
@@ -735,7 +754,11 @@ replacement fails closed; an interrupted read creates no coverage.
       delivery taught: an answer that arrives in your pane is read WHOLE
       from the top, a line naming `cf read <id>` is run and its output read
       in full before anything else, a delivered answer is not re-read with
-      `catchup`, a policy the human set is never changed; the three
+      `catchup`, a policy the human set is never changed; **send and
+      return**: after a consult or a follow-up the lead reports what is
+      running and takes the user's next message — under `auto` the answer
+      arrives in its pane, under `manual` the human says when to read; the
+      skill never names `--wait`, and says polling is wrong; the three
       cmux-only describes replaced.
 - [ ] [IMPL-PANE-50] `src/skill.js`; `evals/harness.mjs` (stub `cf` only;
       `run --new` prints a minted name; a `deliver` fixture pastes into the
@@ -745,7 +768,10 @@ replacement fails closed; an interrupted read creates no coverage.
       pair; new: `a-delivered-answer-is-read-whole`, `a-delivered-file-is-
       read` (the lead runs every `cf read` part and its report contains
       content from the beginning, the middle AND the end of the file, with
-      every range covered), `manual-is-the-humans`); `evals/README.md`. -> satisfies [TEST-PANE-49]
+      every range covered), `manual-is-the-humans`, `a-lead-sends-and-returns`
+      (after `cf run --new` or `cf say` the lead runs no `cf catchup --wait`,
+      no repeated `cf catchup`/`cf sessions`, and its report says the work
+      is running and where); `evals/README.md`. -> satisfies [TEST-PANE-49]
 
 ---
 
@@ -786,6 +812,7 @@ replacement fails closed; an interrupted read creates no coverage.
 | 2026-09-06 | The delivery wire form is an envelope with the delivery id; the digest covers the envelope | astraeus round-3 finding 4: identical answer text cannot identify a delivery |
 | 2026-09-06 | A native session replaced in place invalidates everything for that pane; reopening goes through the app's own path | astraeus round-3 finding 3; no seamless in-place switching in this release |
 | 2026-09-06 | Native adapters are built only after their probe passes; P6 covers an inbox arrival while already idle | astraeus round-3 guard |
+| 2026-09-06 | The standalone skill teaches send-and-return: no `--wait`, no polling; answers arrive under `auto`, the human says when to read under `manual` | User's call (2026-09-06): "answers come automatically, or the owner asks when to read" — a lead blocked in `--wait` is a lead the user cannot reach |
 | 2026-09-06 | Rename, skill and evals in the LAST phase | risk 17 |
 
 ## TDD Log

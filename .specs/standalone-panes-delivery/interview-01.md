@@ -205,3 +205,11 @@ model-visible tool result and the digest of the observed body equals the
 immutable part — an end marker alone never establishes coverage, because a
 receiver keeping only the tail keeps the marker and drops the text. Phase
 2 records attempts without granting coverage, so neither phase is blocked.
+
+## Addition after READY (2026-09-06) — the lead does not wait
+
+Gabriel: in the current skill the lead waits for workers to answer; in the
+new skill it must be told that answers come automatically, or that the
+owner will say when to read. Not implementing yet. Recorded as an
+acceptance criterion, an Architecture paragraph, the skill test
+(TEST-PANE-49) and a new eval scenario `a-lead-sends-and-returns`.
