@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { stripLaunchMarker, withoutInjectedBlocks } from "./packets.js";
+import { openingLineCarriesNonce, TURNS_EXAMINED } from "./session-binding.js";
 
 /**
  * What was said in a harness's own session — read, never written.
@@ -203,7 +205,9 @@ function messageTurn(role, content) {
  */
 function readable(text, role) {
   if (role !== "user") return text;
-  const body = withoutInjectedBlocks(text);
+  // The launch marker is evidence, not content: it rides into the session on
+  // the seed's first line and is stripped before a person ever sees it.
+  const body = withoutInjectedBlocks(stripLaunchMarker(text));
   const marker = "## Message from the user";
   const at = body.indexOf(marker);
   if (at === -1) return body;
@@ -211,25 +215,6 @@ function readable(text, role) {
   // The packet closes with a formatting instruction that is ours, not theirs.
   const end = question.indexOf("\nRespond directly and conversationally");
   return (end === -1 ? question : question.slice(0, end)).trim();
-}
-
-/**
- * Injected blocks off the front, whatever a person wrote left standing.
- *
- * A COMPLETE `<tag>…</tag>` is what an environment injects — verified against
- * a real codex rollout on 2026-08-27, closing tag and all. A lone opening tag
- * is somebody talking: `<div> tags are escaping wrong` is a question, and
- * `<!doctype html>` is an answer. Repeated, because one turn can carry more
- * than one block. If a harness ever injects a block it does not close, this
- * shows it rather than hiding it — the harmless direction for a reader whose
- * job is to lose nothing.
- */
-const INJECTED_BLOCK = /^\s*<([a-z][a-z0-9_-]*)>[\s\S]*?<\/\1>\s*/i;
-
-function withoutInjectedBlocks(text) {
-  let rest = text;
-  while (INJECTED_BLOCK.test(rest)) rest = rest.replace(INJECTED_BLOCK, "");
-  return rest.trim();
 }
 
 function flatten(content) {
@@ -484,37 +469,41 @@ async function discoverOpencodeSessionFiles(cwd, since, env) {
  */
 export async function discoverCodexSession(cwd, since, env = process.env, options = {}) {
   const { seed = null } = options;
-  const root = codexRoot(env);
-  const files = [];
-  await collectFiles(root, (name) => name.startsWith("rollout-") && name.endsWith(".jsonl"), files);
-
-  const candidates = [];
-  for (const file of files) {
-    let stat;
-    try {
-      stat = await fs.stat(file);
-    } catch {
-      continue;
-    }
-    // A file untouched since `since` cannot hold a session created after it —
-    // the cheap test that keeps this off every rollout ever recorded.
-    if (stat.mtimeMs < since) continue;
-    const head = await readHead(file);
-    let meta;
-    try {
-      meta = JSON.parse(head[0] ?? "");
-    } catch {
-      continue;
-    }
-    if (meta?.type !== "session_meta" || meta.payload?.cwd !== cwd) continue;
-    const created = Date.parse(meta.payload?.timestamp ?? meta.timestamp ?? "");
-    if (!Number.isFinite(created) || created < since) continue;
-    // rollout-<timestamp>-<uuid>.jsonl — the uuid is the last 36 characters.
-    candidates.push({ id: path.basename(file, ".jsonl").slice(-36), created, head });
-  }
-  candidates.sort((a, b) => a.created - b.created);
+  const candidates = await collectCodexCandidates(cwd, since, env);
   const ours = seed === null ? candidates[0] : candidates.find((one) => carriesSeed(one.head, seed));
   return ours?.id ?? null;
+}
+
+function isNonce(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+/**
+ * Is this the session we seeded? codex records the prompt it was launched with
+ * as an ordinary user turn, so our own text is in the file verbatim. Compared
+ * with whitespace collapsed, because the only difference a TUI is entitled to
+ * make to text it echoes is how it wraps it.
+ */
+function carriesSeed(lines, seed) {
+  const squash = (text) => String(text).replace(/\s+/g, " ").trim();
+  const wanted = squash(seed);
+  if (wanted.length === 0) return false;
+  for (const line of lines) {
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const payload = event?.payload ?? {};
+    if (payload.role !== "user" && payload.type !== "user_message") continue;
+    const text =
+      typeof payload.message === "string"
+        ? payload.message
+        : (payload.content ?? []).map((part) => part?.text ?? "").join("\n");
+    if (squash(text).includes(wanted)) return true;
+  }
+  return false;
 }
 
 /**
@@ -544,34 +533,6 @@ async function readHead(file, bytes = 512 * 1024) {
       // closing what we could not open is not an error worth having
     }
   }
-}
-
-/**
- * Is this the session we seeded? codex records the prompt it was launched with
- * as an ordinary user turn, so our own text is in the file verbatim. Compared
- * with whitespace collapsed, because the only difference a TUI is entitled to
- * make to text it echoes is how it wraps it.
- */
-function carriesSeed(lines, seed) {
-  const squash = (text) => String(text).replace(/\s+/g, " ").trim();
-  const wanted = squash(seed);
-  if (wanted.length === 0) return false;
-  for (const line of lines) {
-    let event;
-    try {
-      event = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const payload = event?.payload ?? {};
-    if (payload.role !== "user" && payload.type !== "user_message") continue;
-    const text =
-      typeof payload.message === "string"
-        ? payload.message
-        : (payload.content ?? []).map((part) => part?.text ?? "").join("\n");
-    if (squash(text).includes(wanted)) return true;
-  }
-  return false;
 }
 
 async function collectFiles(root, matches, into, depth = 6) {
@@ -637,4 +598,318 @@ export async function discoverKimiSession(cwd, since, env = process.env) {
     }
   }
   return best?.id ?? null;
+}
+
+/**
+ * Discovery with launch evidence, for the standalone path.
+ *
+ * The three `discover*Session` functions above keep their plain-id contract
+ * for `bin/cf.mjs`, which migrates to this in a later Phase 2 task. This one
+ * never returns a session without evidence: `{ sessionId, evidence }` where
+ * `evidence` is `'preallocated'` (the id we minted for claude and pi, and
+ * whose file the harness holds), `'reported'` (an id the harness printed on
+ * our stream — trusted only from a structured harness line, never free
+ * text), or `'nonce'` (the marker opening one of the session's first five
+ * user turns) — or null.
+ */
+export async function discoverSessionWithEvidence(kind, cwd, since, env = process.env, options = {}) {
+  const { nonce = null, reportedId = null, preallocatedId = null } = options;
+  if (kind === "claude-code" || kind === "pi") {
+    // The minted id decides first: discovery must never hand the store an id
+    // the store — which checks `bindEvidence` — would refuse.
+    if (typeof preallocatedId === "string" && preallocatedId.length > 0) {
+      const present =
+        kind === "claude-code"
+          ? await findFile(claudeRoot(env), (name) => name === `${preallocatedId}.jsonl`)
+          : await findFile(piRoot(env), (name) => name.includes(preallocatedId));
+      if (present !== null) return { sessionId: preallocatedId, evidence: "preallocated" };
+      // No file carries the minted id. A reported id equal to it is the same
+      // launch seen twice — accepted as reported. A differing one is refused:
+      // binding it would hand the store an id the store refuses.
+      if (reportedId === preallocatedId) return { sessionId: preallocatedId, evidence: "reported" };
+      return null;
+    }
+    if (typeof reportedId === "string" && reportedId.length > 0) {
+      return { sessionId: reportedId, evidence: "reported" };
+    }
+    return null;
+  }
+  if (typeof reportedId === "string" && reportedId.length > 0) {
+    return { sessionId: reportedId, evidence: "reported" };
+  }
+  if (!isNonce(nonce)) return null;
+  switch (kind) {
+    case "codex":
+      return await discoverCodexWithNonce(cwd, since, env, nonce);
+    case "opencode":
+      return await discoverOpencodeWithNonce(cwd, since, env, nonce);
+    case "kimi":
+      return await discoverKimiWithNonce(cwd, since, env, nonce);
+    default:
+      return null;
+  }
+}
+
+async function discoverCodexWithNonce(cwd, since, env, nonce) {
+  const candidates = await collectCodexCandidates(cwd, since, env);
+  for (const one of candidates) {
+    const turn = findCodexNonceTurn(one.head, nonce);
+    if (turn !== null) return { sessionId: one.id, evidence: "nonce", turn };
+  }
+  return null;
+}
+
+async function discoverOpencodeWithNonce(cwd, since, env, nonce) {
+  const fromDb = await withOpencodeDb(env, (db) => {
+    const rows = db
+      .prepare("select id from session where directory = ? and time_created >= ? order by time_created")
+      .all(cwd, since);
+    for (const row of rows) {
+      const turn = findOpencodeDbNonceTurn(db, row.id, nonce);
+      if (turn !== null) return { sessionId: row.id, evidence: "nonce", turn };
+    }
+    return null;
+  });
+  if (fromDb !== null) return fromDb;
+  const root = path.join(opencodeRoot(env), "session");
+  let projects;
+  try {
+    projects = await fs.readdir(root, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  const matches = [];
+  for (const project of projects) {
+    if (!project.isDirectory()) continue;
+    let names;
+    try {
+      names = await fs.readdir(path.join(root, project.name));
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      if (!name.endsWith(".json")) continue;
+      let session;
+      try {
+        session = JSON.parse(await fs.readFile(path.join(root, project.name, name), "utf8"));
+      } catch {
+        continue;
+      }
+      const created = session?.time?.created ?? 0;
+      if (session?.directory !== cwd || created < since) continue;
+      matches.push({ id: session.id, created });
+    }
+  }
+  matches.sort((a, b) => a.created - b.created);
+  const store = opencodeRoot(env);
+  for (const match of matches) {
+    const turn = await findOpencodeFilesNonceTurn(store, match.id, nonce);
+    if (turn !== null) return { sessionId: match.id, evidence: "nonce", turn };
+  }
+  return null;
+}
+
+async function discoverKimiWithNonce(cwd, since, env, nonce) {
+  const root = kimiRoot(env);
+  let workspaces;
+  try {
+    workspaces = await fs.readdir(root, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  const candidates = [];
+  for (const workspace of workspaces) {
+    if (!workspace.isDirectory()) continue;
+    let sessions;
+    try {
+      sessions = await fs.readdir(path.join(root, workspace.name), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const session of sessions) {
+      if (!session.isDirectory()) continue;
+      const dir = path.join(root, workspace.name, session.name);
+      let state;
+      try {
+        state = JSON.parse(await fs.readFile(path.join(dir, "state.json"), "utf8"));
+      } catch {
+        continue;
+      }
+      const created = state?.createdAt ?? 0;
+      if (state?.cwd !== cwd || created < since) continue;
+      candidates.push({ id: state.id ?? session.name, created, dir });
+    }
+  }
+  candidates.sort((a, b) => a.created - b.created);
+  for (const candidate of candidates) {
+    const turn = await findKimiNonceTurn(candidate.dir, nonce);
+    if (turn !== null) return { sessionId: candidate.id, evidence: "nonce", turn };
+  }
+  return null;
+}
+
+/**
+ * The nonce opens one of the session's first user turns — the seed opens,
+ * but a harness may log its own preamble turns first (a real codex rollout
+ * opens with workspace instructions before the seeded prompt). Only the
+ * opening line counts: a marker quoted deeper in a turn is somebody quoting,
+ * not a launch opening. Pure injected blocks are the environment talking to
+ * itself, not turns, and do not count toward the five. The cap is
+ * `TURNS_EXAMINED` from session-binding.js, shared with the store's check.
+ * Each scanner returns the matching turn's text — the store verifies exactly
+ * what discovery matched — or null.
+ */
+function findCodexNonceTurn(head, nonce) {
+  let seen = 0;
+  for (const line of head) {
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const payload = event?.payload ?? {};
+    if (payload.role !== "user" && payload.type !== "user_message") continue;
+    const text =
+      typeof payload.message === "string"
+        ? payload.message
+        : (payload.content ?? []).map((part) => part?.text ?? "").join("\n");
+    if (withoutInjectedBlocks(text).length === 0) continue;
+    seen += 1;
+    if (seen > TURNS_EXAMINED) return null;
+    if (openingLineCarriesNonce(text, nonce)) return text;
+  }
+  return null;
+}
+
+async function findKimiNonceTurn(dir, nonce) {
+  const lines = await readHead(path.join(dir, "agents", "main", "wire.jsonl"));
+  let seen = 0;
+  for (const line of lines) {
+    if (line.trim().length === 0) continue;
+    let record;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (record?.type !== "turn.prompt" || record.origin?.kind !== "user") continue;
+    const text = flatten(record.input);
+    if (text.length === 0) continue;
+    seen += 1;
+    if (seen > TURNS_EXAMINED) return null;
+    if (openingLineCarriesNonce(text, nonce)) return text;
+  }
+  return null;
+}
+
+function findOpencodeDbNonceTurn(db, sessionId, nonce) {
+  const messages = db
+    .prepare("select id, data from message where session_id = ? order by time_created, id")
+    .all(sessionId);
+  let seen = 0;
+  for (const message of messages) {
+    let parsed;
+    try {
+      parsed = JSON.parse(message.data);
+    } catch {
+      continue;
+    }
+    if (parsed?.role !== "user") continue;
+    const parts = db.prepare("select data from part where message_id = ? order by time_created, id").all(message.id);
+    const texts = [];
+    for (const row of parts) {
+      try {
+        const part = JSON.parse(row.data);
+        if (part?.type === "text" && part.text) texts.push(String(part.text));
+      } catch {
+        // skip a part we cannot read rather than losing the turn
+      }
+    }
+    const text = texts.join("\n").trim();
+    if (text.length === 0) continue;
+    seen += 1;
+    if (seen > TURNS_EXAMINED) return null;
+    if (openingLineCarriesNonce(text, nonce)) return text;
+  }
+  return null;
+}
+
+async function findOpencodeFilesNonceTurn(store, sessionId, nonce) {
+  const dir = path.join(store, "message", sessionId);
+  let names;
+  try {
+    names = await fs.readdir(dir);
+  } catch {
+    return null;
+  }
+  const messages = [];
+  for (const name of names) {
+    if (!name.endsWith(".json")) continue;
+    try {
+      messages.push(JSON.parse(await fs.readFile(path.join(dir, name), "utf8")));
+    } catch {
+      // skip a message we cannot read rather than losing the rest
+    }
+  }
+  messages.sort((a, b) => (a?.time?.created ?? 0) - (b?.time?.created ?? 0));
+  let seen = 0;
+  for (const message of messages) {
+    if (message?.role !== "user") continue;
+    let partNames = [];
+    try {
+      partNames = (await fs.readdir(path.join(store, "part", String(message.id)))).sort();
+    } catch {
+      continue;
+    }
+    const texts = [];
+    for (const part of partNames) {
+      try {
+        const parsed = JSON.parse(await fs.readFile(path.join(store, "part", String(message.id), part), "utf8"));
+        if (parsed?.type === "text" && parsed.text) texts.push(String(parsed.text));
+      } catch {
+        // skip
+      }
+    }
+    const text = texts.join("\n").trim();
+    if (text.length === 0) continue;
+    seen += 1;
+    if (seen > TURNS_EXAMINED) return null;
+    if (openingLineCarriesNonce(text, nonce)) return text;
+  }
+  return null;
+}
+
+/** Every codex rollout in this directory created since, earliest first. */
+async function collectCodexCandidates(cwd, since, env) {
+  const root = codexRoot(env);
+  const files = [];
+  await collectFiles(root, (name) => name.startsWith("rollout-") && name.endsWith(".jsonl"), files);
+
+  const candidates = [];
+  for (const file of files) {
+    let stat;
+    try {
+      stat = await fs.stat(file);
+    } catch {
+      continue;
+    }
+    // A file untouched since `since` cannot hold a session created after it —
+    // the cheap test that keeps this off every rollout ever recorded.
+    if (stat.mtimeMs < since) continue;
+    const head = await readHead(file);
+    let meta;
+    try {
+      meta = JSON.parse(head[0] ?? "");
+    } catch {
+      continue;
+    }
+    if (meta?.type !== "session_meta" || meta.payload?.cwd !== cwd) continue;
+    const created = Date.parse(meta.payload?.timestamp ?? meta.timestamp ?? "");
+    if (!Number.isFinite(created) || created < since) continue;
+    // rollout-<timestamp>-<uuid>.jsonl — the uuid is the last 36 characters.
+    candidates.push({ id: path.basename(file, ".jsonl").slice(-36), created, head });
+  }
+  candidates.sort((a, b) => a.created - b.created);
+  return candidates;
 }

@@ -345,6 +345,10 @@ test('harness transcript: opencode is read from its database, not the frozen fil
     db.exec(
       `insert into part values ('p3', 'm2', 'ses_new', 3, '${JSON.stringify({ type: 'text', text: 'with a caveat' })}')`,
     )
+    // The evidence path binds the same session once the launch nonce is known.
+    db.exec(
+      `update part set data = '${JSON.stringify({ type: 'text', text: '[consensflow launch oc-db-1]\nis it safe?' })}' where id = 'p1'`,
+    )
     db.close()
 
     assert.deepEqual(await harnessTurns('opencode', 'ses_new', env), [
@@ -352,10 +356,27 @@ test('harness transcript: opencode is read from its database, not the frozen fil
       { role: 'assistant', text: 'yes,\nwith a caveat' },
     ])
 
-    const { discoverOpencodeSession } = await import('../../hosts/lib/harness-transcript.js')
+    const { discoverOpencodeSession, discoverSessionWithEvidence } = await import(
+      '../../hosts/lib/harness-transcript.js'
+    )
     assert.equal(await discoverOpencodeSession('/work/here', 4000, env), 'ses_new')
     assert.equal(await discoverOpencodeSession('/work/here', 6000, env), null, 'nothing since')
     assert.equal(await discoverOpencodeSession('/work/elsewhere', 0, env), null)
+    // The evidence path binds the same session on the launch nonce, handing
+    // the store the matching turn it verified.
+    assert.deepEqual(
+      await discoverSessionWithEvidence('opencode', '/work/here', 4000, env, { nonce: 'oc-db-1' }),
+      {
+        sessionId: 'ses_new',
+        evidence: 'nonce',
+        turn: '[consensflow launch oc-db-1]\nis it safe?',
+      },
+    )
+    assert.equal(
+      await discoverSessionWithEvidence('opencode', '/work/here', 4000, env, { nonce: 'nope' }),
+      null,
+    )
+    assert.equal(await discoverSessionWithEvidence('opencode', '/work/here', 4000, env), null)
   })
 })
 
@@ -497,5 +518,121 @@ test('discovery: with a seed, ours is the session carrying it — whatever else 
       null,
       'and an exact search that matches nothing takes nothing',
     )
+  })
+})
+
+test('discovery: kimi binds the session whose first prompt carries the nonce', async () => {
+  // Shapes copied 2026-09-06 from a real Kimi Code session on this machine:
+  // `state.json` carrying `id`, `cwd`, `createdAt`; the first `turn.prompt`
+  // with `origin.kind: 'user'` carrying the seed verbatim.
+  await withStores(async (env) => {
+    const { discoverKimiSession, discoverSessionWithEvidence } = await import(
+      '../../hosts/lib/harness-transcript.js'
+    )
+    const older = 'session_aaaaaaaa-0000-4000-8000-000000000001'
+    const ours = 'session_bbbbbbbb-0000-4000-8000-000000000002'
+    const now = Date.now()
+    const wire = (text) =>
+      [
+        JSON.stringify({ type: 'metadata', protocol_version: '1.5' }),
+        JSON.stringify({
+          type: 'turn.prompt',
+          agentId: 'main',
+          input: [{ type: 'text', text }],
+          origin: { kind: 'user' },
+        }),
+      ].join('\n')
+    await write(
+      path.join(env.HOME, '.kimi-code', 'sessions', 'wd_proj_abc', older, 'state.json'),
+      JSON.stringify({ id: older, cwd: '/work/here', createdAt: now - 1000 }),
+    )
+    await write(
+      path.join(
+        env.HOME,
+        '.kimi-code',
+        'sessions',
+        'wd_proj_abc',
+        older,
+        'agents',
+        'main',
+        'wire.jsonl',
+      ),
+      wire('Tell me a joke.'),
+    )
+    await write(
+      path.join(env.HOME, '.kimi-code', 'sessions', 'wd_proj_abc', ours, 'state.json'),
+      JSON.stringify({ id: ours, cwd: '/work/here', createdAt: now }),
+    )
+    await write(
+      path.join(
+        env.HOME,
+        '.kimi-code',
+        'sessions',
+        'wd_proj_abc',
+        ours,
+        'agents',
+        'main',
+        'wire.jsonl',
+      ),
+      wire('[consensflow launch kimi-nonce]\nTell me a joke.'),
+    )
+
+    const since = now - 60_000
+    assert.equal(
+      await discoverKimiSession('/work/here', since, env),
+      ours,
+      'newest since, as before',
+    )
+    assert.deepEqual(
+      await discoverSessionWithEvidence('kimi', '/work/here', since, env, { nonce: 'kimi-nonce' }),
+      {
+        sessionId: ours,
+        evidence: 'nonce',
+        turn: '[consensflow launch kimi-nonce]\nTell me a joke.',
+      },
+    )
+    assert.deepEqual(
+      await discoverSessionWithEvidence('kimi', '/work/here', since, env, { reportedId: ours }),
+      {
+        sessionId: ours,
+        evidence: 'reported',
+      },
+    )
+    assert.equal(
+      await discoverSessionWithEvidence('kimi', '/work/here', since, env),
+      null,
+      'no nonce, never bound',
+    )
+    assert.equal(
+      await discoverSessionWithEvidence('kimi', '/work/here', since, env, { nonce: 'nope' }),
+      null,
+    )
+  })
+})
+
+test('harness transcript: a seeded packet reads back as the question, marker gone', async () => {
+  await withStores(async (env) => {
+    const id = 'seeded-packet-test'
+    const seed = [
+      '[consensflow launch seed-nonce]',
+      '## Your brief for this run',
+      'GDPR pass',
+      '',
+      '## Message from the user',
+      'Tell me a joke.',
+      '',
+      'Respond directly and conversationally. There is no required format.',
+    ].join('\n')
+    await write(
+      path.join(env.HOME, '.codex', 'sessions', '2026', '08', '24', `rollout-${id}.jsonl`),
+      JSON.stringify({
+        type: 'response_item',
+        payload: { role: 'user', content: [{ text: seed }] },
+      }),
+    )
+
+    const turns = await harnessTurns('codex', id, env)
+
+    assert.deepEqual(turns, [{ role: 'user', text: 'Tell me a joke.' }])
   })
 })

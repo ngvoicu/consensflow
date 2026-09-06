@@ -604,7 +604,7 @@ P1/P2 recorded through this path for each harness being enabled.
 - [ ] [IMPL-PANE-20] `bin/cf.mjs` — requester, controller, `sayVerb`,
       `readVerb`, `attachVerb`/`chatVerb` standalone branches; the kimi
       first-turn path takes ownership from redemption. -> satisfies [TEST-PANE-19]
-- [ ] [TEST-PANE-21] `tests/engine/session-binding.test.mjs` —
+- [x] [TEST-PANE-21] `tests/engine/session-binding.test.mjs` —
       `bindEvidence(kind, candidate, launch)`: claude and pi bind on the
       preallocated id; codex, opencode and kimi bind when the launch nonce is the first
       non-empty line of one of the candidate's first five user turns
@@ -621,7 +621,7 @@ P1/P2 recorded through this path for each harness being enabled.
       where the process and pane stay alive but the native session changes
       (`/new`, `/resume`, a fork) yields `replaced`, which invalidates the
       binding and every dependent decision.
-- [ ] [IMPL-PANE-22] `hosts/lib/harness-transcript.js` discoverers take a
+- [x] [IMPL-PANE-22] `hosts/lib/harness-transcript.js` discoverers take a
       `nonce`; `hosts/lib/packets.js` emits and the reader strips
       `[consensflow launch <nonce>]`; `src/store.js` `session.bind` refuses
       without evidence. -> satisfies [TEST-PANE-21]
@@ -984,6 +984,8 @@ replacement fails closed; an interrupted read creates no coverage.
 | [IMPL-PANE-52] | — | `npm run check`: exit 0, 461 tests, 458 pass; lead re-ran: exit 0, 458 pass | the Astra comment that named "Hyperion's ultra tier" reworded; `skill/SKILL.md` (the checked-in v0 reference) patched by the lead to say max |
 | review fixes A (01–04) + B-Rust (05–10) | hyperion, one failing test per finding (18 findings over two batches; (8), B3, B5-partial, B6 moot after earlier fixes; B8 hidden consumer left unproven by design); RED captured for every non-moot fix except (9), whose RED link step died on `ENOSPC` | `cargo test`: 42 unit + 5 headless passed; Node bridge 26/26; lead re-ran 2026-09-06 19:05 EEST: 42 + 5, clippy clean | PTY tests serialised against `openpty` exhaustion; per-pane writers; bounded delimiter-aware reader; serialized writer queue |
 | Phase 1 review loop | asteria: unit A BLOCK (12 findings) → hyperion batches 1–2; Rust units BLOCK (10) → batch 2; round 3 (7) → batch 3; round 4: PTY+arbiter APPROVE, backpressure APPROVE (C7 deferred), headless approve-with-edit, bridge BLOCK on C2 → batches 4–5; Node: BLOCK (5) → gefjon N1–N5, BLOCK on N2 → N2a/b, then APPROVE. Final: Rust bridge APPROVE 2026-09-06 22:05 EEST | lead re-ran after every batch; last: `cargo test` 52 unit + 6 headless, `cargo clippy -D warnings` clean, `node --test tests/bridge.test.mjs` 43/43, `npm run check` on the exact staged tree exit 0, 489 pass | per batch, under green |
+| [TEST-PANE-21] | gefjon, `node --test tests/engine/session-binding.test.mjs`: `ERR_MODULE_NOT_FOUND hosts/lib/session-binding.js` (13 tests first); after zeus's BLOCK: 13 RED on the rebuilt real-rollout fixtures; after his edits E1/E2: 7 RED | — | — |
+| [IMPL-PANE-22] | — | 23 binding tests green; lead re-ran 51/51 across binding, transcript and store; `npm run check` on the exact staged tree exit 0, 514 pass | zeus review: BLOCK (F1–F9: the codex seed is the SECOND user turn on real rollouts; replacement failed open without `alive`; marker matched any line) → fixed → approve with edits (E1 discovery returns the matching turn; E2 reported-vs-preallocated agreement) → **approve** 2026-09-06 22:50 EEST |
 | [IMPL-PANE-06] (Node half) | — | `node --test tests/bridge.test.mjs`: 17 passed, 0 failed; lead re-ran: 17/17, `tests/ui.test.mjs` 29/29 | biome format + two assignment-in-expression lints fixed; one self-inflicted test sizing (a 64-byte budget could not fit the refusal frame) corrected in the TEST, noted as a test bug not an assertion change |
 
 ## Deviations

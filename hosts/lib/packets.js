@@ -93,8 +93,14 @@ export function taskForKind(_kind, baseTask) {
  * without it the scaffolding would read back as "you asked".
  */
 export function createWindowSeed(input) {
-  const { task, brief = "", extraContext = "", handoff = "" } = input;
+  const { task, brief = "", extraContext = "", handoff = "", nonce = null } = input;
   const sections = [];
+  // A launch nonce is non-secret launch evidence, not content: it rides on
+  // the seed's FIRST line so the harness stores it verbatim in the session's
+  // first user turn, and the display reader strips it before anyone sees it.
+  if (nonce !== null && nonce !== undefined && String(nonce).trim() !== "") {
+    sections.push(formatLaunchMarker(nonce));
+  }
   if (brief && String(brief).trim()) {
     sections.push("## Your brief for this run", String(brief).trim(), "");
   }
@@ -114,4 +120,59 @@ export function createWindowSeed(input) {
   if (sections.length === 0) return message;
   sections.push("## Message from the user", message);
   return sections.join("\n");
+}
+
+/**
+ * Launch-unique evidence for native-session binding.
+ *
+ * `[consensflow launch <nonce>]` is deliberately non-secret: it is stored in
+ * the harness's own session file and its only job is proving THIS launch
+ * opened THAT session. Task text alone can never do that — two identical
+ * prompts in one directory must bind to their own launches.
+ */
+export function formatLaunchMarker(nonce) {
+  const clean = String(nonce ?? "").trim();
+  if (clean.length === 0 || /[\[\]\r\n]/.test(clean)) {
+    throw new Error("launch nonce must be a single line without brackets");
+  }
+  return `[consensflow launch ${clean}]`;
+}
+
+/** The nonce carried by one line, or null when the line carries none. */
+export function parseLaunchNonce(line) {
+  const match = /^\[consensflow launch ([^\]]+)\]\s*$/.exec(String(line ?? "").trim());
+  const nonce = match?.[1]?.trim() ?? "";
+  return nonce.length === 0 ? null : nonce;
+}
+
+/** Drop every launch-marker line; what a person reads never shows one. */
+export function stripLaunchMarker(text) {
+  return String(text ?? "")
+    .split("\n")
+    .filter((line) => parseLaunchNonce(line) === null)
+    .join("\n")
+    .trim();
+}
+
+/**
+ * Injected blocks off the front, whatever a person wrote left standing.
+ *
+ * A COMPLETE `<tag>…</tag>` is what an environment injects — verified against
+ * a real codex rollout on 2026-08-27, closing tag and all. A lone opening tag
+ * is somebody talking: `<div> tags are escaping wrong` is a question, and
+ * `<!doctype html>` is an answer — and so is a tag carrying attributes, which
+ * the injector never writes. Repeated, because one turn can carry more than
+ * one block. If a harness ever injects a block it does not close, this shows
+ * it rather than hiding it — the harmless direction for a reader whose job is
+ * to lose nothing.
+ *
+ * Lives here (not in harness-transcript.js) so the pure session-binding
+ * module can use it without an import cycle.
+ */
+const INJECTED_BLOCK = /^\s*<([a-z][a-z0-9_-]*)>[\s\S]*?<\/\1>\s*/i;
+
+export function withoutInjectedBlocks(text) {
+  let rest = String(text ?? "");
+  while (INJECTED_BLOCK.test(rest)) rest = rest.replace(INJECTED_BLOCK, "");
+  return rest.trim();
 }
