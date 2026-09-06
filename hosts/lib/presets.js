@@ -132,15 +132,18 @@ export const AGENT_PRESETS = [
   // OpenAI's 2026 family: Sol (flagship), Terra (balanced), Luna (fast/affordable).
   // Codex's 5.6 effort ladder extends past xhigh with "max" and "ultra" (ultra =
   // max reasoning + automatic task delegation; Sol/Terra only). All combos verified live.
+  // Sol sits at `max`, one seat below the proven `ultra` ceiling, by the user's decision
+  // (2026-09-06) — a tier ladder is a choice, and this one is recorded so the
+  // effort-ceilings audit above does not "fix" it back.
   {
     preset: "hyperion",
     id: "hyperion",
     name: "Hyperion",
-    label: "Codex GPT 5.6 Sol ULTRA",
-    description: "Titan of heavenly light: GPT 5.6 Sol — the flagship variant — at ultra effort (maximum reasoning with automatic task delegation), the deepest Codex agent in the catalog. Turns can run many minutes.",
+    label: "Codex GPT 5.6 Sol MAX",
+    description: "Titan of heavenly light: GPT 5.6 Sol — the flagship variant — at max effort, the deepest reasoning tier below ultra's automatic task delegation. Turns can run many minutes.",
     kind: "codex",
     model: "gpt-5.6-sol",
-    effort: "ultra",
+    effort: "max",
   },
   {
     preset: "phoebus",
@@ -203,8 +206,8 @@ export const AGENT_PRESETS = [
   // and the model strings differ, which is why no twin rule couples them.
   //
   // Neither road has codex's `ultra`: pi's thinkingLevelMap tops out at max for
-  // this model and OpenRouter's catalog lists low…max. Hyperion's ultra tier is
-  // a codex-CLI level, and it stays there.
+  // this model and OpenRouter's catalog lists low…max. `ultra` is a codex-CLI
+  // level no preset currently names, since Sol stepped down to `max`.
   {
     preset: "phosphoros",
     id: "phosphoros",

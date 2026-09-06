@@ -42,7 +42,7 @@ editor becomes a collapsible panel at the top of the standalone page. The
 target stays macOS, Windows and Linux; this spec tests on macOS and the
 other two follow in their own spec.
 
-50 tasks across 6 phases; five live probes gate three of them.
+52 tasks across 6 phases (two independent of any phase); five live probes gate three of them.
 
 ## Team
 
@@ -425,14 +425,14 @@ wrong.
 
 ## Phase 1: Bridge protocol and PTY transport [in-progress]
 
-- [ ] [TEST-PANE-01] `app/src-tauri/src/pty.rs` `#[cfg(test)]` — `open`
+- [ ] [TEST-PANE-01] ← current (green, review BLOCK — fixes pending) `app/src-tauri/src/pty.rs` `#[cfg(test)]` — `open`
       spawns `sh -c 'printf hello'` and the reader yields `hello` then EOF;
       `resize(24, 80)` is seen by `sh -c 'stty size'`; `kill` ends the
       reader and the whole process group (`sh -c 'sleep 1000 & sleep
       1000'` leaves no orphan); an env map reaches the child; a raw-mode
       recorder child (`stty raw -echo; od -An -tx1`) echoes exactly the
       bytes written, as hex; `open` takes absolute `argv[0]` and refuses a
-      bare name. ← current
+      bare name.
 - [ ] [IMPL-PANE-02] `pty.rs` — `PaneTable` keyed by `(id, generation)`;
       `open(cwd, argv, env, size)` spawning in its own process group,
       `write`, `resize`, `kill`, `list() -> [PaneInfo{id, generation, alive,
@@ -806,10 +806,38 @@ replacement fails closed; an interrupted read creates no coverage.
       no repeated `cf catchup`/`cf sessions`, and its report says the work
       is running and where); `evals/README.md`. -> satisfies [TEST-PANE-49]
 
+### Independent of the phases — Sol at max (any time; assigned to gefjon)
+
+- [x] [TEST-PANE-51] `tests/catalog.test.mjs` + `tests/cli.test.mjs` +
+      `tests/engine/claude-core.test.mjs` + `tests/skill.test.mjs` +
+      `tests/fixtures/v1-participants.json` — the `hyperion` preset is
+      "Codex GPT 5.6 Sol MAX" at `effort: 'max'`; no preset in the catalog
+      names `ultra`; `EFFORTS.codex` still lists `ultra` as a level the CLI
+      takes (it was walked live) but the catalog test asserts no row uses
+      it; the v1 fixture row for hyperion reads `max`; `cf agent sync`
+      moves an existing `hyperion` row from `ultra` to `max` (label,
+      effort, description — the preset-owned fields), and the generated
+      skill's roster line reads "Sol MAX; max effort".
+- [x] [IMPL-PANE-52] `hosts/lib/presets.js` (the Sol row: label, effort,
+      description, and the ladder comment that explains why Sol sits at
+      `max` below the proven `ultra` ceiling), `src/skill.js:136` ("minutes
+      for max"), `tests/fixtures/v1-participants.json`. -> satisfies [TEST-PANE-51]
+
 ---
 
 ## Resume Context
 
+> 2026-09-06 17:20 EEST — asteria's review (`asteria-velvet-brook`) returned BLOCK on
+> both units with 12 findings (4 P1: a blocked PTY writer holding the table
+> lock freezes `kill`; UTF-8 split across chunks corrupted in `bridge.js`;
+> `maxFrameBytes` unenforced on unterminated input; an oversized handler
+> response silently dropped). Findings dispatched to the authors in their
+> conversations; tasks 01–06 stay unticked until the fixes land and the
+> re-review passes. hyperion also delivered the Rust half of the bridge,
+> backpressure and the headless binary (tasks 05–10, 23+3 tests green in his
+> run; one `openpty` failure in the lead's parallel run under investigation);
+> that half is under review next. The Sol unit (51/52) is green and committed.
+>
 > Phase 1 started 2026-09-06 16:14 EEST, delegated by the lead (PM):
 > **hyperion** holds TEST-PANE-01 → IMPL-PANE-04 (Rust `pty.rs` +
 > `arbiter.rs`) in conversation `hyperion-willow-orchard` (pane
@@ -856,12 +884,21 @@ replacement fails closed; an interrupted read creates no coverage.
 | 2026-09-06 | The standalone skill teaches send-and-return: no `--wait`, no polling; answers arrive under `auto`, the human says when to read under `manual` | User's call (2026-09-06): "answers come automatically, or the owner asks when to read" — a lead blocked in `--wait` is a lead the user cannot reach |
 | 2026-09-06 | Team: lead = architect + PM; astraeus co-lead; hyperion, zeus workers and reviewers; gefjon free repetitive worker; brokkr, mnemosyne, coeus workers; Gabriel answers, tests, runs the app; one conversation per work stream, new pane only for independent work | User's call (2026-09-06 goal) |
 | 2026-09-06 | Tag `end-of-cmux-era` at `3e485ba` on origin (NAS) and upstream (GitHub) | User's call: mark where the three-mode era ends |
+| 2026-09-06 | The Sol preset moves from `ultra` to `max` everywhere; `ultra` stays a codex level nobody's preset names | User's call (2026-09-06): "Sol ultra becomes max everywhere in ConsensFlow". A deliberate seat below the proven ceiling, like the DeepSeek rows — recorded so the effort-ceilings audit does not "fix" it back |
 | 2026-09-06 | Rename, skill and evals in the LAST phase | risk 17 |
 
 ## TDD Log
 
 | Task | Red | Green | Refactor |
 |---|---|---|---|
+| [TEST-PANE-01] | hyperion, `cargo test` in `app/src-tauri`: exit 101 — `PaneTable` and `portable_pty` do not exist (7 tests written first) | — | — |
+| [IMPL-PANE-02] | — | `cargo test`: 7 passed, 0 failed (process-group cleanup included); lead re-ran: 13 passed after 04 | removed an unused trait import; the process-group inspection helper compiles only under test; re-ran green |
+| [TEST-PANE-03] | hyperion, `cargo test`: exit 101 — every arbiter symbol absent (6 tests: wrapper+delay bytes, epoch/latch/Enter events, Stale/Draft, the epoch-7/epoch-9 delayed-clear counterexample with a 10× wait, queueing behind the automated `\r`, sanitize across every C0 byte and DEL) | — | — |
+| [IMPL-PANE-04] | — | `cargo test`: 13 passed, 0 failed; lead re-ran 2026-09-06 16:40 EEST: 13 passed | fixed a paste lock left set when the Enter-event receiver disconnects mid-flush; `cargo clippy --all-targets` clean except one pre-existing `lib.rs:169` lint, fix authorised by the lead |
+| [TEST-PANE-05] (Node half) | gefjon, `node --test tests/bridge.test.mjs`: 1 fail — `ERR_MODULE_NOT_FOUND src/bridge.js` (17 tests written first) | — | — |
+| [TEST-PANE-51] | gefjon, `npm test` after moving the pins: 5 failed — `'ultra' !== 'max'` in catalog, cli (add + sync), claude-core, pi-core | — | — |
+| [IMPL-PANE-52] | — | `npm run check`: exit 0, 461 tests, 458 pass; lead re-ran: exit 0, 458 pass | the Astra comment that named "Hyperion's ultra tier" reworded; `skill/SKILL.md` (the checked-in v0 reference) patched by the lead to say max |
+| [IMPL-PANE-06] (Node half) | — | `node --test tests/bridge.test.mjs`: 17 passed, 0 failed; lead re-ran: 17/17, `tests/ui.test.mjs` 29/29 | biome format + two assignment-in-expression lints fixed; one self-inflicted test sizing (a 64-byte budget could not fit the refusal frame) corrected in the TEST, noted as a test bug not an assertion change |
 
 ## Deviations
 

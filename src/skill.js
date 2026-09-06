@@ -133,7 +133,7 @@ question, then decide or ask the user.
    - \`--image <path>\` — reference pictures for an image agent, repeatable.
 
    Turns can take minutes at high effort — use a generous timeout (10+
-   minutes for max/ultra). The thinking streams as it goes.
+    minutes for max). The thinking streams as it goes.
 4. Report the answer to the user **verbatim or faithfully summarized, and
    attributed** ("hyperion says: …"). Never present an agent's answer as
    your own.

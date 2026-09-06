@@ -239,4 +239,17 @@ describe('every tool ships a list of ready-made agents', () => {
     assert.ok(EFFORTS.codex.includes('ultra'))
     assert.ok(EFFORTS.pi.includes('off'))
   })
+
+  it('names no ultra preset — ultra stays a level the CLI takes, not a row the catalog ships', () => {
+    // Sol stepped down from ultra to max by the user's decision (2026-09-06):
+    // a deliberate seat below the proven ceiling, like the DeepSeek rows. The
+    // effort-ceilings audit must not "fix" it back.
+    const ultras = Object.values(CATALOG)
+      .flat()
+      .filter((entry) => entry.effort === 'ultra')
+    assert.deepEqual(ultras, [])
+    const hyperion = catalogEntry('hyperion')
+    assert.equal(hyperion.effort, 'max')
+    assert.equal(hyperion.description, 'Codex GPT 5.6 Sol MAX')
+  })
 })

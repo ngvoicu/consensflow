@@ -14,7 +14,7 @@ const ROSTER = [
     name: 'hyperion',
     harness: 'codex',
     model: 'gpt-5.6-sol',
-    effort: 'ultra',
+    effort: 'max',
   },
   {
     name: 'endymion',

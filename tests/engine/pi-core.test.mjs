@@ -237,7 +237,7 @@ test('agent presets expose the allowed creation list', () => {
   assert.ok(!AGENT_PRESETS.some((p) => p.kind !== 'image' && String(p.model).includes('gpt-5.5')))
   // The frontier matrix: same model+effort family on every engine that runs it.
   assert.equal(getPreset('artemis').effort, 'medium')
-  assert.equal(getPreset('hyperion').effort, 'ultra')
+  assert.equal(getPreset('hyperion').effort, 'max')
   assert.equal(getPreset('kronos').model, 'anthropic/claude-opus-5')
   assert.equal(getPreset('baldr').model, 'openrouter/anthropic/claude-opus-5')
   assert.equal(getPreset('saga').model, 'openrouter/anthropic/claude-fable-5.1')
@@ -248,10 +248,10 @@ test('agent presets expose the allowed creation list', () => {
   assert.equal(getPreset('mani').effort, 'max')
   assert.equal(getPreset('mimir').effort, undefined)
   assert.equal(getPreset('aegir').effort, undefined)
-  // GPT 5.6 celestial trio on Codex: Sol (flagship) gets ultra + xhigh, Terra and Luna get xhigh.
+  // GPT 5.6 celestial trio on Codex: Sol (flagship) gets max + xhigh, Terra and Luna get xhigh.
   assert.equal(getPreset('hyperion').kind, 'codex')
   assert.equal(getPreset('hyperion').model, 'gpt-5.6-sol')
-  assert.equal(getPreset('hyperion').effort, 'ultra')
+  assert.equal(getPreset('hyperion').effort, 'max')
   assert.equal(getPreset('phoebus').model, 'gpt-5.6-sol')
   assert.equal(getPreset('phoebus').effort, 'xhigh')
   assert.equal(getPreset('gaia').model, 'gpt-5.6-terra')

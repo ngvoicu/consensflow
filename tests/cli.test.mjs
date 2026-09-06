@@ -328,7 +328,26 @@ describe('the catalog turns a name into a working agent', () => {
     const hyperion = listed.agents[0]
     assert.equal(hyperion.harness, 'codex')
     assert.equal(hyperion.model, 'gpt-5.6-sol')
-    assert.equal(hyperion.effort, 'ultra')
+    assert.equal(hyperion.effort, 'max')
+  })
+
+  it('syncs a hyperion row from ultra to max — label, effort and description', async () => {
+    // The row was added when the catalog still named ultra; pin it back to
+    // the old values, then `cf agent sync` moves the preset-owned fields.
+    const path = rosterPath(t.env)
+    const document = JSON.parse(readFileSync(path, 'utf8'))
+    const row = document.agents.find((r) => r.id === 'hyperion')
+    row.effort = 'ultra'
+    row.description = 'Codex GPT 5.6 Sol ULTRA'
+    writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`)
+
+    const out = await cf(['agent', 'sync', 'hyperion'], t.env)
+    assert.equal(out.code, 0)
+
+    const listed = JSON.parse((await cf(['agent', 'list', '--json'], t.env)).stdout)
+    const hyperion = listed.agents.find((p) => p.name === 'hyperion')
+    assert.equal(hyperion.effort, 'max')
+    assert.equal(hyperion.description, 'Codex GPT 5.6 Sol MAX')
   })
 
   it('still requires harness and model for a name it does not know', async () => {
