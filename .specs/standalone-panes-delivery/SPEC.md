@@ -178,6 +178,32 @@ other two follow in their own spec.
       network: biome, Node tests, `cargo test` + clippy, page tests, the
       integration suite, the packaged smoke
 
+## Clean install on macOS — what Gabriel gets told when it is time
+
+Gabriel's instruction (2026-09-06): the ConsensFlow of today is removed
+completely from the Mac and the new one is installed clean, with its skill
+and its CLI. The lead announces the moment; the steps are these, and the
+old app's own verbs do the removal so nothing is guessed:
+
+1. Keep the roster: copy `~/.consensflow/agents.json` aside — it is shared
+   with every ConsensFlow tool and `cf reset` would take it.
+2. `cf off` — takes back every installed file the old ConsensFlow owns: the
+   five skills, the `cf` launcher, the take-back-only leftovers.
+3. `cf reset --yes` — removes the config root (`~/.consensflow`, workspaces
+   and conversations included) and the app's own data directories
+   (`dev.ngvoicu.consensflow`).
+4. Quit the app; move `/Applications/ConsensFlow.app` to the Trash — the
+   app never deletes its own bundle.
+5. Install the new build's DMG; open the app once. Opening is the deliberate
+   act: it claims the `cf` launcher and installs the one generated skill
+   into every detected harness (`installEverywhere`, Phase 6).
+6. Put `agents.json` back and open the app again so the skill regenerates
+   from the roster; `cf doctor` shows one shape, no mode line, every
+   harness carrying the skill, the launcher naming the app's node.
+
+Until Phase 6 lands there is nothing to install: the announcement comes
+after the switch-over commit and a green `npm run check:all`.
+
 ## Out of scope now — deferred to a later spec
 
 Windows and Linux packaging (sidecar triples, `nsis`/`deb`/`appimage`,
@@ -827,6 +853,14 @@ replacement fails closed; an interrupted read creates no coverage.
 
 ## Resume Context
 
+> 2026-09-06 17:55 EEST — Gabriel's standing instruction (goal): the lead
+> checks the workers itself, tests, and continues; he is told when the new
+> ConsensFlow can be installed clean (section "Clean install on macOS").
+> A monitor watches each open conversation's last turn and reports a
+> report/verdict turn or a turn unchanged for three minutes; the lead then
+> reads it whole with `cf catchup --unread` into a file. brokkr runs probes
+> P1/P2 through the headless bridge in `brokkr-lilac-thicket`.
+>
 > 2026-09-06 17:20 EEST — asteria's review (`asteria-velvet-brook`) returned BLOCK on
 > both units with 12 findings (4 P1: a blocked PTY writer holding the table
 > lock freezes `kill`; UTF-8 split across chunks corrupted in `bridge.js`;
