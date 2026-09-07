@@ -714,7 +714,7 @@ replacement fails closed; an interrupted read creates no coverage.
 - [x] [IMPL-PANE-30] `hosts/lib/deliveries.js`; `src/store.js`
       `delivery.upsert`; standalone `catchup` bookkeeping by item ids.
       -> satisfies [TEST-PANE-29]
-- [ ] [TEST-PANE-31] `tests/delivery-watch.test.mjs` — `Watcher` runs for
+- [x] [TEST-PANE-31] `tests/delivery-watch.test.mjs` — `Watcher` runs for
       the app's lifetime, independent of the displayed view; a `pane.idle`
       event or a floor tick reads completion for every BOUND conversation,
       live or not; a `pane.exit` triggers a final reconcile for that
@@ -733,7 +733,7 @@ replacement fails closed; an interrupted read creates no coverage.
       completion suspends automatic delivery for that pane, invalidates its
       cursor and pending decisions, and tells the page; the `--wait` grace
       is honoured.
-- [ ] [IMPL-PANE-32] `src/delivery-watch.js`, started by the app process
+- [x] [IMPL-PANE-32] `src/delivery-watch.js`, started by the app process
       at launch (not by mode). -> satisfies [TEST-PANE-31]
 - [x] [TEST-PANE-33] `tests/channels.test.mjs` — `deliver(channel, target,
       record)`: `pty-inline` and `cf-read` call `pane.write_paste` with the
@@ -903,6 +903,15 @@ replacement fails closed; an interrupted read creates no coverage.
 
 ## Resume Context
 
+> 2026-09-07 06:20 EEST — **channels (33–34) committed f9e606c**, registry
+> 36/52. In review: the `cf` side round 3 (hyperion, `hyperion-nutmeg-harbor`),
+> the watcher round 2 (hyperion, `hyperion-nutmeg-cloud`), the bridge
+> operations 35–36 with the lead's session (asteria). In work: lifecycle
+> 41–42 (hyperion, `hyperion-rusty-thicket`, with the new `dropEnv` field
+> on `pane.open`). Waiting on zeus after asteria: `dropEnv` sent for the
+> lead launch, kimi withdrawn from the lead harnesses. Then 43–46, the
+> Phase 3 exit consult with astraeus, Phase 6.
+>
 > 2026-09-07 06:05 EEST — **page (39–40) committed f3943b8, Phase 4 complete**,
 > registry 34/52. In work: `cf` side round 3 (apollo, hyperion's five),
 > channels round 4 (diana, apollo's two), watcher round 2 (phoebus,
@@ -1098,6 +1107,7 @@ replacement fails closed; an interrupted read creates no coverage.
 | 2026-09-07 | Bridge operations (35–36): the lead is a session like a worker, preallocated at `tab.open` for claude and pi and bound at open through `session.bind`, and `tab.resume` resumes the BOUND session with the harness's own resume argument so the lead's context survives; closing the lead pane is the suspend, there is no `tab.suspend` verb; a lead pane ending releases its reservation and suspends the tab; `state.changed` fires on every successful store mutation and never on a failed one; `state.list` carries no answers, `answers.list` is per conversation; bridge operations are not idempotent by opId (the page has no credential, a second click is a second action); an unmodelled throw on a pane route is 500 with the cause's message as `reason`, store refusals carry codes and stay 400; `deliver.now` marks a pending record manual in place and resends an accepted or cancelled one under a new id | zeus, tasks 35–36: a lead's native session was null so every resume started the lead cold, losing its context; a lead exit left an unrecoverable tab; `deliver.now` wrote pending onto a cancelled record and reported success; a bare `internal_error` would have thrown away the one diagnostic a person needs on their own machine |
 | 2026-09-07 | `pane.open` carries `dropEnv`, a list of names Rust removes from the child environment before spawning, after applying `env`; the lead launch sends the harness's billing guards in it (`interactiveGuards`) | zeus, task 21: a lead pane is spawned by Rust and the frame could only add keys, so a lead's harness ran without the guard that keeps a subscription login from switching to API-key billing; workers go through `cf`, which strips them |
 | 2026-09-07 | Channels landed with two recorded follow-ups, neither blocking: the pi adapter does not withdraw the inbox record on `ack-timeout`, so past a 30 s turn the extension may still deliver after the app recorded uncertain (bounded, and readiness-gated on both paths; the clean close is to unlink the record on timeout); the pi extension imports `hosts/lib/deliveries.js`, so Phase 6 packaging must carry that dependency beside the extension | apollo, channels round 4 approve |
+| 2026-09-07 | Bridge operations, after asteria's round 1: a lead's seed opens with the launch marker exactly as a worker's and discovered or reported lead evidence binds through the launch-fenced `leadBind`; a lead exit's release and the tab's suspend are one queued operation compared on pane, generation and launch; page delivery actions choose their transition against the current record inside the queue and never overwrite a terminal state; an unknown lead launch and its pane are preserved until a matching exit; `deliver.now` under manual creates the plan itself from the native answer; a refused resume returns the generation to suspended; a resume re-stamps the binding; `/api/tabs` is the lead-launch operation over HTTP; only explicit refusal types or codes are 400 | asteria, 35–36 round 1: codex and opencode leads could never bind (raw UUID seed), a late lead exit closed its replacement, a page action parked across an acceptance wrote pending over acceptedAt, a manual-policy answer had no way to be sent, a corrupted store file answered 400 |
 
 ## TDD Log
 
@@ -1137,6 +1147,8 @@ replacement fails closed; an interrupted read creates no coverage.
 | [IMPL-PANE-40] | — | Playwright 35/35, cargo test 73 (66 unit + 7 headless incl. B8/C7 at exactly 1,024 unacked and 14,400 drained), clippy -D warnings clean, app-only bundle signed; asteria over five rounds (11 findings, then 3, then 1, then 1): **approve**, no remaining findings | two input paths (human vs emulator replies), synchronous sequence-checked admission with async ticket completion, per-pane writers off the blocking pool, `state.changed` forwarded to the page, headless shutdown order, the page bundling `policy.js` and `layout.js` |
 | [TEST-PANE-33] | diana, `node --test tests/channels.test.mjs`: exit 1 — `ERR_MODULE_NOT_FOUND src/channels.js`; each later finding red first (pointer for cf-read: 2 failures; the 3,000 → 30,000 ms revert failing; the required-timeout guard) | — | — |
 | [IMPL-PANE-34] | — | channels 31/31 with the pi extension suite; P5 and P6 PASSED live and recorded in findings-01.md; apollo over four rounds (8 findings, then 4, then 2): **approve**, cf-read pointer reaching real pi in 248 ms, a mid-turn arrival admitted at 3,966 ms, six reverts caught | `launchConfiguration` and `enabledChannels` as the producer of a lead's native-channel launch; the extension accepts exactly the envelope or the pointer rebuilt from the record, byte for byte |
+| [TEST-PANE-31] | phoebus, `node --test tests/delivery-watch.test.mjs`: exit 1 — `ERR_MODULE_NOT_FOUND src/delivery-watch.js`; then three self-arranged asteria rounds (9, 4, 3 gaps) and hyperion's six, each red first | — | — |
+| [IMPL-PANE-32] | — | 39/39, 118/118 with channels, the pi extension and the bridge; hyperion (independent): **approve**, wait grace held at +3,999 ms and released at +4,000, a pi negative ack failed and replanned under a new id, close waited for an admitted operation, zero watcher-emitted `state.changed` | pointer versus envelope by record channel, `admitted:false` as affirmative non-admission, planning deferred while a newer question may still be landing, close drains admitted work |
 
 ## Deviations
 
