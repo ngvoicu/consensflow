@@ -4,6 +4,40 @@ import test from 'node:test'
 import { answers } from '../../hosts/lib/completion.js'
 import { startIntegration } from './harness.mjs'
 
+test('worker harness starts when the desktop has only the Finder PATH (TEST-PANE-59)', async () => {
+  const app = await startIntegration({ bridgeEnv: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' } })
+  try {
+    const opened = await app.openTab()
+    const run = await app.runCli(
+      ['run', '@worker', 'greet the lead', '--new', '--json'],
+      opened.leadEnv,
+    )
+    assert.equal(run.code, 0, run.stderr)
+    const { conversation, pane } = JSON.parse(run.stdout)
+    const output = () =>
+      app.rustFrames
+        .filter((frame) => frame.op === 'pane.output' && frame.body.id === pane.id)
+        .map((frame) => Buffer.from(frame.body.bytes).toString('utf8'))
+        .join('')
+    await app.waitFor(() => {
+      const session = app.threads()[conversation]?.sessionId
+      return (
+        output().includes('could not be started') ||
+        (typeof session === 'string' &&
+          app.transcript(session).includes('worker completed from a real PTY child'))
+      )
+    })
+    assert.ok(
+      app
+        .transcript(app.threads()[conversation]?.sessionId)
+        .includes('worker completed from a real PTY child'),
+      output(),
+    )
+  } finally {
+    await app.close()
+  }
+})
+
 test('two same-directory leads keep concurrent consults on distinct bindings', async () => {
   const app = await startIntegration()
   try {
@@ -311,9 +345,14 @@ test('a replaced native lead session suspends its pending delivery', async () =>
             /replaced/i.test(delivery.reason ?? ''),
         ),
     )
-    const state = await app.requestNode('state.list', {})
-    const tab = state.tabs.find((candidate) => candidate.id === opened.tab.id)
-    assert.equal(tab.lead.bound, false, JSON.stringify(state))
+    // Suspension is persisted before the watcher invalidates the lead binding.
+    let state
+    let tab
+    await app.waitFor(async () => {
+      state = await app.requestNode('state.list', {})
+      tab = state.tabs.find((candidate) => candidate.id === opened.tab.id)
+      return tab.lead.bound === false
+    })
     assert.equal(tab.lead.nativeSession, null, JSON.stringify(state))
     assert.notEqual(
       state.deliveries.find((delivery) => delivery.conversation === answer.conversation).state,

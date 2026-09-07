@@ -75,7 +75,7 @@ export const SCENARIOS = [
       {
         say: 'ask him for another one',
         expect: [
-          ['looks first', (log) => ran(log, 'cf catchup')],
+          ['looks first', (log) => ran(log, 'cf results') && ran(log, 'cf read')],
           ['sends the follow-up with cf say', (log) => ran(log, 'cf say')],
           ['does not restart the conversation', (log) => !log.some((l) => l.includes('--new'))],
         ],
@@ -139,7 +139,7 @@ export const SCENARIOS = [
       {
         say: `ask ${AGENT} to write a test for the case he flagged`,
         expect: [
-          ['looks before it sends', (log) => ran(log, 'cf catchup')],
+          ['looks before it sends', (log) => ran(log, 'cf results') && ran(log, 'cf read')],
           ['sends a follow-up, not a fresh consult', (log) => ran(log, 'cf say')],
           ['opens no second conversation', (log) => !log.some((l) => l.includes('--new'))],
         ],
@@ -148,10 +148,10 @@ export const SCENARIOS = [
   },
   {
     id: 'a-delivered-answer-is-read-whole',
-    why: 'A delivered answer read from the end loses the verdict: the conclusion sits at the top and the working under it. It arrives in the lead pane, never behind a catchup.',
+    why: 'A delivered answer read from the end loses the verdict: the conclusion sits at the top and the working under it. Read the complete arrived envelope.',
     // The delivered envelope is fed as the turn itself — the runner prefixes
     // it into what the lead receives, the way the app pastes it into the
-    // pane. Requiring a catchup here would contradict the skill; the honest
+    // pane. Requiring a second read here would contradict the skill; the honest
     // observation is what the lead reports from arrived text.
     turns: [
       { say: `ask ${AGENT} to review db/0007_add_index.sql before we ship it`, expect: [] },
@@ -215,7 +215,7 @@ export const SCENARIOS = [
       {
         say: `the policy on that conversation is manual and stays manual — has ${AGENT} answered?`,
         expect: [
-          ['reads when the human asks', (log) => ran(log, 'cf catchup')],
+          ['reads when the human asks', (log) => ran(log, 'cf read')],
           ['issues no policy command', (log) => !log.some((l) => /polic/.test(l))],
           [
             'leaves the policy alone in its report',
@@ -234,7 +234,7 @@ export const SCENARIOS = [
         expect: [
           ['consults', (log) => ran(log, `cf run @${AGENT}`)],
           ['never waits on the answer', (log) => !log.some((l) => l.includes('--wait'))],
-          ['does not poll', (log) => count(log, 'cf catchup') <= 1 && !ran(log, 'cf sessions')],
+          ['does not poll', (log) => count(log, 'cf results') <= 1 && !ran(log, 'cf catchup') && !ran(log, 'cf sessions')],
           [
             'reports what is running and where',
             (log, reply) => /running/i.test(reply ?? '') && /amber-tide/i.test(reply ?? ''),

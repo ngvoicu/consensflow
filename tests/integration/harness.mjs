@@ -122,7 +122,7 @@ function waitFor(predicate, timeoutMs = 10_000, intervalMs = 25) {
  * their production JSON-lines pipes. The helper only observes and routes the
  * bytes; pane.open, PTYs, input arbitration and cleanup stay native.
  */
-export async function startIntegration({ fakeEnv = {}, existingRoot = null } = {}) {
+export async function startIntegration({ fakeEnv = {}, bridgeEnv = {}, existingRoot = null } = {}) {
   assert.equal(existsSync(BRIDGE), true, `missing built bridge: ${BRIDGE}`)
   const root = existingRoot ?? mkdtempSync(join(tmpdir(), 'consensflow-integration-'))
   const workspace = join(root, 'workspace')
@@ -148,7 +148,11 @@ export async function startIntegration({ fakeEnv = {}, existingRoot = null } = {
   const openFrames = []
   const nodePending = new Map()
   const rustPending = new Map()
-  const rust = spawn(BRIDGE, [], { cwd: REPO, env, stdio: ['pipe', 'pipe', 'pipe'] })
+  const rust = spawn(BRIDGE, [], {
+    cwd: REPO,
+    env: { ...env, ...bridgeEnv },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  })
   const rustErrors = []
   rust.stderr.on('data', (chunk) => rustErrors.push(String(chunk)))
   const rustHandleLine = await firstLine(rust.stdout, rust)

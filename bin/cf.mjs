@@ -19,14 +19,13 @@ import {
   discoverCodexSession,
   discoverKimiSession,
   discoverOpencodeSession,
-  harnessTurns,
 } from '../hosts/lib/harness-transcript.js'
 import { renderImageRun, runImageAgent } from '../hosts/lib/image-run.js'
 import { createPacket, createWindowSeed } from '../hosts/lib/packets.js'
 import { childEnv, interactiveResume, interactiveStart, runAgent } from '../hosts/lib/runners.js'
 import { openingLineCarriesNonce, TURNS_EXAMINED } from '../hosts/lib/session-binding.js'
 import { runsRoot } from '../hosts/lib/state.js'
-import { leadId, loadThreads } from '../hosts/lib/threads.js'
+import { loadThreads } from '../hosts/lib/threads.js'
 import { renderEvent } from '../hosts/lib/transcript-events.js'
 import { CATALOG, catalogEntry } from '../src/catalog.js'
 import { launchConfiguration } from '../src/channels.js'
@@ -96,9 +95,9 @@ Usage: cf <command> [options]
     [--notify auto|manual] [--image <path>]
   say <conversation> "<words>"               Continue in that conversation's app pane
   attach <@agent|conversation>                Reopen a conversation through the app
-  read <delivery id> [--part <k>]             Read a complete numbered delivery part
-  catchup [<conversation|@agent>]             Read the harness transcript
-    [--unread] [--last <n>] [--wait] [--json]
+  read <conversation|delivery id>          Read one completed result whole
+    [--answer <id>] [--part <k>]
+  results [conversation|@agent] [--json]    List completed worker results
   sessions [--json]                          List conversations in this workspace
   last <conversation|@agent> [--json]         Read the last recorded answer
   catalog [--harness <h>] [--json]            List available agent presets
@@ -117,7 +116,7 @@ Usage: cf <command> [options]
   off [--force]                             Remove owned installation; keep agents and history
   reset [--yes]                             Remove installation, agents and local app history
 
-Run, say, attach and read need a pane opened by ConsensFlow.
+Run, say, attach, read and results need a pane opened by ConsensFlow.
 The app owns conversation launches, delivery and read marks.
 Every roster change refreshes the generated skill. Unowned skill files stay untouched.
 `
@@ -207,8 +206,10 @@ function resolveAdd(name, values) {
 }
 
 /**
- * Which conversation a read verb means — `attach`, `catchup` and `last` all
- * answer it the same way, and each used to carry its own copy of this.
+ * Which conversation a verb means — `attach` and `last` both answer it the
+ * same way, and each used to carry its own copy of this. (`cf results`
+ * filters the app's own listing instead: the tab it lists is the lead's,
+ * never this workspace's files.)
  *
  * Joining is deliberately NOT lead-scoped (spawning is): whoever is reading
  * gets the newest conversation when they name nothing, that agent's newest for
@@ -234,9 +235,9 @@ function pickConversation(threads, asked) {
  *
  * `@name` is an agent and a bare name is a conversation, everywhere in this
  * CLI — which makes `cf last triton` a one-character mistake, and one the
- * answer used to leave the reader to spot in a list. The three read verbs
- * each carried their own wording of this ("no conversation X" against "no
- * conversation named X"); they share one now, and it names the missing `@`.
+ * answer used to leave the reader to spot in a list. The verbs that resolve
+ * a name share one wording now ("no conversation X" against "no
+ * conversation named X"), and it names the missing `@`.
  */
 function noConversationHere(asked, names, env) {
   // Emptiness first, whatever was asked for: a workspace with nothing in it
@@ -249,25 +250,6 @@ function noConversationHere(asked, names, env) {
     return `no conversation named ${JSON.stringify(asked)} here — ${asked} is an agent, so \`@${asked}\` takes its most recent one; conversations here: ${names.join(', ')}`
   }
   return `no conversation named ${JSON.stringify(asked)} here; you have: ${names.join(', ')}`
-}
-
-/**
- * How much of a conversation this lead has already read.
- *
- * A lead asked "can you see what other jokes he said?" and, having no way to
- * ask for what was new, SENT another request instead — inventing a third
- * round rather than reading the second (live, 2026-08-24). `cf catchup` could
- * only show everything or the last exchange; "since I last looked" is the
- * thing it was actually being asked for.
- *
- * The mark is a turn count per lead, kept on the row. A lead we cannot name
- * gets no mark at all — a shared `null` key would merge every anonymous shell
- * into one reader — so for them `--unread` shows everything, which is the
- * harmless direction for a verb that only reads.
- */
-function readMark(record, lead) {
-  if (lead === null) return 0
-  return record?.seen?.[lead] ?? 0
 }
 
 const DISCOVER = { opencode: discoverOpencodeSession, codex: discoverCodexSession }
@@ -364,7 +346,7 @@ function requireApp(verb) {
 
 /**
  * An agent must not spawn agents, ask them anything, or read their panes:
- * its own skill would otherwise invite it to. One sentence, five verbs.
+ * its own skill would otherwise invite it to. One sentence, six verbs.
  */
 function childRefused() {
   if (env.CONSENSFLOW_CHILD !== '1') return false
@@ -906,36 +888,99 @@ async function sayVerb(rest) {
 }
 
 /**
- * One part of a delivered answer, printed exactly as the app framed it.
+ * A part number as the app counts them: a whole number from 1.
  *
- * Verbatim to the byte, next-part line included: the framing IS the receipt
+ * `parseInt` reads "2garbage" as 2 and would print a different part than
+ * the one asked for, which is the one thing a receipt cannot survive.
+ * Answers null once it has said why it refuses, so the verbs share one
+ * check and no refused number ever reaches the app.
+ */
+function parsePartNumber(asked) {
+  const part = Number(asked)
+  if (!/^[0-9]+$/.test(asked) || !Number.isSafeInteger(part) || part < 1) {
+    fail(`a part is a whole number from 1, and ${JSON.stringify(asked)} is not one`)
+    return null
+  }
+  return part
+}
+
+/**
+ * What is left to read, said on stderr — stdout stays the part verbatim.
+ *
+ * The app answers a result read with the immutable delivery id that owns the
+ * parts, so every follow-up part goes through it: `cf read d-N --part k`.
+ * Only when the answer carries no delivery id does the teaching fall back to
+ * the conversation form that started the read.
+ */
+function teachRemainingParts(session, answerId, answer) {
+  const index = answer.index ?? answer.k
+  const total = answer.total ?? answer.of
+  if (!Number.isSafeInteger(index) || !Number.isSafeInteger(total)) return
+  if (index >= total) return
+  const next = index + 1
+  const where =
+    typeof answer.deliveryId === 'string' && answer.deliveryId.length > 0
+      ? `cf read ${answer.deliveryId} --part ${next}`
+      : `cf read ${session}${answerId === undefined ? '' : ` --answer ${answerId}`} --part ${next}`
+  warn(`part ${index} of ${total} — next: ${where}`)
+}
+
+/**
+ * One complete framed part of a result, printed exactly as the app framed it.
+ *
+ * Two forms: `cf read d-N` reads on with a delivery the app already minted
+ * (its first read returned the id), while `cf read <conversation>` starts
+ * from the conversation — the app selects its oldest unread completed
+ * result, or the one `--answer` names. Either way stdout is the part
+ * verbatim to the byte, next-part line included: the framing IS the receipt
  * the app matches against the lead's tool result, so a newline this side
- * adds or eats is a delivery that cannot be proved.
+ * adds or eats is a delivery that cannot be proved. Reading marks nothing:
+ * the native receipt is the only authority for "read", and a printed
+ * attempt never moves it.
  */
 async function readVerb(rest) {
   const { values, positionals } = parseArgs({
     args: rest,
     allowPositionals: true,
-    options: { part: { type: 'string' } },
+    options: { answer: { type: 'string' }, part: { type: 'string' } },
   })
   if (childRefused()) return
   const app = requireApp('read')
   if (app === null) return
-  const deliveryId = String(positionals[0] ?? '')
-  if (deliveryId.length === 0) {
-    fail('name the delivery: cf read <delivery id> [--part <k>]')
+  const target = String(positionals[0] ?? '')
+  if (target.length === 0) {
+    fail(
+      'name what to read: cf read <conversation> [--answer <id>] [--part <k>], ' +
+        'or carry on with cf read <delivery id> [--part <k>]',
+    )
     return
   }
-  // `parseInt` reads "2garbage" as 2 and would print a different part than
-  // the one asked for, which is the one thing a receipt cannot survive.
-  const asked = values.part ?? '1'
-  const part = Number(asked)
-  if (!/^[0-9]+$/.test(asked) || !Number.isSafeInteger(part) || part < 1) {
-    fail(`a part is a whole number from 1, and ${JSON.stringify(asked)} is not one`)
+  const part = parsePartNumber(values.part ?? '1')
+  if (part === null) return
+  if (/^d-[0-9]+$/.test(target)) {
+    if (values.answer !== undefined) {
+      fail(
+        `cf read ${target} already names its answer — it takes only --part, not --answer; ` +
+          `to select a result, read its conversation instead: cf read <conversation> --answer <id>`,
+      )
+      return
+    }
+    const answer = await leadRequester(app).post('read', {
+      opId: randomUUID(),
+      deliveryId: target,
+      part,
+    })
+    process.stdout.write(String(answer.text ?? ''))
     return
   }
-  const answer = await leadRequester(app).post('read', { opId: randomUUID(), deliveryId, part })
+  const answer = await leadRequester(app).post('results.read', {
+    opId: randomUUID(),
+    session: target,
+    ...(values.answer === undefined ? {} : { answerId: values.answer }),
+    part,
+  })
   process.stdout.write(String(answer.text ?? ''))
+  teachRemainingParts(target, values.answer, answer)
 }
 
 /**
@@ -1093,101 +1138,86 @@ async function attachInPane({ nonce, native }) {
 }
 
 /**
- * What was said in a conversation, with the read mark the app keeps.
+ * Every completed worker result in this tab, with its status and preview.
  *
- * The cmux mark is a turn COUNT, which cannot survive a transcript that is
- * appended to from two directions and says nothing about what was delivered.
- * Here the mark is a set of item ids and the APP decides it — it holds the
- * deliveries and the marks, so an answer this lead was already sent is as
- * read as one printed here, and `--unread` stops repeating what automatic
- * delivery already put in front of it.
+ * Discovery only: the listing comes from the app, which holds the tab's
+ * conversations, their completions and their delivery records — nothing is
+ * read from this workspace's files, and nothing is marked seen. An exact
+ * conversation name narrows to that conversation; `@agent` narrows to that
+ * roster agent's conversations, the same `@`-means-agent rule every verb
+ * shares. Reading one whole is `cf read`'s job.
  */
-async function catchupInApp(app, name, record, values) {
-  if (values.wait) {
-    fail(
-      'the app delivers answers on its own — `cf catchup` reads what is there, it never waits. ' +
-        `read it again when it lands: cf catchup ${name} --unread`,
-    )
-    return
-  }
-  const lead = app.lead
-  if (typeof lead !== 'string' || lead.length === 0) {
-    fail('this pane has no lead identity, and a read mark belongs to a lead')
-    return
-  }
-  if (record.sessionId === undefined || record.sessionId === null) {
-    out(`${name} · @${record.agent} — nothing to read: no ${record.kind} session was captured`)
-    return
-  }
-  const read = await harnessAnswers(record.kind, record.sessionId, env)
-  if (!Array.isArray(read.items)) {
-    out(`${name} · @${record.agent} — ${read.reason ?? 'its transcript could not be read'}`)
-    return
-  }
-  // ONE owner for the walk, and it is the app: it holds the deliveries and
-  // the marks, and a second implementation here would be a second answer to
-  // "has this lead seen it". So the transcript we read goes over as it is —
-  // tool items included, for the server to drop — and the app answers with
-  // the prefix this lead has already seen.
-  const request = leadRequester(app)
-  const wire = (printed) =>
-    read.items.map((item) => ({
-      id: item.id,
-      role: item.role,
-      ...(printed === undefined ? {} : { printed: printed.has(item.id) }),
-    }))
-  const marked = await request.post('seen', {
-    opId: randomUUID(),
-    session: name,
-    items: wire(),
+async function resultsVerb(rest) {
+  const { values, positionals } = parseArgs({
+    args: rest,
+    allowPositionals: true,
+    options: { json: { type: 'boolean', default: false } },
   })
-  const already = new Set(marked.seen)
-  const items = read.items.filter((item) => item.role !== 'tool')
-  const unread = items.filter((item) => !already.has(item.id))
-  const base = values.unread ? unread : items
-  const limit = Number.parseInt(values.last ?? '0', 10)
-  const shown = limit > 0 ? base.slice(-limit) : base
-
-  if (values.json) {
-    out(
-      JSON.stringify(
-        {
-          session: name,
-          agent: record.agent,
-          turns: shown.map((item) => ({ role: item.role, text: item.text })),
-        },
-        null,
-        2,
+  if (childRefused()) return
+  const app = requireApp('results')
+  if (app === null) return
+  if (positionals.length > 1) {
+    fail('cf results takes at most one filter: a conversation or @agent')
+    return
+  }
+  const asked = String(positionals[0] ?? '')
+  const answer = await leadRequester(app).post('results.list', { opId: randomUUID() })
+  const workers = Array.isArray(answer.workers) ? answer.workers : []
+  const kept =
+    asked.length === 0
+      ? workers
+      : asked.startsWith('@')
+        ? workers.filter((worker) => worker.agent === asked.slice(1))
+        : workers.filter((worker) => worker.conversation === asked)
+  if (asked.length > 0 && kept.length === 0) {
+    fail(
+      noConversationHere(
+        asked,
+        workers.map((worker) => worker.conversation),
+        env,
       ),
     )
-  } else if (items.length === 0) {
-    out(`${name} · @${record.agent} — nothing said in it yet`)
-  } else if (values.unread && unread.length === 0) {
-    out(`${name} · @${record.agent} — nothing new since you last looked`)
-  } else {
+    return
+  }
+  if (values.json) {
+    out(JSON.stringify({ workers: kept }, null, 2))
+    return
+  }
+  if (kept.length === 0) {
+    out('no worker conversations here yet — `cf run @name "<task>"` starts one')
+    return
+  }
+  for (const worker of kept) {
+    const results = Array.isArray(worker.results) ? worker.results : []
+    const state = worker.running === true ? 'running' : 'idle'
+    const reason =
+      typeof worker.reason === 'string' && worker.reason.length > 0 ? ` (${worker.reason})` : ''
     out(
-      values.unread
-        ? `${name} · @${record.agent} · ${unread.length} new turn${unread.length === 1 ? '' : 's'}`
-        : `${name} · @${record.agent} · ${items.length} turns`,
+      `${worker.conversation} · @${worker.agent} — ${state}${reason}: ` +
+        `${results.length} completed result${results.length === 1 ? '' : 's'}`,
     )
-    const boundary = values.unread ? -1 : items.length - unread.length
-    shown.forEach((item, index) => {
-      if (index === boundary && unread.length > 0 && boundary > 0) {
-        out('')
-        out(`— ${unread.length} below here you had not seen —`)
-      }
-      out('')
-      out(item.role === 'user' ? '› asked' : `• @${record.agent}`)
-      out(item.text)
-    })
+    for (const result of results) {
+      const onwards =
+        typeof result.deliveryId === 'string' && result.deliveryId.length > 0
+          ? ` — cf read ${result.deliveryId}`
+          : ''
+      out(`  ${result.id} ${result.status} ${result.bytes}B — ${result.preview}${onwards}`)
+    }
   }
+}
 
-  // Showing is seeing. What was actually put in front of the lead goes back
-  // marked `printed`, and the app moves the mark as far as that carries it.
-  const printed = new Set(shown.map((item) => item.id))
-  if (printed.size > 0) {
-    await request.post('seen', { opId: randomUUID(), session: name, items: wire(printed) })
-  }
+/**
+ * `cf catchup` is retired: completed results are discovered with
+ * `cf results` and read whole with `cf read`. The name stays a verb so the
+ * error names the replacements instead of reading as an unknown command —
+ * and it never touches the app, the transcript, or any read mark.
+ */
+async function catchupVerb() {
+  if (childRefused()) return
+  fail(
+    'cf catchup is retired — discover completed results with `cf results [conversation|@agent]`, ' +
+      'then read one whole with `cf read <conversation> [--answer <id>] [--part <k>]`',
+  )
 }
 
 /**
@@ -1220,163 +1250,6 @@ async function handOver(name, agent, invocation) {
     return
   }
   process.exitCode = outcome.code ?? 0
-}
-
-/**
- * What was said in a conversation, including turns we never ran.
- *
- * `cf last` reads OUR record of a run. This reads the harness's own session,
- * so a conversation the user took over with `cf attach` is visible too — the
- * lead is no longer blind to it. Read-only, and empty rather than broken if a
- * harness has moved its files.
- */
-async function catchupVerb(rest) {
-  const { values, positionals } = parseArgs({
-    args: rest,
-    allowPositionals: true,
-    options: {
-      json: { type: 'boolean', default: false },
-      last: { type: 'string' },
-      wait: { type: 'boolean', default: false },
-      unread: { type: 'boolean', default: false },
-    },
-  })
-  const asked = String(positionals[0] ?? '')
-  const threads = await loadThreads(cwdOf())
-  const names = Object.keys(threads)
-  const { name, record: known } = pickConversation(threads, asked)
-  if (known === undefined) {
-    fail(noConversationHere(asked, names, env))
-    return
-  }
-  const standalone = appHere()
-  if (standalone !== null) {
-    await catchupInApp(standalone, name, known, values)
-    return
-  }
-  // A conversation whose window outlasted the search for its id is unreadable
-  // until somebody looks again. This is that look.
-  const record = known
-
-  let turns = await harnessTurns(record.kind, record.sessionId, env)
-
-  // --wait: the answer to the question most recently asked, waited for if it
-  // is still being written. Two races live here and the shape below survives
-  // both. A fast agent can answer BEFORE --wait starts (a warm window, a
-  // trivial question): a baseline of "everything so far" would then wait
-  // forever for an answer that already stands — this hung live, twice. And a
-  // fast LEAD can start --wait before its just-sent question reaches the
-  // store: returning the standing answer immediately would hand back the
-  // PREVIOUS one as if it were new. So: a conversation ending in a user turn
-  // is pending — wait for its answer. One ending in an assistant turn gets a
-  // short grace for a just-sent question to land; if none does, that standing
-  // answer IS the answer. Printing from the last user turn keeps the question
-  // visible, so a stale answer is recognisable as one.
-  if (values.wait) {
-    let current = record
-    const readTurns = async () => {
-      // Re-read the row each round: an opencode session id can land moments
-      // after the window opened.
-      current = (await loadThreads(cwdOf()))[name] ?? current
-      return await harnessTurns(current.kind, current.sessionId, env)
-    }
-    const pending = (list) => list.length === 0 || list.at(-1).role === 'user'
-    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-
-    if (!pending(turns)) {
-      const baseline = turns.length
-      const grace = Number.parseInt(env.CONSENSFLOW_WAIT_GRACE_MS ?? '4000', 10)
-      const graceEnd = Date.now() + grace
-      while (Date.now() < graceEnd) {
-        await sleep(Math.min(500, grace))
-        turns = await readTurns()
-        if (turns.length > baseline) break
-      }
-    }
-
-    const deadline = Date.now() + 15 * 60_000
-    while (pending(turns) && Date.now() < deadline) {
-      await sleep(2000)
-      turns = await readTurns()
-    }
-    if (pending(turns)) {
-      fail(`no answer in ${name} after 15 minutes — is the window still working?`)
-      return
-    }
-
-    const at = turns.findLastIndex((turn) => turn.role === 'user')
-    const from = Math.max(at, 0)
-    const exchange = turns.slice(from)
-    if (values.json) {
-      out(JSON.stringify({ session: name, agent: current.agent, turns: exchange }, null, 2))
-      return
-    }
-    out(`${name} · @${current.agent}`)
-    for (const turn of exchange) {
-      out('')
-      out(turn.role === 'user' ? '› asked' : `• @${current.agent}`)
-      out(turn.text)
-    }
-    return
-  }
-
-  // What this lead has not read yet — the answer to "what did he say while I
-  // was not looking", which is what a lead asks for far more often than the
-  // whole history.
-  const lead = leadId(env)
-  const mark = Math.min(readMark(record, lead), turns.length)
-  const unread = turns.slice(mark)
-  if (values.json) {
-    out(
-      JSON.stringify(
-        { session: name, agent: record.agent, turns: values.unread ? unread : turns },
-        null,
-        2,
-      ),
-    )
-    return
-  }
-  if (turns.length === 0) {
-    // `cf last` is the right place to send a lead only when there IS a run of
-    // ours to read. On a window conversation there is none, and sending them
-    // there was a closed loop: `cf last` answers "its turns live in the
-    // agent's own window — read them with cf catchup" (live, 2026-08-28).
-    if (record.lastRunId != null) {
-      out(`${name} · @${record.agent} — ${record.kind} keeps no readable transcript for this one`)
-      out(`its own runs are still here: cf last ${name}`)
-      return
-    }
-    out(`${name} · @${record.agent} — nothing to read: no ${record.kind} session was captured`)
-    out(
-      `if its window is open, answer whatever ${record.kind} is asking in that pane, then read again`,
-    )
-    return
-  }
-  if (values.unread && unread.length === 0) {
-    out(`${name} · @${record.agent} — nothing new since you last looked`)
-    return
-  }
-
-  const limit = Number.parseInt(values.last ?? '0', 10)
-  const base = values.unread ? unread : turns
-  const shown = limit > 0 ? base.slice(-limit) : base
-  out(
-    values.unread
-      ? `${name} · @${record.agent} · ${unread.length} new turn${unread.length === 1 ? '' : 's'}`
-      : `${name} · @${record.agent} · ${turns.length} turns`,
-  )
-  // In a full read, say where this lead's memory stopped: the turns below the
-  // line are the ones it has never reported to the user.
-  const boundary = values.unread ? -1 : turns.length - unread.length
-  shown.forEach((turn, index) => {
-    if (index === boundary && unread.length > 0 && boundary > 0) {
-      out('')
-      out(`— ${unread.length} below here you had not seen —`)
-    }
-    out('')
-    out(turn.role === 'user' ? '› asked' : `• @${record.agent}`)
-    out(turn.text)
-  })
 }
 
 async function sessionsVerb(rest) {
@@ -1431,7 +1304,7 @@ async function lastVerb(rest) {
       return
     }
     out(`${name} · @${row.agent} — its turns live in the agent's own window`)
-    out(`read them with: cf catchup ${name}`)
+    out(`read them whole with: cf read ${name}`)
     return
   }
   const runDir = join(runsRoot(cwd), String(row.lastRunId))
@@ -1837,7 +1710,10 @@ async function main() {
       out(USAGE)
       return
     case 'catchup':
-      await catchupVerb(rest)
+      await catchupVerb()
+      return
+    case 'results':
+      await resultsVerb(rest)
       return
     case 'attach':
       await attachVerb(rest)

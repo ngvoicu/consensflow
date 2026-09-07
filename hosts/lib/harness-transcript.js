@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { piSessionDir } from "../../src/harnesses.js";
 import { stripLaunchMarker, withoutInjectedBlocks } from "./packets.js";
 import { openingLineCarriesNonce, TURNS_EXAMINED } from "./session-binding.js";
 
@@ -47,7 +48,7 @@ export async function harnessTurns(kind, sessionId, env = process.env) {
 const home = (env) => env.HOME ?? env.USERPROFILE ?? os.homedir();
 const codexRoot = (env) => path.join(env.CODEX_HOME ?? path.join(home(env), ".codex"), "sessions");
 const claudeRoot = (env) => path.join(env.CLAUDE_CONFIG_DIR ?? path.join(home(env), ".claude"), "projects");
-const piRoot = (env) => path.join(home(env), ".pi", "agent", "sessions");
+const piRoot = piSessionDir;
 const kimiRoot = (env) => path.join(env.KIMI_CODE_HOME ?? path.join(home(env), ".kimi-code"), "sessions");
 const opencodeRoot = (env) =>
   path.join(env.XDG_DATA_HOME ?? path.join(home(env), ".local", "share"), "opencode", "storage");

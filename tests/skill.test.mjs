@@ -142,8 +142,13 @@ describe('standalone: the three acts — consult, follow up, read', () => {
 
   it('keeps the three acts and the continue default verbatim', () => {
     assert.match(md, /cf say/)
-    assert.match(md, /cf catchup <name> --unread/)
+    assert.match(md, /cf results/)
+    assert.match(md, /cf read <name>/)
     assert.match(md, /continue by default, unsure means continue/)
+  })
+
+  it('names no retired catchup verb', () => {
+    assert.doesNotMatch(md, /catchup/)
   })
 })
 
@@ -159,12 +164,34 @@ describe('standalone: delivery — whole answers, file reads, human policy', () 
 
   it('runs every cf read part and reads the complete body before reporting', () => {
     assert.match(md, /cf read <id>/)
+    assert.match(md, /cf read <id> --part 2/)
     assert.match(md, /every.*part|each.*part/i)
     assert.match(md, /before anything else|before reporting/i)
   })
 
-  it('never re-reads a delivered answer with catchup', () => {
-    assert.match(md, /delivered.*not.*catchup|catchup.*not.*delivered/i)
+  it('never teaches a conversation-scoped follow-up part', () => {
+    assert.doesNotMatch(md, /cf read <name> --part/)
+  })
+
+  it('further parts use the immutable delivery id from the first part', () => {
+    assert.match(md, /immutable delivery id/i)
+    assert.match(md, /delivery id the first part printed/i)
+  })
+
+  it('says truncation is never the whole result', () => {
+    assert.match(md, /truncat/i)
+  })
+
+  it('a result read covers that result, not the discussion around it', () => {
+    assert.match(md, /omitted discussion|discussion.*around/i)
+  })
+
+  it('manual disables automatic delivery but keeps results reads available to the task', () => {
+    assert.match(md, /no automatic delivery/i)
+    assert.match(md, /whenever the authorized task needs them/i)
+    assert.match(md, /cf results/)
+    assert.match(md, /cf read/)
+    assert.doesNotMatch(md, /human says when to read/)
   })
 
   it('never changes a policy the human set', () => {
@@ -183,14 +210,38 @@ describe('standalone: send and return, never wait', () => {
     assert.match(md, /next message/)
   })
 
-  it('says auto arrives and manual waits on the human', () => {
+  it('says auto delivers and manual leaves answers for the task', () => {
     assert.match(md, /auto/)
     assert.match(md, /manual/)
+    assert.match(md, /no automatic delivery/i)
   })
 
   it('never names --wait and calls polling wrong', () => {
     assert.doesNotMatch(md, /--wait/)
     assert.match(md, /polling.*wrong/i)
+  })
+})
+
+describe('standalone: the input line belongs to the human', () => {
+  const md = generateSkill([
+    { name: 'ares', harness: 'pi', model: 'openrouter/x-ai/grok-4.6', effort: 'high' },
+  ])
+
+  it('never assumes the native input line is empty', () => {
+    assert.match(md, /never assume the input line is empty/i)
+  })
+
+  it('a manual cf read never touches terminal input', () => {
+    assert.match(md, /never touches terminal input/i)
+  })
+
+  it('only a human-only Resume replies confirms the line is empty', () => {
+    assert.match(md, /human-only Resume replies/i)
+  })
+
+  it('promises no automatic transcript-based clearing', () => {
+    assert.match(md, /do not promise that it does/i)
+    assert.doesNotMatch(md, /clears itself|automatically cleared/)
   })
 })
 

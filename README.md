@@ -94,8 +94,9 @@ cf run @name "<task>" --new            # a fresh conversation
 cf run @name "<task>" --session <name> # a specific existing one, by name
 cf say <name> "<words>"                # a follow-up in the same conversation
 cf attach <name>                       # reopen a conversation later, anywhere
-cf read <delivery> [--part N]          # a delivered file, in full, part by part
-cf catchup <name> --unread             # what has been said since you last looked
+cf results [conversation|@agent]       # completed worker results, with status and preview
+cf read <name> [--answer <id>]         # one completed result, first part
+cf read <delivery> [--part N]          # follow-up parts use the delivery id
 ```
 
 **The harness owns the session; ConsensFlow only remembers which one.** That is
@@ -109,19 +110,28 @@ The lead sends and returns, never waits. After a consult or a follow-up it
 reports what is running and in which conversation, then takes your next
 message. Under `auto` every completed worker answer arrives in the lead's pane
 whole — inline when it fits, else as a `cf read <id>` line whose every part
-the lead runs and reads in full before anything else. Under `manual` the human
-says when the lead reads, with `cf catchup <name> --unread`. Waiting a question
+the lead runs and reads in full before anything else. Under `manual` there is
+no automatic delivery, but completed results wait for the task — `cf results`
+discovers them and `cf read <name>` reads one whole whenever the task needs
+them. Waiting a question
 out and polling in a loop are both wrong: an answer the lead has not read is
 not a decision you have made, and a policy you set is never changed behind
 your back.
 
 The app never reads the pane's screen, because screen text is a picture of an
-answer, not an answer. `cf catchup <name> --unread` gives the lead exactly what
-has been said since its last look, from the harness's **own session store** —
+answer, not an answer. `cf results` shows the lead every completed worker
+result — id, status and preview — and `cf read <name>` prints one whole, part
+by part, from the app's delivery records. The completions themselves are
+recognised from the harness's **own session store** —
 codex's rollout file, claude's session jsonl, pi's, opencode's — **read-only,
 never written**. `cf say` still exists for typing turns through our own
 machinery, and every pane runs with the same environment guards: billing keys
 stripped, control variables stripped.
+
+Typing pauses incoming messages to protect your terminal input. After sending
+or erasing it, choose **Resume replies** and confirm the input is empty.
+A new keystroke invalidates that confirmation. This neither erases text nor
+changes your reply policy; manual `cf read` stays available throughout.
 
 ## Outside an app pane
 
@@ -129,10 +139,10 @@ There is no consult outside the app. Without `CONSENSFLOW_APP` — a plain
 terminal, a script, a test — `cf run`, `cf say`, `cf attach` and `cf read`
 refuse and name the app; nothing streams, nothing queues. The lead's `cf run`
 returns as soon as the app accepts the task, and the answer arrives in its
-pane later. Worker runs keep their artifacts under
-`~/.consensflow/workspaces/<key>/runs/<id>/` — `packet.md`, `transcript.md`,
-`result.json` — and `transcript.md` is the durable backstop so a lost
-scrollback never costs the answer. Nothing is written inside your project.
+pane later. The app keeps conversation bindings and delivery records under
+`~/.consensflow/workspaces/<key>/`. Native harness histories are the source
+for complete results even after scrollback is gone. Launch coordination
+files may live in the project's `.consensflow/` directory.
 
 Two things are worth being explicit about:
 

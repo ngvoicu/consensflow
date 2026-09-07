@@ -42,7 +42,7 @@ import {
   syncAgents,
 } from './roster.js'
 import { agentCommand } from './skill.js'
-import { Store } from './store.js'
+import { Store, StoreRefusal } from './store.js'
 import {
   healOnOpen,
   refreshInstalledSkill,
@@ -188,6 +188,10 @@ async function runPaneOperation(panes, op, dimensions, body) {
       return [200, await panes.sentRecord(dimensions.launch, body)]
     case 'read':
       return [200, await panes.read(dimensions.tab, body)]
+    case 'results.list':
+      return [200, await panes.results(dimensions.tab)]
+    case 'results.read':
+      return [200, await panes.readResult(dimensions.tab, body)]
     case 'seen':
       return [200, await panes.seen(dimensions.tab, body)]
     default:
@@ -212,16 +216,30 @@ async function runPaneOperation(panes, op, dimensions, body) {
  * with a person watching, and one minted here would only make a retry
  * silently do nothing.
  */
-function attachPage(bridge, { panes, page, store }) {
+function attachPage(bridge, { panes, page, store, tabs }) {
   const ops = {
     'tab.open': (body) => panes.tabOpen(body),
     'tab.resume': (body) => panes.tabResume(body),
+    'tab.rename': async (body) => {
+      const tab = await tabs.rename(body?.tab, body?.name)
+      return { outcome: 'renamed', tab: tab.id, name: tab.name }
+    },
     'shell.open': (body) => panes.shellOpen(body),
     consult: (body) => panes.consult(body?.tab, { ...body, opId: randomUUID() }),
     attach: (body) => panes.attach(body?.tab, { ...body, opId: randomUUID() }),
     'pane.close': (body) => panes.paneClose(body),
     'notify.set': (body) => panes.notifySet(body),
-    'state.list': () => page.state(),
+    'state.list': async () => {
+      const state = await page.state()
+      const stored = await tabs.list()
+      const names = new Map(stored.map((tab) => [tab.id, tab.name]))
+      return {
+        ...state,
+        tabs: state.tabs.map((tab) =>
+          typeof names.get(tab.id) === 'string' ? { ...tab, name: names.get(tab.id) } : tab,
+        ),
+      }
+    },
     'answers.list': (body) => page.answersList(body),
     'deliver.now': (body) => page.deliverNow(body),
     'deliver.cancel': (body) => page.deliverCancel(body),
@@ -236,6 +254,9 @@ function attachPage(bridge, { panes, page, store }) {
         // The page shows the person a message, so a refusal says what it
         // was; a fault on this side says only that it was ours.
         if (cause instanceof PaneError) return { ok: false, ...paneErrorBody(cause) }
+        if (cause instanceof StoreRefusal) {
+          return { ok: false, error: cause.code, reason: cause.message }
+        }
         return {
           ok: false,
           error: 'internal_error',
@@ -329,6 +350,7 @@ export async function startUiServer(env, { paneOpenDeadlineMs } = {}) {
   // thing that submits a delivery, and two of them would submit each twice.
   const watcher = new Watcher({ store, tabs, env })
   page.attachWatcher(watcher)
+  panes.attachWatcher(watcher)
   let stopAnnouncing = null
 
   const server = createServer(async (request, reply) => {
@@ -605,7 +627,7 @@ export async function startUiServer(env, { paneOpenDeadlineMs } = {}) {
       panes.attachBridge(bridge)
       if (bridge !== null && bridge !== undefined) {
         watcher.attachBridge(bridge)
-        stopAnnouncing = attachPage(bridge, { panes, page, store })
+        stopAnnouncing = attachPage(bridge, { panes, page, store, tabs })
       }
       return panes
     },
@@ -901,10 +923,10 @@ const PAGE = (token) => `<!DOCTYPE html>
     <dd>Send a follow-up to a named conversation.</dd>
     <dt><code>cf sessions</code></dt>
     <dd>List the conversations recorded in this folder.</dd>
-    <dt><code>cf catchup &lt;conversation&gt;</code></dt>
-    <dd>Read a conversation when you want its history or progress.</dd>
-    <dt><code>cf read &lt;delivery-id&gt;</code></dt>
-    <dd>Read every part of a long delivered answer.</dd>
+    <dt><code>cf results [&lt;conversation&gt;]</code></dt>
+    <dd>List completed worker results and which ones have been read.</dd>
+    <dt><code>cf read &lt;conversation&gt;</code></dt>
+    <dd>Read a complete result. For a long answer, follow the returned delivery ID and read every numbered part.</dd>
     <dt><code>cf attach &lt;conversation&gt;</code></dt>
     <dd>Focus or reopen its app pane with the existing history.</dd>
   </dl>

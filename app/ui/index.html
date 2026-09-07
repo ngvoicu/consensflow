@@ -133,7 +133,14 @@
       align-items: baseline;
       gap: 8px;
     }
-    #current-session { font-weight: 650; white-space: nowrap; }
+    #current-session {
+      min-width: 0;
+      max-width: min(40vw, 30ch);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 650;
+    }
     #current-directory {
       color: var(--muted);
       font: 11px/1.2 var(--mono);
@@ -206,6 +213,17 @@
     .tree-button[aria-current="true"] { background: var(--panel-raised); color: var(--seafoam); }
     .tree-node[data-kind="session"] > .tree-row > .tree-button { font-weight: 650; }
     .tree-node[data-closed="true"] { opacity: .48; filter: saturate(.45); }
+    .rename-button {
+      flex: 0 0 auto;
+      border: 0;
+      border-radius: 5px;
+      color: var(--muted);
+      background: transparent;
+      padding: 3px 5px;
+      font-size: 10px;
+      cursor: default;
+    }
+    .rename-button:hover { color: var(--seafoam); background: var(--panel); }
     .resume-button {
       border: 1px solid var(--seafoam-dim);
       border-radius: 5px;
@@ -225,9 +243,10 @@
       display: grid;
       gap: var(--pane-grid-gap);
       padding: var(--pane-grid-padding);
-      overflow: hidden;
+      overflow: auto;
       grid-auto-rows: minmax(0, 1fr);
       grid-auto-columns: minmax(0, 1fr);
+      overscroll-behavior: contain;
     }
     .pane-stage[data-mode="focused"] { display: block; }
     .pane-stage[data-empty="true"] { display: grid; place-items: center; }
@@ -244,7 +263,7 @@
 
     .pane-card {
       min-width: 0;
-      min-height: 0;
+      min-height: 180px;
       overflow: hidden;
       display: grid;
       grid-template-rows: auto minmax(0, 1fr);
@@ -263,6 +282,8 @@
       padding: 5px 8px;
       border-bottom: 1px solid var(--line-soft);
       background: var(--panel);
+      min-width: 0;
+      overflow: hidden;
     }
     .pane-card[data-kind="lead"] .pane-titlebar { background: #14322f; }
     .pane-kind {
@@ -281,21 +302,55 @@
       white-space: nowrap;
       font: 11px/1.2 var(--mono);
     }
+    .resume-replies-button {
+      flex: 0 0 auto;
+      max-width: 104px;
+      min-height: 22px;
+      overflow: hidden;
+      padding: 2px 6px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 10px;
+    }
     .terminal-host { min-width: 0; min-height: 0; padding: 5px 3px 3px; }
     .terminal-host .xterm { height: 100%; }
-    .delivery-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      max-width: 250px;
+    .delivery-summary {
+      flex: 0 0 auto;
+      min-width: 0;
+      max-width: 112px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
       border: 1px solid rgba(231, 185, 104, .45);
       border-radius: 999px;
-      padding: 2px 3px 2px 8px;
+      background: transparent;
+      padding: 2px 7px;
       color: var(--amber);
       font-size: 10px;
+      cursor: default;
+    }
+    .delivery-summary:hover { border-color: var(--amber); }
+    .delivery-detail-row {
+      min-width: 0;
+      align-items: center;
+      gap: 6px;
+      display: flex;
+      border-top: 1px solid var(--line-soft);
+      padding: 7px 8px;
+    }
+    .delivery-detail-reason {
+      min-width: 0;
+      flex: 1;
+      overflow-wrap: anywhere;
+      color: var(--amber);
+      font-size: 10px;
+    }
+    .delivery-detail-row button[role="menuitem"] {
+      width: auto;
+      flex: 0 0 auto;
+      margin: 0;
       white-space: nowrap;
     }
-    .delivery-badge button { min-height: 22px; padding: 2px 7px; font-size: 10px; }
 
     .pane-parking {
       position: fixed;
@@ -410,7 +465,7 @@
       <button class="icon-button delivery-info" id="delivery-info" type="button" popovertarget="delivery-help" aria-label="About reply delivery" hidden>i</button>
       <button class="quiet-button" id="roster-toggle" type="button" aria-haspopup="dialog" aria-controls="agents-dialog">Agents</button>
       <button class="quiet-button" id="new-pane" type="button" hidden>New pane</button>
-      <button class="primary-button" id="new-conversation" type="button">New conversation</button>
+      <button class="primary-button" id="new-conversation" type="button">New session</button>
     </header>
 
     <div class="workspace" data-testid="workspace" data-sidebar-collapsed="false">
@@ -453,7 +508,7 @@
 
   <dialog id="new-conversation-dialog" aria-labelledby="new-conversation-title">
     <form class="dialog-form" method="dialog">
-      <h2 id="new-conversation-title">New conversation</h2>
+      <h2 id="new-conversation-title">New session</h2>
       <label>Directory<input id="conversation-directory" name="directory" readonly></label>
       <label>Lead harness
         <select id="lead-harness" name="harness">
@@ -465,7 +520,7 @@
       </label>
       <div class="dialog-actions">
         <button class="quiet-button" value="cancel" type="button">Cancel</button>
-        <button class="primary-button" id="start-conversation" type="submit">Start conversation</button>
+        <button class="primary-button" id="start-conversation" type="submit">Start session</button>
       </div>
     </form>
   </dialog>
@@ -478,6 +533,29 @@
       <div class="dialog-actions">
         <button class="quiet-button" value="cancel" type="button">Cancel</button>
         <button class="primary-button" id="open-agent-pane" type="submit">Open agent pane</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="rename-session-dialog" aria-labelledby="rename-session-title">
+    <form class="dialog-form" method="dialog">
+      <h2 id="rename-session-title">Rename session</h2>
+      <label>Session name<input id="session-name" name="name" autocomplete="off" required></label>
+      <div class="dialog-actions">
+        <button class="quiet-button" value="cancel" type="button">Cancel</button>
+        <button class="primary-button" type="submit">Save name</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="resume-replies-dialog" aria-labelledby="resume-replies-title" aria-describedby="resume-replies-description">
+    <form class="dialog-form" method="dialog">
+      <h2 id="resume-replies-title">Resume replies</h2>
+      <p>Pane: <strong id="resume-replies-pane"></strong></p>
+      <p id="resume-replies-description">Send or erase your terminal input, then confirm that the input line is empty. Resuming replies does not erase text or change reply policy.</p>
+      <div class="dialog-actions">
+        <button class="quiet-button" value="cancel" type="button">Cancel</button>
+        <button class="primary-button" type="submit">I confirm the input line is empty</button>
       </div>
     </form>
   </dialog>

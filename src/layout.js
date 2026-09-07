@@ -6,9 +6,8 @@
  * the workers draws the wrong picture. Totals 1–6 are the six the spec
  * draws by hand, because the pretty arrangement at those sizes is a taste
  * call and not a formula — twice the lead is full-height beside a stack,
- * which no `ceil(sqrt(n))` would ever produce. From 7 on the formula takes
- * over: `rows = ceil(sqrt(n))`, `cols = ceil(n / rows)`, filled row-major
- * with the lead first.
+ * which no `ceil(sqrt(n))` would ever produce. From 7 on the grid is filled
+ * row-major with the lead first and is never wider than three columns.
  *
  * `areas` is a ready-to-assign CSS `grid-template-areas` value — quoted
  * rows separated by a space, `element.style.gridTemplateAreas = areas` and
@@ -17,9 +16,8 @@
  * setting `grid-area` and never recomputes a position. A cell no pane fills
  * is `.`, CSS's own token for an empty one.
  *
- * The formula never leaves a whole row empty (checked for n = 7…400), so
- * every drawn row carries at least one pane: `cols = ceil(n / rows)` forces
- * `rows * cols - n < rows`, and the spare cells always land at the end of
+ * The row-major grid never leaves a whole row empty: `rows = ceil(n / cols)`
+ * makes every row before the last full, and spare cells land at the end of
  * the last row.
  */
 
@@ -76,21 +74,24 @@ function serialize(grid) {
 
 /**
  * The grid for `n` panes counted WITH the lead (`n >= 1` — a tab always has
- * its lead, so there is no empty case to draw).
+ * its lead, so there is no empty case to draw). The default grid is at most
+ * three columns; callers with a narrower area can request one or two.
  *
  * @param {number} n — the total pane count, the lead included.
+ * @param {{maxColumns?: number}} [options] — the column limit for this area.
  * @returns {{rows: number, cols: number, areas: string}} — `areas` is a CSS
  *   `grid-template-areas` value naming the lead's cell `lead` and each
  *   worker's `w1`, `w2` …, with `.` for a cell no pane fills.
  */
-export function gridTemplate(n) {
+export function gridTemplate(n, { maxColumns = 3 } = {}) {
+  const columnLimit = Math.max(1, Math.min(3, Math.trunc(maxColumns)))
   const drawn = PICTURES.get(n)
-  if (drawn) {
+  if (drawn && drawn[0].length <= columnLimit) {
     return { rows: drawn.length, cols: drawn[0].length, areas: serialize(drawn) }
   }
 
-  const rows = Math.ceil(Math.sqrt(n))
-  const cols = Math.ceil(n / rows)
+  const cols = Math.min(columnLimit, n)
+  const rows = Math.ceil(n / cols)
   const grid = []
   for (let row = 0; row < rows; row++) {
     const cells = []
@@ -104,8 +105,9 @@ export function gridTemplate(n) {
 }
 
 /**
- * Can `n` panes tile `area` and still honour `minPane`? When this is false
- * the page keeps every process and shows the focused-pane view instead.
+ * Can `n` panes tile `area` and still honour `minPane`? This pure sizing
+ * predicate remains useful to callers that need the natural template's fit;
+ * the page keeps every process in a scrollable grid when height is short.
  *
  * The grid decides, not the count: `fits` asks `gridTemplate` for the same
  * `rows` and `cols` the page will draw, so the two can never disagree about

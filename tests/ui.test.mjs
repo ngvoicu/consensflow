@@ -152,7 +152,7 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     for (const verb of [
       'cf run @name',
       'cf sessions',
-      'cf catchup',
+      'cf results',
       'cf say',
       'cf read',
       'cf attach',

@@ -167,6 +167,7 @@ export class Panes {
   #harnessPath
   #shell
   #env
+  #watcher = null
 
   /**
    * @param {object} deps
@@ -220,6 +221,42 @@ export class Panes {
       bridge.onEvent('pane.exit', (body) => this.#paneExited(body))
     }
     return this
+  }
+
+  attachWatcher(watcher) {
+    this.#watcher = watcher
+    return this
+  }
+
+  async results(tabId) {
+    await this.#tab(tabId)
+    if (!this.#watcher) throw new PaneError('result reader is unavailable', { status: 503 })
+    return { workers: await this.#watcher.results(tabId) }
+  }
+
+  async readResult(tabId, request) {
+    const opId = requireText(request.opId, 'opId')
+    return this.#once(tabId, opId, async () => {
+      await this.#tab(tabId)
+      const session = requireText(request.session, 'session')
+      const answerId =
+        request.answerId === undefined ? undefined : requireText(request.answerId, 'answerId')
+      const part = request.part === undefined ? 1 : request.part
+      if (!Number.isSafeInteger(part) || part < 1)
+        throw new PaneError('part must be a positive integer')
+      if (!this.#watcher) throw new PaneError('result reader is unavailable', { status: 503 })
+      let result
+      try {
+        result = await this.#watcher.readResult(tabId, session, answerId)
+      } catch (cause) {
+        throw new PaneError(cause instanceof Error ? cause.message : 'result unavailable', {
+          status: 409,
+        })
+      }
+      // Use the ordinary part path, with its generation check and attempt-only
+      // accounting. The native receipt is the only authority for "read".
+      return await this.read(tabId, { deliveryId: result.id, part, opId: `${opId}:part` })
+    })
   }
 
   // --- lead operations -----------------------------------------------------
@@ -999,7 +1036,11 @@ export class Panes {
           ...(nativeSession === undefined ? [] : ['--native-session', nativeSession]),
         ]),
       ],
-      env: controllerEnv({ pane: pane.id, app: this.#app(), ticket }),
+      env: {
+        ...controllerEnv({ pane: pane.id, app: this.#app(), ticket }),
+        // Finder's environment does not include installed harness CLIs.
+        ...(this.#env.PATH === undefined ? {} : { PATH: this.#env.PATH }),
+      },
     }
     // Everything the transport would refuse the frame for is settled BEFORE
     // the launch counts as transmitted: a body that cannot be encoded, and

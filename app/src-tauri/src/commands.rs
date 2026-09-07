@@ -792,15 +792,6 @@ struct AckRequest {
     seq: u64,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ClearRequest {
-    id: String,
-    generation: u64,
-    submitted_epoch: u64,
-    submission_id: String,
-}
-
 fn default_backlog_bytes() -> usize {
     DEFAULT_BACKLOG_BYTES
 }
@@ -1106,19 +1097,6 @@ fn register_pane_handlers(
             "queuedHumanBytes":snapshot.queued_human_bytes,
             "lastSubmissionId":snapshot.last_submission_id,
         }))
-    });
-
-    builder.on("draft.clear", move |_bridge, body| {
-        let request: ClearRequest = parse_body(body)?;
-        let outcome = arbiter
-            .clear_draft(
-                &request.id,
-                request.generation,
-                request.submitted_epoch,
-                &request.submission_id,
-            )
-            .map_err(|error| error.to_string())?;
-        Ok(json!({"ok":true,"outcome":format!("{outcome:?}")}))
     });
 }
 
@@ -1520,6 +1498,85 @@ pub fn pane_reply_enqueue<R: Runtime>(
 }
 
 #[tauri::command]
+pub fn pane_input_snapshot<R: Runtime>(app: AppHandle<R>, id: String, generation: u64) -> Value {
+    let result = (|| -> Result<Value, String> {
+        let key = pane_key(&id, generation)?;
+        let state = app.state::<AppRuntime>();
+        let page = state
+            .inputs
+            .page
+            .lock()
+            .map_err(|_| "input admission lock is poisoned")?;
+        let routes = state
+            .inputs
+            .senders
+            .lock()
+            .map_err(|_| "input queue lock is poisoned")?;
+        if routes
+            .get(&key)
+            .is_some_and(|route| route.pending_bytes.load(Ordering::Acquire) > 0)
+        {
+            return Err(
+                "Input is still being written. Reopen Resume replies when it finishes.".into(),
+            );
+        }
+        let snapshot = state
+            .inputs
+            .arbiter
+            .snapshot(&key)
+            .map_err(|error| error.to_string())?;
+        Ok(json!({"ok":true,"inputEpoch":snapshot.input_epoch,
+            "sequence":page.last_sequences.get(&key).copied().unwrap_or(0),
+            "draftLatched":snapshot.draft_latched}))
+    })();
+    result.unwrap_or_else(|error| json!({"ok":false,"error":error}))
+}
+
+// This command is deliberately app-only: neither the Node bridge nor lead
+// HTTP credentials can confirm the human's terminal composer is empty.
+#[tauri::command]
+pub fn pane_resume_replies<R: Runtime>(
+    app: AppHandle<R>,
+    id: String,
+    generation: u64,
+    input_epoch: u64,
+    sequence: u64,
+) -> Value {
+    let result = (|| -> Result<Value, String> {
+        let key = pane_key(&id, generation)?;
+        let state = app.state::<AppRuntime>();
+        let page = state
+            .inputs
+            .page
+            .lock()
+            .map_err(|_| "input admission lock is poisoned")?;
+        if page.last_sequences.get(&key).copied().unwrap_or(0) != sequence {
+            return Err("Input changed. Reopen Resume replies and confirm again.".into());
+        }
+        let routes = state
+            .inputs
+            .senders
+            .lock()
+            .map_err(|_| "input queue lock is poisoned")?;
+        if routes
+            .get(&key)
+            .is_some_and(|route| route.pending_bytes.load(Ordering::Acquire) > 0)
+        {
+            return Err(
+                "Input is still being written. Reopen Resume replies when it finishes.".into(),
+            );
+        }
+        state
+            .inputs
+            .arbiter
+            .resume_replies(&key, input_epoch)
+            .map_err(|error| error.to_string())?;
+        Ok(json!({"ok":true}))
+    })();
+    result.unwrap_or_else(|error| json!({"ok":false,"error":error}))
+}
+
+#[tauri::command]
 pub async fn pane_input_wait<R: Runtime>(app: AppHandle<R>, ticket: String) -> Value {
     if let Err(error) = validate_text(&ticket, "pane input ticket") {
         return json!({"ok":false,"error":error});
@@ -1712,6 +1769,26 @@ pub async fn held_send<R: Runtime>(app: AppHandle<R>, tab: String) -> Value {
 }
 
 #[tauri::command]
+pub async fn rename_session<R: Runtime>(app: AppHandle<R>, tab: String, name: String) -> Value {
+    if let Err(error) = validate_text(&tab, "tab") {
+        return json!({"ok":false,"error":error});
+    }
+    let (bridge, startup_error) = {
+        let state = app.state::<AppRuntime>();
+        (state.bridge.clone(), state.startup_error.clone())
+    };
+    run_blocking("tab.rename", move || {
+        request_node(
+            bridge,
+            startup_error,
+            "tab.rename".to_string(),
+            json!({"tab":tab,"name":name}),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn tab_resume<R: Runtime>(app: AppHandle<R>, tab: String) -> Value {
     if let Err(error) = validate_text(&tab, "tab") {
         return json!({"ok":false,"error":error});
@@ -1897,6 +1974,7 @@ mod tests {
             "deliver_cancel",
             "held_send",
             "tab_resume",
+            "rename_session",
             "list_state",
         ] {
             assert!(
@@ -2071,7 +2149,9 @@ mod tests {
             .invoke_handler(tauri::generate_handler![
                 pane_input_enqueue,
                 pane_reply_enqueue,
-                pane_input_wait
+                pane_input_wait,
+                pane_input_snapshot,
+                pane_resume_replies
             ])
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("build mock app");
@@ -2130,16 +2210,42 @@ mod tests {
             regression,
             json!({"ok":false,"error":"pane-input-sequence-regression"})
         );
+        let first_completed = invoke("pane_input_wait", json!({"ticket":first["ticket"]}));
+        assert_eq!(first_completed["ok"], true);
+        let snapshot = invoke("pane_input_snapshot", json!({"id":key.id,"generation":1}));
+        assert_eq!(snapshot["ok"], true);
+        assert_eq!(snapshot["draftLatched"], true);
+        assert_eq!(snapshot["sequence"], 2);
+        // Even rejected page input invalidates an earlier confirmation: its
+        // sequence was consumed before the size check, although the epoch did not move.
+        let rejected = invoke(
+            "pane_input_enqueue",
+            json!({
+                "id":key.id,"generation":1,"sequence":3,"bytes":vec![b'P'; MAX_INPUT_BYTES + 1],
+            }),
+        );
+        assert_eq!(rejected["ok"], false);
+        let resume = |generation: u64, sequence: u64| {
+            invoke(
+                "pane_resume_replies",
+                json!({
+                    "id":key.id,"generation":generation,"sequence":sequence,"inputEpoch":snapshot["inputEpoch"],
+                }),
+            )
+        };
+        assert_eq!(resume(1, 2)["ok"], false);
+        assert_eq!(resume(2, 3)["ok"], false);
+        assert!(arbiter.snapshot(&key).unwrap().draft_latched);
+        assert_eq!(resume(1, 3)["ok"], true);
+        assert!(!arbiter.snapshot(&key).unwrap().draft_latched);
         let second = invoke(
             "pane_reply_enqueue",
-            json!({"id":key.id,"generation":1,"sequence":3,"bytes":[67]}),
+            json!({"id":key.id,"generation":1,"sequence":4,"bytes":[67]}),
         );
         assert_eq!(second["ok"], true);
 
-        for admitted in [&first, &second] {
-            let completed = invoke("pane_input_wait", json!({"ticket":admitted["ticket"]}));
-            assert_eq!(completed["ok"], true);
-        }
+        let completed = invoke("pane_input_wait", json!({"ticket":second["ticket"]}));
+        assert_eq!(completed["ok"], true);
         let mut output = Vec::new();
         reader
             .read_to_end(&mut output)
@@ -2735,6 +2841,12 @@ mod tests {
 
         let routes = vec![
             (
+                "rename_session",
+                json!({"tab":"tab-1","name":"Build review"}),
+                "tab.rename",
+                json!({"tab":"tab-1","name":"Build review"}),
+            ),
+            (
                 "open_lead",
                 json!({"dir":"/tmp","harness":"claude-code"}),
                 "tab.open",
@@ -2870,6 +2982,7 @@ mod tests {
                 deliver_cancel,
                 held_send,
                 tab_resume,
+                rename_session,
                 list_state,
             ])
             .build(tauri::test::mock_context(tauri::test::noop_assets()))

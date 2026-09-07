@@ -53,9 +53,9 @@ test('real cf ui and the headless bridge open a PTY through the production path'
       )?.[0]
       return typeof conversation === 'string'
     })
-    const initialUnread = await app.runCli(['catchup', conversation, '--unread'], opened.leadEnv)
+    const initialUnread = await app.runCli(['results', conversation, '--json'], opened.leadEnv)
     assert.equal(initialUnread.code, 0, initialUnread.stderr)
-    assert.match(initialUnread.stdout, /CF_DELAYED complete from a real PTY/)
+    assert.deepEqual(JSON.parse(initialUnread.stdout).workers[0].results, [])
     writeFileSync(join(app.env.CONSENSFLOW_HOME, 'worker-release'), 'release\n')
     const run = await runPromise
     assert.equal(run.code, 0, run.stderr)
@@ -91,12 +91,12 @@ test('real cf ui and the headless bridge open a PTY through the production path'
     const listed = answers.answers.find((item) => item.id === app.deliveries()[0].answerId)
     assert.equal(listed.ready, true)
     assert.equal(listed.delivered, true)
-    const unread = await app.runCli(['catchup', answer.conversation, '--unread'], opened.leadEnv)
+    const unread = await app.runCli(['results', answer.conversation, '--json'], opened.leadEnv)
     assert.equal(unread.code, 0, unread.stderr)
-    assert.doesNotMatch(
-      unread.stdout,
-      /worker completed from a real PTY child/,
-      'an automatically delivered answer is suppressed from lead unread output',
+    assert.equal(
+      JSON.parse(unread.stdout).workers[0].results[0].status,
+      'read',
+      'an automatically delivered answer has a verified native receipt',
     )
     const state = await app.requestNode('state.list', {})
     assert.equal(state.ok, true, JSON.stringify(state))
@@ -399,8 +399,7 @@ test('a native human draft blocks delivery until the current draft is cleared', 
       submittedEpoch: entered.body.epoch,
       submissionId: 'draft-cover-one',
     })
-    assert.equal(staleClear.ok, true, JSON.stringify(staleClear))
-    assert.equal(staleClear.outcome, 'PreservedNewerInput')
+    assert.notEqual(staleClear.ok, true, 'no legacy clear authority on the bridge')
     const snapshot = await app.requestRust('pane.snapshot', {
       id: lead.id,
       generation: lead.generation,
@@ -413,14 +412,10 @@ test('a native human draft blocks delivery until the current draft is cleared', 
       submittedEpoch: newerEntered.body.epoch,
       submissionId: 'draft-cover-two',
     })
-    assert.equal(cleared.ok, true, JSON.stringify(cleared))
-    await app.waitFor(() =>
-      app
-        .deliveries()
-        .some(
-          (delivery) =>
-            delivery.conversation === answer.conversation && delivery.state === 'accepted',
-        ),
+    assert.notEqual(cleared.ok, true, 'even the current epoch cannot authorize a Node clear')
+    assert.equal(
+      app.deliveries().find((delivery) => delivery.conversation === answer.conversation).state,
+      'pending',
     )
   } finally {
     await app.close()

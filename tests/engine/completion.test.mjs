@@ -659,6 +659,58 @@ test('completion/pi: every retry prefix stays unready until success plus the rea
 
 // ------------------------------------------------------------------ kimi
 
+test('completion/pi: historical finals remain readable during the next turn, with open tools excluded', async () => {
+  for (const openTool of [false, true]) {
+    const staged = await stageJsonl('pi', 'hazy-ridge', 'pi/tool-loop.jsonl', {
+      mutate: (rows) => [
+        ...rows.filter((row) => !openTool || row.message?.role !== 'toolResult'),
+        {
+          type: 'message',
+          id: 'next-user',
+          timestamp: new Date().toISOString(),
+          message: { role: 'user', content: [{ type: 'text', text: 'Continue working' }] },
+        },
+      ],
+    })
+    try {
+      const result = await answers('pi', 'hazy-ridge', staged.env)
+      assert.equal(result.inFlight, true)
+      assert.equal(result.settlement.state, 'in-flight')
+      assert.equal(result.items.find((item) => item.id === '3f9b029e').settled, !openTool)
+      assert.equal(result.items.find((item) => item.id === '4cea719d').settled, false)
+    } finally {
+      await fs.rm(staged.root, { recursive: true, force: true })
+    }
+  }
+})
+
+test('completion/kimi: a new turn preserves earlier completed results, never unfinished tools', async () => {
+  const session = 'session_11c123b3-dd33-4f21-8862-beabdc50cd18'
+  for (const openTool of [false, true]) {
+    const staged = await stageJsonl('kimi', session, 'kimi/tool-result.jsonl', {
+      mutate: (rows) => [
+        ...rows.filter((row) => !openTool || row.event?.type !== 'tool.result'),
+        { type: 'prompt.accepted', promptId: 'next-prompt' },
+        { type: 'context.append_loop_event', event: { type: 'step.begin', turnId: 'next-turn' } },
+      ],
+    })
+    try {
+      const result = await answers('kimi', session, staged.env)
+      assert.equal(result.inFlight, true)
+      assert.equal(
+        result.items.find((item) => item.id === 'e7b213db-15f9-49f4-bd2a-bffee2d1791d').settled,
+        !openTool,
+      )
+      assert.equal(
+        result.items.find((item) => item.id === 'd26c913f-c98b-4262-8340-06a147aa7937').settled,
+        false,
+      )
+    } finally {
+      await fs.rm(staged.root, { recursive: true, force: true })
+    }
+  }
+})
+
 test('completion/kimi: parentUuid/toolCallId closes the originating turn and emits tool output', async () => {
   const session = 'session_11c123b3-dd33-4f21-8862-beabdc50cd18'
   const afterResultStage = await stageJsonl('kimi', session, 'kimi/tool-result.jsonl', { take: 8 })
@@ -684,6 +736,25 @@ test('completion/kimi: parentUuid/toolCallId closes the originating turn and emi
   assert.equal(result.settlement.provenance, 'native')
   assert.equal(result.settlement.boundary, 'turn.ended')
   assert.equal(readiness(result).state, 'ready')
+})
+
+test('completion/kimi: history extraction preserves the latest turn queued-admission guard', async () => {
+  const session = 'session_11c123b3-dd33-4f21-8862-beabdc50cd18'
+  const staged = await stageJsonl('kimi', session, 'kimi/tool-result.jsonl', {
+    mutate: (rows) => [
+      ...rows.slice(0, -1),
+      { type: 'prompt.accepted', promptId: 'queued-during-turn' },
+      rows.at(-1),
+    ],
+  })
+  try {
+    const result = await answers('kimi', session, staged.env)
+    assert.equal(result.settlement.state, 'in-flight')
+    assert.equal(result.items.at(-1).complete, true)
+    assert.equal(result.items.at(-1).settled, false)
+  } finally {
+    await fs.rm(staged.root, { recursive: true, force: true })
+  }
 })
 
 test('completion/kimi: prompt.accepted invalidates a prior turn and supplies the following prompt id', async () => {

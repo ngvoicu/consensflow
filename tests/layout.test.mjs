@@ -7,8 +7,8 @@ import { fits, focusOrder, gridTemplate } from '../src/layout.js'
  *
  * Panes are counted WITH the lead, so `n` is the total: `gridTemplate(3)`
  * is a lead and TWO workers. Totals 1–6 are the six pictures the spec
- * draws; beyond them `rows = ceil(sqrt(n))`, `cols = ceil(n / rows)`,
- * row-major, lead first.
+ * draws; beyond them the grid is row-major, lead first, and never wider than
+ * three columns.
  *
  * The expected `areas` strings are written out as literals on purpose. A
  * helper that built them the way `src/layout.js` does would test the
@@ -67,13 +67,45 @@ test('layout: 9 panes fill a 3 x 3 exactly — not one empty cell', () => {
   })
 })
 
-test('layout: beyond the table rows = ceil(sqrt(n)) and cols = ceil(n / rows)', () => {
+test('layout: beyond the table never exceeds three columns and fills rows', () => {
   for (let n = 7; n <= 40; n++) {
     const { rows, cols } = gridTemplate(n)
-    assert.equal(rows, Math.ceil(Math.sqrt(n)), `rows for ${n}`)
-    assert.equal(cols, Math.ceil(n / rows), `cols for ${n}`)
+    assert.equal(cols, Math.min(3, n), `columns for ${n}`)
+    assert.equal(rows, Math.ceil(n / cols), `rows for ${n}`)
     assert.ok(rows * cols >= n, `${n} panes need at least ${n} cells`)
   }
+})
+
+test('layout: 10 panes remain a three-column grid with a reachable bottom row', () => {
+  assert.deepEqual(gridTemplate(10), {
+    rows: 4,
+    cols: 3,
+    areas: '"lead w1 w2" "w3 w4 w5" "w6 w7 w8" "w9 . ."',
+  })
+  assert.deepEqual(cellsOf(gridTemplate(10).areas).at(-1), 'w9')
+})
+
+test('layout: 20 panes remain a three-column grid with every pane placed', () => {
+  assert.deepEqual(gridTemplate(20), {
+    rows: 7,
+    cols: 3,
+    areas:
+      '"lead w1 w2" "w3 w4 w5" "w6 w7 w8" "w9 w10 w11" "w12 w13 w14" "w15 w16 w17" "w18 w19 ."',
+  })
+  assert.equal(cellsOf(gridTemplate(20).areas).at(-1), 'w19')
+})
+
+test('layout: a narrow area can request two or one columns without losing panes', () => {
+  assert.deepEqual(gridTemplate(10, { maxColumns: 2 }), {
+    rows: 5,
+    cols: 2,
+    areas: '"lead w1" "w2 w3" "w4 w5" "w6 w7" "w8 w9"',
+  })
+  assert.deepEqual(gridTemplate(10, { maxColumns: 1 }), {
+    rows: 10,
+    cols: 1,
+    areas: '"lead" "w1" "w2" "w3" "w4" "w5" "w6" "w7" "w8" "w9"',
+  })
 })
 
 test('layout: the lead cell is always named lead, and named once in the focus order', () => {

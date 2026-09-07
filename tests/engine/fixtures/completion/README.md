@@ -82,6 +82,63 @@ throwaway SQLite database. Production stores are never written.
   hook, the next user turn, the full `compact_boundary` record, and the
   preserved post-compaction user record.
 
+## Claude Code — session JSONL, version `2.1.263` (TEST-PANE-69/IMPL-PANE-70)
+
+- `claude-code/v263-tool-loop.jsonl` — source
+  `/Users/gabrielvoicu/.claude/projects/-Users-gabrielvoicu-Projects-ngvoicu-consensflow/5cbf8973-f472-448a-8763-59fb4268a9d7.jsonl`
+  (323 physical lines, `claude --version` 2.1.263, session completed
+  2026-09-07). Fixture record N maps to source physical line: 1→1 (`mode`),
+  2→5 (opening user turn, versioned), 3→6 (versioned `attachment`
+  ignored envelope), 4→11 (`last-prompt`), 5→12 (`mode`), 6→14
+  (`atis-latch`), 7–9→17–19 (tool loop: assistant text, `tool_use`
+  `toolu_014xV8WiQG7e22f7RZQJYTSE`, matching user `tool_result`),
+  10–11→220–221 (queue enqueue/remove, reason `absorbed_mid_turn`),
+  12–19→222–229 (seven fragments under one native message id
+  `msg_011CepWUqv3VgZSDKwGzUWKH`: thinking, text, `server_tool_use`
+  `srvtoolu_016MAs2kPZC9C7R4dYkPDryP`, its `advisor_tool_result`,
+  thinking, text, `tool_use` `toolu_017Uz3Xuo5gDTWJVaMvAuhgC`, closed by
+  the user `tool_result`), 20–24→302–305+312 (second enqueue/remove pair
+  with intervening assistant thinking/text/`tool_use`, removal before the
+  closing `tool_result` `toolu_01SnLKeA6aAA7Bda4fGFYXaB`), 25→313 (that
+  close), 26–27→320–321 (actual final turn: thinking + text under one
+  native message id `msg_011CepWsDm4DzKV4t8Fbdzno`, both
+  `stop_reason:end_turn`), 28→322 (`system.turn_duration`,
+  `durationMs:735861`, `messageCount:217`), 29→323 (`system.away_summary`).
+  No `stop_hook_summary` exists anywhere in the 323-line source.
+  Redaction changes leaf values only: every text/thinking/signature/
+  tool-input/tool-output/queue-content/`lastPrompt`/`away_summary`-content/
+  `bridgeSessionId`/owner-UUID leaf is `[redacted N chars]` (queue pairs
+  share one constant per pair so enqueue/remove stay replayable); native
+  message, tool, request, prompt and record UUIDs, versions, timestamps,
+  token counts, `cwd`, ordering and grouping are byte-identical.
+  RED state: `completion.js` SUPPORTED admits 2.1.241/247/250, so
+  `answers()` returns `unsupported version 2.1.263 for claude-code`;
+  `tests/engine/claude-v263.test.mjs` fails 7/8, exit 1. The parser also
+  settles only on `system.stop_hook_summary`, which this version never
+  emits — the final-turn settlement assertion is the BLOCKER evidence for
+  IMPL-PANE-70.
+
+Root verified the installed 2.1.263 executable JS before admitting this
+boundary: `/Users/gabrielvoicu/.local/share/claude/versions/2.1.263`,
+`Iyt` constructor at byte 166358621, foreground finalizer at 181924998,
+and deferred swarm finalizer at 181908652. The foreground path follows
+`markQueryComplete`/loading reset and excludes abort. The SDK event schema
+has optional background counts, but the JSONL projection omits them. The
+subagent parking path at 164471699 omits the
+root `messageCount`; it must not settle the root conversation.
+
+The adapter consequently accepts `system.turn_duration` only for this
+verified version, `isSidechain:false`, finite nonnegative duration, a safe
+nonnegative root message count, and absent or numeric-zero pending counts.
+Pending-count mutations are defensive schema checks, not live release
+evidence: Zeus found none in 398 native duration records. Settlement still
+requires the final assistant candidate with no open tools, queued turns or
+hooks. His 66-record 2.1.263 audit found every observed stop-hook summary
+before the duration record (6/6), with no later assistant work in that turn.
+Combined fixture/completion GREEN: 56/56, exit 0. This is native finalizer
+evidence; text ending, elapsed quiet and `away_summary` alone remain
+insufficient.
+
 ## Pi — session JSONL, protocol `3` (Pi `0.85.1`)
 
 - `between-tool-steps.jsonl` — source

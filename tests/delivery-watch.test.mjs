@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { watch } from 'node:fs'
 import fs from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -10,6 +11,7 @@ import { answers } from '../hosts/lib/completion.js'
 import { envelope, plan, pointer } from '../hosts/lib/deliveries.js'
 import { createDeliveryExtension } from '../hosts/pi-extension/consensflow-delivery.mjs'
 import { Bridge } from '../src/bridge.js'
+import { launchConfiguration } from '../src/channels.js'
 import { bookkeepingItems, HELD_ACTION, Watcher } from '../src/delivery-watch.js'
 import { Store } from '../src/store.js'
 import { leadIdentity, Tabs } from '../src/tabs.js'
@@ -181,8 +183,6 @@ async function writePiSession(env, session, exchanges) {
 async function writePiSettlement(env, launchId, session, frontierId) {
   const directory = path.join(env.CONSENSFLOW_HOME, 'pi-settled')
   await fs.mkdir(directory, { recursive: true })
-  env.CF_DELIVERY_SETTLED = directory
-  env.CF_DELIVERY_LAUNCH_ID = launchId
   await fs.writeFile(
     path.join(directory, `${launchId}.json`),
     `${JSON.stringify({
@@ -192,6 +192,7 @@ async function writePiSettlement(env, launchId, session, frontierId) {
       settledAt: Date.now(),
     })}\n`,
   )
+  return directory
 }
 
 async function writeOpenCodeSession(env, session, exchanges) {
@@ -318,7 +319,13 @@ async function nativeLead(s, kind, admitted = true, ackTimeoutMs = 1_000, before
     await writePiSession(s.temporary.env, s.leadSession, [
       { user: 'lead question', answer: 'lead ready', answerId: 'lead-ready-pi' },
     ])
-    await writePiSettlement(s.temporary.env, 'watcher-native-lead', s.leadSession, 'lead-ready-pi')
+    channel.launchId = 'watcher-native-lead'
+    channel.settled = await writePiSettlement(
+      s.temporary.env,
+      channel.launchId,
+      s.leadSession,
+      'lead-ready-pi',
+    )
   } else {
     const server = createServer(async (request, response) => {
       const chunks = []
@@ -1634,6 +1641,69 @@ test('a native Stale claim at expiry is a replayable zero-byte failure', async (
   }
 })
 
+for (const matching of [true, false]) {
+  test(`Pi settlement comes from the target launch, matching=${matching} (TEST-PANE-65)`, async () => {
+    const s = await system()
+    let native
+    try {
+      native = await nativeLead(s, 'pi')
+      if (!matching) {
+        s.temporary.env.CF_DELIVERY_SETTLED = path.join(
+          s.temporary.env.CONSENSFLOW_HOME,
+          'pi-settled',
+        )
+        s.temporary.env.CF_DELIVERY_LAUNCH_ID = 'watcher-native-lead'
+        await s.store.mutate(s.workspace, 'test.other-pi-launch', async (io) => {
+          const tabs = await io.readTabs()
+          tabs.find((t) => t.id === s.tab.id).lead.reserved.channel.launchId = 'other-launch'
+          await io.writeTabs(tabs)
+        })
+      }
+      await writeCodexSession(s.temporary.env, s.workers[0].session, [
+        { user: 'work', answer: 'target-scoped native evidence', answerId: 'answer-1' },
+      ])
+      await s.watcher.start()
+      const [delivery] = await s.deliveries()
+      assert.equal(delivery.state, matching ? 'submitting' : 'pending')
+      assert.equal(native.state.received.length, matching ? 1 : 0)
+    } finally {
+      await s.close()
+      await native?.close()
+    }
+  })
+}
+
+test('Pi worker settlement uses its bound launch without editor environment hints (TEST-PANE-65)', async () => {
+  const s = await system()
+  try {
+    const worker = s.workers[0]
+    await copyPiSession(s.temporary.env)
+    const launchId = 'worker-native-probe'
+    const { channel } = await launchConfiguration('pi', { launchId, workspace: s.workspace })
+    await fs.mkdir(channel.settled, { recursive: true })
+    await fs.writeFile(
+      path.join(channel.settled, `${launchId}.json`),
+      JSON.stringify({
+        launchId,
+        sessionId: 'hazy-ridge',
+        frontier: { id: '3f9b029e' },
+        settledAt: Date.now(),
+      }),
+    )
+    await s.store.mutate(s.workspace, 'test.pi-native-worker', async (io) => {
+      const threads = await io.readThreads()
+      Object.assign(threads[worker.name], { kind: 'pi', sessionId: 'hazy-ridge' })
+      threads[worker.name].binding.launchId = launchId
+      await io.writeThreads(threads)
+    })
+    await s.watcher.start()
+    assert.equal((await s.deliveries()).length, 1, 'native worker settlement plans immediately')
+    assert.equal(s.pipe.state.writes.length, 1)
+  } finally {
+    await s.close()
+  }
+})
+
 test('a watcher cf-read delivery reaches an already-idle real Pi extension as its pointer', async () => {
   const s = await system({ watcherOptions: { inlineBudget: { pi: 1 } } })
   const inbox = path.join(s.temporary.root, 'real-pi-inbox')
@@ -1671,7 +1741,15 @@ test('a watcher cf-read delivery reaches an already-idle real Pi extension as it
       const tab = tabs.find((candidate) => candidate.id === s.tab.id)
       tab.lead.harness = 'pi'
       tab.lead.reserved = {
-        channel: { kind: 'pi-extension', inbox, ack, quarantine, ackTimeoutMs: 200 },
+        channel: {
+          kind: 'pi-extension',
+          inbox,
+          ack,
+          quarantine,
+          ackTimeoutMs: 200,
+          launchId: 'watcher-real-extension',
+          settled: path.join(s.temporary.env.CONSENSFLOW_HOME, 'pi-settled'),
+        },
       }
       await io.writeTabs(tabs)
     })
@@ -1794,6 +1872,8 @@ test('delivery uses the lead reservation channel object instead of writing the b
         channel: {
           kind: 'pi-extension',
           extensionPath: '/repo/hosts/pi-extension/consensflow-delivery.mjs',
+          launchId: 'watcher-reserved-channel',
+          settled: path.join(s.temporary.env.CONSENSFLOW_HOME, 'pi-settled'),
           inbox,
           ack,
           ackTimeoutMs: 1_000,
@@ -2148,5 +2228,183 @@ test('system cleanup closes the restarted watcher with no timer or bridge listen
     assert.deepEqual(restarted.unsubscribe, [])
   } finally {
     await restarted?.close()
+  }
+})
+
+test('results list only whole completed answers and scope them to the requesting session (TEST-PANE-75)', async () => {
+  const s = await system()
+  try {
+    const worker = s.workers[0]
+    let listed = await s.watcher.results(s.tab.id)
+    assert.equal(listed[0].conversation, worker.name)
+    assert.equal(listed[0].results.length, 0)
+    assert.equal(listed[0].running, true)
+    await writeCodexSession(s.temporary.env, worker.session, [
+      { user: 'work', answer: 'complete result', answerId: 'complete-result' },
+      { user: 'still working' },
+    ])
+    listed = await s.watcher.results(s.tab.id)
+    assert.equal(listed[0].running, true)
+    assert.deepEqual(
+      listed[0].results.map((r) => [r.id, r.status]),
+      [['complete-result', 'unread']],
+    )
+    const other = await s.tabs.create(s.workspace, 'codex')
+    assert.deepEqual(await s.watcher.results(other.id), [])
+    await assert.rejects(s.watcher.readResult(other.id, worker.name), /conversation|session/)
+  } finally {
+    await s.close()
+  }
+})
+
+test('manual result reading uses complete framed receipts without injecting into a busy lead (TEST-PANE-75)', async () => {
+  const s = await system({
+    watcherOptions: { partBudget: { default: { bytes: 1_024, lines: 30 } } },
+  })
+  try {
+    const worker = s.workers[0]
+    const whole = 'Result line with detail.\n'.repeat(200)
+    await writeCodexSession(s.temporary.env, worker.session, [
+      { user: 'work', answer: whole, answerId: 'whole-result' },
+    ])
+    s.pipe.state.draft = true
+    const read = await s.watcher.readResult(s.tab.id, worker.name)
+    assert.equal(read.channel, 'cf-read')
+    assert.equal(read.manualRead, true)
+    assert.equal(read.state, 'submitting')
+    assert.equal(read.answer, whole)
+    assert.ok(read.parts.length > 1)
+    assert.deepEqual(s.pipe.state.writes, [])
+    const again = await s.watcher.readResult(s.tab.id, worker.name)
+    assert.equal(again.id, read.id)
+    const listed = await s.watcher.results(s.tab.id)
+    assert.equal(listed[0].results[0].status, 'reading')
+
+    const leadSeed = { user: 'lead question', answer: 'lead ready', answerId: 'lead-ready-1' }
+    // A tail that retains the end marker is still not a complete part.
+    await writeCodexSession(s.temporary.env, s.leadSession, [
+      leadSeed,
+      { user: 'reading', tool: read.parts.map((p) => p.text.slice(-50)).join('\n') },
+    ])
+    s.setNow(100_000)
+    await s.watcher.reconcile()
+    assert.equal((await s.deliveries()).find((r) => r.id === read.id).state, 'submitting')
+    assert.equal((await s.watcher.results(s.tab.id))[0].results[0].status, 'reading')
+    await writeCodexSession(s.temporary.env, s.leadSession, [
+      leadSeed,
+      { user: 'reading', tool: read.parts.map((p) => p.text).join('\n') },
+    ])
+    await s.watcher.reconcile()
+    const accepted = (await s.deliveries()).find((r) => r.id === read.id)
+    assert.equal(accepted.state, 'accepted')
+    assert.equal(accepted.partCoverage.length, read.parts.length)
+    assert.equal((await s.watcher.results(s.tab.id))[0].results[0].status, 'read')
+    assert.deepEqual(s.pipe.state.writes, [])
+  } finally {
+    await s.close()
+  }
+})
+
+test('manual result reads survive daemon restart and finish through durable native receipts', async () => {
+  const s = await system()
+  try {
+    const worker = s.workers[0]
+    await writeCodexSession(s.temporary.env, worker.session, [
+      { user: 'work', answer: 'durable complete result', answerId: 'durable-result' },
+    ])
+    const reading = await s.watcher.readResult(s.tab.id, worker.name)
+    await s.watcher.close()
+    s.watcher = new Watcher({ store: s.store, tabs: s.tabs, env: s.temporary.env, floorMs: 60_000 })
+    s.watcher.attachBridge(s.pipe.node)
+    await s.watcher.start()
+    assert.equal((await s.deliveries()).find((r) => r.id === reading.id).state, 'submitting')
+    assert.equal((await s.watcher.readResult(s.tab.id, worker.name)).id, reading.id)
+    await writeCodexSession(s.temporary.env, s.leadSession, [
+      { user: 'lead question', answer: 'lead ready', answerId: 'lead-ready-1' },
+      { user: 'reading', tool: reading.parts.map((p) => p.text).join('\n') },
+    ])
+    await s.watcher.reconcile()
+    assert.equal((await s.deliveries()).find((r) => r.id === reading.id).state, 'accepted')
+    assert.deepEqual(s.pipe.state.writes, [])
+  } finally {
+    await s.close()
+  }
+})
+
+test('manual reads avoid an in-flight automatic copy but can claim draft-held results', async () => {
+  const s = await system()
+  try {
+    const worker = s.workers[0]
+    await writeCodexSession(s.temporary.env, worker.session, [
+      { user: 'work', answer: 'result one', answerId: 'result-one' },
+    ])
+    await s.watcher.reconcile()
+    const [automatic] = await s.deliveries()
+    assert.equal(automatic.state, 'submitting')
+    assert.notEqual(automatic.channel, 'cf-read')
+    assert.equal((await s.watcher.results(s.tab.id))[0].results[0].status, 'delivering')
+    await assert.rejects(
+      s.watcher.readResult(s.tab.id, worker.name),
+      /automatic delivery.*in progress/i,
+    )
+    assert.equal((await s.deliveries()).length, 1)
+    await writeCodexSession(s.temporary.env, worker.session, [
+      { user: 'work', answer: 'result one', answerId: 'result-one' },
+      { user: 'continue', answer: 'result two', answerId: 'result-two' },
+    ])
+    s.pipe.state.draft = true
+    await s.watcher.reconcile()
+    assert.equal((await s.deliveries()).find((r) => r.answerId === 'result-two').state, 'pending')
+    const read = await s.watcher.readResult(s.tab.id, worker.name, 'result-two')
+    assert.equal(read.manualRead, true)
+    assert.equal(read.state, 'submitting')
+    assert.equal(s.pipe.state.writes.length, 1)
+  } finally {
+    await s.close()
+  }
+})
+
+test('manual reading does not reserve the input channel or consume omitted discussion (TEST-PANE-75)', async () => {
+  const s = await system({ workerCount: 2 })
+  try {
+    for (const worker of s.workers) {
+      await writeCodexSession(s.temporary.env, worker.session, [
+        { user: 'unread question', answer: worker.name, answerId: `${worker.name}-result` },
+      ])
+    }
+    const read = await s.watcher.readResult(s.tab.id, s.workers[0].name)
+    await s.watcher.reconcile()
+    assert.equal((await s.deliveries()).find((r) => r.id === read.id).state, 'submitting')
+    assert.equal(s.pipe.state.writes.length, 1)
+    assert.match(s.pipe.state.writes[0].body, /worker-2/)
+    assert.deepEqual((await s.threads())[s.workers[0].name].seen[s.leadId], [])
+  } finally {
+    await s.close()
+  }
+})
+
+test('native user text and Enter hints never authorize clearing an opaque terminal draft', async () => {
+  const s = await system()
+  try {
+    const clears = []
+    s.pipe.state.draft = true
+    s.pipe.rust.on('pane.enter_digests', () => ({
+      entries: [{ epoch: 7, since: 0, digest: createHash('sha256').update('work').digest('hex') }],
+    }))
+    s.pipe.rust.on('draft.clear', (body) => {
+      clears.push(body)
+      return { ok: true }
+    })
+    await s.watcher.start()
+    s.pipe.rust.event('pane.enter', { id: s.workers[0].pane.id, generation: 1, epoch: 7 })
+    await s.watcher.reconcile()
+    assert.deepEqual(
+      clears,
+      [],
+      'a delayed identical native message cannot prove the editor is empty',
+    )
+    assert.equal(s.pipe.state.draft, true)
+  } finally {
+    await s.close()
   }
 })

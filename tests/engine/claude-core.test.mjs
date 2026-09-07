@@ -1081,13 +1081,13 @@ test('parity: shared lib files stay identical with the consensflow-pi sibling', 
   }
 })
 
-test('docs describe app-owned panes, unread replies and durable artifacts [STRM-21]', async () => {
+test('docs describe app-owned panes and complete native results [STRM-21]', async () => {
   const docs = await readFile(new URL('../../README.md', import.meta.url), 'utf8')
   assert.match(docs, /app is the terminal/i, 'the app owns the live pane surface')
   assert.match(docs, /lead sends and returns, never waits/i, 'consults release the lead turn')
-  assert.match(docs, /cf catchup.*--unread/, 'unread replies remain accessible')
+  assert.match(docs, /cf results/, 'completed unread results remain discoverable')
+  assert.match(docs, /cf read/, 'whole results remain readable')
   assert.match(docs, /own session store/i, 'replies come from the native transcript')
-  assert.match(docs, /transcript\.md/, 'run artifacts remain a durable backstop')
   assert.match(docs, /CONSENSFLOW_APP/, 'outside-app execution has an explicit boundary')
   assert.match(docs, /shared/i, 'the roster remains shared across harnesses')
 })

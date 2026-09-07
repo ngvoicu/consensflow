@@ -68,15 +68,20 @@ case "$1" in
     else
       echo "conversation: $name (continued)"
     fi
-    echo "read it back with: cf catchup $name" ;;
+    echo "discover results with: cf results $name" ;;
   say) echo "said into $2" ;;
-  catchup)
-    ${transcriptPath ? `cat "${transcriptPath}"` : `echo "amber-tide · @${AGENT} · 2 new turns"; echo ""; echo "› asked"; echo "do you have more?"; echo ""; echo "• @${AGENT}"; echo "Why do Java developers wear glasses? Because they can't C#."`} ;;
-  # A delivery pasted into the lead's transcript: later catchups show it.
+  results)
+    echo "amber-tide · @${AGENT} — 1 completed result"
+    echo "result-1 · unread — read with: cf read amber-tide" ;;
+  # A delivery already visible in the lead transcript is reported directly.
   deliver)
     echo "delivered $2"
     ${transcriptPath && deliverEnvelope ? `printf '%s\\n' "${deliverEnvelope}" >> "${transcriptPath}"` : ':'} ;;
   read)
+    case "$2" in
+      d-*) ;;
+      *) ${transcriptPath ? `cat "${transcriptPath}"` : `echo "Why do Java developers wear glasses? Because they can't C#."`}; exit 0 ;;
+    esac
     part="1"; if [ "$3" = "--part" ]; then part="$4"; fi
     case "$2,$part" in
 ${READ_CASES(readParts) || '      *,*) echo "no such delivery part" ;;'}

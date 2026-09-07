@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { homedir } from 'node:os'
+import { basename, dirname, join, resolve } from 'node:path'
 import { detectHarnesses, knownHarnesses } from './harnesses.js'
 import { retireHostPayloads } from './host-payloads.js'
 import { fileState, loadManifest, saveManifest, sha256 } from './manifest.js'
@@ -190,13 +191,31 @@ export function installEverywhere(env, options = {}) {
   }
   const agents = listAgents(env)
   if (agents.length > 0) {
-    changes.push(
-      ...installSkill(
-        { relPath: 'consensflow/SKILL.md', content: generateSkill(agents), source: 'consensflow' },
-        env,
-        { targets: scopeTargets(env, options), force: options.force },
-      ),
+    const installed = installSkill(
+      { relPath: 'consensflow/SKILL.md', content: generateSkill(agents), source: 'consensflow' },
+      env,
+      { targets: scopeTargets(env, options), force: options.force },
     )
+    changes.push(...installed)
+    const legacyPi = join(
+      env.HOME ?? env.USERPROFILE ?? homedir(),
+      '.pi/harness/skills/consensflow/SKILL.md',
+    )
+    if (
+      installed.some(
+        (row) =>
+          row.harness === 'pi' &&
+          row.action !== 'refused-unowned' &&
+          resolve(row.path) !== resolve(legacyPi),
+      )
+    ) {
+      changes.push(
+        ...uninstallSkills(env, {
+          force: options.force,
+          filter: (path, recorded) => path === legacyPi && recorded.source === 'consensflow',
+        }),
+      )
+    }
   }
   changes.push(...syncCmuxSkills(env, options).report)
   return { changes, report, command }

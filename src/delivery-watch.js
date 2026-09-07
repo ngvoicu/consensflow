@@ -13,7 +13,7 @@ import {
 } from '../hosts/lib/deliveries.js'
 import { effectivePolicy } from '../hosts/lib/policy.js'
 import { leadReady } from '../hosts/lib/readiness.js'
-import { deliver, enabledChannels } from './channels.js'
+import { deliver, enabledChannels, launchConfiguration } from './channels.js'
 import { leadIdentity } from './tabs.js'
 
 export const HELD_ACTION = 'Send held answers to this lead'
@@ -35,6 +35,32 @@ const sameTarget = (left, right) =>
   left?.generation === right?.generation
 
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+
+function completionOptions(channel) {
+  return {
+    piSettlement: {
+      directory: channel?.kind === 'pi-extension' ? (channel.settled ?? '') : '',
+      launchId: channel?.kind === 'pi-extension' ? (channel.launchId ?? '') : '',
+    },
+  }
+}
+
+function completedResults(completion) {
+  if (completion?.unknown || completion?.replaced) return []
+  return (completion?.items ?? []).filter(
+    (item) => item.role === 'assistant' && item.complete === true && item.settled === true,
+  )
+}
+
+async function workerAnswers(tab, row, env) {
+  let channel = null
+  const launchId = row.binding?.launchId
+  if (row.kind === 'pi' && typeof launchId === 'string' && /^[A-Za-z0-9._-]+$/.test(launchId)) {
+    // Workers and their extension use the same deterministic launch paths.
+    channel = (await launchConfiguration('pi', { launchId, workspace: tab.directory })).channel
+  }
+  return await answers(row.kind, row.sessionId, env, completionOptions(channel))
+}
 
 const describe = (cause) => (cause instanceof Error ? cause.message : String(cause))
 
@@ -121,6 +147,7 @@ function latestSubmittedCursor(records, target, excludingId = null) {
   let latest = null
   let latestIndex = -1
   for (const [index, record] of records.entries()) {
+    if (record?.manualRead === true) continue
     if (record?.id === excludingId || !sameTarget(record?.target, target)) continue
     if (record?.state === 'failed') continue
     if (!Number.isFinite(record?.submittedAt) || record?.snapshot?.cursor == null) continue
@@ -309,6 +336,147 @@ export class Watcher {
     return { action: HELD_ACTION, records: [...byAnswer.values()] }
   }
 
+  /** One daemon-owned result index, also used by a lead's explicit reads. */
+  async results(tabId) {
+    const tab = await this.tabs.get(tabId)
+    if (!tab) throw new Error(`unknown session ${tabId}`)
+    const target = targetFor(tab)
+    const records = Object.values(await this.store.readDeliveries(tab.directory))
+    const rows = await this.store.readThreads(tab.directory)
+    const listed = []
+    for (const [conversation, row] of Object.entries(rows)) {
+      if (!belongsToTab(row, tab)) continue
+      const completion = bound(row) ? await workerAnswers(tab, row, this.env) : null
+      listed.push({
+        conversation,
+        agent: row.agent,
+        running: completion?.inFlight === true,
+        reason: completion?.reason ?? (bound(row) ? null : 'native session is not bound'),
+        results: completedResults(completion).map((item) => {
+          const copies = records.filter(
+            (r) =>
+              r.conversation === conversation &&
+              r.answerId === item.id &&
+              sameTarget(r.target, target),
+          )
+          const accepted = copies.some((r) => r.state === 'accepted')
+          const reading = copies.find((r) => r.channel === 'cf-read' && r.state === 'submitting')
+          const delivering = copies.some((r) => r.state === 'submitting')
+          return {
+            id: item.id,
+            bytes: Buffer.byteLength(item.text),
+            preview: item.text.replace(/\s+/g, ' ').slice(0, 120),
+            status: accepted ? 'read' : reading ? 'reading' : delivering ? 'delivering' : 'unread',
+            ...(reading ? { deliveryId: reading.id, parts: reading.parts.length } : {}),
+          }
+        }),
+      })
+    }
+    return listed
+  }
+
+  /**
+   * Reading is a tool result, not a paste. It needs a native cursor for full
+   * part receipts, but neither an idle lead nor a clear input draft. The
+   * record reserves only this answer; it never reserves the input channel.
+   */
+  async readResult(tabId, conversation, answerId) {
+    return await this.#serial(async () => {
+      if (this.closed) throw new Error('Watcher is closed')
+      const tab = await this.tabs.get(tabId)
+      if (!tab) throw new Error(`unknown session ${tabId}`)
+      const row = (await this.store.readThreads(tab.directory))[conversation]
+      if (!belongsToTab(row, tab) || !bound(row)) {
+        throw new Error(`no bound conversation ${conversation} for this session`)
+      }
+      const target = targetFor(tab)
+      if (!target || tab.closed) throw new Error('this session has no live lead')
+      const completion = await workerAnswers(tab, row, this.env)
+      const records = Object.values(await this.store.readDeliveries(tab.directory))
+      const copies = records.filter(
+        (r) => r.conversation === conversation && sameTarget(r.target, target),
+      )
+      const items = completedResults(completion)
+      const item =
+        answerId === undefined
+          ? items.find(
+              (candidate) =>
+                !copies.some((r) => r.answerId === candidate.id && r.state === 'accepted'),
+            )
+          : items.find((candidate) => candidate.id === answerId)
+      if (!item)
+        throw new Error(completion?.reason ?? 'no unread completed result; inspect cf results')
+      const existing = copies.find(
+        (r) =>
+          r.answerId === item.id &&
+          r.channel === 'cf-read' &&
+          ['submitting', 'accepted'].includes(r.state),
+      )
+      if (existing) return existing
+      if (copies.some((r) => r.answerId === item.id && r.state === 'submitting')) {
+        throw new Error(
+          'automatic delivery is already in progress; inspect cf results after it completes',
+        )
+      }
+      const lead = await answers(
+        tab.lead.harness,
+        target.session,
+        this.env,
+        completionOptions(tab.lead.reserved?.channel),
+      )
+      if (lead?.unknown || lead?.replaced || !Number.isSafeInteger(lead?.cursor)) {
+        throw new Error(lead?.reason ?? 'the lead transcript has no verified read cursor')
+      }
+      const id = await this.store.allocateDeliveryId()
+      const [planned] = plan({
+        row,
+        items: [item],
+        conversation,
+        agent: row.agent,
+        target,
+        newId: () => id,
+        now: this.now(),
+        workspace: tab.directory,
+        kind: tab.lead.harness,
+        manual: true,
+        inlineBudget: 0,
+        partBudget: this.partBudget,
+      })
+      const reading = {
+        ...submit(planned, { target, cursor: lead.cursor, now: this.now() }),
+        manualRead: true,
+      }
+      await this.#writeImmutable(reading)
+      await this.store.mutate(tab.directory, 'result.read', async (io) => {
+        const currentTab = (await io.readTabs()).find((t) => t.id === tab.id)
+        const currentRow = (await io.readThreads())[conversation]
+        if (
+          currentTab?.closed ||
+          !sameTarget(targetFor(currentTab), target) ||
+          !bound(currentRow) ||
+          currentRow.sessionId !== row.sessionId ||
+          currentRow.binding?.launchId !== row.binding?.launchId
+        ) {
+          throw new Error('the session changed before result reading')
+        }
+        const all = await io.readDeliveries()
+        for (const r of Object.values(all)) {
+          if (
+            r.state === 'pending' &&
+            r.conversation === conversation &&
+            r.answerId === item.id &&
+            sameTarget(r.target, target)
+          ) {
+            all[r.id] = cancel(r, { reason: 'the lead requested this result through the reader' })
+          }
+        }
+        all[id] = reading
+        await io.writeDeliveries(all)
+      })
+      return reading
+    })
+  }
+
   async sendHeld(tabId) {
     if (this.closed) throw new Error('Watcher is closed')
     return await this.#serial(async () => {
@@ -389,7 +557,7 @@ export class Watcher {
       const records = Object.values(await this.store.readDeliveries(workspace))
       for (const record of records) {
         if (this.closed) return
-        if (record?.state !== 'submitting') continue
+        if (record?.state !== 'submitting' || record.manualRead === true) continue
         const recovered = recover(record)
         await this.#persist(workspace, recovered)
       }
@@ -402,7 +570,6 @@ export class Watcher {
     let threads = await this.store.readThreads(tab.directory)
     const records = Object.values(await this.store.readDeliveries(tab.directory))
     const completions = new Map()
-
     const repairedWorkers = new Set()
     for (const record of records) {
       const invalidated = record?.workerInvalidated
@@ -434,7 +601,7 @@ export class Watcher {
 
     for (const [conversation, row] of Object.entries(threads)) {
       if (!belongsToTab(row, tab) || !bound(row)) continue
-      const completion = await answers(row.kind, row.sessionId, this.env)
+      const completion = await workerAnswers(tab, row, this.env)
       completions.set(conversation, completion)
       if (completion?.replaced === true) {
         await this.#replace(tab, conversation, row, completion, records)
@@ -630,7 +797,12 @@ export class Watcher {
   }
 
   async #receipt(tab, record, records) {
-    const leadAnswers = await answers(tab.lead.harness, record.target.session, this.env)
+    const leadAnswers = await answers(
+      tab.lead.harness,
+      record.target.session,
+      this.env,
+      completionOptions(tab.lead.reserved?.channel),
+    )
     if (leadAnswers?.replaced === true) {
       await this.#invalidateLead(
         tab,
@@ -652,7 +824,7 @@ export class Watcher {
       generation: record.target.generation,
       itemsAfter: (cursor) => itemsAfterCursor(tab.lead.harness, leadAnswers?.items, cursor),
       now: this.now(),
-      receiptMs: this.receiptMs,
+      receiptMs: record.manualRead === true ? Number.POSITIVE_INFINITY : this.receiptMs,
     })
   }
 
@@ -661,7 +833,7 @@ export class Watcher {
     if (!bound(row)) return
     let completion = completions.get(record.conversation)
     if (!completion) {
-      completion = await answers(row.kind, row.sessionId, this.env)
+      completion = await workerAnswers(tab, row, this.env)
       completions.set(record.conversation, completion)
     }
     if (completion?.replaced === true) return
@@ -769,7 +941,12 @@ export class Watcher {
       return { record: { ...record, reason: 'held because the lead changed before submission' } }
     }
 
-    const leadAnswers = await answers(currentTab.lead.harness, target.session, this.env)
+    const leadAnswers = await answers(
+      currentTab.lead.harness,
+      target.session,
+      this.env,
+      completionOptions(currentTab.lead.reserved?.channel),
+    )
     if (leadAnswers?.replaced === true) {
       const suspended = await this.#invalidateLead(
         currentTab,
@@ -800,6 +977,7 @@ export class Watcher {
       records.some(
         (candidate) =>
           candidate?.id !== record.id &&
+          candidate?.manualRead !== true &&
           candidate?.state === 'submitting' &&
           sameTarget(candidate.target, target),
       )
@@ -951,7 +1129,7 @@ export class Watcher {
             reason: `automatic delivery cancelled by manual policy (${policy.source})`,
           })
         } else {
-          const completion = await answers(row.kind, row.sessionId, this.env)
+          const completion = await workerAnswers(tab, row, this.env)
           if (completion?.replaced === true) {
             const reason =
               completion.reason ?? 'replaced: the bound worker session was replaced in place'
@@ -1023,6 +1201,7 @@ export class Watcher {
                 (record) =>
                   record?.id !== current.id &&
                   record?.state === 'submitting' &&
+                  record?.manualRead !== true &&
                   sameTarget(record?.target, target),
               )
             ) {

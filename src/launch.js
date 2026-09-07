@@ -3,7 +3,17 @@ import { delimiter, dirname, isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const DEFAULT_TICKET_MS = 60_000
-const LEAD_OPS = ['consult', 'say', 'attach', 'read', 'seen', 'notify.lead', 'panes']
+const LEAD_OPS = [
+  'consult',
+  'say',
+  'attach',
+  'read',
+  'results.list',
+  'results.read',
+  'seen',
+  'notify.lead',
+  'panes',
+]
 const CONTROLLER_OPS = ['session.bind', 'progress.set', 'sent.record']
 const BUNDLE_BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin')
 

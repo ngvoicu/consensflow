@@ -9,10 +9,11 @@
 import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { piSessionDir } from '../../src/harnesses.js'
 
 const SUPPORTED = {
   codex: new Set(['0.153.4']),
-  'claude-code': new Set(['2.1.241', '2.1.247', '2.1.250']),
+  'claude-code': new Set(['2.1.241', '2.1.247', '2.1.250', '2.1.263']),
   pi: new Set(['3']),
   kimi: new Set(['1.5']),
   opencode: new Set(['1.18.27', '1.18.29']),
@@ -1058,9 +1059,26 @@ async function claudeAnswers(sessionId, env) {
       return
     }
 
-    if (record.type === 'system' && record.subtype === 'stop_hook_summary') {
+    // 2.1.263's root query finalizer emits this only after query completion,
+    // after stop hooks, and when not aborted. The transcript omits optional
+    // background counts; candidate/tool/queue/hook guards establish readiness.
+    // The exact installed call sites and native fixture are documented beside
+    // tests/engine/fixtures/completion/claude-code/v263-tool-loop.jsonl.
+    const durationBoundary =
+      record.type === 'system' &&
+      record.subtype === 'turn_duration' &&
+      version === '2.1.263' &&
+      record.isSidechain === false &&
+      Number.isFinite(record.durationMs) &&
+      record.durationMs >= 0 &&
+      Number.isSafeInteger(record.messageCount) &&
+      record.messageCount >= 0 &&
+      [record.pendingBackgroundAgentCount, record.pendingWorkflowCount].every(
+        (count) => count === undefined || count === 0,
+      )
+    if (durationBoundary || (record.type === 'system' && record.subtype === 'stop_hook_summary')) {
       if (!candidate) return
-      if (record.preventedContinuation !== false) return
+      if (!durationBoundary && record.preventedContinuation !== false) return
       hooks.delete(candidate.itemId)
       const item = assistants.get(candidate.itemId)
       if (item) item.complete = true
@@ -1069,7 +1087,7 @@ async function claudeAnswers(sessionId, env) {
         provenance: 'derived',
         complete: true,
         itemId: candidate.itemId,
-        boundary: boundary('system.stop_hook_summary', seq, at, {
+        boundary: boundary(`system.${record.subtype}`, seq, at, {
           uuid: record.uuid,
           hookCount: record.hookCount ?? null,
         }),
@@ -1173,7 +1191,7 @@ async function piSettlementEvidence(sessionId, env, options) {
 }
 
 async function piAnswers(sessionId, env, options = {}) {
-  const root = path.join(home(env), '.pi', 'agent', 'sessions')
+  const root = piSessionDir(env)
   const file = await findFile(root, (name) => name.includes(sessionId))
   if (file === null) return { unknown: true, reason: `unreadable: no pi session ${sessionId}` }
 
@@ -1200,6 +1218,9 @@ async function piAnswers(sessionId, env, options = {}) {
     if (message.role === 'user') {
       const text = piText(message.content)
       if (!text.trim()) return
+      // A later user turn preserves the preceding final as history. This
+      // does not settle the new turn or promote unfinished tool work.
+      if (terminal?.complete && openTools.size === 0) terminal.item.settled = true
       openTools.clear()
       result.failed = false
       result.failure = null
@@ -1557,6 +1578,11 @@ async function kimiAnswers(sessionId, env) {
 
   if (count === 0) throw new Error(`empty kimi wire for ${sessionId}`)
   result.version = version ?? checkedVersion('kimi', undefined)
+  for (const turn of turns.values()) {
+    if (turn.id === latestTurnId) continue
+    const final = turn.finalStepId ? steps.get(turn.finalStepId) : null
+    if (turn.ended && final?.complete && turn.openTools.size === 0) final.settled = true
+  }
   const latest = latestTurnId === null ? null : turns.get(String(latestTurnId))
   const openTools = latest ? [...latest.openTools] : []
   const final = latest?.finalStepId ? steps.get(latest.finalStepId) : null

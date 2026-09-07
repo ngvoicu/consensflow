@@ -96,40 +96,59 @@ the files: send it into the conversation that holds the context.
 cf say <name> "<your follow-up, in plain words>"
 ```
 
-Look before you send: run `cf catchup <name> --unread` first — the
-conversation may have moved without you, and a follow-up composed against a
+Look before you send: run `cf results <name>` first — the
+conversation may have answered without you, and a follow-up composed against a
 stale view asks the wrong question.
 
 ## Read what arrived
 
 Reading a conversation and adding to it are different acts. "What did he
-say?", "did he reply?" ask you to READ: run `cf catchup <name> --unread`
-and report what it shows. Send nothing. Asking the agent again invents a new
-answer instead of finding the one that already exists.
+say?", "did he reply?" ask you to READ: run `cf results <name>` to discover
+its completed results, then `cf read <name>` to read the oldest unread one
+whole. Send nothing. Asking the agent again invents a new answer instead of
+finding the one that already exists.
 
-A delivered answer is read WHOLE from the top, never from the end. An answer
+A completed result is read WHOLE from the top, never from the end. An answer
 that arrives in your pane is the complete answer — read all of it, starting
 at the first line, before you report or act on any of it. A line naming
 `cf read <id>` means the answer arrived as a file: run each part and read
-its complete output in full before anything else.
+its complete output in full before anything else. Truncation is never the
+whole result: a clipped fragment or an unfinished answer is not a complete
+result, so read every part until the answer is whole — the first part prints
+its immutable delivery id, and every further part uses that id.
 
 ```bash
-cf catchup <name> --unread   # what has been said since you last looked
-cf read <id>                 # a delivered file, first part
-cf read <id> --part 2        # every further part, until the answer is whole
+cf results                   # every conversation's completed results, with status and preview
+cf results <name>            # one conversation's completed results
+cf results @<agent>          # that agent's conversations
+cf read <name>               # the oldest unread completed result, first part
+cf read <name> --answer <id> # one specific completed result, first part
+cf read <id> --part 2        # every further part uses the delivery id the first part printed
 ```
 
-A delivered answer is not re-read with `catchup`: once it is delivered, the
-delivery is the record — re-reading it as unread double-counts it.
+A result read covers that result only: it says nothing about the discussion
+around it, and the omitted discussion stays unread.
 
 ## Send and return, never wait
 
 After a consult or a follow-up, report what is running and in which
-conversation, then take the user's next message. Under `auto` the answer
-arrives in your pane on its own; under `manual` the human says when to
-read. Either way you do not sit out the answer: polling is wrong — `cf catchup`
+conversation, then take the user's next message. Under `auto` the daemon
+delivers every completed answer into your pane on its own — read what
+arrives. Under `manual` there is no automatic delivery, but the answers are
+still there whenever the authorized task needs them: invoke `cf results` to
+discover completed results and `cf read` to read them whole. Either way
+you do not sit out the answer: polling is wrong — `cf results`
 in a loop or `cf sessions` every few seconds burns the user's attention and
 answers nothing sooner.
+
+## The pane's input line belongs to the human
+
+The lead pane is a native terminal, and what the human typed into it is
+opaque to you: never assume the input line is empty. A manual `cf read`
+never touches terminal input — it only prints into your own tool result.
+When the line must be clear, the user sends or erases the input, and a
+human-only Resume replies is what confirms it is empty. Nothing clears it
+automatically from the transcript — do not promise that it does.
 
 ## Rules
 

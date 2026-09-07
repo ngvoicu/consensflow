@@ -34,6 +34,7 @@ const PASTE_START = '\u001b[200~'
 const PASTE_END = '\u001b[201~'
 const readFault = process.env.CF_INTEGRATION_READ_FAULT ?? ''
 const bridgeFault = process.env.CF_INTEGRATION_BRIDGE_FAULT ?? ''
+const nativeHumanSubmission = process.env.CF_INTEGRATION_NATIVE_HUMAN_SUBMISSION === '1'
 mkdirSync(directory, { recursive: true })
 appendFileSync(pidFile, `${process.pid}\n`)
 appendFileSync(processFile, `${process.pid}\t${sessionId}\n`)
@@ -203,7 +204,6 @@ if (!worker) {
     process.stdout.write('fake lead resumed\n')
   }
 
-  const input = createInterface({ input: process.stdin, crlfDelay: Infinity })
   let pasted = []
   let bridgeFaulted = false
   let rawMode = false
@@ -243,7 +243,7 @@ if (!worker) {
     }
     process.stdin.on('data', observeBridgePaste)
   }
-  input.on('line', (line) => {
+  const handleLine = (line) => {
     observeBridgePaste(line)
     if (bridgeFaulted) return
     const withoutStart = line.startsWith(PASTE_START) ? line.slice(PASTE_START.length) : line
@@ -283,6 +283,33 @@ if (!worker) {
     user(body)
     assistant('lead receipt')
     settle()
-  })
-  input.on('close', () => process.exit(0))
+  }
+
+  if (nativeHumanSubmission) {
+    let nativeInput = ''
+    const pendingNativeTurns = []
+    const release = join(process.env.CONSENSFLOW_HOME, 'native-human-release')
+    const flushNativeTurns = () => {
+      if (!existsSync(release)) return
+      for (const line of pendingNativeTurns.splice(0)) user(line)
+    }
+    process.stdin.on('data', (chunk) => {
+      nativeInput += String(chunk)
+      const lines = nativeInput.split(/[\r\n]/)
+      nativeInput = lines.pop() ?? ''
+      for (const line of lines) {
+        if (line.length > 0) pendingNativeTurns.push(line)
+      }
+      flushNativeTurns()
+    })
+    const releaseTimer = setInterval(flushNativeTurns, 5)
+    process.stdin.on('close', () => {
+      clearInterval(releaseTimer)
+      process.exit(0)
+    })
+  } else {
+    const input = createInterface({ input: process.stdin, crlfDelay: Infinity })
+    input.on('line', handleLine)
+    input.on('close', () => process.exit(0))
+  }
 }

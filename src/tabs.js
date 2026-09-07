@@ -217,6 +217,20 @@ export class Tabs {
     })
   }
 
+  /** Persists a human label without changing any session or pane identity. */
+  async rename(tabId, label) {
+    requireText(tabId, 'tab id')
+    const name = sessionName(label)
+    return this.store.mutate(await this.#tabDirectory(tabId), 'tab.rename', async (io) => {
+      const envelope = await io.readTabsEnvelope()
+      const tab = findTab(envelope.tabs, tabId)
+      tab.name = name
+      tab.updatedAt = nowIso()
+      await io.writeTabsEnvelope(envelope)
+      return tab
+    })
+  }
+
   async get(tabId) {
     return (await this.store.readTabs()).find((tab) => tab.id === tabId) ?? null
   }
@@ -271,6 +285,23 @@ function requireText(value, label) {
     // Argument validation is always about the request that arrived.
     throw new StoreRefusal(`${label} is required`, 'missing-field')
   }
+}
+
+function sessionName(value) {
+  if (typeof value !== 'string') {
+    throw new StoreRefusal('session name is required', 'invalid-name')
+  }
+  const name = value.trim()
+  if (name.length === 0) {
+    throw new StoreRefusal('session name is required', 'invalid-name')
+  }
+  if (/\p{Cc}/u.test(value)) {
+    throw new StoreRefusal('session name cannot contain control characters', 'invalid-name')
+  }
+  if ([...name].length > 80) {
+    throw new StoreRefusal('session name must be at most 80 characters', 'invalid-name')
+  }
+  return name
 }
 
 function requireOneOf(value, allowed, label) {

@@ -19,7 +19,7 @@ import { delimiter, join, resolve } from 'node:path'
  */
 const NATIVE = {
   claude: (env) => join(home(env), '.claude', 'plugins', 'cache', 'consensflow-cc'),
-  pi: (env) => join(home(env), '.pi', 'harness', 'git', 'github.com', 'ngvoicu', 'consensflow-pi'),
+  pi: (env) => join(piAgentDir(env), 'git', 'github.com', 'ngvoicu', 'consensflow-pi'),
 }
 
 /**
@@ -59,7 +59,7 @@ const HARNESSES = [
     id: 'pi',
     command: 'pi',
     locations: [HOMED(['.pi', 'bin']), HOMED(['.local', 'bin'])],
-    skillsDir: (env) => join(home(env), '.pi', 'harness', 'skills'),
+    skillsDir: (env) => join(piAgentDir(env), 'skills'),
   },
   {
     // The CLI is `kimi`; the product is Kimi Code, which is why its home is
@@ -86,6 +86,23 @@ function home(env) {
   // Windows sets USERPROFILE, not HOME; homedir() knows that, but an explicit
   // env (every test, and the app passing a login environment) may carry either.
   return env.HOME ?? env.USERPROFILE ?? homedir()
+}
+
+function piPath(configured, env) {
+  if (configured === '~') return home(env)
+  if (configured.startsWith('~/')) return join(home(env), configured.slice(2))
+  if (process.platform === 'win32' && configured.startsWith('~\\')) {
+    return join(home(env), configured.slice(2))
+  }
+  return configured
+}
+
+export function piAgentDir(env) {
+  return piPath(env.PI_CODING_AGENT_DIR || join(home(env), '.pi', 'agent'), env)
+}
+
+export function piSessionDir(env) {
+  return piPath(env.PI_CODING_AGENT_SESSION_DIR || join(piAgentDir(env), 'sessions'), env)
 }
 
 /**

@@ -392,7 +392,9 @@ describe('POST /api/panes/consult applies the continuation rule', () => {
       'CONSENSFLOW_APP',
       'CONSENSFLOW_LAUNCH',
       'CONSENSFLOW_PANE_ID',
+      'PATH',
     ])
+    assert.equal(open.env.PATH, s.env.PATH, 'worker tools use the editor’s discovered PATH')
     assert.equal(open.env.CONSENSFLOW_PANE_ID, first.pane.id)
     assert.notEqual(
       open.env.CONSENSFLOW_LAUNCH,

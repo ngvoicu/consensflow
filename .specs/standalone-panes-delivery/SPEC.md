@@ -1,7 +1,7 @@
 ---
 id: standalone-panes-delivery
 title: ConsensFlow owns the panes — standalone mode in the app, results delivered to the lead
-status: completed
+status: active
 created: 2026-09-06
 updated: 2026-09-07
 priority: high
@@ -20,8 +20,9 @@ lays them out in the user's fixed progression, lists tabs and conversations
 in a sidebar, and **delivers every completed worker answer, whole, into the
 lead's pane** when policy allows — `auto` by default, `manual` where the
 human says so, at conversation (tab) scope and at pane scope, and the lead
-can never override the human. Pull stays: `cf catchup` is unchanged in what
-it prints.
+can never override the human. The 2026-09-07 refinement retires `cf catchup`: `cf results` discovers
+completed worker results and `cf read` reads them whole through the same
+framed receipts used by automatic delivery.
 
 **Authority.** This revision (3, 2026-09-06) and Gabriel's round-2 answers
 govern implementation. Where `research-01.md` or `research-02.md` say
@@ -43,7 +44,7 @@ instead of the initially proposed collapsible strip. The
 target stays macOS, Windows and Linux; this spec tests on macOS and the
 other two follow in their own spec.
 
-54 tasks across 6 phases (two independent of any phase, two UI refinements); five live probes gate three of them.
+78 tasks across 9 phases (two independent of any phase, two UI refinements); five live probes gate three of them.
 
 ## Team
 
@@ -54,7 +55,7 @@ is co-leader and release reviewer, **diana** implements bounded work,
 The earlier assignments below are historical handoffs. The lead reads and
 reconciles completed answers and continues autonomously through the release
 gates; no new approval is needed for the already-authorized implementation
-or backed-up clean installation.
+or clean installation. Gabriel subsequently directed that no backups be retained.
 
 - **Gabriel** — owner: answers, tests, starts the app to see it. Asked when
   needed, not polled.
@@ -74,6 +75,17 @@ or backed-up clean installation.
 
 ## Acceptance Criteria
 
+- [ ] A fresh Pi lead discovers the generated ConsensFlow skill through Pi's
+      actual resource loader and its default `~/.pi/agent/skills` directory,
+      honoring `PI_CODING_AGENT_DIR`. The old owned `~/.pi/harness` skill is
+      retired only after the new destination is installed successfully;
+      unowned files and the current override destination are preserved.
+      A live fresh lead asked to greet Gefjon consults the roster agent
+      through `cf run`, creating an app-owned worker pane.
+- [x] The main workspace consistently calls its top-level unit a session:
+      **New session**, **Start session**, and the empty-workspace guidance
+      agree with **Sessions / panes**. Worker conversation names keep their
+      existing meaning and internal route/element identifiers stay stable.
 - [x] In standalone mode, `cf run @nyx "task"` from a lead's pane follows
       today's continuation rule: `--new` creates a conversation and prints
       the name the app minted; `--session` names one; otherwise the lead's
@@ -110,9 +122,10 @@ or backed-up clean installation.
       running, preserves the iframe, and returns focus to the opener
 - [x] Panes tile in the user's progression counted WITH the lead: 1 alone;
       2 beside; 3 lead full-height and two stacked; 4 a 2×2; 5 lead
-      full-height and a 2×2; 6 a 3×2; beyond, `rows = ceil(sqrt(n))`,
-      `cols = ceil(n / rows)`; when minimum pane sizes cannot fit, every
-      process is kept and a focused-pane view with navigation is offered
+      full-height and a 2×2; 6 a 3×2; beyond, at most three columns and
+      two visible rows (six panes), with further rows reached by vertical
+      scroll. Narrow windows reflow to two or one columns. Explicit pane
+      selection focuses one pane; pane count never forces focused mode.
 - [x] Every pane has a title: conversation name · agent · **Replies: Automatic**
       or **Replies: Manual**, with a readable tooltip naming the setting
       source (session, worker, lead preference or default); a shell pane is
@@ -143,10 +156,11 @@ or backed-up clean installation.
       cap on the answer, no truncation, no notice
 - [x] A delivery is submitted only when the lead is ready: its own
       transcript shows its last turn settled with no tool in flight, and no
-      human draft is latched in that pane — a draft is cleared only by the
-      observed submission that covers it (Rust stamps the epoch of the
-      human's Enter; Node clears up to that epoch once the matching user
-      turn appears), never by time and never past newer input; human input
+      human draft is latched in that pane. The human sends or erases input,
+      then confirms **Resume replies** in the app. Rust requires the exact
+      pane generation, input epoch and page sequence captured when opening
+      confirmation, with no pending writes. Native text/Enter observations
+      never authorize a clear. Human input
       arriving between the readiness decision and the write invalidates the
       decision; PTY silence is a polling hint only. Otherwise the delivery
       waits, visibly, with its reason; **Deliver now** bypasses policy —
@@ -196,7 +210,7 @@ or backed-up clean installation.
       wait**: after a consult or a follow-up it reports what is running and
       takes the user's next message; an answer arrives in its pane on its
       own when the conversation is `auto`, and when it is `manual` the human
-      says when to read (`cf catchup <name> --unread`); `--wait` and polling
+      says when to read (`cf results`, then `cf read`); waiting and polling
       are not taught, and the eval holds it
 - [x] `npm run check:all` exits 0 on macOS with no live agent CLI and no
       network: biome, Node tests, `cargo test` + clippy, page tests, the
@@ -274,7 +288,7 @@ covers ConPTY, the bridge is stdio, xterm is JS, paths go through Node's
         ▲ HTTP + lead token / controller capability
  cf run @nyx "task" [--new|--session X]   (requester; continuation rule as today)
  cf run … --in-pane                       (controller, under a ticket)
- cf say <name> "<words>"   cf attach <name>   cf read <deliveryId>   cf catchup <name>
+ cf say <name> "<words>"   cf attach <name>   cf results [<name>]   cf read <name|deliveryId>
 ```
 
 **Identities, kept apart.** A **tab** is app-owned and persisted: id,
@@ -350,13 +364,20 @@ truncating receiver therefore leaves ranges uncovered, and `cf`'s
 deliberate exit-0 on `EPIPE` (`bin/cf.mjs:66`) is never evidence. There is
 no cap on the answer.
 
-**Drafts and clears.** Rust stamps every human `\r` with the pane's input
-epoch and reports `pane.enter {epoch}`; when the matching user turn appears
-in that pane's transcript, Node calls `draft.clear(pane, generation,
-submittedEpoch, submissionId)` and Rust clears only the input that
-submission accounted for — input typed after that epoch stays latched, a
-stale clear is rejected under the same arbiter that rejects stale writes.
-This holds for worker panes receiving `cf say` exactly as for the lead.
+**Drafts and recovery (2026-09-07 refinement).** Typing latches incoming
+messages so an automatic paste cannot overwrite the human's composer.
+Native user text, timestamps and Enter epochs cannot prove causality in an
+opaque terminal: Enter may act on a menu while an older identical prompt is
+flushed to the transcript. Node therefore never clears drafts by matching
+text. After sending or erasing input, the human uses **Resume replies** and
+confirms that the terminal input is empty. App-only Tauri commands capture
+and check the exact pane generation, input epoch and page input sequence;
+any intervening input or pending write refuses recovery. No text is erased,
+no reply policy changes, and there is no lead HTTP/CLI recovery operation.
+This applies equally to worker follow-ups. `cf read` needs no input recovery
+because it returns complete result parts through the lead's tool channel.
+The old `draft.clear` Node bridge endpoint is removed. Knowing an Enter
+epoch, including the current one, never authorizes a Node-side clear.
 
 **Session replacement.** A harness can replace its native session without
 replacing its process or pane (`/new`, `/resume`, a fork; pi has explicit
@@ -390,8 +411,9 @@ attach path when clicked. Nothing about a closed session is forgotten by
 the page: its conversations, their policies and their held deliveries are
 read from the store, not from what is running.
 
-**Layouts, counted with the lead** (totals 1–6 special; beyond: `rows =
-ceil(sqrt(n))`, `cols = ceil(n / rows)`, row-major):
+**Layouts, counted with the lead** (totals 1–6 special where width permits;
+beyond: up to three columns, row-major, at most two visible rows and
+vertical scroll for the rest):
 
 ```
 1: [lead]    2: [lead|w1]    3: [lead|w1]    4: [lead|w1]    5: [lead|w1|w2]    6: [lead|w1|w2]
@@ -406,10 +428,9 @@ user turn from ConsensFlow (after the lead's own turn has settled, so it
 opens the next one), and under `manual` the human decides when the lead
 reads and says so. So the skill teaches send-and-return: report what is
 running and in which conversation, take the user's next message, and read
-only when an answer arrives or the human asks. `--wait` stays a `cf` flag
-for people and scripts; the skill does not name it, and polling
-(`cf catchup` in a loop, `cf sessions` every few seconds) is called out as
-wrong.
+only when an answer arrives or the human asks. Manual discovery uses
+`cf results` and whole reading uses `cf read`; repeated polling is
+unnecessary. `cf catchup`, including its wait mode, is retired.
 
 ## Probes — gates, recorded in `findings-01.md`
 
@@ -799,7 +820,7 @@ replacement fails closed; an interrupted read creates no coverage.
       and resend; **Auto / Manual / Inherit** per pane; tab policy in the
       tab header; a waiting delivery shows its reason (`draft open`, `lead
       busy`, `unbound`) and **Deliver now**; held records show **Send held
-      answers to this lead**; **New conversation**, **New pane** (Shell /
+      answers to this lead**; **New session**, **New pane** (Shell /
       Agent); when panes cannot fit, the focused-pane view with next/prev;
       a HIDDEN tab's emulators keep consuming and acking (a canned flood on
       a hidden pane drains); no request leaves the origin except the roster
@@ -936,16 +957,185 @@ replacement fails closed; an interrupted read creates no coverage.
       `max` below the proven `ultra` ceiling), `src/skill.js:136` ("minutes
       for max"), `tests/fixtures/v1-participants.json`. -> satisfies [TEST-PANE-51]
 
+## Phase 7: Post-install discovery and terminology [in-progress]
+
+- [x] [TEST-PANE-55] `tests/install.test.mjs`: Pi's real default directory,
+      absolute/tilde/empty config overrides, native-integration detection in
+      the same directory, owned legacy migration, destination conflict and
+      preservation of unowned files. Independently exercise the installed
+      Pi loader and confirm the skill enters its model prompt.
+- [x] [IMPL-PANE-56] `src/harnesses.js`, `src/install.js`: resolve Pi's
+      actual agent directory, honor its override, and retire the obsolete
+      owned skill after successful installation. -> satisfies [TEST-PANE-55]
+- [x] [TEST-PANE-57] `app/tests/page.spec.mjs`: New session opens the
+      directory/harness flow, the dialog and submit use session terminology,
+      and the empty workspace says session. -> user-reported label mismatch
+- [x] [IMPL-PANE-58] `app/ui/index.html`, `app/ui/panes.js`: align visible
+      workspace labels while preserving existing identifiers and behavior.
+      Build/update the installed app and verify fresh native Pi delegation.
+      -> satisfies [TEST-PANE-57]
+- [x] [TEST-PANE-59] `tests/integration/harness.mjs`, `task44.test.mjs`:
+      real Rust PTY host inherits a Finder-only PATH while the Node editor
+      knows the harness directory. A real `cf run --in-pane` must start the
+      test harness and produce its native transcript. -> live worker exits
+- [x] [IMPL-PANE-60] `src/panes.js`: carry the editor's discovered PATH
+      into worker controllers, retaining their existing ticket-only authority.
+      Rebuild and repeat fresh Pi/Gefjon delegation and Zeus review.
+      Alpha.24 installed and workers running; Zeus reviewed the change.
+      -> satisfies [TEST-PANE-59]
+
+## Phase 8: Safe input recovery and native completion [in-progress]
+
+Alpha.24 exposed latched input after a human submission. The initial
+transcript-matching proposal and its passing test were insufficient: Zeus
+found permanent poisoning after editor controls; Diana demonstrated delayed
+identical native text plus a phantom Enter can falsely clear an unsent draft.
+The lead accepts the smaller safe design below under Gabriel's architecture
+and implementation authorization. This refinement supersedes earlier claims
+that native text alone proves a submitted input epoch.
+
+- [x] [TEST-PANE-61] Diana's real Node/Rust/PTY reproduction is retained and
+      refined to require zero automatic clears after native user observation,
+      with newer input still latched and no app-only recovery on the Node
+      bridge. Rust unit and real Tauri IPC cases require exact epoch,
+      generation and page sequence for a human confirmation.
+- [x] [DESIGN-PANE-62] Zeus and Diana: review Enter/transcript races, editor
+      controls, generation changes and delayed identical native records.
+      Decision: no heuristic auto-clear and no raw keystroke capture. Only
+      explicit human confirmation in the app can resume an opaque composer.
+- [x] [IMPL-PANE-63] App-only **Resume replies** captures the live input
+      state, explains send/erase/confirm, and refuses stale confirmations.
+      Cancel and Escape do nothing; input policy and terminal contents remain
+      unchanged. Manual `cf read` is independent of the input latch.
+- [ ] [VERIFY-PANE-64] Full checks, rebuilt installed app, actual Pi receives
+      and reports Gefjon's completed response after human input confirmation;
+      independent review and final release record. No retained backups.
+- [x] [TEST-PANE-65] Root: Pi native settlement is read from the target
+      lead/worker launch, without editor-global extension environment.
+      Evidence for a different launch must never authorize delivery.
+- [x] [IMPL-PANE-66] Root: pass launch-scoped Pi settlement paths to the
+      completion adapter at every watcher read. Existing native extension
+      fixtures must carry the production channel fields, not inject globals.
+- [x] [TEST-PANE-67] Diana: both Pi transcript readers honor agent/session
+      directory overrides, native tilde/empty semantics and precedence;
+      overridden reads cannot pick up a decoy from the default directory.
+- [x] [IMPL-PANE-68] Root: share Pi directory resolution between installation
+      and both transcript readers. -> satisfies [TEST-PANE-67]
+- [x] [TEST-PANE-69] Gefjon: frozen native Claude 2.1.263 records prove
+      version admission, incomplete-prefix guards and actual final boundary.
+      Preserve structural records and document source provenance.
+- [x] [IMPL-PANE-70] Root: admit the verified Claude version and address any
+      demonstrated lifecycle difference without weakening unknown-version
+      or incomplete-turn guards. -> satisfies [TEST-PANE-69]
+
+
+## Phase 9: Session names and complete result reading [in-progress]
+
+Gabriel's 2026-09-07 clarification: every live pane stays interactive; a
+lead's instruction not to edit files is a task constraint, not a pane mode.
+Sessions can be named independently of their directory, and every open
+session continues running while another is displayed. Selecting a session
+must neither suspend processes nor stop draining its output.
+
+A lead discovers completed worker results with `cf results` and requests
+a whole result with `cf read <conversation>`. This replaces `cf catchup`
+completely; no legacy catchup execution or read-mark behavior remains.
+The daemon and manual reads share result extraction and receipt evidence.
+An unfinished manual part-read stays `reading` until every part is observed;
+resume it with the listed immutable delivery ID. It does not expire into a
+false receipt or trigger an automatic duplicate.
+Manual reads neither inject into the terminal nor require an idle lead or
+an empty composer. An unfinished fragment or clipped tool output is never
+accepted as a complete result.
+Reuse the existing framed parts and native receipt evidence for large
+results; result-only reads must not pretend that omitted discussion was read.
+Historical complete Pi/Kimi answers stay readable while a later turn runs.
+A manual part-read continues through a daemon restart on the same bound lead;
+it never reserves the input channel. An automatic copy already being submitted
+is not duplicated, while a pending draft-held answer can be claimed by the
+manual reader. Follow-up parts always use the immutable delivery ID.
+
+- [x] [TEST-PANE-71] Diana: persisted session renaming (trimmed nonempty
+      label, bounded length, invalid names rejected, identity/directory/
+      generation unchanged); browser rename/save/cancel and reload coverage.
+- [x] [IMPL-PANE-72] Diana: session rename through the existing store and
+      page architecture, available from session actions. Root wires the
+      minimal Rust command bridge after her Node/UI implementation.
+- [x] [TEST-PANE-73] Diana: two real Node/Rust/PTY sessions remain alive
+      concurrently; page selection drains hidden-session output and never
+      sends a close/suspend command. All live panes retain keyboard input.
+- [ ] [VERIFY-PANE-74] Root: verify concurrent sessions in the installed app,
+      including renaming and switching while worker tasks continue.
+- [x] [TEST-PANE-75] Root: result-only reading excludes partial turns;
+      complete long output uses all framed parts; unread result bookkeeping
+      requires full native receipt and does not consume omitted discussion.
+- [x] [IMPL-PANE-76] Root and Gefjon: `cf results` discovery, dedicated
+      complete `cf read` result retrieval and generated skill guidance;
+      retire catchup execution and its obsolete workflow.
+- [x] [TEST-PANE-77] Diana: 10 and 20 pane session grids stay within three
+      columns and at most two visible rows (six panes on a wide screen),
+      scroll to the last row, and reflow to two/one columns at
+      smaller widths; many pending results never widen a pane or page.
+- [x] [IMPL-PANE-78] Diana: maximum three columns, unlimited rows with
+      vertical scrolling. Each row is at least half the available viewport
+      height, so extra rows stay below the fold even in tall windows. This
+      follows Gabriel's later correction: maximum SIX panes on screen.
+      Keep explicit pane
+      selection focused. Replace repeated delivery badges with one compact
+      per-pane pending-result count and on-demand details/actions.
+
 ---
 
 ## Resume Context
 
+> Alpha.25 is installed at `/Applications/ConsensFlow.app`, without a backup.
+> The DMG in `~/ConsensFlow-Releases/3.0.0-alpha.25/` matches the built and
+> installed app across all 51 files/links. Its SHA-256 is
+> `dc39f079001fc12dbca88ba665248c441064e2e9cb36666ad18ababfa48b06ea`.
+> Codesign, DMG verify, installed `cf doctor` and all five installed skills
+> pass. Old alpha.23/24 local installers were removed.
+>
+> Final `npm run check:all` exited 0 after the last source fixes: Node
+> 1109 passed / 1113 total (four expected default skips); Rust 69 unit +
+> 12 headless; page 52; real integration 19; packaged smoke 1. The packaged
+> smoke runs the built app's own page, Node, CLI and a real PTY child.
+>
+> Zeus verified the main fixes and reported no remaining blockers, with
+> two narrower findings subsequently fixed and tested RED then GREEN:
+> the old Node `draft.clear` endpoint is removed and Kimi history extraction
+> preserves the latest turn's queued-admission guard. Diana's UI passed
+> 52/52; Gefjon's CLI/skill passed 125/125 before final copy alignment.
+>
+> 76/78 tasks are complete. VERIFY-PANE-64 (installed Pi/Gefjon automatic
+> delivery after human input confirmation) and VERIFY-PANE-74 (installed
+> rename/session-switching while workers continue) remain unverified live.
+> The UI tool returns `cgWindowNotFound` for the running installed app;
+> Gabriel has been asked to bring its window onto the current desktop.
+> Automated production IPC/concurrency/result-reader tests pass; they are
+> not recorded as substitutes for those two native operator checks.
+
+> 2026-09-07 post-install regression reopened at `955b54d`, clean tree.
+> Gabriel reported Sessions / panes versus New conversation and a Pi lead
+> spawning `pi -p --name gefjon` instead of a roster consult. The installed
+> Pi's `getAgentDir()` returns `~/.pi/agent`; ConsensFlow wrote its skill to
+> `~/.pi/harness/skills`. The real `loadSkills`/`formatSkillsForPrompt` probe
+> exited 1: no ConsensFlow skill and no model-prompt entry. Existing installer
+> tests mirrored the incorrect path. Default/override discovery is fixed and
+> a fresh Pi uses cf run. The live test also exposed missing worker PATH;
+> both Gefjon and Zeus exited before their harness started. TEST-PANE-59
+> reproduces spawn claude ENOENT through the real PTY and passes after
+> forwarding the editor PATH. Alpha.24 is installed: doctor and codesign pass, native Pi discovers
+> the skill and the legacy file is absent. Real Gefjon and Zeus panes are
+> running; Zeus is reviewing, Gefjon is retrying provider rate limits. No backups are
+> retained: Gabriel explicitly requested deleting them after alpha.23.
+>
+
 > 2026-09-07 **clean installation completed** after Gabriel explicitly
 > directed the reinstall to proceed regardless of other projects' sessions.
-> A fresh mutable-state backup is recorded by
-> `/Users/gabrielvoicu/ConsensFlow-Backups/20260907-151242/latest-reset-backup.txt`.
+> The temporary reset backup and all archived old bundles were subsequently
+> deleted at Gabriel's explicit direction; no backup is retained.
 > The old bundled CLI's `off --force` and `reset --yes` both exited 0;
-> old app and P3 bundles were archived, the verified alpha.23 DMG installed
+> the old app and P3 bundles were retired, the verified alpha.23 DMG installed
 > to `/Applications/ConsensFlow.app`, and only `agents.json` restored.
 > `cf doctor` exits 0 with 11 agents, five installed skills, no mode line,
 > and `/Applications/ConsensFlow.app/Contents/MacOS/node`. All five skill
@@ -955,8 +1145,8 @@ replacement fails closed; an interrupted read creates no coverage.
 > Native UI checks show an empty session tree, the full-window Agents
 > dialog with the restored roster, and Close returning to the fresh workspace.
 > Native harness credentials/history and the other projects' terminal
-> windows were left in place. Release and installation evidence lives beside
-> the DMG and under the backup's `release-evidence` directory. No code changed
+> windows were left in place. Release summaries were recorded beside the
+> DMG; the raw reset evidence was deleted with the backup. No code changed
 > after the tested release commit `3567314`.
 >
 > 2026-09-07 release candidate **3.0.0-alpha.23: all 54 tasks and all
@@ -976,11 +1166,8 @@ replacement fails closed; an interrupted read creates no coverage.
 > Artifact: `/Users/gabrielvoicu/ConsensFlow-Releases/3.0.0-alpha.23/ConsensFlow_3.0.0-alpha.23_aarch64.dmg`.
 > The local commit is gated on `npm run check` from an export of its exact
 > staged tree; that result and the resulting commit id belong in the release
-> record beside the DMG. Clean installation is still pending: other projects have active
-> workers using the old shared installation. The initial backup is at
-> `/Users/gabrielvoicu/ConsensFlow-Backups/20260907-151242`; refresh mutable
-> state after those workers finish and before reset. Native harness history
-> and authentication are outside the cleanup scope.
+> record beside the DMG. This candidate was subsequently installed as recorded
+> above. Native harness history and authentication remain outside cleanup scope.
 >
 > 2026-09-07 release implementation: root owns Phase 6 installer/CLI/settings,
 > package scripts, and the final installation. Zeus implements 45–46 and
@@ -1231,6 +1418,9 @@ replacement fails closed; an interrupted read creates no coverage.
 
 | Task | Red | Green | Refactor |
 |---|---|---|---|
+| [TEST-PANE-59] Worker PATH | Real Node editor and Rust PTY with Finder PATH: 0/1, exit 1; pane output says spawn claude ENOENT and no worker transcript appears | focused real-process test 1/1, authority contract 1/1, full integration 16/16, all exit 0; alpha.24 starts actual OpenCode/Gefjon and Claude/Zeus workers | Earlier fixture gave both processes the same rich PATH, masking desktop behavior. Full integration also exposed a pre-existing observation race: await lead invalidation, which follows durable delivery suspension, instead of asserting between its two writes |
+| [TEST-PANE-55] Pi discovery | node --test tests/install.test.mjs: 50 tests, 11 failed, exit 1; wrong native skill directory/override and migration. Independently, installed Pi loadSkills + formatSkillsForPrompt: no ConsensFlow entry, exit 1 | node --test tests/install.test.mjs: 50/50, exit 0; actual Pi loadSkills and formatSkillsForPrompt discover one enabled ConsensFlow skill, exit 0; fresh native Pi startup lists it and uses cf run @gefjon | Includes an already-green compatibility guard for an explicit override selecting the legacy directory; that case must remain supported |
+| [TEST-PANE-57] Session terminology | focused browser test failed on New session, then with empty-state assertion failed on Open a session; both exit 1 | focused 1/1 and full UI 40/40, exit 0 | Existing directory/harness command assertions retained |
 | Final macOS release gate, alpha.23 | initial audit lacked check:all, integration and packaged smoke; the completed gates found four real packaged/lifecycle defects | final npm run check:all exit 0: Node 1048 pass / 4 skipped, Rust 68+12, clippy -D warnings, UI 40/40, integration 15/15, packaged smoke 1/1 | final app rebuilt after source freeze; codesign verification and hdiutil verify exit 0; mounted DMG contains the identical 50-file tested bundle; Zeus and Gefjon final reviews report no material blocker |
 | [TEST-PANE-43] completed fault matrix | real bridge SIGKILL after observed paste before CR left submitting on disk; body-loss/early-close/marker-only cases originally lacked controls | Diana final full matrix15/15, exit0, 10.123s | raw-mode CR observation plus SIGSTOP barrier; uncertain is asserted before teardown, then real Node/Rust restart and real lead resume wait two watcher intervals with no replay; all missing part numbers reach answers.list |
 | Node EOF durable shutdown | real-process bridge fault above; synchronous process.exit preempted the watcher mutation | focused fault1/1 and lifecycle/UI/CLI67/67, exit0 | idempotent bounded drain of watcher and store before EOF/fatal/EPIPE exit; HTTP partial request cannot hold durable flush behind server.close; ordinary read-pipe EPIPE behavior retained |
@@ -1245,6 +1435,16 @@ replacement fails closed; an interrupted read creates no coverage.
 | Output subscription | packaged smoke saw zero page arrivals after repeated state refresh; real Tauri Channel drop ends the callback | Zeus split subscribe_output from list_state; root browser test confirms output after two state refreshes and one subscription | page fixture rejects duplicate subscription and any channel passed with state refresh |
 | [TEST-PANE-49] standalone skill | Gefjon: 22 tests, 9 passed and 13 failed, exit 1 | 22/22, exit 0; consumers 144 passed, 3 skipped, exit 0 | eight cf-only eval scenarios; actual stub/offline assertions verified; real model evals unrun and outside check:all |
 | [TEST-PANE-43] first integration tranche | real-process suite initially failed against obsolete headless protocol, 3 failed, exit 1 | Diana: 9/9, exit 0; standalone CLI 82/82, page ops 121/121, watcher 45/45 | real cf read every part, unread frontier established via real catchup; deterministic body-loss/bridge-death faults still in progress |
+| [TEST-PANE-67] Pi transcript paths | Diana 4 tests, 1 pass / 3 fail, exit 1; root independently reproduced display failures then completion failures after the display-only fix | 115/115 across paths, display, completion and installer, exit 0 | shared native tilde/empty/override resolution, valid default-path decoys |
+| [TEST-PANE-75] dedicated result reader | three missing watcher methods RED; real CLI unknown results command RED | watcher 53/53 and reader/existing native integration 9/9, exit 0 | real HTTP scope, 60000-byte result, actual child CLI reads all parts, full native receipt, no Node terminal writes and omitted discussion stays unread |
+| [TEST-PANE-77/78] six visible panes | tall viewport 7/10/20 cases all RED, exit 1; all panes incorrectly visible | Diana: layout 18/18, page 48/48, exit 0 | third row below viewport, final rows scroll reachable, two/one columns responsive and compact result indicator cannot widen page |
+| [TEST-PANE-69] Claude 2.1.263 | 8 tests: 1 pass / 7 fail on the version gate; admitting the version left final settlement RED | 56/56 completion tests, exit 0 | native turn_duration finalizer, root messageCount and zero pending background/workflow checks; unknown versions, truncated records and unfinished tool loops fail closed |
+| [TEST-PANE-71/73] rename and concurrency | rename: Node 14/15 and browser 40/41, exit 1 | Diana: tabs 15/15, page 41/41, ui-panes 136/136, concurrent real PTYs 1/1, all exit 0 | Rust rename bridge and installed-app verification remain Root work |
+| [TEST-PANE-61] opaque-input recovery | Initial wiring test RED then GREEN did not prove causality; replacement no-guess regression fails against the heuristic | No-guess native Node/Rust/PTY 1/1, exit 0; human epoch/generation unit and real Tauri sequence checks pass | Zeus/Diana review rejected automatic text matching; human-only confirmation replaces it |
+| [IMPL-PANE-63/76] final authority and latest-turn guard | Bridge old/current epoch clear succeeds before removal; Kimi queued latest incorrectly settled (both RED) | Focused GREEN; final whole gates recorded with release | Removed legacy bridge authority; preserved Kimi latest readiness; UI 52/52 |
+| [IMPL-PANE-76] review regressions | Pi/Kimi historical finals, manual restart and in-flight duplicate: 0/4, exit 1 | 4/4 exit 0; combined completion/watcher/v263 112/112 exit 0 | Open tools stay excluded; draft-held manual reads remain available |
+| [TEST-PANE-65] Pi launch evidence | three focused failures, exit 1: valid launch held, wrong launch admitted, worker evidence missed | 3/3 focused and 48/48 watcher, exit 0 | read extension evidence from the bound target launch, never editor-global hints |
+| Phase 7 integration recheck | one transient teardown asserted a child still alive; direct inspection then found it gone | isolated case and final suite 16/16 exit 0 | no sleeps or weakened cleanup assertions were added; production cleanup contract retained |
 | [TEST-PANE-53] UI refinement | four browser RED failures, exit 1: visible top roster, ambiguous label, and 36 px vertical offset for one/four panes | four focused browser tests passed, exit 0 | full-window Agents dialog retains the iframe/output ACKs; explicit delivery help; focused navigation inside title bar removes the offset |
 | [TEST-PANE-43] native helper parity | real `cargo test --offline --manifest-path app/src-tauri/Cargo.toml --test headless product_bridge_contract`: exit 101, 0 passed / 3 failed; app-issued identity/launch fields rejected, Enter and natural exit events absent | all 12 headless tests passed, exit 0, including the new three and existing nine | `consensflow-bridge` calls shared `commands::run_headless`; production launch/input/claim/draft/exit handlers, launch deduplication, and output ACK behavior are the integration target |
 | [TEST-PANE-39] unfinished-answer menu | new Playwright test failed on the old Uncertain/Resend presentation, 1 failed, exit 1 | full page suite 36/36, exit 0 | backend `ready` distinguishes unfinished answers; visible In progress row with send disabled; completed uncertain deliveries still offer explicit resend |

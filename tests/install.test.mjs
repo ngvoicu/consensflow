@@ -108,13 +108,112 @@ describe('harnesses are detected by their CLI on PATH, dirs from their own env',
     assert.equal(byId.codex.skillsDir, join(t.env.CODEX_HOME, 'skills'))
   })
 
-  it('places opencode under XDG config and pi under the home', () => {
+  it('places opencode under XDG config and pi in its native agent directory', () => {
     stubCli(t.env, 'opencode')
     stubCli(t.env, 'pi')
     const byId = Object.fromEntries(detectHarnesses(t.env).map((a) => [a.id, a]))
     assert.equal(byId.opencode.skillsDir, join(t.env.XDG_CONFIG_HOME, 'opencode', 'skills'))
-    assert.equal(byId.pi.skillsDir, join(t.env.HOME, '.pi', 'harness', 'skills'))
+    assert.equal(byId.pi.skillsDir, join(t.env.HOME, '.pi', 'agent', 'skills'))
   })
+})
+
+describe('Pi skill discovery and migration (TEST-PANE-55)', () => {
+  for (const override of ['/custom/pi', '~/custom-pi', '~', '']) {
+    it(`honors PI_CODING_AGENT_DIR=${JSON.stringify(override)} for skills and native packages`, () => {
+      const t = tempEnv()
+      try {
+        stubCli(t.env, 'pi')
+        // Keep even the absolute override inside this test's throwaway home.
+        const configured = override === '/custom/pi' ? join(t.root, 'custom-pi') : override
+        const env = { ...t.env, PI_CODING_AGENT_DIR: configured }
+        const expected =
+          configured === '~'
+            ? t.env.HOME
+            : configured.startsWith('~/')
+              ? join(t.env.HOME, configured.slice(2))
+              : configured || join(t.env.HOME, '.pi', 'agent')
+        assert.equal(detectHarnesses(env)[0].skillsDir, join(expected, 'skills'))
+        mkdirSync(join(expected, 'git', 'github.com', 'ngvoicu', 'consensflow-pi'), {
+          recursive: true,
+        })
+        assert.equal(detectHarnesses(env)[0].native, true)
+      } finally {
+        t.cleanup()
+      }
+    })
+  }
+
+  it('ignores a native package in the obsolete directory', () => {
+    const t = tempEnv()
+    try {
+      stubCli(t.env, 'pi')
+      mkdirSync(
+        join(t.env.HOME, '.pi', 'harness', 'git', 'github.com', 'ngvoicu', 'consensflow-pi'),
+        {
+          recursive: true,
+        },
+      )
+      assert.equal(detectHarnesses(t.env)[0].native, false)
+    } finally {
+      t.cleanup()
+    }
+  })
+
+  for (const situation of ['owned', 'unowned', 'destination-conflict', 'explicit-legacy-dir']) {
+    it(`migrates the legacy skill safely: ${situation}`, () => {
+      const t = tempEnv()
+      try {
+        stubCli(t.env, 'pi')
+        addAgent({ name: 'gefjon', harness: 'opencode', model: 'test' }, t.env)
+        const legacyDir = join(t.env.HOME, '.pi', 'harness', 'skills')
+        const legacy = join(legacyDir, 'consensflow', 'SKILL.md')
+        const current = join(t.env.HOME, '.pi', 'agent', 'skills', 'consensflow', 'SKILL.md')
+        const env =
+          situation === 'explicit-legacy-dir'
+            ? { ...t.env, PI_CODING_AGENT_DIR: join(t.env.HOME, '.pi', 'harness') }
+            : t.env
+        if (situation === 'unowned') {
+          mkdirSync(dirname(legacy), { recursive: true })
+          writeFileSync(legacy, 'foreign legacy skill\n')
+        } else {
+          installSkill(
+            {
+              relPath: 'consensflow/SKILL.md',
+              content: 'old generated skill\n',
+              source: 'consensflow',
+            },
+            env,
+            { targets: [{ id: 'pi', skillsDir: legacyDir }] },
+          )
+        }
+        if (situation === 'destination-conflict') {
+          mkdirSync(dirname(current), { recursive: true })
+          writeFileSync(current, 'foreign current skill\n')
+        }
+        const outcome = installation.installEverywhere(env)
+        if (situation === 'owned') {
+          assert.equal(existsSync(legacy), false, 'obsolete owned skill is removed')
+          assert.deepEqual(
+            skillsStatus(env).map((row) => row.path),
+            [current],
+          )
+          assert.match(readFileSync(current, 'utf8'), /cf run @<name>/)
+        } else if (situation === 'unowned') {
+          assert.equal(readFileSync(legacy, 'utf8'), 'foreign legacy skill\n')
+          assert.ok(existsSync(current))
+        } else if (situation === 'destination-conflict') {
+          assert.equal(readFileSync(current, 'utf8'), 'foreign current skill\n')
+          assert.equal(readFileSync(legacy, 'utf8'), 'old generated skill\n')
+          assert.ok(outcome.changes.some((row) => row.action === 'refused-unowned'))
+        } else {
+          assert.match(readFileSync(legacy, 'utf8'), /cf run @<name>/)
+          assert.equal(existsSync(current), false)
+        }
+      } finally {
+        t.cleanup()
+      }
+    })
+  }
 })
 
 describe('a host with its own ConsensFlow integration keeps it', () => {
@@ -134,12 +233,9 @@ describe('a host with its own ConsensFlow integration keeps it', () => {
     mkdirSync(join(t.env.HOME, '.claude', 'plugins', 'cache', 'consensflow-cc'), {
       recursive: true,
     })
-    mkdirSync(
-      join(t.env.HOME, '.pi', 'harness', 'git', 'github.com', 'ngvoicu', 'consensflow-pi'),
-      {
-        recursive: true,
-      },
-    )
+    mkdirSync(join(t.env.HOME, '.pi', 'agent', 'git', 'github.com', 'ngvoicu', 'consensflow-pi'), {
+      recursive: true,
+    })
 
     const byId = Object.fromEntries(detectHarnesses(t.env).map((a) => [a.id, a]))
     assert.equal(byId.claude.native, true)

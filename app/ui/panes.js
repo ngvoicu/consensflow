@@ -2,7 +2,7 @@ import { Menus } from './menus.js'
 import { runSelftest } from './selftest.js'
 import { orderedPanes, paneLabel, renderSidebar, sessionName } from './sidebar.js'
 import { EmulatorRegistry, paneKey } from './term.js'
-import { fits, focusOrder, gridTemplate } from './vendor/layout.js'
+import { focusOrder, gridTemplate } from './vendor/layout.js'
 import { effectivePolicy } from './vendor/policy.js'
 
 const MIN_PANE = { width: 260, height: 180 }
@@ -31,6 +31,7 @@ const focusCount = document.querySelector('#focus-count')
 const previousPane = document.querySelector('#previous-pane')
 const nextPane = document.querySelector('#next-pane')
 const status = document.querySelector('#status')
+const resumeDialog = document.querySelector('#resume-replies-dialog')
 
 const tauri = window.__TAURI__ ?? {}
 const invoke = tauri.core?.invoke
@@ -51,6 +52,8 @@ const outputChains = new Map()
 const retiredKeys = new Set()
 const retiringKeys = new Set()
 const inputSequences = new Map()
+let pendingResume = null
+let resumeRequest = 0
 // Set only by the packaged smoke's driver (`selftest.js`), which Rust only
 // lets the page load when the app was started in self-test mode.
 let ackObserver = null
@@ -146,7 +149,87 @@ async function enqueueTerminalInput(command, pane, data) {
   await run('pane_input_wait', { ticket: admitted.ticket }, { refresh: false })
 }
 
+function pageInputSequence(paneKeyValue) {
+  return inputSequences.get(paneKeyValue) ?? 0
+}
+
+function closeResumeDialog() {
+  pendingResume = null
+  if (resumeDialog.open) resumeDialog.close()
+}
+
+async function openResumeDialog(tab, pane) {
+  const request = ++resumeRequest
+  const identity = { id: pane.id, generation: pane.generation }
+  const snapshot = await run('pane_input_snapshot', identity, { refresh: false })
+  if (snapshot?.ok !== true || request !== resumeRequest) return
+
+  const key = paneKey(pane)
+  const sequence = pageInputSequence(key)
+  if (
+    !Number.isSafeInteger(snapshot.inputEpoch) ||
+    !Number.isSafeInteger(snapshot.sequence) ||
+    snapshot.sequence !== sequence
+  ) {
+    report('Terminal input changed after the snapshot. Reopen Resume replies.', 'error')
+    return
+  }
+
+  pendingResume = {
+    ...identity,
+    inputEpoch: snapshot.inputEpoch,
+    sequence: snapshot.sequence,
+    key,
+  }
+  resumeDialog.querySelector('#resume-replies-pane').textContent = paneLabel(tab, pane)
+  resumeDialog.showModal()
+}
+
+async function submitResume(event) {
+  event.preventDefault()
+  const pending = pendingResume
+  pendingResume = null
+  if (pending === null) {
+    resumeDialog.close()
+    return
+  }
+
+  if (pageInputSequence(pending.key) !== pending.sequence) {
+    resumeDialog.close()
+    report('Terminal input changed after the snapshot. Reopen Resume replies.', 'error')
+    return
+  }
+
+  resumeDialog.close()
+  const result = await run(
+    'pane_resume_replies',
+    {
+      id: pending.id,
+      generation: pending.generation,
+      inputEpoch: pending.inputEpoch,
+      sequence: pending.sequence,
+    },
+    { refresh: false },
+  )
+  const failure = resultFailure(result)
+  if (failure !== null && /stale|generation|sequence|epoch/i.test(failure)) {
+    report(
+      'Resume replies became stale. Reopen the confirmation dialog; replies remain held.',
+      'error',
+    )
+  }
+}
+
 const menus = new Menus({ invoke: rawInvoke, run, report })
+
+resumeDialog.querySelector('button[value="cancel"]').addEventListener('click', closeResumeDialog)
+resumeDialog.addEventListener('cancel', () => {
+  pendingResume = null
+})
+resumeDialog.addEventListener('close', () => {
+  pendingResume = null
+})
+resumeDialog.querySelector('form').addEventListener('submit', (event) => void submitResume(event))
 
 const registry = new EmulatorRegistry({
   createEmulator: tauri.test?.createEmulator,
@@ -236,30 +319,56 @@ function deliveriesFor(tab, pane) {
   })
 }
 
-function addDeliveryBadges(titlebar, tab, pane) {
-  for (const previous of titlebar.querySelectorAll('.delivery-badge')) previous.remove()
-  for (const delivery of deliveriesFor(tab, pane)) {
-    const badge = document.createElement('span')
-    badge.className = 'delivery-badge'
-    badge.dataset.testid = `delivery-${delivery.id}`
+function deliveryDetails(event, tab, deliveries) {
+  event.preventDefault()
+  const menu = document.createElement('div')
+  menu.setAttribute('role', 'menu')
+  menu.setAttribute('aria-label', 'Pending results')
+  const heading = document.createElement('div')
+  heading.className = 'menu-heading'
+  heading.textContent = 'Pending results'
+  menu.append(heading)
+  for (const delivery of deliveries) {
+    const row = document.createElement('div')
+    row.className = 'delivery-detail-row'
     const reason = document.createElement('span')
+    reason.className = 'delivery-detail-reason'
     reason.textContent = delivery.reason ?? 'waiting'
     const deliver = document.createElement('button')
     deliver.type = 'button'
-    deliver.className = 'quiet-button'
+    deliver.setAttribute('role', 'menuitem')
     deliver.textContent = 'Deliver now'
     const blocker = READINESS_BLOCKERS.has(delivery.reason)
     deliver.disabled = blocker
     if (blocker) {
       deliver.title = `${delivery.reason} — readiness cannot be bypassed`
     } else {
-      deliver.addEventListener('click', () =>
-        run('deliver_now', { delivery: delivery.id, tab: tab.id }),
-      )
+      deliver.addEventListener('click', async () => {
+        menus.closeMenu()
+        await run('deliver_now', { delivery: delivery.id, tab: tab.id })
+      })
     }
-    badge.append(reason, deliver)
-    titlebar.append(badge)
+    row.append(reason, deliver)
+    menu.append(row)
   }
+  menus.place(menu, event)
+}
+
+function addDeliveryBadges(titlebar, tab, pane) {
+  for (const previous of titlebar.querySelectorAll('.delivery-summary')) previous.remove()
+  const deliveries = deliveriesFor(tab, pane)
+  if (deliveries.length === 0) return
+  const summary = document.createElement('button')
+  summary.type = 'button'
+  summary.className = 'delivery-summary'
+  summary.dataset.testid = `delivery-summary-${pane.id}`
+  summary.textContent = `${deliveries.length} pending result${deliveries.length === 1 ? '' : 's'}`
+  summary.setAttribute(
+    'aria-label',
+    `${deliveries.length} pending result${deliveries.length === 1 ? '' : 's'}`,
+  )
+  summary.addEventListener('click', (event) => deliveryDetails(event, tab, deliveries))
+  titlebar.append(summary)
 }
 
 function createCard(tab, pane) {
@@ -279,6 +388,18 @@ function createCard(tab, pane) {
   const title = document.createElement('span')
   title.className = 'pane-title'
   titlebar.append(kind, title)
+  if (['lead', 'worker'].includes(pane.kind)) {
+    const resume = document.createElement('button')
+    resume.type = 'button'
+    resume.className = 'quiet-button resume-replies-button'
+    resume.dataset.testid = `resume-replies-${pane.id}`
+    resume.textContent = 'Resume replies'
+    resume.addEventListener('click', () => {
+      const context = card._context
+      void openResumeDialog(context.tab, context.pane)
+    })
+    titlebar.append(resume)
+  }
   const terminal = document.createElement('div')
   terminal.className = 'terminal-host'
   terminal.setAttribute('aria-label', `${paneLabel(tab, pane)} terminal`)
@@ -320,6 +441,8 @@ function updateCard(card, tab, pane) {
     }[effective.source]
     title.title = `Reply delivery: ${effective.mode === 'manual' ? 'Manual' : 'Automatic'}. ${source}`
   }
+  const resume = card.querySelector('.resume-replies-button')
+  if (resume !== null) resume.hidden = !isLive(tab, pane)
   addDeliveryBadges(card.querySelector('.pane-titlebar'), tab, pane)
 }
 
@@ -436,14 +559,21 @@ function cssPixels(value) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-function gridContentArea(layout) {
+function columnsForWidth(paneCount) {
   const styles = getComputedStyle(stage)
   const padding = cssPixels(styles.getPropertyValue('--pane-grid-padding'))
   const gap = cssPixels(styles.getPropertyValue('--pane-grid-gap'))
-  return {
-    width: Math.max(0, stage.clientWidth - 2 * padding - (layout.cols - 1) * gap),
-    height: Math.max(0, stage.clientHeight - 2 * padding - (layout.rows - 1) * gap),
-  }
+  const contentWidth = Math.max(0, stage.clientWidth - 2 * padding)
+  const capacity = Math.floor((contentWidth + gap) / (MIN_PANE.width + gap))
+  return Math.max(1, Math.min(3, paneCount, capacity))
+}
+
+function minimumGridRowHeight() {
+  const styles = getComputedStyle(stage)
+  const padding = cssPixels(styles.getPropertyValue('--pane-grid-padding'))
+  const gap = cssPixels(styles.getPropertyValue('--pane-grid-gap'))
+  const available = Math.max(0, stage.clientHeight - 2 * padding - gap)
+  return Math.max(MIN_PANE.height, Math.ceil(available / 2))
 }
 
 function showCards(tab, panes, indices, mode, layout) {
@@ -465,7 +595,8 @@ function showCards(tab, panes, indices, mode, layout) {
   stage.dataset.mode = mode
   stage.dataset.layout = layout.areas
   stage.style.gridTemplateAreas = layout.areas
-  stage.style.gridTemplateRows = `repeat(${layout.rows}, minmax(0, 1fr))`
+  const rowHeight = mode === 'grid' ? minimumGridRowHeight() : MIN_PANE.height
+  stage.style.gridTemplateRows = `repeat(${layout.rows}, minmax(${rowHeight}px, 1fr))`
   stage.style.gridTemplateColumns = `repeat(${layout.cols}, minmax(0, 1fr))`
 
   const cells = focusOrder(panes.length)
@@ -504,16 +635,14 @@ function renderPaneView() {
     empty.textContent =
       tab?.closed === true
         ? 'Resume this session to reopen its lead.'
-        : 'Open a conversation to start a lead pane.'
+        : 'Open a session to start a lead pane.'
     stage.append(empty)
     focusNav.hidden = true
     return
   }
 
-  const layout = gridTemplate(panes.length)
-  const available = gridContentArea(layout)
-  const mustFocus = selection.type === 'pane' || !fits(panes.length, available, MIN_PANE)
-  if (!mustFocus) {
+  const layout = gridTemplate(panes.length, { maxColumns: columnsForWidth(panes.length) })
+  if (selection.type !== 'pane') {
     showCards(
       tab,
       panes,
@@ -570,6 +699,7 @@ function render() {
       render()
     },
     onResume: (tab) => void run('tab_resume', { tab: tab.id }),
+    onRenameSession: (tab) => menus.renameSession(tab),
     onAttach: (tab, pane) =>
       void run('open_consult', {
         tab: tab.id,

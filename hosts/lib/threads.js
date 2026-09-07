@@ -88,7 +88,7 @@ export function allSessionNames() {
  * A fresh, sayable name for a conversation — the agent's name, then two words.
  *
  * `ilmarinen-quartz-valley` rather than `quartz-valley`: a conversation is
- * always somebody's, and the name is what a lead types into `cf catchup`, what
+ * always somebody's, and the name is what a lead types into `cf results`, what
  * a pane tab carries, and what the user reads across a row of panes. Without
  * the agent in it, none of those say whose window they are, and a workspace
  * with four conversations is four two-word names to keep straight in your head.

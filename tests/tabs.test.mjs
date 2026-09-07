@@ -228,6 +228,41 @@ test('tabs: suspend closes a tab, resume mints generation + 1 and a new leadId',
   })
 })
 
+test('tabs: rename trims and persists a bounded label without changing identity or panes', async () => {
+  await withTabs(async ({ dir, store, tabs }) => {
+    const created = await tabs.create(path.join(dir, 'project'), 'pi')
+    const worker = await tabs.addPane(created.id, { kind: 'worker', conversation: 'worker-one' })
+    await tabs.suspend(created.id)
+    const before = await tabs.get(created.id)
+
+    const renamed = await tabs.rename(created.id, '  🚢 Main session  ')
+    assert.equal(renamed.name, '🚢 Main session')
+
+    const after = await tabs.get(created.id)
+    assert.equal(after.id, before.id)
+    assert.equal(after.directory, before.directory)
+    assert.equal(after.closed, before.closed)
+    assert.deepEqual(after.lead, before.lead)
+    assert.deepEqual(after.panes, [before.panes[0], worker])
+    assert.equal(after.name, '🚢 Main session')
+
+    await assert.rejects(() => tabs.rename(created.id, '   '), /name|required/i)
+    for (const name of ['line\nbreak', '\nleading', 'trailing\r']) {
+      await assert.rejects(() => tabs.rename(created.id, name), /control/i)
+    }
+    await assert.rejects(() => tabs.rename(created.id, 'x'.repeat(81)), /80|long/i)
+    const eightyCodepoints = '🚀'.repeat(80)
+    await tabs.rename(created.id, eightyCodepoints)
+    assert.equal([...((await tabs.get(created.id)).name ?? '')].length, 80)
+
+    await store.close()
+    const reopened = new Store(store.root)
+    await reopened.open()
+    assert.equal((await new Tabs(reopened).get(created.id)).name, eightyCodepoints)
+    await reopened.close()
+  })
+})
+
 test('tabs: a restart reads every tab closed', async () => {
   await withTabs(async ({ dir, store, tabs }) => {
     await tabs.create(path.join(dir, 'a'), 'pi')

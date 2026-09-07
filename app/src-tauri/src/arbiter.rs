@@ -374,6 +374,26 @@ impl InputArbiter {
         self.finish_paste(writer, pane, &state)
     }
 
+    /// A human assertion from the app, never inferred from PTY/transcript text.
+    pub fn resume_replies(&self, pane: &PaneKey, epoch: u64) -> Result<(), ArbiterError> {
+        let state = self.pane_state(pane)?;
+        let mut state = lock_state(&state)?;
+        validate_generation(&state, pane)?;
+        if state.input_epoch != epoch {
+            return Err(ArbiterError::Stale);
+        }
+        if state.input_failed {
+            return Err(ArbiterError::InputFailed);
+        }
+        if state.paste_in_flight || !state.queued_human.is_empty() {
+            return Err(ArbiterError::Busy);
+        }
+        state.draft_epoch = None;
+        state.emitted_enter_epochs.clear();
+        state.last_submission_id = None;
+        Ok(())
+    }
+
     pub fn clear_draft(
         &self,
         pane_id: &str,
@@ -726,6 +746,37 @@ mod tests {
             }
             Ok(())
         }
+    }
+
+    #[test]
+    fn human_resume_requires_exact_epoch_and_generation_without_guessing_editor_text() {
+        let key = PaneKey::new("human-resume", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let (events, _receiver) = mpsc::channel();
+        let arbiter = InputArbiter::new(0, events);
+        arbiter.register(&key).unwrap();
+        let old = arbiter
+            .write_human_via(writer.as_ref(), &key, b"\x1b[Aedited\r")
+            .unwrap();
+        let current = arbiter
+            .write_human_via(writer.as_ref(), &key, b"new draft")
+            .unwrap();
+        assert!(matches!(
+            arbiter.resume_replies(&key, old),
+            Err(ArbiterError::Stale)
+        ));
+        assert!(matches!(
+            arbiter.resume_replies(&PaneKey::new(&key.id, 2), current),
+            Err(ArbiterError::Stale)
+        ));
+        assert!(arbiter.snapshot(&key).unwrap().draft_latched);
+        arbiter.resume_replies(&key, current).unwrap();
+        assert!(!arbiter.snapshot(&key).unwrap().draft_latched);
+        let next = arbiter
+            .write_human_via(writer.as_ref(), &key, b"later")
+            .unwrap();
+        assert!(next > current);
+        assert!(arbiter.snapshot(&key).unwrap().draft_latched);
     }
 
     #[test]

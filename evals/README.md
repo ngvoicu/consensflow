@@ -27,7 +27,7 @@ has one shape, the app owns the panes, and the skill never names a pane
 command or a harness CLI.
 
 The stub `cf` mints conversation names on `run --new`, continues on a bare
-run or `--session`, answers `say` and `catchup` from a per-scenario
+run or `--session`, answers `say`, `results` and `read` from a per-scenario
 transcript, pastes a `deliver` fixture into the lead's transcript, and prints
 a long `read` fixture in numbered parts. A turn may also carry a `delivery`
 field, which the runner prefixes into what the lead receives — the envelope
@@ -49,12 +49,12 @@ misses. The runner exits non-zero if any check missed even once.
 | Scenario | What it guards |
 |---|---|
 | `consult-opens-a-pane` | the consult is `cf run --new`, via `cf` only — no pane tool, no harness CLI |
-| `look-before-you-send` | a follow-up is `cf catchup` then `cf say`, never a restart |
+| `look-before-you-send` | a follow-up discovers with `cf results`, reads the whole result with `cf read`, then uses `cf say`, never a restart |
 | `an-independent-task-gets-its-own-conversation` | unrelated work starts fresh with `--new`, nothing sent into the old conversation |
 | `a-dependent-task-stays-in-its-conversation` | work that leans on the conversation is a `cf say` where it belongs |
 | `a-delivered-answer-is-read-whole` | the envelope arrives in the turn, as pasted into the pane — the lead reports its top verdict with no `catchup`, no `read` |
 | `a-delivered-file-is-read` | the pointer arrives in the turn — the lead runs every `cf read` part and its report holds the beginning, the middle AND the end |
-| `manual-is-the-humans` | the lead reads when asked and leaves a human-set `manual` policy alone |
+| `manual-is-the-humans` | the lead can read for its authorized task and leaves a human-set `manual` policy alone |
 | `a-lead-sends-and-returns` | after `cf run --new` or `cf say` the lead reports what is running and where — no `--wait`, no polling |
 
 ## History

@@ -1,3 +1,5 @@
+import { sessionName } from './sidebar.js'
+
 function asArray(value) {
   return Array.isArray(value) ? value : []
 }
@@ -39,19 +41,22 @@ export class Menus {
     this.layer = document.querySelector('#menu-layer')
     this.conversationDialog = document.querySelector('#new-conversation-dialog')
     this.agentDialog = document.querySelector('#agent-dialog')
+    this.renameDialog = document.querySelector('#rename-session-dialog')
     this.directory = document.querySelector('#conversation-directory')
     this.leadHarness = document.querySelector('#lead-harness')
     this.agentPicker = document.querySelector('#agent-picker')
     this.agentTask = document.querySelector('#agent-task')
+    this.renameInput = document.querySelector('#session-name')
     this.pendingDirectory = null
     this.pendingTab = null
+    this.pendingRenameTab = null
 
     document.addEventListener('pointerdown', (event) => {
       if (!this.layer.contains(event.target)) this.closeMenu()
     })
     window.addEventListener('blur', () => this.closeMenu())
 
-    for (const dialog of [this.conversationDialog, this.agentDialog]) {
+    for (const dialog of [this.conversationDialog, this.agentDialog, this.renameDialog]) {
       dialog.querySelector('button[value="cancel"]').addEventListener('click', () => dialog.close())
     }
     this.conversationDialog
@@ -60,6 +65,9 @@ export class Menus {
     this.agentDialog
       .querySelector('form')
       .addEventListener('submit', (event) => this.submitAgent(event))
+    this.renameDialog
+      .querySelector('form')
+      .addEventListener('submit', (event) => this.submitRename(event))
   }
 
   closeMenu() {
@@ -274,6 +282,14 @@ export class Menus {
     this.conversationDialog.showModal()
   }
 
+  renameSession(tab) {
+    this.pendingRenameTab = tab
+    this.renameInput.value = sessionName(tab)
+    this.renameDialog.showModal()
+    this.renameInput.focus()
+    this.renameInput.select()
+  }
+
   async submitConversation(event) {
     event.preventDefault()
     if (this.pendingDirectory === null) return
@@ -292,5 +308,16 @@ export class Menus {
     if (task.length === 0) return
     this.agentDialog.close()
     await this.run('open_consult', { tab: tab.id, agent, task })
+  }
+
+  async submitRename(event) {
+    event.preventDefault()
+    if (this.pendingRenameTab === null) return
+    const tab = this.pendingRenameTab
+    const name = this.renameInput.value.trim()
+    if (name.length === 0) return
+    this.pendingRenameTab = null
+    this.renameDialog.close()
+    await this.run('rename_session', { tab: tab.id, name })
   }
 }

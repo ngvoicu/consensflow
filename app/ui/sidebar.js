@@ -53,7 +53,7 @@ function group() {
 export function renderSidebar(
   container,
   tabs,
-  { selection, onSelectSession, onSelectPane, onResume, onAttach },
+  { selection, onSelectSession, onSelectPane, onResume, onAttach, onRenameSession },
 ) {
   container.replaceChildren()
 
@@ -74,6 +74,17 @@ export function renderSidebar(
       () => onSelectSession(tab),
     )
     const sessionRow = row(sessionButton)
+    const rename = document.createElement('button')
+    rename.type = 'button'
+    rename.className = 'rename-button'
+    rename.dataset.testid = `rename-${tab.id}`
+    rename.setAttribute('aria-label', 'Rename session')
+    rename.textContent = 'Rename'
+    rename.addEventListener('click', (event) => {
+      event.stopPropagation()
+      onRenameSession(tab)
+    })
+    sessionRow.append(rename)
     if (tab.closed === true) {
       const resume = document.createElement('button')
       resume.type = 'button'

@@ -1115,7 +1115,7 @@ fn product_bridge_contract_preserves_app_identity_and_launch_deduplication() {
 }
 
 #[test]
-fn product_bridge_contract_forwards_enter_and_clears_only_the_covered_draft() {
+fn product_bridge_cannot_clear_a_human_draft_even_with_the_exact_enter_epoch() {
     let _pty_guard = serial_headless_test();
     let mut helper = Headless::spawn();
     let mut events = Vec::new();
@@ -1143,14 +1143,17 @@ fn product_bridge_contract_forwards_enter_and_clears_only_the_covered_draft() {
     let cleared = helper.request("draft.clear", json!({
         "id":id, "generation":generation, "submittedEpoch":epoch, "submissionId":"submission-one"
     }), &mut events);
-    assert_eq!(cleared["ok"], true, "draft clear rejected: {cleared}");
+    assert_ne!(
+        cleared["ok"], true,
+        "legacy draft clear remained exposed: {cleared}"
+    );
     let snapshot = helper.request(
         "pane.snapshot",
         json!({"id":id,"generation":generation}),
         &mut events,
     );
-    assert_eq!(snapshot["draftLatched"], false);
-    assert_eq!(snapshot["lastSubmissionId"], "submission-one");
+    assert_eq!(snapshot["draftLatched"], true);
+    assert!(snapshot["lastSubmissionId"].is_null());
     helper.close_input_and_wait();
 }
 

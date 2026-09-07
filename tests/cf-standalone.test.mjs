@@ -43,8 +43,6 @@ const BUNDLE_BIN = join(import.meta.dirname, '..', 'bin')
 const CONSULT_DEADLINE_MS = 250
 /** Nothing listens on port 1, and reaching it needs no DNS and no network. */
 const NO_APP = 'http://127.0.0.1:1'
-/** A version `hosts/lib/completion.js` supports: it reads no other. */
-const CLAUDE_VERSION = '2.1.241'
 /** The session id of the real kimi wire log the fixture shapes come from. */
 const KIMI_SESSION = 'session_11c123b3-dd33-4f21-8862-beabdc50cd18'
 
@@ -1044,6 +1042,7 @@ describe('cf refuses when it cannot reach the app', () => {
     ['run', ['run', '@zeus', 'q']],
     ['say', ['say', 'zeus-quiet-fern', 'words']],
     ['read', ['read', 'd-1']],
+    ['results', ['results']],
     ['attach', ['attach', 'zeus-quiet-fern']],
     ['chat', ['chat', 'zeus-quiet-fern']],
   ]) {
@@ -1070,6 +1069,7 @@ describe('an agent never spawns agents', () => {
     ['run', ['run', '@zeus', 'q']],
     ['say', ['say', 'zeus-quiet-fern', 'words']],
     ['read', ['read', 'd-1']],
+    ['results', ['results']],
     ['attach', ['attach', 'zeus-quiet-fern']],
     ['chat', ['chat', 'zeus-quiet-fern']],
   ]) {
@@ -1141,11 +1141,18 @@ describe('the standalone CLI contract without an app pane', () => {
       'cf: Conversations live in ConsensFlow app panes. Use cf say <conversation> "<words>" or cf attach <conversation>.\n',
     ],
     [
+      'results',
+      ['results'],
+      1,
+      '',
+      "cf: cf results is how you reach a pane, and panes live in ConsensFlow's app — run it from a pane the app opened\n",
+    ],
+    [
       'catchup',
       ['catchup', 'ghost'],
       1,
       '',
-      'cf: no conversations here yet — `cf run @name "<task>"` starts one\n',
+      'cf: cf catchup is retired — discover completed results with `cf results [conversation|@agent]`, then read one whole with `cf read <conversation> [--answer <id>] [--part <k>]`\n',
     ],
     [
       'sessions',
@@ -1173,7 +1180,7 @@ describe('the standalone CLI contract without an app pane', () => {
       'say',
       'attach',
       'read',
-      'catchup',
+      'results',
       'sessions',
       'last',
       'catalog',
@@ -1427,167 +1434,200 @@ describe('a marker that never reaches the harness never binds', () => {
   })
 })
 
-describe('the seen walk belongs to the server', () => {
-  let s
-  let proxy
-  let conversation
-  let transcript
-  let leadId
-
-  const at = '2026-09-07T10:0'
-  const record = (type, uuid, extra) =>
-    JSON.stringify({
-      type,
-      uuid,
-      version: CLAUDE_VERSION,
-      timestamp: `${at}${uuid.at(-1)}:00.000Z`,
-      ...extra,
-    })
-  const answer = (uuid, id, text) =>
-    record('assistant', uuid, {
-      message: { id, role: 'assistant', content: [{ type: 'text', text }] },
-    })
-  const ASKED = record('user', 'u-1', { message: { role: 'user', content: 'what did you find' } })
-  const FIRST = answer('r-2', 'a-1', 'the first answer')
-  const TOOL_RESULT = record('user', 'u-4', {
-    message: {
-      role: 'user',
-      content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'a tool result' }],
-    },
-  })
-  const write = (records) => writeFileSync(transcript, `${records.join('\n')}\n`)
-
-  before(async () => {
-    s = await paneServer()
-    proxy = await recordingProxy(s.url)
-    leadId = s.lead.CONSENSFLOW_LEAD_ID
-
-    // A bound claude conversation, so there is a real transcript to read.
-    const opened = await cf(['run', '@nyx', 'the question', '--new'], s.lead, s.workspace)
-    const line = /^conversation: (\S+) \(new\) — pane (\S+)$/m.exec(opened.stdout)
-    assert.ok(line, `${opened.stdout}${opened.stderr}`)
-    conversation = line[1]
-    const open = s.seen.open.at(-1)
-    const sessionId = open.argv[open.argv.indexOf('--native-session') + 1]
-    const binDir = join(s.t.root, 'seen-bin')
-    fakeHarness(binDir, 'claude')
-    const ran = await cf(
-      open.argv.slice(2),
-      {
-        ...s.t.env,
-        ...open.env,
-        PATH: [binDir, s.t.env.PATH].join(delimiter),
-      },
-      s.workspace,
-    )
-    assert.equal(ran.code, 0, `${ran.stdout}${ran.stderr}`)
-
-    mkdirSync(join(s.t.env.CLAUDE_CONFIG_DIR, 'projects'), { recursive: true })
-    transcript = join(s.t.env.CLAUDE_CONFIG_DIR, 'projects', `${sessionId}.jsonl`)
-    write([ASKED, FIRST])
-
-    // A first, ordinary read: the lead has now seen its own question and the
-    // answer to it, which is where every later read starts from.
-    const first = await catchup([])
-    assert.equal(first.code, 0, first.stderr)
-    assert.deepEqual(s.threads()[conversation].seen[leadId], ['u-1', 'a-1'])
-  })
+describe('cf results lists completed results through the app', () => {
+  const t = tempEnv()
+  let app
   after(async () => {
-    await proxy?.close()
-    await s.close()
+    await app?.close()
+    t.cleanup()
   })
 
-  const catchup = (args) =>
-    cf(['catchup', conversation, ...args], { ...s.lead, CONSENSFLOW_APP: proxy.url }, s.workspace)
-
-  /** A Phase-3 delivery record: no client route writes one, so it is staged. */
-  const deliver = (answerId) => {
-    const root = join(s.t.env.CONSENSFLOW_HOME, 'workspaces', workspaceKey(s.workspace))
-    writeFileSync(
-      join(root, 'deliveries.json'),
-      JSON.stringify({
-        'd-1': {
-          id: 'd-1',
-          state: 'accepted',
-          conversation,
-          answerId,
-          target: { leadId, tab: s.tab.tab.id },
-        },
-      }),
-    )
+  const LIST = {
+    workers: [
+      {
+        conversation: 'nyx-coral-lane',
+        agent: 'nyx',
+        running: false,
+        reason: null,
+        results: [
+          { id: 'a-11', bytes: 41, preview: 'the first answer, whole', status: 'unread' },
+          { id: 'a-12', bytes: 18, preview: 'the second answer', status: 'read' },
+        ],
+      },
+      {
+        conversation: 'zeus-quiet-fern',
+        agent: 'zeus',
+        running: true,
+        reason: 'thinking',
+        results: [
+          {
+            id: 'a-20',
+            bytes: 9,
+            preview: 'thinking out',
+            status: 'reading',
+            deliveryId: 'd-4',
+            parts: 2,
+          },
+        ],
+      },
+    ],
   }
 
-  it('sends items as objects, counts a delivered answer as read, and stops at a gap', async () => {
-    write([
-      ASKED,
-      FIRST,
-      TOOL_RESULT,
-      answer('r-5', 'a-2', 'the delivered answer'),
-      answer('r-6', 'a-3', 'the second answer'),
-      answer('r-7', 'a-4', 'the third answer'),
-    ])
-    deliver('a-2')
-    const before = proxy.to('seen').length
+  before(async () => {
+    app = await stubApp({ '/api/panes/results.list': { status: 200, body: LIST } })
+  })
 
-    const result = await catchup(['--unread', '--last', '1'])
+  const env = () => ({
+    ...t.env,
+    CONSENSFLOW_APP: app.url,
+    CONSENSFLOW_APP_TOKEN: 'lead-token',
+    CONSENSFLOW_TAB: 'tab-1',
+    CONSENSFLOW_LEAD_ID: 'tab:1:1',
+    CONSENSFLOW_PANE_ID: 'p-1',
+  })
+
+  it('lists every completed result id, status and preview under the tab it was given', async () => {
+    const result = await cf(['results'], env(), t.root)
     assert.equal(result.code, 0, result.stderr)
-    assert.match(result.stdout, /the third answer/)
-    assert.doesNotMatch(result.stdout, /the delivered answer/, 'a delivered answer is read')
-    assert.doesNotMatch(result.stdout, /a tool result/, 'a tool result is not a turn')
+    assert.match(result.stdout, /nyx-coral-lane · @nyx/)
+    assert.match(result.stdout, /a-11 unread/)
+    assert.match(result.stdout, /the first answer, whole/)
+    assert.match(result.stdout, /a-12 read/)
+    assert.match(result.stdout, /zeus-quiet-fern · @zeus/)
+    assert.match(result.stdout, /a-20 reading/)
+    assert.match(result.stdout, /cf read d-4/, 'a result being read names its delivery')
 
-    const posts = proxy.to('seen').slice(before)
-    assert.equal(posts.length, 2, 'one call to learn the marks, one to report what was printed')
-    for (const post of posts) {
-      assert.equal(post.session, conversation)
-      for (const item of post.items) {
-        assert.equal(typeof item, 'object', 'items are objects, not bare ids')
-        assert.equal(typeof item.id, 'string')
-        assert.equal(typeof item.role, 'string')
-      }
-      assert.ok(
-        post.items.some((item) => item.role === 'tool'),
-        'the client sends the transcript it read; the server drops tool items',
-      )
+    const call = app.seen.at(-1)
+    assert.equal(call.path, '/api/panes/results.list')
+    assert.equal(call.authorization, 'Bearer lead-token')
+    assert.equal(call.body.tab, 'tab-1')
+    assert.equal(typeof call.body.opId, 'string')
+  })
+
+  it('filters to one conversation by exact name', async () => {
+    const result = await cf(['results', 'nyx-coral-lane'], env(), t.root)
+    assert.equal(result.code, 0, result.stderr)
+    assert.match(result.stdout, /nyx-coral-lane/)
+    assert.doesNotMatch(result.stdout, /zeus-quiet-fern/)
+  })
+
+  it('filters to a roster agent with @', async () => {
+    const result = await cf(['results', '@zeus'], env(), t.root)
+    assert.equal(result.code, 0, result.stderr)
+    assert.match(result.stdout, /zeus-quiet-fern/)
+    assert.doesNotMatch(result.stdout, /nyx-coral-lane/)
+  })
+
+  it('says what it has when the filter matches nothing', async () => {
+    const result = await cf(['results', 'ghost'], env(), t.root)
+    assert.equal(result.code, 1)
+    assert.match(result.stderr, /ghost/)
+    assert.match(result.stderr, /nyx-coral-lane/)
+  })
+
+  it('--json prints the workers the app listed', async () => {
+    const result = await cf(['results', '--json'], env(), t.root)
+    assert.equal(result.code, 0, result.stderr)
+    assert.deepEqual(JSON.parse(result.stdout), LIST)
+  })
+
+  it('discovery marks nothing as seen', async () => {
+    const before = app.seen.length
+    const result = await cf(['results', 'nyx-coral-lane'], env(), t.root)
+    assert.equal(result.code, 0, result.stderr)
+    for (const call of app.seen.slice(before)) {
+      assert.notEqual(call.path, '/api/panes/seen', 'discovery never writes a read mark')
     }
-    assert.ok(
-      !posts[0].items.some((item) => item.printed === true),
-      'the first call only asks what has been seen',
-    )
-    assert.deepEqual(
-      posts[1].items.filter((item) => item.printed === true).map((item) => item.id),
-      ['a-4'],
-      'only what was actually printed is reported as printed',
-    )
+  })
+})
 
-    // a-2 was delivered, so the mark passes it without it ever being
-    // printed; a-3 was neither delivered nor printed, so the mark stops
-    // there and a-4 does not carry it over the gap.
-    assert.deepEqual(s.threads()[conversation].seen[leadId], ['u-1', 'a-1', 'a-2'])
+describe('cf read reads one whole completed result', () => {
+  const t = tempEnv()
+  let app
+  after(async () => {
+    await app?.close()
+    t.cleanup()
   })
 
-  it('closes the gap when the missing turn is finally printed', async () => {
-    const result = await catchup(['--unread'])
+  const PART = {
+    outcome: 'read',
+    deliveryId: 'd-3',
+    conversation: 'nyx-coral-lane',
+    agent: 'nyx',
+    k: 1,
+    of: 2,
+    text: '[part 1 of 2 — 11 bytes]\nthe beginning\n[end of part 1 of 2 — delivery d-3]\nnext: cf read d-3 --part 2\n',
+  }
+
+  before(async () => {
+    app = await stubApp({ '/api/panes/results.read': { status: 200, body: PART } })
+  })
+
+  const env = () => ({
+    ...t.env,
+    CONSENSFLOW_APP: app.url,
+    CONSENSFLOW_APP_TOKEN: 'lead-token',
+    CONSENSFLOW_TAB: 'tab-1',
+    CONSENSFLOW_LEAD_ID: 'tab:1:1',
+    CONSENSFLOW_PANE_ID: 'p-1',
+  })
+  const read = (args) => cf(['read', ...args], env(), t.root)
+
+  it('prints the first framed part verbatim and teaches the next one on stderr', async () => {
+    const result = await read(['nyx-coral-lane'])
     assert.equal(result.code, 0, result.stderr)
-    assert.match(result.stdout, /the second answer/)
-    assert.match(result.stdout, /the third answer/)
+    assert.equal(result.stdout, PART.text, 'a part is printed exactly as the app framed it')
+    assert.match(result.stderr, /part 1 of 2/)
+    assert.match(
+      result.stderr,
+      /cf read d-3 --part 2/,
+      'follow-up parts use the immutable delivery id',
+    )
 
-    assert.deepEqual(s.threads()[conversation].seen[leadId], ['u-1', 'a-1', 'a-2', 'a-3', 'a-4'])
+    const call = app.seen.at(-1)
+    assert.equal(call.path, '/api/panes/results.read')
+    assert.equal(call.authorization, 'Bearer lead-token')
+    assert.equal(call.body.tab, 'tab-1')
+    assert.equal(call.body.session, 'nyx-coral-lane')
+    assert.equal(call.body.part, 1)
+    assert.equal(typeof call.body.opId, 'string')
+    assert.ok(!('answerId' in call.body), 'no answer id unless one was asked for')
   })
 
-  it('leaves the deliveries file to the app, and relays what the app says', async () => {
-    // Corrupting the file proves the ownership either way: if the client
-    // still parsed it, it would shrug and print; because the APP parses it,
-    // the read stops and the app's own words come back through the pane.
-    const root = join(s.t.env.CONSENSFLOW_HOME, 'workspaces', workspaceKey(s.workspace))
-    const kept = readFileSync(join(root, 'deliveries.json'), 'utf8')
-    writeFileSync(join(root, 'deliveries.json'), 'not json at all')
-    try {
-      const result = await catchup(['--unread'])
-      assert.equal(result.code, 1)
-      assert.match(result.stderr, /deliveries\.json/)
-      assert.match(result.stderr, /not JSON/i)
-    } finally {
-      writeFileSync(join(root, 'deliveries.json'), kept)
+  it('--answer selects one completed result', async () => {
+    const result = await read(['nyx-coral-lane', '--answer', 'a-11'])
+    assert.equal(result.code, 0, result.stderr)
+    assert.equal(app.seen.at(-1).body.answerId, 'a-11')
+  })
+
+  it('--part asks for that part', async () => {
+    const result = await read(['nyx-coral-lane', '--answer', 'a-11', '--part', '2'])
+    assert.equal(result.code, 0, result.stderr)
+    assert.equal(app.seen.at(-1).body.part, 2)
+  })
+
+  it('refuses a delivery id with --answer: the delivery already names its answer', async () => {
+    const before = app.seen.length
+    const result = await read(['d-3', '--answer', 'a-11'])
+    assert.equal(result.code, 1)
+    assert.match(result.stderr, /--answer/)
+    assert.equal(app.seen.length, before, 'a refused read asks the app for nothing')
+  })
+
+  it('refuses a bad part number before asking the app', async () => {
+    const before = app.seen.length
+    const result = await read(['nyx-coral-lane', '--part', '2garbage'])
+    assert.equal(result.code, 1)
+    assert.match(result.stderr, /part/)
+    assert.equal(app.seen.length, before, 'a refused part number asks the app for nothing')
+  })
+
+  it('reading marks nothing as seen', async () => {
+    const before = app.seen.length
+    const result = await read(['nyx-coral-lane'])
+    assert.equal(result.code, 0, result.stderr)
+    for (const call of app.seen.slice(before)) {
+      assert.notEqual(call.path, '/api/panes/seen', 'reading never writes a read mark')
     }
   })
 })
@@ -1827,10 +1867,12 @@ describe('the standalone refusals that keep a lead out of the cmux path', () => 
     assert.doesNotMatch(result.stdout, /claude|codex|pi /, 'no command is printed to run by hand')
   })
 
-  it('refuses cf catchup --wait: answers arrive, they are not waited for', async () => {
-    const result = await cf(['catchup', conversation, '--wait'], s.lead, s.workspace)
+  it('cf catchup is retired and names its replacements', async () => {
+    const result = await cf(['catchup', conversation], s.lead, s.workspace)
     assert.equal(result.code, 1, result.stdout)
-    assert.match(result.stderr, /--unread|never waits/)
+    assert.match(result.stderr, /retired/)
+    assert.match(result.stderr, /cf results/)
+    assert.match(result.stderr, /cf read/)
   })
 })
 
