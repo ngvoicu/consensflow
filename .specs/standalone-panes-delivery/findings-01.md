@@ -117,11 +117,109 @@ _not run_
 
 ## P5 — opencode's TUI server accepts a message into the running session
 
-_not run_
+**PASSED 2026-09-07 on macOS.** Installed OpenCode is `1.18.29`, binary
+`/Users/gabrielvoicu/.opencode/bin/opencode`; `~/.local/share/opencode` has
+the database, auth and storage but no source checkout. The embedded Bun bundle
+was inspected with `strings`, and `opencode --help`/`opencode serve --help`:
+the TUI accepts `--port`/`--hostname`; the server uses HTTP Basic Auth, with
+username defaulting to `opencode` and password from
+`OPENCODE_SERVER_PASSWORD`. The live route below establishes the endpoint and
+admission shape rather than relying on those embedded strings.
+
+Exact TUI launch command (the command ran attached to a PTY; all data/config
+homes were throwaway and the password was probe-only):
+
+```text
+env HOME=/tmp/consensflow-p5.Y4VGOp/home XDG_CONFIG_HOME=/tmp/consensflow-p5.Y4VGOp/config XDG_DATA_HOME=/tmp/consensflow-p5.Y4VGOp/data XDG_STATE_HOME=/tmp/consensflow-p5.Y4VGOp/state XDG_CACHE_HOME=/tmp/consensflow-p5.Y4VGOp/cache OPENCODE_SERVER_PASSWORD=p5-secret OPENCODE_SERVER_USERNAME=probe /Users/gabrielvoicu/.opencode/bin/opencode --pure /Users/gabrielvoicu/Projects/ngvoicu/consensflow --port 41893 --hostname 127.0.0.1
+```
+
+Exact HTTP commands and observed responses:
+
+```text
+curl --silent --show-error --include --max-time 5 http://127.0.0.1:41893/global/health
+HTTP/1.1 401 Unauthorized
+www-authenticate: Basic realm="Secure Area"
+Content-Length: 0
+
+curl --silent --show-error --include --max-time 5 -u probe:p5-secret http://127.0.0.1:41893/global/health
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 36
+{"healthy":true,"version":"1.18.29"}
+
+curl --silent --show-error --include --max-time 5 -u probe:p5-secret -H 'content-type: application/json' -X POST http://127.0.0.1:41893/session -d '{}'
+HTTP/1.1 200 OK
+observed JSON fields: id="ses_f86bc3273ffegbmdikZWvzPIT7"; title="New session - 2026-09-07T00:28:01.804Z"; version="1.18.29"; directory="/Users/gabrielvoicu/Projects/ngvoicu/consensflow"
+
+curl --silent --show-error --include --max-time 10 -u probe:p5-secret -H 'content-type: application/json' -X POST http://127.0.0.1:41893/session/ses_f86bc3273ffegbmdikZWvzPIT7/prompt_async -d '{"parts":[{"type":"text","text":"probe-p5-admission-2026-09-07"}]}'
+HTTP/1.1 204 No Content
+Content-Length: 0
+
+curl --silent --show-error --include --max-time 5 -u probe:p5-secret http://127.0.0.1:41893/session/ses_f86bc3273ffegbmdikZWvzPIT7/message
+HTTP/1.1 200 OK
+observed JSON: one message with role="user" and one text part with text="probe-p5-admission-2026-09-07"; the response also contained the assistant error record after that user message
+```
+
+The `204` is the server's admission response, and the immediate message read
+contains the exact probe text as a stored `role:"user"` turn. The TUI's
+provider then showed its own missing-key error, but that did not change the
+admission or stored user turn. **Pass: `opencode-server` is enabled.**
 
 ## P6 — a pi extension delivers a follow-up when the agent is idle
 
-_not run_
+**PASSED 2026-09-07 on macOS.** Installed Pi is `0.85.1`, binary
+`/opt/homebrew/bin/pi`. The installed docs and sources were read:
+`docs/extensions.md` documents `--extension/-e` and `pi.on(...)`;
+`examples/extensions/send-user-message.ts` uses `ctx.isIdle()` and
+`pi.sendUserMessage()`; `dist/core/extensions/types.d.ts` defines
+`session_start`, `agent_settled`, `session_shutdown` and `ctx.isIdle()`; and
+`dist/core/agent-session.d.ts` defines `sendUserMessage` as an actual user
+message that always triggers a turn. Pi's `agent-session.js` emits
+`agent_settled` only after the run, so the probe also tested the inbox watcher
+path while already idle.
+
+The temporary probe extension watched an inbox directory on `session_start`,
+checked `ctx.isIdle()` on each filesystem event, read one JSON record, called
+`pi.sendUserMessage(record.text)`, wrote `<id>.json` in the ack directory, and
+removed the consumed inbox record. It also logged the event order. A local
+OpenAI-compatible provider on `127.0.0.1:43218` returned `p6-ok`, so no remote
+network or real provider quota was used.
+
+Exact provider command:
+
+```text
+node --input-type=module -e 'import { createServer } from "node:http"; import { appendFile } from "node:fs/promises"; const server=createServer(async (req,res)=>{ let body=""; for await (const chunk of req) body+=chunk; await appendFile("/tmp/consensflow-p6.Y4VGOp/run/provider2.jsonl", JSON.stringify({method:req.method,url:req.url,body})+"\n"); res.writeHead(200,{"content-type":"text/event-stream"}); res.write("data: "+JSON.stringify({id:"p6-response",object:"chat.completion.chunk",created:1,model:"p6-model",choices:[{index:0,delta:{role:"assistant",content:"p6-ok"},finish_reason:null}]})+"\n\n"); res.write("data: "+JSON.stringify({id:"p6-response",object:"chat.completion.chunk",created:1,model:"p6-model",choices:[{index:0,delta:{},finish_reason:"stop"}]})+"\n\n"); res.end("data: [DONE]\n\n"); }); server.listen(43218,"127.0.0.1",()=>console.log("p6-provider listening 127.0.0.1:43218"));'
+```
+
+Exact Pi command (isolated config/session homes, extension explicitly loaded):
+
+```text
+env HOME=/tmp/consensflow-p6.Y4VGOp/home3 PI_CODING_AGENT_DIR=/tmp/consensflow-p6.Y4VGOp/agent3 PI_CODING_AGENT_SESSION_DIR=/tmp/consensflow-p6.Y4VGOp/sessions3 PI_TELEMETRY=0 PI_SKIP_VERSION_CHECK=1 CF_P6_INBOX=/tmp/consensflow-p6.Y4VGOp/run3/inbox CF_P6_ACK=/tmp/consensflow-p6.Y4VGOp/run3/ack CF_P6_LOG=/tmp/consensflow-p6.Y4VGOp/run3/events.jsonl CF_P6_PROVIDER_URL=http://127.0.0.1:43218/v1 /opt/homebrew/bin/pi --no-extensions --extension /tmp/consensflow-p6.Y4VGOp/probe-extension.mjs --approve --provider p6-local --model p6-model --session-dir /tmp/consensflow-p6.Y4VGOp/sessions3 --session-id p6-probe-3
+```
+
+Inbox arrival command:
+
+```text
+node --input-type=module -e 'import { writeFile } from "node:fs/promises"; await writeFile("/tmp/consensflow-p6.Y4VGOp/run3/inbox/d-p6-3.json", JSON.stringify({id:"d-p6-3",text:"probe-p6-idle-inbox-2026-09-07"})+"\n")'
+```
+
+Observed extension log, in order:
+
+```text
+{"event":"session_start","idle":true}
+{"event":"arrival","idle":true,"delivery":{"id":"d-p6-3","text":"probe-p6-idle-inbox-2026-09-07"}}
+{"event":"ack","idleAfter":false,"deliveryId":"d-p6-3"}
+{"event":"agent_settled","idle":true}
+```
+
+Ack file `/tmp/consensflow-p6.Y4VGOp/run3/ack/d-p6-3.json` contained:
+`{"id":"d-p6-3","admitted":true,"mode":"tui"}`. The session file
+`/tmp/consensflow-p6.Y4VGOp/sessions3/2026-09-07T00-33-40-446Z_p6-probe-3.jsonl`
+contained the exact user turn with `role:"user"` and the assistant response
+`p6-ok` with `stopReason:"stop"`. Arrival and ack preceded the first
+`agent_settled`, proving that an inbox record written while Pi was already
+idle was delivered immediately rather than stranded. **Pass:
+`pi-extension` is enabled.**
 
 ## Completion markers per harness (Phase 3, TEST-PANE-23 / IMPL-PANE-24)
 

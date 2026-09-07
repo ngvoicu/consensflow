@@ -735,7 +735,7 @@ replacement fails closed; an interrupted read creates no coverage.
       is honoured.
 - [ ] [IMPL-PANE-32] `src/delivery-watch.js`, started by the app process
       at launch (not by mode). -> satisfies [TEST-PANE-31]
-- [ ] [TEST-PANE-33] `tests/channels.test.mjs` — `deliver(channel, target,
+- [x] [TEST-PANE-33] `tests/channels.test.mjs` — `deliver(channel, target,
       record)`: `pty-inline` and `cf-read` call `pane.write_paste` with the
       epoch; `opencode-server` POSTs to the running TUI's server found and
       authenticated as P5 recorded, and reports admission from the
@@ -743,7 +743,7 @@ replacement fails closed; an interrupted read creates no coverage.
       and reports admission from the extension's ack file; a channel not
       enabled for the lead's harness is never chosen; an enabled channel
       carries its launch configuration (extension path, endpoint discovery).
-- [ ] [IMPL-PANE-34] `src/channels/pty.js` always; `src/channels/opencode.js`
+- [x] [IMPL-PANE-34] `src/channels/pty.js` always; `src/channels/opencode.js`
       only once P5 is recorded as passed; `src/channels/pi.js` and the
       `consensflow-delivery` pi extension under `hosts/pi-extension/` only
       once P6 is recorded as passed — and P6 must include an inbox arrival
@@ -903,6 +903,14 @@ replacement fails closed; an interrupted read creates no coverage.
 
 ## Resume Context
 
+> 2026-09-07 06:05 EEST — **page (39–40) committed f3943b8, Phase 4 complete**,
+> registry 34/52. In work: `cf` side round 3 (apollo, hyperion's five),
+> channels round 4 (diana, apollo's two), watcher round 2 (phoebus,
+> hyperion's six), bridge operations 35–36 with the lead's preallocated and
+> resumable session (zeus). Next: Phase 5 lifecycle 41–42 to hyperion,
+> integration 43–44 and smoke 45–46 after 19–20 and 31–36 land, then the
+> Phase 3 exit consult with astraeus and Phase 6 (47–50).
+>
 > 2026-09-07 05:25 EEST — **handlers (17–18 with slice B) committed e4634bd**,
 > registry 32/52. In review: page round 4 (asteria, the last ordering
 > finding), the `cf` side round 2 (hyperion, `hyperion-nutmeg-harbor`),
@@ -1088,6 +1096,8 @@ replacement fails closed; an interrupted read creates no coverage.
 | 2026-09-07 | `cf` side: one evidence validator shared by `run` and `attach`; a kimi launch that captures no session is a visible failure with a nonzero exit; binding returns a status and never mutates the global exit, the final exit is decided once from the window outcome; the fake harness in the tests persists the prompt it was actually given so a marker test proves the marker travelled | hyperion's cf round 2: `attach` ignored bogus evidence flags and handed over with a wrong launch; a missing kimi binary exited 0 in silence; the same unbound transcript exited 0 or 1 depending on when discovery finished; a synthetic opencode fixture passed with the nonce removed from the real prompt |
 | 2026-09-07 | Channels: the pi extension accepts exactly two wire shapes, the envelope and the pointer line rebuilt from the record's fields, compared byte for byte; the pi ack timeout minted at launch is 30 s (a turn of arbitrary length is what it waits on) while the opencode HTTP deadline keeps its own 3 s default, the two never share a constant; the pi cf-read channel test runs the real extension code | apollo, channels round 3: the adapters sent the pointer but the extension still demanded the envelope, so a file delivery through real pi timed out with the record left in the inbox; a delivery arriving 1.2 s into a 5 s turn was admitted on disk while the app recorded uncertain against a 3 s timeout |
 | 2026-09-07 | Bridge operations (35–36): the lead is a session like a worker, preallocated at `tab.open` for claude and pi and bound at open through `session.bind`, and `tab.resume` resumes the BOUND session with the harness's own resume argument so the lead's context survives; closing the lead pane is the suspend, there is no `tab.suspend` verb; a lead pane ending releases its reservation and suspends the tab; `state.changed` fires on every successful store mutation and never on a failed one; `state.list` carries no answers, `answers.list` is per conversation; bridge operations are not idempotent by opId (the page has no credential, a second click is a second action); an unmodelled throw on a pane route is 500 with the cause's message as `reason`, store refusals carry codes and stay 400; `deliver.now` marks a pending record manual in place and resends an accepted or cancelled one under a new id | zeus, tasks 35–36: a lead's native session was null so every resume started the lead cold, losing its context; a lead exit left an unrecoverable tab; `deliver.now` wrote pending onto a cancelled record and reported success; a bare `internal_error` would have thrown away the one diagnostic a person needs on their own machine |
+| 2026-09-07 | `pane.open` carries `dropEnv`, a list of names Rust removes from the child environment before spawning, after applying `env`; the lead launch sends the harness's billing guards in it (`interactiveGuards`) | zeus, task 21: a lead pane is spawned by Rust and the frame could only add keys, so a lead's harness ran without the guard that keeps a subscription login from switching to API-key billing; workers go through `cf`, which strips them |
+| 2026-09-07 | Channels landed with two recorded follow-ups, neither blocking: the pi adapter does not withdraw the inbox record on `ack-timeout`, so past a 30 s turn the extension may still deliver after the app recorded uncertain (bounded, and readiness-gated on both paths; the clean close is to unlink the record on timeout); the pi extension imports `hosts/lib/deliveries.js`, so Phase 6 packaging must carry that dependency beside the extension | apollo, channels round 4 approve |
 
 ## TDD Log
 
@@ -1125,6 +1135,8 @@ replacement fails closed; an interrupted read creates no coverage.
 | [IMPL-PANE-18] | — | 50/50 ui-panes, 133/133 with store and ui; asteria over four rounds (H1–H9, then four residuals, then four more, then one test): **approve**, 285/285 on her snapshot | `store.admit` as the single admission mutation, one owner of give-the-launch-back, the opId ledger before any mutable-state validation, the seen walk owned by the server over `{id, role, printed}` items |
 | [TEST-PANE-39] | hyperion, `npm run test:ui`: exit 1, 20 failed (`#app` absent); every later finding red first through the production invoke handler (1,000 requests reordered as 0002, 0001, 0004, 0000; the oversized paste answering sequence-gap) | — | — |
 | [IMPL-PANE-40] | — | Playwright 35/35, cargo test 73 (66 unit + 7 headless incl. B8/C7 at exactly 1,024 unacked and 14,400 drained), clippy -D warnings clean, app-only bundle signed; asteria over five rounds (11 findings, then 3, then 1, then 1): **approve**, no remaining findings | two input paths (human vs emulator replies), synchronous sequence-checked admission with async ticket completion, per-pane writers off the blocking pool, `state.changed` forwarded to the page, headless shutdown order, the page bundling `policy.js` and `layout.js` |
+| [TEST-PANE-33] | diana, `node --test tests/channels.test.mjs`: exit 1 — `ERR_MODULE_NOT_FOUND src/channels.js`; each later finding red first (pointer for cf-read: 2 failures; the 3,000 → 30,000 ms revert failing; the required-timeout guard) | — | — |
+| [IMPL-PANE-34] | — | channels 31/31 with the pi extension suite; P5 and P6 PASSED live and recorded in findings-01.md; apollo over four rounds (8 findings, then 4, then 2): **approve**, cf-read pointer reaching real pi in 248 ms, a mid-turn arrival admitted at 3,966 ms, six reverts caught | `launchConfiguration` and `enabledChannels` as the producer of a lead's native-channel launch; the extension accepts exactly the envelope or the pointer rebuilt from the record, byte for byte |
 
 ## Deviations
 
@@ -1138,3 +1150,4 @@ replacement fails closed; an interrupted read creates no coverage.
 | [IMPL-PANE-30] catchup clause | task 30 carries the standalone `cf catchup` integration (`bin/cf.mjs:379`, turn counts today) | the clause is delivered by the `cf`-side unit, tasks 19–20 | one worker edits `bin/cf.mjs`; the deliveries module stays pure and exposes `seenAfter`, the CLI consumes it |
 | [TEST-PANE-17] `seen` | `seen {session, items}` by item id | the request carries the ordered transcript items the client read, as objects `{id, role, printed}`, and the SERVER runs `seenAfter` over them with the deliveries and the store row; the client reads no delivery file | asteria (handlers round 3) and hyperion (cf review) found the two ends incompatible: the client sent ids from its own walk over a local copy of the deliveries file, the server required objects. One owner for the walk, the one holding the deliveries |
 | Architecture, pi channel | `sendUserMessage(…, {deliverAs: 'followUp'})` on `agent_settled` | `sendUserMessage(text)` with no `deliverAs`, delivered from an inbox at once when the agent is already idle and on `agent_settled` otherwise | pi's own types apply `deliverAs` only while a turn is streaming; P6 proved an arrival while idle is delivered immediately (apollo's channels review, diana's P6 record) |
+| Lead harnesses | every roster harness can lead | kimi is withdrawn from `LEAD_HARNESSES` until a kimi lead can be seeded with a launch nonce | zeus, task 21: kimi's interactive start takes no positional prompt and `-p` is non-interactive, so a kimi lead opens bare and can never bind |

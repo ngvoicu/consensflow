@@ -12,6 +12,7 @@
       "hosts/lib/readiness.js",
       "hosts/lib/policy.js",
       "hosts/lib/session-binding.js",
+      "hosts/pi-extension/**",
       "*.ts",
       "*.json",
       "!!**/node_modules",
