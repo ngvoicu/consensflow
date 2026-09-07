@@ -756,7 +756,7 @@ replacement fails closed; an interrupted read creates no coverage.
       `held.send {tab}` for held records; `tab.resume`.
 - [ ] [IMPL-PANE-36] `src/panes.js` handlers. -> satisfies [TEST-PANE-35]
 
-## Phase 4: The page — selector, sidebar, panes, layouts, menus [pending] — gated by P3
+## Phase 4: The page — selector, sidebar, panes, layouts, menus [completed] — P3 passed
 
 - [x] [TEST-PANE-37] `tests/layout.test.mjs` — `gridTemplate(n)` for 1–6
       matches the six pictures; beyond 6 `rows = ceil(sqrt(n))`, `cols =
@@ -764,7 +764,7 @@ replacement fails closed; an interrupted read creates no coverage.
       shows the focused-pane view (asserted in TEST-39); the lead cell is
       always `lead`.
 - [x] [IMPL-PANE-38] `src/layout.js`. -> satisfies [TEST-PANE-37]
-- [ ] [TEST-PANE-39] `app/tests/page.spec.mjs` (Playwright, `__TAURI__`
+- [x] [TEST-PANE-39] `app/tests/page.spec.mjs` (Playwright, `__TAURI__`
       shim) — first launch maximized, later launches restore geometry; the
       roster panel (the `cf ui` iframe) collapses upward and expands; the
       sidebar (collapsible left) and the pane area; four and five
@@ -783,7 +783,7 @@ replacement fails closed; an interrupted read creates no coverage.
       a HIDDEN tab's emulators keep consuming and acking (a canned flood on
       a hidden pane drains); no request leaves the origin except the roster
       iframe's own.
-- [ ] [IMPL-PANE-40] `app/ui/` (`index.html`, `panes.js`, `term.js` with
+- [x] [IMPL-PANE-40] `app/ui/` (`index.html`, `panes.js`, `term.js` with
       the `Emulator` interface and per-pane xterm instances that live while
       the pane does, `menus.js`), `app/scripts/bundle-ui.mjs`; `lib.rs`
       commands `open_lead`, `open_shell`, `open_consult`, `close_pane`,
@@ -903,6 +903,19 @@ replacement fails closed; an interrupted read creates no coverage.
 
 ## Resume Context
 
+> 2026-09-07 05:25 EEST — **handlers (17–18 with slice B) committed e4634bd**,
+> registry 32/52. In review: page round 4 (asteria, the last ordering
+> finding), the `cf` side round 2 (hyperion, `hyperion-nutmeg-harbor`),
+> the watcher (hyperion, `hyperion-nutmeg-cloud`), channels round 2 (apollo,
+> `apollo-quartz-fern`). In work: zeus on tasks 35–36 widened to every bridge
+> request Rust sends (the lead launch `tab.open` with binding evidence and
+> channel configuration, `tab.resume`, `shell.open`, `pane.close`,
+> `notify.set`, `state.list`, `answers.list`, `deliver.now`,
+> `deliver.cancel`, `held.send`), the watcher wiring into `src/ui.js`,
+> `state.changed` once per store mutation, 500 for unmodelled throws.
+> Landing order: page, cf side, channels, watcher, then 35–36. Then Phase 5
+> (41–46) and the Phase 3 exit consult with astraeus.
+>
 > 2026-09-07 03:30 EEST — **completion (23–24) committed f9bb3a9, deliveries
 > (29–30) committed 94790a0**, registry 30/52. In work: slice A round 2 of
 > the pane handlers (zeus, nine asteria findings, then slice B read/seen in
@@ -1069,6 +1082,12 @@ replacement fails closed; an interrupted read creates no coverage.
 | 2026-09-07 | A closed conversation is RESUMED by the harness's own continuation path (the one `cf attach` already uses), for consult as for attach, with the `--native-session` the server passes; kimi continues non-interactively on `-S <id>` with the task before its TUI takes over; only `--new` preallocates. The pane-open response is validated: release only on exactly `{ok:false, error}`, any other shape keeps the reservation as uncertain; `transmitted` is set only when bytes were handed to the transport. App-only `cf` flags are validated before the image, app and cmux split, evidence flags require `--in-pane`, exactly one is present and `--launch` must match the redeemed launch; the shim refuses an unset `CONSENSFLOW_NODE` | hyperion's cf review: a closed `cf run` started codex and opencode cold and gave claude `--session-id` instead of `--resume`; asteria's handlers round 3: Rust answering `null` released a launch and a serialisation failure stranded one; the evidence flags fell through to cmux behaviour and a fake PATH `node` ran |
 | 2026-09-07 | Page input admission is a synchronous Tauri command whose body only enqueues into the pane's bounded queue on the IPC thread and returns a ticket, so admission order is arrival order by construction; completion is awaited by a separate async command on the ticket; the page stamps a per-pane monotonic sequence on every input and Rust refuses a gap or regression with a visible code | asteria, page round 3: Tauri schedules the whole async command body, so work placed before the first await still runs in scheduling order; 1,000 sequential IPC requests through the production handler arrived as 0000, 0005, 0001, 0003 |
 | 2026-09-07 | Tasks 35–36 cover every bridge request Rust sends to Node, not only the six page ops named: `tab.open` (the lead launch: tab created, lead reserved on the tab record with a minted launch id, the harness command with the lead's binding evidence, `leadEnv` plus the channel configuration, `pane.open`, the lead bound through the same path as a worker), `tab.resume`, `shell.open`, `pane.close`, `notify.set`, `state.list`, `answers.list`, `deliver.now`, `deliver.cancel`, `held.send`; `state.changed` is emitted once per store mutation that changes what the page shows, from the mutation queue; `/api/tabs` is the HTTP twin of `tab.open` | the lead launch had no task: Rust's `open_lead` asks Node for `tab.open` and Node handled only `ping`, so every page operation rendered as not available; the handlers' owner (zeus) builds them in one unit |
+| 2026-09-07 | Channels: every native-channel delivery has a deadline, the opencode adapter defaults one inside the module; `launchConfiguration('pi')` mints one ack timeout and derives the extension's strictly shorter one from it, both carried in the channel object the adapter reads; an inbox record with an invalid id is quarantined once beside the inbox, never deleted or retried; the opencode username default `opencode` is confirmed against the real binary | apollo, channels round 2: a delivery without a deadline hung indefinitely, and the extension's honest negative ack landed about 10 ms after the adapter's identical 30 s timeout, so it was never read |
+| 2026-09-07 | Page input: a correctly numbered message is consumed under the sequence lock before any refusal about its content (size included) is returned, with no bytes enqueued, so a refusal answers that sequence number and the next one is accepted; the page never rolls its counter back | asteria, page round 4: a 65,537-byte paste as sequence 1 was refused for size before its number was recorded, and every later keystroke answered sequence-gap, the pane dead to input |
+| 2026-09-07 | Watcher: a native channel sends the pointer for a `cf-read` record and the envelope otherwise, the user envelope is never file coverage; `admitted: false` from a native channel is affirmative non-admission, the record fails with zero bytes and stays replayable; planning for a conversation waits while a newer sent question may still be landing, until its user turn appears or the wait grace expires; `close` drains every admitted operation through the transport before it resolves; the watcher emits no `state.changed` of its own | hyperion's watcher review: a large record on a native channel stayed submitting then uncertain with the real adapter, a pi negative ack read as success, a standing old answer was written 100 ms after a new question was sent, and a close between admission and transport stranded a zero-byte delivery as uncertain |
+| 2026-09-07 | `cf` side: one evidence validator shared by `run` and `attach`; a kimi launch that captures no session is a visible failure with a nonzero exit; binding returns a status and never mutates the global exit, the final exit is decided once from the window outcome; the fake harness in the tests persists the prompt it was actually given so a marker test proves the marker travelled | hyperion's cf round 2: `attach` ignored bogus evidence flags and handed over with a wrong launch; a missing kimi binary exited 0 in silence; the same unbound transcript exited 0 or 1 depending on when discovery finished; a synthetic opencode fixture passed with the nonce removed from the real prompt |
+| 2026-09-07 | Channels: the pi extension accepts exactly two wire shapes, the envelope and the pointer line rebuilt from the record's fields, compared byte for byte; the pi ack timeout minted at launch is 30 s (a turn of arbitrary length is what it waits on) while the opencode HTTP deadline keeps its own 3 s default, the two never share a constant; the pi cf-read channel test runs the real extension code | apollo, channels round 3: the adapters sent the pointer but the extension still demanded the envelope, so a file delivery through real pi timed out with the record left in the inbox; a delivery arriving 1.2 s into a 5 s turn was admitted on disk while the app recorded uncertain against a 3 s timeout |
+| 2026-09-07 | Bridge operations (35–36): the lead is a session like a worker, preallocated at `tab.open` for claude and pi and bound at open through `session.bind`, and `tab.resume` resumes the BOUND session with the harness's own resume argument so the lead's context survives; closing the lead pane is the suspend, there is no `tab.suspend` verb; a lead pane ending releases its reservation and suspends the tab; `state.changed` fires on every successful store mutation and never on a failed one; `state.list` carries no answers, `answers.list` is per conversation; bridge operations are not idempotent by opId (the page has no credential, a second click is a second action); an unmodelled throw on a pane route is 500 with the cause's message as `reason`, store refusals carry codes and stay 400; `deliver.now` marks a pending record manual in place and resends an accepted or cancelled one under a new id | zeus, tasks 35–36: a lead's native session was null so every resume started the lead cold, losing its context; a lead exit left an unrecoverable tab; `deliver.now` wrote pending onto a cancelled record and reported success; a bare `internal_error` would have thrown away the one diagnostic a person needs on their own machine |
 
 ## TDD Log
 
@@ -1104,6 +1123,8 @@ replacement fails closed; an interrupted read creates no coverage.
 | [IMPL-PANE-30] | — | 119/119, coverage 99.49 / 99.69 / 100; asteria blocked round 1 (DEL1–DEL8), hyperion blocked rounds 2 and 3, then **approve**, no remaining findings, 22 mutations caught, safe-integer allocator verified on the tree | ids injected and validated (`d-<digits>`), injective part framing with byte count, one plan-time Unicode normalisation, explicit conversation in `seenAfter`, `channelFor` removed, time injected; the catchup clause moved to tasks 19–20 (Deviations) |
 | [TEST-PANE-17] | zeus, `node --test tests/ui-panes.test.mjs`: exit 1, 19 tests, 0 pass, 18 cancelled — `server.attachBridge is not a function`; each later behaviour red first (refused launch leaves no pane row, preallocated harness told its session id, unresolved launch is nobody's live pane, the four asteria residuals, the serialisation boundary) | — | — |
 | [IMPL-PANE-18] | — | 50/50 ui-panes, 133/133 with store and ui; asteria over four rounds (H1–H9, then four residuals, then four more, then one test): **approve**, 285/285 on her snapshot | `store.admit` as the single admission mutation, one owner of give-the-launch-back, the opId ledger before any mutable-state validation, the seen walk owned by the server over `{id, role, printed}` items |
+| [TEST-PANE-39] | hyperion, `npm run test:ui`: exit 1, 20 failed (`#app` absent); every later finding red first through the production invoke handler (1,000 requests reordered as 0002, 0001, 0004, 0000; the oversized paste answering sequence-gap) | — | — |
+| [IMPL-PANE-40] | — | Playwright 35/35, cargo test 73 (66 unit + 7 headless incl. B8/C7 at exactly 1,024 unacked and 14,400 drained), clippy -D warnings clean, app-only bundle signed; asteria over five rounds (11 findings, then 3, then 1, then 1): **approve**, no remaining findings | two input paths (human vs emulator replies), synchronous sequence-checked admission with async ticket completion, per-pane writers off the blocking pool, `state.changed` forwarded to the page, headless shutdown order, the page bundling `policy.js` and `layout.js` |
 
 ## Deviations
 

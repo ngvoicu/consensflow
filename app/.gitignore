@@ -1,5 +1,7 @@
 node_modules/
 src-tauri/target/
+test-results/
+playwright-report/
 # Staged at build time by scripts/prepare-sidecar.mjs
 .cache/
 src-tauri/binaries/

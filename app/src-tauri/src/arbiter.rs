@@ -298,6 +298,37 @@ impl InputArbiter {
         Ok(next_epoch)
     }
 
+    pub fn write_reply(
+        &self,
+        table: &PaneTable,
+        pane: &PaneKey,
+        bytes: &[u8],
+    ) -> Result<(), ArbiterError> {
+        self.write_reply_via(table, pane, bytes)
+    }
+
+    fn write_reply_via<W: PaneInputWriter + ?Sized>(
+        &self,
+        writer: &W,
+        pane: &PaneKey,
+        bytes: &[u8],
+    ) -> Result<(), ArbiterError> {
+        let state = self.pane_state(pane)?;
+        let mut state = lock_state(&state)?;
+        validate_generation(&state, pane)?;
+        if state.input_failed {
+            return Err(ArbiterError::InputFailed);
+        }
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        if let Err(error) = writer.write(pane, bytes) {
+            state.input_failed = true;
+            return Err(error.into());
+        }
+        Ok(())
+    }
+
     pub fn write_paste(
         &self,
         table: &PaneTable,
@@ -724,6 +755,37 @@ mod tests {
             }
         );
         assert_eq!(read_hex(reader), "780d");
+    }
+
+    #[test]
+    fn emulator_reply_writes_without_latching_a_draft_or_advancing_the_epoch() {
+        let key = PaneKey::new("reply", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let (events, receiver) = mpsc::channel();
+        let arbiter = InputArbiter::new(5, events);
+        arbiter.register(&key).expect("register pane");
+
+        arbiter
+            .write_reply_via(writer.as_ref(), &key, b"\x1b[0n")
+            .expect("write terminal reply");
+
+        assert_eq!(
+            writer
+                .records()
+                .iter()
+                .map(|record| &record.bytes)
+                .collect::<Vec<_>>(),
+            vec![b"\x1b[0n"]
+        );
+        let snapshot = arbiter.snapshot(&key).expect("reply state");
+        assert_eq!(snapshot.generation, 1);
+        assert_eq!(snapshot.input_epoch, 0);
+        assert!(!snapshot.draft_latched);
+        assert!(!snapshot.paste_in_flight);
+        assert!(!snapshot.input_failed);
+        assert_eq!(snapshot.queued_human_bytes, 0);
+        assert_eq!(snapshot.last_submission_id, None);
+        assert!(receiver.recv_timeout(Duration::from_millis(50)).is_err());
     }
 
     #[cfg(unix)]

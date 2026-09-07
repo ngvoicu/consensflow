@@ -465,6 +465,83 @@ fn output_window_resumes_only_after_a_wire_ack() {
 }
 
 #[test]
+fn parked_page_probe_stops_at_1024_then_drains_14400_bytes_via_wire_acks() {
+    const BACKLOG_BYTES: usize = 1024;
+    const OUTPUT_BYTES: usize = 14_400;
+
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let opened = helper.request(
+        "pane.open",
+        open_body(
+            "/usr/bin/yes x | /usr/bin/tr -d '\\n' | /usr/bin/head -c 14400",
+            BACKLOG_BYTES,
+        ),
+        &mut events,
+    );
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    let mut received_bytes = 0;
+    let mut pending = Vec::new();
+    while received_bytes < BACKLOG_BYTES {
+        if events.is_empty() {
+            events.push(helper.receive());
+        }
+        for event in events.drain(..) {
+            if let Some((seq, bytes)) = output_bytes(&event, &pane_id, generation) {
+                received_bytes += bytes.len();
+                pending.push(seq);
+            }
+        }
+    }
+    assert_eq!(received_bytes, BACKLOG_BYTES);
+    assert!(matches!(
+        helper.receive_timeout(Duration::from_millis(150)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
+
+    let mut ack_count = 0;
+    while let Some(seq) = pending.pop() {
+        assert_eq!(
+            helper.request(
+                "pane.ack",
+                json!({"id":pane_id,"generation":generation,"seq":seq}),
+                &mut events,
+            ),
+            json!({"ok":true})
+        );
+        ack_count += 1;
+    }
+    while received_bytes < OUTPUT_BYTES {
+        if events.is_empty() {
+            events.push(helper.receive());
+        }
+        let mut received = events
+            .drain(..)
+            .filter_map(|event| output_bytes(&event, &pane_id, generation))
+            .collect::<Vec<_>>();
+        for (seq, bytes) in received.drain(..) {
+            received_bytes += bytes.len();
+            assert!(received_bytes <= OUTPUT_BYTES);
+            assert_eq!(
+                helper.request(
+                    "pane.ack",
+                    json!({"id":pane_id,"generation":generation,"seq":seq}),
+                    &mut events,
+                ),
+                json!({"ok":true})
+            );
+            ack_count += 1;
+        }
+    }
+
+    assert_eq!(received_bytes, OUTPUT_BYTES);
+    assert!(ack_count > 1, "finite flood drained without repeated acks");
+    helper.close_input_and_wait();
+}
+
+#[test]
 fn stdin_eof_reaps_every_spawned_process() {
     let _pty_guard = serial_headless_test();
     let mut helper = Headless::spawn();

@@ -324,6 +324,34 @@ impl PaneTable {
         Ok(StreamedPane { key, output })
     }
 
+    /// Opens a streamed pane at the app-owned identity Node already reserved.
+    /// The store mints pane ids; Rust owns the process living at that key.
+    pub fn open_streamed_at(
+        &self,
+        key: PaneKey,
+        cwd: &Path,
+        argv: &[String],
+        env: &HashMap<String, String>,
+        size: PtySize,
+        backlog_bytes: usize,
+    ) -> Result<StreamedPane, PaneError> {
+        if backlog_bytes == 0 {
+            return Err(PaneError::InvalidBacklog);
+        }
+
+        let reader = self.open_at(key.clone(), cwd, argv, env, size)?;
+        let flow = Arc::new(OutputFlow::new(backlog_bytes));
+        self.lock_panes()?
+            .get_mut(&key)
+            .ok_or_else(|| PaneError::NotFound(key.clone()))?
+            .output_flow = Some(Arc::clone(&flow));
+
+        let (sender, output) = mpsc::channel();
+        let output_key = key.clone();
+        std::thread::spawn(move || stream_output(output_key, reader, flow, sender));
+        Ok(StreamedPane { key, output })
+    }
+
     pub fn ack(&self, key: &PaneKey, seq: u64) -> Result<(), PaneError> {
         let flow = self
             .lock_panes()?
@@ -771,6 +799,33 @@ mod tests {
         table.kill(&second).expect("kill second generation");
         assert_eq!(read_to_end(first_reader), b"");
         assert_eq!(read_to_end(second_reader), b"");
+    }
+
+    #[test]
+    fn streamed_open_at_preserves_the_store_reserved_identity() {
+        let _pty_guard = serial_pty_test();
+        let table = PaneTable::new();
+        let key = PaneKey::new("reserved-worker", 7);
+        let streamed = table
+            .open_streamed_at(
+                key.clone(),
+                Path::new("/tmp"),
+                &shell("printf reserved"),
+                &HashMap::new(),
+                terminal_size(24, 80),
+                1024,
+            )
+            .expect("open the store-reserved pane identity");
+
+        assert_eq!(streamed.key, key);
+        let mut bytes = Vec::<u8>::new();
+        while let Ok(chunk) = streamed.output.recv_timeout(Duration::from_secs(1)) {
+            bytes.extend_from_slice(&chunk.bytes);
+            table
+                .ack(&key, chunk.seq)
+                .expect("ack reserved pane output");
+        }
+        assert_eq!(bytes, b"reserved");
     }
 
     #[test]

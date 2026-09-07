@@ -1,37 +1,479 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<title>ConsensFlow</title>
-<style>
-  :root { color-scheme: dark light; }
-  body {
-    margin: 0; min-height: 100vh; display: grid; place-items: center;
-    background: #0C1E23; color: #E9F1EF; font-family: Archivo, system-ui, sans-serif;
-    padding: 2rem; text-align: center;
-  }
-  main { max-width: 46ch; }
-  p.mark { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px;
-    letter-spacing: .14em; text-transform: uppercase; color: #63C7B2; margin: 0 0 10px; }
-  h1 { font-size: 20px; font-weight: 600; margin: 0 0 10px; }
-  p { line-height: 1.55; color: #8FA9AF; margin: 0; font-size: 14px; }
-  code { font-family: "IBM Plex Mono", ui-monospace, monospace; color: #E9F1EF; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ConsensFlow</title>
+  <link rel="stylesheet" href="./vendor/xterm.css">
+  <style>
+    :root {
+      --ink: #08181d;
+      --deep: #0c2026;
+      --panel: #112a31;
+      --panel-raised: #17343c;
+      --line: #28464d;
+      --line-soft: #1c373e;
+      --foam: #e9f1ef;
+      --muted: #8ea8ad;
+      --seafoam: #63c7b2;
+      --seafoam-dim: #2b7569;
+      --buoy: #ff7868;
+      --amber: #e7b968;
+      --shadow: rgba(0, 0, 0, .32);
+      --ui: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+      --mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: var(--ink);
+      color: var(--foam);
+      font: 13px/1.4 var(--ui);
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input, select, textarea { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+      outline: 2px solid var(--seafoam);
+      outline-offset: 2px;
+    }
+    [hidden] { display: none !important; }
+
+    #app {
+      height: 100dvh;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto 48px minmax(0, 1fr);
+      background:
+        linear-gradient(90deg, rgba(99, 199, 178, .025) 1px, transparent 1px) 0 0 / 24px 24px,
+        var(--ink);
+    }
+
+    .roster-panel {
+      min-height: 38px;
+      border-bottom: 1px solid var(--line);
+      background: var(--deep);
+      box-shadow: 0 10px 30px var(--shadow);
+      z-index: 5;
+    }
+    .roster-bar {
+      height: 38px;
+      padding: 0 12px 0 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-left: 3px solid var(--seafoam);
+    }
+    .brand {
+      font: 700 10px/1 var(--mono);
+      letter-spacing: .19em;
+      text-transform: uppercase;
+      color: var(--seafoam);
+    }
+    .roster-label { color: var(--muted); font-size: 12px; }
+    .spacer { flex: 1; }
+    .roster-body {
+      display: grid;
+      grid-template-rows: 1fr;
+      height: 184px;
+      overflow: hidden;
+      transition: height 160ms ease, opacity 140ms ease;
+    }
+    .roster-panel[data-collapsed="true"] .roster-body { height: 0; opacity: 0; }
+    .roster-body iframe {
+      width: 100%;
+      height: 184px;
+      border: 0;
+      background: var(--panel);
+    }
+
+    .icon-button, .quiet-button, .primary-button, .policy-button {
+      min-height: 30px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      padding: 5px 10px;
+      cursor: default;
+    }
+    .icon-button:hover, .quiet-button:hover, .policy-button:hover { border-color: var(--seafoam-dim); }
+    .primary-button {
+      background: var(--seafoam);
+      color: #071719;
+      border-color: var(--seafoam);
+      font-weight: 700;
+    }
+    .primary-button:hover { background: #7bd4c1; }
+    button:disabled { opacity: .48; cursor: not-allowed; }
+
+    .command-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--line-soft);
+      background: rgba(12, 32, 38, .96);
+      z-index: 4;
+    }
+    .command-bar .session-context {
+      min-width: 0;
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+    #current-session { font-weight: 650; white-space: nowrap; }
+    #current-directory {
+      color: var(--muted);
+      font: 11px/1.2 var(--mono);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .held-button { color: var(--amber); border-color: rgba(231, 185, 104, .5); }
+
+    .workspace {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 248px minmax(0, 1fr);
+      transition: grid-template-columns 150ms ease;
+    }
+    .workspace[data-sidebar-collapsed="true"] { grid-template-columns: 0 minmax(0, 1fr); }
+    .sidebar {
+      min-width: 0;
+      overflow: auto;
+      border-right: 1px solid var(--line);
+      background: rgba(12, 32, 38, .94);
+    }
+    .workspace[data-sidebar-collapsed="true"] .sidebar { overflow: hidden; border-right: 0; }
+    .sidebar-heading {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      padding: 12px 14px 9px;
+      color: var(--muted);
+      background: var(--deep);
+      font: 700 10px/1 var(--mono);
+      letter-spacing: .15em;
+      text-transform: uppercase;
+    }
+    .session-tree, .session-tree ul { list-style: none; margin: 0; padding: 0; }
+    .session-tree { padding: 4px 8px 24px; }
+    .tree-node { position: relative; }
+    .tree-node > [role="group"] {
+      position: relative;
+      margin-left: 12px;
+      padding-left: 12px;
+      border-left: 1px solid var(--line);
+    }
+    .tree-node > [role="group"]::before {
+      content: "";
+      position: absolute;
+      left: -1px;
+      top: 0;
+      width: 1px;
+      height: 17px;
+      background: var(--seafoam);
+    }
+    .tree-row { display: flex; align-items: center; gap: 5px; min-width: 0; }
+    .tree-button {
+      flex: 1;
+      min-width: 0;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      padding: 6px 7px;
+      text-align: left;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      cursor: default;
+    }
+    .tree-button:hover { background: var(--panel); }
+    .tree-button[aria-current="true"] { background: var(--panel-raised); color: var(--seafoam); }
+    .tree-node[data-kind="session"] > .tree-row > .tree-button { font-weight: 650; }
+    .tree-node[data-closed="true"] { opacity: .48; filter: saturate(.45); }
+    .resume-button {
+      border: 1px solid var(--seafoam-dim);
+      border-radius: 5px;
+      color: var(--seafoam);
+      background: transparent;
+      padding: 3px 6px;
+      font-size: 10px;
+    }
+    .worker-index { color: var(--seafoam); font: 10px/1 var(--mono); }
+
+    .pane-shell { min-width: 0; min-height: 0; position: relative; display: grid; }
+    .pane-stage {
+      --pane-grid-gap: 8px;
+      --pane-grid-padding: 8px;
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      gap: var(--pane-grid-gap);
+      padding: var(--pane-grid-padding);
+      overflow: hidden;
+      grid-auto-rows: minmax(0, 1fr);
+      grid-auto-columns: minmax(0, 1fr);
+    }
+    .pane-stage[data-mode="focused"] { display: block; padding-top: 44px; }
+    .pane-stage[data-empty="true"] { display: grid; place-items: center; }
+    .empty-state { color: var(--muted); max-width: 34ch; text-align: center; }
+    .focus-nav {
+      position: absolute;
+      top: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 3;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(8, 24, 29, .94);
+      box-shadow: 0 8px 20px var(--shadow);
+    }
+    .focus-count { min-width: 54px; text-align: center; color: var(--muted); font: 10px/1 var(--mono); }
+
+    .pane-card {
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #07171b;
+      box-shadow: 0 8px 18px rgba(0, 0, 0, .2);
+    }
+    .pane-card[data-kind="lead"] { border-color: var(--seafoam-dim); }
+    .pane-card[data-selected="true"] { box-shadow: 0 0 0 1px var(--seafoam), 0 10px 28px var(--shadow); }
+    .pane-titlebar {
+      min-height: 31px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 8px;
+      border-bottom: 1px solid var(--line-soft);
+      background: var(--panel);
+    }
+    .pane-card[data-kind="lead"] .pane-titlebar { background: #14322f; }
+    .pane-kind {
+      width: 6px;
+      height: 6px;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+    .pane-card[data-kind="lead"] .pane-kind { background: var(--seafoam); }
+    .pane-title {
+      min-width: 0;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font: 11px/1.2 var(--mono);
+    }
+    .terminal-host { min-width: 0; min-height: 0; padding: 5px 3px 3px; }
+    .terminal-host .xterm { height: 100%; }
+    .delivery-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      max-width: 250px;
+      border: 1px solid rgba(231, 185, 104, .45);
+      border-radius: 999px;
+      padding: 2px 3px 2px 8px;
+      color: var(--amber);
+      font-size: 10px;
+      white-space: nowrap;
+    }
+    .delivery-badge button { min-height: 22px; padding: 2px 7px; font-size: 10px; }
+
+    .pane-parking {
+      position: fixed;
+      left: -300vw;
+      top: 0;
+      width: 900px;
+      height: 600px;
+      visibility: hidden;
+      pointer-events: none;
+    }
+    .pane-parking .pane-card { width: 430px; height: 280px; }
+
+    .menu {
+      position: fixed;
+      z-index: 20;
+      min-width: 220px;
+      max-width: 360px;
+      padding: 6px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #173139;
+      box-shadow: 0 18px 45px rgba(0, 0, 0, .5);
+    }
+    .menu-heading {
+      padding: 6px 8px;
+      color: var(--muted);
+      font: 700 10px/1.2 var(--mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .menu-separator { height: 1px; margin: 5px 3px; background: var(--line); }
+    .menu button[role="menuitem"] {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      padding: 7px 8px;
+      text-align: left;
+    }
+    .menu button[role="menuitem"]:hover { background: var(--panel-raised); }
+    .answer-row { border-top: 1px solid var(--line-soft); padding: 7px 8px; }
+    .answer-preview { display: block; color: var(--foam); }
+    .answer-mark { display: block; margin-top: 2px; color: var(--muted); font: 10px/1.2 var(--mono); }
+    .answer-row button { margin-top: 5px; color: var(--seafoam); }
+    .answer-row[data-state="uncertain"] .answer-mark { color: var(--amber); }
+
+    dialog {
+      width: min(480px, calc(100vw - 32px));
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+      color: var(--foam);
+      box-shadow: 0 24px 80px rgba(0, 0, 0, .62);
+      padding: 0;
+    }
+    dialog::backdrop { background: rgba(2, 11, 13, .68); backdrop-filter: blur(3px); }
+    .dialog-form { display: grid; gap: 14px; padding: 20px; }
+    .dialog-form h2 { margin: 0; font-size: 17px; }
+    .dialog-form label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
+    .dialog-form input, .dialog-form select, .dialog-form textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--ink);
+      color: var(--foam);
+      padding: 8px 9px;
+    }
+    .dialog-form textarea { min-height: 96px; resize: vertical; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+    .status-toast {
+      position: fixed;
+      z-index: 30;
+      right: 14px;
+      bottom: 14px;
+      max-width: min(460px, calc(100vw - 28px));
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--seafoam);
+      border-radius: 7px;
+      background: var(--panel-raised);
+      padding: 9px 12px;
+      box-shadow: 0 16px 36px var(--shadow);
+    }
+    .status-toast[data-tone="error"] { border-left-color: var(--buoy); }
+
+    @media (max-width: 760px) {
+      .workspace { grid-template-columns: 210px minmax(0, 1fr); }
+      .command-bar { gap: 5px; }
+      #current-directory { display: none; }
+      .quiet-button, .policy-button { padding-inline: 7px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .001ms !important; }
+    }
+  </style>
 </head>
 <body>
-<main>
-  <p class="mark">consensflow</p>
-  <h1 id="headline">Starting the editor…</h1>
-  <p id="detail">This window opens ConsensFlow's roster editor.</p>
-</main>
-<script>
-  // The Rust side sets data-error when the editor could not be started.
-  new MutationObserver(() => {
-    const error = document.body.dataset.error;
-    if (!error) return;
-    document.querySelector('#headline').textContent = 'The editor did not start';
-    document.querySelector('#detail').textContent = error;
-  }).observe(document.body, { attributes: true, attributeFilter: ['data-error'] });
-</script>
+  <div id="app" data-ready="false">
+    <section class="roster-panel" data-testid="roster-panel" data-collapsed="false">
+      <header class="roster-bar">
+        <span class="brand">ConsensFlow</span>
+        <span class="roster-label">Roster editor</span>
+        <span class="spacer"></span>
+        <button class="icon-button" id="roster-toggle" type="button" aria-expanded="true">Collapse roster</button>
+      </header>
+      <div class="roster-body">
+        <iframe data-testid="roster-frame" title="ConsensFlow roster editor" referrerpolicy="no-referrer" sandbox="allow-forms allow-same-origin allow-scripts"></iframe>
+      </div>
+    </section>
+
+    <header class="command-bar">
+      <button class="icon-button" id="sidebar-toggle" type="button" aria-expanded="true">Collapse sessions</button>
+      <div class="session-context">
+        <span id="current-session">No session</span>
+        <span id="current-directory"></span>
+      </div>
+      <span class="spacer"></span>
+      <button class="quiet-button held-button" id="held-send" type="button" hidden>Send held answers to this lead</button>
+      <button class="policy-button" id="tab-policy" data-testid="tab-policy" type="button" hidden>Policy</button>
+      <button class="quiet-button" id="new-pane" type="button" hidden>New pane</button>
+      <button class="primary-button" id="new-conversation" type="button">New conversation</button>
+    </header>
+
+    <div class="workspace" data-testid="workspace" data-sidebar-collapsed="false">
+      <aside class="sidebar" aria-label="Sessions">
+        <div class="sidebar-heading">Sessions / panes</div>
+        <ul class="session-tree" id="session-tree" role="tree" aria-label="Session tree"></ul>
+      </aside>
+      <main class="pane-shell">
+        <nav class="focus-nav" id="focus-nav" aria-label="Pane navigation" hidden>
+          <button class="icon-button" id="previous-pane" type="button" aria-label="Previous pane">Previous</button>
+          <span class="focus-count" id="focus-count"></span>
+          <button class="icon-button" id="next-pane" type="button" aria-label="Next pane">Next</button>
+        </nav>
+        <section class="pane-stage" id="pane-stage" data-testid="pane-stage" data-mode="grid" aria-label="Panes"></section>
+      </main>
+    </div>
+  </div>
+
+  <div class="pane-parking" id="pane-parking" aria-hidden="true"></div>
+  <div id="menu-layer"></div>
+
+  <dialog id="new-conversation-dialog" aria-labelledby="new-conversation-title">
+    <form class="dialog-form" method="dialog">
+      <h2 id="new-conversation-title">New conversation</h2>
+      <label>Directory<input id="conversation-directory" name="directory" readonly></label>
+      <label>Lead harness
+        <select id="lead-harness" name="harness">
+          <option value="claude-code">Claude Code</option>
+          <option value="codex">Codex</option>
+          <option value="pi">Pi</option>
+          <option value="opencode">OpenCode</option>
+          <option value="kimi">Kimi</option>
+        </select>
+      </label>
+      <div class="dialog-actions">
+        <button class="quiet-button" value="cancel" type="button">Cancel</button>
+        <button class="primary-button" id="start-conversation" type="submit">Start conversation</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="agent-dialog" aria-labelledby="agent-dialog-title">
+    <form class="dialog-form" method="dialog">
+      <h2 id="agent-dialog-title">Open a worker pane</h2>
+      <label>Agent<select id="agent-picker" name="agent"></select></label>
+      <label>Task<textarea id="agent-task" name="task" required></textarea></label>
+      <div class="dialog-actions">
+        <button class="quiet-button" value="cancel" type="button">Cancel</button>
+        <button class="primary-button" id="open-agent-pane" type="submit">Open agent pane</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="status-toast" id="status" role="status" aria-live="polite" hidden></div>
+  <script type="module" src="./panes.js"></script>
 </body>
 </html>
