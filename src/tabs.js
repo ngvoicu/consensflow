@@ -14,7 +14,11 @@ import { allocatePaneId } from './store.js'
  *   `{harness, generation, nativeSession?}`, panes `[{id, kind, order,
  *   generation, conversation?}]`, human policy. `create(dir, harness)`
  *   mints it whole, with its lead pane, and answers
- *   `{id, generation: 1, leadId: 'tab:<id>:1'}`.
+ *   `{id, generation: 1, leadId: 'tab:<id>:1'}`. Its `policy` is UNSET:
+ *   the field records a HUMAN's explicit choice, which `hosts/lib/policy.js`
+ *   ranks above the lead's own `--notify` preference. A default written
+ *   here would be indistinguishable from that choice, and would silently
+ *   outrank every lead preference on the machine.
  * - The lead identity `tab:<id>:<generation>` is derived, never stored
  *   twice. Two tabs may share a directory; sharing a directory never
  *   shares a lead.
@@ -85,7 +89,6 @@ export class Tabs {
         id,
         directory,
         closed: false,
-        policy: 'auto',
         lead: { harness, generation: 1, nativeSession: null },
         panes: [
           {

@@ -13,6 +13,7 @@ import {
   endLaunch,
   issueTicket,
   leadEnv,
+  ownerOf,
   redeem,
   scopedToken,
   shellEnv,
@@ -49,6 +50,7 @@ describe('launch roles expose only their authority', () => {
       pane: 'pane-lead',
       leadId: 'tab:tab-a:4',
       app,
+      node: '/opt/bundle/node',
     })
 
     assert.deepEqual(
@@ -57,11 +59,17 @@ describe('launch roles expose only their authority', () => {
         'CONSENSFLOW_APP',
         'CONSENSFLOW_APP_TOKEN',
         'CONSENSFLOW_LEAD_ID',
+        'CONSENSFLOW_NODE',
         'CONSENSFLOW_PANE_ID',
         'CONSENSFLOW_TAB',
         'PATH',
       ].sort(),
     )
+    // The bundle's `bin/cf` shim runs `cf.mjs` with THIS runtime, never one
+    // it finds on PATH: the first entry of PATH shadows a stale global `cf`,
+    // and this says which node that shim must use.
+    assert.equal(env.CONSENSFLOW_NODE, '/opt/bundle/node')
+    assert.equal(isAbsolute(env.CONSENSFLOW_NODE), true)
     assert.equal(env.CONSENSFLOW_APP, app.url)
     assert.notEqual(env.CONSENSFLOW_APP_TOKEN, app.token, 'the page token is never a lead token')
     assert.equal(env.CONSENSFLOW_LEAD_ID, 'tab:tab-a:4')
@@ -103,9 +111,36 @@ describe('launch roles expose only their authority', () => {
     assert.equal(env.PATH, '/bin')
   })
 
+  it('keeps a native channel’s own variables, which are the harness’s to read', () => {
+    // The strip list exists to stop a child INHERITING our authority. A
+    // channel variable is the opposite: it is what the harness needs to
+    // serve the channel it was launched with, so stripping it would
+    // silently disable the channel the launch just configured.
+    const env = childEnv({
+      CONSENSFLOW_APP_TOKEN: 'ours',
+      OPENCODE_SERVER_PASSWORD: 'the channel’s',
+      PATH: '/bin',
+    })
+    assert.equal(env.CONSENSFLOW_APP_TOKEN, undefined, 'our authority still goes')
+    assert.equal(env.OPENCODE_SERVER_PASSWORD, 'the channel’s', 'the channel’s own stays')
+  })
+
   it('does not read ambient process.env while constructing roles or credentials', () => {
     const source = readFileSync(join(import.meta.dirname, '..', 'src', 'launch.js'), 'utf8')
     assert.doesNotMatch(source, /process\.env/)
+  })
+
+  it('refuses a lead environment with no runtime to name', () => {
+    const app = { url: 'http://127.0.0.1:43210' }
+    assert.throws(
+      () => leadEnv({ tab: 'tab-a', pane: 'pane-lead', leadId: 'tab:tab-a:4', app }),
+      /runtime/,
+      'a shim with no node to run is a shim that finds one on PATH',
+    )
+    assert.throws(
+      () => leadEnv({ tab: 'tab-a', pane: 'pane-lead', leadId: 'tab:tab-a:4', app, node: 'node' }),
+      /absolute/,
+    )
   })
 
   it('mints a lead credential without accepting the page token', () => {
@@ -114,6 +149,7 @@ describe('launch roles expose only their authority', () => {
       pane: 'pane-lead',
       leadId: 'tab:tab-a:4',
       app: { url: 'http://127.0.0.1:43210' },
+      node: '/opt/bundle/node',
     })
 
     assert.equal(checkScope(env.CONSENSFLOW_APP_TOKEN, { tab: 'tab-a', op: 'consult' }), true)
@@ -123,18 +159,25 @@ describe('launch roles expose only their authority', () => {
 describe('launch tickets and scoped credentials', () => {
   it('redeems a ticket once into ownership and a launch-scoped controller capability', () => {
     const expected = ownership('single')
-    const ticket = issueTicket(expected)
+    // The launch identity is minted WITH the ticket and handed back, so one
+    // id serves the store's reservation, Rust's `pane.open` dedupe, the
+    // lead's answer and `endLaunch` — nothing has to map between two.
+    const { ticket, launch } = issueTicket(expected)
 
     assert.equal(typeof ticket, 'string')
     assert.ok(ticket.length >= 32)
+    assert.equal(typeof launch, 'string')
+    assert.notEqual(launch, ticket, 'the launch identity is not the bearer ticket')
+    assert.deepEqual(ownerOf(launch), expected, 'the launch knows what it is for before redemption')
+
     const redeemed = redeem(ticket)
+    assert.equal(redeemed.launch, launch, 'redemption names the launch the ticket was issued for')
     assert.deepEqual(
       { ...redeemed, launch: '<launch>', capability: '<capability>' },
       { ...expected, launch: '<launch>', capability: '<capability>' },
     )
     assert.equal(typeof redeemed.capability, 'string')
     assert.notEqual(redeemed.capability, ticket)
-    assert.notEqual(redeemed.launch, ticket, 'the public launch id is not the bearer ticket')
 
     for (const op of CONTROLLER_OPS) {
       assert.equal(
@@ -174,6 +217,7 @@ describe('launch tickets and scoped credentials', () => {
 
     assert.throws(() => redeem(ticket), /already used|invalid/i)
     assert.equal(endLaunch(redeemed.launch), true)
+    assert.equal(ownerOf(redeemed.launch), null, 'an ended launch is for nothing')
     assert.equal(
       checkScope(redeemed.capability, {
         launch: redeemed.launch,
@@ -184,26 +228,29 @@ describe('launch tickets and scoped credentials', () => {
       'ending the launch revokes its capability',
     )
 
+    // A launch ended before anyone redeemed it: the ticket dies with it,
+    // rather than staying good until it expires.
     const cancelled = issueTicket(ownership('cancelled'))
-    assert.equal(endLaunch(cancelled), true)
-    assert.throws(() => redeem(cancelled), /already used|invalid/i)
+    assert.equal(endLaunch(cancelled.launch), true)
+    assert.throws(() => redeem(cancelled.ticket), /already used|invalid/i)
+    assert.equal(ownerOf(cancelled.launch), null)
   })
 
   it('refuses an expired ticket', async () => {
-    const ticket = issueTicket(ownership('expired'), { ticketMs: 5 })
+    const { ticket } = issueTicket(ownership('expired'), { ticketMs: 5 })
     await delay(20)
     assert.throws(() => redeem(ticket), /expired/i)
   })
 
   it('sweeps expired tickets when issuing and redeeming', async () => {
-    const sweptOnIssue = issueTicket(ownership('swept-on-issue'), { ticketMs: 5 })
+    const { ticket: sweptOnIssue } = issueTicket(ownership('swept-on-issue'), { ticketMs: 5 })
     await delay(20)
     const live = issueTicket(ownership('live'))
     assert.throws(() => redeem(sweptOnIssue), /already used|invalid/i)
-    assert.equal(endLaunch(live), true)
+    assert.equal(endLaunch(live.launch), true)
 
-    const redeemedExpired = issueTicket(ownership('redeemed-expired'), { ticketMs: 5 })
-    const sweptOnRedeem = issueTicket(ownership('swept-on-redeem'), { ticketMs: 5 })
+    const { ticket: redeemedExpired } = issueTicket(ownership('redeemed-expired'), { ticketMs: 5 })
+    const { ticket: sweptOnRedeem } = issueTicket(ownership('swept-on-redeem'), { ticketMs: 5 })
     await delay(20)
     assert.throws(() => redeem(redeemedExpired), /expired/i)
     assert.throws(() => redeem(sweptOnRedeem), /already used|invalid/i)
@@ -327,7 +374,13 @@ describe('the real loopback server enforces role scope before pane routes exist'
     assert.equal(server.created.leadEnv.CONSENSFLOW_PANE_ID, server.created.tab.panes[0].id)
     assert.notEqual(server.created.leadEnv.CONSENSFLOW_APP_TOKEN, server.token)
 
-    assert.deepEqual(Object.keys(server.issued).sort(), ['controllerEnv', 'ticket'])
+    assert.deepEqual(Object.keys(server.issued).sort(), ['controllerEnv', 'launch', 'ticket'])
+    assert.notEqual(server.issued.launch, server.issued.ticket)
+    assert.equal(
+      server.controller.launch,
+      server.issued.launch,
+      'redemption names the launch the route already reported',
+    )
     assert.deepEqual(server.issued.controllerEnv, {
       CONSENSFLOW_APP: server.url,
       CONSENSFLOW_LAUNCH: server.issued.ticket,
@@ -413,14 +466,19 @@ describe('the real loopback server enforces role scope before pane routes exist'
     assert.equal((await api(server.token, '/api/panes/consult')).status, 403)
   })
 
-  it('accepts a valid lead operation up to the not-yet-implemented route', async () => {
+  it('lets a valid lead operation reach the route the scope allows', async () => {
     const response = await api(server.created.leadEnv.CONSENSFLOW_APP_TOKEN, '/api/panes/consult', {
       method: 'POST',
       body: { tab: server.created.tab.id, agent: 'zeus', task: 'review this' },
     })
 
-    assert.equal(response.status, 501)
-    assert.deepEqual(await response.json(), { error: 'not yet' })
+    // What this suite proves is that the credential was accepted, so the
+    // assertion has to name the answer the handler actually gives: any
+    // status but 401 and 403 would also pass if every pane route answered
+    // 500. This body carries no `opId`, and that is where the handler
+    // stops.
+    assert.equal(response.status, 400)
+    assert.deepEqual(await response.json(), { error: 'opId is required' })
   })
 
   it('refuses a lead token on UI-only and controller operations', async () => {
@@ -488,7 +546,21 @@ describe('the real loopback server enforces role scope before pane routes exist'
         method: 'POST',
         body: { launch, generation },
       })
-      assert.equal(response.status, 501, op)
+      // Accepted as a credential, and then answered by the handler itself:
+      // the exact answer, so a route that stopped working could not pass
+      // this test. `/api/launch` issues tickets for a conversation with no
+      // row, so every controller op gets as far as the store and stops
+      // there — except `sent.record`, which wants its `opId` first.
+      assert.equal(response.status, 400, op)
+      assert.deepEqual(
+        await response.json(),
+        {
+          'sent.record': { error: 'opId is required' },
+          'progress.set': { error: 'progress state is required' },
+          'session.bind': { error: 'no conversation named zeus-coral-lane in this workspace' },
+        }[op],
+        op,
+      )
     }
 
     assert.equal(

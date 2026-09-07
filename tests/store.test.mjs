@@ -32,6 +32,22 @@ async function openStore(home) {
 const AT = '2026-09-06T10:00:00.000Z'
 
 /**
+ * The launch a row currently holds, in the shape a controller write names
+ * it. Every controller mutation carries this so the store can compare it
+ * against the reservation of the moment, inside its own queue.
+ */
+async function currentLaunch(store, ws, name) {
+  const reserved = (await store.readThreads(ws))[name]?.reserved
+  if (reserved === undefined) return null
+  return {
+    launchId: reserved.launchId,
+    tab: reserved.tab,
+    pane: reserved.pane,
+    generation: reserved.generation,
+  }
+}
+
+/**
  * Seeds a tab record straight through the queue, the way `src/tabs.js` will
  * once it exists. Store tests exercise the queue with raw mutations on
  * purpose: the serialization is the clause under test, not tab semantics.
@@ -856,6 +872,7 @@ test('store: reserve and release manage a launch on an existing conversation', a
     const bound = await store.sessionBind(ws, {
       name: 'nyx-coral-lane',
       candidate: { sessionId: 'sess-live', turn: '[consensflow launch n-7f3a]\nship it' },
+      expect: await currentLaunch(store, ws, 'nyx-coral-lane'),
     })
     assert.equal(bound.binding.launchId, reserved.reserved.launchId)
 
@@ -878,7 +895,12 @@ test('store: reserve and release manage a launch on an existing conversation', a
     })
     assert.equal(released.reserved, undefined)
     await assert.rejects(
-      () => store.sessionBind(ws, { name: 'nyx-coral-lane', candidate: { sessionId: 's' } }),
+      async () =>
+        store.sessionBind(ws, {
+          name: 'nyx-coral-lane',
+          candidate: { sessionId: 's' },
+          expect: await currentLaunch(store, ws, 'nyx-coral-lane'),
+        }),
       /launch/i,
     )
     await assert.rejects(
@@ -904,15 +926,17 @@ test('store: a replaced session persists its invalidation instead of keeping the
     await store.sessionBind(ws, {
       name: 'nyx-coral-lane',
       candidate: { sessionId: 'sess-live', turn: '[consensflow launch n-7f3a]\nship it' },
+      expect: await currentLaunch(store, ws, 'nyx-coral-lane'),
     })
 
     // The native session was replaced in place (/new, /resume, a fork):
     // the bind is refused AND the old binding dies on disk with it.
     await assert.rejects(
-      () =>
+      async () =>
         store.sessionBind(ws, {
           name: 'nyx-coral-lane',
           candidate: { sessionId: 'sess-live', currentSessionId: 'sess-new', alive: true },
+          expect: await currentLaunch(store, ws, 'nyx-coral-lane'),
         }),
       /replaced/i,
     )
@@ -985,6 +1009,7 @@ test('store: session.bind binds only what bindEvidence accepts, and stamps the g
     const bound = await store.sessionBind(ws, {
       name: 'nyx-coral-lane',
       candidate: { sessionId: 'sess-live', turn: '[consensflow launch n-7f3a]\nship it' },
+      expect: await currentLaunch(store, ws, 'nyx-coral-lane'),
     })
     assert.equal(bound.sessionId, 'sess-live')
     assert.equal(bound.binding.evidence, 'nonce')
@@ -993,20 +1018,22 @@ test('store: session.bind binds only what bindEvidence accepts, and stamps the g
 
     // A candidate whose first turn carries no marker for THIS launch is refused.
     await assert.rejects(
-      () =>
+      async () =>
         store.sessionBind(ws, {
           name: 'nyx-coral-lane',
           candidate: { sessionId: 'sess-other', turn: 'ship it' },
+          expect: await currentLaunch(store, ws, 'nyx-coral-lane'),
         }),
       /unbound/i,
     )
 
     // A session replaced in place never binds.
     await assert.rejects(
-      () =>
+      async () =>
         store.sessionBind(ws, {
           name: 'nyx-coral-lane',
           candidate: { sessionId: 'sess-live', alive: true, currentSessionId: 'sess-new' },
+          expect: await currentLaunch(store, ws, 'nyx-coral-lane'),
         }),
       /replaced/i,
     )
@@ -1020,16 +1047,18 @@ test('store: session.bind binds only what bindEvidence accepts, and stamps the g
       launch: { preallocatedId: 'pi-named-session' },
     })
     await assert.rejects(
-      () =>
+      async () =>
         store.sessionBind(ws, {
           name: 'nyx-amber-moss',
           candidate: { sessionId: 'someone-elses' },
+          expect: await currentLaunch(store, ws, 'nyx-amber-moss'),
         }),
       /preallocated/i,
     )
     const preallocated = await store.sessionBind(ws, {
       name: 'nyx-amber-moss',
       candidate: { sessionId: 'pi-named-session' },
+      expect: await currentLaunch(store, ws, 'nyx-amber-moss'),
     })
     assert.equal(preallocated.binding.evidence, 'preallocated')
     assert.equal(preallocated.binding.generation, 2)
@@ -1045,13 +1074,19 @@ test('store: session.bind binds only what bindEvidence accepts, and stamps the g
     const reported = await store.sessionBind(ws, {
       name: 'nyx-bubble-sky',
       candidate: { sessionId: 'rep-1' },
+      expect: await currentLaunch(store, ws, 'nyx-bubble-sky'),
     })
     assert.equal(reported.binding.evidence, 'reported')
 
     // A row with no launch record has nothing to bind against.
     await store.conversationCreate(ws, { name: 'nyx-bare-lane', agent: 'nyx', kind: 'codex' })
     await assert.rejects(
-      () => store.sessionBind(ws, { name: 'nyx-bare-lane', candidate: { sessionId: 'sess-x' } }),
+      async () =>
+        store.sessionBind(ws, {
+          name: 'nyx-bare-lane',
+          candidate: { sessionId: 'sess-x' },
+          expect: await currentLaunch(store, ws, 'nyx-bare-lane'),
+        }),
       /launch/i,
     )
 
@@ -1059,10 +1094,11 @@ test('store: session.bind binds only what bindEvidence accepts, and stamps the g
     // from bindEvidence against the stored launch record, not from a string
     // anyone can send.
     await assert.rejects(
-      () =>
+      async () =>
         store.sessionBind(ws, {
           name: 'nyx-bare-lane',
           candidate: { sessionId: 'sess-x', evidence: 'nonce' },
+          expect: await currentLaunch(store, ws, 'nyx-bare-lane'),
         }),
       /launch/i,
       'no launch record, no bind — whatever the candidate claims',
@@ -1075,10 +1111,11 @@ test('store: session.bind binds only what bindEvidence accepts, and stamps the g
       launch: { nonce: 'n-real' },
     })
     await assert.rejects(
-      () =>
+      async () =>
         store.sessionBind(ws, {
           name: 'nyx-word-lane',
           candidate: { sessionId: 'sess-x', evidence: 'nonce' },
+          expect: await currentLaunch(store, ws, 'nyx-word-lane'),
         }),
       /unbound/i,
       'the word "nonce" without the marker in the first turn binds nothing',
@@ -1109,7 +1146,12 @@ test('store: unknown rows and malformed inputs fail without writing', async () =
       /no conversation/,
     )
     await assert.rejects(
-      () => store.sessionBind(ws, { name: 'nyx-nope-lane', candidate: {} }),
+      async () =>
+        store.sessionBind(ws, {
+          name: 'nyx-nope-lane',
+          candidate: {},
+          expect: await currentLaunch(store, ws, 'nyx-nope-lane'),
+        }),
       /no conversation/,
     )
     await assert.rejects(
@@ -1231,8 +1273,13 @@ test('store: harness stores are never opened for writing', async () => {
     await store.sessionBind(ws, {
       name: 'nyx-coral-lane',
       candidate: { sessionId: 'sess-1', turn: '[consensflow launch n-abc]\nship it' },
+      expect: await currentLaunch(store, ws, 'nyx-coral-lane'),
     })
-    await store.sentRecord(ws, { name: 'nyx-coral-lane', entry: { text: 'how is it going?' } })
+    await store.sentRecord(ws, {
+      name: 'nyx-coral-lane',
+      entry: { text: 'how is it going?' },
+      expect: await currentLaunch(store, ws, 'nyx-coral-lane'),
+    })
     await store.seenSet(ws, { name: 'nyx-coral-lane', items: ['item-1'], lead: 'tab:t-1:1' })
     await store.deliveryUpsert(ws, { id: 'del-1', state: 'pending', answerId: 'ans-1' })
     await store.policySet({ tab: 't-1', value: 'manual' })
@@ -1690,7 +1737,12 @@ test('store: a bind is refused when the reserved pane no longer serves the conve
       await io.writeTabs(tabs)
     })
     await assert.rejects(
-      () => store.sessionBind(ws, { name: 'nyx-coral-lane', candidate }),
+      async () =>
+        store.sessionBind(ws, {
+          name: 'nyx-coral-lane',
+          candidate,
+          expect: await currentLaunch(store, ws, 'nyx-coral-lane'),
+        }),
       /serves|no pane/,
     )
     assert.equal((await store.readThreads(ws))['nyx-coral-lane'].sessionId, null)
@@ -1704,7 +1756,12 @@ test('store: a bind is refused when the reserved pane no longer serves the conve
       await io.writeTabs(tabs)
     })
     await assert.rejects(
-      () => store.sessionBind(ws, { name: 'nyx-coral-lane', candidate }),
+      async () =>
+        store.sessionBind(ws, {
+          name: 'nyx-coral-lane',
+          candidate,
+          expect: await currentLaunch(store, ws, 'nyx-coral-lane'),
+        }),
       /no pane|generation/,
     )
     const row = (await store.readThreads(ws))['nyx-coral-lane']
@@ -1771,7 +1828,12 @@ test('store: a bind is refused when the reserved pane serves nobody at all', asy
       await io.writeTabs(tabs)
     })
     await assert.rejects(
-      () => store.sessionBind(ws, { name: 'nyx-coral-lane', candidate }),
+      async () =>
+        store.sessionBind(ws, {
+          name: 'nyx-coral-lane',
+          candidate,
+          expect: await currentLaunch(store, ws, 'nyx-coral-lane'),
+        }),
       /serves|no pane/,
       'a null link is not a link',
     )
@@ -1784,7 +1846,12 @@ test('store: a bind is refused when the reserved pane serves nobody at all', asy
       await io.writeTabs(tabs)
     })
     await assert.rejects(
-      () => store.sessionBind(ws, { name: 'nyx-coral-lane', candidate }),
+      async () =>
+        store.sessionBind(ws, {
+          name: 'nyx-coral-lane',
+          candidate,
+          expect: await currentLaunch(store, ws, 'nyx-coral-lane'),
+        }),
       /serves|no pane/,
       'a missing link is not a link either',
     )
@@ -1982,5 +2049,732 @@ test('store: an initialisation that fails after acquiring gives the lock back', 
       await successor.close()
     }
     assert.equal(abandoned.length, 2)
+  })
+})
+
+test('store: a reservation resolves, and only for the launch it names', async () => {
+  await withHome(async (home, dir) => {
+    const ws = path.join(dir, 'ws')
+    const store = await openStore(home)
+    await seedTabRecord(store, ws, 't-1')
+    await store.conversationCreate(ws, { name: 'nyx-coral-lane', agent: 'nyx', kind: 'codex' })
+
+    await assert.rejects(
+      () => store.resolve(ws, { name: 'nyx-coral-lane', launchId: 'l-1', outcome: 'opened' }),
+      /no reservation/,
+    )
+
+    const reserved = await store.reserve(ws, {
+      name: 'nyx-coral-lane',
+      pane: { tab: 't-1', id: 'w-7', generation: 1 },
+      launch: { nonce: 'n-7f3a', opId: 'op-1' },
+    })
+    const { launchId } = reserved.reserved
+    // The operation that reserved it is durable: a restart still knows
+    // which request this launch belongs to.
+    assert.equal(reserved.reserved.opId, 'op-1')
+    assert.equal(reserved.reserved.resolvedAt, undefined, 'a fresh reservation is unresolved')
+
+    // A stale resolve from an ended launch never resolves the live one.
+    await assert.rejects(
+      () => store.resolve(ws, { name: 'nyx-coral-lane', launchId: 'l-other', outcome: 'opened' }),
+      /not l-other/,
+    )
+    assert.equal((await store.readThreads(ws))['nyx-coral-lane'].reserved.resolvedAt, undefined)
+
+    const resolved = await store.resolve(ws, {
+      name: 'nyx-coral-lane',
+      launchId,
+      outcome: 'opened',
+    })
+    assert.equal(resolved.reserved.outcome, 'opened')
+    assert.equal(typeof resolved.reserved.resolvedAt, 'string')
+    assert.equal(resolved.reserved.launchId, launchId)
+    assert.equal(resolved.reserved.opId, 'op-1')
+
+    // Resolving twice is the same answer, not a second event: a retry that
+    // crossed the first answer must not restamp the record.
+    const again = await store.resolve(ws, { name: 'nyx-coral-lane', launchId, outcome: 'opened' })
+    assert.equal(again.reserved.resolvedAt, resolved.reserved.resolvedAt)
+
+    // Release still takes only its own launch, resolved or not.
+    await assert.rejects(
+      () => store.release(ws, { name: 'nyx-coral-lane', launchId: 'l-other' }),
+      /stale release/,
+    )
+    const released = await store.release(ws, { name: 'nyx-coral-lane', launchId })
+    assert.equal(released.reserved, undefined)
+    await store.close()
+  })
+})
+
+test('store: a lead preference and a controller progress note land on the row', async () => {
+  await withHome(async (home, dir) => {
+    const ws = path.join(dir, 'ws')
+    const store = await openStore(home)
+    await seedTabRecord(store, ws, 't-1')
+    await store.conversationCreate(ws, { name: 'nyx-coral-lane', agent: 'nyx', kind: 'codex' })
+
+    const noted = await store.leadPreferenceSet(ws, { name: 'nyx-coral-lane', value: 'manual' })
+    assert.equal(noted.notifyPreference, 'manual')
+    assert.equal((await store.readThreads(ws))['nyx-coral-lane'].notifyPreference, 'manual')
+    // The lead writes through `recordLeadPreference` and reaches exactly one
+    // field: the human's scopes are the tab and the pane, which it cannot name.
+    await assert.rejects(
+      () => store.leadPreferenceSet(ws, { name: 'nyx-coral-lane', value: 'sometimes' }),
+      /not a delivery preference/,
+    )
+    await assert.rejects(
+      () => store.leadPreferenceSet(ws, { name: 'nyx-nope-lane', value: 'auto' }),
+      /no conversation/,
+    )
+
+    const progressed = await store.progressSet(ws, {
+      name: 'nyx-coral-lane',
+      progress: { state: 'running', detail: 'turn 1' },
+    })
+    assert.equal(progressed.progress.state, 'running')
+    assert.equal(progressed.progress.detail, 'turn 1')
+    assert.equal(typeof progressed.progress.at, 'string')
+    // The latest note replaces the last one; progress is a state, not a log.
+    const later = await store.progressSet(ws, {
+      name: 'nyx-coral-lane',
+      progress: { state: 'settled' },
+    })
+    assert.equal(later.progress.state, 'settled')
+    assert.equal(later.progress.detail, undefined)
+    await assert.rejects(
+      () => store.progressSet(ws, { name: 'nyx-coral-lane', progress: { detail: 'no state' } }),
+      /state/,
+    )
+    await store.close()
+  })
+})
+
+test('store: delivery ids are minted app-wide and never come round again', async () => {
+  await withHome(async (home, dir) => {
+    const ws = path.join(dir, 'ws')
+    const store = await openStore(home)
+    await seedTabRecord(store, ws, 't-1', [workerPane('w-7', 0)])
+
+    // Filename-safe by construction: a delivery id becomes
+    // `<workspace>/deliveries/<id>.md`, so the namespace is `d-` and digits
+    // and nothing else — no slash, no dot, no colon, nothing a shell or a
+    // path would read as structure.
+    const first = await store.allocateDeliveryId()
+    assert.match(first, /^d-\d+$/)
+    assert.equal(first, path.basename(first), 'a delivery id is one path segment')
+
+    // The queue is what makes it atomic: fifty at once are fifty ids.
+    const minted = await Promise.all(Array.from({ length: 50 }, () => store.allocateDeliveryId()))
+    assert.equal(new Set(minted).size, 50, 'no id was handed out twice')
+    assert.equal(minted.includes(first), false)
+    for (const id of minted) assert.match(id, /^d-\d+$/)
+
+    // The counter lives in the pane allocator's own file and is written
+    // with it, so neither can lose the other's progress.
+    const envelope = JSON.parse(await readFile(path.join(home, 'app', 'tabs.json'), 'utf8'))
+    assert.equal(envelope.nextDelivery, 52)
+    assert.equal(envelope.nextPane, 1, 'minting a delivery id burns no pane identity')
+    assert.equal(envelope.tabs.length, 1)
+
+    // A record can be written under a minted id like any other.
+    await store.deliveryUpsert(ws, { id: first, targetSession: 'nyx-coral-lane' })
+    assert.equal((await store.readDeliveries(ws))[first].targetSession, 'nyx-coral-lane')
+
+    // Across a restart the counter carries on. An id that came round again
+    // would overwrite an immutable delivery file that is already on disk.
+    await store.close()
+    const restarted = await openStore(home)
+    const afterRestart = await restarted.allocateDeliveryId()
+    assert.equal(new Set([...minted, first]).has(afterRestart), false)
+    assert.equal(afterRestart, 'd-52')
+
+    // A pane minted afterwards still gets its own counter's next id.
+    const tabs = new Tabs(restarted)
+    const created = await tabs.create(path.join(dir, 'other'), 'pi')
+    assert.match((await tabs.get(created.id)).panes[0].id, /^p-\d+$/)
+    await restarted.close()
+  })
+})
+
+test('store: a corrupt delivery counter refuses, and a missing one starts at one', async () => {
+  await withHome(async (home, dir) => {
+    const file = path.join(home, 'app', 'tabs.json')
+    const store = await openStore(home)
+    await seedTabRecord(store, path.join(dir, 'ws'), 't-1')
+    await store.close()
+
+    // A store written before this allocator existed has issued no delivery
+    // ids at all, so beginning at one repeats nothing.
+    const envelope = JSON.parse(await readFile(file, 'utf8'))
+    delete envelope.nextDelivery
+    await writeFile(file, `${JSON.stringify(envelope, null, 2)}\n`)
+    const upgraded = await openStore(home)
+    assert.equal(await upgraded.allocateDeliveryId(), 'd-1')
+    await upgraded.close()
+
+    // A counter we cannot read is NOT a counter of zero. Starting over
+    // would mint ids that name delivery files already written and
+    // immutable on disk, so it refuses and keeps every byte.
+    for (const broken of [0, -3, 'seven', 1.5]) {
+      const corrupt = JSON.parse(await readFile(file, 'utf8'))
+      corrupt.nextDelivery = broken
+      const bytes = `${JSON.stringify(corrupt, null, 2)}\n`
+      await writeFile(file, bytes)
+      await assert.rejects(() => openStore(home), /delivery counter/, JSON.stringify(broken))
+      assert.equal(await readFile(file, 'utf8'), bytes, 'the bytes are preserved')
+    }
+  })
+})
+
+test('store: admission decides and reserves in ONE queued operation', async () => {
+  await withHome(async (home, dir) => {
+    const ws = path.join(dir, 'ws')
+    const store = await openStore(home)
+    await seedTabRecord(store, ws, 't-1')
+    await seedTabRecord(store, path.join(dir, 'ws'), 't-2')
+
+    // A fresh conversation: admission mints the pane, creates the row and
+    // takes the reservation, all in one step. Nothing outside the queue
+    // ever sees the half of it.
+    const first = await store.admit(ws, {
+      name: 'nyx-coral-lane',
+      tab: 't-1',
+      agent: 'nyx',
+      kind: 'codex',
+      lead: 'tab:t-1:1',
+      launch: { launchId: 'l-1', opId: 'op-1', nonce: 'l-1' },
+    })
+    assert.equal(first.outcome, 'reserved')
+    assert.match(first.pane.id, /^p-\d+$/)
+    assert.equal(first.pane.kind, 'worker')
+    assert.equal(first.pane.conversation, 'nyx-coral-lane')
+    const row = (await store.readThreads(ws))['nyx-coral-lane']
+    assert.equal(row.reserved.launchId, 'l-1')
+    assert.equal(row.agent, 'nyx')
+    assert.equal((await store.readTabs())[0].panes.at(-1).id, first.pane.id)
+
+    // Unresolved: nothing may launch it again, whoever asks.
+    await assert.rejects(
+      () =>
+        store.admit(ws, {
+          name: 'nyx-coral-lane',
+          tab: 't-1',
+          launch: { launchId: 'l-2', opId: 'op-2', nonce: 'l-2' },
+        }),
+      /reserved/,
+    )
+
+    // Resolved and linked here: the answer is the live pane, not a launch.
+    await store.resolve(ws, { name: 'nyx-coral-lane', launchId: 'l-1', outcome: 'opened' })
+    const live = await store.admit(ws, {
+      name: 'nyx-coral-lane',
+      tab: 't-1',
+      launch: { launchId: 'l-3', opId: 'op-3', nonce: 'l-3' },
+    })
+    assert.equal(live.outcome, 'live')
+    assert.equal(live.pane.id, first.pane.id)
+    assert.equal((await store.readThreads(ws))['nyx-coral-lane'].reserved.launchId, 'l-1')
+
+    // Running under another tab: never taken, and never released from here.
+    await assert.rejects(
+      () =>
+        store.admit(ws, {
+          name: 'nyx-coral-lane',
+          tab: 't-2',
+          launch: { launchId: 'l-4', opId: 'op-4', nonce: 'l-4' },
+        }),
+      /another session/,
+    )
+    assert.equal((await store.readThreads(ws))['nyx-coral-lane'].reserved.launchId, 'l-1')
+    await store.close()
+  })
+})
+
+test('store: concurrent admissions of one conversation produce ONE launch', async () => {
+  await withHome(async (home, dir) => {
+    const ws = path.join(dir, 'ws')
+    const store = await openStore(home)
+    await seedTabRecord(store, ws, 't-1')
+    await store.conversationCreate(ws, { name: 'nyx-coral-lane', agent: 'nyx', kind: 'codex' })
+
+    // The interleaving that used to lose a launch: both callers read the
+    // state, both decide there is no pane, both reserve. With the decision
+    // INSIDE the queue there is no read to go stale.
+    const attempts = await Promise.allSettled(
+      Array.from({ length: 8 }, (_, at) =>
+        store.admit(ws, {
+          name: 'nyx-coral-lane',
+          tab: 't-1',
+          launch: { launchId: `l-${at}`, opId: `op-${at}`, nonce: `l-${at}` },
+        }),
+      ),
+    )
+    const reserved = attempts.filter(
+      (attempt) => attempt.status === 'fulfilled' && attempt.value.outcome === 'reserved',
+    )
+    assert.equal(reserved.length, 1, 'exactly one caller took the launch')
+    for (const attempt of attempts) {
+      if (attempt === reserved[0]) continue
+      assert.equal(attempt.status, 'rejected')
+      assert.match(attempt.reason.message, /reserved/)
+    }
+    const tabs = await store.readTabs()
+    assert.equal(
+      tabs[0].panes.filter((pane) => pane.conversation === 'nyx-coral-lane').length,
+      1,
+      'and only one pane was ever minted for it',
+    )
+    await store.close()
+  })
+})
+
+test('store: a stale reservation of this tab is released and replaced in one step', async () => {
+  await withHome(async (home, dir) => {
+    const ws = path.join(dir, 'ws')
+    const store = await openStore(home)
+    await seedTabRecord(store, ws, 't-1')
+    const first = await store.admit(ws, {
+      name: 'nyx-coral-lane',
+      tab: 't-1',
+      agent: 'nyx',
+      kind: 'codex',
+      lead: 'tab:t-1:1',
+      launch: { launchId: 'l-1', opId: 'op-1', nonce: 'l-1' },
+    })
+    await store.resolve(ws, { name: 'nyx-coral-lane', launchId: 'l-1', outcome: 'opened' })
+
+    // The pane is gone but the reservation was never released — a crash
+    // between the two. Admission for the SAME tab replaces it; the row
+    // keeps its history and its identity.
+    await store.releaseExitedPane(ws, {
+      name: 'nyx-coral-lane',
+      tab: 't-1',
+      pane: first.pane.id,
+      generation: first.pane.generation,
+      keepReservation: true,
+    })
+    const again = await store.admit(ws, {
+      name: 'nyx-coral-lane',
+      tab: 't-1',
+      launch: { launchId: 'l-9', opId: 'op-9', nonce: 'l-9' },
+    })
+    assert.equal(again.outcome, 'reserved')
+    assert.notEqual(again.pane.id, first.pane.id)
+    assert.equal((await store.readThreads(ws))['nyx-coral-lane'].reserved.launchId, 'l-9')
+    await store.close()
+  })
+})
+
+test('store: a pane exit releases only the reservation that names that pane', async () => {
+  await withHome(async (home, dir) => {
+    const ws = path.join(dir, 'ws')
+    const store = await openStore(home)
+    await seedTabRecord(store, ws, 't-1')
+    const first = await store.admit(ws, {
+      name: 'nyx-coral-lane',
+      tab: 't-1',
+      agent: 'nyx',
+      kind: 'codex',
+      lead: 'tab:t-1:1',
+      launch: { launchId: 'l-1', opId: 'op-1', nonce: 'l-1' },
+    })
+    await store.resolve(ws, { name: 'nyx-coral-lane', launchId: 'l-1', outcome: 'opened' })
+
+    const released = await store.releaseExitedPane(ws, {
+      name: 'nyx-coral-lane',
+      tab: 't-1',
+      pane: first.pane.id,
+      generation: first.pane.generation,
+    })
+    assert.equal(released.released, 'l-1')
+    assert.equal((await store.readThreads(ws))['nyx-coral-lane'].reserved, undefined)
+
+    // The successor launch, in a new pane.
+    const second = await store.admit(ws, {
+      name: 'nyx-coral-lane',
+      tab: 't-1',
+      launch: { launchId: 'l-2', opId: 'op-2', nonce: 'l-2' },
+    })
+    await store.resolve(ws, { name: 'nyx-coral-lane', launchId: 'l-2', outcome: 'opened' })
+
+    // The FIRST pane's exit arriving late — a duplicate, or a slow event —
+    // names a pane the reservation no longer holds. It takes nothing.
+    const stale = await store.releaseExitedPane(ws, {
+      name: 'nyx-coral-lane',
+      tab: 't-1',
+      pane: first.pane.id,
+      generation: first.pane.generation,
+    })
+    assert.equal(stale.released, null)
+    assert.equal(stale.reason, 'stale')
+    assert.equal(
+      (await store.readThreads(ws))['nyx-coral-lane'].reserved.launchId,
+      'l-2',
+      'the successor keeps its reservation',
+    )
+
+    // The right pane at the WRONG generation is a different pane, and an
+    // exit naming another tab is not this reservation's either.
+    for (const wrong of [
+      { tab: 't-1', pane: second.pane.id, generation: second.pane.generation + 1 },
+      { tab: 't-9', pane: second.pane.id, generation: second.pane.generation },
+    ]) {
+      const ignored = await store.releaseExitedPane(ws, { name: 'nyx-coral-lane', ...wrong })
+      assert.equal(ignored.released, null, JSON.stringify(wrong))
+      assert.equal(ignored.reason, 'stale')
+    }
+    assert.equal((await store.readThreads(ws))['nyx-coral-lane'].reserved.launchId, 'l-2')
+    await store.close()
+  })
+})
+
+test('store: a controller write is refused unless it matches the CURRENT reservation', async () => {
+  await withHome(async (home, dir) => {
+    const ws = path.join(dir, 'ws')
+    const store = await openStore(home)
+    await seedTabRecord(store, ws, 't-1')
+    const first = await store.admit(ws, {
+      name: 'nyx-coral-lane',
+      tab: 't-1',
+      agent: 'nyx',
+      kind: 'codex',
+      lead: 'tab:t-1:1',
+      launch: { launchId: 'l-1', opId: 'op-1', nonce: 'l-1' },
+    })
+    await store.resolve(ws, { name: 'nyx-coral-lane', launchId: 'l-1', outcome: 'opened' })
+    const expect = {
+      launchId: 'l-1',
+      tab: 't-1',
+      pane: first.pane.id,
+      generation: first.pane.generation,
+    }
+
+    await store.sentRecord(ws, { name: 'nyx-coral-lane', entry: { kind: 'seed' }, expect })
+    await store.progressSet(ws, {
+      name: 'nyx-coral-lane',
+      progress: { state: 'running' },
+      expect,
+    })
+    await store.sessionBind(ws, {
+      name: 'nyx-coral-lane',
+      candidate: { sessionId: 'sess-1', turn: '[consensflow launch l-1]\nwork' },
+      expect,
+    })
+
+    // The launch ends and its replacement takes the conversation. The old
+    // controller's write was admitted before that and lands now: it names a
+    // launch that is over, and the store compares INSIDE its queue.
+    await store.releaseExitedPane(ws, {
+      name: 'nyx-coral-lane',
+      tab: 't-1',
+      pane: first.pane.id,
+      generation: first.pane.generation,
+    })
+    const second = await store.admit(ws, {
+      name: 'nyx-coral-lane',
+      tab: 't-1',
+      launch: { launchId: 'l-2', opId: 'op-2', nonce: 'l-2' },
+    })
+    await store.resolve(ws, { name: 'nyx-coral-lane', launchId: 'l-2', outcome: 'opened' })
+
+    for (const [op, extra] of [
+      ['sentRecord', { entry: { kind: 'stale' } }],
+      ['progressSet', { progress: { state: 'stale' } }],
+      ['sessionBind', { candidate: { sessionId: 'sess-stale' } }],
+    ]) {
+      await assert.rejects(
+        () => store[op](ws, { name: 'nyx-coral-lane', ...extra, expect }),
+        /launch l-1 is over|not the current reservation/,
+        op,
+      )
+    }
+    const row = (await store.readThreads(ws))['nyx-coral-lane']
+    assert.equal(row.sent.length, 1, 'the ended launch appended nothing')
+    assert.equal(row.progress.state, 'running')
+    assert.equal(row.sessionId, 'sess-1')
+
+    // The replacement's own controller writes fine.
+    await store.sentRecord(ws, {
+      name: 'nyx-coral-lane',
+      entry: { kind: 'seed' },
+      expect: {
+        launchId: 'l-2',
+        tab: 't-1',
+        pane: second.pane.id,
+        generation: second.pane.generation,
+      },
+    })
+    assert.equal((await store.readThreads(ws))['nyx-coral-lane'].sent.length, 2)
+    await store.close()
+  })
+})
+
+test('store: the delivery counter takes only a positive safe integer', async () => {
+  await withHome(async (home, dir) => {
+    const file = path.join(home, 'app', 'tabs.json')
+    const store = await openStore(home)
+    await seedTabRecord(store, path.join(dir, 'ws'), 't-1')
+    await store.close()
+
+    // `null` is a value somebody wrote, not an absent field: reading it as
+    // one would start over at d-1 and mint ids that name delivery files
+    // already on disk. 2^53 and 1e21 are integers JavaScript cannot count
+    // in: the first repeats an id, the second prints `d-1e+21`.
+    for (const broken of [null, 2 ** 53, 1e21, Number.MAX_SAFE_INTEGER + 2, 0, -1, 'x', 1.5]) {
+      const envelope = JSON.parse(await readFile(file, 'utf8'))
+      envelope.nextDelivery = broken
+      const bytes = `${JSON.stringify(envelope, null, 2)}\n`
+      await writeFile(file, bytes)
+      await assert.rejects(() => openStore(home), /delivery counter/, JSON.stringify(broken))
+      assert.equal(await readFile(file, 'utf8'), bytes, `bytes preserved for ${broken}`)
+    }
+
+    // At the ceiling the allocator refuses rather than mint an id it cannot
+    // count past.
+    const envelope = JSON.parse(await readFile(file, 'utf8'))
+    envelope.nextDelivery = Number.MAX_SAFE_INTEGER
+    await writeFile(file, `${JSON.stringify(envelope, null, 2)}\n`)
+    const store2 = await openStore(home)
+    await assert.rejects(() => store2.allocateDeliveryId(), /delivery counter/)
+    await store2.close()
+  })
+})
+
+test('store: reopening on a bound session re-stamps the binding, never leaves it stale', async () => {
+  await withHome(async (home, dir) => {
+    const ws = path.join(dir, 'ws')
+    const store = await openStore(home)
+    await seedTabRecord(store, ws, 't-1')
+    const first = await store.admit(ws, {
+      name: 'nyx-coral-lane',
+      tab: 't-1',
+      agent: 'nyx',
+      kind: 'codex',
+      lead: 'tab:t-1:1',
+      launch: { launchId: 'l-1', opId: 'op-1', nonce: 'l-1' },
+    })
+    await store.resolve(ws, { name: 'nyx-coral-lane', launchId: 'l-1', outcome: 'opened' })
+    await store.sessionBind(ws, {
+      name: 'nyx-coral-lane',
+      candidate: { sessionId: 'rollout-7', turn: '[consensflow launch l-1]\nwork' },
+      expect: {
+        launchId: 'l-1',
+        tab: 't-1',
+        pane: first.pane.id,
+        generation: first.pane.generation,
+      },
+    })
+    const bound = (await store.readThreads(ws))['nyx-coral-lane']
+    assert.equal(bound.binding.generation, first.pane.generation)
+    assert.equal(bound.binding.launchId, 'l-1')
+
+    // The pane ends and the conversation is reopened ON that session. The
+    // binding a reader sees must never name the pane that is gone: a
+    // decision leaning on a stale generation is a decision for a pane
+    // nothing is running in.
+    await store.releaseExitedPane(ws, {
+      name: 'nyx-coral-lane',
+      tab: 't-1',
+      pane: first.pane.id,
+      generation: first.pane.generation,
+    })
+    const again = await store.admit(ws, {
+      name: 'nyx-coral-lane',
+      tab: 't-1',
+      launch: (row) => ({ launchId: 'l-2', opId: 'op-2', reportedId: row.sessionId }),
+    })
+    const reopened = (await store.readThreads(ws))['nyx-coral-lane']
+    assert.equal(reopened.sessionId, 'rollout-7', 'the session it resumes is the one it had')
+    assert.equal(reopened.binding.launchId, 'l-2', 'the binding belongs to the launch resuming it')
+    assert.equal(
+      reopened.binding.generation,
+      again.pane.generation,
+      'and to the pane now carrying it',
+    )
+    assert.equal(reopened.binding.evidence, 'reported')
+    assert.notEqual(again.pane.generation, undefined)
+
+    // A launch that cannot vouch for the session the row names leaves no
+    // binding behind at all, rather than one naming a pane that is gone.
+    await store.releaseExitedPane(ws, {
+      name: 'nyx-coral-lane',
+      tab: 't-1',
+      pane: again.pane.id,
+      generation: again.pane.generation,
+    })
+    await store.admit(ws, {
+      name: 'nyx-coral-lane',
+      tab: 't-1',
+      launch: { launchId: 'l-3', opId: 'op-3', nonce: 'l-3' },
+    })
+    const unvouched = (await store.readThreads(ws))['nyx-coral-lane']
+    assert.equal(unvouched.binding, undefined, 'no binding rather than a stale one')
+    assert.equal(unvouched.sessionId, 'rollout-7', 'the session it knows about is not forgotten')
+    await store.close()
+  })
+})
+
+test('store: a read records an ATTEMPT on the delivery, and never coverage', async () => {
+  await withHome(async (home, dir) => {
+    const ws = path.join(dir, 'ws')
+    const store = await openStore(home)
+    await store.deliveryUpsert(ws, {
+      id: 'd-1',
+      state: 'submitting',
+      conversation: 'nyx-coral-lane',
+      answerId: 'msg_7',
+      partCoverage: [[], []],
+      evidenceIds: [],
+    })
+
+    const first = await store.deliveryReadAttempt(ws, {
+      id: 'd-1',
+      part: 2,
+      lead: 'tab:t-1:1',
+      opId: 'op-read-1',
+    })
+    assert.equal(first.partAttempts['2'], 1)
+    assert.equal(first.lastRead.part, 2)
+    assert.equal(first.lastRead.lead, 'tab:t-1:1')
+    assert.equal(first.lastRead.opId, 'op-read-1')
+    assert.equal(typeof first.lastRead.at, 'string')
+
+    // Printing a part again is another attempt. Counted per part, so the
+    // record stays bounded by the number of parts however often it is read.
+    await store.deliveryReadAttempt(ws, { id: 'd-1', part: 2, lead: 'tab:t-1:1', opId: 'op-2' })
+    const third = await store.deliveryReadAttempt(ws, {
+      id: 'd-1',
+      part: 1,
+      lead: 'tab:t-1:1',
+      opId: 'op-3',
+    })
+    assert.equal(third.partAttempts['2'], 2)
+    assert.equal(third.partAttempts['1'], 1)
+
+    // An attempt is NOT coverage: a part printed is a part sent, and only
+    // the lead's own tool result carries the framing and the digest that
+    // prove it arrived. Nothing here may ever write those.
+    const stored = (await store.readDeliveries(ws))['d-1']
+    assert.deepEqual(stored.partCoverage, [[], []])
+    assert.deepEqual(stored.evidenceIds, [])
+    assert.equal(stored.state, 'submitting')
+
+    await assert.rejects(
+      () => store.deliveryReadAttempt(ws, { id: 'd-9', part: 1, lead: 'tab:t-1:1', opId: 'x' }),
+      /no delivery/,
+    )
+    for (const part of [0, -1, 1.5, 'two']) {
+      await assert.rejects(
+        () => store.deliveryReadAttempt(ws, { id: 'd-1', part, lead: 'tab:t-1:1', opId: 'x' }),
+        /part number/,
+        JSON.stringify(part),
+      )
+    }
+    await store.close()
+  })
+})
+
+test('store: a closed tab is refused, and is never evidence that its pane exited', async () => {
+  await withHome(async (home, dir) => {
+    const ws = path.join(dir, 'ws')
+    const store = await openStore(home)
+    const tabs = new Tabs(store)
+    const created = await tabs.create(ws, 'codex')
+    const first = await store.admit(ws, {
+      name: 'nyx-coral-lane',
+      tab: created.id,
+      agent: 'nyx',
+      kind: 'codex',
+      lead: created.leadId,
+      launch: { launchId: 'l-1', opId: 'op-1', nonce: 'l-1' },
+    })
+    await store.resolve(ws, { name: 'nyx-coral-lane', launchId: 'l-1', outcome: 'opened' })
+
+    // Asteria's interleaving: the caller took its snapshot while the tab
+    // was open, the tab was suspended in between, and admission runs now.
+    const snapshot = (await store.readTabs()).find((tab) => tab.id === created.id)
+    assert.equal(snapshot.closed, false)
+    await tabs.suspend(created.id)
+
+    const panes = (await store.readTabs()).find((tab) => tab.id === created.id).panes.length
+    await assert.rejects(
+      () =>
+        store.admit(ws, {
+          name: 'nyx-coral-lane',
+          tab: created.id,
+          launch: { launchId: 'l-2', opId: 'op-2', nonce: 'l-2' },
+        }),
+      /closed/,
+    )
+
+    // A closed tab says nothing about whether its pane's process ended.
+    // Only `pane.exit` releases, so the reservation stands and no second
+    // pane was minted for the conversation.
+    const row = (await store.readThreads(ws))['nyx-coral-lane']
+    assert.equal(row.reserved.launchId, 'l-1')
+    assert.equal(row.reserved.pane, first.pane.id)
+    assert.equal(
+      (await store.readTabs()).find((tab) => tab.id === created.id).panes.length,
+      panes,
+      'and admission allocated nothing on its way to refusing',
+    )
+    await store.close()
+  })
+})
+
+test('store: admission refuses a conversation that belongs to another agent', async () => {
+  await withHome(async (home, dir) => {
+    const ws = path.join(dir, 'ws')
+    const store = await openStore(home)
+    await seedTabRecord(store, ws, 't-1')
+    const first = await store.admit(ws, {
+      name: 'nyx-coral-lane',
+      tab: 't-1',
+      agent: 'nyx',
+      kind: 'codex',
+      lead: 'tab:t-1:1',
+      launch: { launchId: 'l-1', opId: 'op-1', nonce: 'l-1' },
+    })
+    await store.releaseExitedPane(ws, {
+      name: 'nyx-coral-lane',
+      tab: 't-1',
+      pane: first.pane.id,
+      generation: first.pane.generation,
+    })
+
+    // The identity is checked against the row this mutation read, so a
+    // roster that changed between the caller's look and this write cannot
+    // slip a different harness onto an existing conversation.
+    for (const [agent, kind] of [
+      ['zeus', 'codex'],
+      ['nyx', 'claude-code'],
+    ]) {
+      await assert.rejects(
+        () =>
+          store.admit(ws, {
+            name: 'nyx-coral-lane',
+            tab: 't-1',
+            agent,
+            kind,
+            launch: { launchId: 'l-x', opId: 'op-x', nonce: 'l-x' },
+          }),
+        /belongs to nyx \(codex\)/,
+        `${agent} ${kind}`,
+      )
+    }
+    const row = (await store.readThreads(ws))['nyx-coral-lane']
+    assert.equal(row.reserved, undefined, 'and nothing was admitted on the way to refusing')
+
+    const same = await store.admit(ws, {
+      name: 'nyx-coral-lane',
+      tab: 't-1',
+      agent: 'nyx',
+      kind: 'codex',
+      launch: { launchId: 'l-2', opId: 'op-2', nonce: 'l-2' },
+    })
+    assert.equal(same.outcome, 'reserved')
+    await store.close()
   })
 })

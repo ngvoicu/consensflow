@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { recordLeadPreference } from '../hosts/lib/policy.js'
 import { bindEvidence } from '../hosts/lib/session-binding.js'
 import { workspaceKey, writeJsonAtomic } from '../hosts/lib/state.js'
 import { nowIso } from '../hosts/lib/utils.js'
@@ -14,7 +15,9 @@ import { nowIso } from '../hosts/lib/utils.js'
  * queue guards are small and few, and two queues over one file is how a
  * write gets lost. `mutate(cwd, name, fn)` is the primitive; the named ops
  * (`conversation.create`, `session.bind`, `sent.record`, `policy.set`,
- * `seen.set`, `delivery.upsert`, `tab.*`) are thin methods over it, and
+ * `lead.preference`, `progress.set`, `seen.set`, `delivery.allocate`,
+ * `delivery.upsert`, `delivery.readAttempt`,
+ * `reservation.create|resolve|release`, `tab.*`) are thin methods over it, and
  * `src/tabs.js` builds the tab semantics on the same queue.
  *
  * Rules, each with a test in `tests/store.test.mjs`:
@@ -59,7 +62,16 @@ import { nowIso } from '../hosts/lib/utils.js'
  *   process's panes are gone even though their records remain). Every
  *   reservation carries a durable `launchId`, recorded on the binding too,
  *   and `release` names the launch it releases — a launch's delayed cleanup
- *   never takes the next launch's reservation.
+ *   never takes the next launch's reservation. A reservation is `resolve`d
+ *   when its pane is really open: until then the launch is in flight, and
+ *   an unresolved reservation is what refuses a second launch for one
+ *   conversation. It keeps the `opId` that asked for it too, so a retry
+ *   arriving after a restart can still tell its own launch from a new one.
+ * - A delivery identity is issued by ONE allocator too, `allocateDeliveryId`,
+ *   from a counter persisted beside the pane one and incremented on the
+ *   queue. `d-<n>`, digits only: the id becomes a filename. The delivery
+ *   module is pure and mints nothing, so ids minted there were unique only
+ *   within one plan.
  * - A pane identity is issued by ONE allocator (`allocatePaneId`), whichever
  *   path creates the pane — `tab.create`, `tab.addPane`, or either
  *   reservation writer. It is app-wide: the minted `p-<n>` namespace is the
@@ -72,6 +84,12 @@ import { nowIso } from '../hosts/lib/utils.js'
  *   generation it was made at — a binding made at one pane generation must
  *   never authorise a write for another. A `replaced` verdict is refused
  *   AND persisted: the old binding dies on disk with the session it named.
+ * - A controller write (`session.bind`, `progress.set`, `sent.record`)
+ *   names the launch it is for, and the store compares that against the
+ *   reservation of the moment inside its queue — required in effect, not in
+ *   shape: a RESERVED row refuses a write that cannot name its launch, and
+ *   an unreserved row has no launch to compare, so the generic queue writes
+ *   keep working.
  * - `seen.set` scopes marks to the app-owned lead identity
  *   (`tab:<id>:<generation>`): generations keep their own marks.
  * - Unreadable state is never proof of absence: only a missing file reads
@@ -92,6 +110,20 @@ const PANE_KINDS = ['lead', 'worker', 'shell']
  * not fail the open, it succeeds WITHOUT a lock, which is why the platform
  * is checked before the flag is used.
  */
+/**
+ * A refusal admission makes about the state of a conversation, carrying the
+ * word the HTTP layer answers with. `reserved` is a launch of ours that has
+ * not come back; `elsewhere` is a pane up in another session.
+ */
+export class AdmissionError extends Error {
+  constructor(message, code, detail = null) {
+    super(message)
+    this.name = 'AdmissionError'
+    this.code = code
+    this.detail = detail
+  }
+}
+
 const O_EXLOCK = 0x20
 const O_EXLOCK_PLATFORMS = new Set(['darwin', 'freebsd', 'openbsd', 'netbsd'])
 const LOCK_FILE_NOTE = 'ownership is the kernel lock; this file is diagnostics only'
@@ -300,6 +332,191 @@ export class Store {
   }
 
   /**
+   * Admission: decide whether a conversation needs a launch, and take the
+   * reservation, in ONE queued operation.
+   *
+   * This is one operation because the decision and the write cannot be
+   * separated without a race. Reading the panes and the reservation, then
+   * reserving in a later mutation, means two callers can both read "no
+   * pane here", both decide to launch, and both write — two panes, two
+   * processes, one conversation. So everything a launch decision rests on
+   * is read here, inside the queue, and the reservation is taken before
+   * anything else runs. Bridge I/O stays OUTSIDE: this holds the queue only
+   * as long as reading and writing local state takes.
+   *
+   * Nothing is ever released on the strength of a snapshot taken earlier,
+   * and nothing but a pane's own exit releases a reservation: a CLOSED tab
+   * is refused before anything changes, because a closed tab says nothing
+   * about whether its panes' processes ended.
+   *
+   * A reservation belonging to ANOTHER tab is never released here at all —
+   * that tab's own pane exit releases it — and a stale reservation of this
+   * tab is released and replaced in this same step, having just been read.
+   *
+   * `launch` may be a function of the row this mutation read, for the
+   * evidence that depends on what the conversation already is.
+   *
+   * Answers `{outcome: 'live', pane}` when the conversation is already
+   * running in a pane of this tab, or `{outcome: 'reserved', pane, row}`
+   * with the pane it minted. Refuses `reserved` (a launch that has not come
+   * back) and `elsewhere` (running under another tab).
+   */
+  async admit(cwd, { name, tab, agent, kind, lead = null, launch = null, notify } = {}) {
+    return this.mutate(cwd, 'launch.admit', async (io) => {
+      requireText(name, 'conversation name')
+      requireText(tab, 'tab id')
+      const threads = await io.readThreads()
+      const envelope = await io.readTabsEnvelope()
+      const tabRecord = findTab(envelope.tabs, tab)
+      if (!Array.isArray(tabRecord.panes)) tabRecord.panes = []
+      // A closed session is refused before anything changes — and it is
+      // never evidence that its panes' processes ended. Treating a closed
+      // tab as "the pane is gone" released a live reservation and minted a
+      // second pane for a conversation that already had one running, with
+      // no exit ever coming for the first. Only `pane.exit` releases.
+      if (tabRecord.closed === true) {
+        throw new AdmissionError(`the session ${tab} is closed — resume it first`, 'session-closed')
+      }
+
+      const row = threads[name]
+      if (row !== undefined && !isRecord(row)) throw new Error(`${name} is not a conversation`)
+      // Identity, against the row THIS mutation read: a roster that changed
+      // between the caller's look and this write cannot put a different
+      // agent or harness onto an existing conversation.
+      if (isRecord(row) && agent !== undefined) {
+        if (row.agent !== agent || (kind !== undefined && row.kind !== kind)) {
+          throw new AdmissionError(
+            `${name} belongs to ${row.agent} (${row.kind}), not ${agent} (${kind})`,
+            'agent-mismatch',
+            { agent: row.agent, kind: row.kind },
+          )
+        }
+      }
+      const previousThreads = structuredClone(threads)
+
+      if (isRecord(row) && isRecord(row.reserved)) {
+        const reserved = row.reserved
+        if (reserved.resolvedAt === undefined) {
+          throw new AdmissionError(
+            `${name} is reserved by a launch that has not come back — one conversation never opens two`,
+            'reserved',
+          )
+        }
+        const live = linkedPane(envelope.tabs, reserved)
+        if (reserved.tab !== tab) {
+          // Another session holds it. Never released from here, whether or
+          // not its pane still answers: that session's exit releases it,
+          // and taking it would put two windows on one native session.
+          throw new AdmissionError(
+            `${name} is running in another session — open it there`,
+            'elsewhere',
+            { session: reserved.tab },
+          )
+        }
+        if (live !== null && live.conversation === name) {
+          if (notify === undefined) return { outcome: 'live', pane: live, row }
+          const applied = recordLeadPreference(row, notify)
+          if (applied.ok !== true) {
+            throw new Error(`the lead preference is refused for ${name}: ${applied.reason}`)
+          }
+          threads[name] = { ...applied.row, updatedAt: nowIso() }
+          await io.writeThreads(threads)
+          return { outcome: 'live', pane: live, row: threads[name] }
+        }
+        // This tab's own reservation, whose pane is gone: released here,
+        // having just been read in this same mutation.
+        delete row.reserved
+      }
+
+      if (row === undefined && (agent === undefined || kind === undefined)) {
+        throw new Error(`no conversation named ${name} in this workspace`)
+      }
+      // The lead's `--notify` preference is applied HERE, with the
+      // reservation, rather than in a write of its own afterwards: a
+      // separate write is a window in which a failure leaves a conversation
+      // reserved with nothing running and no exit ever coming for it.
+      if (notify !== undefined && isRecord(row)) {
+        const applied = recordLeadPreference(row, notify)
+        if (applied.ok !== true) {
+          throw new Error(`the lead preference is refused for ${name}: ${applied.reason}`)
+        }
+        threads[name] = applied.row
+      }
+      const pane = appendWorkerPane(envelope, tabRecord, name)
+      const at = nowIso()
+      // The launch record may be a function of the row, because what a
+      // launch must bind by depends on whether this conversation already
+      // has a native session — and that is only known here, from the row
+      // this mutation read.
+      const record = typeof launch === 'function' ? launch(row) : launch
+      const reserved = reservationFrom(
+        { tab, id: pane.id, generation: pane.generation },
+        record,
+        at,
+      )
+      if (row === undefined) {
+        const created = {
+          agent,
+          kind,
+          lead,
+          sessionId: null,
+          runs: 0,
+          sent: [],
+          seen: [],
+          createdAt: at,
+          updatedAt: at,
+          reserved,
+        }
+        if (notify !== undefined) {
+          const applied = recordLeadPreference(created, notify)
+          if (applied.ok !== true) {
+            throw new Error(`the lead preference is refused for ${name}: ${applied.reason}`)
+          }
+          threads[name] = applied.row
+        } else {
+          threads[name] = created
+        }
+      } else {
+        const current = threads[name]
+        current.reserved = reserved
+        current.updatedAt = at
+        restampBinding(current, reserved, at)
+      }
+      await this.#commitLinkedThreads(io, threads, previousThreads, envelope)
+      return { outcome: 'reserved', pane, row: threads[name] }
+    })
+  }
+
+  /**
+   * A pane's process ended: release the reservation, but ONLY when the
+   * reservation is the one that names this pane, compared inside the queue.
+   *
+   * An exit event is not proof about the CURRENT reservation. A duplicate
+   * exit, or one that arrives after the conversation reopened, names a pane
+   * the reservation no longer holds — releasing on its word would free the
+   * successor's launch and let a second window open on it.
+   */
+  async releaseExitedPane(cwd, { name, tab, pane, generation } = {}) {
+    return this.mutate(cwd, 'reservation.releaseExited', async (io) => {
+      requireText(name, 'conversation name')
+      requireText(tab, 'tab id')
+      requireText(pane, 'pane id')
+      const threads = await io.readThreads()
+      const row = threads[name]
+      if (!isRecord(row) || !isRecord(row.reserved)) return { released: null, reason: 'none' }
+      const reserved = row.reserved
+      if (reserved.tab !== tab || reserved.pane !== pane || reserved.generation !== generation) {
+        return { released: null, reason: 'stale', held: reserved.launchId }
+      }
+      const { launchId } = reserved
+      delete row.reserved
+      row.updatedAt = nowIso()
+      await io.writeThreads(threads)
+      return { released: launchId, reason: 'released' }
+    })
+  }
+
+  /**
    * Reserves an EXISTING conversation for a launch: the launch-ticket path,
    * where the conversation predates the pane. Same two-file commit as
    * creation — validated before the first write, restored on a second-file
@@ -322,6 +539,43 @@ export class Store {
       row.reserved = reservationFrom(pane, launch, nowIso())
       row.updatedAt = nowIso()
       await this.#commitLinkedThreads(io, threads, previousThreads, envelope)
+      return row
+    })
+  }
+
+  /**
+   * Marks a reservation's launch resolved — the pane is open and serving.
+   *
+   * A reservation without this stamp is a launch still in flight, and that
+   * is the whole point of the op: a `pane.open` whose answer never came
+   * back leaves the reservation unresolved, and an unresolved reservation
+   * is what refuses the next launch for that conversation. The caller names
+   * the launch it is resolving, compared INSIDE the queued mutation, so a
+   * late answer from an ended launch never resolves the one that replaced
+   * it. Resolving twice is the same answer, not a second event: the stamp
+   * is written once, so a retry that crossed the first answer cannot move
+   * it.
+   */
+  async resolve(cwd, { name, launchId, outcome = 'opened' } = {}) {
+    return this.mutate(cwd, 'reservation.resolve', async (io) => {
+      requireText(name, 'conversation name')
+      requireText(launchId, 'launch id')
+      requireText(outcome, 'launch outcome')
+      const threads = await io.readThreads()
+      const row = requireRow(threads, name)
+      if (!isRecord(row.reserved)) {
+        throw new Error(`${name} holds no reservation to resolve`)
+      }
+      if (row.reserved.launchId !== launchId) {
+        throw new Error(
+          `${name} is reserved for launch ${row.reserved.launchId}, not ${launchId} — a stale resolve never resolves another launch's reservation`,
+        )
+      }
+      if (typeof row.reserved.resolvedAt === 'string') return row
+      row.reserved.resolvedAt = nowIso()
+      row.reserved.outcome = outcome
+      row.updatedAt = nowIso()
+      await io.writeThreads(threads)
       return row
     })
   }
@@ -364,7 +618,7 @@ export class Store {
    * bind happens only on `bound: true`, and the row records the evidence
    * and the pane generation the binding was made at.
    */
-  async sessionBind(cwd, { name, candidate = {} } = {}) {
+  async sessionBind(cwd, { name, candidate = {}, expect } = {}) {
     return this.mutate(cwd, 'session.bind', async (io) => {
       requireText(name, 'conversation name')
       const threads = await io.readThreads()
@@ -372,6 +626,7 @@ export class Store {
       if (!isRecord(row.reserved)) {
         throw new Error(`session.bind refuses for ${name}: the store holds no launch record`)
       }
+      requireCurrentLaunch(row, name, expect)
       // The binding is made against the pane as linked: a launch reserved
       // at one generation never authorises a write for another, and a pane
       // serving someone else never lends its reservation.
@@ -412,12 +667,13 @@ export class Store {
   }
 
   /** Appends to the row's `sent` list — what was pasted into the pane. */
-  async sentRecord(cwd, { name, entry = {} } = {}) {
+  async sentRecord(cwd, { name, entry = {}, expect } = {}) {
     return this.mutate(cwd, 'sent.record', async (io) => {
       requireText(name, 'conversation name')
       if (!isRecord(entry)) throw new Error('entry must be an object')
       const threads = await io.readThreads()
       const row = requireRow(threads, name)
+      requireCurrentLaunch(row, name, expect)
       if (!Array.isArray(row.sent)) row.sent = []
       row.sent.push({ ...entry, at: nowIso() })
       row.updatedAt = nowIso()
@@ -455,6 +711,114 @@ export class Store {
       row.updatedAt = nowIso()
       await io.writeThreads(threads)
       return row
+    })
+  }
+
+  /**
+   * Records what `cf run --notify` asked for, through `policy.js`'s own
+   * writer so the rule and the write cannot drift apart. It reaches
+   * exactly one field, `notifyPreference`: the human's scopes are the tab
+   * and the pane, which `recordLeadPreference` is never handed.
+   */
+  async leadPreferenceSet(cwd, { name, value } = {}) {
+    return this.mutate(cwd, 'lead.preference', async (io) => {
+      requireText(name, 'conversation name')
+      const threads = await io.readThreads()
+      const applied = recordLeadPreference(requireRow(threads, name), value)
+      if (applied.ok !== true) {
+        throw new Error(`the lead preference is refused for ${name}: ${applied.reason}`)
+      }
+      threads[name] = { ...applied.row, updatedAt: nowIso() }
+      await io.writeThreads(threads)
+      return threads[name]
+    })
+  }
+
+  /**
+   * The launch's own account of where it has got to, written by the
+   * controller under its capability. A state, not a log: the latest note
+   * replaces the last one, so nothing here grows without bound.
+   */
+  async progressSet(cwd, { name, progress = {}, expect } = {}) {
+    return this.mutate(cwd, 'progress.set', async (io) => {
+      requireText(name, 'conversation name')
+      if (!isRecord(progress)) throw new Error('progress must be an object')
+      requireText(progress.state, 'progress state')
+      const threads = await io.readThreads()
+      const row = requireRow(threads, name)
+      requireCurrentLaunch(row, name, expect)
+      row.progress = { ...progress, at: nowIso() }
+      row.updatedAt = nowIso()
+      await io.writeThreads(threads)
+      return row
+    })
+  }
+
+  /**
+   * Mints the next delivery identity — app-wide, durable, and one at a time.
+   *
+   * `hosts/lib/deliveries.js` is pure and mints nothing, so ids from two
+   * plans were only ever unique within one call. Identity is the store's,
+   * like pane identity: the counter is persisted in the same envelope as
+   * the pane allocator's, incremented inside the mutation queue (so fifty
+   * at once are fifty ids), and only ever climbing — a restart continues
+   * the sequence rather than beginning it again.
+   *
+   * The namespace is `d-<n>`, digits only, because a delivery id becomes a
+   * path: `<workspace>/deliveries/<id>.md`, and it is quoted back to the
+   * lead inside the envelope's own markers. One path segment, nothing a
+   * shell or a filesystem reads as structure.
+   */
+  async allocateDeliveryId() {
+    return this.mutate(null, 'delivery.allocate', async (io) => {
+      const envelope = await io.readTabsEnvelope()
+      // Past this an increment stops being exact, and two deliveries would
+      // share an id — and a delivery id names a file.
+      if (envelope.nextDelivery >= Number.MAX_SAFE_INTEGER) {
+        throw new Error('the delivery counter has reached the last id this build can count')
+      }
+      const id = `d-${envelope.nextDelivery}`
+      envelope.nextDelivery += 1
+      await io.writeTabsEnvelope(envelope)
+      return id
+    })
+  }
+
+  /**
+   * Records that a part of a delivery was PRINTED — an attempt, never
+   * coverage.
+   *
+   * A part printed is a part sent, and nothing more. Coverage needs the
+   * part's complete framing AND a matching body digest in the lead's own
+   * model-visible tool result: a receiver that keeps only the tail of a
+   * long output keeps the end marker and drops the text, so an end marker
+   * alone would credit a part nobody read. This op therefore writes to its
+   * own fields and to no others — `partCoverage`, `evidenceIds` and
+   * `state` are `receipt`'s alone.
+   *
+   * Counted per part rather than logged, so a delivery read many times
+   * stays bounded by how many parts it has.
+   */
+  async deliveryReadAttempt(cwd, { id, part, lead, opId } = {}) {
+    return this.mutate(cwd, 'delivery.readAttempt', async (io) => {
+      requireText(id, 'delivery id')
+      requireText(lead, 'lead identity')
+      if (!Number.isInteger(part) || part < 1) {
+        throw new Error(`a part number is a positive integer, not ${JSON.stringify(part)}`)
+      }
+      const deliveries = await io.readDeliveries()
+      const record = deliveries[id]
+      if (!isRecord(record)) throw new Error(`no delivery ${id} in this workspace`)
+      const attempts = isRecord(record.partAttempts)
+        ? Object.assign(Object.create(null), record.partAttempts)
+        : Object.create(null)
+      const key = String(part)
+      attempts[key] = (Number.isInteger(attempts[key]) ? attempts[key] : 0) + 1
+      record.partAttempts = attempts
+      record.lastRead = { part, lead, at: nowIso(), ...(opId === undefined ? {} : { opId }) }
+      deliveries[id] = record
+      await io.writeDeliveries(deliveries)
+      return record
     })
   }
 
@@ -568,8 +932,12 @@ export class Store {
         if (!Number.isInteger(envelope?.nextPane) || envelope.nextPane < 1) {
           throw new Error('the pane counter must stay a positive integer')
         }
+        if (!Number.isSafeInteger(envelope?.nextDelivery) || envelope.nextDelivery < 1) {
+          throw new Error('the delivery counter must stay a positive safe integer')
+        }
         await this.#writeAppJson(tabsFile(this.root), {
           nextPane: envelope.nextPane,
+          nextDelivery: envelope.nextDelivery,
           issued: envelope.issued,
           tabs: envelope.tabs,
         })
@@ -769,7 +1137,9 @@ async function readTabsFile(root) {
   try {
     await fs.access(file)
   } catch (error) {
-    if (error?.code === 'ENOENT') return { nextPane: 1, issued: Object.create(null), tabs: [] }
+    if (error?.code === 'ENOENT') {
+      return { nextPane: 1, nextDelivery: 1, issued: Object.create(null), tabs: [] }
+    }
     throw new Error(`cannot read ${file}: ${error?.message ?? error}`)
   }
   const parsed = await readJsonMap(file)
@@ -781,9 +1151,33 @@ async function readTabsFile(root) {
   if (!isRecord(issued)) throw new Error(`cannot read ${file}: the issued pane ids are not a map`)
   return {
     nextPane: parsed.nextPane,
+    // A store written before delivery ids were minted has no counter, and
+    // has therefore issued none: starting at 1 repeats nothing.
+    nextDelivery: deliveryCounter(parsed.nextDelivery, file),
     issued: Object.assign(Object.create(null), issued),
     tabs: parsed.tabs,
   }
+}
+
+/**
+ * The delivery counter as read back. Absent means a store from before this
+ * allocator existed — it has issued nothing, so 1 is safe. Present but not
+ * a positive integer is corruption, and corruption never reads as empty:
+ * starting over would hand out ids that name delivery files already on
+ * disk.
+ */
+function deliveryCounter(value, file) {
+  // ABSENT means a store from before this allocator existed: it has issued
+  // nothing, so 1 repeats nothing. `null` is a value somebody wrote, and
+  // reading it as absent would start the sequence over on top of delivery
+  // files already written and immutable.
+  if (value === undefined) return 1
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(
+      `cannot read ${file}: the delivery counter must be a positive safe integer, not ${JSON.stringify(value)}`,
+    )
+  }
+  return value
 }
 
 const MINTED_PANE_ID = /^p-\d+$/
@@ -838,6 +1232,98 @@ export function allocatePaneId(envelope, { id = null, generation = 1 } = {}) {
   return id
 }
 
+/**
+ * Appends a worker pane to a tab, through the ONE allocator, inside the
+ * caller's mutation. `src/tabs.js` does the same for the page's own paths;
+ * admission needs it here because minting the pane and taking the
+ * reservation for it have to be one step.
+ */
+function appendWorkerPane(envelope, tab, conversation) {
+  const pane = {
+    id: allocatePaneId(envelope, { generation: 1 }),
+    kind: 'worker',
+    conversation,
+    generation: 1,
+    order: nextPaneOrder(tab.panes),
+  }
+  tab.panes.push(pane)
+  tab.updatedAt = nowIso()
+  return pane
+}
+
+/**
+ * The reservation a controller write claims to be for, compared against the
+ * CURRENT one inside the mutation.
+ *
+ * A controller's authority was checked when its request was admitted, which
+ * is earlier than when its write lands. In between, its launch can end and
+ * another can take the conversation — so the ownership check has to be made
+ * again here, against what the row says now, or an ended launch's write
+ * overwrites its replacement's.
+ */
+function requireCurrentLaunch(row, name, expect) {
+  const reserved = isRecord(row.reserved) ? row.reserved : null
+  if (!isRecord(expect)) {
+    // A row nobody has reserved is nobody's launch to claim, so a write
+    // with no expectation is only ever admissible there. A RESERVED row
+    // belongs to a launch, and a write that cannot name it is a write
+    // whose authority we cannot check.
+    if (reserved === null) return null
+    throw new Error(
+      `${name} is reserved by launch ${reserved.launchId}: a write must name the launch it is for`,
+    )
+  }
+  requireText(expect.launchId, 'expected launch id')
+  requireText(expect.tab, 'expected tab')
+  requireText(expect.pane, 'expected pane')
+  if (!Number.isInteger(expect.generation) || expect.generation < 1) {
+    throw new Error('expected generation must be a positive integer')
+  }
+  if (
+    reserved === null ||
+    reserved.launchId !== expect.launchId ||
+    reserved.tab !== expect.tab ||
+    reserved.pane !== expect.pane ||
+    reserved.generation !== expect.generation
+  ) {
+    throw new Error(
+      `launch ${expect.launchId} is over for ${name}: it is not the current reservation`,
+    )
+  }
+  return reserved
+}
+
+/**
+ * A conversation reopened on the session it already had: re-validate the
+ * binding against the launch that is resuming it, and stamp it with the
+ * pane now carrying it.
+ *
+ * A binding records the generation it was made at, because a binding made
+ * for one pane must never authorise a decision for another. Reopening
+ * without re-stamping leaves exactly that: a row naming a live session and
+ * a generation belonging to a pane that is gone. So the launch record has
+ * to vouch for the session again — `bindEvidence` decides, as it does
+ * everywhere else — and a launch that cannot leaves no binding at all,
+ * rather than a stale one. The session id itself is kept either way: it is
+ * what the pane was told to resume, and forgetting it would lose the
+ * conversation's own history.
+ */
+function restampBinding(row, reserved, at) {
+  const sessionId = typeof row.sessionId === 'string' ? row.sessionId : ''
+  if (sessionId.length === 0) return
+  const decision = bindEvidence(row.kind, { sessionId }, reserved)
+  if (decision?.bound !== true) {
+    delete row.binding
+    return
+  }
+  row.binding = {
+    evidence: decision.evidence,
+    generation: reserved.generation,
+    launchId: reserved.launchId,
+    at,
+  }
+}
+
 /** The pane with this id, in whichever tab holds it. */
 function findPaneAnywhere(tabs, paneId) {
   for (const tab of tabs) {
@@ -871,6 +1357,17 @@ function reservationFrom(pane, launch, at) {
     }
   }
   const reserved = { tab: pane.tab, pane: pane.id, generation, launchId, at }
+  // The operation that asked for this launch, kept beside it: a retry that
+  // arrives after a restart can still tell its own launch from a new one.
+  if (
+    launch !== null &&
+    launch !== undefined &&
+    launch.opId !== undefined &&
+    launch.opId !== null
+  ) {
+    requireText(launch.opId, 'launch opId')
+    reserved.opId = launch.opId
+  }
   const evidence = evidenceFields(launch)
   if (evidence !== null) Object.assign(reserved, evidence)
   return reserved

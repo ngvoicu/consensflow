@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
+import { effectivePolicy } from '../hosts/lib/policy.js'
 import { leadId } from '../hosts/lib/threads.js'
 import { Store } from '../src/store.js'
 import { leadIdentity, paneIdentity, samePane, Tabs } from '../src/tabs.js'
@@ -52,12 +53,17 @@ test('tabs: tab.create returns {id, generation: 1, leadId: "tab:<id>:1"}', async
     assert.equal(created.generation, 1)
     assert.equal(created.leadId, `tab:${created.id}:1`)
 
-    // A tab is a directory, one lead pane and a policy — created whole.
+    // A tab is a directory and one lead pane, created whole. Its policy is
+    // UNSET: `policy` records a human's explicit choice, and a tab nobody
+    // has tuned must fall through to the default — writing 'auto' here
+    // would put the app's own value above the lead's `--notify` preference
+    // in `effectivePolicy`, which is a choice no human made.
     const tab = await tabs.get(created.id)
     assert.equal(tab.closed, false)
     assert.equal(tab.directory, path.join(dir, 'project'))
     assert.equal(tab.lead.harness, 'claude-code')
-    assert.equal(tab.policy, 'auto')
+    assert.equal(Object.hasOwn(tab, 'policy'), false, 'a new tab records no policy')
+    assert.equal(effectivePolicy(tab, tab.panes[0], null).source, 'default')
     assert.equal(leadIdentity(tab), created.leadId)
     assert.equal(tab.panes.length, 1)
     assert.equal(tab.panes[0].kind, 'lead')

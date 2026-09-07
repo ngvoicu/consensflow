@@ -28,9 +28,11 @@ import {
   syncCmuxSkills,
   turnOff,
 } from './mode.js'
+import { PaneError, Panes, paneErrorBody } from './panes.js'
 import {
   addAgent,
   agentDrift,
+  agentRow,
   configRoot,
   editAgent,
   HARNESSES,
@@ -224,6 +226,13 @@ function readBody(request) {
 
 const FORBIDDEN_IDENTITY_FIELDS = ['by', 'lead', 'owner']
 
+/**
+ * The runtime this app is running on, which is the runtime everything it
+ * launches must run on: inside the bundle it IS the bundled node, and
+ * resolving one from PATH instead is how a stale install gets a say.
+ */
+const RUNTIME = process.execPath
+
 class InternalInvariantError extends Error {
   constructor(message) {
     super(message)
@@ -240,6 +249,40 @@ function paneOperation(method, pathname) {
   if (method !== 'POST' || !pathname.startsWith('/api/panes/')) return null
   const operation = pathname.slice('/api/panes/'.length)
   return operation.length > 0 && !operation.includes('/') ? operation : null
+}
+
+/**
+ * One pane operation, dispatched after the credential has already decided
+ * it may run. `dimensions` is what the token proved — the tab for a lead,
+ * the launch for a controller — so no operation takes its subject from the
+ * body: a lead's tab and a controller's conversation are the credential's,
+ * never the caller's.
+ *
+ * Returns the `send` arguments so the route stays one line.
+ */
+async function runPaneOperation(panes, op, dimensions, body) {
+  switch (op) {
+    case 'panes':
+      return [200, await panes.list(dimensions.tab)]
+    case 'consult':
+      return [200, await panes.consult(dimensions.tab, body)]
+    case 'say':
+      return [200, await panes.say(dimensions.tab, body)]
+    case 'attach':
+      return [200, await panes.attach(dimensions.tab, body)]
+    case 'session.bind':
+      return [200, await panes.sessionBind(dimensions.launch, body)]
+    case 'progress.set':
+      return [200, await panes.progressSet(dimensions.launch, body)]
+    case 'sent.record':
+      return [200, await panes.sentRecord(dimensions.launch, body)]
+    case 'read':
+      return [200, await panes.read(dimensions.tab, body)]
+    case 'seen':
+      return [200, await panes.seen(dimensions.tab, body)]
+    default:
+      return [404, { error: 'not found' }]
+  }
 }
 
 /**
@@ -272,7 +315,7 @@ export function stdinIsPipe(stream) {
   return isPipe(0)
 }
 
-export async function startUiServer(env) {
+export async function startUiServer(env, { paneOpenDeadlineMs } = {}) {
   // The app is an entry point too: a machine from before the merge should not
   // have to run the CLI once to be tidied up.
   migrateStateRoot(env)
@@ -286,6 +329,20 @@ export async function startUiServer(env) {
   }
   const token = randomBytes(24).toString('hex')
   let app = null
+  const panes = new Panes({
+    store,
+    tabs,
+    agents: {
+      row: (name) => agentRow(name, env),
+      names: () => listAgents(env).map((agent) => agent.name),
+    },
+    app: () => app,
+    // The Node deciding is the Node that will run the pane: inside the
+    // bundle this IS the bundled runtime, and `pane.open` refuses a
+    // relative argv[0].
+    node: RUNTIME,
+    ...(paneOpenDeadlineMs === undefined ? {} : { paneOpenDeadlineMs }),
+  })
 
   const server = createServer(async (request, reply) => {
     const url = new URL(request.url, 'http://127.0.0.1')
@@ -355,7 +412,8 @@ export async function startUiServer(env) {
         if (op === null || !checkScope(bearer, { ...dimensions, op })) {
           return send(403, { error: 'forbidden' })
         }
-        return send(501, { error: 'not yet' })
+        await storeReady()
+        return send(...(await runPaneOperation(panes, op, dimensions, body)))
       }
 
       if (!uiAuthorized) return send(403, { error: 'forbidden' })
@@ -379,6 +437,7 @@ export async function startUiServer(env) {
             leadId: created.leadId,
             app,
             path: env?.PATH,
+            node: RUNTIME,
           }),
         })
       }
@@ -393,7 +452,7 @@ export async function startUiServer(env) {
         if (requester === undefined) {
           throw new InternalInvariantError(`the tab ${tab.id} has no lead pane`)
         }
-        const ticket = issueTicket({
+        const { ticket, launch } = issueTicket({
           tab: tab.id,
           pane: pane.id,
           lead: leadIdentity(tab),
@@ -403,6 +462,7 @@ export async function startUiServer(env) {
         })
         return send(201, {
           ticket,
+          launch,
           controllerEnv: buildControllerEnv({ pane: pane.id, app, ticket }),
         })
       }
@@ -499,6 +559,7 @@ export async function startUiServer(env) {
       return send(404, { error: 'not found' })
     } catch (cause) {
       if (cause instanceof LaunchTicketError) return send(401, { error: 'unauthorized' })
+      if (cause instanceof PaneError) return send(cause.status, paneErrorBody(cause))
       if (cause instanceof InternalInvariantError) return send(500, { error: 'internal_error' })
       return send(400, { error: cause instanceof Error ? cause.message : String(cause) })
     }
@@ -516,6 +577,9 @@ export async function startUiServer(env) {
   return {
     url: `http://127.0.0.1:${port}`,
     token,
+    // The pane host arrives after the handle line: `serveUi` builds the
+    // bridge on the stdio it was handed and gives it to the server here.
+    attachBridge: (bridge) => panes.attachBridge(bridge),
     close: async () => {
       try {
         await new Promise((resolve, reject) => {
@@ -570,6 +634,7 @@ export async function serveUi(
       // must not keep serving.
       const bridge = new Bridge({ input, output, onFatal: () => process.exit(0) })
       bridge.on('ping', () => ({ ok: true }))
+      server.attachBridge(bridge)
     }
     input.on('end', () => process.exit(0))
     input.on('close', () => process.exit(0))
