@@ -63,29 +63,33 @@
  * **Deliver now** may never bypass.
  */
 
-const NATIVE = "native";
-const DERIVED = "derived";
+import { settledAfter } from './completion.js'
+
+const NATIVE = 'native'
+const DERIVED = 'derived'
 
 /**
  * What the page shows while a delivery waits (TEST-PANE-39). Every `busy`
  * reason begins with `lead busy` and every unreadable one says why, so the
  * page can match the prefix and still show the detail.
  */
-const BUSY_REASON = "lead busy";
-const DRAFT_REASON = "draft open";
+const BUSY_REASON = 'lead busy'
+const DRAFT_REASON = 'draft open'
 
 /** The three evidence lists that must all be empty for a boundary to be the frontier. */
 const WORK_LISTS = [
-  ["openTools", "lead busy: a tool is still open"],
-  ["queuedTurns", "lead busy: a turn is queued behind the boundary"],
-  ["hooksInFlight", "lead busy: a hook is still in flight"],
-];
+  ['openTools', 'lead busy: a tool is still open'],
+  ['queuedTurns', 'lead busy: a turn is queued behind the boundary'],
+  ['hooksInFlight', 'lead busy: a hook is still in flight'],
+]
 
 /**
  * Is the lead provably ready to receive a delivery right now?
  *
  * @param {object} input
  * @param {object} input.answers — a `completion.answers()` result.
+ * @param {string} [input.kind] — the harness adapter that minted both
+ *   cursors; required only when `sinceCursor` is supplied.
  * @param {boolean} input.draftLatched — the pane's draft latch, from Rust.
  *   Must be reported: a missing latch is missing evidence, not a clear one.
  * @param {number} input.epoch — the pane's input epoch, a non-negative
@@ -97,48 +101,51 @@ const WORK_LISTS = [
  * @returns {{state: 'ready'|'busy'|'draft'|'unknown', epoch: number|null,
  *   cursor: number|null, provenance: 'native'|'derived'|null, reason: string}}
  */
-export function leadReady({ answers, draftLatched, epoch, sinceCursor } = {}) {
+export function leadReady({ answers, kind, draftLatched, epoch, sinceCursor } = {}) {
   const carry = {
     epoch: isPosition(epoch) ? epoch : null,
     ...carriedProof(answers),
-  };
-  const unknown = (reason) => ({ state: "unknown", ...carry, reason });
-  const busy = (reason) => ({ state: "busy", ...carry, reason });
+  }
+  const unknown = (reason) => ({ state: 'unknown', ...carry, reason })
+  const busy = (reason) => ({ state: 'busy', ...carry, reason })
 
-  const unreadable = unreadableReason(answers);
-  if (unreadable !== null) return unknown(unreadable);
+  const unreadable = unreadableReason(answers)
+  if (unreadable !== null) return unknown(unreadable)
 
-  if (draftLatched === true) return { state: "draft", ...carry, reason: DRAFT_REASON };
+  if (draftLatched === true) return { state: 'draft', ...carry, reason: DRAFT_REASON }
   if (draftLatched !== false) {
-    return unknown("unknown: the pane's draft latch was not reported — a clear latch must be explicit");
+    return unknown(
+      "unknown: the pane's draft latch was not reported — a clear latch must be explicit",
+    )
   }
 
   if (carry.epoch === null) {
-    return unknown("unknown: no valid input epoch was supplied for this decision");
+    return unknown('unknown: no valid input epoch was supplied for this decision')
   }
 
   // Demonstrated work first: it is the one thing that resolves on its own.
-  const working = ongoingWork(answers);
-  if (working !== null) return busy(working);
+  const working = ongoingWork(answers)
+  if (working !== null) return busy(working)
 
-  const settlement = answers.settlement;
-  const unqualified = disqualifyingReason(settlement);
-  if (unqualified !== null) return unknown(unqualified);
+  const settlement = answers.settlement
+  const unqualified = disqualifyingReason(settlement)
+  if (unqualified !== null) return unknown(unqualified)
 
   if (sinceCursor !== undefined && sinceCursor !== null) {
-    if (!isPosition(sinceCursor)) {
-      return unknown("unknown: the last delivery's settlement cursor is not a native position");
+    const freshness = settledAfter(kind, settlement, sinceCursor)
+    if (freshness === null) {
+      return unknown('unknown: the settlement cursors are not recognised by this adapter')
     }
-    if (settlement.cursor <= sinceCursor) {
-      return busy("lead busy: no settlement newer than the last delivery");
+    if (!freshness) {
+      return busy('lead busy: no settlement newer than the last delivery')
     }
   }
 
   return {
-    state: "ready",
+    state: 'ready',
     ...carry,
     reason: `ready: the turn settled at ${settlement.boundary} (${settlement.provenance}, cursor ${settlement.cursor}) with no work in flight and no draft latched`,
-  };
+  }
 }
 
 /**
@@ -147,12 +154,12 @@ export function leadReady({ answers, draftLatched, epoch, sinceCursor } = {}) {
  * these on a refusal as much as on a `ready`.
  */
 function carriedProof(answers) {
-  const settlement = answers?.settlement;
-  const provenance = settlement?.provenance;
+  const settlement = answers?.settlement
+  const provenance = settlement?.provenance
   return {
     cursor: isPosition(settlement?.cursor) ? settlement.cursor : null,
     provenance: provenance === NATIVE || provenance === DERIVED ? provenance : null,
-  };
+  }
 }
 
 /**
@@ -163,25 +170,25 @@ function carriedProof(answers) {
  * session we bound, so nothing in it authorises a write.
  */
 function unreadableReason(answers) {
-  if (answers === null || typeof answers !== "object") {
-    return "unknown: no completion result for this session";
+  if (answers === null || typeof answers !== 'object') {
+    return 'unknown: no completion result for this session'
   }
   if (answers.unknown === true) {
-    return textOr(answers.reason, "unknown: the completion model could not read this session");
+    return textOr(answers.reason, 'unknown: the completion model could not read this session')
   }
   if (answers.replaced === true) {
     return textOr(
       answers.reason,
       "replaced: the pane's native session was replaced — the binding and every decision for it are void",
-    );
+    )
   }
   if (!Array.isArray(answers.items)) {
-    return "unknown: the completion result carries no items";
+    return 'unknown: the completion result carries no items'
   }
   if (answers.items.length === 0) {
-    return "unknown: an empty transcript carries no settlement proof";
+    return 'unknown: an empty transcript carries no settlement proof'
   }
-  return null;
+  return null
 }
 
 /**
@@ -191,55 +198,55 @@ function unreadableReason(answers) {
  * it is a malformed proof, and `disqualifyingReason` refuses it.
  */
 function ongoingWork(answers) {
-  const evidence = answers.settlement?.evidence;
+  const evidence = answers.settlement?.evidence
   for (const [field, reason] of WORK_LISTS) {
-    if (Array.isArray(evidence?.[field]) && evidence[field].length > 0) return reason;
+    if (Array.isArray(evidence?.[field]) && evidence[field].length > 0) return reason
   }
-  if (answers.settlement?.state === "in-flight") return BUSY_REASON;
-  if (answers.inFlight === true) return BUSY_REASON;
-  return null;
+  if (answers.settlement?.state === 'in-flight') return BUSY_REASON
+  if (answers.inFlight === true) return BUSY_REASON
+  return null
 }
 
 /** Why this settlement is not a proof we may act on — or `null` when it is. */
 function disqualifyingReason(settlement) {
-  if (settlement === null || typeof settlement !== "object") {
-    return "unknown: no settlement proof for the current turn";
+  if (settlement === null || typeof settlement !== 'object') {
+    return 'unknown: no settlement proof for the current turn'
   }
-  if (settlement.state !== "settled") {
-    return "unknown: the completion model did not settle the current turn";
+  if (settlement.state !== 'settled') {
+    return 'unknown: the completion model did not settle the current turn'
   }
-  const provenance = settlement.provenance;
+  const provenance = settlement.provenance
   if (provenance !== NATIVE && provenance !== DERIVED) {
-    return "unknown: the settlement names no provenance this module accepts";
+    return 'unknown: the settlement names no provenance this module accepts'
   }
   if (!isPosition(settlement.cursor)) {
-    return "unknown: the settlement carries no native cursor";
+    return 'unknown: the settlement carries no native cursor'
   }
-  if (typeof settlement.boundary !== "string" || settlement.boundary.length === 0) {
-    return "unknown: the settlement names no observed post-turn boundary";
+  if (typeof settlement.boundary !== 'string' || settlement.boundary.length === 0) {
+    return 'unknown: the settlement names no observed post-turn boundary'
   }
-  const evidence = settlement.evidence;
-  if (evidence === null || typeof evidence !== "object") {
-    return "unknown: the settlement carries no evidence";
+  const evidence = settlement.evidence
+  if (evidence === null || typeof evidence !== 'object') {
+    return 'unknown: the settlement carries no evidence'
   }
   for (const [field] of WORK_LISTS) {
     if (!Array.isArray(evidence[field])) {
-      return `unknown: the settlement's ${field} is not a list`;
+      return `unknown: the settlement's ${field} is not a list`
     }
   }
   // Completion may derive only from a complete reply; without that flag the
   // derivation is the weak one, not a slow turn.
   if (provenance === DERIVED && evidence.complete !== true) {
-    return "unknown: a derived settlement needs a complete reply";
+    return 'unknown: a derived settlement needs a complete reply'
   }
-  return null;
+  return null
 }
 
 /** A native total-order position, or an input epoch: a non-negative integer. */
 function isPosition(value) {
-  return Number.isInteger(value) && value >= 0;
+  return Number.isInteger(value) && value >= 0
 }
 
 function textOr(value, fallback) {
-  return typeof value === "string" && value.trim().length > 0 ? value : fallback;
+  return typeof value === 'string' && value.trim().length > 0 ? value : fallback
 }

@@ -313,18 +313,15 @@ test('readiness: every decision reports cursor and provenance, null when unprove
   assert.equal(leadReady(cases[3][1]).provenance, null)
 })
 
-test('readiness: a settlement no newer than the last delivery is busy — the same snapshot is not freshness', () => {
-  for (const sinceCursor of [42, 43, 100]) {
-    const decision = leadReady(qualified({ sinceCursor }))
-    assert.equal(decision.state, 'busy', `sinceCursor ${sinceCursor} against boundary 42`)
-    assert.equal(decision.reason, 'lead busy: no settlement newer than the last delivery')
-    assert.equal(decision.cursor, 42, 'the stale cursor is still reported')
+test('readiness: freshness without adapter-owned cursors is unknown, never numerically guessed', () => {
+  for (const sinceCursor of [41, 42, 43, 100]) {
+    const decision = leadReady(qualified({ kind: 'pi', sinceCursor }))
+    assert.equal(decision.state, 'unknown', `unbranded cursor ${sinceCursor}`)
+    assert.equal(decision.cursor, 42, 'the observed boundary is still reported')
   }
 })
 
-test('readiness: a settlement past the last delivery is fresh, and no last delivery needs none', () => {
-  assert.equal(leadReady(qualified({ sinceCursor: 41 })).state, 'ready')
-  assert.equal(leadReady(qualified({ sinceCursor: 0 })).state, 'ready')
+test('readiness: a first delivery has no freshness cursor to compare', () => {
   assert.equal(leadReady(qualified({ sinceCursor: undefined })).state, 'ready')
   assert.equal(leadReady(qualified({ sinceCursor: null })).state, 'ready')
 })
@@ -450,11 +447,15 @@ test('readiness: an unreadable session still echoes the epoch it was judged at, 
   }
 })
 
-test('readiness: the reported cursor is the settlement boundary, not the freshness input', () => {
+test('readiness: an unknown freshness comparison still reports the observed settlement boundary', () => {
   const decision = leadReady(
-    qualified({ sinceCursor: 500, answers: answers({ settlement: settlement({ cursor: 88 }) }) }),
+    qualified({
+      kind: 'pi',
+      sinceCursor: 500,
+      answers: answers({ settlement: settlement({ cursor: 88 }) }),
+    }),
   )
-  assert.equal(decision.state, 'busy')
+  assert.equal(decision.state, 'unknown')
   assert.equal(
     decision.cursor,
     88,

@@ -1,0 +1,124 @@
+{
+  "session": [
+    {
+      "id": "ses_f87e22f72ffewC2qJ2dAyyfPe1",
+      "project_id": "701ec1bd7e288e5e8e31c08c856626d78d3ce5c5",
+      "parent_id": null,
+      "slug": "calm-forest",
+      "directory": "/Users/gabrielvoicu/Projects/ngvoicu/consensflow",
+      "title": "Phase 3 completion model TEST-PANE-23 IMPL-PANE-24",
+      "version": "1.18.29",
+      "share_url": null,
+      "summary_additions": 0,
+      "summary_deletions": 0,
+      "summary_files": 0,
+      "summary_diffs": null,
+      "revert": null,
+      "permission": null,
+      "time_created": 1788721614989,
+      "time_updated": 1788723144213,
+      "time_compacting": null,
+      "time_archived": null,
+      "workspace_id": null,
+      "path": "",
+      "agent": "build",
+      "model": "{\"id\":\"muse-spark-1.3-contributor-free\",\"providerID\":\"opencode\"}",
+      "cost": 0,
+      "tokens_input": 220289,
+      "tokens_output": 62121,
+      "tokens_reasoning": 30421,
+      "tokens_cache_read": 23874992,
+      "tokens_cache_write": 0,
+      "metadata": null
+    }
+  ],
+  "message": [
+    {
+      "id": "msg_0781dd0a1001NxYXxddKs7UGGM",
+      "session_id": "ses_f87e22f72ffewC2qJ2dAyyfPe1",
+      "time_created": 1788721615009,
+      "time_updated": 1788723144365,
+      "data": "{\"role\":\"user\",\"time\":{\"created\":1788721615009},\"agent\":\"build\",\"model\":{\"providerID\":\"opencode\",\"modelID\":\"muse-spark-1.3-contributor-free\"},\"summary\":{\"diffs\":[{\"file\":\".specs/standalone-panes-delivery/SPEC.md\",\"patch\":\"[redacted 74696 chars]\",\"additions\":32,\"deletions\":2,\"status\":\"modified\"},{\"file\":\".specs/standalone-panes-delivery/findings-01.md\",\"patch\":\"[redacted 15635 chars]\",\"additions\":29,\"deletions\":0,\"status\":\"modified\"},{\"file\":\"hosts/lib/completion.js\",\"patch\":\"[redacted 24995 chars]\",\"additions\":620,\"deletions\":0,\"status\":\"added\"},{\"file\":\"hosts/lib/policy.js\",\"patch\":\"[redacted 3580 chars]\",\"additions\":81,\"deletions\":0,\"status\":\"added\"},{\"file\":\"hosts/lib/readiness.js\",\"patch\":\"[redacted 4889 chars]\",\"additions\":106,\"deletions\":0,\"status\":\"added\"},{\"file\":\"hosts/lib/runners.js\",\"patch\":\"[redacted 30309 chars]\",\"additions\":15,\"deletions\":1,\"status\":\"modified\"},{\"file\":\"src/launch.js\",\"patch\":\"[redacted 5445 chars]\",\"additions\":153,\"deletions\":0,\"status\":\"added\"},{\"file\":\"src/store.js\",\"patch\":\"[redacted 38951 chars]\",\"additions\":390,\"deletions\":85,\"status\":\"modified\"},{\"file\":\"src/tabs.js\",\"patch\":\"[redacted 11367 chars]\",\"additions\":50,\"deletions\":14,\"status\":\"modified\"},{\"file\":\"src/ui.js\",\"patch\":\"[redacted 50332 chars]\",\"additions\":140,\"deletions\":16,\"status\":\"modified\"},{\"file\":\"tests/engine/completion.test.mjs\",\"patch\":\"[redacted 13974 chars]\",\"additions\":332,\"deletions\":0,\"status\":\"added\"},{\"file\":\"tests/engine/fixtures/completion/README.md\",\"patch\":\"[redacted 4795 chars]\",\"additions\":83,\"deletions\":0,\"status\":\"added\"},{\"file\":\"tests/engine/fixtures/completion/claude-code/cancelled.jsonl\",\"patch\":\"[redacted 1792 chars]\",\"additions\":3,\"deletions\":0,\"status\":\"added\"},{\"file\":\"tests/engine/fixtures/completion/claude-code/compacted.jsonl\",\"patch\":\"[redacted 1805 chars]\",\"additions\":3,\"deletions\":0,\"status\":\"added\"},{\"file\":\"tests/engine/fixtures/completion/claude-code/partial-tools.jsonl\",\"patch\":\"[redacted 2925 chars]\",\"additions\":4,\"deletions\":0,\"status\":\"added\"},{\"file\":\"tests/engine/fixtures/completion/claude-code/replaced.jsonl\",\"patch\":\"[redacted 1594 chars]\",\"additions\":2,\"deletions\":0,\"status\":\"added\"},{\"file\":\"tests/engine/fixtures/completion/codex/big-answer.jsonl\",\"patch\":\"[redacted 62165 chars]\",\"additions\":5,\"deletions\":0,\"status\":\"added\"},{\"file\":\"tests/engine/fixtures/completion/codex/cancelled.jsonl\",\"patch\":\"[redacted 3017 chars]\",\"additions\":6,\"deletions\":0,\"status\":\"added\"},{\"file\":\"tests/engine/fixtures/completion/codex/fork.jsonl\",\"patch\":\"[redacted 2969 chars]\",\"additions\":5,\"deletions\":0,\"status\":\"added\"},{\"file\":\"tests/engine/fixtures/completion/codex/partial-tools.jsonl\",\"patch\":\"[redacted 2607 chars]\",\"additions\":5,\"deletions\":0,\"status\":\"added\"},{\"file\":\"tests/engine/fixtures/completion/kimi/cancelled.jsonl\",\"patch\":\"[redacted 1217 chars]\",\"additions\":6,\"deletions\":0,\"status\":\"added\"},{\"file\":\"tests/engine/fixtures/completion/kimi/growing-turn.jsonl\",\"patch\":\"[redacted 3412 chars]\",\"additions\":13,\"deletions\":0,\"status\":\"added\"},{\"file\":\"tests/engine/fixtures/completion/opencode/cancelled/opencode/opencode.db\",\"patch\":\"[redacted 0 chars]\",\"additions\":0,\"deletions\":0,\"status\":\"added\"},{\"file\":\"tests/engine/fixtures/completion/opencode/partial/opencode/opencode.db\",\"patch\":\"[redacted 0 chars]\",\"additions\":0,\"deletions\":0,\"status\":\"added\"},{\"file\":\"tests/engine/fixtures/completion/pi/cancelled.jsonl\",\"patch\":\"[redacted 995 chars]\",\"additions\":3,\"deletions\":0,\"status\":\"added\"},{\"file\":\"tests/engine/fixtures/completion/pi/partial-tools.jsonl\",\"patch\":\"[redacted 2133 chars]\",\"additions\":5,\"deletions\":0,\"status\":\"added\"},{\"file\":\"tests/engine/policy.test.mjs\",\"patch\":\"[redacted 8548 chars]\",\"additions\":191,\"deletions\":0,\"status\":\"added\"},{\"file\":\"tests/engine/readiness.test.mjs\",\"patch\":\"[redacted 8713 chars]\",\"additions\":210,\"deletions\":0,\"status\":\"added\"},{\"file\":\"tests/launch.test.mjs\",\"patch\":\"[redacted 17056 chars]\",\"additions\":116,\"deletions\":50,\"status\":\"modified\"},{\"file\":\"tests/store.test.mjs\",\"patch\":\"[redacted 50167 chars]\",\"additions\":693,\"deletions\":8,\"status\":\"modified\"},{\"file\":\"tests/tabs.test.mjs\",\"patch\":\"[redacted 11506 chars]\",\"additions\":84,\"deletions\":3,\"status\":\"modified\"}]}}"
+    },
+    {
+      "id": "msg_07834cf2a001ZxKIEEils8Twxd",
+      "session_id": "ses_f87e22f72ffewC2qJ2dAyyfPe1",
+      "time_created": 1788723121962,
+      "time_updated": 1788723127359,
+      "data": "{\"parentID\":\"msg_0781dd0a1001NxYXxddKs7UGGM\",\"role\":\"assistant\",\"mode\":\"build\",\"agent\":\"build\",\"path\":{\"cwd\":\"/Users/gabrielvoicu/Projects/ngvoicu/consensflow\",\"root\":\"/Users/gabrielvoicu/Projects/ngvoicu/consensflow\"},\"cost\":0,\"tokens\":{\"total\":209489,\"input\":585,\"output\":203,\"reasoning\":76,\"cache\":{\"write\":0,\"read\":208625}},\"modelID\":\"muse-spark-1.3-contributor-free\",\"providerID\":\"opencode\",\"time\":{\"created\":1788723121962,\"completed\":1788723127358},\"finish\":\"tool-calls\"}"
+    },
+    {
+      "id": "msg_07834e4450017pCEw2eVdPoUxQ",
+      "session_id": "ses_f87e22f72ffewC2qJ2dAyyfPe1",
+      "time_created": 1788723127365,
+      "time_updated": 1788723144168,
+      "data": "{\"parentID\":\"msg_0781dd0a1001NxYXxddKs7UGGM\",\"role\":\"assistant\",\"mode\":\"build\",\"agent\":\"build\",\"path\":{\"cwd\":\"/Users/gabrielvoicu/Projects/ngvoicu/consensflow\",\"root\":\"/Users/gabrielvoicu/Projects/ngvoicu/consensflow\"},\"cost\":0,\"tokens\":{\"total\":210909,\"input\":564,\"output\":1208,\"reasoning\":0,\"cache\":{\"write\":0,\"read\":209137}},\"modelID\":\"muse-spark-1.3-contributor-free\",\"providerID\":\"opencode\",\"time\":{\"created\":1788723127365,\"completed\":1788723144167},\"finish\":\"stop\"}"
+    }
+  ],
+  "part": [
+    {
+      "id": "prt_0781dd0a2001eqaXpgYyr6ji2y",
+      "message_id": "msg_0781dd0a1001NxYXxddKs7UGGM",
+      "session_id": "ses_f87e22f72ffewC2qJ2dAyyfPe1",
+      "time_created": 1788721615013,
+      "time_updated": 1788721615014,
+      "data": "{\"type\":\"text\",\"text\":\"[redacted 4292 chars]\"}"
+    },
+    {
+      "id": "prt_07834dc8d001z87P7xjz2EX5lp",
+      "message_id": "msg_07834cf2a001ZxKIEEils8Twxd",
+      "session_id": "ses_f87e22f72ffewC2qJ2dAyyfPe1",
+      "time_created": 1788723125389,
+      "time_updated": 1788723125390,
+      "data": "{\"snapshot\":\"924eaab496dbb60edce452010a515b2856ff22e3\",\"type\":\"step-start\"}"
+    },
+    {
+      "id": "prt_07834dc8f001J4vUNaC9k7U0lp",
+      "message_id": "msg_07834cf2a001ZxKIEEils8Twxd",
+      "session_id": "ses_f87e22f72ffewC2qJ2dAyyfPe1",
+      "time_created": 1788723125391,
+      "time_updated": 1788723125773,
+      "data": "{\"type\":\"reasoning\",\"text\":\"\",\"time\":{\"start\":1788723125391,\"end\":1788723125773},\"metadata\":{\"openai\":{\"itemId\":\"rs_6a9dbfb5e72ea494f4034dcb:rs_01a07834db207171beba040ea62241c7\",\"reasoningEncryptedContent\":\"[redacted 1426 chars]\"}}}"
+    },
+    {
+      "id": "prt_07834de0e001LFavSKJTkpG9xh",
+      "message_id": "msg_07834cf2a001ZxKIEEils8Twxd",
+      "session_id": "ses_f87e22f72ffewC2qJ2dAyyfPe1",
+      "time_created": 1788723125774,
+      "time_updated": 1788723127236,
+      "data": "{\"type\":\"tool\",\"tool\":\"todowrite\",\"callID\":\"call_01a07834de10713185285bb946f93929\",\"state\":{\"status\":\"completed\",\"input\":{\"todos\":[{\"content\":\"Build fixtures in tests/engine/fixtures/completion/<harness>/ from real stores\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"RED: write tests/engine/completion.test.mjs (fails, no module yet)\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"GREEN: implement hosts/lib/completion.js per harness\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Add Completion markers table to findings-01.md\",\"priority\":\"medium\",\"status\":\"completed\"},{\"content\":\"Run npm run check, verify exit 0; refactor under green\",\"priority\":\"high\",\"status\":\"completed\"}]},\"output\":\"[\\n  {\\n    \\\"content\\\": \\\"Build fixtures in tests/engine/fixtures/completion/<harness>/ from real stores\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"RED: write tests/engine/completion.test.mjs (fails, no module yet)\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"GREEN: implement hosts/lib/completion.js per harness\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Add Completion markers table to findings-01.md\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"medium\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Run npm run check, verify exit 0; refactor under green\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  }\\n]\",\"metadata\":{\"todos\":[{\"content\":\"Build fixtures in tests/engine/fixtures/completion/<harness>/ from real stores\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"RED: write tests/engine/completion.test.mjs (fails, no module yet)\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"GREEN: implement hosts/lib/completion.js per harness\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Add Completion markers table to findings-01.md\",\"status\":\"completed\",\"priority\":\"medium\"},{\"content\":\"Run npm run check, verify exit 0; refactor under green\",\"status\":\"completed\",\"priority\":\"high\"}],\"truncated\":false},\"title\":\"0 todos\",\"time\":{\"start\":1788723127234,\"end\":1788723127235}},\"metadata\":{\"openai\":{\"itemId\":\"fc_01a07834de10713185285bb946f93929\"}}}"
+    },
+    {
+      "id": "prt_07834e408001gbigBkx3fOpem5",
+      "message_id": "msg_07834cf2a001ZxKIEEils8Twxd",
+      "session_id": "ses_f87e22f72ffewC2qJ2dAyyfPe1",
+      "time_created": 1788723127305,
+      "time_updated": 1788723127305,
+      "data": "{\"reason\":\"tool-calls\",\"snapshot\":\"924eaab496dbb60edce452010a515b2856ff22e3\",\"type\":\"step-finish\",\"tokens\":{\"total\":209489,\"input\":585,\"output\":203,\"reasoning\":76,\"cache\":{\"write\":0,\"read\":208625}},\"cost\":0}"
+    },
+    {
+      "id": "prt_07834fd66001by6dnMLDwyzr5Y",
+      "message_id": "msg_07834e4450017pCEw2eVdPoUxQ",
+      "session_id": "ses_f87e22f72ffewC2qJ2dAyyfPe1",
+      "time_created": 1788723133798,
+      "time_updated": 1788723133806,
+      "data": "{\"snapshot\":\"924eaab496dbb60edce452010a515b2856ff22e3\",\"type\":\"step-start\"}"
+    },
+    {
+      "id": "prt_07834fd70001aAGLSN74ke5QX3",
+      "message_id": "msg_07834e4450017pCEw2eVdPoUxQ",
+      "session_id": "ses_f87e22f72ffewC2qJ2dAyyfPe1",
+      "time_created": 1788723133808,
+      "time_updated": 1788723143712,
+      "data": "{\"type\":\"text\",\"text\":\"OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO\",\"time\":{\"start\":1788723133808,\"end\":1788723143711},\"metadata\":{\"openai\":{\"itemId\":\"msg_01a07834fd487b239f18a4f7b2905ddb\"}}}"
+    },
+    {
+      "id": "prt_0783525960018ZNyS85g4IlFXh",
+      "message_id": "msg_07834e4450017pCEw2eVdPoUxQ",
+      "session_id": "ses_f87e22f72ffewC2qJ2dAyyfPe1",
+      "time_created": 1788723144086,
+      "time_updated": 1788723144087,
+      "data": "{\"reason\":\"stop\",\"snapshot\":\"924eaab496dbb60edce452010a515b2856ff22e3\",\"type\":\"step-finish\",\"tokens\":{\"total\":210909,\"input\":564,\"output\":1208,\"reasoning\":0,\"cache\":{\"write\":0,\"read\":209137}},\"cost\":0}"
+    }
+  ]
+}

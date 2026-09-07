@@ -30,7 +30,7 @@
  */
 
 /** The only field `cf run --notify` may write. */
-const LEAD_FIELD = "notifyPreference";
+const LEAD_FIELD = 'notifyPreference'
 
 /**
  * The effective policy for one pane, and where it came from.
@@ -42,18 +42,18 @@ const LEAD_FIELD = "notifyPreference";
  * @returns {{mode: 'auto'|'manual', source: 'tab-human'|'pane-human'|'lead'|'default'}}
  */
 export function effectivePolicy(tab, pane, row) {
-  const tabPolicy = setting(tab?.policy);
-  if (tabPolicy === "manual") return { mode: "manual", source: "tab-human" };
+  const tabPolicy = setting(tab?.policy)
+  if (tabPolicy === 'manual') return { mode: 'manual', source: 'tab-human' }
 
-  const panePolicy = setting(pane?.policy);
-  if (panePolicy !== null) return { mode: panePolicy, source: "pane-human" };
+  const panePolicy = setting(pane?.policy)
+  if (panePolicy !== null) return { mode: panePolicy, source: 'pane-human' }
 
-  if (tabPolicy !== null) return { mode: tabPolicy, source: "tab-human" };
+  if (tabPolicy !== null) return { mode: tabPolicy, source: 'tab-human' }
 
-  const leadPolicy = setting(row?.[LEAD_FIELD]);
-  if (leadPolicy !== null) return { mode: leadPolicy, source: "lead" };
+  const leadPolicy = setting(row?.[LEAD_FIELD])
+  if (leadPolicy !== null) return { mode: leadPolicy, source: 'lead' }
 
-  return { mode: "auto", source: "default" };
+  return { mode: 'auto', source: 'default' }
 }
 
 /**
@@ -65,14 +65,14 @@ export function effectivePolicy(tab, pane, row) {
  * nothing to record it against.
  */
 export function leadMaySet(row) {
-  if (row === null || typeof row !== "object" || Array.isArray(row)) {
+  if (row === null || typeof row !== 'object' || Array.isArray(row)) {
     return {
       allowed: false,
       field: null,
-      reason: "no conversation row: a lead preference is recorded on the conversation it is about",
-    };
+      reason: 'no conversation row: a lead preference is recorded on the conversation it is about',
+    }
   }
-  return { allowed: true, field: LEAD_FIELD };
+  return { allowed: true, field: LEAD_FIELD }
 }
 
 /**
@@ -90,19 +90,19 @@ export function leadMaySet(row) {
  * row}` with the row exactly as it came in (`null` when there was none).
  */
 export function recordLeadPreference(row, value) {
-  const may = leadMaySet(row);
-  if (!may.allowed) return { ok: false, reason: may.reason, row: null };
+  const may = leadMaySet(row)
+  if (!may.allowed) return { ok: false, reason: may.reason, row: null }
   if (setting(value) === null) {
     return {
       ok: false,
       reason: `not a delivery preference: ${JSON.stringify(value)} — cf run --notify records 'auto' or 'manual'`,
       row,
-    };
+    }
   }
-  return { ok: true, field: may.field, row: { ...row, [may.field]: value } };
+  return { ok: true, field: may.field, row: { ...row, [may.field]: value } }
 }
 
 /** `'auto'` or `'manual'` exactly, or `null` — everything else is unset. */
 function setting(value) {
-  return value === "auto" || value === "manual" ? value : null;
+  return value === 'auto' || value === 'manual' ? value : null
 }

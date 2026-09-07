@@ -1,0 +1,78 @@
+{
+  "session": [
+    {
+      "id": "ses_f886ed7dbffe1myK161SPisoR2",
+      "project_id": "701ec1bd7e288e5e8e31c08c856626d78d3ce5c5",
+      "parent_id": null,
+      "slug": "tidy-eagle",
+      "directory": "/Users/gabrielvoicu/Projects/ngvoicu/consensflow",
+      "title": "Phase 2: serialised store, instance lock, and tab store",
+      "version": "1.18.29",
+      "share_url": null,
+      "summary_additions": 0,
+      "summary_deletions": 0,
+      "summary_files": 0,
+      "summary_diffs": null,
+      "revert": null,
+      "permission": null,
+      "time_created": 1788712396836,
+      "time_updated": 1788712932488,
+      "time_compacting": null,
+      "time_archived": null,
+      "workspace_id": null,
+      "path": "",
+      "agent": "build",
+      "model": "{\"id\":\"glm-5.3\",\"providerID\":\"opencode-go\"}",
+      "cost": 0.23846868,
+      "tokens_input": 45391,
+      "tokens_output": 32524,
+      "tokens_reasoning": 0,
+      "tokens_cache_read": 122368,
+      "tokens_cache_write": 0,
+      "metadata": null
+    }
+  ],
+  "message": [
+    {
+      "id": "msg_0779166e7001sYP03lgChIzdvh",
+      "session_id": "ses_f886ed7dbffe1myK161SPisoR2",
+      "time_created": 1788712412903,
+      "time_updated": 1788712932474,
+      "data": "{\"parentID\":\"msg_07791283d001GkeKg48Js6DKXS\",\"role\":\"assistant\",\"mode\":\"build\",\"agent\":\"build\",\"path\":{\"cwd\":\"/Users/gabrielvoicu/Projects/ngvoicu/consensflow\",\"root\":\"/Users/gabrielvoicu/Projects/ngvoicu/consensflow\"},\"cost\":0.15749104,\"tokens\":{\"total\":77588,\"input\":4244,\"output\":32000,\"reasoning\":0,\"cache\":{\"write\":0,\"read\":41344}},\"modelID\":\"glm-5.3\",\"providerID\":\"opencode-go\",\"time\":{\"created\":1788712412903,\"completed\":1788712932474},\"finish\":\"length\"}"
+    }
+  ],
+  "part": [
+    {
+      "id": "prt_077916d6b001a63hfwf2i5Jkam",
+      "message_id": "msg_0779166e7001sYP03lgChIzdvh",
+      "session_id": "ses_f886ed7dbffe1myK161SPisoR2",
+      "time_created": 1788712414571,
+      "time_updated": 1788712414572,
+      "data": "{\"snapshot\":\"837ac3f0dc6df2e0d45ad27b42d980955aed4020\",\"type\":\"step-start\"}"
+    },
+    {
+      "id": "prt_077916d6d001IvE1o30RDwqtLU",
+      "message_id": "msg_0779166e7001sYP03lgChIzdvh",
+      "session_id": "ses_f886ed7dbffe1myK161SPisoR2",
+      "time_created": 1788712414573,
+      "time_updated": 1788712932257,
+      "data": "{\"type\":\"reasoning\",\"text\":\"[redacted 128821 chars]\",\"time\":{\"start\":1788712414573,\"end\":1788712932251}}"
+    },
+    {
+      "id": "prt_07799541c001Remk6LmUs8zapl",
+      "message_id": "msg_0779166e7001sYP03lgChIzdvh",
+      "session_id": "ses_f886ed7dbffe1myK161SPisoR2",
+      "time_created": 1788712932380,
+      "time_updated": 1788712932380,
+      "data": "{\"reason\":\"length\",\"snapshot\":\"510945e46a1de069cdabdbe4d68a40c12c471853\",\"type\":\"step-finish\",\"tokens\":{\"total\":77588,\"input\":4244,\"output\":32000,\"reasoning\":0,\"cache\":{\"write\":0,\"read\":41344}},\"cost\":0.15749104}"
+    },
+    {
+      "id": "prt_077995478001j7KIXpSk8Ufv6o",
+      "message_id": "msg_0779166e7001sYP03lgChIzdvh",
+      "session_id": "ses_f886ed7dbffe1myK161SPisoR2",
+      "time_created": 1788712932472,
+      "time_updated": 1788712932473,
+      "data": "{\"type\":\"patch\",\"hash\":\"837ac3f0dc6df2e0d45ad27b42d980955aed4020\",\"files\":[\"/Users/gabrielvoicu/Projects/ngvoicu/consensflow/.specs/standalone-panes-delivery/SPEC.md\"]}"
+    }
+  ]
+}

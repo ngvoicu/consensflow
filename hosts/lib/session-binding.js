@@ -1,4 +1,4 @@
-import { parseLaunchNonce, withoutInjectedBlocks } from "./packets.js";
+import { parseLaunchNonce, withoutInjectedBlocks } from './packets.js'
 
 /**
  * Native-session binding by launch evidence — pure, no I/O, no env.
@@ -24,14 +24,14 @@ import { parseLaunchNonce, withoutInjectedBlocks } from "./packets.js";
  * session id it has read.
  */
 
-const PREALLOCATED_KINDS = new Set(["claude-code", "pi"]);
+const PREALLOCATED_KINDS = new Set(['claude-code', 'pi'])
 
 /**
  * User turns examined for the nonce, earliest first — the seed opens.
  * Exported so discovery (which does the scanning) and this module (which
  * checks the one turn discovery returns) share a single cap.
  */
-export const TURNS_EXAMINED = 5;
+export const TURNS_EXAMINED = 5
 
 /**
  * Decide whether a candidate native session is this launch's.
@@ -48,9 +48,9 @@ export const TURNS_EXAMINED = 5;
  * with it, whatever else the candidate carries.
  */
 export function bindEvidence(kind, candidate = {}, launch = {}) {
-  const generation = launch?.generation ?? null;
-  const sessionId = candidate?.sessionId ?? null;
-  const current = candidate?.currentSessionId ?? null;
+  const generation = launch?.generation ?? null
+  const sessionId = candidate?.sessionId ?? null
+  const current = candidate?.currentSessionId ?? null
   if (
     sessionId !== null &&
     sessionId !== undefined &&
@@ -63,17 +63,17 @@ export function bindEvidence(kind, candidate = {}, launch = {}) {
     return {
       bound: false,
       replaced: true,
-      reason: "replaced: the live pane now shows a different native session",
+      reason: 'replaced: the live pane now shows a different native session',
       generation,
-    };
+    }
   }
 
-  const nonce = launch?.nonce ?? null;
-  const preallocatedId = launch?.preallocatedId ?? null;
-  const reportedId = launch?.reportedId ?? null;
+  const nonce = launch?.nonce ?? null
+  const preallocatedId = launch?.preallocatedId ?? null
+  const reportedId = launch?.reportedId ?? null
 
   if (sessionId === null || sessionId === undefined || String(sessionId).length === 0) {
-    return { bound: false, reason: "unbound: no candidate session", generation };
+    return { bound: false, reason: 'unbound: no candidate session', generation }
   }
   if (PREALLOCATED_KINDS.has(kind) && preallocatedId !== null && sessionId === preallocatedId) {
     // A reported id equal to the minted one is the same launch seen twice:
@@ -81,27 +81,40 @@ export function bindEvidence(kind, candidate = {}, launch = {}) {
     // the preallocated file first). A differing reported id never reaches
     // here — the mismatch below refuses it.
     if (reportedId === preallocatedId) {
-      return { bound: true, evidence: "reported", generation };
+      return { bound: true, evidence: 'reported', generation }
     }
-    return { bound: true, evidence: "preallocated", generation };
+    return { bound: true, evidence: 'preallocated', generation }
   }
   if (PREALLOCATED_KINDS.has(kind) && preallocatedId !== null) {
-    return { bound: false, reason: "unbound: the candidate is not the preallocated session", generation };
+    return {
+      bound: false,
+      reason: 'unbound: the candidate is not the preallocated session',
+      generation,
+    }
   }
-  if (reportedId !== null && reportedId !== undefined && String(reportedId).length > 0 && sessionId === reportedId) {
-    return { bound: true, evidence: "reported", generation };
+  if (
+    reportedId !== null &&
+    reportedId !== undefined &&
+    String(reportedId).length > 0 &&
+    sessionId === reportedId
+  ) {
+    return { bound: true, evidence: 'reported', generation }
   }
   if (nonce !== null && nonce !== undefined && String(nonce).trim().length > 0) {
     if (openingLineCarriesNonce(candidate?.turn, nonce)) {
-      return { bound: true, evidence: "nonce", generation };
+      return { bound: true, evidence: 'nonce', generation }
     }
     return {
       bound: false,
-      reason: "unbound: the matching turn carries no launch marker for this launch",
+      reason: 'unbound: the matching turn carries no launch marker for this launch',
       generation,
-    };
+    }
   }
-  return { bound: false, reason: "unbound: no launch evidence (preallocated id, reported id, or nonce)", generation };
+  return {
+    bound: false,
+    reason: 'unbound: no launch evidence (preallocated id, reported id, or nonce)',
+    generation,
+  }
 }
 
 /**
@@ -109,7 +122,7 @@ export function bindEvidence(kind, candidate = {}, launch = {}) {
  * `bindEvidence`, never on this.
  */
 export function acceptsBinding(evidence) {
-  return evidence === "preallocated" || evidence === "reported" || evidence === "nonce";
+  return evidence === 'preallocated' || evidence === 'reported' || evidence === 'nonce'
 }
 
 /**
@@ -119,12 +132,12 @@ export function acceptsBinding(evidence) {
  * text that merely mentions a nonce can never bind.
  */
 export function openingLineCarriesNonce(text, nonce) {
-  const wanted = String(nonce ?? "").trim();
-  if (wanted.length === 0 || text === null || text === undefined) return false;
+  const wanted = String(nonce ?? '').trim()
+  if (wanted.length === 0 || text === null || text === undefined) return false
   const first =
     withoutInjectedBlocks(String(text))
-      .split("\n")
+      .split('\n')
       .map((line) => line.trim())
-      .find((line) => line.length > 0) ?? "";
-  return first.length > 0 && parseLaunchNonce(first) === wanted;
+      .find((line) => line.length > 0) ?? ''
+  return first.length > 0 && parseLaunchNonce(first) === wanted
 }

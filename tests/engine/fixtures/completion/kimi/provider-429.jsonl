@@ -1,0 +1,6 @@
+{"type":"metadata","protocol_version":"1.5","created_at":1787580407763}
+{"type":"turn.prompt","agentId":"main","input":[{"type":"text","text":"[redacted 2463 chars]"}],"origin":{"kind":"user"},"time":1787580407807}
+{"type":"context.append_message","agentId":"main","message":{"role":"user","content":[{"type":"text","text":"[redacted 2463 chars]"}],"toolCalls":[],"origin":{"kind":"user"},"id":"msg_01M0T1GQZY5YB5235GG32M9QYK"},"time":1787580407808}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"step.begin","uuid":"af7b49da-cf0c-442f-aab2-98e2cfdea18e","turnId":"0","step":32},"time":1787581807868}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"step.end","uuid":"af7b49da-cf0c-442f-aab2-98e2cfdea18e","turnId":"0","step":32,"finishReason":"error"},"time":1787581819389}
+{"type":"turn.ended","agentId":"main","turnId":0,"reason":"failed","error":{"code":"provider.rate_limit","message":"429 The engine is currently overloaded, please try again later","name":"APIProviderRateLimitError","details":{"statusCode":429,"requestId":null,"traceId":null},"retryable":true},"durationMs":1411587,"time":1787581819395}

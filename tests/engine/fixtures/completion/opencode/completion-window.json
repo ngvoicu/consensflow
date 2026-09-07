@@ -1,0 +1,101 @@
+{
+  "session": [
+    {
+      "id": "ses_f88c0c7cdffeANJRVLwiBceADi",
+      "project_id": "701ec1bd7e288e5e8e31c08c856626d78d3ce5c5",
+      "parent_id": null,
+      "slug": "proud-nebula",
+      "directory": "/Users/gabrielvoicu/Projects/ngvoicu/consensflow",
+      "title": "ConsensFlow bracketed paste probe",
+      "version": "1.18.29",
+      "share_url": null,
+      "summary_additions": 0,
+      "summary_deletions": 0,
+      "summary_files": 0,
+      "summary_diffs": null,
+      "revert": null,
+      "permission": null,
+      "time_created": 1788707026994,
+      "time_updated": 1788707043931,
+      "time_compacting": null,
+      "time_archived": null,
+      "workspace_id": null,
+      "path": "",
+      "agent": "build",
+      "model": "{\"id\":\"kimi-k3\",\"providerID\":\"opencode-go\",\"variant\":\"max\"}",
+      "cost": 0.0818634,
+      "tokens_input": 26420,
+      "tokens_output": 64,
+      "tokens_reasoning": 107,
+      "tokens_cache_read": 128,
+      "tokens_cache_write": 0,
+      "metadata": null
+    }
+  ],
+  "message": [
+    {
+      "id": "msg_0773f385a001oy2xD1d5J3DNge",
+      "session_id": "ses_f88c0c7cdffeANJRVLwiBceADi",
+      "time_created": 1788707027034,
+      "time_updated": 1788707030665,
+      "data": "{\"parentID\":\"msg_0773f3849001TxbTVur1P5ZM7x\",\"role\":\"assistant\",\"mode\":\"build\",\"agent\":\"build\",\"variant\":\"max\",\"path\":{\"cwd\":\"/Users/gabrielvoicu/Projects/ngvoicu/consensflow\",\"root\":\"/Users/gabrielvoicu/Projects/ngvoicu/consensflow\"},\"cost\":0.0397614,\"tokens\":{\"total\":12893,\"input\":12646,\"output\":21,\"reasoning\":98,\"cache\":{\"write\":0,\"read\":128}},\"modelID\":\"kimi-k3\",\"providerID\":\"opencode-go\",\"time\":{\"created\":1788707027034,\"completed\":1788707030665},\"finish\":\"stop\"}"
+    }
+  ],
+  "part": [
+    {
+      "id": "prt_0773f433f001j22Y3jWyYKCTEB",
+      "message_id": "msg_0773f385a001oy2xD1d5J3DNge",
+      "session_id": "ses_f88c0c7cdffeANJRVLwiBceADi",
+      "time_created": 1788707029823,
+      "time_updated": 1788707029824,
+      "data": "{\"snapshot\":\"282e53a62f1f36a0ca68173ad1a7fac3b38973ea\",\"type\":\"step-start\"}"
+    },
+    {
+      "id": "prt_0773f4342001A2opVaqXpbsVWg",
+      "message_id": "msg_0773f385a001oy2xD1d5J3DNge",
+      "session_id": "ses_f88c0c7cdffeANJRVLwiBceADi",
+      "time_created": 1788707029826,
+      "time_updated": 1788707030302,
+      "data": "{\"type\":\"reasoning\",\"text\":\"The user is sending me a \\\"probe\\\" message that claims to be infrastructure testing. It says no work is requested, just acknowledge with one line. This seems harmless enough — it's a paste-handling probe. The message appears to be cut off at the end (\\\"so the probe reach\\\"), which is consistent with a byte-size padding test.\\n\\nI should just give a one-line acknowledgement. No tools needed.\",\"time\":{\"start\":1788707029826,\"end\":1788707030300}}"
+    },
+    {
+      "id": "prt_0773f4520001GA884LvtJRseI1",
+      "message_id": "msg_0773f385a001oy2xD1d5J3DNge",
+      "session_id": "ses_f88c0c7cdffeANJRVLwiBceADi",
+      "time_created": 1788707030304,
+      "time_updated": 1788707030507,
+      "data": "{\"type\":\"text\",\"text\":\"Acknowledged — probe-p1-opencode-4goyvp received; multi-line paste handled intact, no action taken.\",\"time\":{\"start\":1788707030304,\"end\":1788707030506}}"
+    },
+    {
+      "id": "prt_0773f462d001b2ALynt2U6dywu",
+      "message_id": "msg_0773f385a001oy2xD1d5J3DNge",
+      "session_id": "ses_f88c0c7cdffeANJRVLwiBceADi",
+      "time_created": 1788707030573,
+      "time_updated": 1788707030574,
+      "data": "{\"reason\":\"stop\",\"snapshot\":\"282e53a62f1f36a0ca68173ad1a7fac3b38973ea\",\"type\":\"step-finish\",\"tokens\":{\"total\":12893,\"input\":12646,\"output\":21,\"reasoning\":98,\"cache\":{\"write\":0,\"read\":128}},\"cost\":0.0397614}"
+    }
+  ],
+  "event": [
+    {
+      "id": "evt_0773f462d001FyviG426gibqtk",
+      "aggregate_id": "ses_f88c0c7cdffeANJRVLwiBceADi",
+      "seq": 12,
+      "type": "message.part.updated.1",
+      "data": "{\"sessionID\":\"ses_f88c0c7cdffeANJRVLwiBceADi\",\"part\":{\"id\":\"prt_0773f462d001b2ALynt2U6dywu\",\"sessionID\":\"ses_f88c0c7cdffeANJRVLwiBceADi\",\"messageID\":\"msg_0773f385a001oy2xD1d5J3DNge\",\"type\":\"step-finish\",\"reason\":\"stop\",\"snapshot\":\"282e53a62f1f36a0ca68173ad1a7fac3b38973ea\",\"cost\":0.0397614,\"tokens\":{\"total\":12893,\"input\":12646,\"output\":21,\"reasoning\":98,\"cache\":{\"read\":128,\"write\":0}}},\"time\":1788707030573}"
+    },
+    {
+      "id": "evt_0773f462f001Odv9i6bAKbJOSF",
+      "aggregate_id": "ses_f88c0c7cdffeANJRVLwiBceADi",
+      "seq": 13,
+      "type": "message.updated.1",
+      "data": "{\"sessionID\":\"ses_f88c0c7cdffeANJRVLwiBceADi\",\"info\":{\"id\":\"msg_0773f385a001oy2xD1d5J3DNge\",\"sessionID\":\"ses_f88c0c7cdffeANJRVLwiBceADi\",\"role\":\"assistant\",\"time\":{\"created\":1788707027034},\"parentID\":\"msg_0773f3849001TxbTVur1P5ZM7x\",\"modelID\":\"kimi-k3\",\"providerID\":\"opencode-go\",\"mode\":\"build\",\"agent\":\"build\",\"path\":{\"cwd\":\"/Users/gabrielvoicu/Projects/ngvoicu/consensflow\",\"root\":\"/Users/gabrielvoicu/Projects/ngvoicu/consensflow\"},\"cost\":0.0397614,\"tokens\":{\"total\":12893,\"input\":12646,\"output\":21,\"reasoning\":98,\"cache\":{\"read\":128,\"write\":0}},\"variant\":\"max\",\"finish\":\"stop\"}}"
+    },
+    {
+      "id": "evt_0773f4689001ahLxwg9Dlld43Z",
+      "aggregate_id": "ses_f88c0c7cdffeANJRVLwiBceADi",
+      "seq": 15,
+      "type": "message.updated.1",
+      "data": "{\"sessionID\":\"ses_f88c0c7cdffeANJRVLwiBceADi\",\"info\":{\"id\":\"msg_0773f385a001oy2xD1d5J3DNge\",\"sessionID\":\"ses_f88c0c7cdffeANJRVLwiBceADi\",\"role\":\"assistant\",\"time\":{\"created\":1788707027034,\"completed\":1788707030665},\"parentID\":\"msg_0773f3849001TxbTVur1P5ZM7x\",\"modelID\":\"kimi-k3\",\"providerID\":\"opencode-go\",\"mode\":\"build\",\"agent\":\"build\",\"path\":{\"cwd\":\"/Users/gabrielvoicu/Projects/ngvoicu/consensflow\",\"root\":\"/Users/gabrielvoicu/Projects/ngvoicu/consensflow\"},\"cost\":0.0397614,\"tokens\":{\"total\":12893,\"input\":12646,\"output\":21,\"reasoning\":98,\"cache\":{\"read\":128,\"write\":0}},\"variant\":\"max\",\"finish\":\"stop\"}}"
+    }
+  ]
+}

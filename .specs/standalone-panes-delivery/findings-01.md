@@ -77,7 +77,39 @@ count of every stored turn at every size, none collapsed.
 
 ## P3 — `http://localhost` iframe inside a `tauri://` page
 
-_not run_
+**PASSED 2026-09-07 on macOS.** Built the local frontend and signed app with
+`cd app && npm run bundle:ui && npm run prepare-sidecar && npx tauri build
+--bundles app`. The shipped configuration under test was
+`build.frontendDist = "../ui"`, `app.withGlobalTauri = true`,
+`app.security.csp = null`, and `bundle.macOS.exceptionDomain = "localhost"`
+in `app/src-tauri/tauri.conf.json`. The built `Info.plist` contained exactly:
+
+```text
+NSAppTransportSecurity.NSExceptionDomains.localhost = {
+  NSExceptionAllowsInsecureHTTPLoads = true;
+  NSIncludesSubdomains = true;
+}
+```
+
+An installed production ConsensFlow was already running, so the observed
+bundle used a probe-only merge config changing only `productName` to
+`ConsensFlow P3`, `identifier` to `dev.ngvoicu.consensflow.p3`, and bundle
+target to `app`; it did not change the frontend, origin, CSP, ATS, Rust, or
+JavaScript under test. CuaDriver launched that signed bundle without raising
+it. The app-owned Node child listened on `127.0.0.1:50252`; Rust normalised
+the handle to `http://localhost:50252/`, and the page added the UI token to
+the iframe URL. WebKit recorded the iframe as `isMainFrame=0`, then
+`httpStatusCode=200`, `didFinishDocumentLoadForFrame`, and
+`didFinishLoadForFrame` for the same frame id (`21474836481`) at
+`2026-09-07 01:22:50`. Therefore cleartext loopback HTTP loads inside the
+packaged `tauri://` page under the existing ATS exception. No workaround is
+required or shipped.
+
+The first probe build also exposed a separate packaging error: with both
+`app` and `consensflow-bridge` binaries and no Cargo `default-run`, Tauri
+picked the headless helper as `CFBundleExecutable` and opened no window.
+`default-run = "app"` now pins the GUI executable; the passing bundle's
+`CFBundleExecutable` was `app`.
 
 ## P4 — `portable-pty` 0.9.0 on Windows
 
@@ -165,6 +197,54 @@ Unsupported/identity notes:
 - Readiness invalidates a fork/replacement even though its historical items
   remain readable. Malformed interior JSONL fails closed; only an unterminated
   malformed final append is tolerated.
+
+### Round 3 corrections (2026-09-07, asteria CM1–CM10, fixed by hyperion)
+
+The table above is round 2. Round 3 changed these semantics; where the two
+disagree, this list wins.
+
+- Cursors are opaque. `itemsAfterCursor(kind, items, cursor)` is the exported
+  cursor API; comparison stays inside the adapter dispatch, and OpenCode uses
+  the native event sequence, not `time`, for snapshot, item and settlement
+  cursors (two real tool results in `ses_f87e22f72ffewC2qJ2dAyyfPe1` share
+  one timestamp while their completion events are sequence 47 and 48).
+- Pi: `stopReason:stop` is only a completion candidate. Settlement is
+  `session.quiet_window`, 120 seconds after the last append with no open
+  tools, always `derived`. Pi emits `agent_settled` only in memory
+  (`@earendil-works/pi-coding-agent/dist/core/agent-session.js:347`, after
+  retry, compaction and queued continuations at `:772`); its maximum
+  provider backoff is 60 s (`settings-manager.js:610`). The real
+  `triton-jade-fern` session shows two 429 records then success with no
+  user turn between.
+- Claude: cancellation is recognised only by the exact native record shape
+  (the exact marker content plus `interruptedMessageId`), never by a
+  substring; `popAll` queue records are honoured, so the `1b09…` session
+  reports an empty queue after its final non-continuing stop hook at line
+  8320. Fragments are deduplicated by native record identity, never by text.
+- Kimi: `prompt.accepted` is outstanding admission and invalidates readiness
+  the moment it appears, reconciled with the `turn.prompt` that follows
+  (real wire, lines 870–871). Fragments deduplicated by native identity.
+- OpenCode: cancellation is deliberately unsupported. `MessageAbortedError`
+  is `failed:true, cancelled:false` until a supported-version native
+  cancellation fixture establishes the shape (the real database holds 14
+  such rows, none from a supported version).
+- Malformed tails: an incomplete JSON prefix at the end of a file is
+  tolerated as an append in progress; invalid syntax (`definitely-not-json`,
+  `{"type":!}`) returns unknown.
+- No `process.env` default anywhere in the module; `env` is an explicit
+  parameter the entry point passes.
+- Tests: identity asserted unchanged on every positive fixture, completion
+  results exercised through readiness, a competing SQLite writer between two
+  reads of one snapshot, the fork fixture populated. 38/38 completion,
+  33/33 readiness, 25 fixtures.
+
+| Harness | Completion evidence | Settlement boundary | Provenance |
+|---|---|---|---|
+| Codex | `AgentMessage phase:final_answer`, matching `task_complete.last_agent_message` exactly | `task_complete`; `turn_aborted` for verified cancellation | Native |
+| Claude | Fragments grouped by native `message.id`; `end_turn` alone is insufficient | `system.stop_hook_summary` with `preventedContinuation:false`, empty queue/tools/hooks | Derived for successful turns; native API-error and exact interrupt records settle their terminal states |
+| Pi | `stopReason:stop` is only a candidate | `session.quiet_window`, 120 s after the last append with no open tools | Always derived |
+| Kimi | `step.end finishReason:end_turn`; admitted prompts and tools must be clear | `turn.ended`; `prompt.accepted` invalidates readiness immediately | Native |
+| OpenCode | `message.data.time.completed` plus `finish` or terminal error | `message.updated` event carrying `time.completed` (native event sequence 15 in `completion-window.json`) | Native |
 
 ## P7 — a crash-released exclusive lock from Node on macOS (probed 2026-09-07, lead)
 
