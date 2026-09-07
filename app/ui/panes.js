@@ -1,4 +1,5 @@
 import { Menus } from './menus.js'
+import { runSelftest } from './selftest.js'
 import { orderedPanes, paneLabel, renderSidebar, sessionName } from './sidebar.js'
 import { EmulatorRegistry, paneKey } from './term.js'
 import { fits, focusOrder, gridTemplate } from './vendor/layout.js'
@@ -16,6 +17,8 @@ const workspace = document.querySelector('[data-testid="workspace"]')
 const rosterPanel = document.querySelector('[data-testid="roster-panel"]')
 const rosterFrame = document.querySelector('[data-testid="roster-frame"]')
 const rosterToggle = document.querySelector('#roster-toggle')
+const rosterClose = document.querySelector('#roster-close')
+const deliveryInfo = document.querySelector('#delivery-info')
 const sidebarToggle = document.querySelector('#sidebar-toggle')
 const currentSession = document.querySelector('#current-session')
 const currentDirectory = document.querySelector('#current-directory')
@@ -48,6 +51,10 @@ const outputChains = new Map()
 const retiredKeys = new Set()
 const retiringKeys = new Set()
 const inputSequences = new Map()
+// Set only by the packaged smoke's driver (`selftest.js`), which Rust only
+// lets the page load when the app was started in self-test mode.
+let ackObserver = null
+let outputObserver = null
 
 function emptyState() {
   return { available: false, tabs: [], agents: [], deliveries: [], held: [], roster: null }
@@ -212,7 +219,7 @@ function paneTitle(tab, pane) {
   const name = paneLabel(tab, pane)
   const agent = pane.agent ?? pane.harness ?? tab.lead?.harness ?? 'agent'
   const effective = policy(pane, tab)
-  return `${name} · @${agent} · ${effective.mode} (${effective.source})`
+  return `${name} · @${agent} · Replies: ${effective.mode === 'manual' ? 'Manual' : 'Automatic'}`
 }
 
 function isLive(tab, pane) {
@@ -299,7 +306,20 @@ function updateCard(card, tab, pane) {
   card._context = { tab, pane }
   card.dataset.kind = pane.kind
   card.dataset.generation = String(pane.generation)
-  card.querySelector('.pane-title').textContent = paneTitle(tab, pane)
+  const title = card.querySelector('.pane-title')
+  title.textContent = paneTitle(tab, pane)
+  if (pane.kind === 'shell') {
+    title.removeAttribute('title')
+  } else {
+    const effective = policy(pane, tab)
+    const source = {
+      'tab-human': 'Set for this session.',
+      'pane-human': 'Set for this worker.',
+      lead: 'Requested by the lead.',
+      default: 'Using the default setting.',
+    }[effective.source]
+    title.title = `Reply delivery: ${effective.mode === 'manual' ? 'Manual' : 'Automatic'}. ${source}`
+  }
   addDeliveryBadges(card.querySelector('.pane-titlebar'), tab, pane)
 }
 
@@ -510,6 +530,7 @@ function renderPaneView() {
   showCards(tab, panes, [index], 'focused', layout)
   focusCount.textContent = `${index + 1} / ${panes.length}`
   focusNav.hidden = panes.length < 2
+  cards.get(paneKey(panes[index]))?.querySelector('.pane-titlebar')?.append(focusNav)
 }
 
 function renderHeader() {
@@ -517,10 +538,11 @@ function renderHeader() {
   currentSession.textContent = tab === null ? 'No session' : sessionName(tab)
   currentDirectory.textContent = tab?.directory ?? tab?.dir ?? ''
   tabPolicy.hidden = tab === null || tab.closed === true
+  deliveryInfo.hidden = tabPolicy.hidden
   newPane.hidden = tab === null || tab.closed === true
   if (tab !== null) {
     const mode = record(tab.policy) ? tab.policy.mode : tab.policy
-    tabPolicy.textContent = `Policy ${mode ?? 'auto'}`
+    tabPolicy.textContent = `Reply delivery: ${mode === 'manual' ? 'Manual' : 'Automatic'}`
   }
   const held = tab === null ? [] : viewState.held.filter((entry) => entry.tab === tab.id)
   heldSend.hidden = tab === null || held.length === 0 || tab.closed === true
@@ -587,10 +609,9 @@ async function refresh() {
   refreshInFlight = (async () => {
     do {
       refreshPending = false
-      const args = outputChannel !== null ? { onOutput: outputChannel } : {}
       let raw
       try {
-        raw = await rawInvoke('list_state', args)
+        raw = await rawInvoke('list_state', {})
       } catch (cause) {
         raw = { ok: false, error: cause instanceof Error ? cause.message : String(cause) }
       }
@@ -611,6 +632,7 @@ async function refresh() {
 }
 
 function queueOutput(message) {
+  outputObserver?.(message)
   if (!record(message)) return
   const key = `${message.id}:${message.generation}`
   if (
@@ -630,6 +652,7 @@ function queueOutput(message) {
         { id: message.id, generation: message.generation, seq: message.seq },
         { refresh: false },
       )
+      ackObserver?.(message)
     })
     .catch((cause) => report(cause instanceof Error ? cause.message : String(cause), 'error'))
   outputChains.set(key, next)
@@ -733,13 +756,9 @@ async function installGeometryPersistence() {
   await api.onResized(save)
 }
 
-rosterToggle.addEventListener('click', () => {
-  const collapsed = rosterPanel.dataset.collapsed !== 'true'
-  rosterPanel.dataset.collapsed = String(collapsed)
-  rosterToggle.textContent = collapsed ? 'Expand roster' : 'Collapse roster'
-  rosterToggle.setAttribute('aria-expanded', String(!collapsed))
-  scheduleLayout()
-})
+rosterToggle.addEventListener('click', () => rosterPanel.showModal())
+rosterClose.addEventListener('click', () => rosterPanel.close())
+rosterPanel.addEventListener('close', () => rosterToggle.focus())
 
 sidebarToggle.addEventListener('click', () => {
   const collapsed = workspace.dataset.sidebarCollapsed !== 'true'
@@ -791,12 +810,39 @@ async function start() {
   if (typeof Channel === 'function') {
     outputChannel = new Channel()
     outputChannel.onmessage = queueOutput
+    // Once, for the life of the page. Sending this with every refresh ended
+    // the subscription instead of renewing it — see `subscribe_output`.
+    await run('subscribe_output', { onOutput: outputChannel }, { refresh: false })
   }
   if (typeof listen === 'function') {
-    unlistenStateChanged = await listen('state.changed', () => void refresh())
+    // Rust emits `state-changed`: Tauri 2 refuses an event name with a dot in
+    // it, and this rejection used to take the whole page down with it — the
+    // pane area never appeared, because one optional listener failed. Live
+    // refresh is a convenience; losing it must never cost the panes.
+    try {
+      unlistenStateChanged = await listen('state-changed', () => void refresh())
+    } catch (cause) {
+      report(cause instanceof Error ? cause.message : String(cause), 'error')
+    }
   }
   await refresh()
   app.dataset.ready = 'true'
+  const selftest = window.__CONSENSFLOW_SELFTEST__
+  if (record(selftest)) {
+    void runSelftest({
+      config: selftest,
+      invoke: rawInvoke,
+      refresh,
+      registry,
+      sendInput: (pane, data) => enqueueTerminalInput('pane_input_enqueue', pane, data),
+      onAck: (observer) => {
+        ackObserver = observer
+      },
+      onOutput: (observer) => {
+        outputObserver = observer
+      },
+    })
+  }
 }
 
 void start()

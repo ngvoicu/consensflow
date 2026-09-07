@@ -94,8 +94,10 @@ export class Menus {
     loading.textContent = 'Reading transcript…'
     menu.append(loading)
     menu.append(separator())
+    menu.append(heading('Reply delivery'))
     for (const mode of ['auto', 'manual', 'inherit']) {
-      const label = `${mode[0].toUpperCase()}${mode.slice(1)}`
+      const label =
+        mode === 'auto' ? 'Automatic' : mode === 'manual' ? 'Manual' : 'Inherit session setting'
       menu.append(
         menuButton(label, async () => {
           this.closeMenu()
@@ -137,21 +139,36 @@ export class Menus {
       return
     }
     for (const answer of answers) {
+      const unfinished = answer.ready === false
       const row = document.createElement('div')
       row.className = 'answer-row'
-      row.dataset.state =
-        answer.uncertain === true ? 'uncertain' : answer.delivered === true ? 'delivered' : 'ready'
+      row.dataset.state = unfinished
+        ? 'in-progress'
+        : answer.uncertain === true
+          ? 'uncertain'
+          : answer.delivered === true
+            ? 'delivered'
+            : 'ready'
       const preview = document.createElement('span')
       preview.className = 'answer-preview'
       preview.textContent = answer.preview ?? answer.text ?? answer.id
       const mark = document.createElement('span')
       mark.className = 'answer-mark'
-      mark.textContent =
-        answer.uncertain === true ? 'Uncertain' : answer.delivered === true ? 'Delivered' : 'Ready'
+      mark.textContent = unfinished
+        ? 'In progress'
+        : answer.uncertain === true
+          ? 'Uncertain'
+          : answer.delivered === true
+            ? 'Delivered'
+            : 'Ready'
       const resend = answer.delivered === true || answer.uncertain === true
-      const actionLabel = resend ? `Resend ${answer.id} to lead` : `Send ${answer.id} to lead`
+      const actionLabel = unfinished
+        ? `Waiting for ${answer.id} to complete`
+        : resend
+          ? `Resend ${answer.id} to lead`
+          : `Send ${answer.id} to lead`
       const action = menuButton(
-        resend ? 'Resend to lead' : 'Send to lead',
+        unfinished ? 'Waiting for completion' : resend ? 'Resend to lead' : 'Send to lead',
         async () => {
           this.closeMenu()
           await this.run('deliver_now', {
@@ -163,7 +180,18 @@ export class Menus {
         },
         actionLabel,
       )
+      action.disabled = unfinished
       row.append(preview, mark, action)
+      if (answer.partProgress !== undefined && answer.delivered !== true) {
+        const progress = document.createElement('span')
+        progress.className = 'answer-mark'
+        const { total, uncovered } = answer.partProgress
+        const missing = asArray(uncovered)
+        progress.textContent = `${total - missing.length} of ${total} parts confirmed.${
+          missing.length > 0 ? ` Not confirmed: ${missing.join(', ')}.` : ''
+        }`
+        row.insertBefore(progress, action)
+      }
       menu.insertBefore(row, menu.querySelector('.menu-separator'))
     }
     this.place(menu, event)
@@ -172,10 +200,10 @@ export class Menus {
   tabPolicy(anchor, tab) {
     const menu = document.createElement('div')
     menu.setAttribute('role', 'menu')
-    menu.setAttribute('aria-label', 'Session policy')
-    menu.append(heading('Session policy'))
+    menu.setAttribute('aria-label', 'Session reply delivery')
+    menu.append(heading('Reply delivery to this lead'))
     for (const mode of ['auto', 'manual']) {
-      const label = `${mode[0].toUpperCase()}${mode.slice(1)}`
+      const label = mode === 'auto' ? 'Automatic' : 'Manual'
       menu.append(
         menuButton(label, async () => {
           this.closeMenu()

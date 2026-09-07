@@ -1,7 +1,11 @@
 import { existsSync, mkdirSync, readdirSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { detectHarnesses, knownHarnesses } from './harnesses.js'
+import { retireHostPayloads } from './host-payloads.js'
 import { fileState, loadManifest, saveManifest, sha256 } from './manifest.js'
+import { configRoot, listAgents } from './roster.js'
+import { generateSkill } from './skill.js'
+import { installTerminalCommand, removeTerminalCommand, terminalRuntime } from './terminal.js'
 
 /**
  * Installs one skill file into every detected harness's skills directory,
@@ -165,4 +169,142 @@ export function uninstallSkills(env, options = {}) {
 
   saveManifest(manifest, env)
   return report
+}
+
+/** Every detected harness without its own ConsensFlow receives the same skill. */
+export function scopeTargets(env, { all = false } = {}) {
+  return detectHarnesses(env).filter((harness) => all || harness.native !== true)
+}
+
+/** Opening the standalone app claims its launcher and refreshes its installation. */
+export function installEverywhere(env, options = {}) {
+  const changes = [...retireHostPayloads(env)]
+  const wiring = terminalRuntime(env)
+  let command = wiring?.exists && wiring.mine ? 'ok' : 'claimed'
+  const report = []
+  try {
+    installTerminalCommand(env)
+  } catch (cause) {
+    command = cause instanceof Error ? cause.message : String(cause)
+    report.push(`The cf launcher could not be installed: ${command}`)
+  }
+  const agents = listAgents(env)
+  if (agents.length > 0) {
+    changes.push(
+      ...installSkill(
+        { relPath: 'consensflow/SKILL.md', content: generateSkill(agents), source: 'consensflow' },
+        env,
+        { targets: scopeTargets(env, options), force: options.force },
+      ),
+    )
+  }
+  changes.push(...syncCmuxSkills(env, options).report)
+  return { changes, report, command }
+}
+
+const APP_ID = 'dev.ngvoicu.consensflow'
+
+export function syncCmuxSkills(env, options = {}) {
+  const report = uninstallSkills(env, {
+    force: options.force,
+    filter: (_path, recorded) => recorded.source.startsWith('cmux@'),
+  })
+  const cache = join(configRoot(env), 'cache', 'cmux')
+  if (existsSync(cache)) {
+    rmSync(cache, { recursive: true, force: true })
+    report.push({ action: 'removed', path: cache })
+  }
+  return { commit: null, report }
+}
+
+export function turnOff(env, options = {}) {
+  const changes = []
+  changes.push(...retireHostPayloads(env))
+  changes.push(...uninstallSkills(env, { force: options.force }))
+  // The launcher is ours when it says so; someone else's `cf` is left alone.
+  for (const path of removeTerminalCommand(env).removed) {
+    changes.push({ action: 'removed', path })
+  }
+  // Off means off: the bookkeeping goes too, so nothing is left claiming
+  // state that no longer exists. The roster is untouched — agents are
+  // the user's, shared with anything else that reads them.
+  const root = configRoot(env)
+  for (const name of ['mode.json', 'hosts.json', 'skills-manifest.json']) {
+    rmSync(join(root, name), { force: true })
+  }
+  rmSync(join(root, 'hosts'), { recursive: true, force: true })
+  // Off means off, and a clone of someone else's repository is not state worth
+  // keeping for a machine that has stopped consulting.
+  rmSync(join(root, 'cache'), { recursive: true, force: true })
+  try {
+    if (readdirSync(root).length === 0) rmSync(root, { recursive: true, force: true })
+  } catch {
+    // Already gone, or something else lives there — either is fine.
+  }
+
+  return { changes }
+}
+
+export function resetEverything(env, options = {}) {
+  const removed = resetPreview(env)
+  const outcome = turnOff(env, { ...options, force: true })
+  // turnOff prunes the root only when it is already empty — and the roster and
+  // the run artifacts are precisely what kept it from being.
+  rmSync(configRoot(env), { recursive: true, force: true })
+
+  // The desktop app's own data, which lives outside the root because the OS
+  // decides where a bundle keeps it. Nothing else creates these directories —
+  // they carry ConsensFlow's bundle identifier — so a reset that left them
+  // would be leaving something behind.
+  for (const dir of appDataDirs(env)) {
+    if (!existsSync(dir)) continue
+    rmSync(dir, { recursive: true, force: true })
+    outcome.changes.push({ action: 'removed', path: dir })
+  }
+
+  return { ...outcome, removed }
+}
+
+function appDataDirs(env) {
+  const home = env.HOME ?? env.USERPROFILE
+  if (home === undefined) return []
+  if ((env.OS ?? '').toLowerCase().includes('windows') || process.platform === 'win32') {
+    const local = env.LOCALAPPDATA ?? join(home, 'AppData', 'Local')
+    const roaming = env.APPDATA ?? join(home, 'AppData', 'Roaming')
+    return [join(local, APP_ID), join(roaming, APP_ID)]
+  }
+  if (process.platform === 'darwin') {
+    return [
+      join(home, 'Library', 'Caches', APP_ID),
+      join(home, 'Library', 'WebKit', APP_ID),
+      join(home, 'Library', 'Application Support', APP_ID),
+      join(home, 'Library', 'Saved Application State', `${APP_ID}.savedState`),
+    ]
+  }
+  return [
+    join(env.XDG_CACHE_HOME ?? join(home, '.cache'), APP_ID),
+    join(env.XDG_DATA_HOME ?? join(home, '.local', 'share'), APP_ID),
+    join(env.XDG_CONFIG_HOME ?? join(home, '.config'), APP_ID),
+  ]
+}
+
+export function resetPreview(env) {
+  return { agents: listAgents(env).length, runs: countRuns(env) }
+}
+
+function countRuns(env) {
+  const workspaces = join(configRoot(env), 'workspaces')
+  let total = 0
+  for (const workspace of safeReaddir(workspaces)) {
+    total += safeReaddir(join(workspaces, workspace, 'runs')).length
+  }
+  return total
+}
+
+function safeReaddir(dir) {
+  try {
+    return readdirSync(dir)
+  } catch {
+    return []
+  }
 }

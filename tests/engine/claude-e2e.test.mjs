@@ -9,8 +9,8 @@ import { codexAuthPath, loadCodexAuth } from '../../hosts/lib/codex-auth.js'
 import { spawnWithInput } from '../../hosts/lib/runners.js'
 import { workspaceKey } from '../../hosts/lib/state.js'
 
-// The payload CLI these tests used to drive is gone: a mode installs the
-// generated skill and nothing else, so there is one CLI left — the manager's.
+// Exercise runner subprocesses independently of the app's authenticated pane API.
+// cf-standalone and integration suites cover that API and its lifecycle.
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const ENGINE = path.join(ROOT, 'hosts', 'lib')
 const CF = path.join(ROOT, 'bin', 'cf.mjs')
@@ -84,8 +84,12 @@ async function makeFakeEngines(dir) {
   return { bin, out }
 }
 
-async function runCf(args, { ws, dir, fake }, extraEnv = {}) {
-  return await spawnWithInput(process.execPath, [CF, ...args], {
+async function runCf(args, ctx, extraEnv = {}) {
+  return await runNode([CF, ...args], ctx, extraEnv)
+}
+
+async function runNode(args, { ws, dir, fake }, extraEnv = {}) {
+  return await spawnWithInput(process.execPath, args, {
     cwd: ws,
     timeoutMs: 30000,
     // spawnWithInput merges process.env underneath these, so a suite run from
@@ -106,6 +110,29 @@ async function runCf(args, { ws, dir, fake }, extraEnv = {}) {
       ...extraEnv,
     },
   })
+}
+
+async function runEngine(ref, task, ctx) {
+  const source = `
+    import { agentRow } from ${JSON.stringify(path.join(ROOT, 'src', 'roster.js'))};
+    import { createPacket } from ${JSON.stringify(path.join(ENGINE, 'packets.js'))};
+    import { runAgent } from ${JSON.stringify(path.join(ENGINE, 'runners.js'))};
+    const agent = agentRow(${JSON.stringify(ref.replace(/^@/, ''))}, process.env);
+    const packet = await createPacket({ cwd: process.cwd(), agent, task: ${JSON.stringify(task)} });
+    const result = await runAgent({ cwd: process.cwd(), agent, packet,
+      onEvent: event => console.log(JSON.stringify({ event })) });
+    console.log(JSON.stringify({ result }));
+  `
+  const processResult = await runNode(['--input-type=module', '--eval', source], ctx)
+  assert.equal(processResult.exitCode, 0, processResult.stderr)
+  const lines = processResult.stdout
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+  return {
+    result: lines.find((line) => line.result)?.result,
+    events: lines.filter((line) => line.event).map((line) => line.event),
+  }
 }
 
 async function latestPacket(ws, dir) {
@@ -137,17 +164,9 @@ test('e2e: all four engines run, parse, and persist artifacts through the real s
       { ref: '@mani', engine: 'opencode', expect: 'OPENCODE OK' },
     ]
     for (const { ref, engine, expect } of cases) {
-      const run = await runCf(['run', ref, 'ping', 'from', 'the', 'test'], ctx)
-      assert.equal(run.exitCode, 0, `${ref}: ${run.stderr}`)
-      // Attributed either way: `# @name` with the answer under it, or `— @name`
-      // alone when the answer already streamed and repeating it would be noise.
-      assert.match(run.stdout, new RegExp(`[#—] ${ref}`), `${ref}: attributed`)
-      assert.ok(run.stdout.includes(expect), `${ref}: parsed engine output`)
-      // Clean output: a successful read-only run shows just the answer — no run metadata, no
-      // consent boilerplate. (The `Handoff: empty` warning IS expected here: this test never
-      // stashes a transcript; the handoff e2e below covers when that line appears.)
-      assert.doesNotMatch(run.stdout, /Run:|Exit:|Artifacts:|approval/, `${ref}: no metadata noise`)
-
+      const run = await runEngine(ref, 'ping from the test', ctx)
+      assert.equal(run.result.exitCode, 0, `${ref}: child exited cleanly`)
+      assert.equal(run.result.output, expect, `${ref}: parsed engine output`)
       const { packet, result } = await latestPacket(ws, dir)
       assert.match(packet, /# ConsensFlow Packet/)
       assert.match(packet, /You can read and modify this workspace/)
@@ -205,13 +224,12 @@ test('e2e: all four engines run, parse, and persist artifacts through the real s
   })
 })
 
-test('e2e: streaming is the default (thinking always visible); --json is the only quiet mode [STRM-17]', async () => {
+test('e2e: runner streams normalized tool and text events and preserves flag-like task text', async () => {
   await withTempDir(async (dir) => {
     const ws = path.join(dir, 'ws')
     await mkdir(ws, { recursive: true })
     const bin = path.join(dir, 'fakebin')
     await mkdir(bin, { recursive: true })
-    // A fake opencode that emits a real-shaped tool_use + text part, then exits cleanly.
     const shim = [
       '#!/usr/bin/env node',
       `console.log(JSON.stringify({ type: "tool_use", part: { type: "tool", tool: "read", state: { input: { path: "f.txt" }, output: "body" } } }));`,
@@ -220,64 +238,13 @@ test('e2e: streaming is the default (thinking always visible); --json is the onl
     const shimPath = path.join(bin, 'opencode')
     await writeFile(shimPath, shim, 'utf8')
     await chmod(shimPath, 0o755)
-    // A fake pi that reports its final answer only in agent_end. The stream adapter intentionally
-    // skips agent_end to avoid duplicate message_end text, so the CLI must print the parsed final
-    // result after --stream when no answer text streamed.
-    const piShim = [
-      '#!/usr/bin/env node',
-      `console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "PI FALLBACK FINAL" }] }] }));`,
-    ].join('\n')
-    const piShimPath = path.join(bin, 'pi')
-    await writeFile(piShimPath, piShim, 'utf8')
-    await chmod(piShimPath, 0o755)
     const ctx = { ws, dir, fake: { bin, out: dir } }
     await runCf(['agent', 'add', 'mani'], ctx)
-
-    // Streaming needs no flag. The parsed final reply is still printed after the child exits,
-    // so a foreground run always ends with a durable, attributed answer section.
-    const streamed = await runCf(
-      // One quoted task, the way the skill teaches it — so a `--stat` inside the
-      // prompt is text, not an option the manager's strict parser must guess at.
-      ['run', '@mani', 'go check git diff --stat'],
-      ctx,
-    )
-    assert.match(streamed.stdout, /→ .*read/, 'the tool call is streamed live')
-    assert.match(streamed.stdout, /the streamed answer/, 'the text is streamed live')
-    assert.match(
-      streamed.stdout,
-      /[#—] @mani/,
-      'the final answer section is printed after the stream',
-    )
-    assert.match(
-      (await latestPacket(ws, dir)).packet,
-      /go check git diff --stat/,
-      'flag-like text inside the task survives into the packet',
-    )
-
-    // Streaming is the default — thinking/tools are ALWAYS visible. A run without --stream still
-    // streams; only --json suppresses the live trail (machine-readable output).
-    const plain = await runCf(['run', '@mani', 'go'], ctx)
-    assert.match(plain.stdout, /the streamed answer/, 'the answer is present')
-    assert.match(
-      plain.stdout,
-      /→ .*read/,
-      'event lines stream by default — no --stream flag needed',
-    )
-    const quiet = await runCf(['run', '@mani', 'go', '--json'], ctx)
-    assert.doesNotMatch(quiet.stdout, /→ .*read|← .*read/, '--json is the only quiet mode')
-
-    assert.equal(
-      // The manager validates names rather than slugifying them, so it is spelled
-      // here exactly as `@pionly` refers to it below.
-      (await runCf(['agent', 'add', 'pionly', '--harness', 'pi', '--model', 'fake'], ctx)).exitCode,
-      0,
-    )
-    const fallback = await runCf(['run', '@pionly', 'go'], ctx)
-    assert.match(
-      fallback.stdout,
-      /PI FALLBACK FINAL/,
-      'the final output is printed even when no text event streamed',
-    )
+    const streamed = await runEngine('@mani', 'go check git diff --stat', ctx)
+    assert.ok(streamed.events.some((event) => event.tool === 'read' || event.name === 'read'))
+    assert.ok(streamed.events.some((event) => event.text === 'the streamed answer'))
+    assert.equal(streamed.result.output, 'the streamed answer')
+    assert.match((await latestPacket(ws, dir)).packet, /go check git diff --stat/)
   })
 })
 
@@ -298,8 +265,7 @@ test('e2e: runAgent writes a transcript.md backstop (event trail) and sets trans
     const ctx = { ws, dir, fake: { bin, out: dir } }
     await runCf(['agent', 'add', 'mani'], ctx)
 
-    const run = await runCf(['run', '@mani', 'go', '--json'], ctx)
-    const result = JSON.parse(run.stdout)
+    const { result } = await runEngine('@mani', 'go', ctx)
     assert.ok(result.transcriptPath, 'result.json carries transcriptPath')
     const transcript = await readFile(result.transcriptPath, 'utf8')
     assert.ok(transcript.trim().length > 0, 'transcript.md is non-empty')
@@ -317,8 +283,8 @@ test('e2e: a run has full permissions, and there is still no knob to turn [STRM-
     await runCf(['agent', 'add', 'zeus'], ctx) // claude-code
 
     // Every run is full-permission: no allowlist, no deny list, no prompts.
-    await runCf(['run', '@zeus', 'go'], ctx)
-    let claude = JSON.parse(await readFile(path.join(fake.out, 'claude.json'), 'utf8'))
+    await runEngine('@zeus', 'go', ctx)
+    const claude = JSON.parse(await readFile(path.join(fake.out, 'claude.json'), 'utf8'))
     assert.ok(
       claude.argv.includes('--dangerously-skip-permissions'),
       'default run bypasses prompts',
@@ -326,14 +292,9 @@ test('e2e: a run has full permissions, and there is still no knob to turn [STRM-
     assert.equal(claude.argv.includes('--allowedTools'), false, 'no allowlist fences the tools')
     assert.equal(claude.argv.includes('--disallowedTools'), false, 'no deny list')
 
-    // There is still no permission knob: asking for one changes nothing, because
-    // every run already has everything.
-    await runCf(['run', '@zeus', 'go', '--tools', 'full-auto'], ctx)
-    claude = JSON.parse(await readFile(path.join(fake.out, 'claude.json'), 'utf8'))
-    assert.ok(
-      claude.argv.includes('--dangerously-skip-permissions'),
-      'the flag is the default, not an escalation',
-    )
+    const refused = await runCf(['run', '@zeus', 'go', '--tools', 'full-auto'], ctx)
+    assert.equal(refused.exitCode, 1)
+    assert.match(refused.stderr, /Unknown option.*--tools/)
   })
 })
 
@@ -432,7 +393,13 @@ test('e2e: @pygmalion without a Codex login errors cleanly before any network ca
     const fake = await makeFakeEngines(dir)
     const ctx = { ws, dir, fake }
     assert.equal((await runCf(['agent', 'add', 'pygmalion'], ctx)).exitCode, 0)
-    const run = await runCf(['run', '@pygmalion', 'a', 'minimalist', 'logo'], ctx, {
+    const source = `
+      import { agentRow } from ${JSON.stringify(path.join(ROOT, 'src', 'roster.js'))};
+      import { runImageAgent } from ${JSON.stringify(path.join(ENGINE, 'image-run.js'))};
+      const result = await runImageAgent({ cwd: process.cwd(), agent: agentRow('pygmalion', process.env), prompt: 'a minimalist logo' });
+      console.log(JSON.stringify(result));
+    `
+    const run = await runNode(['--input-type=module', '--eval', source], ctx, {
       CODEX_HOME: path.join(dir, 'empty-codex-home'),
     })
     assert.equal(run.exitCode, 1)

@@ -1,0 +1,21 @@
+#!/bin/sh
+# Installed by ConsensFlow. Runs THIS bundle's copy of the CLI, so a pane the
+# app opened never reaches an older `cf` left on PATH by an earlier install:
+# `src/launch.js` puts this directory first in a lead pane's PATH, and this is
+# the file that has to be there for that to mean anything.
+#
+# No external command is used — not even `dirname` — because a pane's PATH is
+# whatever the app gave it, and a launcher that needs coreutils to find itself
+# is a launcher that fails where it matters.
+#
+# CONSENSFLOW_NODE names the runtime absolutely, and the app sets it. Falling
+# back to a `node` off PATH would defeat the shadowing this file exists to do:
+# the stale install this shim shadows is exactly the kind of machine that has
+# some other node in front. So an unset runtime is a refusal, not a guess.
+if [ -z "${CONSENSFLOW_NODE:-}" ]; then
+  echo "cf: CONSENSFLOW_NODE is not set — this launcher runs ConsensFlow's own runtime, which the app sets when it opens a pane. Open a pane from the app, or run bin/cf.mjs with a node of your choosing." >&2
+  exit 1
+fi
+here=${0%/*}
+[ "$here" = "$0" ] && here=.
+exec "$CONSENSFLOW_NODE" "$here/cf.mjs" "$@"

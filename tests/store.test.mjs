@@ -2778,3 +2778,182 @@ test('store: admission refuses a conversation that belongs to another agent', as
     await store.close()
   })
 })
+
+test('the mutation queue announces every mutation it completes, once', async () => {
+  await withHome(async (home, dir) => {
+    const store = await openStore(home)
+    const ws = path.join(dir, 'workspace')
+    const seen = []
+    const stop = store.onMutation((event) => seen.push(event))
+
+    const tabs = new Tabs(store)
+    const created = await tabs.create(ws, 'claude-code')
+
+    // `tab.create` writes the envelope AND the tab list; the page is told
+    // once, about the mutation, not once per file the mutation touched.
+    assert.deepEqual(
+      seen.map((event) => event.op),
+      ['tab.create'],
+    )
+    assert.equal(seen[0].cwd, path.resolve(ws))
+
+    // The listener runs after the write: what it reads is what the
+    // mutation left, never the state before it.
+    let observed = null
+    const stopReader = store.onMutation(() => {
+      observed = store.readTabs()
+    })
+    await tabs.addPane(created.id, { kind: 'worker' })
+    assert.equal((await observed).find((tab) => tab.id === created.id).panes.length, 2)
+    stopReader()
+
+    // A mutation that failed changed nothing and says nothing.
+    const before = seen.length
+    await assert.rejects(() =>
+      store.mutate(ws, 'test.fails', async () => {
+        throw new Error('no')
+      }),
+    )
+    assert.equal(seen.length, before, 'a failed mutation announces nothing')
+
+    stop()
+    await tabs.addPane(created.id, { kind: 'worker' })
+    assert.equal(seen.length, before, 'and an unsubscribed listener hears nothing more')
+    await store.close()
+  })
+})
+
+test('a lead binds its native session only on the launch evidence it was given', async () => {
+  await withHome(async (home, dir) => {
+    const store = await openStore(home)
+    const ws = path.join(dir, 'workspace')
+    const tabs = new Tabs(store)
+    const tab = await tabs.create(ws, 'claude-code')
+
+    const admitted = await store.leadAdmit(ws, {
+      tab: tab.id,
+      launch: () => ({ launchId: 'l-lead-1', preallocatedId: 'ses-abc' }),
+    })
+    assert.equal(admitted.launchId, 'l-lead-1')
+    assert.equal(admitted.nativeSession, null, 'nothing is bound by reserving')
+
+    // The whole point of `bindEvidence`: a session id on its own is not
+    // proof. Anyone who can reach this call could send one, and the id of a
+    // conversation belonging to someone else is exactly what it would be.
+    await assert.rejects(
+      () => store.leadBind(ws, { tab: tab.id, candidate: { sessionId: 'someone-elses' } }),
+      /leadBind refuses/,
+    )
+    assert.equal((await store.readTabs()).find((t) => t.id === tab.id).lead.nativeSession, null)
+
+    const bound = await store.leadBind(ws, {
+      tab: tab.id,
+      candidate: { sessionId: 'ses-abc' },
+      expect: { launchId: 'l-lead-1' },
+    })
+    assert.equal(bound.evidence, 'preallocated')
+    const record = (await store.readTabs()).find((t) => t.id === tab.id)
+    assert.equal(record.lead.nativeSession, 'ses-abc')
+    assert.equal(record.lead.binding.launchId, 'l-lead-1')
+
+    // A write naming a launch that is no longer the tab's own writes
+    // nothing — the fence a worker's controller writes live behind.
+    await assert.rejects(
+      () =>
+        store.leadBind(ws, {
+          tab: tab.id,
+          candidate: { sessionId: 'ses-abc' },
+          expect: { launchId: 'l-lead-0' },
+        }),
+      /is over for the lead/,
+    )
+
+    // And a lead already bound offers no new identity on its next launch:
+    // it is resumed on the one it has.
+    await store.leadRelease(ws, { tab: tab.id, launchId: 'l-lead-1' })
+    const again = await store.leadAdmit(ws, {
+      tab: tab.id,
+      launch: (row) => ({
+        launchId: 'l-lead-2',
+        ...(row.lead.nativeSession === null ? { preallocatedId: 'ses-new' } : {}),
+      }),
+    })
+    assert.equal(again.nativeSession, 'ses-abc')
+    assert.deepEqual(again.evidence, {})
+    await store.close()
+  })
+})
+
+test('a corrupted store file is a fault, not a refusal of the request', async () => {
+  await withHome(async (home, dir) => {
+    const store = await openStore(home)
+    const ws = path.join(dir, 'workspace')
+    const tabs = new Tabs(store)
+    await tabs.create(ws, 'claude-code')
+
+    // The store says no to a REQUEST with a typed refusal carrying a code.
+    // Everything else it throws — a corrupt file, a bug, a full disk — is a
+    // fault on this side, and nothing downstream may dress one up as a bad
+    // request just because it happens to be a plain Error.
+    const file = path.join(home, 'workspaces', workspaceKey(ws), 'threads.json')
+    await mkdir(path.dirname(file), { recursive: true })
+    await writeFile(file, 'not json at all')
+    const corrupt = await store.sentRecord(ws, { name: 'anyone', entry: { kind: 'say' } }).then(
+      () => null,
+      (cause) => cause,
+    )
+    assert.notEqual(corrupt, null, 'a corrupt threads.json must not read as success')
+    assert.equal(corrupt.code, undefined, 'and it carries no refusal code')
+    assert.equal(corrupt.name, 'Error')
+    assert.match(corrupt.message, /threads\.json/)
+    // The instance lock is a real file handle. Leaving it to the collector
+    // fails the whole FILE after every test in it has already passed, and
+    // the report names no test at all.
+    await store.close()
+  })
+})
+
+test('a lead pane ending releases and suspends as ONE decision, or neither', async () => {
+  await withHome(async (home, dir) => {
+    const store = await openStore(home)
+    const ws = path.join(dir, 'workspace')
+    const tabs = new Tabs(store)
+    const tab = await tabs.create(ws, 'claude-code')
+    const pane = (await store.readTabs()).find((t) => t.id === tab.id).panes[0]
+    await store.leadAdmit(ws, { tab: tab.id, launch: () => ({ launchId: 'l-1' }) })
+    await store.leadResolve(ws, { tab: tab.id, launchId: 'l-1' })
+
+    // The exit that matches: the launch is over and the tab has no window.
+    const ended = await store.leadEnded(ws, {
+      tab: tab.id,
+      pane: pane.id,
+      generation: pane.generation,
+      launchId: 'l-1',
+    })
+    assert.equal(ended.ended, true)
+    let record = (await store.readTabs()).find((t) => t.id === tab.id)
+    assert.equal(record.closed, true)
+    assert.equal(record.lead.reserved, undefined)
+
+    // Now the tab is back, on a new generation with a launch of its own.
+    await tabs.resume(tab.id)
+    await store.leadAdmit(ws, { tab: tab.id, launch: () => ({ launchId: 'l-2' }) })
+
+    // The late delivery of the FIRST exit. Releasing was already a no-op —
+    // that reservation is gone — and suspending on the strength of it would
+    // close a window the human just asked for. Both halves are one
+    // decision, so a stale exit changes nothing at all.
+    for (const stale of [
+      { pane: pane.id, generation: pane.generation, launchId: 'l-1' },
+      { pane: pane.id, generation: 2, launchId: 'l-1' },
+      { pane: 'p-nope', generation: 2, launchId: 'l-2' },
+    ]) {
+      const answer = await store.leadEnded(ws, { tab: tab.id, ...stale })
+      assert.equal(answer.ended, false, JSON.stringify(stale))
+      record = (await store.readTabs()).find((t) => t.id === tab.id)
+      assert.equal(record.closed, false, `closed by ${JSON.stringify(stale)}`)
+      assert.equal(record.lead.reserved.launchId, 'l-2', 'and it kept its reservation')
+    }
+    await store.close()
+  })
+})

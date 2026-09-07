@@ -2,8 +2,7 @@ import assert from 'node:assert/strict'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
-import { installSkill } from '../src/install.js'
-import { syncCmuxSkills } from '../src/mode.js'
+import { installSkill, syncCmuxSkills } from '../src/install.js'
 import { tempEnv } from './helpers.mjs'
 
 function stubCli(t, name) {

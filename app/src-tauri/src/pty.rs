@@ -48,6 +48,19 @@ pub struct StreamedPane {
     pub output: mpsc::Receiver<PaneOutput>,
 }
 
+/// The child environment carried by `pane.open`: inherit the parent, apply
+/// `overlay`, then remove every validated name in `drop`.
+pub struct PaneEnvironment<'a> {
+    overlay: &'a HashMap<String, String>,
+    drop: &'a [String],
+}
+
+impl<'a> PaneEnvironment<'a> {
+    pub fn new(overlay: &'a HashMap<String, String>, drop: &'a [String]) -> Self {
+        Self { overlay, drop }
+    }
+}
+
 pub(crate) trait PaneInputWriter {
     fn write(&self, key: &PaneKey, bytes: &[u8]) -> Result<(), PaneError>;
 }
@@ -61,6 +74,7 @@ pub enum PaneError {
     Pty(String),
     Io(io::Error),
     InvalidBacklog,
+    InvalidEnvironmentVariableName(String),
     NoOutputStream(PaneKey),
     FutureAck {
         key: PaneKey,
@@ -90,6 +104,10 @@ impl fmt::Display for PaneError {
             Self::Pty(message) => write!(formatter, "PTY error: {message}"),
             Self::Io(error) => write!(formatter, "PTY I/O error: {error}"),
             Self::InvalidBacklog => write!(formatter, "backlogBytes must be greater than zero"),
+            Self::InvalidEnvironmentVariableName(name) => write!(
+                formatter,
+                "invalid environment variable name in dropEnv: {name:?}"
+            ),
             Self::NoOutputStream(key) => write!(
                 formatter,
                 "pane {} generation {} has no output stream",
@@ -115,6 +133,18 @@ impl From<io::Error> for PaneError {
     fn from(error: io::Error) -> Self {
         Self::Io(error)
     }
+}
+
+/// Rejects names that `std::process::Command` cannot represent. Keeping this
+/// at the PTY boundary makes every caller refuse a malformed removal before
+/// it can spawn a child.
+pub fn validate_drop_env(names: &[String]) -> Result<(), PaneError> {
+    for name in names {
+        if name.is_empty() || name.bytes().any(|byte| byte == b'=' || byte == b'\0') {
+            return Err(PaneError::InvalidEnvironmentVariableName(name.clone()));
+        }
+    }
+    Ok(())
 }
 
 struct Pane {
@@ -222,9 +252,21 @@ impl PaneTable {
         env: &HashMap<String, String>,
         size: PtySize,
     ) -> Result<OpenedPane, PaneError> {
+        self.open_with_drop_env(cwd, argv, env, &[], size)
+    }
+
+    fn open_with_drop_env(
+        &self,
+        cwd: &Path,
+        argv: &[String],
+        env: &HashMap<String, String>,
+        drop_env: &[String],
+        size: PtySize,
+    ) -> Result<OpenedPane, PaneError> {
+        validate_drop_env(drop_env)?;
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let key = PaneKey::new(format!("pane-{id}"), 1);
-        let reader = self.open_at(key.clone(), cwd, argv, env, size)?;
+        let reader = self.open_at_with_drop_env(key.clone(), cwd, argv, env, drop_env, size)?;
         Ok(OpenedPane { key, reader })
     }
 
@@ -236,6 +278,19 @@ impl PaneTable {
         env: &HashMap<String, String>,
         size: PtySize,
     ) -> Result<Box<dyn Read + Send>, PaneError> {
+        self.open_at_with_drop_env(key, cwd, argv, env, &[], size)
+    }
+
+    fn open_at_with_drop_env(
+        &self,
+        key: PaneKey,
+        cwd: &Path,
+        argv: &[String],
+        env: &HashMap<String, String>,
+        drop_env: &[String],
+        size: PtySize,
+    ) -> Result<Box<dyn Read + Send>, PaneError> {
+        validate_drop_env(drop_env)?;
         let program = argv.first().ok_or(PaneError::EmptyArgv)?;
         let program_path = Path::new(program);
         if !program_path.is_absolute() {
@@ -263,9 +318,15 @@ impl PaneTable {
         let mut command = CommandBuilder::new(program);
         command.args(&argv[1..]);
         command.cwd(cwd);
-        command.env_clear();
         for (name, value) in env {
             command.env(name, value);
+        }
+        // A pane inherits the app's launch environment. The frame overlays
+        // role-specific values, then removes guards such as billing API keys.
+        // Removal deliberately comes last so a guarded name cannot be put
+        // back by the frame's `env` map.
+        for name in drop_env {
+            command.env_remove(name);
         }
         let child = pair
             .slave
@@ -303,7 +364,7 @@ impl PaneTable {
         &self,
         cwd: &Path,
         argv: &[String],
-        env: &HashMap<String, String>,
+        environment: PaneEnvironment<'_>,
         size: PtySize,
         backlog_bytes: usize,
     ) -> Result<StreamedPane, PaneError> {
@@ -311,7 +372,8 @@ impl PaneTable {
             return Err(PaneError::InvalidBacklog);
         }
 
-        let OpenedPane { key, reader } = self.open(cwd, argv, env, size)?;
+        let OpenedPane { key, reader } =
+            self.open_with_drop_env(cwd, argv, environment.overlay, environment.drop, size)?;
         let flow = Arc::new(OutputFlow::new(backlog_bytes));
         self.lock_panes()?
             .get_mut(&key)
@@ -331,7 +393,7 @@ impl PaneTable {
         key: PaneKey,
         cwd: &Path,
         argv: &[String],
-        env: &HashMap<String, String>,
+        environment: PaneEnvironment<'_>,
         size: PtySize,
         backlog_bytes: usize,
     ) -> Result<StreamedPane, PaneError> {
@@ -339,7 +401,14 @@ impl PaneTable {
             return Err(PaneError::InvalidBacklog);
         }
 
-        let reader = self.open_at(key.clone(), cwd, argv, env, size)?;
+        let reader = self.open_at_with_drop_env(
+            key.clone(),
+            cwd,
+            argv,
+            environment.overlay,
+            environment.drop,
+            size,
+        )?;
         let flow = Arc::new(OutputFlow::new(backlog_bytes));
         self.lock_panes()?
             .get_mut(&key)
@@ -689,7 +758,7 @@ mod tests {
 
     use portable_pty::PtySize;
 
-    use super::{serial_pty_test, OpenedPane, PaneError, PaneKey, PaneTable};
+    use super::{serial_pty_test, OpenedPane, PaneEnvironment, PaneError, PaneKey, PaneTable};
 
     fn terminal_size(rows: u16, cols: u16) -> PtySize {
         PtySize {
@@ -811,7 +880,7 @@ mod tests {
                 key.clone(),
                 Path::new("/tmp"),
                 &shell("printf reserved"),
-                &HashMap::new(),
+                PaneEnvironment::new(&HashMap::new(), &[]),
                 terminal_size(24, 80),
                 1024,
             )
@@ -951,7 +1020,7 @@ mod tests {
     }
 
     #[test]
-    fn child_environment_is_replaced_instead_of_inherited() {
+    fn child_environment_is_inherited_then_overlaid() {
         let _pty_guard = serial_pty_test();
         const SENTINEL: &str = "CONSENSFLOW_PTY_TEST_LAUNCHER_SENTINEL_7FC9A1";
 
@@ -975,8 +1044,8 @@ mod tests {
                 &HashMap::new(),
                 terminal_size(24, 80),
             )
-            .expect("open child without the sentinel");
-        assert_eq!(read_to_end(reader), b"absent");
+            .expect("open child without an overlay");
+        assert_eq!(read_to_end(reader), b"inherited");
 
         let mut supplied = HashMap::new();
         supplied.insert(SENTINEL.to_string(), "role-value".to_string());
@@ -1180,7 +1249,7 @@ mod tests {
             .open_streamed(
                 Path::new("/tmp"),
                 &shell("/bin/sleep 0.25; printf x; /bin/sleep 1000"),
-                &HashMap::new(),
+                PaneEnvironment::new(&HashMap::new(), &[]),
                 terminal_size(24, 80),
                 1024,
             )
@@ -1216,7 +1285,7 @@ mod tests {
             .open_streamed(
                 Path::new("/tmp"),
                 &["/usr/bin/yes".to_string()],
-                &HashMap::new(),
+                PaneEnvironment::new(&HashMap::new(), &[]),
                 terminal_size(24, 80),
                 BACKLOG_BYTES,
             )
@@ -1256,7 +1325,7 @@ mod tests {
                      printf 3333; /bin/sleep 0.1; printf 4444; /bin/sleep 0.1; \
                      printf 5555; /bin/sleep 0.1; printf 6666; /bin/sleep 1000",
                 ),
-                &HashMap::new(),
+                PaneEnvironment::new(&HashMap::new(), &[]),
                 terminal_size(24, 80),
                 BACKLOG_BYTES,
             )
@@ -1337,7 +1406,7 @@ mod tests {
                      /bin/dd of=/dev/null bs=1024 count=511 2>/dev/null; \
                      printf 'INPUT:%s' \"$first\"; /bin/sleep 1000",
                 ),
-                &HashMap::new(),
+                PaneEnvironment::new(&HashMap::new(), &[]),
                 terminal_size(24, 80),
                 BACKLOG_BYTES,
             )

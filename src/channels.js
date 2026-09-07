@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { createServer } from 'node:net'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { deliver as deliverOpenCode } from './channels/opencode.js'
+import { DEFAULT_DEADLINE_MS, deliver as deliverOpenCode } from './channels/opencode.js'
 import { deliver as deliverPi } from './channels/pi.js'
 import { deliver as deliverPty } from './channels/pty.js'
 
@@ -12,24 +12,30 @@ import { deliver as deliverPty } from './channels/pty.js'
  * `launchConfiguration('opencode', { launchId, workspace })` returns
  * `{ args: ['--port', port, '--hostname', '127.0.0.1'], env:
  * { OPENCODE_SERVER_PASSWORD }, channel: { kind: 'opencode-server',
- * endpoint, password } }`. The endpoint and password are copied into the
- * reservation so the adapter can authenticate its POST without rediscovery.
+ * endpoint, password, ackTimeoutMs } }`. The endpoint and password are copied
+ * into the reservation so the adapter can authenticate its POST without
+ * rediscovery; `ackTimeoutMs` is the adapter's absolute acknowledgement
+ * budget.
  *
  * `launchConfiguration('pi', { launchId, workspace })` returns
  * `{ args: ['--extension', absoluteExtensionPath], env:
  * { CF_DELIVERY_INBOX, CF_DELIVERY_ACK, CF_DELIVERY_QUARANTINE,
+ * CF_DELIVERY_SETTLED, CF_DELIVERY_EXPIRED, CF_DELIVERY_LAUNCH_ID,
  * CF_DELIVERY_ACK_TIMEOUT_MS, CF_DELIVERY_EXTENSION_ACK_TIMEOUT_MS },
- * channel: { kind: 'pi-extension', inbox, ack, quarantine, ackTimeoutMs,
- * extensionAckTimeoutMs } }`. The inbox, ack, and quarantine directories are
- * launch-scoped children of the supplied workspace; the extension timeout is
- * strictly shorter than the adapter timeout.
+ * channel: { kind: 'pi-extension', launchId, inbox, ack, quarantine, settled,
+ * expired, ackTimeoutMs, extensionAckTimeoutMs } }`. The inbox, ack,
+ * settlement, expiry and quarantine directories are launch-scoped children of
+ * the supplied workspace. Each inbox record carries the adapter's one
+ * absolute expiry; the extension reads it and does not mint another deadline.
  * OpenCode's adapter owns its 3_000 ms HTTP deadline; Pi's launch owns its
  * 30_000 ms acknowledgement timeout. These are independent values.
  *
  * Adapter result error codes are `unknown-channel`, `channel-disabled`,
- * `transport`, `deadline`, `ack-timeout`, and `missing-envelope`; transport,
- * deadline, and ack-timeout are returned to callers as `uncertain` because
- * admission is unknown.
+ * `transport`, `deadline`, `ack-timeout`, `admission-unknown`, `invalid-record`,
+ * `expired`, `missing-envelope`, and `failed-with-zero-bytes`. Transport,
+ * deadline, ack-timeout and admission-unknown are returned to callers as
+ * `uncertain`; false admission is a zero-byte failure and is never replayable
+ * automatically after a send.
  *
  * The optional entries below are enabled only by the live probes recorded in
  * findings-01.md: P5 for OpenCode and P6 for Pi, both on 2026-09-07.
@@ -91,7 +97,7 @@ export async function launchConfiguration(kind, input) {
     return {
       args: ['--port', String(port), '--hostname', '127.0.0.1'],
       env: { OPENCODE_SERVER_PASSWORD: password },
-      channel: { kind: 'opencode-server', endpoint, password },
+      channel: { kind: 'opencode-server', endpoint, password, ackTimeoutMs: DEFAULT_DEADLINE_MS },
     }
   }
   if (kind === 'pi') {
@@ -99,6 +105,8 @@ export async function launchConfiguration(kind, input) {
     const inbox = join(root, 'inbox')
     const ack = join(root, 'ack')
     const quarantine = join(root, 'quarantine')
+    const settled = join(root, 'settled')
+    const expired = join(root, 'expired')
     const ackTimeoutMs = 30_000
     const extensionAckTimeoutMs = Math.floor(ackTimeoutMs * 0.8)
     const extensionPath = join(
@@ -114,14 +122,20 @@ export async function launchConfiguration(kind, input) {
         CF_DELIVERY_INBOX: inbox,
         CF_DELIVERY_ACK: ack,
         CF_DELIVERY_QUARANTINE: quarantine,
+        CF_DELIVERY_SETTLED: settled,
+        CF_DELIVERY_EXPIRED: expired,
+        CF_DELIVERY_LAUNCH_ID: launchId,
         CF_DELIVERY_ACK_TIMEOUT_MS: String(ackTimeoutMs),
         CF_DELIVERY_EXTENSION_ACK_TIMEOUT_MS: String(extensionAckTimeoutMs),
       },
       channel: {
         kind: 'pi-extension',
+        launchId,
         inbox,
         ack,
         quarantine,
+        settled,
+        expired,
         ackTimeoutMs,
         extensionAckTimeoutMs,
       },

@@ -122,12 +122,19 @@ impl<R: AsRawFd> AsRawFd for CoalescingReader<R> {
 
 impl Headless {
     fn spawn() -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_consensflow-bridge"))
+        Self::spawn_with_env(&[])
+    }
+
+    fn spawn_with_env(env: &[(&str, &str)]) -> Self {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_consensflow-bridge"));
+        command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .expect("spawn consensflow-bridge");
+            .stderr(Stdio::inherit());
+        for (name, value) in env {
+            command.env(name, value);
+        }
+        let mut child = command.spawn().expect("spawn consensflow-bridge");
         let input = child.stdin.take().expect("piped helper stdin");
         let stdout = child.stdout.take().expect("piped helper stdout");
         let mut reader = BufReader::new(stdout);
@@ -268,6 +275,199 @@ fn output_bytes(event: &Value, pane_id: &str, generation: u64) -> Option<(u64, V
     Some((seq, bytes))
 }
 
+fn output_until(
+    helper: &Headless,
+    events: &mut Vec<Value>,
+    pane_id: &str,
+    generation: u64,
+    expected: &[u8],
+) -> Vec<u8> {
+    let mut output = Vec::new();
+    while !output
+        .windows(expected.len())
+        .any(|bytes| bytes == expected)
+    {
+        if events.is_empty() {
+            events.push(helper.receive());
+        }
+        for event in events.drain(..) {
+            if let Some((_seq, bytes)) = output_bytes(&event, pane_id, generation) {
+                output.extend(bytes);
+            }
+        }
+    }
+    output
+}
+
+#[test]
+fn pane_open_drop_env_removes_after_overlay_and_inherits_unlisted_parent() {
+    const SENTINEL: &str = "CONSENSFLOW_HEADLESS_DROP_ENV_7FC9A1";
+
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn_with_env(&[(SENTINEL, "from-parent")]);
+    let mut events = Vec::new();
+    let probe = format!(
+        "if [ \"${{{SENTINEL}+set}}\" = set ]; then printf '%s' \"${SENTINEL}\"; else printf absent; fi"
+    );
+
+    let mut dropped = open_body(&probe, 1024);
+    dropped["env"] = Value::Object(serde_json::Map::from_iter([(
+        SENTINEL.to_string(),
+        json!("from-frame"),
+    )]));
+    dropped["dropEnv"] = json!([SENTINEL]);
+    let opened = helper.request("pane.open", dropped, &mut events);
+    assert_eq!(opened["ok"], true, "dropEnv is part of the pane.open frame");
+    let pane_id = opened["id"].as_str().expect("opened pane id");
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    assert_eq!(
+        output_until(&helper, &mut events, pane_id, generation, b"absent"),
+        b"absent",
+        "removal runs after the explicit env overlay"
+    );
+    assert_eq!(
+        helper.request(
+            "pane.kill",
+            json!({"id":pane_id,"generation":generation}),
+            &mut events
+        ),
+        json!({"ok":true})
+    );
+
+    let inherited = helper.request("pane.open", open_body(&probe, 1024), &mut events);
+    assert_eq!(inherited["ok"], true);
+    let pane_id = inherited["id"].as_str().expect("opened pane id");
+    let generation = inherited["generation"].as_u64().expect("opened generation");
+    assert_eq!(
+        output_until(&helper, &mut events, pane_id, generation, b"from-parent"),
+        b"from-parent",
+        "an unlisted parent variable remains available"
+    );
+    assert_eq!(
+        helper.request(
+            "pane.kill",
+            json!({"id":pane_id,"generation":generation}),
+            &mut events
+        ),
+        json!({"ok":true})
+    );
+
+    for invalid_name in ["", "BAD=NAME", "BAD\0NAME"] {
+        let mut invalid = open_body("printf should-not-run", 1024);
+        invalid["dropEnv"] = json!([invalid_name]);
+        let refused = helper.request("pane.open", invalid, &mut events);
+        assert_eq!(refused["ok"], false, "accepted {invalid_name:?}");
+        assert!(refused["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("environment variable name")));
+    }
+    assert_eq!(
+        helper.request("pane.list", json!({}), &mut events)["panes"],
+        json!([]),
+        "an invalid name is refused before a pane is spawned"
+    );
+    helper.close_input_and_wait();
+}
+
+#[test]
+fn claim_epoch_observes_intervening_typing_without_writing_to_the_pane() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let opened = helper.request(
+        "pane.open",
+        open_body(
+            "/bin/stty raw -echo; printf ready; /usr/bin/od -An -tx1 -N 2; printf done",
+            1024,
+        ),
+        &mut events,
+    );
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    let _ = output_until(&helper, &mut events, &pane_id, generation, b"ready");
+
+    let snapshot = helper.request(
+        "pane.snapshot",
+        json!({"id":pane_id,"generation":generation}),
+        &mut events,
+    );
+    assert_eq!(snapshot["ok"], true);
+    assert_eq!(snapshot["inputEpoch"], 0);
+    assert_eq!(
+        helper.request(
+            "pane.input",
+            json!({"id":pane_id,"generation":generation,"bytes":[120]}),
+            &mut events,
+        ),
+        json!({"ok":true,"epoch":1})
+    );
+    let claimed = helper.request(
+        "pane.claim_epoch",
+        json!({"pane":pane_id,"generation":generation,"epoch":snapshot["inputEpoch"]}),
+        &mut events,
+    );
+    assert_eq!(
+        claimed,
+        json!({"ok":false,"error":"human draft is latched"})
+    );
+    assert!(
+        events
+            .drain(..)
+            .all(|event| output_bytes(&event, &pane_id, generation).is_none()),
+        "claiming an epoch wrote a second byte before its response"
+    );
+    assert!(matches!(
+        helper.receive_timeout(Duration::from_millis(150)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
+
+    let clean = helper.request(
+        "pane.open",
+        open_body("/bin/stty raw -echo; /bin/sleep 1000", 1024),
+        &mut events,
+    );
+    let clean_id = clean["id"].as_str().expect("clean pane id").to_string();
+    let clean_generation = clean["generation"].as_u64().expect("clean generation");
+    assert_eq!(
+        helper.request(
+            "pane.claim_epoch",
+            json!({"pane":clean_id,"generation":clean_generation,"epoch":0}),
+            &mut events,
+        ),
+        json!({"ok":true})
+    );
+    let after_claim = helper.request(
+        "pane.snapshot",
+        json!({"id":clean_id,"generation":clean_generation}),
+        &mut events,
+    );
+    assert_eq!(after_claim["inputEpoch"], 0);
+    assert_eq!(
+        after_claim["pasteInFlight"], false,
+        "claiming an epoch does not reserve the paste writer"
+    );
+    assert_eq!(
+        helper.request(
+            "pane.claim_epoch",
+            json!({"pane":clean_id,"generation":clean_generation,"epoch":1}),
+            &mut events,
+        ),
+        json!({"ok":false,"error":"stale pane generation or input epoch"})
+    );
+
+    for (id, pane_generation) in [(pane_id, generation), (clean_id, clean_generation)] {
+        assert_eq!(
+            helper.request(
+                "pane.kill",
+                json!({"id":id,"generation":pane_generation}),
+                &mut events,
+            ),
+            json!({"ok":true})
+        );
+    }
+    helper.close_input_and_wait();
+}
+
 #[test]
 fn stdio_protocol_opens_pastes_lists_and_kills_a_raw_recorder() {
     let _pty_guard = serial_headless_test();
@@ -277,9 +477,12 @@ fn stdio_protocol_opens_pastes_lists_and_kills_a_raw_recorder() {
     let opened = helper.request(
         "pane.open",
         open_body(
-            "/bin/stty raw -echo; /bin/sleep 1000 & sleeper=$!; \
-             printf 'PIDS:%s,%s\nready' \"$$\" \"$sleeper\"; \
-             /usr/bin/od -An -tx1 -N 17; printf '\nRECORDER-DONE\n'; wait \"$sleeper\"",
+            "/bin/stty raw -echo; tree=/tmp/cf-tree-$$; \
+             /bin/sh -c '/bin/sleep 1000 & grandchild=$!; \
+             printf \"%s\n\" \"$grandchild\" >\"$1\"; wait' sh \"$tree\" & child=$!; \
+             while [ ! -s \"$tree\" ]; do :; done; grandchild=$(/bin/cat \"$tree\"); \
+             /bin/rm -f \"$tree\"; printf 'PIDS:%s,%s,%s\nready' \"$$\" \"$child\" \"$grandchild\"; \
+             /usr/bin/od -An -tx1 -N 17; printf '\nRECORDER-DONE\n'; wait \"$child\"",
             4096,
         ),
         &mut events,
@@ -368,7 +571,7 @@ fn stdio_protocol_opens_pastes_lists_and_kills_a_raw_recorder() {
         .split(',')
         .map(|pid| pid.trim().parse::<i32>().expect("numeric recorder pid"))
         .collect::<Vec<_>>();
-    assert_eq!(pids.len(), 2);
+    assert_eq!(pids.len(), 3, "root, child, and grandchild pids");
     assert!(pids.iter().all(|pid| process_exists(*pid)));
 
     let listed = helper.request("pane.list", json!({}), &mut events);
@@ -552,8 +755,11 @@ fn stdin_eof_reaps_every_spawned_process() {
         let opened = helper.request(
             "pane.open",
             open_body(
-                "/bin/sleep 1000 & first=$!; /bin/sleep 1000 & second=$!; \
-                 printf '%s,%s,%s\\n' \"$$\" \"$first\" \"$second\"; wait",
+                "tree=/tmp/cf-eof-tree-$$; \
+                 /bin/sh -c '/bin/sleep 1000 & grandchild=$!; \
+                 printf \"%s\\n\" \"$grandchild\" >\"$1\"; wait' sh \"$tree\" & child=$!; \
+                 while [ ! -s \"$tree\" ]; do :; done; grandchild=$(/bin/cat \"$tree\"); \
+                 /bin/rm -f \"$tree\"; printf '%s,%s,%s\\n' \"$$\" \"$child\" \"$grandchild\"; wait \"$child\"",
                 1024,
             ),
             &mut events,
@@ -883,4 +1089,86 @@ fn kill_process_group(process_group_id: i32) {
     const SIGKILL: i32 = 9;
     // SAFETY: the PTY child is its process-group leader and this is test-only cleanup.
     let _ = unsafe { kill(-process_group_id, SIGKILL) };
+}
+
+#[test]
+fn product_bridge_contract_preserves_app_identity_and_launch_deduplication() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let body = json!({
+        "id":"product-pane", "generation":7, "launch":"product-launch",
+        "cwd":"/tmp", "argv":["/bin/cat"], "env":{}
+    });
+    let opened = helper.request("pane.open", body.clone(), &mut events);
+    assert_eq!(opened["ok"], true, "production open rejected: {opened}");
+    assert_eq!(opened["id"], "product-pane");
+    assert_eq!(opened["generation"], 7);
+    let duplicate = helper.request("pane.open", body, &mut events);
+    assert_eq!(
+        duplicate["ok"], true,
+        "duplicate launch rejected: {duplicate}"
+    );
+    assert_eq!(duplicate["id"], "product-pane");
+    assert_eq!(duplicate["deduplicated"], true);
+    helper.close_input_and_wait();
+}
+
+#[test]
+fn product_bridge_contract_forwards_enter_and_clears_only_the_covered_draft() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let opened = helper.request("pane.open", open_body("exec /bin/cat", 1024), &mut events);
+    assert_eq!(opened["ok"], true);
+    let id = opened["id"].as_str().expect("pane id");
+    let generation = opened["generation"].as_u64().expect("generation");
+    let entered = helper.request(
+        "pane.input",
+        json!({
+            "id":id, "generation":generation, "bytes":b"hello\r".to_vec()
+        }),
+        &mut events,
+    );
+    assert_eq!(entered["ok"], true);
+    while !events.iter().any(|event| event["op"] == "pane.enter") {
+        events.push(helper.receive());
+    }
+    let event = events
+        .iter()
+        .find(|event| event["op"] == "pane.enter")
+        .expect("enter event");
+    assert_eq!(event["body"]["id"], id);
+    let epoch = event["body"]["epoch"].as_u64().expect("enter epoch");
+    let cleared = helper.request("draft.clear", json!({
+        "id":id, "generation":generation, "submittedEpoch":epoch, "submissionId":"submission-one"
+    }), &mut events);
+    assert_eq!(cleared["ok"], true, "draft clear rejected: {cleared}");
+    let snapshot = helper.request(
+        "pane.snapshot",
+        json!({"id":id,"generation":generation}),
+        &mut events,
+    );
+    assert_eq!(snapshot["draftLatched"], false);
+    assert_eq!(snapshot["lastSubmissionId"], "submission-one");
+    helper.close_input_and_wait();
+}
+
+#[test]
+fn product_bridge_contract_forwards_a_natural_pane_exit() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let opened = helper.request("pane.open", open_body("printf finished", 1024), &mut events);
+    assert_eq!(opened["ok"], true);
+    while !events.iter().any(|event| event["op"] == "pane.exit") {
+        events.push(helper.receive());
+    }
+    let ended = events
+        .iter()
+        .find(|event| event["op"] == "pane.exit")
+        .expect("exit event");
+    assert_eq!(ended["body"]["id"], opened["id"]);
+    assert_eq!(ended["body"]["generation"], opened["generation"]);
+    helper.close_input_and_wait();
 }

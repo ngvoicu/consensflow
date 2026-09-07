@@ -6,10 +6,11 @@ import { HARNESSES } from './roster.js'
  * was live-proven on claude and codex (2026-08-19) before any of this code
  * existed. Only the roster table and the description's name list vary.
  *
- * The `env -u …_API_KEY` prefixes are deliberate: they keep subscription
- * logins from silently switching to API-key billing (v1's dropEnv, carried
- * as prose). The danger flags appear only on rows the user explicitly stored
- * as full-auto — the table is copy-paste commands a lead will run verbatim.
+ * ConsensFlow has one shape now: the app owns the panes (standalone). There
+ * are no modes, so this generator takes no mode option — anything still
+ * passing one gets the same text. The danger flags appear only on rows the
+ * user explicitly stored as full-auto — the table is copy-paste commands a
+ * lead will run verbatim.
  */
 
 /**
@@ -31,30 +32,29 @@ function row(p) {
 }
 
 /**
- * The skill, generated from the roster — and, in cmux mode, from the fact that
- * panes exist there.
+ * The skill, generated from the roster.
  *
- * `options.mode` only ever ADDS the pane step, and only for `cmux`. ConsensFlow
- * still never drives a pane itself: it says what to run, cmux's own skills say
- * how to place it, and the lead composes the two. That is the same split that
- * kept `cf run` a plain subprocess with an exit code instead of a terminal to
- * be scraped — the v2 lesson this project was rebuilt to avoid.
+ * One text for every lead: the app opens every pane itself, so there is no
+ * pane step here to add or vary. ConsensFlow never drives a pane on the
+ * lead's behalf either — it says what to run, the app places it, and the
+ * lead composes the two. That is the same split that kept `cf run` a plain
+ * request with a printed conversation name instead of a terminal to be
+ * scraped — the v2 lesson this project was rebuilt to avoid.
  */
-export function generateSkill(agents, options = {}) {
+export function generateSkill(agents, _options = {}) {
   const supported = agents.filter((p) => HARNESSES.includes(p.harness))
   if (supported.length === 0) {
     throw new Error('empty roster: add an agent before generating the skill')
   }
   const names = supported.map((p) => p.name).join(', ')
-  const inCmux = options.mode === 'cmux'
 
   // The description is the only part of this file a lead reads before deciding
-  // whether to open the rest. In cmux mode it must not sound complete: a lead
-  // that read "run one-shot in the current directory" concluded there was
-  // nothing further to learn and ran the consult in its own pane (2026-08-24).
-  const shape = inCmux
-    ? "working in the current directory. A consult here opens the agent's own window in a cmux pane — a named conversation — so read this skill before starting one; the exact commands are in it."
-    : 'run one-shot in the current directory.'
+  // whether to open the rest. It must not sound complete and must not hand
+  // out a runnable command: a lead that read "run one-shot in the current
+  // directory" concluded there was nothing further to learn and ran the
+  // consult in its own pane (2026-08-24).
+  const shape =
+    "working in the current directory. A consult here opens a conversation in the app's own window — the app owns the panes — so read this skill before starting one; the exact commands are in it."
 
   return `---
 name: consensflow
@@ -64,11 +64,8 @@ description: Consult one of the user's named AI agents — ${names} — each a r
 # ConsensFlow agents
 
 The user keeps a roster of named AI agents. Each one is a model at a fixed
-${
-  inCmux
-    ? 'effort, run by its own harness (claude, codex, pi, opencode, kimi) — a\nseparately installed CLI.'
-    : 'effort, run one-shot by its own harness (claude, codex, pi, opencode,\nkimi) — a separately installed CLI.'
-} Consulting an agent means running its command below
+effort, run by its own harness (claude, codex, pi, opencode,
+kimi) — a separately installed CLI. Consulting an agent means running its command below
 with your question as the final argument. It runs in **your current working
 directory** and reads the project's files itself, so you need not paste file
 contents — but it cannot see this conversation, so the question has to carry
@@ -91,46 +88,56 @@ Consult when:
 - **the user is about to act on your recommendation** and nobody has checked
   it.
 
-Say who you asked and what they said. Do not consult in a loop: one agent, one
-question, then decide or ask the user.
+Say who you asked and what they said. Independent questions can run in
+parallel in their own conversations; a follow-up belongs to the conversation
+that already holds its context.
 
 ## How to consult
+
+There are three acts: consult, follow up, read.
 
 1. Pick the agent the user named (or choose one yourself when you want
    a second opinion).
 2. Compose the question: one or two sentences of task context, then the
    concrete question. Name specific files with relative paths when relevant.
-3. ${
-    inCmux
-      ? `**Open a pane for that conversation and send the consult there** — never
-   run it in this one. The four commands are written out under "One pane per
-   conversation" below; do not go exploring cmux's CLI.`
-      : `Spawn it from the project directory:
+3. Consult it from your own pane in the app:
 
-   \`\`\`bash
-   cf run @<name> "<task>"
-   \`\`\``
-  }
+    \`\`\`bash
+    cf run @<name> "<task>"
+    \`\`\`
+
+   Today's continuation rule, with no pane of your own to open: run it bare
+   and the agent's conversation with you continues; pass \`--new\` for an
+   independent task and the app starts a fresh conversation; pass
+   \`--session <name>\` to name one explicitly. The app prints the name it
+   minted:
+
+    \`\`\`bash
+    cf run @<name> "<task>" --new            # an independent task: a fresh conversation
+    cf run @<name> "<task>" --session <name> # a specific one, by name
+    # conversation: <name> (new) — pane <id>
+    \`\`\`
+
+   A task that leans on a conversation stays in it; only an independent one
+   gets a new conversation — continue by default, unsure means continue. An
+   independent task is one you could hand a stranger in full, naming its own
+   files, without a word about what that conversation said.
 
    Flags, all optional and combinable:
 
-   - \`--brief "<what this run is for>"\` — what you want from THIS spawn:
-     "review this for GDPR: lawful basis, retention", "you are checking the
-     migration for rollback safety". The agent is told nothing about itself
-     otherwise, so the brief is where the framing goes.
-   - \`--handoff-file <file>\` — your conversation so far, when the agent needs
-     it. You are the one holding it: write the relevant part to a file and
-     pass it.
-   - \`--no-handoff\` — spawn with the task alone. Only matters when a harness
-     has stashed the conversation for you (the Claude Code and pi
-     integrations do); here it is the default, and this flag makes it
-     explicit.
-   - \`--context "<note>"\` — a short brief-alongside for one run.
-   - \`--prompt-file <file>\` — when the task is long. It IS the task: pass it
-     INSTEAD of the quoted one, never beside it, and put your framing in
-     \`--brief\`. Both together is refused, because the file would otherwise
-     replace what you quoted without a word.
-   - \`--image <path>\` — reference pictures for an image agent, repeatable.
+    - \`--brief "<what this run is for>"\` — what you want from THIS run:
+      "review this for GDPR: lawful basis, retention", "you are checking the
+      migration for rollback safety". The agent is told nothing about itself
+      otherwise, so the brief is where the framing goes.
+    - \`--handoff-file <file>\` — your conversation so far, when the agent needs
+      it. You are the one holding it: write the relevant part to a file and
+      pass it.
+    - \`--context "<note>"\` — a short brief-alongside for one run.
+    - \`--prompt-file <file>\` — when the task is long. It IS the task: pass it
+      INSTEAD of the quoted one, never beside it, and put your framing in
+      \`--brief\`. Both together is refused, because the file would otherwise
+      replace what you quoted without a word.
+    - \`--image <path>\` — reference pictures for an image agent, repeatable.
 
    Turns can take minutes at high effort — use a generous timeout (10+
     minutes for max). The thinking streams as it goes.
@@ -138,49 +145,63 @@ question, then decide or ask the user.
    attributed** ("hyperion says: …"). Never present an agent's answer as
    your own.
 
+## Follow up in the same conversation
+
+A follow-up is the same question you would ask a colleague who already read
+the files: send it into the conversation that holds the context.
+
+\`\`\`bash
+cf say <name> "<your follow-up, in plain words>"
+\`\`\`
+
+Look before you send: run \`cf catchup <name> --unread\` first — the
+conversation may have moved without you, and a follow-up composed against a
+stale view asks the wrong question.
+
+## Read what arrived
+
+Reading a conversation and adding to it are different acts. "What did he
+say?", "did he reply?" ask you to READ: run \`cf catchup <name> --unread\`
+and report what it shows. Send nothing. Asking the agent again invents a new
+answer instead of finding the one that already exists.
+
+A delivered answer is read WHOLE from the top, never from the end. An answer
+that arrives in your pane is the complete answer — read all of it, starting
+at the first line, before you report or act on any of it. A line naming
+\`cf read <id>\` means the answer arrived as a file: run each part and read
+its complete output in full before anything else.
+
+\`\`\`bash
+cf catchup <name> --unread   # what has been said since you last looked
+cf read <id>                 # a delivered file, first part
+cf read <id> --part 2        # every further part, until the answer is whole
+\`\`\`
+
+A delivered answer is not re-read with \`catchup\`: once it is delivered, the
+delivery is the record — re-reading it as unread double-counts it.
+
+## Send and return, never wait
+
+After a consult or a follow-up, report what is running and in which
+conversation, then take the user's next message. Under \`auto\` the answer
+arrives in your pane on its own; under \`manual\` the human says when to
+read. Either way you do not sit out the answer: polling is wrong — \`cf catchup\`
+in a loop or \`cf sessions\` every few seconds burns the user's attention and
+answers nothing sooner.
+
 ## Rules
 
-- **One agent at a time.** Wait for one answer before asking another.
 - **Advice is free; acting is gated.** Never apply an agent's suggested
   changes, or keep files it created, without the user's explicit approval —
   unless the user already authorized it in this conversation.
 - **Bring the answer back before anything else.** When an agent replies,
   stop. Report what it said — attributed and faithful, not summarized away —
-  and add what you make of it. Then wait. Do not start implementing, do not
-  spawn a second agent, do not resume your plan until the user has weighed in.
-  An answer they have not read is not a decision they have made.
+  and add what you make of it.
 - **Do not retry a slow agent with a different one** unless the command
   itself failed. Slow usually means thinking.
-- **Do not block on long work.** \`--wait\` is for an answer that is seconds
-  away. When you have handed over something substantial, report that it is
-  running and which conversation it is in, then take the user's next message.
-  A lead the user cannot reach is worse than an answer that arrives late.${
-    inCmux
-      ? `
-- **Reading a conversation and adding to it are different acts.** "What did
-  he say?", "can you see what she answered?", "did he reply?" ask you to
-  READ: run \`cf catchup <name> --unread\` and report what it shows. Send
-  nothing. Asking the agent again invents a new answer instead of finding the
-  one that already exists — and the user was asking about theirs, not yours.
-  "Ask him X", "another one", "tell her Y" are the other act: those you send.
-- **Look before you send, too.** The user types straight into agent panes, so
-  your memory of a conversation is only as fresh as your last look. Run
-  \`cf catchup <name> --unread\` before every follow-up and before acting on
-  anything an agent said — the conversation may have moved without you, and a
-  follow-up composed against a stale view asks the wrong question.
-- **A pane holding a window is a chat box, not a shell.** Everything you send
-  into it reaches the agent as a message, so a follow-up is your question in
-  plain words. A \`cf run\` line sent there asks the agent to consult itself.
-- **A task that leans on a conversation stays in its pane; only an independent
-  one gets a new pane.** "Write the test for it", "what about the timeout
-  too", "fix what you found" all need what the agent has already read and
-  decided, so they go into the window it has — never a new pane, which would
-  hand the same words to an agent that saw none of it. Independent is the
-  task you could hand a stranger in full, its own files named, without a word
-  about what that conversation said: that one starts fresh, in its own pane.
-  Unsure means continue.`
-      : ''
-  }
+- **A policy the human set is never changed.** Delivery policy belongs to the
+  human on the page: never change it, never work around it, and never treat a
+  quiet conversation as permission to flip it.
 
 ## Roster
 
@@ -188,198 +209,12 @@ question, then decide or ask the user.
 |---|---|---|
 ${supported.map(row).join('\n')}
 
-Every one of them is spawned the same way — \`cf run @<name> "<task>"\` — so
+Every one of them is consulted the same way — \`cf run @<name> "<task>"\` — so
 picking an agent is a question of who you want, not of what to type. The
 command carries the billing guards for you: a run never switches a
 subscription login to API-key billing.
 
-${
-  inCmux
-    ? `## One pane per conversation — and the pane IS the agent's window
-
-A consult here is a **conversation** in the agent's own interface. \`cf run
-@<name> "<task>"\` in a pane does not print an answer and exit: it opens
-the agent's real window on that conversation, seeded with your task, and stays
-— claude's, pi's, opencode's and codex's alike. kimi is the one exception: its
-CLI has no way to seed an interactive session, so it streams its first answer
-and the same pane becomes its window after. Either
-way the conversation has a name that says whose it is —
-\`hyperion-ember-ridge\`, \`athena-amber-moss\` — and
-asking again continues it: the agent remembers, and the provider's cache
-stays warm.
-
-**A conversation belongs to the session that started it.** You are a new
-session, so your first consult with an agent opens a new one — you never
-inherit what another lead left in this directory, however recent it looks.
-Conversations someone else started are still reachable when you mean them:
-\`cf sessions\` lists what is here, and \`--session <name>\` continues one
-by name.
-
-Give each conversation its own pane. Five commands, in this order — you do not
-need to explore cmux's CLI, and you must not run the consult in this pane:
-
-\`\`\`bash
-# 1. name the conversation FIRST — the run will print its name into a pane
-#    you cannot read, so you mint it here and hand it in. Give it the agent:
-#    the name then says whose window the pane holds (ares-bubble-sky), which
-#    is what step 4 titles the tab with.
-NAME=$(cf mint @<name>)
-
-# 2. a pane beside you, without stealing focus. Prints: OK surface:NN pane:NN
-CMUX_QUIET=1 cmux new-pane --type terminal --direction right --focus false
-
-# 3. send the consult there, under your name. cd FIRST: a new pane does not
-#    inherit your directory, and a conversation belongs to the directory it
-#    started in. The trailing newline is what runs it. Keep this line short —
-#    a long task belongs in --prompt-file, not in the quotes, because this is
-#    one line a pane has to receive intact.
-CMUX_QUIET=1 cmux send --surface surface:NN 'cd "'"$PWD"'" && cf run @<name> "<task>" --brief "<why>" --new --session '"$NAME"''$'\\n'
-
-# 4. title the tab to match, so the pane can be found again
-CMUX_QUIET=1 cmux rename-tab --surface surface:NN "$NAME"
-
-# 5. confirm it landed. This is the check — you cannot read the pane, and you
-#    do not need to: cf sessions lists $NAME once the consult is real. Not
-#    listed YET means wait, not failed: the paste has to land, the shell has
-#    to run it, the agent has to start. Look again a few seconds later. A name
-#    that never appears means the line did not run — find the pane with
-#    cmux tree, or tell the user. Never send the consult a second time on a
-#    name you have not seen, and never redirect the run to a file to watch it
-#    instead: cf run in a pipe has no window to open, and is refused for
-#    exactly that reason.
-cf sessions
-\`\`\`
-
-Lost track of which pane is which? \`CMUX_QUIET=1 cmux tree\` draws every pane
-in the workspace with its tab title, so the one titled with your conversation
-is the one you sent it to. (\`list-pane-surfaces\` sounds like the right
-command and is not: it lists only the pane you are in.)
-
-**Match how you wait to how long the work is.** A question answers in
-seconds; a refactor, a review or a rewrite runs for many minutes, and blocking
-on it means the user cannot reach you the whole time. For anything substantial:
-send it, say plainly that it is running and in which conversation, and stop —
-the user watches it live in its own pane, and \`cf sessions\` says what is
-still working. Look again when they ask, or when they come back.
-
-**Read the answer with \`cf catchup <name> --unread\` from your own pane** —
-everything said since your last look, which is what you want nearly every
-time. \`--wait\` is for the moment after you send a question and the answer is
-still being written; it blocks until the next one lands. Plain \`cf catchup
-<name>\` gives the whole conversation with a line marking where your memory
-stopped. Do not scrape the other pane's screen: the pane is for the user to
-watch, the harness's own session store is what you read. Screen text is not
-an answer, it is a picture of one.
-
-**A long answer is read from the TOP, never from the end.** \`cf catchup\`
-prints every turn in full and holds nothing back, so a real review runs to
-tens of thousands of characters — and an agent puts its verdict first, then
-its working. Piping that through \`tail\` hands you the end of the reasoning
-without the conclusion it was reasoning towards, and you will report it as the
-answer (live, 2026-08-27: a lead read \`| tail -60\`, said that was the
-answer, and had to be told it had only read the tail). \`--last N\` is the same
-mistake in turns rather than bytes: it is still the end. If one look really is
-too much, walk it in order from the first line and keep going until you have
-all of it. Length is a reason to read in more passes, never a reason to start
-from the bottom.
-
-**Before you send into a pane, decide whether this is a follow-up at all.**
-By default it is. A conversation carries everything the agent has read,
-decided and answered, and a task that leans on any of it — "now write the test
-for it", "what about the timeout path too", "fix what you found" — belongs in
-the pane it already has: the agent remembers, and the provider's cache is
-warm. Opened elsewhere, the same words reach an agent that has never seen the
-files or the reasoning they point at, and the answer is worse. One test tells
-the two apart: could you hand this task to a stranger in full, naming its own
-files, without a word about what that conversation said? Only then is it
-independent, and an independent task starts its own conversation, because a
-history it does not need costs tokens on every turn and leans the answer
-towards the old subject, and because two independent tasks in two panes run
-at the same time while two in one pane wait on each other. Starting one is
-the five commands above, all five: a fresh \`cf mint\`, a new pane, the
-\`cf run … --new --session\` line SENT into that pane, the tab titled,
-\`cf sessions\` to confirm. \`cf run\` never runs in this pane — not on the
-second consult any more than on the first (measured, 2026-09-05: a lead that
-had opened the pane correctly then ran the consult here, off a reference
-line that called \`--new\` "its own pane"). Unsure means continue: an
-unrelated turn costs some tokens, a cold agent costs the context it needed.
-
-**A follow-up is the question itself, typed into that pane.** The pane stopped
-being a shell the moment the consult ran — it holds the agent's window now, so
-whatever you send lands in its input box and is read as a message. Send your
-words, nothing else:
-
-\`\`\`bash
-cf catchup <name> --unread   # FIRST: the conversation may have moved without you
-CMUX_QUIET=1 cmux send --surface surface:NN '<your follow-up, in plain words>'$'\\n'
-cf catchup <name> --wait     # started BEFORE the answer can land, it waits it out
-\`\`\`
-
-Probed one harness at a time (2026-08-24): claude, codex, pi and opencode all
-submit a sent line. **Never send a shell line at a window** — no \`cd\`, no
-\`cf run\`, nothing with an \`&&\` in it. Nothing there would run it: the agent
-reads \`cf run @<name> "…"\` as being asked to consult ITSELF, and would be
-refused if it tried, because an agent does not spawn agents. Live,
-2026-08-31: a lead sent exactly that line into an agent's own window, off this
-page's previous wording, and its follow-up was never asked.
-
-**Two cases need a new pane instead**, and both use \`cf run --session\`, which
-carries the follow-up in as an argument — so it goes where a shell is
-listening, never at a window:
-
-- **a kimi agent** — a send reaches its TUI as a paste, where a newline is a
-  newline rather than Enter, so the text lands in the input box and is never
-  submitted. No answer comes, and the pane looks perfectly alive. Check the
-  roster above for the harness before you type at a pane.
-- **the window is gone** — its pane was closed, or the run ended. Check it
-  rather than assume it: \`CMUX_QUIET=1 cmux tree\` shows no tab named after
-  the conversation (step 4 titled it exactly so this is answerable, and
-  \`cf sessions\` cannot answer it — the row reads the same either way). A
-  consult aimed at a conversation whose window is still open is refused: a
-  second window would put two harnesses on one session.
-
-\`\`\`bash
-CMUX_QUIET=1 cmux new-pane --type terminal --direction right --focus false
-CMUX_QUIET=1 cmux send --surface surface:NN 'cd "'"$PWD"'" && cf run @<name> "<follow-up>" --session <name>'$'\\n'
-CMUX_QUIET=1 cmux rename-tab --surface surface:NN "<name>"
-\`\`\`
-
-It is the same conversation, carrying its whole history; the new pane is where
-it continues, and the old one is finished.
-
-The user can type in that pane, though — a person's keystrokes are real
-keystrokes, and their turns land in the same conversation. Nothing tells you
-it happened, which is why \`--unread\` exists and why the rules say to look
-before you answer for a conversation or add to one.
-
-\`\`\`bash
-# The three cf run lines are what you SEND into a pane (steps 1–5): run by
-# you here they are refused, a lead has no terminal for the window to open
-# in. Everything after them runs here.
-cf run @<name> "<task>"                     # continues that agent's conversation
-cf run @<name> "<task>" --new               # a fresh conversation, sent into a NEW pane
-cf run @<name> "<task>" --session <name>    # a specific one, by name
-cf sessions                                 # what is alive in this workspace
-cf catchup <name> --unread                  # what has been said since you last looked
-cf catchup <name>                           # the whole conversation, marked where you stopped
-cf catchup <name> --wait                    # sit out the answer to a question just sent
-cf last <name>                              # the last answer a streamed run left (codex turn 1)
-cf attach <name>                            # reopen a conversation's window later, anywhere
-\`\`\`
-
-If you cannot open a pane — no workspace, cmux is not running — say so and run
-the consult in your own context instead: without a terminal it streams the
-answer back to you and is recorded, exactly like a host-mode consult.
-
-The cmux commands above are quoted so you need not go looking for them; they
-are cmux's, not ours, and \`cmux --help\` is the authority if they have moved.
-
-This skill defines *what* to run; pane control stays cmux's own business — the
-four commands are quoted, and nothing here drives a pane beyond them.
-
-`
-    : ''
-}## Roster maintenance
+## Roster maintenance
 
 The roster above is generated by ConsensFlow. To change it, the user runs
 \`cf agent …\` or \`cf ui\` — never edit this file by hand; it will be

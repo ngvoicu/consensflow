@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { delimiter, isAbsolute, join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -288,9 +288,19 @@ async function spawnScopedServer() {
   const t = tempEnv()
   chooseCmuxMode(t)
   const cf = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
+  // A piped stdin is what makes this server speak the bridge, and a tab
+  // cannot be created without a pane host any more: creating one opens its
+  // lead's window. So this plays Rust for exactly that one frame.
+  const shims = join(t.root, 'shims')
+  mkdirSync(shims, { recursive: true })
+  writeFileSync(join(shims, 'pi'), '#!/bin/sh\nexit 0\n')
+  chmodSync(join(shims, 'pi'), 0o755)
   const child = spawn(process.execPath, [cf, 'ui', '--json', '--no-open'], {
-    env: { ...t.env, PATH: [t.env.PATH, '/usr/bin', '/bin'].join(delimiter) },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    env: {
+      ...t.env,
+      PATH: [shims, t.env.PATH, '/usr/bin', '/bin'].join(delimiter),
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
   })
   let stderr = ''
   child.stderr.on('data', (chunk) => {
@@ -304,6 +314,26 @@ async function spawnScopedServer() {
       ...handle,
       home: t.env.CONSENSFLOW_HOME,
       workspace: join(t.root, 'workspace'),
+      /**
+       * Answers the next `pane.open` the server sends, skipping the
+       * `state.changed` events the store emits after every mutation.
+       */
+      async answerNextOpen() {
+        for (;;) {
+          const frame = JSON.parse(await nextLine(lines, () => stderr))
+          if (frame.kind !== 'req') continue
+          child.stdin.write(
+            `${JSON.stringify({
+              v: 1,
+              id: frame.id,
+              kind: 'res',
+              op: frame.op,
+              body: { ok: true, id: frame.body.id, generation: frame.body.generation },
+            })}\n`,
+          )
+          return frame
+        }
+      },
       async close() {
         lines.return?.()
         if (child.exitCode === null && child.signalCode === null) {
@@ -326,10 +356,12 @@ describe('the real loopback server enforces role scope before pane routes exist'
 
   before(async () => {
     server = await spawnScopedServer()
-    const created = await api(server.token, '/api/tabs', {
+    const creating = api(server.token, '/api/tabs', {
       method: 'POST',
       body: { dir: server.workspace, harness: 'pi' },
     })
+    await server.answerNextOpen()
+    const created = await creating
     assert.equal(created.status, 201)
     server.created = await created.json()
 
@@ -556,8 +588,14 @@ describe('the real loopback server enforces role scope before pane routes exist'
         await response.json(),
         {
           'sent.record': { error: 'opId is required' },
-          'progress.set': { error: 'progress state is required' },
-          'session.bind': { error: 'no conversation named zeus-coral-lane in this workspace' },
+          'progress.set': { error: 'progress-refused', reason: 'progress state is required' },
+          'session.bind': {
+            // A refusal the store makes about the request: coded, so the
+            // controller can tell it from a fault on the server's side,
+            // which answers 500 and says nothing else.
+            error: 'bind-refused',
+            reason: 'no conversation named zeus-coral-lane in this workspace',
+          },
         }[op],
         op,
       )

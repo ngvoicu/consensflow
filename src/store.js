@@ -115,12 +115,28 @@ const PANE_KINDS = ['lead', 'worker', 'shell']
  * word the HTTP layer answers with. `reserved` is a launch of ours that has
  * not come back; `elsewhere` is a pane up in another session.
  */
-export class AdmissionError extends Error {
+/**
+ * A refusal the store makes ABOUT THE REQUEST, with a code.
+ *
+ * The type is the whole point. Every other error out of this module — a
+ * corrupt file, a full disk, a bug — is a fault on this side, and a caller
+ * that guesses from the shape of a bare `Error` will eventually tell someone
+ * their perfectly good request was wrong because a JSON file was truncated.
+ * So a refusal says so by TYPE, and nothing else may be read as one.
+ */
+export class StoreRefusal extends Error {
   constructor(message, code, detail = null) {
     super(message)
-    this.name = 'AdmissionError'
+    this.name = 'StoreRefusal'
     this.code = code
     this.detail = detail
+  }
+}
+
+export class AdmissionError extends StoreRefusal {
+  constructor(message, code, detail = null) {
+    super(message, code, detail)
+    this.name = 'AdmissionError'
   }
 }
 
@@ -151,6 +167,8 @@ export class Store {
   }
 
   /** Claims the instance lock, then runs restart recovery. Idempotent. */
+  #watchers = new Set()
+
   async open() {
     // A reopen waits for the outstanding close: the successor of this root
     // is this instance, and it may not race its own release.
@@ -173,6 +191,212 @@ export class Store {
       throw cause
     }
     return this
+  }
+
+  /**
+   * The lead's twin of `admit`: one launch at a time for a tab's own window.
+   *
+   * A worker's reservation lives on its conversation row; a lead has no
+   * conversation, so its reservation lives on the tab record, at
+   * `tab.lead.reserved`. That is where the delivery watcher reads the
+   * `channel` the launch was configured with — the endpoint and password,
+   * or the inbox and ack directories — so a delivery never has to
+   * rediscover them.
+   *
+   * The refusals are the worker rules, said about a tab: a closed tab is
+   * resumed before it launches, and a reservation nobody has resolved means
+   * a launch is in flight and a second one must not start. A reservation
+   * left behind at an OLDER lead generation is not in flight — `resume`
+   * minted a new generation past it — so it is replaced rather than obeyed.
+   *
+   * `launch` may be a function of the tab record, so the caller can decide
+   * the launch id from what the store holds inside this same mutation.
+   */
+  async leadAdmit(cwd, { tab, launch = null, channel = null } = {}) {
+    return this.mutate(cwd, 'tab.leadAdmit', async (io) => {
+      requireText(tab, 'tab id')
+      const tabs = await io.readTabs()
+      const record = tabs.find((candidate) => candidate.id === tab)
+      if (record === undefined) {
+        throw new AdmissionError(`no tab ${tab} in this workspace`, 'no-tab')
+      }
+      if (record.closed === true) {
+        throw new AdmissionError(`the tab ${tab} is closed — resume it first`, 'session-closed')
+      }
+      const generation = record.lead.generation
+      const held = isRecord(record.lead.reserved) ? record.lead.reserved : null
+      if (held !== null && held.resolvedAt === undefined && held.generation === generation) {
+        throw new AdmissionError(`the lead of ${tab} is already launching`, 'reserved', {
+          launchId: held.launchId,
+        })
+      }
+      const leadPane = record.panes.find((candidate) => candidate.kind === 'lead')
+      if (leadPane === undefined) {
+        // Unreachable through `create` and `resume`, which both mint one.
+        // Coded rather than bare so a corrupt record cannot read as a
+        // routine bad request on its way out.
+        throw new AdmissionError(`the tab ${tab} has no lead pane`, 'no-lead-pane')
+      }
+      const decided = typeof launch === 'function' ? launch(record) : launch
+      const { launchId, ...evidence } = isRecord(decided) ? decided : { launchId: decided }
+      requireText(launchId, 'lead launch id')
+      // The evidence a lead binds by, decided INSIDE this mutation from the
+      // record the store just read — the same rule admission follows for a
+      // worker, and for the same reason: a lead that already has a native
+      // session is RESUMED on it, never handed a newly minted identity.
+      record.lead.reserved = {
+        launchId,
+        generation,
+        pane: leadPane.id,
+        ...evidence,
+        ...(channel === null || channel === undefined ? {} : { channel }),
+        at: nowIso(),
+      }
+      // A resumed lead keeps its session and takes a NEW launch, so the
+      // binding is re-stamped for the launch that now holds it — inside
+      // this mutation, against the record it was just written on. A binding
+      // still naming a dead launch cannot be invalidated by generation,
+      // which is the mechanism every later decision leans on.
+      if (isRecord(record.lead.binding)) {
+        record.lead.binding = { ...record.lead.binding, launchId, generation, at: nowIso() }
+      }
+      record.updatedAt = nowIso()
+      await io.writeTabs(tabs)
+      return {
+        launchId,
+        tab: record.id,
+        directory: record.directory,
+        harness: record.lead.harness,
+        pane: { id: leadPane.id, generation: leadPane.generation },
+        generation,
+        nativeSession: record.lead.nativeSession ?? null,
+        evidence,
+      }
+    })
+  }
+
+  /**
+   * The lead's twin of `session.bind`.
+   *
+   * A worker's binding lives on its conversation row; a lead has no
+   * conversation, so its native session lives at `tab.lead.nativeSession` —
+   * the field the record has always carried and nothing ever wrote. The
+   * evidence rule is the SAME one, from the same module: an id we
+   * preallocated, an id the harness reported on our own stream, or the
+   * launch nonce in the opening line. A bare session id binds nothing.
+   */
+  async leadBind(cwd, { tab, candidate = {}, expect } = {}) {
+    return this.mutate(cwd, 'tab.leadBind', async (io) => {
+      requireText(tab, 'tab id')
+      const tabs = await io.readTabs()
+      const record = tabs.find((candidate2) => candidate2.id === tab)
+      if (record === undefined) throw new Error(`no tab ${tab} in this workspace`)
+      const reserved = isRecord(record.lead.reserved) ? record.lead.reserved : null
+      if (reserved === null) {
+        throw new StoreRefusal(
+          `tab.leadBind refuses for ${tab}: the store holds no lead launch`,
+          'no-launch',
+        )
+      }
+      if (isRecord(expect) && reserved.launchId !== expect.launchId) {
+        throw new StoreRefusal(
+          `launch ${expect.launchId} is over for the lead of ${tab}: it is not the current one`,
+          'stale-launch',
+        )
+      }
+      const decision = bindEvidence(record.lead.harness, candidate, reserved)
+      if (decision?.bound !== true) {
+        throw new StoreRefusal(
+          `tab.leadBind refuses for ${tab}: ${decision?.reason ?? 'no evidence'}`,
+          'no-evidence',
+        )
+      }
+      record.lead.nativeSession = candidate.sessionId
+      record.lead.binding = {
+        evidence: decision.evidence,
+        generation: reserved.generation,
+        launchId: reserved.launchId,
+        at: nowIso(),
+      }
+      record.updatedAt = nowIso()
+      await io.writeTabs(tabs)
+      return { bound: true, nativeSession: record.lead.nativeSession, evidence: decision.evidence }
+    })
+  }
+
+  /** The lead launch came back: the reservation stands, resolved. */
+  async leadResolve(cwd, { tab, launchId, outcome = 'opened' } = {}) {
+    return this.#leadSettle(cwd, 'tab.leadResolve', tab, launchId, (record) => {
+      record.lead.reserved.resolvedAt = nowIso()
+      record.lead.reserved.outcome = outcome
+    })
+  }
+
+  /**
+   * The lead's window ended: release its launch AND suspend its tab, as one
+   * decision inside one mutation.
+   *
+   * Two writes with the guard read before both is how a late exit closed the
+   * generation that had already replaced it: the release found a reservation
+   * that was no longer its own and settled nothing, and the suspend ran
+   * anyway. So the match — pane, generation and launch together — is read in
+   * the same queued operation that writes, and a stale exit changes nothing
+   * at all rather than half of something.
+   */
+  async leadEnded(cwd, { tab, pane, generation, launchId } = {}) {
+    return this.mutate(cwd, 'tab.leadEnded', async (io) => {
+      requireText(tab, 'tab id')
+      const tabs = await io.readTabs()
+      const record = tabs.find((candidate) => candidate.id === tab)
+      if (record === undefined) return { ended: false, reason: 'no such tab' }
+      const held = isRecord(record.lead.reserved) ? record.lead.reserved : null
+      if (held === null) return { ended: false, reason: 'no reservation' }
+      const leadPane = record.panes.find((candidate) => candidate.kind === 'lead')
+      if (
+        held.launchId !== launchId ||
+        held.generation !== generation ||
+        leadPane?.id !== pane ||
+        leadPane?.generation !== generation
+      ) {
+        return { ended: false, reason: 'not the current lead window' }
+      }
+      delete record.lead.reserved
+      record.closed = true
+      record.updatedAt = nowIso()
+      await io.writeTabs(tabs)
+      return { ended: true, launchId, tab: record.id }
+    })
+  }
+
+  /** The lead launch is over, or never happened: the reservation goes. */
+  async leadRelease(cwd, { tab, launchId } = {}) {
+    return this.#leadSettle(cwd, 'tab.leadRelease', tab, launchId, (record) => {
+      delete record.lead.reserved
+    })
+  }
+
+  /**
+   * Settles a lead reservation, and only the one named. A launch that is no
+   * longer the tab's own — a resume minted a newer one, a duplicate exit
+   * arrived late — must not settle its successor's.
+   */
+  async #leadSettle(cwd, op, tab, launchId, apply) {
+    return this.mutate(cwd, op, async (io) => {
+      requireText(tab, 'tab id')
+      requireText(launchId, 'lead launch id')
+      const tabs = await io.readTabs()
+      const record = tabs.find((candidate) => candidate.id === tab)
+      if (record === undefined) return { settled: false, reason: 'no such tab' }
+      const held = isRecord(record.lead.reserved) ? record.lead.reserved : null
+      if (held === null) return { settled: false, reason: 'no reservation' }
+      if (held.launchId !== launchId) {
+        return { settled: false, reason: 'not the current lead launch' }
+      }
+      apply(record)
+      record.updatedAt = nowIso()
+      await io.writeTabs(tabs)
+      return { settled: true, launchId }
+    })
   }
 
   /**
@@ -252,11 +476,43 @@ export class Store {
     })
     // The chain swallows the rejection: the failing job still rejects for
     // its own caller, and the queue keeps working for everyone after it.
+    // A mutation that SUCCEEDED announces itself here, in the queue slot it
+    // just finished: after its write, before the next mutation starts, once.
     this.#tail = run.then(
-      () => undefined,
+      () => {
+        this.#announce(name, cwd ?? null)
+        return undefined
+      },
       () => undefined,
     )
     return run
+  }
+
+  /**
+   * Watch every mutation this store completes. Returns the unsubscribe.
+   *
+   * ONE call per mutation, after its write and before the next mutation
+   * runs, so a listener that reads the store sees exactly what the mutation
+   * left behind. A failed mutation changed nothing and says nothing.
+   *
+   * Listeners run INSIDE the queue slot, so they must be synchronous and
+   * quick — the app's is a single bridge frame. A listener that throws is
+   * ignored: the queue is not the place to discover a broken observer.
+   */
+  onMutation(listener) {
+    if (typeof listener !== 'function') throw new Error('onMutation needs a function')
+    this.#watchers.add(listener)
+    return () => this.#watchers.delete(listener)
+  }
+
+  #announce(name, cwd) {
+    for (const listener of this.#watchers) {
+      try {
+        listener({ op: name, cwd })
+      } catch {
+        // An observer's fault is not the mutation's, and never the queue's.
+      }
+    }
   }
 
   // --- reads (safe outside the queue: every write is tmp+rename) ---------
@@ -624,7 +880,10 @@ export class Store {
       const threads = await io.readThreads()
       const row = requireRow(threads, name)
       if (!isRecord(row.reserved)) {
-        throw new Error(`session.bind refuses for ${name}: the store holds no launch record`)
+        throw new StoreRefusal(
+          `session.bind refuses for ${name}: the store holds no launch record`,
+          'no-launch',
+        )
       }
       requireCurrentLaunch(row, name, expect)
       // The binding is made against the pane as linked: a launch reserved
@@ -651,7 +910,7 @@ export class Store {
           decision?.replaced === true
             ? 'replaced: the native session changed in place — the binding and every decision leaning on it die with it'
             : decision?.reason
-        throw new Error(`session.bind refuses for ${name}: ${detail}`)
+        throw new StoreRefusal(`session.bind refuses for ${name}: ${detail}`, 'no-evidence')
       }
       row.sessionId = candidate.sessionId
       row.binding = {
@@ -823,6 +1082,35 @@ export class Store {
   }
 
   /** Inserts or merges one delivery record, by id. */
+  /**
+   * Change one delivery by DECIDING inside the queue.
+   *
+   * `decide(current)` is handed the record as it is at the moment of the
+   * write, not as some caller read it a while ago, and whatever it returns
+   * is written. Choosing a transition from a snapshot is how a cancel
+   * landing beside an acceptance produced a `cancelled` record still
+   * carrying `acceptedAt`: two states at once, and the receipt says the
+   * answer arrived while the page says it never went.
+   *
+   * `decide` must be pure and synchronous — it runs in the queue slot.
+   */
+  async deliveryDecide(cwd, { id, decide } = {}) {
+    return this.mutate(cwd, 'delivery.decide', async (io) => {
+      requireText(id, 'delivery id')
+      if (typeof decide !== 'function') throw new Error('deliveryDecide needs decide(current)')
+      const deliveries = await io.readDeliveries()
+      const current = isRecord(deliveries[id]) ? deliveries[id] : undefined
+      const next = decide(current)
+      if (next === undefined || next === null) {
+        return { changed: false, record: current ?? null }
+      }
+      requireText(next.id, 'delivery id')
+      deliveries[next.id] = next
+      await io.writeDeliveries(deliveries)
+      return { changed: next !== current, record: next }
+    })
+  }
+
   async deliveryUpsert(cwd, record = {}) {
     return this.mutate(cwd, 'delivery.upsert', async (io) => {
       if (!isRecord(record)) throw new Error('a delivery record is an object')
@@ -1269,8 +1557,9 @@ function requireCurrentLaunch(row, name, expect) {
     // belongs to a launch, and a write that cannot name it is a write
     // whose authority we cannot check.
     if (reserved === null) return null
-    throw new Error(
+    throw new StoreRefusal(
       `${name} is reserved by launch ${reserved.launchId}: a write must name the launch it is for`,
+      'launch-required',
     )
   }
   requireText(expect.launchId, 'expected launch id')
@@ -1286,8 +1575,9 @@ function requireCurrentLaunch(row, name, expect) {
     reserved.pane !== expect.pane ||
     reserved.generation !== expect.generation
   ) {
-    throw new Error(
+    throw new StoreRefusal(
       `launch ${expect.launchId} is over for ${name}: it is not the current reservation`,
+      'stale-launch',
     )
   }
   return reserved
@@ -1547,7 +1837,11 @@ function findPane(tab, paneId) {
 
 function requireRow(threads, name) {
   const row = threads[name]
-  if (!isRecord(row)) throw new Error(`no conversation named ${name} in this workspace`)
+  // Naming a conversation that is not here is the caller's mistake, and
+  // they can act on it; it is not this machine failing.
+  if (!isRecord(row)) {
+    throw new StoreRefusal(`no conversation named ${name} in this workspace`, 'no-conversation')
+  }
   return row
 }
 
@@ -1557,13 +1851,15 @@ function isRecord(value) {
 
 function requireText(value, label) {
   if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new Error(`${label} is required`)
+    // Argument validation is always about the request that arrived.
+    throw new StoreRefusal(`${label} is required`, 'missing-field')
   }
 }
 
 function requireOneOf(value, allowed, label) {
   if (!allowed.includes(value)) {
-    throw new Error(`${label} must be one of: ${allowed.join(', ')}`)
+    // A value outside the vocabulary is the CALLER's, not this machine's.
+    throw new StoreRefusal(`${label} must be one of: ${allowed.join(', ')}`, 'not-allowed')
   }
 }
 

@@ -233,6 +233,33 @@ test('readiness: derived settlement without complete is refused', () => {
   assert.equal(decision.state, 'ready')
 })
 
+test('readiness: a derived Pi settlement is never automatic-ready without native evidence', () => {
+  const decision = leadReady(
+    qualified({
+      kind: 'pi',
+      answers: answers({
+        settlement: settlement({ provenance: 'derived', boundary: 'session.quiet_window' }),
+      }),
+    }),
+  )
+  assert.equal(decision.state, 'unknown')
+  assert.match(decision.reason, /Pi.*native settlement evidence/i)
+})
+
+test('readiness: a manual Pi delivery may use a derived settlement', () => {
+  const decision = leadReady(
+    qualified({
+      kind: 'pi',
+      purpose: 'manual',
+      answers: answers({
+        settlement: settlement({ provenance: 'derived', boundary: 'session.quiet_window' }),
+      }),
+    }),
+  )
+  assert.equal(decision.state, 'ready')
+  assert.equal(decision.provenance, 'derived')
+})
+
 test('readiness: derived settlement with no evidence object at all is refused', () => {
   const bare = { state: 'settled', provenance: 'derived', cursor: 42, boundary: 'post-turn-hook' }
   const decision = leadReady(qualified({ answers: answers({ settlement: bare }) }))

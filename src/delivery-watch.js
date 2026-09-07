@@ -175,6 +175,18 @@ function waitsForSentQuestion(row, items, now, graceMs) {
   return !items.some((item) => item?.role === 'user' && timestamp(item.at) >= sentAt)
 }
 
+function nativeExpiry(channel, submittedAt) {
+  if (!isRecord(channel)) return null
+  const timeout = channel.ackTimeoutMs
+  if (!Number.isFinite(timeout) || timeout < 0) return null
+  const expiresAt = submittedAt + timeout
+  return Number.isFinite(expiresAt) ? expiresAt : null
+}
+
+function expired(record, now) {
+  return Number.isFinite(record?.expiresAt) && now >= record.expiresAt
+}
+
 /**
  * Reconciles durable completion and delivery state for the life of the app.
  * It owns no process globals: the app supplies its Store, Tabs, environment,
@@ -263,7 +275,11 @@ export class Watcher {
   async held(tabId) {
     const tab = await this.tabs.get(tabId)
     if (!tab) throw new Error(`unknown tab ${tabId}`)
-    const target = targetFor(tab)
+    // A closed tab has no current lead to compare against, but its pending
+    // records are precisely what the page must show as held before resume.
+    // sendHeld still requires targetFor(tab) and a live tab, so visibility
+    // here never grants a send capability.
+    const target = tab.closed === true ? null : targetFor(tab)
     const all = Object.values(await this.store.readDeliveries(tab.directory))
     const copiedToCurrent = new Set(
       all
@@ -274,8 +290,7 @@ export class Watcher {
       (record) =>
         record?.state === 'pending' &&
         record?.target?.tab === tab.id &&
-        target !== null &&
-        !sameTarget(record.target, target) &&
+        (target === null || !sameTarget(record.target, target)) &&
         !copiedToCurrent.has(`${record.conversation}\u0000${record.answerId}`),
     )
     const byAnswer = new Map()
@@ -436,8 +451,10 @@ export class Watcher {
         (item) =>
           item?.role !== 'assistant' ||
           item.complete !== true ||
-          item.settled === true ||
-          (row.kind === 'pi' && completion?.settlement?.state === 'settled'),
+          (row.kind === 'pi'
+            ? completion?.settlement?.state === 'settled' &&
+              completion.settlement.provenance === 'native'
+            : item.settled === true),
       )
       const candidates = planItems.filter(
         (item) =>
@@ -625,6 +642,11 @@ export class Watcher {
         reason: 'lead session replaced after submission; write outcome is uncertain',
       })
     }
+    if (expired(record, this.now())) {
+      return fail(record, {
+        reason: 'native delivery expired before receipt; admission outcome is uncertain',
+      })
+    }
     return receipt(record, record.snapshot, {
       session: record.target.session,
       generation: record.target.generation,
@@ -695,6 +717,13 @@ export class Watcher {
     if (!sameTarget(record.target, target)) {
       return { record: { ...record, reason: 'held for previous lead generation' } }
     }
+    if (expired(record, this.now())) {
+      return {
+        record: fail(record, {
+          reason: 'native delivery expired before a retry; admission outcome is uncertain',
+        }),
+      }
+    }
     if (!this.bridge || this.bridge.closed === true) {
       return { record: { ...record, reason: 'bridge unavailable' } }
     }
@@ -761,6 +790,7 @@ export class Watcher {
     const decision = leadReady({
       answers: leadAnswers,
       kind: currentTab.lead.harness,
+      purpose: record.manual === true ? 'manual' : 'automatic',
       draftLatched: snapshot.draftLatched,
       epoch: snapshot.inputEpoch,
       sinceCursor,
@@ -800,18 +830,45 @@ export class Watcher {
     const at = records.findIndex((candidate) => candidate?.id === record.id)
     if (at !== -1) records[at] = readyRecord
 
+    if (expired(readyRecord, this.now())) {
+      return {
+        record: fail(readyRecord, {
+          reason: 'native delivery expired before transport; admission outcome is uncertain',
+        }),
+      }
+    }
+
     const route = deliveryRoute(admitted.route, target, readyRecord, this.bridge, decision.epoch)
     try {
       const response = await deliver(route.channel, route.target, readyRecord)
-      if (response?.admitted === false) {
+      const responseExpired = expired(readyRecord, this.now())
+      if (response?.admitted === false && (response.bytesWritten === 0 || !responseExpired)) {
         return {
           record: fail(readyRecord, {
             bytesWritten: 0,
             reason:
-              response?.error ??
               response?.ack?.error ??
               response?.ack?.reason ??
+              response?.error ??
               'delivery was not admitted by the lead channel',
+          }),
+        }
+      }
+      if (responseExpired) {
+        return {
+          record: fail(readyRecord, {
+            reason: 'native delivery expired before its admission response was observed',
+          }),
+        }
+      }
+      if (response?.admitted === null || response?.ack?.admitted === null) {
+        return {
+          record: fail(readyRecord, {
+            reason:
+              response?.cause ??
+              response?.ack?.reason ??
+              response?.error ??
+              'native delivery admission was not observed before expiry',
           }),
         }
       }
@@ -971,13 +1028,29 @@ export class Watcher {
             ) {
               next = { ...current, reason: 'lead busy: another delivery is awaiting receipt' }
             } else {
-              next = {
-                ...submit(current, {
-                  target,
-                  cursor: decision.cursor,
-                  now: this.now(),
-                }),
-                submissionOrder: nextSubmissionOrder(all),
+              const submittedAt = this.now()
+              const expiresAt = Number.isFinite(current.expiresAt)
+                ? current.expiresAt
+                : nativeExpiry(route.channel, submittedAt)
+              if (isRecord(route.channel) && expiresAt === null) {
+                next = {
+                  ...current,
+                  reason: 'native delivery channel carries no valid acknowledgement timeout',
+                }
+              } else if (expiresAt !== null && submittedAt >= expiresAt) {
+                next = fail(current, {
+                  reason: 'native delivery expired before a retry; admission outcome is uncertain',
+                })
+              } else {
+                next = {
+                  ...submit(current, {
+                    target,
+                    cursor: decision.cursor,
+                    now: submittedAt,
+                  }),
+                  ...(expiresAt === null ? {} : { expiresAt }),
+                  submissionOrder: nextSubmissionOrder(all),
+                }
               }
             }
           }

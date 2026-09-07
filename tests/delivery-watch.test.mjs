@@ -6,7 +6,8 @@ import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { PassThrough } from 'node:stream'
 import test from 'node:test'
-import { envelope, pointer } from '../hosts/lib/deliveries.js'
+import { answers } from '../hosts/lib/completion.js'
+import { envelope, plan, pointer } from '../hosts/lib/deliveries.js'
 import { createDeliveryExtension } from '../hosts/pi-extension/consensflow-delivery.mjs'
 import { Bridge } from '../src/bridge.js'
 import { bookkeepingItems, HELD_ACTION, Watcher } from '../src/delivery-watch.js'
@@ -177,6 +178,22 @@ async function writePiSession(env, session, exchanges) {
   return file
 }
 
+async function writePiSettlement(env, launchId, session, frontierId) {
+  const directory = path.join(env.CONSENSFLOW_HOME, 'pi-settled')
+  await fs.mkdir(directory, { recursive: true })
+  env.CF_DELIVERY_SETTLED = directory
+  env.CF_DELIVERY_LAUNCH_ID = launchId
+  await fs.writeFile(
+    path.join(directory, `${launchId}.json`),
+    `${JSON.stringify({
+      launchId,
+      sessionId: session,
+      frontier: { id: frontierId },
+      settledAt: Date.now(),
+    })}\n`,
+  )
+}
+
 async function writeOpenCodeSession(env, session, exchanges) {
   env.XDG_DATA_HOME ??= path.join(env.HOME, '.local', 'share')
   const directory = path.join(env.XDG_DATA_HOME, 'opencode')
@@ -269,8 +286,9 @@ async function writeOpenCodeSession(env, session, exchanges) {
   return file
 }
 
-async function nativeLead(s, kind, admitted = true) {
+async function nativeLead(s, kind, admitted = true, ackTimeoutMs = 1_000, beforeResponse = null) {
   const state = { admitted, received: [], authorization: [] }
+  s.setNow(Date.now())
   let close
   let channel
   if (kind === 'pi') {
@@ -284,25 +302,37 @@ async function nativeLead(s, kind, admitted = true) {
         const received = JSON.parse(await fs.readFile(path.join(inbox, name), 'utf8'))
         if (state.received.some((entry) => entry.id === received.id)) continue
         state.received.push(received)
+        await beforeResponse?.(received)
+        const acknowledgement = { id: received.id, admitted: state.admitted }
+        if (state.admitted !== true) {
+          acknowledgement.reason = state.admitted === null ? 'admission-unknown' : 'not admitted'
+        }
         await fs.writeFile(
           path.join(ack, `${received.id}.json`),
-          `${JSON.stringify({ id: received.id, admitted: state.admitted })}\n`,
+          `${JSON.stringify(acknowledgement)}\n`,
         )
       }
     })
-    channel = { kind: 'pi-extension', inbox, ack, ackTimeoutMs: 1_000 }
+    channel = { kind: 'pi-extension', inbox, ack, ackTimeoutMs }
     close = () => extension.close()
     await writePiSession(s.temporary.env, s.leadSession, [
       { user: 'lead question', answer: 'lead ready', answerId: 'lead-ready-pi' },
     ])
+    await writePiSettlement(s.temporary.env, 'watcher-native-lead', s.leadSession, 'lead-ready-pi')
   } else {
     const server = createServer(async (request, response) => {
       const chunks = []
       for await (const chunk of request) chunks.push(chunk)
       state.authorization.push(request.headers.authorization)
       state.received.push(JSON.parse(Buffer.concat(chunks).toString('utf8')))
+      await beforeResponse?.()
       response.writeHead(200, { 'content-type': 'application/json' })
-      response.end(JSON.stringify({ admitted: state.admitted }))
+      response.end(
+        JSON.stringify({
+          admitted: state.admitted,
+          ...(state.admitted === null ? { reason: 'admission-unknown' } : {}),
+        }),
+      )
     })
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
     const { port } = server.address()
@@ -310,6 +340,7 @@ async function nativeLead(s, kind, admitted = true) {
       kind: 'opencode-server',
       endpoint: `http://127.0.0.1:${port}`,
       password: 'watcher-test-password',
+      ackTimeoutMs,
     }
     close = async () =>
       await new Promise((resolve, reject) =>
@@ -349,6 +380,8 @@ function rustPair() {
     draft: false,
     snapshots: [],
     writes: [],
+    claims: [],
+    claim: null,
     beforeSnapshot: null,
     write: null,
   }
@@ -368,6 +401,11 @@ function rustPair() {
   rust.on('pane.write_paste', async (request) => {
     state.writes.push(request)
     if (state.write !== null) return await state.write(request, { rustToNode })
+    return { ok: true }
+  })
+  rust.on('pane.claim_epoch', async (request) => {
+    state.claims.push(request)
+    if (state.claim !== null) return await state.claim(request)
     return { ok: true }
   })
   return {
@@ -834,6 +872,33 @@ test('a resumed lead holds old-generation records and explicit held-send creates
     assert.equal(fresh.target.generation, 2)
     assert.equal(fresh.target.session, 'lead-session-2')
     assert.equal((await s.deliveries()).length, 2)
+  } finally {
+    await s.close()
+  }
+})
+
+test('a closed lead keeps pending answers visible as held until resume', async () => {
+  const s = await system()
+  try {
+    const worker = s.workers[0]
+    s.pipe.state.draft = true
+    await writeCodexSession(s.temporary.env, worker.session, [
+      { user: 'work', answer: 'held while closed', answerId: 'closed-held-answer' },
+    ])
+    await s.watcher.start()
+    const [pending] = await s.deliveries()
+    assert.equal(pending.state, 'pending')
+
+    await s.tabs.suspend(s.tab.id)
+    const held = await s.watcher.held(s.tab.id)
+    assert.deepEqual(
+      held.records.map((record) => record.id),
+      [pending.id],
+    )
+    await assert.rejects(
+      () => s.watcher.sendHeld(s.tab.id),
+      /has no live lead to receive held answers/,
+    )
   } finally {
     await s.close()
   }
@@ -1468,6 +1533,107 @@ test('OpenCode native delivery preserves the reservation authentication', async 
   }
 })
 
+test('each native submission carries one absolute expiry and becomes uncertain at it', async () => {
+  for (const kind of ['pi', 'opencode']) {
+    const s = await system({ watcherOptions: { receiptMs: 10_000 } })
+    let native
+    try {
+      native = await nativeLead(s, kind, true, 10_000)
+      const worker = s.workers[0]
+      await writeCodexSession(s.temporary.env, worker.session, [
+        { user: 'work', answer: `${kind} expiring answer`, answerId: 'answer-1' },
+      ])
+
+      await s.watcher.start()
+
+      let [delivery] = await s.deliveries()
+      assert.equal(delivery.state, 'submitting')
+      assert.equal(delivery.expiresAt, delivery.submittedAt + 10_000)
+      if (kind === 'pi') assert.equal(native.state.received[0].expiresAt, delivery.expiresAt)
+
+      s.setNow(delivery.expiresAt)
+      await s.watcher.reconcile('native-expiry')
+
+      delivery = (await s.deliveries()).find((candidate) => candidate.id === delivery.id)
+      assert.equal(delivery.state, 'uncertain')
+      assert.match(delivery.reason, /expir/i)
+      assert.equal(native.state.received.length, 1, 'an expired submission is never replayed')
+    } finally {
+      await s.close()
+      await native?.close()
+    }
+  }
+})
+
+test('a native response received at the absolute expiry is uncertain', async () => {
+  for (const kind of ['pi', 'opencode']) {
+    const s = await system()
+    let native
+    try {
+      native = await nativeLead(s, kind, false, 1_000, async () => {
+        const [submitted] = await s.deliveries()
+        assert.equal(submitted.state, 'submitting')
+        s.setNow(submitted.expiresAt)
+      })
+      const worker = s.workers[0]
+      await writeCodexSession(s.temporary.env, worker.session, [
+        { user: 'work', answer: `${kind} late response`, answerId: 'answer-1' },
+      ])
+
+      await s.watcher.start()
+
+      const [delivery] = await s.deliveries()
+      assert.equal(delivery.state, 'uncertain')
+      assert.match(delivery.reason, /expir/i)
+      assert.equal(native.state.received.length, 1)
+    } finally {
+      await s.close()
+      await native?.close()
+    }
+  }
+})
+
+test('a native Stale claim at expiry is a replayable zero-byte failure', async () => {
+  const s = await system()
+  let native
+  try {
+    native = await nativeLead(s, 'opencode', true, 1_000)
+    s.pipe.state.claim = async () => {
+      const [submitted] = await s.deliveries()
+      assert.equal(submitted.state, 'submitting')
+      s.setNow(submitted.expiresAt)
+      return { ok: false, error: 'Stale' }
+    }
+    const worker = s.workers[0]
+    await writeCodexSession(s.temporary.env, worker.session, [
+      { user: 'work', answer: 'one-expiry answer', answerId: 'answer-1' },
+    ])
+
+    await s.watcher.start()
+
+    const [delivery] = await s.deliveries()
+    assert.equal(delivery.state, 'failed')
+    assert.match(delivery.reason, /Stale|zero-byte/i)
+    assert.ok(Number.isFinite(delivery.expiresAt))
+    const expiresAt = delivery.expiresAt
+    assert.equal(native.state.received.length, 0)
+
+    s.pipe.state.claim = () => ({ ok: true })
+    await s.watcher.reconcile('stale-retry')
+
+    const deliveries = await s.deliveries()
+    assert.equal(deliveries.length, 2)
+    assert.equal(deliveries.find((candidate) => candidate.id === delivery.id).state, 'failed')
+    const replay = deliveries.find((candidate) => candidate.id !== delivery.id)
+    assert.equal(replay.state, 'submitting')
+    assert.ok(replay.expiresAt > expiresAt)
+    assert.equal(native.state.received.length, 1)
+  } finally {
+    await s.close()
+    await native?.close()
+  }
+})
+
 test('a watcher cf-read delivery reaches an already-idle real Pi extension as its pointer', async () => {
   const s = await system({ watcherOptions: { inlineBudget: { pi: 1 } } })
   const inbox = path.join(s.temporary.root, 'real-pi-inbox')
@@ -1499,6 +1665,7 @@ test('a watcher cf-read delivery reaches an already-idle real Pi extension as it
   })
   await handlers.get('session_start')({}, context)
   try {
+    s.setNow(Date.now())
     await s.store.mutate(s.workspace, 'test.real-pi-lead', async (io) => {
       const tabs = await io.readTabs()
       const tab = tabs.find((candidate) => candidate.id === s.tab.id)
@@ -1511,6 +1678,12 @@ test('a watcher cf-read delivery reaches an already-idle real Pi extension as it
     await writePiSession(s.temporary.env, s.leadSession, [
       { user: 'lead question', answer: 'lead ready', answerId: 'lead-ready-pi' },
     ])
+    await writePiSettlement(
+      s.temporary.env,
+      'watcher-real-extension',
+      s.leadSession,
+      'lead-ready-pi',
+    )
     const worker = s.workers[0]
     await writeCodexSession(s.temporary.env, worker.session, [
       { user: 'work', answer: 'file-backed answer', answerId: 'answer-1' },
@@ -1561,6 +1734,39 @@ test('Pi and OpenCode negative acknowledgements fail with zero bytes and remain 
   }
 })
 
+test('a native admitted:null acknowledgement is uncertain and never replayed', async () => {
+  for (const kind of ['pi', 'opencode']) {
+    const s = await system()
+    let native
+    try {
+      native = await nativeLead(s, kind, null)
+      const worker = s.workers[0]
+      await writeCodexSession(s.temporary.env, worker.session, [
+        {
+          user: 'work',
+          answer: `${kind} admission was not observed`,
+          answerId: 'answer-1',
+        },
+      ])
+
+      await s.watcher.start()
+
+      const [delivery] = await s.deliveries()
+      assert.equal(delivery.state, 'uncertain')
+      assert.match(delivery.reason, /uncertain|unknown|not observed|admission/i)
+      assert.equal(native.state.received.length, 1)
+
+      await s.watcher.reconcile('after-null-admission')
+      const [after] = await s.deliveries()
+      assert.equal(after.state, 'uncertain')
+      assert.equal(native.state.received.length, 1)
+    } finally {
+      await s.close()
+      await native?.close()
+    }
+  }
+})
+
 test('delivery uses the lead reservation channel object instead of writing the bridge directly', async () => {
   const s = await system()
   const inbox = path.join(s.temporary.root, 'pi-inbox')
@@ -1578,6 +1784,7 @@ test('delivery uses the lead reservation channel object instead of writing the b
     )
   })
   try {
+    s.setNow(Date.now())
     const worker = s.workers[0]
     await s.store.mutate(s.workspace, 'test.lead-channel', async (io) => {
       const tabs = await io.readTabs()
@@ -1597,6 +1804,12 @@ test('delivery uses the lead reservation channel object instead of writing the b
     await writePiSession(s.temporary.env, s.leadSession, [
       { user: 'lead question', answer: 'lead ready', answerId: 'lead-ready-pi' },
     ])
+    await writePiSettlement(
+      s.temporary.env,
+      'watcher-reserved-channel',
+      s.leadSession,
+      'lead-ready-pi',
+    )
     await writeCodexSession(s.temporary.env, worker.session, [
       { user: 'work', answer: 'native channel answer', answerId: 'answer-1' },
     ])
@@ -1629,6 +1842,7 @@ test('submission dispatches through the reservation channel captured inside admi
     )
   })
   try {
+    s.setNow(Date.now())
     const worker = s.workers[0]
     let changedRoute = false
     s.store.mutate = async (workspace, name, operation) => {
@@ -1666,7 +1880,7 @@ test('submission dispatches through the reservation channel captured inside admi
   }
 })
 
-test('the floor observes Pi derived settlement after its 120-second quiet window', async () => {
+test('Pi derived-only settlement plans no automatic record but a manual record still delivers', async () => {
   const s = await system({ floorMs: FLOOR_MS })
   try {
     const worker = s.workers[0]
@@ -1682,13 +1896,131 @@ test('the floor observes Pi derived settlement after its 120-second quiet window
 
     const old = new Date(Date.now() - 120_001)
     await fs.utimes(file, old, old)
-    await waitFor(async () => (await s.deliveries()).length === 1)
+    const completion = await answers('pi', 'hazy-ridge', s.temporary.env)
+    assert.equal(completion.settlement.state, 'settled')
+    assert.equal(completion.settlement.provenance, 'derived')
+    await s.watcher.reconcile('pi-derived-only')
+    assert.equal((await s.deliveries()).length, 0, 'derived evidence never plans automatic work')
+
+    const item = completion.items.find(
+      (candidate) => candidate.role === 'assistant' && candidate.complete === true,
+    )
+    const tab = await s.tabs.get(s.tab.id)
+    const leadPane = tab.panes.find((pane) => pane.kind === 'lead')
+    const row = (await s.threads())[worker.name]
+    const manualId = await s.store.allocateDeliveryId()
+    const [manual] = plan({
+      items: [item],
+      policy: { mode: 'manual' },
+      kind: tab.lead.harness,
+      conversation: worker.name,
+      agent: row.agent,
+      target: {
+        leadId: leadIdentity(tab),
+        session: tab.lead.nativeSession,
+        tab: tab.id,
+        pane: leadPane.id,
+        generation: tab.lead.generation,
+      },
+      newId: () => manualId,
+      now: 1_000,
+      workspace: s.workspace,
+      manual: true,
+    })
+    await s.store.deliveryUpsert(s.workspace, manual)
+    await s.watcher.reconcile('deliver.now')
+
+    const [delivery] = await s.deliveries()
+    assert.equal(delivery.manual, true)
+    assert.equal(delivery.state, 'submitting')
+    assert.equal(s.pipe.state.writes.length, 1)
   } finally {
     await s.close()
   }
 })
 
-test('one settled Pi frontier plans every completed historical answer, not only the last', async () => {
+test('deliver.now passes manual purpose so a derived-only Pi lead can receive it', async () => {
+  const s = await system({ workerCount: 2 })
+  try {
+    await s.store.mutate(s.workspace, 'test.derived-pi-lead', async (io) => {
+      const tabs = await io.readTabs()
+      tabs.find((candidate) => candidate.id === s.tab.id).lead.harness = 'pi'
+      await io.writeTabs(tabs)
+    })
+    await writePiSession(s.temporary.env, s.leadSession, [
+      { user: 'lead question', answer: 'derived lead ready', answerId: 'lead-derived-ready' },
+    ])
+    const leadCompletion = await answers('pi', s.leadSession, s.temporary.env)
+    assert.equal(leadCompletion.settlement.state, 'settled')
+    assert.equal(leadCompletion.settlement.provenance, 'derived')
+
+    const [manualWorker, automaticWorker] = s.workers
+    await writeCodexSession(s.temporary.env, manualWorker.session, [
+      { user: 'work', answer: 'manual answer', answerId: 'manual-answer' },
+    ])
+    await writeCodexSession(s.temporary.env, automaticWorker.session, [
+      { user: 'work', answer: 'automatic answer', answerId: 'automatic-answer' },
+    ])
+    const manualCompletion = await answers('codex', manualWorker.session, s.temporary.env)
+    const automaticCompletion = await answers('codex', automaticWorker.session, s.temporary.env)
+    const manualItem = manualCompletion.items.find(
+      (candidate) => candidate.role === 'assistant' && candidate.complete === true,
+    )
+    const automaticItem = automaticCompletion.items.find(
+      (candidate) => candidate.role === 'assistant' && candidate.complete === true,
+    )
+    const tab = await s.tabs.get(s.tab.id)
+    const leadPane = tab.panes.find((pane) => pane.kind === 'lead')
+    const rows = await s.threads()
+    const target = {
+      leadId: leadIdentity(tab),
+      session: tab.lead.nativeSession,
+      tab: tab.id,
+      pane: leadPane.id,
+      generation: tab.lead.generation,
+    }
+    const automaticId = await s.store.allocateDeliveryId()
+    const [automatic] = plan({
+      items: [automaticItem],
+      policy: { mode: 'auto' },
+      kind: tab.lead.harness,
+      conversation: automaticWorker.name,
+      agent: rows[automaticWorker.name].agent,
+      target,
+      newId: () => automaticId,
+      now: 1_000,
+      workspace: s.workspace,
+    })
+    const manualId = await s.store.allocateDeliveryId()
+    const [manual] = plan({
+      items: [manualItem],
+      policy: { mode: 'manual' },
+      kind: tab.lead.harness,
+      conversation: manualWorker.name,
+      agent: rows[manualWorker.name].agent,
+      target,
+      newId: () => manualId,
+      now: 1_000,
+      workspace: s.workspace,
+      manual: true,
+    })
+    await s.store.deliveryUpsert(s.workspace, automatic)
+    await s.store.deliveryUpsert(s.workspace, manual)
+
+    await s.watcher.start()
+
+    const deliveries = await s.deliveries()
+    const pending = deliveries.find((delivery) => delivery.id === automatic.id)
+    assert.equal(pending.state, 'pending')
+    assert.match(pending.reason, /Pi.*native settlement evidence/i)
+    assert.equal(deliveries.find((delivery) => delivery.id === manual.id).state, 'submitting')
+    assert.equal(s.pipe.state.writes.length, 1)
+  } finally {
+    await s.close()
+  }
+})
+
+test('one derived Pi frontier plans none of its completed historical answers', async () => {
   const s = await system()
   try {
     const worker = s.workers[0]
@@ -1704,10 +2036,7 @@ test('one settled Pi frontier plans every completed historical answer, not only 
     })
     await s.watcher.start()
 
-    assert.deepEqual(
-      (await s.deliveries()).map((delivery) => delivery.answerId),
-      ['pi-answer-1', 'pi-answer-2'],
-    )
+    assert.deepEqual(await s.deliveries(), [])
   } finally {
     await s.close()
   }

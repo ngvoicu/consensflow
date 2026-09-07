@@ -58,3 +58,60 @@ test('packet: a one-shot is not invited to ask, because nobody would answer', as
 
   assert.doesNotMatch(packet, /you may ask/i)
 })
+
+/**
+ * The launch marker, in ONE place.
+ *
+ * `createWindowSeed` has carried a `nonce` since Phase 2; kimi opens no
+ * window and takes its prompt in argv, so its first turn is a packet — and
+ * for a while the marker was prepended by the caller instead, which meant
+ * the rule for where launch evidence goes lived in two files and a kimi
+ * worker could never bind at all. Same argument, same first line, one rule.
+ */
+
+/** A follow-up packet carries no timestamp, so it can be pinned to the byte. */
+const CONTINUING =
+  '## Message from the user\nanother one\n\nRespond directly and conversationally. There is no required format.\n'
+
+test('packet: the launch nonce rides on the packet’s first line', async () => {
+  const packet = await createPacket({ ...BASE, nonce: 'abc123' })
+
+  assert.equal(packet.split('\n')[0], '[consensflow launch abc123]')
+  assert.match(packet, /# ConsensFlow Packet/, 'the packet is still a packet')
+  assert.match(packet, /another one/, 'the question survives')
+})
+
+test('packet: no nonce, no marker — byte for byte what it was', async () => {
+  const packet = await createPacket({ ...BASE, continuing: true })
+
+  assert.equal(packet, CONTINUING)
+  assert.ok(!packet.includes('[consensflow launch'), 'no nonce, no marker')
+
+  for (const nonce of [undefined, null, '', '   ']) {
+    assert.equal(
+      await createPacket({ ...BASE, continuing: true, nonce }),
+      CONTINUING,
+      `a ${JSON.stringify(nonce)} nonce is no nonce`,
+    )
+  }
+})
+
+test('packet: the nonce adds the marker line and touches nothing else', async () => {
+  const marked = await createPacket({ ...BASE, continuing: true, nonce: 'abc123' })
+
+  assert.equal(marked, `[consensflow launch abc123]\n${CONTINUING}`)
+
+  // The same on a first turn, where only the created-at stamp moves between
+  // two calls a millisecond apart.
+  const stamp = (text) => text.replace(/^Created: .*$/m, 'Created: <at>')
+  const first = await createPacket({ ...BASE, nonce: 'abc123' })
+  const bare = await createPacket({ ...BASE })
+  assert.equal(stamp(first), `[consensflow launch abc123]\n${stamp(bare)}`)
+})
+
+test('packet: a nonce that could not be a marker is refused, not smuggled', async () => {
+  await assert.rejects(
+    () => createPacket({ ...BASE, nonce: 'two\nlines' }),
+    /single line without brackets/,
+  )
+})

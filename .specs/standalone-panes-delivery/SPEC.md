@@ -3,7 +3,7 @@ id: standalone-panes-delivery
 title: ConsensFlow owns the panes — standalone mode in the app, results delivered to the lead
 status: active
 created: 2026-09-06
-updated: 2026-09-06
+updated: 2026-09-07
 priority: high
 tags: [app, tauri, pty, panes, delivery, standalone, skill, evals]
 ---
@@ -37,14 +37,24 @@ no Unix-only assumption added).
 **Scope correction (2026-09-06, Gabriel):** the claude and pi modes go
 with cmux. ConsensFlow has ONE shape after this spec — standalone, the app
 owning the panes — installed into every detected harness. The mode
-selector from the round-1 requirement goes with the modes; the roster
-editor becomes a collapsible panel at the top of the standalone page. The
+selector from the round-1 requirement goes with the modes. Gabriel's
+2026-09-07 refinement puts the roster editor in a full-window Agents dialog
+instead of the initially proposed collapsible strip. The
 target stays macOS, Windows and Linux; this spec tests on macOS and the
 other two follow in their own spec.
 
-52 tasks across 6 phases (two independent of any phase); five live probes gate three of them.
+54 tasks across 6 phases (two independent of any phase, two UI refinements); five live probes gate three of them.
 
 ## Team
+
+Current release team (Gabriel, 2026-09-07): this lead owns architecture,
+product decisions, integration, the spec and clean installation; **zeus**
+is co-leader and release reviewer, **diana** implements bounded work,
+**gefjon** handles repeat work and checks. **calliope** is unavailable.
+The earlier assignments below are historical handoffs. The lead reads and
+reconciles completed answers and continues autonomously through the release
+gates; no new approval is needed for the already-authorized implementation
+or backed-up clean installation.
 
 - **Gabriel** — owner: answers, tests, starts the app to see it. Asked when
   needed, not polled.
@@ -64,25 +74,25 @@ other two follow in their own spec.
 
 ## Acceptance Criteria
 
-- [ ] In standalone mode, `cf run @nyx "task"` from a lead's pane follows
+- [x] In standalone mode, `cf run @nyx "task"` from a lead's pane follows
       today's continuation rule: `--new` creates a conversation and prints
       the name the app minted; `--session` names one; otherwise the lead's
       most recent conversation with that agent continues — a live pane
       receives the task as a follow-up, a closed one is resumed. No window
       opens in the lead's pane
-- [ ] `cf run`, `cf attach`, `cf say`, `cf read` in standalone mode outside
+- [x] `cf run`, `cf attach`, `cf say`, `cf read` in standalone mode outside
       an app pane refuse and name the app; an unavailable app never
       authorizes a second launch; a timeout after a possible launch reports
       an unknown outcome and never launches again
-- [ ] A lead pane's token is scoped to its tab and to the lead's named
+- [x] A lead pane's token is scoped to its tab and to the lead's named
       operations; the `--in-pane` controller holds a single-use ticket whose
       redemption returns ownership and a capability scoped to that launch
       and generation; the harness child and a shell pane hold nothing; no
       HTTP body may carry `by`, an owner or a foreign target
-- [ ] One app instance owns a state root; every `threads.json`, `tabs.json`
+- [x] One app instance owns a state root; every `threads.json`, `tabs.json`
       and delivery write goes through one app-wide serialised queue;
       harness stores stay read-only
-- [ ] Ownership and read marks in standalone mode use the app-owned lead
+- [x] Ownership and read marks in standalone mode use the app-owned lead
       identity (`tab:<id>:<generation>`); a native session is bound to a
       lead or a worker only with launch-unique evidence; an ambiguous
       binding is visibly `unbound` and never drives automatic delivery; a
@@ -91,20 +101,23 @@ other two follow in their own spec.
       cursor and every pending decision — automatic delivery suspends, the
       page offers reopening through the app's own new/resume path with a
       new generation, and the previous transcript never authorises a write
-- [ ] The page opens maximized on first launch and restores its geometry
-      after; the roster editor is a collapsible panel at the top (the
-      `cf ui` page in an iframe); below it the sidebar (tabs, their
-      conversations, collapsible left) and the pane area; collapsing or
-      expanding a panel neither stops pane services nor changes a running
-      lead's `cf` semantics
-- [ ] Panes tile in the user's progression counted WITH the lead: 1 alone;
+- [x] The page opens maximized on first launch and restores its geometry
+      after; the roster editor remains the authenticated `cf ui` page in an
+      iframe, opened only by the **Agents** button as a
+      full-window dialog with Close and Escape; no roster strip takes space
+      above the workspace. The sidebar remains collapsible left. Opening or
+      closing Agents keeps every pane, output acknowledgement and watcher
+      running, preserves the iframe, and returns focus to the opener
+- [x] Panes tile in the user's progression counted WITH the lead: 1 alone;
       2 beside; 3 lead full-height and two stacked; 4 a 2×2; 5 lead
       full-height and a 2×2; 6 a 3×2; beyond, `rows = ceil(sqrt(n))`,
       `cols = ceil(n / rows)`; when minimum pane sizes cannot fit, every
       process is kept and a focused-pane view with navigation is offered
-- [ ] Every pane has a title: conversation name · agent · effective policy
-      and its source; a shell pane is titled `shell`
-- [ ] The sidebar is a tree: **session** (the tab, shown by its name) →
+- [x] Every pane has a title: conversation name · agent · **Replies: Automatic**
+      or **Replies: Manual**, with a readable tooltip naming the setting
+      source (session, worker, lead preference or default); a shell pane is
+      titled `shell`
+- [x] The sidebar is a tree: **session** (the tab, shown by its name) →
       one level down **lead** (its name) → one level further down each
       worker (`w1 <name>`, `w2 <name>`, …) and each shell; clicking the
       session shows the grid of all its panes, clicking the lead shows the
@@ -114,10 +127,10 @@ other two follow in their own spec.
       generation, and clicking a closed worker conversation reopens it
       through the attach path — a session manager, not a list of what is
       currently running
-- [ ] A human opens panes in a tab beside the ones consults open: a shell
+- [x] A human opens panes in a tab beside the ones consults open: a shell
       pane, or an agent pane that becomes a conversation whose lead is the
       tab's lead
-- [ ] Every completed worker reply — to the lead's question or the human's
+- [x] Every completed worker reply — to the lead's question or the human's
       — is delivered WHOLE into the lead's pane when the effective policy is
       `auto`: inline when its envelope fits the verified inline budget and
       is safely representable, else through `cf read <id>`, which prints
@@ -128,7 +141,7 @@ other two follow in their own spec.
       there equals the part on disk — printing is an attempt, a marker
       alone is not coverage. No
       cap on the answer, no truncation, no notice
-- [ ] A delivery is submitted only when the lead is ready: its own
+- [x] A delivery is submitted only when the lead is ready: its own
       transcript shows its last turn settled with no tool in flight, and no
       human draft is latched in that pane — a draft is cleared only by the
       observed submission that covers it (Rust stamps the epoch of the
@@ -139,7 +152,7 @@ other two follow in their own spec.
       waits, visibly, with its reason; **Deliver now** bypasses policy —
       never readiness, never a latched draft, and the blocked button says
       why
-- [ ] Every delivery is a record: id, source answer, target session and
+- [x] Every delivery is a record: id, source answer, target session and
       generation, payload digest, pre-submission transcript cursor, state
       `pending | submitting | accepted | uncertain | failed | cancelled`;
       what is submitted is an ENVELOPE carrying the delivery id, the source
@@ -150,41 +163,42 @@ other two follow in their own spec.
       next automatic delivery needs fresh readiness after the submitted
       turn; `uncertain` is never replayed automatically; `cancelled` is
       terminal and never recreated by polling
-- [ ] Unread bookkeeping in standalone mode is by stable transcript item
+- [x] Unread bookkeeping in standalone mode is by stable transcript item
       ids and delivery coverage: pull marks what it printed, an inline
       receipt covers its answer, `cf read` covers the file one, gaps stay
       unread, covered answers are not printed again
-- [ ] Policy precedence holds: tab human `manual` veto > pane human setting
+- [x] Policy precedence holds: tab human `manual` veto > pane human setting
       > tab human `auto` > lead preference > default `auto`; set from the
       page only; `cf run --notify` records a preference; disabling cancels
       queued automatic deliveries
-- [ ] Right-click **Send reply to lead…** lists the conversation's
+- [x] Right-click **Send reply to lead…** lists the conversation's
       completed answers from the transcript; a chosen one is delivered
       through the same path; already-delivered ones need an explicit resend
-- [ ] A worker's completion is reconciled when its pane exits and when the
+- [x] A worker's completion is reconciled when its pane exits and when the
       app restarts, so an answer finished just before exit still gets a
-      record; closing a lead suspends its tab and stops its process trees;
+      record; closing a lead suspends its tab and stops that lead's process
+      tree; sibling workers may finish into held answers;
       app exit reaps every owned tree; restart restores tabs closed; resume
       mints a new generation; held deliveries are shown with an explicit
       **Send held answers to this lead** action, never handed to a reused
       pane
-- [ ] The offline integration suite drives the real `cf`, the real Node
+- [x] The offline integration suite drives the real `cf`, the real Node
       server, the real Rust bridge and PTYs and fake harnesses end to end;
       the packaged smoke launches the REAL app bundle on macOS in a
       self-test mode that opens a pane, renders output, takes input, acks
       and shuts down
-- [ ] There are no modes: `cf use` and `cf mode` are gone (a leftover
+- [x] There are no modes: `cf use` and `cf mode` are gone (a leftover
       `mode.json` is ignored and reported once by `cf doctor`), the
       generated skill is installed into every detected harness without a
       native ConsensFlow, it names no cmux command, and the evals hold both
       directions of "continue or start fresh" and the delivery rules
-- [ ] The standalone skill teaches the lead to **send and return, never
+- [x] The standalone skill teaches the lead to **send and return, never
       wait**: after a consult or a follow-up it reports what is running and
       takes the user's next message; an answer arrives in its pane on its
       own when the conversation is `auto`, and when it is `manual` the human
       says when to read (`cf catchup <name> --unread`); `--wait` and polling
       are not taught, and the eval holds it
-- [ ] `npm run check:all` exits 0 on macOS with no live agent CLI and no
+- [x] `npm run check:all` exits 0 on macOS with no live agent CLI and no
       network: biome, Node tests, `cargo test` + clippy, page tests, the
       integration suite, the packaged smoke
 
@@ -195,15 +209,20 @@ completely from the Mac and the new one is installed clean, with its skill
 and its CLI. The lead announces the moment; the steps are these, and the
 old app's own verbs do the removal so nothing is guessed:
 
-1. Keep the roster: copy `~/.consensflow/agents.json` aside — it is shared
-   with every ConsensFlow tool and `cf reset` would take it.
+1. Back up the installed app, launcher, owned skills and complete
+   `~/.consensflow` (including `agents.json` and any `mode.json`), plus the
+   app's OS data directories. Restore only the roster after reset. Finish
+   and reconcile active ConsensFlow workers in other projects before taking
+   back their shared launcher or coordination state. Keep the old bundled
+   Node and CLI paths explicitly: `cf off` removes the global launcher.
 2. `cf off` — takes back every installed file the old ConsensFlow owns: the
    five skills, the `cf` launcher, the take-back-only leftovers.
 3. `cf reset --yes` — removes the config root (`~/.consensflow`, workspaces
    and conversations included) and the app's own data directories
    (`dev.ngvoicu.consensflow`).
-4. Quit the app; move `/Applications/ConsensFlow.app` to the Trash — the
-   app never deletes its own bundle.
+4. Quit the app; archive `/Applications/ConsensFlow.app` and obsolete probe
+   bundles outside the active installation — the app never deletes its own
+   bundle. Do not remove a probe bundle while a worker still uses it.
 5. Install the new build's DMG; open the app once. Opening is the deliberate
    act: it claims the `cf` launcher and installs the one generated skill
    into every detected harness (`installEverywhere`, Phase 6).
@@ -555,7 +574,7 @@ human input serialised behind an in-flight `\r`; bounded output with
 responsive input; nested bridge requests; EOF and process-group cleanup;
 P1/P2 recorded through this path for each harness being enabled.
 
-## Phase 2: Tabs, identity, launch authority and the store [in-progress] — gates P1, P2 passed on all five harnesses
+## Phase 2: Tabs, identity, launch authority and the store [completed] — gates P1, P2 passed on all five harnesses
 
 - [x] [TEST-PANE-11] `tests/store.test.mjs` — `Store(home)`: ONE app-wide
       queue — two mutations on one row, two on different rows, two tabs
@@ -614,18 +633,18 @@ P1/P2 recorded through this path for each harness being enabled.
       /api/panes` lists the caller's tab; controller ops `session.bind
       {evidence}`, `progress.set`, `sent.record` under a capability.
 - [x] [IMPL-PANE-18] `src/ui.js` + `src/panes.js`. -> satisfies [TEST-PANE-17]
-- [ ] [TEST-PANE-19] ← current `tests/cf-standalone.test.mjs` — the `cf` side: from a
+- [x] [TEST-PANE-19] ← current `tests/cf-standalone.test.mjs` — the `cf` side: from a
       lead pane, `cf run @zeus "q"` (no flags) POSTs `consult` without
       `fresh`; `--new` prints `conversation: <name> (new) — pane <id>`;
       `--json`; `--in-pane` without `CONSENSFLOW_LAUNCH` refuses; with a
       ticket, ownership comes from redemption, never from `leadId(env)`,
       and later store updates (session discovery, kimi progress) go through
-      the controller capability; without `CONSENSFLOW_APP` today's cmux
-      behaviour is byte-identical until Phase 6; `cf attach`, `cf say`,
+      the controller capability; after Phase 6, without `CONSENSFLOW_APP`
+      the app is required and direct cmux launching is retired; `cf attach`, `cf say`,
       `cf read`, `cf chat` refuse when the app is unreachable;
       `CONSENSFLOW_CHILD=1` refuses all; a stale global `cf` on `PATH` is
       shadowed by the bundle's.
-- [ ] [IMPL-PANE-20] `bin/cf.mjs` — requester, controller, `sayVerb`,
+- [x] [IMPL-PANE-20] `bin/cf.mjs` — requester, controller, `sayVerb`,
       `readVerb`, `attachVerb`/`chatVerb` standalone branches; the kimi
       first-turn path takes ownership from redemption. -> satisfies [TEST-PANE-19]
 - [x] [TEST-PANE-21] `tests/engine/session-binding.test.mjs` —
@@ -656,7 +675,7 @@ binding by nonce; continuation without a second process; duplicate and
 timed-out launches handled; concurrent mutations preserved; session
 replacement fails closed; an interrupted read creates no coverage.
 
-## Phase 3: Completion, readiness and delivery [pending] — its first harness needs its versioned lifecycle and receipt fixtures before automatic delivery is enabled
+## Phase 3: Completion, readiness and delivery [completed] — versioned lifecycle and receipt fixtures gate automatic delivery
 
 - [x] [TEST-PANE-23] `tests/engine/completion.test.mjs` —
       `answers(kind, session)` returns `{items: [{id, role, text, complete,
@@ -749,14 +768,16 @@ replacement fails closed; an interrupted read creates no coverage.
       once P6 is recorded as passed — and P6 must include an inbox arrival
       while the agent is ALREADY idle (delivered at once, not stranded until
       the next `agent_settled`). -> satisfies [TEST-PANE-33]
-- [ ] [TEST-PANE-35] `tests/ui-panes.test.mjs` — page ops: `answers.list`
-      (ids, previews, `delivered`, `uncertain` marked distinctly);
+- [x] [TEST-PANE-35] `tests/ui-panes.test.mjs` — page ops: `answers.list`
+      (ids, previews, `delivered`, `uncertain` marked distinctly; latest
+      file attempt exposes total and unconfirmed part numbers, displayed
+      in the answer menu);
       `deliver.now {answerId}` creates a `manual` record (policy bypassed,
       readiness honoured); `resend` explicit; `deliver.cancel`;
       `held.send {tab}` for held records; `tab.resume`.
-- [ ] [IMPL-PANE-36] `src/panes.js` handlers. -> satisfies [TEST-PANE-35]
+- [x] [IMPL-PANE-36] `src/panes.js` handlers. -> satisfies [TEST-PANE-35]
 
-## Phase 4: The page — selector, sidebar, panes, layouts, menus [completed] — P3 passed
+## Phase 4: The page — selector, sidebar, panes, layouts, menus [completed] — P3 passed; user refinement 53–54 verified
 
 - [x] [TEST-PANE-37] `tests/layout.test.mjs` — `gridTemplate(n)` for 1–6
       matches the six pictures; beyond 6 `rows = ceil(sqrt(n))`, `cols =
@@ -792,17 +813,33 @@ replacement fails closed; an interrupted read creates no coverage.
       `list_state`, window geometry persistence; `tauri-plugin-dialog`; the
       roster iframe. P3 recorded. -> satisfies [TEST-PANE-39]
 
-## Phase 5: Lifecycle, the end-to-end suite and the packaged smoke [pending]
+### User refinement, 2026-09-07 — clear delivery controls and more pane space
 
-- [ ] [TEST-PANE-41] `app/src-tauri` + `tests/lifecycle.test.mjs` — closing
+- [x] [TEST-PANE-53] `app/tests/page.spec.mjs`: Agents is closed initially,
+      opens a dialog covering the app window, retains its authenticated
+      iframe across Close/Escape, returns focus, and keeps pane output/ACKs
+      running while open. The header says **Reply delivery: Automatic** or
+      **Reply delivery: Manual**; an accessible information button explains
+      complete replies, lead readiness, human typing, manual delivery and
+      the session manual veto. Session and single-pane views share the same
+      pane top edge for one and multiple panes; navigation belongs inside
+      the focused pane title bar and creates no blank strip above it.
+- [x] [IMPL-PANE-54] `app/ui/index.html`, `panes.js`, `menus.js`: existing
+      palette/type, one Agents button, native full-window dialog, explicit
+      delivery labels and help, consistent grid/focused alignment. No new
+      dependency or terminal recreation. -> satisfies [TEST-PANE-53]
+
+## Phase 5: Lifecycle, the end-to-end suite and the packaged smoke [completed]
+
+- [x] [TEST-PANE-41] `app/src-tauri` + `tests/lifecycle.test.mjs` — closing
       a lead stops its process tree and suspends the tab; app exit reaps
       every tree; restart reads tabs closed; `tab.resume` → generation +1;
-      held deliveries stay held and visible; collapsing the roster panel or
+      held deliveries stay held and visible; opening or closing Agents or
       switching tabs keeps every pane and the watcher running; an
       authenticated lead's `cf` keeps its routing while its tab exists.
-- [ ] [IMPL-PANE-42] `pty.rs` process groups, `src/tabs.js` lifecycle,
+- [x] [IMPL-PANE-42] `pty.rs` process groups, `src/tabs.js` lifecycle,
       `lib.rs` exit hook, routing by tab existence. -> satisfies [TEST-PANE-41]
-- [ ] [TEST-PANE-43] `tests/integration/*.test.mjs` — real `cf`, real
+- [x] [TEST-PANE-43] `tests/integration/*.test.mjs` — real `cf`, real
       `cf ui`, headless `consensflow-bridge`, fake harnesses writing
       real-shaped stores and echoing input as hex: lead and worker opened
       through the real path; `cf run --new` → worker under a ticket → the
@@ -824,22 +861,22 @@ replacement fails closed; an interrupted read creates no coverage.
       and `\r` → `uncertain`, never replayed; a worker completing and
       exiting before the next tick still delivers; lead closed and resumed
       → held; shutdown leaves no process.
-- [ ] [IMPL-PANE-44] `tests/integration/harness.mjs`; `package.json`
+- [x] [IMPL-PANE-44] `tests/integration/harness.mjs`; `package.json`
       scripts `test:integration`, `check:all` (biome, `node --test tests/`,
       cargo test + clippy, page tests, integration, smoke). -> satisfies [TEST-PANE-43]
-- [ ] [TEST-PANE-45] `tests/smoke.test.mjs` — the built `.app` launched
+- [x] [TEST-PANE-45] `tests/smoke.test.mjs` — the built `.app` launched
       with `CONSENSFLOW_SELFTEST=1` and a fake-harness `PATH`: the real
       Tauri window opens a tab, a pane renders the fake harness's output
       (the page reports rendered rows over the self-test channel), input
       typed through `pane_input` reaches the child (hex echo), acks flow,
       the app exits 0 and leaves no process; the assets loaded came from
       the bundle.
-- [ ] [IMPL-PANE-46] `lib.rs` self-test mode and `app/ui/selftest.js`;
+- [x] [IMPL-PANE-46] `lib.rs` self-test mode and `app/ui/selftest.js`;
       `npm run smoke`. -> satisfies [TEST-PANE-45]
 
-## Phase 6: Switch-over — one shape, no modes [pending]
+## Phase 6: Switch-over — one shape, no modes [completed]
 
-- [ ] [TEST-PANE-47] `tests/mode.test.mjs` → `tests/install.test.mjs` —
+- [x] [TEST-PANE-47] `tests/mode.test.mjs` → `tests/install.test.mjs` —
       there is no mode: `cf use` and `cf mode` exit with "ConsensFlow has
       one shape now" and the verb list; a leftover `mode.json` (`cmux`,
       `claude`, `pi`, `standalone`) is ignored, and `cf doctor` reports it
@@ -851,11 +888,11 @@ replacement fails closed; an interrupted read creates no coverage.
       `cmux tree`, the `CMUX_SURFACE_ID` fallbacks, `cf`'s direct
       `threads.json` writes, and the claude/pi host-mode skill prose are
       gone.
-- [ ] [IMPL-PANE-48] `src/mode.js` → `src/install.js` (`installEverywhere`,
+- [x] [IMPL-PANE-48] `src/mode.js` → `src/install.js` (`installEverywhere`,
       `turnOff`), `bin/cf.mjs`, `hosts/lib/threads.js`, `src/skill.js`
       (one prose), `src/ui.js` (no mode switcher; the page's system panel
       loses the three cards). -> satisfies [TEST-PANE-47]
-- [ ] [TEST-PANE-49] `tests/skill.test.mjs` — the standalone skill: no
+- [x] [TEST-PANE-49] `tests/skill.test.mjs` — the standalone skill: no
       `cmux`; the consult is `cf run @<name> "<task>"` with today's
       continuation rule, `--new` for an independent task, the name printed
       by the app; follow-up `cf say`; reading `cf catchup --unread`; the
@@ -869,7 +906,7 @@ replacement fails closed; an interrupted read creates no coverage.
       arrives in its pane, under `manual` the human says when to read; the
       skill never names `--wait`, and says polling is wrong; the three
       cmux-only describes replaced.
-- [ ] [IMPL-PANE-50] `src/skill.js`; `evals/harness.mjs` (stub `cf` only;
+- [x] [IMPL-PANE-50] `src/skill.js`; `evals/harness.mjs` (stub `cf` only;
       `run --new` prints a minted name; a `deliver` fixture pastes into the
       lead's transcript; `read` prints a long fixture); `evals/scenarios.mjs`
       (`consult-opens-a-pane` → `cf run --new`, no harness; `look-before-
@@ -903,6 +940,64 @@ replacement fails closed; an interrupted read creates no coverage.
 
 ## Resume Context
 
+> 2026-09-07 release candidate **3.0.0-alpha.23: all 54 tasks and all
+> acceptance criteria passed**. Final `npm run check:all` exited 0: Biome
+> 87 files, Node 1,048 passed / 4 skipped, Rust 68 unit + 12 headless,
+> clippy with `-D warnings`, Playwright 40/40, real-process integration
+> 15/15, real packaged-app smoke 1/1. The four default Node skips include
+> the opt-in smoke, which passed separately inside the aggregate. Real-model
+> evals are explicitly unrun and outside this offline gate.
+> Zeus's final architecture/receipt review and Gefjon's Phase 6/UI review
+> found no material blocker. Diana's real-PTY fault tests prove incomplete
+> reads stay visibly uncovered and bridge death persists `uncertain` before
+> restart, with no replay after a real resume and two watcher intervals.
+> The final signed app's 43 bundled CLI source files match the working tree;
+> the verified DMG's 50 bundle files match that tested app. DMG SHA-256:
+> `7763caa8d36860ddc5db97ceae3eaff03402de145a342910c073b03e6405fc01`.
+> Artifact: `/Users/gabrielvoicu/ConsensFlow-Releases/3.0.0-alpha.23/ConsensFlow_3.0.0-alpha.23_aarch64.dmg`.
+> The local commit is gated on `npm run check` from an export of its exact
+> staged tree; that result and the resulting commit id belong in the release
+> record beside the DMG. Clean installation is still pending: other projects have active
+> workers using the old shared installation. The initial backup is at
+> `/Users/gabrielvoicu/ConsensFlow-Backups/20260907-151242`; refresh mutable
+> state after those workers finish and before reset. Native harness history
+> and authentication are outside the cleanup scope.
+>
+> 2026-09-07 release implementation: root owns Phase 6 installer/CLI/settings,
+> package scripts, and the final installation. Zeus implements 45–46 and
+> adjudicates lifecycle with a real editor present; Diana repairs manual
+> delivery identity/settlement and closed-tab held visibility, then 43–44;
+> Gefjon implements the standalone skill/evals (49–50). Current candidate
+> is `3.0.0-alpha.23`. Installed runtime remains untouched until workers
+> finish and the candidate passes the release gate.
+> Phase 6 root regressions: 126/126 passed, exit 0, after replacing retired
+> mode/direct-cmux execution assertions. Reset/off, unowned-file protection,
+> native integrations, PATH narrowing, roster edits and launcher ownership
+> remain covered. The authenticated standalone CLI suite carries run/say/
+> attach/read/bind/receipt coverage. Scripts `test:integration`, `smoke`,
+> `check:all` now exist; missing integration or smoke artifacts are still
+> release blockers. Do not infer task completion from script presence.
+>
+> 2026-09-07 15:17 EEST — release audit resumed at `3dd52bd` with all
+> preexisting dirty changes preserved under
+> `/Users/gabrielvoicu/ConsensFlow-Backups/20260907-151242` (patch, HEAD,
+> status, untracked files). Zeus audits architecture in
+> `zeus-copper-thicket` (surface:114), Diana audits 19–20/35–36/41–42 in
+> `diana-misty-orchard` (surface:115), Gefjon runs baseline checks and
+> legacy-install inventory in `gefjon-rusty-moss` (surface:116).
+> Lead baseline: `cargo test --offline` exit 0, 66 unit + 9 headless;
+> `cargo clippy --offline --all-targets -- -D warnings` exit 0.
+> Page baseline: 34/35, stale Kimi lead picker and expectation conflict
+> with the recorded lead-harness withdrawal. Corrected expectation first,
+> RED captured (1 failed, exit 1), then removed the stale picker option;
+> focused GREEN 1/1 exit 0; full page regression 35/35 exit 0.
+> Read the complete prior `zeus-copper-tide` and `asteria-amber-fern`
+> handoffs: the final exact-contract lifecycle review was APPROVE after
+> transmitted-unknown protection and pre-transmission shell cleanup.
+> Next: reconcile current test/audit evidence, finish 43–50, run the full
+> release gate on the candidate, then back up app state and clean install.
+> Installation has not started; old runtime stays available for workers.
+>
 > 2026-09-07 06:20 EEST — **channels (33–34) committed f9e606c**, registry
 > 36/52. In review: the `cf` side round 3 (hyperion, `hyperion-nutmeg-harbor`),
 > the watcher round 2 (hyperion, `hyperion-nutmeg-cloud`), the bridge
@@ -1108,11 +1203,38 @@ replacement fails closed; an interrupted read creates no coverage.
 | 2026-09-07 | `pane.open` carries `dropEnv`, a list of names Rust removes from the child environment before spawning, after applying `env`; the lead launch sends the harness's billing guards in it (`interactiveGuards`) | zeus, task 21: a lead pane is spawned by Rust and the frame could only add keys, so a lead's harness ran without the guard that keeps a subscription login from switching to API-key billing; workers go through `cf`, which strips them |
 | 2026-09-07 | Channels landed with two recorded follow-ups, neither blocking: the pi adapter does not withdraw the inbox record on `ack-timeout`, so past a 30 s turn the extension may still deliver after the app recorded uncertain (bounded, and readiness-gated on both paths; the clean close is to unlink the record on timeout); the pi extension imports `hosts/lib/deliveries.js`, so Phase 6 packaging must carry that dependency beside the extension | apollo, channels round 4 approve |
 | 2026-09-07 | Bridge operations, after asteria's round 1: a lead's seed opens with the launch marker exactly as a worker's and discovered or reported lead evidence binds through the launch-fenced `leadBind`; a lead exit's release and the tab's suspend are one queued operation compared on pane, generation and launch; page delivery actions choose their transition against the current record inside the queue and never overwrite a terminal state; an unknown lead launch and its pane are preserved until a matching exit; `deliver.now` under manual creates the plan itself from the native answer; a refused resume returns the generation to suspended; a resume re-stamps the binding; `/api/tabs` is the lead-launch operation over HTTP; only explicit refusal types or codes are 400 | asteria, 35–36 round 1: codex and opencode leads could never bind (raw UUID seed), a late lead exit closed its replacement, a page action parked across an acceptance wrote pending over acceptedAt, a manual-policy answer had no way to be sent, a corrupted store file answered 400 |
+| 2026-09-07 | User UI refinement: Agents opens full-window instead of an always-visible roster strip; reply delivery has explicit labels and explanatory help; selecting a single pane preserves the grid top edge | Gabriel's live screenshots and instructions at 16:26; this supersedes the earlier collapse-up roster layout |
+| 2026-09-07 | Phase 3 exit, with the co-lead: cancellation, seen ownership, opaque cursors, separate channel budgets and the lead as a session all stand. Revised: the pi ack after a send with no observed `message_start` is `admitted: null` (unknown, mapped to uncertain), `admitted: false` only for a refusal before any send; one absolute per-delivery expiry stamped on the record, honoured by adapter and extension alike, expired inbox entries moved aside and never sent; native adapters call a new bridge request `pane.claim_epoch` right before their send, so a native admission has the same draft and epoch protection as a paste; the pi inbox follow-up is required Phase 5 work; the packaged smoke (45–46) must load and deliver through the packaged pi extension without resolving anything from the checkout and exercise the kernel lock with the bundled Node | astraeus: missing admission evidence is not proof of rejection (two successive sends negatively acked while both were delivered); `24 < 30` does not order two timers that start at different moments; `isIdle()` does not establish that the human has no draft |
+| 2026-09-07 | `cf` side, after hyperion's round 3: every failure inside the binding operation, a controller refusal included, is `{bound:false, reason}`, handover always completes and the window decides the exit once; a spawn failure of the harness is a one-line refusal; a resumed kimi turn is a continuing packet; controller-side `--notify` is refused before redemption; `cf help` is the one allowed delta from byte identity; a pi worker launched through `cf` under the app carries the pi extension from `launchConfiguration('pi')`. Server: attaching a closed unbound conversation is refused before admission (`unbound-conversation`) with guidance to a new consult | hyperion's cf round 3: a real 409 on bind left codex with a raw stack and a live window and kimi with no window; a missing codex binary crashed with an unhandled error; the attach mismatch test never reached the check it claimed to test |
+| 2026-09-07 | Readiness takes the caller's purpose: the derived-only Pi gate applies to AUTOMATIC delivery, a manual `deliver.now` proceeds on the derived settlement; the opencode HTTP deadline is the smaller of its 3 s default and the time left to the record's expiry; a caller-contract error throws and is never reported as uncertain; a pre-send epoch claim refusal is a zero-byte replayable failure. Follow-ups recorded: 30 ms slack at the pi expiry boundary, `claimEpoch` duplicated between two adapters | apollo's approve of the Pi evidence unit: `deliver.now` on a Pi lead without native evidence was refused, contradicting the decision that manual delivery stays possible; a malformed target reported "may have been delivered" when nothing was written |
 
 ## TDD Log
 
 | Task | Red | Green | Refactor |
 |---|---|---|---|
+| Final macOS release gate, alpha.23 | initial audit lacked check:all, integration and packaged smoke; the completed gates found four real packaged/lifecycle defects | final npm run check:all exit 0: Node 1048 pass / 4 skipped, Rust 68+12, clippy -D warnings, UI 40/40, integration 15/15, packaged smoke 1/1 | final app rebuilt after source freeze; codesign verification and hdiutil verify exit 0; mounted DMG contains the identical 50-file tested bundle; Zeus and Gefjon final reviews report no material blocker |
+| [TEST-PANE-43] completed fault matrix | real bridge SIGKILL after observed paste before CR left submitting on disk; body-loss/early-close/marker-only cases originally lacked controls | Diana final full matrix15/15, exit0, 10.123s | raw-mode CR observation plus SIGSTOP barrier; uncertain is asserted before teardown, then real Node/Rust restart and real lead resume wait two watcher intervals with no replay; all missing part numbers reach answers.list |
+| Node EOF durable shutdown | real-process bridge fault above; synchronous process.exit preempted the watcher mutation | focused fault1/1 and lifecycle/UI/CLI67/67, exit0 | idempotent bounded drain of watcher and store before EOF/fatal/EPIPE exit; HTTP partial request cannot hold durable flush behind server.close; ordinary read-pipe EPIPE behavior retained |
+| [TEST-PANE-53] visual follow-through | initial immediate capture omitted some not-yet-painted content | Gefjon stable-paint probes display both focused worker and lead titles, and full-window Agents iframe content | root inspected images; no additional product CSS change needed for capture timing; UI regression39/39 before the new part-progress test, focused part-progress1/1 |
+| Unconfirmed file parts, tasks35/43 | real page API omitted partProgress; browser menu omitted the receipt summary; each focused test failed, exit 1 | API 1/1 and browser 1/1, exit 0 | expose only latest attempt id, total and uncovered part numbers; receipt evidence controls coverage; accepted answers hide obsolete missing-part notices; no answer bodies added to page state |
+| Pi timeout withdrawal | actual inbox file still present after ack timeout, 0/1, exit 1 | channels + Pi extension 45/45, exit 0 | remove the unread inbox offer while preserving admitted:null / uncertain; a later real extension consume sends nothing; Zeus reviewed and approved the uncertainty semantics |
+| [TEST-PANE-41] GUI shutdown adjudication | characterization tests pin the existing order; waiting for launch closure before stopping the real editor cannot complete | two real editor-present native tests, exit 0; full Rust 68 unit + 12 headless, exit 0 | closing the editor closes admission; then drain admitted launches, reap pane groups and drain transport. Closing a lead stops its own tree; workers survive until app exit so held replies can finish |
+| [TEST-PANE-45] packaged smoke | missing boot report, invalid Tauri event, zero output arrivals, and missing system-tool PATH each produced exit 1 | Zeus: real built app smoke 1/1, exit 0 | bundled assets, real PTY rows/input hex, >1MiB ACK credit flow, packaged Pi extension send/ack with no checkout resolution, bundled Node lock refusal, ordinary app exit and no child residue; final candidate must be rebuilt after all edits |
+| Phase6 documentation consumers | two engine README assertions required retired foreground/direct-run contracts, 0/2 exit 1 | two current app-owned pane/send-return/unread/artifact assertions, exit 0 | native execution tests retained; source-to-sibling parity checks unchanged |
+| Lead tool PATH | BO10 real server test 0/1, exit 1: actual pane.open PATH ended in bin/cf.mjs instead of preserving inherited executable directories | BO10 1/1, exit 0 | src/panes.js passes the environment PATH to leadEnv; bundled cf still comes first |
+| [TEST-PANE-53] pane labels | two browser failures, exit 1: raw auto/manual and tab-human/pane-human tokens | two focused tests passed, exit 0 | title labels and provenance tooltip use plain language; session manual veto and lead preference remain tested |
+| Output subscription | packaged smoke saw zero page arrivals after repeated state refresh; real Tauri Channel drop ends the callback | Zeus split subscribe_output from list_state; root browser test confirms output after two state refreshes and one subscription | page fixture rejects duplicate subscription and any channel passed with state refresh |
+| [TEST-PANE-49] standalone skill | Gefjon: 22 tests, 9 passed and 13 failed, exit 1 | 22/22, exit 0; consumers 144 passed, 3 skipped, exit 0 | eight cf-only eval scenarios; actual stub/offline assertions verified; real model evals unrun and outside check:all |
+| [TEST-PANE-43] first integration tranche | real-process suite initially failed against obsolete headless protocol, 3 failed, exit 1 | Diana: 9/9, exit 0; standalone CLI 82/82, page ops 121/121, watcher 45/45 | real cf read every part, unread frontier established via real catchup; deterministic body-loss/bridge-death faults still in progress |
+| [TEST-PANE-53] UI refinement | four browser RED failures, exit 1: visible top roster, ambiguous label, and 36 px vertical offset for one/four panes | four focused browser tests passed, exit 0 | full-window Agents dialog retains the iframe/output ACKs; explicit delivery help; focused navigation inside title bar removes the offset |
+| [TEST-PANE-43] native helper parity | real `cargo test --offline --manifest-path app/src-tauri/Cargo.toml --test headless product_bridge_contract`: exit 101, 0 passed / 3 failed; app-issued identity/launch fields rejected, Enter and natural exit events absent | all 12 headless tests passed, exit 0, including the new three and existing nine | `consensflow-bridge` calls shared `commands::run_headless`; production launch/input/claim/draft/exit handlers, launch deduplication, and output ACK behavior are the integration target |
+| [TEST-PANE-39] unfinished-answer menu | new Playwright test failed on the old Uncertain/Resend presentation, 1 failed, exit 1 | full page suite 36/36, exit 0 | backend `ready` distinguishes unfinished answers; visible In progress row with send disabled; completed uncertain deliveries still offer explicit resend |
+| Page event contract, 2026-09-07 | packaged smoke exposed Tauri rejecting `state.changed`; the focused browser external-worker check then failed against its stale dotted emitter (1/1 failed, exit 1) | page shim now enforces Tauri event-name characters and emits `state-changed`; full Playwright 36/36, exit 0 | Rust keeps the Node bridge name `state.changed` and translates only the Tauri hop; fixtures no longer hide invalid Tauri names |
+| Phase 6 engine regression migration | old outside-app CLI engine paths failed as expected after switch-over | real runner subprocess/packet/stream/permission/auth and Pi extension suites 19/19, exit 0 | retained real spawned engine fixtures at the `runAgent` boundary; standalone requester/controller tests cover the app CLI; Pi busy-arrival test observes actual send instead of assuming its handler owns the asynchronous drain, deadline-specific tests retain explicit short expiry |
+| [TEST-PANE-47] switch-over, 2026-09-07 | Installer 3 failures, CLI retirement 4 failures, settings 3 failures, cmux lead fallback 1 failure, pre-mint retirement 1 failure; each captured before its production change, all exit 1 | focused installer 3/3, CLI 4/4, settings/full UI 27/27, exit 0 | final root-owned installation/CLI/UI/ownership/threads regression: 126/126, exit 0; logs in release task directory; skill prose is still assigned to Gefjon |
+| [IMPL-PANE-48] root portion | — | `installEverywhere`, mode-free targets/heal, retired `use`/`mode`/`mint`, app-only run/attach, no direct CLI thread writes/cmux lookup, settings no mode controls | removed obsolete mode module/tests; retained meaningful reset/off/ownership/PATH tests in install suite; full Phase 6 remains open until one skill prose and eval work land |
+| [TEST-PANE-39] picker regression, 2026-09-07 | `cd app && npx playwright test tests/page.spec.mjs --grep 'offers only canonical lead harness'`: 1 test, 1 failed, exit 1; the menu still offers Kimi against the recorded four-lead contract | — | corrected the stale five-lead expectation before removing the option |
+| [IMPL-PANE-40] picker regression, 2026-09-07 | — | same focused command: 1 passed, 0 failed, exit 0 | no further refactor; `cd app && npm run test:ui`: 35 passed, 0 failed, exit 0 |
 | [TEST-PANE-01] | hyperion, `cargo test` in `app/src-tauri`: exit 101 — `PaneTable` and `portable_pty` do not exist (7 tests written first) | — | — |
 | [IMPL-PANE-02] | — | `cargo test`: 7 passed, 0 failed (process-group cleanup included); lead re-ran: 13 passed after 04 | removed an unused trait import; the process-group inspection helper compiles only under test; re-ran green |
 | [TEST-PANE-03] | hyperion, `cargo test`: exit 101 — every arbiter symbol absent (6 tests: wrapper+delay bytes, epoch/latch/Enter events, Stale/Draft, the epoch-7/epoch-9 delayed-clear counterexample with a 10× wait, queueing behind the automated `\r`, sanitize across every C0 byte and DEL) | — | — |
@@ -1163,3 +1285,4 @@ replacement fails closed; an interrupted read creates no coverage.
 | [TEST-PANE-17] `seen` | `seen {session, items}` by item id | the request carries the ordered transcript items the client read, as objects `{id, role, printed}`, and the SERVER runs `seenAfter` over them with the deliveries and the store row; the client reads no delivery file | asteria (handlers round 3) and hyperion (cf review) found the two ends incompatible: the client sent ids from its own walk over a local copy of the deliveries file, the server required objects. One owner for the walk, the one holding the deliveries |
 | Architecture, pi channel | `sendUserMessage(…, {deliverAs: 'followUp'})` on `agent_settled` | `sendUserMessage(text)` with no `deliverAs`, delivered from an inbox at once when the agent is already idle and on `agent_settled` otherwise | pi's own types apply `deliverAs` only while a turn is streaming; P6 proved an arrival while idle is delivered immediately (apollo's channels review, diana's P6 record) |
 | Lead harnesses | every roster harness can lead | kimi is withdrawn from `LEAD_HARNESSES` until a kimi lead can be seeded with a launch nonce | zeus, task 21: kimi's interactive start takes no positional prompt and `-p` is non-interactive, so a kimi lead opens bare and can never bind |
+| Phase 3 exit, Pi | Pi settles by a derived 120 s quiet window and delivers automatically on it | the pi extension records observed `agent_settled` evidence in app-owned state tied to launch, session and frontier, invalidated by new work; the adapter consumes it as a native boundary; a derived-only Pi settlement is not eligible for AUTOMATIC delivery (manual reading and `deliver.now` remain) | astraeus, co-lead, Phase 3 exit: the 60 s is a configurable default, not a maximum, and a retry delay does not bound provider execution, compaction or queued continuations; the adapter reported empty queues it never observed |

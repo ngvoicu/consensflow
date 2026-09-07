@@ -20,104 +20,68 @@ export const AGENT = process.env.CF_EVAL_AGENT ?? 'zeus'
  * The point of an eval is that nothing here is simulated except the
  * consequences: the lead is the actual CLI, reading the actual generated
  * SKILL.md from the real home — which is the artefact under test. What IS
- * replaced is `cf` and `cmux`, by stubs that answer plausibly and record every
+ * replaced is `cf`, by a stub that answers plausibly and records every
  * invocation. The lead's choices are then readable as a log, which is the only
  * honest way to ask "did the prose work".
  *
  * It runs in a throwaway directory so the lead has no project to touch, and
- * the stubs come first on PATH so nothing it types reaches a real pane or a
- * real agent.
+ * the stub comes first on PATH so nothing it types reaches a real agent.
+ * There is no cmux stub any more: ConsensFlow has one shape, the app owns
+ * the panes, and the skill never names a pane tool.
  */
 
 /**
- * A real review runs to tens of thousands of characters, and the verdict sits
- * at the TOP — which is what makes `| tail -60` lose the answer while looking
- * like it found it. A stage that only ever answers in four short lines cannot
- * catch a lead that reads too little, so scenarios can ask for this one.
+ * A delivered file arrives in numbered parts, each closed by an end marker,
+ * with the next part named. The lead has to run every part: a report built
+ * from part 1 alone misses the middle and the end, and the scenario checks
+ * for tokens from each one.
  */
-const LONG_ANSWER = `    echo "amber-tide · @${AGENT} · 4 turns"
-    echo ""
-    echo "› asked"
-    echo "review db/0007_add_index.sql before we ship it"
-    echo ""
-    echo "• @${AGENT}"
-    echo "VERDICT: do not ship this migration."
-    echo ""
-    echo "It takes an ACCESS EXCLUSIVE lock on a 2.1M-row table. Here is every"
-    echo "step I checked, in order:"
-    i=0
-    while [ $i -lt 420 ]; do
-      echo "  - step $i: the rebuild rewrites the heap and holds the lock while it runs, so writes queue behind it"
-      i=$((i+1))
-    done
-    echo ""
-    echo "› asked"
-    echo "anything else?"
-    echo ""
-    echo "• @${AGENT}"
-    echo "No — everything that matters is above."`
+const READ_CASES = (readParts) =>
+  Object.entries(readParts ?? {})
+    .map(([id, parts]) =>
+      parts
+        .map(
+          (body, i) => `    ${id},$((${i} + 1))) printf '%s\\n' "${body}"${i + 1 < parts.length ? `; echo "next: cf read ${id} --part ${i + 2}"` : ''} ;;`,
+        )
+        .join('\n'),
+    )
+    .join('\n')
 
-const CF_STUB = (log, { longAnswer = false, transcriptPath = null } = {}) => `#!/bin/sh
+const CF_STUB = (log, { transcriptPath = null, deliverEnvelope = null, readParts = null } = {}) => `#!/bin/sh
 printf 'cf %s\\n' "$*" >> "${log}"
 case "$1" in
-  # The real mint never hands out a name that is taken. The log already holds
-  # this call, so a count of 2 is the second mint — a second conversation,
-  # which is what the independent-task scenario asks for.
-  mint) if [ "$(grep -c '^cf mint' "${log}")" -ge 2 ]; then echo "${AGENT}-coral-lane"; else echo "amber-tide"; fi ;;
-  sessions)
-    echo "amber-tide        @${AGENT}         0 runs   2026-08-24T16:00:00.000Z"
-    if [ "$(grep -c '^cf mint' "${log}")" -ge 2 ]; then echo "${AGENT}-coral-lane    @${AGENT}         0 runs   2026-08-24T16:05:00.000Z"; fi ;;
-  catchup)
-${
-  transcriptPath
-    ? `    cat "${transcriptPath}"`
-    : longAnswer
-    ? LONG_ANSWER
-    : `    case "$*" in
-      *--unread*) echo "amber-tide · @${AGENT} · 2 new turns"; echo ""; echo "› asked"; echo "do you have more?"; echo ""; echo "• @${AGENT}"; echo "Why do Java developers wear glasses? Because they can't C#." ;;
-      *) echo "amber-tide · @${AGENT} · 4 turns"; echo ""; echo "› asked"; echo "Tell me a joke"; echo ""; echo "• @${AGENT}"; echo "Light attracts bugs."; echo ""; echo "› asked"; echo "do you have more?"; echo ""; echo "• @${AGENT}"; echo "Why do Java developers wear glasses? Because they can't C#." ;;
-    esac`
-} ;;
-  # The real run names the conversation it was given. A stub that always
-  # said amber-tide sent a lead that had just started ${AGENT}-coral-lane back to
-  # read the OLD one (seen 2026-09-05).
+  # The app mints the name and prints it. The log already holds this call,
+  # so a second --new is a second conversation — which is what the
+  # independent-task scenario asks for.
   run)
-    name="amber-tide"; prev=""
-    for a in "$@"; do if [ "$prev" = "--session" ]; then name="$a"; fi; prev="$a"; done
-    echo "conversation: $name (new)"; echo "read it back with: cf catchup $name"; echo "Light attracts bugs."; echo "— @${AGENT}" ;;
-  last) echo "# amber-tide · @${AGENT}"; echo ""; echo "Light attracts bugs." ;;
-  *) : ;;
-esac
-`
-
-const CMUX_STUB = (log) => `#!/bin/sh
-printf 'cmux %s\\n' "$*" >> "${log}"
-case "$1" in
-  # A second new-pane is a second pane. The stub used to answer surface:99
-  # every time, and \`tree\` showed surface:99 titled with the FIRST
-  # conversation — so a lead that opened a pane for an independent task saw
-  # its new pane already wearing the old conversation's name, and either ran
-  # the consult in its own pane or sent words into the "new" one (3/3,
-  # 2026-09-05). The log already holds this call, so a count of 2 is the
-  # second pane.
-  new-pane) if [ "$(grep -c '^cmux new-pane' "${log}")" -ge 2 ]; then echo "OK surface:100 pane:100 workspace:1"; else echo "OK surface:99 pane:99 workspace:1"; fi ;;
-  send) echo "OK $2 $3 workspace:1" ;;
-  rename-tab) echo "OK action=rename tab=tab:${"$"}{3#surface:} workspace=workspace:1" ;;
-  tree)
-    echo "window window:1 [current]"; echo "\\_ workspace workspace:1"
-    echo "   |- pane pane:28"; echo "   |   \\_ surface surface:28 [terminal] \\"the lead\\" [selected] <- here"
-    if [ "$(grep -c '^cmux new-pane' "${log}")" -ge 2 ]; then
-      title=$(grep '^cmux rename-tab --surface surface:100 ' "${log}" | tail -1 | sed 's/^cmux rename-tab --surface surface:100 //')
-      echo "   |- pane pane:99"; echo "   |   \\_ surface surface:99 [terminal] \\"amber-tide\\""
-      echo "   \\_ pane pane:100"; echo "       \\_ surface surface:100 [terminal] \\"$title\\" [selected]"
+    name=""; fresh=""; prev=""
+    for a in "$@"; do
+      if [ "$prev" = "--session" ]; then name="$a"; fi
+      if [ "$a" = "--new" ]; then fresh="1"; fi
+      prev="$a"
+    done
+    if [ -n "$fresh" ]; then
+      if [ "$(grep -c '^cf run.*--new' "${log}")" -ge 2 ]; then name="${AGENT}-coral-lane"; else name="amber-tide"; fi
+      echo "conversation: $name (new)"
+    elif [ -z "$name" ]; then
+      name="amber-tide"; echo "conversation: $name (continued)"
     else
-      echo "   \\_ pane pane:99"; echo "       \\_ surface surface:99 [terminal] \\"amber-tide\\" [selected]"
-    fi ;;
-  # The real one lists ONLY the caller's own pane, whatever you pass it
-  # (probed live, two panes open, 2026-08-26). A stub that helpfully listed
-  # both would let a lead pass the eval with a command that finds nothing.
-  list-pane-surfaces) echo "* surface:28  the lead  [selected]" ;;
-  list-panes) echo "* pane:28  [1 surface]  [focused]"; echo "  pane:99  [1 surface]" ;;
+      echo "conversation: $name (continued)"
+    fi
+    echo "read it back with: cf catchup $name" ;;
+  say) echo "said into $2" ;;
+  catchup)
+    ${transcriptPath ? `cat "${transcriptPath}"` : `echo "amber-tide · @${AGENT} · 2 new turns"; echo ""; echo "› asked"; echo "do you have more?"; echo ""; echo "• @${AGENT}"; echo "Why do Java developers wear glasses? Because they can't C#."`} ;;
+  # A delivery pasted into the lead's transcript: later catchups show it.
+  deliver)
+    echo "delivered $2"
+    ${transcriptPath && deliverEnvelope ? `printf '%s\\n' "${deliverEnvelope}" >> "${transcriptPath}"` : ':'} ;;
+  read)
+    part="1"; if [ "$3" = "--part" ]; then part="$4"; fi
+    case "$2,$part" in
+${READ_CASES(readParts) || '      *,*) echo "no such delivery part" ;;'}
+      *,*) echo "no such delivery part" ;;
+    esac ;;
   *) : ;;
 esac
 `
@@ -132,7 +96,7 @@ export function makeStage(options = {}) {
   writeFileSync(log, '')
   // A scenario whose prompt names a file needs that file to be there. Without
   // it the lead reasonably checks, finds nothing, and asks the user instead of
-  // consulting — which reads in the tally as "never opened a pane" and blames
+  // consulting — which reads in the tally as "never consulted" and blames
   // the skill for the scenario's own missing prop.
   for (const [rel, body] of Object.entries(options.files ?? {})) {
     const path = join(cwd, rel)
@@ -149,19 +113,14 @@ export function makeStage(options = {}) {
     transcriptPath = join(root, 'transcript.txt')
     writeFileSync(transcriptPath, options.transcript)
   }
-  for (const [name, body] of [
-    ['cf', CF_STUB(log, { ...options, transcriptPath })],
-    ['cmux', CMUX_STUB(log)],
-  ]) {
-    const path = join(bin, name)
-    writeFileSync(path, body)
-    chmodSync(path, 0o755)
-  }
+  const cfPath = join(bin, 'cf')
+  writeFileSync(cfPath, CF_STUB(log, { ...options, transcriptPath }))
+  chmodSync(cfPath, 0o755)
   return {
     cwd,
     log,
-    // The stubs come first; everything else the lead needs stays reachable.
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, CMUX_QUIET: '1' },
+    // The stub comes first; everything else the lead needs stays reachable.
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
     read: () => readFileSync(log, 'utf8').split('\n').filter(Boolean),
     cleanup: () => rmSync(root, { recursive: true, force: true }),
   }

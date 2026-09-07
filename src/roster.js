@@ -43,6 +43,15 @@ const KIND_TO_HARNESS = {
   kimi: 'kimi',
   image: 'image',
 }
+/**
+ * The CLI behind a kind. `src/harnesses.js` is keyed by the CLI's own name
+ * (`claude`), the store and the roster speak in kinds (`claude-code`), and
+ * a launcher needs to cross that line to find the binary.
+ */
+export function harnessForKind(kind) {
+  return KIND_TO_HARNESS[kind] ?? null
+}
+
 const HARNESS_TO_KIND = {
   claude: 'claude-code',
   codex: 'codex',

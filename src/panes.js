@@ -2,10 +2,15 @@ import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DEFAULT_PART_BUDGETS, partsFor, seenAfter } from '../hosts/lib/deliveries.js'
+import { discoverSessionWithEvidence } from '../hosts/lib/harness-transcript.js'
+import { formatLaunchMarker } from '../hosts/lib/packets.js'
 import { effectivePolicy } from '../hosts/lib/policy.js'
+import { interactiveResume, interactiveStart } from '../hosts/lib/runners.js'
 import { newSessionName } from '../hosts/lib/threads.js'
-import { controllerEnv, endLaunch, issueTicket, ownerOf } from './launch.js'
-import { leadIdentity } from './tabs.js'
+import { enabledChannels, launchConfiguration } from './channels.js'
+import { controllerEnv, endLaunch, issueTicket, leadEnv, ownerOf } from './launch.js'
+import { StoreRefusal } from './store.js'
+import { leadIdentity, paneIdentity } from './tabs.js'
 
 /**
  * The pane operations (Phase 2, IMPL-PANE-18) — what `/api/panes/*` means.
@@ -67,6 +72,30 @@ import { leadIdentity } from './tabs.js'
 
 const CF_CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'cf.mjs')
 const DEFAULT_PANE_OPEN_DEADLINE_MS = 30_000
+/**
+ * The evidence a LEAD launch binds by, in the three shapes a worker has.
+ *
+ * claude-code and pi take an id from us, so we mint one and it IS the
+ * binding the moment the window opens. Everything else mints its own, so
+ * the launch nonce travels in the seed's opening line and binds when
+ * discovery reads it back. A lead already bound offers no new identity —
+ * it is resumed on the one it has.
+ */
+function leadEvidence(kind, tabId, launchId, nativeSession) {
+  if (typeof nativeSession === 'string' && nativeSession.length > 0) return {}
+  if (kind === 'claude-code') return { preallocatedId: randomUUID() }
+  // pi creates the session when the name is new, so a name scoped to the
+  // tab is both the identity and a thing a human can recognise in pi's own
+  // list. It is stable across resumes for the same reason.
+  if (kind === 'pi') return { preallocatedId: `${tabId}-lead` }
+  return { nonce: launchId }
+}
+
+/** Has this conversation a native session anyone could resume? */
+function boundSession(record) {
+  return typeof record?.sessionId === 'string' && record.sessionId.length > 0
+}
+
 /** The store allocator's own namespace, and the only shape a delivery id has. */
 const MINTED_DELIVERY_ID = /^d-\d+$/
 /** The harnesses whose native session id is ours to name before they start. */
@@ -83,6 +112,34 @@ export class PaneError extends Error {
     // was transmitted: the pane host answered that it opened nothing.
     this.release = release
   }
+}
+
+/**
+ * A refusal another module made ABOUT THE REQUEST — by type, never by shape.
+ *
+ * Guessing from a bare `Error` reads a corrupt `threads.json` as a bad
+ * request and tells the controller to change something that was fine. Only
+ * a `StoreRefusal` (or anything carrying an explicit refusal `code`) is the
+ * caller's business; everything else is ours and reaches the 500 handler
+ * with its reason intact.
+ */
+function isStoreRefusal(cause) {
+  return (
+    cause instanceof StoreRefusal ||
+    (cause instanceof Error && typeof cause.code === 'string' && cause.errno === undefined)
+  )
+}
+
+/** The store's coded admission refusals, in its own words. */
+function admissionRefusal(cause, conversation) {
+  return new PaneError(cause.message, {
+    status: 409,
+    code: cause.code,
+    detail: {
+      ...(conversation === null ? {} : { conversation }),
+      ...(cause.detail ?? {}),
+    },
+  })
 }
 
 /** The body a route sends back for a `PaneError`. */
@@ -104,7 +161,12 @@ export class Panes {
   #node
   #ledger = new Map()
   #inFlight = new Map()
+  // Every `pane.open` this process has sent and not yet had answered.
+  #openings = new Map()
   #onNote = null
+  #harnessPath
+  #shell
+  #env
 
   /**
    * @param {object} deps
@@ -124,6 +186,14 @@ export class Panes {
     agents,
     app,
     node,
+    // Where a harness's CLI and the human's shell actually are on THIS
+    // machine. Both are absolute paths the pane host insists on, and both
+    // are answers only the environment has — which this module never reads.
+    harnessPath = () => null,
+    shell = '/bin/sh',
+    // Discovery reads each harness's own store, and where those live is an
+    // answer only the environment has — which this module never reads.
+    env = {},
     onNote = null,
     paneOpenDeadlineMs = DEFAULT_PANE_OPEN_DEADLINE_MS,
   }) {
@@ -132,6 +202,9 @@ export class Panes {
     this.#agents = agents
     this.#app = app
     this.#node = node
+    this.#harnessPath = harnessPath
+    this.#shell = shell
+    this.#env = env
     this.#deadlineMs = paneOpenDeadlineMs
     this.#onNote = onNote
   }
@@ -265,6 +338,25 @@ export class Panes {
       // conversation belongs to. Refused here as on consult, and again
       // inside admission against the row the store itself reads.
       requireSameAgent(session, record, agent)
+      // Nothing to reopen. A conversation whose pane has ended and which
+      // never bound a native session has no transcript to resume, so the
+      // launch would carry nonce-only evidence, `cf attach` would refuse it
+      // for having no session, and the human would be left with a pane
+      // whose outer command exited 0 and which never ran a harness. Cold
+      // recovery is not specified and is not built, so this says no here —
+      // before admission, before a pane identity is spent, before a frame.
+      // Only a CLOSED one — no launch anywhere and no session. A
+      // conversation still launching, or running in another tab, has its
+      // own refusal with its own code, and the store is the one that can
+      // tell those apart without a race.
+      const closed = !isRecord(record.reserved) && this.#livePane(tab, record, session) === null
+      if (closed && !boundSession(record)) {
+        throw new PaneError(
+          `${session} never bound a session, so there is nothing to attach to — ` +
+            'start a new consult with this agent instead',
+          { status: 409, code: 'unbound-conversation', detail: { conversation: session } },
+        )
+      }
       const admitted = await this.#admit(tab, { name: session, agent, opId })
       if (admitted.outcome === 'live') {
         return {
@@ -406,11 +498,13 @@ export class Panes {
   async sessionBind(launch, request) {
     const owner = this.#owner(launch, request)
     const cwd = await this.#launchDirectory(owner)
-    const bound = await this.#store.sessionBind(cwd, {
-      name: owner.conversation,
-      candidate: isRecord(request.candidate) ? request.candidate : {},
-      expect: expectationFor(launch, owner),
-    })
+    const bound = await this.#refusable('bind-refused', () =>
+      this.#store.sessionBind(cwd, {
+        name: owner.conversation,
+        candidate: isRecord(request.candidate) ? request.candidate : {},
+        expect: expectationFor(launch, owner),
+      }),
+    )
     return {
       outcome: 'bound',
       conversation: owner.conversation,
@@ -424,11 +518,13 @@ export class Panes {
   async progressSet(launch, request) {
     const owner = this.#owner(launch, request)
     const cwd = await this.#launchDirectory(owner)
-    const row = await this.#store.progressSet(cwd, {
-      name: owner.conversation,
-      progress: isRecord(request.progress) ? request.progress : {},
-      expect: expectationFor(launch, owner),
-    })
+    const row = await this.#refusable('progress-refused', () =>
+      this.#store.progressSet(cwd, {
+        name: owner.conversation,
+        progress: isRecord(request.progress) ? request.progress : {},
+        expect: expectationFor(launch, owner),
+      }),
+    )
     return { outcome: 'recorded', conversation: owner.conversation, progress: row.progress }
   }
 
@@ -446,13 +542,279 @@ export class Panes {
     const opId = requireText(request.opId, 'opId')
     return this.#once(launch, opId, async () => {
       const cwd = await this.#launchDirectory(owner)
-      const row = await this.#store.sentRecord(cwd, {
-        name: owner.conversation,
-        entry: { ...(isRecord(request.entry) ? request.entry : {}), opId },
-        expect: expectationFor(launch, owner),
-      })
+      const row = await this.#refusable('record-refused', () =>
+        this.#store.sentRecord(cwd, {
+          name: owner.conversation,
+          entry: { ...(isRecord(request.entry) ? request.entry : {}), opId },
+          expect: expectationFor(launch, owner),
+        }),
+      )
       return { outcome: 'recorded', conversation: owner.conversation, sent: row.sent.length }
     })
+  }
+
+  // --- what the page asks for, over the bridge -----------------------------
+
+  /**
+   * `tab.open {dir, harness}` — a new tab, and its lead's own window.
+   *
+   * Rust's `open_lead` sends this; before it had a handler here, every
+   * button on the page answered "not available yet". The tab is minted
+   * first and the lead launched into it, because the launch is reserved ON
+   * the tab record and there is nothing to reserve against until it exists.
+   * A launch that never leaves gives its reservation back AND closes the
+   * tab it just minted: a tab whose lead never opened is a window the page
+   * would draw with nothing behind it. The record stays, so the id is never
+   * handed out twice, and `tab.resume` is how the human tries again.
+   */
+  async tabOpen(request) {
+    const dir = requireText(request?.dir, 'directory')
+    const harness = requireText(request?.harness, 'harness')
+    const created = await this.#refusable('tab-refused', () => this.#tabs.create(dir, harness))
+    return this.#launchLead(created.id, { opened: true })
+  }
+
+  /**
+   * `tab.resume {tab}` — a suspended tab's lead, opened again.
+   *
+   * `resume` mints the next lead generation before the window exists, so a
+   * launch that fails leaves a resumed tab with no lead pane rather than a
+   * tab still marked closed. That is the honest order: the human asked for
+   * it back, and the tab IS back; only its window did not come.
+   */
+  async tabResume(request) {
+    const tabId = requireText(request?.tab, 'tab')
+    // Before the tab takes its next generation: a pane row is only Node's
+    // memory of a window, and a pane host that restarted holds none of
+    // them. Reconciling first means the resume mints a generation over a
+    // tab whose rows all still exist — and that a host which cannot say
+    // what it holds refuses the resume here, with the tab untouched,
+    // rather than halfway through it.
+    await this.#reconcilePanes(tabId)
+    await this.#refusable('resume-refused', () => this.#tabs.resume(tabId))
+    return this.#launchLead(tabId, { opened: false })
+  }
+
+  /**
+   * The tab's non-lead panes, against the windows the pane host actually
+   * has: `pane.list` is the only thing that knows.
+   *
+   * A worker row nobody is running reads as a live conversation to every
+   * reader, and its controller capability still opens doors — so every row
+   * the host cannot show at the SAME id and generation, alive, is given
+   * exactly the bookkeeping its `pane.exit` would have done: the launch
+   * released, its capability and ticket ended, the row dropped. The
+   * conversation itself stays in the store, which is what lets `attach`
+   * reopen it on the native session it bound.
+   *
+   * The lead is left alone. Its pane IS the tab, its exit is what suspended
+   * this tab in the first place, and `#launchLead` opens it a line later.
+   *
+   * This FAILS CLOSED. A resume that cannot read the host's list has two
+   * ways to be wrong, and they are not equally bad: reconciling against an
+   * answer we do not understand ends launches that may be running, while
+   * refusing leaves the tab exactly as the human left it — closed, at the
+   * same generation, holding its reservations — and they can ask again. So
+   * every doubt is spent BEFORE the first mutation: the request itself, the
+   * answer's shape, and every entry in it are checked, and only a list we
+   * fully understand is allowed to remove anything.
+   */
+  async #reconcilePanes(tabId) {
+    const tab = await this.#tabs.get(tabId)
+    // Only a SUSPENDED tab is being resumed. A tab that is still open has
+    // its panes running, and `tab.resume` on it is a mistake `tabs.resume`
+    // refuses a line later — reconciling first would answer that mistake
+    // by ending the launches of a tab that is working perfectly well.
+    // Same for a tab that is not there: its refusal is the store's to make.
+    if (tab === null || tab.closed !== true) return
+    // Drain what we admitted before reaping what the host has. A launch
+    // whose `pane.open` is still in flight has no pane there YET — the
+    // host has not been answered for it — so a `pane.list` that overtook
+    // it would read "not there" about a window that is about to exist and
+    // reap a live launch. Waiting costs the resume the time that open
+    // already has: the request carries its own deadline, so this settles.
+    await this.#drainOpens()
+    // The tab is re-read because the drain is a real wait: an open that
+    // settled in it may have taken its own row with it.
+    const drained = await this.#tabs.get(tabId)
+    if (drained === null || drained.closed !== true) return
+    const rows = (drained.panes ?? []).filter((pane) => isRecord(pane) && pane.kind !== 'lead')
+    if (rows.length === 0) return
+    let answer
+    try {
+      // `#requireBridge` refuses with `no-pane-host` when there is none,
+      // which is the same refusal one step earlier.
+      answer = await this.#requireBridge().request(
+        'pane.list',
+        {},
+        { deadlineMs: this.#deadlineMs },
+      )
+    } catch (cause) {
+      if (cause instanceof PaneError) throw cause
+      throw unlistablePanes(tabId, cause?.message ?? String(cause))
+    }
+    if (answer?.ok !== true) {
+      throw unlistablePanes(tabId, answer?.reason ?? answer?.error ?? 'it refused')
+    }
+    if (!Array.isArray(answer.panes))
+      throw unlistablePanes(tabId, 'the answer carried no pane list')
+    // Every entry, before any of them is acted on: a list with one
+    // unreadable row is not a list we can tell the dead from the living by.
+    for (const entry of answer.panes) {
+      if (!isListedPane(entry)) {
+        throw unlistablePanes(tabId, `it listed a pane we cannot read: ${encodeFrame(entry)}`)
+      }
+    }
+    const alive = new Set(
+      answer.panes.filter((pane) => pane.alive === true).map((pane) => paneIdentity(pane)),
+    )
+    for (const pane of rows) {
+      if (alive.has(paneIdentity(pane))) continue
+      // A frame this process sent and has no ending for: the host may
+      // still be opening that window, and "not in the list" is not the
+      // same as "never coming". Its own exit is what settles it.
+      if (this.#openings.has(paneIdentity(pane))) continue
+      await this.#paneExited({ id: pane.id, generation: pane.generation })
+    }
+  }
+
+  /**
+   * `shell.open {tab}` — a plain shell beside the agents, in the tab's own
+   * directory. No launch and no reservation: nothing here is an agent, so
+   * there is no conversation to fence and nothing for a controller to
+   * write. The pane row is the whole record.
+   */
+  async shellOpen(request) {
+    const tabId = requireText(request?.tab, 'tab')
+    const bridge = this.#requireBridge()
+    const tab = await this.#openTab(tabId)
+    const shell = this.#shell
+    const pane = await this.#tabs.addPane(tabId, { kind: 'shell' })
+    const body = {
+      id: pane.id,
+      generation: pane.generation,
+      launch: `shell-${pane.id}-${pane.generation}`,
+      cwd: tab.directory,
+      argv: [shell, '-l'],
+      env: {},
+    }
+    const sent = { transmitted: false }
+    let answer
+    try {
+      answer = await this.#transmit(bridge, body, `the shell for ${tabId}`, sent)
+    } catch (cause) {
+      if (!sent.transmitted) {
+        await this.#discardPane(tab, pane)
+        // Given back, so nothing is left to protect — and nothing is left
+        // for a drain to wait on. `#transmit` remembers the open before
+        // `bridge.request`, which can throw the frame away synchronously,
+        // so this is the same clearing the workers and the lead do.
+        this.#openEnded(paneIdentity(pane))
+      }
+      throw cause
+    }
+    if (answer?.ok !== true) {
+      const negative = definiteNegative(answer)
+      if (negative === null) {
+        // No answer we can act on. The shell may be running, and its row is
+        // the only handle anyone has on it — dropping that loses a window
+        // the human can see. Its exit is what removes it.
+        return { outcome: 'unknown', tab: tabId, pane: paneRef(pane), kind: 'shell' }
+      }
+      await this.#discardPane(tab, pane)
+      this.#openEnded(paneIdentity(pane))
+      throw new PaneError(`the pane host did not open a shell: ${negative}`, {
+        status: 409,
+        code: 'pane-refused',
+      })
+    }
+    this.#openEnded(paneIdentity(pane))
+    return { outcome: 'opened', tab: tabId, pane: paneRef(pane), kind: 'shell' }
+  }
+
+  /**
+   * `pane.close {id, generation}` — the human closed a window.
+   *
+   * Rust kills the process and THEN sends this
+   * (`app/src-tauri/src/commands.rs:1329`), so it is bookkeeping and it
+   * cannot refuse: the window is already gone whatever this answers. It is
+   * the same bookkeeping a `pane.exit` event does, asked for rather than
+   * observed — including for the lead, whose pane ending suspends its tab.
+   */
+  async paneClose(request) {
+    const id = requireText(request?.id, 'pane id')
+    const generation = request?.generation
+    if (!Number.isInteger(generation) || generation < 1) {
+      throw new PaneError('pane generation must be a positive integer', {
+        status: 400,
+        code: 'bad-generation',
+      })
+    }
+    const tabs = await this.#tabs.list()
+    const tab = tabs.find((candidate) =>
+      candidate.panes.some((pane) => pane.id === id && pane.generation === generation),
+    )
+    if (tab === undefined) return { outcome: 'gone', pane: { id, generation } }
+    const pane = tab.panes.find((candidate) => candidate.id === id)
+    await this.#paneExited({ id, generation })
+    return { outcome: 'closed', tab: tab.id, pane: { id, generation }, kind: pane.kind }
+  }
+
+  /**
+   * `notify.set {scope, id, mode}` — the human's own delivery choice.
+   *
+   * The two scopes a human owns are the tab and the pane; the lead's
+   * `--notify` is a third, lower one it can never reach from here
+   * (`hosts/lib/policy.js`). `inherit` at pane scope is how a human takes
+   * their hand off and lets the tab decide again.
+   */
+  async notifySet(request) {
+    const scope = requireText(request?.scope, 'scope')
+    const id = requireText(request?.id, 'id')
+    const mode = requireText(request?.mode, 'mode')
+    if (scope !== 'tab' && scope !== 'pane') {
+      throw new PaneError(`a policy scope is 'tab' or 'pane', not ${JSON.stringify(scope)}`, {
+        status: 400,
+        code: 'bad-scope',
+      })
+    }
+    if (scope === 'tab') {
+      await this.#refusable('policy-refused', () => this.#store.policySet({ tab: id, value: mode }))
+      return { outcome: 'set', scope, id, mode }
+    }
+    const tabs = await this.#tabs.list()
+    const tab = tabs.find((candidate) => candidate.panes.some((pane) => pane.id === id))
+    if (tab === undefined) {
+      throw new PaneError(`no pane ${id} in any tab`, { status: 404, code: 'no-pane' })
+    }
+    await this.#refusable('policy-refused', () =>
+      this.#store.policySet({ tab: tab.id, pane: id, value: mode }),
+    )
+    return { outcome: 'set', scope, id, mode, tab: tab.id }
+  }
+
+  /**
+   * A store write whose refusal is the CALLER's business, not a fault.
+   *
+   * These writes carry an expectation — the launch they are for — and the
+   * store refuses them in prose: the launch is over, the pane is not linked,
+   * the candidate carries no evidence. The route answers 500 for anything it
+   * cannot name, which is right for a bug and wrong for a refusal, so each
+   * one is given a code here and stays a 4xx.
+   *
+   * A refusal is a bare `Error`, which is what the store deliberately
+   * throws. A `TypeError`, an `InternalInvariantError`, or anything carrying
+   * an `errno` (the disk, not the request) is a fault and goes up untouched.
+   */
+  async #refusable(code, work) {
+    try {
+      return await work()
+    } catch (cause) {
+      if (cause instanceof PaneError) throw cause
+      if (cause?.name === 'AdmissionError') throw admissionRefusal(cause, null)
+      if (isStoreRefusal(cause)) throw new PaneError(cause.message, { status: 400, code })
+      throw cause
+    }
   }
 
   // --- the decisions behind them ------------------------------------------
@@ -518,13 +880,7 @@ export class Panes {
     } catch (cause) {
       // `reserved` and `elsewhere` are the store's words for two states
       // only it can see without a race; they reach the caller as they are.
-      if (cause?.name === 'AdmissionError') {
-        throw new PaneError(cause.message, {
-          status: 409,
-          code: cause.code,
-          detail: { conversation: name, ...(cause.detail ?? {}) },
-        })
-      }
+      if (cause?.name === 'AdmissionError') throw admissionRefusal(cause, name)
       throw cause
     }
   }
@@ -595,9 +951,15 @@ export class Panes {
       // ONE place decides whether an admitted launch is given back, so
       // there is one rule to read and one to get wrong: nothing went out,
       // or the pane host said plainly that it opened nothing.
-      if (!sent.transmitted || cause?.release === true) {
-        await this.#abandon(tab, options.name, admitted)
-      }
+      const given = !sent.transmitted || cause?.release === true
+      if (given) await this.#abandon(tab, options.name, admitted)
+      // Only a launch that was GIVEN BACK stops protecting its identity,
+      // and only after that cleanup has run — a reconcile in between would
+      // race a row already being taken away. A frame that went out and
+      // then failed for any other reason (a transport that died holding
+      // it) leaves a host handler that may still be opening the window:
+      // the reservation stands, and so does the protection.
+      if (given) this.#openEnded(paneIdentity(admitted.pane))
       throw cause
     }
   }
@@ -655,9 +1017,17 @@ export class Panes {
 
     // `request` writes the frame before it returns, so from here on the
     // bytes are the transport's and the outcome is not ours to assume.
+    const opening = this.#beginOpen(pane)
     const pending = bridge.request('pane.open', body, { deadlineMs: this.#deadlineMs })
     sent.transmitted = true
-    const answer = await pending
+    let answer
+    try {
+      answer = await pending
+    } finally {
+      // Waiting is over either way; the identity is released below, or
+      // by `#openAdmitted` once a refusal's cleanup has run.
+      this.#openSettled(opening)
+    }
 
     if (answer?.ok !== true) {
       const negative = definiteNegative(answer)
@@ -685,6 +1055,10 @@ export class Panes {
       })
     }
     await this.#store.resolve(tab.directory, { name, launchId, outcome: 'opened' })
+    // Resolved, and only now: a reconcile that ran between the answer and
+    // this write would have found a pane the host has and a launch the
+    // store still called outstanding.
+    this.#openEnded(opening)
     return {
       outcome: 'opened',
       conversation: name,
@@ -736,11 +1110,16 @@ export class Panes {
       body: text,
     })
     if (written?.ok !== true) throw refusedBy(written)
-    await this.#store.sentRecord(tab.directory, {
-      name,
-      entry: { kind, opId, chars: text.length, pane: pane.id, generation: pane.generation },
-      expect,
-    })
+    // The bytes are already in the pane. If the launch they were for is
+    // over, recording them is refused — a refusal of THIS request, which
+    // the caller must see as such and never retry.
+    await this.#refusable('record-refused', () =>
+      this.#store.sentRecord(tab.directory, {
+        name,
+        entry: { kind, opId, chars: text.length, pane: pane.id, generation: pane.generation },
+        expect,
+      }),
+    )
   }
 
   /**
@@ -750,6 +1129,20 @@ export class Panes {
    * sidebar reads a closed conversation from.
    */
   async #paneExited({ id, generation } = {}) {
+    // The pane is gone, whatever its open ever answered — but the identity
+    // keeps protecting until this bookkeeping is DONE. Released first, a
+    // reconcile running beside it would find the protection gone, the row
+    // still there and the host not listing it, and reap the same pane a
+    // second time, halfway through the first.
+    try {
+      await this.#exitBookkeeping({ id, generation })
+    } finally {
+      this.#openEnded(paneIdentity({ id, generation }))
+    }
+  }
+
+  /** Everything one exit settles: the launch, then the row it named. */
+  async #exitBookkeeping({ id, generation }) {
     for (const tab of await this.#tabs.list()) {
       const pane = (tab.panes ?? []).find(
         (candidate) => candidate.id === id && candidate.generation === generation,
@@ -776,13 +1169,73 @@ export class Panes {
           endLaunch(released)
         }
       }
-      if (pane.kind !== 'lead') await this.#tabs.removePane(tab.id, id, generation)
+      if (pane.kind === 'lead') {
+        // The lead pane IS the tab: when its process ends the tab has no
+        // window, and leaving it open would draw a live lead that is dead
+        // and offer no way back. Suspending it makes `tab.resume` the
+        // recovery, which is the one path that mints a new generation.
+        const held = isRecord(tab.lead?.reserved) ? tab.lead.reserved : null
+        if (held === null || held.generation !== pane.generation) return
+        // Bind before the launch is let go: the evidence a lead binds by
+        // lives ON the reservation, and the transcript it wrote is only
+        // discoverable now. Release first and the session it just held
+        // becomes unfindable, so every resume after this one opens cold.
+        await this.bindLead(tab.id)
+        // Release and suspend are ONE decision — see `store.leadEnded`.
+        await this.#store.leadEnded(tab.directory, {
+          tab: tab.id,
+          pane: pane.id,
+          generation: pane.generation,
+          launchId: held.launchId,
+        })
+        return
+      }
+      await this.#tabs.removePane(tab.id, id, generation)
       return
     }
   }
 
   #report(message) {
     if (typeof this.#onNote === 'function') this.#onNote(message)
+  }
+
+  /**
+   * A `pane.open` that has gone out, remembered by the identity it names.
+   *
+   * The KEY is protection and the entry is patience, and they end at
+   * different moments on purpose. `Bridge.request`'s deadline stops US
+   * waiting; it cancels nothing on the pane host, whose handler runs on and
+   * whose window will exist. So the entry settles when this process stops
+   * waiting — that is all a reconcile can be asked to wait for — while the
+   * key stays until the launch ends for real: resolved, refused and cleaned
+   * up, or ended by its own `pane.exit`. Everything here is in memory, so a
+   * restarted app protects nothing and reaps what its predecessor left.
+   */
+  #beginOpen(pane) {
+    const key = paneIdentity(pane)
+    let done
+    const finished = new Promise((resolve) => {
+      done = resolve
+    })
+    this.#openings.set(key, { finished, done })
+    return key
+  }
+
+  /** This process has stopped waiting; the identity stays protected. */
+  #openSettled(key) {
+    this.#openings.get(key)?.done()
+  }
+
+  /** The launch ended for real — with its bookkeeping already done. */
+  #openEnded(key) {
+    this.#openings.get(key)?.done()
+    this.#openings.delete(key)
+  }
+
+  /** Waits out the opens still running — outcomes are their callers' business. */
+  async #drainOpens() {
+    if (this.#openings.size === 0) return
+    await Promise.all([...this.#openings.values()].map((entry) => entry.finished))
   }
 
   /** The pane this conversation is running in, or null when none is. */
@@ -826,6 +1279,341 @@ export class Panes {
     const tab = await this.#tabs.get(tabId)
     if (tab === null) throw new PaneError(`no tab ${tabId}`, { status: 404 })
     return tab
+  }
+
+  /**
+   * Opens the lead's window for a tab that already exists.
+   *
+   * The order is the whole point. The channel configuration is built FIRST,
+   * because it is what the delivery watcher will need and it must be
+   * recorded with the reservation, not after it — a lead that is already
+   * running with an OpenCode port nobody wrote down cannot be delivered to.
+   * Then the store reserves the lead and mints its launch id inside that
+   * same mutation. Only then does the frame go out, and the reservation is
+   * given back unless it did.
+   */
+  async #launchLead(tabId, { opened }) {
+    const bridge = this.#requireBridge()
+    // Before deciding warm or cold: a lead that opened with a marker may
+    // have written its transcript since, and the id it minted is only
+    // discoverable there. Binding it here is what makes the NEXT launch a
+    // resume instead of a third cold window.
+    await this.bindLead(tabId)
+    const tab = await this.#openTab(tabId)
+    const kind = tab.lead.harness
+    const command = this.#harnessPath(kind)
+    if (command === null || command === undefined) {
+      await this.#unwindLeadBeforeAdmission(tabId, opened)
+      throw new PaneError(`${kind} is not installed on this machine`, {
+        status: 409,
+        code: 'harness-missing',
+      })
+    }
+    // A launch id is needed to name the channel's own files and its
+    // password before the store has one, so it is minted here and handed to
+    // the store to record. `leadAdmit` is what makes it the tab's launch.
+    const launchId = randomUUID()
+    const configuration = await this.#leadChannel(kind, launchId, tab.directory)
+    let admitted
+    try {
+      admitted = await this.#store.leadAdmit(tab.directory, {
+        tab: tabId,
+        // Decided inside the mutation, from the record the store reads
+        // there: a lead that already bound a session is resumed on it, and
+        // only an unbound one is given a newly minted identity.
+        launch: (record) => ({
+          launchId,
+          ...leadEvidence(kind, tabId, launchId, record.lead.nativeSession),
+        }),
+        channel: configuration.channel,
+      })
+    } catch (cause) {
+      await this.#unwindLeadBeforeAdmission(tabId, opened)
+      if (cause?.name === 'AdmissionError') throw admissionRefusal(cause, null)
+      throw cause
+    }
+    // What the harness itself is told: `hosts/lib/runners.js` owns which
+    // flag each one takes, so this asks it rather than knowing. A bound
+    // lead resumes; an unbound one starts, carrying the nonce in its seed
+    // when the harness insists on minting its own id.
+    const session = this.#leadArgv(kind, admitted)
+    const body = {
+      id: admitted.pane.id,
+      generation: admitted.pane.generation,
+      launch: launchId,
+      cwd: tab.directory,
+      argv: [command, ...configuration.args, ...session.args],
+      dropEnv: session.dropEnv,
+      env: {
+        ...leadEnv({
+          tab: tabId,
+          pane: admitted.pane.id,
+          leadId: leadIdentity(tab),
+          app: this.#app(),
+          path: this.#env.PATH,
+          node: this.#node,
+        }),
+        ...configuration.env,
+      },
+    }
+    const sent = { transmitted: false }
+    let answer
+    try {
+      answer = await this.#transmit(bridge, body, `the lead of ${tabId}`, sent)
+    } catch (cause) {
+      // Only a frame that NEVER left may be taken back. A transport that
+      // rejected after writing leaves a lead that may be running, and
+      // releasing its launch frees a reservation nothing will ever end.
+      if (!sent.transmitted) {
+        await this.#unwindLead(tabId, launchId, admitted)
+        // Given back, so nothing is left to protect. A lead whose frame DID
+        // go out keeps both, on the same rule the workers follow.
+        this.#openEnded(paneIdentity(admitted.pane))
+      }
+      throw cause
+    }
+    if (answer?.ok !== true) {
+      const negative = definiteNegative(answer)
+      if (negative === null) {
+        // The frame went out and nothing came back that we can act on. The
+        // lead may well be running, so the reservation stands: a second
+        // launch on this tab would be a second lead writing one store, and
+        // only a matching `pane.exit` settles it.
+        return { outcome: 'unknown', tab: tabId, pane: admitted.pane, launch: launchId }
+      }
+      // The pane host said plainly that it opened nothing. A tab whose lead
+      // is not there is not a tab the page can draw, so this generation
+      // goes back to suspended — the state `tab.resume` recovers from, and
+      // the state a fresh tab was one step away from anyway.
+      await this.#unwindLead(tabId, launchId, admitted)
+      this.#openEnded(paneIdentity(admitted.pane))
+      throw new PaneError(`the pane host refused to open the lead: ${negative}`, {
+        status: 409,
+        code: 'pane-refused',
+      })
+    }
+    await this.#store.leadResolve(tab.directory, { tab: tabId, launchId, outcome: 'opened' })
+    this.#openEnded(paneIdentity(admitted.pane))
+    // An id we preallocated is bound the moment the window carrying it
+    // opens: we minted it, we passed it, and the harness has no say. The
+    // other shapes bind later, when something observes the session — which
+    // is why `resumedSession` can be null and the answer says so.
+    let bound = session.nativeSession
+    if (session.nativeSession !== null && admitted.nativeSession === null) {
+      const decision = await this.#refusable('bind-refused', () =>
+        this.#store.leadBind(tab.directory, {
+          tab: tabId,
+          candidate: { sessionId: session.nativeSession },
+          expect: { launchId },
+        }),
+      )
+      bound = decision.nativeSession
+    }
+    return {
+      outcome: 'opened',
+      tab: tabId,
+      pane: admitted.pane,
+      launch: launchId,
+      harness: kind,
+      directory: tab.directory,
+      resumedSession: session.resumed ? bound : null,
+      nativeSession: bound,
+      cold: session.resumed !== true,
+      ...(session.reason === null ? {} : { reason: session.reason }),
+    }
+  }
+
+  /**
+   * Bind this tab's lead to the native session its launch left behind.
+   *
+   * The three shapes again, and the same evidence rule: an id we
+   * preallocated is looked for where the harness would have put its file,
+   * an id the harness reported is taken as reported, and everything else is
+   * found by the `[consensflow launch <nonce>]` marker opening one of the
+   * session's first five user turns. `discoverSessionWithEvidence` never
+   * answers without evidence, and `leadBind` checks it again inside the
+   * queue against the launch it is fenced to — so nothing binds on the
+   * strength of having been asked nicely.
+   *
+   * Safe to call whenever: a lead already bound, a tab with no reservation
+   * and a launch nothing can be found for all answer the same way, by
+   * changing nothing.
+   */
+  async bindLead(tabId) {
+    const tab = await this.#tabs.get(tabId)
+    const reserved = isRecord(tab?.lead?.reserved) ? tab.lead.reserved : null
+    if (tab === null || reserved === null) return { bound: false, reason: 'no lead launch' }
+    if (typeof tab.lead.nativeSession === 'string' && tab.lead.nativeSession.length > 0) {
+      return { bound: true, nativeSession: tab.lead.nativeSession, reason: 'already bound' }
+    }
+    const since = Date.parse(reserved.at ?? '')
+    let found = null
+    try {
+      found = await discoverSessionWithEvidence(
+        tab.lead.harness,
+        tab.directory,
+        Number.isFinite(since) ? since : 0,
+        this.#env,
+        {
+          nonce: reserved.nonce ?? null,
+          preallocatedId: reserved.preallocatedId ?? null,
+          reportedId: reserved.reportedId ?? null,
+        },
+      )
+    } catch (cause) {
+      // A harness store we cannot read is not a binding failure worth
+      // stopping a launch for: the lead opens cold and says so.
+      this.#report(`lead discovery for ${tabId} failed: ${cause?.message ?? cause}`)
+      return { bound: false, reason: 'discovery failed' }
+    }
+    if (found === null) return { bound: false, reason: 'no session carries this launch' }
+    try {
+      const decision = await this.#store.leadBind(tab.directory, {
+        tab: tabId,
+        candidate: {
+          sessionId: found.sessionId,
+          ...(found.turn === undefined ? {} : { turn: found.turn }),
+        },
+        expect: { launchId: reserved.launchId },
+      })
+      return { bound: true, ...decision }
+    } catch (cause) {
+      if (isStoreRefusal(cause)) return { bound: false, reason: cause.message }
+      throw cause
+    }
+  }
+
+  /**
+   * The harness's own window on this lead's session.
+   *
+   * `interactiveResume` when there is a bound session — that is the whole
+   * promise, that a tab's PM conversation survives its suspend — and
+   * `interactiveStart` otherwise, seeded with the launch nonce for the
+   * harnesses that mint their own id. Both come from `hosts/lib/runners.js`
+   * so the flags live in ONE place; only the command is replaced, because
+   * the pane host needs the absolute path and that module names a binary.
+   *
+   * The billing guard rides along in `dropEnv` for the same reason: a lead
+   * is spawned by Rust rather than through `cf`, so the names that would
+   * flip a subscription login to API-key billing are only stripped if the
+   * invocation's own list reaches the frame.
+   */
+  #leadArgv(kind, admitted) {
+    const agent = { kind }
+    const reserved = admitted.evidence ?? {}
+    if (admitted.nativeSession !== null && admitted.nativeSession !== undefined) {
+      const resume = interactiveResume(agent, admitted.nativeSession)
+      if (resume !== null) {
+        return {
+          args: resume.args,
+          dropEnv: resume.dropEnv ?? [],
+          nativeSession: admitted.nativeSession,
+          resumed: true,
+          reason: null,
+        }
+      }
+    }
+    const preallocated = reserved.preallocatedId ?? null
+    // `[consensflow launch <nonce>]`, exactly as a worker's packet opens.
+    // A bare nonce is not evidence: `bindEvidence` looks for the MARKER at
+    // the head of one of the first five user turns, so a seed carrying the
+    // id on its own could never bind and the lead stayed cold forever.
+    const seed = typeof reserved.nonce === 'string' ? formatLaunchMarker(reserved.nonce) : undefined
+    const start = interactiveStart(agent, preallocated, seed)
+    return {
+      args: start?.args ?? [],
+      dropEnv: start?.dropEnv ?? [],
+      nativeSession: preallocated,
+      resumed: false,
+      reason:
+        admitted.nativeSession === null || admitted.nativeSession === undefined
+          ? 'this lead never bound a native session, so it opens cold'
+          : `${kind} has no interactive resume, so it opens cold`,
+    }
+  }
+
+  /**
+   * What this harness needs on its command line to be deliverable to.
+   *
+   * Only the harnesses a live probe confirmed have a channel beyond the two
+   * that are always there, and `launchConfiguration` throws for the rest —
+   * so `enabledChannels` is asked first rather than the answer guessed from
+   * a name.
+   */
+  async #leadChannel(kind, launchId, workspace) {
+    const extra = enabledChannels(kind).filter((channel) => channel !== 'pty-inline')
+    if (!extra.some((channel) => channel !== 'cf-read')) {
+      return { args: [], env: {}, channel: null }
+    }
+    return await launchConfiguration(kind, { launchId, workspace })
+  }
+
+  /**
+   * A lead launch that definitely did not happen, given back.
+   *
+   * Release and suspend are ONE queued decision comparing pane, generation
+   * and launch (`store.leadEnded`), so a tab whose lead never opened ends
+   * suspended with no reservation — the only state `tab.resume` can recover
+   * from. Doing half of it is what left a tab open with nothing holding it
+   * and a retry answering "not suspended".
+   */
+  async #unwindLead(tabId, launchId, admitted) {
+    try {
+      await this.#store.leadEnded(await this.#directoryOf(tabId), {
+        tab: tabId,
+        pane: admitted.pane.id,
+        generation: admitted.pane.generation,
+        launchId,
+      })
+    } catch {
+      // The tab stands either way; a failed tidy-up must not replace the
+      // error that actually stopped the launch.
+    }
+  }
+
+  /**
+   * Nothing was admitted yet, so there is no launch to give back — only a
+   * tab this call minted a moment ago, and only `tab.open` mints one.
+   */
+  async #unwindLeadBeforeAdmission(tabId, opened) {
+    if (opened !== true) return
+    try {
+      await this.#tabs.suspend(tabId)
+    } catch {
+      // As above: a failed tidy-up must not replace the real error.
+    }
+  }
+
+  async #directoryOf(tabId) {
+    return (await this.#tabs.get(tabId))?.directory ?? null
+  }
+
+  /**
+   * Encodes a `pane.open` body and sends it, refusing anything the frame
+   * could not carry BEFORE it counts as sent — the same boundary `#open`
+   * keeps, and for the same reason.
+   */
+  async #transmit(bridge, body, subject, sent) {
+    const line = encodeFrame(body)
+    if (line === null || byteLength(line) > bridge.maxFrameBytes) {
+      throw new PaneError(
+        line === null
+          ? `${subject} could not be encoded for the pane host`
+          : `${subject} does not fit one frame (${byteLength(line)} bytes)`,
+        { status: 409, code: 'pane-refused' },
+      )
+    }
+    // `request` writes the frame before it returns, so from here on the
+    // bytes are the transport's and the outcome is not ours to assume — the
+    // same boundary `#open` keeps, and nothing is awaited across it.
+    const opening = this.#beginOpen(body)
+    const pending = bridge.request('pane.open', body, { deadlineMs: this.#deadlineMs })
+    sent.transmitted = true
+    try {
+      return await pending
+    } finally {
+      this.#openSettled(opening)
+    }
   }
 
   async #openTab(tabId) {
@@ -1086,6 +1874,34 @@ function definiteNegative(answer) {
   if (answer.ok !== false) return null
   if (typeof answer.error !== 'string' || answer.error.length === 0) return null
   return answer.error === 'deadline' ? null : answer.error
+}
+
+/**
+ * One entry of a `pane.list` answer, in the only shape a reconcile can
+ * decide by: an identity to compare and a liveness to believe. A missing
+ * or mistyped field is not a dead pane, it is an answer we cannot read.
+ *
+ * The generation must be a SAFE integer: past 2^53 JavaScript stops being
+ * able to tell two of them apart, so a comparison there could match a row
+ * against a pane that is not it and reconcile away a living launch.
+ */
+function isListedPane(entry) {
+  return (
+    isRecord(entry) &&
+    typeof entry.id === 'string' &&
+    entry.id.length > 0 &&
+    Number.isSafeInteger(entry.generation) &&
+    entry.generation >= 1 &&
+    typeof entry.alive === 'boolean'
+  )
+}
+
+/** The refusal that leaves a suspended tab exactly as it was. */
+function unlistablePanes(tabId, reason) {
+  return new PaneError(
+    `the pane host could not say what it still holds, so the tab ${tabId} was left suspended: ${reason}`,
+    { status: 503, code: 'pane-list-unavailable' },
+  )
 }
 
 /** The frame as bytes, or `null` when this body has no encoding at all. */

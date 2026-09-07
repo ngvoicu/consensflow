@@ -32,7 +32,7 @@ export async function answers(kind, sessionId, env, options = {}) {
       case 'claude-code':
         return await claudeAnswers(sessionId, env)
       case 'pi':
-        return await piAnswers(sessionId, env)
+        return await piAnswers(sessionId, env, options)
       case 'kimi':
         return await kimiAnswers(sessionId, env)
       case 'opencode':
@@ -1132,13 +1132,47 @@ function piText(content) {
     .join('\n')
 }
 
+const SAFE_PATH_SEGMENT = /^[A-Za-z0-9._-]+$/
+
 // Pi 0.85.1 emits agent_settled only in memory after retries, compaction, and
-// queued continuations (agent-session.js:772-810); it persists no boundary.
-// Its provider backoff is capped at 60 seconds (settings-manager.js:610-615),
-// so a derived settlement requires twice that period without a file append.
+// queued continuations (agent-session.js:772-810). The bundled extension
+// persists that boundary in app-owned settled/<launchId>.json, tied to Pi's
+// session id and leaf entry. A matching file is native evidence; otherwise the
+// provider backoff is capped at 60 seconds (settings-manager.js:610-615), so a
+// derived settlement requires twice that period without a file append. The
+// readiness module deliberately refuses this derived Pi result for AUTOMATIC
+// delivery; manual reading and deliver.now are unaffected.
 const PI_SETTLEMENT_QUIET_MS = 120_000
 
-async function piAnswers(sessionId, env) {
+async function piSettlementEvidence(sessionId, env, options) {
+  const config = options?.piSettlement ?? options?.pi ?? {}
+  const directory = config.directory ?? env.CF_DELIVERY_SETTLED
+  const launchId = config.launchId ?? env.CF_DELIVERY_LAUNCH_ID
+  if (
+    typeof directory !== 'string' ||
+    typeof launchId !== 'string' ||
+    !SAFE_PATH_SEGMENT.test(launchId)
+  ) {
+    return null
+  }
+  try {
+    const evidence = JSON.parse(await fs.readFile(path.join(directory, `${launchId}.json`), 'utf8'))
+    if (
+      evidence?.launchId !== launchId ||
+      evidence?.sessionId !== sessionId ||
+      typeof evidence?.frontier?.id !== 'string' ||
+      evidence.frontier.id.length === 0
+    ) {
+      return null
+    }
+    return evidence
+  } catch (cause) {
+    if (cause?.code === 'ENOENT' || cause instanceof SyntaxError) return null
+    throw cause
+  }
+}
+
+async function piAnswers(sessionId, env, options = {}) {
   const root = path.join(home(env), '.pi', 'agent', 'sessions')
   const file = await findFile(root, (name) => name.includes(sessionId))
   if (file === null) return { unknown: true, reason: `unreadable: no pi session ${sessionId}` }
@@ -1242,25 +1276,43 @@ async function piAnswers(sessionId, env) {
 
   if (count === 0) throw new Error(`empty pi session ${sessionId}`)
   result.version = version ?? checkedVersion('pi', undefined)
+  const nativeEvidence = await piSettlementEvidence(sessionId, env, options)
+  const hasNativeBoundary = Boolean(
+    nativeEvidence && terminal?.item?.id === nativeEvidence.frontier.id,
+  )
   const { mtimeMs } = await fs.stat(file)
   const quiet = Date.now() - mtimeMs >= PI_SETTLEMENT_QUIET_MS
   const open = [...openTools]
   const canSettle = Boolean(terminal?.complete && quiet && open.length === 0)
-  if (canSettle) terminal.item.settled = true
+  const nativeSettled = Boolean(hasNativeBoundary && open.length === 0)
+  if (canSettle || nativeSettled) terminal.item.settled = true
 
-  result.inFlight = open.length > 0 || (terminal ? !quiet : turnOpen)
-  const state = canSettle ? 'settled' : result.inFlight ? 'in-flight' : 'unknown'
-  const quietBoundary = canSettle
-    ? boundary('session.quiet_window', terminal.boundary.cursor, terminal.boundary.at, {
-        quietMs: PI_SETTLEMENT_QUIET_MS,
+  result.inFlight = open.length > 0 || (terminal ? !(quiet || nativeSettled) : turnOpen)
+  const state = nativeSettled || canSettle ? 'settled' : result.inFlight ? 'in-flight' : 'unknown'
+  const quietBoundary = nativeSettled
+    ? boundary('agent_settled', terminal.boundary.cursor, terminal.boundary.at, {
+        launchId: nativeEvidence.launchId,
+        sessionId: nativeEvidence.sessionId,
+        frontier: nativeEvidence.frontier,
       })
-    : null
-  setSettlement(result, state, 'derived', quietBoundary, quietBoundary?.cursor ?? null, {
-    complete: terminal?.complete ?? false,
-    openTools: open,
-    queuedTurns: [],
-    hooksInFlight: [],
-  })
+    : canSettle
+      ? boundary('session.quiet_window', terminal.boundary.cursor, terminal.boundary.at, {
+          quietMs: PI_SETTLEMENT_QUIET_MS,
+        })
+      : null
+  setSettlement(
+    result,
+    state,
+    nativeSettled ? 'native' : 'derived',
+    quietBoundary,
+    quietBoundary?.cursor ?? null,
+    {
+      complete: terminal?.complete ?? false,
+      openTools: open,
+      queuedTurns: [],
+      hooksInFlight: [],
+    },
+  )
   return result
 }
 

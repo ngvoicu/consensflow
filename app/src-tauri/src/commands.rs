@@ -15,9 +15,13 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::arbiter::{InputArbiter, PaneEvent};
 use crate::bridge::{Bridge, BridgeBuilder, ConnectedBridge};
-use crate::pty::{PaneKey, PaneOutput, PaneTable, StreamedPane};
+use crate::pty::{
+    validate_drop_env, PaneEnvironment, PaneKey, PaneOutput, PaneTable, StreamedPane,
+};
 
 const MAX_FRAME_BYTES: usize = 1024 * 1024;
+/// The page-side name of Node's `state.changed`. No dot: Tauri rejects it.
+const PAGE_STATE_EVENT: &str = "state-changed";
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
 const MAX_INPUT_BYTES: usize = 64 * 1024;
 const INPUT_QUEUE_CAPACITY: usize = 1024;
@@ -75,9 +79,13 @@ impl RosterHandle {
 }
 
 struct OutputHubState {
-    channel: Option<Channel<PaneOutputMessage>>,
+    sink: Option<OutputSink>,
     pending: VecDeque<PaneOutputMessage>,
 }
+
+/// Where one pane's bytes go. `false` means the destination is gone, and the
+/// hub parks what follows until a new one arrives.
+type OutputSink = Arc<dyn Fn(PaneOutputMessage) -> bool + Send + Sync>;
 
 struct OutputHub {
     state: Mutex<OutputHubState>,
@@ -87,6 +95,7 @@ enum InputWork {
     Human(Vec<u8>),
     Reply(Vec<u8>),
     Paste { epoch: u64, body: Vec<u8> },
+    ClaimEpoch { epoch: u64 },
 }
 
 impl InputWork {
@@ -94,6 +103,7 @@ impl InputWork {
         match self {
             Self::Human(bytes) | Self::Reply(bytes) => bytes.len(),
             Self::Paste { body, .. } => body.len().saturating_add(13),
+            Self::ClaimEpoch { .. } => 0,
         }
     }
 }
@@ -270,11 +280,11 @@ impl InputQueue {
         }
 
         page.last_sequences.insert(key.clone(), sequence);
-        let bytes = match &work {
-            InputWork::Human(bytes) | InputWork::Reply(bytes) => bytes,
-            InputWork::Paste { body, .. } => body,
-        };
-        validate_input(bytes)?;
+        match &work {
+            InputWork::Human(bytes) | InputWork::Reply(bytes) => validate_input(bytes)?,
+            InputWork::Paste { body, .. } => validate_input(body)?,
+            InputWork::ClaimEpoch { .. } => {}
+        }
         if page.completions.len() >= MAX_PENDING_INPUT_TICKETS {
             return Err("pane-input-ticket-capacity".to_string());
         }
@@ -322,6 +332,14 @@ impl InputQueue {
         body: Vec<u8>,
     ) -> Result<oneshot::Receiver<InputResponse>, String> {
         self.submit(key, InputWork::Paste { epoch, body })
+    }
+
+    fn claim_epoch(
+        &self,
+        key: PaneKey,
+        epoch: u64,
+    ) -> Result<oneshot::Receiver<InputResponse>, String> {
+        self.submit(key, InputWork::ClaimEpoch { epoch })
     }
 
     fn submit(
@@ -434,6 +452,10 @@ fn input_worker(
                 .write_paste(&panes, &key, epoch, &body)
                 .map(|()| InputSuccess::Written)
                 .map_err(|error| error.to_string()),
+            InputWork::ClaimEpoch { epoch } => arbiter
+                .claim_epoch(&key, epoch)
+                .map(|()| InputSuccess::Written)
+                .map_err(|error| error.to_string()),
         };
         job.pending_bytes
             .fetch_sub(job.reserved_bytes, Ordering::AcqRel);
@@ -455,22 +477,33 @@ impl OutputHub {
     fn new() -> Self {
         Self {
             state: Mutex::new(OutputHubState {
-                channel: None,
+                sink: None,
                 pending: VecDeque::new(),
             }),
         }
     }
 
+    /// The window's destination: a webview channel the page reads.
     fn register(&self, channel: Channel<PaneOutputMessage>) {
+        self.attach(Arc::new(move |message| channel.send(message).is_ok()));
+    }
+
+    /// The headless destination: back over the bridge the request came in on.
+    ///
+    /// The hub exists so `register_pane_handlers` need not know which of the
+    /// two it is feeding — that is what lets the window and the helper share
+    /// one set of handlers instead of two that drift.
+    fn register_sink(&self, sink: OutputSink) {
+        self.attach(sink);
+    }
+
+    fn attach(&self, sink: OutputSink) {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        state.channel = Some(channel);
+        state.sink = Some(sink);
         while let Some(message) = state.pending.front().cloned() {
-            let delivered = state
-                .channel
-                .as_ref()
-                .is_some_and(|channel| channel.send(message).is_ok());
+            let delivered = state.sink.as_ref().is_some_and(|sink| sink(message));
             if !delivered {
-                state.channel = None;
+                state.sink = None;
                 break;
             }
             state.pending.pop_front();
@@ -480,13 +513,13 @@ impl OutputHub {
     fn publish(&self, message: PaneOutputMessage) {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         if state
-            .channel
+            .sink
             .as_ref()
-            .is_some_and(|channel| channel.send(message.clone()).is_ok())
+            .is_some_and(|sink| sink(message.clone()))
         {
             return;
         }
-        state.channel = None;
+        state.sink = None;
         state.pending.push_back(message);
     }
 }
@@ -677,7 +710,7 @@ impl Drop for AppRuntime {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct OpenRequest {
     #[serde(default)]
     id: Option<String>,
@@ -689,6 +722,8 @@ struct OpenRequest {
     argv: Vec<String>,
     #[serde(default)]
     env: HashMap<String, String>,
+    #[serde(default)]
+    drop_env: Vec<String>,
     #[serde(default)]
     size: SizeRequest,
     #[serde(default = "default_backlog_bytes")]
@@ -739,6 +774,14 @@ struct PasteRequest {
     generation: u64,
     epoch: u64,
     body: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ClaimEpochRequest {
+    pane: String,
+    generation: u64,
+    epoch: u64,
 }
 
 #[derive(Deserialize)]
@@ -813,8 +856,15 @@ fn start_editor(
     }
 }
 
+/// Node's `state.changed` becomes the page's `state-changed`.
+///
+/// The two names are not the same namespace and cannot be. Tauri 2 accepts
+/// only alphanumerics, `-`, `/`, `:` and `_` in an event name, so the dotted
+/// bridge name is REFUSED on the page side — `listen` rejects, and the
+/// rejection took the page's whole start-up with it. The bridge keeps its
+/// name; only the hop into the webview is renamed.
 fn register_page_events(builder: &mut BridgeBuilder, sink: PageEventSink) {
-    builder.on_event("state.changed", move |body| sink("state.changed", body));
+    builder.on_event("state.changed", move |body| sink(PAGE_STATE_EVENT, body));
 }
 
 fn bundled_cli(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
@@ -892,14 +942,14 @@ fn register_pane_handlers(
                 pane_key(id, generation)?,
                 &request.cwd,
                 &request.argv,
-                &request.env,
+                PaneEnvironment::new(&request.env, &request.drop_env),
                 size,
                 request.backlog_bytes,
             ),
             (None, None) => open_panes.open_streamed(
                 &request.cwd,
                 &request.argv,
-                &request.env,
+                PaneEnvironment::new(&request.env, &request.drop_env),
                 size,
                 request.backlog_bytes,
             ),
@@ -971,6 +1021,18 @@ fn register_pane_handlers(
             InputSuccess::Written => Ok(json!({"ok":true})),
             InputSuccess::Human { .. } => {
                 Err("pane.write_paste returned the wrong outcome".to_string())
+            }
+        }
+    });
+
+    let claim_queue = Arc::clone(&inputs);
+    builder.on("pane.claim_epoch", move |_bridge, body| {
+        let request: ClaimEpochRequest = parse_body(body)?;
+        let key = pane_key(&request.pane, request.generation)?;
+        match wait_for_input_blocking(claim_queue.claim_epoch(key, request.epoch)?)? {
+            InputSuccess::Written => Ok(json!({"ok":true})),
+            InputSuccess::Human { .. } => {
+                Err("pane.claim_epoch returned the wrong outcome".to_string())
             }
         }
     });
@@ -1093,6 +1155,65 @@ fn stream_to_page(
     });
 }
 
+/// The headless pane helper, running the WINDOW's handlers.
+///
+/// `consensflow-bridge` used to carry its own copy of the pane operations, and
+/// a copy is a contract that drifts: it had no launch deduplication, no pane
+/// id or generation on `pane.open`, no `draft.clear`, it threw the arbiter's
+/// event receiver away so no `pane.enter` was ever sent, and it never reported
+/// a natural `pane.exit`. The real Node side speaks to the window, so against
+/// the helper it could only be refused. There is nothing to keep in step here:
+/// this is `register_pane_handlers`, the same `InputQueue`, the same
+/// `LaunchRegistry`, the same event forwarding and the same shutdown drain the
+/// window uses, over stdin and stdout instead of a webview.
+///
+/// Serves until the peer closes the transport, then reaps what it opened.
+pub fn run_headless() -> Result<(), String> {
+    let panes = Arc::new(PaneTable::new());
+    let output = Arc::new(OutputHub::new());
+    let launches = Arc::new(LaunchRegistry::new());
+    let (event_sender, event_receiver) = mpsc::channel();
+    let arbiter = Arc::new(InputArbiter::new(ENTER_DELAY_MS, event_sender));
+    let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+
+    let mut builder = BridgeBuilder::new(MAX_FRAME_BYTES);
+    register_pane_handlers(
+        &mut builder,
+        Arc::clone(&panes),
+        Arc::clone(&arbiter),
+        Arc::clone(&output),
+        Arc::clone(&launches),
+        Arc::clone(&inputs),
+    );
+    builder.on_error(|error| eprintln!("consensflow-bridge: {error}"));
+
+    let bridge = builder
+        .serve(
+            std::io::stdin(),
+            std::io::stdout(),
+            &json!({"v":1,"kind":"consensflow-bridge"}),
+        )
+        .map_err(|error| error.to_string())?;
+
+    // No page to draw into, so a pane's bytes go back over the same bridge.
+    // Registered after `serve` on purpose: whatever a pane produced in between
+    // is parked in the hub and drains into this sink the moment it attaches.
+    let sink = bridge.clone();
+    output.register_sink(Arc::new(move |message: PaneOutputMessage| {
+        sink.event("pane.output", json!(message)).is_ok()
+    }));
+    forward_input_events(event_receiver, bridge.clone());
+
+    // The same order the window shuts down in, and for the same reason: the
+    // peer's EOF is what closes admission, so the drain can only run after it.
+    bridge
+        .wait_launches_closed()
+        .map_err(|error| error.to_string())?;
+    reap_all(&panes);
+    inputs.close_and_drain();
+    bridge.wait_closed().map_err(|error| error.to_string())
+}
+
 fn forward_input_events(events: mpsc::Receiver<PaneEvent>, bridge: Bridge) {
     thread::spawn(move || {
         for event in events {
@@ -1129,6 +1250,7 @@ fn validate_open_request(request: &OpenRequest) -> Result<(), String> {
     if request.backlog_bytes == 0 {
         return Err("backlogBytes must be greater than zero".to_string());
     }
+    validate_drop_env(&request.drop_env).map_err(|error| error.to_string())?;
     validate_size(request.size.cols, request.size.rows)?;
     if let Some(id) = &request.id {
         validate_text(id, "pane id")?;
@@ -1609,24 +1731,44 @@ pub async fn tab_resume<R: Runtime>(app: AppHandle<R>, tab: String) -> Value {
     .await
 }
 
+/// The page's pane-output subscription, taken ONCE for the life of the page.
+///
+/// It used to ride on every `state.list`, and that was silently destructive:
+/// Tauri builds a fresh `Channel` for each invocation carrying one, and
+/// dropping the previous one emits `{end:true}` to the JavaScript callback
+/// the page reuses. So the SECOND refresh tore down the live subscription and
+/// every pane went blank for the rest of the session — with no error
+/// anywhere, because the sends that followed still returned ok into a channel
+/// nothing was listening to. Only the packaged app could show it: a shimmed
+/// page test has no real channel to end.
 #[tauri::command]
-pub async fn list_state<R: Runtime>(
+pub async fn subscribe_output<R: Runtime>(
     app: AppHandle<R>,
     on_output: Channel<PaneOutputMessage>,
 ) -> Value {
-    let (bridge, startup_error, panes, output, roster) = {
+    let output = {
+        let state = app.state::<AppRuntime>();
+        Arc::clone(&state.output)
+    };
+    output.register(on_output);
+    json!({"ok":true})
+}
+
+/// The page's whole picture. Carries no channel, on purpose — see
+/// [`subscribe_output`].
+#[tauri::command]
+pub async fn list_state<R: Runtime>(app: AppHandle<R>) -> Value {
+    let (bridge, startup_error, panes, roster) = {
         let state = app.state::<AppRuntime>();
         (
             state.bridge.clone(),
             state.startup_error.clone(),
             Arc::clone(&state.panes),
-            Arc::clone(&state.output),
             state.roster.clone(),
         )
     };
     let state_error = startup_error.clone();
     run_blocking("state.list", move || {
-        output.register(on_output);
         let node = request_node(bridge, startup_error, "state.list".to_string(), json!({}));
         compose_state(&panes, node, roster, state_error)
     })
@@ -1693,6 +1835,7 @@ mod tests {
             "generation":1,
             "cwd":"/tmp",
             "argv":["/bin/sh"],
+            "dropEnv":["OPENAI_API_KEY"],
             "size":{"rows":24,"cols":80},
         }))
         .unwrap();
@@ -1707,6 +1850,24 @@ mod tests {
         }))
         .unwrap();
         assert!(validate_open_request(&half_reserved).is_err());
+
+        let invalid_drop_env: OpenRequest = parse_body(json!({
+            "cwd":"/tmp",
+            "argv":["/bin/sh"],
+            "dropEnv":["BAD=NAME"],
+        }))
+        .unwrap();
+        assert!(validate_open_request(&invalid_drop_env)
+            .unwrap_err()
+            .contains("environment variable name"));
+
+        assert!(parse_body::<OpenRequest>(json!({
+            "cwd":"/tmp",
+            "argv":["/bin/sh"],
+            "dropEnv":[],
+            "silentlyIgnoredSecurityField":true,
+        }))
+        .is_err());
     }
 
     #[test]
@@ -2036,7 +2197,7 @@ mod tests {
                     "-c".to_string(),
                     "printf ready; sleep 30".to_string(),
                 ],
-                &HashMap::new(),
+                PaneEnvironment::new(&HashMap::new(), &[]),
                 size,
                 1024,
             )
@@ -2194,7 +2355,7 @@ mod tests {
             received
                 .recv_timeout(Duration::from_secs(1))
                 .expect("page event"),
-            ("state.changed".to_string(), json!({"reason":"pane.open"}))
+            ("state-changed".to_string(), json!({"reason":"pane.open"}))
         );
         drop(node_stream);
         connected.bridge.wait_closed().expect("bridge closes");
@@ -2297,6 +2458,179 @@ mod tests {
             "GUI shutdown returned before its admitted launch finished"
         );
         assert!(panes.list().expect("pane list after shutdown").is_empty());
+    }
+
+    /// Whether a pid is still there — signal 0 delivers nothing and only asks.
+    #[cfg(unix)]
+    fn process_exists(pid: i32) -> bool {
+        unsafe extern "C" {
+            fn kill(pid: i32, signal: i32) -> i32;
+        }
+
+        // SAFETY: signal 0 does not deliver a signal; it only checks whether
+        // the process exists and is signalable by this process.
+        let result = unsafe { kill(pid, 0) };
+        result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(1)
+    }
+
+    /// The case the editor-absent test above could not reach: a REAL editor
+    /// child, its own pipes carrying the bridge, and a `pane.open` admitted
+    /// and still spawning when the app is told to quit.
+    ///
+    /// This is the ordering proof. `Bridge::admit_handler` refuses every new
+    /// handler once the transport is `closed`, and only EOF from the peer
+    /// closes it — so killing the editor IS the act that shuts admission, and
+    /// nothing else in `shutdown()` can do it. What follows the kill is a
+    /// drain of what was ALREADY admitted, and only then the reap, so a pane
+    /// whose spawn was in flight is in the table before anything reaps it.
+    #[cfg(unix)]
+    #[test]
+    fn gui_shutdown_kills_a_present_editor_then_drains_its_admitted_launch() {
+        use std::sync::Barrier;
+
+        let _pty_guard = crate::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let (event_sender, _event_receiver) = mpsc::channel();
+        let arbiter = Arc::new(InputArbiter::new(0, event_sender));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), arbiter));
+        let release = Arc::new(Barrier::new(2));
+        let handler_release = Arc::clone(&release);
+        let handler_panes = Arc::clone(&panes);
+        let (admitted_sender, admitted_receiver) = mpsc::channel();
+        let mut builder = BridgeBuilder::new(MAX_FRAME_BYTES);
+        builder.on_launch("pane.open", move |_bridge, _body| {
+            admitted_sender.send(()).expect("announce admitted launch");
+            handler_release.wait();
+            let key = PaneKey::new("editor-present-pane", 1);
+            let _reader = handler_panes
+                .open_at(
+                    key,
+                    Path::new("/tmp"),
+                    &[
+                        "/bin/sh".to_string(),
+                        "-c".to_string(),
+                        "sleep 30".to_string(),
+                    ],
+                    &HashMap::new(),
+                    PtySize {
+                        rows: 24,
+                        cols: 80,
+                        pixel_width: 0,
+                        pixel_height: 0,
+                    },
+                )
+                .map_err(|error| error.to_string())?;
+            Ok(json!({"ok":true}))
+        });
+
+        // Stands in for `cf ui --json`: the handshake line, one launch request,
+        // then a process that holds both pipes open until something kills it.
+        let mut editor = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(concat!(
+                r#"printf '%s\n' '{"url":"http://localhost:1/","token":"test"}'; "#,
+                r#"printf '%s\n' '{"v":1,"id":"n-open","kind":"req","op":"pane.open","body":{}}'; "#,
+                "exec sleep 60",
+            ))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn the stand-in editor");
+        let editor_pid = editor.id() as i32;
+        let reader = editor.stdout.take().expect("editor stdout");
+        let writer = editor.stdin.take().expect("editor stdin");
+        let connected = builder.connect(reader, writer).expect("connect bridge");
+
+        let runtime = Arc::new(AppRuntime {
+            panes: Arc::clone(&panes),
+            bridge: Some(connected.bridge),
+            editor: Mutex::new(Some(editor)),
+            roster: None,
+            startup_error: None,
+            output: Arc::new(OutputHub::new()),
+            inputs,
+            launches: Arc::new(LaunchRegistry::new()),
+            shutting_down: AtomicBool::new(false),
+        });
+        admitted_receiver
+            .recv_timeout(Duration::from_secs(5))
+            .expect("launch admitted over the real editor pipe");
+
+        let shutdown_runtime = Arc::clone(&runtime);
+        let (shutdown_sender, shutdown_receiver) = mpsc::channel();
+        let shutdown = thread::spawn(move || {
+            shutdown_runtime.shutdown();
+            shutdown_sender.send(()).expect("announce shutdown");
+        });
+        let returned_before_launch = shutdown_receiver
+            .recv_timeout(Duration::from_millis(250))
+            .is_ok();
+        release.wait();
+        if !returned_before_launch {
+            shutdown_receiver
+                .recv_timeout(Duration::from_secs(5))
+                .expect("shutdown returns once the admitted launch has finished");
+        }
+        shutdown.join().expect("shutdown thread");
+
+        assert!(
+            !returned_before_launch,
+            "shutdown returned before its admitted launch finished"
+        );
+        assert!(panes.list().expect("pane list after shutdown").is_empty());
+        assert!(
+            !process_exists(editor_pid),
+            "the editor child outlived shutdown"
+        );
+    }
+
+    /// Why the editor is killed FIRST, stated as a test rather than a comment.
+    ///
+    /// `wait_launches_closed` waits for `closed` AND an empty launch count,
+    /// and only the peer's EOF sets `closed`. Draining before the kill would
+    /// therefore wait on a peer that is still writing — every app exit would
+    /// hang. This is the shape a reordered `shutdown()` would take.
+    #[cfg(unix)]
+    #[test]
+    fn draining_launches_before_the_editor_closes_never_returns() {
+        use std::io::Write;
+        use std::os::unix::net::UnixStream;
+
+        let mut builder = BridgeBuilder::new(1024);
+        builder.on("noop", |_bridge, _body| Ok(json!({"ok":true})));
+        let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
+        node_stream
+            .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
+            .expect("write bridge handle");
+        node_stream.flush().expect("flush bridge handle");
+        let connected = builder
+            .connect(
+                rust_stream.try_clone().expect("clone bridge socket"),
+                rust_stream,
+            )
+            .expect("connect bridge");
+
+        let waiting = connected.bridge.clone();
+        let (done_sender, done_receiver) = mpsc::channel();
+        let wait = thread::spawn(move || {
+            let outcome = waiting.wait_launches_closed();
+            let _ = done_sender.send(outcome.is_ok());
+        });
+        assert!(
+            done_receiver
+                .recv_timeout(Duration::from_millis(300))
+                .is_err(),
+            "wait_launches_closed returned while the editor peer was still open"
+        );
+
+        drop(node_stream);
+        assert!(
+            done_receiver
+                .recv_timeout(Duration::from_secs(5))
+                .expect("wait_launches_closed returns once the peer closes"),
+            "wait_launches_closed failed after the peer closed"
+        );
+        wait.join().expect("wait thread");
     }
 
     #[cfg(unix)]

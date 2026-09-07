@@ -1,12 +1,16 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { detectHarnesses } from './harnesses.js'
-import { installSkill, skillsSummary, uninstallSkills } from './install.js'
+import {
+  installEverywhere,
+  installSkill,
+  scopeTargets,
+  skillsSummary,
+  uninstallSkills,
+} from './install.js'
 import { loadManifest, saveManifest, sha256 } from './manifest.js'
-import { currentMode, scopeTargets } from './mode.js'
 import { HARNESSES, listAgents, rosterPath } from './roster.js'
 import { generateSkill } from './skill.js'
-import { installTerminalCommand, terminalRuntime } from './terminal.js'
 
 /**
  * The one place the roster becomes the installed skill.
@@ -22,13 +26,8 @@ import { installTerminalCommand, terminalRuntime } from './terminal.js'
  */
 
 /**
- * Where the generated skill belongs: exactly who the mode puts in scope.
+ * Where the generated skill belongs: every detected harness without a native integration.
  *
- * This used to answer "cmux mode, or nobody", which was right while `claude`
- * and `pi` were integrations installing a hand-written skill of their own.
- * They are scopes over this same skill now, so a roster edit in a host mode
- * has to reach that one harness — otherwise choosing `claude` and adding the
- * first agent leaves the machine with no skill anywhere.
  */
 export function skillTargets(env, { all = false } = {}) {
   return scopeTargets(env, { all })
@@ -56,7 +55,7 @@ export function retireSkillFromNativeHosts(env) {
 }
 
 /**
- * Harnesses the mode puts in scope that are carrying no skill of ours.
+ * Detected harnesses that are carrying no skill of ours.
  *
  * `installSkill` refuses a path it does not own and records nothing — correct,
  * because the file is someone else's. But the refusal is one row among
@@ -98,7 +97,7 @@ export function staleSkills(env) {
   if (!agents.some((p) => HARNESSES.includes(p.harness))) return []
   let content
   try {
-    content = generateSkill(agents, { mode: currentMode(env) })
+    content = generateSkill(agents)
   } catch {
     return []
   }
@@ -127,7 +126,7 @@ export function refreshInstalledSkill(env) {
   installSkill(
     {
       relPath: 'consensflow/SKILL.md',
-      content: generateSkill(agents, { mode: currentMode(env) }),
+      content: generateSkill(agents),
       source: 'consensflow',
     },
     env,
@@ -176,8 +175,6 @@ function recordRosterSha(env) {
  * so it now does what the buttons do, under three limits that keep it from
  * being a surprise:
  *
- * - nothing before a mode is chosen. An app opened on a machine that has not
- *   picked a path still installs nothing at all.
  * - the command is claimed outright. It names one ConsensFlow absolutely, and
  *   the app you opened is the one you want answering `cf run` — including when
  *   it currently names another install. This machine is meant to hold one.
@@ -190,28 +187,10 @@ function recordRosterSha(env) {
  * reported is exactly the kind of quiet this function exists to end.
  */
 export function healOnOpen(env) {
-  const mode = currentMode(env)
-  if (mode === null) return { mode: null, command: 'no mode chosen', skills: 0 }
-
-  const wiring = terminalRuntime(env)
-  let command = wiring !== null && wiring.exists && wiring.mine ? 'ok' : 'claimed'
-  if (command === 'claimed') {
-    try {
-      installTerminalCommand(env)
-    } catch (cause) {
-      command = cause instanceof Error ? cause.message : String(cause)
-    }
-  }
-
-  // Behind this version, missing from a harness in scope, or edited — all
-  // three are the installed skill not saying what this ConsensFlow says.
   const drifted = skillsSummary(env).drifted
   const behind = staleSkills(env).length + skillGaps(env).length + drifted
-  if (behind > 0) refreshInstalledSkill(env)
-  // `replaced` is counted apart from the rest on purpose: bringing a file up to
-  // date is the app doing its job and needs no announcement — the panel already
-  // shows where the command points and that nothing is behind. Overwriting an
-  // edit is the one thing here a user could regret, so it is the one thing
-  // said out loud.
-  return { mode, command, skills: behind, replaced: drifted }
+  const outcome = installEverywhere(env)
+  retireSkillFromNativeHosts(env)
+  recordRosterSha(env)
+  return { command: outcome.command, skills: behind, replaced: drifted }
 }

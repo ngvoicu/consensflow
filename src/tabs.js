@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { AGENT_KINDS } from '../hosts/lib/state.js'
 import { nowIso } from '../hosts/lib/utils.js'
-import { allocatePaneId } from './store.js'
+import { allocatePaneId, StoreRefusal } from './store.js'
 
 /**
  * The tab store (Phase 2, IMPL-PANE-14) — the semantics of tabs on top of
@@ -42,7 +42,20 @@ import { allocatePaneId } from './store.js'
 
 const PANE_KINDS = ['lead', 'worker', 'shell']
 // An image preset is not a CLI that can hold a pane — a lead runs a real harness.
-const LEAD_HARNESSES = AGENT_KINDS.filter((kind) => kind !== 'image')
+/**
+ * The harnesses a tab lead may run.
+ *
+ * `image` has no window at all. `kimi` is WITHDRAWN (deviation, this
+ * round): `interactiveStart` returns null for it on purpose — `-p` is
+ * defined as non-interactive and it has no positional prompt — so a kimi
+ * lead cannot be seeded with `[consensflow launch <nonce>]`, cannot bind,
+ * and loses its whole conversation on every resume. Offering it is offering
+ * a tab that quietly forgets. It comes back when it can carry a marker.
+ *
+ * Exported because the page picks from it: one list, so what is offered and
+ * what is accepted cannot drift apart.
+ */
+export const LEAD_HARNESSES = AGENT_KINDS.filter((kind) => kind !== 'image' && kind !== 'kimi')
 
 /** The app-owned identity of a tab's lead: `tab:<id>:<generation>`. */
 export function leadIdentity(tab) {
@@ -192,7 +205,7 @@ export class Tabs {
       const tabs = await io.readTabs()
       const tab = findTab(tabs, tabId)
       if (tab.closed !== true) {
-        throw new Error(`the tab ${tabId} is not suspended`)
+        throw new StoreRefusal(`the tab ${tabId} is not suspended`, 'not-suspended')
       }
       tab.closed = false
       tab.lead.generation += 1
@@ -255,12 +268,14 @@ function isRecord(value) {
 
 function requireText(value, label) {
   if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new Error(`${label} is required`)
+    // Argument validation is always about the request that arrived.
+    throw new StoreRefusal(`${label} is required`, 'missing-field')
   }
 }
 
 function requireOneOf(value, allowed, label) {
   if (!allowed.includes(value)) {
-    throw new Error(`${label} must be one of: ${allowed.join(', ')}`)
+    // A value outside the vocabulary is the CALLER's, not this machine's.
+    throw new StoreRefusal(`${label} must be one of: ${allowed.join(', ')}`, 'not-allowed')
   }
 }

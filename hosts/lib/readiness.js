@@ -26,6 +26,9 @@
  *   - provenance `native`, or `derived` with `complete` true — completion may
  *     only derive under that condition, so a derived proof without it is a
  *     malformed proof, not a slow turn;
+ *   - for Pi AUTOMATIC delivery, provenance must be `native`: its quiet-window
+ *     result is a derived fallback and is not sufficient for automatic work;
+ *     MANUAL delivery may proceed on that derived proof;
  *   - the boundary on the CURRENT frontier: no open tool, no queued turn, no
  *     hook in flight. This binds a native marker too — `task_complete`
  *     followed by a queued turn is an earlier turn's marker, not this one's;
@@ -90,6 +93,9 @@ const WORK_LISTS = [
  * @param {object} input.answers — a `completion.answers()` result.
  * @param {string} [input.kind] — the harness adapter that minted both
  *   cursors; required only when `sinceCursor` is supplied.
+ * @param {'automatic'|'manual'} [input.purpose='automatic'] — why this
+ *   caller is asking to deliver. Only an explicit `manual` purpose bypasses
+ *   Pi's derived-settlement gate.
  * @param {boolean} input.draftLatched — the pane's draft latch, from Rust.
  *   Must be reported: a missing latch is missing evidence, not a clear one.
  * @param {number} input.epoch — the pane's input epoch, a non-negative
@@ -101,7 +107,14 @@ const WORK_LISTS = [
  * @returns {{state: 'ready'|'busy'|'draft'|'unknown', epoch: number|null,
  *   cursor: number|null, provenance: 'native'|'derived'|null, reason: string}}
  */
-export function leadReady({ answers, kind, draftLatched, epoch, sinceCursor } = {}) {
+export function leadReady({
+  answers,
+  kind,
+  purpose = 'automatic',
+  draftLatched,
+  epoch,
+  sinceCursor,
+} = {}) {
   const carry = {
     epoch: isPosition(epoch) ? epoch : null,
     ...carriedProof(answers),
@@ -128,7 +141,7 @@ export function leadReady({ answers, kind, draftLatched, epoch, sinceCursor } = 
   if (working !== null) return busy(working)
 
   const settlement = answers.settlement
-  const unqualified = disqualifyingReason(settlement)
+  const unqualified = disqualifyingReason(settlement, kind, purpose)
   if (unqualified !== null) return unknown(unqualified)
 
   if (sinceCursor !== undefined && sinceCursor !== null) {
@@ -208,7 +221,7 @@ function ongoingWork(answers) {
 }
 
 /** Why this settlement is not a proof we may act on — or `null` when it is. */
-function disqualifyingReason(settlement) {
+function disqualifyingReason(settlement, kind, purpose) {
   if (settlement === null || typeof settlement !== 'object') {
     return 'unknown: no settlement proof for the current turn'
   }
@@ -218,6 +231,9 @@ function disqualifyingReason(settlement) {
   const provenance = settlement.provenance
   if (provenance !== NATIVE && provenance !== DERIVED) {
     return 'unknown: the settlement names no provenance this module accepts'
+  }
+  if (kind === 'pi' && provenance === DERIVED && purpose !== 'manual') {
+    return 'unknown: Pi derived settlement requires native settlement evidence'
   }
   if (!isPosition(settlement.cursor)) {
     return 'unknown: the settlement carries no native cursor'

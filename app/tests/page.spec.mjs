@@ -222,7 +222,6 @@ async function installTauriShim(
       class Channel {
         constructor() {
           this.onmessage = null
-          window.__outputChannel = this
         }
       }
 
@@ -296,7 +295,17 @@ async function installTauriShim(
         if (Object.hasOwn(window.__commandResults, command)) {
           return copy(window.__commandResults[command])
         }
+        if (command === 'subscribe_output') {
+          if (window.__outputChannel !== null) {
+            throw new Error('replacing the Rust Channel ends the existing callback')
+          }
+          window.__outputChannel = args.onOutput
+          return { ok: true }
+        }
         if (command === 'list_state') {
+          if (args.onOutput !== undefined) {
+            throw new Error('state refresh must not replace the output subscription')
+          }
           const snapshot = copy(window.__state)
           listStateCalls += 1
           if (listStateCalls === 1 && firstListStateGate !== null) await firstListStateGate
@@ -399,6 +408,9 @@ async function installTauriShim(
         core: { Channel, invoke },
         event: {
           async listen(name, handler) {
+            if (!/^[\p{Alphabetic}\p{Number}/:_-]*$/u.test(name)) {
+              throw new Error(`Tauri refuses the event name ${name}`)
+            }
             const handlers = eventListeners.get(name) ?? []
             handlers.push(handler)
             eventListeners.set(name, handlers)
@@ -443,6 +455,9 @@ async function installTauriShim(
         window.__outputChannel.onmessage({ id, generation, seq, bytes })
       }
       window.__emitTauriEvent = async (name, payload = {}) => {
+        if (!/^[\p{Alphabetic}\p{Number}/:_-]*$/u.test(name)) {
+          throw new Error(`Tauri refuses the event name ${name}`)
+        }
         for (const handler of eventListeners.get(name) ?? []) {
           await handler({ event: name, payload: copy(payload) })
         }
@@ -469,7 +484,7 @@ async function installTauriShim(
         window.__emitPaneOutput('p4-w3', 1, 1, [
           ...new TextEncoder().encode('external worker output\r\n'),
         ])
-        await window.__emitTauriEvent('state.changed', { reason: 'pane.open' })
+        await window.__emitTauriEvent('state-changed', { reason: 'pane.open' })
       }
       window.__releaseOneParserWrite = () => {
         const write = parserWrites.shift()
@@ -544,26 +559,85 @@ test('restores saved geometry on later launches', async ({ page }) => {
   expect(await commandCalls(page, 'window.maximize')).toHaveLength(0)
 })
 
-test('loads the tokenized roster iframe and collapses it upward without removing it', async ({
+test('opens Agents full-window and preserves the roster and pane services when closed', async ({
   page,
 }) => {
   await boot(page)
+  const dialog = page.getByTestId('roster-panel')
   const iframe = page.getByTestId('roster-frame')
+  const opener = page.getByRole('button', { name: 'Agents', exact: true })
+  await expect(dialog).not.toBeVisible()
   await expect(iframe).toHaveAttribute('src', `${ROSTER_ORIGIN}/?token=ui-token`)
+  const before = await page.getByTestId('pane-stage').boundingBox()
+  await opener.click()
+  await expect(page.getByRole('dialog', { name: 'Agents', exact: true })).toBeVisible()
+  const bounds = await dialog.boundingBox()
+  const viewport = page.viewportSize()
+  expect(bounds.x).toBe(0)
+  expect(bounds.y).toBe(0)
+  expect(bounds.width).toBe(viewport.width)
+  expect(bounds.height).toBe(viewport.height)
   await expect(
     page.frameLocator('[data-testid="roster-frame"]').getByText('Roster connected'),
   ).toBeVisible()
-
-  const toggle = page.getByRole('button', { name: 'Collapse roster' })
-  const before = await page.getByTestId('pane-stage').boundingBox()
-  await toggle.click()
-  await expect(page.getByTestId('roster-panel')).toHaveAttribute('data-collapsed', 'true')
-  await expect(page.getByRole('button', { name: 'Expand roster' })).toBeVisible()
-  await expect(iframe).toHaveCount(1)
+  await page.evaluate(() => window.__emitPaneFlood('p5-w1', 1, 8))
   await expect
-    .poll(async () => (await page.getByTestId('pane-stage').boundingBox()).height)
-    .toBeGreaterThan(before.height)
+    .poll(
+      async () =>
+        (await commandCalls(page, 'pane_ack')).filter((call) => call.args.id === 'p5-w1').length,
+    )
+    .toBe(8)
+  await page.getByRole('button', { name: 'Close Agents' }).click()
+  await expect(dialog).not.toBeVisible()
+  await expect(opener).toBeFocused()
+  await expect(iframe).toHaveCount(1)
+  expect(await page.getByTestId('pane-stage').boundingBox()).toEqual(before)
+  await opener.click()
+  await page.getByRole('button', { name: 'Close Agents' }).focus()
+  await page.keyboard.press('Escape')
+  await expect(dialog).not.toBeVisible()
+  await expect(opener).toBeFocused()
+  expect(await commandCalls(page, 'close_pane')).toHaveLength(0)
 })
+
+test('explains reply delivery beside its explicit Automatic or Manual label', async ({ page }) => {
+  await boot(page)
+  await expect(page.getByTestId('tab-policy')).toHaveText('Reply delivery: Automatic')
+  await page.getByRole('button', { name: 'About reply delivery' }).click()
+  const help = page.getByTestId('delivery-help')
+  await expect(help).toBeVisible()
+  await expect(help).toContainText('complete worker replies')
+  await expect(help).toContainText('typing')
+  await expect(help).toContainText('Manual')
+  await expect(help).toContainText('all automatic replies')
+  await page.keyboard.press('Escape')
+  await expect(help).not.toBeVisible()
+  await page.getByTestId('session-t-five-button').click()
+  await expect(page.getByTestId('tab-policy')).toHaveText('Reply delivery: Manual')
+})
+
+for (const count of [1, 4]) {
+  test(`keeps the same top edge when selecting an agent from a ${count}-pane session`, async ({
+    page,
+  }) => {
+    const state = cannedState()
+    state.tabs[0].panes = state.tabs[0].panes.slice(0, count)
+    await boot(page, { state })
+    const lead = page.getByTestId('pane-p4-lead')
+    const gridTop = (await lead.boundingBox()).y
+    await page.getByTestId('pane-node-p4-lead').click()
+    await expect(page.getByTestId('pane-stage')).toHaveAttribute('data-mode', 'focused')
+    expect((await lead.boundingBox()).y).toBe(gridTop)
+    if (count > 1) {
+      const nav = await page.getByRole('navigation', { name: 'Pane navigation' }).boundingBox()
+      const title = await lead.locator('.pane-titlebar').boundingBox()
+      expect(nav.y).toBeGreaterThanOrEqual(title.y)
+      expect(nav.y + nav.height).toBeLessThanOrEqual(title.y + title.height)
+    }
+    await page.getByTestId('session-t-four-button').click()
+    expect((await lead.boundingBox()).y).toBe(gridTop)
+  })
+}
 
 test('collapses the sidebar left while leaving the pane area mounted', async ({ page }) => {
   await boot(page)
@@ -671,7 +745,10 @@ test('keeps focus on the lead when a worker opens', async ({ page }) => {
   await page.getByTestId('pane-node-p4-lead').click()
   await page.getByRole('button', { name: 'New pane' }).click()
   await page.getByRole('menuitem', { name: 'Agent' }).click()
-  await page.getByLabel('Agent').selectOption('nyx')
+  await page
+    .getByRole('dialog', { name: 'Open a worker pane' })
+    .getByLabel('Agent')
+    .selectOption('nyx')
   await page.getByLabel('Task').fill('Inspect the parser')
   await page.getByRole('button', { name: 'Open agent pane' }).click()
 
@@ -680,13 +757,21 @@ test('keeps focus on the lead when a worker opens', async ({ page }) => {
   await expect(page.getByTestId('pane-stage').locator('.pane-title')).toContainText('harbour-lead')
 })
 
-test('shows worker policy provenance and the literal shell title', async ({ page }) => {
+test('explains worker reply delivery and its source in plain language', async ({ page }) => {
   await boot(page)
   await expect(page.getByTestId('pane-p4-w1').locator('.pane-title')).toHaveText(
-    'nyx-coral-lane · @nyx · manual (pane-human)',
+    'nyx-coral-lane · @nyx · Replies: Manual',
   )
   await expect(page.getByTestId('pane-p4-w2').locator('.pane-title')).toHaveText(
-    'ares-amber-moss · @ares · auto (tab-human)',
+    'ares-amber-moss · @ares · Replies: Automatic',
+  )
+  await expect(page.getByTestId('pane-p4-w1').locator('.pane-title')).toHaveAttribute(
+    'title',
+    /Reply delivery: Manual\. Set for this worker\./,
+  )
+  await expect(page.getByTestId('pane-p4-w2').locator('.pane-title')).toHaveAttribute(
+    'title',
+    /Reply delivery: Automatic\. Set for this session\./,
   )
   await expect(page.getByTestId('pane-p4-shell').locator('.pane-title')).toHaveText('shell')
 })
@@ -704,7 +789,11 @@ test('uses the shared effective-policy rule for the tab manual veto and inherita
   await boot(page, { state })
 
   await expect(page.getByTestId('pane-p4-w1').locator('.pane-title')).toHaveText(
-    'nyx-coral-lane · @nyx · manual (tab-human)',
+    'nyx-coral-lane · @nyx · Replies: Manual',
+  )
+  await expect(page.getByTestId('pane-p4-w1').locator('.pane-title')).toHaveAttribute(
+    'title',
+    /Set for this session\./,
   )
 
   await page.evaluate(async () => {
@@ -714,10 +803,14 @@ test('uses the shared effective-policy rule for the tab manual veto and inherita
     currentWorker.policy = 'inherit'
     currentWorker.notifyPreference = 'manual'
     currentWorker.effectivePolicy = { mode: 'auto', source: 'default' }
-    await window.__emitTauriEvent('state.changed', { reason: 'policy.set' })
+    await window.__emitTauriEvent('state-changed', { reason: 'policy.set' })
   })
   await expect(page.getByTestId('pane-p4-w1').locator('.pane-title')).toHaveText(
-    'nyx-coral-lane · @nyx · manual (lead)',
+    'nyx-coral-lane · @nyx · Replies: Manual',
+  )
+  await expect(page.getByTestId('pane-p4-w1').locator('.pane-title')).toHaveAttribute(
+    'title',
+    /Requested by the lead\./,
   )
 })
 
@@ -757,14 +850,59 @@ test('lists transcript answers with delivered and uncertain marks and requires e
   })
 })
 
+test('shows exactly which reply parts are still unconfirmed', async ({ page }) => {
+  const state = cannedState()
+  state.answers['nyx-coral-lane'] = [
+    {
+      id: 'answer-partial',
+      preview: 'A long answer with missing text.',
+      ready: true,
+      delivered: false,
+      uncertain: true,
+      partProgress: { delivery: 'd-8002', total: 3, uncovered: [1, 3] },
+    },
+  ]
+  await boot(page, { state })
+  await page.getByTestId('pane-p4-w1').locator('.pane-titlebar').click({ button: 'right' })
+  const menu = page.getByRole('menu', { name: 'Worker actions' })
+  await expect(menu).toContainText('1 of 3 parts confirmed. Not confirmed: 1, 3.')
+  await expect(menu.getByRole('menuitem', { name: 'Resend answer-partial to lead' })).toBeVisible()
+})
+
+test('shows an unfinished answer as in progress without offering send or resend', async ({
+  page,
+}) => {
+  await boot(page)
+  await page.evaluate(() => {
+    window.__state.answers['nyx-coral-lane'] = [
+      {
+        id: 'answer-writing',
+        preview: 'Still writing.',
+        ready: false,
+        delivered: false,
+        uncertain: true,
+      },
+    ]
+  })
+  await page.getByTestId('pane-p4-w1').locator('.pane-titlebar').click({ button: 'right' })
+  const menu = page.getByRole('menu', { name: 'Worker actions' })
+  await expect(menu).toContainText('Still writing.')
+  await expect(menu).toContainText('In progress')
+  await expect(
+    menu.getByRole('menuitem', { name: 'Waiting for answer-writing to complete' }),
+  ).toBeDisabled()
+  await expect(menu.getByRole('menuitem', { name: /^(Send|Resend) answer-writing/ })).toHaveCount(0)
+  expect(await commandCalls(page, 'deliver_now')).toEqual([])
+})
+
 test('sets Auto, Manual, or Inherit on a worker and exposes tab policy in the header', async ({
   page,
 }) => {
   await boot(page)
   for (const [label, mode] of [
-    ['Auto', 'auto'],
+    ['Automatic', 'auto'],
     ['Manual', 'manual'],
-    ['Inherit', 'inherit'],
+    ['Inherit session setting', 'inherit'],
   ]) {
     await page.getByTestId('pane-p4-w1').locator('.pane-titlebar').click({ button: 'right' })
     await expect(page.getByRole('menuitem', { name: label })).toBeVisible()
@@ -776,8 +914,8 @@ test('sets Auto, Manual, or Inherit on a worker and exposes tab policy in the he
   }
 
   await page.getByTestId('tab-policy').click()
-  await expect(page.getByRole('menu', { name: 'Session policy' })).toContainText('Auto')
-  await expect(page.getByRole('menu', { name: 'Session policy' })).toContainText('Manual')
+  await expect(page.getByRole('menu', { name: 'Session reply delivery' })).toContainText('Auto')
+  await expect(page.getByRole('menu', { name: 'Session reply delivery' })).toContainText('Manual')
   await page.getByRole('menuitem', { name: 'Manual' }).click()
   expect((await commandCalls(page, 'set_policy')).at(-1)).toEqual({
     command: 'set_policy',
@@ -827,7 +965,7 @@ test('offers only canonical lead harness ids accepted by the tab store', async (
   const harnesses = await page
     .locator('#lead-harness option')
     .evaluateAll((options) => options.map((option) => option.value))
-  expect(harnesses).toEqual(['claude-code', 'codex', 'pi', 'opencode', 'kimi'])
+  expect(harnesses).toEqual(['claude-code', 'codex', 'pi', 'opencode'])
   for (const harness of harnesses) {
     const tabs = new Tabs(inMemoryTabStore())
     await expect(tabs.create('/tmp/picker-contract', harness)).resolves.toMatchObject({
@@ -847,7 +985,10 @@ test('opens Shell or Agent from the human New pane menu', async ({ page }) => {
 
   await page.getByRole('button', { name: 'New pane' }).click()
   await page.getByRole('menuitem', { name: 'Agent' }).click()
-  await page.getByLabel('Agent').selectOption('ares')
+  await page
+    .getByRole('dialog', { name: 'Open a worker pane' })
+    .getByLabel('Agent')
+    .selectOption('ares')
   await page.getByLabel('Task').fill('Trace delivery readiness')
   await page.getByRole('button', { name: 'Open agent pane' }).click()
   expect((await commandCalls(page, 'open_consult')).at(-1)).toEqual({
@@ -1074,6 +1215,22 @@ test('reconciles Node state changes and consumes output for a worker the page ha
   await expect(page.getByTestId('pane-p4-w3').locator('.xterm-rows')).toContainText(
     'external worker output',
   )
+  await page.evaluate(async () => {
+    await window.__emitTauriEvent('state-changed', { reason: 'second refresh' })
+    window.__emitPaneOutput('p4-w3', 1, 2, [...new TextEncoder().encode('still connected\r\n')])
+  })
+  await expect
+    .poll(
+      async () =>
+        (await commandCalls(page, 'pane_ack')).filter((call) => call.args.id === 'p4-w3').length,
+    )
+    .toBe(2)
+  await page.getByTestId('pane-node-p4-w3').click()
+  await expect(page.getByTestId('pane-p4-w3').locator('.xterm-rows')).toContainText(
+    'still connected',
+  )
+  expect(await commandCalls(page, 'subscribe_output')).toHaveLength(1)
+  expect((await commandCalls(page, 'list_state')).length).toBeGreaterThanOrEqual(3)
 })
 
 test('keeps an unseen pane emulator across reconciliation until state adopts it', async ({
@@ -1082,7 +1239,7 @@ test('keeps an unseen pane emulator across reconciliation until state adopts it'
   await boot(page, { emulatorGate: true })
   await page.evaluate(async () => {
     window.__emitPaneOutput('p4-w3', 1, 1, [...new TextEncoder().encode('before state\r\n')])
-    await window.__emitTauriEvent('state.changed', { reason: 'unrelated' })
+    await window.__emitTauriEvent('state-changed', { reason: 'unrelated' })
   })
   await page.waitForTimeout(50)
   await page.evaluate(() => window.__releaseOneParserWrite())
@@ -1104,7 +1261,7 @@ test('keeps an unseen pane emulator across reconciliation until state adopts it'
       agent: 'clio',
       alive: true,
     })
-    await window.__emitTauriEvent('state.changed', { reason: 'pane.open' })
+    await window.__emitTauriEvent('state-changed', { reason: 'pane.open' })
   })
   await expect(page.getByTestId('pane-node-p4-w3')).toBeVisible()
   await page.evaluate(() => {
@@ -1236,7 +1393,7 @@ test('replays a state change that arrives while a state request is in flight', a
       agent: 'clio',
       alive: true,
     })
-    await window.__emitTauriEvent('state.changed', { reason: 'pane.open' })
+    await window.__emitTauriEvent('state-changed', { reason: 'pane.open' })
     window.__releaseListState()
   })
 

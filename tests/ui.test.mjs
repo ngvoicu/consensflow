@@ -5,7 +5,7 @@ import { after, before, describe, it } from 'node:test'
 import { Script } from 'node:vm'
 import { listAgents } from '../src/roster.js'
 import { startUiServer } from '../src/ui.js'
-import { chooseCmuxMode, tempEnv } from './helpers.mjs'
+import { tempEnv } from './helpers.mjs'
 
 function stubCli(t, name) {
   mkdirSync(t.env.PATH, { recursive: true })
@@ -17,7 +17,6 @@ function stubCli(t, name) {
 describe('a host program can start the editor and be told where it is', () => {
   it('prints one machine-readable line, then serves', async () => {
     const t = tempEnv()
-    chooseCmuxMode(t)
     const { spawn } = await import('node:child_process')
     const cf = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
     // No stdin at all: the editor serves until it is killed.
@@ -53,7 +52,6 @@ describe('a host program can start the editor and be told where it is', () => {
 
   it('shuts down when the program that started it goes away', async () => {
     const t = tempEnv()
-    chooseCmuxMode(t)
     const { spawn } = await import('node:child_process')
     const cf = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
     const child = spawn(process.execPath, [cf, 'ui', '--json', '--no-open'], {
@@ -148,24 +146,27 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     assert.match(script, /Click again to destroy/)
   })
 
-  it('explains the commands, and how the lead follows a window', async () => {
+  it('explains the commands and automatic replies in app panes', async () => {
     const html = await (await fetch(`${server.url}/?token=${server.token}`)).text()
 
-    for (const verb of ['cf run @name', 'cf sessions', 'cf catchup', 'cf last', 'cf attach']) {
+    for (const verb of [
+      'cf run @name',
+      'cf sessions',
+      'cf catchup',
+      'cf say',
+      'cf read',
+      'cf attach',
+    ]) {
       assert.ok(html.includes(verb), `the page should explain ${verb}`)
     }
-    // The one thing a reader must know: a consult IS the agent's window now,
-    // and the coding agent follows it through the harness's own session.
-    assert.match(html, /own\s+window/i)
-    assert.match(html, /--wait/)
+    assert.match(html, /app pane/i)
+    assert.match(html, /replies.*automatically/i)
   })
 
   it('serves a page that can do the whole job, not half of it', async () => {
     const html = await (await fetch(`${server.url}/?token=${server.token}`)).text()
     // Everything the CLI can do has an affordance here.
-    // Turning off lives on the active mode card now, built when the page
-    // renders — so its affordance is the call, not a static id.
-    for (const marker of ['id="integrations"', 'id="update"', "post('/api/off'", 'Edit']) {
+    for (const marker of ['id="off"', 'id="update"', "post('/api/off'", 'Edit']) {
       assert.ok(html.includes(marker), `the page is missing ${marker}`)
     }
   })
@@ -202,9 +203,6 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
   })
 
   it('installs and regenerates the skill on every change — no separate step', async () => {
-    // Choosing the path is what installs; from then on every roster change
-    // keeps it current with no separate step.
-    await api('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'cmux' }) })
     await api('/api/agents/zeus', {
       method: 'PATCH',
       body: JSON.stringify({ model: 'claude-opus-5' }),
@@ -232,73 +230,28 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     assert.equal(system.agents, 1)
   })
 
-  it('reports the mode and what it means for the machine', async () => {
-    const res = await api('/api/system')
-    const system = await res.json()
-
-    // Whatever this suite has chosen by now, the report describes it: the
-    // no-mode case has its own test in the CLI suite.
-    assert.ok(system.mode.current === null || system.mode.available.includes(system.mode.current))
-    assert.equal(system.mode.labels.cmux, 'cmux (pi, cc, codex, opencode, kimi)')
-    assert.deepEqual([...system.mode.available].sort(), ['claude', 'cmux', 'pi'])
-    assert.ok(Array.isArray(system.mode.report))
-  })
-
-  it('switches mode from the page, saying who gains and loses access', async () => {
-    const res = await api('/api/mode', {
-      method: 'POST',
-      body: JSON.stringify({ mode: 'cmux' }),
-    })
-    assert.equal(res.status, 200)
-    const body = await res.json()
-
-    assert.equal(body.mode, 'cmux')
-    assert.match(body.report.join(' '), /claude/)
-    assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')))
-  })
-
-  it('refuses a mode that does not exist', async () => {
-    const res = await api('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'emacs' }) })
-    assert.equal(res.status, 400)
-  })
-
-  it('reports each integration: what it is, and where it stands', async () => {
+  it('reports one standalone installation without mode choices (TEST-PANE-47)', async () => {
     const system = await (await api('/api/system')).json()
-
-    const byId = Object.fromEntries(system.integrations.map((i) => [i.id, i]))
-    assert.deepEqual(Object.keys(byId).sort(), ['claude', 'cmux', 'pi'])
-
-    // Each one says what it gives you and whether it is the active path.
-    for (const integration of system.integrations) {
-      assert.ok(integration.title.length > 0)
-      assert.ok(integration.summary.length > 0)
-      assert.equal(typeof integration.active, 'boolean')
-      assert.equal(typeof integration.present, 'boolean')
-    }
-    assert.match(byId.cmux.title, /cmux/)
-    // A mode is a scope, and the page says so. It used to promise Claude Code
-    // "your live conversation as context", which nothing has delivered since
-    // the session stashing was deleted.
-    assert.match(byId.claude.summary, /only claude code/i)
-    assert.match(byId.cmux.summary, /every coding harness/i)
-    for (const integration of system.integrations) {
-      assert.doesNotMatch(integration.summary, /conversation/i, 'no promise nothing keeps')
-      // Every card says something about THIS machine — which harnesses the
-      // mode would reach, or that it would reach none. "not the active mode"
-      // next to a Use-this button tells the reader nothing they cannot see.
-      assert.ok(Array.isArray(integration.reach), 'each mode reports its reach')
-      assert.doesNotMatch(integration.detail, /not the active mode/)
-    }
-    const claude = byId.claude
-    assert.deepEqual(claude.reach, ['claude'], 'a host mode reaches exactly its harness')
-    assert.ok(byId.cmux.reach.length >= claude.reach.length, 'cmux reaches at least as many')
+    assert.equal(system.mode, undefined)
+    assert.equal(system.integrations, undefined)
+    assert.equal(typeof system.skills.owned, 'number')
   })
 
-  it('counts a host integration as installed, not just skill files', async () => {
-    const system = await (await api('/api/system')).json()
-    for (const integration of system.integrations) {
-      assert.equal(typeof integration.files, 'number')
+  it('retires the mode endpoint without changing installation (TEST-PANE-47)', async () => {
+    for (const mode of ['claude', 'pi', 'cmux']) {
+      const res = await api('/api/mode', { method: 'POST', body: JSON.stringify({ mode }) })
+      assert.equal(res.status, 404)
     }
+    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'mode.json')), false)
+  })
+
+  it('offers standalone controls and automatic reply guidance (TEST-PANE-47)', async () => {
+    const html = await (await api('/')).text()
+    assert.doesNotMatch(html, /id="integrations"|id="mode-lede"|\/api\/mode|cmux mode|--wait/)
+    for (const marker of ['id="off"', 'id="update"', 'cf say', 'cf read']) {
+      assert.ok(html.includes(marker), `the page is missing ${marker}`)
+    }
+    assert.match(html, /replies.*automatically/i)
   })
 
   it('installs and updates the skills from the page', async () => {
@@ -401,7 +354,7 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
 
     const done = await api('/api/off', { method: 'POST', body: JSON.stringify({ confirm: true }) })
     assert.equal(done.status, 200)
-    assert.equal((await done.json()).system.mode.current, null)
+    assert.equal((await done.json()).system.skills.owned, 0)
     assert.equal(
       existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')),
       false,
@@ -409,9 +362,8 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
   })
 
   it('removes them again, but only when the click was deliberate', async () => {
-    // Off cleared everything, mode included: choosing a path again is what
-    // puts the skill back, so removal has a target.
-    await api('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'cmux' }) })
+    // Reinstall after off so the removal has a target.
+    await api('/api/skills/install', { method: 'POST', body: JSON.stringify({}) })
     assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')))
 
     const refused = await api('/api/skills/uninstall', { method: 'POST', body: JSON.stringify({}) })
@@ -501,7 +453,7 @@ describe('the page can reset the machine, and says what that destroys', () => {
       method: 'POST',
       body: JSON.stringify({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }),
     })
-    await api('/api/mode', { method: 'POST', body: JSON.stringify({ mode: 'claude' }) })
+    await api('/api/skills/install', { method: 'POST', body: JSON.stringify({}) })
     assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')))
 
     const done = await api('/api/reset', {
@@ -513,7 +465,7 @@ describe('the page can reset the machine, and says what that destroys', () => {
     const body = await done.json()
     assert.equal(body.removed.agents, 1)
     assert.match(body.report.join(' '), /1 agent/)
-    assert.equal(body.system.mode.current, null)
+    assert.equal(body.system.skills.owned, 0)
     assert.equal(
       existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')),
       false,

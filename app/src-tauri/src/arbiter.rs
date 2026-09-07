@@ -339,6 +339,16 @@ impl InputArbiter {
         self.write_paste_via(table, pane, epoch, body)
     }
 
+    /**
+     * Admit a native-channel send under the same epoch and draft guard as a
+     * PTY paste, without reserving the writer or sending any bytes.
+     */
+    pub fn claim_epoch(&self, pane: &PaneKey, epoch: u64) -> Result<(), ArbiterError> {
+        let state = self.pane_state(pane)?;
+        let state = lock_state(&state)?;
+        validate_epoch_claim(&state, pane, epoch)
+    }
+
     fn write_paste_via<W: PaneInputWriter + ?Sized>(
         &self,
         writer: &W,
@@ -350,19 +360,7 @@ impl InputArbiter {
         let state = self.pane_state(pane)?;
         {
             let mut state = lock_state(&state)?;
-            validate_generation(&state, pane)?;
-            if state.input_failed {
-                return Err(ArbiterError::InputFailed);
-            }
-            if state.input_epoch != epoch {
-                return Err(ArbiterError::Stale);
-            }
-            if state.draft_epoch.is_some() {
-                return Err(ArbiterError::Draft);
-            }
-            if state.paste_in_flight {
-                return Err(ArbiterError::Busy);
-            }
+            validate_epoch_claim(&state, pane, epoch)?;
             state.paste_in_flight = true;
         }
 
@@ -497,6 +495,29 @@ fn validate_generation(state: &PaneInputState, pane: &PaneKey) -> Result<(), Arb
     } else {
         Err(ArbiterError::Stale)
     }
+}
+
+fn validate_epoch_claim(
+    state: &PaneInputState,
+    pane: &PaneKey,
+    epoch: u64,
+) -> Result<(), ArbiterError> {
+    validate_generation(state, pane)?;
+    if state.input_failed {
+        return Err(ArbiterError::InputFailed);
+    }
+    // Once human input is latched, Draft is the useful refusal even when
+    // those bytes also advanced the epoch after the caller's snapshot.
+    if state.draft_epoch.is_some() {
+        return Err(ArbiterError::Draft);
+    }
+    if state.input_epoch != epoch {
+        return Err(ArbiterError::Stale);
+    }
+    if state.paste_in_flight {
+        return Err(ArbiterError::Busy);
+    }
+    Ok(())
 }
 
 pub fn sanitize(body: &[u8]) -> Result<Vec<u8>, SanitizeError> {
@@ -891,28 +912,41 @@ mod tests {
     }
 
     #[test]
-    fn stale_and_draft_pastes_are_refused() {
+    fn epoch_claims_and_pastes_share_stale_and_draft_guards() {
         let _pty_guard = serial_pty_test();
         let table = PaneTable::new();
         let (key, _reader) = raw_recorder(&table, 1);
         let (events, _receiver) = mpsc::channel();
         let arbiter = InputArbiter::new(5, events);
         arbiter.register(&key).expect("register pane");
+        arbiter.claim_epoch(&key, 0).expect("current epoch claims");
+        assert!(matches!(
+            arbiter.claim_epoch(&key, 1),
+            Err(ArbiterError::Stale)
+        ));
         arbiter
             .write_human(&table, &key, b"x")
             .expect("write human byte");
 
         assert!(matches!(
             arbiter.write_paste(&table, &key, 0, b"automated"),
-            Err(ArbiterError::Stale)
+            Err(ArbiterError::Draft)
         ));
         assert!(matches!(
             arbiter.write_paste(&table, &key, 1, b"automated"),
             Err(ArbiterError::Draft)
         ));
+        assert!(matches!(
+            arbiter.claim_epoch(&key, 0),
+            Err(ArbiterError::Draft)
+        ));
         let stale_generation = PaneKey::new(&key.id, key.generation + 1);
         assert!(matches!(
             arbiter.write_paste(&table, &stale_generation, 1, b"automated"),
+            Err(ArbiterError::Stale)
+        ));
+        assert!(matches!(
+            arbiter.claim_epoch(&stale_generation, 1),
             Err(ArbiterError::Stale)
         ));
     }

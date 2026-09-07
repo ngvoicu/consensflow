@@ -1,6 +1,6 @@
 {
   "name": "consensflow",
-  "version": "3.0.0-alpha.22",
+  "version": "3.0.0-alpha.23",
   "description": "One manager for named AI participants: a shared roster, and the one skill that teaches every coding agent to consult them.",
   "license": "MIT",
   "type": "module",
@@ -19,11 +19,14 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node --test",
+    "test": "node --test tests/*.test.mjs tests/engine/*.test.mjs",
     "lint": "biome check .",
     "format": "biome format --write .",
     "check": "npm run lint && npm test",
-    "eval": "node evals/run.mjs"
+    "eval": "node evals/run.mjs",
+    "test:integration": "node --test tests/integration/*.test.mjs",
+    "smoke": "CONSENSFLOW_SMOKE=1 node --test tests/smoke.test.mjs",
+    "check:all": "npm run check && cargo test --offline --manifest-path app/src-tauri/Cargo.toml && cargo clippy --offline --manifest-path app/src-tauri/Cargo.toml --all-targets -- -D warnings && npm --prefix app run test:ui && npm run test:integration && npm run smoke"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.8"
@@ -43,7 +46,6 @@
     "codex",
     "opencode",
     "pi",
-    "cmux",
     "second-opinion"
   ],
   "author": "Gabriel Voicu (https://ngvoicu.dev)"

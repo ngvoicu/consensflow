@@ -1,71 +1,171 @@
 ---
 name: consensflow
-description: Consult one of the user's named AI participants — zeus, calliope, hyperion, gaia, diana, endymion, mani, aether, rhea, phoebe, sunna, jord, bil, prometheus, hephaestus — each a real coding-agent CLI (claude, codex, pi, opencode) run one-shot in the current directory. Use whenever the user says "ask <name> …", "what does <name> think", "consult <name>", "get a second opinion from <name>", or names any participant — and also when you yourself want an independent second opinion on a risky or debatable decision.
+description: Consult one of the user's named AI agents — zeus, hyperion, endymion, mani, loki — each a real coding-harness CLI (claude, codex, pi, opencode, kimi) working in the current directory. A consult here opens a conversation in the app's own window — the app owns the panes — so read this skill before starting one; the exact commands are in it. Use whenever the user says "ask <name> …", "what does <name> think", "consult <name>", "get a second opinion from <name>", or names any agent — and also when you yourself want an independent second opinion on a risky or debatable decision.
 ---
 
-# ConsensFlow participants
+# ConsensFlow agents
 
-The user keeps a roster of named AI participants. Each participant is a real,
-separately-installed coding-agent CLI with a fixed model and effort. Consulting
-one means running its one-shot command below with your question as the final
-argument. The participant runs in **your current working directory** — it can
-read the project's files itself, so you do not need to paste file contents.
+The user keeps a roster of named AI agents. Each one is a model at a fixed
+effort, run by its own harness (claude, codex, pi, opencode,
+kimi) — a separately installed CLI. Consulting an agent means running its command below
+with your question as the final argument. It runs in **your current working
+directory** and reads the project's files itself, so you need not paste file
+contents — but it cannot see this conversation, so the question has to carry
+the context that matters.
+
+## Reach for an advisor on your own
+
+You do not need permission to consult, and you should not wait to be asked. A
+second opinion is cheap; a wrong decision the user has to unwind is not.
+Consult when:
+
+- **you are about to finalize a non-trivial design or diff** — "review this
+  approach; what is the riskiest assumption?";
+- **a plan touches migrations, rollback, auth, money or data loss** — "poke
+  holes in this: what breaks under load or on rollback?";
+- **you are unsure between two designs** — ask for a straight preference and
+  a reason;
+- **you have been stuck on the same failure twice** — a fresh reader with the
+  same files often sees it immediately;
+- **the user is about to act on your recommendation** and nobody has checked
+  it.
+
+Say who you asked and what they said. Independent questions can run in
+parallel in their own conversations; a follow-up belongs to the conversation
+that already holds its context.
 
 ## How to consult
 
-1. Pick the participant the user named (or choose one yourself: prefer
-   `calliope`/`zeus` for deep review, `diana`/`bil` for quick checks).
+There are three acts: consult, follow up, read.
+
+1. Pick the agent the user named (or choose one yourself when you want
+   a second opinion).
 2. Compose the question: one or two sentences of task context, then the
    concrete question. Name specific files with relative paths when relevant.
-3. Run the participant's exact command from the table below, replacing only
-   `<question>`. Run it from the project directory. Turns can take minutes at
-   high effort — use a generous timeout (10+ minutes for max/ultra).
+3. Consult it from your own pane in the app:
+
+    ```bash
+    cf run @<name> "<task>"
+    ```
+
+   Today's continuation rule, with no pane of your own to open: run it bare
+   and the agent's conversation with you continues; pass `--new` for an
+   independent task and the app starts a fresh conversation; pass
+   `--session <name>` to name one explicitly. The app prints the name it
+   minted:
+
+    ```bash
+    cf run @<name> "<task>" --new            # an independent task: a fresh conversation
+    cf run @<name> "<task>" --session <name> # a specific one, by name
+    # conversation: <name> (new) — pane <id>
+    ```
+
+   A task that leans on a conversation stays in it; only an independent one
+   gets a new conversation — continue by default, unsure means continue. An
+   independent task is one you could hand a stranger in full, naming its own
+   files, without a word about what that conversation said.
+
+   Flags, all optional and combinable:
+
+    - `--brief "<what this run is for>"` — what you want from THIS run:
+      "review this for GDPR: lawful basis, retention", "you are checking the
+      migration for rollback safety". The agent is told nothing about itself
+      otherwise, so the brief is where the framing goes.
+    - `--handoff-file <file>` — your conversation so far, when the agent needs
+      it. You are the one holding it: write the relevant part to a file and
+      pass it.
+    - `--context "<note>"` — a short brief-alongside for one run.
+    - `--prompt-file <file>` — when the task is long. It IS the task: pass it
+      INSTEAD of the quoted one, never beside it, and put your framing in
+      `--brief`. Both together is refused, because the file would otherwise
+      replace what you quoted without a word.
+    - `--image <path>` — reference pictures for an image agent, repeatable.
+
+   Turns can take minutes at high effort — use a generous timeout (10+
+    minutes for max). The thinking streams as it goes.
 4. Report the answer to the user **verbatim or faithfully summarized, and
-   attributed** ("hyperion says: …"). Never present a participant's answer as
+   attributed** ("hyperion says: …"). Never present an agent's answer as
    your own.
+
+## Follow up in the same conversation
+
+A follow-up is the same question you would ask a colleague who already read
+the files: send it into the conversation that holds the context.
+
+```bash
+cf say <name> "<your follow-up, in plain words>"
+```
+
+Look before you send: run `cf catchup <name> --unread` first — the
+conversation may have moved without you, and a follow-up composed against a
+stale view asks the wrong question.
+
+## Read what arrived
+
+Reading a conversation and adding to it are different acts. "What did he
+say?", "did he reply?" ask you to READ: run `cf catchup <name> --unread`
+and report what it shows. Send nothing. Asking the agent again invents a new
+answer instead of finding the one that already exists.
+
+A delivered answer is read WHOLE from the top, never from the end. An answer
+that arrives in your pane is the complete answer — read all of it, starting
+at the first line, before you report or act on any of it. A line naming
+`cf read <id>` means the answer arrived as a file: run each part and read
+its complete output in full before anything else.
+
+```bash
+cf catchup <name> --unread   # what has been said since you last looked
+cf read <id>                 # a delivered file, first part
+cf read <id> --part 2        # every further part, until the answer is whole
+```
+
+A delivered answer is not re-read with `catchup`: once it is delivered, the
+delivery is the record — re-reading it as unread double-counts it.
+
+## Send and return, never wait
+
+After a consult or a follow-up, report what is running and in which
+conversation, then take the user's next message. Under `auto` the answer
+arrives in your pane on its own; under `manual` the human says when to
+read. Either way you do not sit out the answer: polling is wrong — `cf catchup`
+in a loop or `cf sessions` every few seconds burns the user's attention and
+answers nothing sooner.
 
 ## Rules
 
-- **One participant at a time.** Wait for one answer before asking another.
-- **Advice is free; acting is gated.** Never apply a participant's suggested
+- **Advice is free; acting is gated.** Never apply an agent's suggested
   changes, or keep files it created, without the user's explicit approval —
   unless the user already authorized it in this conversation.
-- **Do not retry a slow participant with a different one** unless the command
+- **Bring the answer back before anything else.** When an agent replies,
+  stop. Report what it said — attributed and faithful, not summarized away —
+  and add what you make of it.
+- **Do not retry a slow agent with a different one** unless the command
   itself failed. Slow usually means thinking.
+- **A policy the human set is never changed.** Delivery policy belongs to the
+  human on the page: never change it, never work around it, and never treat a
+  quiet conversation as permission to flip it.
 
 ## Roster
 
-| Participant | Runs | Command (replace `<question>` only) |
+| Agent | Harness | Model |
 |---|---|---|
-| **zeus** — Claude Opus 5, max effort; high-stakes architecture and review | claude | `env -u ANTHROPIC_API_KEY claude -p "<question>" --model claude-opus-5 --effort max` |
-| **calliope** — Claude Fable 5.1, max effort; the deepest reviewer on the roster | claude | `env -u ANTHROPIC_API_KEY claude -p "<question>" --model claude-fable-5-1 --effort max` |
-| **hyperion** — GPT 5.6 Sol, max effort; deepest Codex participant | codex | `env -u OPENAI_API_KEY codex exec --skip-git-repo-check -m gpt-5.6-sol -c model_reasoning_effort="max" "<question>"` |
-| **gaia** — GPT 5.6 Terra, xhigh; balanced Codex | codex | `env -u OPENAI_API_KEY codex exec --skip-git-repo-check -m gpt-5.6-terra -c model_reasoning_effort="xhigh" "<question>"` |
-| **diana** — GPT 5.6 Luna, xhigh; fast Codex checks | codex | `env -u OPENAI_API_KEY codex exec --skip-git-repo-check -m gpt-5.6-luna -c model_reasoning_effort="xhigh" "<question>"` |
-| **endymion** — Kimi K3 (1M context), xhigh; huge-context reads | pi | `pi --no-session --model openrouter/moonshotai/kimi-k3 --thinking xhigh -p "<question>"` |
-| **aether** — GPT 5.6 Sol via pi, xhigh | pi | `pi --no-session --model openai-codex/gpt-5.6-sol --thinking xhigh -p "<question>"` |
-| **rhea** — GPT 5.6 Terra via pi, xhigh | pi | `pi --no-session --model openai-codex/gpt-5.6-terra --thinking xhigh -p "<question>"` |
-| **phoebe** — GPT 5.6 Luna via pi, xhigh | pi | `pi --no-session --model openai-codex/gpt-5.6-luna --thinking xhigh -p "<question>"` |
-| **prometheus** — GLM 5.2, high | pi | `pi --no-session --model openrouter/z-ai/glm-5.2 --thinking high -p "<question>"` |
-| **hephaestus** — Qwen3.7 Max, high | pi | `pi --no-session --model openrouter/qwen/qwen3.7-max --thinking high -p "<question>"` |
-| **mani** — Kimi K3 via opencode | opencode | `opencode run --model openrouter/moonshotai/kimi-k3 "<question>"` |
-| **sunna** — GPT 5.6 Sol via opencode, xhigh | opencode | `opencode run --model openrouter/openai/gpt-5.6-sol --variant xhigh "<question>"` |
-| **jord** — GPT 5.6 Terra via opencode, xhigh | opencode | `opencode run --model openrouter/openai/gpt-5.6-terra --variant xhigh "<question>"` |
-| **bil** — GPT 5.6 Luna via opencode, xhigh | opencode | `opencode run --model openrouter/openai/gpt-5.6-luna --variant xhigh "<question>"` |
+| **zeus** — Deepest reviewer.; max effort | claude | `claude-opus-5` |
+| **hyperion** — max effort | codex | `gpt-5.6-sol` |
+| **endymion** — xhigh effort | pi | `openrouter/moonshotai/kimi-k3` |
+| **mani** | opencode | `openrouter/moonshotai/kimi-k3` |
+| **loki** — xhigh effort | codex | `gpt-5.6-luna` |
 
-The `env -u …_API_KEY` prefixes are deliberate: they keep subscription logins
-from silently switching to API-key billing. Keep them.
-
-(`pygmalion`, the image participant, is not yet supported by this skill.)
-
-## Visible pane (optional)
-
-By default, run the command inline and read its output. If the user asks to
-*watch* the participant work and the cmux skills are installed, open a split in
-the current cmux workspace with those skills and run the same command there —
-this skill defines *what* to run; the cmux skills define pane control.
+Every one of them is consulted the same way — `cf run @<name> "<task>"` — so
+picking an agent is a question of who you want, not of what to type. The
+command carries the billing guards for you: a run never switches a
+subscription login to API-key billing.
 
 ## Roster maintenance
 
-The roster above is generated. To change it, the user runs `cf participant …`
-or the ConsensFlow UI — never edit this file by hand; it will be regenerated.
+The roster above is generated by ConsensFlow. To change it, the user runs
+`cf agent …` or `cf ui` — never edit this file by hand; it will be
+regenerated.
+
+If an agent the user names is missing from the table, the roster may
+have changed since this file was generated (it is shared with other
+ConsensFlow tools): run `cf skills update`, then re-read this file.

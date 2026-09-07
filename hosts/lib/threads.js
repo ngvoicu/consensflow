@@ -147,15 +147,12 @@ function pick(list) {
  * `/resume`, a fork) must not quietly hand the new session the previous
  * lead's conversations.
  *
- * Below it, the harness's own session id still wins over the pane it sits
- * in: start a new Claude Code session in the SAME cmux pane and the pane id
- * has not changed, so the pane would hand the new lead the previous one's
- * conversations — exactly what this is here to stop.
+ * Older transcript readers can still identify the originating harness session.
+ * A cmux surface is not a ConsensFlow lead identity.
  */
 const LEAD_KEYS = [
   "CONSENSFLOW_LEAD_ID",
   "CLAUDE_CODE_SESSION_ID",
-  "CMUX_SURFACE_ID",
   "ITERM_SESSION_ID",
   "TERM_SESSION_ID",
 ];

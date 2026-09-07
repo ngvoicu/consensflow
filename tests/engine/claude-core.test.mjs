@@ -1081,19 +1081,13 @@ test('parity: shared lib files stay identical with the consensflow-pi sibling', 
   }
 })
 
-test('docs describe the stream-first observability surface, transcript backstop, and conventions [STRM-21]', async () => {
-  // AGENTS.md was deleted on 2026-09-06 (its rules moved into the active
-  // spec); the README carries every property asserted below on its own.
+test('docs describe app-owned panes, unread replies and durable artifacts [STRM-21]', async () => {
   const docs = await readFile(new URL('../../README.md', import.meta.url), 'utf8')
-  // Stream-first observability surface (primary), foreground-incremental.
-  assert.match(docs, /stream/i, 'docs describe the automatic live stream')
-  assert.match(docs, /foreground/i, 'docs note runs are foreground')
-  assert.match(docs, /never .*background/i, 'docs forbid background runs (a tool property)')
-  assert.match(docs, /non-optional/i, 'docs lock foreground streaming as non-optional')
-  // Durability backstop + the new parity-locked event module.
-  assert.match(docs, /transcript\.md/, 'docs mention the transcript.md backstop')
-  assert.match(docs, /transcript-events\.js/, 'docs mention the parity-locked event module')
-  // The shared cross-tool roster (--rw is gone: it's a redundant no-op, workspace-write is the default).
-  assert.match(docs, /shared/i, 'docs mention the shared cross-tool roster')
-  // The runners.js mirrored-with-deltas convention.
+  assert.match(docs, /app is the terminal/i, 'the app owns the live pane surface')
+  assert.match(docs, /lead sends and returns, never waits/i, 'consults release the lead turn')
+  assert.match(docs, /cf catchup.*--unread/, 'unread replies remain accessible')
+  assert.match(docs, /own session store/i, 'replies come from the native transcript')
+  assert.match(docs, /transcript\.md/, 'run artifacts remain a durable backstop')
+  assert.match(docs, /CONSENSFLOW_APP/, 'outside-app execution has an explicit boundary')
+  assert.match(docs, /shared/i, 'the roster remains shared across harnesses')
 })

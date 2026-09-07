@@ -273,7 +273,7 @@ test('lead: a harness that names no session is identified by its window', async 
 
   // codex, pi and opencode publish no session id to their children. The pane
   // or terminal window they run in is one lead for as long as it is open.
-  assert.equal(leadId({ CMUX_SURFACE_ID: 'pane-A' }), 'pane-A')
+  assert.equal(leadId({ CMUX_SURFACE_ID: 'pane-A' }), null)
   assert.equal(leadId({ ITERM_SESSION_ID: 'w0t0p0:UUID' }), 'w0t0p0:UUID')
   assert.equal(leadId({ TERM_SESSION_ID: 'abc' }), 'abc')
 })

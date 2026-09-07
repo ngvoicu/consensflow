@@ -1,6 +1,6 @@
 import { accessSync, constants, existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { delimiter, join, resolve } from 'node:path'
 
 /**
  * Where each coding harness keeps its skills, and whether it is installed here.
@@ -103,40 +103,69 @@ function candidateNames(command, env) {
   return [command]
 }
 
-function resolvesOnPath(command, env) {
+/**
+ * Where this command resolves on PATH, as an ABSOLUTE path, or null.
+ *
+ * A PATH entry may be relative — `PATH=.:…`, or a `bin` some launcher
+ * exported from wherever it happened to be — and joining that with a
+ * command name yields a relative candidate the pane host refuses outright
+ * (`app/src-tauri/src/commands.rs:1121`). Resolving here means every caller
+ * gets a path it can spawn, not one that happened to work from this
+ * process's current directory.
+ */
+function pathOnPath(command, env) {
   const executable = process.platform !== 'win32'
   for (const dir of (env.PATH ?? '').split(delimiter)) {
     if (dir.length === 0) continue
     for (const name of candidateNames(command, env)) {
-      const candidate = join(dir, name)
+      const candidate = resolve(dir, name)
       try {
         if (!statSync(candidate).isFile()) continue
         if (executable) accessSync(candidate, constants.X_OK)
-        return true
+        return candidate
       } catch {
         // Not here; keep looking.
       }
     }
   }
-  return false
+  return null
 }
 
 /** PATH first, then the places these CLIs actually install themselves. */
 function isInstalled(harness, env) {
-  if (resolvesOnPath(harness.command, env)) return true
+  return locate(harness, env) !== null
+}
+
+/** The absolute path this harness's CLI resolves to here, or null. */
+function locate(harness, env) {
+  const onPath = pathOnPath(harness.command, env)
+  if (onPath !== null) return onPath
   for (const dir of [...(harness.locations ?? []), ...COMMON]) {
     for (const name of candidateNames(harness.command, env)) {
-      const candidate = join(dir(env), name)
+      const candidate = resolve(dir(env), name)
       try {
         if (!statSync(candidate).isFile()) continue
         if (process.platform !== 'win32') accessSync(candidate, constants.X_OK)
-        return true
+        return candidate
       } catch {
         // Not here either; keep looking.
       }
     }
   }
-  return false
+  return null
+}
+
+/**
+ * The absolute path to a harness's CLI on this machine, or null.
+ *
+ * A pane is opened with an argv the pane host refuses unless argv[0] is
+ * absolute (`app/src-tauri/src/commands.rs:1121`), and the app's own PATH is
+ * not the login shell's — the same reason detection looks past PATH at all.
+ * So the launcher asks for the path, not the name.
+ */
+export function harnessPath(id, env) {
+  const harness = HARNESSES.find((candidate) => candidate.id === id)
+  return harness === undefined ? null : locate(harness, env)
 }
 
 /**

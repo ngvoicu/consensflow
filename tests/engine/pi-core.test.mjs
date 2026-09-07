@@ -1079,20 +1079,13 @@ test('parity: shared lib files stay identical with the consensflow-cc sibling', 
   }
 })
 
-test('docs describe the stream-first observability surface, transcript backstop, and conventions [STRM-21]', async () => {
-  // AGENTS.md was deleted on 2026-09-06 (its rules moved into the active
-  // spec); the README carries every property asserted below on its own.
+test('docs describe app-owned panes, unread replies and durable artifacts [STRM-21]', async () => {
   const docs = await readFile(new URL('../../README.md', import.meta.url), 'utf8')
-  // `onUpdate` was pi's `cf_run_agent` tool, and the pi extension went with the
-  // rest of the host payloads. Requiring the docs to describe it would mean
-  // documenting a surface that no longer exists — the same error as the
-  // README's old "never generates a permission-bypass flag". What is still
-  // true is the property itself, asserted below.
-  assert.match(docs, /foreground/i, 'docs note streaming is foreground-incremental')
-  assert.match(docs, /non-optional/i, 'docs lock streaming as non-optional')
-  // Durability backstop + the new parity-locked event module.
-  assert.match(docs, /transcript\.md/, 'docs mention the transcript.md backstop')
-  assert.match(docs, /transcript-events\.js/, 'docs mention the parity-locked event module')
-  assert.match(docs, /shared/i, 'docs mention the shared cross-tool roster')
-  // The runners.js mirrored-with-deltas convention.
+  assert.match(docs, /app is the terminal/i, 'the app owns the live pane surface')
+  assert.match(docs, /lead sends and returns, never waits/i, 'consults release the lead turn')
+  assert.match(docs, /cf catchup.*--unread/, 'unread replies remain accessible')
+  assert.match(docs, /own session store/i, 'replies come from the native transcript')
+  assert.match(docs, /transcript\.md/, 'run artifacts remain a durable backstop')
+  assert.match(docs, /CONSENSFLOW_APP/, 'outside-app execution has an explicit boundary')
+  assert.match(docs, /shared/i, 'the roster remains shared across harnesses')
 })

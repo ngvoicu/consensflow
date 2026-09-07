@@ -1,27 +1,39 @@
 # Evals — does the skill change what a lead *does*?
 
 `npm test` checks what the skill **says**. Nothing checked what a lead **does**
-with it, so on 2026-08-24 three behavioural failures in one day were each
-answered with more prose, and no change was ever measured.
+with it, so behavioural failures were each answered with more prose, and no
+change was ever measured.
 
 ```sh
 npm run eval                                  # every scenario, once
-npm run eval -- --scenario reading-is-not-writing --repeat 5
+npm run eval -- --scenario look-before-you-send --repeat 5
 npm run eval -- --lead codex
 ```
 
-**This spends real tokens.** It is deliberately not part of `npm test`, which
-spawns no live CLI and reaches no network.
+**This spends real tokens and is not part of any automated gate.** Do not run
+it in CI or as part of `check:all`: it needs a real lead CLI, the installed
+skill in your home, and your approval for the spend.
 
 ## How it works
 
 The lead is a real CLI reading the real installed `SKILL.md` from your home —
 that file is the artefact under test, so nothing about it is simulated. What
-*is* replaced is `cf` and `cmux`: stubs that answer plausibly and record every
+*is* replaced is `cf`: a stub that answers plausibly and records every
 invocation, first on `PATH`. The lead runs in a throwaway directory.
 
 So its choices become a log, and a log can be asserted. Nothing reaches a real
-pane, a real agent, or a real conversation.
+agent or a real conversation. There is no pane tooling to stub: ConsensFlow
+has one shape, the app owns the panes, and the skill never names a pane
+command or a harness CLI.
+
+The stub `cf` mints conversation names on `run --new`, continues on a bare
+run or `--session`, answers `say` and `catchup` from a per-scenario
+transcript, pastes a `deliver` fixture into the lead's transcript, and prints
+a long `read` fixture in numbered parts. A turn may also carry a `delivery`
+field, which the runner prefixes into what the lead receives — the envelope
+or pointer arriving in lead context, the way the app pastes it into the pane.
+Every invocation is logged, so a lead that invents a command the skill never
+taught is caught by the log.
 
 Each scenario is one lead session across several turns, because every failure
 worth checking happened on turn two or later.
@@ -32,92 +44,24 @@ A rate per check, not a verdict. Leads are not deterministic: a check that
 passes 4/5 is a **failing** check, because the user meets it on the run it
 misses. The runner exits non-zero if any check missed even once.
 
-## The scenarios are real failures
+## The scenarios are the standalone contract
 
-Each one happened live, and the fix it guards is in the skill:
-
-| Scenario | The failure |
+| Scenario | What it guards |
 |---|---|
-| `consult-opens-a-pane` | ran `cf run` in its own pane — never opened the skill body |
-| `reading-is-not-writing` | asked to READ a conversation, it SENT another request and invented a new answer |
-| `look-before-you-send` | a follow-up composed against a stale view asks the wrong question |
-| `answers-from-the-conversation` | answered "did she say anything else?" from memory, with the user's pane turns unread |
-| `the-consult-line-is-plain` | piped the consult through `tee` and passed a `--prompt-file` beside a quoted task; could not read the result, and started a second conversation on the same work |
-| `an-independent-task-gets-its-own-pane` | not live yet — the counterweight to every row above, added 2026-09-05: an unrelated task sent into a live conversation inherits a history it does not need and queues behind it |
-| `a-dependent-task-stays-in-its-pane` | the guard against that rule over-correcting: "a test for the case he flagged" only means something in the conversation that flagged it |
+| `consult-opens-a-pane` | the consult is `cf run --new`, via `cf` only — no pane tool, no harness CLI |
+| `look-before-you-send` | a follow-up is `cf catchup` then `cf say`, never a restart |
+| `an-independent-task-gets-its-own-conversation` | unrelated work starts fresh with `--new`, nothing sent into the old conversation |
+| `a-dependent-task-stays-in-its-conversation` | work that leans on the conversation is a `cf say` where it belongs |
+| `a-delivered-answer-is-read-whole` | the envelope arrives in the turn, as pasted into the pane — the lead reports its top verdict with no `catchup`, no `read` |
+| `a-delivered-file-is-read` | the pointer arrives in the turn — the lead runs every `cf read` part and its report holds the beginning, the middle AND the end |
+| `manual-is-the-humans` | the lead reads when asked and leaves a human-set `manual` policy alone |
+| `a-lead-sends-and-returns` | after `cf run --new` or `cf say` the lead reports what is running and where — no `--wait`, no polling |
 
-## Baseline (2026-08-24, lead: claude)
+## History
 
-13/13 checks held on a full pass; the two read-versus-write scenarios held
-3/3 each on repeat. That is the number to compare against when the skill's
-prose is next cut or rearranged — particularly if the Rules section is
-tightened, since these rules were added to it while it was still short.
-
-## What one pass is worth (2026-09-02, lead: claude)
-
-Two full passes over the SAME skill, minutes apart, disagreed:
-`reading-is-not-writing` held 4/4 then 3/4, and `look-before-you-send` 3/4
-then 4/4 — each dropping a check the other pass held. So the 13/13 above is a
-single sample, not a grade, and the README's own rule applies to it: use
-`--repeat` before concluding anything about a prose change.
-
-Two failures that looked like regressions were neither:
-
-- **A SIGKILL reads as a failed scenario.** The default timeout was 180s and
-  three runs were killed mid-turn; every one of them held all its checks once
-  given time. The default is 420s now.
-- **`a-long-answer-is-read-whole` failed 0/2 across both passes** and looked
-  like the one real regression — until it was run against the skill at HEAD
-  and against the changed skill, back to back: 2/2 both times. Consistent
-  twice is still not consistent. A/B against HEAD is the cheap way to settle
-  it, and it settles it in one pass per arm.
-
-## Both directions of one decision (2026-09-05/06, lead: claude)
-
-Two scenarios were added for the "continue or start fresh" decision, one per
-direction, and measuring them found more wrong with the stage than with the
-prose. Four stub lies were fixed, each one seen in a lead's log:
-
-- `cf mint` handed out a name that was already taken on a second call;
-- `cf run` always said `amber-tide`, so a lead that had just started a second
-  conversation was sent back to read the first;
-- `cf catchup` answered with jokes whatever the conversation was about, so
-  "a test for the case he flagged" met a conversation that flagged nothing —
-  scenarios can now supply a `transcript`;
-- `cmux new-pane` returned `surface:99` every time and `cmux tree` showed it
-  titled with the FIRST conversation, so a lead's new pane arrived already
-  wearing the old conversation's name.
-
-The runner now prints every command a lead ran when a check misses. What held
-across every honest run: `a-dependent-task-stays-in-its-pane` 5/5 checks on
-5/5 runs, and the independent scenario's decision (a fresh name, a new pane,
-nothing sent into the old window) 3/3 in every round before the pane stub was
-fixed. What is NOT yet measured: whether the fresh consult is then sent into
-the new pane rather than run in the lead's own — every earlier miss on that
-check happened under one of the stub lies above, and the first run against the
-honest stage was cut short by the Claude session limit. Measure it with
-`--repeat 3` when the limit resets, before reading anything into the prose.
-
-## The agent has to be real (2026-09-06, evening)
-
-Every scenario consulted `nyx`, a name no roster carries, on the theory
-that the stub `cf` answers for anyone. The lead is the one that has to
-believe it: a fresh Claude Code (2.1.263) read the installed skill's
-roster, found no `nyx`, and refused — "There's no agent named nyx" — in
-3/3 runs, every check 0/3, the prose untouched. The scenarios now consult
-`AGENT` (`CF_EVAL_AGENT`, default `zeus`) and the runner refuses to start
-when the installed skill does not list that name.
-
-Measured with the real agent, `--repeat 3`, one lead at a time:
-
-| Scenario | Result |
-|---|---|
-| `a-dependent-task-stays-in-its-pane` | 5/5 checks, 1/1 run (5/5 on 5/5 runs earlier in the day) |
-| `an-independent-task-gets-its-own-pane` — mints, opens a pane, sends the fresh consult there | 3/3 each |
-| `an-independent-task-gets-its-own-pane` — sends no bare words into the old window | 2/3: one lead first typed the unrelated task into the joke window, waited, then minted and opened its own pane |
-
-By this README's rule the last row is a failing check. It is left as
-measured: the cmux recipe it exercises is retired in the standalone
-switch-over (spec `standalone-panes-delivery`, Phase 6), where the
-scenario is re-expressed over `cf run --new`; the decision rule the
-scenario guards held in every run once the lead looked.
+The cmux-era scenarios (pane recipes, `mint`, `tree`, tail-pipe guards) were
+retired with the switch-over: they measured a shape that no longer exists.
+What they taught is kept — the honest-stage rules: a scenario whose prompt
+names a file ships that file, a scenario whose follow-up refers to what the
+agent said ships that transcript, and a miss prints every command the lead
+ran. A check that passes because nothing was sent is no check at all.

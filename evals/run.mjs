@@ -60,6 +60,9 @@ const note = (scenario, check, ok) => {
   row.of += 1
   tally.set(key, row)
 }
+// Lead executions that never completed, per pass label. Counted as misses
+// in the summary below so a dead lead can never read as green.
+const brokenLabels = []
 
 for (const scenario of chosen) {
   for (let pass = 0; pass < repeat; pass += 1) {
@@ -78,7 +81,11 @@ for (const scenario of chosen) {
     try {
       for (const turn of scenario.turns) {
         const before = stage.read().length
-        const invocation = nextTurn(turn.say, thread)
+        // A delivery arrives IN the lead's context, not behind a command:
+        // prefix the envelope into the turn so the lead reads it as arrived
+        // text, exactly as the app pastes it into the pane.
+        const prompt = turn.delivery ? `${turn.delivery}\n\n${turn.say}` : turn.say
+        const invocation = nextTurn(prompt, thread)
         const result = await runLead(invocation, stage, timeoutMs)
         if (invocation.capturesThread) thread = threadFrom(result.stdout) ?? thread
         if (result.code !== 0) {
@@ -122,6 +129,9 @@ for (const scenario of chosen) {
     }
     if (broke) {
       console.log(`  ${label}: could not run — ${broke}`)
+      // A lead that never ran is not a pass: failed executions count as
+      // misses, or a dead lead reads as green.
+      brokenLabels.push(label)
       continue
     }
     console.log(
@@ -147,4 +157,7 @@ for (const scenario of chosen) {
   }
 }
 // A flaky check is a failing check: the user meets it on the run it misses.
+// So is a lead that never ran at all.
+missed += brokenLabels.length
+for (const label of brokenLabels) console.log(`  FAIL  0/1  ${label} could not run`)
 process.exitCode = missed === 0 ? 0 : 1

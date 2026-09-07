@@ -54,6 +54,26 @@ async function stageJsonl(kind, sessionId, fixture, options = {}) {
     throw new Error(`no JSONL staging for ${kind}`)
   }
 
+  if (kind === 'pi' && options.settlement !== undefined) {
+    const settled = path.join(root, 'settled')
+    await fs.mkdir(settled, { recursive: true })
+    const settlement = options.settlement
+    await fs.writeFile(
+      path.join(settled, `${settlement.launchId}.json`),
+      `${JSON.stringify({
+        launchId: settlement.launchId,
+        sessionId: settlement.sessionId ?? sessionId,
+        frontier: { id: settlement.frontierId },
+        settledAt: Date.now(),
+      })}\n`,
+    )
+    env = {
+      ...env,
+      CF_DELIVERY_SETTLED: settled,
+      CF_DELIVERY_LAUNCH_ID: settlement.expectedLaunchId ?? settlement.launchId,
+    }
+  }
+
   const ending = options.finalAppend ?? '\n'
   await fs.writeFile(file, `${records.join('\n')}${ending}`)
   if (options.ageMs !== undefined) {
@@ -180,9 +200,10 @@ function shape(result) {
   assert.ok(['ready', 'busy', 'draft', 'unknown'].includes(readiness(result).state))
 }
 
-function readiness(result, sinceCursor) {
+function readiness(result, sinceCursor, kind) {
   return leadReady({
     answers: result,
+    ...(kind === undefined ? {} : { kind }),
     draftLatched: false,
     epoch: 17,
     ...(sinceCursor === undefined ? {} : { sinceCursor }),
@@ -567,7 +588,35 @@ test('completion/pi: toolCallId closes the loop and a 120-second quiet window de
   assert.equal(result.settlement.state, 'settled')
   assert.equal(result.settlement.provenance, 'derived')
   assert.equal(result.settlement.boundary, 'session.quiet_window')
-  assert.equal(readiness(result).state, 'ready')
+  assert.equal(readiness(result, undefined, 'pi').state, 'unknown')
+})
+
+test('completion/pi: matching settlement evidence promotes the native boundary, mismatches stay derived', async () => {
+  const settledStage = await stageJsonl('pi', 'hazy-ridge', 'pi/tool-loop.jsonl', {
+    settlement: { launchId: 'launch-pi-1', frontierId: '3f9b029e' },
+  })
+  const settled = await answers('pi', 'hazy-ridge', settledStage.env)
+  shape(settled)
+  assert.equal(settled.settlement.state, 'settled')
+  assert.equal(settled.settlement.provenance, 'native')
+  assert.equal(settled.settlement.boundary, 'agent_settled')
+  assert.equal(settled.settlement.evidence.complete, true)
+
+  const wrongFrontierStage = await stageJsonl('pi', 'hazy-ridge', 'pi/tool-loop.jsonl', {
+    settlement: { launchId: 'launch-pi-1', frontierId: 'not-the-leaf' },
+  })
+  const wrongFrontier = await answers('pi', 'hazy-ridge', wrongFrontierStage.env)
+  assert.equal(wrongFrontier.settlement.provenance, 'derived')
+
+  const wrongLaunchStage = await stageJsonl('pi', 'hazy-ridge', 'pi/tool-loop.jsonl', {
+    settlement: {
+      launchId: 'launch-pi-1',
+      expectedLaunchId: 'another-launch',
+      frontierId: '3f9b029e',
+    },
+  })
+  const wrongLaunch = await answers('pi', 'hazy-ridge', wrongLaunchStage.env)
+  assert.equal(wrongLaunch.settlement.provenance, 'derived')
 })
 
 test('completion/pi: every retry prefix stays unready until success plus the real quiet boundary', async () => {
@@ -605,7 +654,7 @@ test('completion/pi: every retry prefix stays unready until success plus the rea
   assert.equal(settled.settlement.state, 'settled')
   assert.equal(settled.settlement.provenance, 'derived')
   assert.equal(settled.settlement.boundary, 'session.quiet_window')
-  assert.equal(readiness(settled).state, 'ready')
+  assert.equal(readiness(settled, undefined, 'pi').state, 'unknown')
 })
 
 // ------------------------------------------------------------------ kimi
@@ -992,8 +1041,8 @@ test('completion/settledAfter: readiness delegates cursor freshness to the ownin
   assert.equal(completion.settledAfter('pi', pi.settlement, claude.settlement.cursor), null)
 
   const common = { answers: pi, kind: 'pi', draftLatched: false, epoch: 17 }
-  assert.equal(leadReady({ ...common, sinceCursor: pi.items[0].seq }).state, 'ready')
-  assert.equal(leadReady({ ...common, sinceCursor: pi.settlement.cursor }).state, 'busy')
+  assert.equal(leadReady({ ...common, sinceCursor: pi.items[0].seq }).state, 'unknown')
+  assert.equal(leadReady({ ...common, sinceCursor: pi.settlement.cursor }).state, 'unknown')
   assert.equal(leadReady({ ...common, sinceCursor: claude.settlement.cursor }).state, 'unknown')
 })
 

@@ -39,6 +39,7 @@ function record(overrides = {}) {
     agent: 'zeus',
     answer: 'The answer is complete.',
     channel: 'pty-inline',
+    expiresAt: Date.now() + 1_000,
     ...overrides,
   }
 }
@@ -50,6 +51,15 @@ function ptyTarget(bridge, enabledChannels = ['pty-inline']) {
     pane: 'lead-pane',
     generation: 4,
     epoch: 19,
+  }
+}
+
+function nativeTarget() {
+  return {
+    pane: 'lead-pane',
+    generation: 4,
+    epoch: 19,
+    claimEpoch: async () => ({ ok: true }),
   }
 }
 
@@ -75,6 +85,7 @@ function startPiStandIn(inbox, onRecord) {
       const files = (await readdir(inbox)).filter((name) => name.endsWith('.json'))
       if (files.length === 0) return
       await onRecord(JSON.parse(await readFile(join(inbox, files[0]), 'utf8')))
+      await rm(join(inbox, files[0]), { force: true })
     } finally {
       running = false
     }
@@ -203,6 +214,182 @@ describe('delivery channels', () => {
     node.close()
   })
 
+  it('claims the observed epoch immediately before an OpenCode native send', async () => {
+    const order = []
+    const { node, rust } = bridgePair()
+    rust.on('pane.claim_epoch', (body) => {
+      order.push('claim')
+      assert.deepEqual(body, { pane: 'lead-pane', generation: 4, epoch: 19 })
+      return { ok: true }
+    })
+    const server = createServer((_incoming, response) => {
+      order.push('send')
+      response.writeHead(204)
+      response.end()
+    })
+    const port = await listen(server)
+    try {
+      assert.deepEqual(
+        await deliver(
+          'opencode-server',
+          {
+            enabledChannels: ['opencode-server'],
+            bridge: node,
+            pane: 'lead-pane',
+            generation: 4,
+            epoch: 19,
+            session: 'ses_probe',
+            launch: { endpoint: `http://127.0.0.1:${port}` },
+          },
+          record({ channel: 'opencode-server' }),
+        ),
+        { ok: true, admitted: true, status: 204 },
+      )
+      assert.deepEqual(order, ['claim', 'send'])
+    } finally {
+      node.close()
+      rust.close()
+      await closeServer(server)
+    }
+  })
+
+  it('does not send an OpenCode prompt when the epoch claim answers Draft', async () => {
+    let sends = 0
+    const { node, rust } = bridgePair()
+    rust.on('pane.claim_epoch', () => ({ ok: false, error: 'Draft' }))
+    const server = createServer((_incoming, response) => {
+      sends += 1
+      response.writeHead(204)
+      response.end()
+    })
+    const port = await listen(server)
+    try {
+      assert.deepEqual(
+        await deliver(
+          'opencode-server',
+          {
+            enabledChannels: ['opencode-server'],
+            bridge: node,
+            pane: 'lead-pane',
+            generation: 4,
+            epoch: 19,
+            session: 'ses_probe',
+            launch: { endpoint: `http://127.0.0.1:${port}` },
+          },
+          record({ channel: 'opencode-server' }),
+        ),
+        {
+          ok: false,
+          admitted: false,
+          error: 'failed-with-zero-bytes',
+          bytesWritten: 0,
+          cause: 'Draft',
+        },
+      )
+      assert.equal(sends, 0)
+    } finally {
+      node.close()
+      rust.close()
+      await closeServer(server)
+    }
+  })
+
+  it('keeps an OpenCode claim deadline retryable because no prompt was sent', async () => {
+    let sends = 0
+    const { node, rust } = bridgePair()
+    rust.on('pane.claim_epoch', () => new Promise(() => {}))
+    const server = createServer((_incoming, response) => {
+      sends += 1
+      response.writeHead(204)
+      response.end()
+    })
+    const port = await listen(server)
+    try {
+      assert.deepEqual(
+        await deliver(
+          'opencode-server',
+          {
+            enabledChannels: ['opencode-server'],
+            bridge: node,
+            pane: 'lead-pane',
+            generation: 4,
+            epoch: 19,
+            deadlineMs: 20,
+            session: 'ses_probe',
+            launch: { endpoint: `http://127.0.0.1:${port}` },
+          },
+          record({ channel: 'opencode-server' }),
+        ),
+        {
+          ok: false,
+          admitted: false,
+          error: 'failed-with-zero-bytes',
+          bytesWritten: 0,
+          cause: 'deadline',
+        },
+      )
+      assert.equal(sends, 0)
+    } finally {
+      node.close()
+      rust.close()
+      await closeServer(server)
+    }
+  })
+
+  it('keeps a thrown OpenCode claim retryable because no prompt was sent', async () => {
+    let sends = 0
+    const server = createServer((_incoming, response) => {
+      sends += 1
+      response.writeHead(204)
+      response.end()
+    })
+    const port = await listen(server)
+    try {
+      assert.deepEqual(
+        await deliver(
+          'opencode-server',
+          {
+            enabledChannels: ['opencode-server'],
+            pane: 'lead-pane',
+            generation: 4,
+            epoch: 19,
+            claimEpoch: async () => {
+              throw new Error('claim transport closed')
+            },
+            session: 'ses_probe',
+            launch: { endpoint: `http://127.0.0.1:${port}` },
+          },
+          record({ channel: 'opencode-server' }),
+        ),
+        {
+          ok: false,
+          admitted: false,
+          error: 'failed-with-zero-bytes',
+          bytesWritten: 0,
+          cause: 'claim transport closed',
+        },
+      )
+      assert.equal(sends, 0)
+    } finally {
+      await closeServer(server)
+    }
+  })
+
+  it('throws a malformed OpenCode target instead of reporting uncertainty', async () => {
+    await assert.rejects(
+      deliver(
+        'opencode-server',
+        {
+          enabledChannels: ['opencode-server'],
+          session: 'ses_probe',
+          launch: { endpoint: 'http://127.0.0.1:1' },
+        },
+        record({ channel: 'opencode-server' }),
+      ),
+      /needs pane, generation and observed epoch/,
+    )
+  })
+
   it('POSTs an authenticated OpenCode prompt and reports a 204 admission', async () => {
     let request
     const server = createServer(async (incoming, response) => {
@@ -219,6 +406,7 @@ describe('delivery channels', () => {
       const answer = await deliver(
         'opencode-server',
         {
+          ...nativeTarget(),
           enabledChannels: ['opencode-server'],
           session: 'ses_probe',
           launch: {
@@ -261,6 +449,7 @@ describe('delivery channels', () => {
         await deliver(
           'opencode-server',
           {
+            ...nativeTarget(),
             enabledChannels: ['opencode-server'],
             session: 'ses_probe',
             launch: { endpoint: `http://127.0.0.1:${port}` },
@@ -275,6 +464,112 @@ describe('delivery channels', () => {
     }
   })
 
+  it('claims the observed epoch immediately before the OpenCode POST', async () => {
+    const order = []
+    const server = createServer((_incoming, response) => {
+      order.push('post')
+      response.writeHead(204)
+      response.end()
+    })
+    const port = await listen(server)
+    try {
+      const answer = await deliver(
+        'opencode-server',
+        {
+          enabledChannels: ['opencode-server'],
+          session: 'ses_probe',
+          pane: 'lead-pane',
+          generation: 4,
+          epoch: 19,
+          claimEpoch: async (request) => {
+            order.push(request)
+            return { ok: true }
+          },
+          launch: { endpoint: `http://127.0.0.1:${port}` },
+        },
+        record({ channel: 'opencode-server' }),
+      )
+      assert.deepEqual(answer, { ok: true, admitted: true, status: 204 })
+      assert.deepEqual(order, [{ pane: 'lead-pane', generation: 4, epoch: 19 }, 'post'])
+    } finally {
+      await closeServer(server)
+    }
+  })
+
+  it('refuses a native Pi delivery when the epoch claim is Draft or Stale', async () => {
+    for (const refusal of [
+      { ok: false, error: 'stale' },
+      { ok: false, error: 'draft' },
+    ]) {
+      const root = await mkdtemp(join(tmpdir(), 'consensflow-channels-pi-claim-'))
+      const inbox = join(root, 'inbox')
+      const ack = join(root, 'ack')
+      await mkdir(inbox)
+      await mkdir(ack)
+      try {
+        const answer = await deliver(
+          'pi-extension',
+          {
+            ...nativeTarget(),
+            enabledChannels: ['pi-extension'],
+            claimEpoch: async () => refusal,
+            launch: { inbox, ack, ackTimeoutMs: 1000 },
+          },
+          record({ channel: 'cf-read' }),
+        )
+        assert.deepEqual(answer, {
+          ok: false,
+          admitted: false,
+          error: 'failed-with-zero-bytes',
+          bytesWritten: 0,
+          cause: refusal.error,
+        })
+        assert.deepEqual(await readdir(inbox), [])
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    }
+  })
+
+  it('keeps a Pi claim deadline retryable because no inbox record was admitted', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'consensflow-channels-pi-claim-deadline-'))
+    const inbox = join(root, 'inbox')
+    const ack = join(root, 'ack')
+    const { node, rust } = bridgePair()
+    rust.on('pane.claim_epoch', () => new Promise(() => {}))
+    await mkdir(inbox)
+    await mkdir(ack)
+    try {
+      assert.deepEqual(
+        await deliver(
+          'pi-extension',
+          {
+            enabledChannels: ['pi-extension'],
+            bridge: node,
+            pane: 'lead-pane',
+            generation: 4,
+            epoch: 19,
+            deadlineMs: 20,
+            launch: { inbox, ack, ackTimeoutMs: 1000 },
+          },
+          record({ channel: 'pi-extension' }),
+        ),
+        {
+          ok: false,
+          admitted: false,
+          error: 'failed-with-zero-bytes',
+          bytesWritten: 0,
+          cause: 'deadline',
+        },
+      )
+      assert.deepEqual(await readdir(inbox), [])
+    } finally {
+      node.close()
+      rust.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('reports an OpenCode HTTP refusal as not admitted', async () => {
     const server = createServer((_incoming, response) => {
       response.writeHead(401)
@@ -286,6 +581,7 @@ describe('delivery channels', () => {
         await deliver(
           'opencode-server',
           {
+            ...nativeTarget(),
             enabledChannels: ['opencode-server'],
             session: 'ses_probe',
             launch: { endpoint: `http://127.0.0.1:${port}` },
@@ -310,6 +606,7 @@ describe('delivery channels', () => {
         await deliver(
           'opencode-server',
           {
+            ...nativeTarget(),
             enabledChannels: ['opencode-server'],
             session: 'ses_probe',
             launch: { endpoint: `http://127.0.0.1:${port}` },
@@ -317,6 +614,37 @@ describe('delivery channels', () => {
           record({ channel: 'opencode-server' }),
         ),
         { ok: true, admitted: false, status: 200 },
+      )
+    } finally {
+      await closeServer(server)
+    }
+  })
+
+  it('preserves an OpenCode null admission as uncertain', async () => {
+    const server = createServer((_incoming, response) => {
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ admitted: null }))
+    })
+    const port = await listen(server)
+    try {
+      assert.deepEqual(
+        await deliver(
+          'opencode-server',
+          {
+            ...nativeTarget(),
+            enabledChannels: ['opencode-server'],
+            session: 'ses_probe',
+            launch: { endpoint: `http://127.0.0.1:${port}` },
+          },
+          record({ channel: 'opencode-server' }),
+        ),
+        {
+          ok: false,
+          admitted: null,
+          error: 'uncertain',
+          cause: 'admission-unknown',
+          status: 200,
+        },
       )
     } finally {
       await closeServer(server)
@@ -335,12 +663,13 @@ describe('delivery channels', () => {
         await deliver(
           'opencode-server',
           {
+            ...nativeTarget(),
             enabledChannels: ['opencode-server'],
             deadlineMs: 20,
             session: 'ses_probe',
             launch: { endpoint: `http://127.0.0.1:${port}` },
           },
-          record({ channel: 'opencode-server' }),
+          record({ channel: 'opencode-server', expiresAt: undefined }),
         ),
         { ok: false, error: 'uncertain', cause: 'deadline' },
       )
@@ -363,11 +692,12 @@ describe('delivery channels', () => {
         await deliver(
           'opencode-server',
           {
+            ...nativeTarget(),
             enabledChannels: ['opencode-server'],
             session: 'ses_probe',
             launch: { endpoint: `http://127.0.0.1:${port}` },
           },
-          record({ channel: 'opencode-server' }),
+          record({ channel: 'opencode-server', expiresAt: undefined }),
         ),
         { ok: false, error: 'uncertain', cause: 'deadline' },
       )
@@ -375,6 +705,35 @@ describe('delivery channels', () => {
         Date.now() - started < DEFAULT_DEADLINE_MS + 350,
         'the request must stop at the module default deadline',
       )
+    } finally {
+      server.closeAllConnections?.()
+      await closeServer(server)
+    }
+  })
+
+  it('uses the record absolute expiry for the OpenCode request deadline', async () => {
+    const server = createServer((_incoming, response) => {
+      const timer = setTimeout(() => response.destroy(), 1_000)
+      response.on('close', () => clearTimeout(timer))
+    })
+    const port = await listen(server)
+    const started = Date.now()
+    try {
+      assert.deepEqual(
+        await deliver(
+          'opencode-server',
+          {
+            ...nativeTarget(),
+            enabledChannels: ['opencode-server'],
+            deadlineMs: 5_000,
+            session: 'ses_probe',
+            launch: { endpoint: `http://127.0.0.1:${port}` },
+          },
+          record({ channel: 'opencode-server', expiresAt: started + 30 }),
+        ),
+        { ok: false, error: 'uncertain', cause: 'deadline' },
+      )
+      assert.ok(Date.now() - started < 300, 'the request must stop at record.expiresAt')
     } finally {
       server.closeAllConnections?.()
       await closeServer(server)
@@ -401,6 +760,7 @@ describe('delivery channels', () => {
       const answer = await deliver(
         'pi-extension',
         {
+          ...nativeTarget(),
           enabledChannels: ['pi-extension'],
           launch: {
             extensionPath: '/repo/hosts/pi-extension/consensflow-delivery.mjs',
@@ -417,7 +777,10 @@ describe('delivery channels', () => {
         admitted: true,
         ack: { id: 'd-33', admitted: true, mode: 'tui' },
       })
-      assert.deepEqual(received, { ...delivery, text: envelope(delivery) })
+      assert.equal(received.id, delivery.id)
+      assert.equal(received.text, envelope(delivery))
+      assert.equal(received.answer, delivery.answer)
+      assert.equal(received.expiresAt, delivery.expiresAt)
       assert.deepEqual(JSON.parse(await readFile(join(ack, 'd-33.json'), 'utf8')), {
         id: 'd-33',
         admitted: true,
@@ -425,6 +788,51 @@ describe('delivery channels', () => {
       })
     } finally {
       extension.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('claims the observed epoch immediately before a Pi inbox admission', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'consensflow-channels-pi-claim-'))
+    const inbox = join(root, 'inbox')
+    const ack = join(root, 'ack')
+    await mkdir(inbox)
+    await mkdir(ack)
+    const order = []
+    const { node, rust } = bridgePair()
+    rust.on('pane.claim_epoch', (body) => {
+      order.push('claim')
+      assert.deepEqual(body, { pane: 'lead-pane', generation: 4, epoch: 19 })
+      return { ok: true }
+    })
+    const extension = startPiStandIn(inbox, async (received) => {
+      order.push('send')
+      await writeFile(
+        join(ack, `${received.id}.json`),
+        `${JSON.stringify({ id: received.id, admitted: true })}\n`,
+      )
+    })
+    try {
+      assert.deepEqual(
+        await deliver(
+          'pi-extension',
+          {
+            enabledChannels: ['pi-extension'],
+            bridge: node,
+            pane: 'lead-pane',
+            generation: 4,
+            epoch: 19,
+            launch: { inbox, ack, ackTimeoutMs: 1000 },
+          },
+          record({ channel: 'pi-extension' }),
+        ),
+        { ok: true, admitted: true, ack: { id: 'd-33', admitted: true } },
+      )
+      assert.deepEqual(order, ['claim', 'send'])
+    } finally {
+      extension.close()
+      node.close()
+      rust.close()
       await rm(root, { recursive: true, force: true })
     }
   })
@@ -450,6 +858,7 @@ describe('delivery channels', () => {
         await deliver(
           'pi-extension',
           {
+            ...nativeTarget(),
             enabledChannels: ['pi-extension'],
             launch: { inbox, ack, ackTimeoutMs: 1000 },
           },
@@ -488,20 +897,35 @@ describe('delivery channels', () => {
     }
   })
 
-  it('maps a missing Pi ack to uncertain', async () => {
+  it('withdraws a Pi inbox record after timeout and keeps admission uncertain', async () => {
     const root = await mkdtemp(join(tmpdir(), 'consensflow-channels-no-ack-'))
     try {
       assert.deepEqual(
         await deliver(
           'pi-extension',
           {
+            ...nativeTarget(),
             enabledChannels: ['pi-extension'],
             launch: { inbox: join(root, 'inbox'), ack: join(root, 'ack'), ackTimeoutMs: 20 },
           },
-          record({ channel: 'pi-extension' }),
+          record({ channel: 'pi-extension', expiresAt: Date.now() + 200 }),
         ),
-        { ok: false, error: 'uncertain', cause: 'ack-timeout' },
+        { ok: false, admitted: null, error: 'uncertain', cause: 'admission-unknown' },
       )
+      assert.deepEqual(await readdir(join(root, 'inbox')), [], 'the timed-out offer is withdrawn')
+      const pi = realPi()
+      const extension = createDeliveryExtension(pi, {
+        inbox: join(root, 'inbox'),
+        ack: join(root, 'ack'),
+        expired: join(root, 'expired'),
+      })
+      try {
+        await pi.handlers.get('session_start')({}, pi.context)
+        await extension.consume()
+        assert.deepEqual(pi.sent, [], 'a later idle extension has no stale offer to send')
+      } finally {
+        await pi.handlers.get('session_shutdown')()
+      }
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -524,14 +948,16 @@ describe('delivery channels', () => {
         await deliver(
           'pi-extension',
           {
+            ...nativeTarget(),
             enabledChannels: ['pi-extension'],
             launch: { inbox, ack, ackTimeoutMs: 1000 },
           },
           record({ channel: 'pi-extension' }),
         ),
         {
-          ok: true,
+          ok: false,
           admitted: false,
+          error: 'failed-with-zero-bytes',
           ack: { id: 'd-33', admitted: false, reason: 'not-observed' },
         },
       )
@@ -548,12 +974,13 @@ describe('delivery channels', () => {
         await deliver(
           'pi-extension',
           {
+            ...nativeTarget(),
             enabledChannels: ['pi-extension'],
             launch: { inbox: join(root, 'inbox'), ack: join(root, 'ack'), ackTimeoutMs: 20 },
           },
           record({ channel: 'pi-extension', answer: undefined }),
         ),
-        { ok: false, error: 'missing-envelope' },
+        { ok: false, admitted: false, error: 'missing-envelope' },
       )
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -595,6 +1022,7 @@ describe('delivery channels', () => {
         await deliver(
           'opencode-server',
           {
+            ...nativeTarget(),
             enabledChannels: enabledChannels('opencode'),
             session: 'ses_from_launch',
             launch: configuration,
@@ -606,6 +1034,7 @@ describe('delivery channels', () => {
       assert.deepEqual(configuration.args.slice(0, 1), ['--port'])
       assert.deepEqual(configuration.args.slice(2), ['--hostname', '127.0.0.1'])
       assert.equal(configuration.env.OPENCODE_SERVER_PASSWORD, configuration.channel.password)
+      assert.equal(configuration.channel.ackTimeoutMs, DEFAULT_DEADLINE_MS)
     } finally {
       await closeServer(server)
       await rm(root, { recursive: true, force: true })
@@ -630,6 +1059,7 @@ describe('delivery channels', () => {
         await deliver(
           'pi-extension',
           {
+            ...nativeTarget(),
             enabledChannels: enabledChannels('pi'),
             launch: configuration,
           },
@@ -658,6 +1088,9 @@ describe('delivery channels', () => {
       )
       assert.ok(configuration.channel.extensionAckTimeoutMs < configuration.channel.ackTimeoutMs)
       assert.equal(configuration.env.CF_DELIVERY_QUARANTINE, configuration.channel.quarantine)
+      assert.equal(configuration.env.CF_DELIVERY_SETTLED, configuration.channel.settled)
+      assert.equal(configuration.env.CF_DELIVERY_EXPIRED, configuration.channel.expired)
+      assert.equal(configuration.env.CF_DELIVERY_LAUNCH_ID, configuration.channel.launchId)
     } finally {
       extension.close()
       await rm(root, { recursive: true, force: true })

@@ -10,9 +10,20 @@ export async function createPacket(input) {
     handoff = "",
     continuing = false,
     conversational = false,
+    nonce = null,
   } = input;
 
   const sections = [];
+  // A launch nonce is non-secret launch evidence, not content: it rides on
+  // the FIRST line so the harness stores it verbatim in the session's first
+  // user turn, and the display reader strips it before anyone sees it. Same
+  // argument and same placement as `createWindowSeed` below, because a
+  // window's seed and a packet are the same thing to the harness that
+  // receives one: kimi opens no window and takes its prompt in argv, so a
+  // packet is the only text its store ever sees. One rule, in one place.
+  if (nonce !== null && nonce !== undefined && String(nonce).trim() !== "") {
+    sections.push(formatLaunchMarker(nonce));
+  }
   // A follow-up in a live conversation needs none of the scene-setting: the
   // agent is already in this workspace and has already been told how to work.
   // Re-sending it every turn buries the actual question — and in an attached

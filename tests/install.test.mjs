@@ -1,10 +1,23 @@
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, isAbsolute, join } from 'node:path'
 import { after, describe, it } from 'node:test'
-import { detectHarnesses } from '../src/harnesses.js'
+import { detectHarnesses, harnessPath } from '../src/harnesses.js'
+import * as installation from '../src/install.js'
 import { installSkill, skillsStatus, skillsSummary, uninstallSkills } from '../src/install.js'
-import { addAgent } from '../src/roster.js'
+import { addAgent, rosterPath } from '../src/roster.js'
 import {
   healOnOpen,
   refreshInstalledSkill,
@@ -13,7 +26,7 @@ import {
   skillTargets,
   staleSkills,
 } from '../src/sync.js'
-import { chooseCmuxMode, tempEnv } from './helpers.mjs'
+import { tempEnv } from './helpers.mjs'
 
 function stubCli(env, name) {
   mkdirSync(env.PATH, { recursive: true })
@@ -22,9 +35,63 @@ function stubCli(env, name) {
   chmodSync(path, 0o755)
 }
 
+describe('standalone installation (TEST-PANE-47)', () => {
+  it('installs the launcher and skill everywhere without selecting a mode', () => {
+    const t = tempEnv()
+    try {
+      for (const name of ['claude', 'codex', 'pi', 'opencode', 'kimi']) stubCli(t.env, name)
+      addAgent({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }, t.env)
+      assert.equal(typeof installation.installEverywhere, 'function')
+      installation.installEverywhere(t.env)
+      assert.ok(existsSync(join(t.env.CONSENSFLOW_BIN_DIR, 'cf')))
+      for (const harness of detectHarnesses(t.env)) {
+        assert.match(
+          readFileSync(join(harness.skillsDir, 'consensflow', 'SKILL.md'), 'utf8'),
+          /zeus/,
+        )
+      }
+      assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'mode.json')), false)
+    } finally {
+      t.cleanup()
+    }
+  })
+
+  it('ignores every legacy mode when determining skill targets', () => {
+    const t = tempEnv()
+    try {
+      stubCli(t.env, 'claude')
+      stubCli(t.env, 'codex')
+      mkdirSync(t.env.CONSENSFLOW_HOME, { recursive: true })
+      for (const mode of ['claude', 'pi', 'cmux', 'standalone']) {
+        writeFileSync(join(t.env.CONSENSFLOW_HOME, 'mode.json'), JSON.stringify({ mode }))
+        assert.deepEqual(
+          skillTargets(t.env)
+            .map((harness) => harness.id)
+            .sort(),
+          ['claude', 'codex'],
+        )
+      }
+    } finally {
+      t.cleanup()
+    }
+  })
+
+  it('opening a fresh app claims its launcher before the roster has agents', () => {
+    const t = tempEnv()
+    try {
+      stubCli(t.env, 'codex')
+      healOnOpen(t.env)
+      assert.ok(existsSync(join(t.env.CONSENSFLOW_BIN_DIR, 'cf')))
+      assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'mode.json')), false)
+      assert.equal(skillsStatus(t.env).length, 0)
+    } finally {
+      t.cleanup()
+    }
+  })
+})
+
 describe('harnesses are detected by their CLI on PATH, dirs from their own env', () => {
   const t = tempEnv()
-  chooseCmuxMode(t)
   after(() => t.cleanup())
 
   it('finds only the harnesses whose CLI resolves', () => {
@@ -52,7 +119,6 @@ describe('harnesses are detected by their CLI on PATH, dirs from their own env',
 
 describe('a host with its own ConsensFlow integration keeps it', () => {
   const t = tempEnv()
-  chooseCmuxMode(t)
   after(() => t.cleanup())
   stubCli(t.env, 'claude')
   stubCli(t.env, 'codex')
@@ -154,7 +220,6 @@ describe('a host with its own ConsensFlow integration keeps it', () => {
 
 describe('install writes owned files with a hash manifest; ours to replace, a stranger file is not', () => {
   const t = tempEnv()
-  chooseCmuxMode(t)
   after(() => t.cleanup())
   stubCli(t.env, 'claude')
   stubCli(t.env, 'codex')
@@ -246,7 +311,6 @@ describe('a harness in scope with no skill of ours is named, not left silent', (
   it('reports the harness whose install was refused', () => {
     stubCli(t.env, 'claude')
     stubCli(t.env, 'codex')
-    chooseCmuxMode(t)
     addAgent({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }, t.env)
 
     // Someone else's file at the path we would write: installSkill refuses it
@@ -310,7 +374,6 @@ describe('a harness in scope with no skill of ours is named, not left silent', (
     const fresh = tempEnv()
     try {
       stubCli(fresh.env, 'claude')
-      chooseCmuxMode(fresh)
       assert.deepEqual(skillGaps(fresh.env), [], 'no agents, nothing owed')
     } finally {
       fresh.cleanup()
@@ -420,23 +483,22 @@ describe('opening the app puts right what its own buttons would', () => {
   after(() => t.cleanup())
   const launcher = () => join(t.env.CONSENSFLOW_BIN_DIR, 'consensflow')
 
-  it('touches nothing before a mode is chosen', () => {
+  it('claims the launcher before the first agent is added', () => {
     stubCli(t.env, 'claude')
 
     const done = healOnOpen(t.env)
 
-    assert.equal(done.mode, null)
+    assert.equal(done.command, 'claimed')
     assert.equal(done.skills, 0)
-    assert.equal(existsSync(launcher()), false, 'a machine that picked no path stays untouched')
+    assert.equal(existsSync(launcher()), true, 'opening the app installs its command')
   })
 
   it('installs the command the skill teaches, and says it did', () => {
-    chooseCmuxMode(t)
     addAgent({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }, t.env)
 
     const done = healOnOpen(t.env)
 
-    assert.equal(done.command, 'claimed')
+    assert.equal(done.command, 'ok')
     assert.ok(existsSync(launcher()), 'the skill teaches `cf run`; now something answers it')
   })
 
@@ -486,5 +548,136 @@ describe('opening the app puts right what its own buttons would', () => {
 
     assert.equal(done.command, 'claimed')
     assert.ok(readFileSync(launcher(), 'utf8').includes(process.execPath), 'points here now')
+  })
+})
+
+describe('BO12: the path a pane is launched with is absolute, whatever PATH says', () => {
+  it('resolves a relative PATH entry before handing it to the pane host', () => {
+    // `pane.open` refuses a relative argv[0] outright
+    // (`app/src-tauri/src/commands.rs:1121`), and a PATH carrying a
+    // relative entry is ordinary — `PATH=.:...` or a `bin` a launcher
+    // exported from wherever it happened to be. Joining that with the
+    // command name produces a relative candidate, and the pane never opens.
+    const root = mkdtempSync(join(tmpdir(), 'cf-relpath-'))
+    const previous = process.cwd()
+    try {
+      mkdirSync(join(root, 'bin'), { recursive: true })
+      const shim = join(root, 'bin', 'claude')
+      writeFileSync(shim, '#!/bin/sh\nexit 0\n')
+      chmodSync(shim, 0o755)
+      process.chdir(root)
+
+      const found = harnessPath('claude', { PATH: 'bin', HOME: root })
+      assert.notEqual(found, null, 'it is on PATH, relatively')
+      assert.equal(isAbsolute(found), true, `relative argv[0]: ${found}`)
+      assert.equal(realpathSync(found), realpathSync(shim))
+    } finally {
+      process.chdir(previous)
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('reset leaves the machine as if ConsensFlow had never been installed', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+  const generated = (dir) => join(dir, 'skills', 'consensflow', 'SKILL.md')
+
+  it('removes what off keeps: the roster and every run artifact', () => {
+    stubCli(t.env, 'claude')
+    addAgent({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }, t.env)
+    installation.installEverywhere(t.env)
+    assert.ok(existsSync(generated(t.env.CLAUDE_CONFIG_DIR)), 'installed first')
+
+    // A run artifact, of the kind that exists nowhere else.
+    const runDir = join(t.env.CONSENSFLOW_HOME, 'workspaces', 'proj-abc', 'runs', 'ask-1')
+    mkdirSync(runDir, { recursive: true })
+    writeFileSync(join(runDir, 'packet.md'), '# ConsensFlow Packet\n')
+
+    const outcome = installation.resetEverything(t.env)
+
+    assert.equal(outcome.removed.agents, 1, 'it counts what it destroyed')
+    assert.equal(outcome.removed.runs, 1)
+    assert.equal(existsSync(t.env.CONSENSFLOW_HOME), false, 'the whole root is gone')
+    assert.equal(existsSync(generated(t.env.CLAUDE_CONFIG_DIR)), false, 'and the skill with it')
+  })
+
+  it('off keeps the roster; reset is the only thing that does not', () => {
+    stubCli(t.env, 'claude')
+    addAgent({ name: 'apollo', harness: 'claude', model: 'claude-opus-5' }, t.env)
+    installation.installEverywhere(t.env)
+
+    installation.turnOff(t.env)
+    assert.ok(existsSync(rosterPath(t.env)), "off is not a reset — agents are the user's")
+
+    installation.resetEverything(t.env)
+    assert.equal(existsSync(rosterPath(t.env)), false, 'reset is')
+  })
+
+  it('takes a skill the user edited too, which off refuses to', () => {
+    stubCli(t.env, 'claude')
+    addAgent({ name: 'hermes', harness: 'claude', model: 'claude-opus-5' }, t.env)
+    installation.installEverywhere(t.env)
+    writeFileSync(generated(t.env.CLAUDE_CONFIG_DIR), 'my own notes on top of the skill\n')
+
+    // Drift is sacred so an install never clobbers an edit by accident. A
+    // reset is not an accident — it is the operation that leaves nothing.
+    installation.resetEverything(t.env)
+
+    assert.equal(existsSync(generated(t.env.CLAUDE_CONFIG_DIR)), false)
+  })
+
+  it("takes the desktop app's own data, but never the app bundle", () => {
+    // These carry ConsensFlow's bundle identifier, so nothing else creates
+    // them — a reset that left them would be leaving something behind. The
+    // .app is deliberately not in that set: an application deleting its own
+    // bundle mid-run is a bad idea, and on macOS that is a Finder gesture.
+    const appData = join(t.env.HOME, 'Library', 'Caches', 'dev.ngvoicu.consensflow')
+    const webkit = join(t.env.HOME, 'Library', 'WebKit', 'dev.ngvoicu.consensflow')
+    const bundle = join(t.env.HOME, 'Applications', 'ConsensFlow.app')
+    for (const dir of [appData, webkit, bundle]) mkdirSync(dir, { recursive: true })
+    writeFileSync(join(appData, 'cached.bin'), 'webview cache\n')
+
+    const outcome = installation.resetEverything(t.env)
+
+    assert.equal(existsSync(appData), false, 'the app cache goes')
+    assert.equal(existsSync(webkit), false, 'and its webview data')
+    assert.ok(existsSync(bundle), 'the bundle itself is not ours to delete')
+    assert.ok(
+      outcome.changes.some((change) => change.path === appData),
+      'and it says so, rather than removing it silently',
+    )
+  })
+
+  it('survives a machine with nothing installed', () => {
+    const fresh = tempEnv()
+    try {
+      assert.doesNotThrow(() => installation.resetEverything(fresh.env))
+      assert.deepEqual(installation.resetEverything(fresh.env).removed, { agents: 0, runs: 0 })
+    } finally {
+      fresh.cleanup()
+    }
+  })
+})
+
+describe('standalone upgrades preserve ownership and absent harness installs', () => {
+  it('keeps a previously installed harness when a later PATH is narrower', () => {
+    const t = tempEnv()
+    try {
+      stubCli(t.env, 'claude')
+      stubCli(t.env, 'codex')
+      addAgent({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }, t.env)
+      installation.installEverywhere(t.env)
+      const codex = join(t.env.CODEX_HOME, 'skills', 'consensflow', 'SKILL.md')
+      assert.ok(existsSync(codex))
+      rmSync(join(t.env.PATH, 'codex'))
+      installation.installEverywhere(t.env)
+      assert.ok(existsSync(codex), 'a narrower PATH must not uninstall a harness')
+      installation.turnOff(t.env)
+      assert.equal(existsSync(codex), false, 'off still removes manifest-owned files')
+      assert.deepEqual(readdirSync(t.env.CONSENSFLOW_HOME), ['agents.json'])
+    } finally {
+      t.cleanup()
+    }
   })
 })

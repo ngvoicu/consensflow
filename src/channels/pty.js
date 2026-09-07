@@ -2,7 +2,7 @@ import { envelope, pointer } from '../../hosts/lib/deliveries.js'
 
 const PTY_CHANNELS = new Set(['pty-inline', 'cf-read'])
 
-function requireTarget(target) {
+function paneEpoch(target) {
   const pane = target?.pane
   const id = typeof pane === 'string' ? pane : pane?.id
   const generation = typeof pane === 'object' ? pane?.generation : target?.generation
@@ -12,10 +12,32 @@ function requireTarget(target) {
   if (!Number.isSafeInteger(target.epoch) || target.epoch < 0) {
     throw new Error('PTY delivery needs the caller-observed input epoch')
   }
+  return { id, generation }
+}
+
+function requireTarget(target) {
+  const pane = paneEpoch(target)
   if (target.bridge === null || typeof target.bridge?.request !== 'function') {
     throw new Error('PTY delivery needs the JSON-lines bridge')
   }
-  return { id, generation }
+  return pane
+}
+
+/** Guard a native send with Rust's current draft and input epoch, without I/O. */
+export async function claimEpoch(target) {
+  const pane = paneEpoch(target)
+  try {
+    const request = { pane: pane.id, generation: pane.generation, epoch: target.epoch }
+    if (typeof target.claimEpoch === 'function') return await target.claimEpoch(request)
+    if (target.bridge === null || typeof target.bridge?.request !== 'function') {
+      throw new Error('native delivery needs pane.claim_epoch')
+    }
+    return await target.bridge.request('pane.claim_epoch', request, {
+      deadlineMs: target.deadlineMs,
+    })
+  } catch (cause) {
+    return { ok: false, error: 'transport', cause: cause?.error ?? cause?.message ?? String(cause) }
+  }
 }
 
 /** Paste one complete delivery or its cf-read pointer through Rust's arbiter. */

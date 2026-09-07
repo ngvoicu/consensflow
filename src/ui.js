@@ -1,13 +1,22 @@
 import { spawn } from 'node:child_process'
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { fstatSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Bridge } from './bridge.js'
 import { CATALOG, EFFORTS } from './catalog.js'
-import { detectHarnesses } from './harnesses.js'
-import { installSkill, skillsStatus, skillsSummary, uninstallSkills } from './install.js'
+import { Watcher } from './delivery-watch.js'
+import { detectHarnesses, harnessPath } from './harnesses.js'
+import {
+  installEverywhere,
+  resetEverything,
+  resetPreview,
+  skillsStatus,
+  skillsSummary,
+  turnOff,
+  uninstallSkills,
+} from './install.js'
 import {
   controllerEnv as buildControllerEnv,
   leadEnv as buildLeadEnv,
@@ -17,17 +26,7 @@ import {
   redeem,
   scopeOf,
 } from './launch.js'
-import {
-  applyMode,
-  currentMode,
-  MODES,
-  modeLabel,
-  modeReport,
-  resetEverything,
-  resetPreview,
-  syncCmuxSkills,
-  turnOff,
-} from './mode.js'
+import { Page } from './page.js'
 import { PaneError, Panes, paneErrorBody } from './panes.js'
 import {
   addAgent,
@@ -36,19 +35,19 @@ import {
   configRoot,
   editAgent,
   HARNESSES,
+  harnessForKind,
   listAgents,
   migrateStateRoot,
   removeAgent,
   syncAgents,
 } from './roster.js'
-import { agentCommand, generateSkill } from './skill.js'
+import { agentCommand } from './skill.js'
 import { Store } from './store.js'
 import {
   healOnOpen,
   refreshInstalledSkill,
   retireSkillFromNativeHosts,
   skillGaps,
-  skillTargets,
   staleSkills,
 } from './sync.js'
 import { leadIdentity, Tabs } from './tabs.js'
@@ -72,78 +71,11 @@ const VERSION = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'),
 ).version
 
-/**
- * The three integrations, each described in the terms someone choosing
- * between them needs: what it gives you, whether it is the path this
- * machine runs, and whether anything of it is already installed.
- */
-const INTEGRATIONS = {
-  claude: {
-    title: 'Claude Code',
-    summary: 'Only Claude Code gets the skill. Nothing else on this machine can consult.',
-  },
-  pi: {
-    title: 'pi',
-    summary: 'Only pi gets the skill. Nothing else on this machine can consult.',
-  },
-  cmux: {
-    title: 'cmux (pi, cc, codex, opencode, kimi)',
-    summary:
-      'Every coding harness gets the skill, and a consult opens the agent’s own window in its cmux pane.',
-  },
-}
-
-/**
- * One row per mode. Every mode installs the same generated skill and differs
- * only in who gets it, so there is one thing to count and one way to say it.
- */
-function integrations(env) {
-  const mode = currentMode(env)
-  const carried = skillsStatus(env).filter((file) => file.source === 'consensflow').length
-
-  const detected = detectHarnesses(env)
-
-  return MODES.map((id) => {
-    // Who this mode would reach on THIS machine. A card offering `pi` on a
-    // machine with no pi is worth saying out loud, not leaving to be discovered
-    // after the switch.
-    const reach = id === 'cmux' ? detected : detected.filter((harness) => harness.id === id)
-    const active = mode === id
-
-    return {
-      id,
-      title: INTEGRATIONS[id].title,
-      summary: INTEGRATIONS[id].summary,
-      active,
-      files: active ? carried : 0,
-      present: active && carried > 0,
-      reach: reach.map((harness) => harness.id),
-      detail: active
-        ? carried > 0
-          ? `${carried} harness${carried === 1 ? '' : 'es'} carry the skill`
-          : 'no agents yet — the first one installs it'
-        : reach.length === 0
-          ? id === 'cmux'
-            ? 'no coding harness found on PATH'
-            : `${id} is not on PATH`
-          : 'available',
-    }
-  })
-}
-
 /** Everything `cf doctor` and `cf skills status` would tell you, as data. */
 function systemState(env) {
   const files = skillsStatus(env)
-  const mode = currentMode(env)
   return {
     version: VERSION,
-    mode: {
-      current: mode,
-      available: MODES,
-      report: modeReport(mode ?? 'cmux', env),
-      labels: Object.fromEntries(MODES.map((name) => [name, modeLabel(name)])),
-    },
-    integrations: integrations(env),
     terminal: terminalCommandStatus(env),
     harnesses: detectHarnesses(env).map((harness) => ({
       id: harness.id,
@@ -177,33 +109,11 @@ function systemState(env) {
  */
 let opened = null
 
-/**
- * The install the page can trigger: the generated skill everywhere it
- * belongs, and cmux's own skills wherever the mode says they go. Named
- * operations only — there
- * is deliberately no endpoint that runs a command someone typed.
- */
+/** Named installation operation; no endpoint executes user-supplied commands. */
 function installFromUi(body, env) {
-  const agents = listAgents(env)
-  const report = []
-  if (agents.length > 0) {
-    report.push(
-      ...installSkill(
-        {
-          relPath: 'consensflow/SKILL.md',
-          content: generateSkill(agents, { mode: currentMode(env) }),
-          source: 'consensflow',
-        },
-        env,
-        { force: body.force === true, targets: skillTargets(env, { all: body.all === true }) },
-      ),
-    )
-    if (body.all !== true) report.push(...retireSkillFromNativeHosts(env))
-  }
-  // The only cmux-skills work left is taking back what an older version
-  // installed — local disk only, so it cannot fail on the network.
-  report.push(...syncCmuxSkills(env, { force: body.force === true }).report)
-  return { report, cmuxCommit: null, system: systemState(env) }
+  const outcome = installEverywhere(env, { force: body.force === true, all: body.all === true })
+  if (body.all !== true) outcome.changes.push(...retireSkillFromNativeHosts(env))
+  return { report: outcome.changes, cmuxCommit: null, system: systemState(env) }
 }
 
 /** The line this agent becomes in the skill — shown verbatim in the UI. */
@@ -286,6 +196,66 @@ async function runPaneOperation(panes, op, dimensions, body) {
 }
 
 /**
+ * Every request Rust sends over the bridge, answered.
+ *
+ * `app/src-tauri/src/commands.rs` sends twelve (`grep request_node`); an op
+ * with no handler answers `unknown-op`, which Rust turns into
+ * `not-available-yet` and the page renders as "not available yet". So this
+ * table is the page's whole vocabulary, and a name missing from it is a
+ * dead button.
+ *
+ * The page has no credential and needs none: its authority IS Rust's
+ * presence on the pipe, which only the app it is embedded in has. That is
+ * why these take their tab from the body where the HTTP routes take it from
+ * a lead token. It also means they are not idempotent by an `opId` the way
+ * the controller's writes are — a page whose click was lost clicks again,
+ * with a person watching, and one minted here would only make a retry
+ * silently do nothing.
+ */
+function attachPage(bridge, { panes, page, store }) {
+  const ops = {
+    'tab.open': (body) => panes.tabOpen(body),
+    'tab.resume': (body) => panes.tabResume(body),
+    'shell.open': (body) => panes.shellOpen(body),
+    consult: (body) => panes.consult(body?.tab, { ...body, opId: randomUUID() }),
+    attach: (body) => panes.attach(body?.tab, { ...body, opId: randomUUID() }),
+    'pane.close': (body) => panes.paneClose(body),
+    'notify.set': (body) => panes.notifySet(body),
+    'state.list': () => page.state(),
+    'answers.list': (body) => page.answersList(body),
+    'deliver.now': (body) => page.deliverNow(body),
+    'deliver.cancel': (body) => page.deliverCancel(body),
+    'held.send': (body) => page.heldSend(body),
+  }
+  for (const [op, run] of Object.entries(ops)) {
+    bridge.on(op, async (body) => {
+      try {
+        const answer = await run(isObject(body) ? body : {})
+        return isObject(answer) ? { ok: true, ...answer } : { ok: true, answer }
+      } catch (cause) {
+        // The page shows the person a message, so a refusal says what it
+        // was; a fault on this side says only that it was ours.
+        if (cause instanceof PaneError) return { ok: false, ...paneErrorBody(cause) }
+        return {
+          ok: false,
+          error: 'internal_error',
+          ...(cause instanceof Error && cause.message.length > 0 ? { reason: cause.message } : {}),
+        }
+      }
+    })
+  }
+  // One notification per mutation, straight off the store's queue. The page
+  // re-reads `state.list` when it arrives, so this carries no state of its
+  // own — a frame that raced the write it describes would be worse than no
+  // frame at all, and this one cannot: the queue announces after the write.
+  return store.onMutation(({ op }) => {
+    bridge.event('state.changed', { op })
+  })
+}
+
+const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+
+/**
  * True when this descriptor is the parent's end of a pipe. Node's `'pipe'`
  * stdio is a socketpair on macOS and a FIFO elsewhere, so both count; a
  * terminal or /dev/null is neither.
@@ -341,8 +311,25 @@ export async function startUiServer(env, { paneOpenDeadlineMs } = {}) {
     // bundle this IS the bundled runtime, and `pane.open` refuses a
     // relative argv[0].
     node: RUNTIME,
+    harnessPath: (kind) => harnessPath(harnessForKind(kind) ?? kind, env),
+    shell: typeof env.SHELL === 'string' && env.SHELL.length > 0 ? env.SHELL : '/bin/sh',
+    env,
     ...(paneOpenDeadlineMs === undefined ? {} : { paneOpenDeadlineMs }),
   })
+  const page = new Page({
+    store,
+    tabs,
+    agents: {
+      row: (name) => agentRow(name, env),
+      names: () => listAgents(env).map((agent) => agent.name),
+    },
+    env,
+  })
+  // One watcher for the app, started here and nowhere else: it is the only
+  // thing that submits a delivery, and two of them would submit each twice.
+  const watcher = new Watcher({ store, tabs, env })
+  page.attachWatcher(watcher)
+  let stopAnnouncing = null
 
   const server = createServer(async (request, reply) => {
     const url = new URL(request.url, 'http://127.0.0.1')
@@ -413,7 +400,28 @@ export async function startUiServer(env, { paneOpenDeadlineMs } = {}) {
           return send(403, { error: 'forbidden' })
         }
         await storeReady()
-        return send(...(await runPaneOperation(panes, op, dimensions, body)))
+        try {
+          return send(...(await runPaneOperation(panes, op, dimensions, body)))
+        } catch (cause) {
+          // A pane operation validates what it was given and refuses it in
+          // its own words, with a code. Anything else that escapes is a
+          // fault on THIS side — a bug, a broken transport, a store that
+          // could not write — and answering 400 would tell the caller it
+          // sent something wrong and invite it to change the request.
+          if (cause instanceof LaunchTicketError) return send(401, { error: 'unauthorized' })
+          if (cause instanceof PaneError) return send(cause.status, paneErrorBody(cause))
+          // `internal_error` is the code, and it is the whole answer to
+          // "whose fault": ours. The words still come along, because the
+          // one reading this is the person who ran the app on their own
+          // machine, and "cannot read deliveries.json: not JSON" is the
+          // difference between fixing it and filing a bug.
+          return send(500, {
+            error: 'internal_error',
+            ...(cause instanceof Error && cause.message.length > 0
+              ? { reason: cause.message }
+              : {}),
+          })
+        }
       }
 
       if (!uiAuthorized) return send(403, { error: 'forbidden' })
@@ -423,23 +431,36 @@ export async function startUiServer(env, { paneOpenDeadlineMs } = {}) {
       }
       if (request.method === 'POST' && url.pathname === '/api/tabs') {
         await storeReady()
-        const created = await tabs.create(body.dir, body.harness)
-        const tab = await tabs.get(created.id)
-        const pane = tab?.panes?.find((candidate) => candidate.kind === 'lead')
-        if (tab === null || pane === undefined) {
-          throw new InternalInvariantError('the new tab has no lead pane')
+        // ONE way to open a tab. This route used to write the records and
+        // stop, so a tab created here had a lead pane in the store and no
+        // process behind it, and nothing else ever launched one. It is the
+        // same operation `tab.open` is; only the response shape is this
+        // route's own, and callers depend on it.
+        try {
+          const launched = await panes.tabOpen({ dir: body?.dir, harness: body?.harness })
+          const tab = await tabs.get(launched.tab)
+          // The response shape is unchanged on purpose: callers depend on
+          // exactly `{tab, leadEnv}`, and the launch is now implied by the
+          // tab existing at all.
+          const pane = tab?.panes?.find((candidate) => candidate.kind === 'lead')
+          if (tab === null || pane === undefined) {
+            throw new InternalInvariantError('the new tab has no lead pane')
+          }
+          return send(201, {
+            tab,
+            leadEnv: buildLeadEnv({
+              tab: tab.id,
+              pane: pane.id,
+              leadId: leadIdentity(tab),
+              app,
+              path: env?.PATH,
+              node: RUNTIME,
+            }),
+          })
+        } catch (cause) {
+          if (cause instanceof PaneError) return send(cause.status, paneErrorBody(cause))
+          throw cause
         }
-        return send(201, {
-          tab,
-          leadEnv: buildLeadEnv({
-            tab: tab.id,
-            pane: pane.id,
-            leadId: created.leadId,
-            app,
-            path: env?.PATH,
-            node: RUNTIME,
-          }),
-        })
       }
       if (request.method === 'POST' && url.pathname === '/api/launch') {
         await storeReady()
@@ -497,13 +518,6 @@ export async function startUiServer(env, { paneOpenDeadlineMs } = {}) {
       if (request.method === 'GET' && url.pathname === '/api/system') {
         return send(200, systemState(env))
       }
-      if (request.method === 'POST' && url.pathname === '/api/mode') {
-        if (!MODES.includes(body.mode)) {
-          return send(400, { error: `unknown mode; expected ${MODES.join(', ')}` })
-        }
-        const outcome = applyMode(body.mode, env, {})
-        return send(200, { ...outcome, system: systemState(env) })
-      }
       if (request.method === 'POST' && url.pathname === '/api/skills/install') {
         return send(200, installFromUi(body, env))
       }
@@ -531,7 +545,7 @@ export async function startUiServer(env, { paneOpenDeadlineMs } = {}) {
           // Off is not a one-way door, and the way back is a section further
           // up this page: say so here, where the reader is looking.
           report: [
-            'ConsensFlow is off — nothing is installed. Pick a path above to switch it back on.',
+            'ConsensFlow is off — your agents are kept. Update skills or reopen the app to reinstall.',
           ],
           system: systemState(env),
         })
@@ -566,8 +580,11 @@ export async function startUiServer(env, { paneOpenDeadlineMs } = {}) {
   })
 
   try {
+    await storeReady()
+    await watcher.start()
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   } catch (cause) {
+    await watcher.close()
     await store.close()
     throw cause
   }
@@ -579,18 +596,56 @@ export async function startUiServer(env, { paneOpenDeadlineMs } = {}) {
     token,
     // The pane host arrives after the handle line: `serveUi` builds the
     // bridge on the stdio it was handed and gives it to the server here.
-    attachBridge: (bridge) => panes.attachBridge(bridge),
+    attachBridge: (bridge) => {
+      // `null` is how the app says the pane host is gone. Everything that
+      // hangs off a bridge comes off with it, the store listener included:
+      // a frame written to a dead bridge is a frame nobody reads.
+      stopAnnouncing?.()
+      stopAnnouncing = null
+      panes.attachBridge(bridge)
+      if (bridge !== null && bridge !== undefined) {
+        watcher.attachBridge(bridge)
+        stopAnnouncing = attachPage(bridge, { panes, page, store })
+      }
+      return panes
+    },
+    /**
+     * Everything this editor started, finished and on disk.
+     *
+     * Deliberately independent of the HTTP server: a keep-alive connection can
+     * hold `server.close()` open indefinitely, and what must not wait behind it
+     * is the delivery whose write is settling. `watcher.close()` awaits the
+     * watcher's own queue — an in-flight submission handles its rejection
+     * inside that queue — and `store.close()` then drains every mutation it
+     * admitted. After this, `submitting` has become whatever it really is.
+     */
+    drain: async () => {
+      stopAnnouncing?.()
+      await watcher.close()
+      await store.close()
+    },
     close: async () => {
       try {
         await new Promise((resolve, reject) => {
           server.close((error) => (error === undefined ? resolve() : reject(error)))
         })
       } finally {
+        stopAnnouncing?.()
+        await watcher.close()
         await store.close()
       }
     },
   }
 }
+
+/**
+ * How long the editor may spend finishing its writes when its parent goes.
+ *
+ * Long enough for a settling delivery and a store queue, short enough that a
+ * wedged one still ends the process — the parent is already gone, so nothing
+ * is served by waiting longer.
+ */
+const DRAIN_MS = 5_000
 
 /**
  * `cf ui`: start, say where it is, run until Ctrl-C.
@@ -601,7 +656,7 @@ export async function startUiServer(env, { paneOpenDeadlineMs } = {}) {
  */
 export async function serveUi(
   env,
-  { onOut, json = false, open = true, stdin = null, stdout = null },
+  { onOut, json = false, open = true, stdin = null, stdout = null, registerDrain = null },
 ) {
   // Opening the app IS the act: it does what its own buttons do, before the
   // page is served, so the first render already tells the truth.
@@ -627,17 +682,52 @@ export async function serveUi(
   // stdio of its own.
   const input = stdin ?? process.stdin
   const output = stdout ?? process.stdout
+
+  /**
+   * The parent is gone, so this editor stops — but not in the same tick.
+   *
+   * `process.exit(0)` here used to end the process synchronously, and a
+   * delivery whose paste the pane accepted and whose Return never landed was
+   * left `submitting` on disk for ever. It reads as "still going", which is
+   * the one thing it is not. The bridge rejects every outstanding request
+   * before this runs, so the write is already settling inside the watcher's
+   * queue; draining lets it reach `uncertain` — never a replay, and never a
+   * pretence that it failed cleanly.
+   *
+   * Bounded, because the parent is not coming back: a drain that will not
+   * finish must still let the process go, and the exit stays 0 either way —
+   * a parent closing its pipe is the ordinary end of a session, not a fault.
+   */
+  let stopping = null
+  const stop = () => {
+    stopping ??= (async () => {
+      const expired = new Promise((resolve) => {
+        const timer = setTimeout(resolve, DRAIN_MS)
+        timer.unref?.()
+      })
+      try {
+        await Promise.race([server.drain(), expired])
+      } catch {
+        // A drain that throws has still had its chance; the parent is gone
+        // and holding the process open over it helps nobody.
+      }
+      process.exit(0)
+    })()
+    return stopping
+  }
+  registerDrain?.(stop)
+
   if (stdinIsPipe(input)) {
     if (json) {
       // A fatal bridge failure ends the session the way stdin EOF does: the
       // parent is gone or the pipe is broken, and an editor nobody can read
       // must not keep serving.
-      const bridge = new Bridge({ input, output, onFatal: () => process.exit(0) })
+      const bridge = new Bridge({ input, output, onFatal: stop })
       bridge.on('ping', () => ({ ok: true }))
       server.attachBridge(bridge)
     }
-    input.on('end', () => process.exit(0))
-    input.on('close', () => process.exit(0))
+    input.on('end', stop)
+    input.on('close', stop)
     input.resume()
   }
   await new Promise(() => {})
@@ -762,20 +852,6 @@ const PAGE = (token) => `<!DOCTYPE html>
   input::placeholder { color: var(--muted); }
   .full { grid-column: 1 / -1; }
   .alert { color: var(--buoy); font-size: 13px; margin: 0; }
-  .integration {
-    border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; margin-bottom: 10px;
-    display: grid; gap: 6px; background: var(--panel);
-  }
-  .integration[data-active="true"] { border-color: var(--seafoam); }
-  .integration__head { display: flex; align-items: baseline; gap: 10px; }
-  .integration__title { font-weight: 600; font-size: 15px; }
-  .integration__state {
-    font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
-    color: var(--muted);
-  }
-  .integration[data-active="true"] .integration__state { color: var(--accent-text); }
-  .integration__head .spacer { flex: 1; }
-  .integration p { margin: 0; font-size: 13px; color: var(--muted); }
   .facts { display: grid; gap: 4px; margin: 0 0 14px; }
   .fact { display: flex; gap: 12px; font-size: 13px; }
   .fact dt { color: var(--muted); min-width: 104px; font-family: var(--mono); font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; padding-top: 2px; }
@@ -804,14 +880,11 @@ const PAGE = (token) => `<!DOCTYPE html>
   <input id="catalog-filter" type="search" placeholder="Filter by name, model or engine…" autocomplete="off">
   <div id="catalog"></div>
 
-  <p class="eyebrow eyebrow--section">How this machine consults</p>
-  <p class="lede" id="mode-lede"></p>
-  <div id="integrations"></div>
-
   <p class="eyebrow eyebrow--section">Installed</p>
   <div id="system"></div>
   <div class="actions">
     <button id="update">Update skills</button>
+    <button id="off" class="danger">Turn off</button>
     <button id="reset" class="danger" title="Removes your agents, every run artifact (packets, transcripts, generated images), and every file ConsensFlow installed — including skill files you edited. The ConsensFlow.app bundle stays. This cannot be undone.">Reset everything</button>
   </div>
   <p id="skills-note" class="note"></p>
@@ -820,25 +893,20 @@ const PAGE = (token) => `<!DOCTYPE html>
   <p class="lede">Your coding agent runs these for you — you just say "ask hyperion…".
   They are here so you can drive it yourself when you want to.</p>
   <dl class="cmds">
-    <dt><code>cf run @name "&lt;task&gt;"</code></dt>
-    <dd>One consult. In cmux mode, in a terminal, this IS the agent's own
-        window: the pane becomes claude's, pi's or opencode's interface on that
-        conversation, seeded with your task, and you just talk. codex streams
-        its first answer, then the pane becomes its window too. Each coding
-        session gets its own conversation — nobody inherits yours.</dd>
     <dt><code>cf run @name "&lt;task&gt;" --new</code></dt>
-    <dd>Start a fresh conversation instead, and print its name.</dd>
+    <dd>Open a fresh conversation in an app pane and print its name. Completed replies arrive automatically when the lead can receive them.</dd>
+    <dt><code>cf run @name "&lt;task&gt;"</code></dt>
+    <dd>Continue the current conversation with that agent.</dd>
+    <dt><code>cf say &lt;conversation&gt; "&lt;task&gt;"</code></dt>
+    <dd>Send a follow-up to a named conversation.</dd>
     <dt><code>cf sessions</code></dt>
-    <dd>The conversations alive in this folder — name, agent, how many turns.</dd>
-    <dt><code>cf catchup &lt;name&gt;</code></dt>
-    <dd>Everything said in one, read from the harness's own session — whoever
-        said it, window or not. <code>--wait</code> sits out the next answer and
-        prints only what is new; it is how your coding agent follows along.</dd>
-    <dt><code>cf last &lt;name&gt;</code></dt>
-    <dd>The last answer a streamed run left, and where its transcript is.</dd>
-    <dt><code>cf attach &lt;name&gt;</code></dt>
-    <dd>Reopen a conversation's window later, in any terminal — whole history
-        in it. Your coding agent still follows with <code>cf catchup</code>.</dd>
+    <dd>List the conversations recorded in this folder.</dd>
+    <dt><code>cf catchup &lt;conversation&gt;</code></dt>
+    <dd>Read a conversation when you want its history or progress.</dd>
+    <dt><code>cf read &lt;delivery-id&gt;</code></dt>
+    <dd>Read every part of a long delivered answer.</dd>
+    <dt><code>cf attach &lt;conversation&gt;</code></dt>
+    <dd>Focus or reopen its app pane with the existing history.</dd>
   </dl>
 
   <p class="eyebrow eyebrow--section">Define your own</p>
@@ -1037,51 +1105,11 @@ function showEfforts(efforts, harness) {
   for (const e of efforts[harness] ?? []) list.appendChild(new Option(e, e));
 }
 
-function renderMode(system) {
-  document.querySelector('#mode-lede').textContent =
-    system.mode.current === null
-      ? 'Nothing is installed yet. Pick the one path this machine runs — switching later removes the previous one.'
-      : system.mode.report.join(' · ');
-
-  const host = document.querySelector('#integrations');
-  host.innerHTML = '';
-  for (const integration of system.integrations) {
-    const card = el('div', 'integration');
-    card.dataset.active = String(integration.active);
-
-    const head = el('div', 'integration__head');
-    head.append(el('span', 'integration__title', integration.title));
-    head.append(el('span', 'integration__state', integration.active ? 'active' : integration.detail));
-    head.append(el('span', 'spacer'));
-    // The mode's own card is where the mode lives, so turning it off belongs
-    // here too — beside the button that turned it on, not in a row of unrelated
-    // danger buttons at the far end of the page.
-    if (integration.active) {
-      const off = el('button', 'danger', 'Turn off');
-      arming(off, 'Turn off', () => 'Click again to turn off — agents are kept',
-        () => post('/api/off', { confirm: true }, 'Turning off…'));
-      head.append(off);
-    } else {
-      const use = el('button', null, 'Use this');
-      use.onclick = () =>
-        post('/api/mode', { mode: integration.id }, 'Switching to ' + integration.title + '…');
-      head.append(use);
-    }
-    card.append(head);
-    card.append(el('p', null, integration.summary));
-    if (integration.active && integration.detail !== 'not installed') {
-      card.append(el('p', null, integration.detail));
-    }
-    host.append(card);
-  }
-}
-
-/** What each harness has, given the path this machine runs. */
-function harnessState(harness, mode) {
-  if (mode === null) return 'nothing yet';
-  if (mode === 'cmux') return 'consults, via the generated skill';
-  if (harness.id === mode) return 'consults, via the generated skill';
-  return 'nothing in ' + mode + ' mode';
+/** Installation state for each detected harness. */
+function harnessState(harness, system) {
+  if (harness.native) return 'provides its own ConsensFlow integration';
+  if (system.gaps.includes(harness.id)) return 'skill missing';
+  return system.skills.ours > 0 ? 'consults via the generated skill' : 'no skill installed';
 }
 
 function renderSystem(system) {
@@ -1094,16 +1122,12 @@ function renderSystem(system) {
   for (const harness of system.harnesses) {
     const line = el('div', 'host');
     line.append(harness.id + ' ');
-    line.append(el('span', null, '— ' + harnessState(harness, system.mode.current)));
+    line.append(el('span', null, '— ' + harnessState(harness, system)));
     hosts.append(line);
   }
   if (system.harnesses.length === 0) hosts.append(el('span', null, 'none on PATH'));
 
-  const active = system.integrations.find((i) => i.active);
   const parts = [];
-  if (active && active.files > 0) {
-    parts.push(active.title + ': ' + active.detail);
-  }
   const sk = system.skills;
   if (sk.files > 0) {
     parts.push(sk.perHarness + ' skills in each of ' + sk.harnesses + ' harnesses');
@@ -1191,7 +1215,7 @@ async function post(path, body, note) {
   load();
 }
 
-// Choosing an integration installs it; this only refreshes what is there.
+// Keep installed skills current with the roster.
 document.querySelector('#catalog-filter').addEventListener('input', () => {
   if (LAST !== null) renderCatalog(LAST);
 });
@@ -1225,6 +1249,13 @@ function arming(button, resting, armedLabel, run) {
 }
 
 arming(
+  document.querySelector('#off'),
+  'Turn off',
+  () => 'Click again to turn off — agents are kept',
+  () => post('/api/off', { confirm: true }, 'Turning off…'),
+);
+
+arming(
   document.querySelector('#reset'),
   'Reset everything',
   () => {
@@ -1251,7 +1282,6 @@ async function load() {
   renderCatalog(data);
   renderForm(data);
   renderSystem(system);
-  renderMode(system);
 }
 
 document.querySelector('#add').onsubmit = async (event) => {

@@ -8,13 +8,13 @@
  * harness on the machine (claude, codex, pi, opencode). The skill teaches the
  * harnesses everything else.
  */
-import { execFileSync, spawn } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
+import { answers as harnessAnswers } from '../hosts/lib/completion.js'
 import {
   discoverCodexSession,
   discoverKimiSession,
@@ -24,24 +24,26 @@ import {
 import { renderImageRun, runImageAgent } from '../hosts/lib/image-run.js'
 import { createPacket, createWindowSeed } from '../hosts/lib/packets.js'
 import { childEnv, interactiveResume, interactiveStart, runAgent } from '../hosts/lib/runners.js'
+import { openingLineCarriesNonce, TURNS_EXAMINED } from '../hosts/lib/session-binding.js'
 import { runsRoot } from '../hosts/lib/state.js'
-import { leadId, loadThreads, newSessionName, saveThread } from '../hosts/lib/threads.js'
+import { leadId, loadThreads } from '../hosts/lib/threads.js'
 import { renderEvent } from '../hosts/lib/transcript-events.js'
 import { CATALOG, catalogEntry } from '../src/catalog.js'
+import { launchConfiguration } from '../src/channels.js'
 import { detectHarnesses } from '../src/harnesses.js'
 import { staleClaudeHooks } from '../src/host-payloads.js'
-import { installSkill, skillsStatus, skillsSummary, uninstallSkills } from '../src/install.js'
 import {
-  applyMode,
-  currentMode,
-  MODES,
-  modeLabel,
-  modeReport,
+  installEverywhere,
+  installSkill,
   resetEverything,
   resetPreview,
+  skillsStatus,
+  skillsSummary,
   syncCmuxSkills,
   turnOff,
-} from '../src/mode.js'
+  uninstallSkills,
+} from '../src/install.js'
+import { appRequester } from '../src/requester.js'
 import {
   addAgent,
   agentRow,
@@ -65,10 +67,16 @@ import { terminalRuntime } from '../src/terminal.js'
 
 // `cf … | head` closes our stdout mid-stream; dying with an EPIPE stack for
 // that is a crash where a quiet exit is the whole contract of a CLI.
+//
+// The editor is the one verb that owns durable state, so it installs a drain
+// here: a broken pipe must not cut a delivery's outcome off before it reaches
+// disk. Every other verb has nothing to finish and exits as it always did.
+const owner = { drain: null }
 for (const stream of [process.stdout, process.stderr]) {
   stream.on('error', (error) => {
-    if (error.code === 'EPIPE') process.exit(0)
-    throw error
+    if (error.code !== 'EPIPE') throw error
+    if (owner.drain === null) process.exit(0)
+    else void owner.drain()
   })
 }
 
@@ -80,77 +88,38 @@ const USAGE = `consensflow ${PKG.version}
 
 Usage: cf <command> [options]
 
-  setup [--all] [--force]                      One command: when the shared roster has agents,
-                                               install the consensflow skill into every detected
-                                               coding harness
-  use <claude|pi|cmux>                         Who on this machine can consult:
-                                               claude / pi = only that harness gets the skill;
-                                               cmux (pi, cc, codex, opencode, kimi) = every harness
-                                               it, and a consult opens the agent's own window in
-                                               its cmux pane
-  run <name> "<task>"                          Spawn one agent here and stream its work back:
-    [--brief <what this run is for>]            a brief for this spawn, your conversation as
-    [--handoff-file <file>] [--no-handoff]      handoff when you pass one, a note alongside it
-    [--context <note>] [--prompt-file <file>]
-    [--image <path>]                            (image agents: reference pictures)
-    [--new] [--session <name>]                  a conversation continues by default in cmux
-    [--thread]                                  mode, and --thread asks for one in a host
-                                               mode; --new starts a fresh one, and with
-                                               --session it starts under that exact name
-  mint <@name>                                 A fresh conversation name, printed before
-                                               anything exists under it — name first, then
-                                               run with --new --session <name>. The agent is
-                                               required: the name says whose it is
-  attach <@name|conversation> [--print]        Open the harness's OWN window on that
-                                               conversation — the real codex/claude/pi
-                                               interface, whole history in it. --print
-                                               emits the command instead of running it
-  chat <@name|conversation> [--new]            Talk to a conversation instead of commanding
-                                               it: one typed line is one turn, /exit or
-                                               Ctrl-D leaves, the conversation stays
-  sessions [--json]                            The conversations alive in this workspace
-  catchup [<name|@agent>] [--last <n>]         Everything said in a conversation, read from
-    [--unread] [--wait]                        the harness's own session — including turns
-                                               the user typed in its pane. --unread is only
-                                               what has been said since you last looked;
-                                               --wait blocks for the next answer
-  last <name|@agent> [--json]                  The last answer from one of them, and where
-                                               its transcript is — how the main pane reads
-                                               what happened in an agent's pane
-  mode                                         Which one is active, and what it means
-  off [--force]                                Take it all back: every file the manifest owns, the
-                                               launcher, and the mode. Agents are kept
-  reset [--yes]                                The clean slate: everything off removes, plus your
-                                               agents and every run artifact. Prints what it would
-                                               destroy and refuses without --yes. Cannot be undone
-  catalog [--harness <h>] [--json]             The ready-made agents, per harness
-  agent add <name>                             A catalog name is enough: cf agent add zeus
-  agent add <name> --harness <h> --model <m> [--effort <e>] [--description <d>]
+  setup [--all] [--force]                     Install the CLI and generated skill
+  run <@agent> "<task>"                       Ask a worker in a ConsensFlow app pane
+    [--brief <purpose>] [--context <note>]
+    [--prompt-file <file>] [--handoff-file <file>] [--no-handoff]
+    [--new | --session <conversation>]        Continue by default; --new mints a name
+    [--notify auto|manual] [--image <path>]
+  say <conversation> "<words>"               Continue in that conversation's app pane
+  attach <@agent|conversation>                Reopen a conversation through the app
+  read <delivery id> [--part <k>]             Read a complete numbered delivery part
+  catchup [<conversation|@agent>]             Read the harness transcript
+    [--unread] [--last <n>] [--wait] [--json]
+  sessions [--json]                          List conversations in this workspace
+  last <conversation|@agent> [--json]         Read the last recorded answer
+  catalog [--harness <h>] [--json]            List available agent presets
+  agent add <name>                           Add a catalog agent
+    [--harness <h>] [--model <m>] [--effort <e>] [--description <d>]
   agent list [--json]
   agent edit <name> [--model <m>] [--effort <e>] [--description <d>]
   agent remove <name>
-  agent sync [<name>] [--dry-run]              Re-resolve catalog-backed agents against the
-                                               catalog: a preset that moved to a newer model reaches
-                                               your roster. Your own definitions and descriptions
-                                               are never touched
-      the roster is ~/.consensflow/agents.json, shared by every path this
-      machine can run (it was participants.json before 2026-08-21 and an
-      existing one is still read)
-  skills install [--all]                       Generate + install the consensflow skill — the one
-                                               skill ConsensFlow ships. It replaces an installed copy
-                                               you edited; a file we never installed is left alone.
-                                               Hosts with their own ConsensFlow (the cc plugin, the pi
-                                               extension) are left alone unless --all
-  skills update [--force]                      Regenerate ours; take back any cmux skills an older
-                                               version installed
-  skills status                                Every owned file: ok, drifted (user-edited) or missing
-  skills uninstall [--force]                   Remove exactly what the manifest owns
-  ui [--json] [--no-open]                      Ephemeral local roster editor (Ctrl-C to stop);
-                                               --json prints a handle line for a host program
-  doctor                                       Harnesses detected, roster size, skills state
+  agent sync [<name>] [--dry-run]             Refresh catalog-owned agent fields
+  skills install [--all]                     Install the generated roster skill
+  skills update [--force]                    Refresh skills and retire owned leftovers
+  skills status                             Inspect installed skills
+  skills uninstall [--force]                Remove manifest-owned skills
+  ui [--json] [--no-open]                     Open the local roster editor
+  doctor                                    Inspect runtime, roster and skill installation
+  off [--force]                             Remove owned installation; keep agents and history
+  reset [--yes]                             Remove installation, agents and local app history
 
-Every roster change regenerates the installed consensflow skill. Drifted files
-are never overwritten without --force.
+Run, say, attach and read need a pane opened by ConsensFlow.
+The app owns conversation launches, delivery and read marks.
+Every roster change refreshes the generated skill. Unowned skill files stay untouched.
 `
 
 function out(text) {
@@ -160,6 +129,17 @@ function out(text) {
 function fail(message) {
   process.stderr.write(`cf: ${message}\n`)
   process.exitCode = 1
+}
+
+/**
+ * Something worth saying that is not this command's verdict.
+ *
+ * A pane whose binding failed still ran its window, and the window is what
+ * the exit status is about; the binding gets the reader's attention without
+ * taking the process's answer away from the thing that actually happened.
+ */
+function warn(message) {
+  process.stderr.write(`cf: ${message}\n`)
 }
 
 const NATIVE_OWNER = {
@@ -227,97 +207,6 @@ function resolveAdd(name, values) {
 }
 
 /**
- * Spawn one agent, here, in whatever mode this machine runs.
- *
- * The host payloads have always had this; the cmux path had only a raw
- * harness command in its skill, which meant no packet, no brief, no handoff
- * and no artifacts. Same verb, same flags, same packet everywhere now — the
- * runner and the packet builder are the shared engine, not a second copy.
- */
-/**
- * Which conversation a consult belongs to, and what to hand the runner.
- *
- * The one rule for `cf run` and `cf chat` both — it used to be written twice,
- * and only one copy learned anything. A named session, a deliberately new one,
- * or this lead's own conversation with that agent. Returns `undefined` for
- * `name` when threading is off.
- *
- * `join` is what separates spawning from joining. A consult (`cf run`) takes
- * only what this lead started: standing in a directory where somebody else
- * left a conversation is not a reason to continue it, which is exactly how
- * "ask hyperion for a joke" became turn 4 of an unrelated one. Joining a
- * conversation you can see (`cf chat`, `cf last`, `cf attach`) falls back to
- * the agent's most recent one whoever started it — the user typing in an
- * agent's pane is a different lead by every measure we have, and refusing them
- * their own conversation would be absurd.
- *
- * Naming a session is never scoped: explicit is the user saying which one they
- * mean, and no rule of ours overrules that.
- */
-async function resolveConversation(agentRow, { wantsThread, session, fresh, join = false }) {
-  if (!wantsThread) return { threads: {}, name: undefined, record: undefined }
-  const threads = await loadThreads(cwdOf())
-  const nextName = () =>
-    newSessionName(
-      Object.keys(threads),
-      listAgents(env).map((a) => a.name),
-      agentRow.id,
-    )
-  if (session !== undefined) {
-    // `--new --session <name>` names the conversation up front. The lead
-    // composing a pane command needs the name BEFORE the run prints it —
-    // there is no other way to title the tab or read the answer back without
-    // guessing from `cf sessions`.
-    if (fresh) {
-      if (!/^[a-z0-9][a-z0-9-]*$/.test(session)) {
-        return {
-          error: `a conversation name is lowercase words and hyphens: ${JSON.stringify(session)}`,
-        }
-      }
-      if (listAgents(env).some((a) => a.name === session)) {
-        return {
-          error: `${session} is an agent's name — a conversation cannot share it ("ask ${session} in ${session}" would read as two agents)`,
-        }
-      }
-      if (threads[session] !== undefined) {
-        return {
-          error: `conversation ${JSON.stringify(session)} already exists here — omit --new to continue it`,
-        }
-      }
-      return { threads, name: session, record: undefined }
-    }
-    if (threads[session] === undefined) {
-      const known = Object.keys(threads)
-      return {
-        error:
-          known.length === 0
-            ? `no conversation named ${JSON.stringify(session)} here — omit --session to start one`
-            : `no conversation named ${JSON.stringify(session)} here; you have: ${known.join(', ')}`,
-      }
-    }
-    return { threads, name: session, record: threads[session] }
-  }
-  if (fresh) return { threads, name: nextName(), record: undefined }
-
-  const lead = leadId(env)
-  const theirs = Object.entries(threads)
-    .filter(([, row]) => row.agent === agentRow.id)
-    .sort((a, b) => String(b[1].lastRunAt ?? '').localeCompare(String(a[1].lastRunAt ?? '')))
-  // A lead we cannot name is nobody, not everybody: `lead === null` matches no
-  // row, so two unidentified shells never share a conversation by accident.
-  const mine = lead === null ? [] : theirs.filter(([, row]) => row.lead === lead)
-  const picked = mine[0] ?? (join ? theirs[0] : undefined)
-  if (picked !== undefined) return { threads, name: picked[0], record: picked[1] }
-  return { threads, name: nextName(), record: undefined }
-}
-
-/** What to pass runAgent: an object means "this belongs to a conversation". */
-function sessionFor(agentRow, name, record) {
-  if (name === undefined) return undefined
-  return { sessionId: record?.sessionId ?? (agentRow.kind === 'pi' ? name : undefined) }
-}
-
-/**
  * Which conversation a read verb means — `attach`, `catchup` and `last` all
  * answer it the same way, and each used to carry its own copy of this.
  *
@@ -381,319 +270,127 @@ function readMark(record, lead) {
   return record?.seen?.[lead] ?? 0
 }
 
-async function markRead(name, record, lead, turnCount) {
-  if (lead === null || record === undefined) return
-  if (record.seen?.[lead] === turnCount) return
-  await saveThread(cwdOf(), name, {
-    ...record,
-    seen: { ...record.seen, [lead]: turnCount },
-  })
-}
+const DISCOVER = { opencode: discoverOpencodeSession, codex: discoverCodexSession }
 
-async function recordTurn(name, agentRow, record, result) {
-  if (name === undefined) return
-  const now = new Date().toISOString()
-  // Read the row back rather than spreading the pre-run snapshot: it carries
-  // fields this writer does not own — the read marks `cf catchup` keeps, the
-  // `startedAt` marker, and whatever a later version adds. Rebuilding from a
-  // literal silently wiped them.
-  const { startedAt, ...current } = (await loadThreads(cwdOf()))[name] ?? record ?? {}
-  await saveThread(cwdOf(), name, {
-    ...current,
-    agent: agentRow.id,
-    kind: agentRow.kind,
-    // Whoever started it keeps it. A later turn can come from the user typing
-    // in the agent's own pane — a different lead by every measure we have —
-    // and rewriting the owner there would take the conversation away from the
-    // lead that is still holding it.
-    lead: record === undefined ? leadId(env) : (record.lead ?? null),
-    sessionId: result.sessionId ?? null,
-    runs: (record?.runs ?? 0) + 1,
-    createdAt: record?.createdAt ?? now,
-    lastRunAt: now,
-    lastRunId: result.runId,
-  })
+const cwdOf = () => process.cwd()
+
+// --- standalone: ConsensFlow's own app owns the panes -------------------------
+
+/**
+ * The app's authority in this process, or null when there is none.
+ *
+ * `src/launch.js` hands a lead pane `CONSENSFLOW_APP` plus a tab-scoped
+ * token, and a `--in-pane` controller `CONSENSFLOW_APP` plus a single-use
+ * ticket. This is the ONLY place `cf` reads them; everything below takes
+ * what it needs as an argument, which is what `src/requester.js` is for.
+ */
+function appHere() {
+  const url = env.CONSENSFLOW_APP
+  if (typeof url !== 'string' || url.trim().length === 0) return null
+  return {
+    url,
+    token: env.CONSENSFLOW_APP_TOKEN,
+    tab: env.CONSENSFLOW_TAB,
+    pane: env.CONSENSFLOW_PANE_ID,
+    ticket: env.CONSENSFLOW_LAUNCH,
+    lead: env.CONSENSFLOW_LEAD_ID,
+  }
 }
 
 /**
- * Whether this cf is talking to a person. A pipe cannot host a TUI: the
- * lead's tool call, a test, `--json` all read our stdout as data, and an
- * interactive window there would hang them. `CONSENSFLOW_TTY` exists so tests
- * can stand on either side of the line without owning a real terminal.
+ * The app's launch evidence, checked the same way wherever it arrives.
+ *
+ * `cf run --in-pane` and `cf attach --in-pane` are two doors into one
+ * launch, and a door that skips the check is the check. Answers the single
+ * flag's value, or null once it has said why it refuses.
  */
-function isTerminal() {
-  if (env.CONSENSFLOW_TTY !== undefined) return env.CONSENSFLOW_TTY === '1'
-  return process.stdout.isTTY === true
-}
-
-/**
- * A conversation exists the moment its first run starts, not when it ends.
- *
- * The row used to be written only after the run returned, so a long consult
- * was invisible: `cf sessions` showed nothing and `cf catchup <name>` said
- * there was no such conversation — for the whole time the lead most wanted to
- * follow it. Writing it up front costs nothing and makes `--wait` work on a
- * run that is still going.
- *
- * `startedAt` is what marks it running; `recordTurn` clears it when the answer
- * lands.
- */
-async function markRunning(name, agentRow, record) {
-  if (name === undefined) return
-  const now = new Date().toISOString()
-  await saveThread(cwdOf(), name, {
-    ...record,
-    agent: agentRow.id,
-    kind: agentRow.kind,
-    lead: record === undefined ? leadId(env) : (record.lead ?? null),
-    sessionId: record?.sessionId ?? null,
-    runs: record?.runs ?? 0,
-    createdAt: record?.createdAt ?? now,
-    lastRunAt: record?.lastRunAt ?? null,
-    lastRunId: record?.lastRunId ?? null,
-    startedAt: now,
-  })
-}
-
-/**
- * Record a conversation whose turns happen in the harness's own window.
- *
- * Window turns are not runs of ours — `runs` stays what it was and there is
- * no run id to record. What must be saved is the session id (before the
- * window opens, where we mint it: a crash mid-window must still resume) and
- * the lead, which stays with whoever started the conversation.
- */
-async function saveWindowRow(name, agentRow, record, sessionId) {
-  const now = new Date().toISOString()
-  await saveThread(cwdOf(), name, {
-    ...record,
-    agent: agentRow.id,
-    kind: agentRow.kind,
-    lead: record === undefined ? leadId(env) : (record.lead ?? null),
-    // Where the window went. A conversation is one harness session, and two
-    // windows on one session are two processes writing one store — so the row
-    // has to remember the pane, or nothing can tell that asking for a second
-    // one is a mistake. cmux exports a UUID here, not the `surface:N` ref its
-    // own output leads with; `liveWindowElsewhere` turns one into the other.
-    surface:
-      typeof env.CMUX_SURFACE_ID === 'string' ? env.CMUX_SURFACE_ID : (record?.surface ?? null),
-    sessionId,
-    runs: record?.runs ?? 0,
-    createdAt: record?.createdAt ?? now,
-    lastRunAt: now,
-    lastRunId: record?.lastRunId ?? null,
-  })
-}
-
-/**
- * The conversation's own window, if it is still open in some OTHER pane.
- *
- * Resuming a session opens a window on it unconditionally, and nothing used to
- * notice that one was already up: `cf run --session <name>` sent into a fresh
- * pane, or `cf attach` run anywhere, put a SECOND harness window on one session
- * — two processes writing one session store, and two screens showing halves of
- * one conversation. The skill even invites it, because its escape hatch for a
- * dead window ("the window is gone") is a condition a lead had no way to check:
- * `cf sessions` prints the same row whether the pane is alive or closed.
- *
- * The pane we are standing in never counts: we are at its shell, so whatever
- * window it held has ended. That is what makes a re-run in the same pane
- * silent, and the first open of a conversation silent too.
- *
- * Reading cmux is not driving it — the v2 lesson is about typing at panes, not
- * asking what exists — and this READ fails open in every direction: no cmux, a
- * non-zero exit, an output that has moved, an id that is absent, all mean
- * "proceed as before". A check that can only ever prevent a mistake, never
- * invent one, is worth the coupling; the reverse would not be.
- */
-function liveWindowElsewhere(record, currentEnv) {
-  const surface = record?.surface
-  if (typeof surface !== 'string' || surface.length === 0) return null
-  if (surface === currentEnv.CMUX_SURFACE_ID) return null
-  let tree = ''
-  try {
-    tree = execFileSync('cmux', ['tree', '--all', '--id-format', 'both'], {
-      encoding: 'utf8',
-      env: { ...currentEnv, CMUX_QUIET: '1' },
-      timeout: 5000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    })
-  } catch {
+function launchEvidenceOf(values) {
+  const given = [
+    ...(values.launch === undefined ? [] : ['--launch']),
+    ...(values['native-session'] === undefined ? [] : ['--native-session']),
+  ]
+  if (values['in-pane'] !== true) {
+    if (given.length === 0) return { nonce: undefined, native: undefined }
+    fail(
+      `${given.join(' and ')} ${given.length === 1 ? 'is' : 'are'} the app's own launch ` +
+        'evidence, and it means nothing without --in-pane',
+    )
     return null
   }
-  const line = tree.split('\n').find((row) => row.includes(surface))
-  if (line === undefined) return null
-  // The short ref is what a `cmux send` takes; fall back to the uuid, which
-  // cmux also accepts, rather than losing the finding over a format change.
-  return { ref: /\b(surface:\d+)\b/.exec(line)?.[1] ?? surface }
+  if (given.length !== 1) {
+    fail(
+      'a pane is launched with exactly one piece of launch evidence — --launch <nonce> or ' +
+        `--native-session <id> — and this one carries ${given.length === 0 ? 'neither' : given.join(' and ')}`,
+    )
+    return null
+  }
+  return { nonce: values.launch, native: values['native-session'] }
 }
 
 /**
- * What to say when a conversation already has a window. Named once because
- * two verbs refuse with it, and a lead that reads two different sentences for
- * one situation learns two rules.
+ * The marker we were told to seed has to be the launch the ticket redeemed,
+ * or this pane would write somebody else's evidence into its own session.
  */
-function windowAlreadyOpen(name, live) {
-  return [
-    `${name} already has a window open at ${live.ref} — a second one would put two harnesses on one session.`,
-    `  say it there:      cmux send --surface ${live.ref} '<your words>'`,
-    `  read it back:      cf catchup ${name} --unread`,
-    '  window really gone? close that pane, then run this again.',
-  ].join('\n')
-}
-
-/**
- * The consult as the agent's own window, from its very first turn.
- *
- * claude opens on a uuid we mint, pi on the conversation's name, opencode on
- * an id its store tells us just after launch. Returns false for the two kinds
- * that cannot open cold — codex (no way to pre-set an interactive session id)
- * and image — and the caller streams the first turn instead, then resumes
- * the window on the id that streaming captured.
- */
-async function openWindow(row, name, record, packetInput) {
-  const seed = createWindowSeed(packetInput)
-
-  // kimi streams its first turn instead of opening cold, because its window
-  // cannot be handed a task and cannot be typed into either.
-  //
-  // Its CLI takes no starting task at all — `-p` is documented non-interactive
-  // and a positional prompt comes back as `unknown command`. So the remaining
-  // idea was to open the window empty and type the task in, which was tried
-  // (2026-08-24) and does not work: `cmux send` reaches the TUI as a PASTE,
-  // and in a paste a newline is a newline. Enter never submits, the text sits
-  // in the input box, no answer ever comes — and because the delivery check
-  // waits for a reply that cannot arrive, every retry pastes another copy on
-  // top of the last. The pane looks alive and holds six overlapping questions.
-  //
-  // That is the typed-bootstrap minefield this project was rebuilt to avoid,
-  // met head-on: no readiness signal, no submit, and a failure that looks
-  // exactly like a working window. The fix belongs upstream — kimi needs a
-  // positional prompt or a `--seed`.
-  if (row.kind === 'kimi') return false
-
-  if (record?.sessionId) {
-    const live = liveWindowElsewhere(record, env)
-    if (live !== null) {
-      fail(windowAlreadyOpen(name, live))
-      return true
-    }
-    const invocation = interactiveResume(row, record.sessionId, seed)
-    if (invocation === null) return false
-    await saveWindowRow(name, row, record, record.sessionId)
-    out(`read it back with: cf catchup ${name}`)
-    await handOver(name, row.id, invocation)
-    return true
-  }
-
-  if (row.kind === 'claude-code' || row.kind === 'pi') {
-    const sessionId = row.kind === 'pi' ? name : randomUUID()
-    const invocation = interactiveStart(row, sessionId, seed)
-    if (invocation === null) return false
-    await saveWindowRow(name, row, record, sessionId)
-    out(`read it back with: cf catchup ${name}`)
-    await handOver(name, row.id, invocation)
-    return true
-  }
-
-  // opencode and codex both open their real window cold but announce no id:
-  // each mints one at launch and says so only in its own store, so the window
-  // and the search run together.
-  const discover = DISCOVER[row.kind]
-  if (discover !== undefined) {
-    const invocation = interactiveStart(row, null, seed)
-    if (invocation === null) return false
-    // A little clock slack: the store's timestamps and ours need not agree
-    // to the millisecond.
-    const since = Date.now() - 2000
-    await saveWindowRow(name, row, record, null)
-    out(`read it back with: cf catchup ${name}`)
-    // The search runs alongside the window because the id exists only once the
-    // harness has written its own store — and it has to outlast a person. The
-    // search used to give up after 60 seconds, which is fine for opencode (its
-    // session exists a second after launch) and far too short for codex: it
-    // asks "trust this directory?" before opening a session at all, and that
-    // prompt is the user's to answer. One was answered 32 minutes later (live,
-    // 2026-08-28) — long after the search had stopped, and nothing ever looked
-    // again, so the conversation stayed unreadable while its rollout sat on
-    // disk. So the search lasts as long as the window does, and while the
-    // window is up it takes only the session carrying the text we seeded:
-    // waiting costs nothing, and everything else appearing in that directory
-    // meanwhile is somebody else's, the lead's own codex very much included.
-    let windowUp = true
-    let closingAt = Number.POSITIVE_INFINITY
-    const searching = () => windowUp || Date.now() < closingAt
-    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-    const save = async (id) =>
-      await saveWindowRow(name, row, (await loadThreads(cwdOf()))[name], id)
-    const found = (async () => {
-      let wait = 500
-      while (searching()) {
-        const id = await discover(cwdOf(), since, env, { seed })
-        if (id !== null) return await save(id)
-        // Unhurried on purpose: a poll walks the harness's store, and what it
-        // is waiting for is measured in minutes. The wait is spent in slices
-        // so the window closing still ends this promptly.
-        const until = Date.now() + wait
-        while (searching() && Date.now() < until) await sleep(250)
-        wait = Math.min(wait * 2, 5000)
-      }
-      // The window is gone. One last exact look — a store written on the way
-      // out still counts — and then the best guess left: the earliest session
-      // that appeared in this directory since we opened it, which is the same
-      // guess `cf catchup` makes when it heals a row later.
-      const id =
-        (await discover(cwdOf(), since, env, { seed })) ?? (await discover(cwdOf(), since, env))
-      if (id !== null) await save(id)
-    })()
-    await handOver(name, row.id, invocation)
-    windowUp = false
-    // A harness may still be writing on the way out, which is the whole reason
-    // kimi's id is recovered at all.
-    closingAt = Date.now() + 3000
-    await found
-    return true
-  }
-
+function launchMatches(nonce, ownership) {
+  if (nonce === undefined || nonce === ownership.launch) return true
+  fail(
+    `this pane was told to seed the launch marker ${JSON.stringify(nonce)}, and its ticket ` +
+      'redeemed a different launch — refusing rather than binding the wrong session',
+  )
   return false
 }
 
-/** The two harnesses that mint a session id and tell only their own store. */
-const DISCOVER = { opencode: discoverOpencodeSession, codex: discoverCodexSession }
-
-/**
- * A window conversation whose id was never captured, given its session back.
- *
- * The id is discovered while the window is up. A window that outlasted that
- * search — codex sitting on its trust prompt — left the row with no id at all,
- * and nothing looked again: `cf catchup` said the harness kept no transcript
- * and pointed at `cf last`, which pointed back at `cf catchup`, a closed loop
- * around a conversation whose file was on disk the whole time (live,
- * 2026-08-28). So a read looks once more, bounded by when the row was created:
- * the earliest session that appeared in this directory after we opened the
- * window. That is a guess where the search was exact, so it says out loud
- * which session it took, and it saves it — a guess made twice is a guess that
- * can disagree with itself.
- */
-async function healWindowSession(name, record, { quiet = false } = {}) {
-  if (record?.sessionId) return record
-  const discover = DISCOVER[record?.kind]
-  const createdAt = Date.parse(record?.createdAt ?? '')
-  if (discover === undefined || !Number.isFinite(createdAt)) return record
-  const id = await discover(cwdOf(), createdAt - 2000, env)
-  if (id === null) return record
-  const healed = { ...record, sessionId: id }
-  // Written field by field over what is there: a read is not a run, so
-  // `lastRunAt`, the read marks and the lead all stay exactly as they were.
-  await saveThread(cwdOf(), name, healed)
-  if (!quiet) {
-    out(`${name} · @${record.agent} — no id was captured when this window opened;`)
-    out(`taking the ${record.kind} session started here right after it: ${id}`)
-  }
-  return healed
+/** The lead's own credential: its tab, its named operations, nothing else. */
+function leadRequester(app) {
+  return appRequester({ url: app.url, token: app.token, tab: app.tab })
 }
 
-const cwdOf = () => process.cwd()
+/**
+ * The app, or a refusal that names it — for the verbs that exist only
+ * because it does. `cf say` and `cf read` drive a pane, and a pane is the
+ * app's; outside one there is nothing for them to talk to.
+ */
+function requireApp(verb) {
+  const app = appHere()
+  if (app === null) {
+    fail(
+      `cf ${verb} is how you reach a pane, and panes live in ConsensFlow's app — ` +
+        'run it from a pane the app opened',
+    )
+    return null
+  }
+  return app
+}
+
+/**
+ * An agent must not spawn agents, ask them anything, or read their panes:
+ * its own skill would otherwise invite it to. One sentence, five verbs.
+ */
+function childRefused() {
+  if (env.CONSENSFLOW_CHILD !== '1') return false
+  fail('this is already an agent run — an agent does not spawn agents')
+  return true
+}
+
+/**
+ * What a consult became, in one line.
+ *
+ * `--new` is the only way this side knows a conversation is new: the app
+ * answers `opened` both for a name it just minted and for one it reopened,
+ * and inventing "(new)" for the first would be a claim nothing here can
+ * check. So an unasked-for open says `opened` and stops there.
+ */
+function consultLine(answer, fresh) {
+  if (answer.outcome === 'unknown') {
+    return [
+      `conversation: ${answer.conversation} (unknown) — launch ${answer.launch}`,
+      '  the pane host never came back: the launch is unresolved, and nothing may',
+      `  launch ${answer.conversation} again until its pane ends`,
+    ].join('\n')
+  }
+  const state = answer.outcome === 'said' ? 'continuing' : fresh === true ? 'new' : 'opened'
+  return `conversation: ${answer.conversation} (${state}) — pane ${answer.pane?.id}`
+}
 
 async function runVerb(rest) {
   const { values, positionals } = parseArgs({
@@ -707,17 +404,24 @@ async function runVerb(rest) {
       'no-handoff': { type: 'boolean', default: false },
       image: { type: 'string', multiple: true },
       json: { type: 'boolean', default: false },
-      thread: { type: 'boolean' },
       new: { type: 'boolean', default: false },
       session: { type: 'string' },
+      // The app's own launch path. `--in-pane` says "the app opened this
+      // pane and started me in it"; the two evidence flags carry what
+      // `childEnv` strips out of the environment before a harness runs —
+      // the launch nonce for the seed's first line, or the native session
+      // id the harness must take.
+      'in-pane': { type: 'boolean', default: false },
+      launch: { type: 'string' },
+      'native-session': { type: 'string' },
+      // The lead's standing answer to "deliver this conversation's replies
+      // to me or wait until I ask" — the one preference the precedence
+      // table takes from a lead, and only the app can honour it.
+      notify: { type: 'string' },
     },
   })
 
-  // An agent must not spawn agents: its own skill would otherwise invite it to.
-  if (env.CONSENSFLOW_CHILD === '1') {
-    fail('this is already an agent run — an agent does not spawn agents')
-    return
-  }
+  if (childRefused()) return
 
   const name = String(positionals[0] ?? '').replace(/^@/, '')
   const row = name.length > 0 ? agentRow(name, env) : undefined
@@ -752,9 +456,7 @@ async function runVerb(rest) {
     return
   }
 
-  // The conversation reaches the agent one way, in every mode: because the
-  // lead put it in a file and passed it. Nothing stashes it behind the scenes
-  // any more, so nothing differs between the harnesses.
+  // Handoff context is explicit: the lead passes a file to the worker.
   const handoff =
     values['no-handoff'] || values['handoff-file'] === undefined
       ? ''
@@ -767,8 +469,42 @@ async function runVerb(rest) {
   // than accepting a flag and ignoring it — a lead asked for `--session` here
   // and then hunted for a conversation that was never going to exist (live,
   // 2026-08-24).
+  // The app's own flags, checked before anything acts on them. They used to
+  // be recognised and then fall through — `--launch` without `--in-pane` ran
+  // an ordinary cmux consult, and an image agent (whose branch comes first)
+  // ignored all four in silence. A flag we do not honour is refused.
+  const standalone = appHere()
   if (row.kind === 'image') {
-    for (const flag of ['session', 'new', 'thread']) {
+    for (const flag of ['in-pane', 'launch', 'native-session', 'notify']) {
+      if (values[flag] !== undefined && values[flag] !== false) {
+        fail(
+          `@${row.id} draws images; it holds no conversation and no pane, so --${flag} means nothing here`,
+        )
+        return
+      }
+    }
+  }
+  if (launchEvidenceOf(values) === null) return
+  if (values.notify !== undefined && values['in-pane']) {
+    fail(
+      '--notify is the lead’s standing preference for a conversation, recorded when the ' +
+        'consult is made; a pane cannot set it for the lead that opened it',
+    )
+    return
+  }
+  if (values.notify !== undefined && standalone === null) {
+    fail(
+      '--notify records a delivery preference, and delivering an answer is the app’s job: ' +
+        'run it from a pane ConsensFlow opened',
+    )
+    return
+  }
+  if (!values['in-pane'] && standalone === null) {
+    requireApp('run')
+    return
+  }
+  if (row.kind === 'image') {
+    for (const flag of ['session', 'new']) {
       if (values[flag] !== undefined && values[flag] !== false) {
         fail(`@${row.id} draws images; it holds no conversation, so --${flag} means nothing here`)
         return
@@ -787,231 +523,424 @@ async function runVerb(rest) {
     return
   }
 
-  // Threading: always on in cmux mode, where the consult IS the agent's
-  // window — a one-shot there would be a run with no window and no
-  // conversation, a host-mode run in the wrong mode, which is why
-  // `--no-thread` is gone (2026-09-02). Off by default in a host mode, where
-  // `--thread` asks for one; `--session` and `--new` are themselves a
-  // request to thread, so naming one is enough.
-  const wantsThread =
-    values.thread === true ||
-    values.session !== undefined ||
-    values.new === true ||
-    currentMode(env) === 'cmux'
-
-  // A consult in cmux mode IS the agent's own window, and a window needs a
-  // terminal. Redirect our stdout and there is no window to open: the run
-  // streamed into the pipe instead — the exact shape `--no-thread` was deleted
-  // for, a conversation with no window, unreadable while it works (`cf catchup`
-  // has no session id until the run ENDS) and unjoinable. It used to degrade in
-  // silence, and the price was measured (live, 2026-09-02): a lead piped a
-  // consult through `tee`, could not read it, and six minutes later opened a
-  // SECOND conversation with the same agent on the same work in the same repo.
-  // The first one's row still said `working since` long after its process had
-  // died, because a run that never finishes never clears its own mark.
-  //
-  // So it is refused rather than reported. Nothing legitimate is behind it:
-  // `--json` is the channel for a program, a pane is where a lead sends a
-  // consult, and a lead running `cf run` in its own pane is the failure the
-  // first eval scenario exists for. Refused HERE, before the name is resolved,
-  // so a run that cannot happen leaves no row behind either.
-  if (wantsThread && currentMode(env) === 'cmux' && !values.json && !isTerminal()) {
-    fail(
-      [
-        "cf run needs a terminal in cmux mode: the consult is the agent's own window, and a pipe cannot hold one.",
-        '  send it into a pane:   cmux new-pane --type terminal --direction right --focus false',
-        '                         cmux send --surface surface:NN \'cd "$PWD" && cf run @name "<task>" --new --session <name>\'',
-        '  the run as data:       cf run @name "<task>" --json',
-        '  read it afterwards:    cf catchup <name>',
-      ].join('\n'),
-    )
+  // The app owns launches; this process is either the requester or its controller.
+  if (values['in-pane']) {
+    await runInPane(row, task, values, handoff)
+    return
+  }
+  if (standalone !== null) {
+    await runThroughApp(standalone, row, task, values)
     return
   }
 
-  const resolved = await resolveConversation(row, {
-    wantsThread,
-    session: values.session,
-    fresh: values.new === true,
-  })
-  if (resolved.error !== undefined) {
-    fail(resolved.error)
-    return
-  }
-  const sessionName = resolved.name
-  const record = resolved.record
-  const started = record === undefined
-
-  // Say which conversation this is on EVERY turn, not only the first. The
-  // lead needs the name to read the answer back (`cf last`), to catch up on
-  // turns the user took (`cf catchup`) and to find the pane again — and being
-  // told it is continuing is what lets it notice the subject has moved on far
-  // enough to want `--new`. `--json` is a machine's channel, so it stays clean.
-  if (wantsThread && !values.json) {
-    out(
-      started
-        ? `conversation: ${sessionName} (new)`
-        : `conversation: ${sessionName} (continuing, turn ${(record.runs ?? 0) + 1})`,
-    )
-  }
-
-  // In a terminal in cmux mode, the consult IS the agent's own window — this
-  // pane becomes claude's, pi's, opencode's interface on that conversation,
-  // seeded with the task. A pipe cannot host a TUI, so a program calling
-  // `cf run` (the lead's tool call, a test, `--json`) streams as before.
-  const wantsWindow = wantsThread && currentMode(env) === 'cmux' && !values.json && isTerminal()
-  if (wantsWindow) {
-    const opened = await openWindow(row, sessionName, record, {
-      cwd,
-      agent: row,
-      kind: 'ask',
-      task,
-      brief: values.brief,
-      extraContext: values.context,
-      handoff,
-    })
-    if (opened) return
-    // codex cannot open cold: stream the first turn (it captures the thread
-    // id), then the pane becomes `codex resume` on it, below.
-    // codex and kimi are the two that cannot open a window cold; say which
-    // one this is, because "codex" in front of a kimi agent reads as a bug.
-    out(`${row.harness ?? row.kind} streams its first answer, then this pane becomes its window`)
-  }
-
-  // The conversation is real from here on: a long consult must be findable
-  // while it runs, not only after it answers.
-  await markRunning(sessionName, row, record)
-  // A little clock slack: a store's timestamps and ours need not agree.
-  const runStartedAt = Date.now() - 2000
-
-  const packet = await createPacket({
-    cwd,
-    agent: row,
-    kind: 'ask',
-    task,
-    brief: values.brief,
-    extraContext: values.context,
-    handoff,
-    // A follow-up in a live conversation needs no scene-setting.
-    continuing: record?.sessionId !== undefined && record?.sessionId !== null,
-    // Threading is what makes a question worth asking: the reply comes back to
-    // the same agent rather than to a stranger.
-    conversational: wantsThread,
-  })
-
-  // Streaming is the point: the thinking has to stay visible while it works.
-  // What was streamed is remembered, so the answer is not printed twice when
-  // the harness already streamed it — some engines only reveal the answer in
-  // the terminal summary, and those still need the block below.
-  let inDelta = false
-  let sawDelta = false
-  let streamed = ''
-  const onEvent = values.json
-    ? undefined
-    : (event) => {
-        if (event.kind === 'delta') {
-          process.stdout.write(event.text)
-          streamed += event.text
-          inDelta = true
-          sawDelta = true
-          return
-        }
-        if (sawDelta && (event.kind === 'thinking' || event.kind === 'text')) return
-        const line = renderEvent(event)
-        if (line) {
-          process.stdout.write(`${inDelta ? '\n' : ''}${line}\n`)
-          streamed += `${line}\n`
-          inDelta = false
-        }
-      }
-
-  let result = await runAgent({
-    cwd,
-    agent: row,
-    packet,
-    kind: 'ask',
-    onEvent,
-    // An object (even an empty one) means "this run belongs to a conversation,
-    // so save the session" — sessionFor mints pi's id from the conversation's
-    // own name, because pi never reports one back. `cf chat` runs through the
-    // same helper, so the two paths cannot drift.
-    session: sessionFor(row, sessionName, record),
-  })
-
-  // The harness owns the session store and may have pruned it. A conversation
-  // it no longer knows costs one fresh start, never the run.
-  if (wantsThread && record?.sessionId && result.exitCode !== 0) {
-    out('')
-    out(`that conversation is gone from ${row.harness ?? row.kind}; starting a new conversation`)
-    result = await runAgent({
-      cwd,
-      agent: row,
-      packet,
-      kind: 'ask',
-      onEvent,
-      // Still a conversation — just a new one. Dropping to a one-shot here
-      // would make the replacement unresumable too.
-      session: { sessionId: row.kind === 'pi' ? `${sessionName}-2` : undefined },
-    })
-  }
-
-  // A stream that never reached its end took the session id with it. kimi
-  // prints its id last of all, so a run that dies mid-work — a provider rate
-  // limit, a closed pane — leaves a conversation nobody can resume, with all
-  // its work on disk. Its store still knows: ask, and the conversation is
-  // recoverable no matter how the run ended.
-  if (wantsThread && !result.sessionId && row.kind === 'kimi') {
-    result = { ...result, sessionId: await discoverKimiSession(cwd, runStartedAt, env) }
-  }
-
-  await recordTurn(sessionName, row, record, result)
-  if (inDelta) process.stdout.write('\n')
-
-  // The streamed turn was only the opening move: in a terminal the pane still
-  // ends as the agent's own window on the session the stream just captured.
-  // Recorded first, so `cf last` works either way.
-  let handOverTo = null
-  if (wantsWindow && sessionName !== undefined) {
-    const fresh = (await loadThreads(cwd))[sessionName]
-    handOverTo = interactiveResume(row, fresh?.sessionId)
-  }
-  if (values.json) {
-    out(JSON.stringify(result, null, 2))
-    return
-  }
-  const answer = (result.output ?? '').trim()
-  if (answer.length === 0) {
-    out('')
-    out(`# @${row.id}`)
-    out('')
-    out('(no answer)')
-    return
-  }
-  // Already on screen? Then say who it was and stop repeating yourself.
-  if (streamed.includes(answer)) {
-    out('')
-    out(`— @${row.id}`)
-    if (handOverTo !== null) await handOver(sessionName, row.id, handOverTo)
-    return
-  }
-  out('')
-  out(`# @${row.id}`)
-  out('')
-  out(answer)
-  if (handOverTo !== null) await handOver(sessionName, row.id, handOverTo)
+  requireApp('run')
 }
 
-function modeVerb() {
-  const mode = currentMode(env)
-  out(`mode: ${mode === null ? 'not set — nothing is installed yet' : modeLabel(mode)}`)
-  for (const line of modeReport(mode ?? 'cmux', env)) out(`  ${line}`)
-  if (mode === null) out('')
-  if (mode === null) out(`choose one with \`consensflow use <${MODES.join('|')}>\``)
+/**
+ * Spend this pane's launch ticket for what it authorises.
+ *
+ * Ownership — which conversation this pane is, in which tab, at which
+ * generation — comes back from the app, and so does a capability scoped to
+ * this one launch. Nothing here is taken from the environment beyond the
+ * ticket itself, and nothing from argv: a pane that could name its own
+ * conversation could write to somebody else's.
+ */
+async function redeemLaunch() {
+  const app = appHere()
+  if (app === null || typeof app.ticket !== 'string' || app.ticket.length === 0) {
+    fail(
+      "--in-pane is the app's own launch path: it runs on a single-use launch ticket, " +
+        "and only ConsensFlow's app issues one",
+    )
+    return null
+  }
+  const ownership = await appRequester({ url: app.url })
+    .redeem(app.ticket)
+    .catch((cause) => {
+      // The app answers a spent, expired or revoked ticket with a bare
+      // `unauthorized`, which tells a pane nothing about what to do next.
+      if (cause?.status !== 401) throw cause
+      throw new Error(
+        'this launch ticket is spent, expired or revoked — a pane is launched once, ' +
+          "and only ConsensFlow's app relaunches it",
+      )
+    })
+  return {
+    app,
+    ownership,
+    controller: appRequester({
+      url: app.url,
+      token: ownership.capability,
+      launch: ownership.launch,
+      generation: ownership.generation,
+    }),
+  }
+}
+
+/**
+ * A consult in the app: one POST, one line back, and no window here.
+ *
+ * The lead's pane stays the lead's. The app applies the continuation rule
+ * against its own records — it knows this lead's conversations, we do not —
+ * so nothing is resolved on this side and no row is written on this side.
+ */
+async function runThroughApp(app, row, task, values) {
+  // `--new --session <name>` is the cmux idiom: mint a name, then create it.
+  // Here the app mints — it holds the records the name has to be unique
+  // against — so the two flags contradict each other, and the app's own
+  // refusal ("two different asks") leaves a lead that learnt that idiom with
+  // nowhere to go. Both ways out, named, and the conversation with them.
+  if (values.new === true && values.session !== undefined) {
+    fail(
+      'in ConsensFlow --new mints the conversation name itself and prints it, so it cannot be ' +
+        `given one too: drop --session and --new mints one, or drop --new to continue ${JSON.stringify(values.session)}.`,
+    )
+    return
+  }
+  const answer = await leadRequester(app).post('consult', {
+    opId: randomUUID(),
+    agent: row.id,
+    task,
+    ...(values.new === true ? { fresh: true } : {}),
+    ...(values.session === undefined ? {} : { session: values.session }),
+    ...(typeof values.brief === 'string' ? { brief: values.brief } : {}),
+    ...(typeof values.context === 'string' ? { context: values.context } : {}),
+    ...(values['no-handoff'] || values['handoff-file'] === undefined
+      ? {}
+      : { handoffFile: values['handoff-file'] }),
+    ...(values.notify === undefined ? {} : { notify: values.notify }),
+  })
+  out(values.json ? JSON.stringify(answer, null, 2) : consultLine(answer, values.new === true))
+}
+
+/**
+ * The process the app started IN the pane it opened.
+ *
+ * Everything this writes goes through the launch capability redemption
+ * hands back, and the conversation it writes to comes from that redemption
+ * too — never from `--session`, never from `leadId(env)`. A pane's process
+ * is trusted with exactly one launch, and the ticket says which.
+ */
+async function runInPane(row, task, values, handoff) {
+  const launch = await redeemLaunch()
+  if (launch === null) return
+  const { app, ownership, controller } = launch
+  const name = ownership.conversation
+  const nonce = values.launch
+  if (!launchMatches(nonce, ownership)) return
+  // `--native-session` names the session this pane must BE. On a fresh
+  // launch (`--new`) the app preallocated it; otherwise the conversation
+  // already holds it and this is a reopening, which is the difference
+  // between `claude --session-id` and `claude --resume`.
+  const native = values['native-session']
+  const resuming = native !== undefined && values.new !== true
+  // What this launch puts in the pane. Every harness but one gets a window
+  // seed; kimi takes its prompt in argv and opens no window, so its first
+  // turn IS a packet — and the launch marker has to ride on the first line
+  // of whichever of the two the harness actually receives, because that is
+  // the text its own store keeps and `bindEvidence` reads back.
+  const seed =
+    row.kind === 'kimi'
+      ? await createPacket({
+          cwd: cwdOf(),
+          agent: row,
+          kind: 'ask',
+          task,
+          brief: values.brief,
+          extraContext: values.context,
+          handoff,
+          // A reopened conversation already has the workspace, the how-to-work
+          // and the scene: re-sending them buries the actual question.
+          continuing: resuming,
+          conversational: true,
+          nonce: nonce ?? null,
+        })
+      : createWindowSeed({
+          task,
+          brief: values.brief,
+          extraContext: values.context,
+          handoff,
+          nonce: nonce ?? null,
+        })
+  // Recorded before it goes in: a seed that reaches the harness and no
+  // record of it is a turn the lead cannot account for.
+  await controller.post('sent.record', {
+    opId: randomUUID(),
+    entry: { kind: 'seed', chars: seed.length, pane: app.pane },
+  })
+
+  // A session the app named is known before the window is, so it binds
+  // first — the store decides on what evidence (the id it preallocated, or
+  // the id it already had reported), from the launch record it holds. A
+  // refusal is carried, not thrown: the window still opens.
+  const preBind = native === undefined ? null : await bindSession(controller, { sessionId: native })
+
+  // kimi can neither be handed a task nor typed into, so its turn streams
+  // here — on the session it is resuming, when there is one — and only then
+  // does the pane become its window.
+  if (row.kind === 'kimi') {
+    await streamKimiTurn(controller, row, name, seed, { native, nonce, preBind })
+    return
+  }
+
+  if (native !== undefined) {
+    const invocation = resuming
+      ? interactiveResume(row, native, seed)
+      : interactiveStart(row, native, seed)
+    if (invocation === null) {
+      fail(
+        resuming
+          ? `${row.kind} has no way to reopen ${native}`
+          : `${row.kind} cannot open a window on a session it was given`,
+      )
+      return
+    }
+    await handOver(name, row.id, await withDeliveryChannel(invocation, row.kind, ownership.launch))
+    reportBinding(preBind)
+    return
+  }
+
+  // Everything left is a fresh codex or opencode: they mint their own id and
+  // tell only their own store, so the window and the search for it run
+  // together — a person may sit on codex's trust prompt for half an hour
+  // before there is a session at all.
+  const discover = DISCOVER[row.kind]
+  if (discover === undefined) {
+    fail(`${row.kind} cannot open a window here`)
+    return
+  }
+  await openAndDiscover(controller, row, name, seed, discover, nonce)
+}
+
+/**
+ * kimi's turn, streamed, and then its window.
+ *
+ * `-p` is defined as non-interactive and there is no way to seed an
+ * interactive kimi, so the task is streamed on the session (resumed with
+ * `-S` when the app named one) and the pane becomes `kimi -S <id>`
+ * afterwards. Without that handover a kimi pane would print an answer and
+ * die, which is the one shape every other harness avoids.
+ */
+async function streamKimiTurn(controller, row, name, seed, { native, nonce, preBind }) {
+  await controller.post('progress.set', { progress: { state: 'first-turn' } })
+  const started = Date.now() - 2000
+  const result = await runAgent({
+    cwd: cwdOf(),
+    agent: row,
+    packet: seed,
+    kind: 'ask',
+    onEvent: (event) => {
+      const line = renderEvent(event)
+      if (line) out(line)
+    },
+    session: native === undefined ? {} : { sessionId: native },
+  })
+  await controller.post('progress.set', {
+    progress: { state: 'first-turn-done', exitCode: result.exitCode ?? null },
+  })
+  const sessionId = native ?? result.sessionId ?? (await discoverKimiSession(cwdOf(), started, env))
+  if (!sessionId) {
+    // No session means no window to hand over and nothing for the app to
+    // read: the pane is empty and the lead is owed the reason, not a
+    // silent success.
+    fail(
+      `${row.kind} captured no session on its first turn (it exited ` +
+        `${result.exitCode ?? 'without a status'}), so this pane has no window and the ` +
+        'app has nothing to read',
+    )
+    return
+  }
+  const bound =
+    native === undefined ? await bindDiscovered(controller, row.kind, sessionId, nonce) : preBind
+  const invocation = interactiveResume(row, sessionId)
+  if (invocation !== null) await handOver(name, row.id, invocation)
+  reportBinding(bound)
+}
+
+/** A cold window, and the search for the session it mints, run together. */
+async function openAndDiscover(controller, row, name, seed, discover, nonce) {
+  const invocation = interactiveStart(row, null, seed)
+  if (invocation === null) {
+    fail(`${row.kind} cannot open a window here`)
+    return
+  }
+  const since = Date.now() - 2000
+  let windowUp = true
+  let closingAt = Number.POSITIVE_INFINITY
+  const searching = () => windowUp || Date.now() < closingAt
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const found = (async () => {
+    let wait = 500
+    while (searching()) {
+      const id = await discover(cwdOf(), since, env, { seed })
+      if (id !== null) return await bindDiscovered(controller, row.kind, id, nonce)
+      const until = Date.now() + wait
+      while (searching() && Date.now() < until) await sleep(250)
+      wait = Math.min(wait * 2, 5000)
+    }
+    // One last exact look — a store written on the way out still counts.
+    // Only the seeded match: cmux's fallback guess ("the earliest session
+    // that appeared here") is a guess, and a guess is not launch evidence.
+    const id = await discover(cwdOf(), since, env, { seed })
+    if (id !== null) return await bindDiscovered(controller, row.kind, id, nonce)
+    return { bound: false, reason: `no ${row.kind} session appeared for this launch` }
+  })()
+  // The window decides the exit status, once, and the search never touches
+  // it: the same launch used to end 0 or 1 depending on whether discovery
+  // finished before the window did.
+  await handOver(name, row.id, invocation)
+  windowUp = false
+  closingAt = Date.now() + 3000
+  const outcome = await found
+  if (outcome?.bound !== true) warn(outcome?.reason ?? 'this launch stays unbound')
+}
+
+/**
+ * Bind the session discovery found, on the turn that carries our nonce.
+ *
+ * The turn is read back from the harness's own store rather than assumed
+ * from the seed we sent: discovery matches a session that CONTAINS the seed,
+ * and `bindEvidence` asks a stricter question — is the marker the opening
+ * line of that turn. Read raw, through the completion adapters: the display
+ * reader strips the marker before anyone sees it, which is exactly the text
+ * the evidence lives in.
+ */
+/**
+ * Ask the app to bind a session, and answer instead of throwing.
+ *
+ * A controller op can be refused — the conversation moved, the launch is
+ * over — and that refusal used to travel as an exception: out of an
+ * unawaited discovery promise as a raw stack, or out of the kimi path
+ * before the window was ever handed over. It is a verdict like any other.
+ */
+async function bindSession(controller, candidate) {
+  try {
+    await controller.post('session.bind', { candidate })
+    return { bound: true }
+  } catch (cause) {
+    return {
+      bound: false,
+      reason:
+        `the app refused to bind ${candidate.sessionId}: ` +
+        `${cause instanceof Error ? cause.message : String(cause)}`,
+    }
+  }
+}
+
+/**
+ * The delivery channel a worker's harness has to carry on its own argv.
+ *
+ * A pi worker records settlement evidence through its extension, and a Pi
+ * conversation without it is not eligible for automatic delivery — so the
+ * extension is not optional for a pane the app launched. `src/channels.js`
+ * owns what that costs (the flag, and the inbox/ack paths in the
+ * environment); this only puts it in front of the arguments the harness
+ * already had, so a positional prompt stays last.
+ */
+async function withDeliveryChannel(invocation, kind, launchId) {
+  if (kind !== 'pi') return invocation
+  const configured = await launchConfiguration(kind, { launchId, workspace: cwdOf() })
+  return {
+    ...invocation,
+    args: [...configured.args, ...invocation.args],
+    env: { ...invocation.env, ...configured.env },
+  }
+}
+
+/** A binding verdict reported where it cannot become the command's answer. */
+function reportBinding(result) {
+  if (result !== null && result !== undefined && result.bound !== true) warn(result.reason)
+}
+
+async function bindDiscovered(controller, kind, sessionId, nonce) {
+  const read = await harnessAnswers(kind, sessionId, env)
+  if (!Array.isArray(read.items)) {
+    // Nothing was read, which is a different thing from nothing matching:
+    // say which, in the adapter's own words, or a supported-version gap
+    // reads as an agent that never carried our marker.
+    return {
+      bound: false,
+      reason:
+        `${kind} session ${sessionId} could not be read, so it stays unbound: ` +
+        `${read.reason ?? 'no reason given'}`,
+    }
+  }
+  const turn = read.items
+    .filter((item) => item.role === 'user')
+    .slice(0, TURNS_EXAMINED)
+    .find((item) => openingLineCarriesNonce(item.text, nonce))
+  if (turn === undefined) {
+    const opening = read.items.find((item) => item.role === 'user')?.text?.split('\n')[0]
+    return {
+      bound: false,
+      reason:
+        `${kind} session ${sessionId} carries no launch marker for this launch — ` +
+        `it stays unbound rather than bound on a guess (its first user turn opens ${JSON.stringify(opening ?? '')})`,
+    }
+  }
+  return await bindSession(controller, { sessionId, turn: turn.text })
+}
+
+/** Words into a live pane, through the app that owns it. */
+async function sayVerb(rest) {
+  const { values, positionals } = parseArgs({
+    args: rest,
+    allowPositionals: true,
+    options: { json: { type: 'boolean', default: false } },
+  })
+  if (childRefused()) return
+  const app = requireApp('say')
+  if (app === null) return
+  const session = String(positionals[0] ?? '')
+  const text = positionals.slice(1).join(' ')
+  if (session.length === 0 || text.trim().length === 0) {
+    fail('say which conversation and what: cf say <conversation> "<words>"')
+    return
+  }
+  const answer = await leadRequester(app).post('say', { opId: randomUUID(), session, text })
+  out(
+    values.json
+      ? JSON.stringify(answer, null, 2)
+      : `said: ${answer.conversation} — pane ${answer.pane?.id}`,
+  )
+}
+
+/**
+ * One part of a delivered answer, printed exactly as the app framed it.
+ *
+ * Verbatim to the byte, next-part line included: the framing IS the receipt
+ * the app matches against the lead's tool result, so a newline this side
+ * adds or eats is a delivery that cannot be proved.
+ */
+async function readVerb(rest) {
+  const { values, positionals } = parseArgs({
+    args: rest,
+    allowPositionals: true,
+    options: { part: { type: 'string' } },
+  })
+  if (childRefused()) return
+  const app = requireApp('read')
+  if (app === null) return
+  const deliveryId = String(positionals[0] ?? '')
+  if (deliveryId.length === 0) {
+    fail('name the delivery: cf read <delivery id> [--part <k>]')
+    return
+  }
+  // `parseInt` reads "2garbage" as 2 and would print a different part than
+  // the one asked for, which is the one thing a receipt cannot survive.
+  const asked = values.part ?? '1'
+  const part = Number(asked)
+  if (!/^[0-9]+$/.test(asked) || !Number.isSafeInteger(part) || part < 1) {
+    fail(`a part is a whole number from 1, and ${JSON.stringify(asked)} is not one`)
+    return
+  }
+  const answer = await leadRequester(app).post('read', { opId: randomUUID(), deliveryId, part })
+  process.stdout.write(String(answer.text ?? ''))
 }
 
 /**
  * Everything ConsensFlow installed, taken back: both host payloads, every
- * file the manifest owns, and the mode itself. The roster is the user's and
- * survives — the same contract as the app's "Turn ConsensFlow off".
+ * file the manifest owns, the roster, and local run artifacts.
  */
 function resetVerb(rest) {
   const { values } = parseArgs({
@@ -1022,8 +951,7 @@ function resetVerb(rest) {
 
   // Counting before refusing makes the refusal the preview: the same two
   // numbers the page puts in its dialog, printed while nothing has been
-  // touched. `off` needs no such ceremony — it is undone by choosing a path
-  // again. This is not: a roster is typed by hand, and a packet, a transcript
+  // touched. `off` can be undone by opening the app again. This is not: a roster is typed by hand, and a packet, a transcript
   // or a generated image exists nowhere else.
   const { agents, runs } = resetPreview(env)
   if (!values.yes) {
@@ -1052,176 +980,214 @@ function plural(count, noun) {
   return `${count} ${noun}${count === 1 ? '' : 's'}`
 }
 
-/**
- * What conversations exist here, and what the last one said.
- *
- * In cmux mode a consult happens in its own pane, so the answer lands in a run
- * directory rather than in the lead's scrollback. These two verbs are how the
- * main pane reads it — the run directory IS the shared state, which is what
- * stands in for a daemon.
- */
-/**
- * A conversation you type into, rather than one you command.
- *
- * The pane an agent runs in is otherwise a place a consult HAPPENED: to ask
- * again you retype `cf run @name "…"` with its quoting. This is the same
- * machinery behind a prompt — each line is one turn in one conversation, the
- * harness session is resumed between them, and every turn still leaves its own
- * run directory. No daemon: the loop is the process you are sitting in, and
- * closing it ends nothing but the typing.
- */
-async function chatVerb(rest) {
-  const { values, positionals } = parseArgs({
-    args: rest,
-    allowPositionals: true,
-    options: { new: { type: 'boolean', default: false } },
-  })
-
-  if (env.CONSENSFLOW_CHILD === '1') {
-    fail('this is already an agent run — an agent does not spawn agents')
-    return
-  }
-
-  const asked = String(positionals[0] ?? '')
-  const threads = await loadThreads(cwdOf())
-  // Either @agent or a conversation name; a name tells us the agent itself.
-  const agentName = asked.startsWith('@') ? asked.slice(1) : (threads[asked]?.agent ?? '')
-  const row = agentName.length > 0 ? agentRow(agentName, env) : undefined
-  if (row === undefined) {
-    const known = listAgents(env).map((a) => a.name)
-    fail(
-      known.length === 0
-        ? 'no agents yet — add one with `cf agent add <name>` or in the app'
-        : `name an agent or a conversation; you have: ${known.join(', ')}`,
-    )
-    return
-  }
-
-  const resolved = await resolveConversation(row, {
-    wantsThread: true,
-    session: asked.startsWith('@') ? undefined : asked,
-    fresh: values.new === true,
-    // Typing into an agent's own pane is a join, not a spawn: the user is a
-    // different lead by every measure we have, and `cf chat @hyperion` there
-    // must reach the conversation in front of them, not open a second one.
-    join: true,
-  })
-  if (resolved.error !== undefined) {
-    fail(resolved.error)
-    return
-  }
-
-  let { name, record } = resolved
-  out(`${name} · @${row.id}`)
-  out('one line is one turn — /exit or Ctrl-D to leave, the conversation stays')
-  out('')
-
-  const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: '> ' })
-  // A piped stdin can end while a turn is still running, so readline may
-  // already be closed by the time we ask for the next line.
-  let open = true
-  rl.on('close', () => {
-    open = false
-  })
-  const prompt = () => {
-    if (open) rl.prompt()
-  }
-  prompt()
-  for await (const line of rl) {
-    const task = line.trim()
-    if (task === '/exit' || task === '/quit') break
-    if (task.length === 0) {
-      prompt()
-      continue
-    }
-
-    const packet = await createPacket({
-      cwd: cwdOf(),
-      agent: row,
-      task,
-      kind: 'ask',
-      continuing: record?.sessionId !== undefined && record?.sessionId !== null,
-      conversational: true,
-    })
-    const result = await runAgent({
-      cwd: cwdOf(),
-      agent: row,
-      packet,
-      kind: 'ask',
-      session: sessionFor(row, name, record),
-    })
-    out('')
-    out(String(result.output ?? '').trim() || '(no answer)')
-    out('')
-    await recordTurn(name, row, record, result)
-    record = (await loadThreads(cwdOf()))[name]
-    prompt()
-  }
-  if (open) rl.close()
-  out('')
-  out(`left ${name} — \`cf chat ${name}\` picks it up again`)
+/** Direct people to the conversation controls in the app. */
+async function chatVerb() {
+  if (childRefused()) return
+  const app = appHere()
+  fail(
+    `Conversations live in ConsensFlow app panes${app === null ? '' : ` at ${app.url}`}. Use cf say <conversation> "<words>" or cf attach <conversation>.`,
+  )
 }
 
-/**
- * Hand this terminal to the harness's own window, on the same conversation.
- *
- * `cf chat` is our prompt around one-shot runs; this is the real thing — codex's
- * TUI, claude's, pi's — opened on the session a consult started, with the whole
- * history already in it. We spawn it with the terminal inherited and exit with
- * its code, so from here on ConsensFlow is not in the way at all.
- */
+/** Focus or reopen a conversation through the app that owns it. */
 async function attachVerb(rest) {
   const { values, positionals } = parseArgs({
     args: rest,
     allowPositionals: true,
-    options: { print: { type: 'boolean', default: false } },
+    options: {
+      print: { type: 'boolean', default: false },
+      'in-pane': { type: 'boolean', default: false },
+      // The app puts the same launch evidence on every `pane.open` argv,
+      // reopening included. A resume needs none of it — the session it
+      // opens was bound when it was created — but it must be accepted, or
+      // the pane the app just opened dies on its own command line.
+      launch: { type: 'string' },
+      'native-session': { type: 'string' },
+    },
   })
-  if (env.CONSENSFLOW_CHILD === '1') {
-    fail('this is already an agent run — an agent does not spawn agents')
-    return
-  }
+  if (childRefused()) return
 
   const asked = String(positionals[0] ?? '')
-  const threads = await loadThreads(cwdOf())
-  const names = Object.keys(threads)
-  // Bare `cf attach` means the obvious one: the conversation you were last in.
-  const { name, record: known } = pickConversation(threads, asked)
-  if (known === undefined) {
-    fail(noConversationHere(asked, names, env))
+  const evidence = launchEvidenceOf(values)
+  if (evidence === null) return
+  if (values['in-pane']) {
+    await attachInPane(evidence)
     return
   }
-  // Same look as `cf catchup`: a window whose id was never captured can still
-  // be reopened, once we work out which session it was.
-  const record = await healWindowSession(name, known)
-
-  const live = liveWindowElsewhere(record, env)
-  if (live !== null && !values.print) {
-    fail(windowAlreadyOpen(name, live))
+  const standalone = appHere()
+  if (standalone !== null) {
+    await attachThroughApp(standalone, asked, values)
     return
   }
+  requireApp('attach')
+}
 
+/**
+ * A window on a conversation, opened by the app rather than by us.
+ *
+ * The app decides whether that conversation already has a live pane (it
+ * answers with it) or needs one (it opens it and runs `cf attach --in-pane`
+ * inside it). Either way no window opens in the pane we are standing in.
+ */
+async function attachThroughApp(app, asked, values) {
+  if (values.print) {
+    fail('--print is unavailable: ConsensFlow opens the pane; use cf attach <conversation>')
+    return
+  }
+  // `@agent` and a bare `cf attach` name no conversation, and only the
+  // records can turn them into one. Read, never written, from this side.
+  let session = asked
+  if (asked.length === 0 || asked.startsWith('@')) {
+    const threads = await loadThreads(cwdOf())
+    const picked = pickConversation(threads, asked)
+    if (picked.record === undefined) {
+      fail(noConversationHere(asked, Object.keys(threads), env))
+      return
+    }
+    session = picked.name
+  }
+  const answer = await leadRequester(app).post('attach', { opId: randomUUID(), session })
+  out(
+    answer.outcome === 'live'
+      ? `${answer.conversation} is already open — pane ${answer.pane?.id}`
+      : `${answer.conversation} — pane ${answer.pane?.id}`,
+  )
+}
+
+/**
+ * The reopening side of that: this process IS the new pane.
+ *
+ * A resume needs no fresh launch evidence — the session it opens is the one
+ * already bound to this conversation, proved when it was created. So this
+ * redeems for its ownership, reads the session id the app recorded, and
+ * hands the pane to the harness.
+ */
+async function attachInPane({ nonce, native }) {
+  const launch = await redeemLaunch()
+  if (launch === null) return
+  if (!launchMatches(nonce, launch.ownership)) return
+  const name = launch.ownership.conversation
+  const record = (await loadThreads(cwdOf()))[name]
+  if (record === undefined) {
+    fail(`the app opened a pane for ${name}, which is not a conversation here`)
+    return
+  }
+  // The session comes from the app, on the command line, like every other
+  // launch: it is the app that decided this pane reopens that session, and
+  // re-reading the row here would answer a question already answered.
+  if (typeof native !== 'string' || native.length === 0) {
+    fail(`${name} was reopened without a session to reopen — the app names it`)
+    return
+  }
   const row = agentRow(record.agent, env)
-  const invocation = interactiveResume(row ?? { kind: record.kind }, record.sessionId)
+  const invocation = interactiveResume(row ?? { kind: record.kind }, native)
   if (invocation === null) {
+    fail(`${record.kind} has no way to reopen ${native}`)
+    return
+  }
+  await handOver(
+    name,
+    record.agent,
+    await withDeliveryChannel(invocation, record.kind, launch.ownership.launch),
+  )
+}
+
+/**
+ * What was said in a conversation, with the read mark the app keeps.
+ *
+ * The cmux mark is a turn COUNT, which cannot survive a transcript that is
+ * appended to from two directions and says nothing about what was delivered.
+ * Here the mark is a set of item ids and the APP decides it — it holds the
+ * deliveries and the marks, so an answer this lead was already sent is as
+ * read as one printed here, and `--unread` stops repeating what automatic
+ * delivery already put in front of it.
+ */
+async function catchupInApp(app, name, record, values) {
+  if (values.wait) {
     fail(
-      record.sessionId
-        ? `${record.kind} has no interactive session to open`
-        : `${name} has no session yet — ask something in it first`,
+      'the app delivers answers on its own — `cf catchup` reads what is there, it never waits. ' +
+        `read it again when it lands: cf catchup ${name} --unread`,
     )
     return
   }
-
-  // The printed form runs in someone else's shell, where our spawn-time env
-  // guard cannot reach — so the guard travels as prose, same as the skill's
-  // generated commands.
-  const guard = (invocation.dropEnv ?? []).map((key) => `-u ${key} `).join('')
-  const line = `${guard ? `env ${guard}` : ''}${[invocation.command, ...invocation.args].join(' ')}`
-  if (values.print) {
-    out(line)
+  const lead = app.lead
+  if (typeof lead !== 'string' || lead.length === 0) {
+    fail('this pane has no lead identity, and a read mark belongs to a lead')
     return
   }
+  if (record.sessionId === undefined || record.sessionId === null) {
+    out(`${name} · @${record.agent} — nothing to read: no ${record.kind} session was captured`)
+    return
+  }
+  const read = await harnessAnswers(record.kind, record.sessionId, env)
+  if (!Array.isArray(read.items)) {
+    out(`${name} · @${record.agent} — ${read.reason ?? 'its transcript could not be read'}`)
+    return
+  }
+  // ONE owner for the walk, and it is the app: it holds the deliveries and
+  // the marks, and a second implementation here would be a second answer to
+  // "has this lead seen it". So the transcript we read goes over as it is —
+  // tool items included, for the server to drop — and the app answers with
+  // the prefix this lead has already seen.
+  const request = leadRequester(app)
+  const wire = (printed) =>
+    read.items.map((item) => ({
+      id: item.id,
+      role: item.role,
+      ...(printed === undefined ? {} : { printed: printed.has(item.id) }),
+    }))
+  const marked = await request.post('seen', {
+    opId: randomUUID(),
+    session: name,
+    items: wire(),
+  })
+  const already = new Set(marked.seen)
+  const items = read.items.filter((item) => item.role !== 'tool')
+  const unread = items.filter((item) => !already.has(item.id))
+  const base = values.unread ? unread : items
+  const limit = Number.parseInt(values.last ?? '0', 10)
+  const shown = limit > 0 ? base.slice(-limit) : base
 
-  await handOver(name, record.agent, invocation)
+  if (values.json) {
+    out(
+      JSON.stringify(
+        {
+          session: name,
+          agent: record.agent,
+          turns: shown.map((item) => ({ role: item.role, text: item.text })),
+        },
+        null,
+        2,
+      ),
+    )
+  } else if (items.length === 0) {
+    out(`${name} · @${record.agent} — nothing said in it yet`)
+  } else if (values.unread && unread.length === 0) {
+    out(`${name} · @${record.agent} — nothing new since you last looked`)
+  } else {
+    out(
+      values.unread
+        ? `${name} · @${record.agent} · ${unread.length} new turn${unread.length === 1 ? '' : 's'}`
+        : `${name} · @${record.agent} · ${items.length} turns`,
+    )
+    const boundary = values.unread ? -1 : items.length - unread.length
+    shown.forEach((item, index) => {
+      if (index === boundary && unread.length > 0 && boundary > 0) {
+        out('')
+        out(`— ${unread.length} below here you had not seen —`)
+      }
+      out('')
+      out(item.role === 'user' ? '› asked' : `• @${record.agent}`)
+      out(item.text)
+    })
+  }
+
+  // Showing is seeing. What was actually put in front of the lead goes back
+  // marked `printed`, and the app moves the mark as far as that carries it.
+  const printed = new Set(shown.map((item) => item.id))
+  if (printed.size > 0) {
+    await request.post('seen', { opId: randomUUID(), session: name, items: wire(printed) })
+  }
 }
 
 /**
@@ -1239,8 +1205,21 @@ async function handOver(name, agent, invocation) {
     stdio: 'inherit',
     env: childEnv(process.env, invocation),
   })
-  const code = await new Promise((resolve) => child.on('close', resolve))
-  process.exitCode = code ?? 0
+  // A binary that is not on PATH emits `error`, never `close`, and an
+  // unhandled `error` on a child process is an uncaught exception: a pane
+  // whose harness is missing printed Node's stack instead of a sentence.
+  const outcome = await new Promise((resolve) => {
+    child.once('error', (cause) => resolve({ cause }))
+    child.once('close', (code) => resolve({ code }))
+  })
+  if (outcome.cause !== undefined) {
+    fail(
+      `${invocation.command} could not be started: ${outcome.cause.message} — ` +
+        `is ${invocation.command} installed and on this pane's PATH?`,
+    )
+    return
+  }
+  process.exitCode = outcome.code ?? 0
 }
 
 /**
@@ -1270,9 +1249,14 @@ async function catchupVerb(rest) {
     fail(noConversationHere(asked, names, env))
     return
   }
+  const standalone = appHere()
+  if (standalone !== null) {
+    await catchupInApp(standalone, name, known, values)
+    return
+  }
   // A conversation whose window outlasted the search for its id is unreadable
   // until somebody looks again. This is that look.
-  const record = await healWindowSession(name, known, { quiet: values.json })
+  const record = known
 
   let turns = await harnessTurns(record.kind, record.sessionId, env)
 
@@ -1323,13 +1307,6 @@ async function catchupVerb(rest) {
     const at = turns.findLastIndex((turn) => turn.role === 'user')
     const from = Math.max(at, 0)
     const exchange = turns.slice(from)
-    // Only what is printed counts as seen. --wait shows the last exchange, so
-    // anything above it — turns the user took in the pane while the lead was
-    // away — is still unread, and the mark stays where it was.
-    const waiting = leadId(env)
-    if (from <= Math.min(readMark(current, waiting), turns.length)) {
-      await markRead(name, current, waiting, turns.length)
-    }
     if (values.json) {
       out(JSON.stringify({ session: name, agent: current.agent, turns: exchange }, null, 2))
       return
@@ -1349,19 +1326,7 @@ async function catchupVerb(rest) {
   const lead = leadId(env)
   const mark = Math.min(readMark(record, lead), turns.length)
   const unread = turns.slice(mark)
-  // Showing is seeing — and only what is SHOWN. The mark used to jump to the
-  // end of the conversation on every read, including the reads that print a
-  // slice of it: `--last` prints the tail, `--wait` prints one exchange. Both
-  // then told the same lead "nothing new since you last looked" about turns
-  // they had never printed, which is the one answer that makes a lead stop
-  // looking (live, 2026-08-27). So it moves only when what we print starts at
-  // or before it — and when it cannot, the cost is re-showing, not silence.
-  const markShown = async (from) => {
-    if (from <= mark) await markRead(name, record, lead, turns.length)
-  }
-
   if (values.json) {
-    await markShown(values.unread ? mark : 0)
     out(
       JSON.stringify(
         { session: name, agent: record.agent, turns: values.unread ? unread : turns },
@@ -1395,7 +1360,6 @@ async function catchupVerb(rest) {
   const limit = Number.parseInt(values.last ?? '0', 10)
   const base = values.unread ? unread : turns
   const shown = limit > 0 ? base.slice(-limit) : base
-  await markShown((values.unread ? mark : 0) + (base.length - shown.length))
   out(
     values.unread
       ? `${name} · @${record.agent} · ${unread.length} new turn${unread.length === 1 ? '' : 's'}`
@@ -1413,41 +1377,6 @@ async function catchupVerb(rest) {
     out(turn.role === 'user' ? '› asked' : `• @${record.agent}`)
     out(turn.text)
   })
-}
-
-/**
- * A fresh conversation name, before anything exists under it.
- *
- * The lead composing a pane command is the one who needs the name — for the
- * tab title, for `cf catchup` — and the only voice it has is its own shell.
- * So it mints first, then sends `cf run … --new --session <name>`. Nothing is
- * reserved: the name is only taken when the run creates it, and the vocabulary
- * is roomy enough that a collision costs one retry.
- */
-async function mintVerb(rest) {
-  const asked = String(rest[0] ?? '').replace(/^@/, '')
-  // A name says whose conversation it is, so minting one asks who for — and
-  // the agent is required, not encouraged. Bare `cf mint` used to hand back
-  // the two-word half, and every lead that ran it titled a pane `yellow-meadow`.
-  const known = () => listAgents(env).map((a) => a.name)
-  if (asked.length === 0) {
-    fail(
-      `cf mint needs an agent: cf mint @<name> — a conversation's name says whose it is; you have: ${known().join(', ')}`,
-    )
-    return
-  }
-  if (agentRow(asked, env) === undefined) {
-    fail(`no agent named ${JSON.stringify(asked)}; you have: ${known().join(', ')}`)
-    return
-  }
-  const threads = await loadThreads(cwdOf())
-  out(
-    newSessionName(
-      Object.keys(threads),
-      listAgents(env).map((a) => a.name),
-      asked,
-    ),
-  )
 }
 
 async function sessionsVerb(rest) {
@@ -1562,24 +1491,6 @@ function offVerb(rest) {
     out(`${String(change.action ?? 'removed').padEnd(16)} ${what}`)
   }
   out('ConsensFlow is off — agents are kept in ~/.consensflow/agents.json')
-}
-
-function useVerb(rest) {
-  const wanted = rest[0]
-  if (!MODES.includes(wanted)) {
-    fail(`name a mode: ${MODES.join(', ')}`)
-    return
-  }
-  const outcome = applyMode(wanted, env, {})
-  for (const change of outcome.changes) {
-    // Name the file whenever there is one: several changes can share a host,
-    // and "removed claude integration" twice says less than either path does.
-    if (change.path) out(`${(change.action ?? 'changed').padEnd(16)} ${change.path}`)
-    else if (change.host) out(`${(change.action ?? 'changed').padEnd(16)} ${change.host}`)
-  }
-  out('')
-  out(`mode: ${modeLabel(outcome.mode)}`)
-  for (const line of outcome.report) out(`  ${line}`)
 }
 
 function catalogVerb(rest) {
@@ -1716,19 +1627,7 @@ function skillsVerb(rest) {
 
   switch (action) {
     case 'install': {
-      // Installs for whoever the mode puts in scope. It used to refuse in a
-      // host mode, which was right while `claude` and `pi` installed a
-      // hand-written skill of their own — they are scopes over this same skill
-      // now, so refusing would deny them the only skill there is. No mode at
-      // all is still a refusal: that is how ConsensFlow used to appear in
-      // harnesses nobody had chosen.
-      const mode = currentMode(env)
-      if (mode === null) {
-        fail(
-          'no path chosen yet — run `consensflow use cmux` to give every harness the generated skill, or `consensflow use claude|pi` to give it to just that one',
-        )
-        return
-      }
+      // Every detected harness receives the same generated skill.
       const agents = listAgents(env)
       if (agents.length === 0) {
         fail('the roster is empty — add an agent with `cf ui` or `cf agent add` first')
@@ -1738,7 +1637,7 @@ function skillsVerb(rest) {
         installSkill(
           {
             relPath: 'consensflow/SKILL.md',
-            content: generateSkill(agents, { mode: currentMode(env) }),
+            content: generateSkill(agents),
             source: 'consensflow',
           },
           env,
@@ -1746,8 +1645,7 @@ function skillsVerb(rest) {
         ),
       )
       reportNativeHosts(env, values.all)
-      // In cmux mode its skills come with the install; being offline costs
-      // those, not the consensflow skill that just landed.
+      // Retire files owned by the old cmux-skills installer.
       syncCmux(env, values)
       return
     }
@@ -1796,6 +1694,8 @@ function setup(rest) {
     },
   })
 
+  const installed = installEverywhere(env, values)
+  for (const line of installed.report) out(line)
   const harnesses = detectHarnesses(env)
   out(
     harnesses.length > 0
@@ -1814,7 +1714,7 @@ function setup(rest) {
       installSkill(
         {
           relPath: 'consensflow/SKILL.md',
-          content: generateSkill(agents, { mode: currentMode(env) }),
+          content: generateSkill(agents),
           source: 'consensflow',
         },
         env,
@@ -1834,6 +1734,9 @@ function doctor() {
   out(
     `harnesses:    ${harnesses.length > 0 ? harnesses.map((a) => `${a.id}${a.native ? ' (has its own consensflow)' : ''}`).join(', ') : 'none on PATH'}`,
   )
+  if (existsSync(join(configRoot(env), 'mode.json'))) {
+    out('legacy:       mode.json is ignored and can be removed')
+  }
   out(`agents:       ${listAgents(env).length}`)
   // Files, not skills — a skill is a directory, and cmux-browser alone is
   // eleven files. Say both, and say whose they are.
@@ -1873,7 +1776,7 @@ function doctor() {
         ? `runtime:      ${wiring.runtime} — MISSING. Reinstall from the app to point the wiring at its runtime.`
         : wiring.mine
           ? `runtime:      ${wiring.runtime}`
-          : `runtime:      ${wiring.runtime} — another ConsensFlow. \`cf\` runs that one; \`cf use <mode>\` from this one claims the command.`,
+          : `runtime:      ${wiring.runtime} — another ConsensFlow. \`cf\` runs that one; \`cf setup\` from this one claims the command.`,
     )
   }
 
@@ -1921,22 +1824,29 @@ async function main() {
   // `run` belongs here most of all: a lead that only ever consults would
   // otherwise read a skill generated from the old roster until some other
   // verb happened to run. The check is one hash compare on the common path.
-  if (['agent', 'setup', 'ui', 'doctor', 'mode', 'run', 'catalog'].includes(command)) {
+  if (['agent', 'setup', 'ui', 'doctor', 'run', 'catalog'].includes(command)) {
     healSkillIfStale(env)
   }
 
   switch (command) {
     case 'use':
-      useVerb(rest)
-      return
     case 'mode':
-      modeVerb()
+      fail(
+        'ConsensFlow has one shape now: the standalone app. Open ConsensFlow to install its CLI and skill.',
+      )
+      out(USAGE)
       return
     case 'catchup':
       await catchupVerb(rest)
       return
     case 'attach':
       await attachVerb(rest)
+      return
+    case 'say':
+      await sayVerb(rest)
+      return
+    case 'read':
+      await readVerb(rest)
       return
     case 'chat':
       await chatVerb(rest)
@@ -1945,7 +1855,9 @@ async function main() {
       await sessionsVerb(rest)
       return
     case 'mint':
-      await mintVerb(rest)
+      fail(
+        'The app creates conversation names. Use cf run @name "<task>" --new and use the name it prints.',
+      )
       return
     case 'last':
       await lastVerb(rest)
@@ -1987,6 +1899,9 @@ async function main() {
         open: !values['no-open'],
         stdin: process.stdin,
         stdout: process.stdout,
+        registerDrain: (drain) => {
+          owner.drain = drain
+        },
       })
       return
     }
