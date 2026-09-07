@@ -686,7 +686,7 @@ replacement fails closed; an interrupted read creates no coverage.
       `inherit` falls through; the result names its source; `--notify`
       writes only `notifyPreference`.
 - [x] [IMPL-PANE-28] `hosts/lib/policy.js`. -> satisfies [TEST-PANE-27]
-- [ ] [TEST-PANE-29] `tests/engine/deliveries.test.mjs` — records: `plan`
+- [x] [TEST-PANE-29] `tests/engine/deliveries.test.mjs` — records: `plan`
       yields one `pending` per completed, uncovered answer under `auto`,
       with `digest`, `channel` (`pty-inline` when the serialised envelope
       ≤ `inlineBudget[kind]` and safely representable, else `cf-read` with
@@ -711,7 +711,7 @@ replacement fails closed; an interrupted read creates no coverage.
       `coverage` maps delivery → item ids; `seen` advances only over
       covered-or-printed items contiguous with the mark; a file delivery
       covers nothing until every part is covered by framing AND digest.
-- [ ] [IMPL-PANE-30] `hosts/lib/deliveries.js`; `src/store.js`
+- [x] [IMPL-PANE-30] `hosts/lib/deliveries.js`; `src/store.js`
       `delivery.upsert`; standalone `catchup` bookkeeping by item ids.
       -> satisfies [TEST-PANE-29]
 - [ ] [TEST-PANE-31] `tests/delivery-watch.test.mjs` — `Watcher` runs for
@@ -1081,6 +1081,8 @@ replacement fails closed; an interrupted read creates no coverage.
 | [IMPL-PANE-14] | — | 14/14 (persisted pane allocator, generation-checked removal after asteria's T1/T2); asteria: **approve** | `CONSENSFLOW_LEAD_ID` first in `LEAD_KEYS` |
 | [TEST-PANE-23] | hyperion's replacement suite (gefjon's first version blocked by hyperion against the real stores): `node --test tests/engine/completion.test.mjs`: exit 1, 21 tests, 1 pass, 20 failed | — | — |
 | [IMPL-PANE-24] | — | 29/29, then after asteria's four rounds (CM1–CM10, then CM4/CM7 residue): completion 44/44, readiness 33/33; asteria: **approve**, 77/77, real OpenCode session settled across late metadata updates, 56 fixture rows verified against native records | five version-gated adapters, `itemsAfterCursor` and `settledAfter` own cursors and freshness, Pi derived 120 s quiet window, OpenCode cancellation gated (Deviations) |
+| [TEST-PANE-29] | gefjon's first suite red on a missing `hosts/lib/deliveries.js`; apollo's round-2 suite against gefjon's module: 82 tests, 32 pass, 50 fail, exit 1; his round-3 suite against the round-2 module: 106 tests, 70 pass, 36 fail (hashes recorded in his report) | — | — |
+| [IMPL-PANE-30] | — | 119/119, coverage 99.49 / 99.69 / 100; asteria blocked round 1 (DEL1–DEL8), hyperion blocked rounds 2 and 3, then **approve**, no remaining findings, 22 mutations caught, safe-integer allocator verified on the tree | ids injected and validated (`d-<digits>`), injective part framing with byte count, one plan-time Unicode normalisation, explicit conversation in `seenAfter`, `channelFor` removed, time injected; the catchup clause moved to tasks 19–20 (Deviations) |
 
 ## Deviations
 
