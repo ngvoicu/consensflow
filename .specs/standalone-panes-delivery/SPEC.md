@@ -1,7 +1,7 @@
 ---
 id: standalone-panes-delivery
 title: ConsensFlow owns the panes — standalone mode in the app, results delivered to the lead
-status: active
+status: completed
 created: 2026-09-06
 updated: 2026-09-07
 priority: high
@@ -940,6 +940,25 @@ replacement fails closed; an interrupted read creates no coverage.
 
 ## Resume Context
 
+> 2026-09-07 **clean installation completed** after Gabriel explicitly
+> directed the reinstall to proceed regardless of other projects' sessions.
+> A fresh mutable-state backup is recorded by
+> `/Users/gabrielvoicu/ConsensFlow-Backups/20260907-151242/latest-reset-backup.txt`.
+> The old bundled CLI's `off --force` and `reset --yes` both exited 0;
+> old app and P3 bundles were archived, the verified alpha.23 DMG installed
+> to `/Applications/ConsensFlow.app`, and only `agents.json` restored.
+> `cf doctor` exits 0 with 11 agents, five installed skills, no mode line,
+> and `/Applications/ConsensFlow.app/Contents/MacOS/node`. All five skill
+> files match the installed generator and their manifest hashes. The actual
+> running app executable is also under `/Applications`; a stale macOS
+> registration of the build copy was removed before the verified launch.
+> Native UI checks show an empty session tree, the full-window Agents
+> dialog with the restored roster, and Close returning to the fresh workspace.
+> Native harness credentials/history and the other projects' terminal
+> windows were left in place. Release and installation evidence lives beside
+> the DMG and under the backup's `release-evidence` directory. No code changed
+> after the tested release commit `3567314`.
+>
 > 2026-09-07 release candidate **3.0.0-alpha.23: all 54 tasks and all
 > acceptance criteria passed**. Final `npm run check:all` exited 0: Biome
 > 87 files, Node 1,048 passed / 4 skipped, Rust 68 unit + 12 headless,
