@@ -10,7 +10,6 @@ import {
 } from 'node:fs'
 import { createServer } from 'node:http'
 import { delimiter, join } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
 import { PassThrough } from 'node:stream'
 import { after, before, describe, it } from 'node:test'
 import { promisify } from 'node:util'
@@ -18,9 +17,10 @@ import { workspaceKey } from '../hosts/lib/state.js'
 import { Bridge } from '../src/bridge.js'
 import { launchConfiguration } from '../src/channels.js'
 import { leadEnv } from '../src/launch.js'
+import { preparePiExtension } from '../src/pi-install.js'
 import { addAgent } from '../src/roster.js'
 import { startUiServer } from '../src/ui.js'
-import { chooseCmuxMode, tempEnv } from './helpers.mjs'
+import { chooseCmuxMode, tempEnv, testRoleConfiguration } from './helpers.mjs'
 
 /**
  * The `cf` side of the pane protocol (Phase 2, TEST-PANE-19).
@@ -32,9 +32,10 @@ import { chooseCmuxMode, tempEnv } from './helpers.mjs'
  * a lead types goes in one end; what lands in the store and on the bridge
  * comes out the other.
  *
- * No harness CLI is ever run: `claude` and `codex` are five-line stand-ins
- * on a fake PATH that record their argv, and (for codex) write the rollout
- * a real one would write. No network: everything is loopback or a pipe.
+ * No native harness CLI is ever run: `claude` and `codex` are five-line
+ * stand-ins on a fake PATH, while OpenCode's stand-in covers its authenticated
+ * native session API and records the ordinary TUI argv. No external network:
+ * everything is loopback or a pipe.
  */
 
 const run = promisify(execFile)
@@ -68,6 +69,65 @@ async function cf2(command, args, env) {
     return { code: cause.code ?? 1, stdout: cause.stdout ?? '', stderr: cause.stderr ?? '' }
   }
 }
+
+it('sessions reports pane/task evidence instead of misleading zero archived runs', async () => {
+  const t = tempEnv()
+  try {
+    const workspace = join(t.root, 'workspace')
+    mkdirSync(workspace, { recursive: true })
+    const state = join(t.env.CONSENSFLOW_HOME, 'workspaces', workspaceKey(workspace))
+    mkdirSync(state, { recursive: true })
+    const opened = {
+      agent: 'zeus',
+      kind: 'claude-code',
+      runs: 0,
+      sessionId: 'native-worker',
+      reserved: {
+        pane: 'p-1',
+        generation: 1,
+        outcome: 'opened',
+        channel: { password: 'private-channel' },
+      },
+    }
+    writeFileSync(
+      join(state, 'threads.json'),
+      JSON.stringify({
+        'zeus-running': opened,
+        'gefjon-failed': {
+          ...opened,
+          agent: 'gefjon',
+          progress: {
+            state: 'failed',
+            pane: 'p-1',
+            generation: 1,
+            message: 'OpenCode task startup timed out',
+          },
+        },
+        'gefjon-admitted': {
+          ...opened,
+          agent: 'gefjon',
+          progress: { state: 'task-submitted', pane: 'p-1', generation: 1 },
+        },
+        'new-generation': {
+          ...opened,
+          progress: { state: 'failed', pane: 'p-1', generation: 0, message: 'old failure' },
+        },
+      }),
+    )
+    const listed = await cf(['sessions'], t.env, workspace)
+    assert.equal(listed.code, 0, listed.stderr)
+    assert.doesNotMatch(listed.stdout, /0 runs|old failure/)
+    assert.match(listed.stdout, /zeus-running.*pane opened.*task status not recorded/)
+    assert.match(listed.stdout, /gefjon-failed.*startup failed.*startup timed out/)
+    assert.match(listed.stdout, /gefjon-admitted.*task submitted/)
+    const json = await cf(['sessions', '--json'], t.env, workspace)
+    assert.equal(json.code, 0, json.stderr)
+    assert.doesNotMatch(json.stdout, /private-channel/)
+    assert.equal(JSON.parse(json.stdout)['gefjon-failed'].status, 'startup failed')
+  } finally {
+    t.cleanup()
+  }
+})
 
 function waitFor(predicate, timeoutMs = 4000) {
   const started = Date.now()
@@ -166,132 +226,124 @@ if (prompt !== undefined) {
 }
 
 /**
- * An OpenCode session in its real store, ready for a launch to bind to.
- *
- * The session row, the assistant message, its parts and its events are the
- * real captured rows from `tests/engine/fixtures/completion/opencode`, merged
- * with the real `native-events.json` exactly as `tests/engine/completion.test.mjs`
- * merges them; only the session's directory and creation time are rewritten,
- * so discovery (which searches by directory and time) can find it.
- *
- * What is NOT here is the user turn. Those captured fixtures hold only the
- * assistant side, and a launch binds on the marker in a user turn — so the
- * stand-in harness writes that row itself, from the prompt it was actually
- * given. Those four rows are SYNTHETIC: their ids, timestamps and event
- * positions are invented (the message id is the one the captured assistant
- * row already names as its `parentID`, and the positions are free slots below
- * the captured ones, which start at 7). They are shaped like the real ones,
- * but they are not captured, and nothing here should be read as evidence of
- * OpenCode's user-turn wire format.
+ * A native OpenCode stand-in. `serve` requires the configured Basic auth,
+ * creates an empty session in the same SQLite store the TUI uses, and stays
+ * alive until the bootstrap helper reaps it. The ordinary TUI requires the
+ * exact returned id and records the prompt it receives.
  */
-function stageOpencodeSession(env) {
-  const fixtures = join(import.meta.dirname, 'engine', 'fixtures', 'completion', 'opencode')
-  const fixture = JSON.parse(readFileSync(join(fixtures, 'completion-window.json'), 'utf8'))
-  const native = JSON.parse(readFileSync(join(fixtures, 'native-events.json'), 'utf8')).event
+function opencodeBody(env) {
   const dir = join(env.XDG_DATA_HOME ?? join(env.HOME, '.local', 'share'), 'opencode')
-  mkdirSync(dir, { recursive: true })
-  const db = new DatabaseSync(join(dir, 'opencode.db'))
-  db.exec(`
-    create table session (id text primary key, project_id text, parent_id text, slug text,
-      directory text, title text, version text, share_url text, summary_additions integer,
-      summary_deletions integer, summary_files integer, summary_diffs text, revert text,
-      permission text, time_created integer, time_updated integer, time_compacting integer,
-      time_archived integer, workspace_id text, path text, agent text, model text,
-      cost real default 0, tokens_input integer default 0, tokens_output integer default 0,
-      tokens_reasoning integer default 0, tokens_cache_read integer default 0,
-      tokens_cache_write integer default 0, metadata text);
-    create table message (id text primary key, session_id text, time_created integer,
-      time_updated integer, data text);
-    create table part (id text primary key, message_id text, session_id text,
-      time_created integer, time_updated integer, data text);
-    create table event (id text primary key, aggregate_id text, seq integer, type text, data text);
-  `)
-
-  // The session row is NOT written here. OpenCode creates it when it starts,
-  // and discovery searches for exactly that row — staging it up front would
-  // let discovery win before the harness had written anything, and a launch
-  // would bind against a transcript with no turns in it.
-  const session = fixture.session[0]
-  const sid = session.id
-  for (const row of fixture.message) {
-    db.prepare(
-      'insert into message (id,session_id,time_created,time_updated,data) values (?,?,?,?,?)',
-    ).run(row.id, row.session_id, row.time_created, row.time_updated, row.data)
-  }
-  for (const row of fixture.part) {
-    db.prepare(
-      'insert into part (id,message_id,session_id,time_created,time_updated,data) values (?,?,?,?,?,?)',
-    ).run(row.id, row.message_id, row.session_id, row.time_created, row.time_updated, row.data)
-  }
-  const objectIds = new Set([
-    ...fixture.message.map((row) => row.id),
-    ...fixture.part.map((row) => row.id),
-  ])
-  const events = [
-    ...new Map(
-      [...(fixture.event ?? []), ...native]
-        .filter((row) => row.aggregate_id === sid)
-        .filter((row) => {
-          const data = JSON.parse(row.data)
-          return row.type === 'session.updated.1' || objectIds.has(data.info?.id ?? data.part?.id)
-        })
-        .map((row) => [row.id, row]),
-    ).values(),
-  ]
-  for (const row of events) {
-    db.prepare('insert into event (id,aggregate_id,seq,type,data) values (?,?,?,?,?)').run(
-      row.id,
-      row.aggregate_id,
-      row.seq,
-      row.type,
-      row.data,
-    )
-  }
-  db.close()
-  return { session, sessionId: sid, userMessage: JSON.parse(fixture.message[0].data).parentID }
-}
-
-/**
- * A stand-in opencode that records the prompt it was given.
- *
- * It writes the user turn into the session's own store, which is the only
- * reason a launch can bind: `persist` decides what text lands there, so a
- * test can send a prompt whose marker never arrives and watch the binding
- * refuse. Without that, the marker would be manufactured beside the harness
- * and the test would pass whatever the pane was actually sent.
- */
-function opencodeBody(env, staged, { persist = 'prompt' } = {}) {
-  const dir = join(env.XDG_DATA_HOME ?? join(env.HOME, '.local', 'share'), 'opencode')
-  const columns = Object.keys(staged.session)
+  const database = join(dir, 'opencode.db')
+  const log = join(env.CONSENSFLOW_HOME, 'opencode-calls.jsonl')
   return `
+import { mkdirSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
+import { dirname } from 'node:path'
 const argv = process.argv.slice(2)
-if (argv.includes('--prompt')) {
-  const prompt = argv[argv.indexOf('--prompt') + 1]
-  const text = ${persist === 'prompt' ? 'prompt' : "prompt.split('\\n').slice(1).join('\\n')"}
-  const db = new DatabaseSync(${JSON.stringify(join(dir, 'opencode.db'))})
-  const sid = ${JSON.stringify(staged.sessionId)}
-  const message = ${JSON.stringify(staged.userMessage)}
-  // A resume appends to a session that already exists; only a first turn
-  // creates one, and only a first turn is what a launch binds against.
-  if (db.prepare('select id from session where id = ?').get(sid) === undefined) {
-  // opencode makes its session when it starts, in the directory it was
-  // started in — which is what discovery looks for.
-  const session = { ...${JSON.stringify(staged.session)}, directory: process.cwd(), time_created: Date.now() }
-  db.prepare('insert into session (${columns.join(',')}) values (${columns.map(() => '?').join(',')})')
-    .run(...${JSON.stringify(columns)}.map((column) => session[column]))
-  const part = 'prt_0773f3849001UserTurnPartA'
-  const at = 1788707026000
-  db.prepare('insert into message (id,session_id,time_created,time_updated,data) values (?,?,?,?,?)')
-    .run(message, sid, at, at, JSON.stringify({ role: 'user', sessionID: sid, time: { created: at } }))
-  db.prepare('insert into part (id,message_id,session_id,time_created,time_updated,data) values (?,?,?,?,?,?)')
-    .run(part, message, sid, at, at, JSON.stringify({ type: 'text', text, time: { start: at, end: at } }))
-  db.prepare('insert into event (id,aggregate_id,seq,type,data) values (?,?,?,?,?)')
-    .run('evt_user_message', sid, 3, 'message.updated.1', JSON.stringify({ sessionID: sid, info: { id: message, sessionID: sid, role: 'user', time: { created: at } } }))
-  db.prepare('insert into event (id,aggregate_id,seq,type,data) values (?,?,?,?,?)')
-    .run('evt_user_part', sid, 5, 'message.part.updated.1', JSON.stringify({ sessionID: sid, part: { id: part, sessionID: sid, messageID: message, type: 'text', text } }))
+const database = ${JSON.stringify(database)}
+const log = ${JSON.stringify(log)}
+mkdirSync(dirname(log), { recursive: true })
+const write = (value) => appendFileSync(log, JSON.stringify(value) + '\\n')
+const openDb = () => {
+  mkdirSync(dirname(database), { recursive: true })
+  const db = new DatabaseSync(database)
+  db.exec('PRAGMA busy_timeout = 3000')
+  db.exec('create table if not exists session (id text primary key, directory text, time_created integer, time_updated integer)')
+  db.exec('create table if not exists message (id text primary key, session_id text, time_created integer, data text)')
+  return db
+}
+write({ kind: 'start', argv })
+
+if (argv[0] === 'serve') {
+  const port = Number(argv[argv.indexOf('--port') + 1])
+  const password = process.env.OPENCODE_SERVER_PASSWORD
+  const expected = 'Basic ' + Buffer.from('opencode:' + password).toString('base64')
+  let sequence = 0
+  const server = createServer((request, response) => {
+    const chunks = []
+    request.on('data', (chunk) => chunks.push(chunk))
+    request.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8')
+      let body = null
+      try {
+        body = raw.length === 0 ? null : JSON.parse(raw)
+      } catch {}
+      const url = new URL(request.url, 'http://127.0.0.1')
+      const authorization = request.headers.authorization ?? null
+      const authorized = authorization === expected
+      write({ kind: 'api', method: request.method, path: url.pathname, query: Object.fromEntries(url.searchParams), body, authorization, authorized })
+      if (!authorized) {
+        response.writeHead(401, { 'content-type': 'application/json' })
+        return response.end(JSON.stringify({ error: 'unauthorized' }))
+      }
+      if (request.method === 'GET' && url.pathname === '/global/health') {
+        response.writeHead(200, { 'content-type': 'application/json' })
+        return response.end(JSON.stringify({ healthy: true, version: '1.18.29' }))
+      }
+      if (request.method !== 'POST' || url.pathname !== '/session') {
+        response.writeHead(404, { 'content-type': 'application/json' })
+        return response.end(JSON.stringify({ error: 'not found' }))
+      }
+      sequence += 1
+      const id = 'ses_fixture' + process.pid + Date.now() + sequence
+      const directory = url.searchParams.get('directory') ?? process.cwd()
+      const now = Date.now()
+      const db = openDb()
+      db.prepare('insert into session (id,directory,time_created,time_updated) values (?,?,?,?)').run(id, directory, now, now)
+      db.close()
+      write({ kind: 'session-created', id, directory, empty: true })
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ id, slug: id, projectID: 'project-fixture', directory, title: '', version: '1.18.29', time: { created: now, updated: now } }))
+    })
+  })
+  const stop = () => server.close(() => process.exit(0))
+  process.once('SIGTERM', stop)
+  process.once('SIGINT', stop)
+  server.listen(port, '127.0.0.1')
+} else {
+  const sessionIndex = argv.indexOf('--session')
+  const promptIndex = argv.indexOf('--prompt')
+  const session = sessionIndex === -1 ? null : argv[sessionIndex + 1]
+  const prompt = promptIndex === -1 ? null : argv[promptIndex + 1]
+  const db = openDb()
+  const row = session === null ? undefined : db.prepare('select id,directory from session where id = ?').get(session)
+  write({ kind: 'tui', argv, session, prompt, exists: row !== undefined, launchNonce: process.env.CF_OPENCODE_LAUNCH_NONCE ?? null, config: process.env.OPENCODE_CONFIG_CONTENT ?? null })
+  if (session === null || row === undefined) {
+    db.close()
+    process.stderr.write('opencode fixture requires an existing --session\\n')
+    process.exitCode = 2
+  } else {
+    db.close()
+    // Native OpenCode ignores --prompt when opening --session. Only the
+    // native prompt API starts the task in that session.
+    const expected = 'Basic ' + Buffer.from('opencode:' + process.env.OPENCODE_SERVER_PASSWORD).toString('base64')
+    const server = createServer((request, response) => {
+      const url = new URL(request.url, 'http://127.0.0.1')
+      if (request.headers.authorization !== expected) return response.writeHead(401).end()
+      if (url.pathname === '/global/health') return response.writeHead(200).end('{}')
+      if (request.method !== 'POST' || url.pathname !== '/session/' + session + '/prompt_async') return response.writeHead(404).end()
+      const chunks = []
+      request.on('data', (chunk) => chunks.push(chunk))
+      request.on('end', () => {
+        const body = JSON.parse(Buffer.concat(chunks).toString())
+        write({ kind: 'seed', session, body, directory: url.searchParams.get('directory') })
+        const db = openDb()
+        const message = 'msg_fixture_' + process.pid + '_' + Date.now()
+        db.prepare('insert into message (id,session_id,time_created,data) values (?,?,?,?)').run(message, session, Date.now(), JSON.stringify({ role: 'user', text: body.parts[0].text }))
+        db.close()
+        if (process.env.CF_FIXTURE_SEED_DISCONNECT === '1') {
+          request.socket.destroy()
+          process.exit(0)
+        }
+        response.writeHead(204).end()
+        clearTimeout(timer)
+        setTimeout(() => server.close(), 25)
+      })
+    })
+    const timer = setTimeout(() => server.close(), 2000)
+    server.listen(Number(argv[argv.indexOf('--port') + 1]), '127.0.0.1')
   }
-  db.close()
 }
 `
 }
@@ -305,7 +357,7 @@ async function paneServer({ paneOpenDeadlineMs = CONSULT_DEADLINE_MS } = {}) {
   addAgent({ name: 'ilmarinen', harness: 'kimi', model: 'moonshot-ai/kimi-k3' }, t.env)
   addAgent({ name: 'pygmalion', harness: 'image', model: 'gpt-image-2' }, t.env)
   addAgent({ name: 'clio', harness: 'pi', model: 'pi-core' }, t.env)
-  addAgent({ name: 'gefjon', harness: 'opencode', model: 'grok-code' }, t.env)
+  addAgent({ name: 'gefjon', harness: 'opencode', model: 'opencode/grok-code' }, t.env)
   const workspace = join(t.root, 'workspace')
   mkdirSync(workspace, { recursive: true })
   // The app refuses to open a tab for a harness this machine does not have,
@@ -313,10 +365,13 @@ async function paneServer({ paneOpenDeadlineMs = CONSULT_DEADLINE_MS } = {}) {
   // so the throwaway machine is given them; a test that wants one missing
   // hands the pane a PATH of its own.
   for (const harness of ['claude', 'codex', 'pi', 'opencode', 'kimi']) {
-    fakeHarness(t.env.PATH, harness)
+    fakeHarness(t.env.PATH, harness, harness === 'opencode' ? opencodeBody(t.env) : '')
   }
 
-  const server = await startUiServer(t.env, { paneOpenDeadlineMs })
+  const server = await startUiServer(t.env, {
+    paneOpenDeadlineMs,
+    prepareRole: testRoleConfiguration,
+  })
   const nodeToRust = new PassThrough()
   const rustToNode = new PassThrough()
   let rust
@@ -377,6 +432,17 @@ async function paneServer({ paneOpenDeadlineMs = CONSULT_DEADLINE_MS } = {}) {
     state,
     /** Exactly what a lead pane's `cf` is given, and nothing more. */
     lead: { ...t.env, ...tab.leadEnv },
+    opencodeCalls() {
+      try {
+        return readFileSync(join(t.env.CONSENSFLOW_HOME, 'opencode-calls.jsonl'), 'utf8')
+          .trimEnd()
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => JSON.parse(line))
+      } catch {
+        return []
+      }
+    },
     /** The pane's process ended — the only honest signal that it is gone. */
     async endPane(pane) {
       rust.event('pane.exit', { id: pane.id, generation: pane.generation })
@@ -385,7 +451,9 @@ async function paneServer({ paneOpenDeadlineMs = CONSULT_DEADLINE_MS } = {}) {
           headers: { authorization: `Bearer ${tab.leadEnv.CONSENSFLOW_APP_TOKEN}` },
         })
         const body = await listed.json()
-        return !body.panes.some((candidate) => candidate.id === pane.id)
+        return !body.panes.some(
+          (candidate) => candidate.id === pane.id && candidate.closed !== true,
+        )
       })
     },
     threads() {
@@ -519,6 +587,7 @@ describe('cf run in a lead pane asks the app', () => {
 
     const row = s.threads()[first.conversation]
     assert.equal(row.lead, s.lead.CONSENSFLOW_LEAD_ID, 'the app owns the lead identity')
+    assert.match(result.stdout, /Pane opened; task startup continues in the app\./)
   })
 
   it('continues that conversation on the next bare run — no `fresh` was ever sent', async () => {
@@ -1180,6 +1249,7 @@ describe('the standalone CLI contract without an app pane', () => {
       'say',
       'attach',
       'read',
+      'lead',
       'results',
       'sessions',
       'last',
@@ -1268,7 +1338,7 @@ describe('a closed conversation is resumed, never started again', () => {
    * row already holds, and the pane must REOPEN that session rather than
    * start a new one on top of it.
    */
-  const closedRun = async ({ agent, kind, bin, stage, firstArgv, resumeArgv }) => {
+  const closedRun = async ({ agent, kind, bin, stage, firstArgv, resumeArgv, afterOpen }) => {
     const binDir = join(s.t.root, `${bin}-resume-bin`)
     const harness = stage(binDir)
 
@@ -1278,6 +1348,7 @@ describe('a closed conversation is resumed, never started again', () => {
     const conversation = line[1]
     const first = s.seen.open.at(-1)
     await harness.before?.(first, conversation)
+    await afterOpen?.({ conversation, first, row: s.threads()[conversation] })
     const started = await inPane(first, binDir)
     assert.equal(started.code, 0, `first turn: ${started.stdout}${started.stderr}`)
 
@@ -1287,8 +1358,12 @@ describe('a closed conversation is resumed, never started again', () => {
       'string',
       `${kind} never bound.\nrow: ${JSON.stringify(row)}\npane said: ${started.stdout}${started.stderr}`,
     )
+    const firstOffset = kind === 'pi' ? 0 : JSON.parse(first.env.CF_DELIVERY_CONFIG).args.length
     assert.deepEqual(
-      harness.calls().at(-1).slice(0, firstArgv.length),
+      harness
+        .calls()
+        .at(-1)
+        .slice(firstOffset, firstOffset + firstArgv.length),
       firstArgv.map((part) => (part === '<session>' ? row.sessionId : part)),
       'the first turn opens the session the app named',
     )
@@ -1311,8 +1386,9 @@ describe('a closed conversation is resumed, never started again', () => {
     assert.equal(back.code, 0, `resume: ${back.stdout}${back.stderr}`)
 
     const calls = harness.calls()
+    const resumeOffset = kind === 'pi' ? 0 : JSON.parse(resumed.env.CF_DELIVERY_CONFIG).args.length
     assert.deepEqual(
-      calls.at(-1).slice(0, resumeArgv.length),
+      calls.at(-1).slice(resumeOffset, resumeOffset + resumeArgv.length),
       resumeArgv.map((part) => (part === '<session>' ? row.sessionId : part)),
       `${kind} must reopen its own session, not start a new one`,
     )
@@ -1359,18 +1435,89 @@ describe('a closed conversation is resumed, never started again', () => {
     })
   })
 
-  it('opencode reopens with --session, not a cold window', async () => {
-    await closedRun({
+  it('opencode reopens with --session, not a cold window', async (t) => {
+    const proxy = await recordingProxy(s.url)
+    t.after(() => proxy.close())
+    const result = await closedRun({
       agent: 'gefjon',
       kind: 'opencode',
       bin: 'opencode',
-      stage: (dir) => {
-        const staged = stageOpencodeSession(s.t.env)
-        return fakeHarness(dir, 'opencode', opencodeBody(s.t.env, staged))
-      },
-      firstArgv: ['--model', 'grok-code'],
+      stage: (dir) => fakeHarness(dir, 'opencode', opencodeBody(s.t.env)),
+      firstArgv: ['--session', '<session>', '--model', 'opencode/grok-code'],
       resumeArgv: ['--session', '<session>'],
+      afterOpen: ({ first, row }) => {
+        first.env.CONSENSFLOW_APP = proxy.url
+        const native = first.argv[first.argv.indexOf('--native-session') + 1]
+        assert.equal(first.argv.includes('--launch'), false, 'native OpenCode needs no marker flag')
+        assert.equal(
+          first.argv.includes('--new'),
+          true,
+          'a fresh worker remains a new conversation',
+        )
+        assert.equal(typeof native, 'string')
+        assert.equal(
+          row.reserved.reportedId,
+          native,
+          'the app reserves the native id before pane launch',
+        )
+        assert.equal(row.reserved.nonce, undefined, 'the reservation needs no prompt marker')
+      },
     })
+    const calls = s.opencodeCalls()
+    const creates = calls.filter((call) => call.kind === 'api' && call.path === '/session')
+    const sessions = calls.filter((call) => call.kind === 'session-created')
+    const tui = calls.filter((call) => call.kind === 'tui')
+    const seeds = calls.filter((call) => call.kind === 'seed')
+    assert.equal(creates.length, 1, 'the worker creates one native session')
+    assert.equal(creates[0].authorized, true, 'native session creation uses configured Basic auth')
+    assert.deepEqual(creates[0].body, {}, 'native creation sends an empty session body')
+    assert.equal(
+      creates[0].query.directory,
+      realpathSync(s.workspace),
+      'native creation names this workspace',
+    )
+    assert.equal(sessions.length, 1, 'the fixture persisted one empty native session')
+    assert.equal(tui.length, 2, 'the initial window and reopen use the same fixture')
+    assert.equal(tui[0].session, result.sessionId)
+    assert.equal(tui[1].session, result.sessionId)
+    assert.equal(seeds.length, 2, 'each TUI receives exactly one native task')
+    assert.equal(seeds[0].body.parts[0].text, 'the first turn')
+    assert.equal(seeds[1].body.parts[0].text, 'the follow-up')
+    assert.deepEqual(seeds[0].body.model, { providerID: 'opencode', modelID: 'grok-code' })
+    assert.equal(seeds[1].body.model, undefined, 'resume keeps the native model')
+    assert.ok(seeds.every((call) => call.session === result.sessionId))
+    assert.equal(s.threads()[result.conversation].progress?.state, 'task-submitted')
+    assert.deepEqual(
+      proxy.to('progress.set').map((entry) => entry.progress.state),
+      ['starting', 'task-submitted'],
+      'the real controller announces startup before native task admission',
+    )
+    for (const call of tui) {
+      assert.equal(call.exists, true, 'the TUI never mints a replacement session')
+      assert.equal(call.prompt, null, 'the TUI does not receive an ignored --prompt')
+      assert.equal(call.launchNonce, null, 'native OpenCode has no internal launch marker')
+      assert.equal(call.config, null, 'native OpenCode has no plugin configuration')
+    }
+  })
+
+  it('reports uncertain OpenCode task admission even when its TUI exits zero', async () => {
+    const binDir = join(s.t.root, 'opencode-disconnect-bin')
+    fakeHarness(binDir, 'opencode', opencodeBody(s.t.env))
+    const opened = await cf(['run', '@gefjon', 'the uncertain task', '--new'], s.lead, s.workspace)
+    const line = /^conversation: (\S+) \(new\) — pane (\S+)$/m.exec(opened.stdout)
+    assert.ok(line, `${opened.stdout}${opened.stderr}`)
+    const first = s.seen.open.at(-1)
+    first.env.CF_FIXTURE_SEED_DISCONNECT = '1'
+    const started = await inPane(first, binDir)
+    assert.equal(started.code, 1, `${started.stdout}${started.stderr}`)
+    assert.match(started.stderr, /admission is uncertain.*not retried/)
+    const row = s.threads()[line[1]]
+    assert.equal(row.progress.state, 'failed')
+    assert.equal(
+      s.opencodeCalls().filter((call) => call.kind === 'seed' && call.session === row.sessionId)
+        .length,
+      1,
+    )
   })
 
   it('kimi continues on -S <id> and then hands over its TUI', async () => {
@@ -1393,44 +1540,6 @@ describe('a closed conversation is resumed, never started again', () => {
     assert.doesNotMatch(packet, /# ConsensFlow Packet/, 'no ceremony for a follow-up')
     assert.doesNotMatch(packet, /## How to work/, 'it already knows how to work')
     assert.doesNotMatch(packet, /Workspace:/, 'it is already in the workspace')
-  })
-})
-
-describe('a marker that never reaches the harness never binds', () => {
-  let s
-
-  before(async () => {
-    s = await paneServer()
-  })
-  after(async () => {
-    await s.close()
-  })
-
-  it('does not bind when the marker never reaches the harness', async () => {
-    // The mutation this exists for: strip the marker line from the prompt
-    // opencode is actually given, and the binding must refuse. It used to
-    // pass, because the fixture manufactured the marker beside the harness
-    // instead of taking it from what the pane was sent.
-    const binDir = join(s.t.root, 'opencode-nomarker-bin')
-    const staged = stageOpencodeSession(s.t.env)
-    fakeHarness(binDir, 'opencode', opencodeBody(s.t.env, staged, { persist: 'without-marker' }))
-
-    const opened = await cf(['run', '@gefjon', 'a question', '--new'], s.lead, s.workspace)
-    const line = /^conversation: (\S+) \(new\)/m.exec(opened.stdout)
-    assert.ok(line, `${opened.stdout}${opened.stderr}`)
-    const open = s.seen.open.at(-1)
-    const result = await cf(
-      open.argv.slice(2),
-      {
-        ...s.t.env,
-        ...open.env,
-        PATH: [binDir, s.t.env.PATH].join(delimiter),
-      },
-      s.workspace,
-    )
-
-    assert.match(result.stderr, /carries no launch marker/)
-    assert.equal(s.threads()[line[1]].sessionId ?? null, null, 'no marker, no binding')
   })
 })
 
@@ -2032,7 +2141,11 @@ writeFileSync(${JSON.stringify(join(s.t.root, 'pi-env.json'))}, JSON.stringify(p
     // workspace is what the pane must have handed pi.
     const expected = await launchConfiguration('pi', {
       launchId: open.launch,
-      workspace: realpathSync(s.workspace),
+      workspace: s.workspace,
+      extensionPath: preparePiExtension({
+        ...s.t.env,
+        PATH: [binDir, s.t.env.PATH].join(delimiter),
+      }).path,
     })
     const argv = readFileSync(join(binDir, 'pi.argv'), 'utf8')
       .trimEnd()

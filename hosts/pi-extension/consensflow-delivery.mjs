@@ -4,7 +4,31 @@ import { join } from 'node:path'
 import { envelope, pointer } from '../../hosts/lib/deliveries.js'
 
 const DELIVERY_ID = /^d-\d+$/
+const MESSAGE_ID = /^m-[a-f0-9]{32}$/
 const SAFE_PATH_SEGMENT = /^[A-Za-z0-9._-]+$/
+const EDITOR_PROBE_ID = /^editor-[a-f0-9]{32}$/
+const MESSAGE_FIELDS = new Set(['id', 'type', 'launchId', 'session', 'text', 'expiresAt'])
+
+// Interactive Pi reads the expanded editor, including pasted attachment paths.
+// RPC/headless also return an empty string, so the native TUI mode is required.
+function nativeEditorState(ctx, session) {
+  try {
+    if (typeof session !== 'string' || sessionIdOf(ctx) !== session) {
+      return { ready: false, reason: 'native session changed' }
+    }
+    if (ctx?.mode !== 'tui' || ctx.hasUI !== true || typeof ctx.ui?.getEditorText !== 'function') {
+      return { ready: false, reason: 'native editor unavailable' }
+    }
+    const text = ctx.ui.getEditorText()
+    if (typeof text !== 'string') return { ready: false, reason: 'native editor unavailable' }
+    if (text !== '') return { ready: false, reason: 'draft open' }
+    if (ctx.isIdle?.() !== true || ctx.hasPendingMessages?.() !== false)
+      return { ready: false, reason: 'lead busy' }
+    return { ready: true }
+  } catch {
+    return { ready: false, reason: 'native editor unavailable' }
+  }
+}
 
 function messageText(message) {
   if (typeof message?.content === 'string') return message.content
@@ -33,6 +57,26 @@ function envelopeText(record) {
 
 function validDeliveryId(id) {
   return typeof id === 'string' && DELIVERY_ID.test(id)
+}
+
+function validMessageId(id) {
+  return typeof id === 'string' && MESSAGE_ID.test(id)
+}
+
+/**
+ * A raw worker followup is strictly bounded: exactly the adapter's six
+ * fields, a non-empty text sent verbatim and no result envelope. Anything
+ * wider is refused before send without touching the native editor.
+ */
+function invalidMessageShape(record) {
+  if (record?.type !== 'message') return 'invalid-record'
+  for (const key of Object.keys(record ?? {})) {
+    if (!MESSAGE_FIELDS.has(key)) return 'invalid-record'
+  }
+  if (typeof record.launchId !== 'string' || record.launchId.length === 0) return 'invalid-record'
+  if (typeof record.session !== 'string' || record.session.length === 0) return 'invalid-record'
+  if (typeof record.text !== 'string' || record.text.length === 0) return 'missing-text'
+  return null
 }
 
 function validExpiry(expiresAt) {
@@ -71,7 +115,7 @@ function frontierOf(ctx) {
  */
 export function createDeliveryExtension(
   pi,
-  { inbox, ack, quarantine, settled, expired, launchId, logger = console } = {},
+  { inbox, ack, quarantine, settled, expired, launchId, editorGuard, logger = console } = {},
 ) {
   let context
   let watcher
@@ -138,6 +182,7 @@ export function createDeliveryExtension(
     entry.done = true
     if (entry.timer !== null) clearTimeout(entry.timer)
     const response = { id, admitted }
+    if (admitted === false && editorGuard === 1) response.bytesWritten = 0
     if (admitted === true) response.mode = 'tui'
     else response.reason = reason
     const ackPath = join(ack, `${id}.json`)
@@ -184,7 +229,12 @@ export function createDeliveryExtension(
     if (typeof inbox !== 'string' || typeof ack !== 'string') return
     running = true
     try {
-      const files = (await readdir(inbox)).filter((name) => name.endsWith('.json')).sort()
+      const files = (await readdir(inbox))
+        .filter((name) => name.endsWith('.json'))
+        .sort(
+          (a, b) =>
+            Number(b.startsWith('editor-')) - Number(a.startsWith('editor-')) || a.localeCompare(b),
+        )
       for (const file of files) {
         const path = join(inbox, file)
         let record
@@ -195,6 +245,95 @@ export function createDeliveryExtension(
           continue
         }
         const id = record?.id
+        if (editorGuard === 1 && EDITOR_PROBE_ID.test(id) && file === `${id}.json`) {
+          // A fresh launch/session-bound challenge, never cached editor text.
+          if (
+            record.launchId === launchId &&
+            validExpiry(record.expiresAt) &&
+            record.expiresAt > Date.now()
+          ) {
+            const response = {
+              id,
+              launchId,
+              session: record.session,
+              expiresAt: record.expiresAt,
+              ...nativeEditorState(context, record.session),
+            }
+            await mkdir(ack, { recursive: true })
+            const destination = join(ack, file)
+            await writeFile(`${destination}.tmp`, `${JSON.stringify(response)}\n`, 'utf8')
+            await rename(`${destination}.tmp`, destination)
+          }
+          await unlink(path).catch(() => {})
+          continue
+        }
+        if (record?.type === 'message') {
+          if (!validMessageId(id)) {
+            if (typeof quarantine === 'string') {
+              try {
+                await rename(path, await uniquePath(quarantine, file))
+                logError(`invalid message id quarantined from ${file}`)
+              } catch (cause) {
+                logError(
+                  `could not quarantine invalid message ${file}: ${cause?.message ?? String(cause)}`,
+                )
+              }
+            } else {
+              logError(`invalid message id in ${file}: quarantine is not configured`)
+            }
+            continue
+          }
+          if (pending.has(id)) continue
+          const shapeError = invalidMessageShape(record)
+          if (shapeError !== null) {
+            logError(`message ${id} is ${shapeError}`)
+            await refuseBeforeSend(path, file, id, shapeError)
+            continue
+          }
+          if (record.launchId !== launchId) {
+            await refuseBeforeSend(path, file, id, 'wrong-launch')
+            continue
+          }
+          if (!validExpiry(record.expiresAt)) {
+            await refuseBeforeSend(path, file, id, 'missing-expiry')
+            continue
+          }
+          if (record.expiresAt <= Date.now()) {
+            if (typeof expired === 'string') {
+              await refuseBeforeSend(path, file, id, 'expired-before-send', expired)
+            } else {
+              logError(`expired message ${id}: expired directory is not configured`)
+            }
+            continue
+          }
+          if (context?.isIdle?.() !== true) break
+          if (editorGuard === 1) {
+            const editor = nativeEditorState(context, record.session)
+            if (editor.ready !== true) {
+              await refuseBeforeSend(path, file, id, editor.reason)
+              continue
+            }
+          } else if (sessionIdOf(context) !== record.session) {
+            await refuseBeforeSend(path, file, id, 'native session changed')
+            continue
+          }
+          const message = record.text
+          const messageEntry = { path, file, text: message, timer: null, done: false }
+          pending.set(id, messageEntry)
+          messageEntry.timer = setTimeout(
+            () => void acknowledge(id, null, 'admission-unknown'),
+            Math.max(0, record.expiresAt - Date.now()),
+          )
+          try {
+            // The raw text goes verbatim. Only message_start proves entry;
+            // the draft is only read, never cleared or overwritten.
+            pi.sendUserMessage(message)
+          } catch (cause) {
+            void acknowledge(id, false, 'send-user-message-threw')
+            logError(`could not submit message ${id}: ${cause?.message ?? String(cause)}`)
+          }
+          break
+        }
         if (!validDeliveryId(id)) {
           if (typeof quarantine === 'string') {
             try {
@@ -230,6 +369,14 @@ export function createDeliveryExtension(
           continue
         }
         if (context?.isIdle?.() !== true) break
+
+        if (editorGuard === 1) {
+          const editor = nativeEditorState(context, record.target?.session)
+          if (editor.ready !== true) {
+            await refuseBeforeSend(path, file, id, editor.reason)
+            continue
+          }
+        }
 
         const entry = { path, file, text, timer: null, done: false }
         pending.set(id, entry)
@@ -295,5 +442,6 @@ export default function consensflowDelivery(pi) {
     settled: process.env.CF_DELIVERY_SETTLED,
     expired: process.env.CF_DELIVERY_EXPIRED,
     launchId: process.env.CF_DELIVERY_LAUNCH_ID,
+    editorGuard: process.env.CF_DELIVERY_EDITOR_GUARD === '1' ? 1 : undefined,
   })
 }

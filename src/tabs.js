@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { AGENT_KINDS } from '../hosts/lib/state.js'
+import { newSessionName } from '../hosts/lib/threads.js'
 import { nowIso } from '../hosts/lib/utils.js'
 import { allocatePaneId, StoreRefusal } from './store.js'
 
@@ -90,17 +91,43 @@ export class Tabs {
   }
 
   /** Creates a tab with its lead pane; answers the identity triple. */
-  async create(dir, harness) {
+  async create(dir, harness, { parentTabId = null } = {}) {
     requireText(dir, 'directory')
     requireOneOf(harness, LEAD_HARNESSES, 'harness')
     const directory = path.resolve(dir)
     return this.store.mutate(directory, 'tab.create', async (io) => {
       const envelope = await io.readTabsEnvelope()
+      if (parentTabId !== null) {
+        const parent = findTab(envelope.tabs, parentTabId)
+        if (parent.role === 'pm') throw new Error('PM cannot own another PM')
+        if (parent.deleting === true) throw new Error('Parent session is being deleted')
+        if (parent.directory !== directory) throw new Error('PM directory must match its parent')
+        const existing = envelope.tabs.find(
+          (tab) => tab.role === 'pm' && tab.parentTabId === parentTabId,
+        )
+        if (existing)
+          return {
+            id: existing.id,
+            generation: existing.lead.generation,
+            leadId: leadIdentity(existing),
+            existing: true,
+          }
+      }
+      const role = parentTabId === null ? 'lead' : 'pm'
+      const roleName = newSessionName(
+        envelope.tabs.map((tab) => `${role}-${tab.roleName}`),
+        [],
+        role,
+      ).slice(role.length + 1)
       const at = nowIso()
-      const id = `t-${nextTabId(envelope.tabs)}`
+      if (envelope.nextTab >= Number.MAX_SAFE_INTEGER) throw new Error('tab ids exhausted')
+      const id = `t-${envelope.nextTab++}`
       const tab = {
         id,
         directory,
+        role,
+        roleName,
+        ...(parentTabId === null ? {} : { parentTabId }),
         closed: false,
         lead: { harness, generation: 1, nativeSession: null },
         panes: [
@@ -121,6 +148,12 @@ export class Tabs {
     })
   }
 
+  async createPm(parentTabId, harness) {
+    const parent = await this.get(parentTabId)
+    if (!parent) throw new Error('Parent session does not exist')
+    return this.create(parent.directory, harness, { parentTabId })
+  }
+
   /** Appends a pane to the tab; the id is minted app-wide when absent. */
   async addPane(tabId, { id = null, kind, conversation = null, generation = 1 } = {}) {
     requireText(tabId, 'tab id')
@@ -132,6 +165,8 @@ export class Tabs {
     return this.store.mutate(await this.#tabDirectory(tabId), 'tab.addPane', async (io) => {
       const envelope = await io.readTabsEnvelope()
       const tab = findTab(envelope.tabs, tabId)
+      if (tab.deleting === true)
+        throw new StoreRefusal('the session is being deleted', 'session-deleting')
       const pane = {
         id: allocatePaneId(envelope, { id, generation }),
         kind,
@@ -147,13 +182,30 @@ export class Tabs {
   }
 
   /**
-   * Drops one pane, keeping the survivors' order. The expected generation
+   * Closes a worker without deleting its conversation navigation; drops shells. The expected generation
    * is compared inside the queued mutation: a delayed removal naming an
    * old generation refuses instead of taking the replacement. The lead
    * pane is refused: closing a lead suspends its tab — that is the only
    * shape a tab without its lead pane could have.
    */
-  async removePane(tabId, paneId, generation) {
+  async beginPaneDelete(tabId, paneId, generation) {
+    return this.store.mutate(await this.#tabDirectory(tabId), 'pane.delete.begin', async (io) => {
+      const tabs = await io.readTabs()
+      const tab = findTab(tabs, tabId)
+      const pane = tab.panes.find((row) => row.id === paneId && row.generation === generation)
+      if (!pane || pane.kind === 'lead')
+        throw new Error('stale pane or lead: delete the session to remove its lead')
+      pane.deleting = true
+      if (pane.conversation) {
+        tab.deletedConversations = [
+          ...new Set([...(tab.deletedConversations ?? []), pane.conversation]),
+        ]
+      }
+      await io.writeTabs(tabs)
+    })
+  }
+
+  async removePane(tabId, paneId, generation, { preserveHistory = false } = {}) {
     requireText(tabId, 'tab id')
     requireText(paneId, 'pane id')
     if (!Number.isInteger(generation) || generation < 1) {
@@ -172,10 +224,26 @@ export class Tabs {
       if (pane.kind === 'lead') {
         throw new Error(`the lead pane is the tab itself — suspend the tab ${tabId} instead`)
       }
-      tab.panes = tab.panes.filter((candidate) => candidate.id !== paneId)
+      if (pane.kind === 'worker' && preserveHistory) {
+        pane.closed = true
+        pane.alive = false
+      } else {
+        tab.panes = tab.panes.filter((candidate) => candidate.id !== paneId)
+      }
       tab.updatedAt = nowIso()
       await io.writeTabs(tabs)
       return true
+    })
+  }
+
+  async failPane(tabId, paneId, generation, failure) {
+    return this.store.mutate(await this.#tabDirectory(tabId), 'tab.pane.failed', async (io) => {
+      const tabs = await io.readTabs()
+      const tab = findTab(tabs, tabId)
+      const pane = tab.panes.find((p) => p.id === paneId && p.generation === generation)
+      if (!pane || tab.deleting === true) return
+      pane.failure = failure
+      await io.writeTabs(tabs)
     })
   }
 
@@ -204,6 +272,8 @@ export class Tabs {
     return this.store.mutate(await this.#tabDirectory(tabId), 'tab.resume', async (io) => {
       const tabs = await io.readTabs()
       const tab = findTab(tabs, tabId)
+      if (tab.deleting === true)
+        throw new StoreRefusal('the session is being deleted', 'session-deleting')
       if (tab.closed !== true) {
         throw new StoreRefusal(`the tab ${tabId} is not suspended`, 'not-suspended')
       }
@@ -228,6 +298,39 @@ export class Tabs {
       tab.updatedAt = nowIso()
       await io.writeTabsEnvelope(envelope)
       return tab
+    })
+  }
+
+  /** Fence new launches before the host stops this session's process trees. */
+  async beginDelete(tabId, generation) {
+    return this.store.mutate(await this.#tabDirectory(tabId), 'tab.delete.begin', async (io) => {
+      const tabs = await io.readTabs()
+      const tab = findTab(tabs, tabId)
+      if (!Number.isSafeInteger(generation) || tab.lead.generation !== generation) {
+        throw new StoreRefusal('session generation changed', 'stale-generation')
+      }
+      tab.closed = true
+      tab.deleting = true
+      tab.updatedAt = nowIso()
+      await io.writeTabs(tabs)
+      return tab
+    })
+  }
+
+  /** Remove only after the host has confirmed process shutdown. */
+  async remove(tabId, generation) {
+    return this.store.mutate(await this.#tabDirectory(tabId), 'tab.delete', async (io) => {
+      const envelope = await io.readTabsEnvelope()
+      const tab = findTab(envelope.tabs, tabId)
+      if (tab.lead.generation !== generation || tab.deleting !== true) {
+        throw new StoreRefusal(
+          'session deletion was not prepared at this generation',
+          'stale-generation',
+        )
+      }
+      envelope.tabs = envelope.tabs.filter((candidate) => candidate.id !== tabId)
+      await io.writeTabsEnvelope(envelope)
+      return true
     })
   }
 
@@ -257,15 +360,6 @@ function findTab(tabs, tabId) {
   if (tab === undefined) throw new Error(`no tab ${tabId}`)
   if (!Array.isArray(tab.panes)) tab.panes = []
   return tab
-}
-
-function nextTabId(tabs) {
-  let max = 0
-  for (const tab of tabs) {
-    const match = isRecord(tab) ? /^t-(\d+)$/.exec(tab.id) : null
-    if (match !== null) max = Math.max(max, Number(match[1]))
-  }
-  return max + 1
 }
 
 function nextPaneOrder(tab) {

@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { roleConfiguration } from '../src/role-skills.js'
 
 /**
  * Every test runs against a throwaway CONSENSFLOW_HOME and throwaway harness
@@ -47,3 +48,10 @@ export function chooseCmuxMode(t) {
     `${JSON.stringify({ mode: 'cmux', at: '2026-08-21T00:00:00.000Z' }, null, 2)}\n`,
   )
 }
+
+/** Native config resolution is a subprocess boundary, covered in role-skills.test. */
+export const testRoleConfiguration = (kind, options) =>
+  roleConfiguration(kind, {
+    ...options,
+    readInstructions: async () => '',
+  })

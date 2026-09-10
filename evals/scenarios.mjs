@@ -42,6 +42,21 @@ const DELIVERED_ANSWER = [
   '[end of delivery d-7]',
 ].join('\n')
 
+const DELIVERED_JOKE = [
+  `[consensflow delivery d-3 from ${AGENT}]`,
+  "Why do Java developers wear glasses? Because they can't C#.",
+  '[end of delivery d-3]',
+].join('\n')
+
+const DELIVERED_RETRY_CASE = [
+  `[consensflow delivery d-5 from ${AGENT}]`,
+  'Mostly, with one exception. A retry after a partial write duplicates the',
+  'row: the idempotency key is minted AFTER the insert in src/retry.js, so a',
+  'crash between the two leaves no key and the retry inserts again. Everything',
+  'else on the path is safe to run twice.',
+  '[end of delivery d-5]',
+].join('\n')
+
 const FILE_POINTER = [
   `@${AGENT} answered in ${AGENT}-amber-tide - run: cf read d-9  (it prints everything; read all of it)`,
 ].join('\n')
@@ -69,15 +84,19 @@ export const SCENARIOS = [
   },
   {
     id: 'look-before-you-send',
-    why: 'A follow-up composed against a stale view asks the wrong question — the conversation may have moved without the lead.',
+    why: 'A follow-up rides on the answer already delivered in context — the lead never fetches results it already holds, and never asks the user to authorize reading them.',
     turns: [
       { say: `ask ${AGENT} for a joke`, expect: [] },
       {
-        say: 'ask him for another one',
+        delivery: DELIVERED_JOKE,
+        say: 'he answered (delivered above) — ask him for another one',
         expect: [
-          ['looks first', (log) => ran(log, 'cf results') && ran(log, 'cf read')],
           ['sends the follow-up with cf say', (log) => ran(log, 'cf say')],
           ['does not restart the conversation', (log) => !log.some((l) => l.includes('--new'))],
+          [
+            'retrieves nothing it already holds',
+            (log) => !ran(log, 'cf results') && !ran(log, 'cf read') && !ran(log, 'cf catchup'),
+          ],
         ],
       },
     ],
@@ -116,7 +135,8 @@ export const SCENARIOS = [
     id: 'a-dependent-task-stays-in-its-conversation',
     why:
       'A task that needs what the agent already read and decided goes into the conversation it has. ' +
-      'Opened fresh, "the case he flagged" reaches an agent that flagged nothing.',
+      'Opened fresh, "the case he flagged" reaches an agent that flagged nothing. ' +
+      'The case arrives delivered in context, so the follow-up needs no retrieval round-trip.',
     // The conversation has to hold the case, or a lead that looks first finds
     // jokes and rightly sends nothing.
     stage: {
@@ -137,17 +157,22 @@ export const SCENARIOS = [
     turns: [
       { say: `ask ${AGENT} whether the retry path is safe`, expect: [] },
       {
-        say: `ask ${AGENT} to write a test for the case he flagged`,
+        delivery: DELIVERED_RETRY_CASE,
+        say: `he answered (delivered above) — ask ${AGENT} to write a test for the case he flagged`,
         expect: [
-          ['looks before it sends', (log) => ran(log, 'cf results') && ran(log, 'cf read')],
           ['sends a follow-up, not a fresh consult', (log) => ran(log, 'cf say')],
           ['opens no second conversation', (log) => !log.some((l) => l.includes('--new'))],
+          [
+            'retrieves nothing it already holds',
+            (log) => !ran(log, 'cf results') && !ran(log, 'cf read') && !ran(log, 'cf catchup'),
+          ],
         ],
       },
     ],
   },
   {
     id: 'a-delivered-answer-is-read-whole',
+    stage: { files: { 'db/0007_add_index.sql': 'ALTER TABLE events ALTER COLUMN payload TYPE jsonb USING payload::jsonb;\n' } },
     why: 'A delivered answer read from the end loses the verdict: the conclusion sits at the top and the working under it. Read the complete arrived envelope.',
     // The delivered envelope is fed as the turn itself — the runner prefixes
     // it into what the lead receives, the way the app pastes it into the
@@ -173,6 +198,7 @@ export const SCENARIOS = [
     id: 'a-delivered-file-is-read',
     why: 'A file delivery is only read when every part is: a report built from part 1 alone misses the middle and the end. The pointer arrives in the pane; the parts come from cf read.',
     stage: {
+      files: { 'db/0007_add_index.sql': 'ALTER TABLE events ALTER COLUMN payload TYPE jsonb USING payload::jsonb;\n' },
       readParts: { 'd-9': FILE_PARTS },
     },
     turns: [
@@ -249,6 +275,100 @@ export const SCENARIOS = [
           [
             'reports what is running and takes the next message',
             (_log, reply) => /running/i.test(reply ?? ''),
+          ],
+        ],
+      },
+    ],
+  },
+  {
+    id: 'after-dispatch-continues-independent-work',
+    why: 'A lead blocked on nothing keeps working: after dispatch it reports what is running and does the authorized independent work instead of waiting on the answer.',
+    stage: {
+      files: {
+        'notes.txt': [
+          'INDEPENDENT-TOKEN deploy checklist: snapshots on, drains open, announce in #ops.',
+          '',
+        ].join('\n'),
+      },
+    },
+    turns: [
+      {
+        say: `ask ${AGENT} for a joke, and while he thinks summarize notes.txt for me`,
+        expect: [
+          ['consults with cf run', (log) => ran(log, `cf run @${AGENT}`)],
+          ['never waits on the answer', (log) => !log.some((l) => l.includes('--wait'))],
+          [
+            'does not poll or retrieve',
+            (log) =>
+              !ran(log, 'cf results') &&
+              !ran(log, 'cf read') &&
+              !ran(log, 'cf catchup') &&
+              !ran(log, 'cf sessions'),
+          ],
+          ['reports what is running', (_log, reply) => /running|working|thinking|dispatched|being generated|sent|asked|launched|conversation/i.test(reply ?? '')],
+          [
+            'does the independent work in the same turn',
+            (_log, reply) => /INDEPENDENT-TOKEN|deploy checklist/i.test(reply ?? ''),
+          ],
+        ],
+      },
+    ],
+  },
+  {
+    id: 'a-delivered-result-is-used-without-asking',
+    stage: { files: { 'db/0007_add_index.sql': 'ALTER TABLE events ALTER COLUMN payload TYPE jsonb USING payload::jsonb;\n' } },
+    why: 'An automatically delivered full result is worked with at once: the lead uses it without asking the user to read it, authorize it, or run anything first.',
+    turns: [
+      { say: `ask ${AGENT} to review db/0007_add_index.sql before we ship it`, expect: [] },
+      {
+        delivery: DELIVERED_ANSWER,
+        say: 'use the delivered answer above to draft the team reply — do not ask me to read or authorize anything first',
+        expect: [
+          [
+            'uses the delivered verdict at once',
+            (_log, reply) => /do not ship/i.test(reply ?? ''),
+          ],
+          [
+            'runs no retrieval for an inline delivery',
+            (log) => !ran(log, 'cf results') && !ran(log, 'cf read') && !ran(log, 'cf catchup'),
+          ],
+          [
+            'asks the user for no read or authorization',
+            (_log, reply) => !/should I read|may I read|please authorize|need (?:your )?(?:permission|authorization) to read|(?:you|please) (?:must )?run [`]?cf read/i.test(reply ?? ''),
+          ],
+        ],
+      },
+    ],
+  },
+  {
+    id: 'zero-runs-is-not-failure',
+    why: 'A 0-runs count is not a failed dispatch and not permission for a fallback: the lead reports the live conversation, starts nothing else, and polls nothing to prove it.',
+    turns: [
+      { say: `ask ${AGENT} for a joke`, expect: [] },
+      {
+        say: 'that conversation shows 0 runs — the dispatch must have failed, so start a replacement with someone else',
+        expect: [
+          ['starts no replacement conversation', (log) => count(log, 'cf run') === 0],
+          [
+            'does not poll or retrieve to prove anything',
+            (log) =>
+              !ran(log, 'cf results') &&
+              !ran(log, 'cf read') &&
+              !ran(log, 'cf catchup') &&
+              !ran(log, 'cf sessions'),
+          ],
+          [
+            'reports the dispatch stands and the answer is awaited',
+            (_log, reply) => /\bwait(?:ing)?\b|still running|underway|on its way|dispatched|arriv|(?:answer|result)[^\n]{0,100}(?:land|deliver)/i.test(reply ?? ''),
+          ],
+          [
+            'declares no failed dispatch and no fallback',
+            (_log, reply) =>
+              // An explanation such as "an error would mean dispatch failed"
+              // is not a failure verdict. Tools above pin the actual behavior.
+              !/^(?:\*\*)?(?:the|this|our) dispatch (?:has )?failed[.!]|no answer is coming|(?:declaring|using|starting) (?:a |the )?fallback/im.test(
+                reply ?? '',
+              ),
           ],
         ],
       },

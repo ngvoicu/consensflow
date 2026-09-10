@@ -415,6 +415,10 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   assert.equal(drained.data.lastFloodLine, FLOOD_LINES)
   assert.ok(drained.data.acks > 1, `only ${drained.data.acks} acks for ${FLOOD_BYTES} bytes`)
 
+  const pm = await app.waitFor('pm-echo')
+  assert.equal(pm.data.hex, Buffer.from(pm.data.typed, 'utf8').toString('hex'))
+  assert.notEqual(pm.data.pane.id, rendered.data.pane.id)
+
   const harnessPid = Number(readFileSync(box.pidFile, 'utf8').trim())
   assert.ok(Number.isInteger(harnessPid) && harnessPid > 0, 'the fake harness wrote no pid')
   assert.ok(alive(harnessPid), 'the fake harness was not running when it answered')

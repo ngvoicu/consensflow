@@ -100,7 +100,7 @@ export function taskForKind(_kind, baseTask) {
  * one line of question is exactly what `continuing` was invented to stop.
  *
  * So a bare task travels bare. When a brief, note or handoff rides along, the
- * "## Message from the user" marker stays — `cf catchup` unwraps on it, and
+ * "## Message from the user" marker stays — the thread reader unwraps on it, and
  * without it the scaffolding would read back as "you asked".
  */
 export function createWindowSeed(input) {
@@ -108,10 +108,12 @@ export function createWindowSeed(input) {
   const sections = [];
   // A launch nonce is non-secret launch evidence, not content: it rides on
   // the seed's FIRST line so the harness stores it verbatim in the session's
-  // first user turn, and the display reader strips it before anyone sees it.
+  // first user turn. The reader strips it; OpenCode's launch plugin keeps it
+  // in a hidden, ignored native part before the turn is saved.
   if (nonce !== null && nonce !== undefined && String(nonce).trim() !== "") {
     sections.push(formatLaunchMarker(nonce));
   }
+  const evidenceSections = sections.length;
   if (brief && String(brief).trim()) {
     sections.push("## Your brief for this run", String(brief).trim(), "");
   }
@@ -128,8 +130,8 @@ export function createWindowSeed(input) {
     sections.push("## Note from the lead", String(extraContext).trim(), "");
   }
   const message = String(task ?? "").trim() || "Respond to the user's message.";
-  if (sections.length === 0) return message;
-  sections.push("## Message from the user", message);
+  if (sections.length > evidenceSections) sections.push("## Message from the user");
+  sections.push(message);
   return sections.join("\n");
 }
 

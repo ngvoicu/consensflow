@@ -69,7 +69,7 @@ async function assertPiFixtureIsRead(env, label) {
     undefined,
     `${label}: completion.answers should parse the real Pi fixture`,
   )
-  assert.equal(completion.version, '3', `${label}: Pi fixture version`)
+  assert.equal(completion.version, undefined, `${label}: native version metadata is ignored`)
   assert.equal(completion.items.length, 5, `${label}: completion item count`)
   assert.ok(
     completion.items.some((item) => item.id === '4cea719d' && item.role === 'assistant'),

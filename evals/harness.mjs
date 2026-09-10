@@ -1,12 +1,15 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { rosterPath } from '../src/roster.js'
+import { harnessPath } from '../src/harnesses.js'
+import { roleConfiguration } from '../src/role-skills.js'
 
 /**
  * The agent every scenario consults. It has to be a name the INSTALLED
- * skill's roster carries: the lead reads that roster before it consults, and
+ * roster carries: the lead reads that roster before it consults, and
  * a name that is not there is refused, not tried — `nyx` was refused by a
  * lead on 2026-09-06 ("no agent named nyx") and every check read as 0/3
  * while the prose was fine. The stub `cf` answers for any name; the lead
@@ -15,11 +18,11 @@ import { dirname, join } from 'node:path'
 export const AGENT = process.env.CF_EVAL_AGENT ?? 'zeus'
 
 /**
- * A real lead, a real installed skill, and no real side effects.
+ * A real lead, a bundled role skill, and no real side effects.
  *
  * The point of an eval is that nothing here is simulated except the
- * consequences: the lead is the actual CLI, reading the actual generated
- * SKILL.md from the real home — which is the artefact under test. What IS
+ * consequences: the lead is the actual CLI, reading the bundled role document
+ * from a private evaluation app root — which is the artefact under test. What IS
  * replaced is `cf`, by a stub that answers plausibly and records every
  * invocation. The lead's choices are then readable as a log, which is the only
  * honest way to ask "did the prose work".
@@ -62,13 +65,14 @@ case "$1" in
     done
     if [ -n "$fresh" ]; then
       if [ "$(grep -c '^cf run.*--new' "${log}")" -ge 2 ]; then name="${AGENT}-coral-lane"; else name="amber-tide"; fi
-      echo "conversation: $name (new)"
+      echo "conversation: $name (new) — pane p-2"
+      echo "Pane opened; task startup continues in the app."
     elif [ -z "$name" ]; then
       name="amber-tide"; echo "conversation: $name (continued)"
     else
       echo "conversation: $name (continued)"
     fi
-    echo "discover results with: cf results $name" ;;
+    ;;
   say) echo "said into $2" ;;
   results)
     echo "amber-tide · @${AGENT} — 1 completed result"
@@ -91,8 +95,11 @@ ${READ_CASES(readParts) || '      *,*) echo "no such delivery part" ;;'}
 esac
 `
 
-export function makeStage(options = {}) {
+export function makeStage(options = {}, baseEnv = process.env) {
   const root = mkdtempSync(join(tmpdir(), 'cf-eval-'))
+  const env = { ...baseEnv, CONSENSFLOW_HOME: join(root, 'app-state') }
+  mkdirSync(env.CONSENSFLOW_HOME, { recursive: true })
+  if (existsSync(rosterPath(baseEnv))) copyFileSync(rosterPath(baseEnv), rosterPath(env))
   const bin = join(root, 'bin')
   const cwd = join(root, 'work')
   const log = join(root, 'commands.log')
@@ -125,7 +132,7 @@ export function makeStage(options = {}) {
     cwd,
     log,
     // The stub comes first; everything else the lead needs stays reachable.
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+    env: { ...env, PATH: `${bin}:${baseEnv.PATH}` },
     read: () => readFileSync(log, 'utf8').split('\n').filter(Boolean),
     cleanup: () => rmSync(root, { recursive: true, force: true }),
   }
@@ -142,7 +149,7 @@ export function leadSession(kind) {
     return (say) => {
       const args = started ? ['--resume', id] : ['--session-id', id]
       started = true
-      return { command: 'claude', args: [...args, '-p', say, '--dangerously-skip-permissions'] }
+      return { command: 'claude', args: [...args, '-p', say, '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'] }
     }
   }
   if (kind === 'codex') {
@@ -166,7 +173,13 @@ export function leadSession(kind) {
   throw new Error(`no eval lead for ${kind} — claude and codex are supported`)
 }
 
-export function runLead({ command, args }, { cwd, env }, timeoutMs) {
+export async function runLead({ command, args }, { cwd, env }, timeoutMs) {
+  const executable = harnessPath(command, env)
+  if (!executable) throw new Error(`${command} is not installed`)
+  const configuration = await roleConfiguration(command === 'claude' ? 'claude-code' : command, { role: 'lead', env, executable, cwd })
+  args = [...configuration.args, ...args]
+  env = { ...env, ...configuration.env }
+  command = executable
   return new Promise((resolve) => {
     const child = spawn(command, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''
@@ -180,7 +193,17 @@ export function runLead({ command, args }, { cwd, env }, timeoutMs) {
     const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs)
     child.on('close', (code) => {
       clearTimeout(timer)
-      resolve({ code, stdout, stderr })
+      // A native turn may report useful work before a background dispatch
+      // finishes. Grade all assistant messages the user actually sees.
+      const messages = []
+      for (const line of stdout.split('\n')) {
+        let item
+        try { item = JSON.parse(line) } catch { continue }
+        if (item.type === 'assistant') {
+          for (const block of item.message?.content ?? []) if (block.type === 'text') messages.push(block.text)
+        } else if (item.type === 'item.completed' && item.item?.type === 'agent_message') messages.push(item.item.text)
+      }
+      resolve({ code, stdout, stderr, reply: messages.length ? messages.join('\n') : stdout })
     })
     child.on('error', (cause) => {
       clearTimeout(timer)

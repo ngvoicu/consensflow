@@ -519,8 +519,8 @@ function transition(record, next, patch = {}) {
  * invent: the `conversation` and `agent` these answers came from, the
  * `target` lead they are for, `newId()` — the store's delivery-id allocator —
  * and `now`. An answer is skipped when THIS conversation already has a
- * non-`failed` delivery for it or the caller lists it in `coveredIds`;
- * `failed` answers are re-planned, `cancelled` and `uncertain` ones never are.
+ * delivery for it or the caller lists it in `coveredIds`. A failed attempt
+ * needs an explicit resend; a daemon tick must never mint repeated attempts.
  */
 export function plan({
   row,
@@ -565,7 +565,7 @@ export function plan({
   const taken = new Set()
   for (const record of deliveries) {
     if (typeof record?.id === 'string') taken.add(record.id)
-    if (record?.answerId === undefined || record?.state === 'failed') continue
+    if (record?.answerId === undefined) continue
     live.add(`${record.conversation}\u0000${record.answerId}`)
   }
   const from = headerField(agent ?? row?.agent, 'agent')
@@ -621,7 +621,7 @@ function attachFile(record, workspace, budget) {
  * target must be the one captured at plan time, so a resumed lead cannot
  * inherit a record meant for its predecessor.
  */
-export function submit(record, { target, cursor, evidenceType, now } = {}) {
+export function submit(record, { target, cursor, evidenceType, now, manualRead = false } = {}) {
   requireState(record, 'pending', 'submit')
   const lead = requireTarget(target)
   if (!sameTarget(record.target, lead)) {
@@ -631,7 +631,10 @@ export function submit(record, { target, cursor, evidenceType, now } = {}) {
         `${lead.pane}, session ${lead.session})`,
     )
   }
-  if (cursor === null || cursor === undefined || cursor === '') {
+  if (
+    (cursor === null || cursor === undefined || cursor === '') &&
+    !(manualRead === true && record.channel === 'cf-read' && cursor === null)
+  ) {
     throw new Error(
       `submit: ${record.id} needs the pre-submission cursor — the completion adapter's opaque ` +
         'token for where the lead transcript stood before the write',
@@ -686,6 +689,9 @@ export function resend(record, { id, now, workspace, partBudget } = {}) {
   for (const field of [
     'snapshot',
     'submittedAt',
+    'expiresAt',
+    'nativeSubmissionId',
+    'submissionOrder',
     'acceptedAt',
     'evidenceIds',
     'partCoverage',
@@ -840,6 +846,9 @@ export function receipt(record, snapshot, context = {}) {
   }
 
   const evidenceIds = evidence
+    .filter(
+      (item) => record.nativeSubmissionId === undefined || item.id === record.nativeSubmissionId,
+    )
     .filter((item) => matchInline(record, item?.text))
     .map((item) => item.id)
   if (evidenceIds.length > 0) {

@@ -19,6 +19,7 @@ import {
   discoverCodexSession,
   discoverKimiSession,
   discoverOpencodeSession,
+  discoverSessionWithEvidence,
 } from '../hosts/lib/harness-transcript.js'
 import { renderImageRun, runImageAgent } from '../hosts/lib/image-run.js'
 import { createPacket, createWindowSeed } from '../hosts/lib/packets.js'
@@ -28,6 +29,7 @@ import { runsRoot } from '../hosts/lib/state.js'
 import { loadThreads } from '../hosts/lib/threads.js'
 import { renderEvent } from '../hosts/lib/transcript-events.js'
 import { CATALOG, catalogEntry } from '../src/catalog.js'
+import { seedSession as seedOpenCodeSession } from '../src/channels/opencode.js'
 import { launchConfiguration } from '../src/channels.js'
 import { detectHarnesses } from '../src/harnesses.js'
 import { staleClaudeHooks } from '../src/host-payloads.js'
@@ -37,11 +39,10 @@ import {
   resetEverything,
   resetPreview,
   skillsStatus,
-  skillsSummary,
-  syncCmuxSkills,
   turnOff,
   uninstallSkills,
 } from '../src/install.js'
+import { preparePiExtension } from '../src/pi-install.js'
 import { appRequester } from '../src/requester.js'
 import {
   addAgent,
@@ -57,7 +58,6 @@ import { generateSkill } from '../src/skill.js'
 import {
   healSkillIfStale,
   refreshInstalledSkill as refreshSkill,
-  retireSkillFromNativeHosts,
   skillGaps,
   skillTargets,
   staleSkills,
@@ -87,7 +87,7 @@ const USAGE = `consensflow ${PKG.version}
 
 Usage: cf <command> [options]
 
-  setup [--all] [--force]                     Install the CLI and generated skill
+  setup [--all] [--force]                     Prepare the CLI and bundled role context
   run <@agent> "<task>"                       Ask a worker in a ConsensFlow app pane
     [--brief <purpose>] [--context <note>]
     [--prompt-file <file>] [--handoff-file <file>] [--no-handoff]
@@ -97,6 +97,8 @@ Usage: cf <command> [options]
   attach <@agent|conversation>                Reopen a conversation through the app
   read <conversation|delivery id>          Read one completed result whole
     [--answer <id>] [--part <k>]
+  lead send --message-file <file>            PM: send agreed text to this session’s lead
+  lead read [--answer <id>] [--part <k>]       PM: read a complete lead result
   results [conversation|@agent] [--json]    List completed worker results
   sessions [--json]                          List conversations in this workspace
   last <conversation|@agent> [--json]         Read the last recorded answer
@@ -107,18 +109,16 @@ Usage: cf <command> [options]
   agent edit <name> [--model <m>] [--effort <e>] [--description <d>]
   agent remove <name>
   agent sync [<name>] [--dry-run]             Refresh catalog-owned agent fields
-  skills install [--all]                     Install the generated roster skill
-  skills update [--force]                    Refresh skills and retire owned leftovers
-  skills status                             Inspect installed skills
-  skills uninstall [--force]                Remove manifest-owned skills
+  skills status                             Inspect private role files
+  skills uninstall [--force]                Remove owned private role files
   ui [--json] [--no-open]                     Open the local roster editor
-  doctor                                    Inspect runtime, roster and skill installation
+  doctor                                    Inspect runtime, roster and private role files
   off [--force]                             Remove owned installation; keep agents and history
   reset [--yes]                             Remove installation, agents and local app history
 
 Run, say, attach, read and results need a pane opened by ConsensFlow.
 The app owns conversation launches, delivery and read marks.
-Every roster change refreshes the generated skill. Unowned skill files stay untouched.
+Role skills ship with the app. Roster changes refresh its private lead context.
 `
 
 function out(text) {
@@ -139,38 +139,6 @@ function fail(message) {
  */
 function warn(message) {
   process.stderr.write(`cf: ${message}\n`)
-}
-
-const NATIVE_OWNER = {
-  claude: 'the consensflow-cc plugin',
-  pi: 'the consensflow-pi extension',
-}
-
-/** Says out loud where the generated skill was deliberately not installed. */
-function reportNativeHosts(env, all) {
-  if (all) return
-  // An upgrade can inherit copies installed before the host had its own.
-  for (const row of retireSkillFromNativeHosts(env)) {
-    out(
-      row.action === 'retired'
-        ? `retired          ${row.path}`
-        : `kept (you edited it)  ${row.path}`,
-    )
-  }
-  for (const harness of detectHarnesses(env).filter((a) => a.native === true)) {
-    out(
-      `${harness.id}: left alone — ${NATIVE_OWNER[harness.id] ?? 'its own integration'} already provides a consensflow skill (--all to install ours too)`,
-    )
-  }
-}
-
-/**
- * ConsensFlow ships one skill — its own. This takes back what the cloning
- * era installed: cmux-sourced files and the checkout cache. Local disk work
- * only; it cannot fail on the network because it never touches one.
- */
-function syncCmux(env, values) {
-  printReport(syncCmuxSkills(env, { force: values.force }).report)
 }
 
 function printReport(report) {
@@ -355,7 +323,7 @@ function childRefused() {
 }
 
 /**
- * What a consult became, in one line.
+ * What a consult became, without confusing a pane opening with task admission.
  *
  * `--new` is the only way this side knows a conversation is new: the app
  * answers `opened` both for a name it just minted and for one it reopened,
@@ -371,7 +339,10 @@ function consultLine(answer, fresh) {
     ].join('\n')
   }
   const state = answer.outcome === 'said' ? 'continuing' : fresh === true ? 'new' : 'opened'
-  return `conversation: ${answer.conversation} (${state}) — pane ${answer.pane?.id}`
+  const line = `conversation: ${answer.conversation} (${state}) — pane ${answer.pane?.id}`
+  return answer.outcome === 'opened'
+    ? `${line}\nPane opened; task startup continues in the app.`
+    : line
 }
 
 async function runVerb(rest) {
@@ -656,19 +627,35 @@ async function runInPane(row, task, values, handoff) {
   // the id it already had reported), from the launch record it holds. A
   // refusal is carried, not thrown: the window still opens.
   const preBind = native === undefined ? null : await bindSession(controller, { sessionId: native })
+  const onFailure = (failure) =>
+    controller.post('progress.set', {
+      progress: {
+        state: 'failed',
+        pane: ownership.pane,
+        generation: ownership.generation,
+        ...failure,
+      },
+    })
 
   // kimi can neither be handed a task nor typed into, so its turn streams
   // here — on the session it is resuming, when there is one — and only then
   // does the pane become its window.
   if (row.kind === 'kimi') {
-    await streamKimiTurn(controller, row, name, seed, { native, nonce, preBind })
+    await streamKimiTurn(controller, row, name, seed, { native, nonce, preBind, onFailure })
     return
   }
 
   if (native !== undefined) {
+    const apiSeed = row.kind === 'opencode'
+    if (apiSeed && preBind?.bound !== true) {
+      const message = preBind?.reason ?? 'OpenCode task session could not be bound'
+      fail(message)
+      await onFailure({ message, exitCode: null })
+      return
+    }
     const invocation = resuming
-      ? interactiveResume(row, native, seed)
-      : interactiveStart(row, native, seed)
+      ? interactiveResume(row, native, apiSeed ? undefined : seed)
+      : interactiveStart(row, native, apiSeed ? undefined : seed)
     if (invocation === null) {
       fail(
         resuming
@@ -677,7 +664,35 @@ async function runInPane(row, task, values, handoff) {
       )
       return
     }
-    await handOver(name, row.id, await withDeliveryChannel(invocation, row.kind, ownership.launch))
+    await handOver(
+      name,
+      row.id,
+      await withDeliveryChannel(invocation, row.kind, ownership.launch),
+      onFailure,
+      apiSeed
+        ? async (signal) => {
+            const progress = { pane: ownership.pane, generation: ownership.generation }
+            await controller.post('progress.set', { progress: { ...progress, state: 'starting' } })
+            await seedOpenCodeSession({
+              channel: JSON.parse(env.CF_DELIVERY_CONFIG).channel,
+              sessionId: native,
+              cwd: cwdOf(),
+              text: seed,
+              model: resuming ? undefined : row.model,
+              signal,
+            })
+            // The native endpoint admitted the task. A bookkeeping failure
+            // after that boundary must never be reported as a failed send.
+            try {
+              await controller.post('progress.set', {
+                progress: { ...progress, state: 'task-submitted' },
+              })
+            } catch (cause) {
+              warn(`task submitted, but its status could not be recorded: ${cause.message}`)
+            }
+          }
+        : undefined,
+    )
     reportBinding(preBind)
     return
   }
@@ -691,7 +706,7 @@ async function runInPane(row, task, values, handoff) {
     fail(`${row.kind} cannot open a window here`)
     return
   }
-  await openAndDiscover(controller, row, name, seed, discover, nonce)
+  await openAndDiscover(controller, row, name, seed, discover, nonce, onFailure)
 }
 
 /**
@@ -703,7 +718,7 @@ async function runInPane(row, task, values, handoff) {
  * afterwards. Without that handover a kimi pane would print an answer and
  * die, which is the one shape every other harness avoids.
  */
-async function streamKimiTurn(controller, row, name, seed, { native, nonce, preBind }) {
+async function streamKimiTurn(controller, row, name, seed, { native, nonce, preBind, onFailure }) {
   await controller.post('progress.set', { progress: { state: 'first-turn' } })
   const started = Date.now() - 2000
   const result = await runAgent({
@@ -735,12 +750,12 @@ async function streamKimiTurn(controller, row, name, seed, { native, nonce, preB
   const bound =
     native === undefined ? await bindDiscovered(controller, row.kind, sessionId, nonce) : preBind
   const invocation = interactiveResume(row, sessionId)
-  if (invocation !== null) await handOver(name, row.id, invocation)
+  if (invocation !== null) await handOver(name, row.id, invocation, onFailure)
   reportBinding(bound)
 }
 
 /** A cold window, and the search for the session it mints, run together. */
-async function openAndDiscover(controller, row, name, seed, discover, nonce) {
+async function openAndDiscover(controller, row, name, seed, discover, nonce, onFailure) {
   const invocation = interactiveStart(row, null, seed)
   if (invocation === null) {
     fail(`${row.kind} cannot open a window here`)
@@ -751,28 +766,43 @@ async function openAndDiscover(controller, row, name, seed, discover, nonce) {
   let closingAt = Number.POSITIVE_INFINITY
   const searching = () => windowUp || Date.now() < closingAt
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const discoverLaunch = async () =>
+    row.kind === 'opencode'
+      ? ((await discoverSessionWithEvidence(row.kind, cwdOf(), since, env, { nonce }))?.sessionId ??
+        null)
+      : await discover(cwdOf(), since, env, { seed })
   const found = (async () => {
     let wait = 500
     while (searching()) {
-      const id = await discover(cwdOf(), since, env, { seed })
-      if (id !== null) return await bindDiscovered(controller, row.kind, id, nonce)
+      const id = await discoverLaunch()
+      if (id !== null) {
+        const bound = await bindDiscovered(controller, row.kind, id, nonce)
+        // Native stores publish metadata, text and events separately. Only
+        // incomplete native evidence is retried; an app refusal is final.
+        if (bound.retryable !== true) return bound
+      }
       const until = Date.now() + wait
       while (searching() && Date.now() < until) await sleep(250)
       wait = Math.min(wait * 2, 5000)
     }
-    // One last exact look — a store written on the way out still counts.
-    // Only the seeded match: cmux's fallback guess ("the earliest session
-    // that appeared here") is a guess, and a guess is not launch evidence.
-    const id = await discover(cwdOf(), since, env, { seed })
+    // A store written on the way out still counts. A metadata-only candidate
+    // can explain a failed launch, but the same strict nonce check below
+    // still refuses to bind it without its opening user turn.
+    const id = (await discoverLaunch()) ?? (await discover(cwdOf(), since, env, { seed }))
     if (id !== null) return await bindDiscovered(controller, row.kind, id, nonce)
     return { bound: false, reason: `no ${row.kind} session appeared for this launch` }
   })()
   // The window decides the exit status, once, and the search never touches
   // it: the same launch used to end 0 or 1 depending on whether discovery
   // finished before the window did.
-  await handOver(name, row.id, invocation)
+  const harnessExit = await handOver(
+    name,
+    row.id,
+    await withDeliveryChannel(invocation, row.kind, nonce),
+    onFailure,
+  )
   windowUp = false
-  closingAt = Date.now() + 3000
+  closingAt = harnessExit?.cause === undefined ? Date.now() + 3000 : 0
   const outcome = await found
   if (outcome?.bound !== true) warn(outcome?.reason ?? 'this launch stays unbound')
 }
@@ -820,8 +850,29 @@ async function bindSession(controller, candidate) {
  * already had, so a positional prompt stays last.
  */
 async function withDeliveryChannel(invocation, kind, launchId) {
-  if (kind !== 'pi') return invocation
-  const configured = await launchConfiguration(kind, { launchId, workspace: cwdOf() })
+  let configured
+  if (env.CF_DELIVERY_CONFIG !== undefined) {
+    configured = JSON.parse(env.CF_DELIVERY_CONFIG)
+    const channel = configured?.channel
+    if (
+      !Array.isArray(configured?.args) ||
+      !configured.args.every((arg) => typeof arg === 'string') ||
+      !configured.env ||
+      typeof configured.env !== 'object' ||
+      (channel !== null && channel?.launchId !== launchId)
+    ) {
+      throw new Error('invalid app delivery launch configuration')
+    }
+  } else {
+    if (kind !== 'pi') return invocation
+    const extension = preparePiExtension(env)
+    if (!extension.path) throw new Error(extension.reason ?? 'Pi extension is unavailable')
+    configured = await launchConfiguration(kind, {
+      launchId,
+      workspace: cwdOf(),
+      extensionPath: extension.path,
+    })
+  }
   return {
     ...invocation,
     args: [...configured.args, ...invocation.args],
@@ -842,6 +893,7 @@ async function bindDiscovered(controller, kind, sessionId, nonce) {
     // reads as an agent that never carried our marker.
     return {
       bound: false,
+      retryable: true,
       reason:
         `${kind} session ${sessionId} could not be read, so it stays unbound: ` +
         `${read.reason ?? 'no reason given'}`,
@@ -855,6 +907,7 @@ async function bindDiscovered(controller, kind, sessionId, nonce) {
     const opening = read.items.find((item) => item.role === 'user')?.text?.split('\n')[0]
     return {
       bound: false,
+      retryable: true,
       reason:
         `${kind} session ${sessionId} carries no launch marker for this launch — ` +
         `it stays unbound rather than bound on a guess (its first user turn opens ${JSON.stringify(opening ?? '')})`,
@@ -938,6 +991,55 @@ function teachRemainingParts(session, answerId, answer) {
  * the native receipt is the only authority for "read", and a printed
  * attempt never moves it.
  */
+async function leadVerb(rest) {
+  const [action, ...args] = rest
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      'message-file': { type: 'string' },
+      answer: { type: 'string' },
+      part: { type: 'string' },
+    },
+  })
+  if (positionals.length || !['send', 'read'].includes(action)) {
+    fail('use cf lead send --message-file <file> or cf lead read [--answer <id>] [--part <k>]')
+    return
+  }
+  const app = requireApp('lead')
+  if (app === null) return
+  if (action === 'send') {
+    if (!values['message-file'] || values.answer !== undefined || values.part !== undefined) {
+      fail('cf lead send requires only --message-file <file>')
+      return
+    }
+    const text = readFileSync(values['message-file'], 'utf8')
+    const response = await leadRequester(app).post('lead.send', { opId: randomUUID(), text })
+    out(
+      response.outcome === 'admitted'
+        ? 'Message admitted to this session’s lead.'
+        : JSON.stringify(response),
+    )
+    return
+  }
+  if (values['message-file'] !== undefined) {
+    fail('cf lead read does not send a message')
+    return
+  }
+  const part = parsePartNumber(values.part ?? '1')
+  if (part === null) return
+  const response = await leadRequester(app).post('lead.read', {
+    opId: randomUUID(),
+    ...(values.answer === undefined ? {} : { answerId: values.answer }),
+    part,
+  })
+  process.stdout.write(String(response.text ?? ''))
+  if (part < response.of)
+    process.stderr.write(
+      `Read remaining parts with cf lead read --answer ${response.deliveryId} --part <k> (through ${response.of}).\n`,
+    )
+}
+
 async function readVerb(rest) {
   const { values, positionals } = parseArgs({
     args: rest,
@@ -1228,7 +1330,7 @@ async function catchupVerb() {
  * marker set. For a while this spawned with the full inherited environment,
  * which meant every attached turn could silently bill an API key.
  */
-async function handOver(name, agent, invocation) {
+async function handOver(name, agent, invocation, onFailure, onStarted) {
   out(`${name} · @${agent} — handing this terminal to ${invocation.command}`)
   const child = spawn(invocation.command, invocation.args, {
     cwd: cwdOf(),
@@ -1238,18 +1340,46 @@ async function handOver(name, agent, invocation) {
   // A binary that is not on PATH emits `error`, never `close`, and an
   // unhandled `error` on a child process is an uncaught exception: a pane
   // whose harness is missing printed Node's stack instead of a sentence.
-  const outcome = await new Promise((resolve) => {
-    child.once('error', (cause) => resolve({ cause }))
-    child.once('close', (code) => resolve({ code }))
+  const lifetime = new AbortController()
+  const ended = new Promise((resolve) => {
+    const finish = (outcome) => {
+      lifetime.abort()
+      resolve(outcome)
+    }
+    child.once('error', (cause) => finish({ cause }))
+    child.once('close', (code, signal) => finish({ code, signal }))
   })
-  if (outcome.cause !== undefined) {
-    fail(
-      `${invocation.command} could not be started: ${outcome.cause.message} — ` +
-        `is ${invocation.command} installed and on this pane's PATH?`,
-    )
-    return
+  let startupFailed = false
+  const reportFailure = async (message, exitCode) => {
+    fail(message)
+    if (onFailure) {
+      try {
+        await onFailure({ message, exitCode })
+      } catch (cause) {
+        warn(`could not record the harness failure: ${cause.message}`)
+      }
+    }
   }
-  process.exitCode = outcome.code ?? 0
+  const startup = Promise.resolve()
+    .then(() => onStarted?.(lifetime.signal))
+    .catch(async (cause) => {
+      if (lifetime.signal.aborted && cause.name === 'AbortError') return
+      startupFailed = true
+      await reportFailure(cause.message, null)
+    })
+  const outcome = await ended
+  await startup
+  const message =
+    outcome.cause !== undefined
+      ? `${invocation.command} could not be started: ${outcome.cause.message}`
+      : outcome.code !== 0
+        ? `${invocation.command} exited ${outcome.code === null ? `on ${outcome.signal}` : `with code ${outcome.code}`}`
+        : null
+  if (message !== null) {
+    await reportFailure(message, outcome.code ?? null)
+  }
+  process.exitCode = startupFailed || outcome.cause !== undefined ? 1 : (outcome.code ?? 1)
+  return outcome
 }
 
 async function sessionsVerb(rest) {
@@ -1260,8 +1390,42 @@ async function sessionsVerb(rest) {
   })
   const cwd = process.cwd()
   const threads = await loadThreads(cwd)
+  const sessions = Object.fromEntries(
+    Object.entries(threads).map(([name, row]) => {
+      if (!row.reserved && !row.binding && !row.lead?.startsWith('tab:')) return [name, row]
+      const launch = row.reserved
+      const progress =
+        row.progress?.pane === launch?.pane && row.progress?.generation === launch?.generation
+          ? row.progress
+          : null
+      const status =
+        progress?.state === 'failed'
+          ? 'startup failed'
+          : progress?.state === 'task-submitted'
+            ? 'task submitted'
+            : progress?.state === 'starting'
+              ? 'starting task'
+              : launch?.outcome === 'opened'
+                ? 'pane opened'
+                : launch
+                  ? 'launch unresolved'
+                  : 'pane closed'
+      return [
+        name,
+        {
+          agent: row.agent,
+          kind: row.kind,
+          sessionId: row.sessionId ?? null,
+          pane: launch?.pane ?? null,
+          generation: launch?.generation ?? null,
+          status,
+          ...(status === 'startup failed' ? { message: progress.message } : {}),
+        },
+      ]
+    }),
+  )
   if (values.json) {
-    out(JSON.stringify(threads, null, 2))
+    out(JSON.stringify(sessions, null, 2))
     return
   }
   const names = Object.keys(threads)
@@ -1270,6 +1434,15 @@ async function sessionsVerb(rest) {
     return
   }
   for (const name of names.sort()) {
+    const session = sessions[name]
+    if (session.status) {
+      const detail =
+        session.message ?? (session.status === 'pane opened' ? 'task status not recorded' : '')
+      out(
+        `${name} · @${session.agent} — ${session.status}${detail ? `: ${detail}` : ''}${session.pane ? ` — pane ${session.pane}` : ''}`,
+      )
+      continue
+    }
     const row = threads[name]
     const runs = `${row.runs} run${row.runs === 1 ? '' : 's'}`
     // A row still carrying `startedAt` is one whose run has not come back.
@@ -1499,35 +1672,12 @@ function skillsVerb(rest) {
   })
 
   switch (action) {
-    case 'install': {
-      // Every detected harness receives the same generated skill.
-      const agents = listAgents(env)
-      if (agents.length === 0) {
-        fail('the roster is empty — add an agent with `cf ui` or `cf agent add` first')
-        return
-      }
-      printReport(
-        installSkill(
-          {
-            relPath: 'consensflow/SKILL.md',
-            content: generateSkill(agents),
-            source: 'consensflow',
-          },
-          env,
-          { targets: skillTargets(env, { all: values.all }) },
-        ),
+    case 'install':
+    case 'update':
+      out(
+        'Role skills are included with ConsensFlow. Update the application instead; no files were changed.',
       )
-      reportNativeHosts(env, values.all)
-      // Retire files owned by the old cmux-skills installer.
-      syncCmux(env, values)
       return
-    }
-    case 'update': {
-      refreshSkill(env)
-      syncCmux(env, values)
-      out('updated')
-      return
-    }
     case 'status': {
       const rows = skillsStatus(env)
       if (rows.length === 0) {
@@ -1544,7 +1694,7 @@ function skillsVerb(rest) {
       if (behind.size > 0) {
         out('')
         out(
-          `${behind.size} file${behind.size === 1 ? '' : 's'} carry an older ConsensFlow's text — refresh with: cf skills install`,
+          `${behind.size} file${behind.size === 1 ? '' : 's'} carry an older ConsensFlow's text — refresh by updating or reopening ConsensFlow`,
         )
       }
       return
@@ -1594,10 +1744,7 @@ function setup(rest) {
         { targets: skillTargets(env, { all: values.all }) },
       ),
     )
-    reportNativeHosts(env, values.all)
   }
-
-  if (harnesses.length > 0) syncCmux(env, values)
 }
 
 function doctor() {
@@ -1611,24 +1758,14 @@ function doctor() {
     out('legacy:       mode.json is ignored and can be removed')
   }
   out(`agents:       ${listAgents(env).length}`)
-  // Files, not skills — a skill is a directory, and cmux-browser alone is
-  // eleven files. Say both, and say whose they are.
-  const skills = skillsSummary(env)
-  const parts = [`${skills.files} files`]
-  if (skills.files > 0) {
-    parts.push(
-      `${skills.ours} ours` +
-        (skills.cmux > 0 ? `, ${skills.cmux} from cmux@${skills.cmuxCommit}` : ''),
-    )
-    parts.push(
-      `${skills.perHarness} skill${skills.perHarness === 1 ? '' : 's'} in each of ${skills.harnesses} harness${skills.harnesses === 1 ? '' : 'es'}`,
-    )
-  }
-  const bad = skills.drifted + skills.missing
+  const privateRoot = `${join(configRoot(env), 'roles')}/`
+  const files = skillsStatus(env).filter((row) => row.path.startsWith(privateRoot))
+  const bad = files.filter((row) => row.state !== 'ok').length
+  const parts = [
+    'bundled lead + PM',
+    `${files.length} prepared private file${files.length === 1 ? '' : 's'}`,
+  ]
   if (bad > 0) parts.push(`${bad} drifted/missing`)
-  // An upgrade brings a new skill template; nothing rewrites the installed
-  // files until the roster moves, so say it here rather than let a lead read
-  // the previous version's prose.
   const behind = staleSkills(env).length
   if (behind > 0) parts.push(`${behind} behind this version`)
   out(`skills:       ${parts.join(' · ')}`)
@@ -1658,7 +1795,7 @@ function doctor() {
   const gaps = skillGaps(env)
   if (gaps.length > 0) {
     out(
-      `missing:      ${gaps.join(', ')} ${gaps.length === 1 ? 'is' : 'are'} in scope but carrying no skill — run \`cf skills install\``,
+      `missing:      ${gaps.join(', ')} ${gaps.length === 1 ? 'is' : 'are'} missing private role context — reopen ConsensFlow`,
     )
   }
 
@@ -1687,6 +1824,13 @@ async function main() {
   }
   if (command === '--version' || command === '-v' || command === 'version') {
     out(PKG.version)
+    return
+  }
+
+  if (env.CONSENSFLOW_ROLE === 'pm' && command !== 'lead') {
+    fail(
+      'PM panes can use only cf lead send and cf lead read; worker and administration commands are unavailable.',
+    )
     return
   }
 
@@ -1720,6 +1864,9 @@ async function main() {
       return
     case 'say':
       await sayVerb(rest)
+      return
+    case 'lead':
+      await leadVerb(rest)
       return
     case 'read':
       await readVerb(rest)

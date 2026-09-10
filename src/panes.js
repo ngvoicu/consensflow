@@ -1,14 +1,18 @@
 import { randomUUID } from 'node:crypto'
-import { dirname, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { DEFAULT_PART_BUDGETS, partsFor, seenAfter } from '../hosts/lib/deliveries.js'
+import { answers as nativeAnswers } from '../hosts/lib/completion.js'
+import { DEFAULT_PART_BUDGETS, partsFor, plan, seenAfter } from '../hosts/lib/deliveries.js'
 import { discoverSessionWithEvidence } from '../hosts/lib/harness-transcript.js'
 import { formatLaunchMarker } from '../hosts/lib/packets.js'
 import { effectivePolicy } from '../hosts/lib/policy.js'
-import { interactiveResume, interactiveStart } from '../hosts/lib/runners.js'
+import { childEnv, interactiveResume, interactiveStart } from '../hosts/lib/runners.js'
 import { newSessionName } from '../hosts/lib/threads.js'
-import { enabledChannels, launchConfiguration } from './channels.js'
+import * as openCode from './channels/opencode.js'
+import { enabledChannels, launchConfiguration, send as sendNative } from './channels.js'
 import { controllerEnv, endLaunch, issueTicket, leadEnv, ownerOf } from './launch.js'
+import { preparePiExtension } from './pi-install.js'
+import { roleConfiguration } from './role-skills.js'
 import { StoreRefusal } from './store.js'
 import { leadIdentity, paneIdentity } from './tabs.js'
 
@@ -75,19 +79,19 @@ const DEFAULT_PANE_OPEN_DEADLINE_MS = 30_000
 /**
  * The evidence a LEAD launch binds by, in the three shapes a worker has.
  *
- * claude-code and pi take an id from us, so we mint one and it IS the
- * binding the moment the window opens. Everything else mints its own, so
- * the launch nonce travels in the seed's opening line and binds when
- * discovery reads it back. A lead already bound offers no new identity —
+ * Claude Code and Pi take an id from us. Codex records the launch nonce
+ * in its native originator metadata, keeping an empty lead idle. OpenCode
+ * reports an empty session created through its native API. A lead already bound offers no new identity —
  * it is resumed on the one it has.
  */
 function leadEvidence(kind, tabId, launchId, nativeSession) {
   if (typeof nativeSession === 'string' && nativeSession.length > 0) return {}
   if (kind === 'claude-code') return { preallocatedId: randomUUID() }
-  // pi creates the session when the name is new, so a name scoped to the
-  // tab is both the identity and a thing a human can recognise in pi's own
-  // list. It is stable across resumes for the same reason.
-  if (kind === 'pi') return { preallocatedId: `${tabId}-lead` }
+  // Pi resumes an existing name. Tab ids restart after an app-state reset,
+  // while native sessions survive, so fresh names also need the launch id.
+  // Explicit resume uses the recorded binding instead of recomputing it.
+  if (kind === 'pi') return { preallocatedId: `${tabId}-lead-${launchId}` }
+  if (kind === 'codex') return { nonce: launchId, originator: `consensflow-${launchId}` }
   return { nonce: launchId }
 }
 
@@ -165,9 +169,13 @@ export class Panes {
   #openings = new Map()
   #onNote = null
   #harnessPath
+  #prepareRole
+  #prepareChannel
   #shell
   #env
   #watcher = null
+  #deletions = new Map()
+  #tabWork = new Map()
 
   /**
    * @param {object} deps
@@ -191,6 +199,8 @@ export class Panes {
     // machine. Both are absolute paths the pane host insists on, and both
     // are answers only the environment has — which this module never reads.
     harnessPath = () => null,
+    prepareRole = roleConfiguration,
+    prepareChannel = launchConfiguration,
     shell = '/bin/sh',
     // Discovery reads each harness's own store, and where those live is an
     // answer only the environment has — which this module never reads.
@@ -204,6 +214,8 @@ export class Panes {
     this.#app = app
     this.#node = node
     this.#harnessPath = harnessPath
+    this.#prepareRole = prepareRole
+    this.#prepareChannel = prepareChannel
     this.#shell = shell
     this.#env = env
     this.#deadlineMs = paneOpenDeadlineMs
@@ -521,6 +533,7 @@ export class Panes {
           generation: pane.generation,
           order: pane.order,
           conversation: pane.conversation ?? null,
+          closed: pane.closed === true,
           agent: record?.agent ?? null,
           ...paneLiveness(tab, pane, record, this.#livePane(tab, record, pane.conversation)),
           policy: effectivePolicy(tab, pane, record),
@@ -611,6 +624,153 @@ export class Panes {
     return this.#launchLead(created.id, { opened: true })
   }
 
+  async pmSend(tabId, request) {
+    const opId = requireText(request.opId, 'opId')
+    const text = requireText(request.text, 'text')
+    return this.#once(tabId, opId, async () => {
+      const pm = await this.#openTab(tabId)
+      if (pm.role !== 'pm' || !pm.parentTabId)
+        throw new PaneError('only a PM can send to its lead', { status: 403 })
+      const parent = await this.#openTab(pm.parentTabId)
+      const pane = parent.panes.find((pane) => pane.kind === 'lead')
+      const reservation = parent.lead.reserved
+      const channel = reservation?.channel
+      if (!pane || !channel || !parent.lead.nativeSession)
+        throw new PaneError('the lead is not ready for a native message', {
+          status: 409,
+          code: 'unbound',
+        })
+      const bridge = this.#requireBridge()
+      const snapshot = await bridge.request('pane.snapshot', {
+        id: pane.id,
+        generation: pane.generation,
+      })
+      if (snapshot?.ok !== true) throw refusedBy(snapshot)
+      const current = await this.#openTab(parent.id)
+      if (
+        current.lead.reserved?.launchId !== reservation.launchId ||
+        current.lead.nativeSession !== parent.lead.nativeSession ||
+        current.lead.generation !== parent.lead.generation
+      ) {
+        throw new PaneError('the lead changed before the message', {
+          status: 409,
+          code: 'stale-launch',
+        })
+      }
+      const result = await sendNative(
+        channel.kind,
+        {
+          launch: channel,
+          channel,
+          session: parent.lead.nativeSession,
+          bridge,
+          pane: pane.id,
+          generation: pane.generation,
+          epoch: snapshot.inputEpoch,
+        },
+        text,
+      )
+      if (result?.ok !== true || result.admitted === false) throw refusedBy(result)
+      return { outcome: 'admitted', lead: parent.id, pane: pane.id }
+    })
+  }
+
+  async pmRead(tabId, request) {
+    const opId = requireText(request.opId, 'opId')
+    return this.#once(tabId, opId, async () => {
+      const pm = await this.#openTab(tabId)
+      if (pm.role !== 'pm' || !pm.parentTabId)
+        throw new PaneError('only a PM can read its lead', { status: 403 })
+      const parent = await this.#tab(pm.parentTabId)
+      const answerId =
+        request.answerId === undefined ? undefined : requireText(request.answerId, 'answerId')
+      const part = request.part ?? 1
+      if (!Number.isSafeInteger(part) || part < 1)
+        throw new PaneError('part must be a positive integer')
+      const saved = Object.values(await this.#store.readDeliveries(pm.directory)).filter(
+        (record) =>
+          record.target?.tab === pm.id &&
+          record.sourceParent === parent.id &&
+          record.manual === true,
+      )
+      let record =
+        answerId === undefined
+          ? null
+          : saved.find((record) => record.id === answerId || record.answerId === answerId)
+      if (!record) {
+        if (part !== 1)
+          throw new PaneError('further parts require the immutable answer ID from the first read')
+        const channel = parent.lead.reserved?.channel
+        const completion = await nativeAnswers(
+          parent.lead.harness,
+          parent.lead.nativeSession,
+          this.#env,
+          {
+            piSettlement: {
+              directory: channel?.kind === 'pi-extension' ? channel.settled : '',
+              launchId: channel?.kind === 'pi-extension' ? channel.launchId : '',
+            },
+          },
+        )
+        const items =
+          completion.unknown || completion.replaced
+            ? []
+            : (completion.items ?? []).filter(
+                (item) =>
+                  item.role === 'assistant' && item.complete === true && item.settled === true,
+              )
+        const item =
+          answerId === undefined ? items.at(-1) : items.find((item) => item.id === answerId)
+        if (!item)
+          throw new PaneError(
+            completion.reason ?? 'the requested lead result is not complete or available',
+            { status: 409 },
+          )
+        record = saved.find(
+          (record) =>
+            record.answerId === item.id && record.sourceSession === parent.lead.nativeSession,
+        )
+        if (!record) {
+          const id = await this.#store.allocateDeliveryId()
+          const pane = pm.panes.find((pane) => pane.kind === 'lead')
+          ;[record] = plan({
+            items: [item],
+            conversation: `lead-${parent.id}`,
+            agent: 'lead',
+            kind: pm.lead.harness,
+            target: {
+              leadId: leadIdentity(pm),
+              session: pm.lead.nativeSession ?? `held:${pm.id}`,
+              tab: pm.id,
+              pane: pane.id,
+              generation: pane.generation,
+            },
+            newId: () => id,
+            now: Date.now(),
+            manual: true,
+            inlineBudget: 0,
+          })
+          record.sourceParent = parent.id
+          record.sourceSession = parent.lead.nativeSession
+          await this.#store.deliveryUpsert(pm.directory, record)
+        }
+      }
+      return this.read(pm.id, { deliveryId: record.id, part, opId: `${opId}:part` })
+    })
+  }
+
+  async pmOpen(request) {
+    const parentId = requireText(request?.tab, 'parent session')
+    const created = await this.#refusable('pm-refused', () =>
+      this.#tabs.createPm(parentId, request?.harness),
+    )
+    const pm = await this.#tab(created.id)
+    if (created.existing && !pm.closed)
+      return { ok: true, tab: pm.id, pane: pm.panes[0], existing: true }
+    if (pm.closed) return this.tabResume({ tab: pm.id })
+    return this.#launchLead(pm.id, { opened: true })
+  }
+
   /**
    * `tab.resume {tab}` — a suspended tab's lead, opened again.
    *
@@ -620,6 +780,10 @@ export class Panes {
    * it back, and the tab IS back; only its window did not come.
    */
   async tabResume(request) {
+    return this.#trackTabWork(request?.tab, () => this.#resumeTab(request))
+  }
+
+  async #resumeTab(request) {
     const tabId = requireText(request?.tab, 'tab')
     // Before the tab takes its next generation: a pane row is only Node's
     // memory of a window, and a pane host that restarted holds none of
@@ -629,7 +793,100 @@ export class Panes {
     // rather than halfway through it.
     await this.#reconcilePanes(tabId)
     await this.#refusable('resume-refused', () => this.#tabs.resume(tabId))
-    return this.#launchLead(tabId, { opened: false })
+    const lead = await this.#launchLead(tabId, { opened: false })
+    const tab = await this.#openTab(tabId)
+    if (tab.role === 'pm') return lead
+    const threads = await this.#store.readThreads(tab.directory)
+    const workers = []
+    for (const pane of tab.panes) {
+      if (
+        pane.kind !== 'worker' ||
+        pane.deleting ||
+        tab.deletedConversations?.includes(pane.conversation) ||
+        !boundSession(threads[pane.conversation])
+      )
+        continue
+      try {
+        workers.push(
+          await this.attach(tabId, {
+            session: pane.conversation,
+            opId: `resume-${tab.lead.generation}-${pane.id}`,
+          }),
+        )
+      } catch (cause) {
+        workers.push({ conversation: pane.conversation, error: cause.message })
+      }
+    }
+    return { ...lead, workers }
+  }
+
+  /** The page deletes a session; controllers and leads have no such route. */
+  async tabDelete(request) {
+    const tabId = requireText(request?.tab, 'tab')
+    const generation = request?.generation
+    const key = `${tabId}:${generation}`
+    if (this.#deletions.has(key)) return this.#deletions.get(key)
+    const deleting = this.#deleteTab(tabId, generation)
+    this.#deletions.set(key, deleting)
+    try {
+      return await deleting
+    } finally {
+      this.#deletions.delete(key)
+    }
+  }
+
+  async #deleteTab(tabId, generation) {
+    const bridge = this.#requireBridge()
+    await this.#refusable('delete-refused', () => this.#tabs.beginDelete(tabId, generation))
+    for (const companion of await this.#tabs.list()) {
+      if (companion.role === 'pm' && companion.parentTabId === tabId) {
+        await this.tabDelete({ tab: companion.id, generation: companion.lead.generation })
+      }
+    }
+    // The durable closed flag fences admission. Drain calls that crossed that
+    // fence earlier, including the time before they sent pane.open.
+    await Promise.allSettled([
+      ...[...this.#inFlight].filter(([key]) => key.startsWith(`${tabId}:`)).map(([, work]) => work),
+      ...(this.#tabWork.get(tabId) ?? []),
+    ])
+    await this.#watcher?.reconcile('tab.delete')
+    const tab = await this.#tab(tabId)
+    const listed = await bridge.request('pane.list', {}, { deadlineMs: this.#deadlineMs })
+    if (listed?.ok !== true || !Array.isArray(listed.panes) || !listed.panes.every(isListedPane)) {
+      throw unlistablePanes(tabId, 'cannot confirm which processes remain')
+    }
+    if (tab.panes.some((pane) => this.#openings.has(paneIdentity(pane)))) {
+      throw new PaneError(
+        'a pane launch is still unresolved; retry session deletion when it settles',
+        { status: 409 },
+      )
+    }
+    const hosted = new Set(listed.panes.map(paneIdentity))
+    for (const pane of tab.panes) {
+      const identity = paneIdentity(pane)
+      if (hosted.has(identity)) {
+        const stopped = await bridge.request('pane.kill', paneRef(pane), {
+          deadlineMs: this.#deadlineMs,
+        })
+        if (stopped?.ok !== true) throw refusedBy(stopped)
+      }
+      await this.#paneExited(paneRef(pane))
+    }
+    await this.#tabs.remove(tabId, generation)
+    return { outcome: 'deleted', tab: tabId }
+  }
+
+  async #trackTabWork(tabId, work) {
+    const pending = work()
+    const running = this.#tabWork.get(tabId) ?? new Set()
+    this.#tabWork.set(tabId, running)
+    running.add(pending)
+    try {
+      return await pending
+    } finally {
+      running.delete(pending)
+      if (running.size === 0) this.#tabWork.delete(tabId)
+    }
   }
 
   /**
@@ -722,6 +979,10 @@ export class Panes {
    * write. The pane row is the whole record.
    */
   async shellOpen(request) {
+    return this.#trackTabWork(request?.tab, () => this.#openShell(request))
+  }
+
+  async #openShell(request) {
     const tabId = requireText(request?.tab, 'tab')
     const bridge = this.#requireBridge()
     const tab = await this.#openTab(tabId)
@@ -767,6 +1028,29 @@ export class Panes {
     }
     this.#openEnded(paneIdentity(pane))
     return { outcome: 'opened', tab: tabId, pane: paneRef(pane), kind: 'shell' }
+  }
+
+  async paneDelete(request) {
+    const id = requireText(request?.id, 'pane id')
+    const generation = request?.generation
+    const tab = (await this.#tabs.list()).find((tab) =>
+      tab.panes.some((pane) => pane.id === id && pane.generation === generation),
+    )
+    if (!tab) throw new PaneError('stale pane generation', { status: 409 })
+    const pane = tab.panes.find((pane) => pane.id === id)
+    if (this.#openings.has(paneIdentity(pane)))
+      throw new PaneError('pane is still opening; retry deletion when it settles', { status: 409 })
+    await this.#tabs.beginPaneDelete(tab.id, id, generation)
+    await this.#drainOpens()
+    const stopped = await this.#requireBridge().request(
+      'pane.kill',
+      { id, generation },
+      { deadlineMs: this.#deadlineMs },
+    )
+    if (stopped?.ok !== true) throw refusedBy(stopped)
+    await this.#paneExited({ id, generation })
+    await this.#tabs.removePane(tab.id, id, generation)
+    return { outcome: 'deleted', tab: tab.id, pane: { id, generation } }
   }
 
   /**
@@ -906,11 +1190,40 @@ export class Panes {
         kind: agent.kind,
         lead: leadIdentity(tab),
         ...(notify === undefined ? {} : { notify }),
-        launch: (row) => {
+        launch: async (row) => {
+          const executable = this.#harnessPath(agent.kind)
+          if (executable === null || executable === undefined) {
+            throw new PaneError(`${agent.kind} is not installed on this machine`, {
+              status: 409,
+              code: 'harness-missing',
+            })
+          }
+
           const launchId = randomUUID()
-          const { evidence, nativeSession } = launchEvidence(agent.kind, name, launchId, row)
-          Object.assign(held, { launchId, nativeSession, created: row === undefined })
-          return { launchId, opId, ...evidence }
+          let { evidence, nativeSession } = launchEvidence(agent.kind, name, launchId, row)
+          const configuration = await this.#leadChannel(
+            agent.kind,
+            launchId,
+            tab.directory,
+            executable,
+          )
+          if (agent.kind === 'opencode' && nativeSession === undefined) {
+            nativeSession = await openCode.createSession({
+              executable,
+              cwd: tab.directory,
+              env: childEnv(this.#env),
+              configuration,
+            })
+            evidence = { reportedId: nativeSession }
+          }
+          Object.assign(held, {
+            executable,
+            launchId,
+            nativeSession,
+            configuration,
+            created: row === undefined,
+          })
+          return { launchId, opId, ...evidence, channel: configuration.channel }
         },
       })
       return { ...admitted, ...held }
@@ -1038,8 +1351,15 @@ export class Panes {
       ],
       env: {
         ...controllerEnv({ pane: pane.id, app: this.#app(), ticket }),
+        CF_DELIVERY_CONFIG: JSON.stringify(admitted.configuration),
         // Finder's environment does not include installed harness CLIs.
-        ...(this.#env.PATH === undefined ? {} : { PATH: this.#env.PATH }),
+        PATH: [
+          ...new Set(
+            [dirname(admitted.executable), ...(this.#env.PATH ?? '').split(delimiter)].filter(
+              Boolean,
+            ),
+          ),
+        ].join(delimiter),
       },
     }
     // Everything the transport would refuse the frame for is settled BEFORE
@@ -1144,13 +1464,50 @@ export class Panes {
       generation: pane.generation,
     })
     if (snapshot?.ok !== true) throw refusedBy(snapshot)
-    const written = await bridge.request('pane.write_paste', {
-      id: pane.id,
-      generation: pane.generation,
-      epoch: snapshot.inputEpoch,
-      body: text,
-    })
-    if (written?.ok !== true) throw refusedBy(written)
+    const currentTab = await this.#openTab(tab.id)
+    const row = (await this.#store.readThreads(tab.directory))[name]
+    const reserved = row?.reserved
+    if (
+      !reserved ||
+      Object.entries(expect ?? {}).some(([key, value]) => reserved[key] !== value) ||
+      !this.#livePane(currentTab, row, name)
+    ) {
+      throw new PaneError('the worker launch changed before the message', {
+        status: 409,
+        code: 'stale-launch',
+      })
+    }
+    const channel = reserved.channel
+    let written
+    if (isRecord(channel)) {
+      if (!boundSession(row) || row.binding?.launchId !== reserved.launchId) {
+        throw new PaneError('the native worker thread is not bound yet', {
+          status: 409,
+          code: 'unbound',
+        })
+      }
+      written = await sendNative(
+        channel.kind,
+        {
+          launch: channel,
+          channel,
+          session: row.sessionId,
+          bridge,
+          pane: pane.id,
+          generation: pane.generation,
+          epoch: snapshot.inputEpoch,
+        },
+        text,
+      )
+    } else {
+      written = await bridge.request('pane.write_paste', {
+        id: pane.id,
+        generation: pane.generation,
+        epoch: snapshot.inputEpoch,
+        body: text,
+      })
+    }
+    if (written?.ok !== true || written?.admitted === false) throw refusedBy(written)
     // The bytes are already in the pane. If the launch they were for is
     // over, recording them is refused — a refusal of THIS request, which
     // the caller must see as such and never retry.
@@ -1190,7 +1547,19 @@ export class Panes {
       )
       if (pane === undefined) continue
       const name = pane.conversation
+      let failure = null
+      let preserveHistory = false
       if (typeof name === 'string' && name.length > 0) {
+        const thread = (await this.#store.readThreads(tab.directory))[name]
+        preserveHistory = typeof thread?.sessionId === 'string' && thread.sessionId.length > 0
+        const progress = thread?.progress
+        if (
+          progress?.state === 'failed' &&
+          progress.pane === id &&
+          progress.generation === generation
+        ) {
+          failure = { message: progress.message, exitCode: progress.exitCode ?? null }
+        }
         // The store compares the exit against the reservation of the
         // moment, inside its queue: a duplicate exit, or one that arrives
         // after the conversation reopened, names a pane the reservation no
@@ -1211,6 +1580,10 @@ export class Panes {
         }
       }
       if (pane.kind === 'lead') {
+        if (tab.deleting === true) {
+          endLaunch(tab.lead?.reserved?.launchId)
+          return
+        }
         // The lead pane IS the tab: when its process ends the tab has no
         // window, and leaving it open would draw a live lead that is dead
         // and offer no way back. Suspending it makes `tab.resume` the
@@ -1231,7 +1604,9 @@ export class Panes {
         })
         return
       }
-      await this.#tabs.removePane(tab.id, id, generation)
+      if (failure !== null && tab.deleting !== true)
+        await this.#tabs.failPane(tab.id, id, generation, failure)
+      else await this.#tabs.removePane(tab.id, id, generation, { preserveHistory })
       return
     }
   }
@@ -1333,9 +1708,13 @@ export class Panes {
    * same mutation. Only then does the frame go out, and the reservation is
    * given back unless it did.
    */
-  async #launchLead(tabId, { opened }) {
+  async #launchLead(tabId, options) {
+    return this.#trackTabWork(tabId, () => this.#openLead(tabId, options))
+  }
+
+  async #openLead(tabId, { opened }) {
     const bridge = this.#requireBridge()
-    // Before deciding warm or cold: a lead that opened with a marker may
+    // Before deciding warm or cold: an unbound lead may
     // have written its transcript since, and the id it minted is only
     // discoverable there. Binding it here is what makes the NEXT launch a
     // resume instead of a third cold window.
@@ -1354,17 +1733,38 @@ export class Panes {
     // password before the store has one, so it is minted here and handed to
     // the store to record. `leadAdmit` is what makes it the tab's launch.
     const launchId = randomUUID()
-    const configuration = await this.#leadChannel(kind, launchId, tab.directory)
+    let configuration
     let admitted
     try {
+      const role = await this.#prepareRole(kind, {
+        role: tab.role === 'pm' ? 'pm' : 'lead',
+        env: this.#env,
+        cwd: tab.directory,
+        executable: command,
+      })
+      configuration = await this.#leadChannel(kind, launchId, tab.directory, command, {
+        ...this.#env,
+        ...role.env,
+      })
+      configuration.args.push(...role.args)
+      configuration.env = { ...configuration.env, ...role.env }
       admitted = await this.#store.leadAdmit(tab.directory, {
         tab: tabId,
         // Decided inside the mutation, from the record the store reads
         // there: a lead that already bound a session is resumed on it, and
         // only an unbound one is given a newly minted identity.
-        launch: (record) => ({
+        launch: async (record) => ({
           launchId,
-          ...leadEvidence(kind, tabId, launchId, record.lead.nativeSession),
+          ...(kind === 'opencode' && !record.lead.nativeSession
+            ? {
+                reportedId: await openCode.createSession({
+                  executable: command,
+                  cwd: tab.directory,
+                  env: childEnv(this.#env),
+                  configuration,
+                }),
+              }
+            : leadEvidence(kind, tabId, launchId, record.lead.nativeSession)),
         }),
         channel: configuration.channel,
       })
@@ -1373,10 +1773,8 @@ export class Panes {
       if (cause?.name === 'AdmissionError') throw admissionRefusal(cause, null)
       throw cause
     }
-    // What the harness itself is told: `hosts/lib/runners.js` owns which
-    // flag each one takes, so this asks it rather than knowing. A bound
-    // lead resumes; an unbound one starts, carrying the nonce in its seed
-    // when the harness insists on minting its own id.
+    // The runner owns native flags. Bound leads resume; fresh leads carry
+    // identity through their native session metadata without a model task.
     const session = this.#leadArgv(kind, admitted)
     const body = {
       id: admitted.pane.id,
@@ -1388,6 +1786,7 @@ export class Panes {
       env: {
         ...leadEnv({
           tab: tabId,
+          role: tab.role === 'pm' ? 'pm' : 'lead',
           pane: admitted.pane.id,
           leadId: leadIdentity(tab),
           app: this.#app(),
@@ -1395,6 +1794,7 @@ export class Panes {
           node: this.#node,
         }),
         ...configuration.env,
+        ...session.env,
       },
     }
     const sent = { transmitted: false }
@@ -1469,9 +1869,9 @@ export class Panes {
    *
    * The three shapes again, and the same evidence rule: an id we
    * preallocated is looked for where the harness would have put its file,
-   * an id the harness reported is taken as reported, and everything else is
-   * found by the `[consensflow launch <nonce>]` marker opening one of the
-   * session's first five user turns. `discoverSessionWithEvidence` never
+   * an id the harness reported is taken as reported, and Codex uses native
+   * originator metadata. OpenCode reports its empty session through the
+   * native API; legacy launches carry a marker. `discoverSessionWithEvidence` never
    * answers without evidence, and `leadBind` checks it again inside the
    * queue against the launch it is fenced to — so nothing binds on the
    * strength of having been asked nicely.
@@ -1497,6 +1897,7 @@ export class Panes {
         this.#env,
         {
           nonce: reserved.nonce ?? null,
+          originator: reserved.originator ?? null,
           preallocatedId: reserved.preallocatedId ?? null,
           reportedId: reserved.reportedId ?? null,
         },
@@ -1514,6 +1915,7 @@ export class Panes {
         candidate: {
           sessionId: found.sessionId,
           ...(found.turn === undefined ? {} : { turn: found.turn }),
+          ...(found.sessionMeta === undefined ? {} : { sessionMeta: found.sessionMeta }),
         },
         expect: { launchId: reserved.launchId },
       })
@@ -1529,8 +1931,8 @@ export class Panes {
    *
    * `interactiveResume` when there is a bound session — that is the whole
    * promise, that a tab's PM conversation survives its suspend — and
-   * `interactiveStart` otherwise, seeded with the launch nonce for the
-   * harnesses that mint their own id. Both come from `hosts/lib/runners.js`
+   * `interactiveStart` otherwise, with a native identity or metadata for
+   * discovery after the first human turn. Both come from `hosts/lib/runners.js`
    * so the flags live in ONE place; only the command is replaced, because
    * the pane host needs the absolute path and that module names a binary.
    *
@@ -1554,15 +1956,22 @@ export class Panes {
         }
       }
     }
-    const preallocated = reserved.preallocatedId ?? null
-    // `[consensflow launch <nonce>]`, exactly as a worker's packet opens.
-    // A bare nonce is not evidence: `bindEvidence` looks for the MARKER at
-    // the head of one of the first five user turns, so a seed carrying the
-    // id on its own could never bind and the lead stayed cold forever.
-    const seed = typeof reserved.nonce === 'string' ? formatLaunchMarker(reserved.nonce) : undefined
+    const preallocated =
+      reserved.preallocatedId ?? (kind === 'opencode' ? reserved.reportedId : null)
+    // Fresh Codex and OpenCode leads wait for the first human message.
+    // Codex metadata and OpenCode's API-created ID identify their launch.
+    const seed =
+      kind !== 'codex' && kind !== 'opencode' && typeof reserved.nonce === 'string'
+        ? formatLaunchMarker(reserved.nonce)
+        : undefined
     const start = interactiveStart(agent, preallocated, seed)
+    let env = {}
+    if (kind === 'codex' && typeof reserved.originator === 'string') {
+      env = { CODEX_INTERNAL_ORIGINATOR_OVERRIDE: reserved.originator }
+    }
     return {
       args: start?.args ?? [],
+      env,
       dropEnv: start?.dropEnv ?? [],
       nativeSession: preallocated,
       resumed: false,
@@ -1581,12 +1990,22 @@ export class Panes {
    * so `enabledChannels` is asked first rather than the answer guessed from
    * a name.
    */
-  async #leadChannel(kind, launchId, workspace) {
+  async #leadChannel(kind, launchId, workspace, executable, env = this.#env) {
     const extra = enabledChannels(kind).filter((channel) => channel !== 'pty-inline')
     if (!extra.some((channel) => channel !== 'cf-read')) {
       return { args: [], env: {}, channel: null }
     }
-    return await launchConfiguration(kind, { launchId, workspace })
+    const extension = kind === 'pi' ? preparePiExtension(env) : null
+    if (extension && !extension.path)
+      throw new Error(extension.reason ?? 'Pi extension is unavailable')
+    return await this.#prepareChannel(kind, {
+      ...(extension ? { extensionPath: extension.path } : {}),
+      launchId,
+      workspace,
+      executable,
+      node: this.#node,
+      env,
+    })
   }
 
   /**

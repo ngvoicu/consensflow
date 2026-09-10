@@ -7,9 +7,9 @@ import { fileURLToPath } from 'node:url'
 import { Bridge } from './bridge.js'
 import { CATALOG, EFFORTS } from './catalog.js'
 import { Watcher } from './delivery-watch.js'
+import { HarnessAdmin, integrationEvidence } from './harness-admin.js'
 import { detectHarnesses, harnessPath } from './harnesses.js'
 import {
-  installEverywhere,
   resetEverything,
   resetPreview,
   skillsStatus,
@@ -43,13 +43,7 @@ import {
 } from './roster.js'
 import { agentCommand } from './skill.js'
 import { Store, StoreRefusal } from './store.js'
-import {
-  healOnOpen,
-  refreshInstalledSkill,
-  retireSkillFromNativeHosts,
-  skillGaps,
-  staleSkills,
-} from './sync.js'
+import { healOnOpen, refreshInstalledSkill, skillGaps, staleSkills } from './sync.js'
 import { leadIdentity, Tabs } from './tabs.js'
 import { terminalCommandStatus, terminalRuntime } from './terminal.js'
 
@@ -108,13 +102,6 @@ function systemState(env) {
  * which is what tests and other callers use.
  */
 let opened = null
-
-/** Named installation operation; no endpoint executes user-supplied commands. */
-function installFromUi(body, env) {
-  const outcome = installEverywhere(env, { force: body.force === true, all: body.all === true })
-  if (body.all !== true) outcome.changes.push(...retireSkillFromNativeHosts(env))
-  return { report: outcome.changes, cmuxCommit: null, system: systemState(env) }
-}
 
 /** The line this agent becomes in the skill — shown verbatim in the UI. */
 function withCommand(agent) {
@@ -190,6 +177,10 @@ async function runPaneOperation(panes, op, dimensions, body) {
       return [200, await panes.read(dimensions.tab, body)]
     case 'results.list':
       return [200, await panes.results(dimensions.tab)]
+    case 'lead.send':
+      return [200, await panes.pmSend(dimensions.tab, body)]
+    case 'lead.read':
+      return [200, await panes.pmRead(dimensions.tab, body)]
     case 'results.read':
       return [200, await panes.readResult(dimensions.tab, body)]
     case 'seen':
@@ -219,7 +210,9 @@ async function runPaneOperation(panes, op, dimensions, body) {
 function attachPage(bridge, { panes, page, store, tabs }) {
   const ops = {
     'tab.open': (body) => panes.tabOpen(body),
+    'pm.open': (body) => panes.pmOpen(body),
     'tab.resume': (body) => panes.tabResume(body),
+    'tab.delete': (body) => panes.tabDelete(body),
     'tab.rename': async (body) => {
       const tab = await tabs.rename(body?.tab, body?.name)
       return { outcome: 'renamed', tab: tab.id, name: tab.name }
@@ -228,6 +221,7 @@ function attachPage(bridge, { panes, page, store, tabs }) {
     consult: (body) => panes.consult(body?.tab, { ...body, opId: randomUUID() }),
     attach: (body) => panes.attach(body?.tab, { ...body, opId: randomUUID() }),
     'pane.close': (body) => panes.paneClose(body),
+    'pane.delete': (body) => panes.paneDelete(body),
     'notify.set': (body) => panes.notifySet(body),
     'state.list': async () => {
       const state = await page.state()
@@ -306,7 +300,22 @@ export function stdinIsPipe(stream) {
   return isPipe(0)
 }
 
-export async function startUiServer(env, { paneOpenDeadlineMs } = {}) {
+export async function startUiServer(
+  env,
+  { paneOpenDeadlineMs, prepareRole, prepareChannel, harnessLatest } = {},
+) {
+  const harnessAdmin = new HarnessAdmin(env, {
+    latest: harnessLatest,
+    integration: async (id) => {
+      await storeReady()
+      const current = await tabs.list()
+      const deliveries = []
+      for (const directory of new Set(current.map((tab) => tab.directory))) {
+        deliveries.push(...Object.values(await store.readDeliveries(directory)))
+      }
+      return integrationEvidence(id, current, deliveries)
+    },
+  })
   // The app is an entry point too: a machine from before the merge should not
   // have to run the CLI once to be tidied up.
   migrateStateRoot(env)
@@ -336,6 +345,8 @@ export async function startUiServer(env, { paneOpenDeadlineMs } = {}) {
     shell: typeof env.SHELL === 'string' && env.SHELL.length > 0 ? env.SHELL : '/bin/sh',
     env,
     ...(paneOpenDeadlineMs === undefined ? {} : { paneOpenDeadlineMs }),
+    ...(prepareRole === undefined ? {} : { prepareRole }),
+    ...(prepareChannel === undefined ? {} : { prepareChannel }),
   })
   const page = new Page({
     store,
@@ -348,7 +359,7 @@ export async function startUiServer(env, { paneOpenDeadlineMs } = {}) {
   })
   // One watcher for the app, started here and nowhere else: it is the only
   // thing that submits a delivery, and two of them would submit each twice.
-  const watcher = new Watcher({ store, tabs, env })
+  const watcher = new Watcher({ store, tabs, env, bindLead: (tab) => panes.bindLead(tab) })
   page.attachWatcher(watcher)
   panes.attachWatcher(watcher)
   let stopAnnouncing = null
@@ -540,8 +551,21 @@ export async function startUiServer(env, { paneOpenDeadlineMs } = {}) {
       if (request.method === 'GET' && url.pathname === '/api/system') {
         return send(200, systemState(env))
       }
+      if (request.method === 'POST' && url.pathname === '/api/harnesses/check') {
+        if (
+          body.id !== undefined &&
+          !['claude', 'codex', 'opencode', 'pi', 'kimi'].includes(body.id)
+        ) {
+          return send(400, { error: 'Unknown harness' })
+        }
+        return send(200, {
+          harnesses: await harnessAdmin.check(body.id ?? null, { refresh: body.refresh === true }),
+        })
+      }
       if (request.method === 'POST' && url.pathname === '/api/skills/install') {
-        return send(200, installFromUi(body, env))
+        return send(410, {
+          error: 'Role skills are included with ConsensFlow. Update the application instead.',
+        })
       }
       if (request.method === 'POST' && url.pathname === '/api/reset') {
         if (body.confirm !== true) {
@@ -627,7 +651,7 @@ export async function startUiServer(env, { paneOpenDeadlineMs } = {}) {
       panes.attachBridge(bridge)
       if (bridge !== null && bridge !== undefined) {
         watcher.attachBridge(bridge)
-        stopAnnouncing = attachPage(bridge, { panes, page, store, tabs })
+        stopAnnouncing = attachPage(bridge, { panes, page, store, tabs, env })
       }
       return panes
     },
@@ -678,12 +702,20 @@ const DRAIN_MS = 5_000
  */
 export async function serveUi(
   env,
-  { onOut, json = false, open = true, stdin = null, stdout = null, registerDrain = null },
+  {
+    onOut,
+    json = false,
+    open = true,
+    stdin = null,
+    stdout = null,
+    registerDrain = null,
+    serverOptions = undefined,
+  },
 ) {
   // Opening the app IS the act: it does what its own buttons do, before the
   // page is served, so the first render already tells the truth.
   opened = healOnOpen(env)
-  const server = await startUiServer(env)
+  const server = await startUiServer(env, serverOptions)
   const url = `${server.url}/?token=${server.token}`
 
   if (json) {
@@ -905,7 +937,6 @@ const PAGE = (token) => `<!DOCTYPE html>
   <p class="eyebrow eyebrow--section">Installed</p>
   <div id="system"></div>
   <div class="actions">
-    <button id="update">Update skills</button>
     <button id="off" class="danger">Turn off</button>
     <button id="reset" class="danger" title="Removes your agents, every run artifact (packets, transcripts, generated images), and every file ConsensFlow installed — including skill files you edited. The ConsensFlow.app bundle stays. This cannot be undone.">Reset everything</button>
   </div>
@@ -1127,11 +1158,48 @@ function showEfforts(efforts, harness) {
   for (const e of efforts[harness] ?? []) list.appendChild(new Option(e, e));
 }
 
-/** Installation state for each detected harness. */
-function harnessState(harness, system) {
-  if (harness.native) return 'provides its own ConsensFlow integration';
-  if (system.gaps.includes(harness.id)) return 'skill missing';
-  return system.skills.ours > 0 ? 'consults via the generated skill' : 'no skill installed';
+let HARNESS_ROWS = [];
+async function checkHarnesses(id = null, button = null) {
+  if (button) { button.disabled = true; button.textContent = 'Checking…'; }
+  try {
+    const response = await fetch('/api/harnesses/check', { method: 'POST', headers, body: JSON.stringify({ ...(id ? { id } : {}), refresh: button !== null }) });
+    if (!response.ok) throw new Error('Harness check failed');
+    const { harnesses } = await response.json();
+    HARNESS_ROWS = id ? HARNESS_ROWS.map(row => row.id === id ? harnesses[0] : row) : harnesses;
+    if (LAST_SYSTEM) renderSystem(LAST_SYSTEM);
+  } catch (error) {
+    if (button) button.textContent = error.message + ' — retry';
+  } finally { if (button) button.disabled = false; }
+}
+
+function renderHarness(row) {
+  const line = el('div', 'host');
+  line.append(el('strong', null, row.id + (row.lead ? '' : ' (worker only)')));
+  line.append(el('div', null, row.installed ? 'Installed: ' + row.path : 'Not installed'));
+  if (row.installed) {
+    line.append(el('div', null, 'Version: ' + (row.version.value || row.version.reason || row.version.state)));
+    const update = row.update;
+    const text = update.state === 'available' ? 'New release: ' + update.value : update.state === 'current' ? 'Up to date' : update.reason || 'Update availability not verified';
+    line.append(el('div', null, text));
+    if (update.note) line.append(el('small', null, update.note));
+    line.append(el('div', null, 'Integration: ' + row.integration.state + ' — ' + row.integration.reason));
+    if (row.extension) {
+      const failed = row.extension.state === 'error' || row.extension.state === 'not-installed';
+      const status = el('div', null, failed ? 'Pi extension missing / installation failed: ' + (row.extension.reason || '') : row.integration.state === 'ok' ? 'Pi extension installed; complete result delivery verified' : 'Pi extension installed; live connection not verified');
+      if (failed) status.style.color = '#f47769';
+      line.append(status);
+      if (failed) {
+        const retry = el('button', null, 'Retry extension installation');
+        retry.onclick = () => checkHarnesses(row.id, retry); line.append(retry);
+      }
+    }
+  }
+  const link = el('a', null, row.installed ? 'Update instructions' : 'Installation instructions');
+  link.href = row.instructions; link.target = '_blank'; link.rel = 'noopener noreferrer'; line.append(link);
+  const check = el('button', null, 'Check again');
+  check.onclick = () => checkHarnesses(row.id, check); line.append(check);
+  line.append(el('small', null, 'Checked: ' + new Date(row.checkedAt).toLocaleString()));
+  return line;
 }
 
 function renderSystem(system) {
@@ -1141,24 +1209,11 @@ function renderSystem(system) {
   const list = el('dl', 'facts');
 
   const hosts = el('div');
-  for (const harness of system.harnesses) {
-    const line = el('div', 'host');
-    line.append(harness.id + ' ');
-    line.append(el('span', null, '— ' + harnessState(harness, system)));
-    hosts.append(line);
-  }
-  if (system.harnesses.length === 0) hosts.append(el('span', null, 'none on PATH'));
-
-  const parts = [];
-  const sk = system.skills;
-  if (sk.files > 0) {
-    parts.push(sk.perHarness + ' skills in each of ' + sk.harnesses + ' harnesses');
-    parts.push(sk.files + ' files: ' + sk.ours + ' ours'
-      + (sk.cmux > 0 ? ', ' + sk.cmux + ' from cmux@' + sk.cmuxCommit : ''));
-  }
-  if (sk.drifted) parts.push(sk.drifted + ' edited by you');
-  if (sk.missing) parts.push(sk.missing + ' missing');
-  const skills = parts.length > 0 ? parts.join(' · ') : 'nothing yet';
+  const checkAll = el('button', null, 'Check all harnesses');
+  checkAll.onclick = () => checkHarnesses(null, checkAll); hosts.append(checkAll);
+  if (HARNESS_ROWS.length) for (const row of HARNESS_ROWS) hosts.append(renderHarness(row));
+  else hosts.append(el('div', null, 'Harnesses have not been checked yet'));
+  const skills = 'Role skills included in ConsensFlow ' + system.version + ' — lead and PM only';
 
   const runtime = system.runtime === null
     ? null
@@ -1172,17 +1227,6 @@ function renderSystem(system) {
 
   const rows = [['Harnesses', hosts], ['Installed', skills]];
   if (runtime) rows.push(['Runtime', runtime]);
-  if (system.gaps.length > 0) rows.push(['Missing', system.gaps.join(', ') + ' — in scope but carrying no skill']);
-  // An upgrade brings a new skill; the installed files stay as they are until
-  // something rewrites them. Say which button does that.
-  if (sk.stale > 0) rows.push(['Out of date', sk.stale + ' file' + (sk.stale === 1 ? '' : 's') + " carry an older ConsensFlow's text — press “Update skills” below"]);
-  // Opening the app repairs what it can. Say so: a silent write is worse than
-  // no write, and the one thing it deliberately does NOT do belongs here too.
-  const on = system.opened;
-  if (on && on.replaced > 0) {
-    rows.push(['On open', 'replaced ' + on.replaced + ' skill file' + (on.replaced === 1 ? '' : 's')
-      + ' you had edited — the generated skill is what the agents read']);
-  }
   rows.push(['Home', system.home]);
 
   for (const [label, value] of rows) {
@@ -1242,8 +1286,6 @@ document.querySelector('#catalog-filter').addEventListener('input', () => {
   if (LAST !== null) renderCatalog(LAST);
 });
 
-document.querySelector('#update').onclick = () =>
-  post('/api/skills/install', {}, 'Updating…');
 /**
  * A confirmation the host cannot swallow.
  *
@@ -1304,6 +1346,7 @@ async function load() {
   renderCatalog(data);
   renderForm(data);
   renderSystem(system);
+  if (!HARNESS_ROWS.length) checkHarnesses();
 }
 
 document.querySelector('#add').onsubmit = async (event) => {

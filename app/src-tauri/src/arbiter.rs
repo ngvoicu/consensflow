@@ -346,7 +346,15 @@ impl InputArbiter {
     pub fn claim_epoch(&self, pane: &PaneKey, epoch: u64) -> Result<(), ArbiterError> {
         let state = self.pane_state(pane)?;
         let state = lock_state(&state)?;
-        validate_epoch_claim(&state, pane, epoch)
+        validate_epoch_claim(&state, pane, epoch, true)
+    }
+
+    /// Native Pi checks its own editor at admission; this only fences input.
+    /// It neither clears the opaque draft latch nor authorizes a PTY paste.
+    pub fn claim_native_epoch(&self, pane: &PaneKey, epoch: u64) -> Result<(), ArbiterError> {
+        let state = self.pane_state(pane)?;
+        let state = lock_state(&state)?;
+        validate_epoch_claim(&state, pane, epoch, false)
     }
 
     fn write_paste_via<W: PaneInputWriter + ?Sized>(
@@ -360,7 +368,7 @@ impl InputArbiter {
         let state = self.pane_state(pane)?;
         {
             let mut state = lock_state(&state)?;
-            validate_epoch_claim(&state, pane, epoch)?;
+            validate_epoch_claim(&state, pane, epoch, true)?;
             state.paste_in_flight = true;
         }
 
@@ -372,26 +380,6 @@ impl InputArbiter {
             return Err(error.into());
         }
         self.finish_paste(writer, pane, &state)
-    }
-
-    /// A human assertion from the app, never inferred from PTY/transcript text.
-    pub fn resume_replies(&self, pane: &PaneKey, epoch: u64) -> Result<(), ArbiterError> {
-        let state = self.pane_state(pane)?;
-        let mut state = lock_state(&state)?;
-        validate_generation(&state, pane)?;
-        if state.input_epoch != epoch {
-            return Err(ArbiterError::Stale);
-        }
-        if state.input_failed {
-            return Err(ArbiterError::InputFailed);
-        }
-        if state.paste_in_flight || !state.queued_human.is_empty() {
-            return Err(ArbiterError::Busy);
-        }
-        state.draft_epoch = None;
-        state.emitted_enter_epochs.clear();
-        state.last_submission_id = None;
-        Ok(())
     }
 
     pub fn clear_draft(
@@ -521,6 +509,7 @@ fn validate_epoch_claim(
     state: &PaneInputState,
     pane: &PaneKey,
     epoch: u64,
+    require_draft_clear: bool,
 ) -> Result<(), ArbiterError> {
     validate_generation(state, pane)?;
     if state.input_failed {
@@ -528,7 +517,7 @@ fn validate_epoch_claim(
     }
     // Once human input is latched, Draft is the useful refusal even when
     // those bytes also advanced the epoch after the caller's snapshot.
-    if state.draft_epoch.is_some() {
+    if require_draft_clear && state.draft_epoch.is_some() {
         return Err(ArbiterError::Draft);
     }
     if state.input_epoch != epoch {
@@ -749,37 +738,6 @@ mod tests {
     }
 
     #[test]
-    fn human_resume_requires_exact_epoch_and_generation_without_guessing_editor_text() {
-        let key = PaneKey::new("human-resume", 1);
-        let (writer, _observed) = RecordingWriter::new(None);
-        let (events, _receiver) = mpsc::channel();
-        let arbiter = InputArbiter::new(0, events);
-        arbiter.register(&key).unwrap();
-        let old = arbiter
-            .write_human_via(writer.as_ref(), &key, b"\x1b[Aedited\r")
-            .unwrap();
-        let current = arbiter
-            .write_human_via(writer.as_ref(), &key, b"new draft")
-            .unwrap();
-        assert!(matches!(
-            arbiter.resume_replies(&key, old),
-            Err(ArbiterError::Stale)
-        ));
-        assert!(matches!(
-            arbiter.resume_replies(&PaneKey::new(&key.id, 2), current),
-            Err(ArbiterError::Stale)
-        ));
-        assert!(arbiter.snapshot(&key).unwrap().draft_latched);
-        arbiter.resume_replies(&key, current).unwrap();
-        assert!(!arbiter.snapshot(&key).unwrap().draft_latched);
-        let next = arbiter
-            .write_human_via(writer.as_ref(), &key, b"later")
-            .unwrap();
-        assert!(next > current);
-        assert!(arbiter.snapshot(&key).unwrap().draft_latched);
-    }
-
-    #[test]
     fn paste_is_bracketed_then_enter_is_a_delayed_separate_write() {
         let key = PaneKey::new("recorded", 1);
         let (writer, _observed) = RecordingWriter::new(None);
@@ -960,6 +918,44 @@ mod tests {
         assert_eq!(responsive_result.expect("responsive write epoch"), 1);
         assert_eq!(read_hex(reader), "52");
         let _ = table.kill(&responsive_key);
+    }
+
+    #[test]
+    fn native_editor_claim_preserves_latch_and_rejects_newer_input() {
+        let _pty_guard = serial_pty_test();
+        let table = PaneTable::new();
+        let (key, _reader) = raw_recorder(&table, 20);
+        let (events, _receiver) = mpsc::channel();
+        let arbiter = InputArbiter::new(0, events);
+        arbiter.register(&key).expect("register pane");
+        let epoch = arbiter
+            .write_human(&table, &key, b"sent\r")
+            .expect("human question");
+        arbiter
+            .claim_native_epoch(&key, epoch)
+            .expect("native editor owns the draft check");
+        assert!(arbiter.snapshot(&key).expect("snapshot").draft_latched);
+        assert!(matches!(
+            arbiter.claim_epoch(&key, epoch),
+            Err(ArbiterError::Draft)
+        ));
+        assert!(matches!(
+            arbiter.write_paste(&table, &key, epoch, b"reply"),
+            Err(ArbiterError::Draft)
+        ));
+        let newer = arbiter
+            .write_human(&table, &key, b"new draft")
+            .expect("new input");
+        assert!(matches!(
+            arbiter.claim_native_epoch(&key, epoch),
+            Err(ArbiterError::Stale)
+        ));
+        assert!(matches!(
+            arbiter.claim_native_epoch(&PaneKey::new(&key.id, key.generation + 1), newer),
+            Err(ArbiterError::Stale)
+        ));
+        assert!(arbiter.snapshot(&key).expect("snapshot").draft_latched);
+        table.kill(&key).expect("kill pane");
     }
 
     #[test]

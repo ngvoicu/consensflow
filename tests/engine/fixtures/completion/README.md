@@ -235,3 +235,42 @@ All OpenCode row fixtures come from
   the original user's metadata-only summary update at 2364. Native `seq` values
   supply the positions encoded in adapter-minted opaque cursors; timestamps
   remain display evidence and are never ordering positions.
+
+## Claude Code 2.1.265 (Phase 17)
+
+`claude-code/v265-tool-loop.jsonl` contains complete records 6, 27, 29,
+37, 40, 41, 44 and 45 from the isolated native test lead
+`17499106-8778-48e1-a306-87bd186c9f7e` on 2026-09-09. Source:
+`~/.claude/projects/-private-var-folders-5f-cy8ywl5d2-z-1g1zcn45g7gr0000gn-T-cf-stability35-J6j7qv/17499106-8778-48e1-a306-87bd186c9f7e.jsonl`.
+The two deliberate probe turns return CF35_CLAUDE_READY and
+CF35_CLAUDE_TOOL_DONE after a real Bash printf. No user project history is
+included and no fields in the selected records were changed.
+
+The installed 2.1.265 executable's native root finalizer was checked at byte
+183372821: markQueryComplete/resetLoadingState precede the duration, the
+abort branch excludes it, and background tasks defer it. The constructor
+at 167795358 retains messageCount and optional pending-work counts. These
+match the established 2.1.263 guards. A future version is still rejected.
+RED: 3/4 failed because 2.1.265 was unsupported. GREEN with the existing
+2.1.263 fixture suite: 15/15, exit 0. This proves completion parsing; native
+queue admission and preservation of a human draft are separate checks.
+
+### Claude 2.1.266 and OpenCode 1.18.30 (2026-09-09)
+
+`claude-code/v266-tool-loop.jsonl` and `opencode/v130-tool-loop.json` were
+captured from isolated ConsensFlow-owned native lead conversations. Each ran
+`/usr/bin/true` and returned `CF_NATIVE_VERSION_PROBE_DONE`. Claude remained
+unready until its root `turn_duration`; OpenCode preserved `tool-calls` then
+its final `stop` and completion time. Paths were sanitized; reasoning text and
+unrelated diagnostics were omitted. Neither fixture comes from a worker's
+private thread. `current-native-versions.test.mjs` exercises the real parsers.
+
+A fresh Claude 2.1.266 pane also accepted `CF_PEER266_DELIVERED` through its
+native peer queue while retaining the unsent draft `CF_UNSENT_DRAFT_266` in
+the real Xterm display. The app added no native plugin, channel or configuration.
+
+The same isolated run then dispatched the real OpenCode 1.18.30 Gefjon
+worker. Its complete `CF_OC130_AUTO_DONE` result arrived automatically as
+delivery `d-3` in the Claude 2.1.266 lead, which acknowledged it while the
+unsent `CF_UNSENT_DRAFT_266` remained visible. This checks the composed
+worker-to-lead path, separately from completion parsing and direct ingress.

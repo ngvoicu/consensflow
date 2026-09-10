@@ -73,12 +73,39 @@ test('window: claude and pi refuse to open fresh without the id they need', () =
 
 // --- resuming a window, now with a first message ---------------------------
 
+test('window: a resume names the recorded native session on every kind', () => {
+  // A resume reopens the identity the store recorded — never a fresh one,
+  // never the last session in the folder.
+  assert.deepEqual(interactiveResume(AGENTS.pi, 't-1-lead-x').args.slice(0, 2), [
+    '--session-id',
+    't-1-lead-x',
+  ])
+  const oc = interactiveResume(AGENTS.opencode, 'ses_recorded')
+  assert.deepEqual(
+    [oc.args[oc.args.indexOf('--session')], oc.args[oc.args.indexOf('--session') + 1]],
+    ['--session', 'ses_recorded'],
+  )
+  assert.ok(!oc.args.includes('--continue'), 'resuming one session never continues the last')
+  assert.deepEqual(interactiveResume(AGENTS.codex, 'thread-1').args.slice(0, 2), [
+    'resume',
+    'thread-1',
+  ])
+  assert.deepEqual(interactiveResume(AGENTS.claude, 'sess-1').args.slice(0, 2), [
+    '--resume',
+    'sess-1',
+  ])
+})
+
 test('window: every resume can carry the follow-up as its seed', () => {
   assert.equal(interactiveResume(AGENTS.codex, 'thread-1', 'again?').args.at(-1), 'again?')
   assert.equal(interactiveResume(AGENTS.claude, 'sess-1', 'again?').args.at(-1), 'again?')
   assert.equal(interactiveResume(AGENTS.pi, 'jade-waves', 'again?').args.at(-1), 'again?')
   const oc = interactiveResume(AGENTS.opencode, 'ses_1', 'again?')
-  assert.equal(oc.args[oc.args.indexOf('--prompt') + 1], 'again?')
+  assert.equal(
+    oc.args.includes('--prompt'),
+    false,
+    'OpenCode receives tasks through its native API',
+  )
 })
 
 test('window: a resume without a seed stays exactly the hand-over it was', () => {
@@ -161,6 +188,29 @@ test('seed: a bare task travels bare — the window needs no scene-setting', asy
   const seed = createWindowSeed({ task: 'Tell me a joke.' })
 
   assert.equal(seed, 'Tell me a joke.')
+})
+
+test('seed: launch evidence alone does not add a user-message heading', async () => {
+  const { createWindowSeed } = await import('../../hosts/lib/packets.js')
+  assert.equal(
+    createWindowSeed({ task: 'Tell me a joke.', nonce: 'unique-launch' }),
+    '[consensflow launch unique-launch]\nTell me a joke.',
+  )
+})
+
+test('window: OpenCode opens the exact empty native session without plugins or a prompt', () => {
+  const w = interactiveStart(AGENTS.opencode, 'ses_created')
+  assert.equal(w.args[w.args.indexOf('--session') + 1], 'ses_created')
+  assert.equal(w.args.includes('--prompt'), false)
+  assert.equal(w.env.OPENCODE_CONFIG_CONTENT, undefined)
+  assert.equal(w.env.CF_OPENCODE_LAUNCH_NONCE, undefined)
+})
+
+test('window: OpenCode worker opens its exact native session and leaves task delivery to the API', () => {
+  const w = interactiveStart(AGENTS.opencode, 'ses_created', 'Tell me a joke.')
+  assert.equal(w.args[w.args.indexOf('--session') + 1], 'ses_created')
+  assert.equal(w.args.includes('--prompt'), false, '--session ignores CLI prompts')
+  assert.deepEqual(Object.keys(w.env), ['CONSENSFLOW_CHILD'])
 })
 
 test('seed: no packet scaffolding, whatever rides along', async () => {

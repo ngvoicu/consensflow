@@ -32,7 +32,9 @@
  *   - the boundary on the CURRENT frontier: no open tool, no queued turn, no
  *     hook in flight. This binds a native marker too — `task_complete`
  *     followed by a queued turn is an earlier turn's marker, not this one's;
- *   - the pane's draft latch reported and EXPLICITLY clear;
+ *   - the pane's draft latch reported and EXPLICITLY clear, or admission
+ *     delegated to the native Pi editor (checked again at send), or a proven
+ *     native queue that never writes into the terminal composer;
  *   - a valid decision epoch, so Rust can refuse the write if human bytes
  *     arrived since;
  *   - a non-empty transcript — empty history is no proof of anything;
@@ -98,6 +100,8 @@ const WORK_LISTS = [
  *   Pi's derived-settlement gate.
  * @param {boolean} input.draftLatched — the pane's draft latch, from Rust.
  *   Must be reported: a missing latch is missing evidence, not a clear one.
+ * @param {'terminal'|'pi-native-editor'|'native-queue'} [input.composerAuthority='terminal']
+ *   Native delivery preserves Rust's latch and cannot authorize a PTY paste.
  * @param {number} input.epoch — the pane's input epoch, a non-negative
  *   integer; echoed back so a stale write can be refused.
  * @param {number} [input.sinceCursor] — the settlement cursor at the last
@@ -112,6 +116,7 @@ export function leadReady({
   kind,
   purpose = 'automatic',
   draftLatched,
+  composerAuthority = 'terminal',
   epoch,
   sinceCursor,
 } = {}) {
@@ -125,8 +130,15 @@ export function leadReady({
   const unreadable = unreadableReason(answers)
   if (unreadable !== null) return unknown(unreadable)
 
-  if (draftLatched === true) return { state: 'draft', ...carry, reason: DRAFT_REASON }
-  if (draftLatched !== false) {
+  const nativeEditor = kind === 'pi' && composerAuthority === 'pi-native-editor'
+  const nativeQueue =
+    ['claude-code', 'codex', 'opencode'].includes(kind) && composerAuthority === 'native-queue'
+  if (composerAuthority !== 'terminal' && !nativeEditor && !nativeQueue) {
+    return unknown('unknown: no native composer authority for this harness')
+  }
+  if (!nativeEditor && !nativeQueue && draftLatched === true)
+    return { state: 'draft', ...carry, reason: DRAFT_REASON }
+  if (typeof draftLatched !== 'boolean') {
     return unknown(
       "unknown: the pane's draft latch was not reported — a clear latch must be explicit",
     )
@@ -157,7 +169,7 @@ export function leadReady({
   return {
     state: 'ready',
     ...carry,
-    reason: `ready: the turn settled at ${settlement.boundary} (${settlement.provenance}, cursor ${settlement.cursor}) with no work in flight and no draft latched`,
+    reason: `ready: the turn settled at ${settlement.boundary} (${settlement.provenance}, cursor ${settlement.cursor}) with no work in flight and ${nativeEditor ? 'editor admission checked by native Pi' : nativeQueue ? 'native delivery preserves the composer' : 'no draft latched'}`,
   }
 }
 

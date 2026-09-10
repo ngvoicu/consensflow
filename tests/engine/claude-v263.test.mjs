@@ -42,7 +42,7 @@ function readiness(result) {
 
 function admitted(result) {
   assert.equal(result.unknown, undefined, `2.1.263 must be admitted, got: ${result.reason}`)
-  assert.equal(result.version, '2.1.263')
+  assert.equal(result.version, undefined)
 }
 
 test('claude-v263: the installed 2.1.263 transcript is admitted, not rejected', async () => {

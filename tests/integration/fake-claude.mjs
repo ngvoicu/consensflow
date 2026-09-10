@@ -11,8 +11,15 @@ let sessionId = null
 let awaitingSession = false
 let resuming = false
 let seed = ''
+let skipValue = false
 for (const arg of args) {
-  if (awaitingSession) {
+  if (skipValue) {
+    skipValue = false
+  } else if (
+    ['--add-dir', '--append-system-prompt-file', '--system-prompt-snapshot'].includes(arg)
+  ) {
+    skipValue = true
+  } else if (awaitingSession) {
     sessionId = arg
     awaitingSession = false
   } else if (arg === '--session-id') {

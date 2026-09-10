@@ -181,9 +181,30 @@ function cannedState() {
       ],
     },
     deliveries: [
-      { id: 'd-draft', tab: 't-four', pane: 'p4-lead', state: 'pending', reason: 'draft open' },
-      { id: 'd-busy', tab: 't-four', pane: 'p4-w1', state: 'pending', reason: 'lead busy' },
-      { id: 'd-unbound', tab: 't-four', pane: 'p4-w2', state: 'pending', reason: 'unbound' },
+      {
+        id: 'd-draft',
+        tab: 't-four',
+        pane: 'p4-lead',
+        generation: 1,
+        state: 'pending',
+        reason: 'draft open',
+      },
+      {
+        id: 'd-busy',
+        tab: 't-four',
+        pane: 'p4-w1',
+        generation: 1,
+        state: 'pending',
+        reason: 'lead busy',
+      },
+      {
+        id: 'd-unbound',
+        tab: 't-four',
+        pane: 'p4-w2',
+        generation: 1,
+        state: 'pending',
+        reason: 'unbound',
+      },
     ],
     held: [{ id: 'held-1', tab: 't-four', answerId: 'answer-held' }],
   }
@@ -230,11 +251,9 @@ async function installTauriShim(
       const eventListeners = new Map()
       const parserWrites = []
       let nextInputTicket = 1
-      const inputSequences = new Map()
-      const inputEpochs = new Map()
-      let inputSnapshotGate = null
-      let releaseInputSnapshot
       let parserGateOpen = !gateEmulator
+      let tabDeleteGate = null
+      let releaseTabDelete
       let releaseFirstListState
       let listStateCalls = 0
       const firstListStateGate = gateListState
@@ -318,16 +337,10 @@ async function installTauriShim(
       }
 
       const findTab = (id) => window.__state.tabs.find((tab) => tab.id === id)
-      const inputKey = (args) => `${args.id}:${args.generation}`
       const invoke = async (command, args = {}) => {
         const logged = { ...args }
         if (logged.onOutput !== undefined) logged.onOutput = '[channel]'
         window.__calls.push({ command, args: copy(logged) })
-        if (command === 'pane_input_enqueue' || command === 'pane_reply_enqueue') {
-          const key = inputKey(args)
-          inputSequences.set(key, (inputSequences.get(key) ?? 0) + 1)
-          inputEpochs.set(key, (inputEpochs.get(key) ?? 0) + (args.bytes?.length ?? 0))
-        }
         if (Object.hasOwn(window.__commandResults, command)) {
           return copy(window.__commandResults[command])
         }
@@ -345,6 +358,7 @@ async function installTauriShim(
           const snapshot = copy(window.__state)
           listStateCalls += 1
           if (listStateCalls === 1 && firstListStateGate !== null) await firstListStateGate
+          if (window.__pendingListState !== undefined) await window.__pendingListState
           return snapshot
         }
         if (command === 'answers_list') {
@@ -363,18 +377,40 @@ async function installTauriShim(
           if (tab !== undefined) tab.name = args.name
           return { ok: true, tab: args.tab, name: args.name }
         }
-        if (command === 'pane_input_snapshot') {
-          const key = inputKey(args)
-          const snapshot = {
-            ok: true,
-            inputEpoch: inputEpochs.get(key) ?? 0,
-            sequence: inputSequences.get(key) ?? 0,
-            draftLatched: true,
+        if (command === 'tab_delete') {
+          if (tabDeleteGate !== null) await tabDeleteGate
+          const tab = findTab(args.tab)
+          if (tab === undefined) return { ok: false, error: 'tab not found' }
+          if (args.generation !== tab.lead?.generation) {
+            return { ok: false, error: 'stale tab generation' }
           }
-          if (inputSnapshotGate !== null) await inputSnapshotGate
-          return snapshot
+          window.__state.tabs = window.__state.tabs.filter((candidate) => candidate.id !== args.tab)
+          return { ok: true, tab: args.tab }
         }
-        if (command === 'pane_resume_replies') return { ok: true }
+        if (command === 'close_pane' || command === 'delete_pane') {
+          const tab = window.__state.tabs.find((candidate) =>
+            candidate.panes.some(
+              (pane) => pane.id === args.id && pane.generation === args.generation,
+            ),
+          )
+          if (tab === undefined) return { ok: false, error: 'stale pane generation' }
+          const pane = tab.panes.find(
+            (candidate) => candidate.id === args.id && candidate.generation === args.generation,
+          )
+          if (pane.kind === 'lead') {
+            tab.closed = true
+            pane.alive = false
+          } else {
+            tab.panes = tab.panes.filter((candidate) => candidate.id !== args.id)
+          }
+          return {
+            ok: true,
+            outcome: 'closed',
+            tab: tab.id,
+            pane: { id: args.id, generation: args.generation },
+            kind: pane.kind,
+          }
+        }
         if (command === 'open_shell') {
           const tab = findTab(args.tab)
           const next = {
@@ -487,15 +523,15 @@ async function installTauriShim(
       window.__setCommandResult = (command, result) => {
         window.__commandResults[command] = copy(result)
       }
-      window.__gateInputSnapshot = () => {
-        inputSnapshotGate = new Promise((resolveGate) => {
-          releaseInputSnapshot = resolveGate
+      window.__gateTabDelete = () => {
+        tabDeleteGate = new Promise((resolveGate) => {
+          releaseTabDelete = resolveGate
         })
       }
-      window.__releaseInputSnapshot = () => {
-        releaseInputSnapshot?.()
-        releaseInputSnapshot = undefined
-        inputSnapshotGate = null
+      window.__releaseTabDelete = () => {
+        releaseTabDelete?.()
+        releaseTabDelete = undefined
+        tabDeleteGate = null
       }
       window.__emitPaneFlood = (id, generation, count) => {
         if (typeof window.__outputChannel?.onmessage !== 'function') {
@@ -541,6 +577,7 @@ async function installTauriShim(
           id: 'd-external',
           tab: 't-four',
           pane: 'p4-lead',
+          generation: 1,
           state: 'pending',
           reason: 'worker reply ready',
         })
@@ -672,6 +709,7 @@ test('explains reply delivery beside its explicit Automatic or Manual label', as
   await expect(help).toContainText('complete worker replies')
   await expect(help).toContainText('typing')
   await expect(help).toContainText('Manual')
+  await expect(help).toContainText('The lead reads results only when you ask')
   await expect(help).toContainText('all automatic replies')
   await page.keyboard.press('Escape')
   await expect(help).not.toBeVisible()
@@ -717,7 +755,7 @@ test('collapses the sidebar left while leaving the pane area mounted', async ({ 
 test('renders the exact four- and five-pane templates counted with the lead', async ({ page }) => {
   await boot(page)
   const stage = page.getByTestId('pane-stage')
-  await expect(stage).toHaveAttribute('data-layout', '"lead w1" "w2 w3"')
+  await expect(stage).toHaveAttribute('data-layout', '"lead w1 w3" "lead w2 ."')
   const four = await stage.locator('.pane-card').evaluateAll((cards) =>
     Object.fromEntries(
       cards.map((card) => {
@@ -732,11 +770,11 @@ test('renders the exact four- and five-pane templates counted with the lead', as
   expect(four['p4-lead'].y).toBe(four['p4-w1'].y)
   expect(four['p4-lead'].x).toBeLessThan(four['p4-w1'].x)
   expect(four['p4-w2'].y).toBeGreaterThan(four['p4-lead'].y)
-  expect(four['p4-w2'].x).toBe(four['p4-lead'].x)
-  expect(four['p4-shell'].x).toBe(four['p4-w1'].x)
+  expect(four['p4-w2'].x).toBe(four['p4-w1'].x)
+  expect(four['p4-shell'].x).toBeGreaterThan(four['p4-w1'].x)
 
   await page.getByTestId('session-t-five-button').click()
-  await expect(stage).toHaveAttribute('data-layout', '"lead w1 w2" "lead w3 w4"')
+  await expect(stage).toHaveAttribute('data-layout', '"lead w1 w3" "lead w2 w4"')
   const five = await stage.locator('.pane-card').evaluateAll((cards) =>
     Object.fromEntries(
       cards.map((card) => {
@@ -749,10 +787,10 @@ test('renders the exact four- and five-pane templates counted with the lead', as
     ),
   )
   expect(five['p5-lead'].height).toBeGreaterThan(five['p5-w1'].height * 1.9)
-  expect(five['p5-w1'].y).toBe(five['p5-w2'].y)
-  expect(five['p5-w3'].y).toBeGreaterThan(five['p5-w1'].y)
-  expect(five['p5-w1'].x).toBeLessThan(five['p5-w2'].x)
-  expect(five['p5-w3'].x).toBe(five['p5-w1'].x)
+  expect(five['p5-w1'].y).toBe(five['p5-w3'].y)
+  expect(five['p5-w2'].y).toBeGreaterThan(five['p5-w1'].y)
+  expect(five['p5-w1'].x).toBeLessThan(five['p5-w3'].x)
+  expect(five['p5-w2'].x).toBe(five['p5-w1'].x)
 })
 
 test('renders session → lead → numbered workers and shells as a nested tree', async ({ page }) => {
@@ -764,6 +802,33 @@ test('renders session → lead → numbered workers and shells as a nested tree'
   await expect(lead.locator(':scope > [role="group"]')).toContainText('w1 nyx-coral-lane')
   await expect(lead.locator(':scope > [role="group"]')).toContainText('w2 ares-amber-moss')
   await expect(lead.locator(':scope > [role="group"]')).toContainText('shell')
+})
+
+test('renders a lead without workers as a leaf and keeps worker children grouped', async ({
+  page,
+}) => {
+  const state = cannedState()
+  state.tabs.push({
+    id: 't-leaf',
+    name: 'leaf',
+    directory: '/work/leaf',
+    closed: false,
+    policy: 'auto',
+    lead: { name: 'leaf-lead', harness: 'pi', generation: 4 },
+    panes: [pane('p-leaf-lead', 'lead', { name: 'leaf-lead', harness: 'pi', generation: 4 })],
+  })
+  await boot(page, { state })
+
+  const leaf = page.getByTestId('session-t-leaf')
+  const leafLead = leaf.locator(':scope > [role="group"] > [data-kind="lead"]')
+  await expect(leafLead).not.toHaveAttribute('aria-expanded')
+  await expect(leafLead.locator(':scope > [role="group"]')).toHaveCount(0)
+
+  const workerLead = page
+    .getByTestId('session-t-four')
+    .locator(':scope > [role="group"] > [data-kind="lead"]')
+  await expect(workerLead).toHaveAttribute('aria-expanded', 'true')
+  await expect(workerLead.locator(':scope > [role="group"]')).toContainText('w1 nyx-coral-lane')
 })
 
 test('session, lead, and worker nodes select the grid or one pane', async ({ page }) => {
@@ -1005,11 +1070,137 @@ test('summarizes waiting results per pane and opens bounded details with safe ac
 
 test('offers held answers to the resumed lead', async ({ page }) => {
   await boot(page)
-  await page.getByRole('button', { name: 'Send held answers to this lead' }).click()
+  await page.getByRole('button', { name: '1 previous-session reply' }).click()
   expect((await commandCalls(page, 'held_send')).at(-1)).toEqual({
     command: 'held_send',
     args: { tab: 't-four' },
   })
+})
+
+test('shows the persisted waiting reason without obsolete Claude channel guidance', async ({
+  page,
+}) => {
+  const state = cannedState()
+  state.deliveries[0].reason = 'native-session-unknown'
+  await boot(page, { state })
+  await page.getByTestId('delivery-summary-p4-lead').click()
+  const details = page.getByRole('menu', { name: 'Pending results' })
+  await expect(details).toContainText('native-session-unknown')
+  await expect(details).not.toContainText('Claude reply channel')
+  const deliver = details.getByRole('menuitem', { name: 'Deliver now' })
+  await expect(deliver).toBeDisabled()
+  await expect(deliver).toHaveAttribute(
+    'title',
+    /native-session-unknown.*readiness cannot be bypassed/i,
+  )
+})
+
+test('TEST-PANE-141: shows source agent and reason once for current waiting answers', async ({
+  page,
+}) => {
+  const state = cannedState()
+  state.deliveries = [
+    {
+      id: 'd-current-old',
+      tab: 't-four',
+      pane: 'p4-lead',
+      generation: 1,
+      conversation: 'nyx-coral-lane',
+      agent: 'nyx',
+      answerId: 'answer-current',
+      state: 'pending',
+      reason: 'old reason',
+    },
+    {
+      id: 'd-current-new',
+      tab: 't-four',
+      pane: 'p4-lead',
+      generation: 1,
+      conversation: 'nyx-coral-lane',
+      agent: 'nyx',
+      answerId: 'answer-current',
+      state: 'pending',
+      reason: 'actual waiting reason',
+    },
+    {
+      id: 'd-current-accepted',
+      tab: 't-four',
+      pane: 'p4-w1',
+      generation: 1,
+      conversation: 'nyx-coral-lane',
+      agent: 'nyx',
+      answerId: 'answer-accepted',
+      state: 'accepted',
+      reason: 'already accepted',
+    },
+  ]
+  await boot(page, { state })
+
+  await expect(page.getByTestId('delivery-summary-p4-lead')).toHaveText('1 pending result')
+  await page.getByTestId('delivery-summary-p4-lead').click()
+  const details = page.getByRole('menu', { name: 'Pending results' })
+  await expect(details).toContainText('nyx-coral-lane')
+  await expect(details).toContainText('nyx')
+  await expect(details).toContainText('actual waiting reason')
+  await expect(details).not.toContainText('old reason')
+})
+
+test('IMPL-PANE-142: shows startup failure without disabling its live terminal', async ({
+  page,
+}) => {
+  const state = cannedState()
+  const worker = state.tabs[0].panes.find((candidate) => candidate.id === 'p4-w2')
+  worker.progress = {
+    state: 'failed',
+    pane: 'p4-w2',
+    generation: 1,
+    message: 'OpenCode task submission failed',
+  }
+  await boot(page, { state })
+
+  const card = page.getByTestId('pane-p4-w2')
+  await expect(card).toBeVisible()
+  await expect(card).toContainText('Startup failed')
+  await expect(card).toContainText('OpenCode task submission failed')
+  await expect(card.locator('.xterm-helper-textarea')).toBeEnabled()
+
+  await card.locator('.xterm-helper-textarea').focus()
+  await page.keyboard.type('live after startup failure')
+  await expect
+    .poll(async () => (await commandCalls(page, 'pane_input_enqueue')).length)
+    .toBeGreaterThan(0)
+})
+
+test('counts only current-generation pending results and labels held replies separately', async ({
+  page,
+}) => {
+  const state = cannedState()
+  state.deliveries.push(
+    {
+      id: 'd-old-generation',
+      tab: 't-four',
+      pane: 'p4-lead',
+      generation: 2,
+      state: 'pending',
+      reason: 'old generation',
+    },
+    {
+      id: 'd-missing-generation',
+      tab: 't-four',
+      pane: 'p4-lead',
+      state: 'pending',
+      reason: 'missing generation',
+    },
+  )
+  state.held.push({ id: 'held-2', tab: 't-four', answerId: 'answer-held-2' })
+  await boot(page, { state })
+
+  await expect(page.getByTestId('delivery-summary-p4-lead')).toHaveText('1 pending result')
+  await page.getByTestId('delivery-summary-p4-lead').click()
+  const details = page.getByRole('menu', { name: 'Pending results' })
+  await expect(details).not.toContainText('old generation')
+  await expect(details).not.toContainText('missing generation')
+  await expect(page.getByRole('button', { name: '2 previous-session replies' })).toBeVisible()
 })
 
 test('uses consistent session labels in the directory and harness flow', async ({ page }) => {
@@ -1030,6 +1221,79 @@ test('uses consistent session labels in the directory and harness flow', async (
     args: { dir: '/picked/workspace', harness: 'codex' },
   })
 })
+
+test('selects the new session in the same directory and focuses its own terminal', async ({
+  page,
+}) => {
+  const state = cannedState()
+  state.tabs[0].directory = '/picked/workspace'
+  await boot(page, { state })
+  await page.getByTestId('pane-node-p4-lead').click()
+  for (const harness of ['pi', 'codex']) {
+    await page.getByRole('button', { name: 'New session', exact: true }).click()
+    await page.getByLabel('Lead harness').selectOption(harness)
+    await page.evaluate((harness) => {
+      const tab = {
+        id: `fresh-${harness}`,
+        name: `fresh-${harness}`,
+        directory: '/picked/workspace',
+        closed: false,
+        lead: { harness, generation: 1 },
+        panes: [{ id: `lead-${harness}`, generation: 1, kind: 'lead', order: 0, alive: true }],
+      }
+      window.__state.tabs.push(tab)
+      window.__commandResults.open_lead = {
+        ok: true,
+        outcome: 'opened',
+        tab: tab.id,
+        pane: tab.panes[0],
+      }
+    }, harness)
+    await page.getByRole('button', { name: 'Start session', exact: true }).click()
+    await expect(page.locator('#current-session')).toHaveText(`fresh-${harness}`)
+    await expect(page.getByTestId('pane-stage').locator('.pane-card')).toHaveCount(1)
+    await expect(
+      page.getByTestId(`pane-lead-${harness}`).locator('.xterm-helper-textarea'),
+    ).toBeFocused()
+  }
+  await expect(page.getByTestId('pane-p4-lead')).toHaveAttribute('data-parked', 'true')
+})
+
+for (const outcome of ['opened', 'unknown']) {
+  test(`selects a new session only after confirmed creation: ${outcome}`, async ({ page }) => {
+    await boot(page)
+    await page.getByRole('button', { name: 'New session', exact: true }).click()
+    await page.getByLabel('Lead harness').selectOption('pi')
+    await page.evaluate((outcome) => {
+      if (outcome === 'opened') {
+        window.__pendingListState = new Promise((release) => {
+          window.__finishPendingListState = release
+        })
+        void window.__emitTauriEvent('state-changed')
+      }
+      const tab = {
+        id: 'fresh-racing',
+        name: 'fresh-racing',
+        directory: '/picked/workspace',
+        closed: false,
+        lead: { harness: 'pi', generation: 1 },
+        panes: [{ id: 'racing-lead', generation: 1, kind: 'lead', order: 0, alive: true }],
+      }
+      window.__state.tabs.push(tab)
+      window.__commandResults.open_lead = { ok: true, outcome, tab: tab.id, pane: tab.panes[0] }
+    }, outcome)
+    await page.getByRole('button', { name: 'Start session', exact: true }).click()
+    await expect.poll(async () => (await commandCalls(page, 'open_lead')).length).toBe(1)
+    await page.evaluate(() => window.__finishPendingListState?.())
+    await expect(page.getByTestId('session-fresh-racing-button')).toBeVisible()
+    await expect(page.locator('#current-session')).toHaveText(
+      outcome === 'opened' ? 'fresh-racing' : 'harbour',
+    )
+    const input = page.getByTestId('pane-racing-lead').locator('.xterm-helper-textarea')
+    if (outcome === 'opened') await expect(input).toBeFocused()
+    else await expect(input).not.toBeFocused()
+  })
+}
 
 test('renames open and closed sessions through the accessible dialog and refreshes the header', async ({
   page,
@@ -1068,91 +1332,122 @@ test('renames open and closed sessions through the accessible dialog and refresh
   })
 })
 
-test('offers Resume replies only on live lead and worker panes with cancel and Escape', async ({
+test('confirms active and closed session deletion and selects the next live session', async ({
   page,
 }) => {
   await boot(page)
 
-  await expect(page.locator('.resume-replies-button:visible')).toHaveCount(3)
-  await expect(page.getByTestId('pane-p4-shell').locator('.resume-replies-button')).toHaveCount(0)
-
-  const button = page.getByTestId('pane-p4-w1').getByRole('button', { name: 'Resume replies' })
-  await button.click()
-  const dialog = page.getByRole('dialog', { name: 'Resume replies' })
+  const active = page.getByTestId('session-t-four')
+  await active.getByRole('button', { name: 'Delete session' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Delete session' })
   await expect(dialog).toBeVisible()
-  await expect(dialog).toContainText(/send or erase your terminal input/i)
-  await expect(dialog).toContainText(/does not erase text or change reply policy/i)
+  await expect(dialog).toContainText('harbour')
+  await expect(dialog).toContainText(/stops all its panes and removes it from the app/i)
+  await expect(dialog).toContainText(/project files and native histories remain/i)
   await dialog.getByRole('button', { name: 'Cancel' }).click()
   await expect(dialog).toBeHidden()
-  expect(await commandCalls(page, 'pane_resume_replies')).toHaveLength(0)
+  expect(await commandCalls(page, 'tab_delete')).toHaveLength(0)
 
-  await button.click()
-  await expect(dialog).toBeVisible()
+  await active.getByRole('button', { name: 'Delete session' }).click()
   await page.keyboard.press('Escape')
   await expect(dialog).toBeHidden()
-  expect(await commandCalls(page, 'pane_resume_replies')).toHaveLength(0)
-  expect(await commandCalls(page, 'pane_input_snapshot')).toHaveLength(2)
+  expect(await commandCalls(page, 'tab_delete')).toHaveLength(0)
+
+  await active.getByRole('button', { name: 'Delete session' }).click()
+  await dialog.getByRole('button', { name: 'Delete session', exact: true }).click()
+  await expect.poll(async () => (await commandCalls(page, 'tab_delete')).length).toBe(1)
+  expect((await commandCalls(page, 'tab_delete')).at(-1)).toEqual({
+    command: 'tab_delete',
+    args: { tab: 't-four', generation: 1 },
+  })
+  await expect(page.getByTestId('session-t-four')).toHaveCount(0)
+  await expect(page.locator('#current-session')).toHaveText('foundry')
+  await expect(page.getByTestId('session-t-five-button')).toHaveAttribute('aria-current', 'true')
+
+  const closed = page.getByTestId('session-t-closed')
+  await closed.getByRole('button', { name: 'Delete session' }).click()
+  const closedDialog = page.getByRole('dialog', { name: 'Delete session' })
+  await closedDialog.getByRole('button', { name: 'Delete session', exact: true }).click()
+  await expect.poll(async () => (await commandCalls(page, 'tab_delete')).length).toBe(2)
+  expect((await commandCalls(page, 'tab_delete')).at(-1)).toEqual({
+    command: 'tab_delete',
+    args: { tab: 't-closed', generation: 2 },
+  })
+  await expect(page.getByTestId('session-t-closed')).toHaveCount(0)
+  await expect(page.locator('#current-session')).toHaveText('foundry')
+  await expect(page.getByTestId('session-t-five')).toBeVisible()
 })
 
-test('captures one snapshot and resumes replies with its exact identity and sequence', async ({
-  page,
-}) => {
+test('keeps session deletion single-flight and reports a stale failure', async ({ page }) => {
   await boot(page)
+  await page.evaluate(() => window.__gateTabDelete())
 
-  const button = page.getByTestId('pane-p4-lead').getByRole('button', { name: 'Resume replies' })
-  await button.click()
-  const dialog = page.getByRole('dialog', { name: 'Resume replies' })
-  await expect(dialog).toBeVisible()
-  expect((await commandCalls(page, 'pane_input_snapshot')).at(-1)).toEqual({
-    command: 'pane_input_snapshot',
-    args: { id: 'p4-lead', generation: 1 },
-  })
-
-  await dialog.getByRole('button', { name: 'I confirm the input line is empty' }).click()
-  await expect.poll(async () => (await commandCalls(page, 'pane_resume_replies')).length).toBe(1)
-  expect((await commandCalls(page, 'pane_resume_replies')).at(-1)).toEqual({
-    command: 'pane_resume_replies',
-    args: { id: 'p4-lead', generation: 1, inputEpoch: 0, sequence: 0 },
-  })
-})
-
-test('keeps replies held and asks to reopen after a stale generation failure', async ({ page }) => {
-  await boot(page)
+  const active = page.getByTestId('session-t-four')
+  await active.getByRole('button', { name: 'Delete session' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Delete session' })
+  const confirm = dialog.locator('button[type="submit"]')
+  await confirm.click()
+  await expect(confirm).toBeDisabled()
+  expect(await commandCalls(page, 'tab_delete')).toHaveLength(1)
   await page.evaluate(() =>
-    window.__setCommandResult('pane_resume_replies', {
-      ok: false,
-      error: 'stale pane generation',
-    }),
+    document.querySelector('#delete-session-dialog button[type="submit"]').click(),
   )
-
-  await page.getByTestId('pane-p4-lead').getByRole('button', { name: 'Resume replies' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Resume replies' })
-  await expect(dialog).toBeVisible()
-  await dialog.getByRole('button', { name: 'I confirm the input line is empty' }).click()
-  await expect.poll(async () => (await commandCalls(page, 'pane_resume_replies')).length).toBe(1)
-  await expect(page.getByRole('status')).toContainText('Reopen the confirmation dialog')
+  expect(await commandCalls(page, 'tab_delete')).toHaveLength(1)
+  await page.evaluate(() => window.__releaseTabDelete())
   await expect(dialog).toBeHidden()
+  await expect(page.getByTestId('session-t-four')).toHaveCount(0)
+
+  await page.evaluate(() =>
+    window.__setCommandResult('tab_delete', { ok: false, error: 'stale tab generation' }),
+  )
+  const next = page.getByTestId('session-t-five')
+  await next.getByRole('button', { name: 'Delete session' }).click()
+  const failureDialog = page.getByRole('dialog', { name: 'Delete session' })
+  const failureConfirm = failureDialog.getByRole('button', {
+    name: 'Delete session',
+    exact: true,
+  })
+  await failureConfirm.click()
+  await expect(page.getByRole('status')).toContainText('stale tab generation')
+  await expect(failureDialog).toBeVisible()
+  await expect(failureConfirm).toBeEnabled()
+  await expect(page.getByTestId('session-t-five')).toBeVisible()
 })
 
-test('rejects input typed after the snapshot without sending a resume command', async ({
+test('locks the confirmed delete target while delayed IPC prevents cancel or retargeting', async ({
   page,
 }) => {
   await boot(page)
-  await page.evaluate(() => window.__gateInputSnapshot())
+  await page.evaluate(() => window.__gateTabDelete())
 
-  const button = page.getByTestId('pane-p4-lead').getByRole('button', { name: 'Resume replies' })
-  await button.click()
-  const textarea = page.getByTestId('pane-p4-lead').locator('.xterm-helper-textarea')
-  await textarea.focus()
-  await page.keyboard.type('typed after snapshot')
-  await expect
-    .poll(async () => (await commandCalls(page, 'pane_input_enqueue')).length)
-    .toBeGreaterThan(0)
+  const active = page.getByTestId('session-t-four')
+  const next = page.getByTestId('session-t-five')
+  await active.getByRole('button', { name: 'Delete session' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Delete session' })
+  const cancel = dialog.getByRole('button', { name: 'Cancel' })
+  const confirm = dialog.locator('button[type="submit"]')
+  await confirm.click()
+  await expect(confirm).toBeDisabled()
+  await expect(cancel).toBeDisabled()
+  expect(await commandCalls(page, 'tab_delete')).toHaveLength(1)
 
-  await page.evaluate(() => window.__releaseInputSnapshot())
-  await expect(page.getByRole('status')).toContainText('Reopen Resume replies')
-  expect(await page.getByRole('dialog', { name: 'Resume replies' })).toBeHidden()
-  expect(await commandCalls(page, 'pane_resume_replies')).toHaveLength(0)
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toContainText('harbour')
+
+  await next.getByRole('button', { name: 'Delete session' }).click({ force: true })
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toContainText('harbour')
+  await expect(dialog).not.toContainText('foundry')
+  expect(await commandCalls(page, 'tab_delete')).toHaveLength(1)
+
+  await page.evaluate(() => window.__releaseTabDelete())
+  await expect(dialog).toBeHidden()
+  expect((await commandCalls(page, 'tab_delete')).at(-1)).toEqual({
+    command: 'tab_delete',
+    args: { tab: 't-four', generation: 1 },
+  })
+  await expect(page.getByTestId('session-t-five')).toBeVisible()
 })
 
 test('offers only canonical lead harness ids accepted by the tab store', async ({ page }) => {
@@ -1192,156 +1487,244 @@ test('opens Shell or Agent from the human New pane menu', async ({ page }) => {
   })
 })
 
-test('keeps every pane in a scrollable grid when height cannot fit all rows', async ({ page }) => {
-  await page.setViewportSize({ width: 650, height: 470 })
-  await boot(page)
-  const stage = page.getByTestId('pane-stage')
-  await expect(stage).toHaveAttribute('data-mode', 'grid')
-  await expect(stage.locator('.pane-card')).toHaveCount(4)
-  await expect(page.getByRole('navigation', { name: 'Pane navigation' })).toBeHidden()
-  const dimensions = await stage.evaluate((element) => ({
-    scrollHeight: element.scrollHeight,
-    clientHeight: element.clientHeight,
-  }))
-  expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight)
-})
+test('TEST-PANE-135: offers a clear close action on every pane, including failed workers', async ({
+  page,
+}) => {
+  const state = cannedState()
+  const failed = state.tabs[0].panes.find((pane) => pane.id === 'p4-w1')
+  failed.alive = false
+  failed.failure = { message: 'worker harness failed', exitCode: 23 }
+  await boot(page, { state })
 
-test('subtracts grid padding and gaps before enforcing the minimum card size', async ({ page }) => {
-  await boot(page)
-  const stage = page.getByTestId('pane-stage')
-  await stage.evaluate((element) => {
-    element.style.position = 'absolute'
-    element.style.inset = '0 auto auto 0'
-    element.style.width = '520px'
-    element.style.height = '360px'
-  })
-  await expect(stage).toHaveAttribute('data-mode', 'grid')
-  await expect(stage).toHaveAttribute('data-layout', '"lead" "w1" "w2" "w3"')
-
-  await stage.evaluate((element) => {
-    element.style.width = '544px'
-    element.style.height = '384px'
-  })
-  await expect(stage).toHaveAttribute('data-mode', 'grid')
-  await expect(stage).toHaveAttribute('data-layout', '"lead w1" "w2 w3"')
-  const dimensions = await stage.locator('.pane-card').evaluateAll((cards) =>
-    cards.map((card) => {
-      const bounds = card.getBoundingClientRect()
-      return { width: bounds.width, height: bounds.height }
-    }),
-  )
-  expect(dimensions).toHaveLength(4)
-  for (const dimension of dimensions) {
-    expect(dimension.width).toBeGreaterThanOrEqual(260)
-    expect(dimension.height).toBeGreaterThanOrEqual(180)
+  await expect(
+    page.getByTestId('pane-p4-lead').getByRole('button', { name: 'Suspend session' }),
+  ).toBeVisible()
+  for (const id of ['p4-w1', 'p4-w2', 'p4-shell']) {
+    await expect(
+      page.getByTestId(`pane-${id}`).getByRole('button', { name: 'Close pane' }),
+    ).toBeVisible()
   }
 })
 
-test('keeps 10 panes in three columns and makes the bottom row reachable by scrolling', async ({
+test('TEST-PANE-135: closes worker and shell panes by their generation without touching siblings or history', async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 1280, height: 520 })
-  await boot(page, { state: gridState(10) })
-  const stage = page.getByTestId('pane-stage')
-  await expect(stage).toHaveAttribute('data-mode', 'grid')
-  await expect(stage.locator('.pane-card')).toHaveCount(10)
-  await expect(stage).toHaveAttribute('data-layout', '"lead w1 w2" "w3 w4 w5" "w6 w7 w8" "w9 . ."')
-  const columns = await stage.evaluate((element) => getComputedStyle(element).gridTemplateColumns)
-  expect(columns.trim().split(/\s+/)).toHaveLength(3)
-  const lastRowReachable = await stage.evaluate((element) => {
-    element.scrollTop = element.scrollHeight
-    const stageBounds = element.getBoundingClientRect()
-    const last = element.querySelector('[data-testid="pane-p-grid-9"]')
-    const bounds = last.getBoundingClientRect()
-    return bounds.top >= stageBounds.top && bounds.bottom <= stageBounds.bottom
+  await boot(page)
+
+  await page.getByTestId('pane-p4-w1').getByRole('button', { name: 'Close pane' }).click()
+  await expect(page.getByTestId('pane-p4-w1')).toHaveCount(0)
+  expect((await commandCalls(page, 'close_pane')).at(-1)).toEqual({
+    command: 'close_pane',
+    args: { id: 'p4-w1', generation: 1 },
   })
-  expect(lastRowReachable).toBe(true)
+  for (const id of ['p4-lead', 'p4-w2', 'p4-shell']) {
+    await expect(page.getByTestId(`pane-${id}`)).toBeVisible()
+  }
+  await expect(page.getByTestId('pane-node-p4-w2')).toBeVisible()
+  expect(await page.evaluate(() => window.__state.answers['nyx-coral-lane'])).toHaveLength(3)
+
+  await page.getByTestId('pane-p4-shell').getByRole('button', { name: 'Close pane' }).click()
+  await expect(page.getByTestId('pane-p4-shell')).toHaveCount(0)
+  expect((await commandCalls(page, 'close_pane')).at(-1)).toEqual({
+    command: 'close_pane',
+    args: { id: 'p4-shell', generation: 1 },
+  })
+  for (const id of ['p4-lead', 'p4-w2']) {
+    await expect(page.getByTestId(`pane-${id}`)).toBeVisible()
+  }
 })
 
-test('keeps 20 panes in a three-column grid rather than switching to focus mode', async ({
+test('TEST-PANE-135: closing the lead suspends only its session and exposes Resume', async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 1280, height: 520 })
-  await boot(page, { state: gridState(20) })
-  const stage = page.getByTestId('pane-stage')
-  await expect(stage).toHaveAttribute('data-mode', 'grid')
-  await expect(stage.locator('.pane-card')).toHaveCount(20)
-  await expect(stage.locator('[data-testid="pane-p-grid-19"]')).toHaveCount(1)
-  await expect(stage).toHaveAttribute('data-layout', /"w18 w19 \."$/)
-  const columns = await stage.evaluate((element) => getComputedStyle(element).gridTemplateColumns)
-  expect(columns.trim().split(/\s+/)).toHaveLength(3)
+  await boot(page)
+
+  await page.getByTestId('pane-p4-lead').getByRole('button', { name: 'Suspend session' }).click()
+  await expect(page.getByTestId('pane-p4-lead')).toHaveCount(0)
+  await expect(page.getByTestId('pane-stage')).toContainText(
+    'Resume this session to reopen its lead.',
+  )
+  await expect(page.getByTestId('resume-t-four')).toBeVisible()
+  expect((await commandCalls(page, 'close_pane')).at(-1)).toEqual({
+    command: 'close_pane',
+    args: { id: 'p4-lead', generation: 1 },
+  })
+  expect(
+    await page.evaluate(() => {
+      const tab = window.__state.tabs.find((candidate) => candidate.id === 't-four')
+      return {
+        closed: tab.closed,
+        workerAlive: tab.panes.find((pane) => pane.id === 'p4-w1')?.alive,
+      }
+    }),
+  ).toEqual({ closed: true, workerAlive: true })
 })
 
-for (const count of [7, 10, 20]) {
-  test(`shows no more than six panes before scrolling a tall ${count}-pane grid`, async ({
+test('TEST-PANE-136: uses the clicked generation and keeps a stale close error visible', async ({
+  page,
+}) => {
+  await boot(page)
+  await page.evaluate(() => {
+    window.__state.tabs[0].panes.find((pane) => pane.id === 'p4-w2').generation = 2
+    window.__setCommandResult('close_pane', { ok: false, error: 'stale pane generation' })
+  })
+
+  await page.getByTestId('pane-p4-w2').getByRole('button', { name: 'Close pane' }).click()
+  await expect(page.getByRole('status')).toContainText('stale pane generation')
+  await expect(page.getByTestId('pane-p4-w2')).toBeVisible()
+  expect((await commandCalls(page, 'close_pane')).at(-1)).toEqual({
+    command: 'close_pane',
+    args: { id: 'p4-w2', generation: 1 },
+  })
+})
+
+test('TEST-PANE-136: closes a failed worker through the same pane action', async ({ page }) => {
+  const state = cannedState()
+  const failed = state.tabs[0].panes.find((pane) => pane.id === 'p4-w1')
+  failed.alive = false
+  failed.failure = { message: 'worker harness failed', exitCode: 23 }
+  await boot(page, { state })
+
+  await expect(page.getByTestId('pane-p4-w1')).toHaveAttribute('data-state', 'failed')
+  await page.getByTestId('pane-p4-w1').getByRole('button', { name: 'Close pane' }).click()
+  await expect(page.getByTestId('pane-p4-w1')).toHaveCount(0)
+  expect((await commandCalls(page, 'close_pane')).at(-1)).toEqual({
+    command: 'close_pane',
+    args: { id: 'p4-w1', generation: 1 },
+  })
+})
+
+test('keeps actual xterm terminals full height with hidden and visible failure banners', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 1100 })
+  const state = cannedState()
+  state.deliveries = []
+  state.held = []
+  await boot(page, { state })
+
+  const stage = page.getByTestId('pane-stage')
+  const lead = page.getByTestId('pane-p4-lead')
+  const metrics = () =>
+    lead.evaluate((card) => {
+      const bounds = (selector) => card.querySelector(selector).getBoundingClientRect()
+      const host = bounds('.terminal-host')
+      const hostElement = card.querySelector('.terminal-host')
+      const hostStyles = getComputedStyle(hostElement)
+      const xterm = card.querySelector('.xterm')
+      const screen = bounds('.xterm-screen')
+      const rows = card.querySelector('.xterm-rows')
+      const firstRow = rows?.firstElementChild
+      const failure = card.querySelector('.pane-failure')
+      return {
+        cardBottom: card.getBoundingClientRect().bottom,
+        titleBottom: bounds('.pane-titlebar').bottom,
+        failureBottom: failure.getBoundingClientRect().bottom,
+        failureDisplay: getComputedStyle(failure).display,
+        hostTop: host.top,
+        hostBottom: host.bottom,
+        availableHeight:
+          hostElement.clientHeight -
+          Number.parseFloat(hostStyles.paddingTop) -
+          Number.parseFloat(hostStyles.paddingBottom),
+        xtermBottom: xterm.getBoundingClientRect().bottom,
+        screenHeight: screen.height,
+        screenBottom: screen.bottom,
+        rowCount: rows?.children.length ?? 0,
+        rowHeight: firstRow === null ? 0 : firstRow.getBoundingClientRect().height,
+      }
+    })
+  const latestResizeRows = () =>
+    commandCalls(page, 'pane_resize').then(
+      (calls) => calls.filter((call) => call.args.id === 'p4-lead').at(-1)?.args.rows ?? 0,
+    )
+  const assertTerminalFillsCard = async (expectedFailureDisplay) => {
+    const current = await metrics()
+    const resizeRows = await latestResizeRows()
+    expect(current.failureDisplay).toBe(expectedFailureDisplay)
+    expect(
+      Math.abs(current.hostBottom - current.cardBottom),
+      JSON.stringify(current),
+    ).toBeLessThanOrEqual(1)
+    expect(current.hostTop).toBeGreaterThanOrEqual(current.titleBottom)
+    if (expectedFailureDisplay !== 'none') {
+      expect(current.hostTop).toBeGreaterThanOrEqual(current.failureBottom)
+    }
+    expect(current.xtermBottom).toBeLessThanOrEqual(current.hostBottom)
+    expect(
+      Math.abs(current.screenHeight - current.rowCount * current.rowHeight),
+      JSON.stringify(current),
+    ).toBeLessThanOrEqual(1)
+    expect(
+      Math.abs(current.screenHeight - current.availableHeight),
+      JSON.stringify(current),
+    ).toBeLessThanOrEqual(current.rowHeight)
+    expect(
+      Math.abs(resizeRows - current.rowCount),
+      JSON.stringify({ current, resizeRows }),
+    ).toBeLessThanOrEqual(1)
+    expect(resizeRows).toBeGreaterThan(0)
+    expect(current.rowHeight).toBeGreaterThan(0)
+  }
+
+  await expect(lead).toBeVisible()
+  await expect.poll(latestResizeRows).toBeGreaterThan(0)
+  await assertTerminalFillsCard('none')
+  const gridResizeRows = await latestResizeRows()
+
+  await page.getByTestId('pane-node-p4-lead').click()
+  await expect(stage).toHaveAttribute('data-mode', 'focused')
+  await expect.poll(latestResizeRows).toBeGreaterThanOrEqual(gridResizeRows)
+  await assertTerminalFillsCard('none')
+  const focusedResizeRows = await latestResizeRows()
+
+  await page.evaluate(async () => {
+    const tab = window.__state.tabs.find((candidate) => candidate.id === 't-four')
+    const pane = tab.panes.find((candidate) => candidate.id === 'p4-lead')
+    pane.alive = false
+    pane.failure = { message: 'lead harness failed', exitCode: 17 }
+    await window.__emitTauriEvent('state-changed', { reason: 'lead.failed' })
+  })
+  await expect(lead).toHaveAttribute('data-state', 'failed')
+  await expect(lead).toContainText('lead harness failed')
+  await expect.poll(latestResizeRows).toBeGreaterThanOrEqual(focusedResizeRows)
+  await assertTerminalFillsCard('flex')
+})
+
+for (const count of [2, 3, 5, 7, 10, 20]) {
+  test(`session geometry keeps ${count} panes in fixed-height horizontal columns`, async ({
     page,
   }) => {
-    await page.setViewportSize({ width: 1280, height: 1200 })
+    await page.setViewportSize({ width: 1280, height: 700 })
     await boot(page, { state: gridState(count) })
     const stage = page.getByTestId('pane-stage')
-    const metrics = await stage.evaluate((element) => {
-      const styles = getComputedStyle(element)
-      const padding = Number.parseFloat(styles.getPropertyValue('--pane-grid-padding'))
-      const gap = Number.parseFloat(styles.getPropertyValue('--pane-grid-gap'))
-      const stageBounds = element.getBoundingClientRect()
-      const cards = [...element.querySelectorAll('.pane-card')]
-      const visible = cards.filter((card) => {
-        const bounds = card.getBoundingClientRect()
-        return bounds.top < stageBounds.bottom && bounds.bottom > stageBounds.top
+    await expect(stage.locator('.pane-card')).toHaveCount(count)
+    const geometry = await stage.evaluate((element) => {
+      const lead = element.querySelector('.pane-card').getBoundingClientRect()
+      const workers = element.querySelector('.worker-stage')
+      const worker = workers.querySelector('.pane-card').getBoundingClientRect()
+      const bounds = workers.getBoundingClientRect()
+      const visible = [...workers.children].filter((card) => {
+        const rect = card.getBoundingClientRect()
+        return rect.left < bounds.right - 1 && rect.right > bounds.left + 1
       }).length
-      const first = cards[0].getBoundingClientRect()
-      const third = cards[6].getBoundingClientRect()
       return {
+        ratio: lead.width / worker.width,
         visible,
-        firstHeight: first.height,
-        minimumRowHeight: (element.clientHeight - 2 * padding - gap) / 2,
-        thirdTop: third.top,
-        stageBottom: stageBounds.bottom,
+        height: element.clientHeight,
         scrollHeight: element.scrollHeight,
-        clientHeight: element.clientHeight,
+        overflow: workers.scrollWidth > workers.clientWidth + 1,
       }
     })
-    expect(metrics.visible).toBeLessThanOrEqual(6)
-    expect(metrics.firstHeight).toBeGreaterThanOrEqual(metrics.minimumRowHeight)
-    expect(metrics.thirdTop).toBeGreaterThan(metrics.stageBottom)
-    expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight)
-
-    await stage.evaluate((element) => {
-      const third = element.querySelector('[data-testid="pane-p-grid-6"]')
-      element.scrollTop = third.offsetTop - element.clientHeight + third.offsetHeight
-    })
-    const thirdRowReached = await stage.evaluate((element) => {
-      const stageBounds = element.getBoundingClientRect()
-      const third = element.querySelector('[data-testid="pane-p-grid-6"]').getBoundingClientRect()
-      return {
-        reached: third.top >= stageBounds.top && third.bottom <= stageBounds.bottom + 1,
-        thirdTop: third.top,
-        thirdBottom: third.bottom,
-        stageTop: stageBounds.top,
-        stageBottom: stageBounds.bottom,
-        scrollTop: element.scrollTop,
-        scrollHeight: element.scrollHeight,
-        clientHeight: element.clientHeight,
-      }
-    })
-    expect(thirdRowReached.reached, JSON.stringify(thirdRowReached)).toBe(true)
+    expect(geometry.ratio).toBeCloseTo(2, 2)
+    expect(geometry.visible).toBeLessThanOrEqual(4)
+    expect(geometry.scrollHeight).toBeLessThanOrEqual(geometry.height + 1)
+    expect(geometry.overflow).toBe(count > 5)
+    await page.setViewportSize({ width: 650, height: 470 })
+    await expect(stage.locator('.pane-card')).toHaveCount(count)
+    expect(await stage.evaluate((e) => e.scrollHeight <= e.clientHeight + 1)).toBe(true)
   })
 }
-
-test('reflows a many-pane session to two and one columns at narrower widths', async ({ page }) => {
-  await page.setViewportSize({ width: 900, height: 700 })
-  await boot(page, { state: gridState(10) })
-  const stage = page.getByTestId('pane-stage')
-  const columnCount = () =>
-    stage.evaluate(
-      (element) => getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length,
-    )
-  await expect.poll(columnCount).toBe(2)
-  await page.setViewportSize({ width: 600, height: 700 })
-  await expect.poll(columnCount).toBe(1)
-  await expect(stage).toHaveAttribute('data-mode', 'grid')
-  await expect(stage.locator('.pane-card')).toHaveCount(10)
-})
 
 test('keeps a compact pending-result count within each pane and the page width', async ({
   page,
@@ -1351,6 +1734,7 @@ test('keeps a compact pending-result count within each pane and the page width',
     id: `d-many-${index}`,
     tab: 't-four',
     pane: 'p4-w1',
+    generation: 1,
     state: 'pending',
     reason: `result ${index} with a very long reason`,
   }))
@@ -1562,6 +1946,27 @@ test('reconciles Node state changes and consumes output for a worker the page ha
   expect((await commandCalls(page, 'list_state')).length).toBeGreaterThanOrEqual(3)
 })
 
+test('preserves startup output while the lead has not been marked alive yet', async ({ page }) => {
+  const state = gridState(1)
+  state.tabs[0].panes[0].alive = false
+  state.tabs[0].panes[0].starting = true
+  const id = state.tabs[0].panes[0].id
+  await boot(page, { state })
+  await page.evaluate(async (id) => {
+    window.__emitPaneOutput(id, 1, 1, [...new TextEncoder().encode('startup banner\r\n')])
+    await window.__emitTauriEvent('state-changed', { reason: 'launch still pending' })
+  }, id)
+  await expect.poll(async () => (await commandCalls(page, 'pane_ack')).length).toBe(1)
+  await page.evaluate(async () => {
+    window.__state.tabs[0].panes[0].alive = true
+    delete window.__state.tabs[0].panes[0].starting
+    await window.__emitTauriEvent('state-changed', { reason: 'launch resolved' })
+  })
+  await expect(page.getByTestId(`pane-${id}`).locator('.xterm-rows')).toContainText(
+    'startup banner',
+  )
+})
+
 test('keeps an unseen pane emulator across reconciliation until state adopts it', async ({
   page,
 }) => {
@@ -1608,6 +2013,144 @@ test('keeps an unseen pane emulator across reconciliation until state adopts it'
     'data-consumed',
     /before state[\s\S]*after state/,
   )
+})
+
+test('retains failed worker diagnostics without terminal actions while live workers stay interactive', async ({
+  page,
+}) => {
+  await boot(page)
+  const failed = page.getByTestId('pane-p4-w1')
+
+  await page.evaluate(() => {
+    window.__emitPaneOutput('p4-w1', 1, 1, [
+      ...new TextEncoder().encode('scrollback before failure\r\n'),
+    ])
+  })
+  await expect(failed.locator('.xterm-rows')).toContainText('scrollback before failure')
+  await expect
+    .poll(
+      async () =>
+        (await commandCalls(page, 'pane_ack')).filter((call) => call.args.id === 'p4-w1').length,
+    )
+    .toBe(1)
+
+  await page.evaluate(async () => {
+    const tab = window.__state.tabs.find((candidate) => candidate.id === 't-four')
+    const pane = tab.panes.find((candidate) => candidate.id === 'p4-w1')
+    pane.alive = false
+    pane.failure = { message: 'worker harness failed', exitCode: 23 }
+    await window.__emitTauriEvent('state-changed', { reason: 'worker.failed' })
+  })
+
+  await expect(failed).toHaveAttribute('data-state', 'failed')
+  await expect(failed).toContainText('worker harness failed')
+  await expect(failed).toContainText('23')
+  await expect(failed).toContainText('Ended')
+  await expect(failed.locator('.xterm-rows')).toContainText('scrollback before failure')
+  const failedNode = page.getByTestId('pane-node-p4-w1').locator('../..')
+  await expect(failedNode).toHaveAttribute('data-state', 'failed')
+  await expect(failedNode).toBeVisible()
+  await page.evaluate(async () => {
+    window.__state.tabs[0].panes.find((pane) => pane.id === 'p4-w1').failure.exitCode = null
+    await window.__emitTauriEvent('state-changed', { reason: 'worker.signal' })
+  })
+  await expect(failed).toContainText('Exit code: unknown')
+  await expect(failed.locator('.xterm-rows')).toContainText('scrollback before failure')
+  expect(await commandCalls(page, 'subscribe_output')).toHaveLength(1)
+
+  const beforeFailedActions = await page.evaluate(
+    () =>
+      window.__calls.filter(
+        (call) =>
+          call.command === 'open_consult' ||
+          call.command === 'pane_input_enqueue' ||
+          call.command === 'pane_reply_enqueue',
+      ).length,
+  )
+  await page.getByTestId('pane-node-p4-w1').click()
+  await expect(failed).toHaveAttribute('data-selected', 'true')
+  await expect(page.getByTestId('pane-stage')).toContainText('worker harness failed')
+
+  await failed.locator('.pane-titlebar').click({ button: 'right' })
+  await expect(page.getByRole('menu', { name: 'Worker actions' })).toHaveCount(0)
+  await failed.locator('.xterm-helper-textarea').focus()
+  await page.keyboard.type('do not send')
+  await page.evaluate(() => {
+    window.__emitPaneOutput('p4-w1', 1, 2, [
+      ...new TextEncoder().encode('output after failure\r\n\u001b[5n'),
+    ])
+  })
+  await expect(failed.locator('.xterm-rows')).toContainText('output after failure')
+  await expect
+    .poll(
+      async () =>
+        (await commandCalls(page, 'pane_ack')).filter((call) => call.args.id === 'p4-w1').length,
+    )
+    .toBe(2)
+  await expect
+    .poll(
+      async () =>
+        await page.evaluate(
+          () =>
+            window.__calls.filter(
+              (call) =>
+                call.command === 'open_consult' ||
+                call.command === 'pane_input_enqueue' ||
+                call.command === 'pane_reply_enqueue',
+            ).length,
+        ),
+    )
+    .toBe(beforeFailedActions)
+
+  await page.getByTestId('pane-node-p4-w2').click()
+  const liveInput = page.getByTestId('pane-p4-w2').locator('.xterm-helper-textarea')
+  await liveInput.focus()
+  await page.keyboard.type('live worker input')
+  await expect
+    .poll(async () => (await commandCalls(page, 'pane_input_enqueue')).length)
+    .toBeGreaterThan(0)
+  await page.getByTestId('pane-p4-w2').locator('.pane-titlebar').click({ button: 'right' })
+  await expect(page.getByRole('menu', { name: 'Worker actions' })).toBeVisible()
+})
+
+test('removes an obsolete failed row when its conversation is admitted again and hides it in closed sessions', async ({
+  page,
+}) => {
+  await boot(page)
+  await page.evaluate(async () => {
+    const tab = window.__state.tabs.find((candidate) => candidate.id === 't-four')
+    const pane = tab.panes.find((candidate) => candidate.id === 'p4-w1')
+    pane.alive = false
+    pane.failure = { message: 'worker harness failed', exitCode: 23 }
+    await window.__emitTauriEvent('state-changed', { reason: 'worker.failed' })
+  })
+  await expect(page.getByTestId('pane-p4-w1')).toBeVisible()
+
+  await page.evaluate(async () => {
+    const tab = window.__state.tabs.find((candidate) => candidate.id === 't-four')
+    tab.panes = tab.panes.filter((pane) => pane.id !== 'p4-w1')
+    tab.panes.push({
+      id: 'p4-w1-reopened',
+      generation: 1,
+      kind: 'worker',
+      order: 1,
+      conversation: 'nyx-coral-lane',
+      agent: 'nyx',
+      effectivePolicy: { mode: 'manual', source: 'pane' },
+      alive: true,
+    })
+    await window.__emitTauriEvent('state-changed', { reason: 'worker.reopened' })
+  })
+  await expect(page.getByTestId('pane-p4-w1')).toHaveCount(0)
+  await expect(page.getByTestId('pane-p4-w1-reopened')).toBeVisible()
+  await expect(page.getByTestId('pane-node-p4-w1-reopened')).toBeVisible()
+
+  await page.getByTestId('session-t-closed-button').click()
+  await expect(page.getByTestId('session-t-closed')).toBeVisible()
+  await expect(page.getByTestId('pane-stage')).toContainText(
+    'Resume this session to reopen its lead.',
+  )
+  await expect(page.getByTestId('pane-stage').locator('.pane-card')).toHaveCount(0)
 })
 
 test('drains and retires an unseen pane that exited before the first snapshot', async ({
@@ -1891,4 +2434,207 @@ test('shows input sequence gap and regression refusals without parking the page'
   await expect(page.locator('#app')).toHaveAttribute('data-ready', 'true')
   const calls = await commandCalls(page, 'pane_input_enqueue')
   expect(calls.slice(-2).map((call) => call.args.sequence)).toEqual([1, 2])
+})
+
+for (const harness of ['claude-code', 'codex', 'pi', 'opencode']) {
+  test(`no reply confirmation controls for ${harness} leads or workers (TEST-PANE-111)`, async ({
+    page,
+  }) => {
+    const state = cannedState()
+    state.tabs[0].lead.harness = harness
+    await boot(page, { state })
+    await expect(
+      page.getByRole('button', { name: /Resume replies|Allow lead messages/ }),
+    ).toHaveCount(0)
+    await expect(page.locator('#resume-replies-dialog')).toHaveCount(0)
+    expect(await commandCalls(page, 'pane_input_snapshot')).toHaveLength(0)
+    expect(await commandCalls(page, 'pane_resume_replies')).toHaveLength(0)
+    await expect(page.getByTestId('pane-p4-lead').locator('.terminal-host')).toBeVisible()
+    await expect(page.getByTestId('pane-p4-w1').locator('.terminal-host')).toBeVisible()
+  })
+}
+
+test('renders native harness colors without an app-specific ANSI palette', async ({ page }) => {
+  await boot(page)
+  const result = await page.evaluate(async () => {
+    const { XtermEmulator } = await import('/term.js')
+    const { Terminal } = await import('/vendor/xterm.js')
+    const replies = []
+    const defaults = []
+    const hosts = [document.createElement('div'), document.createElement('div')]
+    for (const host of hosts) {
+      host.style.cssText = 'width:600px;height:300px'
+      document.body.append(host)
+    }
+    const appTerminal = new XtermEmulator(hosts[0], { onReply: (data) => replies.push(data) })
+    const nativeTerminal = new Terminal()
+    nativeTerminal.open(hosts[1])
+    nativeTerminal.onData((data) => defaults.push(data))
+    // Query the actual parser's default foreground/background and all ANSI
+    // slots, then check that RGB text keeps the colors emitted by the TUI.
+    const query =
+      '\x1b]10;?\x1b\\\x1b]11;?\x1b\\' +
+      Array.from({ length: 16 }, (_, i) => `\x1b]4;${i};?\x1b\\`).join('')
+    await appTerminal.write(
+      new TextEncoder().encode(`${query}\x1b[38;2;12;34;56m\x1b[48;2;78;90;123mX`),
+    )
+    await new Promise((resolve) => nativeTerminal.write(query, resolve))
+    const cell = appTerminal.terminal.buffer.active.getLine(0).getCell(0)
+    const colors = { foreground: cell.getFgColor(), background: cell.getBgColor() }
+    appTerminal.dispose()
+    nativeTerminal.dispose()
+    for (const host of hosts) host.remove()
+    return { replies, defaults, colors }
+  })
+  expect(result.replies).toHaveLength(18)
+  expect(result.replies).toEqual(result.defaults)
+  expect(result.colors).toEqual({ foreground: 0x0c2238, background: 0x4e5a7b })
+})
+
+test('session keeps a double-width lead fixed while later workers scroll horizontally', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await boot(page, { state: gridState(10) })
+  const stage = page.getByTestId('pane-stage')
+  const measure = () =>
+    stage.evaluate((element) => {
+      const cards = [...element.querySelectorAll('.pane-card')]
+      const lead = cards[0].getBoundingClientRect()
+      const worker = cards[1].getBoundingClientRect()
+      const workers = element.querySelector('.worker-stage')
+      return {
+        leadX: lead.x,
+        leadWidth: lead.width,
+        workerWidth: worker.width,
+        scrollHeight: element.scrollHeight,
+        height: element.clientHeight,
+        overflow: workers ? workers.scrollWidth > workers.clientWidth : false,
+      }
+    })
+  const before = await measure()
+  expect(Math.abs(before.leadWidth - 2 * before.workerWidth)).toBeLessThanOrEqual(2)
+  expect(before.scrollHeight).toBeLessThanOrEqual(before.height + 1)
+  expect(before.overflow).toBe(true)
+  await stage.locator('.worker-stage').evaluate((element) => {
+    element.scrollLeft = element.scrollWidth
+  })
+  expect((await measure()).leadX).toBe(before.leadX)
+  const last = stage.locator('[data-testid="pane-p-grid-9"]')
+  await expect(last).toBeInViewport()
+})
+
+test('PM appears above the lead and uses the main full-size pane outside the grid', async ({
+  page,
+}) => {
+  const state = cannedState()
+  state.tabs[0].roleName = 'clear-forest'
+  state.tabs.push({
+    id: 't-pm',
+    role: 'pm',
+    parentTabId: state.tabs[0].id,
+    roleName: 'quiet-river',
+    directory: state.tabs[0].directory,
+    lead: { harness: 'pi', generation: 1 },
+    panes: [pane('p-pm', 'lead')],
+  })
+  await boot(page, { state })
+  const stage = page.getByTestId('pane-stage')
+  const pm = page.getByTestId('pm-t-pm')
+  expect((await pm.boundingBox()).y).toBeLessThan(
+    (await page.getByTestId('pane-node-p4-lead').boundingBox()).y,
+  )
+  await expect(stage.locator('[data-pane-id="p-pm"]')).toHaveCount(0)
+  await pm.click()
+  await expect(stage.getByTestId('pane-p-pm')).toBeVisible()
+  await expect(stage.locator('.pane-title')).not.toContainText('Replies:')
+  await expect(stage.locator('.pane-card')).toHaveCount(1)
+  await expect(page.locator('#new-pane')).toBeHidden()
+  await page.evaluate(() =>
+    window.__emitPaneOutput('p-pm', 1, 1, [...new TextEncoder().encode('PM-MAIN-OUTPUT')]),
+  )
+  await expect(stage.locator('.xterm-rows')).toContainText('PM-MAIN-OUTPUT')
+  await stage.locator('.xterm-helper-textarea').focus()
+  await page.keyboard.type('hello')
+  await expect
+    .poll(
+      async () =>
+        (await commandCalls(page, 'pane_input_enqueue')).filter((c) => c.args.id === 'p-pm').length,
+    )
+    .toBeGreaterThan(0)
+  const box = await stage.boundingBox()
+  const card = await stage.getByTestId('pane-p-pm').boundingBox()
+  expect(Math.abs(box.height - 16 - card.height)).toBeLessThanOrEqual(2)
+  await page.getByTestId('session-t-four-button').click()
+  await expect(stage.locator('[data-pane-id="p-pm"]')).toHaveCount(0)
+  await pm.click()
+  await expect(stage.locator('.xterm-rows')).toContainText('PM-MAIN-OUTPUT')
+  expect(await commandCalls(page, 'open_pm')).toHaveLength(0)
+})
+
+test('focused worker fills the stage after grid selection and viewport resize', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await boot(page, { state: gridState(8) })
+  await page.getByTestId('pane-node-p-grid-2').click()
+  const stage = page.getByTestId('pane-stage')
+  await expect(stage).toHaveAttribute('data-mode', 'focused')
+  for (const height of [1000, 720, 1100]) {
+    await page.setViewportSize({ width: 1440, height })
+    await expect
+      .poll(() =>
+        stage.evaluate((element) => {
+          const box = element.getBoundingClientRect()
+          const card = element.querySelector('.pane-card').getBoundingClientRect()
+          return Math.abs(box.bottom - 8 - card.bottom)
+        }),
+      )
+      .toBeLessThanOrEqual(2)
+  }
+})
+
+test('Delete pane requires confirmation and retains the captured pane identity', async ({
+  page,
+}) => {
+  await boot(page)
+  await page
+    .getByTestId('pane-node-p4-w1')
+    .locator('..')
+    .getByRole('button', { name: /Delete pane/ })
+    .click()
+  const dialog = page.getByRole('dialog', { name: 'Delete pane', exact: true })
+  await expect(dialog).toBeVisible()
+  await page.keyboard.press('Escape')
+  expect(await commandCalls(page, 'delete_pane')).toHaveLength(0)
+  await page
+    .getByTestId('pane-node-p4-w1')
+    .locator('..')
+    .getByRole('button', { name: /Delete pane/ })
+    .click()
+  await dialog.getByRole('button', { name: 'Delete pane', exact: true }).click()
+  expect(await commandCalls(page, 'delete_pane')).toEqual([
+    { command: 'delete_pane', args: { id: 'p4-w1', generation: 1 } },
+  ])
+  await expect(page.getByTestId('pane-p4-w1')).toHaveCount(0)
+  await expect(page.getByTestId('pane-p4-w2')).toBeVisible()
+})
+
+test('a closed worker can be deleted from the sidebar without reopening it', async ({ page }) => {
+  const state = cannedState()
+  state.tabs[0].closed = true
+  for (const pane of state.tabs[0].panes) pane.alive = false
+  await boot(page, { state })
+  await page
+    .getByTestId('pane-node-p4-w1')
+    .locator('..')
+    .getByRole('button', { name: /Delete pane/ })
+    .click()
+  await page
+    .getByRole('dialog', { name: 'Delete pane', exact: true })
+    .getByRole('button', { name: 'Delete pane', exact: true })
+    .click()
+  expect(await commandCalls(page, 'open_consult')).toHaveLength(0)
+  expect(await commandCalls(page, 'tab_resume')).toHaveLength(0)
+  await expect(page.getByTestId('pane-node-p4-w1')).toHaveCount(0)
 })

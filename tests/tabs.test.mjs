@@ -398,3 +398,81 @@ test('tabs: a __proto__ pane id is refused, and never reaches the registry', asy
     await restarted.close()
   })
 })
+
+test('TEST-PANE-81: deleted sessions never reuse identities, including after restart', async () => {
+  await withTabs(async ({ dir, store, tabs }) => {
+    const first = await tabs.create(dir, 'pi')
+    await assert.rejects(() => tabs.beginDelete(first.id, 2), /generation/)
+    assert.equal((await tabs.get(first.id)).closed, false)
+    await tabs.beginDelete(first.id, first.generation)
+    await assert.rejects(() => tabs.resume(first.id), /delet/)
+    await assert.rejects(() => tabs.addPane(first.id, { kind: 'shell' }), /delet|closed/)
+    await tabs.remove(first.id, first.generation)
+    assert.equal(await tabs.get(first.id), null)
+    await store.close()
+    await store.open()
+    const next = await tabs.create(dir, 'pi')
+    assert.notEqual(next.id, first.id)
+    assert.notEqual(next.leadId, first.leadId)
+    const other = await tabs.create(dir, 'pi')
+    await tabs.beginDelete(other.id, other.generation)
+    await tabs.remove(other.id, other.generation)
+    assert.ok(Number((await tabs.create(dir, 'pi')).id.slice(2)) > Number(other.id.slice(2)))
+    assert.equal((await tabs.get(next.id)).closed, false)
+  })
+})
+
+test('TEST-PANE-81: an interrupted deletion remains fenced and can finish after restart', async () => {
+  await withTabs(async ({ dir, store, tabs }) => {
+    const created = await tabs.create(dir, 'pi')
+    await tabs.beginDelete(created.id, 1)
+    await store.close()
+    await store.open()
+    assert.equal((await tabs.get(created.id)).deleting, true)
+    await assert.rejects(() => tabs.resume(created.id), /delet/)
+    await tabs.beginDelete(created.id, 1)
+    await tabs.remove(created.id, 1)
+    assert.equal(await tabs.get(created.id), null)
+  })
+})
+
+test('worker navigation survives process exit and store restart without relaunch', async () => {
+  await withTabs(async ({ dir, store, tabs }) => {
+    const { id } = await tabs.create(dir, 'codex')
+    const worker = await tabs.addPane(id, { kind: 'worker', conversation: 'worker-history' })
+    await tabs.removePane(id, worker.id, worker.generation, { preserveHistory: true })
+    const closed = (await tabs.get(id)).panes.find((pane) => pane.id === worker.id)
+    assert.equal(closed?.closed, true)
+    assert.equal(closed.conversation, 'worker-history')
+    await store.close()
+    await store.open()
+    await tabs.resume(id)
+    const restored = (await tabs.get(id)).panes.find((pane) => pane.id === worker.id)
+    assert.equal(restored.closed, true)
+    assert.equal(restored.generation, worker.generation)
+  })
+})
+
+test('PM is a unique persistent companion of its session, with independent native identity', async () => {
+  await withTabs(async ({ dir, tabs }) => {
+    const parent = await tabs.create(dir, 'codex')
+    const [a, b] = await Promise.all([
+      tabs.createPm(parent.id, 'pi'),
+      tabs.createPm(parent.id, 'pi'),
+    ])
+    assert.equal(a.id, b.id)
+    const pm = await tabs.get(a.id)
+    assert.equal(pm.role, 'pm')
+    assert.equal(pm.parentTabId, parent.id)
+    assert.equal(pm.directory, dir)
+    assert.notEqual(pm.panes[0].id, (await tabs.get(parent.id)).panes[0].id)
+    assert.ok(pm.roleName)
+    const name = pm.roleName
+    await tabs.suspend(a.id)
+    await tabs.resume(a.id)
+    assert.equal((await tabs.get(a.id)).roleName, name)
+    assert.equal((await tabs.get(parent.id)).closed, false)
+    await assert.rejects(tabs.createPm(a.id, 'pi'), /PM cannot own/)
+    await assert.rejects(tabs.createPm(parent.id, 'kimi'), /harness/)
+  })
+})

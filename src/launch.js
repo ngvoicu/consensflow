@@ -166,7 +166,8 @@ export function endLaunch(launch) {
  * shim that resolved its own runtime would defeat the shadowing it exists
  * to do. The path must be absolute for the same reason.
  */
-export function leadEnv({ tab, pane, leadId, app, path, node } = {}) {
+export function leadEnv({ tab, pane, leadId, app, path, node, role = 'lead' } = {}) {
+  if (!['lead', 'pm'].includes(role)) throw new Error('Unknown app role')
   requireText(tab, 'tab')
   requireText(pane, 'pane')
   requireText(leadId, 'lead id')
@@ -176,7 +177,11 @@ export function leadEnv({ tab, pane, leadId, app, path, node } = {}) {
   const inheritedPath = typeof path === 'string' && path.length > 0 ? path : ''
   return {
     CONSENSFLOW_APP: url,
-    CONSENSFLOW_APP_TOKEN: scopedToken({ tab, ops: LEAD_OPS }),
+    CONSENSFLOW_APP_TOKEN: scopedToken({
+      tab,
+      ops: role === 'pm' ? ['lead.send', 'lead.read'] : LEAD_OPS,
+    }),
+    ...(role === 'pm' ? { CONSENSFLOW_ROLE: 'pm' } : {}),
     CONSENSFLOW_LEAD_ID: leadId,
     CONSENSFLOW_NODE: node,
     CONSENSFLOW_TAB: tab,

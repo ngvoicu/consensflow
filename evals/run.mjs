@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util'
-import { existsSync, readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { listAgents } from '../src/roster.js'
 import { AGENT, leadSession, makeStage, runLead, threadFrom } from './harness.mjs'
 import { SCENARIOS } from './scenarios.mjs'
 
@@ -41,10 +39,9 @@ if (chosen.length === 0) {
   process.exit(2)
 }
 
-// The lead consults only names it finds in the installed skill's roster.
-const skillPath = join(homedir(), values.lead === 'codex' ? '.codex' : '.claude', 'skills', 'consensflow', 'SKILL.md')
-if (!existsSync(skillPath) || !readFileSync(skillPath, 'utf8').includes(`**${AGENT}**`)) {
-  console.error(`the installed skill at ${skillPath} does not list ${AGENT}; set CF_EVAL_AGENT to a roster name (cf agent list)`)
+// The same roster is copied into each private evaluation app root.
+if (!listAgents(process.env).some(agent => agent.name === AGENT)) {
+  console.error(`The roster does not list ${AGENT}; set CF_EVAL_AGENT to a roster name (cf agent list)`)
   process.exit(2)
 }
 
@@ -99,7 +96,7 @@ for (const scenario of chosen) {
           // What the lead DID, and what it then told the user: some failures are
           // only visible in the report — a lead that read the tail of a long
           // answer ran exactly the right command and still reported the wrong thing.
-          const ok = holds(log, result.stdout)
+          const ok = holds(log, result.reply ?? result.stdout)
           note(scenario.id, check, ok)
           if (!ok) {
             failures.push(check)
@@ -123,6 +120,7 @@ for (const scenario of chosen) {
           for (const line of log) evidence.push(`      $ ${line}`)
           if (log.length === 0) evidence.push('      (nothing)')
         }
+        if (missedHere) evidence.push(`    lead reply: ${result.reply ?? result.stdout}`)
       }
     } finally {
       stage.cleanup()

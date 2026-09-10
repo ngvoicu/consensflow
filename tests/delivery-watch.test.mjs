@@ -1,24 +1,29 @@
 import assert from 'node:assert/strict'
+import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { watch } from 'node:fs'
 import fs from 'node:fs/promises'
 import { createServer } from 'node:http'
+import net from 'node:net'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { PassThrough } from 'node:stream'
 import test from 'node:test'
+import { promisify } from 'node:util'
 import { answers } from '../hosts/lib/completion.js'
-import { envelope, plan, pointer } from '../hosts/lib/deliveries.js'
+import { envelope, plan, pointer, resend } from '../hosts/lib/deliveries.js'
 import { createDeliveryExtension } from '../hosts/pi-extension/consensflow-delivery.mjs'
 import { Bridge } from '../src/bridge.js'
 import { launchConfiguration } from '../src/channels.js'
 import { bookkeepingItems, HELD_ACTION, Watcher } from '../src/delivery-watch.js'
+import { Page } from '../src/page.js'
 import { Store } from '../src/store.js'
 import { leadIdentity, Tabs } from '../src/tabs.js'
 import { tempEnv } from './helpers.mjs'
 
 const FLOOR_MS = 20
 const NEVER_FLOOR_MS = 60_000
+const run = promisify(execFile)
 
 function waitFor(predicate, timeoutMs = 4_000) {
   const started = Date.now()
@@ -367,6 +372,170 @@ async function nativeLead(s, kind, admitted = true, ackTimeoutMs = 1_000, before
   return { ...state, state, close }
 }
 
+async function writeClaudeSession(env, session, exchanges) {
+  const directory = path.join(env.CLAUDE_CONFIG_DIR, 'projects')
+  await fs.mkdir(directory, { recursive: true })
+  const rows = []
+  for (const [index, exchange] of exchanges.entries()) {
+    if (exchange.user !== undefined) {
+      rows.push({
+        type: 'user',
+        uuid: exchange.userId ?? `${session}-user-${index}`,
+        sessionId: session,
+        message: { role: 'user', content: [{ type: 'text', text: exchange.user }] },
+      })
+    }
+    if (exchange.answer === undefined) continue
+    rows.push({
+      type: 'assistant',
+      uuid: `${session}-assistant-${index}`,
+      sessionId: session,
+      version: '2.1.263',
+      message: {
+        id: exchange.answerId ?? `${session}-answer-${index}`,
+        role: 'assistant',
+        content: [{ type: 'text', text: exchange.answer }],
+        stop_reason: 'end_turn',
+      },
+    })
+    rows.push({
+      type: 'system',
+      subtype: 'stop_hook_summary',
+      uuid: `${session}-hook-${index}`,
+      sessionId: session,
+      preventedContinuation: false,
+    })
+  }
+  await fs.writeFile(
+    path.join(directory, `${session}.jsonl`),
+    `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`,
+  )
+}
+
+async function nativeClaudePeerLead(s, ackTimeoutMs = 1_000) {
+  const session = '17499106-8778-48e1-a306-87bd186c9f7e'
+  s.setNow(Date.now())
+  const socket = path.join(s.temporary.root, 'claude-peer.sock')
+  const capture = path.join(s.temporary.root, 'claude-peer.body')
+  const child = spawn(
+    process.execPath,
+    [
+      '-e',
+      `const net = require('node:net')
+const fs = require('node:fs')
+const socketPath = process.argv[1]
+const capturePath = process.argv[2]
+try { fs.unlinkSync(socketPath) } catch {}
+const server = net.createServer((socket) => {
+  const chunks = []
+  socket.on('data', (chunk) => chunks.push(chunk))
+  socket.on('end', () => {
+    fs.appendFileSync(capturePath, Buffer.concat(chunks))
+    socket.end()
+  })
+})
+server.listen(socketPath)
+setInterval(() => {}, 1000)
+`,
+      socket,
+      capture,
+    ],
+    { stdio: 'ignore' },
+  )
+  const stop = () =>
+    new Promise((resolve) => {
+      if (child.exitCode !== null) {
+        resolve()
+        return
+      }
+      child.once('exit', resolve)
+      child.kill()
+    })
+  try {
+    await waitFor(async () => {
+      try {
+        await fs.stat(socket)
+        return true
+      } catch {
+        return false
+      }
+    })
+    const procStart = (
+      await run('/bin/ps', ['-p', String(child.pid), '-o', 'lstart='], {
+        env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' },
+      })
+    ).stdout.trim()
+    const sessions = path.join(s.temporary.env.CLAUDE_CONFIG_DIR, 'sessions')
+    await fs.mkdir(sessions, { recursive: true })
+    const native = {
+      pid: child.pid,
+      sessionId: session,
+      procStart,
+      messagingSocketPath: socket,
+      kind: 'interactive',
+      entrypoint: 'cli',
+      version: '2.1.265',
+      peerProtocol: 1,
+    }
+    await fs.writeFile(path.join(sessions, `${child.pid}.json`), JSON.stringify(native), {
+      mode: 0o600,
+    })
+    const keyName = createHash('sha256').update(socket).digest('hex')
+    await fs.writeFile(
+      path.join(sessions, `${child.pid}.${keyName}.key`),
+      JSON.stringify({ peerToken: '1'.repeat(32), procStart }),
+      { mode: 0o600 },
+    )
+    const channel = {
+      kind: 'claude-peer',
+      preservesDraft: 1,
+      configDir: s.temporary.env.CLAUDE_CONFIG_DIR,
+      ackTimeoutMs,
+    }
+    await s.store.mutate(s.workspace, 'test.native-claude-peer', async (io) => {
+      const tabs = await io.readTabs()
+      const tab = tabs.find((candidate) => candidate.id === s.tab.id)
+      tab.lead.harness = 'claude-code'
+      tab.lead.nativeSession = session
+      tab.lead.reserved = { channel }
+      await io.writeTabs(tabs)
+    })
+    s.leadSession = session
+    await writeClaudeSession(s.temporary.env, session, [
+      { user: 'lead question', answer: 'lead ready', answerId: 'lead-ready-claude-peer' },
+    ])
+    s.pipe.state.peerSend = async (request) =>
+      await new Promise((resolve, reject) => {
+        const connection = net.createConnection(request.socket, () => connection.end(request.body))
+        connection.once('error', reject)
+        connection.once('close', resolve)
+      }).then(() => ({ ok: true }))
+    return {
+      session,
+      channel,
+      native,
+      registry: path.join(sessions, `${child.pid}.json`),
+      async messages() {
+        let body = ''
+        try {
+          body = await fs.readFile(capture, 'utf8')
+        } catch {}
+        return body
+          .split('\n')
+          .filter((line) => line.length > 0)
+          .map((line) => JSON.parse(line))
+      },
+      async close() {
+        s.pipe.state.peerSend = null
+        await stop()
+      },
+    }
+  } catch (cause) {
+    await stop()
+    throw cause
+  }
+}
+
 function rustPair() {
   const nodeToRust = new PassThrough()
   const rustToNode = new PassThrough()
@@ -388,10 +557,13 @@ function rustPair() {
     snapshots: [],
     writes: [],
     claims: [],
+    peerSends: [],
     claim: null,
+    peerSend: null,
     beforeSnapshot: null,
     write: null,
   }
+  rust.on('pane.list', async () => ({ ok: true, panes: state.panes ?? [] }))
   rust.on('pane.snapshot', async (request) => {
     state.snapshots.push(request)
     await state.beforeSnapshot?.(request)
@@ -413,6 +585,16 @@ function rustPair() {
   rust.on('pane.claim_epoch', async (request) => {
     state.claims.push(request)
     if (state.claim !== null) return await state.claim(request)
+    return { ok: true }
+  })
+  rust.on('pane.claim_native_epoch', async (request) => {
+    state.claims.push({ ...request, nativeEditor: true })
+    if (state.claim !== null) return await state.claim(request)
+    return { ok: true }
+  })
+  rust.on('pane.send_peer', async (request) => {
+    state.peerSends.push(request)
+    if (state.peerSend !== null) return await state.peerSend(request)
     return { ok: true }
   })
   return {
@@ -634,7 +816,7 @@ test('auto writes only on ready, passes the epoch and requires a fresh settled t
 })
 
 for (const refusal of ['Stale', 'Draft']) {
-  test(`${refusal} keeps the automatic record pending with a reason`, async () => {
+  test(`${refusal} prose without zero-byte evidence never authorizes retry`, async () => {
     const s = await system()
     try {
       const worker = s.workers[0]
@@ -644,8 +826,11 @@ for (const refusal of ['Stale', 'Draft']) {
       s.pipe.state.write = async () => ({ ok: false, error: refusal })
       await s.watcher.start()
       const [delivery] = await s.deliveries()
-      assert.equal(delivery.state, 'pending')
+      assert.equal(delivery.state, 'uncertain')
       assert.match(delivery.reason, new RegExp(refusal, 'i'))
+      await s.watcher.reconcile('unknown-refusal-is-not-retryable')
+      assert.equal((await s.deliveries()).length, 1)
+      assert.equal(s.pipe.state.writes.length, 1)
     } finally {
       await s.close()
     }
@@ -824,7 +1009,7 @@ test('bridge EOF after write admission is uncertain and never automatically repl
   }
 })
 
-test('a confirmed zero-byte refusal retries without waiting for fresh lead settlement', async () => {
+test('a confirmed zero-byte refusal stays failed until explicit resend', async () => {
   const s = await system()
   try {
     const worker = s.workers[0]
@@ -837,13 +1022,58 @@ test('a confirmed zero-byte refusal retries without waiting for fresh lead settl
       return writes === 1 ? { ok: false, error: 'not admitted', bytesWritten: 0 } : { ok: true }
     }
     await s.watcher.start()
-    assert.equal((await s.deliveries())[0].state, 'failed')
+    let deliveries = await s.deliveries()
+    const failed = deliveries[0]
+    assert.equal(failed.state, 'failed')
 
-    await s.watcher.reconcile('retry-confirmed-failure')
-    const deliveries = await s.deliveries()
+    await s.watcher.reconcile('no-automatic-retry-after-confirmed-failure')
+    deliveries = await s.deliveries()
+    assert.equal(s.pipe.state.writes.length, 1)
+    assert.equal(deliveries.length, 1)
+    assert.deepEqual(deliveries[0], failed)
+
+    const retry = resend(failed, {
+      id: await s.store.allocateDeliveryId(),
+      now: Date.now(),
+      workspace: s.workspace,
+    })
+    await s.store.deliveryUpsert(s.workspace, retry)
+    await s.watcher.reconcile('explicit-resend-after-confirmed-failure')
+    deliveries = await s.deliveries()
     assert.equal(s.pipe.state.writes.length, 2)
     assert.equal(deliveries.length, 2)
-    assert.equal(deliveries[1].state, 'submitting')
+    assert.deepEqual(
+      deliveries.find((delivery) => delivery.id === failed.id),
+      failed,
+    )
+    assert.equal(deliveries.find((delivery) => delivery.state === 'submitting').resendOf, failed.id)
+  } finally {
+    await s.close()
+  }
+})
+
+test('a page refresh survives deletion before its held-result lookup', async () => {
+  const s = await system({ workerCount: 0 })
+  try {
+    const page = new Page({
+      store: s.store,
+      tabs: s.tabs,
+      agents: { names: () => [] },
+      env: s.temporary.env,
+    }).attachWatcher(s.watcher)
+    const readThreads = s.store.readThreads.bind(s.store)
+    s.store.readThreads = async (workspace) => {
+      const threads = await readThreads(workspace)
+      await s.tabs.beginDelete(s.tab.id, s.tab.lead.generation)
+      await s.tabs.remove(s.tab.id, s.tab.lead.generation)
+      return threads
+    }
+    const state = await page.state()
+    assert.equal(state.ok, true)
+    assert.deepEqual(state.held, [])
+    assert.deepEqual((await page.state()).tabs, [])
+    await assert.rejects(s.watcher.sendHeld(s.tab.id), /unknown tab/)
+    assert.equal(s.pipe.state.writes.length, 0)
   } finally {
     await s.close()
   }
@@ -1540,35 +1770,105 @@ test('OpenCode native delivery preserves the reservation authentication', async 
   }
 })
 
-test('each native submission carries one absolute expiry and becomes uncertain at it', async () => {
+test('native admission deadlines are enforced before send and never replayed', async () => {
   for (const kind of ['pi', 'opencode']) {
-    const s = await system({ watcherOptions: { receiptMs: 10_000 } })
+    const s = await system({ watcherOptions: { receiptMs: 60_000 } })
     let native
     try {
-      native = await nativeLead(s, kind, true, 10_000)
-      const worker = s.workers[0]
-      await writeCodexSession(s.temporary.env, worker.session, [
-        { user: 'work', answer: `${kind} expiring answer`, answerId: 'answer-1' },
+      native = await nativeLead(s, kind, true, 3_000)
+      s.pipe.state.draft = true
+      await writeCodexSession(s.temporary.env, s.workers[0].session, [
+        { user: 'work', answer: `${kind} held before admission`, answerId: 'answer-1' },
       ])
-
       await s.watcher.start()
 
       let [delivery] = await s.deliveries()
-      assert.equal(delivery.state, 'submitting')
-      assert.equal(delivery.expiresAt, delivery.submittedAt + 10_000)
-      if (kind === 'pi') assert.equal(native.state.received[0].expiresAt, delivery.expiresAt)
-
-      s.setNow(delivery.expiresAt)
-      await s.watcher.reconcile('native-expiry')
+      assert.equal(delivery.state, 'pending')
+      assert.equal(native.state.received.length, 0)
+      const expiresAt = Date.now() + 3_000
+      await s.store.mutate(s.workspace, 'test.persisted-admission-expiry', async (io) => {
+        const deliveries = await io.readDeliveries()
+        deliveries[delivery.id] = { ...deliveries[delivery.id], expiresAt }
+        await io.writeDeliveries(deliveries)
+      })
+      s.pipe.state.draft = false
+      s.setNow(expiresAt)
+      await s.watcher.reconcile('native-expiry-before-send')
 
       delivery = (await s.deliveries()).find((candidate) => candidate.id === delivery.id)
       assert.equal(delivery.state, 'uncertain')
-      assert.match(delivery.reason, /expir/i)
-      assert.equal(native.state.received.length, 1, 'an expired submission is never replayed')
+      assert.match(delivery.reason, /expired before a retry/i)
+      assert.equal(native.state.received.length, 0, 'an expired admission is never sent')
+      await s.watcher.reconcile('native-expiry-before-send-again')
+      assert.equal(native.state.received.length, 0, 'an uncertain record is never replayed')
     } finally {
       await s.close()
       await native?.close()
     }
+  }
+})
+
+test('native admission expiry does not end the receipt window for OpenCode', async () => {
+  const s = await system({ watcherOptions: { receiptMs: 60_000 } })
+  let native
+  try {
+    native = await nativeLead(s, 'opencode', true, 3_000)
+    await writeCodexSession(s.temporary.env, s.workers[0].session, [
+      { user: 'work', answer: 'opencode late receipt', answerId: 'answer-1' },
+    ])
+
+    await s.watcher.start()
+
+    let [delivery] = await s.deliveries()
+    assert.equal(delivery.state, 'submitting')
+    assert.equal(delivery.expiresAt, delivery.submittedAt + 3_000)
+    s.setNow(delivery.expiresAt + 1)
+    await writeOpenCodeSession(s.temporary.env, s.leadSession, [
+      { user: 'lead question', answer: 'lead ready', answerId: 'lead-ready-opencode' },
+      { user: envelope(delivery), answer: 'OpenCode receipt', answerId: 'lead-received' },
+    ])
+    await s.watcher.reconcile('opencode-receipt-after-admission-expiry')
+
+    delivery = (await s.deliveries()).find((candidate) => candidate.id === delivery.id)
+    assert.equal(delivery.state, 'accepted')
+    assert.ok(delivery.acceptedAt > delivery.expiresAt)
+    assert.equal(native.state.received.length, 1, 'an accepted native send is never replayed')
+  } finally {
+    await s.close()
+    await native?.close()
+  }
+})
+
+test('native receipt expiry remains uncertain and never replays after later evidence', async () => {
+  const s = await system({ watcherOptions: { receiptMs: 60_000 } })
+  let native
+  try {
+    native = await nativeLead(s, 'opencode', true, 3_000)
+    await writeCodexSession(s.temporary.env, s.workers[0].session, [
+      { user: 'work', answer: 'opencode missing receipt', answerId: 'answer-1' },
+    ])
+    await s.watcher.start()
+
+    let [delivery] = await s.deliveries()
+    s.setNow(delivery.submittedAt + 60_001)
+    await s.watcher.reconcile('opencode-receipt-expiry')
+
+    delivery = (await s.deliveries()).find((candidate) => candidate.id === delivery.id)
+    assert.equal(delivery.state, 'uncertain')
+    assert.equal(native.state.received.length, 1)
+    await writeOpenCodeSession(s.temporary.env, s.leadSession, [
+      { user: 'lead question', answer: 'lead ready', answerId: 'lead-ready-opencode' },
+      { user: envelope(delivery), answer: 'late OpenCode receipt', answerId: 'late-receipt' },
+    ])
+    await s.watcher.reconcile('opencode-receipt-after-uncertain')
+    assert.equal(
+      (await s.deliveries()).find((candidate) => candidate.id === delivery.id).state,
+      'uncertain',
+    )
+    assert.equal(native.state.received.length, 1, 'uncertain is never replayed')
+  } finally {
+    await s.close()
+    await native?.close()
   }
 })
 
@@ -1600,7 +1900,7 @@ test('a native response received at the absolute expiry is uncertain', async () 
   }
 })
 
-test('a native Stale claim at expiry is a replayable zero-byte failure', async () => {
+test('a native Stale claim at expiry remains a terminal zero-byte failure', async () => {
   const s = await system()
   let native
   try {
@@ -1622,19 +1922,15 @@ test('a native Stale claim at expiry is a replayable zero-byte failure', async (
     assert.equal(delivery.state, 'failed')
     assert.match(delivery.reason, /Stale|zero-byte/i)
     assert.ok(Number.isFinite(delivery.expiresAt))
-    const expiresAt = delivery.expiresAt
     assert.equal(native.state.received.length, 0)
 
     s.pipe.state.claim = () => ({ ok: true })
-    await s.watcher.reconcile('stale-retry')
+    await s.watcher.reconcile('no-automatic-stale-retry')
 
     const deliveries = await s.deliveries()
-    assert.equal(deliveries.length, 2)
-    assert.equal(deliveries.find((candidate) => candidate.id === delivery.id).state, 'failed')
-    const replay = deliveries.find((candidate) => candidate.id !== delivery.id)
-    assert.equal(replay.state, 'submitting')
-    assert.ok(replay.expiresAt > expiresAt)
-    assert.equal(native.state.received.length, 1)
+    assert.equal(deliveries.length, 1)
+    assert.deepEqual(deliveries[0], delivery)
+    assert.equal(native.state.received.length, 0)
   } finally {
     await s.close()
     await native?.close()
@@ -1746,7 +2042,7 @@ test('a watcher cf-read delivery reaches an already-idle real Pi extension as it
           inbox,
           ack,
           quarantine,
-          ackTimeoutMs: 200,
+          ackTimeoutMs: 3000,
           launchId: 'watcher-real-extension',
           settled: path.join(s.temporary.env.CONSENSFLOW_HOME, 'pi-settled'),
         },
@@ -1779,7 +2075,125 @@ test('a watcher cf-read delivery reaches an already-idle real Pi extension as it
   }
 })
 
-test('Pi and OpenCode negative acknowledgements fail with zero bytes and remain replayable', async () => {
+for (const race of ['editor', 'epoch']) {
+  test(`native Pi delivers after explicit resend following a newer ${race} race`, async () => {
+    const s = await system()
+    const configuration = await launchConfiguration('pi', {
+      launchId: 'native-editor-test',
+      workspace: s.workspace,
+    })
+    const channel = configuration.channel
+    const handlers = new Map()
+    const sent = []
+    let editor = 'unfinished question'
+    const context = {
+      mode: 'tui',
+      hasUI: true,
+      ui: { getEditorText: () => editor },
+      isIdle: () => true,
+      hasPendingMessages: () => false,
+      sessionManager: { getSessionId: () => s.leadSession, getLeafId: () => 'lead-ready-pi' },
+    }
+    createDeliveryExtension(
+      {
+        on: (event, handler) => handlers.set(event, handler),
+        sendUserMessage(text) {
+          sent.push(text)
+          queueMicrotask(() =>
+            handlers.get('message_start')({ message: { role: 'user', content: text } }, context),
+          )
+        },
+      },
+      channel,
+    )
+    await handlers.get('session_start')({}, context)
+    try {
+      s.setNow(Date.now())
+      await s.store.mutate(s.workspace, 'test.native-editor', async (io) => {
+        const tabs = await io.readTabs()
+        const tab = tabs.find((candidate) => candidate.id === s.tab.id)
+        tab.lead.harness = 'pi'
+        tab.lead.reserved = { channel }
+        await io.writeTabs(tabs)
+      })
+      await writePiSession(s.temporary.env, s.leadSession, [
+        { user: 'ask a worker', answer: 'worker dispatched', answerId: 'lead-ready-pi' },
+      ])
+      await handlers.get('agent_settled')({}, context)
+      await writeCodexSession(s.temporary.env, s.workers[0].session, [
+        {
+          user: 'question',
+          answer: 'The whole worker answer.\nIts final line.',
+          answerId: 'answer-1',
+        },
+      ])
+      s.pipe.state.draft = true // Human input stays latched in the terminal.
+      await s.watcher.start()
+      let [delivery] = await s.deliveries()
+      assert.equal(delivery.state, 'pending')
+      assert.equal(delivery.reason, 'draft open')
+      assert.equal(
+        delivery.expiresAt,
+        undefined,
+        'waiting on a draft does not start admission expiry',
+      )
+      assert.deepEqual(sent, [])
+      assert.equal(editor, 'unfinished question')
+
+      editor = '' // Pi cleared the submitted editor; no Resume replies call.
+      s.pipe.state.claim = () => {
+        editor = 'newer draft' // Input between the native probe and the actual send.
+        if (race === 'epoch') {
+          s.pipe.state.epoch += 1
+          return { ok: false, error: 'Stale' }
+        }
+        return { ok: true }
+      }
+      await s.watcher.reconcile('input-races-native-send')
+      ;[delivery] = await s.deliveries()
+      assert.equal(delivery.state, 'failed')
+      assert.equal(delivery.reason, race === 'editor' ? 'draft open' : 'Stale')
+      assert.deepEqual(sent, [])
+      assert.equal(editor, 'newer draft')
+      const failed = delivery
+      s.pipe.state.claim = null
+      await s.watcher.reconcile('no-automatic-retry-after-native-race')
+      let deliveries = await s.deliveries()
+      assert.equal(deliveries.length, 1)
+      assert.deepEqual(deliveries[0], failed)
+
+      editor = ''
+      const retry = resend(failed, {
+        id: await s.store.allocateDeliveryId(),
+        now: Date.now(),
+        workspace: s.workspace,
+      })
+      await s.store.deliveryUpsert(s.workspace, retry)
+      await s.watcher.reconcile('native-editor-cleared-explicit-resend')
+      deliveries = await s.deliveries()
+      const submitting = deliveries.find((record) => record.state === 'submitting')
+      assert.equal(submitting.resendOf, failed.id)
+      assert.deepEqual(sent, [envelope(submitting)])
+      assert.equal(s.pipe.state.claims.at(-1).nativeEditor, true)
+      assert.equal(s.pipe.state.draft, true, 'native delivery does not clear the terminal latch')
+      assert.deepEqual(s.pipe.state.writes, [], 'no terminal paste or Enter is sent')
+      await writePiSession(s.temporary.env, s.leadSession, [
+        { user: 'ask a worker', answer: 'worker dispatched', answerId: 'lead-ready-pi' },
+        { user: sent[0], answer: 'The whole result arrived.', answerId: 'lead-received' },
+      ])
+      await s.watcher.reconcile('native-receipt')
+      assert.equal(
+        (await s.deliveries()).find((record) => record.id === submitting.id).state,
+        'accepted',
+      )
+    } finally {
+      await handlers.get('session_shutdown')()
+      await s.close()
+    }
+  })
+}
+
+test('Pi and OpenCode zero-byte failures stay terminal until explicit resend', async () => {
   for (const kind of ['pi', 'opencode']) {
     const s = await system()
     let native
@@ -1795,15 +2209,36 @@ test('Pi and OpenCode negative acknowledgements fail with zero bytes and remain 
       assert.equal(deliveries.length, 1)
       assert.equal(deliveries[0].state, 'failed')
       assert.match(deliveries[0].reason, /not admitted|declined|refused/i)
+      const failed = deliveries[0]
 
       native.state.admitted = true
-      await s.watcher.reconcile('retry-after-negative-ack')
+      await s.watcher.reconcile('no-automatic-retry-after-negative-ack')
+      await s.watcher.reconcile('no-automatic-retry-after-negative-ack-again')
       deliveries = await s.deliveries()
-      assert.equal(deliveries.length, 2, 'affirmative non-admission is replayable')
-      assert.equal(deliveries.find((delivery) => delivery.state === 'failed').answerId, 'answer-1')
+      assert.equal(deliveries.length, 1, 'a failed attempt is not replanned on watcher ticks')
+      assert.deepEqual(deliveries[0], failed, 'watcher ticks leave the failed attempt immutable')
+
+      const retry = resend(failed, {
+        id: await s.store.allocateDeliveryId(),
+        now: Date.now(),
+        workspace: s.workspace,
+      })
+      await s.store.deliveryUpsert(s.workspace, retry)
+      await s.watcher.reconcile('explicit-resend-after-negative-ack')
+      deliveries = await s.deliveries()
+      assert.equal(deliveries.length, 2, 'explicit resend creates a new attempt')
+      assert.deepEqual(
+        deliveries.find((delivery) => delivery.id === failed.id),
+        failed,
+        'explicit resend does not mutate the failed attempt',
+      )
       assert.equal(
         deliveries.find((delivery) => delivery.state === 'submitting').answerId,
         'answer-1',
+      )
+      assert.equal(
+        deliveries.find((delivery) => delivery.state === 'submitting').resendOf,
+        failed.id,
       )
     } finally {
       await s.close()
@@ -1938,7 +2373,7 @@ test('submission dispatches through the reservation channel captured inside admi
               extensionPath: '/repo/hosts/pi-extension/consensflow-delivery.mjs',
               inbox,
               ack,
-              ackTimeoutMs: 1_000,
+              ackTimeoutMs: 5_000,
             },
           }
           await io.writeTabs(tabs)
@@ -2257,6 +2692,28 @@ test('results list only whole completed answers and scope them to the requesting
   }
 })
 
+test('whole worker results remain readable when the lead transcript is unavailable', async () => {
+  const s = await system()
+  try {
+    const worker = s.workers[0]
+    const whole = 'Complete worker answer.\n'.repeat(300)
+    await writeCodexSession(s.temporary.env, worker.session, [
+      { user: 'work', answer: whole, answerId: 'read-without-lead' },
+    ])
+    const leadFile = await writeCodexSession(s.temporary.env, s.leadSession, [])
+    await fs.writeFile(leadFile, '{invalid native record}\n')
+    const read = await s.watcher.readResult(s.tab.id, worker.name)
+    assert.equal(read.answer, whole)
+    assert.equal(read.manualRead, true)
+    assert.equal(read.snapshot.cursor, null)
+    assert.deepEqual(s.pipe.state.writes, [])
+    await s.watcher.reconcile()
+    assert.equal((await s.deliveries()).find((r) => r.id === read.id).state, 'submitting')
+  } finally {
+    await s.close()
+  }
+})
+
 test('manual result reading uses complete framed receipts without injecting into a busy lead (TEST-PANE-75)', async () => {
   const s = await system({
     watcherOptions: { partBudget: { default: { bytes: 1_024, lines: 30 } } },
@@ -2407,4 +2864,691 @@ test('native user text and Enter hints never authorize clearing an opaque termin
   } finally {
     await s.close()
   }
+})
+
+test('Claude peer Watcher preserves a draft, uses pane.send_peer, and waits for a full receipt', async () => {
+  const s = await system()
+  let native
+  try {
+    native = await nativeClaudePeerLead(s)
+    const worker = s.workers[0]
+    await writeCodexSession(s.temporary.env, worker.session, [
+      { user: 'work', answer: 'Claude peer result', answerId: 'answer-1' },
+    ])
+    s.pipe.state.draft = true
+
+    await s.watcher.start()
+
+    let [delivery] = await s.deliveries()
+    assert.equal(delivery.state, 'submitting', 'transport admission is not native acceptance')
+    assert.equal(s.pipe.state.peerSends.length, 1)
+    assert.deepEqual(s.pipe.state.writes, [], 'Claude peer delivery never pastes through the PTY')
+    assert.equal(s.pipe.state.draft, true, 'the native draft latch remains untouched')
+    const messages = await native.messages()
+    assert.equal(messages.length, 2)
+    assert.equal(messages[0].type, 'auth')
+    assert.equal(messages[1].type, 'user')
+    assert.equal(messages[1].session_id, native.session)
+    assert.equal(messages[1].message.content, envelope(delivery))
+
+    await writeClaudeSession(s.temporary.env, native.session, [
+      { user: 'lead question', answer: 'lead ready', answerId: 'lead-ready-claude-peer' },
+      {
+        user: messages[1].message.content,
+        userId: messages[1].uuid,
+        answer: 'received',
+        answerId: 'lead-received',
+      },
+    ])
+    await s.watcher.reconcile('claude-peer-receipt')
+    delivery = (await s.deliveries()).find((candidate) => candidate.id === delivery.id)
+    assert.equal(delivery.state, 'accepted')
+    assert.equal(s.pipe.state.peerSends.length, 1, 'a native receipt does not replay the send')
+  } finally {
+    await native?.close()
+    await s.close()
+  }
+})
+
+test('Claude peer receipts reject a wrong target, foreign session, incomplete turn, and altered answer', async () => {
+  const s = await system()
+  let native
+  try {
+    native = await nativeClaudePeerLead(s)
+    const worker = s.workers[0]
+    await writeCodexSession(s.temporary.env, worker.session, [
+      { user: 'wrong target', answer: 'not for this lead', answerId: 'answer-wrong-target' },
+      { user: 'work', answer: 'exact answer', answerId: 'answer-exact' },
+    ])
+    const row = (await s.threads())[worker.name]
+    const leadPane = s.tab.panes.find((pane) => pane.kind === 'lead')
+    const [wrongTarget] = plan({
+      row,
+      items: [
+        {
+          id: 'answer-wrong-target',
+          role: 'assistant',
+          complete: true,
+          text: 'not for this lead',
+        },
+      ],
+      policy: { mode: 'auto' },
+      pane: worker.pane,
+      kind: 'claude-code',
+      conversation: worker.name,
+      agent: row.agent,
+      target: {
+        leadId: s.leadId,
+        session: native.session,
+        tab: s.tab.id,
+        pane: leadPane.id,
+        generation: 2,
+      },
+      newId: () => 'd-900',
+      now: Date.now(),
+      workspace: s.workspace,
+      deliveries: [],
+    })
+    await s.store.deliveryUpsert(s.workspace, wrongTarget)
+    await s.watcher.start()
+
+    let deliveries = await s.deliveries()
+    const wrong = deliveries.find((candidate) => candidate.id === 'd-900')
+    let exact = deliveries.find((candidate) => candidate.answerId === 'answer-exact')
+    assert.equal(wrong.state, 'pending')
+    assert.match(wrong.reason, /previous lead generation/i)
+    assert.equal(exact.state, 'submitting')
+    assert.equal(s.pipe.state.peerSends.length, 1)
+    const sentMessage = (await native.messages())[1]
+    const sent = sentMessage.message.content
+    const lead = { user: 'lead question', answer: 'lead ready', answerId: 'lead-ready-claude-peer' }
+
+    const otherSession = '27499106-8778-48e1-a306-87bd186c9f7e'
+    await writeClaudeSession(s.temporary.env, otherSession, [
+      { user: sent, answer: 'foreign session', answerId: 'foreign-answer' },
+    ])
+    await s.watcher.reconcile('claude-peer-foreign-session')
+    exact = (await s.deliveries()).find((candidate) => candidate.answerId === 'answer-exact')
+    assert.equal(exact.state, 'submitting')
+
+    await writeClaudeSession(s.temporary.env, native.session, [
+      lead,
+      {
+        user: sent,
+        userId: 'other-native-uuid',
+        answer: 'wrong native UUID',
+        answerId: 'wrong-native-uuid',
+      },
+    ])
+    await s.watcher.reconcile('claude-peer-wrong-native-uuid')
+    exact = (await s.deliveries()).find((candidate) => candidate.answerId === 'answer-exact')
+    assert.equal(exact.state, 'submitting')
+
+    await writeClaudeSession(s.temporary.env, native.session, [
+      lead,
+      {
+        user: sent.replace(`\n[end of delivery ${exact.id}]\n`, '\n'),
+        userId: sentMessage.uuid,
+      },
+    ])
+    await s.watcher.reconcile('claude-peer-incomplete')
+    exact = (await s.deliveries()).find((candidate) => candidate.answerId === 'answer-exact')
+    assert.equal(exact.state, 'submitting')
+
+    await writeClaudeSession(s.temporary.env, native.session, [
+      lead,
+      {
+        user: envelope({ ...exact, answer: 'altered answer' }),
+        userId: sentMessage.uuid,
+        answer: 'wrong',
+        answerId: 'wrong-answer',
+      },
+    ])
+    await s.watcher.reconcile('claude-peer-altered-answer')
+    exact = (await s.deliveries()).find((candidate) => candidate.answerId === 'answer-exact')
+    assert.equal(exact.state, 'submitting')
+
+    await writeClaudeSession(s.temporary.env, native.session, [
+      lead,
+      {
+        user: sent,
+        userId: sentMessage.uuid,
+        answer: 'accepted exact answer',
+        answerId: 'accepted-answer',
+      },
+    ])
+    await s.watcher.reconcile('claude-peer-exact-receipt')
+    deliveries = await s.deliveries()
+    exact = deliveries.find((candidate) => candidate.answerId === 'answer-exact')
+    assert.equal(exact.state, 'accepted')
+    assert.equal(deliveries.find((candidate) => candidate.id === wrong.id).state, 'pending')
+    assert.equal(s.pipe.state.peerSends.length, 1)
+  } finally {
+    await native?.close()
+    await s.close()
+  }
+})
+
+test('multiple Claude peer deliveries serialize behind the prior native receipt', async () => {
+  const s = await system({ workerCount: 2 })
+  let native
+  try {
+    native = await nativeClaudePeerLead(s)
+    for (const worker of s.workers) {
+      await writeCodexSession(s.temporary.env, worker.session, [
+        { user: 'work', answer: `answer from ${worker.name}`, answerId: `${worker.name}-answer` },
+      ])
+    }
+    s.pipe.state.draft = true
+    await s.watcher.start()
+
+    let deliveries = await s.deliveries()
+    assert.equal(deliveries.length, 2)
+    assert.equal(deliveries.filter((record) => record.state === 'submitting').length, 1)
+    assert.equal(deliveries.filter((record) => record.state === 'pending').length, 1)
+    assert.equal(s.pipe.state.peerSends.length, 1)
+    assert.deepEqual(s.pipe.state.writes, [])
+    const first = deliveries.find((record) => record.state === 'submitting')
+    const firstMessage = (await native.messages())[1]
+    const firstEnvelope = firstMessage.message.content
+    await writeClaudeSession(s.temporary.env, native.session, [
+      { user: 'lead question', answer: 'lead ready', answerId: 'lead-ready-claude-peer' },
+      {
+        user: firstEnvelope,
+        userId: firstMessage.uuid,
+        answer: 'first accepted',
+        answerId: 'lead-first-receipt',
+      },
+    ])
+    await s.watcher.reconcile('claude-peer-frontier')
+
+    deliveries = await s.deliveries()
+    assert.equal(deliveries.find((record) => record.id === first.id).state, 'accepted')
+    assert.equal(deliveries.filter((record) => record.state === 'submitting').length, 1)
+    assert.equal(s.pipe.state.peerSends.length, 2)
+    assert.equal(s.pipe.state.draft, true)
+  } finally {
+    await native?.close()
+    await s.close()
+  }
+})
+
+test('large Claude peer results use the same peer route as inline results', async () => {
+  const s = await system({ watcherOptions: { inlineBudget: { 'claude-code': 10 } } })
+  let native
+  try {
+    native = await nativeClaudePeerLead(s)
+    await writeCodexSession(s.temporary.env, s.workers[0].session, [
+      { user: 'work', answer: 'large result '.repeat(200), answerId: 'answer-large' },
+    ])
+    s.pipe.state.draft = true
+    await s.watcher.start()
+
+    const [delivery] = await s.deliveries()
+    assert.equal(delivery.channel, 'cf-read')
+    assert.equal((await native.messages())[1].message.content, pointer(delivery))
+    assert.equal(s.pipe.state.peerSends.length, 1)
+    assert.deepEqual(s.pipe.state.writes, [])
+  } finally {
+    await native?.close()
+    await s.close()
+  }
+})
+
+test('Claude peer transport ambiguity becomes uncertain and is never replayed', async () => {
+  const s = await system()
+  let native
+  try {
+    native = await nativeClaudePeerLead(s)
+    s.pipe.state.peerSend = async () => {
+      throw Error('simulated peer timeout')
+    }
+    await writeCodexSession(s.temporary.env, s.workers[0].session, [
+      { user: 'work', answer: 'ambiguous result', answerId: 'answer-ambiguous' },
+    ])
+    await s.watcher.start()
+
+    let [delivery] = await s.deliveries()
+    assert.equal(delivery.state, 'uncertain')
+    assert.match(delivery.reason, /simulated peer timeout/i)
+    assert.equal(s.pipe.state.peerSends.length, 1)
+    assert.deepEqual(s.pipe.state.writes, [])
+    await s.watcher.reconcile('claude-peer-uncertain')
+    delivery = (await s.deliveries())[0]
+    assert.equal(delivery.state, 'uncertain')
+    assert.equal(s.pipe.state.peerSends.length, 1)
+  } finally {
+    await native?.close()
+    await s.close()
+  }
+})
+
+test('Claude peer stale-input-epoch zero-byte race reuses the pending record after expiry', async () => {
+  const s = await system({ watcherOptions: { receiptMs: 60_000 } })
+  let native
+  try {
+    native = await nativeClaudePeerLead(s, 3_000)
+    s.pipe.state.peerSend = async () => {
+      const [submitted] = await s.deliveries()
+      assert.equal(submitted.state, 'submitting')
+      s.setNow(submitted.expiresAt + 1)
+      return { ok: false, admitted: false, bytesWritten: 0, error: 'stale-input-epoch' }
+    }
+    await writeCodexSession(s.temporary.env, s.workers[0].session, [
+      { user: 'work', answer: 'stale epoch result', answerId: 'answer-stale-epoch' },
+    ])
+    await s.watcher.start()
+
+    let [delivery] = await s.deliveries()
+    const firstRequest = s.pipe.state.peerSends[0]
+    const firstMessage = JSON.parse(firstRequest.body.trimEnd().split('\n')[1])
+    assert.equal(delivery.state, 'pending')
+    assert.equal(delivery.id, 'd-1')
+    assert.equal(delivery.nativeSubmissionId, firstMessage.uuid)
+    assert.equal(delivery.expiresAt, null)
+    assert.equal(delivery.snapshot, null)
+    assert.equal(delivery.submittedAt, null)
+    assert.match(delivery.reason, /input changed/i)
+    assert.deepEqual(s.pipe.state.writes, [])
+
+    s.pipe.state.peerSend = null
+    await s.watcher.reconcile('retry-after-stale-input-epoch')
+    delivery = (await s.deliveries()).find((candidate) => candidate.id === delivery.id)
+    const secondRequest = s.pipe.state.peerSends[1]
+    const secondMessage = JSON.parse(secondRequest.body.trimEnd().split('\n')[1])
+    assert.equal(delivery.state, 'submitting')
+    assert.equal(delivery.id, 'd-1')
+    assert.equal(delivery.nativeSubmissionId, firstMessage.uuid)
+    assert.equal(secondMessage.uuid, firstMessage.uuid)
+    assert.equal(s.pipe.state.peerSends.length, 2)
+  } finally {
+    await native?.close()
+    await s.close()
+  }
+})
+
+test('Claude peer stale or draft prose without the exact zero-byte code stays failed', async () => {
+  const s = await system()
+  let native
+  try {
+    native = await nativeClaudePeerLead(s)
+    s.pipe.state.peerSend = async () => ({
+      ok: false,
+      admitted: false,
+      bytesWritten: 0,
+      error: 'stale input epoch; draft changed',
+    })
+    await writeCodexSession(s.temporary.env, s.workers[0].session, [
+      { user: 'work', answer: 'near miss result', answerId: 'answer-near-miss' },
+    ])
+    await s.watcher.start()
+
+    let [delivery] = await s.deliveries()
+    assert.equal(delivery.state, 'failed')
+    assert.equal(s.pipe.state.peerSends.length, 1)
+    await s.watcher.reconcile('no-retry-for-stale-prose')
+    delivery = (await s.deliveries())[0]
+    assert.equal(delivery.state, 'failed')
+    assert.equal(s.pipe.state.peerSends.length, 1)
+  } finally {
+    await native?.close()
+    await s.close()
+  }
+})
+
+test('Claude peer explicit resend after its deadline gets a fresh expiry and UUID', async () => {
+  const s = await system({ watcherOptions: { receiptMs: 60_000 } })
+  let native
+  try {
+    native = await nativeClaudePeerLead(s, 3_000)
+    let first = true
+    s.pipe.state.peerSend = async () => {
+      const [submitted] = await s.deliveries()
+      if (first) {
+        first = false
+        s.setNow(submitted.expiresAt + 1)
+        return { ok: false, admitted: false, bytesWritten: 0, error: 'not admitted' }
+      }
+      return { ok: true }
+    }
+    await writeCodexSession(s.temporary.env, s.workers[0].session, [
+      { user: 'work', answer: 'expired then resent', answerId: 'answer-expired-resend' },
+    ])
+    await s.watcher.start()
+
+    let [failed] = await s.deliveries()
+    assert.equal(failed.state, 'failed')
+    const originalId = failed.id
+    const originalExpiry = failed.expiresAt
+    const originalNativeId = failed.nativeSubmissionId
+    const retry = resend(failed, {
+      id: await s.store.allocateDeliveryId(),
+      now: originalExpiry + 1,
+      workspace: s.workspace,
+    })
+    await s.store.deliveryUpsert(s.workspace, retry)
+    await s.watcher.reconcile('explicit-resend-after-expiry')
+
+    const deliveries = await s.deliveries()
+    failed = deliveries.find((candidate) => candidate.id === originalId)
+    const fresh = deliveries.find((candidate) => candidate.id === retry.id)
+    const firstMessage = JSON.parse(s.pipe.state.peerSends[0].body.trimEnd().split('\n')[1])
+    const secondMessage = JSON.parse(s.pipe.state.peerSends[1].body.trimEnd().split('\n')[1])
+    assert.equal(failed.state, 'failed')
+    assert.equal(failed.expiresAt, originalExpiry)
+    assert.equal(failed.nativeSubmissionId, originalNativeId)
+    assert.equal(fresh.state, 'submitting')
+    assert.notEqual(fresh.id, originalId)
+    assert.ok(fresh.expiresAt > originalExpiry)
+    assert.notEqual(fresh.nativeSubmissionId, originalNativeId)
+    assert.equal(firstMessage.uuid, originalNativeId)
+    assert.equal(secondMessage.uuid, fresh.nativeSubmissionId)
+    assert.equal(s.pipe.state.writes.length, 0)
+  } finally {
+    await native?.close()
+    await s.close()
+  }
+})
+
+test('Claude peer admission expiry is uncertain before send and never replays', async () => {
+  const s = await system({ watcherOptions: { receiptMs: 60_000 } })
+  let native
+  try {
+    native = await nativeClaudePeerLead(s, 3_000)
+    const worker = s.workers[0]
+    await writeCodexSession(s.temporary.env, worker.session, [
+      { user: 'work', answer: 'expired Claude peer result', answerId: 'answer-expired' },
+    ])
+    const row = (await s.threads())[worker.name]
+    const leadPane = s.tab.panes.find((pane) => pane.kind === 'lead')
+    const expiresAt = Date.now() + 3_000
+    const [planned] = plan({
+      row,
+      items: [
+        {
+          id: 'answer-expired',
+          role: 'assistant',
+          complete: true,
+          text: 'expired Claude peer result',
+        },
+      ],
+      policy: { mode: 'auto' },
+      pane: worker.pane,
+      kind: 'claude-code',
+      conversation: worker.name,
+      agent: row.agent,
+      target: {
+        leadId: s.leadId,
+        session: native.session,
+        tab: s.tab.id,
+        pane: leadPane.id,
+        generation: 1,
+      },
+      newId: () => 'd-901',
+      now: Date.now(),
+      workspace: s.workspace,
+      deliveries: [],
+    })
+    await s.store.deliveryUpsert(s.workspace, { ...planned, expiresAt })
+    s.setNow(expiresAt)
+    await s.watcher.start()
+
+    const [delivery] = await s.deliveries()
+    assert.equal(delivery.state, 'uncertain')
+    assert.match(delivery.reason, /expired before a retry/i)
+    assert.equal(s.pipe.state.peerSends.length, 0)
+    await s.watcher.reconcile('claude-peer-expiry-before-send-again')
+    assert.equal(s.pipe.state.peerSends.length, 0)
+  } finally {
+    await native?.close()
+    await s.close()
+  }
+})
+
+for (const race of [false, true]) {
+  test(`native queue delivery preserves the composer and requires a receipt; epoch race=${race} (TEST-PANE-109)`, async () => {
+    const s = await system()
+    const native = await nativeLead(s, 'opencode')
+    try {
+      await s.store.mutate(s.workspace, 'test.native-queue', async (io) => {
+        const tabs = await io.readTabs()
+        tabs.find((t) => t.id === s.tab.id).lead.reserved.channel.preservesDraft = 1
+        await io.writeTabs(tabs)
+      })
+      await writeCodexSession(s.temporary.env, s.workers[0].session, [
+        { user: 'work', answer: 'Complete result\nincluding final line.', answerId: 'answer-1' },
+      ])
+      s.pipe.state.draft = true
+      if (race) s.pipe.state.claim = () => ({ ok: false, error: 'Stale' })
+      await s.watcher.start()
+      const [delivery] = await s.deliveries()
+      assert.equal(delivery.state, race ? 'failed' : 'submitting')
+      assert.equal(s.pipe.state.draft, true)
+      assert.deepEqual(s.pipe.state.writes, [])
+      assert.equal(s.pipe.state.claims.at(-1).nativeEditor, true)
+      assert.equal(native.state.received.length, race ? 0 : 1)
+      if (!race) {
+        assert.equal(native.state.received[0].parts[0].text, envelope(delivery))
+        await writeOpenCodeSession(s.temporary.env, s.leadSession, [
+          { user: 'lead question', answer: 'lead ready', answerId: 'lead-ready-opencode' },
+          { user: envelope(delivery), answer: 'received', answerId: 'lead-received' },
+        ])
+        await s.watcher.reconcile('native-receipt')
+        assert.equal((await s.deliveries())[0].state, 'accepted')
+      }
+    } finally {
+      await native.close()
+      await s.close()
+    }
+  })
+}
+
+test('a retired Claude reservation falls back to the terminal channel (TEST-PANE-121)', async () => {
+  const s = await system()
+  try {
+    const nativeSession = '11111111-2222-4333-8444-555555555555'
+    await s.store.mutate(s.workspace, 'test.retired-claude-channel', async (io) => {
+      const tabs = await io.readTabs()
+      const tab = tabs.find((t) => t.id === s.tab.id)
+      tab.lead.harness = 'claude-code'
+      tab.lead.nativeSession = nativeSession
+      tab.lead.reserved = {
+        channel: { kind: 'claude-channel', launchId: 'stale-claude', ackTimeoutMs: 3_000 },
+      }
+      await io.writeTabs(tabs)
+    })
+    await writeClaudeSession(s.temporary.env, nativeSession, [
+      { user: 'lead question', answer: 'lead ready', answerId: 'lead-ready-claude' },
+    ])
+    await writeCodexSession(s.temporary.env, s.workers[0].session, [
+      { user: 'work', answer: 'retired channel answer', answerId: 'answer-1' },
+    ])
+
+    await s.watcher.start()
+
+    const [delivery] = await s.deliveries()
+    assert.equal(delivery.state, 'submitting')
+    assert.equal(delivery.channel, 'pty-inline')
+    assert.equal(s.pipe.state.writes.length, 1)
+    assert.match(s.pipe.state.writes[0].body, /retired channel answer/)
+    assert.deepEqual(s.pipe.state.claims, [], 'no native epoch is claimed')
+  } finally {
+    await s.close()
+  }
+})
+
+test('saved whole results survive native history loss and lead resume within their session', async () => {
+  const s = await system()
+  try {
+    const worker = s.workers[0]
+    const whole = 'Saved complete answer.\n'.repeat(200)
+    const file = await writeCodexSession(s.temporary.env, worker.session, [
+      { user: 'work', answer: whole, answerId: 'saved-whole' },
+    ])
+    await s.watcher.readResult(s.tab.id, worker.name)
+    await fs.rm(file)
+    await s.tabs.suspend(s.tab.id)
+    await s.tabs.resume(s.tab.id)
+    const listed = await s.watcher.results(s.tab.id)
+    assert.equal(listed[0].results[0]?.id, 'saved-whole')
+    const read = await s.watcher.readResult(s.tab.id, worker.name, 'saved-whole')
+    assert.equal(read.answer, whole)
+    assert.deepEqual(s.pipe.state.writes, [])
+    const other = await s.tabs.create(s.tab.directory, 'codex')
+    await assert.rejects(s.watcher.readResult(other.id, worker.name), /conversation|session/)
+  } finally {
+    await s.close()
+  }
+})
+
+test('PM companions never receive automatic worker results even if old records point at them', async () => {
+  const s = await system()
+  try {
+    await s.store.mutate(s.workspace, 'test.pm-role', async (io) => {
+      const rows = await io.readTabs()
+      rows.find((row) => row.id === s.tab.id).role = 'pm'
+      await io.writeTabs(rows)
+    })
+    await writeCodexSession(s.temporary.env, s.workers[0].session, [
+      { user: 'work', answer: 'must not push into PM', answerId: 'worker-complete' },
+    ])
+    await s.watcher.start()
+    await s.watcher.reconcile('pm-no-push')
+    assert.equal(s.pipe.state.writes.length, 0)
+    assert.equal((await s.deliveries()).length, 0)
+  } finally {
+    await s.close()
+  }
+})
+
+test('Claude clear follows the exact live lead pane and delivers the full result once', async () => {
+  const s = await system()
+  let native
+  try {
+    native = await nativeClaudePeerLead(s)
+    const current = '27499106-8778-48e1-a306-87bd186c9f7e'
+    const group = Number(
+      (await run('/bin/ps', ['-p', String(native.native.pid), '-o', 'pgid='])).stdout.trim(),
+    )
+    const tab = await s.tabs.get(s.tab.id)
+    const pane = tab.panes.find((p) => p.kind === 'lead')
+    s.pipe.state.panes = [
+      { id: pane.id, generation: tab.lead.generation, alive: true, processGroupId: group },
+    ]
+    await fs.writeFile(native.registry, JSON.stringify({ ...native.native, sessionId: current }))
+    await writeClaudeSession(s.temporary.env, current, [
+      { user: 'new conversation', answer: 'ready', answerId: 'ready-new' },
+    ])
+    await writeCodexSession(s.temporary.env, s.workers[0].session, [
+      { user: 'work', answer: 'Entire answer after clear.', answerId: 'clear-answer' },
+    ])
+    await s.watcher.start()
+    const [record] = await s.deliveries()
+    assert.equal(record.target.session, current)
+    assert.equal(record.state, 'submitting')
+    const messages = await native.messages()
+    assert.equal(messages[1].session_id, current)
+    assert.equal(messages[1].message.content, envelope(record))
+    await s.watcher.reconcile()
+    assert.equal(s.pipe.state.peerSends.length, 1)
+    assert.deepEqual(s.pipe.state.writes, [])
+  } finally {
+    await native?.close()
+    await s.close()
+  }
+})
+
+test('Claude pane tracking ignores another process group', async () => {
+  const s = await system()
+  let native
+  try {
+    native = await nativeClaudePeerLead(s)
+    const tab = await s.tabs.get(s.tab.id)
+    s.pipe.state.panes = [
+      {
+        id: tab.panes.find((p) => p.kind === 'lead').id,
+        generation: tab.lead.generation,
+        alive: true,
+        processGroupId: 2147483647,
+      },
+    ]
+    await fs.writeFile(
+      native.registry,
+      JSON.stringify({ ...native.native, sessionId: '27499106-8778-48e1-a306-87bd186c9f7e' }),
+    )
+    await s.watcher.start()
+    assert.equal((await s.tabs.get(s.tab.id)).lead.nativeSession, native.session)
+    assert.equal(s.pipe.state.peerSends.length, 0)
+  } finally {
+    await native?.close()
+    await s.close()
+  }
+})
+
+test('Claude clear moves an already pending reply without duplicating it', async () => {
+  const s = await system()
+  let native
+  try {
+    native = await nativeClaudePeerLead(s)
+    const current = '27499106-8778-48e1-a306-87bd186c9f7e'
+    const group = Number(
+      (await run('/bin/ps', ['-p', String(native.native.pid), '-o', 'pgid='])).stdout.trim(),
+    )
+    const tab = await s.tabs.get(s.tab.id)
+    const pane = tab.panes.find((p) => p.kind === 'lead')
+    s.pipe.state.panes = [
+      { id: pane.id, generation: tab.lead.generation, alive: true, processGroupId: group },
+    ]
+    await writeClaudeSession(s.temporary.env, native.session, [{ user: 'still working' }])
+    await writeCodexSession(s.temporary.env, s.workers[0].session, [
+      { user: 'work', answer: 'Entire answer after clear.', answerId: 'clear-answer' },
+    ])
+    await s.watcher.start()
+    const [pending] = await s.deliveries()
+    assert.equal(pending.state, 'pending')
+    await fs.writeFile(native.registry, JSON.stringify({ ...native.native, sessionId: current }))
+    await writeClaudeSession(s.temporary.env, current, [
+      { user: 'new conversation', answer: 'ready', answerId: 'ready-new' },
+    ])
+    await writeCodexSession(s.temporary.env, s.workers[0].session, [
+      { user: 'work', answer: 'Entire answer after clear.', answerId: 'clear-answer' },
+    ])
+    await s.watcher.reconcile()
+    const [record] = await s.deliveries()
+    assert.equal(record.id, pending.id)
+    assert.equal(record.target.session, current)
+    assert.equal(record.state, 'submitting')
+    const messages = await native.messages()
+    assert.equal(messages[1].session_id, current)
+    assert.equal(messages[1].message.content, envelope(record))
+    await s.watcher.reconcile()
+    assert.equal(s.pipe.state.peerSends.length, 1)
+    assert.deepEqual(s.pipe.state.writes, [])
+  } finally {
+    await native?.close()
+    await s.close()
+  }
+})
+
+test('Claude missing inbox holds the zero-byte result and delivers once registration returns', async () => {
+  const s = await system()
+  let native
+  try {
+    native = await nativeClaudePeerLead(s)
+    await fs.rm(native.registry)
+    await writeCodexSession(s.temporary.env, s.workers[0].session, [
+      { user: 'work', answer: 'Held complete reply.', answerId: 'held-inbox' },
+    ])
+    await s.watcher.start()
+    const [pending] = await s.deliveries()
+    assert.equal(pending.state, 'pending')
+    assert.equal(s.pipe.state.peerSends.length, 0)
+    await fs.writeFile(native.registry, JSON.stringify(native.native), { mode: 0o600 })
+    await s.watcher.reconcile()
+    const [sent] = await s.deliveries()
+    assert.equal(sent.id, pending.id)
+    assert.equal(sent.state, 'submitting')
+    await s.watcher.reconcile()
+    assert.equal(s.pipe.state.peerSends.length, 1)
+  } finally { await native?.close(); await s.close() }
 })

@@ -42,22 +42,39 @@ export class Menus {
     this.conversationDialog = document.querySelector('#new-conversation-dialog')
     this.agentDialog = document.querySelector('#agent-dialog')
     this.renameDialog = document.querySelector('#rename-session-dialog')
+    this.deleteDialog = document.querySelector('#delete-session-dialog')
     this.directory = document.querySelector('#conversation-directory')
     this.leadHarness = document.querySelector('#lead-harness')
     this.agentPicker = document.querySelector('#agent-picker')
     this.agentTask = document.querySelector('#agent-task')
     this.renameInput = document.querySelector('#session-name')
+    this.deleteName = document.querySelector('#delete-session-name')
+    this.deleteCancel = this.deleteDialog.querySelector('button[value="cancel"]')
+    this.deleteConfirm = this.deleteDialog.querySelector('button[type="submit"]')
     this.pendingDirectory = null
     this.pendingTab = null
     this.pendingRenameTab = null
+    this.pendingDelete = null
+    this.deletePending = false
 
     document.addEventListener('pointerdown', (event) => {
       if (!this.layer.contains(event.target)) this.closeMenu()
     })
     window.addEventListener('blur', () => this.closeMenu())
 
-    for (const dialog of [this.conversationDialog, this.agentDialog, this.renameDialog]) {
-      dialog.querySelector('button[value="cancel"]').addEventListener('click', () => dialog.close())
+    for (const dialog of [
+      this.conversationDialog,
+      this.agentDialog,
+      this.renameDialog,
+      this.deleteDialog,
+    ]) {
+      dialog.querySelector('button[value="cancel"]').addEventListener('click', (event) => {
+        if (dialog === this.deleteDialog && this.deletePending) {
+          event.preventDefault()
+          return
+        }
+        dialog.close()
+      })
     }
     this.conversationDialog
       .querySelector('form')
@@ -68,10 +85,42 @@ export class Menus {
     this.renameDialog
       .querySelector('form')
       .addEventListener('submit', (event) => this.submitRename(event))
+    this.deleteDialog.addEventListener('cancel', (event) => {
+      if (this.deletePending) {
+        event.preventDefault()
+        return
+      }
+      this.pendingDelete = null
+    })
+    this.deleteDialog.addEventListener('close', () => {
+      if (!this.deletePending) this.pendingDelete = null
+    })
+    this.deleteDialog
+      .querySelector('form')
+      .addEventListener('submit', (event) => this.submitDelete(event))
+  }
+
+  newPm(tab, anchor) {
+    const menu = document.createElement('div')
+    menu.setAttribute('role', 'menu')
+    menu.setAttribute('aria-label', 'Project manager harness')
+    for (const harness of ['claude-code', 'codex', 'opencode', 'pi']) {
+      menu.append(
+        menuButton(harness, async () => {
+          this.closeMenu()
+          await this.run('open_pm', { tab: tab.id, harness })
+        }),
+      )
+    }
+    this.place(menu, anchor)
   }
 
   closeMenu() {
     this.layer.replaceChildren()
+  }
+
+  async closePane(pane) {
+    await this.run('close_pane', { id: pane.id, generation: pane.generation })
   }
 
   place(menu, anchorOrEvent) {
@@ -290,6 +339,30 @@ export class Menus {
     this.renameInput.select()
   }
 
+  deletePane(pane) {
+    if (this.deletePending) return
+    this.pendingDelete = { id: pane.id, generation: pane.generation, kind: 'pane' }
+    this.deleteName.textContent = pane.name ?? pane.id
+    this.deleteDialog.querySelector('h2').textContent = 'Delete pane'
+    this.deleteDialog.querySelector('#delete-session-description').textContent =
+      'This stops this pane and permanently removes it from this session. Resume will not reopen it. Project files and native history remain.'
+    this.deleteConfirm.textContent = 'Delete pane'
+    this.deleteDialog.showModal()
+    this.deleteConfirm.focus()
+  }
+
+  deleteSession(tab) {
+    if (this.deletePending) return
+    this.deleteDialog.querySelector('h2').textContent = 'Delete session'
+    this.deleteDialog.querySelector('#delete-session-description').textContent =
+      'This stops all its panes and removes it from the app. Project files and native histories remain.'
+    this.deleteConfirm.textContent = 'Delete session'
+    this.pendingDelete = { id: tab.id, generation: tab.lead.generation }
+    this.deleteName.textContent = sessionName(tab)
+    this.deleteDialog.showModal()
+    this.deleteConfirm.focus()
+  }
+
   async submitConversation(event) {
     event.preventDefault()
     if (this.pendingDirectory === null) return
@@ -319,5 +392,27 @@ export class Menus {
     this.pendingRenameTab = null
     this.renameDialog.close()
     await this.run('rename_session', { tab: tab.id, name })
+  }
+
+  async submitDelete(event) {
+    event.preventDefault()
+    if (this.pendingDelete === null || this.deletePending) return
+    const target = this.pendingDelete
+    this.deletePending = true
+    this.deleteCancel.disabled = true
+    this.deleteConfirm.disabled = true
+    this.deleteConfirm.textContent = 'Deleting…'
+    const result = await this.run(target.kind === 'pane' ? 'delete_pane' : 'tab_delete', {
+      [target.kind === 'pane' ? 'id' : 'tab']: target.id,
+      generation: target.generation,
+    })
+    this.deletePending = false
+    this.deleteCancel.disabled = false
+    this.deleteConfirm.disabled = false
+    this.deleteConfirm.textContent = target.kind === 'pane' ? 'Delete pane' : 'Delete session'
+    if (result !== null && result?.ok !== false) {
+      this.pendingDelete = null
+      this.deleteDialog.close()
+    }
   }
 }

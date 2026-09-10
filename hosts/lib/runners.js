@@ -526,9 +526,9 @@ function interactiveGuards(kind) {
  * open, so a conversation ConsensFlow began can be handed straight to the
  * real agent window with its whole history. That is `codex resume`, not
  * `codex exec resume`: the first is the interface, the second is the
- * one-shot. `seed` is an optional first message the window opens with — every
- * TUI takes one, so a follow-up can travel INSIDE the hand-over instead of
- * needing a run before it.
+ * one-shot. `seed` is an optional first message where the TUI accepts one.
+ * OpenCode tasks go through its native API after this window starts because
+ * its `--session` launch ignores `--prompt`.
  *
  * Returns null when the harness has no interactive resume, or when there is
  * no session id yet.
@@ -551,7 +551,6 @@ export function interactiveResume(agent, sessionId, seed) {
     }
     case "opencode": {
       const args = ["--session", sessionId];
-      if (seed) args.push("--prompt", seed);
       return { command: "opencode", args, env: { ...CHILD_ENV }, dropEnv: [] };
     }
     case "kimi": {
@@ -569,12 +568,10 @@ export function interactiveResume(agent, sessionId, seed) {
  * The harness's OWN window on a conversation that does not exist yet.
  *
  * Two harnesses take the id from us — claude (`--session-id`, a uuid the
- * caller mints) and pi (`--session-id` creates if missing). opencode mints
- * its own after launch, so its invocation carries no id and the caller
- * discovers it from the store. codex has no way to pre-set an interactive
- * session id at all: this returns null, and the caller streams the first
- * turn through the one-shot machinery (which captures the thread id) and
- * resumes the window on it.
+ * caller mints) and pi (`--session-id` creates if missing). OpenCode opens
+ * the empty session its native API created; the controller submits the task
+ * after the TUI server starts. Codex opens on a positional seed and its native
+ * metadata identifies the new thread afterward.
  *
  * The seed is the first message — the packet, on turn one. The window gets
  * the same model and effort the one-shot would send, and the same guards.
@@ -599,8 +596,9 @@ export function interactiveStart(agent, sessionId, seed) {
     }
     case "opencode": {
       const args = [];
+      if (sessionId) args.push("--session", sessionId);
       if (agent.model) args.push("--model", agent.model);
-      if (seed) args.push("--prompt", seed);
+      if (seed && !sessionId) args.push("--prompt", seed);
       return { command: "opencode", args, env: { ...CHILD_ENV }, dropEnv: [] };
     }
     case "codex": {

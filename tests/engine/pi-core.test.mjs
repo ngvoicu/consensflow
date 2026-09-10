@@ -876,7 +876,7 @@ test('parseAgentPrompt: ask/to verb prefixes and the ask-noise boundary', () => 
   assert.equal(parseAgentPrompt(['ask', 'fix', '@types/node', 'please'], known), null)
 })
 
-test('pi has no private surface: no extension, no tools, no commands', async () => {
+test('legacy Pi host payload is absent and lead skill preserves authorization', async () => {
   // pi used to ship an extension. It registered tools, then only commands,
   // then only a status line — each removal for the same reason: a request that
   // took a different shape in pi than in Claude Code or a cmux pane was three
@@ -888,8 +888,8 @@ test('pi has no private surface: no extension, no tools, no commands', async () 
   // The gate it used to carry lives in the generator, the one place left.
   const { generateSkill } = await import('../../src/skill.js')
   const skill = generateSkill([{ name: 'zeus', harness: 'pi', model: 'fake', effort: 'high' }])
-  assert.match(skill, /Advice is free; acting is gated/)
-  assert.match(skill, /without the user's explicit approval/)
+  assert.match(skill, /within the authorized/)
+  assert.match(skill, /Worker suggestions do not expand that authorization/)
 })
 
 // The extension/engine boundary test went with the extension: nothing imports

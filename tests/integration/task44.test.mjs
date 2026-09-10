@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import test from 'node:test'
 import { answers } from '../../hosts/lib/completion.js'
 import { startIntegration } from './harness.mjs'
@@ -358,6 +359,123 @@ test('a replaced native lead session suspends its pending delivery', async () =>
       state.deliveries.find((delivery) => delivery.conversation === answer.conversation).state,
       'accepted',
     )
+  } finally {
+    await app.close()
+  }
+})
+
+test('TEST-PANE-83: detected user-local harness starts in a worker without being on PATH', async () => {
+  const app = await startIntegration({ fakeEnv: { PATH: '/usr/bin:/bin' } })
+  try {
+    const local = join(app.env.HOME, '.local', 'bin')
+    mkdirSync(local, { recursive: true })
+    renameSync(join(app.root, 'fake-bin', 'claude'), join(local, 'claude'))
+    const opened = await app.openTab()
+    const run = await app.runCli(
+      ['run', '@worker', 'local harness launch', '--new', '--json'],
+      opened.leadEnv,
+    )
+    assert.equal(run.code, 0, run.stderr)
+    const { conversation, pane } = JSON.parse(run.stdout)
+    const output = () =>
+      app.rustFrames
+        .filter((f) => f.op === 'pane.output' && f.body.id === pane.id)
+        .map((f) => Buffer.from(f.body.bytes).toString('utf8'))
+        .join('')
+    await app.waitFor(
+      () =>
+        output().includes('could not be started') ||
+        app
+          .transcript(app.threads()[conversation]?.sessionId)
+          .includes('worker completed from a real PTY child'),
+    )
+    assert.ok(
+      app
+        .transcript(app.threads()[conversation]?.sessionId)
+        .includes('worker completed from a real PTY child'),
+      output(),
+    )
+  } finally {
+    await app.close()
+  }
+})
+
+test('TEST-PANE-83: failed worker startup remains visible with its error after the controller exits', async () => {
+  const app = await startIntegration()
+  try {
+    const opened = await app.openTab()
+    await app.waitFor(() =>
+      app.processes().some((row) => row.sessionId === opened.tab.lead.nativeSession),
+    )
+    writeFileSync(
+      join(app.root, 'fake-bin', 'claude'),
+      '#!/bin/sh\necho native-startup-error >&2\nexit 7\n',
+    )
+    const run = await app.runCli(
+      ['run', '@worker', 'missing harness', '--new', '--json'],
+      opened.leadEnv,
+    )
+    assert.equal(run.code, 0, run.stderr)
+    const { pane, conversation } = JSON.parse(run.stdout)
+    await app.waitFor(() =>
+      app.rustFrames.some((f) => f.op === 'pane.exit' && f.body.id === pane.id),
+    )
+    await app.waitFor(() => app.threads()[conversation]?.reserved === undefined)
+    const state = await app.requestNode('state.list', {})
+    const failed = state.tabs[0].panes.find((p) => p.id === pane.id)
+    assert.ok(failed, 'a failed worker must remain inspectable')
+    assert.equal(failed.alive, false)
+    assert.match(failed.failure.message, /claude.*exited with code 7/)
+    assert.equal(app.threads()[conversation].reserved, undefined)
+    assert.equal(
+      (await app.requestNode('tab.delete', { tab: opened.tab.id, generation: 1 })).outcome,
+      'deleted',
+    )
+  } finally {
+    await app.close()
+  }
+})
+
+test('TEST-PANE-83: a missing worker harness refuses before any reservation or pane is created', async () => {
+  const app = await startIntegration()
+  try {
+    const opened = await app.openTab()
+    await app.waitFor(() =>
+      app.processes().some((row) => row.sessionId === opened.tab.lead.nativeSession),
+    )
+    unlinkSync(join(app.root, 'fake-bin', 'claude'))
+    const run = await app.runCli(
+      ['run', '@worker', 'never launch', '--new', '--json'],
+      opened.leadEnv,
+    )
+    assert.notEqual(run.code, 0, run.stdout)
+    assert.match(run.stderr, /not installed/)
+    assert.deepEqual(app.threads(), {})
+    assert.equal(app.openFrames.length, 1)
+  } finally {
+    await app.close()
+  }
+})
+
+test('TEST-PANE-83: continuing a live worker needs no second executable lookup', async () => {
+  const app = await startIntegration()
+  try {
+    const opened = await app.openTab()
+    const first = await app.runCli(
+      ['run', '@worker', 'CF_HOLD existing worker', '--new', '--json'],
+      opened.leadEnv,
+    )
+    assert.equal(first.code, 0, first.stderr)
+    const { conversation } = JSON.parse(first.stdout)
+    await app.waitFor(() => app.processes().length === 2)
+    unlinkSync(join(app.root, 'fake-bin', 'claude'))
+    const next = await app.runCli(
+      ['run', '@worker', 'continue the existing worker', '--session', conversation, '--json'],
+      opened.leadEnv,
+    )
+    assert.equal(next.code, 0, next.stderr)
+    assert.equal(JSON.parse(next.stdout).outcome, 'said')
+    assert.equal(app.openFrames.length, 2)
   } finally {
     await app.close()
   }

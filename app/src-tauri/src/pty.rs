@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -12,6 +12,12 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 pub struct PaneKey {
     pub id: String,
     pub generation: u64,
+}
+
+pub struct PeerSendError {
+    pub uncertain: bool,
+    pub code: &'static str,
+    pub reason: String,
 }
 
 impl PaneKey {
@@ -68,6 +74,8 @@ pub(crate) trait PaneInputWriter {
 #[derive(Debug)]
 pub enum PaneError {
     EmptyArgv,
+    Updating,
+    UpdateBlocked,
     ProgramNotAbsolute(PathBuf),
     AlreadyOpen(PaneKey),
     NotFound(PaneKey),
@@ -88,6 +96,14 @@ impl fmt::Display for PaneError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EmptyArgv => write!(formatter, "argv must contain an absolute program path"),
+            Self::Updating => write!(
+                formatter,
+                "ConsensFlow is installing an update; new panes cannot start"
+            ),
+            Self::UpdateBlocked => write!(
+                formatter,
+                "Close or suspend every open session and wait for pane cleanup before installing"
+            ),
             Self::ProgramNotAbsolute(path) => {
                 write!(formatter, "argv[0] must be absolute: {}", path.display())
             }
@@ -145,6 +161,41 @@ pub fn validate_drop_env(names: &[String]) -> Result<(), PaneError> {
         }
     }
     Ok(())
+}
+
+/// A launcher may have no terminal or advertise `dumb`; the pane is xterm.
+/// A tool runner's inherited plain-output flags do not describe this terminal.
+/// Explicit pane overrides and removals still win; no native theme is changed.
+fn advertise_color_capability(
+    command: &mut CommandBuilder,
+    env: &HashMap<String, String>,
+    drop_env: &[String],
+) {
+    for name in ["NO_COLOR", "FORCE_COLOR", "CLICOLOR_FORCE"] {
+        if !env.contains_key(name) {
+            command.env_remove(name);
+        }
+    }
+    if !drop_env.iter().any(|name| name == "TERM")
+        && !env.contains_key("TERM")
+        && matches!(
+            command.get_env("TERM").and_then(|value| value.to_str()),
+            None | Some("" | "dumb")
+        )
+    {
+        command.env("TERM", "xterm-256color");
+    }
+    if !drop_env.iter().any(|name| name == "COLORTERM")
+        && !env.contains_key("COLORTERM")
+        && matches!(
+            command
+                .get_env("COLORTERM")
+                .and_then(|value| value.to_str()),
+            None | Some("")
+        )
+    {
+        command.env("COLORTERM", "truecolor");
+    }
 }
 
 struct Pane {
@@ -235,6 +286,48 @@ impl OutputFlow {
 pub struct PaneTable {
     panes: Mutex<HashMap<PaneKey, Pane>>,
     next_id: AtomicU64,
+    updating: AtomicBool,
+    teardown: Arc<Teardown>,
+}
+
+/// Panes whose child is still being torn down. A pane leaves `finishing` only
+/// on positive evidence that its process is gone; anything unproven moves to
+/// `unconfirmed`, which holds admission closed until ConsensFlow restarts.
+#[derive(Default)]
+struct Teardown {
+    finishing: AtomicU64,
+    unconfirmed: AtomicU64,
+}
+
+impl Teardown {
+    fn begin(&self) {
+        self.finishing.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// Raising `unconfirmed` before lowering `finishing` keeps the two counts
+    /// from summing to zero mid-handover, so no installer slips through.
+    fn resolve(&self, child_is_gone: bool) {
+        if !child_is_gone {
+            self.unconfirmed.fetch_add(1, Ordering::AcqRel);
+        }
+        self.finishing.fetch_sub(1, Ordering::AcqRel);
+    }
+
+    fn counts(&self) -> (u64, u64) {
+        (
+            self.finishing.load(Ordering::Acquire),
+            self.unconfirmed.load(Ordering::Acquire),
+        )
+    }
+}
+
+/// The installer owns admission until restart, or until failure drops this guard.
+pub struct UpdatePermit(Arc<PaneTable>);
+
+impl Drop for UpdatePermit {
+    fn drop(&mut self) {
+        self.0.updating.store(false, Ordering::Release);
+    }
 }
 
 impl PaneTable {
@@ -242,7 +335,36 @@ impl PaneTable {
         Self {
             panes: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
+            updating: AtomicBool::new(false),
+            teardown: Arc::new(Teardown::default()),
         }
+    }
+
+    pub fn begin_update(self: &Arc<Self>) -> Result<UpdatePermit, PaneError> {
+        let panes = self.lock_panes()?;
+        let (finishing, unconfirmed) = self.teardown.counts();
+        if !panes.is_empty() || finishing != 0 || unconfirmed != 0 {
+            return Err(PaneError::UpdateBlocked);
+        }
+        if self.updating.swap(true, Ordering::AcqRel) {
+            return Err(PaneError::Updating);
+        }
+        Ok(UpdatePermit(Arc::clone(self)))
+    }
+
+    pub fn update_blockers(&self) -> Result<Vec<PaneKey>, PaneError> {
+        let panes = self.lock_panes()?;
+        let mut keys: Vec<_> = panes.keys().cloned().collect();
+        let (finishing, unconfirmed) = self.teardown.counts();
+        for i in 0..finishing {
+            keys.push(PaneKey::new(format!("finishing-pane-cleanup-{i}"), 0));
+        }
+        // Named apart from the transient case: this one never clears on its own.
+        for i in 0..unconfirmed {
+            keys.push(PaneKey::new(format!("unconfirmed-pane-cleanup-{i}"), 0));
+        }
+        keys.sort();
+        Ok(keys)
     }
 
     pub fn open(
@@ -298,6 +420,9 @@ impl PaneTable {
         }
 
         let mut panes = self.lock_panes()?;
+        if self.updating.load(Ordering::Acquire) {
+            return Err(PaneError::Updating);
+        }
         if panes.contains_key(&key) {
             return Err(PaneError::AlreadyOpen(key));
         }
@@ -328,6 +453,7 @@ impl PaneTable {
         for name in drop_env {
             command.env_remove(name);
         }
+        advertise_color_capability(&mut command, env, drop_env);
         let child = pair
             .slave
             .spawn_command(command)
@@ -488,15 +614,19 @@ impl PaneTable {
     }
 
     pub fn kill(&self, key: &PaneKey) -> Result<(), PaneError> {
-        let mut pane = self
-            .lock_panes()?
+        let mut panes = self.lock_panes()?;
+        let mut pane = panes
             .remove(key)
             .ok_or_else(|| PaneError::NotFound(key.clone()))?;
+        self.teardown.begin();
+        drop(panes);
         close_output(&pane);
         if pane.active_writes.load(Ordering::Acquire) == 0 {
-            terminate(&mut pane)
+            let result = terminate(&mut pane);
+            self.teardown.resolve(result.is_ok());
+            result
         } else {
-            terminate_detached(pane)
+            terminate_detached(pane, Arc::clone(&self.teardown))
         }
     }
 
@@ -530,13 +660,98 @@ impl PaneTable {
         Ok(listed)
     }
 
-    #[cfg(test)]
-    fn process_group_id(&self, key: &PaneKey) -> Result<i32, PaneError> {
+    pub fn process_group_id(&self, key: &PaneKey) -> Result<i32, PaneError> {
         self.lock_panes()?
             .get(key)
             .ok_or_else(|| PaneError::NotFound(key.clone()))?
             .process_group_id
             .ok_or_else(|| PaneError::Pty("the PTY has no process group".to_string()))
+    }
+
+    /// Authenticate the connected local process before sending any bytes.
+    /// A successful write is transport submission, never native acceptance.
+    #[cfg(target_os = "macos")]
+    pub fn send_peer(
+        &self,
+        key: &PaneKey,
+        path: &Path,
+        expected_pid: i32,
+        body: &[u8],
+        timeout: Duration,
+        before_write: impl FnOnce() -> Result<(), String>,
+    ) -> Result<(), PeerSendError> {
+        use socket2::{Domain, SockAddr, Socket, Type};
+        use std::os::fd::AsRawFd;
+        let refused = |reason: String| PeerSendError {
+            uncertain: false,
+            code: "peer-refused",
+            reason,
+        };
+        let group = self
+            .process_group_id(key)
+            .map_err(|e| refused(e.to_string()))?;
+        let started = Instant::now();
+        let socket =
+            Socket::new(Domain::UNIX, Type::STREAM, None).map_err(|e| refused(e.to_string()))?;
+        let address = SockAddr::unix(path).map_err(|e| refused(e.to_string()))?;
+        socket
+            .connect_timeout(&address, timeout)
+            .map_err(|e| refused(e.to_string()))?;
+        let mut pid: libc::pid_t = 0;
+        let mut len = std::mem::size_of_val(&pid) as libc::socklen_t;
+        let mut uid: libc::uid_t = 0;
+        let mut gid: libc::gid_t = 0;
+        // These calls fill initialized scalar buffers of their exact C sizes.
+        let identity_matches = unsafe {
+            libc::getsockopt(
+                socket.as_raw_fd(),
+                libc::SOL_LOCAL,
+                libc::LOCAL_PEERPID,
+                (&mut pid as *mut libc::pid_t).cast(),
+                &mut len,
+            ) == 0
+                && len as usize == std::mem::size_of_val(&pid)
+                && pid == expected_pid
+                && libc::getpeereid(socket.as_raw_fd(), &mut uid, &mut gid) == 0
+                && uid == libc::getuid()
+                && libc::getpgid(pid) == group
+        };
+        if !identity_matches {
+            return Err(refused(
+                "native peer is not the expected pane process".to_string(),
+            ));
+        }
+        before_write().map_err(|reason| PeerSendError {
+            uncertain: false,
+            code: if reason == "stale-input-epoch" {
+                "stale-input-epoch"
+            } else {
+                "peer-refused"
+            },
+            reason,
+        })?;
+        if self
+            .process_group_id(key)
+            .map_err(|e| refused(e.to_string()))?
+            != group
+        {
+            return Err(refused("native peer pane changed before send".to_string()));
+        }
+        let left = timeout
+            .checked_sub(started.elapsed())
+            .filter(|left| !left.is_zero())
+            .ok_or_else(|| refused("native peer deadline elapsed before send".to_string()))?;
+        socket
+            .set_write_timeout(Some(left))
+            .map_err(|e| refused(e.to_string()))?;
+        (&socket).write_all(body).map_err(|e| PeerSendError {
+            uncertain: true,
+            code: "uncertain",
+            reason: e.to_string(),
+        })?;
+        // Native macOS inboxes inspect the connecting PID asynchronously.
+        // This process remains alive; closing the stream terminates the frame.
+        Ok(())
     }
 
     fn lock_panes(&self) -> Result<MutexGuard<'_, HashMap<PaneKey, Pane>>, PaneError> {
@@ -666,33 +881,72 @@ fn close_output(pane: &Pane) {
     }
 }
 
+/// `ECHILD` says the kernel has no such child left to reap, which is proof the
+/// process is gone rather than a doubt. Every other error leaves its fate open.
+#[cfg(unix)]
+fn already_reaped(error: &io::Error) -> bool {
+    const ECHILD: i32 = 10;
+    error.raw_os_error() == Some(ECHILD)
+}
+
+#[cfg(not(unix))]
+fn already_reaped(_error: &io::Error) -> bool {
+    false
+}
+
+fn has_exited(pane: &mut Pane) -> Result<bool, PaneError> {
+    match pane.child.try_wait() {
+        Ok(status) => Ok(status.is_some()),
+        Err(error) if already_reaped(&error) => Ok(true),
+        Err(error) => Err(PaneError::Io(error)),
+    }
+}
+
+fn wait_for_exit(pane: &mut Pane) -> Result<(), PaneError> {
+    match pane.child.wait() {
+        Ok(_) => Ok(()),
+        Err(error) if already_reaped(&error) => Ok(()),
+        Err(error) => Err(PaneError::Io(error)),
+    }
+}
+
 fn terminate(pane: &mut Pane) -> Result<(), PaneError> {
     let child_exited = signal_for_termination(pane)?;
 
     if !child_exited {
-        pane.child.wait()?;
+        wait_for_exit(pane)?;
     }
     pane.alive = false;
     Ok(())
 }
 
-fn terminate_detached(mut pane: Pane) -> Result<(), PaneError> {
-    let child_exited = signal_for_termination(&mut pane)?;
+fn terminate_detached(mut pane: Pane, teardown: Arc<Teardown>) -> Result<(), PaneError> {
+    let child_exited = match signal_for_termination(&mut pane) {
+        Ok(exited) => exited,
+        Err(error) => {
+            teardown.resolve(false);
+            return Err(error);
+        }
+    };
     if child_exited {
         pane.alive = false;
+        teardown.resolve(true);
         return Ok(());
     }
 
-    std::thread::Builder::new()
+    let reaper = Arc::clone(&teardown);
+    if let Err(error) = std::thread::Builder::new()
         .name("consensflow-pty-reaper".to_string())
-        .spawn(move || {
-            let _ = pane.child.wait();
-        })?;
+        .spawn(move || reaper.resolve(wait_for_exit(&mut pane).is_ok()))
+    {
+        teardown.resolve(false);
+        return Err(PaneError::Io(error));
+    }
     Ok(())
 }
 
 fn signal_for_termination(pane: &mut Pane) -> Result<bool, PaneError> {
-    let mut child_exited = pane.child.try_wait()?.is_some();
+    let mut child_exited = has_exited(pane)?;
 
     #[cfg(unix)]
     if let Some(process_group_id) = pane.process_group_id {
@@ -700,7 +954,7 @@ fn signal_for_termination(pane: &mut Pane) -> Result<bool, PaneError> {
             if is_permission_denied(&error) {
                 let deadline = Instant::now() + Duration::from_millis(100);
                 while !child_exited && Instant::now() < deadline {
-                    child_exited = pane.child.try_wait()?.is_some();
+                    child_exited = has_exited(pane)?;
                     if !child_exited {
                         std::thread::sleep(Duration::from_millis(5));
                     }
@@ -782,6 +1036,137 @@ mod tests {
                 terminal_size(40, 120),
             )
             .expect("open shell in a PTY")
+    }
+
+    #[cfg(unix)]
+    unsafe extern "C" {
+        fn kill(pid: i32, signal: i32) -> i32;
+        fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
+    }
+
+    #[cfg(unix)]
+    fn child_process_id(table: &PaneTable, key: &PaneKey) -> i32 {
+        table
+            .panes
+            .lock()
+            .unwrap()
+            .get(key)
+            .and_then(|pane| pane.child.process_id())
+            .expect("the pane child reports a process id") as i32
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_child_reaped_outside_the_table_still_reopens_update_admission() {
+        let _serial = serial_pty_test();
+        let table = Arc::new(PaneTable::new());
+        let pane = open_shell(&table, "exec /bin/cat");
+        let pid = child_process_id(&table, &pane.key);
+
+        // Someone else reaps the child first, so the table's own wait sees
+        // ECHILD. That is proof the process is gone, not a doubt to hold on to.
+        assert_eq!(unsafe { kill(pid, 9) }, 0, "signal the pane child");
+        let mut status = 0;
+        assert_eq!(
+            unsafe { waitpid(pid, &mut status, 0) },
+            pid,
+            "reap the pane child outside the table"
+        );
+
+        table
+            .kill(&pane.key)
+            .expect("closing a pane whose child is already reaped succeeds");
+        assert!(
+            table.update_blockers().unwrap().is_empty(),
+            "a reaped child leaves no cleanup blocker behind"
+        );
+        assert!(
+            table.begin_update().is_ok(),
+            "update admission reopens once every child is gone"
+        );
+    }
+
+    #[test]
+    fn an_unproven_teardown_holds_admission_closed_under_its_own_name() {
+        let table = Arc::new(PaneTable::new());
+        table.teardown.begin();
+        table.teardown.resolve(false);
+
+        assert!(
+            matches!(table.begin_update(), Err(PaneError::UpdateBlocked)),
+            "a child that never proved it stopped keeps admission closed"
+        );
+        assert_eq!(
+            table
+                .update_blockers()
+                .unwrap()
+                .iter()
+                .map(|key| key.id.clone())
+                .collect::<Vec<_>>(),
+            ["unconfirmed-pane-cleanup-0"],
+            "the blocker names itself so the dialog can ask for a restart"
+        );
+    }
+
+    #[test]
+    fn update_installation_blocks_all_pane_launches_and_failure_restores_admission() {
+        let _serial = serial_pty_test();
+        let table = Arc::new(PaneTable::new());
+        let pane = open_shell(&table, "exec /bin/cat");
+        assert!(
+            table.begin_update().is_err(),
+            "any open pane prevents installation"
+        );
+        table.kill(&pane.key).unwrap();
+        let permit = table.begin_update().unwrap();
+        let launched = table.open_at(
+            PaneKey::new("racing-worker", 7),
+            Path::new("/tmp"),
+            &shell("exec /bin/cat"),
+            &HashMap::new(),
+            terminal_size(40, 120),
+        );
+        assert!(matches!(launched, Err(PaneError::Updating)));
+        assert!(table.list().unwrap().is_empty());
+        assert!(
+            table.begin_update().is_err(),
+            "only one installer may hold admission"
+        );
+        drop(permit); // failed install/panic: admission must reopen automatically
+        let pane = open_shell(&table, "exec /bin/cat");
+        table.kill(&pane.key).unwrap();
+        assert!(table.begin_update().is_ok());
+    }
+
+    #[test]
+    fn update_installation_and_real_spawn_share_one_atomic_boundary() {
+        let _serial = serial_pty_test();
+        for _ in 0..20 {
+            let table = Arc::new(PaneTable::new());
+            let start = Arc::new(std::sync::Barrier::new(2));
+            let child_table = table.clone();
+            let child_start = start.clone();
+            let launch = thread::spawn(move || {
+                child_start.wait();
+                child_table.open(
+                    Path::new("/tmp"),
+                    &shell("exec /bin/cat"),
+                    &HashMap::new(),
+                    terminal_size(40, 120),
+                )
+            });
+            start.wait();
+            let install = table.begin_update();
+            let opened = launch.join().unwrap();
+            assert_ne!(
+                install.is_ok(),
+                opened.is_ok(),
+                "exactly one side is admitted"
+            );
+            if let Ok(pane) = opened {
+                table.kill(&pane.key).unwrap();
+            }
+        }
     }
 
     fn read_to_end(mut reader: Box<dyn Read + Send>) -> Vec<u8> {

@@ -1,0 +1,9 @@
+{
+  "source_checkout": "/Users/gabrielvoicu/Projects/ngvoicu/consensflow-next-ib1cg0zs",
+  "protected_file_sha256": {
+    "/Applications/ConsensFlow.app/Contents/Info.plist": "2c5451563c15cdc00e919a9b68bd478b26ed4e28d29f5e8d1cf4c80ca75f1e0c",
+    "/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf.mjs": "820efbaf1b502976ebf8919d3e6794cb6a67719614fa088b8e51f7af6c9b187e",
+    "/Applications/ConsensFlow.app/Contents/Resources/cli/src/channels.js": "d134322c65bb71e2175a7eddf0146714e88bec0fe7f9147595fca1307591ecfb",
+    "/Users/gabrielvoicu/.codex/skills/consensflow/SKILL.md": "63d0c6495cb10edc418edbaeebf9d024f4915b2313fba58235f63f0af779ad72"
+  }
+}

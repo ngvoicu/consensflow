@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { piSessionDir } from "../../src/harnesses.js";
 import { stripLaunchMarker, withoutInjectedBlocks } from "./packets.js";
-import { openingLineCarriesNonce, TURNS_EXAMINED } from "./session-binding.js";
+import { bindEvidence, openingLineCarriesNonce, TURNS_EXAMINED } from "./session-binding.js";
 
 /**
  * What was said in a harness's own session — read, never written.
@@ -614,7 +614,7 @@ export async function discoverKimiSession(cwd, since, env = process.env) {
  * user turns) — or null.
  */
 export async function discoverSessionWithEvidence(kind, cwd, since, env = process.env, options = {}) {
-  const { nonce = null, reportedId = null, preallocatedId = null } = options;
+  const { nonce = null, reportedId = null, preallocatedId = null, originator = null } = options;
   if (kind === "claude-code" || kind === "pi") {
     // The minted id decides first: discovery must never hand the store an id
     // the store — which checks `bindEvidence` — would refuse.
@@ -641,7 +641,7 @@ export async function discoverSessionWithEvidence(kind, cwd, since, env = proces
   if (!isNonce(nonce)) return null;
   switch (kind) {
     case "codex":
-      return await discoverCodexWithNonce(cwd, since, env, nonce);
+      return await discoverCodexWithNonce(cwd, since, env, nonce, originator);
     case "opencode":
       return await discoverOpencodeWithNonce(cwd, since, env, nonce);
     case "kimi":
@@ -651,8 +651,15 @@ export async function discoverSessionWithEvidence(kind, cwd, since, env = proces
   }
 }
 
-async function discoverCodexWithNonce(cwd, since, env, nonce) {
+async function discoverCodexWithNonce(cwd, since, env, nonce, originator = null) {
   const candidates = await collectCodexCandidates(cwd, since, env);
+  if (originator !== null) {
+    const matched = candidates.filter((one) =>
+      bindEvidence("codex", { sessionId: one.id, sessionMeta: one.meta }, { nonce, originator }).bound,
+    );
+    if (matched.length !== 1) return null;
+    return { sessionId: matched[0].id, evidence: "nonce", sessionMeta: matched[0].meta };
+  }
   for (const one of candidates) {
     const turn = findCodexNonceTurn(one.head, nonce);
     if (turn !== null) return { sessionId: one.id, evidence: "nonce", turn };
@@ -888,6 +895,7 @@ async function collectCodexCandidates(cwd, since, env) {
   await collectFiles(root, (name) => name.startsWith("rollout-") && name.endsWith(".jsonl"), files);
 
   const candidates = [];
+  const canonicalCwd = await fs.realpath(cwd).catch(() => cwd);
   for (const file of files) {
     let stat;
     try {
@@ -905,11 +913,13 @@ async function collectCodexCandidates(cwd, since, env) {
     } catch {
       continue;
     }
-    if (meta?.type !== "session_meta" || meta.payload?.cwd !== cwd) continue;
+    if (meta?.type !== "session_meta" || typeof meta.payload?.cwd !== "string") continue;
+    const nativeCwd = await fs.realpath(meta.payload.cwd).catch(() => meta.payload.cwd);
+    if (nativeCwd !== canonicalCwd) continue;
     const created = Date.parse(meta.payload?.timestamp ?? meta.timestamp ?? "");
     if (!Number.isFinite(created) || created < since) continue;
     // rollout-<timestamp>-<uuid>.jsonl — the uuid is the last 36 characters.
-    candidates.push({ id: path.basename(file, ".jsonl").slice(-36), created, head });
+    candidates.push({ id: path.basename(file, ".jsonl").slice(-36), created, head, meta: meta.payload });
   }
   candidates.sort((a, b) => a.created - b.created);
   return candidates;

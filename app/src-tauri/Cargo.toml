@@ -1,7 +1,7 @@
 [package]
 name = "app"
 default-run = "app"
-version = "3.0.0-alpha.25"
+version = "3.0.0-alpha.43"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -27,6 +27,18 @@ portable-pty = "0.9"
 tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-dialog = "2.7.3"
+tauri-plugin-updater = "~2.11.0"
+semver = "1"
+url = "2"
+time = { version = "0.3", features = ["formatting"] }
+tempfile = "3"
+tar = "0.4"
+flate2 = "1"
+reqwest = { version = "0.13.4", default-features = false }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+socket2 = "0.6"
 
 [dev-dependencies]
 tauri = { version = "2.11.3", features = ["test"] }

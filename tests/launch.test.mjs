@@ -702,3 +702,23 @@ describe('the real loopback server enforces role scope before pane routes exist'
     assert.deepEqual(await invariant.json(), { error: 'internal_error' })
   })
 })
+
+it('PM credentials authorize only manual lead send/read and never worker delegation', () => {
+  const env = leadEnv({
+    tab: 'pm-tab',
+    pane: 'pm-pane',
+    leadId: 'tab:pm-tab:1',
+    app: { url: 'http://127.0.0.1:1234', token: 'ui-token' },
+    node: process.execPath,
+    role: 'pm',
+  })
+  assert.equal(checkScope(env.CONSENSFLOW_APP_TOKEN, { tab: 'pm-tab', op: 'lead.send' }), true)
+  assert.equal(checkScope(env.CONSENSFLOW_APP_TOKEN, { tab: 'pm-tab', op: 'lead.read' }), true)
+  for (const op of ['consult', 'say', 'attach', 'read', 'results.list', 'panes', 'notify.lead']) {
+    assert.equal(checkScope(env.CONSENSFLOW_APP_TOKEN, { op }), false, op)
+  }
+  assert.equal(
+    checkScope(env.CONSENSFLOW_APP_TOKEN, { tab: 'another-tab', op: 'lead.read' }),
+    false,
+  )
+})

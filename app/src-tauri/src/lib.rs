@@ -7,6 +7,9 @@ pub mod arbiter;
 pub mod bridge;
 pub mod commands;
 pub mod pty;
+#[cfg(target_os = "macos")]
+mod update_install;
+pub mod updates;
 
 use commands::AppRuntime;
 
@@ -27,9 +30,24 @@ use commands::AppRuntime;
 mod selftest {
     use super::{json, AppHandle, BufRead, Value, Write};
 
+    static UPDATE_CONTINUE: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+
+    pub fn wait_for_update_probe() -> bool {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        while !UPDATE_CONTINUE.load(std::sync::atomic::Ordering::Acquire) {
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        true
+    }
+
     pub struct Config {
         pub dir: String,
         pub tag: String,
+        pub updater_expected_version: Option<String>,
     }
 
     /// Read at every call, not cached: the guard is the environment the app
@@ -45,6 +63,7 @@ mod selftest {
         Some(Config {
             dir: std::env::var("CONSENSFLOW_SELFTEST_DIR").unwrap_or_default(),
             tag: std::env::var("CONSENSFLOW_SELFTEST_TAG").unwrap_or_default(),
+            updater_expected_version: std::env::var("CONSENSFLOW_SELFTEST_UPDATER_EXPECTED").ok(),
         })
     }
 
@@ -69,7 +88,7 @@ mod selftest {
     pub fn initialization_script(config: &Config) -> String {
         format!(
             "window.__CONSENSFLOW_SELFTEST__ = {};\n{}",
-            json!({"dir": config.dir, "tag": config.tag}),
+            json!({"dir": config.dir, "tag": config.tag, "updaterExpectedVersion":config.updater_expected_version}),
             PAGE_CHANNEL,
         )
     }
@@ -120,7 +139,7 @@ mod selftest {
     /// One line of the self-test channel: the app's own stdout, which only
     /// the process that launched it can read.
     pub fn report(event: &str, data: &Value) {
-        let line = json!({"event": event, "data": data});
+        let line = json!({"event": event, "data": data, "pid": std::process::id()});
         let mut out = std::io::stdout().lock();
         let _ = writeln!(out, "consensflow-selftest {line}");
         let _ = out.flush();
@@ -145,7 +164,13 @@ mod selftest {
             // closing means "done".
             let stdin = std::io::stdin();
             let mut lines = stdin.lock().lines();
-            while let Some(Ok(_)) = lines.next() {}
+            while let Some(Ok(line)) = lines.next() {
+                if line == "continue-updater"
+                    && config().is_some_and(|c| c.updater_expected_version.is_some())
+                {
+                    UPDATE_CONTINUE.store(true, std::sync::atomic::Ordering::Release);
+                }
+            }
             report("quit", &json!({"reason":"stdin-eof"}));
             handle.exit(0);
         });
@@ -160,6 +185,12 @@ fn selftest_report(event: String, data: Value) -> Value {
         return json!({"ok":false,"error":"self-test reporting is not enabled"});
     }
     selftest::report(&event, &data);
+    if event == "update-blocked"
+        && selftest::config().is_some_and(|c| c.updater_expected_version.is_some())
+        && !selftest::wait_for_update_probe()
+    {
+        return json!({"ok":false,"error":"updater probe did not continue"});
+    }
     json!({"ok":true})
 }
 
@@ -167,31 +198,52 @@ fn selftest_report(event: String, data: Value) -> Value {
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![
-            commands::open_lead,
-            commands::open_shell,
-            commands::open_consult,
-            commands::close_pane,
-            commands::pane_input_enqueue,
-            commands::pane_reply_enqueue,
-            commands::pane_input_wait,
-            commands::pane_resize,
-            commands::pane_ack,
-            commands::set_policy,
-            commands::answers_list,
-            commands::deliver_now,
-            commands::deliver_cancel,
-            commands::held_send,
-            commands::tab_resume,
-            commands::rename_session,
-            commands::pane_input_snapshot,
-            commands::pane_resume_replies,
-            commands::list_state,
-            commands::subscribe_output,
-            selftest_report,
-        ])
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .invoke_handler(|invoke| {
+            if !commands::window_command_allowed(
+                invoke.message.webview_ref().label(),
+                invoke.message.command(),
+            ) {
+                invoke
+                    .resolver
+                    .reject("This command is unavailable in this window");
+                return true;
+            }
+            let handler: Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool> =
+                Box::new(tauri::generate_handler![
+                    commands::open_pm,
+                    commands::open_lead,
+                    commands::open_shell,
+                    commands::open_consult,
+                    commands::close_pane,
+                    commands::delete_pane,
+                    commands::pane_input_enqueue,
+                    commands::pane_reply_enqueue,
+                    commands::pane_input_wait,
+                    commands::pane_resize,
+                    commands::pane_ack,
+                    commands::set_policy,
+                    commands::answers_list,
+                    commands::deliver_now,
+                    commands::deliver_cancel,
+                    commands::held_send,
+                    commands::tab_resume,
+                    commands::tab_delete,
+                    commands::rename_session,
+                    commands::list_state,
+                    commands::subscribe_output,
+                    updates::update_status,
+                    updates::update_channel,
+                    updates::update_check,
+                    updates::update_download,
+                    updates::update_install,
+                    selftest_report,
+                ]);
+            handler(invoke)
+        })
         .setup(|app| {
             app.manage(AppRuntime::start(app.handle()));
+            updates::setup(app)?;
             let mut window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("ConsensFlow")
                 .inner_size(1280.0, 820.0)

@@ -8,8 +8,9 @@ import { describe, it } from 'node:test'
 import { envelope, pointer } from '../hosts/lib/deliveries.js'
 import { createDeliveryExtension } from '../hosts/pi-extension/consensflow-delivery.mjs'
 import { Bridge } from '../src/bridge.js'
-import { DEFAULT_DEADLINE_MS } from '../src/channels/opencode.js'
-import { deliver, enabledChannels, launchConfiguration } from '../src/channels.js'
+import { DEFAULT_DEADLINE_MS, send as sendOpenCode } from '../src/channels/opencode.js'
+import { probeEditor } from '../src/channels/pi.js'
+import { deliver, enabledChannels, launchConfiguration, send } from '../src/channels.js'
 
 function bridgePair() {
   const nodeToRust = new PassThrough()
@@ -123,6 +124,38 @@ function realPi() {
 }
 
 describe('delivery channels', () => {
+  for (const mismatch of ['launchId', 'session', 'id', 'missing']) {
+    it(`refuses a native editor probe with ${mismatch} evidence`, async () => {
+      const root = await mkdtemp(join(tmpdir(), 'consensflow-editor-probe-'))
+      const { channel } = await launchConfiguration('pi', {
+        launchId: 'probe-test',
+        workspace: root,
+      })
+      await mkdir(channel.inbox, { recursive: true })
+      await mkdir(channel.ack, { recursive: true })
+      const extension = startPiStandIn(channel.inbox, async (request) => {
+        if (mismatch === 'missing') return
+        const response = { ...request, ready: true, [mismatch]: 'wrong-identity' }
+        await writeFile(join(channel.ack, `${request.id}.json`), JSON.stringify(response))
+      })
+      try {
+        assert.deepEqual(await probeEditor(channel, 'native-pi'), {
+          ready: false,
+          reason: 'native editor unavailable',
+        })
+        assert.deepEqual(await readdir(channel.inbox), [], 'the expired challenge is withdrawn')
+        assert.deepEqual(
+          await readdir(channel.ack),
+          [],
+          'a rejected acknowledgement cannot be reused',
+        )
+      } finally {
+        extension.close()
+        await rm(root, { recursive: true, force: true })
+      }
+    })
+  }
+
   it('pty-inline writes the complete envelope with the observed input epoch', async () => {
     const { node, rust } = bridgePair()
     let request
@@ -988,7 +1021,7 @@ describe('delivery channels', () => {
   })
 
   it('exposes only the probe-enabled optional channels', () => {
-    assert.deepEqual(enabledChannels('codex'), ['pty-inline', 'cf-read'])
+    assert.deepEqual(enabledChannels('codex'), ['pty-inline', 'cf-read', 'codex-queue'])
     assert.deepEqual(enabledChannels('opencode'), ['pty-inline', 'cf-read', 'opencode-server'])
     assert.deepEqual(enabledChannels('pi'), ['pty-inline', 'cf-read', 'pi-extension'])
   })
@@ -1034,6 +1067,7 @@ describe('delivery channels', () => {
       assert.deepEqual(configuration.args.slice(0, 1), ['--port'])
       assert.deepEqual(configuration.args.slice(2), ['--hostname', '127.0.0.1'])
       assert.equal(configuration.env.OPENCODE_SERVER_PASSWORD, configuration.channel.password)
+      assert.equal(configuration.env.OPENCODE_SERVER_USERNAME, 'opencode')
       assert.equal(configuration.channel.ackTimeoutMs, DEFAULT_DEADLINE_MS)
     } finally {
       await closeServer(server)
@@ -1116,5 +1150,176 @@ describe('delivery channels', () => {
     } finally {
       await rm(root, { recursive: true, force: true })
     }
+  })
+})
+
+// A native server message targets the thread while its TUI keeps the composer.
+it('OpenCode worker messages claim native authority and preserve raw text (TEST-PANE-109)', async () => {
+  const { node, rust } = bridgePair()
+  const claims = []
+  rust.on('pane.claim_native_epoch', (body) => {
+    claims.push(body)
+    return { ok: true }
+  })
+  const received = []
+  const server = createServer(async (req, res) => {
+    let body = ''
+    for await (const chunk of req) body += chunk
+    received.push({ url: req.url, body: JSON.parse(body) })
+    res.writeHead(204).end()
+  })
+  const port = await listen(server)
+  try {
+    const text = 'Keep my exact message\nincluding the second line.'
+    const result = await sendOpenCode(
+      {
+        pane: 'worker',
+        generation: 3,
+        epoch: 7,
+        bridge: node,
+        session: 'ses_probe',
+        launch: {
+          kind: 'opencode-server',
+          preservesDraft: 1,
+          endpoint: `http://127.0.0.1:${port}`,
+        },
+      },
+      text,
+    )
+    assert.equal(result.admitted, true)
+    assert.deepEqual(claims, [{ pane: 'worker', generation: 3, epoch: 7 }])
+    assert.deepEqual(received, [
+      { url: '/session/ses_probe/prompt_async', body: { parts: [{ type: 'text', text }] } },
+    ])
+  } finally {
+    node.close()
+    rust.close()
+    await closeServer(server)
+  }
+})
+
+it('Codex launch enables only an installed native queue capability (TEST-PANE-109)', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'cf-native-capability-'))
+  const executable = join(root, 'codex')
+  const { chmod } = await import('node:fs/promises')
+  try {
+    await writeFile(executable, '#!/bin/sh\nprintf "%s\\n" "--thread --message"\n')
+    await chmod(executable, 0o755)
+    const configured = await launchConfiguration('codex', {
+      launchId: 'launch-codex',
+      workspace: root,
+      executable,
+    })
+    assert.equal(configured.channel.kind, 'codex-queue')
+    assert.equal(configured.channel.preservesDraft, 1)
+    assert.equal(configured.channel.executable, executable)
+    assert.equal(configured.channel.cwd, root)
+    assert.deepEqual(configured.args, [])
+    await writeFile(executable, '#!/bin/sh\nexit 0\n')
+    assert.equal(
+      (await launchConfiguration('codex', { launchId: 'old-codex', workspace: root, executable }))
+        .channel,
+      null,
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+describe('retired Claude development channel (TEST-PANE-121)', () => {
+  async function claudeExecutable(root) {
+    const executable = join(root, 'claude')
+    const { chmod } = await import('node:fs/promises')
+    await writeFile(
+      executable,
+      `#!/bin/sh\nprintf called > '${join(root, 'probe-called')}'\nexit 1\n`,
+    )
+    await chmod(executable, 0o755)
+    return executable
+  }
+
+  it('opens Claude without development channels regardless of version', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'cf-claude-retired-'))
+    try {
+      for (const version of ['2.1.263', '2.1.265', '2.1.262', '2.2.0']) {
+        const executable = await claudeExecutable(root)
+        const configuration = await launchConfiguration('claude-code', {
+          launchId: `retired-${version}`,
+          workspace: root,
+          executable,
+          node: process.execPath,
+        })
+        assert.deepEqual(configuration.args, [], version)
+        assert.deepEqual(configuration.env, {}, version)
+        if (process.platform === 'darwin') {
+          assert.equal(configuration.channel?.kind, 'claude-peer', version)
+          assert.equal(configuration.channel?.preservesDraft, 1)
+        } else assert.equal(configuration.channel, null, version)
+      }
+      assert.deepEqual(
+        await launchConfiguration('claude-code', {
+          launchId: 'retired-missing',
+          workspace: root,
+        }),
+        { args: [], env: {}, channel: null },
+      )
+      assert.deepEqual(await readdir(root), ['claude'], 'no delivery directories are authored')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('offers no claude-channel to the lead harness', () => {
+    assert.deepEqual(enabledChannels('claude-code'), ['pty-inline', 'cf-read', 'claude-peer'])
+  })
+
+  it('a stale claude-channel refuses sending without writing', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'cf-claude-stale-'))
+    const inbox = join(root, 'inbox')
+    const ack = join(root, 'ack')
+    await mkdir(inbox, { recursive: true })
+    await mkdir(ack, { recursive: true })
+    const claims = []
+    const stale = {
+      session: '11111111-2222-4333-8444-555555555555',
+      pane: 'lead-pane',
+      generation: 4,
+      epoch: 19,
+      enabledChannels: enabledChannels('claude-code'),
+      launch: {
+        kind: 'claude-channel',
+        launchId: 'stale-claude',
+        inbox,
+        ack,
+        ackTimeoutMs: 50,
+      },
+      claimEpoch: async (request) => {
+        claims.push(request)
+        return { ok: true }
+      },
+    }
+    const delivery = {
+      id: 'd-31',
+      answerId: 'answer-7',
+      conversation: 'worker-one',
+      agent: 'zeus',
+      answer: 'The answer is complete.',
+      channel: 'pty-inline',
+      expiresAt: Date.now() + 1_000,
+    }
+    assert.deepEqual(await deliver('claude-channel', stale, delivery), {
+      ok: false,
+      error: 'unknown-channel',
+    })
+    assert.deepEqual(await send('claude-channel', stale, 'worker follow-up'), {
+      ok: false,
+      admitted: false,
+      bytesWritten: 0,
+      error: 'channel-disabled',
+    })
+    assert.deepEqual(claims, [], 'no input epoch is claimed')
+    assert.deepEqual(await readdir(inbox), [], 'no inbox record is offered')
+    assert.deepEqual(await readdir(ack), [], 'no acknowledgement is minted')
+    await rm(root, { recursive: true, force: true })
   })
 })

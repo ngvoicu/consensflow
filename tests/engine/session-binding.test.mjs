@@ -608,3 +608,133 @@ test('session binding: a reported id differing from the minted id is refused', a
   assert.equal(storeSide.bound, false)
   assert.match(storeSide.reason, /unbound/)
 })
+
+test('quiet Codex binding accepts only launch-owned native session metadata', () => {
+  const launch = { nonce: 'quiet-launch', originator: 'consensflow-quiet-launch', generation: 4 }
+  const sessionId = '00000000-1111-4222-8333-444444444444'
+  const sessionMeta = {
+    id: sessionId,
+    originator: launch.originator,
+    source: 'cli',
+    cli_version: 'future-version',
+    thread_source: 'user',
+  }
+  assert.deepEqual(bindEvidence('codex', { sessionId, sessionMeta }, launch), {
+    bound: true,
+    evidence: 'nonce',
+    generation: 4,
+  })
+  for (const changed of [
+    { thread_source: 'subagent' },
+    { originator: 'consensflow-another-launch' },
+    { id: 'someone-else' },
+    { source: { subagent: {} } },
+    { forked_from_id: 'parent' },
+    { parent_thread_id: 'parent' },
+  ]) {
+    assert.equal(
+      bindEvidence(
+        'codex',
+        {
+          sessionId,
+          sessionMeta: { ...sessionMeta, ...changed },
+          turn: '[consensflow launch quiet-launch]',
+        },
+        launch,
+      ).bound,
+      false,
+      'a matching user turn cannot replace the metadata evidence',
+    )
+  }
+  assert.equal(
+    bindEvidence(
+      'codex',
+      {
+        sessionId,
+        turn: '[consensflow launch quiet-launch]',
+      },
+      launch,
+    ).bound,
+    false,
+  )
+  assert.equal(bindEvidence('opencode', { sessionId, sessionMeta }, launch).bound, false)
+})
+
+test('quiet Codex discovery separates concurrent launches and refuses ambiguous metadata', async () => {
+  await withStores(async (env) => {
+    const root = path.join(env.HOME, '.codex', 'sessions')
+    const since = Date.now() - 1000
+    const cwd = '/work/quiet'
+    const launch = { nonce: 'quiet-launch', originator: 'consensflow-quiet-launch' }
+    const own = '00000000-1111-4222-8333-444444444444'
+    const other = '00000000-1111-4222-8333-555555555555'
+    const fork = '00000000-1111-4222-8333-666666666666'
+    const metadata = (id, more = {}) => ({
+      id,
+      originator: launch.originator,
+      source: 'cli',
+      cli_version: '0.153.4',
+      thread_source: 'user',
+      cwd,
+      timestamp: new Date().toISOString(),
+      ...more,
+    })
+    const save = async (id, meta, turn) =>
+      write(
+        path.join(root, `rollout-x-${id}.jsonl`),
+        JSON.stringify({ type: 'session_meta', payload: meta }) +
+          '\n' +
+          (turn
+            ? `${JSON.stringify({
+                type: 'event_msg',
+                payload: { type: 'user_message', message: turn },
+              })}\n`
+            : ''),
+      )
+    await save(
+      other,
+      metadata(other, { originator: 'consensflow-other-launch' }),
+      '[consensflow launch quiet-launch]',
+    )
+    await save(fork, metadata(fork, { forked_from_id: own }), '[consensflow launch quiet-launch]')
+    assert.equal(await discoverSessionWithEvidence('codex', cwd, since, env, launch), null)
+    const ours = metadata(own)
+    await save(own, ours)
+    assert.deepEqual(await discoverSessionWithEvidence('codex', cwd, since, env, launch), {
+      sessionId: own,
+      evidence: 'nonce',
+      sessionMeta: ours,
+    })
+    assert.equal(
+      await discoverSessionWithEvidence('codex', '/another-folder', since, env, launch),
+      null,
+    )
+    assert.equal(
+      await discoverSessionWithEvidence('codex', cwd, Date.now() + 1000, env, launch),
+      null,
+    )
+    await save(other, metadata(other))
+    assert.equal(
+      await discoverSessionWithEvidence('codex', cwd, since, env, launch),
+      null,
+      'two native roots carrying one launch are ambiguous, never choose the newest',
+    )
+  })
+})
+
+test('quiet Codex launch discovery accepts an alias of the exact workspace', async () => {
+  await withStores(async env => {
+    const actual = path.join(env.HOME, 'actual-workspace')
+    const alias = path.join(env.HOME, 'workspace-alias')
+    await mkdir(actual)
+    const { symlink } = await import('node:fs/promises')
+    await symlink(actual, alias)
+    const launch = { nonce: 'alias-launch', originator: 'consensflow-alias-launch' }
+    const id = '00000000-1111-4222-8333-444444444444'
+    await write(path.join(env.HOME, '.codex', 'sessions', `rollout-x-${id}.jsonl`), JSON.stringify({
+      type: 'session_meta', payload: { id, originator: launch.originator, source: 'cli', thread_source: 'user', cwd: actual, timestamp: new Date().toISOString() }
+    }) + '\n')
+    const found = await discoverSessionWithEvidence('codex', alias, Date.now() - 1000, env, launch)
+    assert.equal(found?.sessionId, id)
+  })
+})

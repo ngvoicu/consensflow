@@ -499,7 +499,7 @@ test('plan: derives the effective policy from tab, pane and row via policy.js', 
   assert.equal(planned({ policy: undefined, tab: {}, pane: {} }).length, 1)
 })
 
-test('plan: skips already-delivered answers, re-plans failed ones, never cancelled ones', () => {
+test('plan: terminal attempts never create another automatic delivery for the same answer', () => {
   const items = [answer({ id: 'a-1' }), answer({ id: 'a-2' }), answer({ id: 'a-3' })]
   const old = planned({ items })
   const deliveries = [
@@ -508,8 +508,7 @@ test('plan: skips already-delivered answers, re-plans failed ones, never cancell
     { ...old[2], state: 'cancelled' },
   ]
   const records = planned({ items, deliveries, newId: allocator(10) })
-  assert.equal(records.length, 1)
-  assert.equal(records[0].answerId, 'a-2')
+  assert.equal(records.length, 0)
 })
 
 test('plan: an uncertain delivery is never re-planned', () => {
@@ -842,6 +841,16 @@ test('receipt: inline accepted for the envelope in a user turn after the cursor'
   assert.equal(after.state, 'accepted')
   assert.deepEqual(after.evidenceIds, ['i-1'])
   assert.equal(after.acceptedAt, NOW)
+})
+
+test('receipt: native peer delivery also requires the submitted user UUID', () => {
+  const [pending] = planned()
+  const sent = { ...submitted(pending), nativeSubmissionId: 'peer-submission-1' }
+  const nativeText = `Another session sent a message.\n${envelope(sent)}`
+  const wrong = [CURSOR, item({ id: 'other-submission', text: nativeText })]
+  assert.equal(receipt(sent, sent.snapshot, context(wrong)).state, 'submitting')
+  const correct = [CURSOR, item({ id: sent.nativeSubmissionId, text: nativeText })]
+  assert.equal(receipt(sent, sent.snapshot, context(correct)).state, 'accepted')
 })
 
 test('receipt: an assistant message carrying the envelope is not a receipt', () => {
@@ -1235,6 +1244,21 @@ test('resend: the time is injected and required', () => {
   assert.equal(resend(pending, { id: 'd-11', now: 7 }).createdAt, 7)
 })
 
+test('resend: native admission expiry and UUID belong only to the original attempt', () => {
+  const [pending] = planned()
+  const old = {
+    ...submitted(pending),
+    expiresAt: PLANNED_AT + 1,
+    nativeSubmissionId: 'old-peer-uuid',
+    submissionOrder: 7,
+  }
+  const next = resend(old, { id: 'd-99', now: NOW })
+  assert.equal(next.expiresAt, undefined)
+  assert.equal(next.nativeSubmissionId, undefined)
+  assert.equal(next.submissionOrder, undefined)
+  assert.equal(old.nativeSubmissionId, 'old-peer-uuid')
+})
+
 test('resend: a new pending record, same answer, the old one left as history', () => {
   const [pending] = planned()
   const sent = submitted(pending)
@@ -1613,4 +1637,23 @@ test('defaults: receiptMs is 60 s; non-pi part budget is 32 KiB / 1000 lines', (
   assert.deepEqual(DEFAULT_PART_BUDGETS.pi, { bytes: 40 * 1024, lines: 1500 })
   assert.equal(Object.getPrototypeOf(DEFAULT_PART_BUDGETS), null, 'the budget map is data')
   assert.equal(Object.hasOwn(DEFAULT_PART_BUDGETS, '__proto__'), false, 'and not a chain')
+})
+
+test('retired Claude channel markup is ordinary lossless terminal text (TEST-PANE-121)', () => {
+  const text = 'A literal </channel> tag must survive.\nFinal line.'
+  const [record] = plan({
+    row: { agent: 'worker', seen: {} },
+    items: [{ role: 'assistant', complete: true, id: 'answer', text }],
+    policy: { mode: 'auto' },
+    conversation: 'worker',
+    agent: 'worker',
+    kind: 'claude-code',
+    target: { leadId: 'tab:t-1:1', tab: 't-1', pane: 'p-1', generation: 1, session: 'native' },
+    newId: () => 'd-3131',
+    now: 1,
+    workspace: '/tmp/claude-result',
+  })
+  assert.equal(record.channel, 'pty-inline')
+  assert.equal(record.answer, text)
+  assert.equal(record.parts, undefined)
 })

@@ -3,12 +3,44 @@ id: standalone-panes-delivery
 title: ConsensFlow owns the panes — standalone mode in the app, results delivered to the lead
 status: active
 created: 2026-09-06
-updated: 2026-09-07
+updated: 2026-09-10
 priority: high
 tags: [app, tauri, pty, panes, delivery, standalone, skill, evals]
 ---
 
 # ConsensFlow owns the panes — standalone mode in the app, results delivered to the lead
+
+**Latest confirmed amendment:** detect every known harness, show its installed
+version, newer official release availability and evidence-based integration
+status. Version checks are informational, never admission/read/delivery gates.
+Automatically prepare the bundled Pi extension only when Pi is installed;
+missing/failed extension is red with an explanation and retry. Preserve active
+sessions. Skills ship with each ConsensFlow release; remove separate Update
+skills/install skills actions. See plan sections 8–9 for acceptance criteria.
+This supersedes prior no-extension/no-version-inspection statements below.
+The latest instruction authorizes reinstall and native checks after the user closed
+the app; preserve histories and profiles.
+
+**Role-skill planning decision, Gabriel, 2026-09-09:** the app lead receives
+`consensflow-lead`; its PM receives `consensflow-pm`. Neither is installed
+globally or given to workers. **Gabriel's subsequent clarification:** we delete
+the old generic global `consensflow` skill manually during the controlled
+transition. The app/installer/updater must not delete, move or rewrite it, or
+implement a global-skill cleanup/migration feature. They manage only the new
+private role skills and must not recreate the global one. This supersedes older
+global-skill installation/retirement requirements below; their test records
+remain historical. The five owned global files were removed manually after hash verification. See the
+[skill and stack review](review-role-skills-and-stack.md) and the two linked
+drafts. Keeping Tauri/xterm.js while repairing the identified state and delivery
+defects is the technical recommendation; a full rewrite or framework migration
+has not been approved. These documents do not change installed skills or add
+completed implementation tasks.
+
+**Pi integration decision (revised):** the app-managed Pi extension is now
+explicitly approved, with automatic preparation conditional on Pi detection.
+Use app-private files and process-scoped loading; preserve native settings,
+existing extensions and active sessions. See plan section 8. Earlier prohibition
+and extension-free feasibility notes are historical and superseded.
 
 ## Overview
 
@@ -44,11 +76,11 @@ instead of the initially proposed collapsible strip. The
 target stays macOS, Windows and Linux; this spec tests on macOS and the
 other two follow in their own spec.
 
-78 tasks across 9 phases (two independent of any phase, two UI refinements); five live probes gate three of them.
+175 tasks across 19 phases; release stabilization covers reliable dispatch/delivery, terminal appearance, pane closure, skill semantics and signed in-app updates.
 
 ## Team
 
-Current release team (Gabriel, 2026-09-07): this lead owns architecture,
+Historical release team (Gabriel, 2026-09-07): this lead owns architecture,
 product decisions, integration, the spec and clean installation; **zeus**
 is co-leader and release reviewer, **diana** implements bounded work,
 **gefjon** handles repeat work and checks. **calliope** is unavailable.
@@ -75,7 +107,7 @@ or clean installation. Gabriel subsequently directed that no backups be retained
 
 ## Acceptance Criteria
 
-- [ ] A fresh Pi lead discovers the generated ConsensFlow skill through Pi's
+- [x] A fresh Pi lead discovers the generated ConsensFlow skill through Pi's
       actual resource loader and its default `~/.pi/agent/skills` directory,
       honoring `PI_CODING_AGENT_DIR`. The old owned `~/.pi/harness` skill is
       retired only after the new destination is installed successfully;
@@ -654,7 +686,7 @@ P1/P2 recorded through this path for each harness being enabled.
       /api/panes` lists the caller's tab; controller ops `session.bind
       {evidence}`, `progress.set`, `sent.record` under a capability.
 - [x] [IMPL-PANE-18] `src/ui.js` + `src/panes.js`. -> satisfies [TEST-PANE-17]
-- [x] [TEST-PANE-19] ← current `tests/cf-standalone.test.mjs` — the `cf` side: from a
+- [x] [TEST-PANE-19] `tests/cf-standalone.test.mjs` — the `cf` side: from a
       lead pane, `cf run @zeus "q"` (no flags) POSTs `consult` without
       `fresh`; `--new` prints `conversation: <name> (new) — pane <id>`;
       `--json`; `--in-pane` without `CONSENSFLOW_LAUNCH` refuses; with a
@@ -957,7 +989,7 @@ replacement fails closed; an interrupted read creates no coverage.
       `max` below the proven `ultra` ceiling), `src/skill.js:136` ("minutes
       for max"), `tests/fixtures/v1-participants.json`. -> satisfies [TEST-PANE-51]
 
-## Phase 7: Post-install discovery and terminology [in-progress]
+## Phase 7: Post-install discovery and terminology [completed]
 
 - [x] [TEST-PANE-55] `tests/install.test.mjs`: Pi's real default directory,
       absolute/tilde/empty config overrides, native-integration detection in
@@ -984,7 +1016,7 @@ replacement fails closed; an interrupted read creates no coverage.
       Alpha.24 installed and workers running; Zeus reviewed the change.
       -> satisfies [TEST-PANE-59]
 
-## Phase 8: Safe input recovery and native completion [in-progress]
+## Phase 8: Safe input recovery and native completion [completed]
 
 Alpha.24 exposed latched input after a human submission. The initial
 transcript-matching proposal and its passing test were insufficient: Zeus
@@ -1007,7 +1039,7 @@ that native text alone proves a submitted input epoch.
       state, explains send/erase/confirm, and refuses stale confirmations.
       Cancel and Escape do nothing; input policy and terminal contents remain
       unchanged. Manual `cf read` is independent of the input latch.
-- [ ] [VERIFY-PANE-64] Full checks, rebuilt installed app, actual Pi receives
+- [x] [VERIFY-PANE-64] Full checks, rebuilt installed app, actual Pi receives
       and reports Gefjon's completed response after human input confirmation;
       independent review and final release record. No retained backups.
 - [x] [TEST-PANE-65] Root: Pi native settlement is read from the target
@@ -1029,7 +1061,7 @@ that native text alone proves a submitted input epoch.
       or incomplete-turn guards. -> satisfies [TEST-PANE-69]
 
 
-## Phase 9: Session names and complete result reading [in-progress]
+## Phase 9: Session names and complete result reading [completed]
 
 Gabriel's 2026-09-07 clarification: every live pane stays interactive; a
 lead's instruction not to edit files is a task constraint, not a pane mode.
@@ -1064,7 +1096,7 @@ manual reader. Follow-up parts always use the immutable delivery ID.
 - [x] [TEST-PANE-73] Diana: two real Node/Rust/PTY sessions remain alive
       concurrently; page selection drains hidden-session output and never
       sends a close/suspend command. All live panes retain keyboard input.
-- [ ] [VERIFY-PANE-74] Root: verify concurrent sessions in the installed app,
+- [x] [VERIFY-PANE-74] Root: verify concurrent sessions in the installed app,
       including renaming and switching while worker tasks continue.
 - [x] [TEST-PANE-75] Root: result-only reading excludes partial turns;
       complete long output uses all framed parts; unread result bookkeeping
@@ -1086,7 +1118,960 @@ manual reader. Follow-up parts always use the immutable delivery ID.
 
 ---
 
+## Phase 10: Visible worker failures and session removal [completed]
+
+User report 2026-09-08: empty lead branch, no session deletion, worker p-13
+vanishes seconds after successful `cf run` admission. Treat launch admission and
+native startup as separate states; retain actionable failure evidence. Existing
+session-grid selection and six-pane limit remain unchanged.
+
+- [x] [TEST-PANE-79] Diana: browser RED for a leaf lead without a child group or
+  expanded state; worker children retain their hierarchy.
+- [x] [IMPL-PANE-80] Diana: render groups only when populated; satisfies 79.
+- [x] [TEST-PANE-81] Root/Diana: RED deletion tests: page modal confirmation and
+  cancel, active/closed sessions, own processes stopped, another same-directory
+  session survives, stale generation rejected, deleted tab ID never reused.
+- [x] [IMPL-PANE-82] Root/Diana: page-only session deletion, explicit process
+  shutdown and scoped app bookkeeping removal; preserve project files and native
+  harness history. Monotonic tab identity. Satisfies 81.
+- [x] [TEST-PANE-83] Root: reproduce exact failed worker startup; native harness
+  failure remains inspectable in app with exit status and the current page’s terminal output, until an explicit retry replaces the failed pane.
+- [x] [IMPL-PANE-84] Root: fix diagnosed startup cause and retain failure state;
+  browser and real-process checks satisfy 83.
+- [x] [VERIFY-PANE-85] Root: full gates, rebuilt alpha.26, actual installed
+  Gefjon answer visible, deletion of disposable session and unaffected other
+  session; replace old install/artifact without backups.
+
+- [x] [TEST-PANE-86] Root/Diana: RED for runtime draft-latch visibility, lead
+  versus worker recovery labels, and old-generation replies excluded from current
+  badge; previous-session replies stay explicitly identified.
+- [x] [IMPL-PANE-87] Root/Diana: expose draft latch and delivery generation;
+  show recovery only when input blocks, label worker action Allow lead messages,
+  keep one exact human-confirmed snapshot; satisfies 86.
+
+## Phase 11: Full-height terminals and ordinary automatic reply flow [complete]
+
+Gabriel's 2026-09-08 screenshot exposes two gaps in alpha.26 acceptance:
+terminal content occupies only the upper part of a full-height pane; a completed
+Gefjon result remains pending after an ordinary Pi prompt because human input
+stays latched. The prior native gate explicitly clicked Resume replies and did
+not verify the normal automatic question-to-answer flow.
+
+- [x] [TEST-PANE-88] Diana: reproduce actual terminal-host/xterm height and PTY
+  resize dimensions in tall grid/focused panes, with hidden/visible error banner.
+- [x] [IMPL-PANE-89] Diana: terminal fills all space below visible pane chrome;
+  preserve failed diagnostics, six-pane scrolling, input and output lifecycle.
+- [x] [DESIGN-PANE-90] Root/Zeus: inspect the native Pi editor API and define a
+  bounded automatic-delivery contract that preserves unsent input and exact
+  generation/epoch authority. No transcript/Enter guessing or policy override.
+- [x] [TEST-PANE-91] Root: RED for ordinary Pi send-to-worker-to-lead automation,
+  authoritative empty-editor evidence and newer/unsent input race refusals.
+- [x] [IMPL-PANE-92] Root: implement the reviewed native Pi path and honest
+  recovery UI/docs; opaque terminal routes retain their existing protection.
+- [x] [VERIFY-PANE-93] Root: full gates and actual installed alpha.28: terminal
+  allocation fills its pane; Pi receives the complete worker result after a normal
+  question without Resume clicks; a real unsent draft is preserved. Replace
+  prior app/installer without backups after verification.
+
+2026-09-08 user decision after seeing installed alpha.27: keep Pi's normal
+inline layout, including the space below a short transcript; the same behavior
+occurs in cmux. Do not enable Pi fullscreen mode or reposition its native
+composer. The CSS fix still ensures xterm receives the entire pane height;
+installed OpenCode was observed with its native composer at the pane bottom.
+
+Diana's final bounded review is PASS, no material findings. Her independent
+native suites were 150/150 and actual Xterm probe 1/1. Root's complete
+`npm run check:all` exited 0: 1131 Node total, 1127 pass, 4 expected skips;
+70 Rust unit + 12 real headless; 63 UI; 25 integration; 1 packaged smoke;
+Clippy with warnings denied. Installed alpha.27 matches built/mounted DMG
+(51 files/links), deep strict codesign passes. Alpha.26 installer removed;
+no backup created. Normal installed Pi -> Gefjon -> Pi accepted d-35 once,
+whole native user-envelope equality, manual=false, no Resume click. User
+deleted the old t-6/t-7 sessions while this work ran; they were not restored.
+The existing replacement t-8 session was resumed after reinstall. Draft
+preservation/automatic continuation is the remaining native acceptance check.
+
+Additional native gate blocker (d-35 succeeded, second GF failed before delivery):
+`gefjon-velvet-harbor` p-29 created its native session metadata before the nonce
+user turn. `openAndDiscover` selected the id too early and permanently returned
+from `bindDiscovered` on missing evidence; the transcript later completed but
+row.sessionId remained null. This is distinct from draft readiness. Alpha.28
+will keep discovery pending for unavailable native evidence and select
+OpenCode candidates by the existing launch nonce scanner, not newest id.
+
+- [x] [TEST-PANE-94] Root: spawned CLI/server regression for session metadata
+  preceding first user turn, a newer unrelated native session, and message
+  parts preceding their completion events. RED: 3 failed, exit 1.
+- [x] [IMPL-PANE-95] Root: nonce-bound discovery with transient evidence retry;
+  explicit app binding refusals remain final, unknown evidence never binds.
+- [x] [VERIFY-PANE-96] Diana: bounded independent review of this discovery fix.
+  `diana-olive-valley`, native `01a07fc6-d6da-74a0-837e-1244e8aeaa75`,
+  complete result read: APPROVE, no material findings; static review only.
+
+Discovery GREEN: 8/8 spawned CLI/server probes, exit 0, including missing
+marker refusal, native process exit outcome and explicit controller refusals.
+The existing nonce scanner selects across OpenCode sessions; incomplete native
+text/events keep discovery alive within its existing lifecycle deadline.
+
+Alpha.28 release gates: build and codesign exit 0; installed app, built app
+and mounted DMG match across 51 files/links. Initial check:all stopped at two
+documentation tests because README.md disappeared during the run. Restored
+the tracked documentation with current Pi delivery and session/grid behavior;
+both documentation probes passed 2/2. Final `npm run check`: exit 0, Node
+1134 total / 1130 passed / 4 expected skips. Remaining full-gate chain exited
+0: Rust 70 unit + 12 real headless, Clippy warnings denied, 63 UI,
+25 integration and 1 packaged smoke. No runtime change followed the build.
+Native alpha.28 acceptance passed in resumed test session t-9, generation 2.
+Gefjon `gefjon-dusty-glade` bound by nonce to native OpenCode
+`ses_f8030eb28ffelZ7J1bp7QBVxS4`. Its entire three-line answer with
+CF28-DRAFT-START/END stayed pending as d-37 while Pi visibly retained the
+unsent CF28-UNSENT-KEEP-THIS draft. Two native snapshots 34,832 ms apart
+confirmed the same pending id, zero native receipts, and no submittedAt or
+expiresAt. After Ctrl-U erased only the probe draft, d-37 was accepted with
+one attempt and exactly one complete canonical user-envelope receipt. Pi
+then relayed all three lines and settled. No Resume click, manual read,
+policy change or manual delivery. Native OpenCode editor reached the pane
+bottom; Pi's accepted inline behavior remains unchanged.
+
+Release: `/Users/gabrielvoicu/ConsensFlow-Releases/3.0.0-alpha.28/ConsensFlow_3.0.0-alpha.28_aarch64.dmg`,
+SHA-256 `16ebc079e009cc215df9a841403e1ad69e644a8f27927b202ffb74b1634fbcec`.
+The prior alpha.27 app and installer were replaced without backups. Only
+previously active t-8/t-9 leads were resumed; user-deleted sessions stayed
+deleted. Evidence: `/tmp/cf-alpha28-check-green.log`,
+`/tmp/cf-alpha28-remaining.log`, `/tmp/cf-alpha28-discovery-red.log`,
+`/tmp/cf-alpha28-discovery-green.log`, plus `release28-proof.json` and
+`native28-draft*.json` in `/var/folders/5f/cy8ywl5d2_z_1g1zcn45g7gr0000gn/T/cf-alpha27-ae2xud65`.
+
+Phase 11 design (Root, reviewed by Zeus `zeus-lilac-reef`): the current Pi
+SDK's `ctx.mode === 'tui'`, `hasUI`, `ui.getEditorText`, `isIdle`, and
+`hasPendingMessages` are the native editor authority. A launch-scoped,
+nonce/session/expiry-bound request avoids submitting while a draft exists.
+The extension checks the editor again synchronously at `sendUserMessage`,
+with no await between check and send. Pi's API preserves editor contents.
+RPC and headless empty-string fallbacks are rejected. No raw editor text is
+persisted. The new internal `pane.claim_native_epoch` keeps epoch, generation,
+input failure and busy checks; it never clears the opaque latch or permits a
+PTY paste. Readiness names this explicit Pi delegation rather than inventing
+a clear latch. Only launches with the new `editorGuard: 1` capability use it.
+
+Zeus approved the core design and requested honest readiness/UI wording
+(integrated), plus pending rather than failed state for send-boundary refusals.
+Root retains the established affirmative-zero-byte failure/replan contract:
+a rare raced refusal gets a fresh delivery id, so stale ack files/deadlines
+cannot validate a retry. Ordinary draft waiting stays one pending record with
+no admission expiry. Failed records are excluded from the pending badge;
+unknown or possibly admitted outcomes are never retried automatically.
+
+Diana handed back the two UI files: real xterm height RED exit 1 (89px gap),
+focused GREEN 1/1 and full UI 62/62 exit 0. Root's native-editor refusal RED
+was 5 failures exit 1; native-claim RED was a missing-method compile failure
+exit 101. Native flow/epoch/probe gates are green: `npm run check` exit 0, Node 1131 total / 1127 passed / 4 expected skips; Rust 70 unit + 12 headless exit 0; UI 63 passed exit 0. Final `check:all` and installed gates continue.
+
+## Phase 12: Clear prompts and efficient result delivery [completed]
+
+2026-09-08 screenshots: OpenCode shows the launch nonce and a redundant
+Message from the user heading for a bare task. Pi ran two results listings
+and a read to retrieve one known conversation. Live evidence: d-38 was
+automatically planned while Pi processed a repeated user request; manual
+cf read cancelled that pending record and accepted d-39. The daemon did
+not lose the worker answer. Generated src/skill.js still carried the older
+opaque-Pi instructions even though skill/SKILL.md had been updated.
+
+- [x] [DESIGN-PANE-97] Root/Zeus: choose a supported way to keep launch
+  correlation separate from visible task text; retain exact session binding.
+  Zeus's whole msg_011CeqbogpTfVLxYbwF4pDYe confirms the heading bug and
+  recommends probing native support. Root verified OpenCode v1.18.29 source:
+  chat.message runs before native persistence, synthetic hides a text part,
+  ignored excludes it from model input, and PartID accepts the prt prefix.
+  Chosen: a launch-scoped plugin splits the marker into a hidden/ignored
+  native part, preserving nonce discovery and completion events. Actual task,
+  briefs and attachments remain intact. No native database edits, guessed IDs,
+  global plugin installation or new delivery transport. Unmergeable inline
+  JSONC keeps the original launch configuration and visible marker.
+  Sources: https://github.com/anomalyco/opencode/blob/v1.18.29/packages/opencode/src/session/prompt.ts,
+  https://github.com/anomalyco/opencode/blob/v1.18.29/packages/tui/src/routes/session/index.tsx,
+  https://github.com/anomalyco/opencode/blob/v1.18.29/packages/opencode/src/session/message-v2.ts,
+  https://github.com/anomalyco/opencode/blob/v1.18.29/packages/opencode/src/session/schema.ts.
+- [x] [TEST-PANE-98] Root: RED for generated guidance using one direct read
+  of a known conversation, automatic delivery by default, current native Pi
+  authority and parity with the shipped sample skill.
+  Focused generator tests: 3 failed, exit 1, before production changes.
+- [x] [IMPL-PANE-99] Root: update the generator and sample; optional discovery
+  only for unknown/multiple conversations, no status/read polling after run.
+  Skill and installer suites passed 84/84, exit 0. Existing cf read already
+  retrieves the whole first part in one invocation; no new reader API needed.
+- [x] [TEST-PANE-100] Root: native prompt regression for the chosen design,
+  including simultaneous identical tasks and whole result/receipt preservation.
+  RED: 5 failed before production (heading, launch wiring, plugin missing).
+  Focused plugin, interactive and binding suites pass 53/53, exit 0;
+  standalone CF boundary suite passes 98/98, including the actual plugin
+  through spawned CF and native-shaped SQLite parts/events. Installed native
+  acceptance below proves two identical tasks, plugin loading and whole receipts.
+- [x] [IMPL-PANE-101] Root: implement the minimal reviewed prompt correction.
+  Zeus complete msg_011Cer272WR3RZ1wvn1Cq6Jp confirms worker env wiring,
+  native visibility/model exclusion and configuration merge. Native plugin
+  loading remains an explicit acceptance gate. His latent lead-seed comment
+  is outside the current path: leads carry marker-only seeds, so the plugin
+  is intentionally not configured there; any future lead task seed needs env
+  wiring and a test. No --pure flag is used in app launches or this probe.
+- [x] [VERIFY-PANE-102] Root/Zeus: bounded final review, relevant complete
+  checks, rebuilt installed app and native ordinary automatic/manual read probes.
+  Final npm run check:all exit 0: Node 1144 total / 1140 pass / 4 expected
+  skips, Rust 70 unit + 12 real headless, Clippy warnings denied, UI 63/63,
+  integration 25/25, packaged smoke 1/1. Build exit 0. Built, installed and
+  mounted DMG match across 52 files/links; deep strict codesign passes.
+  Five installed harness skills equal generateSkill(actual roster) exactly.
+
+Installed alpha.29 native acceptance, 2026-09-08:
+
+- Own isolated Pi lead t-12 launched two real Gefjon/OpenCode 1.18.29 workers:
+  gefjon-amber-harbor (ses_f7edcf9fdffep9mtgpH75b3FJI) and
+  gefjon-ember-harbor (ses_f7edcf2ffffedJEqKOila5CnGn). Both received the
+  identical three-line task and bound to their distinct launch nonces.
+  Each first native user turn has the original marker part with
+  synthetic=true, ignored=true plus an ordinary visible task part. Neither
+  visible task contains the launch marker or the redundant user heading.
+  These stored native parts prove the packaged plugin loaded; no --pure,
+  injected native DB rows or guessed binding were used. CUA AX confirms
+  both app-owned workers. Post-install screenshot capture was unavailable
+  (ScreenCaptureKit -3801), so no fresh pixel-level claim is made.
+- Automatic d-42 and d-43: complete 60-byte answers, manual=false, accepted,
+  exact native user envelope once each, current lead generation. Pi relayed
+  every line with attribution. Zero cf results/read calls. The initial
+  technical test did include nine other pre-dispatch exploratory tool calls;
+  this is not evidence that every agent setup always costs only one call.
+- Explicit manual re-read of the known ember result: exactly one
+  cf read gefjon-ember-harbor --answer msg_0812310fc00155JDLSqrfUNTUF.
+  d-44 accepted, manual=true, cf-read, one complete part, one whole native
+  tool receipt, no results listing. Pi quoted the complete answer.
+- Ordinary request "Ask gefjon-amber-harbor for a joke.": one tool call
+  total, cf say, followed by automatic d-45; zero result/read calls, one
+  whole native user receipt. Gefjon answered "Why do programmers prefer
+  dark mode? Because light attracts bugs." Pi relayed that answer whole.
+- Old alpha.28 installer and root-owned packaging copies removed, including
+  temporary alpha.27/28/29 DMG roots. No backups, commits or session deletion.
+  Existing user sessions remain available in the sidebar after restart.
+
+Evidence: /var/folders/5f/cy8ywl5d2_z_1g1zcn45g7gr0000gn/T/cf-efficiency-nzh965nw/
+(native29-auto-proof.json, native29-tool-proof.json, native29-manual-proof.json,
+native29-joke-proof.json, installed-skill-proof.json, release29-proof.json,
+release29-manifest.json, cleanup29.json, zeus-implementation-result.json).
+Gate/build logs: /tmp/cf-efficiency-check-all.log and
+/tmp/cf-efficiency-build.log. Installer:
+/Users/gabrielvoicu/ConsensFlow-Releases/3.0.0-alpha.29/ConsensFlow_3.0.0-alpha.29_aarch64.dmg
+SHA256 ba712b20de1edd7c98b7aaf1306c5f3032b86facc95c4923fbf156defd2feba3.
+
+Acceptance: Automatic short answers need no follow-up tool call. If the user
+explicitly asks to read a known conversation, one cf read call returns its
+complete result (further parts remain required for large answers). User drafts
+and policy remain authoritative. Correlation metadata must not be removed
+without replacement evidence; native transcripts are never rewritten.
+
+## Phase 13: Wait for delivery or an explicit read request [complete]
+
+Gabriel's clarification: the lead does not need to know whether delivery is
+Automatic or Manual. After delegation it returns control and waits for an
+answer. Automatic delivery supplies it; under Manual the human asks the lead
+to read. Do not add policy snapshots, mode queries or a new authorization UI.
+
+- [x] [TEST-PANE-103] Root: RED for generated guidance that requires an
+  explicit human result-read request, removes the unconditional pre-follow-up
+  read, forbids polling/native-store bypass, and preserves whole delivered
+  file-part reads. The UI explanation must say the lead reads only when asked.
+  RED: 4 generated-skill failures and 1 focused UI failure, both exit 1.
+  GREEN: skill/installer 86/86 and focused UI 1/1, both exit 0.
+- [x] [IMPL-PANE-104] Root: update the skill generator, exact generated sample,
+  README and existing Manual help. One requested read covers the requested
+  results and their parts, not future polling; completing an already delivered
+  result remains allowed. This is an agent instruction, not a claim that the
+  CLI can prove natural-language user intent. No daemon or CLI API change.
+- [x] [VERIFY-PANE-105] Root/Gefjon: read the bounded native review, run the
+  relevant regression gates, rebuild/install the app and all generated skills,
+  then verify an isolated Manual session waits without reading and an explicit
+  request retrieves the whole answer in one call. Recheck ordinary Auto
+  delivery without result calls. No backups or changes to user session policy.
+  Gefjon whole msg_0814d7a2d001GbYXmTHBN2QsJZ confirms the implemented
+  skill gate and allows shipping it alone. Its policy-snapshot discussion is
+  superseded; no snapshot or mode-query guidance was added.
+  npm run check:all exit 0: Node 1146 total / 1142 pass / 4 expected skips,
+  Rust 70 unit + 12 headless, Clippy warnings denied, UI 63/63, integration
+  25/25, packaged smoke 1/1. Initial gate caught one formatter issue in the
+  new test; corrected before the passing full run.
+  First native Manual probe exposed a behavior failure: t-14 waited after
+  dispatch, but interpreted "Continue the existing task" as permission to
+  cf read (d-47). Not accepted as release proof. Added explicit negative
+  examples (continue/carry on/finish the task) and a return-control rule.
+  New assertion RED: 1/36 fails, exit 1; fresh native acceptance required.
+
+Installed alpha.30 final-skill acceptance, 2026-09-08:
+
+- Fresh Pi t-15 / gefjon-velvet-lagoon, native OpenCode
+  ses_f7ea65004ffeP3yLENJu0DoFLf. Ordinary delegation on Manual loaded the
+  generated skill and ran one cf run; the complete worker answer remained
+  undelivered. The exact previously failing request, "Continue the existing
+  task", then produced zero new tools. The lead explicitly returned control
+  and waited. Both native harnesses were settled; no result was fetched.
+- Explicit "Read the result from gefjon-velvet-lagoon and report the whole
+  reply" used one cf read, no results listing. Complete 57-byte d-48 accepted
+  as manual=true, cf-read, with one exact whole native tool receipt and an
+  attributed complete lead reply. A transient provider 429 recovered without
+  duplicate result tools.
+- The human page switched only this own session to Auto, without informing
+  the lead. Ordinary "Ask gefjon-velvet-lagoon for another short joke" used
+  one cf say. Daemon d-49 accepted as manual=false, pty-inline, with one exact
+  complete native user envelope; the lead reported the whole joke. Zero new
+  result-read or result-list tools, no mode queries and no Resume replies click.
+- After the final instruction-only refinement, npm run check passed again:
+  1146 total / 1142 pass / 4 expected skips. The earlier full gate covers the
+  unchanged daemon, Rust, UI and integration paths. Final build passed; native
+  acceptance used the final generated skill, SHA256
+  03cc30b1123c2603a03bbab1146f3dae84763965f1ca902cb532ae3047c0c080.
+  Final bundled generator and all five installed skills produce those same
+  bytes. Built, installed and mounted DMG match across 52 files/links; deep
+  strict codesign and installed version checks pass. A Finder .DS_Store was
+  removed from the package before resealing; no production behavior changed.
+- Alpha.29 installer and temporary packaging copies removed. Alpha.30 app
+  reopened successfully; no backup or session deletion/restoration.
+
+Evidence: /var/folders/5f/cy8ywl5d2_z_1g1zcn45g7gr0000gn/T/cf-manual-l3l63wn5/
+(native30-acceptance.json, native30-v2-manual-before.json,
+native30-v2-manual-continue.json, native30-v2-manual-requested.json,
+native30-v2-auto.json, installed-skill-proof.json, release30-proof.json,
+release30-manifest.json, cleanup30.json, gefjon-initial-review.json).
+The initial failing native30-manual-continue.json is retained as test evidence.
+Logs: /tmp/cf-manual-check-all.log, /tmp/cf-manual-continue-check.log,
+/tmp/cf-manual-build-final.log and /tmp/cf-manual-package-final.log.
+Installer:
+/Users/gabrielvoicu/ConsensFlow-Releases/3.0.0-alpha.30/ConsensFlow_3.0.0-alpha.30_aarch64.dmg
+SHA256 18a55aa7b8d9407a889893f1e9438e4215207bf6bc52f6c1a4939f08b7888eb2.
+
+## Phase 14: Native terminal style and automatic input handling [complete]
+
+User direction, 2026-09-08: remove Resume replies for everyone and clean its
+obsolete code; preserve the original style of each native TUI. This supersedes
+the earlier human-confirmation workflow, but never authorizes overwriting a
+draft. Auto delivery remains daemon-owned; Manual still waits for an explicit
+user read request. Large-result references remain as accepted in Phase 13.
+
+- [x] [DESIGN-PANE-106] Root/Zeus: establish supported native ingress or exact
+  editor authority for each harness, including workers. No inference from Enter
+  or transcript silence; prove that native delivery preserves unsent drafts.
+- [x] [TEST-PANE-107] Gefjon: reproduce missing terminal color capabilities in
+  a real child PTY and app palette overrides in real Xterm rendering.
+- [x] [IMPL-PANE-108] Gefjon: advertise correct terminal capabilities and let
+  each TUI retain its own colors and formatting; preserve explicit user choices.
+- [x] [TEST-PANE-109] Root: test automatic delivery without confirmation,
+  draft preservation, concurrent typing, stale launches and duplicate receipts.
+- [x] [IMPL-PANE-110] Root: implement the proven native delivery/readiness path.
+- [x] [TEST-PANE-111] Root: replace obsolete recovery UI and skill expectations
+  with the new behavior for every lead and worker.
+- [x] [IMPL-PANE-112] Root: remove recovery controls and their unused commands,
+  dialog state and documentation; retain independent delivery and input guards.
+- [x] [VERIFY-PANE-113] Root/Zeus: run focused and full gates, review the final
+  diff, verify native colors and draft-safe delivery in the actual app.
+- [x] [RELEASE-PANE-114] Root: build, install and verify the new app and installer;
+  remove superseded release artifacts, without backups or restoring sessions.
+- [x] [TEST-PANE-115] Gefjon: reproduce a new app session incorrectly opening
+  an earlier native conversation in the same directory.
+- [x] [IMPL-PANE-116] Gefjon/Root: make New session create a fresh native
+  conversation for every supported harness; preserve explicit session resume.
+- [x] [VERIFY-PANE-117] Root: verify two new installed-app sessions in one
+  directory have distinct native identities and no inherited conversation.
+
+Implementation and review evidence: real child-PTY color regression failed before capability defaults;
+Xterm now matches the default terminal's foreground/background and all 16 ANSI
+color query responses, and retains exact 24-bit SGR colors. Codex native queue
+and Claude MCP channel probes both preserved an unsent draft. OpenCode's HTTP
+message through the real Rust PTY and Xterm displayed the answer while preserving
+the draft and keeping Rust's latch set. Native queue epoch-race and real native
+receipt regressions pass; full release evidence is recorded below.
+
+Ownership: Gefjon completed terminal colors and Pi raw-message support. Diana
+completed Codex adapter and owns obsolete recovery UI/Rust API cleanup. Zeus
+owns Claude channel server/adapter/tests. Root owns launch/store/watcher wiring,
+spec, documentation, integration and release. No shared-file stashes or commits.
+
+Cleanup evidence: TEST-PANE-111 first failed on all 4 supported lead harnesses;
+Diana's final UI suite passed 61/61, Rust 69 unit + 13 headless; generator tests
+36/36. Production Claude channel/hook through Rust PTY and real Xterm preserved
+the draft and displayed the native result. /clear rotated its native session ID;
+an old-target follow-up was refused with zero bytes and native-session-changed.
+Zeus's final review identified a Claude session-transition gap and an admission
+expiry incorrectly reused for native receipts. Root added SessionEnd closure
+markers scoped to each native UUID, explicit verified-version gating, and raw
+channel-text refusal; their regressions are green. Diana owns receipt-window
+separation and visible lead invalidation. Native receipt was accepted 3908 ms after submit with the unsent draft
+preserved. The real Claude receiving hook rejected an old-target message even
+after the probe deliberately restored stale SessionStart evidence and removed
+the SessionEnd marker; no worker prompt or answer entered the new transcript.
+UserPromptSubmit is the independent live-session guard; SessionEnd tombstones
+are scoped to the old UUID, so delayed closure cannot erase a new session.
+Diana's receipt and invalidation fixes passed 281 focused Node tests. The user's new same-folder session bug is
+completed by Gefjon as TEST/IMPL-PANE-115/116. Pi reused a tab-derived native
+session name across app-state resets; fresh names now include the launch UUID,
+while explicit resume uses the recorded native identity. The regression failed
+before the change and passed afterward; 127 pane-server tests and 28 runner tests
+passed. The reported harness is still unconfirmed, so installed verification
+covered both Pi and Codex in the same directory.
+
+Diana's final review (automatic delivery d-61) found no material blockers in the
+Claude receiving guard, hook wiring, version gate, or native proof. The page
+projection regression failed before suspended records were excluded from current
+pending results and passed afterward. Native unknown-session states now explain
+that the Claude reply channel is unavailable. Rust verification passed 69 unit
+and 13 headless tests, and Clippy with warnings denied.
+
+The rebuilt alpha.31 smoke exposed a startup race: an unresolved lead appeared
+as alive:false and the page retired it before its first PTY output. The original
+smoke failed with two arrivals and no acknowledgements; the page now receives an
+explicit starting:true state and retains that terminal. The state and real-Xterm
+regressions failed before the fix; 129 pane-server tests, 63 UI tests, and the
+rebuilt packaged smoke passed after it. Diana's final read-only review d-64 found
+no material blocker. The initial candidate installer was removed and regenerated from the corrected bundle.
+Installed acceptance found a separate New session navigation defect: the native
+conversation was fresh but the page kept the old tab selected. The new-session
+result now selects its returned tab ID and focuses that terminal after refresh.
+The same-directory Pi/Codex regression failed with the old header still shown;
+all 64 UI tests passed after the correction. The installed candidate was updated with this UI correction before native acceptance.
+The native Codex worker also exposed inherited TERM=dumb from a noninteractive
+launcher. Rust now replaces absent, empty, or dumb inherited TERM with
+xterm-256color; explicit pane overrides and dropEnv remain authoritative, and
+NO_COLOR/FORCE_COLOR are untouched. The new real-PTY regression failed before
+the change (dumb:end), then all 69 Rust unit and 14 headless tests passed, as did
+Clippy with warnings denied. Native folder trust was acknowledged only for this
+run's isolated acceptance directory. No user project settings were changed. Evidence: /tmp/cf-starting-state-red31.log,
+/tmp/cf-startup-red31.log, /tmp/cf-starting-state-green31.log,
+/tmp/cf-startup-ui-green31.log, /tmp/cf-native-packaged-smoke31-final.log.
+
+Installed alpha.31 acceptance confirmed four separate new sessions in one
+directory (Pi t-20/t-21, Codex t-22/t-23), distinct native identities, no marker
+from another conversation, and immediate selection/focus of each new terminal.
+Gefjon's exact final token arrived automatically as d-68 with one native receipt,
+one cf run and zero result-read commands. Diana's automatic d-67 review passed the
+stale-refresh/unknown-outcome correction. Deleting all five acceptance sessions
+succeeded but exposed a page read racing tab removal: Watcher.held threw unknown
+tab after Page.state had captured the old tab list. The real Page/Watcher/Store
+regression failed there, then all 63 watcher tests passed after deleted tabs
+returned an empty held list. sendHeld still refuses an absent tab. The final
+candidate includes this cleanup fix; prior acceptance remains valid
+for unchanged fresh identity, selection, terminal and delivery behavior.
+
+
+Final release evidence, 2026-09-08:
+
+- Gefjon's complete automatic review d-69 passed the deletion-race fix and
+  confirmed that deleted sessions cannot acquire send authority.
+- Every verification component passed: Node 1201/1205 (4 expected skips),
+  Rust 69 unit + 14 headless, UI 66/66, integration 25/25, packaged smoke 1/1,
+  Biome 100 files and warning-denied Clippy. Total: 1376 passed, 4 skipped.
+  The components were rerun individually after the earlier fixture corrections;
+  this does not claim a later single check:all invocation.
+- Alpha.31 was installed and restarted from the final verified bundle. Deep,
+  strict codesign verification passed; the mounted DMG, staged app and installed
+  app matched the built bundle's 55-file/link manifest.
+- Final installed cleanup resumed only test t-24 explicitly, preserving its
+  native identity at generation 2, then deleted it and confirmed its Pi process
+  stopped. No internal_error appeared after deletion. Own t-19 through t-24 and
+  the temporary native-workspace directory are gone; user t-16/t-17 remain.
+- Alpha.30 and superseded candidate installers/staging copies were removed.
+  No backup or commit was made. Native histories were not reset or restored.
+
+Installer:
+/Users/gabrielvoicu/ConsensFlow-Releases/3.0.0-alpha.31/ConsensFlow_3.0.0-alpha.31_aarch64.dmg
+SHA256 964ed55bcb8dc88c172acb8d0f502dce8c6dc774e2f4258ea692792aefe07d2d.
+Evidence directory:
+/var/folders/5f/cy8ywl5d2_z_1g1zcn45g7gr0000gn/T/cf-native-style-ryaplurd/
+(installed-native-acceptance31.json, fresh-sessions31.json,
+native31-diana-final.json, native31-cleanup-review.json, final-gates31.json,
+release31-proof.json, release31-manifest.json, cleanup31.json).
+Final logs: /tmp/cf-delete-refresh-{node,integration,smoke,lint,build,package}31.log,
+/tmp/cf-new-selection-ui-final31.log, /tmp/cf-inherited-term-rust-green31.log,
+and /tmp/cf-inherited-term-clippy31.log.
+
+## Phase 15: Quiet fresh sessions and removal of the Claude development channel [completed]
+
+User direction, 2026-09-08: do not use the Claude development channel.
+A new Codex session must remain idle until the human sends the first message;
+an internal launch identifier is not a task and must never be submitted as one.
+The removal includes the channel implementation, launch arguments and hooks,
+registrations, tests specific to the retired adapter, and current documentation.
+Claude results remain readable on request. Do not replace the rejected channel
+with a permission bypass or write over the native editor. Preserve fresh native
+identities, explicit resume, worker task dispatch and existing user settings.
+
+- [x] [DESIGN-PANE-118] Root/Gefjon: choose and verify native session binding
+  that does not invoke the model; confirm the removal boundary for Claude.
+- [x] [TEST-PANE-119] Root: reproduce unsolicited Codex startup work and
+  the rejected Claude launch configuration at real process boundaries.
+- [x] [IMPL-PANE-120] Root: start fresh leads without a synthetic task;
+  preserve exact binding/resume and intentionally seeded worker launches.
+- [x] [TEST-PANE-121] Root: prove Claude opens without development channels
+  and retired configurations cannot send; explicit result reads still work.
+- [x] [IMPL-PANE-122] Root: remove the Claude development adapter and its
+  owned hooks/configuration/docs; accurately show unavailable automatic delivery.
+- [x] [VERIFY-PANE-123] Root/Gefjon: review the final change, run relevant
+  suites, install and verify new idle sessions and Claude startup in the app.
+
+Alpha.32 acceptance, 2026-09-08:
+
+- Installed app: fresh Codex 0.153.4 sessions t-28 and t-29 in the same
+  repository remained idle until their first human message. Each native
+  transcript contains its own test prompt and one final answer, with no
+  synthetic launch prompt. Native IDs are respectively
+  `01a0821b-879d-7de0-89fe-0580c8a20f22` and
+  `01a0821c-ed12-7d93-a3f5-de12ee9a3d11`. Closing and explicitly resuming t-29
+  retained its exact native ID and answer, with no extra model turn.
+- Installed Claude 2.1.263 session t-30 opened at its normal empty editor,
+  with native colors and 0 tokens. No development-channel confirmation;
+  its launch reservation has no channel. Native ID:
+  `941a56d8-4d8a-4747-87d5-6cef51f3363f`.
+- Native Codex queue probe also delivered the requested answer while retaining
+  an unsent draft. New Codex binding requires the verified 0.153.4 native
+  metadata, original CLI user thread and exact launch-specific originator;
+  absent, ambiguous, forked or unsupported metadata remains unbound. This
+  internal metadata mechanism must be reverified when upgrading Codex.
+- Claude's retired adapter, launch flags, registrations, owned implementation
+  files and channel-specific framing rule are removed. Historical reservations
+  cannot reactivate it. Existing guarded terminal delivery and explicit result
+  reads remain; removal does not prove automatic delivery through opaque input.
+- Gefjon d-70 implemented and tested the removal; Diana d-71 reviewed native
+  identity options. Gefjon d-72's final review found one stale test fixture
+  missing the newly required native metadata. The fixture was corrected without
+  weakening expectations, and the full Node check passed afterward.
+- Final gates: Node 1185 passed / 4 expected skips, UI 66/66, Rust 83/83,
+  integration 25/25, packaged smoke 1/1; 1360 passed total. Lint, Clippy with
+  warnings denied and diff whitespace checks passed. One initial integration
+  teardown check transiently saw an exiting fake process; it was absent on
+  inspection, and both isolated and full reruns passed without code changes.
+- The 53-entry built, DMG and installed app manifests match; strict deep
+  signature verification passed. All five installed skills match the current
+  generator and user roster. DMG SHA-256:
+  `86c8e43ef7f35a537bd618e9f271710ff9eef031fc1372d46a56cb4f74b33f01`.
+- Removed own review/acceptance sessions t-27–t-30 and temporary installer
+  staging; superseded alpha.31 installer removed. No backup or commit. User
+  sessions t-16/t-26 remain closed for the user to manage; native histories
+  and user settings were not deleted.
+
+Evidence: `/var/folders/5f/cy8ywl5d2_z_1g1zcn45g7gr0000gn/T/cf-startup32-1cp5ur_z/`
+(`installed-idle32-proof.json`, `codex-native32-proof.json`,
+`claude-quiet32-proof.json`, `gates32.json`, `release32-proof.json`,
+`release32-manifest.json`, `skills32-proof.json`, `cleanup32-proof.json`).
+Installer: `/Users/gabrielvoicu/ConsensFlow-Releases/3.0.0-alpha.32/ConsensFlow_3.0.0-alpha.32_aarch64.dmg`.
+
+## Phase 16: Quiet fresh OpenCode sessions [pending]
+
+User report, 2026-09-08: a fresh OpenCode lead receives an internal launch
+marker as a task and starts thinking before the first human message. New leads
+must open idle. User explicitly rejects the plugin approach and modifications
+to Claude Code, Codex, Pi or OpenCode. The implementation stays in ConsensFlow,
+using ordinary native CLI/API operations without editing harness binaries,
+source or global settings. Existing native styles remain unchanged.
+
+Create an empty OpenCode session through its authenticated loopback API, stop
+the temporary server, and launch the normal TUI with the exact returned session
+ID. No synthetic prompt, guessed newest session or plugin injection. Native
+creation is bounded; failures prevent pane launch and release its reservation.
+Same-folder sessions must have distinct identities; explicit resume preserves
+its existing identity. Retire ConsensFlow's OpenCode launch plugin, using the
+same native identity for workers so their actual task can travel without a
+launch marker. Preserve automatic result delivery and other harness behavior.
+
+- [x] [TEST-PANE-124] Root: reproduce the unsolicited OpenCode lead prompt at
+  the real server/pane boundary; verify distinct launches and resume.
+- [x] [IMPL-PANE-125] Root: create and bind native OpenCode identities before
+  opening leads/workers, send only real worker tasks, remove plugin injection.
+  -> satisfies [TEST-PANE-124]
+- [x] [TEST-PANE-126] Gefjon: test native empty-session creation with real
+  subprocess/API boundaries, bounded failures and child cleanup.
+- [x] [IMPL-PANE-127] Gefjon: add the native session-creation helper in
+  ConsensFlow. -> satisfies [TEST-PANE-126]
+- [x] [TEST-PANE-129] Root: reproduce ignored OpenCode `--session --prompt` with the installed app and a real spawned CLI fixture; native task API readiness, model, cancellation and no-retry regressions.
+- [x] [IMPL-PANE-130] Root: submit first/reopened OpenCode worker tasks through the native API after its TUI starts; preserve exact session, initial model and bounded cancellation. -> satisfies [TEST-PANE-129]
+- [x] [VERIFY-PANE-128] Root: final review incorporating earlier independent findings, relevant full
+  gates, native and installed idle/first-message/binding/resume acceptance;
+  package and reinstall without backups, clean only own test artifacts.
+
+## Phase 17: Reliable everyday operation [completed]
+
+Gabriel's 2026-09-08 installed report reopens acceptance. Preserve the live
+fortuna-advisor and poker-bot sessions, their panes and native histories. Work
+in an isolated ConsensFlow state root; no app restart while user work runs.
+No native harness binary/source/global-setting edits, Claude development
+channel, backups or commits. This phase is authorized with the prior release
+fixes and cleanup. A new stack is an option only if diagnosed boundaries need it.
+
+Acceptance: a fresh/reopened worker receives its exact task once after slow
+startup; dispatch output distinguishes a pane opening from task admission;
+zero historical runs never means a live worker did no work. The lead uses a
+complete auto-delivered answer immediately and continues independent work
+while waiting, without polling or asking the user to read an already delivered
+answer. Manual result retrieval remains user-requested. Native Claude/Codex
+colors survive the app launch environment. Every pane offers a clear close
+action preserving conversation history; closing one worker leaves its siblings
+and lead running. Automatic complete results from Claude, Pi and OpenCode reach
+real native leads, preserve drafts and do not replay uncertain submissions.
+Pending indicators show unique current results and their actual blocker.
+
+- [x] [TEST-PANE-131] Root/Gefjon: tests/opencode-launch.test.mjs and tests/cf-standalone.test.mjs: reproduce slow first/resumed seeding and misleading launch status.
+- [x] [IMPL-PANE-132] src/channels/opencode.js and bin/cf.mjs: bounded readiness and truthful dispatch/session status. -> satisfies [TEST-PANE-131]
+- [x] [TEST-PANE-133] Root: tests/skill.test.mjs and evals: automatic-arrival, independent-work, manual-read and zero-runs scenarios.
+- [x] [IMPL-PANE-134] src/skill.js and skill/SKILL.md: simplify the lead workflow, preserve default conversation continuation and manual retrieval rule; regenerate owned installations. -> satisfies [TEST-PANE-133]
+- [x] [TEST-PANE-135] Diana: app/tests/page.spec.mjs and relevant real bridge lifecycle tests: worker/shell close, lead/session semantics, stale-generation refusal, surviving sibling.
+- [x] [IMPL-PANE-136] Diana: app/ui/panes.js, menus.js and minimal existing bridge paths: visible pane close action with history retained. -> satisfies [TEST-PANE-135]
+- [x] [TEST-PANE-137] Root: real PTY/terminal tests reproduce lost native colors under inherited launcher environment; retain ANSI/dim/bold styles.
+- [x] [IMPL-PANE-138] Root: minimal app terminal environment/rendering correction, no native theme/config edits. -> satisfies [TEST-PANE-137]
+- [x] [TEST-PANE-139] Root/Zeus: native-process delivery matrix reproduces Claude lead and Pi completion failures, draft/interruption/no-replay boundaries.
+- [x] [IMPL-PANE-140] Root: correct completion/readiness/delivery at the diagnosed boundary with native evidence and no retired Claude channel. -> satisfies [TEST-PANE-139]
+- [x] [TEST-PANE-141] Root: page/watcher tests reproduce stale/duplicate/hidden blocked result indicators.
+- [x] [IMPL-PANE-142] Root: current unique result counts and actionable truthful waiting reasons. -> satisfies [TEST-PANE-141]
+- [x] [VERIFY-PANE-143] Final integration review, relevant full gates, real native cross-harness acceptance, packaged isolated acceptance, safe install and superseded release/staging cleanup; close VERIFY-PANE-128 only on its actual evidence.
+
+## Phase 18: Signed updates with user-controlled restart [completed]
+
+Gabriel authorized this addition on 2026-09-09. Implement in the existing
+Tauri app; keep the protected installed sessions running. No remote release
+publication or native-harness modification is part of local implementation.
+
+Contract:
+
+- A quiet check ten seconds after startup and every six hours discovers a
+  newer release; background failures do not interrupt terminal work. A
+  permanent native menu item and an Updates button provide explicit checks,
+  including clear offline/error/up-to-date feedback. Self-tests skip scheduling.
+- The update dialog shows installed version, selected channel, candidate
+  version, plain-text release notes, download progress and Download / Later.
+  Downloading is explicit and may proceed while agents work. Installation and
+  restart are a separate explicit action, never triggered by a timer or download.
+- Stable admits only stable semantic versions. Alpha admits alpha prereleases
+  and stable graduation releases. Both require a strictly newer version;
+  switching channels never downgrades. Channel choice persists in app-owned
+  preferences; a first run derives its channel from its installed version.
+- Use the official Rust Tauri updater and mandatory signatures. Metadata is
+  public static JSON per channel on GitHub, with immutable versioned release
+  archive URLs. Only the app's guarded update commands are exposed to the UI;
+  direct plugin install commands are not granted. Release notes remain text.
+  On macOS, after official signature verification, installation stages beside
+  the current app and uses atomic RENAME_SWAP. The official 2.11.0 installer
+  moves the old app away before its second rename; a failed rename can drop
+  the temporary old copy. The atomic swap removes that failure window.
+  The old bundle is deleted after a successful exchange; no backup is retained.
+  A post-swap filesystem cleanup error records the staging path on Console,
+  without claiming that the already-installed update was rolled back.
+- The signed archive contains the app, bundled Node, cf, generated skill and
+  adapters as one matching version. Prepare release metadata only after all
+  artifacts and signatures exist; publishing assets precedes publishing the
+  channel pointer. Signing private material stays outside the checkout and
+  never enters logs or workers. No backups are created.
+- The backend refuses installation with ANY open native pane, across all
+  sessions. The user must close/suspend those sessions first: opaque unsent
+  native-editor drafts cannot be saved or inferred safely. No automatic
+  stopping of agents and no claiming that idle means a draft is absent.
+  The install gate and every native pane launch share one atomic admission
+  boundary; a racing launch either precedes and blocks installation, or is
+  refused before spawning. On installation failure, admission reopens.
+- Historical alpha.36 contract, superseded by the latest no-native-version-check
+  decision above: candidate compatibility metadata lists only exact native CLI versions with
+  recorded release evidence, separately from transcript schema versions.
+  Detected unverified versions are explained; an available fix is advertised
+  only when that newer release explicitly verifies the detected version.
+  Unknown compatibility stays unknown. During this phase Claude 2.1.266 and
+  OpenCode 1.18.30 arrived; captured native fixtures and a real Claude peer
+  delivery preserving an unsent draft verify them. A real OpenCode worker
+  also delivered automatically to that Claude lead without disturbing the
+  draft. Future 2.1.267 remains
+  unverified in the diagnostics regression.
+- Tests exercise the real updater's signature/download boundary, rejected
+  tampering, channel/version policy, failure/retry and real-PTY installation
+  admission races. Test installation/restart only in an isolated throwaway
+  app copy. The protected installed app and its sessions remain untouched.
+
+- [x] [TEST-PANE-144] Root: update state, signed download, channel/version rejection and retry regression tests.
+- [x] [IMPL-PANE-145] Root: guarded official Rust updater controller, persisted channel and native menu integration. -> satisfies [TEST-PANE-144]
+- [x] [TEST-PANE-146] Root: real PTY tests for open-pane refusal, launch/install race and admission recovery.
+- [x] [IMPL-PANE-147] Root: atomic PaneTable installation admission guard, explicit install/restart only. -> satisfies [TEST-PANE-146]
+- [x] [TEST-PANE-148] Diana: UI tests for quiet/manual checks, notes, download/later, progress, channel changes and protected install.
+- [x] [IMPL-PANE-149] Diana: concise update dialog, permanent entry and scheduled check lifecycle. -> satisfies [TEST-PANE-148]
+- [x] [TEST-PANE-150] Gefjon/Diana: release-feed tests for bundle versions, signatures, HTTPS immutable assets and channel semantics.
+- [x] [IMPL-PANE-151] Diana after bounded handoff from Gefjon: deterministic local metadata preparation and documented publish order. -> satisfies [TEST-PANE-150]
+- [x] [TEST-PANE-152] Root: native-version compatibility diagnostics, unknown future versions and candidate fix evidence.
+- [x] [IMPL-PANE-153] Root: report verified compatibility and available fixes without changing native harnesses. -> satisfies [TEST-PANE-152]
+- [x] [VERIFY-PANE-154] Zeus review, full applicable gates, signed package and isolated real update/install/restart evidence; publication and protected-install boundaries documented in the alpha.36 release validation.
+
+## Phase 19 — accepted role/session plan [completed]
+
+Implementation is isolated in `consensflow-next-ib1cg0zs`. The user's latest
+2026-09-09 instruction authorizes reinstall and native verification after closing
+the installed app. Preserve histories and native profiles. No commit or publication.
+
+- [x] [TEST-PANE-155] Native result and binding tests ignore absent/arbitrary harness versions; launch never probes versions.
+- [x] [IMPL-PANE-156] Remove native version decisions from readers, binding and delivery selection. -> satisfies [TEST-PANE-155]
+- [x] [TEST-PANE-157] Complete worker results remain readable without a readable lead transcript or receipt cursor.
+- [x] [IMPL-PANE-158] Separate result access from receiver receipt observation. -> satisfies [TEST-PANE-157]
+- [x] [TEST-PANE-159] Closed workers and whole results persist across restart/resume, without redispatch or cross-session leakage.
+- [x] [IMPL-PANE-160] Restore durable worker navigation and same-session result access. -> satisfies [TEST-PANE-159]
+- [x] [TEST-PANE-161] Pi extension integration preserves drafts and complete automatic results; installation occurs only when Pi is detected.
+- [x] [IMPL-PANE-162] Implement conditional app-private Pi extension preparation and verify launch, editor, settlement and delivery without changing active processes. -> satisfies [TEST-PANE-161]
+- [x] [TEST-PANE-163] Real terminal geometry: fixed double-width lead and two-row workers scrolling horizontally beyond pane five.
+- [x] [IMPL-PANE-164] Implement fixed lead layout, scrolling and persistent selection without recreating terminals. -> satisfies [TEST-PANE-163]
+- [x] [TEST-PANE-165] Private lead/PM skills are scoped correctly; setup/update/roster leave global skills untouched.
+- [x] [IMPL-PANE-166] Implement private role skills and remove global installation/healing, with no automatic global cleanup. -> satisfies [TEST-PANE-165]
+- [x] [TEST-PANE-167] PM has separate identity/window, manual same-session lead send/read and no worker authority or push.
+- [x] [IMPL-PANE-168] Add optional PM role/window and complete manual lead result reads. -> satisfies [TEST-PANE-167]
+- [x] [TEST-PANE-169] Updater and release metadata never inspect native versions; signed ConsensFlow version checks remain.
+- [x] [IMPL-PANE-170] Remove compatibility probes, matrices, feed requirements and stale documentation. -> satisfies [TEST-PANE-169]
+- [x] [VERIFY-PANE-171] Applicable full gates, isolated candidate acceptance, then authorized reinstall and installed verification with user histories preserved.
+
+### Harness administration amendment
+
+- [x] [TEST-PANE-172] In tests/ui.test.mjs and app/tests/page.spec.mjs cover each detected/missing harness, version/latest-release failures, evidence-based status, Pi extension red/retry and non-disruptive checks. Network/CLI boundaries use isolated fixtures.
+- [x] [IMPL-PANE-173] Update src/install.js, src/ui.js, src/page.js and app administration UI with per-harness detection, informational version/update checks, status/actions and Pi installer status. No native version gating or active-session mutation. -> satisfies [TEST-PANE-172]
+- [x] [TEST-PANE-174] Packaging, CLI and UI tests prove role skills are build-owned, no separate install/update skills action exists and global files remain untouched across app upgrades.
+- [x] [IMPL-PANE-175] Remove separate skill-management actions from bin/cf.mjs and UI, update bundle/README to report included role skills; retain private roster data refresh and manual legacy cleanup. -> satisfies [TEST-PANE-174]
+
+Decision log amendment: user now authorizes Pi extension auto-preparation only
+when Pi exists and asks for version/update/status controls for every harness.
+This supersedes the no-extension feasibility blocker and blanket diagnostics
+version ban, not the no-version-gating contract. Completed historical tasks
+155/169 retain their recorded evidence; new diagnostics are covered by 172/173.
+VERIFY-PANE-171 runs after these new tasks as the final integrated gate.
+
+### Phase 19 evidence
+
+Implementation started in the isolated checkout; baseline protected file hashes
+are recorded in `implementation-isolation.json`. Alpha.37 is installed; companion-window, updater and final acceptance passed.
+
 ## Resume Context
+
+2026-09-10 current: Phase 23 is complete. Alpha.43 is installed; the duplicate
+Updates header button is removed and the native-menu event remains tested.
+UI 89/89, Rust updater 8/8, Node updater 16/16, packaged smoke 1/1; all exit 0.
+Installed bytes and existing state/preferences were verified. Both remote
+feeds remain HTTP 404 because signed updater releases have not been published.
+No GitHub release, commit, GitHub push or NAS push was performed. See Phase 23.
+
+Previous Phase 22: Alpha.42 was installed and running;
+both saved conversation identities survived. Full assigned role instructions
+are supplied on launch/resume for all four supported lead/PM harnesses. Role
+tests 21/21, packaged smoke 1/1, session-concurrency 3/3; native fresh PM probes
+passed for all four harnesses after explicitly selecting Gefjon's free Muse
+model for OpenCode/Pi. The earlier default-model limits are superseded. Full Node
+1221 passed, one existing lifecycle assertion failed, five skipped; integration
+24/25 with a timing-sensitive failed-worker assertion that passes in isolation.
+See Phase 22 evidence below. No commit or publication.
+
+Previous Phase 20 context: at 183/184, both reported regressions were fixed
+and tested; alpha.38 DMG and signed updater archive are prepared. Fortuna is
+open with eight panes, so installation awaits the user's restart decision.
+Next: install alpha.38 when approved, verify bundled version and preserved
+session rows, then close VERIFY-PANE-178. Do not stop active panes meanwhile.
+
+Previous completed release context:
+
+Latest authorization, 2026-09-09: the user closed ConsensFlow and explicitly
+asked to finish implementation, reinstall and check the installed application.
+Continue source work in the isolated checkout; installation and native acceptance
+are now authorized. Preserve user history and profiles; do not publish or commit.
+Completed: 175/175 tasks. Alpha.37 is installed and running; the final
+installed bundle matches all 55 files of the tested build. Source changes are
+integrated into the original repository without committing. PM and updater
+packaged acceptance both passed. Automated core/UI/process gates and native automatic
+result receipt have passed for Claude Code, Codex, Pi and OpenCode. Pi draft
+holding and delivery after explicit editor clearing were observed. Model-provider
+quota/authentication errors are recorded separately from delivery acceptance.
+
+Current product contract: Tauri/xterm.js, fixed double-width lead, horizontal
+worker columns, full-size PM view above the lead in the main window, private `consensflow-lead` and
+`consensflow-pm` documents for Claude Code/Codex/OpenCode/Pi only. Workers receive
+neither role document; Kimi remains worker-only. PM send/read is manual and
+same-session. Native versions are informational diagnostics, never gates.
+Pi's process-scoped extension is explicitly approved and prepared only when Pi
+is installed. No harness profile changes, development channels or global skill
+installation. The five manifest-owned generic global skills were manually
+removed after matching their stored hashes. The application does not delete them.
+
+Historical defect/recovery record follows; it describes alpha.34, not the
+installed alpha.37 implementation.
+
+**Historical product blockers, 2026-09-09; recovery alone was not a product fix:**
+
+- The running installed app and bundled CLI are still **alpha.34**, whose
+  completion reader rejects Claude Code **2.1.266**. Alpha.36 admits that
+  version, but `DeliveryWatcher.readResult` still couples worker-result access
+  to parsing the lead transcript for a receipt cursor. Decouple authenticated
+  access to a complete result from receiver-version/receipt availability;
+  retain unknown receipt status rather than refusing the already-available text.
+  Adding versions to an allowlist is no longer an acceptable fix: remove all
+  native version checks per the latest planning decision, including the ones
+  already present in alpha.36. Keep only ConsensFlow's own release comparison.
+- After restart/resume, Poker `t-16` generation 6 has only lead `p-45` in its
+  pane list; Astraeus/Calliope remain in `threads.json` under `tab:t-16:5`.
+  Astraeus `d-105` is held for the previous lead generation. Both native
+  reviews are complete: Astraeus 24949 bytes and Calliope 26168 bytes.
+  The lead's claim that Calliope never started was false. Both were exported
+  byte-for-byte to Gabriel's requested `pluribus/reviews/astraeus-2026-09-09.md`
+  and `pluribus/reviews/calliope-2026-09-09.md`; no native task was restarted.
+- Fortuna `t-41` generation 2 likewise has only lead `p-104`; Zeus, Diana,
+  Apollo and Gefjon remain linked to generation 1. Apollo (10548 bytes) and
+  Gefjon (2902 bytes) have complete native results. Zeus and Diana have no
+  confirmed final result; their last public progress concerns tests in flight,
+  which does not prove a process remains alive. Finals and explicitly incomplete
+  progress exports are in `fortuna-advisor/runtime-archive/reviews/consensflow-recovered-2026-09-09/`.
+  Recovery did not change Fortuna code/specs, tests, native stores, read marks
+  or processes. The draft requires persistent worker navigation, readable old
+  results and resumable native conversations without redispatch or cross-session
+  reassignment. Investigate process-exit pane removal as well as restart recovery.
+
+No installed restart was executed in this planning/recovery turn. These are
+newly observed acceptance blockers; historical green test counts below do not
+close them. The existing VERIFY-PANE-128/143 gates remain open.
+
+Historical Phase 18 local implementation and verification: 152/154,
+2026-09-09. The alpha.36 local candidate is prepared at
+`/Users/gabrielvoicu/ConsensFlow-Releases/3.0.0-alpha.36/ConsensFlow_3.0.0-alpha.36_aarch64.dmg`
+(SHA256 `1d2ac00748a28752e366c8de95322f0aaa8eaa06b068a8797b62b6d4bc17eff9`).
+The matching signed archive, alpha `latest.json`, manifest, full validation and
+sanitized evidence are in that directory. It supersedes the alpha.35 installer;
+its earlier stabilization evidence is retained as historical evidence only.
+
+Implemented: ten-second startup/six-hour checks, native menu and update dialog,
+explicit download and later/install actions, stable/alpha channels, exact native
+compatibility, official signature verification, atomic macOS bundle exchange
+and restart. ALL open/hidden/idle panes and incomplete cleanup block install;
+no draft is inferred and no working agent is stopped by the updater. A racing
+launch cannot pass the same install admission boundary. Unknown cleanup stays
+visible, ECHILD is treated as already reaped, and post-swap shutdown is bounded.
+The complete app/Node/cf/skill/adapters update as one matching version.
+
+Zeus reviewed final architecture and cleanup; Diana completed UI, release-feed
+binding and packaged acceptance work; Gefjon supplied the initial release RED
+suite. Their results were delivered through ConsensFlow and read whole. Root
+integrated and verified. No native binary/global-setting edits, development
+channels, plugins, commits or backups.
+
+Final gates: Node1254 passed/1259 total (5 intentional skips), Rust102, UI83,
+integration25, ordinary packaged smoke1 and actual packaged updater1: 1466
+passing tests. Lint, warning-denied Clippy and formatting exit0. Final release
+subset33/33. Mounted DMG matches all55 tested application files; deep strict
+ad-hoc signature, archive/bundle byte-and-mode equality and actual release-key
+verification pass. Altered archive bytes fail signature verification.
+
+The isolated actual update ran alpha.35 PID3389, downloaded and verified the
+signed test archive over HTTPS, refused installation with two real PTY panes
+still alive, then atomically installed alpha.36 and restarted as PID3516. The
+new UI and bundled Node were live, old processes were reaped, no staging stayed,
+and the target application was unchanged. Test-driver path/TLS/barrier/FIFO
+failures were corrected before that passing run; no rejected run was counted
+as success. This uses an isolated test signing key; the separate distribution
+archive was verified against the real configured release public key.
+
+Native Claude2.1.266/OpenCode1.18.30 fixtures and real automatic worker-to-lead
+delivery passed: Gefjon result CF_OC130_AUTO_DONE arrived as d-3, the Claude
+lead acknowledged it and its unsent CF_UNSENT_DRAFT_266 remained visible.
+Alpha.35's earlier seven-route matrix, skill behavior and original-colour
+receipts remain in the historical evidence. Future native versions still need
+verification; native permission rules can hold an agent's result-file tool call.
+
+OPEN operations: read-only verification on 2026-09-09 found the installed
+alpha.34 app at PID66854, started at 17:31:08 local time. Preserve Fortuna
+t-41 and Poker t-16; their latest generations and recovery are recorded above.
+VERIFY-PANE-128 and VERIFY-PANE-143 stay
+unchecked until safe replacement/restart and installed acceptance are allowed.
+The versioned GitHub release and rolling alpha/stable feeds have not been
+published; online discovery is not activated. Older builds need one manual DMG
+install to acquire the updater. The app is ad-hoc signed, not Apple-notarized.
+There is no remaining local Phase18 code/test work. All owned worker labs and
+scratch app copies are closed/cleaned; the release signing key is outside both
+app state roots at ~/.tauri/consensflow-updater.key.
+
+Previous release:
+
+Current: Phase 15 complete, 123/123. Alpha.32 is installed and restarted.
+Fresh Codex leads open without a model prompt and bind by verified native
+metadata; same-folder separation and exact explicit resume passed installed
+acceptance. Claude's development channel is removed and normal idle startup
+passed. All final gates passed: 1360 tests, 4 expected skips. Own app test
+sessions and superseded installer staging are removed; user sessions t-16/t-26
+remain closed and retained. No commit or backup.
+
+Previous release: Phase 14 complete, 117/117, alpha.31.
+Native TUI styles and automatic draft-safe delivery are verified; reply recovery
+controls are removed. New Pi/Codex conversations in the same directory have
+separate native identities and histories, and the newly created terminal is
+selected and focused. All verification components passed (1376 tests plus
+4 expected skips); Diana and Gefjon reviews passed. Own acceptance sessions,
+workspace and superseded release artifacts were removed without backups or a
+commit. User sessions t-16/t-17 remain closed after the normal app restart;
+resuming or deleting them remains the user's choice.
+
+Previous release:
+
+Current: Phase 13 complete, 105/105. Alpha.30 installed and restarted;
+all five harness skills match the final generator and the native-tested skill
+hash. The lead waits without querying delivery mode; generic continuation is
+not a request to read. Explicit reading and Auto delivery both passed native
+acceptance. No backup, commit, session deletion or restoration. Existing
+sessions are suspended by the normal app restart and remain the user's to manage.
+
+Previous release:
+
+Current: Phase 12 complete, 102/102. Alpha.29 installed and release artifact
+verified. Generated skills updated on all five harnesses; bare worker prompts
+are clean through the native OpenCode launch plugin. Two identical tasks
+bind separately and deliver whole automatically with zero result tools; an
+explicit known-result read uses one call; ordinary joke follow-up uses one
+send and zero result calls. Zeus's whole review is recorded above. No backup
+or commit. Existing t-10/t-11 are suspended after installation; own t-12 is
+active. User-deleted t-8/t-9 were not restored. Pi's accepted inline terminal
+layout is unchanged.
+
+Historical alpha.26 native acceptance (limited to explicit recovery):
+
+- Fresh Pi lead t-4 loaded the generated skill and used `cf run @gefjon`.
+  Gefjon `gefjon-amber-brook`, p-19, native OpenCode
+  `ses_f808fec32ffe1or1SrmSXZ6CPP`, stayed visible and replied completely.
+- After one app confirmation of the visually empty lead input, automatic
+  delivery d-27 was accepted and Pi quoted the entire joke with AUTO-DELIVERY-OK.
+  Direct worker input also worked: WORKER-STILL-LIVE and CONCURRENT-WORKER-OK
+  arrived automatically as accepted d-28/d-29. Native Pi agent_settled evidence
+  confirmed the lead's complete reports. No manual read, polling or policy change
+  was used by the test lead.
+- Two actual Pi sessions in the same directory stayed active. t-4 was renamed
+  to Alpha.26 verificat at 05:20:28 UTC while Gefjon's 20-second task continued;
+  its final answer completed at 05:20:37 UTC. Selection and rename retained
+  generation 1, native identities and all six app/controller/harness processes.
+- Native Delete removed t-4 and stopped Pi 12600, controller 13581 and
+  OpenCode 13582; Pi 16808 in t-5 survived and answered AFTER-DELETE-OK.
+  Both disposable sessions were removed through the app; the three user
+  sessions remain available to resume or delete.
+- Full gate exit 0: Node 1111 passed / 1115 total (four expected skips),
+  Rust 69 unit + 12 headless, UI 61, real integration 25, packaged smoke 1.
+  Final dialog wording distinguishes worker replies at the lead from lead
+  messages at workers; its follow-up browser RED cases are recorded below.
+  Final rebuilt bundle passed `npm run check:all` again, exit 0, with the same counts.
+  The final installed and mounted DMG applications match all 51 files/links;
+  codesign and DMG verification pass. Installed doctor confirms alpha.26,
+  11 roster agents and one generated skill in each of five harnesses.
+- Startup: four real-process RED/GREEN cases cover local PATH, retained exit 7,
+  missing binary before admission and live continuation without a second lookup.
+  Deletion modal races and interrupted deletion retry are covered. Failed pane
+  scrollback stays in the page emulator until retry; no native re-subscription
+  or failure-history archive is added. Unresolved launches are checked before
+  any pane is stopped. Tab counter corruption fails closed.
+- Zeus confirmed the final scope/lifecycle design. Generated immutable
+  `/deliveries/d-*.md` bodies are now ignored by Git, preserving complete
+  result receipts without committing inter-agent output. Session deletion
+  preserves conversation records, inert coordination files and native history.
+
+Final release artifact: `~/ConsensFlow-Releases/3.0.0-alpha.26/ConsensFlow_3.0.0-alpha.26_aarch64.dmg`.
+SHA-256: `aa351fa767fd8c45e62d08cc0657fbe878e4092c41400bb39c0bd9b5b3c567d0`.
+The alpha.25 installer and temporary QA folders were removed; no backup directory
+or duplicate installed app remains. The three pre-existing sessions are retained.
+Final native UI check resumed the existing repository session: its 18 historical
+replies appear separately as **18 previous-session replies**, with no current
+pending-result badge and no Resume replies button on the fresh unlatched lead.
+All 87 tasks and all acceptance criteria are complete for the scoped macOS release.
+
+Historical alpha.25 release record (superseded by alpha.26):
 
 > Alpha.25 is installed at `/Applications/ConsensFlow.app`, without a backup.
 > The DMG in `~/ConsensFlow-Releases/3.0.0-alpha.25/` matches the built and
@@ -1346,6 +2331,8 @@ manual reader. Follow-up parts always use the immutable delivery ID.
 
 ## Decision Log
 
+2026-09-08, Phase 16: user rejects harness modifications/plugins. Use only native OpenCode CLI/API session creation inside ConsensFlow; retire its launch plugin. Diana conditional GO requires canonical directory and exact ID evidence, durable empty session, and reaped bootstrap child. Native probe proves idle TUI and draft-preserving queue; implementation gates remain open.
+
 | Date | Decision | Rationale |
 |---|---|---|
 | 2026-09-06 | macOS first; Windows and Linux packaging deferred to a later spec, choices kept compatible | User's call ("no Windows machine; later; macOS for now") |
@@ -1418,6 +2405,49 @@ manual reader. Follow-up parts always use the immutable delivery ID.
 
 | Task | Red | Green | Refactor |
 |---|---|---|---|
+| [TEST-PANE-144] updater policy/state/download | Actual cargo runner exit101: absent validator/controller/download and candidate compatibility helper; root policy/state/signature/fix-metadata RED logs. | Official updater signature/download and policy tests pass; actual signed bytes accepted, tampering refused; full Rust102 exit0. | Fixed HTTPS channel feeds, strict newer-version policy, matching exact native compatibility and no direct UI plugin install authority. |
+| [TEST-PANE-146] / [IMPL-PANE-147] install/lifecycle | Missing admission API; missing-runtime installer assertion failed; absent bounded-drain helper failed compilation, exits101. | Real PTY launch/install races, teardown, codesigned bundle failure cases and bounded drain pass; full Rust102 exit0. | Atomic same-volume exchange; ECHILD is reaped, unconfirmed cleanup blocks, post-swap drain cannot prevent restart indefinitely. |
+| [TEST-PANE-148] / [IMPL-PANE-149] updater UI | Diana initial missing-surface RED plus two actual notes/blocker failures, exit1. | Nine worker UI cases plus cleanup-label integration case; updater10 and complete UI83/83, exits0. | Later dismisses the same-version banner, channel change checks immediately, failed pre-install refresh refuses installation. |
+| [TEST-PANE-150] / [IMPL-PANE-151] release metadata | Gefjon actual absent prepare-update module failures, exit1. | Diana implemented helper:17/17 release tests, final related subset33/33, exits0. Real DMG/archive/source metadata preparation exit0. | Bind exact source/bundle/archive versions and native compatibility; compare safe archive bytes/modes without extraction; retain notes as text. |
+| [TEST-PANE-152] / [IMPL-PANE-153] compatibility | Missing module/candidate helper and real bridge-wrapper mismatch failed tests. Native266/1.18.30 initially rejected; Claude266 peer version initially unsupported. | Compatibility/full Node1254 pass; native fixture/regression102 pass; real Claude266 peer and OpenCode30 automatic result with draft preserved. | Exact native versions only; future2.1.267 remains unknown. No native plugin or configuration edits. |
+| [VERIFY-PANE-154] packaged acceptance | Isolated driver failed on path guard, generated public-key filename, macOS symlink path, TLS extensions, observation ordering and inherited stdin lifetime. Finder cosmetic DMG step was interrupted after stalling. | Final HTTPS/signature/two-real-PTY-block/install/restart test1/1; native oldPID3389 -> newPID3516 and exact app bytes/modes, no staging. CI DMG build, mount/hash/codesign and real distribution-signature checks pass. All distinct gates1466 pass. | Driver uses canonical scratch paths, valid TLS, an explicit selftest barrier and external FIFO writer; production verification stays enabled. Published feed and protected installed acceptance remain separate. |
+| [IMPL-PANE-132] dispatch wording | Spawned CLI first-open assertion failed, exit1: only a conversation/pane line. | Full CLI95/95, exit0; startup combined109/109 earlier. | Keep first line stable; explicitly state that task startup continues in the app. |
+| [TEST-PANE-139] / [IMPL-PANE-140] native delivery | Real native matrix exposed UTC process-identity mismatch, failed-record replan flood and unbound active Codex lead. Diana expiry-race regression2/3: deleted expiresAt was restored by store merge. | Native7/7 whole receipts and lead answers; same-ID/UUID epoch-race expiry clearing uses null. Node full1230 pass; Rust85; integration25; peer serialized-frame boundary10/10. | No retries after uncertain writes; exact native Claude UUID plus complete envelope; failed attempts stay terminal, explicit resend gets fresh metadata. |
+| [TEST-PANE-141] / [IMPL-PANE-142] page indicators | Diana added duplicate/stale-generation failure and pending indicators regressions. | Current UI73/73 and full server/CLI suite pass. | Count current unique worker results and show source/reason; startup failure remains visible even if a native TUI is open. |
+| [TEST-PANE-131] | Gefjon slow native startup: 1/1 failed at 15 seconds. Root spawned CLI status: 1/1 failed; progress admission: 1/1 failed, exits 1. | Gefjon helper 14/14; root real CLI startup/resume/uncertain/status 3/3, exits 0. | Shared 60-second budget, exactly one task POST. |
+| [TEST-PANE-133] | Skill suite 39 tests, 3 failed, exit 1. | Text contract39/39; real Claude independent-work5/5, delivered-use3/3, manual-read3/3, exits0. Gefjon updated11 scenarios. Eval stream capture now keeps all assistant messages; fixtures include named input files. | Independent work and automatic arrivals are not manual retrieval. |
+| [TEST-PANE-135] / [IMPL-PANE-136] | Diana 5/5 UI close regressions failed, exit 1. | Diana automatic delivery d-2: focused5, UI71, related bridge138 all pass, exits0. Root reviewed visible generation-bound action and existing close bridge. | No session deletion on pane close; lead action says Suspend session. |
+| [TEST-PANE-137] / [IMPL-PANE-138] | Real Rust PTY inherited NO_COLOR=1, FORCE_COLOR=0 and empty COLORTERM; 1 failed, exit101. | Actual PTY pane tests6/6, exit0, including ANSI bytes and explicit overrides. | Remove only inherited color suppression; preserve explicit pane overrides. |
+| [TEST-PANE-139] (completion subset) | Native Claude2.1.265 fixture3/4 failed because adapter rejected new version. | Claude263/265 suites15/15, exit0. | Captured own direct/tool turns and checked installed native finalizer; native seven-route matrix subsequently passed (see Resume Context). |
+| [TEST-PANE-129] | Installed alpha33: zero native worker messages with --session/--prompt. Native helper 6 failures; spawned CLI zero task POSTs, exits 1 (`cf-native34-seed-red.log`, `cf-native34-cli-red.log`). | Focused107/107, runners28/28 and native model/task/queue/draft proof pass. | Native task API must be exercised, not just argv recorded. |
+| [TEST-PANE-124] | Original unsolicited prompt: 3/3 RED, exit 1. Revised native-only contract: 6 failures / 7 tests, exit 1 (`cf-native33-red.log`), showing absent native identity/creation. Auth configuration RED: missing explicit native username, exit 1. | Runner 28/28, launch/auth 6/6, and focused native pane 9/9 pass, all exit 0. Native production-helper probe passed first-human/queue/draft checks. | Plugin approach rejected by user; native API replaces plugin identity. |
+| [TEST-PANE-126] | Gefjon: missing createSession export, exit 1. | Gefjon: native helper 6/6, channel regression 43/43, exit 0; parent-exit/canonical-path review corrections included. | No harness plugin or native app edits. |
+| [VERIFY-PANE-123] | Gefjon d-72 identified a stale native-metadata fixture; first integration teardown had a transient process-exit check. | Corrected fixture, unchanged expectations: full Node 1185 passed / 4 skips; integration rerun 25/25; all gates 1360 passed. Installed Codex idle/separate/resume and Claude no-channel startup passed. | Alpha.32 installed with matching signed artifact manifests; own app test sessions and old installer removed, no backups or commit. |
+| [TEST-PANE-121] / [IMPL-PANE-122] | Gefjon d-70: 3 retirement tests failed. Root closing-tag regression failed because text was forced into a file. | Gefjon: channels 43/43, delivery watcher 62/62, skill 36/36; Root delivery planner suite exit 0. | Removed Claude adapter/hooks/flags/registry/files, obsolete closing-tag rule and stale documentation. Retired stored channels retain existing guarded terminal fallback. |
+| [DESIGN-PANE-118] | Diana d-71: native app-server creates empty thread ID but no resumable rollout before first real user turn; hooks require trust and cannot be bypassed. | Root native Codex 0.153.4: no synthetic task, launch-specific originator persisted with first human turn, queue accepted and draft preserved. | Root accepts only verified cli_version 0.153.4 / thread_source user metadata; no future-version, fork, recency, or prompt-marker fallback for new metadata-bound leads. The originator mechanism is internal, like the transcript reader, not claimed as a public API. |
+| [IMPL-PANE-120] | Quiet startup regression: 1 failed. Metadata binding/discovery regressions: 2 failed, including a false match from a copied prompt marker. | Native Codex probe: idle for 8 seconds, then answered only after human input; native session_meta.originator retained the launch marker. Binding/transcript suites: 41/41 pass. Pane server suite: exit 0. | No model prompt, hook or terminal scraping for Codex lead identity. Legacy marker launches still resume; metadata-only launches reject prompt-based fallback, forks and ambiguity. |
+| [TEST-PANE-119] | `node --test --test-name-pattern="opens a new Codex lead without submitting a user prompt" tests/ui-panes.test.mjs`: exit 1, synthetic launch marker present in the native pane command | Focused regression passed; final full Node gate and installed idle startup passed. | Worker prompts remain intentional; fresh lead carries identity only through native metadata. |
+
+2026-09-08 verification adjustments: the spawned server fixture offered a Codex
+worker but installed only a Claude shim; preflight correctly refused it. Added
+its missing harness fixture. Missing executable is now refused before launch;
+the retained-failure test uses an executable that exits 7, testing runtime startup
+failure. HTTP deletion expects existing page-only 403 behavior. No assertions
+were weakened to permit lost processes or missing error output.
+
+| Task | Red | Green | Refactor |
+|---|---|---|---|
+| [113/114] deletion during page read | Actual app cleanup showed internal_error; deterministic Page/Watcher/Store regression threw unknown tab from held | Watcher 63/63; deleted-tab send remains refused with zero writes | Only the read path returns an empty list after deletion |
+| [115/116] new-session selection races | Two real-Xterm cases failed: an older refresh retained harbour; an unknown launch selected fresh-racing | Focused 3/3; full UI 66/66; lint exit 0 | Select and render only the confirmed returned live tab after the coalesced refresh completes; no new state machine |
+| [86/87] recovery explanation | Lead description incorrectly said lead messages: 1 failed; worker dialog kept Resume replies title: 2 failed | Final full browser gate 61/61, full check:all exit 0 | Role-specific title and direction; unchanged snapshot/sequence contract |
+| [81/82, 83/84] final UI edges | 2 failed: interrupted deletion offered Resume; null exit status printed null | 4/4 focused browser cases, exit 0 | No re-subscribe on failed-pane refresh |
+| [79/80, 81/82, 86/87] UI and lifecycle | Diana 3 browser failures; Root missing tab deletion, latch state and generation failures, all captured | UI 58/58; Node/lifecycle 197/197; extended real deletion 3/3; Tauri latch 1/1, all exit 0 | No unrelated refactor |
+| [83/84] startup and failure | Real startup PATH, failed-pane retention, missing preflight and unnecessary live continuation lookup each failed first | 4/4 real startup cases; Diana failure UI 2/2 and full UI 60/60, all exit 0 | Preflight only on a new launch; resolved directory included in worker PATH |
+| [81/82] deletion modal race | Diana 1/1 failed, exit 1 | 3/3 related UI cases, exit 0 | Snapshot target; disable cancel and ignore Escape while deleting |
+| [TEST-PANE-83] local harness | Real Rust/Node/CLI/PTY test: 1 failed, exit 1 — spawn claude ENOENT despite successful lead detection in user-local bin | See grouped GREEN evidence above | none |
+| [TEST-PANE-86] runtime draft state | `cargo test ... production_ipc_consumes_sequence_before_size_refusal`: 1 failed, exit 101 — Null instead of false | See grouped GREEN evidence above | none |
+| [TEST-PANE-81] process deletion | Real integration: 1 failed, exit 1 — unknown-op. Corrected fake harness setup to hold the worker alive before RED. | See grouped GREEN evidence above | none |
+| [TEST-PANE-81] tab identity | `node --test --test-name-pattern TEST-PANE-81 tests/tabs.test.mjs`: 1 test, 1 failed, exit 1 — beginDelete missing | See grouped GREEN evidence above | none |
 | [TEST-PANE-59] Worker PATH | Real Node editor and Rust PTY with Finder PATH: 0/1, exit 1; pane output says spawn claude ENOENT and no worker transcript appears | focused real-process test 1/1, authority contract 1/1, full integration 16/16, all exit 0; alpha.24 starts actual OpenCode/Gefjon and Claude/Zeus workers | Earlier fixture gave both processes the same rich PATH, masking desktop behavior. Full integration also exposed a pre-existing observation race: await lead invalidation, which follows durable delivery suspension, instead of asserting between its two writes |
 | [TEST-PANE-55] Pi discovery | node --test tests/install.test.mjs: 50 tests, 11 failed, exit 1; wrong native skill directory/override and migration. Independently, installed Pi loadSkills + formatSkillsForPrompt: no ConsensFlow entry, exit 1 | node --test tests/install.test.mjs: 50/50, exit 0; actual Pi loadSkills and formatSkillsForPrompt discover one enabled ConsensFlow skill, exit 0; fresh native Pi startup lists it and uses cf run @gefjon | Includes an already-green compatibility guard for an explicit override selecting the legacy directory; that case must remain supported |
 | [TEST-PANE-57] Session terminology | focused browser test failed on New session, then with empty-state assertion failed on Open a session; both exit 1 | focused 1/1 and full UI 40/40, exit 0 | Existing directory/harness command assertions retained |
@@ -1505,3 +2535,449 @@ manual reader. Follow-up parts always use the immutable delivery ID.
 | Architecture, pi channel | `sendUserMessage(…, {deliverAs: 'followUp'})` on `agent_settled` | `sendUserMessage(text)` with no `deliverAs`, delivered from an inbox at once when the agent is already idle and on `agent_settled` otherwise | pi's own types apply `deliverAs` only while a turn is streaming; P6 proved an arrival while idle is delivered immediately (apollo's channels review, diana's P6 record) |
 | Lead harnesses | every roster harness can lead | kimi is withdrawn from `LEAD_HARNESSES` until a kimi lead can be seeded with a launch nonce | zeus, task 21: kimi's interactive start takes no positional prompt and `-p` is non-interactive, so a kimi lead opens bare and can never bind |
 | Phase 3 exit, Pi | Pi settles by a derived 120 s quiet window and delivers automatically on it | the pi extension records observed `agent_settled` evidence in app-owned state tied to launch, session and frontier, invalidated by new work; the adapter consumes it as a native boundary; a derived-only Pi settlement is not eligible for AUTOMATIC delivery (manual reading and `deliver.now` remain) | astraeus, co-lead, Phase 3 exit: the 60 s is a configurable default, not a maximum, and a retry delay does not bound provider execution, compaction or queued continuations; the adapter reported empty queues it never observed |
+
+Implementation evidence 2026-09-09 (isolated checkout): native-reader regression failed with unsupported Codex 0.154.0; readers then passed 54/54. Binding/peer/launch regression failed before removal; focused suite passed 77/77 afterward. No installed files touched. TEST-PANE-157 is next.
+
+
+### Isolated implementation checkpoint
+
+Completed source slices: TEST/IMPL 155–160, 163–164, 169–170. RED evidence captured for version rejection, missing lead transcript, saved answer after native transcript deletion, lost worker row, and wrong lead width. GREEN: native completion fixtures 57 tests; launch/binding/peer suite 77; result/delivery/tab suite 213; browser UI suite 82; release packaging 15; retired compatibility bridge 1. Rust updater tests pass (see test output in isolated validation log). Full regression still required.
+
+Pending: extension-free Pi automatic delivery (native interactive external inbox not established), native role-skill acceptance and remaining legacy packaging/evaluation cleanup, PM role/window and restricted manual commands, and full release verification. The asynchronous question asks whether Pi automatic delivery remains a release blocker; no answer means the original requirement stays in force. Existing Pi extension remains in this unfinished source candidate until a replacement decision is established; this candidate MUST NOT be installed.
+
+Installed application, global CLI/skills, active sessions and original checkout have not been changed by this implementation pass. The isolated checkout contains the prior dirty source snapshot plus these new changes, not a clean published release.
+
+
+Role-skill implementation checkpoint (same isolated checkout): lead/PM Markdown
+is stored under the app-private roles directory. Lead launch supplies the role
+through Claude add-dir, Pi --skill, OpenCode skills.paths, or a Codex developer
+instruction reference. Codex config/read probes preserved root/project native
+instructions without a model turn; modern profile composition and four-harness
+native role-discovery acceptance are still open. Setup, roster refresh, update,
+off and uninstall no longer write/delete global skill files; forced cleanup is
+also covered by a global-file canary. CLI/UI installation regressions pass 61/61;
+private installation/role tests pass 21/21. Failed role preparation suspends the
+unopened tab and sends no pane request (focused regression 1/1). Tasks 165/166
+remain unchecked until native acceptance and legacy packaging/eval cleanup.
+
+Protection check: SHA256 matches the recorded baseline for installed Info.plist,
+installed cf.mjs, installed channels.js and the global Codex ConsensFlow skill.
+No restart, installation, global cleanup, ConsensFlow dispatch or commit was run.
+
+Final Node regression checkpoint for this source pass: `node --test
+--test-concurrency=2 tests/*.test.mjs tests/engine/*.test.mjs` exited 0:
+1178 total, 1173 passed, 5 skipped, 0 failed. Browser layout suite previously
+passed 82/82; updater Rust subset passed 7/7. This does not close native
+role/Pi/PM acceptance or VERIFY-PANE-171, and no installed-instance test was run.
+
+
+### Current implementation evidence: Pi preparation and harness diagnostics
+
+| Slice | RED | GREEN / refactor |
+|---|---|---|
+| TEST-PANE-161, private preparation subset | `node --test tests/pi-install.test.mjs`: missing src/pi-install.js; opening subset then failed on absent piExtension status. | 4/4 pass; formatting then rerun passes. Conditional Pi detection, immutable private files with resolved imports, unchanged global settings, idempotence and errors. |
+| TEST-PANE-161, launch wiring subset | `node --test --test-name-pattern='Pi lead loads' tests/ui-panes.test.mjs`: path outside private extension directory. | 1/1 pass: real server's Pi lead launch uses prepared private bundle. Native automatic delivery acceptance remains pending. |
+| TEST-PANE-172, diagnostics subset | `node --test tests/harness-admin.test.mjs`: missing src/harness-admin.js. Fixture corrected to create its declared HOME before executing native shim. | 3/3 pass; combined diagnostic/preparation refactor run 7/7. Missing harnesses, version parsing, update checks/cache/refresh, offline, invalid id and no false integration OK. |
+
+No tasks checked complete for these subsets: UI controls, live integration
+proof, full diagnostic edge matrix and native delivery validation remain.
+Official metadata references: https://registry.npmjs.org/@openai/codex/latest,
+https://code.claude.com/docs/en/setup, https://opencode.ai/docs/cli/,
+https://pi.dev/news/2026/5/7/pi-has-a-new-home and
+https://github.com/MoonshotAI/kimi-cli. Update status is informational; the current
+prototype compares published release metadata, not a machine's package-manager
+channel, and labels that distinction. Distribution-specific resolution remains
+required before task 173 is complete.
+
+| TEST-PANE-167, PM identity and authority subsets | New PM identity, credential, watcher and opening tests each failed before implementation. | Focused identity/launch 40 passed; PM watcher and real-server opening tests passed individually. One companion per parent, distinct native launch, PM-only permissions and no automatic worker delivery. Window and manual communication acceptance remain pending. |
+
+
+### Phase 19 final implementation evidence — 2026-09-09
+
+- PM manual send/read: one scoped call, exact file text, immutable multipart reads,
+  native-file-loss recovery and idempotent send; unauthorized worker/admin calls
+  refused. Focused PM regression: 287 passed. Browser suite: 85 passed, including
+  the PM sibling/window route, separate grid, original terminal palette and admin.
+- PM native output routes by window and generation; a destroyed window cannot
+  receive a newer PM's output or close its pane. Parent deletion cascades to its
+  own companion. Fresh role names are persisted for legacy tabs. Native command
+  tests verify authority and independent output; headless PM routing reproduced
+  a missing-output RED and now passes without exposing PM output in the main UI.
+- Harness diagnostics use current-generation native receipt evidence, not a green
+  launch label. Tests cover obsolete/mismatched receipts and publisher versus
+  detected Homebrew/native update sources. Pi preparation preserves profiles and
+  copies its imports into an immutable private bundle.
+- Global generic skill template and eval dependency retired; eval stages use their
+  own ConsensFlow root and the bundled role loader. Generated role files are
+  updated with the application/roster, without a separate skill-update workflow.
+- Full Node run: 1197 passed, 5 gated skips. A later loaded-machine run had one
+  one-second Pi editor-probe timeout; the unchanged focused suite passed 20/20.
+  Full Rust: 89 unit plus 16 process tests passed. PTY integration: 25/25. Its
+  simulator now explicitly uses the generic PTY channel instead of pretending to
+  implement Claude's native inbox, and parses the private skill argument correctly.
+- Native receipt artifacts: `/tmp/cf-alpha37-native/{claude-code,codex,pi,opencode}.json`.
+  Pi's default Go provider hit a weekly quota; the alternative authenticated
+  provider reported an invalid OAuth token. These did not erase the worker result:
+  the transport's native receipt was verified. OpenCode's free model completed the
+  same test after the default Go model entered a provider retry wait.
+- Installed app and bundled CLI report 3.0.0-alpha.37. The built real app terminal
+  smoke passed. PM packaged input/output and full updater replacement are the
+  remaining final acceptance checks, recorded below when complete.
+
+- Packaged PM acceptance passed after a RED that reported no PM echo. Its own
+  webview subscribes, renders a real PTY banner, sends text through `pm_command`,
+  and observes the child's exact hex echo. This also exercises real Tauri window
+  permissions. No main-window terminal or mocked renderer substitutes for PM.
+- Packaged updater acceptance passed: open panes blocked installation; after
+  their cleanup the signed update replaced an isolated alpha.36 fixture bundle
+  with alpha.37, restarted and reported alpha.37 with zero remaining blockers.
+- Native Claude restart acceptance passed: retained worker navigation, exact
+  same-session `--resume`, whole result through `cf read`, no worker redispatch.
+- Final full Node run with bounded test concurrency passed 1197/1202; the three
+  missing optional legacy sibling parity checks remain skipped, and the two
+  packaged checks passed separately. Final UI 85/85; CLI wording/private-role
+  regression 37/37; Clippy passes with warnings denied.
+
+- Closure of VERIFY-PANE-128/143/171: all applicable gates above passed, final
+  bundle installed without backups and `cf --version`/`cf doctor` report alpha.37
+  from `/Applications/ConsensFlow.app`. Local review replaces another agent pass
+  under the accepted plan's explicit no-ConsensFlow/no-other-subagents instruction;
+  no independent reviewer is claimed for this final pass. The final reviewed
+  boundaries were role authority, window/generation ownership, durable reads,
+  native receipt evidence, private installation and updater admission.
+- User histories and native settings are preserved. Old generic global files and
+  their five obsolete manifest entries were removed manually. No GitHub release,
+  rolling feed publication or commit was performed; prepared release artifacts
+  are in `/Users/gabrielvoicu/ConsensFlow-Releases/3.0.0-alpha.37/`.
+
+### Final legacy navigation migration — 2026-09-09
+
+The installed alpha.34 data had already lost worker pane rows while retaining
+threads. Startup now reconstructs closed navigation rows only for exact surviving
+tab ownership and past/current lead generations, using the central pane allocator.
+It never starts a worker or rewrites its native binding. Other tabs in the same
+folder, deleted tabs, future generations and malformed ownership are excluded.
+Reopening a lead does not mark recovered workers running or starting.
+
+Regression: RED missing worker navigation, then GREEN, including idempotent second
+restart and unchanged thread bindings. The real-data isolated migration recovered
+all seven Fortuna workers with every threads.json byte unchanged; final installed
+startup recovered the same seven closed rows. Full Node 1198 passed / 1203 total
+(five previously documented skips), UI 85 passed, rebuilt packaged lead/PM smoke
+passed. Final bundle is installed and its 55 files match the built artifact.
+
+## Phase 20 — focused geometry and complete session resume [in-progress]
+
+- [x] TEST-PANE-176: Reproduce focused worker height shrinking after grid selection and viewport resize; reproduce resume opening only the lead.
+- [x] IMPL-PANE-177: Keep focused cards stretched and attach every bound worker conversation on session resume, with no task resend. Isolate/report individual failures; leave unbound work and PM separate.
+- [x] VERIFY-PANE-178: Run UI and lifecycle regressions, package and validate the corrected app, then install without disrupting active work.
+
+RED 2026-09-10: focused card bottom missed stage bottom by 477.8px; resume opened one pane instead of lead plus saved worker. Logs /tmp/cf-focus-red.log and /tmp/cf-resume-red.log.
+
+GREEN 2026-09-10: focused worker fills stage at 720/1000/1100px viewport heights; session resume reattaches both saved workers despite a removed roster agent, skips an unbound conversation, and sends no new task. Node lifecycle/store/page 227/227, browser UI 86/86. Alpha.38 package verification follows; alpha.37 remains running untouched.
+
+Alpha.38 packaged lead/PM real-terminal smoke passed (1/1); session-concurrency real-process tests 3/3; Biome passed. Signed DMG/archive prepared in ~/ConsensFlow-Releases/3.0.0-alpha.38. Installation is pending restart approval because Fortuna currently has 8 open panes. Source fixes complete; VERIFY-PANE-178 remains open until installation.
+
+## Permanent pane removal — Phase 20 extension [in-progress]
+
+- [x] TEST-PANE-179: RED for missing delete command/UI and durable deletion; verify stale generation and lead deletion refuse before killing anything, Escape sends nothing, and native history survives.
+- [x] IMPL-PANE-180: Separate Delete pane from reversible Close pane. Confirm using a captured pane ID/generation. Stop only that process and retain a session-scoped deletion record so legacy recovery and resume never recreate it. Sidebar action works for closed panes too. A failed stop remains retryable; project files/native history remain intact.
+- [x] VERIFY-PANE-181: Validate deletion, rebuild the pending alpha.38 package, and install when the active-session restart is approved.
+
+RED logs: /tmp/cf-delete-red.log, /tmp/cf-delete-route-red.log, /tmp/cf-delete-ui-red.log. Focused GREEN confirms durable removal and isolated process kill; full regressions and rebuild follow.
+
+Permanent-delete validation: 229/229 backend tests, 88/88 UI tests, 89/89 Rust unit tests. The action is in each non-lead sidebar row, keeping the terminal titlebar compact. Closed rows can be deleted without attach/resume. Native histories are preserved; deletion records prevent automatic restoration and further admission of that conversation in the same session. Alpha.38 installation still awaits the pending restart decision.
+
+Alpha.38 rebuilt with permanent deletion; packaged lead/PM smoke passed and Clippy passed with warnings denied. Signed release artifacts refreshed. Only approved installation remains for VERIFY-PANE-178/181.
+
+## PM in the main window — Phase 20 correction [in-progress]
+
+User supersedes the earlier separate-window requirement: PM appears above the
+lead, at the same sidebar level, and selecting it shows one full-size pane in
+the main window. It stays out of the parent session grid. Its native conversation,
+role skill and manual-only lead send/read remain independent.
+
+- [x] TEST-PANE-182: RED PM was below the lead and absent from the main pane view; verify full-height output/input, selection and retained buffer across switching.
+- [x] IMPL-PANE-183: Use the shared main-window terminal registry, place PM first, hide worker/reply controls in PM view; remove PM-only windows, IPC handlers, renderer files and output routing.
+- [x] VERIFY-PANE-184: Validate UI/role boundaries and native packaged main-window PM input/output, rebuild alpha.39 and install when restart is approved.
+
+Focused RED /tmp/cf-pm-inline-red.log; GREEN /tmp/cf-pm-inline-green.log.
+
+Installed alpha.38 verified against its signed release archive: all installed files match. User screenshot confirms the permanent-delete sidebar and corrected focused height. VERIFY-PANE-178/181 closed; alpha.39 carries the newer PM main-window change. Remaining progress 183/184.
+
+
+## Lead conversation changes — Phase 21 [in-progress]
+
+The reply destination is the same ConsensFlow lead pane and generation. A native
+conversation change must refresh its identity using process ownership, never cwd
+or newest-history guesses. Pending replies follow the new identity; submitted or
+uncertain replies retain their original receipt target and cannot replay blindly.
+
+- [x] TEST-PANE-185: Reproduce Claude /clear retaining the obsolete ID; verify complete single delivery to the current pane conversation and exclusion of another process group.
+- [x] IMPL-PANE-186: Expose pane process group, validate native registry/process credentials, refresh lead and pending targets atomically, hold zero-byte missing-inbox races for reconciliation.
+- [x] VERIFY-PANE-187: Build/install alpha.40 and verify native delivery after conversation change. Cross-harness conversation-change acceptance remains open.
+
+Evidence: /tmp/cf-clear-red.log failed on old versus new session ID; focused
+regression green; /tmp/cf-clear-suite.log 85 passed; /tmp/cf-clear-rust.log 89 passed.
+Alpha.39 installed with 58 files compared and bundled cf version verified.
+
+Alpha.40 built; /tmp/cf-clear-suite.log 87 passed, Rust 89 passed, packaged smoke 1 passed. Installation awaits the active-session restart answer. Existing failed alpha.39 replies are preserved and are not silently replayed.
+
+
+### Live matrix follow-up — alpha.40/41
+Claude /clear with real OpenCode worker: native receipt accepted in the new lead
+conversation. Claude, Pi, and OpenCode leads received complete Claude/Codex/OpenCode
+worker tokens. Pi worker weekly quota and Kimi insufficient balance prevent
+completed outputs. Pi lead records inbound receipts but has invalid OAuth for
+its response model. Codex testing exposed /var vs /private/var path equivalence:
+exact launch metadata existed but cwd string equality excluded it.
+
+- [x] TEST-PANE-188: RED Codex workspace symlink alias with exact launch originator.
+- [x] IMPL-PANE-189: Canonicalize workspace path comparison while preserving unique launch metadata binding. Session binding suite 26 passed.
+- [x] VERIFY-PANE-190: Complete live matrix report and install alpha.41 containing the path correction.
+
+Final alpha.41 acceptance: [live matrix and limits](acceptance-alpha41.md). Installed and reopened; Claude clear and Codex alias live tests passed. 12 native receipt combinations passed; eight provider-blocked cells remain explicitly unverified.
+
+## Automatic role instructions — Phase 22 [completed]
+
+Gabriel approved on 2026-09-10: the complete assigned role must be present in
+the first model request after launching or resuming a lead/PM pane, without
+asking the user to invoke a skill. Skill discovery alone is insufficient.
+Use the existing app-private role documents: Claude appends the role file and
+disables old system-prompt snapshot reuse, Pi appends the role text, OpenCode
+adds the file to process-local `instructions`, and Codex appends its contents
+to the native effective `developer_instructions`. Keep native defaults and
+existing configuration, preserve skill discovery, and give workers no role.
+
+Testing uses the existing Node test runner and real temporary files. The Codex
+configuration resolver is a subprocess boundary; no model/network calls belong
+in the regression suite. Test both roles across all four harnesses, preservation
+and invalid OpenCode instruction configuration, worker isolation, and real pane
+launch regressions. Build alpha.42, verify the packaged app, then reinstall and
+check installed bytes and retained session state. User authorized the restart.
+
+- [x] [TEST-PANE-191] Add full-role startup matrix and preservation regressions in `tests/role-skills.test.mjs`.
+- [x] [IMPL-PANE-192] Add native startup instructions in `src/role-skills.js`; update the fake CLI parser and role documentation. → satisfies [TEST-PANE-191]
+- [x] [TEST-PANE-193] Reject invalid OpenCode instruction lists before launch; preserve worker isolation.
+- [x] [IMPL-PANE-194] Validate the additional instruction-list boundary. → satisfies [TEST-PANE-193]
+- [x] [VERIFY-PANE-195] Run regressions, build alpha.42, verify and reinstall the bundle, preserving saved conversations.
+
+### Phase 22 acceptance
+
+- [x] Both roles' complete documents enter native startup context across all four harnesses; Claude resumes rebuild the prompt.
+- [x] Existing configuration and instruction content survives; workers receive no role and invalid instruction lists fail closed.
+- [x] Role tests and packaged verification pass; alpha.42 is installed and reopened with saved session identities preserved. Broader suite and live-provider limits are recorded below.
+
+### Phase 22 TDD log
+
+| Task | Red | Green | Refactor |
+|---|---|---|---|
+| [TEST-PANE-191] | `node --test tests/role-skills.test.mjs`: 14 tests, 10 failed, exit 1; all eight harness/role combinations lack full startup instructions. `/tmp/cf-role-startup-red.log`. | — | — |
+| [IMPL-PANE-192] | — | `node --test tests/role-skills.test.mjs`: 14/14 passed, exit 0. | Biome formatting; rerun 14/14, exit 0. |
+| [TEST-PANE-193] | `node --test tests/role-skills.test.mjs`: 21 tests, 6 failed, exit 1; invalid instruction lists are accepted or fail with an unhelpful iterator error. `/tmp/cf-role-validation-red.log`. | — | — |
+| [IMPL-PANE-194] | — | `node --test tests/role-skills.test.mjs`: 21/21 passed, exit 0. | No refactor needed; broader launch run exposed two outdated strict OpenCode config expectations and one lifecycle timing failure. Update expectations to the approved full-role behavior and investigate lifecycle separately. |
+| [VERIFY-PANE-195] | — | Role suite 21/21, exit 0; `npm run smoke` 1/1, exit 0; `node --test --test-concurrency=1 tests/integration/session-concurrency.test.mjs` 3/3, exit 0. Alpha.42 build and codesign verification exit 0. | Final review confirms only assigned roles receive full instructions; existing configuration survives; all 50 bundled CLI source files and all 57 installed bundle files match. |
+
+### Phase 22 verification record — 2026-09-10
+
+- Production change: `src/role-skills.js`; tests cover both roles across all four
+  harnesses, exact full body inclusion, Codex user instructions with quotes and
+  newlines, OpenCode existing instruction/skill configuration and idempotence,
+  malformed instruction lists, and no role for workers. OpenCode pane frame
+  expectations now include the approved instruction list; fake Claude consumes
+  the new native flags without treating them as a user task.
+- Native fresh PM checks used no file reads/skill invocations: Claude Code
+  2.1.267 and Codex 0.154.0 returned their PM role and exact
+  `cf lead send --message-file <file>` command from the role body. Codex recorded
+  zero tool calls. OpenCode 1.18.30 produced no output before a 90-second timeout;
+  Pi 0.85.1 returned provider weekly-usage-limit HTTP 429. Those probes used
+  harness defaults, not Gefjon, and are superseded by the successful reruns below.
+- Broad Node run at default concurrency: 1227 total, 1219 passed, three failed,
+  five skipped, exit 1. Both timing-sensitive channel/pipe tests passed on an
+  isolated rerun (2/2). With concurrency 2: 1221 passed, one failed, five skipped,
+  exit 1 (`/tmp/cf-role-full-node-limited.log`). The remaining lifecycle test
+  expects one `pane.list` but observes two; it reproduces unchanged with the
+  installed alpha.41 role module (`/tmp/cf-role-lifecycle-baseline.log`).
+- Integration suite: 24/25, exit 1 at `task44.test.mjs:427` (failed worker still
+  alive immediately after reservation release). That test passes individually,
+  and the isolated pre-change launcher suite passed 25/25. This remains a
+  timing-sensitive broader verification failure, not a claimed green gate.
+  No worker lifecycle implementation or assertion was changed in this task.
+- `npx biome check` on touched JS/config files exits 0; two pre-existing style
+  infos in `tests/ui-panes.test.mjs` remain. Final `git diff --check` exits 0.
+- Built using `npm --prefix app run build -- --bundles app --config
+  '{"bundle":{"createUpdaterArtifacts":false}}'` (exit 0). Packaged real PTY
+  input/output and lead/PM smoke passed; `codesign --verify --deep --strict`
+  passed before and after installation. No updater feed or release published.
+- Installed `/Applications/ConsensFlow.app`, version and bundled CLI both
+  `3.0.0-alpha.42`, reopened PID 59749. All 57 file hashes matched the tested
+  bundle. Two saved tab/native-conversation identities were unchanged; startup
+  marks their panes closed for explicit resume. The previous bundle and state
+  snapshot are retained at `/var/folders/5f/cy8ywl5d2_z_1g1zcn45g7gr0000gn/T/cf-role-install-neulzssb`.
+
+### Gefjon model correction and native acceptance — 2026-09-10
+
+Gabriel pointed out that Gefjon is available through both OpenCode and Pi.
+The live roster selects `opencode/muse-spark-1.3-contributor-free`, `xhigh`.
+Pi's saved/default Muse route was `opencode-go/muse-spark-1.3-contributor`;
+that subscription route caused the previous weekly-limit error. Pi's installed
+catalog also contains the free model under provider `opencode`, but the provider
+was not shown by `--list-models` without an authentication value. OpenCode's
+official provider uses the literal `public` for its unauthenticated free route.
+
+Reran the fresh PM startup probes using the installed alpha.42 role module:
+
+- OpenCode 1.18.30: explicit `--model opencode/muse-spark-1.3-contributor-free
+  --variant xhigh`, `run --auto --format json`, process-local role instructions,
+  and all tool permissions denied. Exit 0; returned
+  `ConsensFlow PM — cf lead send --message-file <file>`; no tool-use events.
+  Log: `/tmp/cf-role-gefjon-native.log`.
+- Pi 0.85.1: explicit `--provider opencode --model muse-spark-1.3-contributor-free
+  --thinking xhigh --api-key public`, no tools, no extensions, ephemeral session,
+  and the installed role loader's appended instructions. Exit 0; returned
+  `Role consensflow-pm, send: cf lead send --message-file <file>`.
+  Log: `/tmp/cf-role-gefjon-pi-native.log`.
+
+All four harnesses now have a successful native fresh PM role-awareness check.
+The automated startup matrix covers both PM and lead roles. No provider settings,
+credentials, roster entries, or application code were changed by these reruns;
+no rebuild/reinstall is needed. This closes the two Phase 22 default-model probe
+limitations, not the separate lifecycle/integration assertions above.
+
+Current code and official native documentation were reviewed before and after
+implementation. The requested advisor tool and Context7 were unavailable; no
+dependency or framework was added. Native prompt mechanisms were checked against
+Claude CLI reference, OpenAI configuration reference, OpenCode rules, and Pi's
+installed documentation. Existing unrelated workspace edits were preserved.
+
+Progress tally correction: the prior registry used highest task ID 190 as a
+count. There are 184 existing task checkboxes, plus five Phase 22 tasks; the
+registry now counts actual task checkboxes (acceptance criteria excluded).
+
+
+## Native-menu updates — Phase 23 [completed]
+
+Gabriel requested removal of the dedicated app-header Updates button because
+macOS already offers Check for Updates, and reported a failing check. Live
+inspection on 2026-09-10 confirms both configured GitHub rolling feeds return
+HTTP 404; published releases contain DMGs only. This is a distribution setup
+gap, not a menu dispatch failure. The Stable selection is a saved preference;
+alpha builds still default to Alpha when no preference exists.
+
+Scope: remove the duplicate header button and the updater's dependency on it.
+Keep the native menu, update notice, quiet scheduling, channel preference,
+download verification and explicit guarded install. Describe an unavailable
+feed by channel without claiming success, unpublished status from arbitrary
+HTTP failures, or falling back across channels. Other updater errors retain
+their original details. Document the missing publication prerequisite.
+
+Verification: production UI Playwright tests invoke the native menu event at
+the Tauri boundary; Rust exercises actual updater HTTP failures and retry state.
+Run the complete app UI suite and focused updater tests, build alpha.43, verify
+codesign and packaged behavior, then reinstall under the user's existing
+reinstall authorization. Preserve saved conversations. No remote publication.
+Advisor and Context7 are unavailable; inspect the installed updater source.
+
+- [x] [TEST-PANE-196] Regress menu-only entry, missing-feed feedback and safe controls.
+- [x] [IMPL-PANE-197] Remove the header button and decouple updater initialization. → satisfies [TEST-PANE-196]
+- [x] [TEST-PANE-198] Exercise real updater HTTP errors with channel-specific feedback and retained retryability.
+- [x] [IMPL-PANE-199] Explain unavailable feeds and document the publication prerequisite. → satisfies [TEST-PANE-198]
+- [x] [VERIFY-PANE-200] Verify, build and reinstall alpha.43; record menu behavior and live feed limitation.
+
+### Phase 23 acceptance
+
+- [x] No dedicated header Updates button; native menu still opens the dialog and checks.
+- [x] Missing feeds remain failures with useful channel context; download/install stay unavailable.
+- [x] UI/updater checks pass and alpha.43 is installed with saved identities preserved.
+- [x] Public feed availability is explicitly reported separately from local verification.
+
+### Phase 23 TDD log
+
+| Task | Red | Green | Refactor |
+|---|---|---|---|
+| [TEST-PANE-196] | Updater Playwright: 11 passed, 1 failed, exit 1; duplicate header button remains. `/tmp/cf-update-menu-red.log`. | — | — |
+| [TEST-PANE-198] | Rust regression cannot compile because `describe_check_error` is absent, exit 101. `/tmp/cf-update-feed-red.log`. Live production feeds separately reproduced HTTP 404. A control run with the old error mapping compiled and failed the expected message assertion (0/1, exit 101), `/tmp/cf-update-feed-control-red.log`. | — | — |
+| [IMPL-PANE-197] | — | Updater Playwright 12/12, exit 0. `/tmp/cf-update-menu-green.log`. | Removed the obsolete element lookup and click handler; menu event and banner drive the same dialog. |
+| [IMPL-PANE-199] | — | Rust updater 8/8, exit 0; includes actual HTTP 404/503, malformed JSON schema, error state and retry. `/tmp/cf-update-feed-final.log`. | Rustfmt; original-behavior control failed the new assertion; restored implementation passes. Other error details are retained. |
+| [VERIFY-PANE-200] | — | App UI 89/89; Rust updater 8/8; Node updater 16/16; packaged smoke 1/1; all exit 0. Alpha.43 build/codesign/install passed. | Scoped Biome and diff checks pass. Installed header verified in the native window; all 57 installed file hashes match the tested bundle. |
+
+### Phase 23 verification record — 2026-09-10
+
+- The native `check-updates` event is exercised through the actual frontend,
+  with only the Tauri command/event boundary mocked. All 12 updater scenarios
+  pass without a header button, including repeated menu opening and errors;
+  the full app UI suite is 89/89 (`/tmp/cf-update-ui-all.log`). Native menu
+  construction and its event dispatch are unchanged. The installed header was
+  separately inspected through accessibility and a screenshot; its Updates
+  button is absent (`/tmp/cf-update-installed.png`). A physical post-install
+  menu selection was not exercised while the app remained in the background.
+- Rust updater tests: 8/8 (`/tmp/cf-update-feed-final.log`), including real
+  404/503 replies, malformed metadata diagnostics, retry state and signed archive
+  tampering. The old mapping was restored temporarily as a control and failed
+  the new assertion; the final implementation was then restored and passed.
+- Node release/compatibility tests: 16/16 (`/tmp/cf-update-node.log`).
+  `npm run smoke`: 1/1, real packaged UI, Tauri bridge, Node and PTY
+  (`/tmp/cf-update-smoke.log`). Build exit 0 (`/tmp/cf-update-build.log`).
+- Installed version and bundled CLI: `3.0.0-alpha.43`; all 57 installed file
+  hashes match the tested build; deep strict codesign verification passes.
+  Existing state had zero saved tabs before replacement. Its complete JSON
+  and the saved Stable channel preference match their backups after restart.
+  Previous bundle and snapshots:
+  `/var/folders/5f/cy8ywl5d2_z_1g1zcn45g7gr0000gn/T/cf-update-install-wagwljvz`.
+  The initial background launch exited before final inspection; relaunch by
+  app name was verified as `/Applications/ConsensFlow.app/Contents/MacOS/app`,
+  PID 95091, with the expected native window and production UI.
+- Live GitHub inspection: repository public; both `update-alpha/latest.json`
+  and `update-stable/latest.json` return HTTP 404. Existing releases have DMGs,
+  no signed updater archive/feed. The local change explains unavailable feeds;
+  it does not supply remote releases or make online discovery operational.
+- No GitHub release, commit, GitHub push, or NAS push was performed. Gabriel
+  asked about publication and NAS during verification; answered that only the
+  local build/reinstall had been done. No publication request was inferred.
+- Final review: updater initialization no longer depends on a DOM button;
+  missing-feed mapping uses Tauri's typed error, preserves other diagnostics,
+  and retains failed-check state. Channel policies, signature validation and
+  guarded explicit installation remain intact. No dependency was added.
+
+
+## Publish alpha.43 — Phase 24 [active]
+
+Gabriel explicitly authorized the GitHub release, updater publication and NAS
+push on 2026-09-10 ("do it" following the local-only release report). This
+supersedes previous no-commit/no-publication instructions for this release.
+Publish the current alpha.43 source and matching installed bundle, including
+pending standalone-pane changes since the last source commit. Exclude generated
+test-results and local runtime data. No force pushes or unrelated ref changes.
+
+Prepare a DMG and signed updater archive from the exact tested/installed app.
+The official signer consumes the existing external key; never print or copy
+private key material. Publish immutable v3.0.0-alpha.43 assets before the
+rolling update-alpha/latest.json. Stable must not serve an Alpha prerelease.
+Verify remote asset hashes, feed metadata and signature plus both Git remote
+heads. Record remaining test limitations explicitly. No application-code changes
+are planned; reuse existing release checks and run packaged upgrade acceptance.
+
+- [x] [PREP-PANE-201] Prepare and validate exact alpha.43 artifacts and source snapshot.
+- [x] [VERIFY-PANE-202] Run release regressions and packaged alpha.42-to-alpha.43 upgrade.
+- [ ] [RELEASE-PANE-203] Commit/push matching source to NAS and GitHub, publish version and Alpha feed, verify remotely. ← current
+
+### Phase 24 evidence
+
+Preparation in progress. The complete app UI (89), focused Rust updater (8),
+Node updater (16) and packaged startup smoke (1) passed for this same bundle
+in Phase 23. Both remote main branches currently end at 3dd52bd; local HEAD
+1b7a890 is a descendant. Signing public key matches the app's pinned key.
+
+Preparation verified: exact installed bundle copied to
+`~/ConsensFlow-Releases/3.0.0-alpha.43`; archive and mounted DMG match its
+contents; codesign passes. Tauri signed the archive using the existing external
+key, and minisign-verify independently verified it against the app's pinned
+public key. Metadata helper validates latest.json and a SHA256SUMS file records
+all four artifacts. No private key material is included in release assets.
+
+Fresh release checks: Rust 90 unit + 16 headless passed; integration 25/25;
+packaged updater alpha.42-to-alpha.43 passed with signature checks, active-pane
+refusal, install and restart. Full Node: 1221 passed, one existing lifecycle
+assertion failed (pane.list count 2 versus 1, tests/lifecycle.test.mjs:345), five
+skipped. The published prerelease notes explicitly disclose this limitation.
+Logs: `/tmp/cf-release43-{node,rust,integration,upgrade,clippy}.log`.

@@ -81,6 +81,35 @@ function qualified(overrides = {}) {
 
 // --- the qualified positives -------------------------------------------------
 
+test('readiness: Pi can delegate composer admission without claiming its terminal latch is clear', () => {
+  const input = qualified({ kind: 'pi', draftLatched: true, composerAuthority: 'pi-native-editor' })
+  const decision = leadReady(input)
+  assert.equal(decision.state, 'ready')
+  assert.match(decision.reason, /editor admission checked by native Pi/)
+  assert.doesNotMatch(decision.reason, /no draft latched/)
+  assert.equal(leadReady({ ...input, composerAuthority: 'terminal' }).state, 'draft')
+  assert.equal(leadReady({ ...input, kind: 'codex' }).state, 'unknown')
+  assert.equal(leadReady({ ...input, draftLatched: undefined }).state, 'unknown')
+  assert.equal(leadReady({ ...input, answers: answers({ inFlight: true }) }).state, 'busy')
+})
+
+test('native queue delivery preserves the composer without clearing its latch (TEST-PANE-109)', () => {
+  for (const kind of ['claude-code', 'codex', 'opencode']) {
+    const input = qualified({ kind, draftLatched: true, composerAuthority: 'native-queue' })
+    assert.equal(leadReady(input).state, 'ready', kind)
+    assert.equal(leadReady({ ...input, composerAuthority: 'terminal' }).state, 'draft')
+    assert.equal(leadReady({ ...input, answers: answers({ inFlight: true }) }).state, 'busy')
+    assert.equal(leadReady({ ...input, epoch: undefined }).state, 'unknown')
+    assert.equal(leadReady({ ...input, answers: answers({ replaced: true }) }).state, 'unknown')
+  }
+  for (const kind of ['pi', 'kimi', 'unknown']) {
+    assert.equal(
+      leadReady(qualified({ kind, draftLatched: true, composerAuthority: 'native-queue' })).state,
+      'unknown',
+    )
+  }
+})
+
 test('readiness: a native settlement, an explicitly clear latch and a valid epoch are ready', () => {
   const decision = leadReady(qualified())
   assert.equal(decision.state, 'ready')

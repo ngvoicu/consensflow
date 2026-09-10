@@ -1,13 +1,15 @@
 # ConsensFlow
 
-Named AI agents your coding agent can consult, in every harness on your machine.
+A native terminal workspace for a lead, its workers, and an optional project manager.
 
-You keep a roster — `zeus` is Claude Opus at max effort, `hyperion` is GPT 5.6
-Sol at max. ConsensFlow generates **one skill** from it and installs that skill
-into Claude Code, codex, pi, opencode and Kimi Code, which all read the same Agent Skills
-format. From then on you say *"ask hyperion whether this migration is safe"* and
-your coding agent does the rest: it asks from its pane in the app, reports what
-is running, and reads the answer when it arrives, attributed. You never type a command.
+Keep a roster of named agents such as `zeus` and `hyperion`, then ask your lead
+to consult them. ConsensFlow opens worker conversations in its own panes and
+delivers completed results back to their lead. Each session can also have a PM
+in a separate window for research, planning and explanations.
+
+The application supplies `consensflow-lead` or `consensflow-pm` only to the
+corresponding role it launches. Workers and ordinary external terminals receive
+neither skill. Your harness profiles and native terminal appearance are preserved.
 
 **No accounts, no API keys.** Agents run through the harness CLIs you already
 have installed and logged in — your Claude subscription, your ChatGPT login,
@@ -36,34 +38,48 @@ build so far is a prerelease, and GitHub's `latest` skips those.)
 Or build your own, which is the same artifact:
 
 ```sh
-cd app && npm install && npm run build
+cd app && npm install
+npm run build -- --config '{"bundle":{"createUpdaterArtifacts":false}}'
 # → app/src-tauri/target/release/bundle/dmg/ConsensFlow_<version>_aarch64.dmg
 ```
 
-Unsigned either way, so macOS blocks the first launch. Right-click → **Open**
+The app is ad-hoc code-signed, but not Apple-notarized, so macOS blocks the first launch. Right-click → **Open**
 still works on older systems; since Sequoia, Gatekeeper no longer offers it for
 unnotarized apps — open it once, let it be refused, then **System Settings →
 Privacy & Security → Open Anyway**.
 
+Use **ConsensFlow → Check for Updates…** in the macOS menu for in-app updates.
+The app checks quietly after startup and every six hours.
+Choose the stable or alpha channel, read the release notes, then download the
+update. Installation and restart happen only when you choose them, after closing
+all panes across every session. Save or submit native drafts before closing:
+ConsensFlow does not infer draft contents or stop working agents automatically.
+
+Update archives have a separate cryptographic signature and include the app,
+Node, `cf`, role skills and integration code together. Harness detection, installed
+versions, official release checks and observed integration status appear in
+**Agents**. Native harness versions never gate launching or reading results.
+Older builds require one manual DMG installation to acquire the updater. Channel feeds must be published before
+online discovery works; see [update release preparation](docs/updates.md).
+
 Nothing is seeded. Open the app, pick from the ready-made list — `zeus`,
 `hyperion`, `athena`, `endymion` … — or define your own with any model string
-its harness accepts. **The skill installs itself the moment your first agent
-exists, and rewrites itself on every change after.** No install step, no sync
-step.
+its harness accepts. The app refreshes its private lead roster context when agents change.
+No separate skill installation or update is needed.
 
 The roster lives at `~/.consensflow/agents.json` and is shared by everything
 that reads it.
 
 ## Who can consult
 
-ConsensFlow has one shape: the app owns the panes (standalone). There are no
-modes and no `cf use` — the one generated skill is installed into every
-detected harness without a native ConsensFlow. A harness that ships its own
-ConsensFlow is left alone rather than given a second skill with the same name.
+Claude Code, Codex, Pi and OpenCode can be leads or PMs. Kimi is available as a
+worker. A lead can delegate and continue worker conversations; a PM can send to
+or read from its own lead only when you request it. Several sessions can work
+at once, including sessions sharing the same project folder.
 
-ConsensFlow ships exactly one skill — its own. `cf doctor` names any harness
-that is missing it, and reports a leftover `mode.json` from the old three-mode
-era as removable.
+Pi uses a bundled extension loaded only into its ConsensFlow process. It is
+prepared automatically if Pi is installed; an installation error is shown with
+a retry action. No global Pi extension or settings are changed.
 
 ## A consult lives in the app
 
@@ -82,6 +98,9 @@ One agent can hold several conversations at once, which is why they have names
 — and the name carries the agent, so a row of panes says whose each one is:
 *"ask ares in ares-bubble-sky about the migration"*. A sidebar lists every
 session ever opened, live or closed, and a closed one resumes from there.
+Sessions can be renamed or deleted from the sidebar, and several can keep
+working at once. Grid view shows at most six panes across two visible rows,
+with at most three columns; additional rows scroll vertically.
 
 **A conversation belongs to the session that started it.** Open a new coding
 session and its first consult starts a fresh conversation — it never picks up
@@ -111,9 +130,14 @@ reports what is running and in which conversation, then takes your next
 message. Under `auto` every completed worker answer arrives in the lead's pane
 whole — inline when it fits, else as a `cf read <id>` line whose every part
 the lead runs and reads in full before anything else. Under `manual` there is
-no automatic delivery, but completed results wait for the task — `cf results`
-discovers them and `cf read <name>` reads one whole whenever the task needs
-them. Waiting a question
+no automatic delivery: the lead reads results only when you explicitly ask.
+The lead follows the same rule in either mode and does not need to query the
+setting: wait for delivery or your request. Delegation or an ongoing task does
+not authorize fetching results. Completing the parts of an already delivered
+result needs no new request. When asked, `cf read <name>` reads a known
+conversation's completed result directly, without a preliminary listing.
+`cf results` is for finding a conversation or selecting among requested results.
+One request covers those results and their parts, not future polling. Waiting a question
 out and polling in a loop are both wrong: an answer the lead has not read is
 not a decision you have made, and a policy you set is never changed behind
 your back.
@@ -128,17 +152,35 @@ never written**. `cf say` still exists for typing turns through our own
 machinery, and every pane runs with the same environment guards: billing keys
 stripped, control variables stripped.
 
-Typing pauses incoming messages to protect your terminal input. After sending
-or erasing it, choose **Resume replies** and confirm the input is empty.
-A new keystroke invalidates that confirmation. This neither erases text nor
-changes your reply policy; manual `cf read` stays available throughout.
+Replies use native input routes for leads and workers. Codex queues messages
+by thread ID; OpenCode receives them through its local server. Supported
+Claude Code versions 2.1.263 and 2.1.265 use their built-in local peer inbox,
+with no development channel or plugin. Unsent input is preserved. Pi waits
+until its native editor is empty, then continues automatically. The app keeps
+each TUI's original palette, layout and text styling.
+
+When terminal input cannot be verified as clear, incoming messages remain held.
+Manual result reads stay available when you request them, and reply policy remains
+yours to set. Start a new ConsensFlow session for a new collaboration.
+
+New Codex leads open without a prompt and wait for the human's first message.
+Their launch identifier travels in native session metadata; no prompt is
+injected. Once Codex persists that session, ConsensFlow binds it by the exact identifier; a recent conversation
+in the same folder is never a fallback. Explicit Resume uses the bound session.
+
+New OpenCode sessions use an empty session created through OpenCode's native
+API and open its exact ID in the ordinary TUI. They wait for the first human
+message; worker tasks are submitted once through the native API after their
+TUI server starts, using the selected model. This requires no ConsensFlow
+plugin in OpenCode and changes no harness binaries or global settings.
 
 ## Outside an app pane
 
 There is no consult outside the app. Without `CONSENSFLOW_APP` — a plain
 terminal, a script, a test — `cf run`, `cf say`, `cf attach` and `cf read`
 refuse and name the app; nothing streams, nothing queues. The lead's `cf run`
-returns as soon as the app accepts the task, and the answer arrives in its
+returns after the app opens the pane; task startup continues there. `cf sessions`
+shows recorded startup/admission status, and the answer arrives in the lead's
 pane later. The app keeps conversation bindings and delivery records under
 `~/.consensflow/workspaces/<key>/`. Native harness histories are the source
 for complete results even after scrollback is gone. Launch coordination
@@ -151,35 +193,37 @@ claude, `--dangerously-bypass-approvals-and-sandbox` for codex, `--auto` for
 opencode. An agent is a helper you hand a task to: it reads and writes files and
 reaches the network. There is no knob, and that is deliberate — **the protection
 is the approval gate on *keeping* its work, not a fence around the run.** The
-skill tells your coding agent never to apply or keep an agent's changes without
-asking you first.
+lead skill keeps worker suggestions within the user's existing authorization.
 
 **Nothing rides along.** An agent sees the brief, the task, and whatever you
 hand it with `--handoff-file`. No conversation is stashed or attached
 automatically.
 
-## The one skill ConsensFlow manages
+## App-private role skills
 
-**`consensflow`** — generated from your roster. Its description names your
-actual agents, which is what makes a harness reach for it when you say a name.
+`consensflow-lead` is generated from the roster in ConsensFlow's private data
+folder. The app supplies it only when launching a lead. Native global skill
+folders are never written, refreshed, or cleaned by this installer.
+The old global `consensflow` skill must be removed manually.
 
 ```sh
-cf skills status      # every file ConsensFlow owns: ok, drifted, missing
-cf skills update      # regenerate ours
+cf skills status      # inspect owned files
 cf doctor             # harnesses, agents, skills, runtime
 ```
 
-Ownership is a hash manifest (`~/.consensflow/skills-manifest.json`). A file you
-edited by hand is **drifted**: files ConsensFlow owns regenerate from the
-roster when the app opens, so hand edits to owned files do not survive — while
-a file it never owned is never touched. Claude Code's
-`settings.json` is never written at all — a hook an older version left there is
-reported by `cf doctor` for you to remove.
+Role skills ship with each application release. There is no separate skill update.
+Claude Code, Codex, OpenCode and Pi receive the full assigned role instructions
+as native startup context when a lead or PM launches or resumes. No manual skill
+invocation is needed; existing native instructions and settings are preserved.
+Use **Add project manager** beside a session to choose a PM harness. The PM opens
+in its own maximized window; it shares the project folder and communicates with
+its lead only through explicit `cf lead send --message-file <file>` and
+`cf lead read` requests. It cannot create or control workers.
 
 ## Leaving
 
 ```sh
-cf off            # remove every file it installed. Your agents and runs are kept
+cf off            # remove the private installation; keep agents and runs
 cf reset --yes    # the clean slate: those too, and the app's own caches
 ```
 
@@ -209,12 +253,14 @@ site's logo: the roster designing its own app.
 | Roster | `~/.consensflow/agents.json` |
 | Conversations | `~/.consensflow/workspaces/<key>/threads.json` |
 | Run artifacts | `~/.consensflow/workspaces/<key>/runs/<id>/` |
-| Skill manifest | `~/.consensflow/skills-manifest.json` |
+| Role documents | `~/.consensflow/roles/` |
+| Private Pi integration | `~/.consensflow/extensions/pi/` |
+| Owned-file manifest | `~/.consensflow/skills-manifest.json` |
 
 A leftover `mode.json` from the old three-mode era is ignored; `cf doctor`
-reports it once as removable. One root; `CONSENSFLOW_HOME` moves all of it. The only things written outside
-are the generated skill in each harness's own skills directory and the
-`cf`/`consensflow` launcher on PATH.
+reports it once as removable. One root; `CONSENSFLOW_HOME` moves all of it. The `cf`/`consensflow` launchers are placed on PATH. Role documents and Pi
+integration files stay under this private root; native global skill folders are
+not changed.
 
 ## Development
 

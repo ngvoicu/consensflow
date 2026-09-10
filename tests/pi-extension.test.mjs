@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { envelope as makeEnvelope, pointer } from '../hosts/lib/deliveries.js'
 import { createDeliveryExtension } from '../hosts/pi-extension/consensflow-delivery.mjs'
+import { probeEditor } from '../src/channels/pi.js'
 import { deliver, enabledChannels, launchConfiguration } from '../src/channels.js'
 
 function fakePi() {
@@ -56,7 +57,10 @@ async function waitFor(path, timeoutMs = 300) {
   throw new Error(`timed out waiting for ${path}`)
 }
 
-async function setup(record, { idle = true, ackTimeoutMs = 1000 } = {}) {
+async function setup(
+  record,
+  { idle = true, ackTimeoutMs = 1000, editorGuard, editor = '', hasUI = true, mode = 'tui' } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), 'consensflow-pi-extension-'))
   const inbox = join(root, 'inbox')
   const ack = join(root, 'ack')
@@ -73,16 +77,22 @@ async function setup(record, { idle = true, ackTimeoutMs = 1000 } = {}) {
     settled,
     expired,
     launchId: 'launch-pi-test',
+    editorGuard,
     ackTimeoutMs,
     logger: { error: (...args) => logs.push(args.join(' ')) },
   })
   let currentIdle = idle
   const ctx = context(() => currentIdle)
+  ctx.hasUI = hasUI
+  ctx.mode = mode
+  ctx.hasPendingMessages = () => false
+  ctx.ui = { getEditorText: () => editor }
   const payload =
-    typeof record.id === 'string' && /^d-\d+$/.test(record.id) && record.expiresAt === undefined
+    typeof record?.id === 'string' && /^d-\d+$/.test(record.id) && record.expiresAt === undefined
       ? { ...record, expiresAt: Date.now() + ackTimeoutMs }
       : record
-  await writeFile(join(inbox, `${record.file ?? record.id}.json`), `${JSON.stringify(payload)}\n`)
+  if (record !== null)
+    await writeFile(join(inbox, `${record.file ?? record.id}.json`), `${JSON.stringify(payload)}\n`)
   await pi.handlers.get('session_start')({}, ctx)
   return {
     ack,
@@ -100,6 +110,9 @@ async function setup(record, { idle = true, ackTimeoutMs = 1000 } = {}) {
     setIdle(value) {
       currentIdle = value
     },
+    setEditor(value) {
+      editor = value
+    },
     ctx,
   }
 }
@@ -115,6 +128,124 @@ const envelopeRecord = {
 const envelope = makeEnvelope(envelopeRecord)
 
 describe('consensflow Pi extension', () => {
+  it('answers fresh native editor probes without persisting any editor text', async () => {
+    const s = await setup(null, { editorGuard: 1 })
+    const config = {
+      kind: 'pi-extension',
+      editorGuard: 1,
+      inbox: s.inbox,
+      ack: s.ack,
+      launchId: 'launch-pi-test',
+    }
+    try {
+      assert.deepEqual(await probeEditor(config, 'native-pi-session'), { ready: true })
+      s.setEditor('private unfinished text')
+      assert.deepEqual(await probeEditor(config, 'native-pi-session'), {
+        ready: false,
+        reason: 'draft open',
+      })
+      assert.deepEqual(await probeEditor(config, 'old-session'), {
+        ready: false,
+        reason: 'native session changed',
+      })
+      s.setEditor('')
+      s.ctx.mode = 'rpc'
+      assert.deepEqual(await probeEditor(config, 'native-pi-session'), {
+        ready: false,
+        reason: 'native editor unavailable',
+      })
+      s.ctx.mode = 'tui'
+      delete s.ctx.ui.getEditorText
+      assert.deepEqual(await probeEditor(config, 'native-pi-session'), {
+        ready: false,
+        reason: 'native editor unavailable',
+      })
+      assert.deepEqual(s.pi.sent, [])
+    } finally {
+      await s.close()
+    }
+  })
+
+  it('handles a probe while a busy delivery stays queued unchanged', async () => {
+    const s = await setup({ ...envelopeRecord, text: envelope }, { editorGuard: 1, idle: false })
+    try {
+      const file = join(s.inbox, 'd-51.json')
+      const before = await readFile(file, 'utf8')
+      assert.deepEqual(
+        await probeEditor(
+          {
+            kind: 'pi-extension',
+            editorGuard: 1,
+            inbox: s.inbox,
+            ack: s.ack,
+            launchId: 'launch-pi-test',
+          },
+          'native-pi-session',
+        ),
+        { ready: false, reason: 'lead busy' },
+      )
+      assert.equal(await readFile(file, 'utf8'), before)
+      assert.deepEqual(s.pi.sent, [])
+    } finally {
+      await s.close()
+    }
+  })
+
+  for (const [name, options, reason] of [
+    ['unsent text', { editor: 'my unfinished question' }, 'draft open'],
+    ['whitespace draft', { editor: ' ' }, 'draft open'],
+    ['headless empty-editor fallback', { hasUI: false }, 'native editor unavailable'],
+    ['RPC empty-editor fallback', { mode: 'rpc' }, 'native editor unavailable'],
+    ['missing editor text', { editor: null }, 'native editor unavailable'],
+  ]) {
+    it(`refuses ${name} at the native send boundary without touching the editor`, async () => {
+      const s = await setup(
+        { ...envelopeRecord, text: envelope, target: { session: 'native-pi-session' } },
+        { editorGuard: 1, ...options },
+      )
+      try {
+        assert.deepEqual(s.pi.sent, [])
+        assert.equal((await waitFor(join(s.ack, 'd-51.json'))).reason, reason)
+        assert.equal(
+          s.ctx.ui.getEditorText(),
+          Object.hasOwn(options, 'editor') ? options.editor : '',
+        )
+      } finally {
+        await s.close()
+      }
+    })
+  }
+
+  it('refuses a guarded delivery addressed to a different native Pi session', async () => {
+    const s = await setup(
+      { ...envelopeRecord, text: envelope, target: { session: 'previous-session' } },
+      { editorGuard: 1 },
+    )
+    try {
+      assert.deepEqual(s.pi.sent, [])
+      assert.equal((await waitFor(join(s.ack, 'd-51.json'))).reason, 'native session changed')
+    } finally {
+      await s.close()
+    }
+  })
+
+  it('rechecks the native editor after busy work settles', async () => {
+    const s = await setup(
+      { ...envelopeRecord, text: envelope, target: { session: 'native-pi-session' } },
+      { editorGuard: 1, idle: false },
+    )
+    try {
+      s.setEditor('new draft')
+      s.setIdle(true)
+      await s.pi.handlers.get('agent_settled')({}, s.ctx)
+      assert.equal((await waitFor(join(s.ack, 'd-51.json'))).admitted, false)
+      assert.deepEqual(s.pi.sent, [])
+      assert.equal(s.ctx.ui.getEditorText(), 'new draft')
+    } finally {
+      await s.close()
+    }
+  })
+
   it('delivers an inbox arrival immediately when Pi is already idle', async () => {
     const s = await setup({ ...envelopeRecord, text: envelope })
     try {

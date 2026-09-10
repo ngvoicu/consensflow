@@ -14,7 +14,7 @@ import { addAgent } from '../src/roster.js'
 import { Store } from '../src/store.js'
 import { leadIdentity, Tabs } from '../src/tabs.js'
 import { startUiServer } from '../src/ui.js'
-import { chooseCmuxMode, tempEnv } from './helpers.mjs'
+import { chooseCmuxMode, tempEnv, testRoleConfiguration } from './helpers.mjs'
 
 const WAIT_MS = 4_000
 
@@ -49,7 +49,7 @@ async function paneServer() {
   }
   fixture.env.PATH = `${shims}:${fixture.env.PATH}`
 
-  const server = await startUiServer(fixture.env)
+  const server = await startUiServer(fixture.env, { prepareRole: testRoleConfiguration })
   const nodeToRust = new PassThrough()
   const rustToNode = new PassThrough()
   server.attachBridge(
@@ -207,7 +207,9 @@ test('lead resume preserves native context and tab routing while worker capabili
     app.rust.event('pane.exit', { id: worker.pane.id, generation: worker.pane.generation })
     await waitFor(async () => {
       const listed = await json(await app.api(token), 200)
-      return listed.panes.some((pane) => pane.id === worker.pane.id) ? null : listed
+      return listed.panes.some((pane) => pane.id === worker.pane.id && pane.closed !== true)
+        ? null
+        : listed
     })
     await json(
       await app.api(firstController.capability, '/api/panes/progress.set', {
@@ -353,7 +355,9 @@ test('resume releases worker launches absent from a restarted pane host before r
       401,
     )
     assert.equal(
-      (await json(await app.api(token), 200)).panes.some((pane) => pane.id === worker.pane.id),
+      (await json(await app.api(token), 200)).panes.some(
+        (pane) => pane.id === worker.pane.id && pane.closed !== true,
+      ),
       false,
     )
 
@@ -552,7 +556,7 @@ test('the durable drain finishes while the HTTP server is still held open', asyn
   // then the store's — and this asserts it completes while `close` cannot.
   const t = tempEnv()
   chooseCmuxMode(t)
-  const server = await startUiServer(t.env)
+  const server = await startUiServer(t.env, { prepareRole: testRoleConfiguration })
 
   // Half a request: connected, headers unfinished. Node keeps this connection
   // active, which is what makes `server.close()` wait. (An IDLE keep-alive

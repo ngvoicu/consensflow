@@ -13,7 +13,7 @@ use serde_json::{json, Map, Value};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
-use crate::arbiter::{InputArbiter, PaneEvent};
+use crate::arbiter::{ArbiterError, InputArbiter, PaneEvent};
 use crate::bridge::{Bridge, BridgeBuilder, ConnectedBridge};
 use crate::pty::{
     validate_drop_env, PaneEnvironment, PaneKey, PaneOutput, PaneTable, StreamedPane,
@@ -95,7 +95,7 @@ enum InputWork {
     Human(Vec<u8>),
     Reply(Vec<u8>),
     Paste { epoch: u64, body: Vec<u8> },
-    ClaimEpoch { epoch: u64 },
+    ClaimEpoch { epoch: u64, native_editor: bool },
 }
 
 impl InputWork {
@@ -338,8 +338,15 @@ impl InputQueue {
         &self,
         key: PaneKey,
         epoch: u64,
+        native_editor: bool,
     ) -> Result<oneshot::Receiver<InputResponse>, String> {
-        self.submit(key, InputWork::ClaimEpoch { epoch })
+        self.submit(
+            key,
+            InputWork::ClaimEpoch {
+                epoch,
+                native_editor,
+            },
+        )
     }
 
     fn submit(
@@ -452,10 +459,22 @@ fn input_worker(
                 .write_paste(&panes, &key, epoch, &body)
                 .map(|()| InputSuccess::Written)
                 .map_err(|error| error.to_string()),
-            InputWork::ClaimEpoch { epoch } => arbiter
-                .claim_epoch(&key, epoch)
-                .map(|()| InputSuccess::Written)
-                .map_err(|error| error.to_string()),
+            InputWork::ClaimEpoch {
+                epoch,
+                native_editor,
+            } => {
+                let claimed = if native_editor {
+                    arbiter.claim_native_epoch(&key, epoch)
+                } else {
+                    arbiter.claim_epoch(&key, epoch)
+                };
+                claimed
+                    .map(|()| InputSuccess::Written)
+                    .map_err(|error| match error {
+                        ArbiterError::Stale if native_editor => "stale-input-epoch".to_string(),
+                        error => error.to_string(),
+                    })
+            }
         };
         job.pending_bytes
             .fetch_sub(job.reserved_bytes, Ordering::AcqRel);
@@ -500,18 +519,13 @@ impl OutputHub {
     fn attach(&self, sink: OutputSink) {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         state.sink = Some(sink);
-        while let Some(message) = state.pending.front().cloned() {
-            let delivered = state.sink.as_ref().is_some_and(|sink| sink(message));
-            if !delivered {
-                state.sink = None;
-                break;
-            }
-            state.pending.pop_front();
+        let pending = std::mem::take(&mut state.pending);
+        for message in pending {
+            Self::deliver_or_park(&mut state, message);
         }
     }
 
-    fn publish(&self, message: PaneOutputMessage) {
-        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+    fn deliver_or_park(state: &mut OutputHubState, message: PaneOutputMessage) {
         if state
             .sink
             .as_ref()
@@ -522,6 +536,15 @@ impl OutputHub {
         state.sink = None;
         state.pending.push_back(message);
     }
+
+    fn publish(&self, message: PaneOutputMessage) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        Self::deliver_or_park(&mut state, message);
+    }
+}
+
+pub(crate) fn window_command_allowed(window: &str, _command: &str) -> bool {
+    window == "main"
 }
 
 pub struct AppRuntime {
@@ -537,6 +560,10 @@ pub struct AppRuntime {
 }
 
 impl AppRuntime {
+    pub(crate) fn pane_table(&self) -> Arc<PaneTable> {
+        Arc::clone(&self.panes)
+    }
+
     pub fn start(app: &AppHandle) -> Self {
         let panes = Arc::new(PaneTable::new());
         let output = Arc::new(OutputHub::new());
@@ -603,8 +630,14 @@ impl AppRuntime {
     }
 
     pub fn shutdown(&self) {
+        if self.begin_shutdown() {
+            self.finish_shutdown();
+        }
+    }
+
+    pub(crate) fn begin_shutdown(&self) -> bool {
         if self.shutting_down.swap(true, Ordering::AcqRel) {
-            return;
+            return false;
         }
         if let Some(mut editor) = self
             .editor
@@ -615,6 +648,10 @@ impl AppRuntime {
             let _ = editor.kill();
             let _ = editor.wait();
         }
+        true
+    }
+
+    pub(crate) fn finish_shutdown(&self) {
         if let Some(bridge) = &self.bridge {
             let _ = bridge.wait_launches_closed();
         }
@@ -655,27 +692,10 @@ fn request_node(
 }
 
 fn compose_state(
-    panes: &PaneTable,
     node: Value,
     roster: Option<RosterHandle>,
     startup_error: Option<String>,
 ) -> Value {
-    let pane_runtime = match panes.list() {
-        Ok(panes) => panes
-            .into_iter()
-            .map(|pane| {
-                json!({
-                    "id":pane.id,
-                    "generation":pane.generation,
-                    "alive":pane.alive,
-                    "idleMs":pane.idle_ms,
-                })
-            })
-            .collect::<Vec<_>>(),
-        Err(error) => {
-            return json!({"ok":false,"error":error.to_string(),"operation":"state.list"});
-        }
-    };
     let mut object = match node {
         Value::Object(object) => object,
         other => Map::from_iter([
@@ -683,7 +703,6 @@ fn compose_state(
             ("state".to_string(), other),
         ]),
     };
-    object.insert("paneRuntime".to_string(), Value::Array(pane_runtime));
     if let Some(roster) = roster {
         object.insert(
             "roster".to_string(),
@@ -774,6 +793,18 @@ struct PasteRequest {
     generation: u64,
     epoch: u64,
     body: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PeerSendRequest {
+    id: String,
+    generation: u64,
+    epoch: u64,
+    socket: PathBuf,
+    peer_pid: i32,
+    body: String,
+    timeout_ms: u64,
 }
 
 #[derive(Deserialize)]
@@ -1016,15 +1047,53 @@ fn register_pane_handlers(
         }
     });
 
-    let claim_queue = Arc::clone(&inputs);
-    builder.on("pane.claim_epoch", move |_bridge, body| {
-        let request: ClaimEpochRequest = parse_body(body)?;
-        let key = pane_key(&request.pane, request.generation)?;
-        match wait_for_input_blocking(claim_queue.claim_epoch(key, request.epoch)?)? {
-            InputSuccess::Written => Ok(json!({"ok":true})),
-            InputSuccess::Human { .. } => {
-                Err("pane.claim_epoch returned the wrong outcome".to_string())
+    for (operation, native_editor) in [
+        ("pane.claim_epoch", false),
+        ("pane.claim_native_epoch", true),
+    ] {
+        let claim_queue = Arc::clone(&inputs);
+        builder.on(operation, move |_bridge, body| {
+            let request: ClaimEpochRequest = parse_body(body)?;
+            let key = pane_key(&request.pane, request.generation)?;
+            match wait_for_input_blocking(claim_queue.claim_epoch(
+                key,
+                request.epoch,
+                native_editor,
+            )?)? {
+                InputSuccess::Written => Ok(json!({"ok":true})),
+                InputSuccess::Human { .. } => {
+                    Err(format!("{operation} returned the wrong outcome"))
+                }
             }
+        });
+    }
+
+    let peer_panes = Arc::clone(&panes);
+    let peer_queue = Arc::clone(&inputs);
+    builder.on("pane.send_peer", move |_bridge, body| {
+        let request: PeerSendRequest = parse_body(body)?;
+        let key = pane_key(&request.id, request.generation)?;
+        if !request.socket.is_absolute() || request.peer_pid <= 0
+            || request.body.len() > MAX_INPUT_BYTES || !(1..=3000).contains(&request.timeout_ms) {
+            return Ok(json!({"ok":false,"admitted":false,"bytesWritten":0,"error":"invalid native peer request"}));
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let result = peer_panes.send_peer(&key, &request.socket, request.peer_pid,
+                request.body.as_bytes(), std::time::Duration::from_millis(request.timeout_ms), || {
+                    wait_for_input_blocking(peer_queue.claim_epoch(key.clone(), request.epoch, true)?)
+                        .map(|_| ())
+                });
+            Ok(match result {
+                Ok(()) => json!({"ok":true}),
+                Err(error) if error.uncertain => json!({"ok":false,"admitted":null,"error":"uncertain","cause":error.reason}),
+                Err(error) => json!({"ok":false,"admitted":false,"bytesWritten":0,"error":error.code,"cause":error.reason}),
+            })
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (&peer_panes, &peer_queue, key, request.epoch);
+            Ok(json!({"ok":false,"admitted":false,"bytesWritten":0,"error":"native peer identity is unsupported on this platform"}))
         }
     });
 
@@ -1075,6 +1144,7 @@ fn register_pane_handlers(
                     "generation":pane.generation,
                     "alive":pane.alive,
                     "idleMs":pane.idle_ms,
+                    "processGroupId":list_panes.process_group_id(&PaneKey { id: pane.id.clone(), generation: pane.generation }).ok(),
                 })
             })
             .collect::<Vec<_>>();
@@ -1333,6 +1403,23 @@ async fn input_result(result: Result<PageInputCompletion, String>) -> Value {
 }
 
 #[tauri::command]
+pub async fn open_pm<R: Runtime>(app: AppHandle<R>, tab: String, harness: String) -> Value {
+    let (bridge, startup_error) = {
+        let state = app.state::<AppRuntime>();
+        (state.bridge.clone(), state.startup_error.clone())
+    };
+    run_blocking("pm.open", move || {
+        request_node(
+            bridge,
+            startup_error,
+            "pm.open".into(),
+            json!({"tab":tab,"harness":harness}),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn open_lead<R: Runtime>(app: AppHandle<R>, dir: String, harness: String) -> Value {
     if let Err(error) =
         validate_text(&dir, "directory").and_then(|()| validate_text(&harness, "harness"))
@@ -1407,6 +1494,26 @@ pub async fn open_consult<R: Runtime>(
     };
     run_blocking(operation, move || {
         request_node(bridge, startup_error, operation.to_string(), body)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn delete_pane<R: Runtime>(app: AppHandle<R>, id: String, generation: u64) -> Value {
+    if let Err(error) = pane_key(&id, generation) {
+        return json!({"ok":false,"error":error});
+    }
+    let (bridge, startup_error) = {
+        let state = app.state::<AppRuntime>();
+        (state.bridge.clone(), state.startup_error.clone())
+    };
+    run_blocking("pane.delete", move || {
+        request_node(
+            bridge,
+            startup_error,
+            "pane.delete".into(),
+            json!({"id":id,"generation":generation}),
+        )
     })
     .await
 }
@@ -1498,85 +1605,6 @@ pub fn pane_reply_enqueue<R: Runtime>(
 }
 
 #[tauri::command]
-pub fn pane_input_snapshot<R: Runtime>(app: AppHandle<R>, id: String, generation: u64) -> Value {
-    let result = (|| -> Result<Value, String> {
-        let key = pane_key(&id, generation)?;
-        let state = app.state::<AppRuntime>();
-        let page = state
-            .inputs
-            .page
-            .lock()
-            .map_err(|_| "input admission lock is poisoned")?;
-        let routes = state
-            .inputs
-            .senders
-            .lock()
-            .map_err(|_| "input queue lock is poisoned")?;
-        if routes
-            .get(&key)
-            .is_some_and(|route| route.pending_bytes.load(Ordering::Acquire) > 0)
-        {
-            return Err(
-                "Input is still being written. Reopen Resume replies when it finishes.".into(),
-            );
-        }
-        let snapshot = state
-            .inputs
-            .arbiter
-            .snapshot(&key)
-            .map_err(|error| error.to_string())?;
-        Ok(json!({"ok":true,"inputEpoch":snapshot.input_epoch,
-            "sequence":page.last_sequences.get(&key).copied().unwrap_or(0),
-            "draftLatched":snapshot.draft_latched}))
-    })();
-    result.unwrap_or_else(|error| json!({"ok":false,"error":error}))
-}
-
-// This command is deliberately app-only: neither the Node bridge nor lead
-// HTTP credentials can confirm the human's terminal composer is empty.
-#[tauri::command]
-pub fn pane_resume_replies<R: Runtime>(
-    app: AppHandle<R>,
-    id: String,
-    generation: u64,
-    input_epoch: u64,
-    sequence: u64,
-) -> Value {
-    let result = (|| -> Result<Value, String> {
-        let key = pane_key(&id, generation)?;
-        let state = app.state::<AppRuntime>();
-        let page = state
-            .inputs
-            .page
-            .lock()
-            .map_err(|_| "input admission lock is poisoned")?;
-        if page.last_sequences.get(&key).copied().unwrap_or(0) != sequence {
-            return Err("Input changed. Reopen Resume replies and confirm again.".into());
-        }
-        let routes = state
-            .inputs
-            .senders
-            .lock()
-            .map_err(|_| "input queue lock is poisoned")?;
-        if routes
-            .get(&key)
-            .is_some_and(|route| route.pending_bytes.load(Ordering::Acquire) > 0)
-        {
-            return Err(
-                "Input is still being written. Reopen Resume replies when it finishes.".into(),
-            );
-        }
-        state
-            .inputs
-            .arbiter
-            .resume_replies(&key, input_epoch)
-            .map_err(|error| error.to_string())?;
-        Ok(json!({"ok":true}))
-    })();
-    result.unwrap_or_else(|error| json!({"ok":false,"error":error}))
-}
-
-#[tauri::command]
 pub async fn pane_input_wait<R: Runtime>(app: AppHandle<R>, ticket: String) -> Value {
     if let Err(error) = validate_text(&ticket, "pane input ticket") {
         return json!({"ok":false,"error":error});
@@ -1585,7 +1613,11 @@ pub async fn pane_input_wait<R: Runtime>(app: AppHandle<R>, ticket: String) -> V
         let state = app.state::<AppRuntime>();
         Arc::clone(&state.inputs)
     };
-    input_result(inputs.take_page_completion(&ticket)).await
+    let result = input_result(inputs.take_page_completion(&ticket)).await;
+    if result.get("epoch").is_some() {
+        let _ = app.emit(PAGE_STATE_EVENT, json!({"reason":"human-input"}));
+    }
+    result
 }
 
 #[tauri::command]
@@ -1789,6 +1821,26 @@ pub async fn rename_session<R: Runtime>(app: AppHandle<R>, tab: String, name: St
 }
 
 #[tauri::command]
+pub async fn tab_delete<R: Runtime>(app: AppHandle<R>, tab: String, generation: u64) -> Value {
+    if let Err(error) = validate_text(&tab, "tab") {
+        return json!({"ok":false,"error":error});
+    }
+    let (bridge, startup_error) = {
+        let state = app.state::<AppRuntime>();
+        (state.bridge.clone(), state.startup_error.clone())
+    };
+    run_blocking("tab.delete", move || {
+        request_node(
+            bridge,
+            startup_error,
+            "tab.delete".into(),
+            json!({"tab":tab,"generation":generation}),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn tab_resume<R: Runtime>(app: AppHandle<R>, tab: String) -> Value {
     if let Err(error) = validate_text(&tab, "tab") {
         return json!({"ok":false,"error":error});
@@ -1835,19 +1887,18 @@ pub async fn subscribe_output<R: Runtime>(
 /// [`subscribe_output`].
 #[tauri::command]
 pub async fn list_state<R: Runtime>(app: AppHandle<R>) -> Value {
-    let (bridge, startup_error, panes, roster) = {
+    let (bridge, startup_error, roster) = {
         let state = app.state::<AppRuntime>();
         (
             state.bridge.clone(),
             state.startup_error.clone(),
-            Arc::clone(&state.panes),
             state.roster.clone(),
         )
     };
     let state_error = startup_error.clone();
     run_blocking("state.list", move || {
         let node = request_node(bridge, startup_error, "state.list".to_string(), json!({}));
-        compose_state(&panes, node, roster, state_error)
+        compose_state(node, roster, state_error)
     })
     .await
 }
@@ -1857,6 +1908,51 @@ mod tests {
     use super::*;
     use std::io::Read;
     use std::time::Duration;
+
+    #[test]
+    fn headless_output_includes_companion_panes() {
+        let hub = OutputHub::new();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let copy = Arc::clone(&seen);
+        hub.register_sink(Arc::new(move |message| {
+            copy.lock().unwrap().push(message.id);
+            true
+        }));
+        hub.publish(PaneOutputMessage {
+            id: "p-pm".into(),
+            generation: 1,
+            seq: 1,
+            bytes: vec![65],
+        });
+        assert_eq!(*seen.lock().unwrap(), vec!["p-pm"]);
+    }
+
+    #[test]
+    fn only_main_window_has_application_command_authority() {
+        assert!(window_command_allowed("main", "open_pm"));
+        assert!(!window_command_allowed("pm-t-2", "open_pm"));
+        assert!(!window_command_allowed("stranger", "pane_input_enqueue"));
+    }
+
+    #[test]
+    fn main_subscription_receives_pm_and_lead_output_without_replacing_either() {
+        let hub = OutputHub::new();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let copy = Arc::clone(&seen);
+        hub.attach(Arc::new(move |message| {
+            copy.lock().unwrap().push(message.id);
+            true
+        }));
+        for id in ["p-pm", "p-lead", "p-pm"] {
+            hub.publish(PaneOutputMessage {
+                id: id.into(),
+                generation: 1,
+                seq: 1,
+                bytes: vec![65],
+            });
+        }
+        assert_eq!(*seen.lock().unwrap(), vec!["p-pm", "p-lead", "p-pm"]);
+    }
 
     #[test]
     fn unknown_node_operations_are_explicitly_not_available() {
@@ -1965,6 +2061,7 @@ mod tests {
             "open_shell",
             "open_consult",
             "close_pane",
+            "delete_pane",
             "pane_input_wait",
             "pane_resize",
             "pane_ack",
@@ -1974,6 +2071,7 @@ mod tests {
             "deliver_cancel",
             "held_send",
             "tab_resume",
+            "tab_delete",
             "rename_session",
             "list_state",
         ] {
@@ -2149,9 +2247,7 @@ mod tests {
             .invoke_handler(tauri::generate_handler![
                 pane_input_enqueue,
                 pane_reply_enqueue,
-                pane_input_wait,
-                pane_input_snapshot,
-                pane_resume_replies
+                pane_input_wait
             ])
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("build mock app");
@@ -2212,12 +2308,8 @@ mod tests {
         );
         let first_completed = invoke("pane_input_wait", json!({"ticket":first["ticket"]}));
         assert_eq!(first_completed["ok"], true);
-        let snapshot = invoke("pane_input_snapshot", json!({"id":key.id,"generation":1}));
-        assert_eq!(snapshot["ok"], true);
-        assert_eq!(snapshot["draftLatched"], true);
-        assert_eq!(snapshot["sequence"], 2);
-        // Even rejected page input invalidates an earlier confirmation: its
-        // sequence was consumed before the size check, although the epoch did not move.
+        // A rejected page input still consumes its sequence, although the
+        // epoch does not move, so the next sequence remains valid.
         let rejected = invoke(
             "pane_input_enqueue",
             json!({
@@ -2225,19 +2317,6 @@ mod tests {
             }),
         );
         assert_eq!(rejected["ok"], false);
-        let resume = |generation: u64, sequence: u64| {
-            invoke(
-                "pane_resume_replies",
-                json!({
-                    "id":key.id,"generation":generation,"sequence":sequence,"inputEpoch":snapshot["inputEpoch"],
-                }),
-            )
-        };
-        assert_eq!(resume(1, 2)["ok"], false);
-        assert_eq!(resume(2, 3)["ok"], false);
-        assert!(arbiter.snapshot(&key).unwrap().draft_latched);
-        assert_eq!(resume(1, 3)["ok"], true);
-        assert!(!arbiter.snapshot(&key).unwrap().draft_latched);
         let second = invoke(
             "pane_reply_enqueue",
             json!({"id":key.id,"generation":1,"sequence":4,"bytes":[67]}),
@@ -2907,6 +2986,12 @@ mod tests {
                 json!({"tab":"tab-1"}),
             ),
             (
+                "tab_delete",
+                json!({"tab":"tab-1","generation":7}),
+                "tab.delete",
+                json!({"tab":"tab-1","generation":7}),
+            ),
+            (
                 "list_state",
                 json!({"onOutput":"__CHANNEL__:99"}),
                 "state.list",
@@ -2982,6 +3067,7 @@ mod tests {
                 deliver_cancel,
                 held_send,
                 tab_resume,
+                tab_delete,
                 rename_session,
                 list_state,
             ])
@@ -3008,10 +3094,7 @@ mod tests {
             .deserialize::<Value>()
             .expect("command response JSON");
             if command == "list_state" {
-                assert_eq!(
-                    response,
-                    json!({"ok":true,"available":true,"paneRuntime":[]})
-                );
+                assert_eq!(response, json!({"ok":true,"available":true}));
             } else {
                 assert_eq!(response, json!({"ok":true}));
             }

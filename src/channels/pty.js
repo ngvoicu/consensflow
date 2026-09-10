@@ -24,15 +24,15 @@ function requireTarget(target) {
 }
 
 /** Guard a native send with Rust's current draft and input epoch, without I/O. */
-export async function claimEpoch(target) {
+export async function claimEpoch(target, operation = 'pane.claim_epoch') {
   const pane = paneEpoch(target)
   try {
     const request = { pane: pane.id, generation: pane.generation, epoch: target.epoch }
-    if (typeof target.claimEpoch === 'function') return await target.claimEpoch(request)
+    if (typeof target.claimEpoch === 'function') return await target.claimEpoch(request, operation)
     if (target.bridge === null || typeof target.bridge?.request !== 'function') {
       throw new Error('native delivery needs pane.claim_epoch')
     }
-    return await target.bridge.request('pane.claim_epoch', request, {
+    return await target.bridge.request(operation, request, {
       deadlineMs: target.deadlineMs,
     })
   } catch (cause) {

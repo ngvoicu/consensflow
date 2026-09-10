@@ -186,7 +186,6 @@ function shape(result) {
   assert.equal(typeof result.failed, 'boolean')
   assert.ok(result.failure === null || typeof result.failure === 'string')
   assert.ok(result.cursor !== undefined && result.cursor !== null)
-  assert.equal(typeof result.version, 'string')
   assert.ok(['settled', 'in-flight', 'unknown'].includes(result.settlement.state))
   assert.ok(['native', 'derived', 'unknown'].includes(result.settlement.provenance))
   assert.equal(typeof result.settlement.evidence.complete, 'boolean')
@@ -230,7 +229,7 @@ test('completion/codex: native ids survive duplicate text and task_complete sett
   assert.equal(final.id, 'msg_04d9db96cf5fb8de016a9da268ba0c87d296ccd58a43338425')
   assert.equal(final.complete, true)
   assert.equal(final.settled, true)
-  assert.equal(result.version, '0.153.4')
+  assert.equal(result.version, undefined)
   assert.equal(result.settlement.state, 'settled')
   assert.equal(result.settlement.provenance, 'native')
   assert.equal(result.settlement.boundary, 'task_complete')
@@ -379,7 +378,7 @@ test('completion/claude-code: fragments share message.id, server tool result is 
   assert.equal(tool.id, 'srvtoolu_01EDse4eJ8ri24eacy6VeNmi')
   assert.match(tool.text, /advisor_redacted_result/)
   assert.match(tool.text, /redacted 4852 chars/)
-  assert.equal(result.version, '2.1.247')
+  assert.equal(result.version, undefined)
   assert.equal(result.settlement.state, 'settled')
   assert.equal(result.settlement.provenance, 'derived')
   assert.equal(result.settlement.boundary, 'system.stop_hook_summary')
@@ -411,7 +410,7 @@ test('completion/claude-code: fragment identity supports growth and repeated equ
   assert.equal(result.items.find((item) => item.role === 'assistant').text, 'AB\nAB')
 })
 
-test('completion/claude-code: a real supported mid-session CLI upgrade reports the latest version', async () => {
+test('completion/claude-code: mid-session version metadata does not affect settlement', async () => {
   const session = '15fba934-d727-4777-8791-123675a63649'
   const { env } = await stageJsonl('claude-code', session, 'claude-code/fragments.jsonl', {
     mutate(records) {
@@ -421,7 +420,7 @@ test('completion/claude-code: a real supported mid-session CLI upgrade reports t
   })
   const result = await answers('claude-code', session, env)
   shape(result)
-  assert.equal(result.version, '2.1.250')
+  assert.equal(result.version, undefined)
   assert.equal(result.settlement.state, 'settled')
 })
 
@@ -1374,7 +1373,7 @@ test('completion: every adapter returns a 60,000-character native text leaf whol
 
 // ------------------------------------------------ versions, corruption, guards
 
-test('completion: every adapter rejects an undeclared protocol or schema version', async () => {
+test('completion: native readers ignore undeclared version metadata', async () => {
   const codexSession = '01a074ec-7aff-74b0-8cf6-aa00d8e451cb'
   const codexStage = await stageJsonl('codex', codexSession, 'codex/completed.jsonl', {
     mutate(records) {
@@ -1412,10 +1411,34 @@ test('completion: every adapter rejects an undeclared protocol or schema version
     ),
   ]
   for (const result of cases) {
-    assert.equal(result.unknown, true)
-    assert.match(result.reason, /unsupported version/i)
+    assert.equal(result.unknown, undefined, result.reason)
+    assert.ok(result.items.length > 0)
+    assert.equal(result.version, undefined)
   }
 })
+
+for (const [kind, session, fixture] of [
+  ['codex', '01a074ec-7aff-74b0-8cf6-aa00d8e451cb', 'codex/completed.jsonl'],
+  ['claude-code', '15fba934-d727-4777-8791-123675a63649', 'claude-code/fragments.jsonl'],
+  ['pi', 'hazy-ridge', 'pi/tool-loop.jsonl'],
+]) {
+  test(`completion/${kind}: absent version metadata preserves result extraction`, async (t) => {
+    const staged = await stageJsonl(kind, session, fixture, {
+      mutate(records) {
+        for (const record of records) {
+          delete record.version
+          if (record.payload) delete record.payload.cli_version
+        }
+        return records
+      },
+    })
+    t.after(() => fs.rm(staged.root, { recursive: true, force: true }))
+    const result = await answers(kind, session, staged.env)
+    assert.equal(result.unknown, undefined, result.reason)
+    assert.ok(result.items.length > 0)
+    assert.equal(result.version, undefined)
+  })
+}
 
 test('completion: JSONL streams tolerate only an incomplete final append', async () => {
   const session = '01a074ec-7aff-74b0-8cf6-aa00d8e451cb'

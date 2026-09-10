@@ -4,6 +4,7 @@ import path from 'node:path'
 import { recordLeadPreference } from '../hosts/lib/policy.js'
 import { bindEvidence } from '../hosts/lib/session-binding.js'
 import { workspaceKey, writeJsonAtomic } from '../hosts/lib/state.js'
+import { newSessionName } from '../hosts/lib/threads.js'
 import { nowIso } from '../hosts/lib/utils.js'
 
 /**
@@ -237,7 +238,7 @@ export class Store {
         // routine bad request on its way out.
         throw new AdmissionError(`the tab ${tab} has no lead pane`, 'no-lead-pane')
       }
-      const decided = typeof launch === 'function' ? launch(record) : launch
+      const decided = typeof launch === 'function' ? await launch(record) : launch
       const { launchId, ...evidence } = isRecord(decided) ? decided : { launchId: decided }
       requireText(launchId, 'lead launch id')
       // The evidence a lead binds by, decided INSIDE this mutation from the
@@ -634,6 +635,12 @@ export class Store {
         throw new AdmissionError(`the session ${tab} is closed — resume it first`, 'session-closed')
       }
 
+      if (tabRecord.deletedConversations?.includes(name)) {
+        throw new AdmissionError(
+          'this conversation was deleted from this session',
+          'conversation-deleted',
+        )
+      }
       const row = threads[name]
       if (row !== undefined && !isRecord(row)) throw new Error(`${name} is not a conversation`)
       // Identity, against the row THIS mutation read: a roster that changed
@@ -704,7 +711,7 @@ export class Store {
       // launch must bind by depends on whether this conversation already
       // has a native session — and that is only known here, from the row
       // this mutation read.
-      const record = typeof launch === 'function' ? launch(row) : launch
+      const record = typeof launch === 'function' ? await launch(row) : launch
       const reserved = reservationFrom(
         { tab, id: pane.id, generation: pane.generation },
         record,
@@ -1209,7 +1216,11 @@ export class Store {
       writeTabs: async (tabs) => {
         asArray(tabs, 'tabs')
         const envelope = await readTabsFile(this.root)
-        await this.#writeAppJson(tabsFile(this.root), { ...envelope, tabs })
+        await this.#writeAppJson(tabsFile(this.root), {
+          ...envelope,
+          nextTab: Math.max(envelope.nextTab, tabCounter(undefined, tabs)),
+          tabs,
+        })
       },
       // The whole envelope, for the paths that issue a pane identity: the
       // allocator's state and the tabs it belongs to commit together.
@@ -1224,6 +1235,7 @@ export class Store {
           throw new Error('the delivery counter must stay a positive safe integer')
         }
         await this.#writeAppJson(tabsFile(this.root), {
+          nextTab: tabCounter(envelope.nextTab, envelope.tabs),
           nextPane: envelope.nextPane,
           nextDelivery: envelope.nextDelivery,
           issued: envelope.issued,
@@ -1310,15 +1322,57 @@ export class Store {
       null,
       'store.recover',
       async (io) => {
-        const tabs = await io.readTabs()
+        const envelope = await io.readTabsEnvelope()
+        const tabs = envelope.tabs
         let closed = 0
+        let named = false
+        let restored = false
         for (const tab of tabs) {
+          if (isRecord(tab) && !tab.roleName) {
+            tab.role = tab.role === 'pm' ? 'pm' : 'lead'
+            tab.roleName = newSessionName(
+              tabs.map((item) => `${tab.role}-${item.roleName}`),
+              [],
+              tab.role,
+            ).slice(tab.role.length + 1)
+            named = true
+          }
           if (isRecord(tab) && tab.closed !== true) {
             tab.closed = true
             closed += 1
           }
         }
-        if (closed > 0) await io.writeTabs(tabs)
+        for (const tab of tabs) {
+          if (
+            !isRecord(tab) ||
+            tab.role === 'pm' ||
+            typeof tab.directory !== 'string' ||
+            !Array.isArray(tab.panes) ||
+            !Number.isSafeInteger(tab.lead?.generation)
+          )
+            continue
+          const threads = await io.readThreads(tab.directory)
+          for (const [name, row] of Object.entries(threads)) {
+            if (tab.deletedConversations?.includes(name)) continue
+            const owner = typeof row?.lead === 'string' ? row.lead.split(':') : []
+            if (
+              owner.length !== 3 ||
+              owner[0] !== 'tab' ||
+              owner[1] !== tab.id ||
+              !/^[1-9][0-9]*$/.test(owner[2]) ||
+              Number(owner[2]) > tab.lead.generation ||
+              tab.panes.some((pane) => pane.conversation === name)
+            )
+              continue
+            // Older builds discarded pane rows on restart. Restore navigation,
+            // never a process, and retain the conversation's original ownership.
+            const pane = appendWorkerPane(envelope, tab, name)
+            pane.closed = true
+            pane.alive = false
+            restored = true
+          }
+        }
+        if (closed > 0 || named || restored) await io.writeTabsEnvelope(envelope)
         const released = await this.#reconcileReservations(tabs)
         return { tabsClosed: closed, reservationsReleased: released }
       },
@@ -1426,7 +1480,7 @@ async function readTabsFile(root) {
     await fs.access(file)
   } catch (error) {
     if (error?.code === 'ENOENT') {
-      return { nextPane: 1, nextDelivery: 1, issued: Object.create(null), tabs: [] }
+      return { nextTab: 1, nextPane: 1, nextDelivery: 1, issued: Object.create(null), tabs: [] }
     }
     throw new Error(`cannot read ${file}: ${error?.message ?? error}`)
   }
@@ -1438,6 +1492,7 @@ async function readTabsFile(root) {
   const issued = parsed.issued ?? Object.create(null)
   if (!isRecord(issued)) throw new Error(`cannot read ${file}: the issued pane ids are not a map`)
   return {
+    nextTab: tabCounter(parsed.nextTab, parsed.tabs),
     nextPane: parsed.nextPane,
     // A store written before delivery ids were minted has no counter, and
     // has therefore issued none: starting at 1 repeats nothing.
@@ -1454,6 +1509,19 @@ async function readTabsFile(root) {
  * starting over would hand out ids that name delivery files already on
  * disk.
  */
+function tabCounter(value, tabs) {
+  let minimum = 1
+  for (const tab of tabs) {
+    const match = /^t-(\d+)$/.exec(tab?.id ?? '')
+    if (match) minimum = Math.max(minimum, Number(match[1]) + 1)
+  }
+  const counter = value === undefined ? minimum : value
+  if (!Number.isSafeInteger(counter) || counter < minimum) {
+    throw new Error('the tab counter must be a positive safe integer above existing ids')
+  }
+  return counter
+}
+
 function deliveryCounter(value, file) {
   // ABSENT means a store from before this allocator existed: it has issued
   // nothing, so 1 repeats nothing. `null` is a value somebody wrote, and
@@ -1527,6 +1595,10 @@ export function allocatePaneId(envelope, { id = null, generation = 1 } = {}) {
  * reservation for it have to be one step.
  */
 function appendWorkerPane(envelope, tab, conversation) {
+  // Readers resolve a conversation to one pane; a retry replaces its failed identity.
+  tab.panes = tab.panes.filter(
+    (pane) => !(pane.conversation === conversation && (pane.failure || pane.closed === true)),
+  )
   const pane = {
     id: allocatePaneId(envelope, { generation: 1 }),
     kind: 'worker',
@@ -1658,6 +1730,7 @@ function reservationFrom(pane, launch, at) {
     requireText(launch.opId, 'launch opId')
     reserved.opId = launch.opId
   }
+  if (isRecord(launch?.channel)) reserved.channel = structuredClone(launch.channel)
   const evidence = evidenceFields(launch)
   if (evidence !== null) Object.assign(reserved, evidence)
   return reserved

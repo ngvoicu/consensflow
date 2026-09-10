@@ -68,6 +68,34 @@ export function bindEvidence(kind, candidate = {}, launch = {}) {
     }
   }
 
+  // Fresh Codex leads carry the launch nonce in native session metadata,
+  // not in a user turn. A fork or subagent can inherit an originator, so
+  // only the original CLI session is evidence for this lead.
+  if (launch?.originator !== undefined && launch.originator !== null) {
+    const meta = candidate?.sessionMeta
+    if (
+      kind === 'codex' &&
+      typeof launch.nonce === 'string' &&
+      launch.nonce.length > 0 &&
+      launch.originator === `consensflow-${launch.nonce}` &&
+      typeof sessionId === 'string' &&
+      sessionId.length > 0 &&
+      meta?.id === sessionId &&
+      meta.originator === launch.originator &&
+      meta.source === 'cli' &&
+      meta.thread_source === 'user' &&
+      !meta.forked_from_id &&
+      !meta.parent_thread_id
+    ) {
+      return { bound: true, evidence: 'nonce', generation }
+    }
+    return {
+      bound: false,
+      reason: 'unbound: native metadata does not identify this launch',
+      generation,
+    }
+  }
+
   const nonce = launch?.nonce ?? null
   const preallocatedId = launch?.preallocatedId ?? null
   const reportedId = launch?.reportedId ?? null

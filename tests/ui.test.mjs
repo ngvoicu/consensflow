@@ -5,7 +5,7 @@ import { after, before, describe, it } from 'node:test'
 import { Script } from 'node:vm'
 import { listAgents } from '../src/roster.js'
 import { startUiServer } from '../src/ui.js'
-import { tempEnv } from './helpers.mjs'
+import { tempEnv, testRoleConfiguration } from './helpers.mjs'
 
 function stubCli(t, name) {
   mkdirSync(t.env.PATH, { recursive: true })
@@ -84,7 +84,7 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
 
   before(async () => {
     stubCli(t, 'claude')
-    server = await startUiServer(t.env)
+    server = await startUiServer(t.env, { prepareRole: testRoleConfiguration })
   })
   after(async () => {
     await server.close()
@@ -166,7 +166,7 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
   it('serves a page that can do the whole job, not half of it', async () => {
     const html = await (await fetch(`${server.url}/?token=${server.token}`)).text()
     // Everything the CLI can do has an affordance here.
-    for (const marker of ['id="off"', 'id="update"', "post('/api/off'", 'Edit']) {
+    for (const marker of ['id="off"', 'Check all harnesses', "post('/api/off'", 'Edit']) {
       assert.ok(html.includes(marker), `the page is missing ${marker}`)
     }
   })
@@ -209,7 +209,15 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     })
 
     const installed = readFileSync(
-      join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md'),
+      join(
+        t.env.CONSENSFLOW_HOME,
+        'roles',
+        'lead',
+        '.claude',
+        'skills',
+        'consensflow-lead',
+        'SKILL.md',
+      ),
       'utf8',
     )
     assert.match(installed, /claude-opus-5/)
@@ -248,49 +256,20 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
   it('offers standalone controls and automatic reply guidance (TEST-PANE-47)', async () => {
     const html = await (await api('/')).text()
     assert.doesNotMatch(html, /id="integrations"|id="mode-lede"|\/api\/mode|cmux mode|--wait/)
-    for (const marker of ['id="off"', 'id="update"', 'cf say', 'cf read']) {
+    for (const marker of ['id="off"', 'cf say', 'cf read']) {
       assert.ok(html.includes(marker), `the page is missing ${marker}`)
     }
     assert.match(html, /replies.*automatically/i)
   })
 
-  it('installs and updates the skills from the page', async () => {
-    const res = await api('/api/skills/install', { method: 'POST', body: JSON.stringify({}) })
-    assert.equal(res.status, 200)
-    const body = await res.json()
-
-    // Installed, updated, or already exactly right — all three are success.
-    // An install that changes nothing reports `unchanged`, not a silent pass.
-    assert.ok(body.report.length > 0, 'the install reported on every target')
-    assert.ok(
-      body.report.every((r) => ['installed', 'updated', 'unchanged'].includes(r.action)),
-      'nothing was refused',
-    )
-    assert.ok(
-      existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')),
-      'the generated skill is on disk',
-    )
-  })
-
-  it('installs no cmux skills from any button — ConsensFlow ships one skill', async () => {
-    // The cloning era installed cmux's skills tree here; the buttons now only
-    // take back what it left. A git on PATH that would clone happily proves
-    // nothing reaches for it.
-    const git = join(t.env.PATH, 'git')
-    writeFileSync(git, '#!/bin/sh\necho "git should never run" >&2\nexit 1\n')
-    chmodSync(git, 0o755)
-
-    const body = await (
-      await api('/api/skills/install', { method: 'POST', body: JSON.stringify({}) })
-    ).json()
-
-    assert.equal(body.cmuxCommit, null, 'there is no cmux clone to report')
+  it('retires the separate skills installer without creating unrelated files', async () => {
+    const response = await api('/api/skills/install', { method: 'POST', body: '{}' })
+    assert.equal(response.status, 410)
+    assert.match((await response.json()).error, /included with ConsensFlow/)
     assert.equal(
       existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'cmux-core', 'SKILL.md')),
       false,
-      'no pane-control tree appears',
     )
-    assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')))
   })
 
   it('offers the catalog update from the page, as a named operation', async () => {
@@ -344,7 +323,7 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
 
     // The facts it used to carry in a tooltip stay, on the panel that reports.
     const system = await (await api('/api/system')).json()
-    assert.equal(typeof system.runtime.mine, 'boolean')
+    assert.ok(system.runtime === null || typeof system.runtime.mine === 'boolean')
     assert.equal(typeof system.terminal.onPath, 'boolean')
   })
 
@@ -356,19 +335,54 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     assert.equal(done.status, 200)
     assert.equal((await done.json()).system.skills.owned, 0)
     assert.equal(
-      existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')),
+      existsSync(
+        join(
+          t.env.CONSENSFLOW_HOME,
+          'roles',
+          'lead',
+          '.claude',
+          'skills',
+          'consensflow-lead',
+          'SKILL.md',
+        ),
+      ),
       false,
     )
   })
 
   it('removes them again, but only when the click was deliberate', async () => {
-    // Reinstall after off so the removal has a target.
-    await api('/api/skills/install', { method: 'POST', body: JSON.stringify({}) })
-    assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')))
+    // Opening the app prepares its private role document; the retired UI cannot.
+    const { refreshInstalledSkill } = await import('../src/sync.js')
+    refreshInstalledSkill(t.env)
+    assert.ok(
+      existsSync(
+        join(
+          t.env.CONSENSFLOW_HOME,
+          'roles',
+          'lead',
+          '.claude',
+          'skills',
+          'consensflow-lead',
+          'SKILL.md',
+        ),
+      ),
+    )
 
     const refused = await api('/api/skills/uninstall', { method: 'POST', body: JSON.stringify({}) })
     assert.equal(refused.status, 400)
-    assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')))
+    assert.ok(
+      existsSync(
+        join(
+          t.env.CONSENSFLOW_HOME,
+          'roles',
+          'lead',
+          '.claude',
+          'skills',
+          'consensflow-lead',
+          'SKILL.md',
+        ),
+      ),
+    )
 
     const done = await api('/api/skills/uninstall', {
       method: 'POST',
@@ -376,7 +390,17 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     })
     assert.equal(done.status, 200)
     assert.equal(
-      existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')),
+      existsSync(
+        join(
+          t.env.CONSENSFLOW_HOME,
+          'roles',
+          'lead',
+          '.claude',
+          'skills',
+          'consensflow-lead',
+          'SKILL.md',
+        ),
+      ),
       false,
     )
   })
@@ -410,7 +434,7 @@ describe('the page can reset the machine, and says what that destroys', () => {
 
   before(async () => {
     stubCli(t, 'claude')
-    server = await startUiServer(t.env)
+    server = await startUiServer(t.env, { prepareRole: testRoleConfiguration })
   })
   after(async () => {
     await server.close()
@@ -454,7 +478,19 @@ describe('the page can reset the machine, and says what that destroys', () => {
       body: JSON.stringify({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }),
     })
     await api('/api/skills/install', { method: 'POST', body: JSON.stringify({}) })
-    assert.ok(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')))
+    assert.ok(
+      existsSync(
+        join(
+          t.env.CONSENSFLOW_HOME,
+          'roles',
+          'lead',
+          '.claude',
+          'skills',
+          'consensflow-lead',
+          'SKILL.md',
+        ),
+      ),
+    )
 
     const done = await api('/api/reset', {
       method: 'POST',
@@ -467,9 +503,67 @@ describe('the page can reset the machine, and says what that destroys', () => {
     assert.match(body.report.join(' '), /1 agent/)
     assert.equal(body.system.skills.owned, 0)
     assert.equal(
-      existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'skills', 'consensflow', 'SKILL.md')),
+      existsSync(
+        join(
+          t.env.CONSENSFLOW_HOME,
+          'roles',
+          'lead',
+          '.claude',
+          'skills',
+          'consensflow-lead',
+          'SKILL.md',
+        ),
+      ),
       false,
     )
     assert.equal(existsSync(t.env.CONSENSFLOW_HOME), false, 'the whole root is gone')
   })
+})
+
+it('harness administration is UI-authorized and exposes all harnesses with honest statuses', async () => {
+  const t = tempEnv()
+  const server = await startUiServer(t.env, { harnessLatest: async () => '99.0.0' })
+  try {
+    const path = `${server.url}/api/harnesses/check`
+    assert.equal((await fetch(path, { method: 'POST' })).status, 401)
+    const headers = { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' }
+    const response = await fetch(path, { method: 'POST', headers, body: '{}' })
+    assert.equal(response.status, 200)
+    const { harnesses } = await response.json()
+    assert.equal(harnesses.length, 5)
+    assert.ok(harnesses.every((h) => h.installed === false))
+    const invalid = await fetch(path, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ id: 'unknown' }),
+    })
+    assert.equal(invalid.status, 400)
+    const html = await (await fetch(server.url, { headers })).text()
+    assert.match(html, /Check all harnesses/)
+    assert.doesNotMatch(html, /skills in each of|consults via the generated skill/)
+  } finally {
+    await server.close()
+    t.cleanup()
+  }
+})
+
+it('role skills ship with the app and have no separate UI installation action', async () => {
+  const t = tempEnv()
+  const server = await startUiServer(t.env)
+  try {
+    const headers = { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' }
+    const html = await (await fetch(server.url, { headers })).text()
+    assert.doesNotMatch(html, /Update skills|id="update"/)
+    assert.match(html, /Role skills included in ConsensFlow/)
+    const response = await fetch(`${server.url}/api/skills/install`, {
+      method: 'POST',
+      headers,
+      body: '{}',
+    })
+    assert.equal(response.status, 410)
+    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'roles')), false)
+  } finally {
+    await server.close()
+    t.cleanup()
+  }
 })

@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="dark">
   <title>ConsensFlow</title>
   <link rel="stylesheet" href="./vendor/xterm.css">
+  <link rel="stylesheet" href="./updates.css">
   <style>
     :root {
       --ink: #08181d;
@@ -213,6 +214,8 @@
     .tree-button[aria-current="true"] { background: var(--panel-raised); color: var(--seafoam); }
     .tree-node[data-kind="session"] > .tree-row > .tree-button { font-weight: 650; }
     .tree-node[data-closed="true"] { opacity: .48; filter: saturate(.45); }
+    .tree-node[data-state="failed"] { opacity: .9; filter: none; }
+    .tree-node[data-state="failed"] > .tree-row > .tree-button { color: var(--buoy); }
     .rename-button {
       flex: 0 0 auto;
       border: 0;
@@ -224,6 +227,17 @@
       cursor: default;
     }
     .rename-button:hover { color: var(--seafoam); background: var(--panel); }
+    .delete-button {
+      flex: 0 0 auto;
+      border: 0;
+      border-radius: 5px;
+      color: var(--buoy);
+      background: transparent;
+      padding: 3px 5px;
+      font-size: 10px;
+      cursor: default;
+    }
+    .delete-button:hover { color: var(--foam); background: rgba(255, 120, 104, .16); }
     .resume-button {
       border: 1px solid var(--seafoam-dim);
       border-radius: 5px;
@@ -243,12 +257,16 @@
       display: grid;
       gap: var(--pane-grid-gap);
       padding: var(--pane-grid-padding);
-      overflow: auto;
+      overflow: hidden;
       grid-auto-rows: minmax(0, 1fr);
       grid-auto-columns: minmax(0, 1fr);
       overscroll-behavior: contain;
     }
-    .pane-stage[data-mode="focused"] { display: block; }
+    .worker-stage {
+      min-width: 0; min-height: 0; display: grid;
+      grid-auto-flow: column; gap: var(--pane-grid-gap);
+      overflow-x: auto; overflow-y: hidden; overscroll-behavior: contain;
+    }
     .pane-stage[data-empty="true"] { display: grid; place-items: center; }
     .empty-state { color: var(--muted); max-width: 34ch; text-align: center; }
     .focus-nav {
@@ -266,13 +284,14 @@
       min-height: 180px;
       overflow: hidden;
       display: grid;
-      grid-template-rows: auto minmax(0, 1fr);
+      grid-template-rows: auto auto minmax(0, 1fr);
       border: 1px solid var(--line);
       border-radius: 7px;
       background: #07171b;
       box-shadow: 0 8px 18px rgba(0, 0, 0, .2);
     }
     .pane-card[data-kind="lead"] { border-color: var(--seafoam-dim); }
+    .pane-card[data-state="failed"] { border-color: var(--buoy); background: #241719; }
     .pane-card[data-selected="true"] { box-shadow: 0 0 0 1px var(--seafoam), 0 10px 28px var(--shadow); }
     .pane-titlebar {
       min-height: 31px;
@@ -294,6 +313,7 @@
       background: var(--muted);
     }
     .pane-card[data-kind="lead"] .pane-kind { background: var(--seafoam); }
+    .pane-card[data-state="failed"] .pane-kind { background: var(--buoy); }
     .pane-title {
       min-width: 0;
       flex: 1;
@@ -302,20 +322,34 @@
       white-space: nowrap;
       font: 11px/1.2 var(--mono);
     }
-    .resume-replies-button {
+    .pane-close-button {
       flex: 0 0 auto;
-      max-width: 104px;
-      min-height: 22px;
-      overflow: hidden;
-      padding: 2px 6px;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      font-size: 10px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      color: var(--muted);
+      background: transparent;
+      padding: 3px 6px;
+      font: 10px/1 var(--mono);
+      cursor: default;
     }
-    .terminal-host { min-width: 0; min-height: 0; padding: 5px 3px 3px; }
+    .pane-close-button:hover { color: var(--foam); border-color: var(--seafoam-dim); }
+    .pane-failure {
+      display: flex;
+      align-items: baseline;
+      gap: 7px;
+      min-width: 0;
+      padding: 6px 8px;
+      border-bottom: 1px solid rgba(255, 120, 104, .35);
+      color: var(--buoy);
+      background: rgba(255, 120, 104, .08);
+      font: 10px/1.25 var(--mono);
+    }
+    .pane-failure-message { min-width: 0; overflow-wrap: anywhere; }
+    .pane-failure-exit { margin-left: auto; flex: 0 0 auto; }
+    .terminal-host { grid-row: 3; min-width: 0; min-height: 0; padding: 5px 3px 3px; }
     .terminal-host .xterm { height: 100%; }
     .delivery-summary {
-      flex: 0 0 auto;
+      flex: 0 1 auto;
       min-width: 0;
       max-width: 112px;
       overflow: hidden;
@@ -499,7 +533,7 @@
   <aside class="delivery-help" id="delivery-help" data-testid="delivery-help" popover aria-labelledby="delivery-help-title">
     <h2 id="delivery-help-title">Reply delivery</h2>
     <p><strong>Automatic</strong> sends complete worker replies to this session's lead when it is ready. Replies wait while the lead is working or you are typing.</p>
-    <p><strong>Manual</strong> keeps replies available for you to read or send with <strong>Send reply to lead</strong>. Sending still waits for the lead to be ready.</p>
+    <p><strong>Manual</strong> keeps replies available. The lead reads results only when you ask. You can also use <strong>Send reply to lead</strong>; sending waits for the lead to be ready.</p>
     <p>A Manual session pauses <strong>all automatic replies</strong>, including workers set to Automatic. Workers set to Inherit follow the session setting.</p>
   </aside>
 
@@ -548,14 +582,14 @@
     </form>
   </dialog>
 
-  <dialog id="resume-replies-dialog" aria-labelledby="resume-replies-title" aria-describedby="resume-replies-description">
+  <dialog id="delete-session-dialog" aria-labelledby="delete-session-title" aria-describedby="delete-session-description">
     <form class="dialog-form" method="dialog">
-      <h2 id="resume-replies-title">Resume replies</h2>
-      <p>Pane: <strong id="resume-replies-pane"></strong></p>
-      <p id="resume-replies-description">Send or erase your terminal input, then confirm that the input line is empty. Resuming replies does not erase text or change reply policy.</p>
+      <h2 id="delete-session-title">Delete session</h2>
+      <p>Delete <strong id="delete-session-name"></strong>?</p>
+      <p id="delete-session-description">This stops all its panes and removes it from the app. Project files and native histories remain.</p>
       <div class="dialog-actions">
         <button class="quiet-button" value="cancel" type="button">Cancel</button>
-        <button class="primary-button" type="submit">I confirm the input line is empty</button>
+        <button class="primary-button" type="submit">Delete session</button>
       </div>
     </form>
   </dialog>

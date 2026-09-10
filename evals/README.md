@@ -11,13 +11,13 @@ npm run eval -- --lead codex
 ```
 
 **This spends real tokens and is not part of any automated gate.** Do not run
-it in CI or as part of `check:all`: it needs a real lead CLI, the installed
-skill in your home, and your approval for the spend.
+it in CI or as part of `check:all`: it needs a real lead CLI, a configured roster, and your approval for the spend.
 
 ## How it works
 
-The lead is a real CLI reading the real installed `SKILL.md` from your home —
-that file is the artefact under test, so nothing about it is simulated. What
+The lead is a real CLI reading the bundled `consensflow-lead` document through
+the app’s role-loading code. Each evaluation has a private app root and a copy
+of the roster; it does not depend on a globally installed ConsensFlow skill. What
 *is* replaced is `cf`: a stub that answers plausibly and records every
 invocation, first on `PATH`. The lead runs in a throwaway directory.
 
@@ -49,13 +49,16 @@ misses. The runner exits non-zero if any check missed even once.
 | Scenario | What it guards |
 |---|---|
 | `consult-opens-a-pane` | the consult is `cf run --new`, via `cf` only — no pane tool, no harness CLI |
-| `look-before-you-send` | a follow-up discovers with `cf results`, reads the whole result with `cf read`, then uses `cf say`, never a restart |
+| `look-before-you-send` | a follow-up rides on the answer already delivered in context — `cf say`, never a restart, no `results`/`read` round-trip |
 | `an-independent-task-gets-its-own-conversation` | unrelated work starts fresh with `--new`, nothing sent into the old conversation |
-| `a-dependent-task-stays-in-its-conversation` | work that leans on the conversation is a `cf say` where it belongs |
+| `a-dependent-task-stays-in-its-conversation` | work that leans on the conversation is a `cf say` on the delivered context where it belongs — no retrieval, no second conversation |
 | `a-delivered-answer-is-read-whole` | the envelope arrives in the turn, as pasted into the pane — the lead reports its top verdict with no `catchup`, no `read` |
 | `a-delivered-file-is-read` | the pointer arrives in the turn — the lead runs every `cf read` part and its report holds the beginning, the middle AND the end |
 | `manual-is-the-humans` | the lead can read for its authorized task and leaves a human-set `manual` policy alone |
 | `a-lead-sends-and-returns` | after `cf run --new` or `cf say` the lead reports what is running and where — no `--wait`, no polling |
+| `after-dispatch-continues-independent-work` | after dispatch the lead reports what is running and does the authorized independent work in the same turn — no `--wait`, no polling, no retrieval |
+| `a-delivered-result-is-used-without-asking` | an automatically delivered full result is used at once — verdict in the report, no retrieval, no read/authorize ask-back |
+| `zero-runs-is-not-failure` | a `0 runs` count starts no replacement, polls nothing, and is never declared a failed dispatch or a fallback |
 
 ## History
 

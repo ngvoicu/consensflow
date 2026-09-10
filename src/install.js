@@ -1,82 +1,35 @@
 import { existsSync, mkdirSync, readdirSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { detectHarnesses, knownHarnesses } from './harnesses.js'
-import { retireHostPayloads } from './host-payloads.js'
 import { fileState, loadManifest, saveManifest, sha256 } from './manifest.js'
+import { preparePiExtension } from './pi-install.js'
 import { configRoot, listAgents } from './roster.js'
 import { generateSkill } from './skill.js'
 import { installTerminalCommand, removeTerminalCommand, terminalRuntime } from './terminal.js'
 
-/**
- * Installs one skill file into every detected harness's skills directory,
- * under the manifest's ownership rules:
- *
- * - a target we own and left unchanged is rewritten freely (that's an update);
- * - a target we own that the user edited is rewritten too, and reported as
- *   `replaced`: the skill is generated from the roster, so an edited copy is
- *   an agent answering for a roster that has moved;
- * - a target we never wrote is refused without force, always — that file is
- *   somebody else's, and `skillGaps` is what tells you it is there.
- *
- * `options.targets` narrows the harnesses written to; callers use it to leave a
- * host's own ConsensFlow integration alone (see skillTargets).
- */
-export function installSkill({ relPath, content, source }, env, options = {}) {
+/** Legacy install entry point now writes only ConsensFlow's private role document. */
+export function installSkill({ content, source }, env) {
+  if (source !== 'consensflow') return []
+  const path = join(
+    configRoot(env),
+    'roles',
+    'lead',
+    '.claude',
+    'skills',
+    'consensflow-lead',
+    'SKILL.md',
+  )
   const manifest = loadManifest(env)
-  const report = []
-
-  for (const harness of options.targets ?? detectHarnesses(env)) {
-    const path = join(harness.skillsDir, relPath)
-    const owned = manifest.files[path]
-    const existed = existsSync(path)
-
-    // A file we never installed is still refused: that is somebody else's, and
-    // `skillGaps` is the only thing that tells you it is sitting at our path.
-    // A file we DID install is ours to rewrite even when it has been edited —
-    // the skill is generated from the roster, not a document the user keeps,
-    // and an edited copy makes every agent that reads it answer for a roster
-    // that no longer exists (the owner's call, 2026-08-28). It says `replaced`
-    // rather than `updated`, because losing an edit in silence is the only
-    // part of this that would be wrong.
-    if (existed && owned === undefined && options.force !== true) {
-      report.push({ harness: harness.id, path, action: 'refused-unowned' })
-      continue
-    }
-    const edited = existed && owned !== undefined && fileState(path, owned) === 'drifted'
-
-    // Already exactly this, byte for byte? Then say so rather than claiming an
-    // update. Reporting "312 updated" when nothing moved teaches the reader to
-    // ignore the number, which is the one thing it exists to be read for — and
-    // it meant every click rewrote 312 identical files.
-    const next = sha256(content)
-    if (
-      existed &&
-      owned !== undefined &&
-      owned.sha256 === next &&
-      fileState(path, owned) === 'ok'
-    ) {
-      // The bytes are already right, so nothing is written — but the record
-      // still moves: a cmux file identical across two commits must be recorded
-      // under the NEW one, or `skills status` reports a version we no longer
-      // carry.
-      manifest.files[path] = { sha256: next, source }
-      report.push({ harness: harness.id, path, action: 'unchanged' })
-      continue
-    }
-
-    mkdirSync(dirname(path), { recursive: true })
-    writeFileSync(path, content)
-    manifest.files[path] = { sha256: next, source }
-    report.push({
-      harness: harness.id,
-      path,
-      action: owned === undefined ? 'installed' : edited ? 'replaced' : 'updated',
-    })
+  const unchanged =
+    manifest.files[path]?.sha256 === sha256(content) &&
+    fileState(path, manifest.files[path]) === 'ok'
+  if (!unchanged) {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
+    writeFileSync(path, content, { mode: 0o600 })
   }
-
+  manifest.files[path] = { sha256: sha256(content), source }
   saveManifest(manifest, env)
-  return report
+  return [{ harness: 'consensflow', path, action: unchanged ? 'unchanged' : 'installed' }]
 }
 
 /**
@@ -89,7 +42,10 @@ export function installSkill({ relPath, content, source }, env, options = {}) {
  */
 export function skillsSummary(env) {
   const rows = skillsStatus(env)
-  const dirs = knownHarnesses(env)
+  const dirs = [
+    ...knownHarnesses(env),
+    { id: 'consensflow', skillsDir: join(configRoot(env), 'roles', 'lead', '.claude', 'skills') },
+  ]
   const skills = new Set()
   let ours = 0
   let cmux = 0
@@ -142,6 +98,10 @@ export function uninstallSkills(env, options = {}) {
   const report = []
 
   for (const [path, recorded] of Object.entries(manifest.files)) {
+    if (!resolve(path).startsWith(`${resolve(configRoot(env), 'roles')}/`)) {
+      report.push({ path, action: 'manual-cleanup-required' })
+      continue
+    }
     // A filter narrows the sweep (retiring one skill from one host, say);
     // without it every owned file goes.
     if (options.filter !== undefined && !options.filter(path, recorded)) continue
@@ -178,8 +138,8 @@ export function scopeTargets(env, { all = false } = {}) {
 }
 
 /** Opening the standalone app claims its launcher and refreshes its installation. */
-export function installEverywhere(env, options = {}) {
-  const changes = [...retireHostPayloads(env)]
+export function installEverywhere(env) {
+  const changes = []
   const wiring = terminalRuntime(env)
   let command = wiring?.exists && wiring.mine ? 'ok' : 'claimed'
   const report = []
@@ -189,56 +149,20 @@ export function installEverywhere(env, options = {}) {
     command = cause instanceof Error ? cause.message : String(cause)
     report.push(`The cf launcher could not be installed: ${command}`)
   }
-  const agents = listAgents(env)
-  if (agents.length > 0) {
-    const installed = installSkill(
-      { relPath: 'consensflow/SKILL.md', content: generateSkill(agents), source: 'consensflow' },
-      env,
-      { targets: scopeTargets(env, options), force: options.force },
-    )
-    changes.push(...installed)
-    const legacyPi = join(
-      env.HOME ?? env.USERPROFILE ?? homedir(),
-      '.pi/harness/skills/consensflow/SKILL.md',
-    )
-    if (
-      installed.some(
-        (row) =>
-          row.harness === 'pi' &&
-          row.action !== 'refused-unowned' &&
-          resolve(row.path) !== resolve(legacyPi),
-      )
-    ) {
-      changes.push(
-        ...uninstallSkills(env, {
-          force: options.force,
-          filter: (path, recorded) => path === legacyPi && recorded.source === 'consensflow',
-        }),
-      )
-    }
-  }
-  changes.push(...syncCmuxSkills(env, options).report)
-  return { changes, report, command }
+  changes.push(
+    ...installSkill({ content: generateSkill(listAgents(env)), source: 'consensflow' }, env),
+  )
+  return { changes, report, command, piExtension: preparePiExtension(env) }
 }
 
 const APP_ID = 'dev.ngvoicu.consensflow'
 
-export function syncCmuxSkills(env, options = {}) {
-  const report = uninstallSkills(env, {
-    force: options.force,
-    filter: (_path, recorded) => recorded.source.startsWith('cmux@'),
-  })
-  const cache = join(configRoot(env), 'cache', 'cmux')
-  if (existsSync(cache)) {
-    rmSync(cache, { recursive: true, force: true })
-    report.push({ action: 'removed', path: cache })
-  }
-  return { commit: null, report }
+export function syncCmuxSkills() {
+  return { report: [], notice: 'Global skills are managed manually.' }
 }
 
 export function turnOff(env, options = {}) {
   const changes = []
-  changes.push(...retireHostPayloads(env))
   changes.push(...uninstallSkills(env, { force: options.force }))
   // The launcher is ours when it says so; someone else's `cf` is left alone.
   for (const path of removeTerminalCommand(env).removed) {

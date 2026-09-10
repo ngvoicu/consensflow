@@ -1,17 +1,16 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { after, before, describe, it } from 'node:test'
 import { answers as harnessAnswers } from '../hosts/lib/completion.js'
 import { plan } from '../hosts/lib/deliveries.js'
-import { bindEvidence } from '../hosts/lib/session-binding.js'
 import { workspaceKey } from '../hosts/lib/state.js'
 import { Bridge } from '../src/bridge.js'
 import { addAgent, removeAgent } from '../src/roster.js'
 import { startUiServer } from '../src/ui.js'
-import { chooseCmuxMode, tempEnv } from './helpers.mjs'
+import { chooseCmuxMode, tempEnv, testRoleConfiguration } from './helpers.mjs'
 
 /**
  * The pane HTTP surface (Phase 2, TEST-PANE-17) against the REAL server,
@@ -57,8 +56,16 @@ function waitFor(predicate, timeoutMs = 4000) {
 }
 
 /** The real server, with a fake Rust on the other end of the bridge. */
-async function paneServer({ paneOpenDeadlineMs = CONSULT_DEADLINE_MS, maxFrameBytes } = {}) {
+async function paneServer({
+  paneOpenDeadlineMs = CONSULT_DEADLINE_MS,
+  maxFrameBytes,
+  nativeCodex = false,
+  opencodeConfig,
+  opencodeFailure = false,
+  prepareRole = testRoleConfiguration,
+} = {}) {
   const t = tempEnv()
+  if (opencodeConfig !== undefined) t.env.OPENCODE_CONFIG_CONTENT = opencodeConfig
   chooseCmuxMode(t)
   addAgent({ name: 'zeus', harness: 'codex', model: 'gpt-5-codex' }, t.env)
   addAgent({ name: 'nyx', harness: 'claude', model: 'opus' }, t.env)
@@ -77,13 +84,47 @@ async function paneServer({ paneOpenDeadlineMs = CONSULT_DEADLINE_MS, maxFrameBy
   const shimmed = {}
   for (const command of ['claude', 'codex', 'pi', 'opencode', 'kimi']) {
     const file = join(shims, command)
-    writeFileSync(file, '#!/bin/sh\nexit 0\n')
+    writeFileSync(
+      file,
+      nativeCodex && command === 'codex'
+        ? `#!${process.execPath}
+const args = process.argv.slice(2)
+if (args.includes('--help')) process.stdout.write('--thread --message')
+else { const { appendFileSync } = await import('node:fs'); appendFileSync(${JSON.stringify(join(t.root, 'native-queue.jsonl'))}, JSON.stringify(args) + '\\n') }
+`
+        : command === 'opencode'
+          ? `#!${process.execPath}
+const { createServer } = require('node:http')
+const { appendFileSync } = require('node:fs')
+const { randomUUID } = require('node:crypto')
+const args = process.argv.slice(2)
+const log = value => appendFileSync(${JSON.stringify(join(t.root, 'opencode-api.jsonl'))}, JSON.stringify(value) + '\\n')
+log({ pid: process.pid, args, cwd: process.cwd(), config: process.env.OPENCODE_CONFIG_CONTENT })
+if (args[0] !== 'serve') process.exit(2)
+const server = createServer(async (req, res) => {
+  let body = ''; for await (const chunk of req) body += chunk
+  log({ method: req.method, url: req.url, body })
+  res.setHeader('content-type', 'application/json')
+  if (req.headers.authorization !== 'Basic ' + Buffer.from('opencode:' + process.env.OPENCODE_SERVER_PASSWORD).toString('base64')) { res.writeHead(401); res.end('{}'); return }
+  if (new URL(req.url, 'http://localhost').pathname === '/global/health') res.end(JSON.stringify({ healthy: true }))
+  else if (req.method === 'POST' && new URL(req.url, 'http://localhost').pathname === '/session') {
+    if (${opencodeFailure}) { res.writeHead(500); res.end('{}'); return }
+    res.end(JSON.stringify({ id: 'ses_' + randomUUID().replaceAll('-', ''), directory: process.cwd() }))
+  } else { res.writeHead(404); res.end('{}') }
+})
+server.listen(Number(args[args.indexOf('--port') + 1]), '127.0.0.1')
+`
+          : '#!/bin/sh\nexit 0\n',
+    )
     chmodSync(file, 0o755)
     shimmed[command] = file
   }
   t.env.PATH = `${shims}:${t.env.PATH ?? ''}`
 
-  const server = await startUiServer(t.env, { paneOpenDeadlineMs })
+  const server = await startUiServer(t.env, {
+    paneOpenDeadlineMs,
+    prepareRole,
+  })
 
   const nodeToRust = new PassThrough()
   const rustToNode = new PassThrough()
@@ -261,7 +302,9 @@ async function paneServer({ paneOpenDeadlineMs = CONSULT_DEADLINE_MS, maxFrameBy
       rust.event('pane.exit', { id: pane.id, generation: pane.generation })
       await waitFor(async () => {
         const listed = await json(await api(leadToken, '/api/panes'))
-        return !listed.panes.some((candidate) => candidate.id === pane.id)
+        return !listed.panes.some(
+          (candidate) => candidate.id === pane.id && candidate.closed !== true,
+        )
       })
     },
     /**
@@ -389,6 +432,7 @@ describe('POST /api/panes/consult applies the continuation rule', () => {
     assert.ok(open.argv.includes('--new'), 'a fresh conversation is created under its own name')
 
     assert.deepEqual(Object.keys(open.env).sort(), [
+      'CF_DELIVERY_CONFIG',
       'CONSENSFLOW_APP',
       'CONSENSFLOW_LAUNCH',
       'CONSENSFLOW_PANE_ID',
@@ -1493,6 +1537,8 @@ describe('the pane routes work through the real cf ui wiring', () => {
     mkdirSync(shims, { recursive: true })
     writeFileSync(join(shims, 'claude'), '#!/bin/sh\nexit 0\n')
     chmodSync(join(shims, 'claude'), 0o755)
+    writeFileSync(join(shims, 'codex'), '#!/bin/sh\nexit 0\n')
+    chmodSync(join(shims, 'codex'), 0o755)
     t.env.PATH = `${shims}:${t.env.PATH ?? ''}`
     const cf = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
     const child = spawn(process.execPath, [cf, 'ui', '--json', '--no-open'], {
@@ -2475,6 +2521,30 @@ describe('tab.open launches the tab lead itself', () => {
     assert.equal(again.error, 'resume-refused', JSON.stringify(again))
   })
 
+  it('distinguishes a starting lead from a retired pane', async () => {
+    let finish
+    s.state.open = (request) =>
+      new Promise((resolve) => {
+        finish = () => resolve({ ok: true, id: request.id, generation: request.generation })
+      })
+    const opening = s.rust.request('tab.open', { dir: s.workspace, harness: 'claude-code' })
+    try {
+      await waitFor(() => finish !== undefined)
+      const pending = await s.rust.request('state.list', {})
+      const lead = pending.tabs.at(-1).panes.find((pane) => pane.kind === 'lead')
+      assert.equal(lead.alive, false)
+      assert.equal(lead.starting, true)
+    } finally {
+      finish?.()
+      await opening
+      s.state.open = (request) => ({ ok: true, id: request.id, generation: request.generation })
+    }
+    const ready = await s.rust.request('state.list', {})
+    const lead = ready.tabs.at(-1).panes.find((pane) => pane.kind === 'lead')
+    assert.equal(lead.alive, true)
+    assert.equal(lead.starting, undefined)
+  })
+
   it('reopens a suspended tab at the next lead generation', async () => {
     const opened = await s.rust.request('tab.open', { dir: s.workspace, harness: 'claude-code' })
     const was = tabsOnDisk().find((tab) => tab.id === opened.tab).lead.generation
@@ -2602,6 +2672,34 @@ describe('the rest of the page: panes, policy, state and deliveries', () => {
     assert.equal(typeof worker.conversation, 'string')
     assert.ok(Array.isArray(state.deliveries))
     assert.ok(Array.isArray(state.held))
+  })
+
+  it('keeps suspended results out of the current pending count', async () => {
+    for (const [id, suspended] of [
+      ['d-9100', true],
+      ['d-9101', false],
+    ]) {
+      s.seedDelivery({
+        id,
+        target: { tab: tab.tab, pane: tab.pane.id, generation: 1 },
+        conversation: 'old-worker',
+        answerId: id,
+        state: 'pending',
+        suspended,
+        reason: suspended ? 'native-session-changed' : undefined,
+      })
+    }
+    const state = await s.rust.request('state.list', {})
+    const old = state.deliveries.find((record) => record.id === 'd-9100')
+    const current = state.deliveries.find((record) => record.id === 'd-9101')
+    assert.equal(old.state, 'suspended')
+    assert.equal(old.reason, 'native-session-changed')
+    assert.equal(current.state, 'pending')
+    assert.equal(
+      s.deliveries()['d-9100'].state,
+      'pending',
+      'projection preserves the durable record',
+    )
   })
 
   it('tells Rust that something changed, once per mutation', async () => {
@@ -2820,7 +2918,7 @@ describe('a lead pane that ends leaves a tab the human can get back', () => {
     const hasWorker = async () =>
       (await s.rust.request('state.list', {})).tabs
         .find((candidate) => candidate.id === tab.tab)
-        .panes.some((pane) => pane.id === worker.pane.id)
+        .panes.some((pane) => pane.id === worker.pane.id && pane.closed !== true)
     const suspend = async (generation) => {
       s.rust.event('pane.exit', { id: tab.pane.id, generation })
       await waitFor(() => tabOnDisk(tab.tab).closed === true)
@@ -3102,6 +3200,7 @@ describe('answers.list reads the harness transcript, not the conversation record
       tab: tab.tab,
       agent: 'nyx',
       task: 'no transcript',
+      fresh: true,
     })
     const file = join(
       s.env.CONSENSFLOW_HOME,
@@ -3179,28 +3278,238 @@ describe('the tab lead binds a native session, and resume returns to it', () => 
     assert.notEqual(flag, -1, `no --session-id in ${JSON.stringify(argv)}`)
     assert.match(argv[flag + 1], new RegExp(`${opened.tab}`), 'scoped to the tab it leads')
     assert.equal(tabOnDisk(opened.tab).lead.nativeSession, argv[flag + 1])
+    const picture = await s.rust.request('state.list', {})
+    assert.equal(tabOnDisk(opened.tab).lead.reserved.channel.editorGuard, 1)
+    assert.equal(
+      picture.tabs.find((tab) => tab.id === opened.tab).lead.nativeEditorGuard,
+      undefined,
+    )
   })
 
-  it('carries the launch nonce in the seed when the harness mints its own id', async () => {
-    // codex has no way to pre-set an interactive session id, so it opens
-    // cold and the nonce travels in the first line of the seed — the same
-    // evidence a worker leaves, and the only one that survives a harness
-    // choosing its own identity.
+  it('opens a new OpenCode lead without submitting a user prompt', async () => {
+    const opened = await s.rust.request('tab.open', { dir: s.workspace, harness: 'opencode' })
+    assert.equal(opened.ok, true, JSON.stringify(opened))
+    const frame = s.seen.open.at(-1)
+    assert.equal(frame.argv.includes('--prompt'), false, 'a new lead must wait for human input')
+    assert.equal(
+      frame.argv.some((arg) => arg.includes('[consensflow launch')),
+      false,
+    )
+  })
+
+  it('gives simultaneous OpenCode leads distinct empty native sessions', async () => {
+    const launches = await Promise.all([
+      s.rust.request('tab.open', { dir: s.workspace, harness: 'opencode' }),
+      s.rust.request('tab.open', { dir: s.workspace, harness: 'opencode' }),
+    ])
+    const ids = []
+    for (const opened of launches) {
+      assert.equal(opened.ok, true, JSON.stringify(opened))
+      const tab = tabOnDisk(opened.tab)
+      const frame = s.seen.open.find((one) => one.id === opened.pane.id)
+      assert.match(tab.lead.nativeSession, /^ses_[A-Za-z0-9]+$/)
+      assert.equal(frame.argv[frame.argv.indexOf('--session') + 1], tab.lead.nativeSession)
+      assert.equal(frame.argv.includes('--prompt'), false)
+      assert.equal(frame.argv.includes('--continue'), false)
+      assert.deepEqual(JSON.parse(frame.env.OPENCODE_CONFIG_CONTENT), {
+        skills: { paths: [join(s.env.CONSENSFLOW_HOME, 'roles', 'lead', '.claude', 'skills')] },
+        instructions: [
+          join(
+            s.env.CONSENSFLOW_HOME,
+            'roles',
+            'lead',
+            '.claude',
+            'skills',
+            'consensflow-lead',
+            'SKILL.md',
+          ),
+        ],
+      })
+      assert.equal(tab.lead.binding.evidence, 'reported')
+      assert.equal(opened.cold, true, 'newly created native session is a fresh conversation')
+      ids.push(tab.lead.nativeSession)
+    }
+    assert.notEqual(ids[0], ids[1])
+  })
+
+  it('resumes an OpenCode lead on its exact native ID without creating another session', async () => {
+    const opened = await s.rust.request('tab.open', { dir: s.workspace, harness: 'opencode' })
+    assert.equal(opened.ok, true, JSON.stringify(opened))
+    const native = tabOnDisk(opened.tab).lead.nativeSession
+    const calls = () =>
+      readFileSync(join(s.t.root, 'opencode-api.jsonl'), 'utf8')
+        .trim()
+        .split('\n')
+        .map(JSON.parse)
+        .filter((call) => call.method === 'POST').length
+    const before = calls()
+    s.rust.event('pane.exit', { id: opened.pane.id, generation: opened.pane.generation })
+    await waitFor(() => tabOnDisk(opened.tab).closed === true)
+    const resumed = await s.rust.request('tab.resume', { tab: opened.tab })
+    assert.equal(resumed.ok, true, JSON.stringify(resumed))
+    assert.equal(resumed.cold, false)
+    assert.equal(resumed.resumedSession, native)
+    assert.equal(calls(), before)
+    const argv = s.seen.open.at(-1).argv
+    assert.equal(argv[argv.indexOf('--session') + 1], native)
+    assert.equal(argv.includes('--prompt'), false)
+  })
+
+  it('reserves a fresh OpenCode worker by native API identity without a launch prompt marker', async () => {
+    addAgent({ name: 'eris', harness: 'opencode', model: 'native-fixture' }, s.env)
+    const opened = await s.rust.request('tab.open', { dir: s.workspace, harness: 'pi' })
+    const lead = s.seen.open.at(-1).env.CONSENSFLOW_APP_TOKEN
+    const response = await s.api(lead, '/api/panes/consult', {
+      method: 'POST',
+      body: {
+        agent: 'eris',
+        task: 'Tell me a joke.',
+        fresh: true,
+        tab: opened.tab,
+        opId: `native-worker-${opened.tab}`,
+      },
+    })
+    const worker = await json(response, 200)
+    const frame = s.seen.open.at(-1)
+    const id = frame.argv[frame.argv.indexOf('--native-session') + 1]
+    assert.match(id, /^ses_[A-Za-z0-9]+$/)
+    assert.equal(frame.argv.includes('--launch'), false)
+    const threads = JSON.parse(
+      readFileSync(
+        join(s.env.CONSENSFLOW_HOME, 'workspaces', workspaceKey(s.workspace), 'threads.json'),
+        'utf8',
+      ),
+    )
+    assert.equal(threads[worker.conversation].reserved.reportedId, id)
+    assert.equal(threads[worker.conversation].reserved.nonce, undefined)
+  })
+
+  it('preserves user configuration without injecting plugins on an idle OpenCode launch', async () => {
+    const previous = {
+      plugin: ['user-plugin'],
+      permission: { edit: 'ask' },
+      instructions: ['/user/rules.md'],
+    }
+    const configured = await paneServer({ opencodeConfig: JSON.stringify(previous) })
+    try {
+      const opened = await configured.rust.request('tab.open', {
+        dir: configured.workspace,
+        harness: 'opencode',
+      })
+      assert.equal(opened.ok, true, JSON.stringify(opened))
+      const frame = configured.seen.open.at(-1)
+      assert.deepEqual(
+        JSON.parse(frame.env.OPENCODE_CONFIG_CONTENT),
+        {
+          ...previous,
+          skills: {
+            paths: [join(configured.env.CONSENSFLOW_HOME, 'roles', 'lead', '.claude', 'skills')],
+          },
+          instructions: [
+            ...previous.instructions,
+            join(
+              configured.env.CONSENSFLOW_HOME,
+              'roles',
+              'lead',
+              '.claude',
+              'skills',
+              'consensflow-lead',
+              'SKILL.md',
+            ),
+          ],
+        },
+        'TUI preserves native configuration and loads the private role instructions',
+      )
+      assert.equal(frame.env.CF_OPENCODE_LAUNCH_NONCE, undefined)
+      const nativeCalls = readFileSync(
+        join(dirname(configured.workspace), 'opencode-api.jsonl'),
+        'utf8',
+      )
+        .trim()
+        .split('\n')
+        .map(JSON.parse)
+      assert.equal(
+        nativeCalls[0].config,
+        frame.env.OPENCODE_CONFIG_CONTENT,
+        'server uses the same preserved configuration and private role as the TUI',
+      )
+      assert.deepEqual(
+        nativeCalls.filter((call) => call.method === 'POST').map((call) => JSON.parse(call.body)),
+        [{}],
+      )
+      assert.throws(
+        () => process.kill(nativeCalls[0].pid, 0),
+        { code: 'ESRCH' },
+        'temporary server ended before TUI launch',
+      )
+    } finally {
+      await configured.close()
+    }
+  })
+
+  it('suspends a new OpenCode tab when native session creation fails without opening a pane', async () => {
+    const failed = await paneServer({ opencodeFailure: true })
+    try {
+      const opened = await failed.rust.request('tab.open', {
+        dir: failed.workspace,
+        harness: 'opencode',
+      })
+      assert.equal(opened.ok, false)
+      assert.equal(failed.seen.open.length, 0)
+      const tabs = JSON.parse(
+        readFileSync(join(failed.env.CONSENSFLOW_HOME, 'app', 'tabs.json'), 'utf8'),
+      ).tabs
+      assert.equal(tabs.length, 1)
+      assert.equal(tabs[0].closed, true)
+      assert.equal(tabs[0].lead.reserved, undefined)
+    } finally {
+      await failed.close()
+    }
+  })
+
+  it('opens a new Codex lead without submitting a user prompt', async () => {
+    const opened = await s.rust.request('tab.open', { dir: s.workspace, harness: 'codex' })
+    assert.equal(opened.ok, true, JSON.stringify(opened))
+    const argv = s.seen.open.at(-1).argv
+    assert.equal(
+      argv.some((arg) => arg.includes('[consensflow launch')),
+      false,
+      'opening a session must not send a synthetic user task to the model',
+    )
+  })
+
+  it('keeps an active OpenCode lead bound when opening its first worker', async () => {
+    const opened = await s.rust.request('tab.open', { dir: s.workspace, harness: 'opencode' })
+    const native = tabOnDisk(opened.tab).lead.nativeSession
+    assert.match(native, /^ses_[A-Za-z0-9]+$/)
+    const frame = s.seen.open.at(-1)
+    const response = await s.api(frame.env.CONSENSFLOW_APP_TOKEN, '/api/panes/consult', {
+      method: 'POST',
+      body: {
+        agent: 'nyx',
+        task: 'Tell me a joke.',
+        fresh: true,
+        tab: opened.tab,
+        opId: `live-bind-${opened.tab}`,
+      },
+    })
+    await json(response, 200)
+    assert.equal(tabOnDisk(opened.tab).closed, false)
+    assert.equal(tabOnDisk(opened.tab).lead.nativeSession, native)
+  })
+
+  it('carries the Codex launch nonce in metadata without a task', async () => {
     const opened = await s.rust.request('tab.open', { dir: s.workspace, harness: 'codex' })
     assert.equal(opened.ok, true, JSON.stringify(opened))
     const tab = tabOnDisk(opened.tab)
-    const nonce = tab.lead.reserved.nonce
-    assert.equal(typeof nonce, 'string')
-    const seed = s.seen.open.at(-1).argv.at(-1)
+    const frame = s.seen.open.at(-1)
+    assert.equal(tab.lead.reserved.originator, `consensflow-${tab.lead.reserved.nonce}`)
+    assert.equal(frame.env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE, tab.lead.reserved.originator)
     assert.equal(
-      seed.split('\n')[0],
-      `[consensflow launch ${nonce}]`,
-      'the marker opens the seed — a bare nonce is not evidence',
+      frame.argv.some((arg) => arg.includes('[consensflow launch')),
+      false,
     )
-
-    // Nothing has observed the session yet, so nothing is bound. That is
-    // not a failure: it is the honest state until discovery reports one.
-    assert.equal(tab.lead.nativeSession, null)
+    assert.equal(tab.lead.nativeSession, null, 'an empty native session need not be persisted yet')
     assert.equal(tab.lead.binding, undefined)
   })
 
@@ -3215,7 +3524,7 @@ describe('the tab lead binds a native session, and resume returns to it', () => 
 
     // The whole point: the PM conversation survives the suspend.
     const argv = s.seen.open.at(-1).argv
-    assert.deepEqual(argv.slice(1), ['--resume', bound], JSON.stringify(argv))
+    assert.deepEqual(argv.slice(-2), ['--resume', bound], JSON.stringify(argv))
     assert.equal(resumed.resumedSession, bound)
     assert.equal(tabOnDisk(opened.tab).lead.nativeSession, bound, 'and it is still bound')
   })
@@ -3234,8 +3543,12 @@ describe('the tab lead binds a native session, and resume returns to it', () => 
     const tab = tabOnDisk(opened.tab)
     assert.notEqual(tab.lead.reserved.nonce, undefined)
     assert.equal(
-      s.seen.open.at(-1).argv.at(-1).split('\n')[0],
-      `[consensflow launch ${tab.lead.reserved.nonce}]`,
+      s.seen.open.at(-1).env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE,
+      `consensflow-${tab.lead.reserved.nonce}`,
+    )
+    assert.equal(
+      s.seen.open.at(-1).argv.some((arg) => arg.includes('[consensflow launch')),
+      false,
     )
   })
 
@@ -3325,14 +3638,8 @@ describe('BO11: only a typed refusal is the caller’s fault', () => {
   })
 })
 
-/**
- * BO1: a lead that mints its own session id binds by the SAME marker a
- * worker does. A raw nonce in the seed is not evidence — `bindEvidence`
- * wants `[consensflow launch <nonce>]` opening one of the first five user
- * turns — so a seed carrying the bare uuid could never bind, and the lead
- * stayed cold through every resume.
- */
-describe('BO1: a lead binds by the launch marker, and resumes on what it bound', () => {
+/** Quiet Codex leads bind on native metadata; legacy marker launches still resume. */
+describe('BO1: a lead binds by launch evidence and resumes on what it bound', () => {
   let s
 
   before(async () => {
@@ -3347,8 +3654,8 @@ describe('BO1: a lead binds by the launch marker, and resumes on what it bound',
       (tab) => tab.id === id,
     )
 
-  /** A codex rollout the way codex writes one, carrying the marker. */
-  const seedCodexRollout = (sessionId, turn) => {
+  /** The native first record identifies the launch independently of the first user turn. */
+  const seedCodexRollout = (sessionId, turn, originator) => {
     const root = join(s.env.CODEX_HOME ?? join(s.env.HOME, '.codex'), 'sessions')
     mkdirSync(root, { recursive: true })
     const at = new Date().toISOString()
@@ -3357,39 +3664,42 @@ describe('BO1: a lead binds by the launch marker, and resumes on what it bound',
       `${[
         JSON.stringify({
           type: 'session_meta',
-          payload: { cwd: s.workspace, timestamp: at },
+          payload: {
+            id: sessionId,
+            cwd: s.workspace,
+            timestamp: at,
+            source: 'cli',
+            originator,
+            cli_version: '0.153.4',
+            thread_source: 'user',
+          },
         }),
         JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: turn } }),
       ].join('\n')}\n`,
     )
   }
 
-  it('opens codex with the marker as the seed’s first line', async () => {
+  it('opens codex idle with its launch originator in the process environment', async () => {
     const opened = await s.rust.request('tab.open', { dir: s.workspace, harness: 'codex' })
     assert.equal(opened.ok, true, JSON.stringify(opened))
-    const nonce = tabOnDisk(opened.tab).lead.reserved.nonce
-    const seed = s.seen.open.at(-1).argv.at(-1)
+    const reserved = tabOnDisk(opened.tab).lead.reserved
+    const frame = s.seen.open.at(-1)
     assert.equal(
-      seed.split('\n')[0],
-      `[consensflow launch ${nonce}]`,
-      'the seed opens with the marker the store checks for, not a bare id',
+      frame.argv.some((arg) => arg.includes('[consensflow launch')),
+      false,
     )
-    // The proof it is evidence and not just a string that looks like one:
-    // the module that decides binding accepts this turn for this launch.
-    assert.deepEqual(
-      bindEvidence('codex', { sessionId: 'c-1', turn: seed }, { nonce, generation: 1 }),
-      { bound: true, evidence: 'nonce', generation: 1 },
-    )
+    assert.equal(frame.env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE, reserved.originator)
+    assert.equal(reserved.originator, `consensflow-${reserved.nonce}`)
   })
 
   it('binds a discovered codex transcript and resumes on that session', async () => {
     const opened = await s.rust.request('tab.open', { dir: s.workspace, harness: 'codex' })
-    const nonce = tabOnDisk(opened.tab).lead.reserved.nonce
+    const originator = tabOnDisk(opened.tab).lead.reserved.originator
     assert.equal(tabOnDisk(opened.tab).lead.nativeSession, null, 'nothing observed yet')
 
-    // codex has now written its rollout, carrying our marker.
+    // Codex persists its native metadata when the human starts the first turn.
     const sessionId = '00000000-1111-2222-3333-444444444444'
-    seedCodexRollout(sessionId, `[consensflow launch ${nonce}]\nplease begin`)
+    seedCodexRollout(sessionId, 'First actual human task', originator)
 
     s.rust.event('pane.exit', { id: opened.pane.id, generation: opened.pane.generation })
     await waitFor(() => tabOnDisk(opened.tab).closed === true)
@@ -3403,7 +3713,36 @@ describe('BO1: a lead binds by the launch marker, and resumes on what it bound',
     assert.equal(lead.binding.evidence, 'nonce')
     assert.equal(resumed.cold, false)
     assert.equal(resumed.resumedSession, sessionId)
-    assert.deepEqual(s.seen.open.at(-1).argv.slice(1), ['resume', sessionId])
+    assert.deepEqual(s.seen.open.at(-1).argv.slice(-2), ['resume', sessionId])
+  })
+
+  it('binds the first Codex turn while the pane stays open and no page is polling', async () => {
+    const opened = await s.rust.request('tab.open', { dir: s.workspace, harness: 'codex' })
+    const originator = tabOnDisk(opened.tab).lead.reserved.originator
+    const sessionId = 'a0000000-1111-4222-8333-444444444444'
+    seedCodexRollout(sessionId, 'First actual human task', originator)
+    await waitFor(() => tabOnDisk(opened.tab).lead.nativeSession === sessionId)
+    assert.equal(tabOnDisk(opened.tab).closed, false)
+    assert.equal(
+      tabOnDisk(opened.tab).panes.some((pane) => pane.id === opened.pane.id),
+      true,
+    )
+  })
+
+  it('still resumes a legacy Codex launch that was identified by a prompt marker', async () => {
+    const opened = await s.rust.request('tab.open', { dir: s.workspace, harness: 'codex' })
+    const file = join(s.env.CONSENSFLOW_HOME, 'app', 'tabs.json')
+    const saved = JSON.parse(readFileSync(file, 'utf8'))
+    const lead = saved.tabs.find((tab) => tab.id === opened.tab).lead
+    delete lead.reserved.originator
+    writeFileSync(file, JSON.stringify(saved))
+    const sessionId = '11111111-1111-4111-8111-111111111111'
+    seedCodexRollout(sessionId, `[consensflow launch ${lead.reserved.nonce}]`)
+    s.rust.event('pane.exit', { id: opened.pane.id, generation: opened.pane.generation })
+    await waitFor(() => tabOnDisk(opened.tab).closed === true)
+    const resumed = await s.rust.request('tab.resume', { tab: opened.tab })
+    assert.equal(resumed.resumedSession, sessionId)
+    assert.deepEqual(s.seen.open.at(-1).argv.slice(-2), ['resume', sessionId])
   })
 
   it('leaves a lead unbound when the transcript carries someone else’s marker', async () => {
@@ -3637,6 +3976,7 @@ describe('BO8, BO9: what the page is told about a delivery', () => {
     // for a delivery that is perfectly valid.
     assert.equal(record.tab, tab.tab)
     assert.equal(record.pane, tab.pane.id)
+    assert.equal(record.generation, tab.pane.generation)
     assert.equal(record.state, 'pending')
   })
 
@@ -3715,6 +4055,159 @@ describe('BO8, BO9: what the page is told about a delivery', () => {
     const marked = again.answers.find((answer) => answer.id === target.id)
     assert.equal(marked.uncertain, true, 'its delivery may or may not have landed')
     assert.equal(marked.delivered, false, 'and it was never accepted')
+  })
+})
+
+describe('TEST-PANE-141/IMPL-PANE-142: current delivery and startup projection', () => {
+  let s
+  let tab
+  let conversation
+
+  before(async () => {
+    s = await paneServer()
+    tab = await s.tab('opencode')
+    const response = await s.api(tab.lead, '/api/panes/consult', {
+      method: 'POST',
+      body: {
+        tab: tab.tab.id,
+        agent: 'nyx',
+        task: 'current answer projection',
+        fresh: true,
+        opId: 'pane-141-current',
+      },
+    })
+    const opened = await json(response, 200)
+    conversation = opened.conversation
+
+    const target = {
+      leadId: `tab:${tab.tab.id}:1`,
+      session: 'lead',
+      tab: tab.tab.id,
+      pane: tab.leadPane.id,
+      generation: 1,
+    }
+    const seed = (id, answerId, state, extra = {}) =>
+      s.seedDelivery({
+        id,
+        conversation,
+        agent: 'nyx',
+        answerId,
+        state,
+        target,
+        createdAt: Number(id.slice(2)),
+        ...extra,
+      })
+
+    seed('d-1411', 'answer-one', 'pending', { reason: 'older retry reason' })
+    seed('d-1412', 'answer-one', 'pending', { reason: 'actual worker waiting reason' })
+    seed('d-1413', 'answer-two', 'pending', { reason: 'superseded pending attempt' })
+    seed('d-1414', 'answer-two', 'accepted')
+    seed('d-1415', 'answer-three', 'accepted')
+    seed('d-1416', 'answer-three', 'pending', { reason: 'manual retry waiting' })
+    seed('d-1417', 'answer-four', 'pending', { reason: 'cancelled answer' })
+    seed('d-1418', 'answer-four', 'cancelled', { reason: 'cancelled by policy' })
+    seed('d-1419', 'answer-old-generation', 'pending', {
+      reason: 'old lead generation',
+      target: { ...target, generation: 2 },
+    })
+  })
+
+  after(async () => {
+    await s.close()
+  })
+
+  it('TEST-PANE-141: counts one current pending answer per latest delivery attempt', async () => {
+    const state = await s.rust.request('state.list', {})
+    const current = state.deliveries.filter(
+      (record) =>
+        record.tab === tab.tab.id &&
+        record.pane === tab.leadPane.id &&
+        record.generation === 1 &&
+        ['pending', 'waiting'].includes(record.state),
+    )
+    assert.deepEqual(
+      current.map((record) => record.id).sort(),
+      ['d-1412', 'd-1416'],
+      'duplicate parts and attempts collapse, while accepted/cancelled latest attempts disappear',
+    )
+    assert.deepEqual(
+      current.map((record) => ({
+        conversation: record.conversation,
+        agent: record.agent,
+        reason: record.reason,
+      })),
+      [
+        { conversation, agent: 'nyx', reason: 'actual worker waiting reason' },
+        { conversation, agent: 'nyx', reason: 'manual retry waiting' },
+      ],
+    )
+  })
+
+  it('IMPL-PANE-142: exposes only a matching failed startup while the pane stays alive', async () => {
+    const consulted = await s.api(tab.lead, '/api/panes/consult', {
+      method: 'POST',
+      body: {
+        tab: tab.tab.id,
+        agent: 'nyx',
+        task: 'startup status',
+        fresh: true,
+        opId: 'pane-142-startup',
+      },
+    })
+    const opened = await json(consulted, 200)
+    const redeemed = await s.api(null, '/api/launch/redeem', {
+      method: 'POST',
+      body: { ticket: s.seen.open.at(-1).env.CONSENSFLOW_LAUNCH },
+    })
+    const controller = await json(redeemed, 200)
+    const progressBody = (progress) => ({
+      launch: controller.launch,
+      generation: opened.pane.generation,
+      progress,
+    })
+
+    const failed = await s.api(controller.capability, '/api/panes/progress.set', {
+      method: 'POST',
+      body: progressBody({
+        state: 'failed',
+        pane: opened.pane.id,
+        generation: opened.pane.generation,
+        message: 'OpenCode task submission failed',
+      }),
+    })
+    assert.equal(failed.status, 200, JSON.stringify(await json(failed)))
+    const visible = await s.rust.request('state.list', {})
+    const pane = visible.tabs
+      .find((candidate) => candidate.id === tab.tab.id)
+      .panes.find((candidate) => candidate.id === opened.pane.id)
+    assert.equal(
+      pane.alive,
+      true,
+      'startup failure does not turn a live terminal into an exited pane',
+    )
+    assert.deepEqual(pane.progress, {
+      state: 'failed',
+      pane: opened.pane.id,
+      generation: opened.pane.generation,
+      message: 'OpenCode task submission failed',
+      at: pane.progress.at,
+    })
+
+    const stale = await s.api(controller.capability, '/api/panes/progress.set', {
+      method: 'POST',
+      body: progressBody({
+        state: 'failed',
+        pane: opened.pane.id,
+        generation: opened.pane.generation + 1,
+        message: 'stale startup failure',
+      }),
+    })
+    assert.equal(stale.status, 200, JSON.stringify(await json(stale)))
+    const ignored = await s.rust.request('state.list', {})
+    const ignoredPane = ignored.tabs
+      .find((candidate) => candidate.id === tab.tab.id)
+      .panes.find((candidate) => candidate.id === opened.pane.id)
+    assert.equal(ignoredPane.progress, undefined, 'progress from another generation is not exposed')
   })
 })
 
@@ -4318,7 +4811,10 @@ async function restartableApp() {
   const nodeSide = () =>
     new Bridge({ input: rustToNode, output: nodeToRust, idPrefix: 'n-', peerIdPrefix: 'r-' })
   const boot = async () => {
-    server = await startUiServer(t.env, { paneOpenDeadlineMs: CONSULT_DEADLINE_MS })
+    server = await startUiServer(t.env, {
+      paneOpenDeadlineMs: CONSULT_DEADLINE_MS,
+      prepareRole: testRoleConfiguration,
+    })
     nodeToRust = new PassThrough()
     rustToNode = new PassThrough()
     node = nodeSide()
@@ -4788,7 +5284,7 @@ describe('a fresh app reaps the unresolved rows its predecessor left', () => {
 
       assert.equal((await app.rust.request('tab.resume', { tab: tab.tab })).ok, true)
       assert.equal(
-        app.tab(tab.tab).panes.some((pane) => pane.id === unknown.pane.id),
+        app.tab(tab.tab).panes.some((pane) => pane.id === unknown.pane.id && pane.closed !== true),
         false,
         'the stale row is reaped',
       )
@@ -4801,4 +5297,552 @@ describe('a fresh app reaps the unresolved rows its predecessor left', () => {
       await app.close()
     }
   })
+})
+
+it('launches and follows up a native Codex worker without touching a draft (TEST-PANE-109)', async () => {
+  const s = await paneServer({ nativeCodex: true })
+  const claims = []
+  s.rust.on('pane.claim_native_epoch', (body) => {
+    claims.push(body)
+    return { ok: true }
+  })
+  try {
+    const tab = await s.tab()
+    const opened = await json(
+      await s.api(tab.lead, '/api/panes/consult', {
+        method: 'POST',
+        body: { tab: tab.tab.id, opId: 'native-launch', agent: 'zeus', task: 'first', fresh: true },
+      }),
+      200,
+    )
+    const file = join(
+      s.env.CONSENSFLOW_HOME,
+      'workspaces',
+      workspaceKey(s.workspace),
+      'threads.json',
+    )
+    const threads = JSON.parse(readFileSync(file, 'utf8'))
+    const row = threads[opened.conversation]
+    assert.equal(row.reserved.channel.kind, 'codex-queue')
+    assert.equal(
+      JSON.parse(s.seen.open.at(-1).env.CF_DELIVERY_CONFIG).channel.launchId,
+      row.reserved.launchId,
+    )
+    row.sessionId = '01a0817b-e6b0-7f32-8e11-370dc000cbc0'
+    row.binding = {
+      launchId: row.reserved.launchId,
+      generation: row.reserved.generation,
+      sessionId: row.sessionId,
+    }
+    writeFileSync(file, JSON.stringify(threads))
+    s.state.latched = true
+    const body = {
+      tab: tab.tab.id,
+      opId: 'native-followup',
+      session: opened.conversation,
+      text: 'native followup\nexact text',
+    }
+    await json(await s.api(tab.lead, '/api/panes/say', { method: 'POST', body }))
+    await json(await s.api(tab.lead, '/api/panes/say', { method: 'POST', body }))
+    const captured = readFileSync(join(s.t.root, 'native-queue.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map(JSON.parse)
+    assert.deepEqual(captured, [['queue', '--thread', row.sessionId, '--message', body.text]])
+    assert.equal(claims.length, 1, 'idempotent operation admits only once')
+    assert.equal(s.seen.paste.length, 0)
+    assert.equal(s.state.latched, true, 'native delivery never clears the input latch')
+  } finally {
+    await s.close()
+  }
+})
+
+/**
+ * A new tab is a new native conversation — even in a folder whose harness
+ * stores still hold a previous install's sessions.
+ *
+ * Native sessions outlive the app: pi's live user-global under
+ * `~/.pi/agent/sessions`, codex rollouts under `~/.codex/sessions`, claude
+ * transcripts under `~/.claude/projects`, opencode sessions in its storage.
+ * Wiping the app state (a fresh install) restarts tab ids at `t-1`, so any
+ * fresh identity derived from the tab id alone reopens the previous
+ * install's session in the same folder instead of starting one. Claude mints
+ * a uuid, and codex/opencode mint their own and bind only by launch-nonce
+ * evidence, so the same reset leaves them fresh — proved here for every
+ * supported lead kind. An explicit resume still reopens the recorded native
+ * identity.
+ */
+describe('a new tab never reuses a stranger native session', () => {
+  let s
+  before(async () => {
+    s = await paneServer()
+  })
+  after(async () => {
+    await s.close()
+  })
+
+  const tabOnDisk = (id) =>
+    JSON.parse(readFileSync(join(s.env.CONSENSFLOW_HOME, 'app', 'tabs.json'), 'utf8')).tabs.find(
+      (tab) => tab.id === id,
+    )
+  const writeTabOnDisk = (id, mutate) => {
+    const file = join(s.env.CONSENSFLOW_HOME, 'app', 'tabs.json')
+    const envelope = JSON.parse(readFileSync(file, 'utf8'))
+    mutate(envelope.tabs.find((tab) => tab.id === id))
+    writeFileSync(file, `${JSON.stringify(envelope, null, 2)}\n`)
+  }
+  /** A fresh install: the app state is gone, the harness stores survive. */
+  const resetAppState = () =>
+    rmSync(join(s.env.CONSENSFLOW_HOME, 'app', 'tabs.json'), { force: true })
+  const openTab = async (harness) => {
+    const opened = await s.rust.request('tab.open', { dir: s.workspace, harness })
+    assert.equal(opened.ok, true, JSON.stringify(opened))
+    return opened
+  }
+  const sessionFlag = (argv, flag) => argv[argv.indexOf(flag) + 1]
+  const suspendLead = async (opened) => {
+    s.rust.event('pane.exit', { id: opened.pane.id, generation: opened.pane.generation })
+    await waitFor(() => tabOnDisk(opened.tab).closed === true)
+  }
+
+  it('pi: a reset app state does not reopen the previous install’s session', async () => {
+    const first = await openTab('pi')
+    const oldId = sessionFlag(s.seen.open.at(-1).argv, '--session-id')
+
+    // The previous install's pi session, surviving the reset user-global.
+    const sessions = join(s.env.HOME, '.pi', 'agent', 'sessions')
+    mkdirSync(sessions, { recursive: true })
+    writeFileSync(
+      join(sessions, `${oldId}.jsonl`),
+      `${JSON.stringify({ type: 'message', message: { role: 'user', content: 'old work' } })}\n`,
+    )
+    await suspendLead(first)
+    assert.equal(tabOnDisk(first.tab).lead.nativeSession, oldId, 'the first tab bound its own')
+    resetAppState()
+
+    const second = await openTab('pi')
+    const freshId = sessionFlag(s.seen.open.at(-1).argv, '--session-id')
+    assert.notEqual(freshId, oldId, 'a new tab never takes the previous install’s pi session')
+    assert.equal(tabOnDisk(second.tab).lead.nativeSession, freshId)
+
+    // And the explicit resume still reopens the recorded identity.
+    await suspendLead(second)
+    const resumed = await s.rust.request('tab.resume', { tab: second.tab })
+    assert.equal(resumed.ok, true, JSON.stringify(resumed))
+    assert.equal(resumed.cold, false)
+    assert.equal(resumed.resumedSession, freshId)
+    assert.equal(sessionFlag(s.seen.open.at(-1).argv, '--session-id'), freshId)
+  })
+
+  it('claude-code: a reset app state mints a session no stranger can match', async () => {
+    // A stranger transcript from the previous install, in this folder.
+    const projects = join(s.env.CLAUDE_CONFIG_DIR, 'projects', 'old-slug')
+    mkdirSync(projects, { recursive: true })
+    const stranger = 'aaaaaaaa-1111-2222-3333-444444444444'
+    writeFileSync(
+      join(projects, `${stranger}.jsonl`),
+      `${JSON.stringify({ type: 'user', message: { role: 'user', content: 'old work' } })}\n`,
+    )
+    resetAppState()
+
+    await openTab('claude-code')
+    const argv = s.seen.open.at(-1).argv
+    const minted = sessionFlag(argv, '--session-id')
+    assert.match(minted, /^[0-9a-f]{8}-[0-9a-f]{4}-/)
+    assert.notEqual(minted, stranger)
+    assert.equal(argv.includes('--resume'), false, 'a new tab never resumes')
+  })
+
+  it('codex: a recent stranger rollout without our marker never binds', async () => {
+    // The previous install's last thread in this folder: recent, but it
+    // carries no launch marker of ours.
+    const root = join(s.env.CODEX_HOME ?? join(s.env.HOME, '.codex'), 'sessions')
+    mkdirSync(root, { recursive: true })
+    const at = new Date().toISOString()
+    writeFileSync(
+      join(root, `rollout-${Date.now()}-99999999-0000-4000-8000-ffffffffffff.jsonl`),
+      `${[
+        JSON.stringify({ type: 'session_meta', payload: { cwd: s.workspace, timestamp: at } }),
+        JSON.stringify({
+          type: 'event_msg',
+          payload: { type: 'user_message', message: 'old work, no marker' },
+        }),
+      ].join('\n')}\n`,
+    )
+    resetAppState()
+
+    const opened = await openTab('codex')
+    const argv = s.seen.open.at(-1).argv
+    assert.equal(argv.includes('resume'), false, 'a new tab never resumes')
+    const nonce = tabOnDisk(opened.tab).lead.reserved.nonce
+    assert.equal(
+      argv.some((arg) => arg.includes('[consensflow launch')),
+      false,
+    )
+    assert.equal(s.seen.open.at(-1).env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE, `consensflow-${nonce}`)
+    assert.equal(tabOnDisk(opened.tab).lead.nativeSession, null)
+
+    // Even across an exit and a resume, the stranger never binds.
+    await suspendLead(opened)
+    const resumed = await s.rust.request('tab.resume', { tab: opened.tab })
+    assert.equal(resumed.ok, true, JSON.stringify(resumed))
+    assert.equal(resumed.cold, true)
+    assert.equal(tabOnDisk(opened.tab).lead.nativeSession, null)
+  })
+
+  it('opencode: a stranger session file never steers a new tab', async () => {
+    const root = join(s.env.HOME, '.local', 'share', 'opencode', 'storage', 'session', 'proj')
+    mkdirSync(root, { recursive: true })
+    writeFileSync(
+      join(root, 'ses_stranger.json'),
+      JSON.stringify({
+        id: 'ses_stranger',
+        directory: s.workspace,
+        time: { created: Date.now() },
+      }),
+    )
+    resetAppState()
+
+    const opened = await openTab('opencode')
+    const argv = s.seen.open.at(-1).argv
+    const created = sessionFlag(argv, '--session')
+    assert.match(created, /^ses_[A-Za-z0-9]+$/)
+    assert.notEqual(
+      created,
+      'ses_stranger',
+      'a new tab opens the ID just created by its native API',
+    )
+    assert.equal(argv.includes('--continue'), false, 'nor by continuing the last session')
+    assert.equal(argv.includes('--prompt'), false)
+    assert.equal(tabOnDisk(opened.tab).lead.nativeSession, created)
+  })
+
+  it('opencode: an explicit resume reopens the recorded native session', async () => {
+    const opened = await openTab('opencode')
+    const recorded = 'ses_recorded_1'
+    // Bound the way discovery would have on the first turn.
+    writeTabOnDisk(opened.tab, (tab) => {
+      tab.lead.nativeSession = recorded
+    })
+    await suspendLead(opened)
+
+    const resumed = await s.rust.request('tab.resume', { tab: opened.tab })
+    assert.equal(resumed.ok, true, JSON.stringify(resumed))
+    assert.equal(resumed.cold, false)
+    assert.equal(resumed.resumedSession, recorded)
+    const argv = s.seen.open.at(-1).argv
+    assert.equal(sessionFlag(argv, '--session'), recorded)
+  })
+})
+
+it('a role configuration failure suspends the unopened tab without sending a pane', async () => {
+  const s = await paneServer({
+    prepareRole: async () => {
+      throw new Error('role configuration unavailable')
+    },
+  })
+  try {
+    const result = await s.rust.request('tab.open', { dir: s.workspace, harness: 'codex' })
+    assert.equal(result.ok, false)
+    assert.equal(s.seen.open.length, 0)
+    const tabs = JSON.parse(
+      readFileSync(join(s.env.CONSENSFLOW_HOME, 'app', 'tabs.json'), 'utf8'),
+    ).tabs
+    assert.equal(tabs.length, 1)
+    assert.equal(tabs[0].closed, true)
+  } finally {
+    await s.close()
+  }
+})
+
+it('Pi lead loads the prepared private extension instead of mutable source files', async () => {
+  const s = await paneServer()
+  try {
+    const result = await s.rust.request('tab.open', { dir: s.workspace, harness: 'pi' })
+    assert.equal(result.ok, true, JSON.stringify(result))
+    const argv = s.seen.open.at(-1).argv
+    const path = argv[argv.indexOf('--extension') + 1]
+    assert.ok(path.startsWith(join(s.env.CONSENSFLOW_HOME, 'extensions', 'pi')))
+    assert.match(readFileSync(path, 'utf8'), /createDeliveryExtension/)
+  } finally {
+    await s.close()
+  }
+})
+
+it('PM opens separately with only PM instructions and cannot call worker or administration APIs', async () => {
+  const s = await paneServer()
+  try {
+    const lead = await s.rust.request('tab.open', { dir: s.workspace, harness: 'codex' })
+    const pm = await s.rust.request('pm.open', { tab: lead.tab, harness: 'pi' })
+    assert.equal(pm.ok, true, JSON.stringify(pm))
+    assert.notEqual(pm.tab, lead.tab)
+    const state = await s.rust.request('state.list', {})
+    const companion = state.tabs.find((tab) => tab.id === pm.tab)
+    assert.equal(companion.role, 'pm')
+    assert.equal(companion.parentTabId, lead.tab)
+    assert.match(companion.roleName, /^[a-z]+-[a-z]+$/)
+    const frame = s.seen.open.at(-1)
+    assert.equal(frame.env.CONSENSFLOW_ROLE, 'pm')
+    const skill = frame.argv[frame.argv.indexOf('--skill') + 1]
+    assert.match(skill, /consensflow-pm/)
+    assert.doesNotMatch(readFileSync(skill, 'utf8'), /consensflow-lead/)
+    const token = frame.env.CONSENSFLOW_APP_TOKEN
+    assert.equal(
+      (
+        await s.api(token, '/api/panes/consult', {
+          method: 'POST',
+          body: { tab: pm.tab, agent: 'zeus', task: 'forbidden', opId: 'pm-denied' },
+        })
+      ).status,
+      403,
+    )
+    assert.equal((await s.api(token, '/api/agents')).status, 403)
+    const again = await s.rust.request('pm.open', { tab: lead.tab, harness: 'pi' })
+    assert.equal(again.tab, pm.tab)
+    assert.equal(s.seen.open.length, 2)
+  } finally {
+    await s.close()
+  }
+})
+
+it('PM reads its own lead result completely and keeps immutable parts after the native file disappears', async () => {
+  const s = await paneServer()
+  try {
+    const lead = await s.rust.request('tab.open', { dir: s.workspace, harness: 'claude-code' })
+    const pm = await s.rust.request('pm.open', { tab: lead.tab, harness: 'pi' })
+    const token = s.seen.open.at(-1).env.CONSENSFLOW_APP_TOKEN
+    const tabsPath = join(s.env.CONSENSFLOW_HOME, 'app', 'tabs.json')
+    const envelope = JSON.parse(readFileSync(tabsPath, 'utf8'))
+    const parent = envelope.tabs.find((t) => t.id === lead.tab)
+    const session = parent.lead.reserved.preallocatedId
+    parent.lead.nativeSession = session
+    writeFileSync(tabsPath, JSON.stringify(envelope))
+    const dir = join(s.env.CLAUDE_CONFIG_DIR, 'projects', 'workspace')
+    mkdirSync(dir, { recursive: true })
+    const nativePath = join(dir, `${session}.jsonl`)
+    const body = 'Complete lead answer. '.repeat(8000) + 'END-OF-ANSWER'
+    const fixture = readFileSync(
+      'tests/engine/fixtures/completion/claude-code/v266-tool-loop.jsonl',
+      'utf8',
+    )
+    const lines = fixture
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+    for (const line of lines) {
+      if (line.sessionId) line.sessionId = session
+      if (line.session_id) line.session_id = session
+      if (line.type === 'assistant' && line.message?.stop_reason === 'end_turn')
+        line.message.content = [{ type: 'text', text: body }]
+    }
+    writeFileSync(nativePath, lines.map((line) => JSON.stringify(line)).join('\n') + '\n')
+    const first = await json(
+      await s.api(token, '/api/panes/lead.read', {
+        method: 'POST',
+        body: { tab: pm.tab, opId: 'pm-read-first' },
+      }),
+      200,
+    )
+    assert.ok(first.of > 1, JSON.stringify(first))
+    assert.ok(first.text.includes('Complete lead answer.'))
+    rmSync(nativePath)
+    const last = await json(
+      await s.api(token, '/api/panes/lead.read', {
+        method: 'POST',
+        body: { tab: pm.tab, opId: 'pm-read-last', answerId: first.deliveryId, part: first.of },
+      }),
+      200,
+    )
+    assert.ok(last.text.includes('END-OF-ANSWER'))
+    assert.equal(last.deliveryId, first.deliveryId)
+    assert.equal(
+      (
+        await s.api(token, '/api/panes/lead.read', {
+          method: 'POST',
+          body: { tab: lead.tab, opId: 'foreign' },
+        })
+      ).status,
+      400,
+    )
+  } finally {
+    await s.close()
+  }
+})
+
+it('PM sends the agreed text once to its own bound lead through the native queue', async () => {
+  const s = await paneServer({ nativeCodex: true })
+  try {
+    const lead = await s.rust.request('tab.open', { dir: s.workspace, harness: 'codex' })
+    const pm = await s.rust.request('pm.open', { tab: lead.tab, harness: 'pi' })
+    const token = s.seen.open.at(-1).env.CONSENSFLOW_APP_TOKEN
+    const send = (opId) =>
+      s.api(token, '/api/panes/lead.send', {
+        method: 'POST',
+        body: { tab: pm.tab, opId, text: 'Agreed plan\nKeep this exact text.' },
+      })
+    assert.equal((await send('unbound')).status, 409)
+    const tabsPath = join(s.env.CONSENSFLOW_HOME, 'app', 'tabs.json')
+    const envelope = JSON.parse(readFileSync(tabsPath, 'utf8'))
+    const parent = envelope.tabs.find((t) => t.id === lead.tab)
+    const session = '11111111-2222-4333-8444-555555555555'
+    parent.lead.nativeSession = session
+    writeFileSync(tabsPath, JSON.stringify(envelope))
+    const claims = []
+    s.rust.on('pane.claim_native_epoch', (request) => {
+      claims.push(request)
+      return { ok: true }
+    })
+    const first = await json(await send('once'), 200)
+    assert.equal(first.outcome, 'admitted')
+    assert.deepEqual(await json(await send('once'), 200), first)
+    assert.equal(claims.length, 1)
+    assert.equal(claims[0].pane, lead.pane.id)
+    const queued = readFileSync(join(dirname(s.workspace), 'native-queue.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map(JSON.parse)
+    assert.deepEqual(queued, [
+      ['queue', '--thread', session, '--message', 'Agreed plan\nKeep this exact text.'],
+    ])
+    assert.equal(s.seen.paste.length, 0)
+  } finally {
+    await s.close()
+  }
+})
+
+it('deleting a session also stops and removes its PM without touching another session', async () => {
+  const s = await paneServer()
+  try {
+    const lead = await s.rust.request('tab.open', { dir: s.workspace, harness: 'codex' })
+    const pm = await s.rust.request('pm.open', { tab: lead.tab, harness: 'pi' })
+    const other = await s.rust.request('tab.open', { dir: s.workspace, harness: 'codex' })
+    s.state.list = () => ({
+      ok: true,
+      panes: [lead.pane, pm.pane, other.pane].map((pane) => ({ ...pane, alive: true })),
+    })
+    const killed = []
+    s.rust.on('pane.kill', (body) => {
+      killed.push(body.id)
+      return { ok: true }
+    })
+    const result = await s.rust.request('tab.delete', {
+      tab: lead.tab,
+      generation: lead.pane.generation,
+    })
+    assert.equal(result.ok, true, JSON.stringify(result))
+    assert.deepEqual(new Set(killed), new Set([lead.pane.id, pm.pane.id]))
+    const state = await s.rust.request('state.list', {})
+    assert.deepEqual(
+      state.tabs.map((tab) => tab.id),
+      [other.tab],
+    )
+  } finally {
+    await s.close()
+  }
+})
+
+it('resuming a session reopens every bound worker without redispatching its task', async () => {
+  const s = await paneServer()
+  try {
+    const opened = await s.rust.request('tab.open', { dir: s.workspace, harness: 'claude-code' })
+    const name = 'zeus-old-review'
+    const threadsFile = join(
+      s.env.CONSENSFLOW_HOME,
+      'workspaces',
+      workspaceKey(s.workspace),
+      'threads.json',
+    )
+    mkdirSync(dirname(threadsFile), { recursive: true })
+    writeFileSync(
+      threadsFile,
+      JSON.stringify({
+        'removed-review': { agent: 'removed', kind: 'codex', sessionId: 'native-removed' },
+        'unbound-review': { agent: 'zeus', kind: 'codex' },
+        'zeus-second-review': {
+          agent: 'zeus',
+          kind: 'codex',
+          sessionId: 'native-second',
+          sent: [],
+        },
+        [name]: {
+          agent: 'zeus',
+          kind: 'codex',
+          sessionId: 'native-review',
+          lead: `tab:${opened.tab}:1`,
+          sent: [],
+        },
+      }),
+    )
+    const tabsFile = join(s.env.CONSENSFLOW_HOME, 'app', 'tabs.json')
+    const envelope = JSON.parse(readFileSync(tabsFile, 'utf8'))
+    const tab = envelope.tabs.find((t) => t.id === opened.tab)
+    tab.closed = true
+    for (const [index, conversation] of [
+      'removed-review',
+      'unbound-review',
+      'zeus-second-review',
+    ].entries()) {
+      tab.panes.push({
+        id: `p-history-${index}`,
+        kind: 'worker',
+        conversation,
+        generation: 1,
+        order: index + 2,
+        closed: true,
+      })
+    }
+    tab.panes.push({
+      id: 'p-legacy',
+      kind: 'worker',
+      conversation: name,
+      generation: 1,
+      order: 1,
+      closed: true,
+    })
+    writeFileSync(tabsFile, JSON.stringify(envelope))
+    s.state.list = () => ({ ok: true, panes: [] })
+    const count = s.seen.open.length
+    const resumed = await s.rust.request('tab.resume', { tab: opened.tab })
+    assert.equal(resumed.ok, true, JSON.stringify(resumed))
+    assert.equal(s.seen.open.length - count, 3, 'lead and both bound workers reopened')
+    assert.equal(resumed.workers.filter((worker) => worker.error).length, 1)
+    assert.match(resumed.workers[0].error, /not in the roster/)
+    assert.deepEqual(s.threads()['zeus-second-review'].sent, [])
+    const worker = s.seen.open.at(-1)
+    assert(worker.argv.includes('attach'), JSON.stringify(worker.argv))
+    assert.equal(s.threads()[name].sessionId, 'native-review')
+    assert.deepEqual(s.threads()[name].sent, [], 'no original task resend')
+  } finally {
+    await s.close()
+  }
+})
+
+it('permanent pane deletion stops only the requested generation and refuses the lead', async () => {
+  const s = await paneServer()
+  const killed = []
+  s.rust.on('pane.kill', (body) => {
+    killed.push(body)
+    return { ok: true }
+  })
+  try {
+    const tab = await s.rust.request('tab.open', { dir: s.workspace, harness: 'claude-code' })
+    const shell = await s.rust.request('shell.open', { tab: tab.tab })
+    const stale = await s.rust.request('pane.delete', {
+      id: shell.pane.id,
+      generation: shell.pane.generation + 1,
+    })
+    assert.equal(stale.ok, false)
+    const lead = await s.rust.request('pane.delete', tab.pane)
+    assert.equal(lead.ok, false)
+    assert.equal(killed.length, 0)
+    const deleted = await s.rust.request('pane.delete', shell.pane)
+    assert.equal(deleted.ok, true, JSON.stringify(deleted))
+    assert.equal(deleted.outcome, 'deleted')
+    assert.deepEqual(killed, [shell.pane])
+    const current = (await s.rust.request('state.list', {})).tabs.find((row) => row.id === tab.tab)
+    assert.equal(current.panes.length, 1)
+    assert.equal(current.closed, false)
+  } finally {
+    await s.close()
+  }
 })

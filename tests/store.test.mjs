@@ -2957,3 +2957,149 @@ test('a lead pane ending releases and suspends as ONE decision, or neither', asy
     await store.close()
   })
 })
+
+test('legacy sessions receive a persistent role name without losing their native identity', async () => {
+  await withHome(async (home) => {
+    let store = await openStore(home)
+    const tabs = new Tabs(store)
+    const created = await tabs.create('/tmp/project', 'codex')
+    await store.mutate('/tmp/project', 'legacy.fixture', async (io) => {
+      const rows = await io.readTabs()
+      delete rows[0].roleName
+      delete rows[0].role
+      rows[0].lead.nativeSession = 'retained-native-session'
+      await io.writeTabs(rows)
+    })
+    await store.close()
+    store = await openStore(home)
+    const first = (await store.readTabs())[0]
+    assert.equal(first.role, 'lead')
+    assert.match(first.roleName, /^[a-z]+-[a-z]+$/)
+    assert.equal(first.id, created.id)
+    assert.equal(first.lead.nativeSession, 'retained-native-session')
+    await store.close()
+    store = await openStore(home)
+    assert.equal((await store.readTabs())[0].roleName, first.roleName)
+    await store.close()
+  })
+})
+
+test('restart restores legacy worker navigation only for the original surviving tab', async () => {
+  await withHome(async (home) => {
+    let store = await openStore(home)
+    let tabs = new Tabs(store)
+    const a = await tabs.create('/tmp/legacy-project', 'codex')
+    const b = await tabs.create('/tmp/legacy-project', 'codex')
+    const other = await tabs.create('/tmp/other-project', 'codex')
+    const original = {
+      'a-review': {
+        agent: 'zeus',
+        kind: 'claude-code',
+        lead: `tab:${a.id}:1`,
+        sessionId: 'native-a',
+      },
+      'b-review': { agent: 'diana', kind: 'codex', lead: `tab:${b.id}:1`, sessionId: 'native-b' },
+      'deleted-session': {
+        agent: 'zeus',
+        kind: 'claude-code',
+        lead: 'tab:t-999:1',
+        sessionId: 'native-deleted',
+      },
+      'future-generation': {
+        agent: 'zeus',
+        kind: 'claude-code',
+        lead: `tab:${a.id}:9`,
+        sessionId: 'native-future',
+      },
+      'invalid-owner': {
+        agent: 'zeus',
+        kind: 'claude-code',
+        lead: `tab:${a.id}:1extra`,
+        sessionId: 'native-invalid',
+      },
+    }
+    await store.mutate('/tmp/legacy-project', 'legacy.workers', async (io) =>
+      io.writeThreads(original),
+    )
+    await store.close()
+    store = await openStore(home)
+    tabs = new Tabs(store)
+    const restoredA = (await tabs.get(a.id)).panes.filter((p) => p.kind === 'worker')
+    const restoredB = (await tabs.get(b.id)).panes.filter((p) => p.kind === 'worker')
+    assert.deepEqual(
+      restoredA.map((p) => p.conversation),
+      ['a-review'],
+    )
+    assert.deepEqual(
+      restoredB.map((p) => p.conversation),
+      ['b-review'],
+    )
+    assert.notEqual(restoredA[0].id, restoredB[0].id)
+    assert.equal(restoredA[0].closed, true)
+    assert.equal(restoredA[0].alive, false)
+    assert.equal((await tabs.get(other.id)).panes.length, 1)
+    assert.deepEqual(
+      { ...(await store.readThreads('/tmp/legacy-project')) },
+      original,
+      'native bindings and ownership stay unchanged',
+    )
+    await tabs.resume(a.id)
+    const { Page } = await import('../src/page.js')
+    const page = new Page({
+      store,
+      tabs,
+      agents: { row: () => undefined, names: () => [] },
+      env: { HOME: home, CONSENSFLOW_HOME: home },
+    })
+    const drawn = (await page.state()).tabs
+      .find((t) => t.id === a.id)
+      .panes.find((p) => p.kind === 'worker')
+    assert.equal(drawn.alive, false, 'a recovered history row is not a running worker')
+    assert.notEqual(drawn.starting, true)
+    await store.close()
+    store = await openStore(home)
+    assert.deepEqual(
+      (await store.readTabs()).find((t) => t.id === a.id).panes.filter((p) => p.kind === 'worker'),
+      restoredA,
+    )
+    await store.close()
+  })
+})
+
+test('permanent pane deletion fences admission and survives legacy recovery', async () => {
+  await withHome(async (home) => {
+    let store = await openStore(home)
+    const tabs = new Tabs(store)
+    const created = await tabs.create('/tmp/delete-pane-project', 'codex')
+    const pane = await tabs.addPane(created.id, { kind: 'worker', conversation: 'old-review' })
+    await store.mutate('/tmp/delete-pane-project', 'fixture', (io) =>
+      io.writeThreads({
+        'old-review': {
+          agent: 'zeus',
+          kind: 'codex',
+          sessionId: 'native-kept',
+          lead: `tab:${created.id}:1`,
+        },
+      }),
+    )
+    await assert.rejects(() => tabs.beginPaneDelete(created.id, pane.id, pane.generation + 1))
+    await tabs.beginPaneDelete(created.id, pane.id, pane.generation)
+    await assert.rejects(
+      () => store.admit('/tmp/delete-pane-project', { name: 'old-review', tab: created.id }),
+      /deleted from this session/,
+    )
+    await tabs.removePane(created.id, pane.id, pane.generation)
+    await store.close()
+    store = await openStore(home)
+    assert.equal(
+      (await store.readTabs())[0].panes.length,
+      1,
+      'deleted worker stays absent after restart',
+    )
+    assert.equal(
+      (await store.readThreads('/tmp/delete-pane-project'))['old-review'].sessionId,
+      'native-kept',
+    )
+    await store.close()
+  })
+})

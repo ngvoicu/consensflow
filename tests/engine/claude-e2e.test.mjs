@@ -410,7 +410,7 @@ test('e2e: @pygmalion without a Codex login errors cleanly before any network ca
 
 // --- Plugin packaging: consent gate, hooks wiring, import boundaries --------
 
-test('the consent gate and name-neutrality stay locked into the generated skill', async () => {
+test('authorization scope and name-neutrality stay locked into the lead skill', async () => {
   // There is one skill now, and it is generated — so the gate has to live in
   // the generator, not in a hand-written copy per host. The payload skills
   // that used to carry their own copy are gone.
@@ -418,9 +418,9 @@ test('the consent gate and name-neutrality stay locked into the generated skill'
   const skill = generateSkill([
     { name: 'zeus', harness: 'claude', model: 'claude-opus-5', effort: 'max' },
   ])
-  assert.match(skill, /Advice is free; acting is gated/)
-  assert.match(skill, /without the user's explicit approval/)
-  assert.match(skill, /You do not need permission to consult/)
+  assert.match(skill, /within the authorized/)
+  assert.match(skill, /Worker suggestions do not expand that authorization/)
+  assert.match(skill, /already authorized by the user without asking again/)
 
   // No host payload ships any more, so no second copy of the gate can drift.
   assert.equal(existsSync(path.join(ROOT, 'hosts', 'claude')), false, 'no claude payload')

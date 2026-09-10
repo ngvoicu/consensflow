@@ -2,12 +2,18 @@ import { Menus } from './menus.js'
 import { runSelftest } from './selftest.js'
 import { orderedPanes, paneLabel, renderSidebar, sessionName } from './sidebar.js'
 import { EmulatorRegistry, paneKey } from './term.js'
-import { focusOrder, gridTemplate } from './vendor/layout.js'
+import { initializeUpdates } from './updates.js'
+import { gridTemplate } from './vendor/layout.js'
 import { effectivePolicy } from './vendor/policy.js'
 
-const MIN_PANE = { width: 260, height: 180 }
 const GEOMETRY_KEY = 'consensflow.window.geometry.v1'
-const READINESS_BLOCKERS = new Set(['draft open', 'lead busy', 'unbound'])
+const READINESS_BLOCKERS = new Set([
+  'draft open',
+  'lead busy',
+  'unbound',
+  'native-session-unknown',
+  'native-session-changed',
+])
 
 const app = document.querySelector('#app')
 const stage = document.querySelector('#pane-stage')
@@ -31,7 +37,6 @@ const focusCount = document.querySelector('#focus-count')
 const previousPane = document.querySelector('#previous-pane')
 const nextPane = document.querySelector('#next-pane')
 const status = document.querySelector('#status')
-const resumeDialog = document.querySelector('#resume-replies-dialog')
 
 const tauri = window.__TAURI__ ?? {}
 const invoke = tauri.core?.invoke
@@ -41,6 +46,12 @@ const listen = tauri.event?.listen
 let viewState = emptyState()
 let selection = { tabId: null, type: 'session', paneId: null }
 const focusByTab = new Map()
+const scrollByTab = new Map()
+const workerStage = document.createElement('div')
+workerStage.className = 'worker-stage'
+workerStage.addEventListener('scroll', () => {
+  if (workerStage.dataset.tab) scrollByTab.set(workerStage.dataset.tab, workerStage.scrollLeft)
+})
 let resizeFrame = null
 let refreshInFlight = null
 let refreshPending = false
@@ -52,8 +63,6 @@ const outputChains = new Map()
 const retiredKeys = new Set()
 const retiringKeys = new Set()
 const inputSequences = new Map()
-let pendingResume = null
-let resumeRequest = 0
 // Set only by the packaged smoke's driver (`selftest.js`), which Rust only
 // lets the page load when the app was started in self-test mode.
 let ackObserver = null
@@ -123,6 +132,27 @@ async function run(command, args = {}, { refresh: shouldRefresh = true } = {}) {
     return result
   }
   if (shouldRefresh) await refresh()
+  if (command === 'tab_resume' && Array.isArray(result?.workers)) {
+    const failed = result.workers.filter((worker) => worker.error)
+    if (failed.length)
+      report(failed.map((worker) => `${worker.conversation}: ${worker.error}`).join('; '), 'error')
+  }
+  if (
+    ['open_lead', 'open_pm'].includes(command) &&
+    result?.ok === true &&
+    (result.outcome === 'opened' || command === 'open_pm') &&
+    viewState.tabs.some((tab) => tab.id === result.tab && tab.closed !== true)
+  ) {
+    selection = {
+      tabId: result.tab,
+      type: command === 'open_pm' ? 'pane' : 'session',
+      paneId: command === 'open_pm' ? result.pane?.id : null,
+    }
+    render()
+    if (record(result.pane)) {
+      cards.get(paneKey(result.pane))?.querySelector('.xterm-helper-textarea')?.focus()
+    }
+  }
   return result
 }
 
@@ -149,97 +179,20 @@ async function enqueueTerminalInput(command, pane, data) {
   await run('pane_input_wait', { ticket: admitted.ticket }, { refresh: false })
 }
 
-function pageInputSequence(paneKeyValue) {
-  return inputSequences.get(paneKeyValue) ?? 0
-}
-
-function closeResumeDialog() {
-  pendingResume = null
-  if (resumeDialog.open) resumeDialog.close()
-}
-
-async function openResumeDialog(tab, pane) {
-  const request = ++resumeRequest
-  const identity = { id: pane.id, generation: pane.generation }
-  const snapshot = await run('pane_input_snapshot', identity, { refresh: false })
-  if (snapshot?.ok !== true || request !== resumeRequest) return
-
-  const key = paneKey(pane)
-  const sequence = pageInputSequence(key)
-  if (
-    !Number.isSafeInteger(snapshot.inputEpoch) ||
-    !Number.isSafeInteger(snapshot.sequence) ||
-    snapshot.sequence !== sequence
-  ) {
-    report('Terminal input changed after the snapshot. Reopen Resume replies.', 'error')
-    return
-  }
-
-  pendingResume = {
-    ...identity,
-    inputEpoch: snapshot.inputEpoch,
-    sequence: snapshot.sequence,
-    key,
-  }
-  resumeDialog.querySelector('#resume-replies-pane').textContent = paneLabel(tab, pane)
-  resumeDialog.showModal()
-}
-
-async function submitResume(event) {
-  event.preventDefault()
-  const pending = pendingResume
-  pendingResume = null
-  if (pending === null) {
-    resumeDialog.close()
-    return
-  }
-
-  if (pageInputSequence(pending.key) !== pending.sequence) {
-    resumeDialog.close()
-    report('Terminal input changed after the snapshot. Reopen Resume replies.', 'error')
-    return
-  }
-
-  resumeDialog.close()
-  const result = await run(
-    'pane_resume_replies',
-    {
-      id: pending.id,
-      generation: pending.generation,
-      inputEpoch: pending.inputEpoch,
-      sequence: pending.sequence,
-    },
-    { refresh: false },
-  )
-  const failure = resultFailure(result)
-  if (failure !== null && /stale|generation|sequence|epoch/i.test(failure)) {
-    report(
-      'Resume replies became stale. Reopen the confirmation dialog; replies remain held.',
-      'error',
-    )
-  }
-}
-
 const menus = new Menus({ invoke: rawInvoke, run, report })
-
-resumeDialog.querySelector('button[value="cancel"]').addEventListener('click', closeResumeDialog)
-resumeDialog.addEventListener('cancel', () => {
-  pendingResume = null
-})
-resumeDialog.addEventListener('close', () => {
-  pendingResume = null
-})
-resumeDialog.querySelector('form').addEventListener('submit', (event) => void submitResume(event))
 
 const registry = new EmulatorRegistry({
   createEmulator: tauri.test?.createEmulator,
   onData: (pane, data) => {
+    if (isFailed(pane)) return
     void enqueueTerminalInput('pane_input_enqueue', pane, data)
   },
   onReply: (pane, data) => {
+    if (isFailed(pane)) return
     void enqueueTerminalInput('pane_reply_enqueue', pane, data)
   },
   onResize: (pane, cols, rows) => {
+    if (isFailed(pane)) return
     void run(
       'pane_resize',
       { id: pane.id, generation: pane.generation, cols, rows },
@@ -301,6 +254,7 @@ function paneTitle(tab, pane) {
   if (pane.kind === 'shell') return 'shell'
   const name = paneLabel(tab, pane)
   const agent = pane.agent ?? pane.harness ?? tab.lead?.harness ?? 'agent'
+  if (tab.role === 'pm') return `${name} · @${agent}`
   const effective = policy(pane, tab)
   return `${name} · @${agent} · Replies: ${effective.mode === 'manual' ? 'Manual' : 'Automatic'}`
 }
@@ -309,14 +263,66 @@ function isLive(tab, pane) {
   return tab.closed !== true && pane.alive !== false
 }
 
-function deliveriesFor(tab, pane) {
-  return viewState.deliveries.filter((delivery) => {
-    const sameTab = delivery.tab === undefined || delivery.tab === tab.id
-    const target = delivery.pane ?? delivery.targetPane ?? delivery.target?.pane
-    return (
-      sameTab && target === pane.id && ['pending', 'waiting'].includes(delivery.state ?? 'pending')
+function currentPane(pane) {
+  for (const tab of viewState.tabs) {
+    const match = array(tab.panes).find(
+      (candidate) => candidate.id === pane.id && candidate.generation === pane.generation,
     )
-  })
+    if (match !== undefined) return match
+  }
+  return pane
+}
+
+function paneFailure(pane) {
+  const failure = currentPane(pane).failure
+  return record(failure) ? failure : null
+}
+
+function paneStartupFailure(pane) {
+  const progress = currentPane(pane).progress
+  return record(progress) &&
+    progress.state === 'failed' &&
+    progress.pane === pane.id &&
+    progress.generation === pane.generation
+    ? progress
+    : null
+}
+
+function isFailed(pane) {
+  return paneFailure(pane) !== null
+}
+
+function isVisiblePane(tab, pane) {
+  return tab.closed !== true && (isLive(tab, pane) || pane.starting === true || isFailed(pane))
+}
+
+function deliveriesFor(tab, pane) {
+  const latest = new Map()
+  const orderOf = (delivery) => {
+    const numericId = Number(String(delivery.id ?? '').replace(/^d-/, ''))
+    return Number.isFinite(numericId) ? numericId : 0
+  }
+  viewState.deliveries
+    .filter((delivery) => {
+      const sameTab = delivery.tab === undefined || delivery.tab === tab.id
+      const target = delivery.pane ?? delivery.targetPane ?? delivery.target?.pane
+      const sameGeneration =
+        Number.isSafeInteger(delivery.generation) && delivery.generation === pane.generation
+      return sameTab && target === pane.id && sameGeneration
+    })
+    .forEach((delivery) => {
+      const key =
+        delivery.answerId === undefined || delivery.answerId === null
+          ? `delivery:${delivery.id}`
+          : `${delivery.conversation ?? ''}\u0000${delivery.answerId}`
+      const previous = latest.get(key)
+      if (previous === undefined || orderOf(delivery) >= orderOf(previous)) {
+        latest.set(key, delivery)
+      }
+    })
+  return [...latest.values()].filter((delivery) =>
+    ['pending', 'waiting'].includes(delivery.state ?? 'pending'),
+  )
 }
 
 function deliveryDetails(event, tab, deliveries) {
@@ -333,7 +339,12 @@ function deliveryDetails(event, tab, deliveries) {
     row.className = 'delivery-detail-row'
     const reason = document.createElement('span')
     reason.className = 'delivery-detail-reason'
-    reason.textContent = delivery.reason ?? 'waiting'
+    const source = [delivery.conversation, delivery.agent].filter(
+      (value) => typeof value === 'string' && value.length > 0,
+    )
+    reason.textContent = `${source.length > 0 ? source.join(' · ') : 'unknown source'} — waiting: ${
+      delivery.reason ?? 'waiting'
+    }`
     const deliver = document.createElement('button')
     deliver.type = 'button'
     deliver.setAttribute('role', 'menuitem')
@@ -341,7 +352,7 @@ function deliveryDetails(event, tab, deliveries) {
     const blocker = READINESS_BLOCKERS.has(delivery.reason)
     deliver.disabled = blocker
     if (blocker) {
-      deliver.title = `${delivery.reason} — readiness cannot be bypassed`
+      deliver.title = `${reason.textContent} — readiness cannot be bypassed`
     } else {
       deliver.addEventListener('click', async () => {
         menus.closeMenu()
@@ -387,28 +398,42 @@ function createCard(tab, pane) {
   kind.setAttribute('aria-hidden', 'true')
   const title = document.createElement('span')
   title.className = 'pane-title'
-  titlebar.append(kind, title)
-  if (['lead', 'worker'].includes(pane.kind)) {
-    const resume = document.createElement('button')
-    resume.type = 'button'
-    resume.className = 'quiet-button resume-replies-button'
-    resume.dataset.testid = `resume-replies-${pane.id}`
-    resume.textContent = 'Resume replies'
-    resume.addEventListener('click', () => {
-      const context = card._context
-      void openResumeDialog(context.tab, context.pane)
+  const close = document.createElement('button')
+  close.type = 'button'
+  close.className = 'pane-close-button'
+  close.textContent = pane.kind === 'lead' ? 'Suspend session' : 'Close pane'
+  close.setAttribute('aria-label', close.textContent)
+  close.title =
+    pane.kind === 'lead'
+      ? 'Suspend this session and keep its lead conversation for Resume'
+      : 'Close this pane and keep its native conversation'
+  close.addEventListener('click', (event) => {
+    event.stopPropagation()
+    void menus.closePane({
+      id: card.dataset.paneId,
+      generation: Number(card.dataset.generation),
     })
-    titlebar.append(resume)
-  }
+  })
+  titlebar.append(kind, title, close)
   const terminal = document.createElement('div')
   terminal.className = 'terminal-host'
   terminal.setAttribute('aria-label', `${paneLabel(tab, pane)} terminal`)
-  card.append(titlebar, terminal)
+  const failure = document.createElement('div')
+  failure.className = 'pane-failure'
+  failure.hidden = true
+  const failureState = document.createElement('strong')
+  failureState.className = 'pane-failure-state'
+  const failureMessage = document.createElement('span')
+  failureMessage.className = 'pane-failure-message'
+  const failureExit = document.createElement('span')
+  failureExit.className = 'pane-failure-exit'
+  failure.append(failureState, failureMessage, failureExit)
+  card.append(titlebar, failure, terminal)
   parking.append(card)
 
   card._context = { tab, pane }
   titlebar.addEventListener('contextmenu', (event) => {
-    if (card._context.pane.kind === 'worker') {
+    if (card._context.pane.kind === 'worker' && !isFailed(card._context.pane)) {
       void menus.worker(event, card._context.tab, card._context.pane)
     }
   })
@@ -427,6 +452,27 @@ function updateCard(card, tab, pane) {
   card._context = { tab, pane }
   card.dataset.kind = pane.kind
   card.dataset.generation = String(pane.generation)
+  const failure = paneFailure(pane)
+  const startupFailure = paneStartupFailure(pane)
+  const problem = failure ?? startupFailure
+  card.dataset.state = problem === null ? 'live' : 'failed'
+  card.dataset.failed = problem === null ? 'false' : 'true'
+  const failureView = card.querySelector('.pane-failure')
+  if (failureView !== null) {
+    failureView.hidden = problem === null
+    if (problem !== null) {
+      failureView.querySelector('.pane-failure-state').textContent =
+        failure === null ? 'Startup failed' : 'Ended'
+      failureView.querySelector('.pane-failure-message').textContent =
+        typeof problem.message === 'string' && problem.message.length > 0
+          ? problem.message
+          : 'Worker harness failed'
+      failureView.querySelector('.pane-failure-exit').textContent =
+        failure === null
+          ? `Generation: ${problem.generation ?? pane.generation}`
+          : `Exit code: ${failure.exitCode == null ? 'unknown' : String(failure.exitCode)}`
+    }
+  }
   const title = card.querySelector('.pane-title')
   title.textContent = paneTitle(tab, pane)
   if (pane.kind === 'shell') {
@@ -441,8 +487,6 @@ function updateCard(card, tab, pane) {
     }[effective.source]
     title.title = `Reply delivery: ${effective.mode === 'manual' ? 'Manual' : 'Automatic'}. ${source}`
   }
-  const resume = card.querySelector('.resume-replies-button')
-  if (resume !== null) resume.hidden = !isLive(tab, pane)
   addDeliveryBadges(card.querySelector('.pane-titlebar'), tab, pane)
 }
 
@@ -471,7 +515,7 @@ function retirePane(key) {
 }
 
 function reconcileCards() {
-  const liveKeys = new Set()
+  const visibleKeys = new Set()
   const authoritativeKeys = new Set()
   const authoritativePaneIds = new Set()
   for (const tab of viewState.tabs) {
@@ -479,11 +523,11 @@ function reconcileCards() {
       const key = paneKey(pane)
       authoritativeKeys.add(key)
       authoritativePaneIds.add(pane.id)
-      if (!isLive(tab, pane)) {
+      if (!isVisiblePane(tab, pane)) {
         retirePane(key)
         continue
       }
-      liveKeys.add(key)
+      visibleKeys.add(key)
       retiredKeys.delete(key)
       let card = cards.get(key)
       if (card === undefined) {
@@ -502,12 +546,11 @@ function reconcileCards() {
     if (replacedGeneration) retirePane(key)
   }
 
-  for (const [key, card] of cards) {
-    if (liveKeys.has(key) || provisionalKeys.has(key) || retiringKeys.has(key)) continue
-    card.remove()
-    cards.delete(key)
+  for (const [key] of cards) {
+    if (visibleKeys.has(key) || provisionalKeys.has(key) || retiringKeys.has(key)) continue
+    retirePane(key)
   }
-  registry.reconcile(new Set([...liveKeys, ...provisionalKeys, ...retiringKeys]))
+  registry.reconcile(new Set([...visibleKeys, ...provisionalKeys, ...retiringKeys]))
 }
 
 function activeTab() {
@@ -559,70 +602,60 @@ function cssPixels(value) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-function columnsForWidth(paneCount) {
-  const styles = getComputedStyle(stage)
-  const padding = cssPixels(styles.getPropertyValue('--pane-grid-padding'))
-  const gap = cssPixels(styles.getPropertyValue('--pane-grid-gap'))
-  const contentWidth = Math.max(0, stage.clientWidth - 2 * padding)
-  const capacity = Math.floor((contentWidth + gap) / (MIN_PANE.width + gap))
-  return Math.max(1, Math.min(3, paneCount, capacity))
-}
-
-function minimumGridRowHeight() {
-  const styles = getComputedStyle(stage)
-  const padding = cssPixels(styles.getPropertyValue('--pane-grid-padding'))
-  const gap = cssPixels(styles.getPropertyValue('--pane-grid-gap'))
-  const available = Math.max(0, stage.clientHeight - 2 * padding - gap)
-  return Math.max(MIN_PANE.height, Math.ceil(available / 2))
-}
-
 function showCards(tab, panes, indices, mode, layout) {
   const desired = indices.map((index) => cards.get(paneKey(panes[index]))).filter(Boolean)
-  const desiredSet = new Set(desired)
+  const wanted = new Set(desired)
+  for (const card of cards.values()) if (!wanted.has(card)) parkCard(card)
   for (const child of [...stage.children]) {
-    if (child.classList.contains('pane-card') && !desiredSet.has(child)) parkCard(child)
-    else if (!child.classList.contains('pane-card')) child.remove()
-  }
-  let cursor = stage.firstElementChild
-  for (const card of desired) {
-    if (card === cursor) {
-      cursor = cursor.nextElementSibling
-      continue
-    }
-    stage.insertBefore(card, cursor)
+    if (!wanted.has(child) && child !== workerStage) child.remove()
   }
   stage.dataset.empty = 'false'
   stage.dataset.mode = mode
   stage.dataset.layout = layout.areas
-  stage.style.gridTemplateAreas = layout.areas
-  const rowHeight = mode === 'grid' ? minimumGridRowHeight() : MIN_PANE.height
-  stage.style.gridTemplateRows = `repeat(${layout.rows}, minmax(${rowHeight}px, 1fr))`
-  stage.style.gridTemplateColumns = `repeat(${layout.cols}, minmax(0, 1fr))`
-
-  const cells = focusOrder(panes.length)
+  stage.style.removeProperty('grid-template-areas')
+  stage.style.gridTemplateRows = 'minmax(0, 1fr)'
+  if (mode === 'grid' && desired.length > 1) {
+    const styles = getComputedStyle(stage)
+    const padding = cssPixels(styles.getPropertyValue('--pane-grid-padding'))
+    const gap = cssPixels(styles.getPropertyValue('--pane-grid-gap'))
+    const visibleColumns = Math.min(2, Math.ceil((desired.length - 1) / 2))
+    const width = Math.max(
+      0,
+      (stage.clientWidth - 2 * padding - visibleColumns * gap) / (2 + visibleColumns),
+    )
+    stage.style.gridTemplateColumns = `${2 * width}px minmax(0, 1fr)`
+    workerStage.style.gridAutoColumns = `${width}px`
+    workerStage.style.gridTemplateRows =
+      desired.length === 2 ? 'minmax(0, 1fr)' : 'repeat(2, minmax(0, 1fr))'
+    if (desired[0].parentElement !== stage) stage.prepend(desired[0])
+    if (workerStage.parentElement !== stage) stage.append(workerStage)
+    for (const card of desired.slice(1)) {
+      if (card.parentElement !== workerStage) workerStage.append(card)
+    }
+    workerStage.dataset.tab = tab.id
+    workerStage.scrollLeft = scrollByTab.get(tab.id) ?? 0
+  } else {
+    stage.style.gridTemplateColumns = 'minmax(0, 1fr)'
+    for (const card of desired) if (card.parentElement !== stage) stage.append(card)
+    workerStage.remove()
+  }
   for (const index of indices) {
     const pane = panes[index]
     const card = cards.get(paneKey(pane))
     if (card === undefined) continue
     card.dataset.parked = 'false'
     card.dataset.selected =
-      mode === 'focused' ? 'true' : index === focusedIndex(tab, panes) ? 'true' : 'false'
-    if (mode === 'grid') {
-      card.style.removeProperty('width')
-      card.style.removeProperty('height')
-      card.style.gridArea = cells[index]
-    } else {
-      card.style.removeProperty('grid-area')
-      card.style.width = '100%'
-      card.style.height = '100%'
-    }
+      mode === 'focused' || index === focusedIndex(tab, panes) ? 'true' : 'false'
+    card.style.removeProperty('grid-area')
+    card.style.removeProperty('width')
+    card.style.removeProperty('height')
     registry.fit(pane.id, pane.generation)
   }
 }
 
 function renderPaneView() {
   const tab = activeTab()
-  const panes = tab === null ? [] : orderedPanes(tab).filter((pane) => isLive(tab, pane))
+  const panes = tab === null ? [] : orderedPanes(tab).filter((pane) => isVisiblePane(tab, pane))
   if (tab === null || panes.length === 0) {
     parkEveryCard()
     stage.replaceChildren()
@@ -641,7 +674,7 @@ function renderPaneView() {
     return
   }
 
-  const layout = gridTemplate(panes.length, { maxColumns: columnsForWidth(panes.length) })
+  const layout = gridTemplate(panes.length)
   if (selection.type !== 'pane') {
     showCards(
       tab,
@@ -666,14 +699,15 @@ function renderHeader() {
   const tab = activeTab()
   currentSession.textContent = tab === null ? 'No session' : sessionName(tab)
   currentDirectory.textContent = tab?.directory ?? tab?.dir ?? ''
-  tabPolicy.hidden = tab === null || tab.closed === true
+  tabPolicy.hidden = tab === null || tab.closed === true || tab.role === 'pm'
   deliveryInfo.hidden = tabPolicy.hidden
-  newPane.hidden = tab === null || tab.closed === true
+  newPane.hidden = tab === null || tab.closed === true || tab.role === 'pm'
   if (tab !== null) {
     const mode = record(tab.policy) ? tab.policy.mode : tab.policy
     tabPolicy.textContent = `Reply delivery: ${mode === 'manual' ? 'Manual' : 'Automatic'}`
   }
   const held = tab === null ? [] : viewState.held.filter((entry) => entry.tab === tab.id)
+  heldSend.textContent = `${held.length} previous-session repl${held.length === 1 ? 'y' : 'ies'}`
   heldSend.hidden = tab === null || held.length === 0 || tab.closed === true
 }
 
@@ -698,8 +732,16 @@ function render() {
       )
       render()
     },
+    onOpenPm: (tab, pm, anchor) => {
+      if (!pm) return menus.newPm(tab, anchor)
+      if (pm.closed) return void run('open_pm', { tab: tab.id, harness: pm.lead.harness })
+      selection = { tabId: pm.id, type: 'pane', paneId: pm.panes[0]?.id }
+      render()
+    },
+    onDeletePane: (tab, pane) => menus.deletePane({ ...pane, name: paneLabel(tab, pane) }),
     onResume: (tab) => void run('tab_resume', { tab: tab.id }),
     onRenameSession: (tab) => menus.renameSession(tab),
+    onDeleteSession: (tab) => menus.deleteSession(tab),
     onAttach: (tab, pane) =>
       void run('open_consult', {
         tab: tab.id,
@@ -910,7 +952,7 @@ heldSend.addEventListener('click', () => {
 
 newPane.addEventListener('click', () => {
   const tab = activeTab()
-  if (tab !== null) menus.newPane(newPane, tab, viewState.agents)
+  if (tab !== null && tab.role !== 'pm') menus.newPane(newPane, tab, viewState.agents)
 })
 
 newConversation.addEventListener('click', () => void menus.newConversation(tauri.dialog))
@@ -957,6 +999,11 @@ async function start() {
   }
   await refresh()
   app.dataset.ready = 'true'
+  await initializeUpdates({
+    invoke: rawInvoke,
+    listen,
+    getState: () => viewState,
+  })
   const selftest = window.__CONSENSFLOW_SELFTEST__
   if (record(selftest)) {
     void runSelftest({

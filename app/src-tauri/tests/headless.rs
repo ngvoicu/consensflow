@@ -421,6 +421,36 @@ fn claim_epoch_observes_intervening_typing_without_writing_to_the_pane() {
         Err(mpsc::RecvTimeoutError::Timeout)
     ));
 
+    assert_eq!(
+        helper.request(
+            "pane.claim_native_epoch",
+            json!({"pane":pane_id,"generation":generation,"epoch":0}),
+            &mut events
+        ),
+        json!({"ok":false,"error":"stale-input-epoch"})
+    );
+    assert_eq!(
+        helper.request(
+            "pane.claim_native_epoch",
+            json!({"pane":pane_id,"generation":generation,"epoch":1}),
+            &mut events
+        ),
+        json!({"ok":true})
+    );
+    let still_latched = helper.request(
+        "pane.snapshot",
+        json!({"id":pane_id,"generation":generation}),
+        &mut events,
+    );
+    assert_eq!(
+        still_latched["draftLatched"], true,
+        "native claims cannot clear terminal protection"
+    );
+    assert_eq!(
+        still_latched["inputEpoch"], 1,
+        "native claims write no bytes"
+    );
+
     let clean = helper.request(
         "pane.open",
         open_body("/bin/stty raw -echo; /bin/sleep 1000", 1024),
@@ -1174,4 +1204,320 @@ fn product_bridge_contract_forwards_a_natural_pane_exit() {
     assert_eq!(ended["body"]["id"], opened["id"]);
     assert_eq!(ended["body"]["generation"], opened["generation"]);
     helper.close_input_and_wait();
+}
+
+#[test]
+fn pane_advertises_native_color_capability_and_preserves_ansi_bytes() {
+    use std::ffi::OsString;
+
+    let _pty_guard = serial_headless_test();
+    // Simulate a Finder launch: strip color advertisement from this process
+    // so the bridge helper inherits a color-blind parent environment.
+    let saved_term = std::env::var_os("TERM");
+    let saved_colorterm = std::env::var_os("COLORTERM");
+    let saved_force_color = std::env::var_os("FORCE_COLOR");
+    let saved_no_color = std::env::var_os("NO_COLOR");
+    std::env::remove_var("TERM");
+    std::env::remove_var("COLORTERM");
+    std::env::remove_var("FORCE_COLOR");
+    std::env::remove_var("NO_COLOR");
+    struct RestoreColorEnv {
+        term: Option<OsString>,
+        colorterm: Option<OsString>,
+        force_color: Option<OsString>,
+        no_color: Option<OsString>,
+    }
+    impl Drop for RestoreColorEnv {
+        fn drop(&mut self) {
+            if let Some(value) = self.term.take() {
+                std::env::set_var("TERM", value);
+            }
+            if let Some(value) = self.colorterm.take() {
+                std::env::set_var("COLORTERM", value);
+            }
+            if let Some(value) = self.force_color.take() {
+                std::env::set_var("FORCE_COLOR", value);
+            }
+            if let Some(value) = self.no_color.take() {
+                std::env::set_var("NO_COLOR", value);
+            }
+        }
+    }
+    let _restore = RestoreColorEnv {
+        term: saved_term,
+        colorterm: saved_colorterm,
+        force_color: saved_force_color,
+        no_color: saved_no_color,
+    };
+
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+
+    // A color-blind parent must still yield a color-capable child: the PTY
+    // advertises the native xterm capability instead of inheriting blankness.
+    let opened = helper.request(
+        "pane.open",
+        open_body("printf '%s|%s' \"$TERM\" \"$COLORTERM\"", 1024),
+        &mut events,
+    );
+    assert_eq!(opened["ok"], true);
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    assert_eq!(
+        output_until(
+            &helper,
+            &mut events,
+            &pane_id,
+            generation,
+            b"xterm-256color|truecolor"
+        ),
+        b"xterm-256color|truecolor",
+        "Finder-launched panes must advertise TERM=xterm-256color and COLORTERM=truecolor"
+    );
+    assert_eq!(
+        helper.request(
+            "pane.kill",
+            json!({"id":pane_id,"generation":generation}),
+            &mut events
+        ),
+        json!({"ok":true})
+    );
+
+    // Standard ANSI SGR bytes travel through the PTY unmodified so each
+    // harness renders its own native styling.
+    let opened = helper.request(
+        "pane.open",
+        open_body("printf '\\033[31mred\\033[0m'", 1024),
+        &mut events,
+    );
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    assert_eq!(
+        output_until(&helper, &mut events, &pane_id, generation, b"\x1b[0m"),
+        b"\x1b[31mred\x1b[0m",
+        "standard ANSI SGR sequences must reach the renderer untouched"
+    );
+    assert_eq!(
+        helper.request(
+            "pane.kill",
+            json!({"id":pane_id,"generation":generation}),
+            &mut events
+        ),
+        json!({"ok":true})
+    );
+
+    // Explicit user no-color choices stay untouched: an overlaid TERM=dumb
+    // is honored, a dropped TERM stays absent, and the bridge never forces
+    // color or clears NO_COLOR semantics.
+    let mut dumb = open_body("printf '%s' \"$TERM\"", 1024);
+    dumb["env"] = json!({"TERM":"dumb"});
+    let opened = helper.request("pane.open", dumb, &mut events);
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    assert_eq!(
+        output_until(&helper, &mut events, &pane_id, generation, b"dumb"),
+        b"dumb",
+        "an explicit TERM=dumb overlay must survive"
+    );
+    assert_eq!(
+        helper.request(
+            "pane.kill",
+            json!({"id":pane_id,"generation":generation}),
+            &mut events
+        ),
+        json!({"ok":true})
+    );
+
+    // A dropped TERM stays removed: the bridge must not put back what the
+    // frame explicitly removed. (macOS /bin/sh reports its own "dumb"
+    // default when TERM is unset, so "dumb" -- never the bridge's
+    // "xterm-256color" -- is the observable proof of removal.)
+    let mut dropped = open_body("printf '%s' \"$TERM\"", 1024);
+    dropped["dropEnv"] = json!(["TERM"]);
+    let opened = helper.request("pane.open", dropped, &mut events);
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    assert_eq!(
+        output_until(&helper, &mut events, &pane_id, generation, b"dumb"),
+        b"dumb",
+        "dropEnv TERM must stay removed"
+    );
+    assert_eq!(
+        helper.request(
+            "pane.kill",
+            json!({"id":pane_id,"generation":generation}),
+            &mut events
+        ),
+        json!({"ok":true})
+    );
+
+    let opened = helper.request(
+        "pane.open",
+        open_body(
+            "if [ \"${FORCE_COLOR+set}\" = set ]; then printf forced; else printf unforced; fi",
+            1024,
+        ),
+        &mut events,
+    );
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    assert_eq!(
+        output_until(&helper, &mut events, &pane_id, generation, b"unforced"),
+        b"unforced",
+        "the bridge must never force FORCE_COLOR"
+    );
+    assert_eq!(
+        helper.request(
+            "pane.kill",
+            json!({"id":pane_id,"generation":generation}),
+            &mut events
+        ),
+        json!({"ok":true})
+    );
+
+    helper.close_input_and_wait();
+}
+
+#[test]
+fn pane_replaces_a_noninteractive_launchers_dumb_term() {
+    let _pty_guard = serial_headless_test();
+    for inherited in ["dumb", ""] {
+        let mut helper = Headless::spawn_with_env(&[("TERM", inherited)]);
+        let mut events = Vec::new();
+        let opened = helper.request(
+            "pane.open",
+            open_body("printf '%s:end' \"$TERM\"", 1024),
+            &mut events,
+        );
+        assert_eq!(opened["ok"], true);
+        let id = opened["id"].as_str().unwrap();
+        let generation = opened["generation"].as_u64().unwrap();
+        assert_eq!(
+            output_until(&helper, &mut events, id, generation, b":end"),
+            b"xterm-256color:end",
+            "a noninteractive launcher does not describe the pane's xterm"
+        );
+    }
+}
+
+#[test]
+fn pane_does_not_inherit_a_launchers_disabled_colors() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn_with_env(&[
+        ("TERM", "dumb"),
+        ("COLORTERM", ""),
+        ("NO_COLOR", "1"),
+        ("FORCE_COLOR", "0"),
+    ]);
+    let mut events = Vec::new();
+    let command = "printf '%s|%s|%s|%s:end' \"$TERM\" \"$COLORTERM\" \"${NO_COLOR-unset}\" \"${FORCE_COLOR-unset}\"";
+    let opened = helper.request("pane.open", open_body(command, 1024), &mut events);
+    assert_eq!(opened["ok"], true);
+    let id = opened["id"].as_str().unwrap();
+    let generation = opened["generation"].as_u64().unwrap();
+    assert_eq!(
+        output_until(&helper, &mut events, id, generation, b":end"),
+        b"xterm-256color|truecolor|unset|unset:end",
+        "the app's real terminal must not inherit a tool runner's plain-output flags"
+    );
+    let mut explicit = open_body(command, 1024);
+    explicit["env"] =
+        json!({"TERM":"vt100", "COLORTERM":"custom", "NO_COLOR":"1", "FORCE_COLOR":"0"});
+    let opened = helper.request("pane.open", explicit, &mut events);
+    let id = opened["id"].as_str().unwrap();
+    let generation = opened["generation"].as_u64().unwrap();
+    assert_eq!(
+        output_until(&helper, &mut events, id, generation, b":end"),
+        b"vt100|custom|1|0:end",
+        "an explicit pane environment remains authoritative"
+    );
+    helper.close_input_and_wait();
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn native_peer_send_checks_the_connected_process_and_preserves_the_draft() {
+    let _guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let socket = format!("/tmp/cf-peer-{}.sock", std::process::id());
+    let _ = std::fs::remove_file(&socket);
+    let script = r#"
+import os, socket, sys
+s = socket.socket(socket.AF_UNIX)
+s.bind(sys.argv[1])
+s.listen()
+print('READY:' + str(os.getpid()), flush=True)
+while True:
+    c, _ = s.accept()
+    data = b''
+    while True:
+        chunk = c.recv(65536)
+        if not chunk: break
+        data += chunk
+    c.close()
+    if data:
+        print('PEER:' + data.decode() + ':DONE', flush=True)
+"#;
+    let opened = helper.request(
+        "pane.open",
+        json!({
+            "cwd":"/tmp", "argv":["/usr/bin/python3", "-u", "-c", script, socket],
+            "env":{}, "size":{"rows":24,"cols":80}, "backlogBytes":4096
+        }),
+        &mut events,
+    );
+    let id = opened["id"].as_str().unwrap().to_string();
+    let generation = opened["generation"].as_u64().unwrap();
+    let ready = output_until(&helper, &mut events, &id, generation, b"\n");
+    let pid = String::from_utf8(ready)
+        .unwrap()
+        .trim()
+        .strip_prefix("READY:")
+        .unwrap()
+        .parse::<i32>()
+        .unwrap();
+    let typed = helper.request(
+        "pane.input",
+        json!({
+            "id":id,"generation":generation,"bytes":b"KEEP_DRAFT".to_vec()
+        }),
+        &mut events,
+    );
+    let epoch = typed["epoch"].as_u64().unwrap();
+    let request = json!({"id":id,"generation":generation,"epoch":epoch,
+        "socket":socket,"peerPid":pid,"body":"CF_PEER_BODY\n","timeoutMs":1000});
+
+    let other = helper.request("pane.open", open_body("/bin/sleep 1000", 1024), &mut events);
+    let mut wrong_owner = request.clone();
+    wrong_owner["id"] = other["id"].clone();
+    wrong_owner["generation"] = other["generation"].clone();
+    wrong_owner["epoch"] = json!(0);
+    let mut wrong_pid = request.clone();
+    wrong_pid["peerPid"] = json!(std::process::id());
+    let mut stale = request.clone();
+    stale["epoch"] = json!(0);
+    for (denied, code) in [
+        (wrong_owner, "peer-refused"),
+        (wrong_pid, "peer-refused"),
+        (stale, "stale-input-epoch"),
+    ] {
+        let result = helper.request("pane.send_peer", denied, &mut events);
+        assert_eq!(result["admitted"], false, "{result}");
+        assert_eq!(result["bytesWritten"], 0, "{result}");
+        assert_eq!(result["error"], code, "{result}");
+    }
+    let sent = helper.request("pane.send_peer", request, &mut events);
+    assert_eq!(sent["ok"], true, "{sent}");
+    let observed = output_until(&helper, &mut events, &id, generation, b":DONE");
+    assert!(String::from_utf8_lossy(&observed).contains("PEER:CF_PEER_BODY\r\n:DONE"));
+    let snapshot = helper.request(
+        "pane.snapshot",
+        json!({"id":id,"generation":generation}),
+        &mut events,
+    );
+    assert_eq!(snapshot["draftLatched"], true);
+    assert_eq!(snapshot["inputEpoch"], epoch);
+    helper.close_input_and_wait();
+    std::fs::remove_file(socket).unwrap();
 }

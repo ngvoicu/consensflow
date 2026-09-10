@@ -65,11 +65,15 @@ export class Page {
       const threads = await this.#store.readThreads(tab.directory)
       drawn.push({
         id: tab.id,
+        role: tab.role ?? 'lead',
+        roleName: tab.roleName ?? tab.lead.harness,
+        parentTabId: tab.parentTabId ?? null,
         // Derived for display, never stored: the store knows a tab by its
         // directory, and two tabs may share one.
         name: basename(tab.directory),
         directory: tab.directory,
         closed: tab.closed === true,
+        deleting: tab.deleting === true,
         ...(tab.policy === undefined ? {} : { policy: tab.policy }),
         lead: {
           harness: tab.lead.harness,
@@ -323,8 +327,16 @@ export class Page {
   #pane(tab, pane, threads) {
     const row = pane.conversation === null ? undefined : threads[pane.conversation]
     const reserved = isRecord(row?.reserved) ? row.reserved : null
+    const progress =
+      isRecord(row?.progress) &&
+      row.progress.pane === pane.id &&
+      row.progress.generation === pane.generation
+        ? row.progress
+        : undefined
     const alive =
       tab.closed !== true &&
+      pane.closed !== true &&
+      !pane.failure &&
       (pane.kind === 'lead'
         ? isRecord(tab.lead.reserved) && tab.lead.reserved.resolvedAt !== undefined
         : pane.kind === 'shell' || reserved === null || reserved.resolvedAt !== undefined)
@@ -334,6 +346,13 @@ export class Page {
       kind: pane.kind,
       order: pane.order,
       alive,
+      // An open lead is published before its native launch resolves. A dead
+      // lead closes its tab; an explicit worker failure has its own record.
+      ...(!alive && tab.closed !== true && pane.closed !== true && !pane.failure
+        ? { starting: true }
+        : {}),
+      ...(pane.failure ? { failure: pane.failure } : {}),
+      ...(progress === undefined ? {} : { progress }),
       ...(pane.conversation === null
         ? {}
         : { conversation: pane.conversation, name: pane.conversation }),
@@ -344,7 +363,24 @@ export class Page {
   }
 
   async #deliveries(tabs) {
-    const listed = []
+    const latest = new Map()
+    const isLater = (record, previous) => {
+      const createdAt = Number(record.createdAt)
+      const previousCreatedAt = Number(previous.createdAt)
+      if (
+        Number.isFinite(createdAt) &&
+        Number.isFinite(previousCreatedAt) &&
+        createdAt !== previousCreatedAt
+      ) {
+        return createdAt > previousCreatedAt
+      }
+      const numericId = Number(String(record.id ?? '').replace(/^d-/, ''))
+      const previousNumericId = Number(String(previous.id ?? '').replace(/^d-/, ''))
+      if (Number.isFinite(numericId) && Number.isFinite(previousNumericId)) {
+        return numericId > previousNumericId
+      }
+      return true
+    }
     for (const workspace of workspaces(tabs)) {
       for (const record of Object.values(await this.#store.readDeliveries(workspace))) {
         if (!isRecord(record)) continue
@@ -352,18 +388,30 @@ export class Page {
         // pane on `target` — the pane that produced the answer is not where
         // it is going. Reading them off the record itself finds nothing,
         // and the page's pane filter then hides a perfectly valid badge.
-        listed.push({
+        const target = record.target ?? {}
+        const tab = target.tab ?? record.tab ?? null
+        const pane = target.pane ?? record.pane ?? null
+        const generation = target.generation ?? record.generation ?? null
+        const answerKey =
+          record.answerId === undefined || record.answerId === null
+            ? `delivery:${record.id}`
+            : `${tab}\u0000${pane}\u0000${generation}\u0000${record.conversation ?? ''}\u0000${record.answerId}`
+        const previous = latest.get(answerKey)
+        if (previous !== undefined && !isLater(record, previous)) continue
+        latest.set(answerKey, {
           id: record.id,
-          tab: record.target?.tab ?? record.tab ?? null,
-          pane: record.target?.pane ?? record.pane ?? null,
+          tab,
+          pane,
+          generation,
           conversation: record.conversation ?? null,
+          agent: record.agent ?? null,
           answerId: record.answerId ?? null,
-          state: record.state ?? 'unknown',
+          state: record.suspended === true ? 'suspended' : (record.state ?? 'unknown'),
           ...(record.reason === undefined ? {} : { reason: record.reason }),
         })
       }
     }
-    return listed
+    return [...latest.values()]
   }
 
   async #held(tabs) {

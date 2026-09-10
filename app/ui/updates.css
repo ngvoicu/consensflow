@@ -1,0 +1,68 @@
+.update-banner {
+  position: fixed;
+  z-index: 25;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(520px, calc(100vw - 28px));
+  border: 1px solid var(--seafoam-dim);
+  border-radius: 7px;
+  background: var(--panel-raised);
+  padding: 8px 10px 8px 12px;
+  box-shadow: 0 16px 36px var(--shadow);
+}
+.update-banner span { min-width: 0; color: var(--foam); }
+.update-banner .icon-button { min-height: 26px; padding: 2px 7px; }
+
+#updates-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 32px));
+  overflow: auto;
+}
+.updates-dialog-form { display: grid; gap: 0; }
+.updates-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.updates-header h2 { margin: 0; font-size: 17px; }
+.updates-brand {
+  color: var(--seafoam);
+  font: 700 10px/1 var(--mono);
+  letter-spacing: .15em;
+  text-transform: uppercase;
+}
+.updates-header .quiet-button { margin-left: auto; }
+.updates-content { display: grid; gap: 12px; padding: 18px 20px; }
+.updates-description, .updates-state, .updates-feedback, .updates-date { margin: 0; }
+.updates-description, .updates-date { color: var(--muted); }
+.updates-feedback { border-left: 3px solid var(--seafoam); padding: 7px 9px; background: rgba(99, 199, 178, .08); }
+.updates-feedback[data-tone="error"] { border-left-color: var(--buoy); background: rgba(255, 120, 104, .08); }
+.updates-metadata { display: grid; grid-template-columns: 1fr minmax(150px, 180px); gap: 12px; align-items: end; }
+.updates-installed { margin: 0; }
+.updates-metadata label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
+.updates-metadata select {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--ink);
+  color: var(--foam);
+  padding: 7px 8px;
+}
+.updates-candidate, .updates-blockers { border-top: 1px solid var(--line-soft); padding-top: 12px; }
+.updates-candidate h3, .updates-blockers h3 { margin: 0; font-size: 13px; }
+.updates-candidate h4 { margin: 12px 0 5px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+.updates-notes { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.updates-blockers p { margin: 8px 0 0; color: var(--amber); }
+.updates-blockers ul { margin: 7px 0 0; padding-left: 20px; color: var(--muted); }
+.updates-progress { margin: 0; color: var(--seafoam); font: 11px/1.3 var(--mono); }
+.updates-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 0 20px 18px; }
+
+@media (max-width: 520px) {
+  .updates-metadata { grid-template-columns: 1fr; }
+  .updates-actions { justify-content: stretch; }
+  .updates-actions button { flex: 1 1 45%; }
+}

@@ -9,6 +9,7 @@ import { workspaceKey } from '../../hosts/lib/state.js'
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const CF = join(REPO, 'bin', 'cf.mjs')
 const BRIDGE = join(REPO, 'app', 'src-tauri', 'target', 'debug', 'consensflow-bridge')
+const EDITOR = fileURLToPath(new URL('./pty-editor.mjs', import.meta.url))
 const FAKE = join(dirname(fileURLToPath(import.meta.url)), 'fake-claude.mjs')
 
 function parser(onLine) {
@@ -132,7 +133,7 @@ export async function startIntegration({ fakeEnv = {}, bridgeEnv = {}, existingR
   const env = { ...safeEnvironment(root, fakeBin, FAKE), ...fakeEnv }
   writeRoster(env)
 
-  const ui = spawn(process.execPath, [CF, 'ui', '--json', '--no-open'], {
+  const ui = spawn(process.execPath, [EDITOR], {
     cwd: REPO,
     env,
     stdio: ['pipe', 'pipe', 'pipe'],

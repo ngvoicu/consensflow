@@ -15,6 +15,8 @@
  * the child's own hex of what was typed, the ack count the page really sent.
  */
 
+import { runUpdateSelftest } from './update-selftest.js'
+
 const READY = /CFSMOKE-READY (\S+)/
 const TOOLS = /CFSMOKE-TOOLS (\S+)/
 const FLOODED = /CFSMOKE-FLOODED (\S+)/
@@ -68,6 +70,14 @@ export async function runSelftest({
   onAck,
   onOutput,
 }) {
+  if (
+    typeof config?.updaterExpectedVersion === 'string' &&
+    config.updaterExpectedVersion.length > 0
+  ) {
+    await runUpdateSelftest({ config, invoke, refresh })
+    return
+  }
+
   let acks = 0
   let arrivals = 0
   let arrivedBytes = 0
@@ -222,6 +232,20 @@ export async function runSelftest({
     )
     await report('drained', { lastFloodLine: flood.last, acks })
 
+    const pm = await invoke('open_pm', { tab: opened.tab, harness: 'claude-code' })
+    if (!pm.ok) throw new Error(pm.error ?? 'PM did not open')
+    await refresh()
+    document.querySelector(`[data-testid="pm-${pm.tab}"]`)?.click()
+    const pmEmulator = await until(
+      'PM emulator in main registry',
+      () => registry.emulators.get(`${pm.pane.id}:${pm.pane.generation}`)?.emulator,
+    )
+    await runPmSelftest({
+      emulator: pmEmulator,
+      pane: pm.pane,
+      enqueue: (_action, text) => sendInput(pm.pane, text),
+      invoke,
+    })
     await report('settled', { acks, pane })
   } catch (cause) {
     await report('failed', { error: cause instanceof Error ? cause.message : String(cause) })
@@ -232,4 +256,24 @@ function toHex(text) {
   return [...new TextEncoder().encode(text)]
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('')
+}
+
+/** Exercise the PM through the main window's real emulator and input path. */
+async function runPmSelftest({ emulator, pane, enqueue, invoke }) {
+  try {
+    await until('PM terminal banner', () => screen(emulator).some((row) => READY.test(row)))
+    const typed = 'cfsmoke-pm-input'
+    await enqueue('input', typed)
+    await enqueue('input', '\r')
+    const hex = await until('PM input echo', () => {
+      for (const row of screen(emulator)) {
+        const match = HEX.exec(row)
+        if (match?.[1] === toHex(typed)) return match[1]
+      }
+      return null
+    })
+    await invoke('selftest_report', { event: 'pm-echo', data: { pane, typed, hex } })
+  } catch (error) {
+    await invoke('selftest_report', { event: 'failed', data: { error: String(error) } })
+  }
 }

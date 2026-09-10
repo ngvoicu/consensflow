@@ -12,11 +12,7 @@ import path from 'node:path'
 import { piSessionDir } from '../../src/harnesses.js'
 
 const SUPPORTED = {
-  codex: new Set(['0.153.4']),
-  'claude-code': new Set(['2.1.241', '2.1.247', '2.1.250', '2.1.263']),
-  pi: new Set(['3']),
   kimi: new Set(['1.5']),
-  opencode: new Set(['1.18.27', '1.18.29']),
 }
 
 class UnsupportedVersionError extends Error {}
@@ -167,7 +163,6 @@ function resultBase() {
     failed: false,
     failure: null,
     cursor: null,
-    version: '',
     settlement: {
       state: 'unknown',
       provenance: 'unknown',
@@ -526,7 +521,6 @@ async function codexAnswers(sessionId, env) {
   const turns = new Map()
   const calls = new Map()
   const subagents = new Map()
-  let version
   let currentTurnId = null
   let latestTurnId = null
 
@@ -556,7 +550,6 @@ async function codexAnswers(sessionId, env) {
 
     if (record.type === 'session_meta') {
       const meta = record.payload ?? {}
-      version = checkedVersion('codex', meta.cli_version)
       const own = meta.id ?? meta.session_id
       if ((own && own !== sessionId) || meta.forked_from_id) result.replaced = true
       return
@@ -714,7 +707,6 @@ async function codexAnswers(sessionId, env) {
   })
 
   if (count === 0) throw new Error(`empty codex rollout for ${sessionId}`)
-  result.version = version ?? checkedVersion('codex', undefined)
 
   for (const turn of turns.values()) {
     if (turn.terminal?.kind !== 'complete') continue
@@ -832,7 +824,6 @@ async function claudeAnswers(sessionId, env) {
   const dequeued = []
   const popped = []
   const hooks = new Set()
-  let version
   let turnOpen = false
   let candidate = null
   let terminal = null
@@ -907,10 +898,6 @@ async function claudeAnswers(sessionId, env) {
     const seq = mintCursor('claude-code', recordIndex)
     const at = record.timestamp ?? recordIndex
     result.cursor = seq
-    if (record.version !== undefined) {
-      const observed = checkedVersion('claude-code', record.version)
-      version = observed
-    }
     const own = record.sessionId
     if (own && own !== sessionId) result.replaced = true
 
@@ -1059,7 +1046,7 @@ async function claudeAnswers(sessionId, env) {
       return
     }
 
-    // 2.1.263's root query finalizer emits this only after query completion,
+    // 2.1.263/265/266's root query finalizer emits this only after query completion,
     // after stop hooks, and when not aborted. The transcript omits optional
     // background counts; candidate/tool/queue/hook guards establish readiness.
     // The exact installed call sites and native fixture are documented beside
@@ -1067,7 +1054,6 @@ async function claudeAnswers(sessionId, env) {
     const durationBoundary =
       record.type === 'system' &&
       record.subtype === 'turn_duration' &&
-      version === '2.1.263' &&
       record.isSidechain === false &&
       Number.isFinite(record.durationMs) &&
       record.durationMs >= 0 &&
@@ -1097,7 +1083,6 @@ async function claudeAnswers(sessionId, env) {
   })
 
   if (count === 0) throw new Error(`empty claude session ${sessionId}`)
-  result.version = version ?? checkedVersion('claude-code', undefined)
   const queuedTurns = queueEvidence()
   const hookEvidence = [...hooks].map((id) => `stop-hook:${id}`)
   const evidence = {
@@ -1197,7 +1182,6 @@ async function piAnswers(sessionId, env, options = {}) {
 
   const result = resultBase()
   const openTools = new Set()
-  let version
   let turnOpen = false
   let terminal = null
 
@@ -1207,7 +1191,6 @@ async function piAnswers(sessionId, env, options = {}) {
     result.cursor = seq
 
     if (record.type === 'session') {
-      version = checkedVersion('pi', record.version)
       if (record.id && record.id !== sessionId) result.replaced = true
       return
     }
@@ -1296,7 +1279,6 @@ async function piAnswers(sessionId, env, options = {}) {
   })
 
   if (count === 0) throw new Error(`empty pi session ${sessionId}`)
-  result.version = version ?? checkedVersion('pi', undefined)
   const nativeEvidence = await piSettlementEvidence(sessionId, env, options)
   const hasNativeBoundary = Boolean(
     nativeEvidence && terminal?.item?.id === nativeEvidence.frontier.id,
@@ -1657,7 +1639,6 @@ async function opencodeAnswers(sessionId, env, options) {
     if (!session) {
       return { unknown: true, reason: `unreadable: no opencode session ${sessionId}` }
     }
-    const version = checkedVersion('opencode', session.version)
     const messages = db
       .prepare('select * from message where session_id = ? order by time_created, id')
       .all(sessionId)
@@ -1670,7 +1651,6 @@ async function opencodeAnswers(sessionId, env, options) {
       .all(sessionId)
 
     const result = resultBase()
-    result.version = version
     const messagePositions = new Map()
     const messageCompletionPositions = new Map()
     const partPositions = new Map()

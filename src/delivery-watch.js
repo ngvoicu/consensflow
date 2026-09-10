@@ -3,6 +3,8 @@ import path from 'node:path'
 import { answers, itemsAfterCursor } from '../hosts/lib/completion.js'
 import {
   cancel,
+  digest,
+  envelope,
   fail,
   plan,
   receipt,
@@ -13,6 +15,11 @@ import {
 } from '../hosts/lib/deliveries.js'
 import { effectivePolicy } from '../hosts/lib/policy.js'
 import { leadReady } from '../hosts/lib/readiness.js'
+import {
+  currentSession as currentClaudeSession,
+  submissionId as claudeSubmissionId,
+} from './channels/claude-peer.js'
+import { probeEditor } from './channels/pi.js'
 import { deliver, enabledChannels, launchConfiguration } from './channels.js'
 import { leadIdentity } from './tabs.js'
 
@@ -50,6 +57,35 @@ function completedResults(completion) {
   return (completion?.items ?? []).filter(
     (item) => item.role === 'assistant' && item.complete === true && item.settled === true,
   )
+}
+
+/** Saved immutable answers are a read fallback, never an automatic-send source. */
+function readableResults(completion, records, tab, conversation) {
+  const items = completedResults(completion)
+  const ids = new Set(items.map((item) => item.id))
+  for (const record of records) {
+    if (
+      record?.target?.tab !== tab.id ||
+      record.conversation !== conversation ||
+      typeof record.answer !== 'string' ||
+      ids.has(record.answerId)
+    )
+      continue
+    try {
+      if (digest(envelope(record)) !== record.digest) continue
+    } catch {
+      continue
+    }
+    items.push({
+      id: record.answerId,
+      role: 'assistant',
+      text: record.answer,
+      complete: true,
+      settled: true,
+    })
+    ids.add(record.answerId)
+  }
+  return items
 }
 
 async function workerAnswers(tab, row, env) {
@@ -105,7 +141,10 @@ function targetForRow(tab, row, records) {
 
 function deliveryRoute(route, target, record, bridge, epoch) {
   const stored = route?.channel
-  if (isRecord(stored)) {
+  // A reservation names the channel its launch enabled. A retired kind (the
+  // removed Claude development channel) is never chosen: the record keeps its
+  // own terminal channel instead of failing against an unknown adapter.
+  if (isRecord(stored) && enabledChannels(route.harness).includes(stored.kind)) {
     return {
       channel: stored.kind,
       target: {
@@ -229,6 +268,7 @@ export class Watcher {
     receiptMs,
     inlineBudget,
     partBudget,
+    bindLead = null,
     onError = null,
   } = {}) {
     if (!store || typeof store.readThreads !== 'function') {
@@ -248,6 +288,7 @@ export class Watcher {
     this.receiptMs = receiptMs
     this.inlineBudget = inlineBudget
     this.partBudget = partBudget
+    this.bindLead = bindLead
     this.onError = typeof onError === 'function' ? onError : () => {}
     this.bridge = null
     this.started = false
@@ -301,7 +342,9 @@ export class Watcher {
 
   async held(tabId) {
     const tab = await this.tabs.get(tabId)
-    if (!tab) throw new Error(`unknown tab ${tabId}`)
+    // A page snapshot can outlive a deleted tab. Reads have nothing to show;
+    // sendHeld still requires a current, live lead before it can send.
+    if (!tab) return { action: HELD_ACTION, records: [] }
     // A closed tab has no current lead to compare against, but its pending
     // records are precisely what the page must show as held before resume.
     // sendHeld still requires targetFor(tab) and a live tab, so visibility
@@ -352,7 +395,7 @@ export class Watcher {
         agent: row.agent,
         running: completion?.inFlight === true,
         reason: completion?.reason ?? (bound(row) ? null : 'native session is not bound'),
-        results: completedResults(completion).map((item) => {
+        results: readableResults(completion, records, tab, conversation).map((item) => {
           const copies = records.filter(
             (r) =>
               r.conversation === conversation &&
@@ -396,7 +439,7 @@ export class Watcher {
       const copies = records.filter(
         (r) => r.conversation === conversation && sameTarget(r.target, target),
       )
-      const items = completedResults(completion)
+      const items = readableResults(completion, records, tab, conversation)
       const item =
         answerId === undefined
           ? items.find(
@@ -424,9 +467,10 @@ export class Watcher {
         this.env,
         completionOptions(tab.lead.reserved?.channel),
       )
-      if (lead?.unknown || lead?.replaced || !Number.isSafeInteger(lead?.cursor)) {
-        throw new Error(lead?.reason ?? 'the lead transcript has no verified read cursor')
-      }
+      // Result access does not depend on a receiver transcript. A missing
+      // cursor leaves the receipt unconfirmed; it never authorizes injection.
+      const cursor =
+        !lead?.unknown && !lead?.replaced && Number.isSafeInteger(lead?.cursor) ? lead.cursor : null
       const id = await this.store.allocateDeliveryId()
       const [planned] = plan({
         row,
@@ -443,7 +487,7 @@ export class Watcher {
         partBudget: this.partBudget,
       })
       const reading = {
-        ...submit(planned, { target, cursor: lead.cursor, now: this.now() }),
+        ...submit(planned, { target, cursor, now: this.now(), manualRead: true }),
         manualRead: true,
       }
       await this.#writeImmutable(reading)
@@ -539,15 +583,63 @@ export class Watcher {
   async #run(restart) {
     if (this.closed) return
     const tabs = await this.tabs.list()
-    if (restart) await this.#recoverSubmissions(tabs)
-    for (const tab of tabs) {
+    if (restart) await this.#recoverSubmissions(tabs.filter((tab) => tab.role !== 'pm'))
+    for (let tab of tabs) {
       if (this.closed) return
       try {
+        if (this.bridge && !tab.closed && !tab.lead?.nativeSession && this.bindLead) {
+          await this.bindLead(tab.id)
+          tab = await this.tabs.get(tab.id)
+          if (!tab) continue
+        }
+        tab = await this.#refreshLeadSession(tab)
         await this.#reconcileTab(tab)
       } catch (cause) {
         this.onError(cause)
       }
     }
+  }
+
+  async #refreshLeadSession(tab) {
+    const channel = tab.lead?.reserved?.channel
+    const target = targetFor(tab)
+    if (!this.bridge || tab.closed || !target || channel?.kind !== 'claude-peer') return tab
+    let session
+    try {
+      session = await currentClaudeSession(
+        channel,
+        { id: target.pane, generation: target.generation },
+        this.bridge,
+      )
+    } catch {
+      return tab
+    }
+    if (!session || session === target.session) return tab
+    await this.store.mutate(tab.directory, 'delivery.lead-conversation', async (io) => {
+      const tabs = await io.readTabs()
+      const current = tabs.find((t) => t.id === tab.id)
+      if (!sameTarget(targetFor(current), target) || current.closed) return
+      current.lead.nativeSession = session
+      const records = await io.readDeliveries()
+      for (const record of Object.values(records)) {
+        // Only unsubmitted results follow a conversation change. Uncertain writes
+        // continue checking their original receipt and are never replayed.
+        if (
+          !sameTarget(record.target, target) ||
+          record.manualRead === true ||
+          record.state !== 'pending'
+        )
+          continue
+        record.target = { ...record.target, session }
+        record.snapshot = null
+        record.submittedAt = null
+        record.expiresAt = null
+        delete record.nativeSubmissionId
+      }
+      await io.writeDeliveries(records)
+      await io.writeTabs(tabs)
+    })
+    return await this.tabs.get(tab.id)
   }
 
   async #recoverSubmissions(tabs) {
@@ -565,6 +657,7 @@ export class Watcher {
   }
 
   async #reconcileTab(tabAtStart) {
+    if (tabAtStart.role === 'pm') return
     let tab = tabAtStart
     if (!tab?.directory) return
     let threads = await this.store.readThreads(tab.directory)
@@ -628,10 +721,7 @@ export class Watcher {
           item?.role === 'assistant' &&
           item.complete === true &&
           !records.some(
-            (record) =>
-              record?.conversation === conversation &&
-              record?.answerId === item.id &&
-              record?.state !== 'failed',
+            (record) => record?.conversation === conversation && record?.answerId === item.id,
           ) &&
           !(row.seen?.[target.leadId] ?? []).includes(item.id),
       )
@@ -797,6 +887,7 @@ export class Watcher {
   }
 
   async #receipt(tab, record, records) {
+    if (record.manualRead === true && record.snapshot?.cursor === null) return record
     const leadAnswers = await answers(
       tab.lead.harness,
       record.target.session,
@@ -814,11 +905,8 @@ export class Watcher {
         reason: 'lead session replaced after submission; write outcome is uncertain',
       })
     }
-    if (expired(record, this.now())) {
-      return fail(record, {
-        reason: 'native delivery expired before receipt; admission outcome is uncertain',
-      })
-    }
+    // `expiresAt` is the native channel's admission deadline. The receipt
+    // primitive owns the separate, longer receipt window from `submittedAt`.
     return receipt(record, record.snapshot, {
       session: record.target.session,
       generation: record.target.generation,
@@ -964,15 +1052,31 @@ export class Watcher {
       }
     }
     const sinceCursor = latestSubmittedCursor(records, target, record.id)
+    const nativeEditor = currentTab.lead.reserved?.channel
+    const guardedPi = nativeEditor?.kind === 'pi-extension' && nativeEditor.editorGuard === 1
+    const nativeQueue =
+      nativeEditor?.preservesDraft === 1 &&
+      {
+        'claude-code': 'claude-peer',
+        codex: 'codex-queue',
+        opencode: 'opencode-server',
+      }[currentTab.lead.harness] === nativeEditor.kind
     const decision = leadReady({
       answers: leadAnswers,
       kind: currentTab.lead.harness,
       purpose: record.manual === true ? 'manual' : 'automatic',
+      // Native queues preserve the composer; Pi checks its editor at sendUserMessage.
+      // The opaque latch remains set and continues to forbid every PTY paste.
       draftLatched: snapshot.draftLatched,
+      composerAuthority: guardedPi ? 'pi-native-editor' : nativeQueue ? 'native-queue' : 'terminal',
       epoch: snapshot.inputEpoch,
       sinceCursor,
     })
     if (decision.state !== 'ready') return { record: { ...record, reason: decision.reason } }
+    if (guardedPi) {
+      const editor = await probeEditor(nativeEditor, target.session)
+      if (editor.ready !== true) return { record: { ...record, reason: editor.reason } }
+    }
     if (
       records.some(
         (candidate) =>
@@ -1020,6 +1124,26 @@ export class Watcher {
     try {
       const response = await deliver(route.channel, route.target, readyRecord)
       const responseExpired = expired(readyRecord, this.now())
+      if (
+        ['stale-input-epoch', 'native-session-unavailable'].includes(response?.error) &&
+        response.admitted === false &&
+        response.bytesWritten === 0
+      ) {
+        // No byte reached native ingress. Keep this identity, then take a new
+        // readiness snapshot and admission deadline once human input settles.
+        const retry = {
+          ...readyRecord,
+          state: 'pending',
+          reason:
+            response.error === 'native-session-unavailable'
+              ? 'waiting for the lead pane native conversation'
+              : 'human input changed before delivery',
+          snapshot: null,
+          submittedAt: null,
+          expiresAt: null,
+        }
+        return { record: retry }
+      }
       if (response?.admitted === false && (response.bytesWritten === 0 || !responseExpired)) {
         return {
           record: fail(readyRecord, {
@@ -1027,6 +1151,7 @@ export class Watcher {
             reason:
               response?.ack?.error ??
               response?.ack?.reason ??
+              response?.cause ??
               response?.error ??
               'delivery was not admitted by the lead channel',
           }),
@@ -1052,17 +1177,6 @@ export class Watcher {
       }
       if (response?.ok === true) return admitted
       const refusal = response?.error ?? 'unknown bridge refusal'
-      if (/stale|draft/i.test(refusal)) {
-        return {
-          record: {
-            ...readyRecord,
-            state: 'pending',
-            reason: refusal,
-            snapshot: null,
-            submittedAt: null,
-          },
-        }
-      }
       if (refusal === 'uncertain') {
         return {
           record: fail(readyRecord, {
@@ -1228,6 +1342,9 @@ export class Watcher {
                     now: submittedAt,
                   }),
                   ...(expiresAt === null ? {} : { expiresAt }),
+                  ...(route.channel?.kind === 'claude-peer'
+                    ? { nativeSubmissionId: claudeSubmissionId(target, current) }
+                    : {}),
                   submissionOrder: nextSubmissionOrder(all),
                 }
               }
