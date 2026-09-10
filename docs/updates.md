@@ -4,18 +4,18 @@
 
 ## Prepare a feed
 
-Build the app and archive with the same version, then run the helper from the repository root. The current source version is `3.0.0-alpha.37`; replace paths and the publication date for the release being prepared.
+Build the app and archive with the same version, then run the helper from the repository root. The current source version is `3.0.0-alpha.43`; replace paths and the publication date for the release being prepared.
 
 ```sh
 node app/scripts/prepare-update.mjs \
   --repo "$PWD" \
   --bundle /path/to/ConsensFlow.app \
-  --archive /path/to/ConsensFlow-3.0.0-alpha.37_aarch64.app.tar.gz \
-  --signature /path/to/ConsensFlow-3.0.0-alpha.37_aarch64.app.tar.gz.sig \
+  --archive /path/to/ConsensFlow-3.0.0-alpha.43_aarch64.app.tar.gz \
+  --signature /path/to/ConsensFlow-3.0.0-alpha.43_aarch64.app.tar.gz.sig \
   --notes /path/to/release-notes.txt \
   --output /path/to/latest.json \
   --channel alpha \
-  --date 2026-09-09T12:00:00Z
+  --date 2026-09-10T12:00:00Z
 ```
 
 The helper checks source, bundle, bundled CLI, and archive versions; compares archive bytes and modes against the supplied app; rejects traversal, links, and special archive entries; validates the Tauri outer-base64 minisign envelope; and writes deterministic JSON. Release notes are treated as text and are preserved, including URLs. The platform URL is constructed from the fixed official GitHub release path and the versioned archive filename.
@@ -45,5 +45,12 @@ date. A DMG-only GitHub release cannot satisfy the updater: publish the signed
 archive and matching feed in the order above. Changing channels does not repair
 a missing feed; each channel is checked independently.
 
-On 2026-09-10, both rolling feeds returned HTTP 404 and the published releases
-contained DMGs only. Local builds/reinstalls do not publish updater assets.
+The first signed updater release, [3.0.0-alpha.43](https://github.com/ngvoicu/consensflow/releases/tag/v3.0.0-alpha.43),
+was published on 2026-09-10 with its [Alpha feed](https://github.com/ngvoicu/consensflow/releases/download/update-alpha/latest.json).
+Select **Alpha** in the app to use it. The Stable feed is not published until a
+stable release exists. Local builds/reinstalls alone do not publish assets.
+
+Publication verification downloaded all versioned assets and compared their
+hashes, verified the archive with the app's pinned public key, and exercised the
+native updater against the public feed: alpha.42 found/downloaded alpha.43 and
+alpha.43 reported up to date.

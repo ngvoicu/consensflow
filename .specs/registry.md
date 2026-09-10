@@ -6,7 +6,7 @@
 | cmux-agent-threads | Agent Threads — named, resumable conversations (SPEC.md missing) | completed | high | 16/16 | 2026-08-23 |
 | cmux-attached-consults | Attached consults — the pane IS the agent's window (SPEC.md missing) | completed | high | 10/10 | 2026-08-24 |
 | kimi-harness | Kimi Code as a fifth harness (SPEC.md missing) | completed | high | 8/8 | 2026-08-24 |
-| standalone-panes-delivery | ConsensFlow owns the panes — standalone mode in the app, results delivered to the lead | active | high | 196/197 | 2026-09-10 |
+| standalone-panes-delivery | ConsensFlow owns the panes — standalone mode in the app, results delivered to the lead | active | high | 197/197 | 2026-09-10 |
 
 Phase 19 is complete: alpha.37 is installed and source is integrated into the
 original checkout. Native delivery, persistent results, PM window, updater and
@@ -51,3 +51,9 @@ alpha.43. Prepare exact installed artifacts; publish only the Alpha feed.
 
 Alpha.43 artifacts prepared and verified; packaged upgrade passed. Publication
 is current. Full Node retains the disclosed lifecycle count assertion failure.
+
+Phase 24 complete: alpha.43 published on GitHub; source b34bd42 and version/feed
+tags pushed to NAS and GitHub. All five release assets downloaded and verified;
+Alpha feed returns HTTP 200. Real native updater: alpha.42 sees/downloads the
+release, alpha.43 is current. Stable remains unpublished. Documentation-only
+publication evidence follows the immutable release commit on both main branches.

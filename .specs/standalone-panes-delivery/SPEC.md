@@ -1842,12 +1842,13 @@ are recorded in `implementation-isolation.json`. Alpha.37 is installed; companio
 
 ## Resume Context
 
-2026-09-10 current: Phase 23 is complete. Alpha.43 is installed; the duplicate
-Updates header button is removed and the native-menu event remains tested.
-UI 89/89, Rust updater 8/8, Node updater 16/16, packaged smoke 1/1; all exit 0.
-Installed bytes and existing state/preferences were verified. Both remote
-feeds remain HTTP 404 because signed updater releases have not been published.
-No GitHub release, commit, GitHub push or NAS push was performed. See Phase 23.
+2026-09-10 current: Phase 24 is complete. Alpha.43 is installed and published
+on GitHub with signed updater assets and a live Alpha feed. Source commit
+b34bd42 and release/feed tags are pushed to both NAS and GitHub. All remote
+asset hashes and the production signature were verified. The actual native
+updater found/downloaded alpha.43 from alpha.42 and reported alpha.43 current.
+Select Alpha; no Stable release exists yet. See Phase 24's full evidence.
+The existing full-Node lifecycle assertion is disclosed in the release notes.
 
 Previous Phase 22: Alpha.42 was installed and running;
 both saved conversation identities survived. Full assigned role instructions
@@ -2940,7 +2941,7 @@ Advisor and Context7 are unavailable; inspect the installed updater source.
   guarded explicit installation remain intact. No dependency was added.
 
 
-## Publish alpha.43 — Phase 24 [active]
+## Publish alpha.43 — Phase 24 [completed]
 
 Gabriel explicitly authorized the GitHub release, updater publication and NAS
 push on 2026-09-10 ("do it" following the local-only release report). This
@@ -2959,7 +2960,7 @@ are planned; reuse existing release checks and run packaged upgrade acceptance.
 
 - [x] [PREP-PANE-201] Prepare and validate exact alpha.43 artifacts and source snapshot.
 - [x] [VERIFY-PANE-202] Run release regressions and packaged alpha.42-to-alpha.43 upgrade.
-- [ ] [RELEASE-PANE-203] Commit/push matching source to NAS and GitHub, publish version and Alpha feed, verify remotely. ← current
+- [x] [RELEASE-PANE-203] Commit/push matching source to NAS and GitHub, publish version and Alpha feed, verify remotely.
 
 ### Phase 24 evidence
 
@@ -2981,3 +2982,39 @@ refusal, install and restart. Full Node: 1221 passed, one existing lifecycle
 assertion failed (pane.list count 2 versus 1, tests/lifecycle.test.mjs:345), five
 skipped. The published prerelease notes explicitly disclose this limitation.
 Logs: `/tmp/cf-release43-{node,rust,integration,upgrade,clippy}.log`.
+
+### Phase 24 publication verified — 2026-09-10
+
+- Release source commit `b34bd42b3edc4b7b1adfaff3999ae393859d639e`, annotated
+  `v3.0.0-alpha.43` tag and `update-alpha` tag were pushed normally to both
+  `origin` (NAS) and `upstream` (GitHub); remote refs were read back and matched.
+  The release includes pending standalone-pane implementation/spec/test work;
+  generated `test-results/` remains untracked and was not published.
+- GitHub prerelease: https://github.com/ngvoicu/consensflow/releases/tag/v3.0.0-alpha.43
+  Published DMG, updater archive, `.sig`, `latest.json`, and `SHA256SUMS`.
+  All five public assets were downloaded and compared to the prepared hashes.
+  The public archive signature verified against the app's pinned public key.
+- Published rolling feed only after version assets were public:
+  https://github.com/ngvoicu/consensflow/releases/download/update-alpha/latest.json
+  HTTP 200; version alpha.43; SHA-256
+  `d549e3f28a9be5303a6468ff0768f90eb85aad45eb4076da48e17ab286697b3e`.
+  Stable remains unpublished because this is an Alpha prerelease.
+- A temporary native Tauri updater probe used the production pinned key and
+  real public HTTPS endpoint. Alpha.42 discovered alpha.43, downloaded the
+  public archive and verified its signature and bytes; alpha.43 returned no
+  candidate (up to date). 1/1 passed, exit 0. No test endpoint or key override,
+  no install, no persistent app setting change. Probe source/log retained at
+  `/tmp/cf-release43-live-probe.rs` and `/tmp/cf-release43-live-native.log`;
+  its temporary Cargo integration-test file was removed.
+- Packaged alpha.42-to-alpha.43 install/restart acceptance also passed 1/1,
+  using an isolated installation. Rust 106/106, integration 25/25, Clippy with
+  denied warnings passed; Phase 23 UI 89/89, focused updater Node 16/16 and
+  packaged startup 1/1 apply to the identical released bundle. Full Node's
+  pre-existing lifecycle assertion remains disclosed in the release notes.
+- Versioned local assets and remote hash evidence:
+  `~/ConsensFlow-Releases/3.0.0-alpha.43`. The installed alpha.43 bundle was
+  already byte-identical to this release; no further reinstall was needed.
+- Final review confirms explicit publication authorization, matching code/tag
+  identity, forward-only pushes, immutable version assets published before the
+  rolling feed, pinned-key signature verification and actual native checks.
+  Advisor/Context7 tools remained unavailable; no dependencies were added.
