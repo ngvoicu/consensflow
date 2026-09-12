@@ -1,6 +1,5 @@
 import { spawn } from 'node:child_process'
 import { isAbsolute } from 'node:path'
-import { envelope, pointer } from '../../hosts/lib/deliveries.js'
 import { claimEpoch } from './pty.js'
 
 export const DEFAULT_DEADLINE_MS = 3_000
@@ -66,10 +65,10 @@ function timeoutBudget(target, config) {
   return Math.min(...budgets, DEFAULT_DEADLINE_MS)
 }
 
-function deadlineAt(target, config, record) {
+function deadlineAt(target, config) {
   const now = Date.now()
   const configured = now + timeoutBudget(target, config)
-  return Number.isFinite(record?.expiresAt) ? Math.min(configured, record.expiresAt) : configured
+  return configured
 }
 
 function zeroByteRefusal(cause, error = 'failed-with-zero-bytes') {
@@ -184,13 +183,62 @@ function runQueue(config, launch, session, text, deadline) {
   })
 }
 
-async function sendText(target, text, record) {
+/** Native TUI replies identify the main lead, independently of transcript recency. */
+export async function currentSession(config) {
+  return (await currentSessionState(config))?.sessionId
+}
+
+export async function currentSessionState(config) {
+  if (!config?.sessionBridge || !config.launchId) return undefined
+  try {
+    const response = await fetch(new URL('/session', config.sessionBridge.endpoint), {
+      headers: { authorization: `Bearer ${config.sessionBridge.token}` },
+      signal: AbortSignal.timeout(1000),
+    })
+    const current = await response.json()
+    if (!response.ok || current.launchId !== config.launchId) return undefined
+    if (current.sessionId !== null && !UUID.test(current.sessionId ?? '')) return undefined
+    return { sessionId: current.sessionId, empty: current.empty === true }
+  } catch {
+    return undefined
+  }
+}
+
+async function sendCurrent(config, session, text, deadline) {
+  if (Date.now() >= deadline) return zeroByteRefusal(undefined, 'expired')
+  try {
+    const response = await fetch(new URL('/deliver', config.sessionBridge.endpoint), {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${config.sessionBridge.token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        launchId: config.launchId,
+        sessionId: session,
+        text,
+        expiresAt: deadline,
+      }),
+      signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+    })
+    const result = await response.json()
+    if (response.ok && result.ok === true && result.admitted === true)
+      return { ok: true, admitted: true }
+    if (result.admitted === false && result.bytesWritten === 0 && typeof result.error === 'string')
+      return zeroByteRefusal(undefined, result.error)
+    return uncertain('native-queue-admission')
+  } catch {
+    return uncertain('native-queue-transport')
+  }
+}
+
+async function sendText(target, text) {
   paneTarget(target)
   const { config, launch } = launchConfig(target)
   const session = nativeSession(target)
   if (typeof text !== 'string') throw new Error('codex-queue delivery needs text')
 
-  const deadline = deadlineAt(target, config, record)
+  const deadline = deadlineAt(target, config)
   if (deadline <= Date.now()) return zeroByteRefusal(undefined, 'expired')
 
   const claimed = await claimEpoch(target, 'pane.claim_native_epoch')
@@ -201,15 +249,10 @@ async function sendText(target, text, record) {
     )
   if (deadline <= Date.now()) return zeroByteRefusal(undefined, 'expired')
 
+  if (config.sessionBridge) return await sendCurrent(config, session, text, deadline)
   return await runQueue(config, launch, session, text, deadline)
 }
 
 export async function send(target, text) {
   return await sendText(target, text)
-}
-
-export async function deliver(channel, target, record) {
-  if (channel !== 'codex-queue') throw new Error(`unsupported Codex channel: ${channel}`)
-  const text = record?.channel === 'cf-read' ? pointer(record) : envelope(record)
-  return await sendText(target, text, record)
 }

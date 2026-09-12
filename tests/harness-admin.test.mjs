@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
 import { HarnessAdmin } from '../src/harness-admin.js'
+import { startUiServer } from '../src/ui.js'
 import { tempEnv } from './helpers.mjs'
 
 test('administration lists missing harnesses without probing or installing them', async () => {
@@ -22,7 +23,7 @@ test('administration lists missing harnesses without probing or installing them'
   }
 })
 
-test('version and update probes do not manufacture integration success; checks cache and refresh', async () => {
+test('version and update checks cache results and refresh on request', async () => {
   const t = tempEnv()
   try {
     mkdirSync(t.env.HOME, { recursive: true })
@@ -39,7 +40,7 @@ test('version and update probes do not manufacture integration success; checks c
     const [row] = await admin.check('codex')
     assert.equal(row.version.value, '99.1.0')
     assert.equal(row.update.state, 'available')
-    assert.equal(row.integration.state, 'unverified')
+    assert.equal(Object.hasOwn(row, 'integration'), false)
     await admin.check('codex')
     assert.equal(calls, 1)
     await admin.check('codex', { refresh: true })
@@ -64,63 +65,11 @@ test('offline and invalid version output are explicit failures, not latest or in
     const [row] = await admin.check('claude')
     assert.equal(row.version.state, 'unknown')
     assert.equal(row.update.state, 'error')
-    assert.equal(row.integration.state, 'unverified')
+    assert.equal(Object.hasOwn(row, 'integration'), false)
     await assert.rejects(admin.check('../invalid'), /Unknown harness/)
   } finally {
     t.cleanup()
   }
-})
-
-test('integration reports current native receipt evidence independently from version checks', async () => {
-  const t = tempEnv()
-  try {
-    mkdirSync(t.env.HOME, { recursive: true })
-    mkdirSync(t.env.PATH, { recursive: true })
-    writeFileSync(join(t.env.PATH, 'codex'), '#!/bin/sh\nprintf "unknown version\\n"\n')
-    chmodSync(join(t.env.PATH, 'codex'), 0o755)
-    const admin = new HarnessAdmin(t.env, {
-      latest: async () => '1.0.0',
-      integration: async (id) => ({
-        state: 'ok',
-        reason: `Complete result observed in the current ${id} lead`,
-        checkedAt: 100,
-      }),
-    })
-    const [row] = await admin.check('codex')
-    assert.equal(row.version.state, 'unknown')
-    assert.equal(row.integration.state, 'ok')
-    assert.match(row.integration.reason, /Complete result observed/)
-  } finally {
-    t.cleanup()
-  }
-})
-
-test('only a native receipt addressed to the current live lead proves integration', async () => {
-  const { integrationEvidence } = await import('../src/harness-admin.js')
-  const tabs = [
-    {
-      id: 't-1',
-      role: 'lead',
-      lead: { harness: 'codex', generation: 2, nativeSession: 'native-current' },
-      panes: [{ id: 'p-1', kind: 'lead', generation: 2 }],
-    },
-  ]
-  const target = { tab: 't-1', pane: 'p-1', generation: 2, session: 'native-current' }
-  const receipt = { state: 'accepted', target, acceptedAt: 100, evidenceIds: ['native-result-1'] }
-  for (const candidate of [
-    { ...receipt, state: 'submitting' },
-    { ...receipt, target: { ...target, generation: 1 } },
-    { ...receipt, target: { ...target, session: 'old' } },
-    { ...receipt, evidenceIds: [] },
-  ]) {
-    assert.equal(integrationEvidence('codex', tabs, [candidate]).state, 'unverified')
-  }
-  assert.equal(integrationEvidence('codex', tabs, [receipt]).state, 'ok')
-  assert.equal(
-    integrationEvidence('codex', [{ ...tabs[0], closed: true }], [receipt]).state,
-    'unverified',
-  )
-  assert.equal(integrationEvidence('pi', tabs, [receipt]).state, 'unverified')
 })
 
 test('update source follows the detected Homebrew distribution instead of npm latest', async () => {
@@ -148,6 +97,41 @@ test('update source follows the detected Homebrew distribution instead of npm la
       'npm',
     )
   } finally {
+    t.cleanup()
+  }
+})
+
+test('harness checks do not require session storage or expose receipt diagnostics', async () => {
+  const t = tempEnv()
+  mkdirSync(t.env.HOME, { recursive: true })
+  mkdirSync(t.env.PATH, { recursive: true })
+  mkdirSync(t.env.CONSENSFLOW_HOME, { recursive: true })
+  writeFileSync(join(t.env.PATH, 'codex'), '#!/bin/sh\necho 1.2.3\n')
+  chmodSync(join(t.env.PATH, 'codex'), 0o755)
+  mkdirSync(join(t.env.CONSENSFLOW_HOME, 'app'), { recursive: true })
+  const tabs = join(t.env.CONSENSFLOW_HOME, 'app', 'tabs.json')
+  const server = await startUiServer(t.env, { harnessLatest: async () => '1.2.4' })
+  const saved = existsSync(tabs) ? readFileSync(tabs) : null
+  try {
+    writeFileSync(tabs, 'unreadable session state')
+    const response = await fetch(`${server.url}/api/harnesses/check`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
+      body: '{}',
+    })
+    assert.equal(response.status, 200)
+    const { harnesses } = await response.json()
+    assert.equal(harnesses.find((row) => row.id === 'codex').update.state, 'available')
+    assert.ok(
+      harnesses.every(
+        (row) => !Object.hasOwn(row, 'integration') && !Object.hasOwn(row, 'instructions'),
+      ),
+    )
+    assert.equal(readFileSync(tabs, 'utf8'), 'unreadable session state')
+  } finally {
+    if (saved === null) rmSync(tabs, { force: true })
+    else writeFileSync(tabs, saved)
+    await server.close()
     t.cleanup()
   }
 })

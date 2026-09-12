@@ -4,7 +4,7 @@ import { constants } from 'node:fs'
 import { open, readdir } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { promisify } from 'node:util'
-import { envelope, pointer } from '../../hosts/lib/deliveries.js'
+import { answers } from '../../hosts/lib/completion.js'
 
 const run = promisify(execFile)
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -16,18 +16,6 @@ const refused = (cause) => ({
   error: 'peer-refused',
   cause,
 })
-
-/** A durable delivery always has the same native UUID, including after restart. */
-export function submissionId(target, record) {
-  const bytes = createHash('sha256')
-    .update(`${target.session}\0${record.id}\0${record.answerId}`)
-    .digest()
-    .subarray(0, 16)
-  bytes[6] = (bytes[6] & 15) | 0x50
-  bytes[8] = (bytes[8] & 63) | 0x80
-  const hex = bytes.toString('hex')
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
-}
 
 async function readNativeJson(path, { key = false } = {}) {
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
@@ -47,7 +35,7 @@ async function readNativeJson(path, { key = false } = {}) {
   }
 }
 
-async function discover(config, session, deadline) {
+async function discover(config, session, deadline, allowBackground = false) {
   const directory = join(config.configDir, 'sessions')
   const matches = []
   for (const file of await readdir(directory)) {
@@ -70,11 +58,16 @@ async function discover(config, session, deadline) {
     throw error
   }
   const { file, row } = matches[0]
+  if (row.kind === 'bg' && !allowBackground) {
+    const error = Error('native Claude background inbox requires verified continuation ownership')
+    error.code = 'background-peer'
+    throw error
+  }
   if (
     row.pid !== Number(file.slice(0, -5)) ||
     !Number.isSafeInteger(row.pid) ||
     row.pid <= 0 ||
-    row.kind !== 'interactive' ||
+    (row.kind !== 'interactive' && !(allowBackground && row.kind === 'bg')) ||
     row.entrypoint !== 'cli' ||
     typeof row.procStart !== 'string' ||
     typeof row.messagingSocketPath !== 'string' ||
@@ -108,7 +101,7 @@ async function discover(config, session, deadline) {
   ) {
     throw Error('native Claude conversation changed before submission')
   }
-  return { pid: row.pid, socket: row.messagingSocketPath, peerToken: key.peerToken }
+  return { pid: row.pid, socket: row.messagingSocketPath, peerToken: key.peerToken, kind: row.kind }
 }
 
 /** Resolve only the native process owned by this pane, never by cwd or recency. */
@@ -136,10 +129,49 @@ export async function currentSession(config, pane, bridge) {
       /* A disappearing or invalid process is not binding evidence. */
     }
   }
-  return matches.length === 1 ? matches[0] : null
+  if (matches.length !== 1) return null
+  let session = matches[0]
+  const visited = new Set()
+  for (let hop = 0; hop < 16; hop++) {
+    if (visited.has(session)) return null
+    visited.add(session)
+    const completion = await answers('claude-code', session, {
+      CLAUDE_CONFIG_DIR: config.configDir,
+    })
+    if (!completion.continuedInSessionId) {
+      if (completion.unknown && visited.size > 1) return null
+      return session
+    }
+    const successor = completion.continuedInSessionId
+    try {
+      const peer = await discover(config, successor, Date.now() + 3000, true)
+      if (!(await belongsToPane(peer.pid, live.processGroupId))) return null
+    } catch {
+      return null
+    }
+    session = successor
+  }
+  return null
 }
 
-async function sendText(target, text, record) {
+async function belongsToPane(pid, group) {
+  const seen = new Set()
+  for (let depth = 0; pid > 1 && depth < 64 && !seen.has(pid); depth++) {
+    seen.add(pid)
+    const values = (
+      await run('/bin/ps', ['-p', String(pid), '-o', 'ppid=,pgid='], { timeout: 1000 })
+    ).stdout
+      .trim()
+      .split(/\s+/)
+      .map(Number)
+    if (values.length !== 2 || values.some((n) => !Number.isSafeInteger(n) || n <= 0)) return false
+    if (values[1] === group) return true
+    pid = values[0]
+  }
+  return false
+}
+
+async function sendText(target, text) {
   const pane =
     typeof target?.pane === 'object'
       ? target.pane
@@ -163,15 +195,34 @@ async function sendText(target, text, record) {
   const budgets = [3000, target.deadlineMs, launch.ackTimeoutMs].filter((n) => n !== undefined)
   if (budgets.some((n) => !Number.isSafeInteger(n) || n < 0))
     throw Error('claude-peer requires a non-negative deadline')
-  const deadline = Math.min(Date.now() + Math.min(...budgets), record?.expiresAt ?? Infinity)
+  const deadline = Date.now() + Math.min(...budgets)
   if (deadline <= Date.now()) return refused('native Claude peer delivery expired')
   let peer
+  let allowDescendant = false
   try {
     peer = await discover(launch, target.session, deadline)
   } catch (error) {
-    return { ...refused(error.message), error: error.code ?? 'peer-refused' }
+    if (error.code !== 'background-peer')
+      return { ...refused(error.message), error: error.code ?? 'peer-refused' }
+    try {
+      // Only an explicit continuation from this pane's interactive root may use
+      // a background descendant. Other background agents remain ineligible.
+      if ((await currentSession(launch, pane, target.bridge)) !== target.session) throw error
+      peer = await discover(launch, target.session, deadline, true)
+      allowDescendant = peer.kind === 'bg'
+    } catch {
+      return { ...refused(error.message), error: error.code ?? 'peer-refused' }
+    }
   }
-  const uuid = record?.nativeSubmissionId ?? (record ? submissionId(target, record) : randomUUID())
+  const completion = await answers('claude-code', target.session, {
+    CLAUDE_CONFIG_DIR: launch.configDir,
+  })
+  if (completion.continuedInSessionId || completion.reason?.includes('native continuation'))
+    return {
+      ...refused('native Claude conversation continued before submission'),
+      error: 'native-session-changed',
+    }
+  const uuid = randomUUID()
   const body =
     JSON.stringify({ type: 'auth', token: peer.peerToken }) +
     '\n' +
@@ -203,6 +254,7 @@ async function sendText(target, text, record) {
         epoch: target.epoch,
         socket: peer.socket,
         peerPid: peer.pid,
+        ...(allowDescendant ? { allowDescendant: true } : {}),
         body,
         timeoutMs,
       },
@@ -224,13 +276,4 @@ async function sendText(target, text, record) {
 
 export async function send(target, text) {
   return await sendText(target, text)
-}
-
-export async function deliver(channel, target, record) {
-  if (channel !== 'claude-peer') throw Error(`unsupported Claude channel: ${channel}`)
-  return await sendText(
-    target,
-    record.channel === 'cf-read' ? pointer(record) : envelope(record),
-    record,
-  )
 }

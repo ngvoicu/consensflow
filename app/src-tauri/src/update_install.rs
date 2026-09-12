@@ -54,7 +54,20 @@ fn validate_bundle(app: &Path, version: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn install_archive(app: &Path, bytes: &[u8], version: &str) -> Result<(), String> {
+fn stage_update(directory: &Path) -> Result<tempfile::TempDir, String> {
+    fs::create_dir_all(directory).map_err(|e| e.to_string())?;
+    tempfile::Builder::new()
+        .prefix("update-")
+        .tempdir_in(directory)
+        .map_err(|e| format!("Could not stage the update in ConsensFlow home: {e}"))
+}
+
+pub(crate) fn install_archive(
+    app: &Path,
+    bytes: &[u8],
+    version: &str,
+    directory: &Path,
+) -> Result<(), String> {
     if app.extension().and_then(|s| s.to_str()) != Some("app")
         || fs::symlink_metadata(app)
             .map_err(|e| e.to_string())?
@@ -71,10 +84,7 @@ pub(crate) fn install_archive(app: &Path, bytes: &[u8], version: &str) -> Result
     if semver::Version::parse(version).map_err(|e| e.to_string())? <= installed {
         return Err("The update must be newer than the installed app".into());
     }
-    let staging = tempfile::Builder::new()
-        .prefix(".consensflow-update-")
-        .tempdir_in(app.parent().ok_or("Invalid app path")?)
-        .map_err(|e| format!("Could not stage an update beside the app: {e}"))?;
+    let staging = stage_update(directory)?;
     let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(Cursor::new(bytes)));
     let mut expanded = 0_u64;
     for (index, entry) in archive.entries().map_err(|e| e.to_string())?.enumerate() {
@@ -101,8 +111,8 @@ pub(crate) fn install_archive(app: &Path, bytes: &[u8], version: &str) -> Result
     validate_bundle(&candidate, version)?;
     let old = CString::new(app.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
     let new = CString::new(candidate.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
-    // Both paths share a parent filesystem. RENAME_SWAP exchanges them
-    // atomically; an error changes neither. No rm-old-then-mv-new window.
+    // RENAME_SWAP is atomic on the same filesystem; cross-volume installs
+    // fail without changing either path or staging outside ConsensFlow home.
     if unsafe {
         libc::renameatx_np(
             libc::AT_FDCWD,
@@ -136,6 +146,11 @@ mod tests {
     use std::fs;
     use std::path::Path;
     use std::process::Command;
+
+    fn install_fixture(app: &Path, bytes: &[u8], version: &str) -> Result<(), String> {
+        let home = tempfile::tempdir().unwrap();
+        install_archive(app, bytes, version, &home.path().join("updates"))
+    }
 
     fn bundle(parent: &Path, version: &str) -> std::path::PathBuf {
         let app = parent.join("ConsensFlow.app");
@@ -188,12 +203,23 @@ mod tests {
     }
 
     #[test]
+    fn update_staging_stays_inside_the_private_directory() {
+        let home = tempfile::tempdir().unwrap();
+        let directory = home.path().join(".consensflow/app/updates");
+        let staging = stage_update(&directory).unwrap();
+        assert_eq!(staging.path().parent(), Some(directory.as_path()));
+        assert!(staging.path().is_dir());
+        staging.close().unwrap();
+        assert_eq!(fs::read_dir(directory).unwrap().count(), 0);
+    }
+
+    #[test]
     fn signed_bundle_replaces_whole_app_and_leaves_no_retained_copy() {
         let old = tempfile::tempdir().unwrap();
         let new = tempfile::tempdir().unwrap();
         let app = bundle(old.path(), "3.0.0-alpha.35");
         let next = bundle(new.path(), "3.0.0-alpha.36");
-        install_archive(&app, &archive(&next), "3.0.0-alpha.36").unwrap();
+        install_fixture(&app, &archive(&next), "3.0.0-alpha.36").unwrap();
         assert!(
             fs::read_to_string(app.join("Contents/Resources/cli/package.json"))
                 .unwrap()
@@ -220,7 +246,7 @@ mod tests {
         let before = fs::read(app.join("Contents/Info.plist")).unwrap();
         let next = bundle(new.path(), "3.0.0-alpha.34");
         for bytes in [b"not a tar".to_vec(), archive(&next)] {
-            assert!(install_archive(&app, &bytes, "3.0.0-alpha.36").is_err());
+            assert!(install_fixture(&app, &bytes, "3.0.0-alpha.36").is_err());
             assert_eq!(fs::read(app.join("Contents/Info.plist")).unwrap(), before);
             assert_eq!(fs::read_dir(old.path()).unwrap().count(), 1);
         }
@@ -229,7 +255,7 @@ mod tests {
             "changed after signing",
         )
         .unwrap();
-        assert!(install_archive(&app, &archive(&next), "3.0.0-alpha.34").is_err());
+        assert!(install_fixture(&app, &archive(&next), "3.0.0-alpha.34").is_err());
         assert_eq!(fs::read(app.join("Contents/Info.plist")).unwrap(), before);
     }
 
@@ -240,7 +266,7 @@ mod tests {
         let app = bundle(old.path(), "3.0.0-alpha.35");
         let next = bundle(new.path(), "3.0.0-alpha.36");
         std::os::unix::fs::symlink("/tmp", next.join("Contents/escape")).unwrap();
-        assert!(install_archive(&app, &archive(&next), "3.0.0-alpha.36").is_err());
+        assert!(install_fixture(&app, &archive(&next), "3.0.0-alpha.36").is_err());
         assert!(!app.join("Contents/escape").exists());
         assert_eq!(fs::read_dir(old.path()).unwrap().count(), 1);
     }
@@ -260,7 +286,7 @@ mod tests {
             .unwrap()
             .status
             .success());
-        assert!(install_archive(&app, &archive(&next), "3.0.0-alpha.36").is_err());
+        assert!(install_fixture(&app, &archive(&next), "3.0.0-alpha.36").is_err());
         assert_eq!(
             plist_value(&app, "CFBundleShortVersionString").unwrap(),
             "3.0.0-alpha.35"
@@ -274,7 +300,7 @@ mod tests {
         let app = bundle(old.path(), "3.0.0-alpha.35");
         let next = bundle(new.path(), "3.0.0-alpha.36");
         fs::write(next.join("Contents/Resources/cli/bin/cf.mjs"), "tampered").unwrap();
-        let error = install_archive(&app, &archive(&next), "3.0.0-alpha.36").unwrap_err();
+        let error = install_fixture(&app, &archive(&next), "3.0.0-alpha.36").unwrap_err();
         assert!(error.contains("code-signature"), "{error}");
         assert_eq!(
             plist_value(&app, "CFBundleShortVersionString").unwrap(),

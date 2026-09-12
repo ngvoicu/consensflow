@@ -57,18 +57,77 @@ ConsensFlow does not infer draft contents or stop working agents automatically.
 
 Update archives have a separate cryptographic signature and include the app,
 Node, `cf`, role skills and integration code together. Harness detection, installed
-versions, official release checks and observed integration status appear in
-**Agents**. Native harness versions never gate launching or reading results.
+versions and official release checks appear in **Harnesses**. Native harness
+versions never gate launching or reading results.
 Older builds require one manual DMG installation to acquire the updater. Channel feeds must be published before
 online discovery works; see [update release preparation](docs/updates.md).
 
-Nothing is seeded. Open the app, pick from the ready-made list — `zeus`,
+Nothing is seeded. Open **Agent library** in the app and pick from the ready-made list — `zeus`,
 `hyperion`, `athena`, `endymion` … — or define your own with any model string
 its harness accepts. The app refreshes its private lead roster context when agents change.
 No separate skill installation or update is needed.
 
-The roster lives at `~/.consensflow/agents.json` and is shared by everything
-that reads it.
+**Your agents** and **Agent library** are separate top-level screens, each with independent search, category filters
+and grouping/sorting controls with the same options. Both open with **Model and reasoning**
+cards by default; **Clear filters** restores this view. **None** and **Harness** remain
+available. Shared cards show common tags, descriptions and scores once, with individual harness/provider
+choices and Add/Remove or Edit/Remove controls beneath. This applies to every repeated
+model/reasoning combination; differing agent metadata stays on its own row. Added presets stay visible
+as Already added, with an adjacent Remove button that removes the saved copy while
+keeping the library choice available. Default sorting uses model family and tier,
+then Ultra → Max → Xhigh → High → Medium → Low (followed by Minimal, Off and defaults).
+Claude families appear as Fable → Opus → Sonnet → Haiku; GPT as Astra → Sol → Terra → Luna.
+Claude, GPT and Gemini stay together first, followed by the other model families.
+Each agent shows its categories as individual pills, separately from its provider route.
+Muse Spark 1.3 Contributor and Contributor Free share the Muse 1.3 model card;
+this grouping follows the provider's description of Contributor as a pricing/data-use
+[tier](https://openrouter.ai/meta/muse-spark-1.3-contributor). Contributor and Free
+remain on their provider rows, including the disclosed use of prompts/replies for
+[Meta model training](https://opencode.ai/docs/go/#privacy). Execution model IDs
+and separate Add/Remove identities are preserved. Gemini 3.1 Pro Preview is retired.
+Lead and PM recommendations require Fable, Opus, Astra or Sol at Xhigh or above
+where supported. Reviewer / second opinion recommendations start at Medium for
+known coding models. These tags do not change how roles are launched. Sol Low and
+Medium are available on Codex, Pi and OpenCode, using their existing provider routes. Pygmalion uses Codex Images through your existing Codex login.
+[OpenAI currently documents GPT Image 2](https://learn.chatgpt.com/docs/image-generation)
+for built-in Codex image generation; this route does not select GPT Image 2.5.
+
+Kimi Code is K3-only; K2.7 Code and Highspeed have been removed from the library.
+Ilmarinen selects **Max**. K3 also supports **Low** and **High** through Edit or
+custom-agent creation. These settings reach the Kimi process through its
+[supported environment control](https://www.kimi.com/code/docs/en/kimi-code-cli/configuration/env-vars.html),
+without changing native configuration or credentials. An unset effort reads
+**Kimi setting** and follows Kimi's configuration. Existing saved copies keep
+their selection until you use **Update** or **Edit**.
+
+The roster lives at `~/.consensflow/agents.json`. Each saved agent includes its
+configuration, description and the model, provider route, categories and Good for
+details shown in the app, plus available benchmark scores and their provenance.
+Editing an agent refreshes those details for its actual model and reasoning effort. The file is
+created when you add an agent; an empty installation seeds nothing.
+
+Artificial Analysis scores appear as pills, with explanations and tested settings
+under **Benchmark details**. **Sort by** offers metrics with available scores;
+missing scores sort last, and hallucination rate sorts lowest first. Grouping
+stays independent. Scores describe AA’s test configuration, not measured
+ConsensFlow harness performance. When AA publishes a model-level result without a
+reasoning level, its scores carry **AA reasoning level not specified**. Named
+reasoning settings and ambiguous model snapshots never borrow another tested
+configuration. Codex Images has no claimed underlying model score.
+
+For the optional AA integration, store your own key in
+`$CONSENSFLOW_HOME/artificial-analysis-key` (default
+`~/.consensflow/artificial-analysis-key`) with file permissions `0600`.
+Keep it outside the repository and app bundle. The local backend calls AA and
+caches scores daily in `artificial-analysis-cache.json`; credentials never enter
+the browser or `agents.json`. Failed refreshes retain dated cached scores and
+respect quota retry times. Free access provides Intelligence, Coding and Agentic
+indexes. Higher access enables supported individual benchmarks, including
+Terminal-Bench v4.0, hallucinations/knowledge accuracy, instruction following,
+long-context reasoning and professional work. See
+[AA API documentation](https://artificialanalysis.ai/data-api/docs) for current
+access and attribution requirements. No key or live AA dataset is distributed
+with ConsensFlow.
 
 ## Who can consult
 
@@ -152,21 +211,25 @@ never written**. `cf say` still exists for typing turns through our own
 machinery, and every pane runs with the same environment guards: billing keys
 stripped, control variables stripped.
 
-Replies use native input routes for leads and workers. Codex queues messages
-by thread ID; OpenCode receives them through its local server. Supported
-Claude Code versions 2.1.263 and 2.1.265 use their built-in local peer inbox,
-with no development channel or plugin. Unsent input is preserved. Pi waits
-until its native editor is empty, then continues automatically. The app keeps
-each TUI's original palette, layout and text styling.
+Every completed worker reply or advisor finding is kept in a private result inbox.
+The selected Lead or PM conversation fetches complete numbered parts when ready.
+The same receipt rules apply to Claude Code, Codex, Pi and OpenCode: only full
+content in the native conversation confirms receipt. A transport response or
+opening Results in the app does not mark a result received. Unconfirmed writes
+are retained and are never automatically replayed.
 
-When terminal input cannot be verified as clear, incoming messages remain held.
-Manual result reads stay available when you request them, and reply policy remains
-yours to set. Start a new ConsensFlow session for a new collaboration.
+The Results view shows every reply and its full text, including replies from
+previous native conversations. Each worker/advisor and its coordinator shows
+an unconfirmed count. Manual policy keeps results available for explicit reading
+or collection. Native session changes retire the previous receiver while keeping
+its receipt evidence. ConsensFlow uses small process-local native integrations,
+prepared under its private home; it does not change global harness settings or
+write bookkeeping into project folders.
 
-New Codex leads open without a prompt and wait for the human's first message.
-Their launch identifier travels in native session metadata; no prompt is
-injected. Once Codex persists that session, ConsensFlow binds it by the exact identifier; a recent conversation
-in the same folder is never a fallback. Explicit Resume uses the bound session.
+PM and Lead have separate grids within one project session. Advisors return
+research, review and existing-test findings to their owning PM; only the PM
+incorporates that advice into specifications. Switching grids keeps both groups
+running and preserves each group's navigation and terminal output.
 
 New OpenCode sessions use an empty session created through OpenCode's native
 API and open its exact ID in the ordinary TUI. They wait for the first human
@@ -220,18 +283,11 @@ in its own maximized window; it shares the project folder and communicates with
 its lead only through explicit `cf lead send --message-file <file>` and
 `cf lead read` requests. It cannot create or control workers.
 
-## Leaving
-
-```sh
-cf off            # remove the private installation; keep agents and runs
-cf reset --yes    # the clean slate: those too, and the app's own caches
-```
-
-`cf reset` prints what it will destroy and refuses without `--yes`. It does not
-delete `ConsensFlow.app` — removing an application is a Finder gesture — and it
-never touches a harness's own session store.
-
 ## Inside the app
+
+**Agents** manages the worker roster. **Harnesses**, beside it, shows installed
+coding tools, versions and available updates, plus a retry action if Pi setup
+fails. Harness checks run when that screen is first opened or refreshed.
 
 The app is the terminal, not a window around the roster. It hosts every pane
 itself — a PTY per pane, drawn by the page — and the **Agents** button opens
@@ -258,7 +314,7 @@ site's logo: the roster designing its own app.
 | Owned-file manifest | `~/.consensflow/skills-manifest.json` |
 
 A leftover `mode.json` from the old three-mode era is ignored; `cf doctor`
-reports it once as removable. One root; `CONSENSFLOW_HOME` moves all of it. The `cf`/`consensflow` launchers are placed on PATH. Role documents and Pi
+reports it once as removable. One root; `CONSENSFLOW_HOME` moves all of it. The `cf`/`consensflow` launchers live under `~/.consensflow/bin`; add that directory to your shell PATH to use them outside the app. App panes receive the bundled CLI automatically. Role documents and Pi
 integration files stay under this private root; native global skill folders are
 not changed.
 

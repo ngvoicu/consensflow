@@ -82,7 +82,7 @@ lines.on('line', line => {
 
 test('both roles enter native startup context without a skill invocation', async (t) => {
   for (const kind of ['claude-code', 'codex', 'opencode', 'pi']) {
-    for (const role of ['lead', 'pm']) {
+    for (const role of ['lead', 'pm', 'advisor']) {
       await t.test(`${kind} ${role}`, async (t) => {
         const { env } = await fixture(t)
         const existing = 'User instructions: preserve "quotes", `backticks`, $HOME\nand newlines.'
@@ -141,7 +141,7 @@ test('both roles enter native startup context without a skill invocation', async
           instructions.includes(content),
           'all role instructions, including the body, must already be loaded',
         )
-        assert.ok(content.includes(role === 'pm' ? '# ConsensFlow PM' : '# ConsensFlow lead'))
+        assert.ok(content.includes(role === 'pm' ? '# ConsensFlow PM' : `# ConsensFlow ${role}`))
         assert.ok(!instructions.includes(`name: consensflow-${role === 'pm' ? 'lead' : 'pm'}`))
         assert.equal(env.OPENCODE_CONFIG_CONTENT, JSON.stringify(original))
       })
@@ -198,4 +198,16 @@ test('app installation and skill removal leave old global skills for manual clea
   saveManifest(manifest, env)
   uninstallSkills(env, { force: true })
   assert.equal(await readFile(global, 'utf8'), 'old global skill')
+})
+
+test('advisors can research and run existing tests but only the PM writes specifications', async (t) => {
+  const { env } = await fixture(t)
+  const configuration = await roleConfiguration('pi', { role: 'advisor', env })
+  const instructions = configuration.args.at(-1)
+  assert.match(instructions, /search the web/)
+  assert.match(instructions, /Run existing tests/)
+  assert.match(instructions, /Only the PM writes or revises specifications/)
+  assert.match(instructions, /Do not edit/)
+  assert.match(instructions, /owning PM/)
+  assert.match(instructions, /Do not delegate/)
 })

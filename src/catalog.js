@@ -1,4 +1,6 @@
-import { AGENT_PRESETS } from '../hosts/lib/presets.js'
+import { AGENT_PRESETS, agentProfile, KIMI_EFFORTS } from '../hosts/lib/presets.js'
+
+export { agentProfile } from '../hosts/lib/presets.js'
 
 /**
  * Ready-made agents, per tool.
@@ -18,12 +20,8 @@ import { AGENT_PRESETS } from '../hosts/lib/presets.js'
  * 3.7 Flash to the harness. A name must mean one model, so the harness's
  * list won: it is the superset, and it is what actually launches the run.
  *
- * Verified live 2026-08-21: all 16 OpenRouter ids exist in
- * openrouter.ai/api/v1/models; claude-fable-5, claude-opus-5 and
- * claude-haiku-4-5 each answered a real `claude -p`; pi lists every
- * `openai-codex/gpt-5.6-*` id. The five `anthropic/claude-*` presets on pi
- * (orpheus, linus, erato, kronos, atlas) are correct but need pi's
- * anthropic provider configured — `pi auth check --provider anthropic`.
+ * Pi Claude presets use OpenRouter API, as selected by the user. Saved rows
+ * retain their provider/model until explicitly synced with the catalog.
  */
 
 /** Effort levels each CLI accepts, quoted from its own help output. */
@@ -36,11 +34,8 @@ export const EFFORTS = {
   pi: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
   // opencode --help: "provider-specific reasoning effort, e.g., high, max, minimal"
   opencode: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
-  // Kimi Code has NO effort flag: `support_efforts` and `default_effort` are
-  // per-model keys in the user's own config.toml, which is theirs to edit and
-  // carries their API key. An empty list is the honest answer — the UI then
-  // offers no effort for a kimi agent rather than a choice that goes nowhere.
-  kimi: [],
+  // K3 uses the supported per-process KIMI_MODEL_THINKING_EFFORT control.
+  kimi: KIMI_EFFORTS,
 }
 
 /**
@@ -68,6 +63,7 @@ function entryFor(preset) {
     // preset's own prose is kept alongside for the card that wants it.
     description: preset.label ?? preset.description,
     detail: preset.description,
+    profile: agentProfile({ harness: KIND_TO_HARNESS[preset.kind], model: preset.model, effort }),
     // Provenance: what a roster row records so a later catalog change can be
     // offered as an update instead of silently diverging.
     preset: preset.preset,

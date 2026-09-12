@@ -5,7 +5,6 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import { answers } from '../../hosts/lib/completion.js'
-import { leadReady } from '../../hosts/lib/readiness.js'
 
 test('Claude 2.1.266 settles the captured native tool turn only after its finalizer', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'cf-native266-'))
@@ -24,15 +23,12 @@ test('Claude 2.1.266 settles the captured native tool turn only after its finali
   for (const n of [rows.length - 1, rows.length]) {
     await writeFile(
       join(root, 'projects', `${session}.jsonl`),
-      rows.slice(0, n).map(JSON.stringify).join('\n') + '\n',
+      `${rows.slice(0, n).map(JSON.stringify).join('\n')}\n`,
     )
     const found = await answers('claude-code', session, { CLAUDE_CONFIG_DIR: root })
     assert.equal(found.unknown, undefined, found.reason)
     assert.equal(found.version, undefined)
-    assert.equal(
-      leadReady({ answers: found, draftLatched: false, epoch: 2 }).state === 'ready',
-      n === rows.length,
-    )
+    assert.equal(found.settlement.state === 'settled', n === rows.length)
     if (n === rows.length) assert.equal(found.items.at(-1).text, 'CF_NATIVE_VERSION_PROBE_DONE')
   }
 })
@@ -63,5 +59,5 @@ test('OpenCode 1.18.30 uses captured native event order and final completion met
   assert.equal(found.unknown, undefined, found.reason)
   assert.equal(found.version, undefined)
   assert.equal(found.items.at(-1).text, 'CF_NATIVE_VERSION_PROBE_DONE')
-  assert.equal(leadReady({ answers: found, draftLatched: false, epoch: 2 }).state, 'ready')
+  assert.equal(found.settlement.state, 'settled')
 })

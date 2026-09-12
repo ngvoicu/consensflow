@@ -141,33 +141,61 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     for (const call of ['confirm(', 'alert(', 'prompt(']) {
       assert.ok(!script.includes(call), `the page must not call ${call}`)
     }
-    // Deliberate still, just in-page: arm on the first click, act on the second.
-    assert.match(script, /Click again to turn off/)
-    assert.match(script, /Click again to destroy/)
   })
 
-  it('explains the commands and automatic replies in app panes', async () => {
-    const html = await (await fetch(`${server.url}/?token=${server.token}`)).text()
+  it('omits the agent-facing command reference from the roster screen', async () => {
+    const html = await (await api('/')).text()
+    assert.doesNotMatch(
+      html,
+      /Talking to an agent|class="cmds"|ask hyperion|cf sessions|cf results|cf read|cf attach/,
+    )
+  })
 
-    for (const verb of [
-      'cf run @name',
-      'cf sessions',
-      'cf results',
-      'cf say',
-      'cf read',
-      'cf attach',
+  it('keeps the Agents page focused on roster editing', async () => {
+    const html = await (await api('/')).text()
+    for (const marker of [
+      'id="roster"',
+      'aria-label="Your agents"',
+      'Model and reasoning',
+      'id="add"',
+      'Edit',
     ]) {
-      assert.ok(html.includes(verb), `the page should explain ${verb}`)
+      assert.ok(html.includes(marker), `the page is missing ${marker}`)
     }
-    assert.match(html, /app pane/i)
-    assert.match(html, /replies.*automatically/i)
+    assert.doesNotMatch(
+      html,
+      /id="catalog-section"|Check all harnesses|\/api\/harnesses|\/api\/system|id="system"|Role skills included|Turn off|Reset everything/,
+    )
   })
 
-  it('serves a page that can do the whole job, not half of it', async () => {
-    const html = await (await fetch(`${server.url}/?token=${server.token}`)).text()
-    // Everything the CLI can do has an affordance here.
-    for (const marker of ['id="off"', 'Check all harnesses', "post('/api/off'", 'Edit']) {
-      assert.ok(html.includes(marker), `the page is missing ${marker}`)
+  it('serves Agent library separately with authentication and valid JavaScript', async () => {
+    assert.equal((await fetch(`${server.url}/library`)).status, 401)
+    const response = await api('/library')
+    assert.equal(response.status, 200)
+    const html = await response.text()
+    assert.match(html, /aria-label="Agent library"/)
+    assert.match(html, /id="catalog"/)
+    assert.match(html, /offer__actions/)
+    assert.doesNotMatch(html, /id="roster-section"|id="add"/)
+    for (const [, source] of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)) {
+      assert.doesNotThrow(() => new Script(source))
+    }
+  })
+
+  it('serves Harnesses as its own authenticated page with valid JavaScript', async () => {
+    assert.equal((await fetch(`${server.url}/harnesses`)).status, 401)
+    const response = await api('/harnesses')
+    assert.equal(response.status, 200)
+    const html = await response.text()
+    assert.match(html, /<h1>Harnesses<\/h1>/)
+    assert.match(html, /Check all harnesses/)
+    assert.ok(html.includes(`const TOKEN = "${server.token}"`))
+    assert.doesNotMatch(
+      html,
+      /id="roster"|id="system"|Role skills included|Turn off|Reset everything/,
+    )
+    for (const [, source] of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)) {
+      assert.doesNotThrow(() => new Script(source))
     }
   })
 
@@ -223,26 +251,8 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     assert.match(installed, /claude-opus-5/)
   })
 
-  it('reports the same system state cf doctor prints', async () => {
-    const res = await api('/api/system')
-    assert.equal(res.status, 200)
-    const system = await res.json()
-
-    assert.match(system.version, /^3\./)
-    assert.deepEqual(
-      system.harnesses.map((a) => a.id),
-      ['claude'],
-    )
-    assert.equal(system.harnesses[0].native, false)
-    assert.equal(typeof system.skills.owned, 'number')
-    assert.equal(system.agents, 1)
-  })
-
-  it('reports one standalone installation without mode choices (TEST-PANE-47)', async () => {
-    const system = await (await api('/api/system')).json()
-    assert.equal(system.mode, undefined)
-    assert.equal(system.integrations, undefined)
-    assert.equal(typeof system.skills.owned, 'number')
+  it('retires the unused system status endpoint', async () => {
+    assert.equal((await api('/api/system')).status, 404)
   })
 
   it('retires the mode endpoint without changing installation (TEST-PANE-47)', async () => {
@@ -253,13 +263,9 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
     assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'mode.json')), false)
   })
 
-  it('offers standalone controls and automatic reply guidance (TEST-PANE-47)', async () => {
+  it('keeps retired mode controls absent (TEST-PANE-47)', async () => {
     const html = await (await api('/')).text()
     assert.doesNotMatch(html, /id="integrations"|id="mode-lede"|\/api\/mode|cmux mode|--wait/)
-    for (const marker of ['id="off"', 'cf say', 'cf read']) {
-      assert.ok(html.includes(marker), `the page is missing ${marker}`)
-    }
-    assert.match(html, /replies.*automatically/i)
   })
 
   it('retires the separate skills installer without creating unrelated files', async () => {
@@ -311,8 +317,7 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
   it('offers no button for the terminal command — opening the app owns it', async () => {
     // The page used to install and remove the launcher. Removing it is a button
     // that undoes itself now: the app claims the command every time it opens,
-    // so the next launch brings it straight back. Taking the command away is
-    // what "Turn ConsensFlow off" is for, and nothing else.
+    // so the next launch brings it straight back.
     const html = await (await fetch(`${server.url}/?token=${server.token}`)).text()
     assert.ok(!html.includes('id="terminal"'), 'no command button')
     assert.ok(!html.includes('Remove terminal command'))
@@ -320,34 +325,6 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
 
     const gone = await api('/api/terminal-command', { method: 'POST', body: JSON.stringify({}) })
     assert.equal(gone.status, 404, 'and no endpoint behind it')
-
-    // The facts it used to carry in a tooltip stay, on the panel that reports.
-    const system = await (await api('/api/system')).json()
-    assert.ok(system.runtime === null || typeof system.runtime.mine === 'boolean')
-    assert.equal(typeof system.terminal.onPath, 'boolean')
-  })
-
-  it('turns everything off from the page, deliberately', async () => {
-    const refused = await api('/api/off', { method: 'POST', body: JSON.stringify({}) })
-    assert.equal(refused.status, 400)
-
-    const done = await api('/api/off', { method: 'POST', body: JSON.stringify({ confirm: true }) })
-    assert.equal(done.status, 200)
-    assert.equal((await done.json()).system.skills.owned, 0)
-    assert.equal(
-      existsSync(
-        join(
-          t.env.CONSENSFLOW_HOME,
-          'roles',
-          'lead',
-          '.claude',
-          'skills',
-          'consensflow-lead',
-          'SKILL.md',
-        ),
-      ),
-      false,
-    )
   })
 
   it('removes them again, but only when the click was deliberate', async () => {
@@ -428,96 +405,48 @@ describe('the roster UI is loopback, token-gated and ephemeral', () => {
   })
 })
 
-describe('the page can reset the machine, and says what that destroys', () => {
-  const t = tempEnv()
-  let server
-
-  before(async () => {
-    stubCli(t, 'claude')
-    server = await startUiServer(t.env, { prepareRole: testRoleConfiguration })
-  })
-  after(async () => {
-    await server.close()
-    t.cleanup()
-  })
-
-  function api(path, options = {}) {
-    return fetch(`${server.url}${path}`, {
-      ...options,
-      headers: {
-        authorization: `Bearer ${server.token}`,
-        'content-type': 'application/json',
-        ...options.headers,
-      },
+describe('retired destructive API routes leave saved data intact', () => {
+  for (const route of ['/api/off', '/api/reset']) {
+    it(`${route} is absent even with confirmation and force`, async () => {
+      const t = tempEnv()
+      const { healOnOpen } = await import('../src/sync.js')
+      const { addAgent } = await import('../src/roster.js')
+      addAgent({ name: 'zeus', harness: 'claude', model: 'example' }, t.env)
+      healOnOpen(t.env)
+      const saved = [
+        join(t.env.CONSENSFLOW_HOME, 'agents.json'),
+        join(t.env.CONSENSFLOW_BIN_DIR, 'cf'),
+        join(
+          t.env.CONSENSFLOW_HOME,
+          'roles',
+          'lead',
+          '.claude',
+          'skills',
+          'consensflow-lead',
+          'SKILL.md',
+        ),
+        join(t.env.CONSENSFLOW_HOME, 'tabs.json'),
+      ]
+      writeFileSync(saved[3], '{"version":1,"tabs":[]}')
+      const before = saved.map((path) => readFileSync(path))
+      const server = await startUiServer(t.env)
+      try {
+        const response = await fetch(`${server.url}${route}`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ confirm: true, force: true }),
+        })
+        assert.equal(response.status, 404)
+        assert.deepEqual(
+          saved.map((path) => readFileSync(path)),
+          before,
+        )
+      } finally {
+        await server.close()
+        t.cleanup()
+      }
     })
   }
-
-  it('offers the reset as its own button, not a variant of off', async () => {
-    const page = await (await api('/')).text()
-
-    assert.match(page, /id="reset"/)
-    // It has to name what only this button destroys, or it reads as a louder
-    // "off" and someone loses a roster they typed by hand. The host cannot be
-    // asked for a dialog here, so the warning lives on the button itself and
-    // the arming label counts the cost before the second click.
-    assert.match(page, /cannot be undone/i)
-    assert.match(page, /run artifact/i)
-    assert.match(page, /Click again to destroy/)
-  })
-
-  it('refuses without a deliberate confirmation', async () => {
-    const refused = await api('/api/reset', { method: 'POST', body: JSON.stringify({}) })
-
-    assert.equal(refused.status, 400)
-    assert.match((await refused.json()).error, /confirm/)
-  })
-
-  it('removes everything and reports what it counted', async () => {
-    await api('/api/agents', {
-      method: 'POST',
-      body: JSON.stringify({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }),
-    })
-    await api('/api/skills/install', { method: 'POST', body: JSON.stringify({}) })
-    assert.ok(
-      existsSync(
-        join(
-          t.env.CONSENSFLOW_HOME,
-          'roles',
-          'lead',
-          '.claude',
-          'skills',
-          'consensflow-lead',
-          'SKILL.md',
-        ),
-      ),
-    )
-
-    const done = await api('/api/reset', {
-      method: 'POST',
-      body: JSON.stringify({ confirm: true }),
-    })
-
-    assert.equal(done.status, 200)
-    const body = await done.json()
-    assert.equal(body.removed.agents, 1)
-    assert.match(body.report.join(' '), /1 agent/)
-    assert.equal(body.system.skills.owned, 0)
-    assert.equal(
-      existsSync(
-        join(
-          t.env.CONSENSFLOW_HOME,
-          'roles',
-          'lead',
-          '.claude',
-          'skills',
-          'consensflow-lead',
-          'SKILL.md',
-        ),
-      ),
-      false,
-    )
-    assert.equal(existsSync(t.env.CONSENSFLOW_HOME), false, 'the whole root is gone')
-  })
 })
 
 it('harness administration is UI-authorized and exposes all harnesses with honest statuses', async () => {
@@ -538,7 +467,7 @@ it('harness administration is UI-authorized and exposes all harnesses with hones
       body: JSON.stringify({ id: 'unknown' }),
     })
     assert.equal(invalid.status, 400)
-    const html = await (await fetch(server.url, { headers })).text()
+    const html = await (await fetch(`${server.url}/harnesses`, { headers })).text()
     assert.match(html, /Check all harnesses/)
     assert.doesNotMatch(html, /skills in each of|consults via the generated skill/)
   } finally {
@@ -554,7 +483,7 @@ it('role skills ship with the app and have no separate UI installation action', 
     const headers = { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' }
     const html = await (await fetch(server.url, { headers })).text()
     assert.doesNotMatch(html, /Update skills|id="update"/)
-    assert.match(html, /Role skills included in ConsensFlow/)
+    assert.doesNotMatch(html, /Role skills included in ConsensFlow/)
     const response = await fetch(`${server.url}/api/skills/install`, {
       method: 'POST',
       headers,
@@ -562,6 +491,98 @@ it('role skills ship with the app and have no separate UI installation action', 
     })
     assert.equal(response.status, 410)
     assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'roles')), false)
+  } finally {
+    await server.close()
+    t.cleanup()
+  }
+})
+
+it('API profiles follow edited saved agents without rewriting descriptions or state', async () => {
+  const { addAgent, editAgent, rosterPath } = await import('../src/roster.js')
+  const t = tempEnv()
+  addAgent(
+    {
+      name: 'renamed',
+      harness: 'codex',
+      model: 'gpt-6-astra',
+      effort: 'medium',
+      preset: 'astraeus',
+      description: '<my custom description>',
+    },
+    t.env,
+  )
+  const server = await startUiServer(t.env)
+  const read = async () =>
+    (
+      await fetch(`${server.url}/api/agents`, {
+        headers: { authorization: `Bearer ${server.token}` },
+      })
+    ).json()
+  try {
+    const before = readFileSync(rosterPath(t.env), 'utf8')
+    const data = await read()
+    assert.deepEqual(data.agents[0].profile?.categories, ['coding', 'reviewer'])
+    assert.equal(data.agents[0].description, '<my custom description>')
+    assert.equal(readFileSync(rosterPath(t.env), 'utf8'), before)
+    editAgent('renamed', { model: 'custom-model', effort: 'low' }, t.env)
+    const edited = readFileSync(rosterPath(t.env), 'utf8')
+    const row = (await read()).agents[0]
+    assert.deepEqual(row.profile.categories, ['coding'])
+    assert.equal(row.profile.modelLabel, 'custom-model')
+    assert.equal(row.description, '<my custom description>')
+    assert.equal(row.preset, 'astraeus')
+    assert.equal(readFileSync(rosterPath(t.env), 'utf8'), edited)
+  } finally {
+    await server.close()
+    t.cleanup()
+  }
+})
+
+it('fills legacy saved profiles without changing operational data and refreshes external edits', async () => {
+  const { rosterPath } = await import('../src/roster.js')
+  const t = tempEnv()
+  mkdirSync(t.env.CONSENSFLOW_HOME, { recursive: true })
+  const legacy = {
+    id: 'personal',
+    name: 'Personal',
+    kind: 'pi',
+    model: 'anthropic/claude-opus-5',
+    thinking: 'medium',
+    description: 'My notes',
+    createdAt: 'old',
+    updatedAt: 'old',
+    custom: { keep: true },
+  }
+  writeFileSync(
+    rosterPath(t.env),
+    JSON.stringify({ schemaVersion: 1, customDocument: true, agents: [legacy] }),
+  )
+  const server = await startUiServer(t.env)
+  const read = async () =>
+    (
+      await fetch(`${server.url}/api/agents`, {
+        headers: { authorization: `Bearer ${server.token}` },
+      })
+    ).json()
+  try {
+    const data = await read()
+    const saved = JSON.parse(readFileSync(rosterPath(t.env), 'utf8'))
+    assert.deepEqual(saved.agents[0].profile, data.agents[0].profile)
+    const { profile, ...rest } = saved.agents[0]
+    assert.ok(profile?.routeLabel)
+    assert.deepEqual(rest, legacy)
+    assert.equal(saved.customDocument, true)
+    const stable = readFileSync(rosterPath(t.env), 'utf8')
+    await read()
+    assert.equal(readFileSync(rosterPath(t.env), 'utf8'), stable)
+    saved.agents[0].model = 'openai-codex/gpt-6-astra'
+    writeFileSync(rosterPath(t.env), JSON.stringify(saved))
+    const edited = await read()
+    assert.deepEqual(edited.agents[0].profile.categories, ['coding', 'reviewer'])
+    assert.deepEqual(
+      JSON.parse(readFileSync(rosterPath(t.env), 'utf8')).agents[0].profile,
+      edited.agents[0].profile,
+    )
   } finally {
     await server.close()
     t.cleanup()

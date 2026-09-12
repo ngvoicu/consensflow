@@ -1,6 +1,5 @@
 import { spawn } from 'node:child_process'
 import { realpath } from 'node:fs/promises'
-import { envelope, pointer } from '../../hosts/lib/deliveries.js'
 
 /**
  * The P5 prompt_async endpoint admits a request but may stay silent forever.
@@ -104,14 +103,71 @@ async function claimEpoch(target) {
   throw new Error('opencode-server delivery needs pane.claim_epoch')
 }
 
+/** Only the launch-owned TUI can attest which native conversation is displayed. */
+export async function currentSession(config) {
+  const bridge = config?.sessionBridge
+  if (!bridge?.endpoint || !bridge.token || !config.launchId) return undefined
+  try {
+    const response = await fetch(new URL('/session', bridge.endpoint), {
+      headers: { authorization: `Bearer ${bridge.token}` },
+      signal: AbortSignal.timeout(1000),
+    })
+    const current = await response.json()
+    if (!response.ok || current.launchId !== config.launchId) return undefined
+    if (current.sessionId === null) return null
+    return /^ses_[A-Za-z0-9]+$/.test(current.sessionId ?? '') ? current.sessionId : undefined
+  } catch {
+    return undefined
+  }
+}
+
+async function sendCurrent(target, text, config) {
+  const refused = (error) => ({ ok: false, admitted: false, bytesWritten: 0, error })
+  if (!config.sessionBridge) return refused('native-session-unavailable')
+  validateCaller(target)
+  const expiresAt = Date.now() + (target.deadlineMs ?? DEFAULT_DEADLINE_MS)
+  if (expiresAt <= Date.now()) return refused('expired')
+  const claimed = await claimEpoch(target)
+  if (claimed?.ok !== true) return zeroByteClaimRefusal(claimed)
+  if (expiresAt <= Date.now()) return refused('expired')
+  try {
+    const response = await fetch(new URL('/deliver', config.sessionBridge.endpoint), {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${config.sessionBridge.token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        launchId: config.launchId,
+        sessionId: target.session,
+        text,
+        expiresAt,
+      }),
+      signal: AbortSignal.timeout(Math.min(DEFAULT_DEADLINE_MS, expiresAt - Date.now())),
+    })
+    const result = await response.json()
+    if (response.ok && result.ok === true && result.admitted === true)
+      return { ok: true, admitted: true }
+    if (result.admitted === false && result.bytesWritten === 0 && typeof result.error === 'string')
+      return refused(result.error)
+    return { ok: false, admitted: null, error: 'uncertain' }
+  } catch {
+    return { ok: false, admitted: null, error: 'uncertain' }
+  }
+}
+
 /**
  * POST one admitted user turn to the P5-discovered OpenCode TUI server after
  * pane.claim_epoch confirms the caller's observed epoch and clear draft. Any
  * failed claim is retryable: the HTTP request has not started yet.
  */
-async function sendText(target, text, record) {
+async function sendText(target, text) {
   if (typeof text !== 'string') throw new Error('opencode-server delivery needs text')
   const launch = launchConfig(target)
+  const config = launch.channel ?? launch
+  // Every ConsensFlow-owned launch carries an identity; legacy launches without
+  // the TUI bridge must wait for restart rather than post to a historical UUID.
+  if (config.launchId) return await sendCurrent(target, text, config)
   const endpointSpecValue = endpointSpec(target, launch)
   const endpoint = endpointUrl(endpointSpecValue)
   const session = target.session ?? launch.session
@@ -136,7 +192,7 @@ async function sendText(target, text, record) {
   let response
   let responseText
   try {
-    const expiresAt = record?.expiresAt
+    const expiresAt = Date.now() + targetDeadlineMs
     if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
       return { ok: false, admitted: false, error: 'expired', bytesWritten: 0 }
     }
@@ -211,6 +267,8 @@ export async function seedSession({
   cwd,
   text,
   model,
+  variant,
+  resume = false,
   signal,
   timeoutMs = 60000,
 }) {
@@ -228,7 +286,10 @@ export async function seedSession({
     timeoutMs <= 0
   )
     throw new Error('invalid OpenCode task launch')
+  if (variant !== undefined && (typeof variant !== 'string' || !variant || variant.length > 256))
+    throw new Error('invalid OpenCode reasoning effort')
   const body = { parts: [{ type: 'text', text }] }
+  if (variant !== undefined) body.variant = variant
   if (model) {
     const slash = model.indexOf('/')
     if (slash < 1 || slash === model.length - 1)
@@ -251,22 +312,51 @@ export async function seedSession({
   try {
     for (;;) {
       lifetime.signal.throwIfAborted()
+      // An early TUI health request can stall even after the server is ready.
+      // Bound each read (including its body), not just the whole startup.
+      const attempt = AbortSignal.any([lifetime.signal, AbortSignal.timeout(500)])
       let response
       try {
         response = await fetch(new URL('/global/health', endpoint), {
           headers,
-          signal: lifetime.signal,
+          signal: attempt,
         })
-      } catch {
+        await readBoundedText(response, 64 * 1024)
+      } catch (cause) {
         lifetime.signal.throwIfAborted()
+        if (response && !attempt.aborted) throw cause
         await sleep(100)
         continue
       }
-      await readBoundedText(response, 64 * 1024)
       if (response.status === 401 || response.status === 403)
         throw new Error('OpenCode task server unauthorized')
       if (response.ok) break
       await sleep(100)
+    }
+    lifetime.signal.throwIfAborted()
+    if (resume) {
+      const nativeUrl = new URL(`/session/${encodeURIComponent(sessionId)}`, endpoint)
+      nativeUrl.searchParams.set('directory', directory)
+      const response = await fetch(nativeUrl, { headers, signal: lifetime.signal })
+      if (!response.ok) {
+        await response.body?.cancel()
+        throw new Error('Could not read the current OpenCode session settings')
+      }
+      const native = JSON.parse(await readBoundedText(response, 64 * 1024))
+      const valid = (value) => typeof value === 'string' && value.length > 0 && value.length <= 256
+      if (
+        native.id !== sessionId ||
+        !valid(native.model?.id) ||
+        !valid(native.model?.providerID) ||
+        (native.model.variant !== undefined && !valid(native.model.variant)) ||
+        (native.agent !== undefined && !valid(native.agent))
+      ) {
+        throw new Error('OpenCode session has no valid current model and effort')
+      }
+      body.model = { providerID: native.model.providerID, modelID: native.model.id }
+      // Omission would inherit the configured agent variant, not native default.
+      body.variant = native.model.variant ?? 'default'
+      if (native.agent !== undefined) body.agent = native.agent
     }
     lifetime.signal.throwIfAborted()
     const url = new URL(`/session/${encodeURIComponent(sessionId)}/prompt_async`, endpoint)
@@ -563,13 +653,4 @@ export async function createSession({
     await stop().catch(() => {})
     throw cause
   }
-}
-
-export async function deliver(channel, target, record) {
-  if (channel !== 'opencode-server') throw new Error(`unsupported OpenCode channel: ${channel}`)
-  return await sendText(
-    target,
-    record.channel === 'cf-read' ? pointer(record) : envelope(record),
-    record,
-  )
 }

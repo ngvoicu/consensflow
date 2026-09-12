@@ -1,5 +1,5 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { roleConfiguration } from '../src/role-skills.js'
 
@@ -17,36 +17,13 @@ export function tempEnv() {
     CODEX_HOME: join(root, 'home', '.codex'),
     XDG_CONFIG_HOME: join(root, 'home', '.config'),
     PATH: join(root, 'bin'),
-    CONSENSFLOW_BIN_DIR: join(root, 'user-bin'),
+    CONSENSFLOW_BIN_DIR: join(root, 'consensflow', 'bin'),
   }
   return {
     root,
     env,
     cleanup: () => rmSync(root, { recursive: true, force: true }),
   }
-}
-
-/** Fails a test that produced a path under the real home directory. */
-export function assertOutsideRealHome(path) {
-  const real = homedir()
-  if (path === real || path.startsWith(`${real}/`)) {
-    throw new Error(`test touched the real home directory: ${path}`)
-  }
-}
-
-/**
- * Declares the precondition the generated skill needs: a machine that has
- * chosen the cmux path. Nothing installs before that choice — writing the
- * mode file is exactly what `applyMode` records, without dragging a host
- * payload and a git stub into a test about installing skills.
- */
-export function chooseCmuxMode(t) {
-  const root = t.env.CONSENSFLOW_HOME
-  mkdirSync(root, { recursive: true })
-  writeFileSync(
-    join(root, 'mode.json'),
-    `${JSON.stringify({ mode: 'cmux', at: '2026-08-21T00:00:00.000Z' }, null, 2)}\n`,
-  )
 }
 
 /** Native config resolution is a subprocess boundary, covered in role-skills.test. */

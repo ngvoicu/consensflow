@@ -610,12 +610,10 @@ test('store: 50 concurrent mixed mutations lose none', async () => {
       jobs.push(store.seenSet(wsA, { name: 'sink', items: [`item-${i}`], lead: 'tab:t-mix:1' }))
     }
     for (let i = 1; i <= 7; i += 1) {
-      jobs.push(
-        store.deliveryUpsert(wsA, { id: `del-${i}`, state: 'pending', answerId: `ans-${i}` }),
-      )
+      jobs.push(seedLegacy(store, wsA, { id: `del-${i}`, state: 'pending', answerId: `ans-${i}` }))
     }
-    jobs.push(store.deliveryUpsert(wsA, { id: 'del-3', state: 'accepted' }))
-    jobs.push(store.deliveryUpsert(wsA, { id: 'del-5', note: 're-planned' }))
+    jobs.push(seedLegacy(store, wsA, { id: 'del-3', state: 'accepted' }))
+    jobs.push(seedLegacy(store, wsA, { id: 'del-5', note: 're-planned' }))
     for (let i = 1; i <= 5; i += 1) {
       const directory = path.join(dir, `tabdir-${i}`)
       jobs.push(
@@ -1175,8 +1173,6 @@ test('store: unknown rows and malformed inputs fail without writing', async () =
       () => store.seenSet(ws, { name: 'nyx-coral-lane', items: [''], lead: 'tab:t-1:1' }),
       /required/,
     )
-    await assert.rejects(() => store.deliveryUpsert(ws, 'nope'), /object/)
-    await assert.rejects(() => store.deliveryUpsert(ws, { state: 'pending' }), /delivery id/)
     await assert.rejects(
       () => store.conversationCreate(ws, { name: '', agent: 'nyx', kind: 'pi' }),
       /required/,
@@ -1186,7 +1182,7 @@ test('store: unknown rows and malformed inputs fail without writing', async () =
 
     // Untouched rows, and an upsert for an unknown delivery id is creation
     // by design — not an unknown-row failure.
-    const created = await store.deliveryUpsert(ws, { id: 'del-new', state: 'pending' })
+    const created = await seedLegacy(store, ws, { id: 'del-new', state: 'pending' })
     assert.equal(created.id, 'del-new')
     const threads = await store.readThreads(ws)
     assert.deepEqual(Object.keys(threads), ['nyx-coral-lane'])
@@ -1281,7 +1277,7 @@ test('store: harness stores are never opened for writing', async () => {
       expect: await currentLaunch(store, ws, 'nyx-coral-lane'),
     })
     await store.seenSet(ws, { name: 'nyx-coral-lane', items: ['item-1'], lead: 'tab:t-1:1' })
-    await store.deliveryUpsert(ws, { id: 'del-1', state: 'pending', answerId: 'ans-1' })
+    await seedLegacy(store, ws, { id: 'del-1', state: 'pending', answerId: 'ans-1' })
     await store.policySet({ tab: 't-1', value: 'manual' })
     await store.mutate(ws, 'tab.suspend', async (io) => {
       const tabs = await io.readTabs()
@@ -2179,7 +2175,7 @@ test('store: delivery ids are minted app-wide and never come round again', async
     assert.equal(envelope.tabs.length, 1)
 
     // A record can be written under a minted id like any other.
-    await store.deliveryUpsert(ws, { id: first, targetSession: 'nyx-coral-lane' })
+    await seedLegacy(store, ws, { id: first, targetSession: 'nyx-coral-lane' })
     assert.equal((await store.readDeliveries(ws))[first].targetSession, 'nyx-coral-lane')
 
     // Across a restart the counter carries on. An id that came round again
@@ -2225,6 +2221,34 @@ test('store: a corrupt delivery counter refuses, and a missing one starts at one
       await assert.rejects(() => openStore(home), /delivery counter/, JSON.stringify(broken))
       assert.equal(await readFile(file, 'utf8'), bytes, 'the bytes are preserved')
     }
+  })
+})
+
+test('store: worker admission saves native lead context for every lead harness', async () => {
+  await withHome(async (home, dir) => {
+    const store = await openStore(home)
+    const ws = path.join(dir, 'ws')
+    for (const kind of ['claude-code', 'codex', 'opencode', 'pi']) {
+      const tab = `t-${kind}`
+      await seedTabRecord(store, ws, tab)
+      await store.mutate(ws, 'test.lead-context', async (io) => {
+        const tabs = await io.readTabs()
+        const lead = tabs.find((row) => row.id === tab).lead
+        lead.harness = kind
+        lead.nativeSession = `${kind}-native`
+        await io.writeTabs(tabs)
+      })
+      const admitted = await store.admit(ws, {
+        name: `worker-${kind}`,
+        tab,
+        agent: 'gefjon',
+        kind: 'opencode',
+        lead: `tab:${tab}:1`,
+        launch: { launchId: `launch-${kind}`, nonce: `launch-${kind}` },
+      })
+      assert.deepEqual(admitted.row.leadContext, { kind, session: `${kind}-native` })
+    }
+    await store.close()
   })
 })
 
@@ -2612,66 +2636,6 @@ test('store: reopening on a bound session re-stamps the binding, never leaves it
     const unvouched = (await store.readThreads(ws))['nyx-coral-lane']
     assert.equal(unvouched.binding, undefined, 'no binding rather than a stale one')
     assert.equal(unvouched.sessionId, 'rollout-7', 'the session it knows about is not forgotten')
-    await store.close()
-  })
-})
-
-test('store: a read records an ATTEMPT on the delivery, and never coverage', async () => {
-  await withHome(async (home, dir) => {
-    const ws = path.join(dir, 'ws')
-    const store = await openStore(home)
-    await store.deliveryUpsert(ws, {
-      id: 'd-1',
-      state: 'submitting',
-      conversation: 'nyx-coral-lane',
-      answerId: 'msg_7',
-      partCoverage: [[], []],
-      evidenceIds: [],
-    })
-
-    const first = await store.deliveryReadAttempt(ws, {
-      id: 'd-1',
-      part: 2,
-      lead: 'tab:t-1:1',
-      opId: 'op-read-1',
-    })
-    assert.equal(first.partAttempts['2'], 1)
-    assert.equal(first.lastRead.part, 2)
-    assert.equal(first.lastRead.lead, 'tab:t-1:1')
-    assert.equal(first.lastRead.opId, 'op-read-1')
-    assert.equal(typeof first.lastRead.at, 'string')
-
-    // Printing a part again is another attempt. Counted per part, so the
-    // record stays bounded by the number of parts however often it is read.
-    await store.deliveryReadAttempt(ws, { id: 'd-1', part: 2, lead: 'tab:t-1:1', opId: 'op-2' })
-    const third = await store.deliveryReadAttempt(ws, {
-      id: 'd-1',
-      part: 1,
-      lead: 'tab:t-1:1',
-      opId: 'op-3',
-    })
-    assert.equal(third.partAttempts['2'], 2)
-    assert.equal(third.partAttempts['1'], 1)
-
-    // An attempt is NOT coverage: a part printed is a part sent, and only
-    // the lead's own tool result carries the framing and the digest that
-    // prove it arrived. Nothing here may ever write those.
-    const stored = (await store.readDeliveries(ws))['d-1']
-    assert.deepEqual(stored.partCoverage, [[], []])
-    assert.deepEqual(stored.evidenceIds, [])
-    assert.equal(stored.state, 'submitting')
-
-    await assert.rejects(
-      () => store.deliveryReadAttempt(ws, { id: 'd-9', part: 1, lead: 'tab:t-1:1', opId: 'x' }),
-      /no delivery/,
-    )
-    for (const part of [0, -1, 1.5, 'two']) {
-      await assert.rejects(
-        () => store.deliveryReadAttempt(ws, { id: 'd-1', part, lead: 'tab:t-1:1', opId: 'x' }),
-        /part number/,
-        JSON.stringify(part),
-      )
-    }
     await store.close()
   })
 })
@@ -3103,3 +3067,54 @@ test('permanent pane deletion fences admission and survives legacy recovery', as
     await store.close()
   })
 })
+
+test('store: closed advisors cannot be adopted by the lead and PM cannot adopt workers', async () => {
+  await withHome(async (home, dir) => {
+    const ws = path.join(dir, 'ws')
+    const store = await openStore(home)
+    try {
+      await seedTabRecord(store, ws, 't-1')
+      await seedTabRecord(store, ws, 't-pm')
+      await store.mutate(ws, 'test.pm', async (io) => {
+        const tabs = await io.readTabs()
+        tabs.find((t) => t.id === 't-pm').role = 'pm'
+        await io.writeTabs(tabs)
+      })
+      for (const [owner, other, role] of [
+        ['t-1', 't-pm', 'worker'],
+        ['t-pm', 't-1', 'advisor'],
+      ]) {
+        const name = `same-agent-${role}`
+        const admitted = await store.admit(ws, {
+          name,
+          tab: owner,
+          agent: 'zeus',
+          kind: 'codex',
+          lead: `tab:${owner}:1`,
+          launch: { launchId: role, opId: role, nonce: role },
+        })
+        assert.equal(admitted.row.role, role)
+        await store.resolve(ws, { name, launchId: role, outcome: 'opened' })
+        await store.releaseExitedPane(ws, {
+          name,
+          tab: owner,
+          pane: admitted.pane.id,
+          generation: admitted.pane.generation,
+        })
+        await assert.rejects(store.admit(ws, { name, tab: other }), /another group/)
+      }
+    } finally {
+      await store.close()
+    }
+  })
+})
+
+async function seedLegacy(store, cwd, record) {
+  return store.mutate(cwd, 'test.legacy', async (io) => {
+    const records = await io.readDeliveries()
+    const merged = { ...records[record.id], ...record }
+    records[record.id] = merged
+    await io.writeDeliveries(records)
+    return merged
+  })
+}

@@ -134,6 +134,7 @@
       align-items: baseline;
       gap: 8px;
     }
+    #group-views button[aria-pressed="true"] { background: var(--accent); color: var(--bg); }
     #current-session {
       min-width: 0;
       max-width: min(40vw, 30ch);
@@ -149,7 +150,14 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .held-button { color: var(--amber); border-color: rgba(231, 185, 104, .5); }
+    #results-dialog { width: min(1000px, 90vw); max-height: 90vh; padding: 0; }
+    #results-list { padding: 0 24px 24px; overflow: auto; }
+    .result-row { border-bottom: 1px solid var(--line-soft); padding: 16px 0; }
+    .result-row h3 { margin: 0; font: 14px var(--mono); }
+    .result-meta { color: var(--muted); font-size: 12px; }
+    .result-row[data-state="uncertain"] .result-meta { color: var(--amber); }
+    .result-row button { margin-right: 8px; }
+    .result-body { white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.5 var(--mono); padding: 16px; background: var(--ink); }
 
     .workspace {
       position: relative;
@@ -348,7 +356,7 @@
     .pane-failure-exit { margin-left: auto; flex: 0 0 auto; }
     .terminal-host { grid-row: 3; min-width: 0; min-height: 0; padding: 5px 3px 3px; }
     .terminal-host .xterm { height: 100%; }
-    .delivery-summary {
+    .result-summary {
       flex: 0 1 auto;
       min-width: 0;
       max-width: 112px;
@@ -363,29 +371,7 @@
       font-size: 10px;
       cursor: default;
     }
-    .delivery-summary:hover { border-color: var(--amber); }
-    .delivery-detail-row {
-      min-width: 0;
-      align-items: center;
-      gap: 6px;
-      display: flex;
-      border-top: 1px solid var(--line-soft);
-      padding: 7px 8px;
-    }
-    .delivery-detail-reason {
-      min-width: 0;
-      flex: 1;
-      overflow-wrap: anywhere;
-      color: var(--amber);
-      font-size: 10px;
-    }
-    .delivery-detail-row button[role="menuitem"] {
-      width: auto;
-      flex: 0 0 auto;
-      margin: 0;
-      white-space: nowrap;
-    }
-
+    .result-summary:hover { border-color: var(--amber); }
     .pane-parking {
       position: fixed;
       left: -300vw;
@@ -429,11 +415,6 @@
       text-align: left;
     }
     .menu button[role="menuitem"]:hover { background: var(--panel-raised); }
-    .answer-row { border-top: 1px solid var(--line-soft); padding: 7px 8px; }
-    .answer-preview { display: block; color: var(--foam); }
-    .answer-mark { display: block; margin-top: 2px; color: var(--muted); font: 10px/1.2 var(--mono); }
-    .answer-row button { margin-top: 5px; color: var(--seafoam); }
-    .answer-row[data-state="uncertain"] .answer-mark { color: var(--amber); }
 
     dialog {
       width: min(480px, calc(100vw - 32px));
@@ -493,11 +474,17 @@
         <span id="current-session">No session</span>
         <span id="current-directory"></span>
       </div>
+      <div id="group-views" role="group" aria-label="Session view" hidden>
+        <button class="quiet-button" id="view-pm" data-testid="view-pm" type="button" aria-pressed="false">PM</button>
+        <button class="quiet-button" id="view-lead" data-testid="view-lead" type="button" aria-pressed="false">Lead</button>
+      </div>
       <span class="spacer"></span>
-      <button class="quiet-button held-button" id="held-send" type="button" hidden>Send held answers to this lead</button>
+      <button class="quiet-button" id="results-toggle" type="button" hidden>Results</button>
       <button class="policy-button" id="tab-policy" data-testid="tab-policy" type="button" hidden>Reply delivery</button>
       <button class="icon-button delivery-info" id="delivery-info" type="button" popovertarget="delivery-help" aria-label="About reply delivery" hidden>i</button>
-      <button class="quiet-button" id="roster-toggle" type="button" aria-haspopup="dialog" aria-controls="agents-dialog">Agents</button>
+      <button class="quiet-button" id="roster-toggle" type="button" aria-haspopup="dialog" aria-controls="agents-dialog">Your agents</button>
+      <button class="quiet-button" id="library-toggle" type="button" aria-haspopup="dialog" aria-controls="library-dialog">Agent library</button>
+      <button class="quiet-button" id="harnesses-toggle" type="button" aria-haspopup="dialog" aria-controls="harnesses-dialog">Harnesses</button>
       <button class="quiet-button" id="new-pane" type="button" hidden>New pane</button>
       <button class="primary-button" id="new-conversation" type="button">New session</button>
     </header>
@@ -521,19 +508,49 @@
   <dialog class="roster-panel" id="agents-dialog" data-testid="roster-panel" aria-labelledby="agents-title">
     <header class="roster-bar">
       <span class="brand">ConsensFlow</span>
-      <h1 id="agents-title">Agents</h1>
+      <h1 id="agents-title">Your agents</h1>
       <span class="spacer"></span>
-      <button class="quiet-button" id="roster-close" type="button" aria-label="Close Agents" autofocus>Close</button>
+      <button class="quiet-button" id="roster-close" type="button" aria-label="Close Your agents" autofocus>Close</button>
     </header>
     <div class="roster-body">
       <iframe data-testid="roster-frame" title="ConsensFlow roster editor" referrerpolicy="no-referrer" sandbox="allow-forms allow-same-origin allow-scripts"></iframe>
     </div>
   </dialog>
 
+  <dialog class="roster-panel" id="library-dialog" data-testid="library-panel" aria-labelledby="library-title">
+    <header class="roster-bar">
+      <span class="brand">ConsensFlow</span>
+      <h1 id="library-title">Agent library</h1>
+      <span class="spacer"></span>
+      <button class="quiet-button" id="library-close" type="button" aria-label="Close Agent library" autofocus>Close</button>
+    </header>
+    <div class="roster-body">
+      <iframe data-testid="library-frame" title="ConsensFlow agent library" referrerpolicy="no-referrer" sandbox="allow-forms allow-same-origin allow-scripts"></iframe>
+    </div>
+  </dialog>
+
+  <dialog class="roster-panel" id="harnesses-dialog" aria-labelledby="harnesses-title">
+    <header class="roster-bar">
+      <span class="brand">ConsensFlow</span>
+      <h1 id="harnesses-title">Harnesses</h1>
+      <span class="spacer"></span>
+      <button class="quiet-button" id="harnesses-close" type="button" aria-label="Close Harnesses" autofocus>Close</button>
+    </header>
+    <div class="roster-body">
+      <iframe data-testid="harnesses-frame" title="ConsensFlow harness diagnostics" referrerpolicy="no-referrer" sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox"></iframe>
+    </div>
+  </dialog>
+
+  <dialog id="results-dialog" aria-labelledby="results-title">
+    <header class="roster-bar"><h1 id="results-title">Results</h1><span class="spacer"></span><button id="results-close" type="button" autofocus>Close</button></header>
+    <div id="results-list"></div>
+  </dialog>
+
   <aside class="delivery-help" id="delivery-help" data-testid="delivery-help" popover aria-labelledby="delivery-help-title">
     <h2 id="delivery-help-title">Reply delivery</h2>
-    <p><strong>Automatic</strong> sends complete worker replies to this session's lead when it is ready. Replies wait while the lead is working or you are typing.</p>
-    <p><strong>Manual</strong> keeps replies available. The lead reads results only when you ask. You can also use <strong>Send reply to lead</strong>; sending waits for the lead to be ready.</p>
+    <p><strong>Automatic</strong> lets the Lead or PM collect complete worker replies and advisor findings when ready.</p>
+    <p><strong>Manual</strong> keeps replies in Results until you ask the Lead or PM to read them or choose <strong>Collect</strong>.</p>
+    <p>Every completed reply stays in Results. Opening it here does not mark it received by the Lead or PM. Unconfirmed counts include all replies without a verified receipt.</p>
     <p>A Manual session pauses <strong>all automatic replies</strong>, including workers set to Automatic. Workers set to Inherit follow the session setting.</p>
   </aside>
 

@@ -3,18 +3,16 @@ import { readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { harnessPath, knownHarnesses } from './harnesses.js'
+import { prepareOpenCodeExtension } from './opencode-install.js'
 import { preparePiExtension } from './pi-install.js'
 
 const execute = promisify(execFile)
 const SOURCES = {
-  claude: [
-    'https://registry.npmjs.org/@anthropic-ai/claude-code/latest',
-    'https://code.claude.com/docs/en/setup',
-  ],
-  codex: ['https://registry.npmjs.org/@openai/codex/latest', 'https://github.com/openai/codex'],
-  opencode: ['https://registry.npmjs.org/opencode-ai/latest', 'https://opencode.ai/docs/cli/'],
-  pi: ['https://registry.npmjs.org/@earendil-works/pi-coding-agent/latest', 'https://pi.dev/'],
-  kimi: ['https://pypi.org/pypi/kimi-cli/json', 'https://github.com/MoonshotAI/kimi-cli'],
+  claude: 'https://registry.npmjs.org/@anthropic-ai/claude-code/latest',
+  codex: 'https://registry.npmjs.org/@openai/codex/latest',
+  opencode: 'https://registry.npmjs.org/opencode-ai/latest',
+  pi: 'https://registry.npmjs.org/@earendil-works/pi-coding-agent/latest',
+  kimi: 'https://pypi.org/pypi/kimi-cli/json',
 }
 
 export function releaseSource(id, executable, env) {
@@ -50,7 +48,7 @@ export function releaseSource(id, executable, env) {
     }
   }
   return {
-    url: SOURCES[id][0],
+    url: SOURCES[id],
     format: id === 'kimi' ? 'pypi' : 'npm',
     distribution: path?.includes('/node_modules/')
       ? 'npm'
@@ -97,45 +95,15 @@ async function latestRelease(_id, source) {
   return value
 }
 
-export function integrationEvidence(id, tabs, deliveries) {
-  const kind = id === 'claude' ? 'claude-code' : id
-  for (const tab of tabs) {
-    if (tab.closed || tab.role === 'pm' || tab.lead?.harness !== kind) continue
-    const pane = tab.panes.find((pane) => pane.kind === 'lead')
-    const receipt = deliveries.find(
-      (record) =>
-        record.state === 'accepted' &&
-        Array.isArray(record.evidenceIds) &&
-        record.evidenceIds.length > 0 &&
-        record.target?.tab === tab.id &&
-        record.target.pane === pane?.id &&
-        record.target.generation === tab.lead.generation &&
-        record.target.session === tab.lead.nativeSession,
-    )
-    if (receipt)
-      return {
-        state: 'ok',
-        reason: `A complete worker result was observed in the current lead (${tab.roleName ?? tab.id})`,
-        checkedAt: receipt.acceptedAt,
-      }
-  }
-  return {
-    state: 'unverified',
-    reason: 'No complete result receipt has been verified for a currently running lead',
-  }
-}
-
 /** Diagnostics never participate in launch, binding, reading or delivery decisions. */
 export class HarnessAdmin {
   #env
   #latest
-  #integration
   #cache = new Map()
   #pending = new Map()
-  constructor(env, { latest = latestRelease, integration = null } = {}) {
+  constructor(env, { latest = latestRelease } = {}) {
     this.#env = env
     this.#latest = latest
-    this.#integration = integration
   }
 
   async check(id = null, { refresh = false } = {}) {
@@ -169,10 +137,8 @@ export class HarnessAdmin {
       installed: Boolean(path),
       lead: id !== 'kimi',
       checkedAt: Date.now(),
-      instructions: SOURCES[id][1],
       version: { state: 'not-installed' },
       update: { state: 'not-checked' },
-      integration: { state: 'unverified', reason: 'No live integration evidence has been checked' },
     }
     if (!path) return row
     try {
@@ -210,12 +176,8 @@ export class HarnessAdmin {
     } catch (error) {
       row.update = { state: 'error', reason: error.message }
     }
-    if (this.#integration) row.integration = await this.#integration(id)
-    if (id === 'pi') {
-      row.extension = preparePiExtension(this.#env)
-      if (row.extension.state === 'error')
-        row.integration = { state: 'error', reason: row.extension.reason }
-    }
+    if (id === 'pi') row.extension = preparePiExtension(this.#env)
+    if (id === 'opencode') row.extension = prepareOpenCodeExtension(this.#env)
     return row
   }
 }

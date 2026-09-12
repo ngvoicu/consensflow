@@ -1,12 +1,12 @@
 import { watch } from 'node:fs'
 import { access, mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { envelope, pointer } from '../../hosts/lib/deliveries.js'
+import { createReceiver } from '../lib/receiver.js'
 
-const DELIVERY_ID = /^d-\d+$/
 const MESSAGE_ID = /^m-[a-f0-9]{32}$/
 const SAFE_PATH_SEGMENT = /^[A-Za-z0-9._-]+$/
 const EDITOR_PROBE_ID = /^editor-[a-f0-9]{32}$/
+const SESSION_PROBE_ID = /^session-[a-f0-9]{32}$/
 const MESSAGE_FIELDS = new Set(['id', 'type', 'launchId', 'session', 'text', 'expiresAt'])
 
 // Interactive Pi reads the expanded editor, including pasted attachment paths.
@@ -37,26 +37,6 @@ function messageText(message) {
     .filter((part) => part?.type === 'text')
     .map((part) => part.text)
     .join('')
-}
-
-/** Accept exactly the canonical envelope or the canonical cf-read pointer. */
-function envelopeText(record) {
-  if (typeof record?.text !== 'string') return null
-  if (record.channel === 'cf-read') {
-    try {
-      if (record.text === pointer(record)) return record.text
-    } catch {}
-    return null
-  }
-  if (typeof record?.answer !== 'string') return null
-  try {
-    if (record.text === envelope(record)) return record.text
-  } catch {}
-  return null
-}
-
-function validDeliveryId(id) {
-  return typeof id === 'string' && DELIVERY_ID.test(id)
 }
 
 function validMessageId(id) {
@@ -106,8 +86,9 @@ function frontierOf(ctx) {
  * 140, 240-241), so the evidence is tied to Pi's native session frontier.
  *
  * `settled/<launchId>.json` is app-owned evidence with `{launchId, sessionId,
- * frontier: {id}, settledAt}`. It is written only at `agent_settled` and
- * removed at new work. A delivery record carries its own absolute `expiresAt`;
+ * frontier: {id}, settledAt}`. It is written at `agent_settled` or when an idle
+ * TUI restores a completed assistant leaf, and removed at new work.
+ * A delivery record carries its own absolute `expiresAt`;
  * this extension never derives a second timeout from launch configuration.
  * Before a send, false means zero-byte refusal. After a send, absent
  * `message_start` means null/unknown, never false. Invalid ids are quarantined;
@@ -115,13 +96,24 @@ function frontierOf(ctx) {
  */
 export function createDeliveryExtension(
   pi,
-  { inbox, ack, quarantine, settled, expired, launchId, editorGuard, logger = console } = {},
+  {
+    inbox,
+    ack,
+    quarantine,
+    settled,
+    expired,
+    launchId,
+    editorGuard,
+    receiver,
+    logger = console,
+  } = {},
 ) {
   let context
   let watcher
   let running = false
   let queued = false
   const pending = new Map()
+  let resultReceiver
 
   const logError = (...args) => logger?.error?.(...args)
   const evidenceFile =
@@ -233,7 +225,8 @@ export function createDeliveryExtension(
         .filter((name) => name.endsWith('.json'))
         .sort(
           (a, b) =>
-            Number(b.startsWith('editor-')) - Number(a.startsWith('editor-')) || a.localeCompare(b),
+            Number(/^(editor|session)-/.test(b)) - Number(/^(editor|session)-/.test(a)) ||
+            a.localeCompare(b),
         )
       for (const file of files) {
         const path = join(inbox, file)
@@ -245,7 +238,11 @@ export function createDeliveryExtension(
           continue
         }
         const id = record?.id
-        if (editorGuard === 1 && EDITOR_PROBE_ID.test(id) && file === `${id}.json`) {
+        if (
+          editorGuard === 1 &&
+          (EDITOR_PROBE_ID.test(id) || SESSION_PROBE_ID.test(id)) &&
+          file === `${id}.json`
+        ) {
           // A fresh launch/session-bound challenge, never cached editor text.
           if (
             record.launchId === launchId &&
@@ -255,9 +252,15 @@ export function createDeliveryExtension(
             const response = {
               id,
               launchId,
-              session: record.session,
               expiresAt: record.expiresAt,
-              ...nativeEditorState(context, record.session),
+              ...(SESSION_PROBE_ID.test(id)
+                ? {
+                    sessionId:
+                      context?.mode === 'tui' && context.hasUI === true
+                        ? sessionIdOf(context)
+                        : null,
+                  }
+                : { session: record.session, ...nativeEditorState(context, record.session) }),
             }
             await mkdir(ack, { recursive: true })
             const destination = join(ack, file)
@@ -329,70 +332,13 @@ export function createDeliveryExtension(
             // the draft is only read, never cleared or overwritten.
             pi.sendUserMessage(message)
           } catch (cause) {
-            void acknowledge(id, false, 'send-user-message-threw')
+            void acknowledge(id, null, 'send-user-message-threw')
             logError(`could not submit message ${id}: ${cause?.message ?? String(cause)}`)
           }
           break
         }
-        if (!validDeliveryId(id)) {
-          if (typeof quarantine === 'string') {
-            try {
-              await rename(path, await uniquePath(quarantine, file))
-              logError(`invalid delivery id quarantined from ${file}`)
-            } catch (cause) {
-              logError(
-                `could not quarantine invalid delivery ${file}: ${cause?.message ?? String(cause)}`,
-              )
-            }
-          } else {
-            logError(`invalid delivery id in ${file}: quarantine is not configured`)
-          }
-          continue
-        }
-        if (pending.has(id)) continue
-        if (!validExpiry(record.expiresAt)) {
-          await refuseBeforeSend(path, file, id, 'missing-expiry')
-          continue
-        }
-        if (record.expiresAt <= Date.now()) {
-          if (typeof expired === 'string') {
-            await refuseBeforeSend(path, file, id, 'expired-before-send', expired)
-          } else {
-            logError(`expired delivery ${id}: expired directory is not configured`)
-          }
-          continue
-        }
-        const text = envelopeText(record)
-        if (text === null) {
-          logError(`delivery ${id} is missing envelope or pointer`)
-          await refuseBeforeSend(path, file, id, 'missing-envelope')
-          continue
-        }
-        if (context?.isIdle?.() !== true) break
-
-        if (editorGuard === 1) {
-          const editor = nativeEditorState(context, record.target?.session)
-          if (editor.ready !== true) {
-            await refuseBeforeSend(path, file, id, editor.reason)
-            continue
-          }
-        }
-
-        const entry = { path, file, text, timer: null, done: false }
-        pending.set(id, entry)
-        entry.timer = setTimeout(
-          () => void acknowledge(id, null, 'admission-unknown'),
-          Math.max(0, record.expiresAt - Date.now()),
-        )
-        try {
-          // Pi's sendUserMessage returns void. Only message_start proves entry
-          // into the session; a settled promise would merely mean turn end.
-          pi.sendUserMessage(text)
-        } catch (cause) {
-          void acknowledge(id, false, 'send-user-message-threw')
-          logError(`could not submit delivery ${id}: ${cause?.message ?? String(cause)}`)
-        }
-        break
+        // Superseded d-N offers are never an automatic-delivery fallback.
+        if (typeof quarantine === 'string') await rename(path, await uniquePath(quarantine, file))
       }
     } finally {
       running = false
@@ -405,7 +351,49 @@ export function createDeliveryExtension(
 
   pi.on('session_start', async (_event, ctx) => {
     context = ctx
+    watcher?.close()
+    if (receiver && !resultReceiver) {
+      resultReceiver = createReceiver({
+        ...receiver,
+        session: () =>
+          context?.mode === 'tui' && context.hasUI === true ? sessionIdOf(context) : null,
+        ready: () => nativeEditorState(context, sessionIdOf(context)).ready,
+        insert: (claim) => {
+          if (!nativeEditorState(context, claim.receiver.session).ready)
+            return {
+              admitted: false,
+              bytesWritten: 0,
+              reason: 'native session or readiness changed',
+            }
+          pi.sendMessage(
+            {
+              customType: 'consensflow-worker-result',
+              content: claim.text,
+              display: true,
+              details: { resultId: claim.result, claimId: claim.id },
+            },
+            { triggerTurn: true, deliverAs: 'followUp' },
+          )
+          return { admitted: true }
+        },
+        onError: (error) => logError(`result receiver: ${error.message}`),
+      })
+      resultReceiver.start()
+      await resultReceiver.poll()
+    }
     await invalidateSettlement()
+    const leaf = ctx.sessionManager?.getLeafEntry?.()
+    if (
+      ctx.mode === 'tui' &&
+      ctx.hasUI === true &&
+      ctx.isIdle?.() === true &&
+      ctx.hasPendingMessages?.() === false &&
+      leaf?.type === 'message' &&
+      leaf.id === frontierOf(ctx)?.id &&
+      leaf.message?.role === 'assistant' &&
+      leaf.message.stopReason === 'stop'
+    )
+      await writeSettlement()
     if (typeof inbox !== 'string' || typeof ack !== 'string') return
     await mkdir(inbox, { recursive: true })
     watcher = watch(inbox, { persistent: false }, () => void consume())
@@ -419,7 +407,7 @@ export function createDeliveryExtension(
     await writeSettlement()
     await consume()
   })
-  pi.on('session_shutdown', () => {
+  pi.on('session_shutdown', async () => {
     watcher?.close()
     watcher = undefined
     for (const entry of pending.values()) {
@@ -427,9 +415,16 @@ export function createDeliveryExtension(
     }
     pending.clear()
     context = undefined
+    await resultReceiver?.stop().catch((error) => logError(`result receiver: ${error.message}`))
+    resultReceiver = undefined
   })
 
-  return { consume }
+  return {
+    consume,
+    get receiver() {
+      return resultReceiver
+    },
+  }
 }
 
 // This is the only environment-reading entry point. The launch producer
@@ -443,5 +438,8 @@ export default function consensflowDelivery(pi) {
     expired: process.env.CF_DELIVERY_EXPIRED,
     launchId: process.env.CF_DELIVERY_LAUNCH_ID,
     editorGuard: process.env.CF_DELIVERY_EDITOR_GUARD === '1' ? 1 : undefined,
+    receiver: process.env.CF_RESULT_RECEIVER
+      ? { config: process.env.CF_RESULT_RECEIVER }
+      : undefined,
   })
 }

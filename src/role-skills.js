@@ -9,7 +9,7 @@ export async function roleConfiguration(
   kind,
   { role, env, executable, cwd, readInstructions = codexInstructions },
 ) {
-  if (role !== 'lead' && role !== 'pm') return { args: [], env: {} }
+  if (!['lead', 'pm', 'advisor'].includes(role)) return { args: [], env: {} }
   const name = `consensflow-${role}`
   const root = join(configRoot(env), 'roles', role)
   const skills = join(root, '.claude', 'skills')

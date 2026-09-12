@@ -13,11 +13,64 @@ import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import * as completion from '../../hosts/lib/completion.js'
-import { leadReady } from '../../hosts/lib/readiness.js'
 
 const FIX = fileURLToPath(new URL('./fixtures/completion/', import.meta.url))
 const { answers } = completion
 const PI_QUIET_MS = 120_000
+
+test('completion/pi: native custom inbox messages retain full receipt body without becoming worker answers', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-pi-receipt-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const directory = path.join(root, '.pi', 'agent', 'sessions', 'project')
+  await fs.mkdir(directory, { recursive: true })
+  const body = '[consensflow receiver claim-one]\nComplete result\n[end of receiver claim-one]\n'
+  await fs.writeFile(
+    path.join(directory, 'native-receipt.jsonl'),
+    [
+      { type: 'session', id: 'native-receipt' },
+      {
+        type: 'custom_message',
+        id: 'entry-one',
+        customType: 'consensflow-worker-result',
+        content: body,
+        display: true,
+      },
+    ]
+      .map(JSON.stringify)
+      .join('\n') + '\n',
+  )
+  const parsed = await answers('pi', 'native-receipt', { HOME: root })
+  assert.equal(parsed.items.length, 1)
+  assert.equal(parsed.items[0].role, 'custom')
+  assert.equal(parsed.items[0].text, body)
+})
+
+test('completion/claude-code: synchronous hook context is exact native receipt evidence, not assistant text', async (t) => {
+  const session = '15fba934-d727-4777-8791-123675a63649'
+  const body = '[consensflow receiver claim-one]\nComplete result\n[end of receiver claim-one]\n'
+  const staged = await stageJsonl('claude-code', session, 'claude-code/fragments.jsonl', {
+    mutate(records) {
+      records.push({
+        type: 'attachment',
+        uuid: 'hook-receipt',
+        sessionId: session,
+        isSidechain: false,
+        attachment: {
+          type: 'hook_additional_context',
+          hookEvent: 'UserPromptSubmit',
+          hookName: 'UserPromptSubmit',
+          content: [body],
+        },
+      })
+      return records
+    },
+  })
+  t.after(() => fs.rm(staged.root, { recursive: true, force: true }))
+  const parsed = await answers('claude-code', session, staged.env)
+  const receipt = parsed.items.find((item) => item.id === 'hook-receipt')
+  assert.equal(receipt?.text, body)
+  assert.equal(receipt?.role, 'custom')
+})
 
 async function stageJsonl(kind, sessionId, fixture, options = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-completion-'))
@@ -196,24 +249,11 @@ function shape(result) {
     assert.ok(result.settlement.cursor !== null)
     assert.equal(typeof result.settlement.boundary, 'string')
   }
-  assert.ok(['ready', 'busy', 'draft', 'unknown'].includes(readiness(result).state))
-}
-
-function readiness(result, sinceCursor, kind) {
-  return leadReady({
-    answers: result,
-    ...(kind === undefined ? {} : { kind }),
-    draftLatched: false,
-    epoch: 17,
-    ...(sinceCursor === undefined ? {} : { sinceCursor }),
-  })
 }
 
 function assertNotReady(result) {
-  assert.notEqual(readiness(result).state, 'ready')
+  assert.ok(result.unknown || result.replaced || result.settlement.state !== 'settled')
 }
-
-// ---------------------------------------------------------------- codex
 
 test('completion/codex: native ids survive duplicate text and task_complete settles an exact final', async () => {
   const session = '01a074ec-7aff-74b0-8cf6-aa00d8e451cb'
@@ -235,7 +275,7 @@ test('completion/codex: native ids survive duplicate text and task_complete sett
   assert.equal(result.settlement.boundary, 'task_complete')
   assert.equal(result.settlement.cursor, result.cursor)
   assert.deepEqual(result.settlement.evidence.openTools, [])
-  assert.equal(readiness(result).state, 'ready')
+  assert.equal(result.settlement.state, 'settled')
 })
 
 test('completion/codex: native AgentMessage remains canonical when its response mirror has injected text', async () => {
@@ -340,7 +380,7 @@ test('completion/codex: verified turn_aborted is cancellation; a native fork is 
     ],
   )
   assert.equal(fork.settlement.state, 'settled')
-  assert.equal(readiness(fork).state, 'unknown', 'replacement voids a populated native proof')
+  assert.equal(fork.replaced, true, 'replacement voids a populated native proof')
 })
 
 test('completion/codex: a 60,000-character answer is never display-normalised', async () => {
@@ -352,6 +392,88 @@ test('completion/codex: a 60,000-character answer is never display-normalised', 
 })
 
 // ------------------------------------------------------------- claude-code
+
+const lateClaudeSession = '4e761651-511b-4065-8a65-6ff21582faad'
+const lateClaudeFixture = 'claude-code/v268-late-ancestors.jsonl'
+test('completion/claude-code: late native user ancestors preserve completion and cursor freshness', async (t) => {
+  const { env, file, root } = await stageJsonl('claude-code', lateClaudeSession, lateClaudeFixture)
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const records = (await fs.readFile(file, 'utf8')).trim().split('\n').map(JSON.parse)
+  await fs.writeFile(file, records.slice(0, 6).map(JSON.stringify).join('\n') + '\n')
+  const before = await answers('claude-code', lateClaudeSession, env)
+  assert.equal(before.settlement.state, 'settled')
+  await fs.appendFile(file, records.slice(6).map(JSON.stringify).join('\n') + '\n')
+  const result = await answers('claude-code', lateClaudeSession, env)
+  shape(result)
+  assert.equal(result.inFlight, false)
+  assert.equal(result.settlement.state, 'settled')
+  assert.deepEqual(result.settlement, before.settlement, 'late ancestry is not a new boundary')
+  assert.deepEqual(
+    result.items[0],
+    before.items[0],
+    'assistant text and physical cursor remain stable',
+  )
+  assert.equal(result.items[1].id, records[6].uuid, 'late user stays in the native history')
+  assert.equal(result.items[1].text, records[6].message.content)
+})
+
+test('completion/claude-code: late ancestry cannot settle unrelated or unproven work', async (t) => {
+  for (const [name, mutate] of [
+    ['missing attachment', (rows) => rows.pop()],
+    ['unrelated user', (rows) => (rows[6].uuid = 'another-user')],
+    ['cyclic attachments', (rows) => (rows[7].parentUuid = rows[10].uuid)],
+    ['duplicate attachment ID', (rows) => rows.push({ ...rows[7] })],
+    ['duplicate user ID', (rows) => rows.push({ ...rows[6] })],
+    ['foreign attachment', (rows) => (rows[8].sessionId = 'foreign')],
+    ['sidechain attachment', (rows) => (rows[8].isSidechain = true)],
+    ['unknown ancestry record', (rows) => (rows[8].type = 'unknown')],
+    ['sidechain assistant', (rows) => (rows[3].isSidechain = true)],
+    ['wrong boundary parent', (rows) => (rows[4].parentUuid = 'another-assistant')],
+    ['stop hooks not complete', (rows) => rows.splice(4, 1)],
+    ['open tool', (rows) => rows[3].message.content.push({ type: 'tool_use', id: 'open-tool' })],
+    [
+      'next user with earlier timestamp',
+      (rows) =>
+        rows.push({
+          ...rows[6],
+          uuid: 'next-user',
+          parentUuid: rows[3].uuid,
+        }),
+    ],
+    [
+      'next user before late ancestors',
+      (rows) =>
+        rows.splice(6, 0, {
+          ...rows[6],
+          uuid: 'next-user',
+          parentUuid: rows[3].uuid,
+        }),
+    ],
+    [
+      'later queue matching old prompt',
+      (rows) =>
+        rows.splice(6, 0, {
+          type: 'queue-operation',
+          operation: 'enqueue',
+          content: rows[6].message.content,
+        }),
+    ],
+  ]) {
+    await t.test(name, async (t) => {
+      const { env, root } = await stageJsonl('claude-code', lateClaudeSession, lateClaudeFixture, {
+        mutate: (rows) => {
+          mutate(rows)
+          return rows
+        },
+      })
+      t.after(() => fs.rm(root, { recursive: true, force: true }))
+      const result = await answers('claude-code', lateClaudeSession, env)
+      assertNotReady(result)
+      if (name.startsWith('later queue'))
+        assert.equal(result.settlement.evidence.queuedTurns.length, 1)
+    })
+  }
+})
 
 test('completion/claude-code: fragments share message.id, server tool result is lossless, hook settles', async () => {
   const session = '15fba934-d727-4777-8791-123675a63649'
@@ -388,7 +510,7 @@ test('completion/claude-code: fragments share message.id, server tool result is 
     queuedTurns: [],
     hooksInFlight: [],
   })
-  assert.equal(readiness(result).state, 'ready')
+  assert.equal(result.settlement.state, 'settled')
 })
 
 test('completion/claude-code: fragment identity supports growth and repeated equal text', async () => {
@@ -477,7 +599,7 @@ test('completion/claude-code: the captured interrupt cancels; compaction keeps p
   assert.equal(interrupted.inFlight, false)
   assert.equal(interrupted.settlement.state, 'settled')
   assert.equal(interrupted.settlement.boundary, 'user.request_interrupted')
-  assert.equal(readiness(interrupted).state, 'ready')
+  assert.equal(interrupted.settlement.state, 'settled')
 
   const quotedStage = await stageJsonl('claude-code', session, 'claude-code/interrupted.jsonl', {
     mutate(records) {
@@ -529,7 +651,7 @@ test('completion/claude-code: popAll consumes every popped item and later queue 
   assert.deepEqual(final.settlement.evidence.queuedTurns, [])
   assert.equal(final.settlement.boundary, 'system.stop_hook_summary')
   assert.equal(final.settlement.state, 'settled')
-  assert.equal(readiness(final).state, 'ready')
+  assert.equal(final.settlement.state, 'settled')
 })
 
 test('completion/claude-code: native API error settles incomplete as failure, not cancellation', async () => {
@@ -587,7 +709,6 @@ test('completion/pi: toolCallId closes the loop and a 120-second quiet window de
   assert.equal(result.settlement.state, 'settled')
   assert.equal(result.settlement.provenance, 'derived')
   assert.equal(result.settlement.boundary, 'session.quiet_window')
-  assert.equal(readiness(result, undefined, 'pi').state, 'unknown')
 })
 
 test('completion/pi: matching settlement evidence promotes the native boundary, mismatches stay derived', async () => {
@@ -653,7 +774,6 @@ test('completion/pi: every retry prefix stays unready until success plus the rea
   assert.equal(settled.settlement.state, 'settled')
   assert.equal(settled.settlement.provenance, 'derived')
   assert.equal(settled.settlement.boundary, 'session.quiet_window')
-  assert.equal(readiness(settled, undefined, 'pi').state, 'unknown')
 })
 
 // ------------------------------------------------------------------ kimi
@@ -734,7 +854,7 @@ test('completion/kimi: parentUuid/toolCallId closes the originating turn and emi
   assert.equal(result.settlement.state, 'settled')
   assert.equal(result.settlement.provenance, 'native')
   assert.equal(result.settlement.boundary, 'turn.ended')
-  assert.equal(readiness(result).state, 'ready')
+  assert.equal(result.settlement.state, 'settled')
 })
 
 test('completion/kimi: history extraction preserves the latest turn queued-admission guard', async () => {
@@ -900,7 +1020,7 @@ test('completion/opencode: step-finish is in-flight until native time.completed 
   assert.equal(after.items[0].seq, before.items[0].seq)
   assert.ok(after.items[0].seq < after.settlement.cursor)
   assert.equal(after.settlement.cursor, after.cursor)
-  assert.equal(readiness(after).state, 'ready')
+  assert.equal(after.settlement.state, 'settled')
 })
 
 test('completion/opencode: native length and APIError are settled incomplete, failure is separate', async () => {
@@ -963,7 +1083,7 @@ test('completion/opencode: tool output and long final text are emitted whole fro
   assert.equal(final.text.length, 4515)
   assert.equal(final.complete, true)
   assert.equal(result.settlement.state, 'settled')
-  assert.equal(readiness(result).state, 'ready')
+  assert.equal(result.settlement.state, 'settled')
 })
 
 test('completion/opencode: metadata updates preserve native admission order and settlement', async () => {
@@ -992,7 +1112,7 @@ test('completion/opencode: metadata updates preserve native admission order and 
     expectedIds,
   )
   assert.equal(after.settlement.state, 'settled')
-  assert.equal(readiness(after).state, 'ready')
+  assert.equal(after.settlement.state, 'settled')
   assert.equal(after.settlement.cursor, before.settlement.cursor)
   assert.ok(after.cursor > before.cursor, 'the metadata event advances only the snapshot frontier')
   assert.equal(
@@ -1093,27 +1213,6 @@ test('completion/itemsAfterCursor: unparseable items return null, not verified e
   assert.equal(completion.itemsAfterCursor('opencode', [arrayItem], result.cursor), null)
   assert.equal(completion.itemsAfterCursor('__proto__', [], 0), null)
   assert.equal(completion.itemsAfterCursor('toString', [], 0), null)
-})
-
-test('completion/settledAfter: readiness delegates cursor freshness to the owning adapter', async () => {
-  const piStage = await stageJsonl('pi', 'hazy-ridge', 'pi/tool-loop.jsonl', {
-    ageMs: PI_QUIET_MS + 1_000,
-  })
-  const pi = await answers('pi', 'hazy-ridge', piStage.env)
-  const claudeSession = '15fba934-d727-4777-8791-123675a63649'
-  const claudeStage = await stageJsonl('claude-code', claudeSession, 'claude-code/fragments.jsonl')
-  const claude = await answers('claude-code', claudeSession, claudeStage.env)
-  shape(pi)
-  shape(claude)
-
-  assert.equal(completion.settledAfter('pi', pi.settlement, pi.items[0].seq), true)
-  assert.equal(completion.settledAfter('pi', pi.settlement, pi.settlement.cursor), false)
-  assert.equal(completion.settledAfter('pi', pi.settlement, claude.settlement.cursor), null)
-
-  const common = { answers: pi, kind: 'pi', draftLatched: false, epoch: 17 }
-  assert.equal(leadReady({ ...common, sinceCursor: pi.items[0].seq }).state, 'unknown')
-  assert.equal(leadReady({ ...common, sinceCursor: pi.settlement.cursor }).state, 'unknown')
-  assert.equal(leadReady({ ...common, sinceCursor: claude.settlement.cursor }).state, 'unknown')
 })
 
 test('completion/opencode: one read transaction rejects a competing writer from its snapshot', async () => {
@@ -1305,11 +1404,7 @@ test('completion: every positive fixture keeps exact native identity across repe
       first.items.map(({ id, role }) => ({ id, role })),
       `${fixture.kind} identity changed without a native rewrite`,
     )
-    assert.equal(
-      readiness(first).state,
-      fixture.readyState ?? 'ready',
-      `${fixture.kind} positive fixture`,
-    )
+    assert.equal(first.settlement.state, 'settled', `${fixture.kind} positive fixture`)
   }
 })
 

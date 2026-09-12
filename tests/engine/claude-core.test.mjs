@@ -157,6 +157,21 @@ test('createPacket tells every agent it can work in the project', async () => {
 
 test('agent presets mirror consensflow-pi exactly (image preset included)', () => {
   assert.deepEqual(listPresetIds(), [
+    'hemera',
+    'phaethon',
+    'leto',
+    'asterope',
+    'arvakr',
+    'alsvidr',
+    'electra',
+    'maia',
+    'alcyone',
+    'merope',
+    'dagr',
+    'skirnir',
+    'terpsichore',
+    'musaeus',
+    'suttung',
     'calliope',
     'clio',
     'euterpe',
@@ -196,7 +211,6 @@ test('agent presets mirror consensflow-pi exactly (image preset included)', () =
     'zephyros',
     'sif',
     'hades',
-    'helios',
     'ares',
     'hephaestus',
     'athena',
@@ -208,7 +222,6 @@ test('agent presets mirror consensflow-pi exactly (image preset included)', () =
     'triton',
     'eos',
     'odin',
-    'heimdall',
     'thor',
     'tyr',
     'bragi',
@@ -241,8 +254,6 @@ test('agent presets mirror consensflow-pi exactly (image preset included)', () =
     'audhumla',
     'gefjon',
     'ilmarinen',
-    'seppo',
-    'ahti',
     'pygmalion',
   ])
   // All four engines are integrated, same as consensflow-pi — plus the Codex-backend image kind.
@@ -258,7 +269,7 @@ test('agent presets mirror consensflow-pi exactly (image preset included)', () =
   // The frontier matrix: same model+effort family on every engine that runs it.
   assert.equal(getPreset('artemis').effort, 'medium')
   assert.equal(getPreset('hyperion').effort, 'max')
-  assert.equal(getPreset('kronos').model, 'anthropic/claude-opus-5')
+  assert.equal(getPreset('kronos').model, 'openrouter/anthropic/claude-opus-5')
   assert.equal(getPreset('baldr').model, 'openrouter/anthropic/claude-opus-5')
   assert.equal(getPreset('saga').model, 'openrouter/anthropic/claude-fable-5.1')
   // Effort vocabularies are engine-real: claude-code tops out at "max", Codex's GPT 5.6 ladder
@@ -319,16 +330,16 @@ test('agent presets mirror consensflow-pi exactly (image preset included)', () =
   assert.equal(getPreset('prometheus').kind, 'pi')
   assert.equal(getPreset('prometheus').model, 'openrouter/z-ai/glm-5.3')
   assert.equal(getPreset('prometheus').thinking, 'max')
-  // Gemini 3.1 Pro and 3.8 Flash both stop at high — there is nothing above it to ask for.
-  assert.equal(getPreset('heimdall').effort, 'high')
+  // Gemini 3.8 Flash stops at high.
+  assert.equal(getPreset('helios'), null)
+  assert.equal(getPreset('heimdall'), null)
   assert.equal(getPreset('sif').effort, 'high')
   // The Fable family follows the same rules: claude-code gets max, the rest hold xhigh. It runs
   // Fable 5.1 wherever the harness carries it — and the id is spelled differently in each place:
-  // Anthropic's own API uses a dash, OpenRouter a dot. pi keeps Fable 5 until pi-ai lists 5.1
-  // (see "Fable 5.1" in hosts/lib/presets.js), which is why one preset here still names it.
+  // Claude uses a dash; Pi and OpenCode use the user-selected OpenRouter dotted ID.
   assert.equal(getPreset('calliope').effort, 'max')
   assert.equal(getPreset('calliope').model, 'claude-fable-5-1')
-  assert.equal(getPreset('orpheus').model, 'anthropic/claude-fable-5')
+  assert.equal(getPreset('orpheus').model, 'openrouter/anthropic/claude-fable-5.1')
   assert.equal(getPreset('saga').model, 'openrouter/anthropic/claude-fable-5.1')
   assert.equal(getPreset('saga').effort, 'xhigh')
   assert.equal(getPreset('euterpe').effort, 'high')

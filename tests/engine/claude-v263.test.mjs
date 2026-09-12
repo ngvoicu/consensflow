@@ -16,7 +16,6 @@ import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { answers } from '../../hosts/lib/completion.js'
-import { leadReady } from '../../hosts/lib/readiness.js'
 
 const FIXTURE = fileURLToPath(
   new URL('./fixtures/completion/claude-code/v263-tool-loop.jsonl', import.meta.url),
@@ -34,10 +33,6 @@ async function stage(take, mutate = (records) => records) {
     `${records.slice(0, take ?? records.length).join('\n')}\n`,
   )
   return { CLAUDE_CONFIG_DIR: root }
-}
-
-function readiness(result) {
-  return leadReady({ answers: result, draftLatched: false, epoch: 17 })
 }
 
 function admitted(result) {
@@ -65,7 +60,7 @@ test('claude-v263: the tool loop opens and closes by native tool_use_id', async 
   admitted(open)
   assert.deepEqual(open.settlement.evidence.openTools, ['toolu_014xV8WiQG7e22f7RZQJYTSE'])
   assert.equal(open.inFlight, true)
-  assert.notEqual(readiness(open).state, 'ready')
+  assert.notEqual(open.settlement.state, 'settled')
 
   const closed = await answers('claude-code', SESSION, await stage(9))
   admitted(closed)
@@ -104,7 +99,7 @@ test('claude-v263: every incomplete prefix stays unready and never settles', asy
     const prefix = await answers('claude-code', SESSION, await stage(take))
     admitted(prefix)
     assert.notEqual(prefix.settlement.state, 'settled', `fixture prefix ${take} settled early`)
-    assert.notEqual(readiness(prefix).state, 'ready', `fixture prefix ${take} reads ready`)
+    assert.notEqual(prefix.settlement.state, 'settled', `fixture prefix ${take} reads ready`)
   }
 })
 
@@ -139,7 +134,7 @@ test('claude-v263: the now-complete actual final turn settles and reads ready', 
   assert.equal(result.settlement.state, 'settled')
   assert.deepEqual(result.settlement.evidence.openTools, [])
   assert.deepEqual(result.settlement.evidence.queuedTurns, [])
-  assert.equal(readiness(result).state, 'ready')
+  assert.equal(result.settlement.state, 'settled')
 })
 
 for (const field of ['pendingBackgroundAgentCount', 'pendingWorkflowCount']) {
@@ -152,7 +147,7 @@ for (const field of ['pendingBackgroundAgentCount', 'pendingWorkflowCount']) {
       )
       const result = await answers('claude-code', SESSION, env)
       admitted(result)
-      assert.notEqual(readiness(result).state, 'ready')
+      assert.notEqual(result.settlement.state, 'settled')
       assert.notEqual(result.settlement.state, 'settled')
     }
   })
@@ -165,5 +160,5 @@ test('claude-v263: a sidechain duration cannot close the root turn', async () =>
     ),
   )
   const result = await answers('claude-code', SESSION, env)
-  assert.notEqual(readiness(result).state, 'ready')
+  assert.notEqual(result.settlement.state, 'settled')
 })

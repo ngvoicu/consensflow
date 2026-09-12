@@ -14,11 +14,12 @@ import {
   issueTicket,
   leadEnv,
   ownerOf,
+  receiverEnv,
   redeem,
   scopedToken,
   shellEnv,
 } from '../src/launch.js'
-import { chooseCmuxMode, tempEnv } from './helpers.mjs'
+import { tempEnv } from './helpers.mjs'
 
 const LEAD_OPS = ['consult', 'say', 'attach', 'read', 'seen', 'notify.lead', 'panes']
 const CONTROLLER_OPS = ['session.bind', 'progress.set', 'sent.record']
@@ -43,6 +44,41 @@ function ownership(suffix = 'one') {
 }
 
 describe('launch roles expose only their authority', () => {
+  it('receiver credentials are separate, launch-scoped and revoked with their coordinator', () => {
+    const app = { url: 'http://127.0.0.1:43210', token: 'page' }
+    const env = receiverEnv({
+      app,
+      tab: 't-1',
+      pane: 'p-1',
+      launch: 'receiver-launch',
+      generation: 2,
+      kind: 'pi',
+    })
+    const config = JSON.parse(env.CF_RESULT_RECEIVER)
+    assert.equal(
+      checkScope(config.token, {
+        tab: 't-1',
+        launch: 'receiver-launch',
+        generation: 2,
+        op: 'receiver',
+      }),
+      true,
+    )
+    assert.equal(checkScope(config.token, { tab: 't-other', op: 'receiver' }), false)
+    assert.equal(checkScope(config.token, { generation: 1, op: 'receiver' }), false)
+    assert.equal(checkScope(config.token, { op: 'consult' }), false)
+    const lead = leadEnv({
+      app,
+      tab: 't-1',
+      pane: 'p-1',
+      leadId: 'tab:t-1:2',
+      node: '/bundle/node',
+    })
+    assert.equal(checkScope(lead.CONSENSFLOW_APP_TOKEN, { op: 'receiver' }), false)
+    assert.equal(childEnv(env).CF_RESULT_RECEIVER, undefined)
+    endLaunch('receiver-launch')
+    assert.equal(checkScope(config.token, { op: 'receiver' }), false)
+  })
   it('builds the exact lead, controller and shell environment shapes', () => {
     const app = { url: 'http://127.0.0.1:43210', token: 'page-ui-token' }
     const env = leadEnv({
@@ -286,7 +322,6 @@ async function nextLine(lines, stderr) {
 
 async function spawnScopedServer() {
   const t = tempEnv()
-  chooseCmuxMode(t)
   const cf = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
   // A piped stdin is what makes this server speak the bridge, and a tab
   // cannot be created without a pane host any more: creating one opens its
@@ -703,7 +738,7 @@ describe('the real loopback server enforces role scope before pane routes exist'
   })
 })
 
-it('PM credentials authorize only manual lead send/read and never worker delegation', () => {
+it('PM credentials authorize own advisors and manual lead handoff, never another group', () => {
   const env = leadEnv({
     tab: 'pm-tab',
     pane: 'pm-pane',
@@ -715,7 +750,8 @@ it('PM credentials authorize only manual lead send/read and never worker delegat
   assert.equal(checkScope(env.CONSENSFLOW_APP_TOKEN, { tab: 'pm-tab', op: 'lead.send' }), true)
   assert.equal(checkScope(env.CONSENSFLOW_APP_TOKEN, { tab: 'pm-tab', op: 'lead.read' }), true)
   for (const op of ['consult', 'say', 'attach', 'read', 'results.list', 'panes', 'notify.lead']) {
-    assert.equal(checkScope(env.CONSENSFLOW_APP_TOKEN, { op }), false, op)
+    assert.equal(checkScope(env.CONSENSFLOW_APP_TOKEN, { tab: 'pm-tab', op }), true, op)
+    assert.equal(checkScope(env.CONSENSFLOW_APP_TOKEN, { tab: 'parent-tab', op }), false, op)
   }
   assert.equal(
     checkScope(env.CONSENSFLOW_APP_TOKEN, { tab: 'another-tab', op: 'lead.read' }),

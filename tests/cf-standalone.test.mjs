@@ -18,9 +18,9 @@ import { Bridge } from '../src/bridge.js'
 import { launchConfiguration } from '../src/channels.js'
 import { leadEnv } from '../src/launch.js'
 import { preparePiExtension } from '../src/pi-install.js'
-import { addAgent } from '../src/roster.js'
+import { addAgent, editAgent } from '../src/roster.js'
 import { startUiServer } from '../src/ui.js'
-import { chooseCmuxMode, tempEnv, testRoleConfiguration } from './helpers.mjs'
+import { tempEnv, testRoleConfiguration } from './helpers.mjs'
 
 /**
  * The `cf` side of the pane protocol (Phase 2, TEST-PANE-19).
@@ -322,6 +322,7 @@ if (argv[0] === 'serve') {
       const url = new URL(request.url, 'http://127.0.0.1')
       if (request.headers.authorization !== expected) return response.writeHead(401).end()
       if (url.pathname === '/global/health') return response.writeHead(200).end('{}')
+      if (request.method === 'GET' && url.pathname === '/session/' + session) return response.writeHead(200).end(JSON.stringify({ id: session, agent: 'build', model: { id: 'native-choice', providerID: 'opencode', variant: 'medium' } }))
       if (request.method !== 'POST' || url.pathname !== '/session/' + session + '/prompt_async') return response.writeHead(404).end()
       const chunks = []
       request.on('data', (chunk) => chunks.push(chunk))
@@ -351,7 +352,6 @@ if (argv[0] === 'serve') {
 /** The real server, with this test playing Rust — as `ui-panes` starts it. */
 async function paneServer({ paneOpenDeadlineMs = CONSULT_DEADLINE_MS } = {}) {
   const t = tempEnv()
-  chooseCmuxMode(t)
   addAgent({ name: 'zeus', harness: 'codex', model: 'gpt-5-codex' }, t.env)
   addAgent({ name: 'nyx', harness: 'claude', model: 'opus' }, t.env)
   addAgent({ name: 'ilmarinen', harness: 'kimi', model: 'moonshot-ai/kimi-k3' }, t.env)
@@ -1095,7 +1095,6 @@ process.stdout.write(JSON.stringify({ role: 'assistant', content: 'kimi answered
 
 describe('cf refuses when it cannot reach the app', () => {
   const t = tempEnv()
-  chooseCmuxMode(t)
   addAgent({ name: 'zeus', harness: 'codex', model: 'gpt-5-codex' }, t.env)
   const env = {
     ...t.env,
@@ -1130,7 +1129,6 @@ describe('cf refuses when it cannot reach the app', () => {
 
 describe('an agent never spawns agents', () => {
   const t = tempEnv()
-  chooseCmuxMode(t)
   addAgent({ name: 'zeus', harness: 'codex', model: 'gpt-5-codex' }, t.env)
   after(() => t.cleanup())
 
@@ -1166,7 +1164,6 @@ describe('an agent never spawns agents', () => {
 
 describe('--notify is the app’s, and says so outside it', () => {
   const t = tempEnv()
-  chooseCmuxMode(t)
   addAgent({ name: 'zeus', harness: 'codex', model: 'gpt-5-codex' }, t.env)
   after(() => t.cleanup())
 
@@ -1258,8 +1255,6 @@ describe('the standalone CLI contract without an app pane', () => {
       'skills',
       'ui',
       'doctor',
-      'off',
-      'reset',
     ])
   })
 
@@ -1338,7 +1333,16 @@ describe('a closed conversation is resumed, never started again', () => {
    * row already holds, and the pane must REOPEN that session rather than
    * start a new one on top of it.
    */
-  const closedRun = async ({ agent, kind, bin, stage, firstArgv, resumeArgv, afterOpen }) => {
+  const closedRun = async ({
+    agent,
+    kind,
+    bin,
+    stage,
+    firstArgv,
+    resumeArgv,
+    afterOpen,
+    afterFirst,
+  }) => {
     const binDir = join(s.t.root, `${bin}-resume-bin`)
     const harness = stage(binDir)
 
@@ -1368,6 +1372,7 @@ describe('a closed conversation is resumed, never started again', () => {
       'the first turn opens the session the app named',
     )
 
+    await afterFirst?.()
     await s.endPane({ id: first.id, generation: first.generation })
 
     const again = await cf(['run', `@${agent}`, 'the follow-up'], s.lead, s.workspace)
@@ -1436,10 +1441,13 @@ describe('a closed conversation is resumed, never started again', () => {
   })
 
   it('opencode reopens with --session, not a cold window', async (t) => {
+    editAgent('gefjon', { effort: 'low' }, s.t.env)
+    t.after(() => editAgent('gefjon', { effort: '' }, s.t.env))
     const proxy = await recordingProxy(s.url)
     t.after(() => proxy.close())
     const result = await closedRun({
       agent: 'gefjon',
+      afterFirst: () => editAgent('gefjon', { effort: 'max' }, s.t.env),
       kind: 'opencode',
       bin: 'opencode',
       stage: (dir) => fakeHarness(dir, 'opencode', opencodeBody(s.t.env)),
@@ -1484,7 +1492,10 @@ describe('a closed conversation is resumed, never started again', () => {
     assert.equal(seeds[0].body.parts[0].text, 'the first turn')
     assert.equal(seeds[1].body.parts[0].text, 'the follow-up')
     assert.deepEqual(seeds[0].body.model, { providerID: 'opencode', modelID: 'grok-code' })
-    assert.equal(seeds[1].body.model, undefined, 'resume keeps the native model')
+    assert.equal(seeds[0].body.variant, 'low', 'fresh roster effort reaches native request')
+    assert.deepEqual(seeds[1].body.model, { providerID: 'opencode', modelID: 'native-choice' })
+    assert.equal(seeds[1].body.variant, 'medium', 'native effort wins over edited roster max')
+    assert.equal(seeds[1].body.agent, 'build')
     assert.ok(seeds.every((call) => call.session === result.sessionId))
     assert.equal(s.threads()[result.conversation].progress?.state, 'task-submitted')
     assert.deepEqual(
@@ -2140,6 +2151,7 @@ writeFileSync(${JSON.stringify(join(s.t.root, 'pi-env.json'))}, JSON.stringify(p
     // The module is the authority: what it computes for this launch and this
     // workspace is what the pane must have handed pi.
     const expected = await launchConfiguration('pi', {
+      env: s.t.env,
       launchId: open.launch,
       workspace: s.workspace,
       extensionPath: preparePiExtension({

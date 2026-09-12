@@ -140,6 +140,21 @@ test('createPacket gives write-capable agents a read-write mode line', async () 
 
 test('agent presets expose the allowed creation list', () => {
   assert.deepEqual(listPresetIds(), [
+    'hemera',
+    'phaethon',
+    'leto',
+    'asterope',
+    'arvakr',
+    'alsvidr',
+    'electra',
+    'maia',
+    'alcyone',
+    'merope',
+    'dagr',
+    'skirnir',
+    'terpsichore',
+    'musaeus',
+    'suttung',
     'calliope',
     'clio',
     'euterpe',
@@ -179,7 +194,6 @@ test('agent presets expose the allowed creation list', () => {
     'zephyros',
     'sif',
     'hades',
-    'helios',
     'ares',
     'hephaestus',
     'athena',
@@ -191,7 +205,6 @@ test('agent presets expose the allowed creation list', () => {
     'triton',
     'eos',
     'odin',
-    'heimdall',
     'thor',
     'tyr',
     'bragi',
@@ -224,8 +237,6 @@ test('agent presets expose the allowed creation list', () => {
     'audhumla',
     'gefjon',
     'ilmarinen',
-    'seppo',
-    'ahti',
     'pygmalion',
   ])
   assert.equal(getPreset('zeus').kind, 'claude-code')
@@ -238,7 +249,7 @@ test('agent presets expose the allowed creation list', () => {
   // The frontier matrix: same model+effort family on every engine that runs it.
   assert.equal(getPreset('artemis').effort, 'medium')
   assert.equal(getPreset('hyperion').effort, 'max')
-  assert.equal(getPreset('kronos').model, 'anthropic/claude-opus-5')
+  assert.equal(getPreset('kronos').model, 'openrouter/anthropic/claude-opus-5')
   assert.equal(getPreset('baldr').model, 'openrouter/anthropic/claude-opus-5')
   assert.equal(getPreset('saga').model, 'openrouter/anthropic/claude-fable-5.1')
   // Effort vocabularies are engine-real: claude-code tops out at "max", Codex's GPT 5.6 ladder
@@ -280,16 +291,12 @@ test('agent presets expose the allowed creation list', () => {
   assert.equal(getPreset('mani').model, 'openrouter/moonshotai/kimi-k3')
   // The twin of endymion, so the same level: one name, one meaning, both harnesses.
   assert.equal(getPreset('mani').effort, 'max')
-  // Kimi K2.7 Code was retired from the OpenRouter list in 1.9.0 — K3
-  // supersedes it there, and that path is K3-only. On the kimi harness itself
-  // the code-specialist K2.7 models stay: K3 is a general flagship with no
-  // code counterpart, so they are the newest of a different family, and K2.6
-  // (which K3 does supersede) is the one left out.
+  // All Kimi routes are K3-only after retirement of native K2.7 presets.
   assert.ok(!AGENT_PRESETS.some((p) => String(p.model).includes('openrouter/moonshotai/kimi-k2')))
   assert.ok(!AGENT_PRESETS.some((p) => String(p.model).includes('kimi-k2.6')))
   assert.equal(getPreset('ilmarinen').kind, 'kimi')
   assert.equal(getPreset('ilmarinen').model, 'moonshot-ai/kimi-k3')
-  assert.equal(getPreset('ilmarinen').effort, undefined, 'kimi has no effort flag')
+  assert.equal(getPreset('ilmarinen').effort, 'max', 'Kimi uses its supported environment control')
   assert.equal(getPreset('endymion').model, 'openrouter/moonshotai/kimi-k3')
   assert.equal(getPreset('endymion').kind, 'pi')
   assert.equal(getPreset('mani').model, 'openrouter/moonshotai/kimi-k3')
@@ -303,16 +310,16 @@ test('agent presets expose the allowed creation list', () => {
   assert.equal(getPreset('prometheus').kind, 'pi')
   assert.equal(getPreset('prometheus').model, 'openrouter/z-ai/glm-5.3')
   assert.equal(getPreset('prometheus').thinking, 'max')
-  // Gemini 3.1 Pro and 3.8 Flash both stop at high — there is nothing above it to ask for.
-  assert.equal(getPreset('heimdall').effort, 'high')
+  // Gemini 3.8 Flash stops at high.
+  assert.equal(getPreset('helios'), null)
+  assert.equal(getPreset('heimdall'), null)
   assert.equal(getPreset('sif').effort, 'high')
   // The Fable family follows the same rules: claude-code gets max, the rest hold xhigh. It runs
   // Fable 5.1 wherever the harness carries it — and the id is spelled differently in each place:
-  // Anthropic's own API uses a dash, OpenRouter a dot. pi keeps Fable 5 until pi-ai lists 5.1
-  // (see "Fable 5.1" in hosts/lib/presets.js), which is why one preset here still names it.
+  // Claude uses a dash; Pi and OpenCode use the user-selected OpenRouter dotted ID.
   assert.equal(getPreset('calliope').effort, 'max')
   assert.equal(getPreset('calliope').model, 'claude-fable-5-1')
-  assert.equal(getPreset('orpheus').model, 'anthropic/claude-fable-5')
+  assert.equal(getPreset('orpheus').model, 'openrouter/anthropic/claude-fable-5.1')
   assert.equal(getPreset('saga').model, 'openrouter/anthropic/claude-fable-5.1')
   assert.equal(getPreset('saga').effort, 'xhigh')
   assert.equal(getPreset('euterpe').effort, 'high')
@@ -1088,4 +1095,28 @@ test('docs describe app-owned panes and complete native results [STRM-21]', asyn
   assert.match(docs, /own session store/i, 'replies come from the native transcript')
   assert.match(docs, /CONSENSFLOW_APP/, 'outside-app execution has an explicit boundary')
   assert.match(docs, /shared/i, 'the roster remains shared across harnesses')
+})
+
+test('engine persistence stores and refreshes the full agent display profile', async () => {
+  await withTempDir(async (cwd) => {
+    const { agentProfile } = await import('../../src/catalog.js')
+    const input = {
+      id: 'personal',
+      name: 'Personal',
+      kind: 'pi',
+      model: 'openai-codex/gpt-6-astra',
+      thinking: 'medium',
+      description: 'Keep these notes',
+    }
+    await upsertAgent(cwd, input)
+    let saved = JSON.parse(await readFile(agentsPath(cwd), 'utf8')).agents[0]
+    assert.deepEqual(
+      saved.profile,
+      agentProfile({ harness: 'pi', model: input.model, effort: 'medium' }),
+    )
+    await upsertAgent(cwd, { ...saved, thinking: 'low' })
+    saved = JSON.parse(await readFile(agentsPath(cwd), 'utf8')).agents[0]
+    assert.deepEqual(saved.profile.categories, ['coding'])
+    assert.equal(saved.description, 'Keep these notes')
+  })
 })

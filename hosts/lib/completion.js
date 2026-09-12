@@ -25,7 +25,7 @@ export async function answers(kind, sessionId, env, options = {}) {
   try {
     switch (kind) {
       case 'codex':
-        return await codexAnswers(sessionId, env)
+        return await codexAnswers(sessionId, env, options)
       case 'claude-code':
         return await claudeAnswers(sessionId, env)
       case 'pi':
@@ -63,7 +63,7 @@ const cursorKindCodes = Object.freeze(
     opencode: 5,
   }),
 )
-const ITEM_ROLES = new Set(['user', 'assistant', 'tool'])
+const ITEM_ROLES = new Set(['user', 'assistant', 'tool', 'custom'])
 
 /**
  * Return items strictly after an adapter-minted cursor. An empty array is a
@@ -82,17 +82,6 @@ export function itemsAfterCursor(kind, items, cursor) {
     if (compareCursors(kind, item.seq, cursor) > 0) after.push(item)
   }
   return after
-}
-
-/** Adapter-owned freshness: null means either cursor belongs elsewhere. */
-export function settledAfter(kind, settlement, sinceCursor) {
-  if (settlement === null || typeof settlement !== 'object' || Array.isArray(settlement)) {
-    return null
-  }
-  const current = cursorPosition(kind, settlement.cursor)
-  const previous = cursorPosition(kind, sinceCursor)
-  if (current === null || previous === null) return null
-  return current > previous
 }
 
 function isNormalisedItem(kind, item) {
@@ -509,10 +498,24 @@ function codexTurn(turns, turnId) {
   return turn
 }
 
-async function codexAnswers(sessionId, env) {
+async function codexAnswers(sessionId, env, options) {
   const root = path.join(env.CODEX_HOME ?? path.join(home(env), '.codex'), 'sessions')
   const file = await findFile(root, (name) => name.includes(sessionId))
   if (file === null) {
+    // Only a current authenticated native observation proves an empty thread.
+    // The adapter owns its initial cursor; missing history alone proves nothing.
+    if (options.codexSession?.sessionId === sessionId && options.codexSession.empty === true) {
+      const result = resultBase()
+      result.cursor = mintCursor('codex', 0)
+      result.settlement = {
+        ...result.settlement,
+        state: 'settled',
+        provenance: 'native',
+        cursor: result.cursor,
+        boundary: 'thread/started-empty',
+      }
+      return result
+    }
     return { unknown: true, reason: `unreadable: no codex rollout for ${sessionId}` }
   }
 
@@ -894,12 +897,78 @@ async function claudeAnswers(sessionId, env) {
     return true
   }
 
-  const count = await readJsonl(file, (record, recordIndex) => {
+  // A single snapshot resolves ancestors flushed after their completed answer.
+  // Replay still uses physical positions: ancestry must never mint fresh delivery cursors.
+  const records = []
+  const parents = new Map()
+  const count = await readJsonl(file, (record) => {
+    records.push(record)
+    if (typeof record.uuid === 'string' && record.uuid) {
+      parents.set(record.uuid, parents.has(record.uuid) ? null : record)
+    }
+  })
+  const lateAncestor = (user) => {
+    if (terminal?.provenance !== 'derived' || terminal.itemId !== candidate?.itemId) return false
+    const end = parents.get(terminal.boundary.uuid)
+    if (
+      end?.sessionId !== sessionId ||
+      end.isSidechain !== false ||
+      end.parentUuid !== candidate.uuid
+    )
+      return false
+    let record = parents.get(candidate.uuid)
+    const seen = new Set()
+    while (record && !seen.has(record.uuid)) {
+      if (record.sessionId !== sessionId || record.isSidechain !== false) return false
+      if (record === user) return true
+      if (record.uuid !== candidate.uuid && record.type !== 'attachment') return false
+      seen.add(record.uuid)
+      record = parents.get(record.parentUuid)
+    }
+    return false
+  }
+
+  records.forEach((record, recordIndex) => {
     const seq = mintCursor('claude-code', recordIndex)
     const at = record.timestamp ?? recordIndex
     result.cursor = seq
     const own = record.sessionId
     if (own && own !== sessionId) result.replaced = true
+    if (
+      record.type === 'attachment' &&
+      own === sessionId &&
+      record.isSidechain === false &&
+      record.attachment?.type === 'hook_additional_context' &&
+      record.attachment.hookEvent === 'UserPromptSubmit' &&
+      Array.isArray(record.attachment.content)
+    ) {
+      const text = record.attachment.content.filter((part) => typeof part === 'string').join('\n')
+      if (text)
+        result.items.push({
+          id: nativeId(record.uuid, 'claude hook context', seq),
+          role: 'custom',
+          text,
+          complete: true,
+          settled: true,
+          at,
+          seq,
+        })
+    }
+    if (record.type === 'continued-in' && own === sessionId && record.isSidechain !== true) {
+      const successor = record.continuedInSessionId
+      if (
+        typeof successor !== 'string' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          successor,
+        ) ||
+        successor === sessionId ||
+        (result.continuedInSessionId && result.continuedInSessionId !== successor)
+      ) {
+        throw new Error('invalid or ambiguous native continuation')
+      }
+      result.continuedInSessionId = successor
+      result.continuedAt = record.timestamp ?? null
+    }
 
     if (record.type === 'queue-operation') {
       if (record.operation === 'enqueue') {
@@ -976,7 +1045,7 @@ async function claudeAnswers(sessionId, env) {
       }
 
       if (message.stop_reason === 'end_turn' || message.stop_reason === 'stop_sequence') {
-        candidate = { itemId: item.id }
+        candidate = { itemId: item.id, uuid: record.uuid }
         hooks.add(item.id)
       }
       return
@@ -1016,6 +1085,16 @@ async function claudeAnswers(sessionId, env) {
       }
 
       if (!text.trim()) return
+      result.items.push({
+        id: nativeId(record.uuid, 'claude user', seq),
+        role: 'user',
+        text,
+        complete: true,
+        settled: true,
+        at,
+        seq,
+      })
+      if (lateAncestor(record)) return
       const poppedIndex = popped.findIndex((entry) => entry.content === text)
       if (poppedIndex !== -1) popped.splice(poppedIndex, 1)
       if (record.promptSource === 'queued' || dequeued.length > 0) {
@@ -1031,18 +1110,36 @@ async function claudeAnswers(sessionId, env) {
       result.cancelled = false
       result.failed = false
       result.failure = null
-      result.items.push({
-        id: nativeId(record.uuid, 'claude user', seq),
-        role: 'user',
-        text,
-        complete: true,
-        settled: true,
-        at,
-        seq,
-      })
       turnOpen = true
       candidate = null
       terminal = null
+      return
+    }
+
+    const command = result.items.at(-1)
+    if (
+      record.type === 'system' &&
+      record.subtype === 'local_command' &&
+      record.sessionId === sessionId &&
+      record.isSidechain === false &&
+      record.isMeta === false &&
+      record.level === 'info' &&
+      record.content === '<local-command-stdout></local-command-stdout>' &&
+      command?.role === 'user' &&
+      record.parentUuid === command.id &&
+      /^<command-name>\/clear<\/command-name>\s*<command-message>clear<\/command-message>\s*<command-args><\/command-args>$/.test(
+        command.text,
+      ) &&
+      openTools.size === 0 &&
+      hooks.size === 0
+    ) {
+      turnOpen = false
+      candidate = null
+      terminal = {
+        provenance: 'native',
+        complete: true,
+        boundary: boundary('system.local_command', seq, at, { uuid: record.uuid }),
+      }
       return
     }
 
@@ -1142,9 +1239,8 @@ const SAFE_PATH_SEGMENT = /^[A-Za-z0-9._-]+$/
 // persists that boundary in app-owned settled/<launchId>.json, tied to Pi's
 // session id and leaf entry. A matching file is native evidence; otherwise the
 // provider backoff is capped at 60 seconds (settings-manager.js:610-615), so a
-// derived settlement requires twice that period without a file append. The
-// readiness module deliberately refuses this derived Pi result for AUTOMATIC
-// delivery; manual reading and deliver.now are unaffected.
+// derived settlement requires twice that period without a file append.
+// This describes source completion; the native receiver owns destination readiness.
 const PI_SETTLEMENT_QUIET_MS = 120_000
 
 async function piSettlementEvidence(sessionId, env, options) {
@@ -1192,6 +1288,20 @@ async function piAnswers(sessionId, env, options = {}) {
 
     if (record.type === 'session') {
       if (record.id && record.id !== sessionId) result.replaced = true
+      return
+    }
+    if (record.type === 'custom_message') {
+      const text = typeof record.content === 'string' ? record.content : piText(record.content)
+      if (text)
+        result.items.push({
+          id: nativeId(record.id, 'pi custom message', seq),
+          role: 'custom',
+          text,
+          complete: true,
+          settled: true,
+          at,
+          seq,
+        })
       return
     }
     if (record.type !== 'message') return

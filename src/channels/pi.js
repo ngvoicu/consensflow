@@ -1,7 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { envelope, pointer } from '../../hosts/lib/deliveries.js'
 import { claimEpoch } from './pty.js'
 
 const ACK_POLL_MS = 10
@@ -10,18 +9,33 @@ const ACK_GRACE_MS = ACK_POLL_MS * 3
 /** Ask the running extension; an old marker or the headless empty fallback is no proof. */
 export async function probeEditor(config, session) {
   const unavailable = { ready: false, reason: 'native editor unavailable' }
+  if (typeof session !== 'string') return unavailable
+  const response = await probe(config, { session }, 'editor')
+  if (response?.session !== session) return unavailable
+  if (response.ready === true) return { ready: true }
+  return { ready: false, reason: response.reason ?? unavailable.reason }
+}
+
+/** A fresh response from this launch, including after Pi /new or /resume. */
+export async function currentSession(config) {
+  const response = await probe(config, {}, 'session')
+  return typeof response?.sessionId === 'string' && response.sessionId.length > 0
+    ? response.sessionId
+    : null
+}
+
+async function probe(config, fields, type) {
   if (
     config?.kind !== 'pi-extension' ||
     config.editorGuard !== 1 ||
-    typeof session !== 'string' ||
     typeof config.inbox !== 'string' ||
     typeof config.ack !== 'string' ||
     typeof config.launchId !== 'string' ||
     !/^[A-Za-z0-9._-]+$/.test(config.launchId)
   )
-    return unavailable
-  const id = `editor-${randomBytes(16).toString('hex')}`
-  const request = { id, launchId: config.launchId, session, expiresAt: Date.now() + 1000 }
+    return null
+  const id = `${type}-${randomBytes(16).toString('hex')}`
+  const request = { id, launchId: config.launchId, ...fields, expiresAt: Date.now() + 1000 }
   const inboxFile = join(config.inbox, `${id}.json`)
   const ackFile = join(config.ack, `${id}.json`)
   const temporary = `${inboxFile}.tmp`
@@ -32,15 +46,13 @@ export async function probeEditor(config, session) {
     const response = await ackFor(ackFile, id, request.expiresAt)
     if (
       response?.launchId !== request.launchId ||
-      response?.session !== session ||
       response?.expiresAt !== request.expiresAt ||
       Date.now() >= request.expiresAt
     )
-      return unavailable
-    if (response.ready === true) return { ready: true }
-    return { ready: false, reason: response.reason ?? unavailable.reason }
+      return null
+    return response
   } catch {
-    return unavailable
+    return null
   } finally {
     await Promise.all(
       [temporary, inboxFile, ackFile].map((file) => rm(file, { force: true }).catch(() => {})),
@@ -190,97 +202,6 @@ export async function send(target, text) {
       await rm(inboxFile, { force: true })
     }
     return readAckResult(ack)
-  } catch (cause) {
-    await rm(temporary, { force: true }).catch(() => {})
-    return { ok: false, error: 'transport', cause: cause?.message ?? String(cause) }
-  }
-}
-
-/**
- * Write a record for consensflow-delivery and wait for its ack file.
- * `record.expiresAt` is stamped by the watcher and is authoritative; this
- * adapter never recomputes it from the channel timeout. Native admission is
- * gated by pane.claim_epoch immediately before the inbox rename. Any failed
- * claim is retryable because no inbox record exists yet. A true ack is
- * admitted, false is a zero-byte failure, and null is uncertain.
- */
-export async function deliver(channel, target, record) {
-  if (channel !== 'pi-extension') throw new Error(`unsupported Pi channel: ${channel}`)
-  const launch = launchConfig(target)
-  const config = channelConfig(target, launch)
-  const inbox = config.inbox
-  const ackDirectory = config.ack
-  if (typeof inbox !== 'string' || typeof ackDirectory !== 'string') {
-    throw new Error('pi-extension delivery needs inbox and ack directories')
-  }
-  const ackTimeoutMs = config.ackTimeoutMs
-  if (!Number.isFinite(ackTimeoutMs) || ackTimeoutMs < 0) {
-    throw new Error('pi-extension delivery needs the channel ack timeout')
-  }
-  const id = record?.id
-  if (typeof id !== 'string' || !/^d-\d+$/.test(id)) {
-    return { ok: false, admitted: false, error: 'invalid-record' }
-  }
-  if (record.channel !== 'cf-read' && typeof record?.answer !== 'string') {
-    return { ok: false, admitted: false, error: 'missing-envelope' }
-  }
-  let text
-  try {
-    text = record.channel === 'cf-read' ? pointer(record) : envelope(record)
-  } catch (cause) {
-    return {
-      ok: false,
-      admitted: false,
-      error: 'invalid-record',
-      cause: cause?.message ?? String(cause),
-    }
-  }
-  const expiresAt = record.expiresAt
-  if (!Number.isFinite(expiresAt)) {
-    return { ok: false, admitted: false, error: 'missing-expiry', bytesWritten: 0 }
-  }
-  if (expiresAt <= Date.now()) {
-    return { ok: false, admitted: false, error: 'expired', bytesWritten: 0 }
-  }
-  const inboxFile = join(inbox, `${id}.json`)
-  const ackFile = join(ackDirectory, `${id}.json`)
-  const temporary = `${inboxFile}.tmp`
-  try {
-    await mkdir(inbox, { recursive: true })
-    await mkdir(dirname(ackFile), { recursive: true })
-    await writeFile(temporary, `${JSON.stringify({ ...record, expiresAt, text })}\n`, 'utf8')
-    const claimed = await claimEpoch(
-      target,
-      config.editorGuard === 1 ? 'pane.claim_native_epoch' : 'pane.claim_epoch',
-    )
-    if (claimed?.ok !== true) {
-      await rm(temporary, { force: true })
-      return zeroByteClaimRefusal(claimed)
-    }
-    await rename(temporary, inboxFile)
-    const ack = await ackFor(ackFile, id, expiresAt)
-    if (ack === null) {
-      // Withdraw a still-unread offer. The extension may already have read
-      // it, so removing the file never proves zero-byte non-admission.
-      await rm(inboxFile, { force: true })
-      return { ok: false, admitted: null, error: 'uncertain', cause: 'admission-unknown' }
-    }
-    if (ack.admitted === null) {
-      return { ok: false, admitted: null, error: 'uncertain', cause: 'admission-unknown', ack }
-    }
-    if (ack.admitted === false) {
-      return {
-        ok: false,
-        admitted: false,
-        error: 'failed-with-zero-bytes',
-        ...(ack.bytesWritten === 0 ? { bytesWritten: 0 } : {}),
-        ack,
-      }
-    }
-    if (ack.admitted !== true) {
-      return { ok: false, admitted: null, error: 'uncertain', cause: 'invalid-admission', ack }
-    }
-    return { ok: true, admitted: true, ack }
   } catch (cause) {
     await rm(temporary, { force: true }).catch(() => {})
     return { ok: false, error: 'transport', cause: cause?.message ?? String(cause) }

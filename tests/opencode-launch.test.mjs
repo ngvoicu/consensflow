@@ -31,7 +31,31 @@ async function seedServer(t, mode = 'ok') {
       ) {
         response.writeHead(401).end()
       } else if (url.pathname === '/global/health') {
+        const firstProbe = calls.filter((call) => call.path === '/global/health').length === 1
+        if (firstProbe && mode === 'health-hang') return
+        if (firstProbe && mode === 'health-body-hang') {
+          response.writeHead(200, { 'content-type': 'application/json' })
+          response.write('{')
+          return
+        }
         response.writeHead(healthy ? 200 : 503).end('{}')
+      } else if (request.method === 'GET' && url.pathname.startsWith('/session/')) {
+        if (mode === 'native-read-failure') return response.writeHead(503).end('{}')
+        if (mode === 'native-read-hang') return
+        response.writeHead(200).end(
+          JSON.stringify({
+            id: url.pathname.split('/').at(-1),
+            agent: 'review',
+            model:
+              mode === 'invalid-native-model'
+                ? {}
+                : {
+                    id: 'native-model',
+                    providerID: 'openrouter',
+                    ...(mode === 'native-default' ? {} : { variant: 'medium' }),
+                  },
+          }),
+        )
       } else if (mode === 'disconnect') {
         request.socket.destroy()
       } else if (mode === 'hang') {
@@ -60,6 +84,24 @@ async function seedServer(t, mode = 'ok') {
 }
 
 describe('OpenCode worker seed uses the native API after the TUI starts', () => {
+  for (const mode of ['health-hang', 'health-body-hang']) {
+    it(`recovers from ${mode} when later readiness probes succeed`, async (t) => {
+      const server = await seedServer(t, mode)
+      server.ready()
+      await nativeOpenCode.seedSession({
+        channel: server.channel,
+        sessionId: 'ses_health123',
+        cwd: os.tmpdir(),
+        text: 'Tell me a joke.',
+        timeoutMs: 2000,
+      })
+      assert.ok(server.calls.filter((call) => call.path === '/global/health').length >= 2)
+      const posts = server.calls.filter((call) => call.method === 'POST')
+      assert.equal(posts.length, 1)
+      assert.equal(JSON.parse(posts[0].body).parts[0].text, 'Tell me a joke.')
+    })
+  }
+
   it('waits for readiness, then sends the exact task and roster model once', async (t) => {
     const server = await seedServer(t)
     const task = 'Only the actual task.\nKeep all of it.'
@@ -91,12 +133,72 @@ describe('OpenCode worker seed uses the native API after the TUI starts', () => 
       sessionId: 'ses_resume123',
       cwd: os.tmpdir(),
       text: 'follow-up',
+      resume: true,
+      model: 'wrong/edited-roster',
+      variant: 'max',
       timeoutMs: 2000,
     })
     assert.deepEqual(JSON.parse(server.calls.find((call) => call.method === 'POST').body), {
       parts: [{ type: 'text', text: 'follow-up' }],
+      model: { providerID: 'openrouter', modelID: 'native-model' },
+      variant: 'medium',
+      agent: 'review',
     })
   })
+
+  for (const variant of ['low', 'medium']) {
+    it(`sends selected ${variant} to the native prompt API`, async (t) => {
+      const server = await seedServer(t)
+      server.ready()
+      await nativeOpenCode.seedSession({
+        channel: server.channel,
+        sessionId: 'ses_effort123',
+        cwd: os.tmpdir(),
+        text: 'task',
+        model: 'openrouter/openai/gpt-6-astra',
+        variant,
+        timeoutMs: 2000,
+      })
+      const body = JSON.parse(server.calls.find((c) => c.method === 'POST').body)
+      assert.equal(body.variant, variant)
+      assert.deepEqual(body.model, { providerID: 'openrouter', modelID: 'openai/gpt-6-astra' })
+      assert.equal(
+        server.calls.filter((c) => c.path.startsWith('/session/') && c.method === 'GET').length,
+        0,
+      )
+    })
+  }
+  it('sends explicit native default rather than falling back to roster or agent effort', async (t) => {
+    const server = await seedServer(t, 'native-default')
+    server.ready()
+    await nativeOpenCode.seedSession({
+      channel: server.channel,
+      sessionId: 'ses_default123',
+      cwd: os.tmpdir(),
+      text: 'task',
+      resume: true,
+      variant: 'max',
+      timeoutMs: 2000,
+    })
+    assert.equal(JSON.parse(server.calls.find((c) => c.method === 'POST').body).variant, 'default')
+  })
+  for (const mode of ['native-read-failure', 'invalid-native-model', 'native-read-hang']) {
+    it(`sends no prompt after ${mode}`, async (t) => {
+      const server = await seedServer(t, mode)
+      server.ready()
+      await assert.rejects(
+        nativeOpenCode.seedSession({
+          channel: server.channel,
+          sessionId: 'ses_read123',
+          cwd: os.tmpdir(),
+          text: 'task',
+          resume: true,
+          timeoutMs: 150,
+        }),
+      )
+      assert.equal(server.calls.filter((c) => c.method === 'POST').length, 0)
+    })
+  }
 
   for (const mode of ['disconnect', 'hang']) {
     it(`reports uncertain admission and never retries after ${mode}`, async (t) => {

@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict'
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
-import { envelope as makeEnvelope, pointer } from '../hosts/lib/deliveries.js'
 import { createDeliveryExtension } from '../hosts/pi-extension/consensflow-delivery.mjs'
-import { probeEditor } from '../src/channels/pi.js'
-import { deliver, enabledChannels, launchConfiguration } from '../src/channels.js'
+import { currentSession, probeEditor } from '../src/channels/pi.js'
+import { send } from '../src/channels.js'
 
 function fakePi() {
   const handlers = new Map()
@@ -59,7 +58,16 @@ async function waitFor(path, timeoutMs = 300) {
 
 async function setup(
   record,
-  { idle = true, ackTimeoutMs = 1000, editorGuard, editor = '', hasUI = true, mode = 'tui' } = {},
+  {
+    idle = true,
+    ackTimeoutMs = 1000,
+    editorGuard,
+    editor = '',
+    hasUI = true,
+    mode = 'tui',
+    leaf,
+    pendingMessages = false,
+  } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'consensflow-pi-extension-'))
   const inbox = join(root, 'inbox')
@@ -85,10 +93,13 @@ async function setup(
   const ctx = context(() => currentIdle)
   ctx.hasUI = hasUI
   ctx.mode = mode
-  ctx.hasPendingMessages = () => false
+  ctx.hasPendingMessages = () => pendingMessages
+  ctx.sessionManager.getLeafEntry = () => leaf
   ctx.ui = { getEditorText: () => editor }
   const payload =
-    typeof record?.id === 'string' && /^d-\d+$/.test(record.id) && record.expiresAt === undefined
+    typeof record?.id === 'string' &&
+    /^m-[a-f0-9]+$/.test(record.id) &&
+    record.expiresAt === undefined
       ? { ...record, expiresAt: Date.now() + ackTimeoutMs }
       : record
   if (record !== null)
@@ -118,16 +129,80 @@ async function setup(
 }
 
 const envelopeRecord = {
-  id: 'd-51',
-  answerId: 'answer-51',
-  conversation: 'worker',
-  agent: 'pi',
-  answer: 'body',
-  channel: 'pi-extension',
+  id: 'm-00000000000000000000000000000051',
+  type: 'message',
+  launchId: 'launch-pi-test',
+  session: 'native-pi-session',
+  text: 'exact task text',
 }
-const envelope = makeEnvelope(envelopeRecord)
+const envelope = envelopeRecord.text
 
 describe('consensflow Pi extension', () => {
+  it('probes the live Pi conversation after native new-session replacement without sending', async () => {
+    const s = await setup(null, { editorGuard: 1 })
+    const config = {
+      kind: 'pi-extension',
+      editorGuard: 1,
+      inbox: s.inbox,
+      ack: s.ack,
+      launchId: 'launch-pi-test',
+    }
+    try {
+      assert.equal(await currentSession(config), 'native-pi-session')
+      await s.pi.handlers.get('session_shutdown')({ reason: 'new' })
+      const next = { ...s.ctx, ...context(() => false, { sessionId: 'new-native-session' }) }
+      await s.pi.handlers.get('session_start')({ reason: 'new' }, next)
+      assert.equal(await currentSession(config), 'new-native-session', 'identity works while busy')
+      next.mode = 'rpc'
+      assert.equal(await currentSession(config), null, 'only the native TUI is an app lead')
+      next.mode = 'tui'
+      assert.equal(await currentSession({ ...config, launchId: 'wrong-launch' }), null)
+      await s.pi.handlers.get('session_shutdown')({ reason: 'quit' })
+      assert.equal(
+        await currentSession(config),
+        null,
+        'a stopped extension leaves no reusable identity',
+      )
+      assert.deepEqual(s.pi.sent, [])
+      assert.deepEqual(await readdir(s.inbox), [])
+      assert.deepEqual(await readdir(s.ack), [])
+    } finally {
+      await s.close()
+    }
+  })
+
+  for (const corrupt of ['id', 'launchId', 'expiresAt', 'sessionId']) {
+    it(`rejects a Pi identity response with invalid ${corrupt}`, async () => {
+      const s = await setup(null, { editorGuard: 1 })
+      await s.pi.handlers.get('session_shutdown')({ reason: 'quit' })
+      const config = {
+        kind: 'pi-extension',
+        editorGuard: 1,
+        inbox: s.inbox,
+        ack: s.ack,
+        launchId: 'launch-pi-test',
+      }
+      let responder
+      try {
+        responder = setInterval(async () => {
+          for (const file of await readdir(s.inbox)) {
+            if (!file.endsWith('.json')) continue
+            const request = JSON.parse(await readFile(join(s.inbox, file), 'utf8'))
+            const response = { ...request, sessionId: 'forged-session' }
+            response[corrupt] = corrupt === 'expiresAt' ? 0 : ''
+            await mkdir(s.ack, { recursive: true })
+            await writeFile(join(s.ack, file), JSON.stringify(response))
+            clearInterval(responder)
+          }
+        }, 10)
+        assert.equal(await currentSession(config), null)
+      } finally {
+        clearInterval(responder)
+        await s.close()
+      }
+    })
+  }
+
   it('answers fresh native editor probes without persisting any editor text', async () => {
     const s = await setup(null, { editorGuard: 1 })
     const config = {
@@ -169,7 +244,7 @@ describe('consensflow Pi extension', () => {
   it('handles a probe while a busy delivery stays queued unchanged', async () => {
     const s = await setup({ ...envelopeRecord, text: envelope }, { editorGuard: 1, idle: false })
     try {
-      const file = join(s.inbox, 'd-51.json')
+      const file = join(s.inbox, 'm-00000000000000000000000000000051.json')
       const before = await readFile(file, 'utf8')
       assert.deepEqual(
         await probeEditor(
@@ -200,12 +275,15 @@ describe('consensflow Pi extension', () => {
   ]) {
     it(`refuses ${name} at the native send boundary without touching the editor`, async () => {
       const s = await setup(
-        { ...envelopeRecord, text: envelope, target: { session: 'native-pi-session' } },
+        { ...envelopeRecord, text: envelope, session: 'native-pi-session' },
         { editorGuard: 1, ...options },
       )
       try {
         assert.deepEqual(s.pi.sent, [])
-        assert.equal((await waitFor(join(s.ack, 'd-51.json'))).reason, reason)
+        assert.equal(
+          (await waitFor(join(s.ack, 'm-00000000000000000000000000000051.json'))).reason,
+          reason,
+        )
         assert.equal(
           s.ctx.ui.getEditorText(),
           Object.hasOwn(options, 'editor') ? options.editor : '',
@@ -218,12 +296,15 @@ describe('consensflow Pi extension', () => {
 
   it('refuses a guarded delivery addressed to a different native Pi session', async () => {
     const s = await setup(
-      { ...envelopeRecord, text: envelope, target: { session: 'previous-session' } },
+      { ...envelopeRecord, text: envelope, session: 'previous-session' },
       { editorGuard: 1 },
     )
     try {
       assert.deepEqual(s.pi.sent, [])
-      assert.equal((await waitFor(join(s.ack, 'd-51.json'))).reason, 'native session changed')
+      assert.equal(
+        (await waitFor(join(s.ack, 'm-00000000000000000000000000000051.json'))).reason,
+        'native session changed',
+      )
     } finally {
       await s.close()
     }
@@ -231,14 +312,17 @@ describe('consensflow Pi extension', () => {
 
   it('rechecks the native editor after busy work settles', async () => {
     const s = await setup(
-      { ...envelopeRecord, text: envelope, target: { session: 'native-pi-session' } },
+      { ...envelopeRecord, text: envelope, session: 'native-pi-session' },
       { editorGuard: 1, idle: false },
     )
     try {
       s.setEditor('new draft')
       s.setIdle(true)
       await s.pi.handlers.get('agent_settled')({}, s.ctx)
-      assert.equal((await waitFor(join(s.ack, 'd-51.json'))).admitted, false)
+      assert.equal(
+        (await waitFor(join(s.ack, 'm-00000000000000000000000000000051.json'))).admitted,
+        false,
+      )
       assert.deepEqual(s.pi.sent, [])
       assert.equal(s.ctx.ui.getEditorText(), 'new draft')
     } finally {
@@ -254,12 +338,12 @@ describe('consensflow Pi extension', () => {
         { message: { role: 'user', content: [{ type: 'text', text: envelope }] } },
         s.ctx,
       )
-      assert.deepEqual(await waitFor(join(s.ack, 'd-51.json')), {
-        id: 'd-51',
+      assert.deepEqual(await waitFor(join(s.ack, 'm-00000000000000000000000000000051.json')), {
+        id: 'm-00000000000000000000000000000051',
         admitted: true,
         mode: 'tui',
       })
-      assert.equal(await exists(join(s.inbox, 'd-51.json')), false)
+      assert.equal(await exists(join(s.inbox, 'm-00000000000000000000000000000051.json')), false)
     } finally {
       await s.close()
     }
@@ -269,7 +353,14 @@ describe('consensflow Pi extension', () => {
     timeout: 2000,
   }, async () => {
     const s = await setup(
-      { ...envelopeRecord, id: 'd-52', text: envelope.replaceAll('d-51', 'd-52') },
+      {
+        ...envelopeRecord,
+        id: 'm-00000000000000000000000000000052',
+        text: envelope.replaceAll(
+          'm-00000000000000000000000000000051',
+          'm-00000000000000000000000000000052',
+        ),
+      },
       { idle: false },
     )
     try {
@@ -279,18 +370,31 @@ describe('consensflow Pi extension', () => {
       // A filesystem notification can already be consuming the inbox; observe
       // the send itself instead of assuming this handler owns the drain.
       await s.pi.sentOnce
-      assert.deepEqual(s.pi.sent, [envelope.replaceAll('d-51', 'd-52')])
+      assert.deepEqual(s.pi.sent, [
+        envelope.replaceAll(
+          'm-00000000000000000000000000000051',
+          'm-00000000000000000000000000000052',
+        ),
+      ])
       await s.pi.handlers.get('message_start')(
         {
           message: {
             role: 'user',
-            content: [{ type: 'text', text: envelope.replaceAll('d-51', 'd-52') }],
+            content: [
+              {
+                type: 'text',
+                text: envelope.replaceAll(
+                  'm-00000000000000000000000000000051',
+                  'm-00000000000000000000000000000052',
+                ),
+              },
+            ],
           },
         },
         s.ctx,
       )
-      assert.deepEqual(await waitFor(join(s.ack, 'd-52.json')), {
-        id: 'd-52',
+      assert.deepEqual(await waitFor(join(s.ack, 'm-00000000000000000000000000000052.json')), {
+        id: 'm-00000000000000000000000000000052',
         admitted: true,
         mode: 'tui',
       })
@@ -302,6 +406,7 @@ describe('consensflow Pi extension', () => {
   it('quarantines an invalid id once without using it in any ack path', async () => {
     const s = await setup({
       id: '../escaped-ack',
+      type: 'message',
       file: 'invalid',
       text: '[consensflow delivery invalid]\n',
     })
@@ -310,30 +415,15 @@ describe('consensflow Pi extension', () => {
       assert.equal(await exists(join(s.inbox, 'invalid.json')), false)
       assert.equal(await exists(join(s.quarantine, 'invalid.json')), true)
       assert.equal(await exists(join(s.ack, '..', 'escaped-ack.json')), false)
-      assert.equal(s.logs.filter((line) => line.includes('invalid delivery id')).length, 1)
+      assert.equal(s.logs.filter((line) => line.includes('invalid message id')).length, 1)
       assert.deepEqual(JSON.parse(await readFile(join(s.quarantine, 'invalid.json'), 'utf8')), {
         id: '../escaped-ack',
+        type: 'message',
         file: 'invalid',
         text: '[consensflow delivery invalid]\n',
       })
       await s.extension.consume()
-      assert.equal(s.logs.filter((line) => line.includes('invalid delivery id')).length, 1)
-    } finally {
-      await s.close()
-    }
-  })
-
-  it('refuses a bare answer without an envelope before send and acknowledges the refusal', async () => {
-    const s = await setup({ id: 'd-53', answer: 'bare answer' })
-    try {
-      assert.deepEqual(s.pi.sent, [])
-      assert.deepEqual(await waitFor(join(s.ack, 'd-53.json')), {
-        id: 'd-53',
-        admitted: false,
-        reason: 'missing-envelope',
-      })
-      assert.equal(await exists(join(s.inbox, 'd-53.json')), false)
-      assert.match(s.logs.join('\n'), /missing envelope/)
+      assert.equal(s.logs.filter((line) => line.includes('invalid message id')).length, 1)
     } finally {
       await s.close()
     }
@@ -341,16 +431,23 @@ describe('consensflow Pi extension', () => {
 
   it('acks unknown admission when no user message event arrives and then removes the inbox record', async () => {
     const s = await setup(
-      { ...envelopeRecord, id: 'd-54', text: envelope.replaceAll('d-51', 'd-54') },
+      {
+        ...envelopeRecord,
+        id: 'm-00000000000000000000000000000054',
+        text: envelope.replaceAll(
+          'm-00000000000000000000000000000051',
+          'm-00000000000000000000000000000054',
+        ),
+      },
       { ackTimeoutMs: 20 },
     )
     try {
-      assert.deepEqual(await waitFor(join(s.ack, 'd-54.json')), {
-        id: 'd-54',
+      assert.deepEqual(await waitFor(join(s.ack, 'm-00000000000000000000000000000054.json')), {
+        id: 'm-00000000000000000000000000000054',
         admitted: null,
         reason: 'admission-unknown',
       })
-      assert.equal(await exists(join(s.inbox, 'd-54.json')), false)
+      assert.equal(await exists(join(s.inbox, 'm-00000000000000000000000000000054.json')), false)
     } finally {
       await s.close()
     }
@@ -359,26 +456,85 @@ describe('consensflow Pi extension', () => {
   it('moves an expired inbox record aside and refuses it without sending', async () => {
     const s = await setup({
       ...envelopeRecord,
-      id: 'd-58',
-      text: envelope.replaceAll('d-51', 'd-58'),
+      id: 'm-00000000000000000000000000000058',
+      text: envelope.replaceAll(
+        'm-00000000000000000000000000000051',
+        'm-00000000000000000000000000000058',
+      ),
       expiresAt: Date.now() - 1,
     })
     try {
-      assert.deepEqual(await waitFor(join(s.ack, 'd-58.json')), {
-        id: 'd-58',
+      assert.deepEqual(await waitFor(join(s.ack, 'm-00000000000000000000000000000058.json')), {
+        id: 'm-00000000000000000000000000000058',
         admitted: false,
         reason: 'expired-before-send',
       })
-      assert.equal(await exists(join(s.inbox, 'd-58.json')), false)
-      assert.equal(await exists(join(s.expired, 'd-58.json')), true)
+      assert.equal(await exists(join(s.inbox, 'm-00000000000000000000000000000058.json')), false)
+      assert.equal(await exists(join(s.expired, 'm-00000000000000000000000000000058.json')), true)
       assert.deepEqual(s.pi.sent, [])
     } finally {
       await s.close()
     }
   })
 
+  it('restores native settlement on an idle resumed Pi TUI without a new model turn', async () => {
+    const leaf = {
+      id: 'leaf-1',
+      type: 'message',
+      message: { role: 'assistant', stopReason: 'stop' },
+    }
+    const s = await setup(null, { leaf })
+    try {
+      const evidence = await waitFor(join(s.settled, 'launch-pi-test.json'))
+      assert.equal(evidence.sessionId, 'native-pi-session')
+      assert.deepEqual(evidence.frontier, { id: leaf.id })
+      assert.equal(evidence.launchId, 'launch-pi-test')
+      assert.equal(s.pi.sent.length, 0)
+      await s.pi.handlers.get('agent_start')({}, s.ctx)
+      assert.equal(await exists(join(s.settled, 'launch-pi-test.json')), false)
+    } finally {
+      await s.close()
+    }
+  })
+
+  for (const options of [
+    { idle: false },
+    { pendingMessages: true },
+    { mode: 'rpc' },
+    { hasUI: false },
+    {
+      leaf: {
+        id: 'wrong-leaf',
+        type: 'message',
+        message: { role: 'assistant', stopReason: 'stop' },
+      },
+    },
+    {
+      leaf: { id: 'leaf-1', type: 'message', message: { role: 'assistant', stopReason: 'error' } },
+    },
+    { leaf: { id: 'leaf-1', type: 'message', message: { role: 'user' } } },
+  ]) {
+    it(`does not restore Pi startup settlement for ${JSON.stringify(options)}`, async () => {
+      const leaf = {
+        id: 'leaf-1',
+        type: 'message',
+        message: { role: 'assistant', stopReason: 'stop' },
+      }
+      const s = await setup(null, { leaf, ...options })
+      try {
+        assert.equal(await exists(join(s.settled, 'launch-pi-test.json')), false)
+      } finally {
+        await s.close()
+      }
+    })
+  }
+
   it('writes settlement evidence tied to the launch, session and leaf, then invalidates it on new work', async () => {
-    const s = await setup({ ...envelopeRecord, id: 'd-59', text: envelope })
+    const s = await setup({
+      ...envelopeRecord,
+      id: 'm-00000000000000000000000000000059',
+      text: envelope,
+    })
     try {
       await s.pi.handlers.get('agent_settled')({}, s.ctx)
       const evidence = await waitFor(join(s.settled, 'launch-pi-test.json'))
@@ -401,154 +557,41 @@ describe('consensflow Pi extension', () => {
       await s.close()
     }
   })
+})
 
-  it('accepts a pointer rebuilt from the record even when no answer body is present', async () => {
-    const delivery = {
-      id: 'd-60',
-      answerId: 'answer-60',
-      conversation: 'worker',
-      agent: 'pi',
-      channel: 'cf-read',
-      expiresAt: Date.now() + 100,
-    }
-    const text = pointer(delivery)
-    const s = await setup({ ...delivery, text })
-    try {
-      assert.deepEqual(s.pi.sent, [text])
-      await s.pi.handlers.get('message_start')(
-        { message: { role: 'user', content: [{ type: 'text', text }] } },
-        s.ctx,
-      )
-      assert.deepEqual(await waitFor(join(s.ack, 'd-60.json')), {
-        id: 'd-60',
-        admitted: true,
-        mode: 'tui',
-      })
-    } finally {
-      await s.close()
-    }
-  })
-
-  it('delivers a canonical cf-read pointer when Pi is already idle', async () => {
-    const delivery = {
-      id: 'd-56',
-      answerId: 'answer-56',
-      conversation: 'worker',
-      agent: 'pi',
-      answer: 'body',
-      channel: 'cf-read',
-    }
-    const text = pointer(delivery)
-    const s = await setup({ ...delivery, text })
-    try {
-      assert.deepEqual(s.pi.sent, [text])
-      await s.pi.handlers.get('message_start')(
-        { message: { role: 'user', content: [{ type: 'text', text }] } },
-        s.ctx,
-      )
-      assert.deepEqual(await waitFor(join(s.ack, 'd-56.json')), {
-        id: 'd-56',
-        admitted: true,
-        mode: 'tui',
-      })
-      assert.equal(await exists(join(s.inbox, 'd-56.json')), false)
-    } finally {
-      await s.close()
-    }
-  })
-
-  it('rejects a noncanonical pointer instead of sending it to Pi', async () => {
-    const delivery = {
-      id: 'd-57',
-      answerId: 'answer-57',
-      conversation: 'worker',
-      agent: 'pi',
-      answer: 'body',
-      channel: 'cf-read',
-    }
-    const s = await setup({ ...delivery, text: `${pointer(delivery)}\n` })
-    try {
-      assert.deepEqual(s.pi.sent, [])
-      assert.deepEqual(await waitFor(join(s.ack, 'd-57.json')), {
-        id: 'd-57',
-        admitted: false,
-        reason: 'missing-envelope',
-      })
-      assert.equal(await exists(join(s.inbox, 'd-57.json')), false)
-      assert.match(s.logs.join('\n'), /missing envelope or pointer/)
-    } finally {
-      await s.close()
-    }
-  })
-
-  it('reads the production Pi timeout split and receives its unknown ack at the shared expiry', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'consensflow-pi-production-shape-'))
-    const configuration = await launchConfiguration('pi', {
-      launchId: 'launch-pi-negative-1',
-      workspace: root,
-    })
-    assert.ok(Number.isFinite(configuration.channel.ackTimeoutMs))
-    assert.equal(configuration.channel.ackTimeoutMs, 30_000)
-    assert.ok(configuration.channel.extensionAckTimeoutMs < configuration.channel.ackTimeoutMs)
-    assert.equal(configuration.channel.extensionAckTimeoutMs, 24_000)
-    assert.equal(
-      configuration.env.CF_DELIVERY_ACK_TIMEOUT_MS,
-      String(configuration.channel.ackTimeoutMs),
-    )
-    assert.equal(
-      configuration.env.CF_DELIVERY_EXTENSION_ACK_TIMEOUT_MS,
-      String(configuration.channel.extensionAckTimeoutMs),
-    )
-    assert.equal(configuration.env.CF_DELIVERY_SETTLED, configuration.channel.settled)
-    assert.equal(configuration.env.CF_DELIVERY_EXPIRED, configuration.channel.expired)
-    assert.equal(configuration.env.CF_DELIVERY_LAUNCH_ID, configuration.channel.launchId)
-    const pi = fakePi()
-    const extension = createDeliveryExtension(pi, {
-      inbox: configuration.env.CF_DELIVERY_INBOX,
-      ack: configuration.env.CF_DELIVERY_ACK,
-      quarantine: configuration.env.CF_DELIVERY_QUARANTINE,
-    })
-    const contextValue = context(() => true)
-    await pi.handlers.get('session_start')({}, contextValue)
-    const pump = setInterval(() => void extension.consume(), 5)
-    pump.unref()
-    const started = Date.now()
-    try {
-      const answer = await deliver(
-        'pi-extension',
-        {
-          ...context(true),
-          enabledChannels: enabledChannels('pi'),
-          pane: 'lead-pane',
-          generation: 1,
-          epoch: 0,
-          claimEpoch: async () => ({ ok: true }),
-          launch: {
-            ...configuration,
-            channel: { ...configuration.channel, ackTimeoutMs: 40 },
+it('a Pi session switch at admission reports a retryable zero-byte refusal', async () => {
+  const s = await setup(null, { editorGuard: 1 })
+  try {
+    const result = await send(
+      'pi-extension',
+      {
+        session: 'native-pi-session',
+        pane: 'lead-pane',
+        generation: 1,
+        epoch: 0,
+        claimEpoch: async () => {
+          s.ctx.sessionManager.getSessionId = () => 'new-pi-session'
+          return { ok: true }
+        },
+        launch: {
+          channel: {
+            kind: 'pi-extension',
+            editorGuard: 1,
+            inbox: s.inbox,
+            ack: s.ack,
+            launchId: 'launch-pi-test',
+            ackTimeoutMs: 1000,
           },
         },
-        {
-          id: 'd-55',
-          answerId: 'answer-55',
-          conversation: 'worker',
-          agent: 'pi',
-          answer: 'body',
-          expiresAt: Date.now() + 40,
-        },
-      )
-      assert.deepEqual(answer, {
-        ok: false,
-        admitted: null,
-        error: 'uncertain',
-        cause: 'admission-unknown',
-        ack: { id: 'd-55', admitted: null, reason: 'admission-unknown' },
-      })
-      assert.ok(Date.now() - started < 200)
-    } finally {
-      clearInterval(pump)
-      await pi.handlers.get('session_shutdown')()
-      await rm(root, { recursive: true, force: true })
-    }
-  })
+      },
+      envelopeRecord.text,
+    )
+    assert.equal(result.error, 'failed-with-zero-bytes')
+    assert.equal(result.ack.reason, 'native session changed')
+    assert.equal(result.admitted, false)
+    assert.equal(result.bytesWritten, 0)
+    assert.deepEqual(s.pi.sent, [])
+  } finally {
+    await s.close()
+  }
 })

@@ -6,6 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { PassThrough } from 'node:stream'
 import test from 'node:test'
+import { digest, envelope } from '../hosts/lib/deliveries.js'
 import { workspaceKey } from '../hosts/lib/state.js'
 import { Bridge } from '../src/bridge.js'
 import { Watcher } from '../src/delivery-watch.js'
@@ -14,7 +15,7 @@ import { addAgent } from '../src/roster.js'
 import { Store } from '../src/store.js'
 import { leadIdentity, Tabs } from '../src/tabs.js'
 import { startUiServer } from '../src/ui.js'
-import { chooseCmuxMode, tempEnv, testRoleConfiguration } from './helpers.mjs'
+import { tempEnv, testRoleConfiguration } from './helpers.mjs'
 
 const WAIT_MS = 4_000
 
@@ -36,7 +37,6 @@ async function json(response, status) {
 
 async function paneServer() {
   const fixture = tempEnv()
-  chooseCmuxMode(fixture)
   addAgent({ name: 'zeus', harness: 'codex', model: 'gpt-5-codex' }, fixture.env)
   const workspace = path.join(fixture.root, 'workspace')
   const shims = path.join(fixture.root, 'shims')
@@ -278,136 +278,153 @@ test('lead resume preserves native context and tab routing while worker capabili
   }
 })
 
-test('resume releases worker launches absent from a restarted pane host before reattach', async () => {
-  const app = await paneServer()
-  try {
-    const opened = await app.rust.request('tab.open', {
-      dir: app.workspace,
-      harness: 'claude-code',
-    })
-    const leadFrame = app.opens.at(-1)
-    const token = leadFrame.env.CONSENSFLOW_APP_TOKEN
-    const worker = await json(
-      await app.api(token, '/api/panes/consult', {
-        method: 'POST',
-        body: {
-          tab: opened.tab,
-          agent: 'zeus',
-          task: 'survive restart by native session',
-          fresh: true,
-          opId: 'lifecycle-restart-worker',
-        },
-      }),
-      200,
-    )
-    const workerFrame = app.opens.at(-1)
-    const oldController = await json(
-      await app.api(null, '/api/launch/redeem', {
-        method: 'POST',
-        body: { ticket: workerFrame.env.CONSENSFLOW_LAUNCH },
-      }),
-      200,
-    )
-    const nativeSession = 'worker-native-after-restart'
-    const workerRow = JSON.parse(readFileSync(app.threadsFile, 'utf8'))[worker.conversation]
-    assert.equal(
-      (
-        await json(
-          await app.api(oldController.capability, '/api/panes/session.bind', {
-            method: 'POST',
-            body: {
-              launch: oldController.launch,
-              generation: worker.pane.generation,
-              candidate: {
-                sessionId: nativeSession,
-                turn: `[consensflow launch ${workerRow.reserved.nonce}]\nsurvive restart by native session`,
+for (const role of ['lead', 'pm'])
+  test(`${role} resume replaces missing owned launches once and reuses their native history`, async () => {
+    const app = await paneServer()
+    try {
+      const parent = await app.rust.request('tab.open', {
+        dir: app.workspace,
+        harness: 'claude-code',
+      })
+      const opened =
+        role === 'pm'
+          ? await app.rust.request('pm.open', { tab: parent.tab, harness: 'claude-code' })
+          : parent
+      const leadFrame = app.opens.at(-1)
+      const token = leadFrame.env.CONSENSFLOW_APP_TOKEN
+      const worker = await json(
+        await app.api(token, '/api/panes/consult', {
+          method: 'POST',
+          body: {
+            tab: opened.tab,
+            agent: 'zeus',
+            task: 'survive restart by native session',
+            fresh: true,
+            opId: 'lifecycle-restart-worker',
+          },
+        }),
+        200,
+      )
+      const workerFrame = app.opens.at(-1)
+      const oldController = await json(
+        await app.api(null, '/api/launch/redeem', {
+          method: 'POST',
+          body: { ticket: workerFrame.env.CONSENSFLOW_LAUNCH },
+        }),
+        200,
+      )
+      const nativeSession = 'worker-native-after-restart'
+      const workerRow = JSON.parse(readFileSync(app.threadsFile, 'utf8'))[worker.conversation]
+      assert.equal(
+        (
+          await json(
+            await app.api(oldController.capability, '/api/panes/session.bind', {
+              method: 'POST',
+              body: {
+                launch: oldController.launch,
+                generation: worker.pane.generation,
+                candidate: {
+                  sessionId: nativeSession,
+                  turn: `[consensflow launch ${workerRow.reserved.nonce}]\nsurvive restart by native session`,
+                },
               },
-            },
-          }),
-          200,
-        )
-      ).outcome,
-      'bound',
-    )
+            }),
+            200,
+          )
+        ).outcome,
+        'bound',
+      )
 
-    app.rust.event('pane.exit', {
-      id: leadFrame.id,
-      generation: leadFrame.generation,
-    })
-    await waitFor(async () => {
-      const response = await app.api(token)
-      return response.status === 200 && (await response.json()).closed === true ? true : null
-    })
-    app.live.clear()
+      app.rust.event('pane.exit', {
+        id: leadFrame.id,
+        generation: leadFrame.generation,
+      })
+      await waitFor(async () => {
+        const response = await app.api(token)
+        return response.status === 200 && (await response.json()).closed === true ? true : null
+      })
+      app.live.clear()
 
-    const resumed = await app.rust.request('tab.resume', { tab: opened.tab })
-    assert.equal(resumed.ok, true, JSON.stringify(resumed))
-    assert.equal(app.listCount(), 1, 'resume asks the replacement pane host what still exists')
-    await json(
-      await app.api(oldController.capability, '/api/panes/progress.set', {
-        method: 'POST',
-        body: {
-          launch: oldController.launch,
-          generation: worker.pane.generation,
-          progress: { state: 'stale' },
-        },
-      }),
-      401,
-    )
-    assert.equal(
-      (await json(await app.api(token), 200)).panes.some(
-        (pane) => pane.id === worker.pane.id && pane.closed !== true,
-      ),
-      false,
-    )
+      const listsBeforeResume = app.listCount()
+      const opensBeforeResume = app.opens.length
+      const resumed = await app.rust.request('tab.resume', { tab: opened.tab })
+      assert.equal(resumed.ok, true, JSON.stringify(resumed))
+      assert.ok(
+        app.listCount() > listsBeforeResume,
+        'resume asks the replacement pane host what still exists',
+      )
+      await json(
+        await app.api(oldController.capability, '/api/panes/progress.set', {
+          method: 'POST',
+          body: {
+            launch: oldController.launch,
+            generation: worker.pane.generation,
+            progress: { state: 'stale' },
+          },
+        }),
+        401,
+      )
+      assert.equal(
+        (await json(await app.api(token), 200)).panes.some(
+          (pane) => pane.id === worker.pane.id && pane.closed !== true,
+        ),
+        false,
+      )
 
-    const beforeAttach = app.opens.length
-    const replacement = await json(
-      await app.api(token, '/api/panes/attach', {
-        method: 'POST',
-        body: {
-          tab: opened.tab,
-          session: worker.conversation,
-          opId: 'lifecycle-restart-reattach',
-        },
-      }),
-      200,
-    )
-    assert.equal(replacement.outcome, 'opened')
-    assert.equal(app.opens.length, beforeAttach + 1)
-    const replacementFrame = app.opens.at(-1)
-    assert.equal(
-      replacementFrame.argv[replacementFrame.argv.indexOf('--native-session') + 1],
-      nativeSession,
-    )
-    const newController = await json(
-      await app.api(null, '/api/launch/redeem', {
-        method: 'POST',
-        body: { ticket: replacementFrame.env.CONSENSFLOW_LAUNCH },
-      }),
-      200,
-    )
-    assert.notEqual(newController.capability, oldController.capability)
-    assert.equal(
-      (
-        await json(
-          await app.api(newController.capability, '/api/panes/progress.set', {
-            method: 'POST',
-            body: {
-              launch: newController.launch,
-              generation: replacement.pane.generation,
-              progress: { state: 'running', detail: 'reconciled after restart' },
-            },
-          }),
-          200,
-        )
-      ).outcome,
-      'recorded',
-    )
-  } finally {
-    await app.close()
-  }
-})
+      assert.equal(resumed.workers.length, 1)
+      assert.equal(resumed.workers[0].outcome, 'opened')
+      assert.equal(app.opens.length, opensBeforeResume + 2, 'resume opens one lead and one worker')
+      const beforeAttach = app.opens.length
+      const replacement = await json(
+        await app.api(token, '/api/panes/attach', {
+          method: 'POST',
+          body: {
+            tab: opened.tab,
+            session: worker.conversation,
+            opId: 'lifecycle-restart-reattach',
+          },
+        }),
+        200,
+      )
+      assert.equal(replacement.outcome, 'live')
+      assert.equal(
+        app.opens.length,
+        beforeAttach,
+        'reattach must not duplicate the worker resumed by the app',
+      )
+      const replacementFrame = app.opens.at(-1)
+      assert.equal(
+        replacementFrame.argv[replacementFrame.argv.indexOf('--native-session') + 1],
+        nativeSession,
+      )
+      const newController = await json(
+        await app.api(null, '/api/launch/redeem', {
+          method: 'POST',
+          body: { ticket: replacementFrame.env.CONSENSFLOW_LAUNCH },
+        }),
+        200,
+      )
+      assert.notEqual(newController.capability, oldController.capability)
+      assert.equal(
+        (
+          await json(
+            await app.api(newController.capability, '/api/panes/progress.set', {
+              method: 'POST',
+              body: {
+                launch: newController.launch,
+                generation: replacement.pane.generation,
+                progress: { state: 'running', detail: 'reconciled after restart' },
+              },
+            }),
+            200,
+          )
+        ).outcome,
+        'recorded',
+      )
+    } finally {
+      await app.close()
+    }
+  })
 
 test('resume fails closed before generation changes when the pane host cannot list workers', async () => {
   const app = await paneServer()
@@ -475,7 +492,7 @@ test('restart closes tabs; resume preserves the bound lead and keeps old deliver
     const before = await tabs.get(created.id)
     const leadPane = before.panes.find((pane) => pane.kind === 'lead')
     const deliveryId = await store.allocateDeliveryId()
-    await store.deliveryUpsert(workspace, {
+    const historical = {
       id: deliveryId,
       state: 'pending',
       conversation: 'worker-session',
@@ -490,7 +507,9 @@ test('restart closes tabs; resume preserves the bound lead and keeps old deliver
         pane: leadPane.id,
         generation: before.lead.generation,
       },
-    })
+    }
+    historical.digest = digest(envelope(historical))
+    await seedLegacy(store, workspace, historical)
 
     await store.close()
     store = new Store(store.root)
@@ -506,21 +525,18 @@ test('restart closes tabs; resume preserves the bound lead and keeps old deliver
 
     watcher = new Watcher({ store, tabs, env: {}, floorMs: 60_000 })
     await watcher.start()
-    const held = await watcher.held(created.id)
-    assert.deepEqual(
-      held.records.map((record) => record.id),
-      [deliveryId],
-    )
-
     const page = new Page({
       store,
       tabs,
       agents: { names: () => [], row: () => null },
       env: {},
-    }).attachWatcher(watcher)
+    })
     const firstView = await page.state()
     const secondView = await page.state()
-    assert.deepEqual(firstView.held, [{ id: deliveryId, tab: created.id, answerId: 'answer-1' }])
+    assert.equal(firstView.results.length, 1)
+    assert.equal(firstView.results[0].tab, created.id)
+    assert.equal(firstView.results[0].answerId, 'answer-1')
+    assert.equal(firstView.results[0].state, 'waiting')
     assert.deepEqual(
       secondView.tabs,
       firstView.tabs,
@@ -530,15 +546,9 @@ test('restart closes tabs; resume preserves the bound lead and keeps old deliver
 
     const beforeTransfer = await store.readDeliveries(workspace)
     assert.equal(beforeTransfer[deliveryId].target.generation, created.generation)
-    const [transferred] = await watcher.sendHeld(created.id)
-    assert.equal(transferred.heldOf, deliveryId)
-    assert.equal(transferred.target.generation, created.generation + 1)
-    assert.equal(transferred.target.session, nativeSession)
-    const afterTransfer = await store.readDeliveries(workspace)
-    assert.equal(afterTransfer[deliveryId].state, 'pending')
-    assert.equal(afterTransfer[deliveryId].target.generation, created.generation)
-    assert.equal(afterTransfer[transferred.id].heldOf, deliveryId)
-    assert.deepEqual((await watcher.held(created.id)).records, [])
+    await watcher.reconcile()
+    assert.deepEqual(await store.readDeliveries(workspace), beforeTransfer)
+    assert.equal((await page.state()).results.length, 1, 'resume never clones results')
   } finally {
     await watcher?.close()
     await store.close()
@@ -555,7 +565,6 @@ test('the durable drain finishes while the HTTP server is still held open', asyn
   // exactly such a peer. So `drain` is its own path — the watcher's queue,
   // then the store's — and this asserts it completes while `close` cannot.
   const t = tempEnv()
-  chooseCmuxMode(t)
   const server = await startUiServer(t.env, { prepareRole: testRoleConfiguration })
 
   // Half a request: connected, headers unfinished. Node keeps this connection
@@ -590,3 +599,13 @@ test('the durable drain finishes while the HTTP server is still held open', asyn
   await closing
   t.cleanup()
 })
+
+async function seedLegacy(store, cwd, record) {
+  return store.mutate(cwd, 'test.legacy', async (io) => {
+    const records = await io.readDeliveries()
+    const merged = { ...records[record.id], ...record }
+    records[record.id] = merged
+    await io.writeDeliveries(records)
+    return merged
+  })
+}

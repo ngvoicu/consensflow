@@ -1,9 +1,7 @@
 import { slugify, stripMention } from "./utils.js";
 
 
-// Same catalog as consensflow-pi, image preset included: here pygmalion rides the Codex CLI's
-// ChatGPT login (lib/codex-auth.js) to the same gpt-image-2 backend pi reaches via its
-// openai-codex login.
+// Image agents use the Codex login; Codex selects the underlying image model.
 // --- Effort ceilings (audited 2026-08-27) --------------------------------
 // Every preset names the HIGHEST level its model actually takes, and no preset names a level the
 // model does not have. Both facts come from the harnesses' own catalogs, which each publish the
@@ -18,7 +16,7 @@ import { slugify, stripMention } from "./utils.js";
 // None of them errored: pi maps an unknown level to null and sends nothing, and opencode validates
 // nothing at all (a deliberately bogus `--variant` was probed and ran). So the run quietly used the
 // model's default while the label promised MAX — the failure mode this comment exists to prevent.
-// Three models take no effort parameter at all (MiniMax M3, Laguna S 2.1 free, and gpt-image-2):
+// Three models take no effort parameter at all (MiniMax M3, Laguna S 2.1 free, and Codex Images):
 // their presets name no level, because a level nothing honours is worse than a blank one.
 //
 // The one disagreement that touches this catalog is DeepSeek V4 (all variants): pi says
@@ -31,22 +29,12 @@ import { slugify, stripMention } from "./utils.js";
 // the xhigh tier that the same three models occupy on codex and pi, so the trio means the same
 // thing on every harness. A tier ladder is a choice; a level the model lacks is a bug.
 //
-// --- Fable 5.1 (2026-09-01) ----------------------------------------------
-// The Fable rows moved to Claude Fable 5.1 on the two harnesses that carry it. Sources, all read
-// that day: models.dev lists `reasoning_options` low..max for BOTH `anthropic/claude-fable-5-1`
-// and `openrouter/anthropic/claude-fable-5.1`; OpenRouter's /api/v1/models carries the dotted id;
-// the Claude Code binary (2.1.257) carries the dashed one. Both ids were then LIVE-PROBED on the
-// CLI that will run them — `claude -p --model claude-fable-5-1 --effort low` and `opencode run
-// --model openrouter/anthropic/claude-fable-5.1` both answered — because a catalog listing proves
-// the id and only a run proves the harness. Same price as Fable 5 ($10/$50 per MTok), so the
-// ladder did not move: claude-code keeps max/xhigh/high/medium and OpenCode keeps
-// xhigh/high/medium. pi is the exception and the comment above the pi rows says why.
-//
-// One finding this audit did NOT act on, recorded so the next one starts from it: pi-ai's
-// thinkingLevelMap for `claude-fable-5` is {off, xhigh, max} today — no `high`, no `medium` — so
-// linus (high) and erato (medium) already run at the model's default while their labels promise a
-// tier. That is the exact failure this record exists to prevent, and fixing it means choosing a
-// new shape for those two rows (raise, blank, or retire), not editing a string.
+// --- Fable 5.1 (updated 2026-09-10) --------------------------------------
+// Native Claude uses claude-fable-5-1; OpenRouter uses anthropic/claude-fable-5.1.
+// Pi 0.85.1 now carries low/medium on the OpenRouter model, the user-chosen route.
+// Omitted standard thinking-map keys can use provider defaults; explicit null
+// marks unsupported levels. Do not mistake an omitted key for a dropped effort.
+// Model/effort source and transport evidence: .specs/agent-catalog-redesign/.
 //
 // --- Gemini 3.8 Flash (2026-09-03) ---------------------------------------
 // nike and sif moved from Gemini 3.7 Flash to 3.8. The ceiling did NOT move and neither did the
@@ -85,6 +73,158 @@ import { slugify, stripMention } from "./utils.js";
 // OpenCode trio does: a tier ladder is a choice, and asteria/astraeus were asked for as xhigh and
 // max. Add an ultra row when someone wants the top; the level is there and proven.
 export const AGENT_PRESETS = [
+  // Lower-effort choices; existing names and higher tiers stay stable.
+  {
+    preset: "hemera",
+    id: "hemera",
+    name: "Hemera",
+    label: "Codex GPT 5.6 Sol LOW",
+    description: "Small code changes and focused reviews.",
+    kind: "codex",
+    model: "gpt-5.6-sol",
+    effort: "low",
+  },
+  {
+    preset: "phaethon",
+    id: "phaethon",
+    name: "Phaethon",
+    label: "Codex GPT 5.6 Sol MEDIUM",
+    description: "Implementation, code review and planning.",
+    kind: "codex",
+    model: "gpt-5.6-sol",
+    effort: "medium",
+  },
+  {
+    preset: "leto",
+    id: "leto",
+    name: "Leto",
+    label: "Pi GPT 5.6 Sol LOW",
+    description: "Small code changes and focused reviews.",
+    kind: "pi",
+    model: "openai-codex/gpt-5.6-sol",
+    thinking: "low",
+  },
+  {
+    preset: "asterope",
+    id: "asterope",
+    name: "Asterope",
+    label: "Pi GPT 5.6 Sol MEDIUM",
+    description: "Implementation, code review and planning.",
+    kind: "pi",
+    model: "openai-codex/gpt-5.6-sol",
+    thinking: "medium",
+  },
+  {
+    preset: "arvakr",
+    id: "arvakr",
+    name: "Arvakr",
+    label: "OpenCode GPT 5.6 Sol LOW",
+    description: "Small code changes and focused reviews.",
+    kind: "opencode",
+    model: "openrouter/openai/gpt-5.6-sol",
+    effort: "low",
+  },
+  {
+    preset: "alsvidr",
+    id: "alsvidr",
+    name: "Alsvidr",
+    label: "OpenCode GPT 5.6 Sol MEDIUM",
+    description: "Implementation, code review and planning.",
+    kind: "opencode",
+    model: "openrouter/openai/gpt-5.6-sol",
+    effort: "medium",
+  },
+  {
+    preset: "electra",
+    id: "electra",
+    name: "Electra",
+    label: "Codex GPT 6 Astra LOW",
+    description: "Small code changes and focused reviews.",
+    kind: "codex",
+    model: "gpt-6-astra",
+    effort: "low",
+  },
+  {
+    preset: "maia",
+    id: "maia",
+    name: "Maia",
+    label: "Codex GPT 6 Astra MEDIUM",
+    description: "Implementation, code review and planning.",
+    kind: "codex",
+    model: "gpt-6-astra",
+    effort: "medium",
+  },
+  {
+    preset: "alcyone",
+    id: "alcyone",
+    name: "Alcyone",
+    label: "Pi GPT 6 Astra LOW",
+    description: "Small code changes and focused reviews.",
+    kind: "pi",
+    model: "openai-codex/gpt-6-astra",
+    thinking: "low",
+  },
+  {
+    preset: "merope",
+    id: "merope",
+    name: "Merope",
+    label: "Pi GPT 6 Astra MEDIUM",
+    description: "Implementation, code review and planning.",
+    kind: "pi",
+    model: "openai-codex/gpt-6-astra",
+    thinking: "medium",
+  },
+  {
+    preset: "dagr",
+    id: "dagr",
+    name: "Dagr",
+    label: "OpenCode GPT 6 Astra LOW (OpenRouter API)",
+    description: "Small code changes and focused reviews.",
+    kind: "opencode",
+    model: "openrouter/openai/gpt-6-astra",
+    effort: "low",
+  },
+  {
+    preset: "skirnir",
+    id: "skirnir",
+    name: "Skirnir",
+    label: "OpenCode GPT 6 Astra MEDIUM (OpenRouter API)",
+    description: "Implementation, code review and planning.",
+    kind: "opencode",
+    model: "openrouter/openai/gpt-6-astra",
+    effort: "medium",
+  },
+  {
+    preset: "terpsichore",
+    id: "terpsichore",
+    name: "Terpsichore",
+    label: "Claude Code Fable 5.1 LOW",
+    description: "Small code changes and focused reviews.",
+    kind: "claude-code",
+    model: "claude-fable-5-1",
+    effort: "low",
+  },
+  {
+    preset: "musaeus",
+    id: "musaeus",
+    name: "Musaeus",
+    label: "Pi Fable 5.1 LOW (OpenRouter API)",
+    description: "Small code changes and focused reviews.",
+    kind: "pi",
+    model: "openrouter/anthropic/claude-fable-5.1",
+    thinking: "low",
+  },
+  {
+    preset: "suttung",
+    id: "suttung",
+    name: "Suttung",
+    label: "OpenCode Fable 5.1 LOW (OpenRouter API)",
+    description: "Small code changes and focused reviews.",
+    kind: "opencode",
+    model: "openrouter/anthropic/claude-fable-5.1",
+    effort: "low",
+  },
+
   // --- Claude Fable 5.1 — Anthropic's most capable model (priced above Opus).
   // Muse names on claude-code; bard/storyteller names on the other engines.
   {
@@ -92,7 +232,7 @@ export const AGENT_PRESETS = [
     id: "calliope",
     name: "Calliope",
     label: "Claude Code Fable 5.1 MAX",
-    description: "Chief muse: Claude Fable 5.1 at max effort — the deepest Claude-powered collaborator in the catalog. Turns can run many minutes.",
+    description: "Complex debugging, architecture and detailed review.",
     kind: "claude-code",
     model: "claude-fable-5-1",
     effort: "max",
@@ -102,7 +242,7 @@ export const AGENT_PRESETS = [
     id: "clio",
     name: "Clio",
     label: "Claude Code Fable 5.1 XHIGH",
-    description: "Muse of history: Claude Fable 5.1 at xhigh effort, the recommended tier for coding, planning, and agentic work.",
+    description: "Complex debugging, architecture and detailed review.",
     kind: "claude-code",
     model: "claude-fable-5-1",
     effort: "xhigh",
@@ -112,7 +252,7 @@ export const AGENT_PRESETS = [
     id: "euterpe",
     name: "Euterpe",
     label: "Claude Code Fable 5.1 HIGH",
-    description: "Muse of music: Claude Fable 5.1 at high effort — strong reasoning without the xhigh wait.",
+    description: "Complex debugging, architecture and detailed review.",
     kind: "claude-code",
     model: "claude-fable-5-1",
     effort: "high",
@@ -122,7 +262,7 @@ export const AGENT_PRESETS = [
     id: "thalia",
     name: "Thalia",
     label: "Claude Code Fable 5.1 MEDIUM",
-    description: "Muse of comedy: Claude Fable 5.1 at medium effort for quicker takes from the top model.",
+    description: "Implementation, code review and planning.",
     kind: "claude-code",
     model: "claude-fable-5-1",
     effort: "medium",
@@ -140,7 +280,7 @@ export const AGENT_PRESETS = [
     id: "hyperion",
     name: "Hyperion",
     label: "Codex GPT 5.6 Sol MAX",
-    description: "Titan of heavenly light: GPT 5.6 Sol — the flagship variant — at max effort, the deepest reasoning tier below ultra's automatic task delegation. Turns can run many minutes.",
+    description: "Feature work, code review and technical planning.",
     kind: "codex",
     model: "gpt-5.6-sol",
     effort: "max",
@@ -150,7 +290,7 @@ export const AGENT_PRESETS = [
     id: "phoebus",
     name: "Phoebus",
     label: "Codex GPT 5.6 Sol XHIGH",
-    description: "The radiant sun: GPT 5.6 Sol at xhigh effort — flagship depth without the ultra wait.",
+    description: "Feature work, code review and technical planning.",
     kind: "codex",
     model: "gpt-5.6-sol",
     effort: "xhigh",
@@ -160,7 +300,7 @@ export const AGENT_PRESETS = [
     id: "gaia",
     name: "Gaia",
     label: "Codex GPT 5.6 Terra XHIGH",
-    description: "Primordial earth: GPT 5.6 Terra — the mid-size variant — at xhigh effort for strong everyday coding and planning.",
+    description: "Everyday implementation and tests.",
     kind: "codex",
     model: "gpt-5.6-terra",
     effort: "xhigh",
@@ -170,7 +310,7 @@ export const AGENT_PRESETS = [
     id: "diana",
     name: "Diana",
     label: "Codex GPT 5.6 Luna XHIGH",
-    description: "Roman moon goddess: GPT 5.6 Luna — the compact, fast variant — at xhigh effort for quick, sharp takes.",
+    description: "Small fixes and focused coding tasks.",
     kind: "codex",
     model: "gpt-5.6-luna",
     effort: "xhigh",
@@ -181,7 +321,7 @@ export const AGENT_PRESETS = [
     id: "astraeus",
     name: "Astraeus",
     label: "Codex GPT 6 Astra MAX",
-    description: "Titan of the stars and of dusk: GPT 6 Astra at max effort — the deepest reasoning tier this model takes without ultra's task delegation. Turns can run many minutes.",
+    description: "Complex debugging, architecture and detailed review.",
     kind: "codex",
     model: "gpt-6-astra",
     effort: "max",
@@ -191,7 +331,7 @@ export const AGENT_PRESETS = [
     id: "asteria",
     name: "Asteria",
     label: "Codex GPT 6 Astra XHIGH",
-    description: "Titaness of the falling stars: GPT 6 Astra at xhigh effort — the tier its GPT 5.6 siblings hold, for strong work without the max wait.",
+    description: "Complex debugging, architecture and detailed review.",
     kind: "codex",
     model: "gpt-6-astra",
     effort: "xhigh",
@@ -213,7 +353,7 @@ export const AGENT_PRESETS = [
     id: "phosphoros",
     name: "Phosphoros",
     label: "Pi GPT 6 Astra MAX",
-    description: "The morning star, bringer of light: GPT 6 Astra at max thinking on Pi, riding your ChatGPT (Codex) login — the same road Aether's GPT 5.6 Sol takes. Turns can run many minutes.",
+    description: "Complex debugging, architecture and detailed review.",
     kind: "pi",
     model: "openai-codex/gpt-6-astra",
     thinking: "max",
@@ -223,7 +363,7 @@ export const AGENT_PRESETS = [
     id: "hesperos",
     name: "Hesperos",
     label: "Pi GPT 6 Astra XHIGH",
-    description: "The evening star — the same planet as Phosphoros under its other name, and the same model one tier down: GPT 6 Astra at xhigh thinking on Pi via your ChatGPT (Codex) login, the tier its GPT 5.6 siblings hold.",
+    description: "Complex debugging, architecture and detailed review.",
     kind: "pi",
     model: "openai-codex/gpt-6-astra",
     thinking: "xhigh",
@@ -233,7 +373,7 @@ export const AGENT_PRESETS = [
     id: "aurvandil",
     name: "Aurvandil",
     label: "OpenCode GPT 6 Astra MAX",
-    description: "The frozen toe Thor threw into the sky, where it became a star: GPT 6 Astra through OpenCode at max effort — its ceiling on OpenRouter, which lists no `ultra` for it. Turns can run many minutes.",
+    description: "Complex debugging, architecture and detailed review.",
     kind: "opencode",
     model: "openrouter/openai/gpt-6-astra",
     effort: "max",
@@ -243,7 +383,7 @@ export const AGENT_PRESETS = [
     id: "delling",
     name: "Delling",
     label: "OpenCode GPT 6 Astra XHIGH",
-    description: "The shining one who fathers the day: GPT 6 Astra through OpenCode at xhigh effort (via OpenRouter) — strong work without the max wait, and the tier its GPT 5.6 siblings hold.",
+    description: "Complex debugging, architecture and detailed review.",
     kind: "opencode",
     model: "openrouter/openai/gpt-6-astra",
     effort: "xhigh",
@@ -259,7 +399,7 @@ export const AGENT_PRESETS = [
     id: "aether",
     name: "Aether",
     label: "Pi GPT 5.6 Sol XHIGH",
-    description: "Primordial upper air and light: GPT 5.6 Sol — the flagship variant — on Pi, riding your ChatGPT (Codex) login at xhigh thinking.",
+    description: "Feature work, code review and technical planning.",
     kind: "pi",
     model: "openai-codex/gpt-5.6-sol",
     thinking: "xhigh",
@@ -269,7 +409,7 @@ export const AGENT_PRESETS = [
     id: "rhea",
     name: "Rhea",
     label: "Pi GPT 5.6 Terra XHIGH",
-    description: "Titaness of the earth: GPT 5.6 Terra — the balanced variant — on Pi via your ChatGPT (Codex) login at xhigh thinking.",
+    description: "Everyday implementation and tests.",
     kind: "pi",
     model: "openai-codex/gpt-5.6-terra",
     thinking: "xhigh",
@@ -279,7 +419,7 @@ export const AGENT_PRESETS = [
     id: "phoebe",
     name: "Phoebe",
     label: "Pi GPT 5.6 Luna XHIGH",
-    description: "Titaness of the moon: GPT 5.6 Luna — the compact, fast variant — on Pi via your ChatGPT (Codex) login at xhigh thinking.",
+    description: "Small fixes and focused coding tasks.",
     kind: "pi",
     model: "openai-codex/gpt-5.6-luna",
     thinking: "xhigh",
@@ -289,7 +429,7 @@ export const AGENT_PRESETS = [
     id: "sunna",
     name: "Sunna",
     label: "OpenCode GPT 5.6 Sol XHIGH",
-    description: "Norse sun goddess: GPT 5.6 Sol — the flagship variant — through OpenCode on OpenRouter at xhigh effort.",
+    description: "Feature work, code review and technical planning.",
     kind: "opencode",
     model: "openrouter/openai/gpt-5.6-sol",
     effort: "xhigh",
@@ -299,7 +439,7 @@ export const AGENT_PRESETS = [
     id: "jord",
     name: "Jord",
     label: "OpenCode GPT 5.6 Terra XHIGH",
-    description: "Norse earth goddess, mother of Thor: GPT 5.6 Terra — the balanced variant — through OpenCode on OpenRouter at xhigh effort.",
+    description: "Everyday implementation and tests.",
     kind: "opencode",
     model: "openrouter/openai/gpt-5.6-terra",
     effort: "xhigh",
@@ -309,7 +449,7 @@ export const AGENT_PRESETS = [
     id: "bil",
     name: "Bil",
     label: "OpenCode GPT 5.6 Luna XHIGH",
-    description: "The child who follows Mani across the night sky: GPT 5.6 Luna — the compact, fast variant — through OpenCode on OpenRouter at xhigh effort.",
+    description: "Small fixes and focused coding tasks.",
     kind: "opencode",
     model: "openrouter/openai/gpt-5.6-luna",
     effort: "xhigh",
@@ -321,7 +461,7 @@ export const AGENT_PRESETS = [
     id: "zeus",
     name: "Zeus",
     label: "Claude Code Opus 5 MAX",
-    description: "Deepest Opus-tier Claude Code agent for high-stakes architecture, implementation plans, and final checks; half the price of Fable 5.1, which stays the catalog ceiling (@calliope).",
+    description: "Feature work, code review and technical planning.",
     kind: "claude-code",
     model: "claude-opus-5",
     effort: "max",
@@ -331,7 +471,7 @@ export const AGENT_PRESETS = [
     id: "apollo",
     name: "Apollo",
     label: "Claude Code Opus 5 XHIGH",
-    description: "Deep but slightly cheaper/faster Claude Code agent for spec critique, design alternatives, and implementation plans.",
+    description: "Feature work, code review and technical planning.",
     kind: "claude-code",
     model: "claude-opus-5",
     effort: "xhigh",
@@ -341,7 +481,7 @@ export const AGENT_PRESETS = [
     id: "artemis",
     name: "Artemis",
     label: "Claude Code Opus 5 MEDIUM",
-    description: "Apollo's twin: Opus 5 at medium effort for quicker, cheaper Claude Code takes.",
+    description: "Feature work, code review and technical planning.",
     kind: "claude-code",
     model: "claude-opus-5",
     effort: "medium",
@@ -351,19 +491,15 @@ export const AGENT_PRESETS = [
   // OpenCode reaches Fable 5.1 through OpenRouter, whose id spells the version with a DOT
   // (anthropic/claude-fable-5.1) where Anthropic's own API spells it with a dash
   // (claude-fable-5-1) — one model, two spellings, and the wrong one is a 404.
-  // pi stays on Fable 5: pi-ai 0.84.4 (the newest release on 2026-09-01) carries no 5.1 entry for
-  // the anthropic provider, and its fallback for an unknown id copies the provider's DEFAULT model
-  // (claude-opus-4-8) and swaps the name — so the label would promise a Fable 5.1 tier while the
-  // thinking level was mapped through another model's table. Move orpheus/linus/erato the day
-  // pi-ai lists the model. The trio keeps xhigh as its tier so calliope stays the catalog ceiling.
+  // Pi uses the user-selected OpenRouter API route, with explicit catalog sync.
   {
     preset: "orpheus",
     id: "orpheus",
     name: "Orpheus",
-    label: "Pi Fable 5 XHIGH (Anthropic)",
-    description: "The legendary bard: Pi-backed Claude Fable 5 with xhigh thinking; needs Anthropic auth in pi.",
+    label: "Pi Fable 5.1 XHIGH (OpenRouter API)",
+    description: "Complex code changes and analysis.",
     kind: "pi",
-    model: "anthropic/claude-fable-5",
+    model: "openrouter/anthropic/claude-fable-5.1",
     thinking: "xhigh",
     skillsPolicy: "default",
   },
@@ -371,10 +507,10 @@ export const AGENT_PRESETS = [
     preset: "linus",
     id: "linus",
     name: "Linus",
-    label: "Pi Fable 5 HIGH (Anthropic)",
-    description: "Orpheus's bard brother: Pi-backed Claude Fable 5 with high thinking; needs Anthropic auth in pi.",
+    label: "Pi Fable 5.1 HIGH (OpenRouter API)",
+    description: "Complex code changes and analysis.",
     kind: "pi",
-    model: "anthropic/claude-fable-5",
+    model: "openrouter/anthropic/claude-fable-5.1",
     thinking: "high",
     skillsPolicy: "default",
   },
@@ -382,10 +518,10 @@ export const AGENT_PRESETS = [
     preset: "erato",
     id: "erato",
     name: "Erato",
-    label: "Pi Fable 5 MEDIUM (Anthropic)",
-    description: "Muse of lyric poetry: Pi-backed Claude Fable 5 with medium thinking; needs Anthropic auth in pi.",
+    label: "Pi Fable 5.1 MEDIUM (OpenRouter API)",
+    description: "Complex code changes and analysis.",
     kind: "pi",
-    model: "anthropic/claude-fable-5",
+    model: "openrouter/anthropic/claude-fable-5.1",
     thinking: "medium",
     skillsPolicy: "default",
   },
@@ -394,7 +530,7 @@ export const AGENT_PRESETS = [
     id: "saga",
     name: "Saga",
     label: "OpenCode Fable 5.1 XHIGH",
-    description: "Norse goddess of storytelling: OpenCode-backed Claude Fable 5.1 at xhigh variant (via OpenRouter).",
+    description: "Complex debugging, architecture and detailed review.",
     kind: "opencode",
     model: "openrouter/anthropic/claude-fable-5.1",
     effort: "xhigh",
@@ -404,7 +540,7 @@ export const AGENT_PRESETS = [
     id: "gunnlod",
     name: "Gunnlod",
     label: "OpenCode Fable 5.1 HIGH",
-    description: "Guardian of the mead of poetry: OpenCode-backed Claude Fable 5.1 at high variant (via OpenRouter).",
+    description: "Complex debugging, architecture and detailed review.",
     kind: "opencode",
     model: "openrouter/anthropic/claude-fable-5.1",
     effort: "high",
@@ -414,23 +550,20 @@ export const AGENT_PRESETS = [
     id: "kvasir",
     name: "Kvasir",
     label: "OpenCode Fable 5.1 MEDIUM",
-    description: "Source of the mead of poetry: OpenCode-backed Claude Fable 5.1 at medium variant (via OpenRouter).",
+    description: "Implementation, code review and planning.",
     kind: "opencode",
     model: "openrouter/anthropic/claude-fable-5.1",
     effort: "medium",
   },
-  // Opus 5 on pi (anthropic provider). pi's model layer gained a "max" thinking level in
-  // @earendil-works/pi-ai 0.82 (verified in its registry: claude-opus-5 maps xhigh AND max),
-  // but the pi releases shipping today still bundle an older pi-ai that caps at xhigh — so
-  // these stay at xhigh/medium, which is valid on both.
+  // Pi Opus uses the same OpenRouter route, preserving its xhigh/medium tiers.
   {
     preset: "kronos",
     id: "kronos",
     name: "Kronos",
-    label: "Pi Opus 5 XHIGH (Anthropic)",
-    description: "Pi-backed Claude Opus 5 with xhigh thinking; needs Anthropic auth in pi.",
+    label: "Pi Opus 5 XHIGH (OpenRouter API)",
+    description: "Feature work, code review and technical planning.",
     kind: "pi",
-    model: "anthropic/claude-opus-5",
+    model: "openrouter/anthropic/claude-opus-5",
     thinking: "xhigh",
     skillsPolicy: "default",
   },
@@ -438,10 +571,10 @@ export const AGENT_PRESETS = [
     preset: "atlas",
     id: "atlas",
     name: "Atlas",
-    label: "Pi Opus 5 MEDIUM (Anthropic)",
-    description: "Pi-backed Claude Opus 5 with medium thinking; needs Anthropic auth in pi.",
+    label: "Pi Opus 5 MEDIUM (OpenRouter API)",
+    description: "Feature work, code review and technical planning.",
     kind: "pi",
-    model: "anthropic/claude-opus-5",
+    model: "openrouter/anthropic/claude-opus-5",
     thinking: "medium",
     skillsPolicy: "default",
   },
@@ -452,7 +585,7 @@ export const AGENT_PRESETS = [
     id: "baldr",
     name: "Baldr",
     label: "OpenCode Opus 5 XHIGH",
-    description: "OpenCode-backed Claude Opus 5 at xhigh variant (via OpenRouter).",
+    description: "Feature work, code review and technical planning.",
     kind: "opencode",
     model: "openrouter/anthropic/claude-opus-5",
     effort: "xhigh",
@@ -462,7 +595,7 @@ export const AGENT_PRESETS = [
     id: "vali",
     name: "Vali",
     label: "OpenCode Opus 5 MEDIUM",
-    description: "OpenCode-backed Claude Opus 5 at medium variant (via OpenRouter).",
+    description: "Feature work, code review and technical planning.",
     kind: "opencode",
     model: "openrouter/anthropic/claude-opus-5",
     effort: "medium",
@@ -475,7 +608,7 @@ export const AGENT_PRESETS = [
     id: "hermod",
     name: "Hermod",
     label: "Claude Code Sonnet 5 MAX",
-    description: "Fast, cheap Claude Code agent (Haiku) for quick gut-checks.",
+    description: "Everyday implementation and tests.",
     kind: "claude-code",
     model: "claude-sonnet-5",
     effort: "max",
@@ -485,7 +618,7 @@ export const AGENT_PRESETS = [
     id: "nike",
     name: "Nike",
     label: "Pi Gemini 3.8 Flash HIGH (fast)",
-    description: "Swift, cheap Pi-backed Gemini 3.8 Flash at high thinking — its ceiling — for quick second opinions.",
+    description: "Routine coding and second opinions.",
     kind: "pi",
     model: "openrouter/google/gemini-3.8-flash",
     thinking: "high",
@@ -496,7 +629,7 @@ export const AGENT_PRESETS = [
     id: "freya",
     name: "Freya",
     label: "OpenCode DeepSeek V4 Flash HIGH (fast)",
-    description: "Cheap, fast OpenCode-backed DeepSeek V4 Flash at high variant (via OpenRouter) — the one level both harness catalogs agree this model has.",
+    description: "Routine coding and second opinions.",
     kind: "opencode",
     model: "openrouter/deepseek/deepseek-v4-flash-0731",
     effort: "high",
@@ -506,7 +639,7 @@ export const AGENT_PRESETS = [
     id: "zephyros",
     name: "Zephyros",
     label: "Pi DeepSeek V4 Flash HIGH (fast)",
-    description: "Swift west wind: Pi-backed DeepSeek V4 Flash at high thinking (via OpenRouter) — `low` was not a level this model has.",
+    description: "Routine coding and second opinions.",
     kind: "pi",
     model: "openrouter/deepseek/deepseek-v4-flash-0731",
     thinking: "high",
@@ -517,7 +650,7 @@ export const AGENT_PRESETS = [
     id: "sif",
     name: "Sif",
     label: "OpenCode Gemini 3.8 Flash HIGH (fast)",
-    description: "Swift, cheap OpenCode-backed Gemini 3.8 Flash at high variant — its ceiling (via OpenRouter).",
+    description: "Routine coding and second opinions.",
     kind: "opencode",
     model: "openrouter/google/gemini-3.8-flash",
     effort: "high",
@@ -529,20 +662,9 @@ export const AGENT_PRESETS = [
     id: "hades",
     name: "Hades",
     label: "Pi DeepSeek V4 Pro",
-    description: "Pi-backed DeepSeek V4 Pro agent (via OpenRouter).",
+    description: "Complex code changes and analysis.",
     kind: "pi",
     model: "openrouter/deepseek/deepseek-v4-pro-0813",
-    thinking: "high",
-    skillsPolicy: "default",
-  },
-  {
-    preset: "helios",
-    id: "helios",
-    name: "Helios",
-    label: "Pi Gemini 3.1 Pro",
-    description: "Pi-backed Google Gemini 3.1 Pro agent (via OpenRouter).",
-    kind: "pi",
-    model: "openrouter/google/gemini-3.1-pro-preview",
     thinking: "high",
     skillsPolicy: "default",
   },
@@ -551,7 +673,7 @@ export const AGENT_PRESETS = [
     id: "ares",
     name: "Ares",
     label: "Pi Grok 4.6 XHIGH",
-    description: "Pi-backed xAI Grok 4.6 agent at xhigh thinking — its ceiling (via OpenRouter).",
+    description: "Complex code changes and analysis.",
     kind: "pi",
     model: "openrouter/x-ai/grok-4.6",
     thinking: "xhigh",
@@ -562,7 +684,7 @@ export const AGENT_PRESETS = [
     id: "hephaestus",
     name: "Hephaestus",
     label: "Pi Qwen3.8 Max XHIGH",
-    description: "Pi-backed Qwen3.8 Max agent at xhigh thinking — its ceiling (via OpenRouter).",
+    description: "Complex code changes and analysis.",
     kind: "pi",
     model: "openrouter/qwen/qwen3.8-max",
     thinking: "xhigh",
@@ -573,7 +695,7 @@ export const AGENT_PRESETS = [
     id: "athena",
     name: "Athena",
     label: "Pi Qwen3.8 27B XHIGH",
-    description: "Pi-backed Qwen3.8 27B at xhigh thinking — its ceiling; `max` is not a level this model has (via OpenRouter). The dense sibling of Hephaestus's Max.",
+    description: "Coding and analysis across longer tasks.",
     kind: "pi",
     model: "openrouter/qwen/qwen3.8-27b",
     thinking: "xhigh",
@@ -584,7 +706,7 @@ export const AGENT_PRESETS = [
     id: "metis",
     name: "Metis",
     label: "Pi MiniMax M3",
-    description: "Pi-backed MiniMax M3 agent (via OpenRouter); goddess of cunning strategy for 'minimax'. M3 reasons, but no harness can steer how hard: it takes no effort parameter, so this preset names no level.",
+    description: "Coding and analysis across longer tasks.",
     kind: "pi",
     model: "openrouter/minimax/minimax-m3",
     skillsPolicy: "default",
@@ -594,7 +716,7 @@ export const AGENT_PRESETS = [
     id: "prometheus",
     name: "Prometheus",
     label: "Pi GLM 5.3 MAX",
-    description: "Pi-backed Zhipu GLM 5.3 at max thinking — its ceiling (via OpenRouter); the Titan who brought knowledge to mortals.",
+    description: "Complex code changes and analysis.",
     kind: "pi",
     model: "openrouter/z-ai/glm-5.3",
     thinking: "max",
@@ -605,7 +727,7 @@ export const AGENT_PRESETS = [
     id: "endymion",
     name: "Endymion",
     label: "Pi Kimi K3 MAX",
-    description: "Beloved of the moon goddess: Pi-backed Kimi K3 — Moonshot's 1M-context flagship reasoner — at max thinking, its ceiling. K3 takes low/high/max and never had `xhigh`; the kimi-k3 entry in ~/.pi/agent/models.json is still worth having for sane token limits, but the level no longer depends on it (probed 2026-08-27: max returns reasoning tokens).",
+    description: "Coding and analysis across longer tasks.",
     kind: "pi",
     model: "openrouter/moonshotai/kimi-k3",
     thinking: "max",
@@ -632,7 +754,7 @@ export const AGENT_PRESETS = [
     id: "nyx",
     name: "Nyx",
     label: "Pi GLM 5.3 Flash MAX",
-    description: "Primordial goddess of night: ZAI's GLM 5.3 Flash on Pi at max thinking (via OpenRouter) — 1.3M context and reasoning; the stealth model that ran here as ox-alpha, now under its own name.",
+    description: "Routine coding and second opinions.",
     kind: "pi",
     model: "openrouter/z-ai/glm-5.3-flash",
     thinking: "max",
@@ -642,7 +764,7 @@ export const AGENT_PRESETS = [
     id: "oceanus",
     name: "Oceanus",
     label: "Pi Nemotron 3 Ultra 550B FREE HIGH",
-    description: "Titan of the world-encircling river: NVIDIA's 550B-parameter Nemotron 3 Ultra on Pi at high thinking — its ceiling, `max` is not a level it has — on OpenRouter's free tier (1M context there).",
+    description: "Coding and analysis across longer tasks.",
     kind: "pi",
     model: "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
     thinking: "high",
@@ -652,7 +774,7 @@ export const AGENT_PRESETS = [
     id: "triton",
     name: "Triton",
     label: "Pi Laguna S 2.1 FREE",
-    description: "Herald of the deep, for a model named after a lagoon: Poolside's Laguna S 2.1 on Pi, on OpenRouter's free tier. It reasons, but takes no effort parameter, so this preset names no level.",
+    description: "Code changes and repository tasks.",
     kind: "pi",
     model: "openrouter/poolside/laguna-s-2.1:free",
   },
@@ -662,7 +784,7 @@ export const AGENT_PRESETS = [
     id: "eos",
     name: "Eos",
     label: "Pi Muse Spark 1.3 XHIGH",
-    description: "Goddess of the dawn, for a model named for the first spark: Meta's Muse Spark 1.3 on Pi at xhigh thinking — its ceiling, `max` is not a level it has (via OpenRouter).",
+    description: "Collaborative coding and task breakdown.",
     kind: "pi",
     model: "openrouter/meta/muse-spark-1.3",
     thinking: "xhigh",
@@ -686,19 +808,9 @@ export const AGENT_PRESETS = [
     id: "odin",
     name: "Odin",
     label: "OpenCode DeepSeek V4 Pro HIGH",
-    description: "OpenCode-backed DeepSeek V4 Pro agent at high variant (via OpenRouter).",
+    description: "Complex code changes and analysis.",
     kind: "opencode",
     model: "openrouter/deepseek/deepseek-v4-pro-0813",
-    effort: "high",
-  },
-  {
-    preset: "heimdall",
-    id: "heimdall",
-    name: "Heimdall",
-    label: "OpenCode Gemini 3.1 Pro",
-    description: "OpenCode-backed Google Gemini 3.1 Pro agent at high variant (via OpenRouter).",
-    kind: "opencode",
-    model: "openrouter/google/gemini-3.1-pro-preview",
     effort: "high",
   },
   {
@@ -706,7 +818,7 @@ export const AGENT_PRESETS = [
     id: "thor",
     name: "Thor",
     label: "OpenCode Grok 4.6 XHIGH",
-    description: "OpenCode-backed xAI Grok 4.6 agent at xhigh variant — its ceiling (via OpenRouter).",
+    description: "Complex code changes and analysis.",
     kind: "opencode",
     model: "openrouter/x-ai/grok-4.6",
     effort: "xhigh",
@@ -716,7 +828,7 @@ export const AGENT_PRESETS = [
     id: "tyr",
     name: "Tyr",
     label: "OpenCode Qwen3.8 Max XHIGH",
-    description: "OpenCode-backed Qwen3.8 Max agent at xhigh variant — its ceiling (via OpenRouter).",
+    description: "Complex code changes and analysis.",
     kind: "opencode",
     model: "openrouter/qwen/qwen3.8-max",
     effort: "xhigh",
@@ -726,7 +838,7 @@ export const AGENT_PRESETS = [
     id: "bragi",
     name: "Bragi",
     label: "OpenCode Qwen3.8 27B XHIGH",
-    description: "OpenCode-backed Qwen3.8 27B at xhigh effort — its ceiling; `max` is not a level this model has (via OpenRouter). The dense sibling of Tyr's Max.",
+    description: "Coding and analysis across longer tasks.",
     kind: "opencode",
     model: "openrouter/qwen/qwen3.8-27b",
     effort: "xhigh",
@@ -738,7 +850,7 @@ export const AGENT_PRESETS = [
     id: "mimir",
     name: "Mimir",
     label: "OpenCode MiniMax M3",
-    description: "OpenCode-backed MiniMax M3 agent (via OpenRouter); god of wisdom for 'minimax'.",
+    description: "Coding and analysis across longer tasks.",
     kind: "opencode",
     model: "openrouter/minimax/minimax-m3",
   },
@@ -747,7 +859,7 @@ export const AGENT_PRESETS = [
     id: "mani",
     name: "Mani",
     label: "OpenCode Kimi K3 MAX",
-    description: "Norse moon god: OpenCode-backed Kimi K3 — Moonshot's 1M-context flagship reasoner — at max effort, its ceiling (via OpenRouter).",
+    description: "Coding and analysis across longer tasks.",
     kind: "opencode",
     model: "openrouter/moonshotai/kimi-k3",
     effort: "max",
@@ -757,7 +869,7 @@ export const AGENT_PRESETS = [
     id: "nott",
     name: "Nott",
     label: "OpenCode GLM 5.3 Flash MAX",
-    description: "Norse night personified, sister in spirit to Pi's Nyx: ZAI's GLM 5.3 Flash through OpenCode at max effort (via OpenRouter) — the model that was stealth/ox-alpha until it was named.",
+    description: "Routine coding and second opinions.",
     kind: "opencode",
     model: "openrouter/z-ai/glm-5.3-flash",
     effort: "max",
@@ -767,7 +879,7 @@ export const AGENT_PRESETS = [
     id: "ymir",
     name: "Ymir",
     label: "OpenCode Nemotron 3 Ultra 550B FREE HIGH",
-    description: "The primordial giant the world was built from: NVIDIA's 550B-parameter Nemotron 3 Ultra through OpenCode at high effort — its ceiling, `max` is not a level it has — on OpenRouter's free tier.",
+    description: "Coding and analysis across longer tasks.",
     kind: "opencode",
     model: "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
     effort: "high",
@@ -777,7 +889,7 @@ export const AGENT_PRESETS = [
     id: "aegir",
     name: "Aegir",
     label: "OpenCode Laguna S 2.1 FREE",
-    description: "Norse giant of the sea, for a model named after a lagoon: Poolside's Laguna S 2.1 through OpenCode, on OpenRouter's free tier. It reasons, but takes no effort parameter, so this preset names no level.",
+    description: "Code changes and repository tasks.",
     kind: "opencode",
     model: "openrouter/poolside/laguna-s-2.1:free",
   },
@@ -787,7 +899,7 @@ export const AGENT_PRESETS = [
     id: "logi",
     name: "Logi",
     label: "OpenCode Muse Spark 1.3 XHIGH",
-    description: "Fire itself, given a name: Meta's Muse Spark 1.3 through OpenCode at xhigh variant — its ceiling, and the level its Pi twin Eos holds (via OpenRouter).",
+    description: "Collaborative coding and task breakdown.",
     kind: "opencode",
     model: "openrouter/meta/muse-spark-1.3",
     effort: "xhigh",
@@ -842,7 +954,7 @@ export const AGENT_PRESETS = [
     id: "boreas",
     name: "Boreas",
     label: "Pi DeepSeek V4 Flash MAX (OpenCode Go)",
-    description: "The north wind: DeepSeek V4 Flash at max thinking on Pi through the OpenCode Go subscription. A tier above its OpenRouter twin Zephyros on purpose — on this road pi and models.dev agree the model has `max`, and on that one they never did.",
+    description: "Routine coding and second opinions.",
     kind: "pi",
     model: "opencode-go/deepseek-v4-flash",
     thinking: "max",
@@ -852,7 +964,7 @@ export const AGENT_PRESETS = [
     id: "nereus",
     name: "Nereus",
     label: "Pi DeepSeek V4 Pro MAX (OpenCode Go)",
-    description: "The old man of the sea, all depth and no drama: DeepSeek V4 Pro at max thinking on Pi through OpenCode Go — a tier above its OpenRouter twin Hades, for the same reason Boreas is.",
+    description: "Complex code changes and analysis.",
     kind: "pi",
     model: "opencode-go/deepseek-v4-pro",
     thinking: "max",
@@ -862,7 +974,7 @@ export const AGENT_PRESETS = [
     id: "eris",
     name: "Eris",
     label: "Pi Grok 4.6 XHIGH (OpenCode Go)",
-    description: "Goddess of strife, for the model that argues back: Grok 4.6 at xhigh thinking — its ceiling — on Pi through OpenCode Go, where Ares reaches the same model on OpenRouter. Go keeps 30 days of Grok logs for abuse monitoring.",
+    description: "Complex code changes and analysis.",
     kind: "pi",
     model: "opencode-go/grok-4.6",
     thinking: "xhigh",
@@ -872,7 +984,7 @@ export const AGENT_PRESETS = [
     id: "coeus",
     name: "Coeus",
     label: "Pi Qwen3.8 Max XHIGH (OpenCode Go)",
-    description: "Titan of the inquiring mind: Qwen3.8 Max at xhigh thinking on Pi through OpenCode Go — its ceiling, and note that `high` is not a level this model has at all ({low, medium, xhigh}). Hephaestus is the same model on OpenRouter.",
+    description: "Complex code changes and analysis.",
     kind: "pi",
     model: "opencode-go/qwen3.8-max",
     thinking: "xhigh",
@@ -884,7 +996,7 @@ export const AGENT_PRESETS = [
     id: "kairos",
     name: "Kairos",
     label: "Pi MiniMax M3 (OpenCode Go)",
-    description: "The fleeting right moment: MiniMax M3 on Pi through OpenCode Go. It reasons, but takes no effort parameter, so this preset names no level — exactly like its OpenRouter twin Metis.",
+    description: "Coding and analysis across longer tasks.",
     kind: "pi",
     model: "opencode-go/minimax-m3",
   },
@@ -893,7 +1005,7 @@ export const AGENT_PRESETS = [
     id: "hecate",
     name: "Hecate",
     label: "Pi GLM 5.3 MAX (OpenCode Go)",
-    description: "Three-formed goddess of the crossroads: ZAI's GLM 5.3 at max thinking on Pi through OpenCode Go — the same model Prometheus runs on OpenRouter, on the cheaper road.",
+    description: "Complex code changes and analysis.",
     kind: "pi",
     model: "opencode-go/glm-5.3",
     thinking: "max",
@@ -903,7 +1015,7 @@ export const AGENT_PRESETS = [
     id: "hermes",
     name: "Hermes",
     label: "Pi GLM 5.3 Flash MAX (OpenCode Go)",
-    description: "The swift messenger: GLM 5.3 Flash at max thinking on Pi through OpenCode Go — the cheapest fast model on the subscription ($0.075/$0.25 per MTok), twin to Nyx on OpenRouter.",
+    description: "Routine coding and second opinions.",
     kind: "pi",
     model: "opencode-go/glm-5.3-flash",
     thinking: "max",
@@ -913,7 +1025,7 @@ export const AGENT_PRESETS = [
     id: "mnemosyne",
     name: "Mnemosyne",
     label: "Pi Kimi K3 MAX (OpenCode Go)",
-    description: "Titaness of memory, for the 1M-context reasoner: Kimi K3 at max — the only level it has — on Pi through OpenCode Go. Endymion reaches the same model on OpenRouter and Ilmarinen on Moonshot's own key: three accounts, one model.",
+    description: "Coding and analysis across longer tasks.",
     kind: "pi",
     model: "opencode-go/kimi-k3",
     thinking: "max",
@@ -923,7 +1035,7 @@ export const AGENT_PRESETS = [
     id: "urania",
     name: "Urania",
     label: "Pi Muse Spark 1.3 Contributor XHIGH (OpenCode Go)",
-    description: "Muse of the stars: Meta's Muse Spark 1.3 at xhigh thinking on Pi through OpenCode Go — the CONTRIBUTOR tier, priced far under the standard model ($0.10/$0.20 per MTok against $1.25/$4.25) because you grant permission to use your prompts and completions to train future Meta models. Eos is the same model on OpenRouter's paid tier: send private code there, not here.",
+    description: "Collaborative coding and task breakdown.",
     kind: "pi",
     model: "opencode-go/muse-spark-1.3-contributor",
     thinking: "xhigh",
@@ -933,7 +1045,7 @@ export const AGENT_PRESETS = [
     id: "selene",
     name: "Selene",
     label: "Pi GPT 5.6 Luna XHIGH (OpenCode Go)",
-    description: "The moon herself: GPT 5.6 Luna at xhigh thinking on Pi through OpenCode Go — deliberately not the `max` this road allows, because the whole GPT 5.6 family holds xhigh across the catalog. Go keeps 30 days of Luna logs for abuse monitoring.",
+    description: "Small fixes and focused coding tasks.",
     kind: "pi",
     model: "opencode-go/gpt-5.6-luna",
     thinking: "xhigh",
@@ -943,7 +1055,7 @@ export const AGENT_PRESETS = [
     id: "dvalin",
     name: "Dvalin",
     label: "OpenCode Go DeepSeek V4 Flash MAX",
-    description: "The dwarf whose name means 'the dormant one' and who works anything but: DeepSeek V4 Flash at max effort through OpenCode Go — a tier above its OpenRouter twin Freya, and level-matched to Pi's Boreas.",
+    description: "Routine coding and second opinions.",
     kind: "opencode",
     model: "opencode-go/deepseek-v4-flash",
     effort: "max",
@@ -953,7 +1065,7 @@ export const AGENT_PRESETS = [
     id: "durin",
     name: "Durin",
     label: "OpenCode Go DeepSeek V4 Pro MAX",
-    description: "First of the dwarves, the deep delver: DeepSeek V4 Pro at max effort through OpenCode Go, where Odin runs the same model on OpenRouter at high.",
+    description: "Complex code changes and analysis.",
     kind: "opencode",
     model: "opencode-go/deepseek-v4-pro",
     effort: "max",
@@ -963,7 +1075,7 @@ export const AGENT_PRESETS = [
     id: "loki",
     name: "Loki",
     label: "OpenCode Go Grok 4.6 XHIGH",
-    description: "The trickster, for the model that argues back: Grok 4.6 at xhigh effort — its ceiling — through OpenCode Go; Thor is the OpenRouter twin. Go keeps 30 days of Grok logs for abuse monitoring.",
+    description: "Complex code changes and analysis.",
     kind: "opencode",
     model: "opencode-go/grok-4.6",
     effort: "xhigh",
@@ -973,7 +1085,7 @@ export const AGENT_PRESETS = [
     id: "alviss",
     name: "Alviss",
     label: "OpenCode Go Qwen3.8 Max XHIGH",
-    description: "The all-wise dwarf who answered every question until dawn caught him: Qwen3.8 Max at xhigh effort through OpenCode Go — its ceiling, and `high` is not a level this model has. Tyr is the OpenRouter twin.",
+    description: "Complex code changes and analysis.",
     kind: "opencode",
     model: "opencode-go/qwen3.8-max",
     effort: "xhigh",
@@ -984,7 +1096,7 @@ export const AGENT_PRESETS = [
     id: "andvari",
     name: "Andvari",
     label: "OpenCode Go MiniMax M3",
-    description: "The dwarf guarding his hoard behind the waterfall: MiniMax M3 through OpenCode Go. No effort here — the model takes a reasoning toggle and no levels — exactly like its OpenRouter twin Mimir.",
+    description: "Coding and analysis across longer tasks.",
     kind: "opencode",
     model: "opencode-go/minimax-m3",
   },
@@ -993,7 +1105,7 @@ export const AGENT_PRESETS = [
     id: "brokkr",
     name: "Brokkr",
     label: "OpenCode Go GLM 5.3 MAX",
-    description: "The dwarf smith who forged Mjolnir while a fly bit his eyelid: ZAI's GLM 5.3 at max effort through OpenCode Go. The only GLM 5.3 row on this harness — OpenCode reaches the full model nowhere else in this catalog, only its Flash sibling.",
+    description: "Complex code changes and analysis.",
     kind: "opencode",
     model: "opencode-go/glm-5.3",
     effort: "max",
@@ -1003,7 +1115,7 @@ export const AGENT_PRESETS = [
     id: "sindri",
     name: "Sindri",
     label: "OpenCode Go GLM 5.3 Flash MAX",
-    description: "Brokkr's brother at the same forge: GLM 5.3 Flash at max effort through OpenCode Go — the subscription's cheapest fast model; Nott is the OpenRouter twin.",
+    description: "Routine coding and second opinions.",
     kind: "opencode",
     model: "opencode-go/glm-5.3-flash",
     effort: "max",
@@ -1013,7 +1125,7 @@ export const AGENT_PRESETS = [
     id: "regin",
     name: "Regin",
     label: "OpenCode Go Kimi K3 MAX",
-    description: "Smith, tutor and keeper of old lore: Kimi K3 at max — its only level — through OpenCode Go, where Mani reaches the same 1M-context model on OpenRouter.",
+    description: "Coding and analysis across longer tasks.",
     kind: "opencode",
     model: "opencode-go/kimi-k3",
     effort: "max",
@@ -1023,7 +1135,7 @@ export const AGENT_PRESETS = [
     id: "odrerir",
     name: "Odrerir",
     label: "OpenCode Go Muse Spark 1.3 Contributor XHIGH",
-    description: "The vessel that holds the mead of poetry: Meta's Muse Spark 1.3 at xhigh effort through OpenCode Go — the CONTRIBUTOR tier, priced far under the standard model ($0.10/$0.20 per MTok against $1.25/$4.25) because you grant permission to use your prompts and completions to train future Meta models. Logi is the same model on OpenRouter's paid tier: keep private code on that one.",
+    description: "Collaborative coding and task breakdown.",
     kind: "opencode",
     model: "opencode-go/muse-spark-1.3-contributor",
     effort: "xhigh",
@@ -1033,7 +1145,7 @@ export const AGENT_PRESETS = [
     id: "hjuki",
     name: "Hjuki",
     label: "OpenCode Go GPT 5.6 Luna XHIGH",
-    description: "Bil's brother, the other child the moon carries across the sky: GPT 5.6 Luna at xhigh effort through OpenCode Go — the family tier, not the `max` this road would allow. Bil is the same model on OpenRouter. Go keeps 30 days of Luna logs for abuse monitoring.",
+    description: "Small fixes and focused coding tasks.",
     kind: "opencode",
     model: "opencode-go/gpt-5.6-luna",
     effort: "xhigh",
@@ -1063,7 +1175,7 @@ export const AGENT_PRESETS = [
     id: "audhumla",
     name: "Audhumla",
     label: "OpenCode Zen Nemotron 3 Ultra 550B FREE",
-    description: "The primordial cow whose milk fed Ymir: NVIDIA's 550B Nemotron 3 Ultra free through OpenCode Zen — the same model Ymir reaches on OpenRouter's free tier, on a second free road for when the first is rate-limited.",
+    description: "Coding and analysis across longer tasks.",
     kind: "opencode",
     model: "opencode/nemotron-3-ultra-free",
   },
@@ -1072,7 +1184,7 @@ export const AGENT_PRESETS = [
     id: "gefjon",
     name: "Gefjon",
     label: "OpenCode Zen Muse Spark 1.3 Contributor FREE XHIGH",
-    description: "The giver, who ploughed an island out of a king's promise: Meta's Muse Spark 1.3 free through OpenCode Zen at xhigh effort, its ceiling on this tier. Free because it is the CONTRIBUTOR tier — your prompts and completions may be used to train future Meta models. Logi is the same model on OpenRouter's paid tier: keep private code there.",
+    description: "Collaborative coding and task breakdown.",
     kind: "opencode",
     model: "opencode/muse-spark-1.3-contributor-free",
     effort: "xhigh",
@@ -1081,56 +1193,147 @@ export const AGENT_PRESETS = [
   // --- Kimi Code (Finnish names, so a kimi agent is recognisable as one at a
   // glance — Greek, Norse and muse names are all spoken for). Added 2026-08-24.
   //
-  // K2.6 is left out: K3 supersedes it outright, and this list carries the
-  // newest of each family — the rule that keeps glm-5.2 and qwen3.7 out too.
-  // The K2.7 *code* models stay, because K3 is a general flagship and has no
-  // code-specialist counterpart: they are the newest of a different family,
-  // not an older version of this one.
-  //
-  // This bills MOONSHOT DIRECTLY through Kimi Code's own key, unlike endymion
-  // and mani, which reach the same K3 through OpenRouter: same model, different
-  // account and different rate limits. No effort field, because Kimi Code has
-  // no effort flag — `default_effort` lives in that config file (max for K3).
+  // K3 only: K2.7 Code and Highspeed retired at the user's request.
+  // Kimi Code uses its own configured account. The child-only
+  // KIMI_MODEL_THINKING_EFFORT control selects Low/High/Max without a CLI flag
+  // or changes to that account's config. Max is an explicit catalog choice.
   {
     preset: "ilmarinen",
     id: "ilmarinen",
     name: "Ilmarinen",
-    label: "Kimi K3",
-    description: "The eternal smith who forged the sky: Kimi K3 on Kimi Code — 1M context, billed to Moonshot directly rather than through OpenRouter. Effort comes from your kimi config (max by default).",
+    label: "Kimi K3 MAX",
+    description: "Coding and analysis across longer tasks.",
     kind: "kimi",
     model: "moonshot-ai/kimi-k3",
+    effort: "max",
   },
-  {
-    preset: "seppo",
-    id: "seppo",
-    name: "Seppo",
-    label: "Kimi K2.7 Code",
-    description: "The smith at his anvil: Kimi K2.7 Code on Kimi Code — the code-specialist Ilmarinen's general K3 does not replace. 262K context, billed to Moonshot directly.",
-    kind: "kimi",
-    model: "moonshot-ai/kimi-k2.7-code",
-  },
-  {
-    preset: "ahti",
-    id: "ahti",
-    name: "Ahti",
-    label: "Kimi K2.7 Code Highspeed",
-    description: "God of swift water: the same code-specialist tuned for speed — for a quick read or a second pair of eyes, where Seppo is for the careful pass.",
-    kind: "kimi",
-    model: "moonshot-ai/kimi-k2.7-code-highspeed",
-  },
-  // --- Image generation (Codex backend → gpt-image-2) ---------------------
+  // --- Image generation through the existing Codex login -----------------
   {
     preset: "pygmalion",
     id: "pygmalion",
     name: "Pygmalion",
-    label: "Image — gpt-image-2 (via Codex login)",
-    description: "Generates images with gpt-image-2 through your existing Codex / openai-codex login. Accepts optional reference images (`--image <path>`, repeatable) to edit/condition on. The model field is only the trigger model; the image backend is always gpt-image-2.",
+    label: "Codex Images (via Codex login)",
+    description: "Generate illustrations and edit reference images through your existing Codex login.",
     kind: "image",
-    // The image path calls IMAGE_BACKEND (gpt-image-2) directly; this field is
-    // what the catalog displays, so it names the model that actually runs.
-    model: "gpt-image-2",
+    // A logical route, not a selectable image model.
+    model: "codex-image",
   },
 ];
+
+// Reviewed 2026-09-10; source notes live in .specs/agent-catalog-redesign.
+// Keys describe exact model identities, not callsigns or saved preset provenance.
+const MODEL_LABELS = {
+  'gpt-6-astra': 'GPT-6 Astra',
+  'gpt-5.6-sol': 'GPT-5.6 Sol',
+  'gpt-5.6-terra': 'GPT-5.6 Terra',
+  'gpt-5.6-luna': 'GPT-5.6 Luna',
+  'claude-fable-5.1': 'Claude Fable 5.1',
+  'claude-fable-5': 'Claude Fable 5',
+  'claude-opus-5': 'Claude Opus 5',
+  'claude-sonnet-5': 'Claude Sonnet 5',
+  'gemini-3.8-flash': 'Gemini 3.8 Flash',
+  'deepseek-v4-flash-0731': 'DeepSeek V4 Flash (0731)',
+  'deepseek-v4-pro-0813': 'DeepSeek V4 Pro (0813)',
+  'deepseek-v4-flash': 'DeepSeek V4 Flash',
+  'deepseek-v4-pro': 'DeepSeek V4 Pro',
+  'grok-4.6': 'Grok 4.6',
+  'qwen3.8-max': 'Qwen 3.8 Max',
+  'qwen3.8-27b': 'Qwen 3.8 27B',
+  'minimax-m3': 'MiniMax M3',
+  'glm-5.3': 'GLM 5.3',
+  'glm-5.3-flash': 'GLM 5.3 Flash',
+  'kimi-k3': 'Kimi K3',
+  'nemotron-3-ultra-550b-a55b:free': 'Nemotron 3 Ultra (free)',
+  'nemotron-3-ultra-free': 'Nemotron 3 Ultra (Zen free)',
+  'laguna-s-2.1:free': 'Laguna S 2.1 (free)',
+  'muse-spark-1.3': 'Muse Spark 1.3',
+}
+
+export function agentProfile({ harness, kind, model, effort, thinking }) {
+  harness ??= kind === "claude-code" ? "claude" : kind
+  if (harness === "pi") effort = thinking ?? effort
+  if (harness === 'image')
+    return {
+      modelKey: 'codex-image',
+      modelLabel: 'Codex Images',
+      routeLabel: 'Codex login',
+      categories: ['images'],
+      goodFor: 'Generate illustrations and edit reference images.',
+    }
+  const known = AGENT_PRESETS.some((p) => (p.kind === "claude-code" ? "claude" : p.kind) === harness && p.model === model)
+  // Strip provider paths only AFTER an exact curated model/harness match.
+  const key = known
+    ? model
+        .split('/')
+        .at(-1)
+        .replace(/^claude-fable-5-1$/, 'claude-fable-5.1')
+        // Contributor/free are reviewed pricing and data-use routes for Muse 1.3.
+        .replace(/^muse-spark-1\.3-contributor(?:-free)?$/, 'muse-spark-1.3')
+    : (model ?? "default")
+  const categories = ['claude', 'codex', 'pi', 'opencode', 'kimi'].includes(harness)
+    ? ['coding']
+    : []
+  const contributor = known && key === 'muse-spark-1.3' && model.includes('-contributor')
+  const routeLabel = model?.startsWith('openrouter/')
+    ? 'OpenRouter · API'
+    : model?.startsWith('opencode-go/')
+      ? 'OpenCode Go'
+      : model?.startsWith('opencode/')
+        ? 'OpenCode Zen'
+        : model?.startsWith('openai-codex/')
+          ? 'Codex subscription'
+          : model?.startsWith('anthropic/')
+            ? 'Anthropic · API'
+            : ({ claude: 'Claude Code account', codex: 'Codex login', kimi: 'Kimi Code account' }[
+                harness
+              ] ?? harness)
+  let goodFor = categories.length
+    ? 'Use your chosen model for coding tasks.'
+    : 'Use your custom harness and model.'
+  if (known) {
+    if (['gpt-6-astra', 'claude-fable-5.1'].includes(key) || (key === 'gpt-5.6-sol' && ['low', 'medium'].includes(effort))) {
+      goodFor =
+        effort === 'low'
+          ? 'Small code changes and focused reviews.'
+          : effort === 'medium'
+            ? 'Implementation, code review and planning.'
+            : 'Complex debugging, architecture and detailed review.'
+    } else if (/sol|opus/.test(key)) goodFor = 'Feature work, code review and technical planning.'
+    else if (/terra|sonnet/.test(key)) goodFor = 'Everyday implementation and tests.'
+    else if (/luna/.test(key)) goodFor = 'Small fixes and focused coding tasks.'
+    else if (/flash/.test(key)) goodFor = 'Routine coding and second opinions.'
+    else if (/laguna/.test(key)) goodFor = 'Code changes and repository tasks.'
+    else if (/muse/.test(key)) goodFor = 'Collaborative coding and task breakdown.'
+    else if (/27b|minimax|kimi|nemotron/.test(key))
+      goodFor = 'Coding and analysis across longer tasks.'
+    else goodFor = 'Complex code changes and analysis.'
+    const supportedEffort =
+      (harness === 'kimi' ? KIMI_EFFORTS : ['low', 'medium', 'high', 'xhigh', 'max']).includes(effort) ||
+      (harness === 'codex' && effort === 'ultra')
+    if (supportedEffort) {
+      const roleModel = ['gpt-6-astra', 'claude-fable-5.1', 'gpt-5.6-sol', 'claude-opus-5'].includes(key)
+      if (roleModel && ['xhigh', 'max', 'ultra'].includes(effort)) categories.push('lead', 'pm')
+      if (effort !== 'low') categories.push('reviewer')
+    }
+  }
+  return {
+    modelKey: key,
+    modelLabel: (known && MODEL_LABELS[key]) || model || "Default",
+    routeLabel: routeLabel + (contributor ? (model.endsWith('-free') ? ' · Contributor · Free' : ' · Contributor') : ''),
+    ...(contributor ? { routeNote: 'Prompts and replies may train Meta models.' } : {}),
+    categories,
+    goodFor,
+  }
+}
+
+export const KIMI_EFFORTS = ['low', 'high', 'max'];
+
+export function validateKimiEffort(agent) {
+  if ((agent.kind ?? agent.harness) !== 'kimi' || agent.effort == null || agent.effort === '') return;
+  if (!KIMI_EFFORTS.includes(agent.effort)) {
+    throw new Error('Kimi K3 effort must be low, high or max; leave it blank to use Kimi settings');
+  }
+}
 
 export function getPreset(ref) {
   const id = slugify(stripMention(ref));

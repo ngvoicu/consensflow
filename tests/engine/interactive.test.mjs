@@ -266,20 +266,38 @@ test('kimi: full permissions are IMPLIED by -p, so no flag is the correct shape'
   assert.equal(args, null, 'kimi cannot open a window on an id it was given')
 })
 
-test('kimi: effort is ignored, because Kimi Code has no effort flag', async () => {
-  const { buildRunnerInvocation } = await import('../../hosts/lib/runners.js')
-  // `default_effort` lives per-model in the user's own config.toml — the file
-  // that also holds their API key. Inventing a flag would fail the run.
-  const args = buildRunnerInvocation(
-    { id: 'ilmarinen', kind: 'kimi', model: 'moonshot-ai/kimi-k3', effort: 'max' },
-    '/tmp/packet.md',
-    '/repo',
-    undefined,
-    'p',
-  ).args
-
-  assert.ok(!args.some((a) => String(a).includes('effort')))
-  assert.ok(!args.includes('max'))
+test('kimi: selected K3 effort reaches fresh, continued and reopened children through the environment', async () => {
+  const { buildRunnerInvocation, childEnv } = await import('../../hosts/lib/runners.js')
+  for (const effort of ['low', 'high', 'max']) {
+    const agent = { id: 'ilmarinen', kind: 'kimi', model: 'moonshot-ai/kimi-k3', effort }
+    for (const invocation of [
+      buildRunnerInvocation(agent, '/tmp/packet.md', '/repo', undefined, 'p'),
+      buildRunnerInvocation(agent, '/tmp/packet.md', '/repo', { sessionId: 'session_abc' }, 'p'),
+      interactiveResume(agent, 'session_abc'),
+    ]) {
+      assert.equal(invocation.env.KIMI_MODEL_THINKING_EFFORT, effort)
+      assert.deepEqual(invocation.env, {
+        CONSENSFLOW_CHILD: '1',
+        KIMI_MODEL_THINKING_EFFORT: effort,
+      })
+      assert.ok(!invocation.args.includes('--effort'), 'this CLI uses an environment control')
+      const env = childEnv(
+        { HOME: '/user', KIMI_CODE_HOME: '/kimi', KIMI_MODEL_THINKING_EFFORT: 'off' },
+        invocation,
+      )
+      assert.equal(
+        env.KIMI_MODEL_THINKING_EFFORT,
+        effort,
+        'saved selection wins over inherited override',
+      )
+      assert.equal(env.KIMI_CODE_HOME, '/kimi', 'native config and credentials stay in place')
+    }
+  }
+  for (const effort of ['medium', 'xhigh', 'ultra', 'off', 'on', 0, false]) {
+    const agent = { kind: 'kimi', model: 'moonshot-ai/kimi-k3', effort }
+    assert.throws(() => buildRunnerInvocation(agent, '/tmp/p', '/repo'), /low.*high.*max/)
+    assert.throws(() => interactiveResume(agent, 'session_abc'), /low.*high.*max/)
+  }
 })
 
 test('kimi: no billing guard exists to carry — its key is in a config file', async () => {
@@ -389,6 +407,52 @@ test('image: a run that produced no file is a failure, and leaves a record', asy
     if (previousCodex === undefined) delete process.env.CODEX_HOME
     else process.env.CODEX_HOME = previousCodex
     process.env.PATH = previousPath
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('image: Codex login generation records an honest route and excludes API billing', async () => {
+  const { runImageAgent } = await import('../../hosts/lib/image-run.js')
+  const { getPreset } = await import('../../hosts/lib/presets.js')
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-img-profile-'))
+  const keys = ['CONSENSFLOW_HOME', 'PATH', 'CODEX_HOME', 'OPENAI_API_KEY']
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
+  try {
+    process.env.CONSENSFLOW_HOME = path.join(dir, 'home')
+    process.env.CODEX_HOME = path.join(dir, 'codex')
+    process.env.OPENAI_API_KEY = 'must-not-reach-image-child'
+    await mkdir(process.env.CODEX_HOME, { recursive: true })
+    await writeFile(
+      path.join(process.env.CODEX_HOME, 'auth.json'),
+      JSON.stringify({ tokens: { access_token: 'test', account_id: 'test' } }),
+    )
+    const bin = path.join(dir, 'bin')
+    await mkdir(bin)
+    const stub = path.join(bin, 'codex')
+    await writeFile(
+      stub,
+      `#!${process.execPath}\nconst fs=require('node:fs');\nif(process.env.OPENAI_API_KEY)process.exit(7);\nconst prompt=process.argv.at(-1);\nconst file=prompt.match(/Save the result to this exact absolute path: (.*)/)[1];\nfs.writeFileSync(file, Buffer.from('fixture image'));\n`,
+    )
+    await fsp.chmod(stub, 0o755)
+    process.env.PATH = `${bin}:${previous.PATH}`
+    const result = await runImageAgent({
+      cwd: dir,
+      agent: { id: 'legacy', kind: 'image', model: 'gpt-image-2' },
+      prompt: 'a square',
+    })
+    assert.equal(result.ok, true)
+    assert.equal(result.backend, 'codex-image')
+    assert.equal(result.via, 'codex exec')
+    assert.equal(getPreset('pygmalion').model, 'codex-image')
+    assert.equal(
+      JSON.parse(await fsp.readFile(path.join(result.runDir, 'result.json'), 'utf8')).backend,
+      'codex-image',
+    )
+  } finally {
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key]
+      else process.env[key] = previous[key]
+    }
     await rm(dir, { recursive: true, force: true })
   }
 })

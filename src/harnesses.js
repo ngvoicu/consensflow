@@ -1,4 +1,4 @@
-import { accessSync, constants, existsSync, statSync } from 'node:fs'
+import { accessSync, constants, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 
@@ -8,19 +8,6 @@ import { delimiter, join, resolve } from 'node:path'
  * commands live or die by. Directories honour each harness's own override
  * variable, which is also what keeps tests off the real machine.
  */
-
-/**
- * A host that ships its own ConsensFlow already has a richer path than the
- * generated skill — consensflow-cc packets the live Claude Code conversation,
- * consensflow-pi does the same inside pi. Installing our skill there too
- * would put two entries with the same name and the same trigger in front of
- * one harness, competing for its skills budget. So we detect them and stand
- * aside (`--all` overrides).
- */
-const NATIVE = {
-  claude: (env) => join(home(env), '.claude', 'plugins', 'cache', 'consensflow-cc'),
-  pi: (env) => join(piAgentDir(env), 'git', 'github.com', 'ngvoicu', 'consensflow-pi'),
-}
 
 /**
  * Where these CLIs install themselves, beyond whatever PATH we were handed.
@@ -202,6 +189,5 @@ export function detectHarnesses(env) {
     id: harness.id,
     command: harness.command,
     skillsDir: harness.skillsDir(env),
-    native: NATIVE[harness.id] !== undefined && existsSync(NATIVE[harness.id](env)),
   }))
 }

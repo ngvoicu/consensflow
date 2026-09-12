@@ -2,15 +2,24 @@ import { randomUUID } from 'node:crypto'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { answers as nativeAnswers } from '../hosts/lib/completion.js'
-import { DEFAULT_PART_BUDGETS, partsFor, plan, seenAfter } from '../hosts/lib/deliveries.js'
+import { seenAfter } from '../hosts/lib/deliveries.js'
 import { discoverSessionWithEvidence } from '../hosts/lib/harness-transcript.js'
+import { indexResult } from '../hosts/lib/inbox.js'
 import { formatLaunchMarker } from '../hosts/lib/packets.js'
 import { effectivePolicy } from '../hosts/lib/policy.js'
 import { childEnv, interactiveResume, interactiveStart } from '../hosts/lib/runners.js'
 import { newSessionName } from '../hosts/lib/threads.js'
+import { currentSession as currentCodexSession } from './channels/codex.js'
 import * as openCode from './channels/opencode.js'
-import { enabledChannels, launchConfiguration, send as sendNative } from './channels.js'
-import { controllerEnv, endLaunch, issueTicket, leadEnv, ownerOf } from './launch.js'
+import {
+  enabledChannels,
+  launchConfiguration,
+  send as sendNative,
+  withNativeBridge,
+} from './channels.js'
+import { prepareClaudeReceiver } from './claude-install.js'
+import { controllerEnv, endLaunch, issueTicket, leadEnv, ownerOf, receiverEnv } from './launch.js'
+import { prepareOpenCodeExtension } from './opencode-install.js'
 import { preparePiExtension } from './pi-install.js'
 import { roleConfiguration } from './role-skills.js'
 import { StoreRefusal } from './store.js'
@@ -422,21 +431,7 @@ export class Panes {
     })
   }
 
-  /**
-   * `POST /api/panes/read` — one part of a delivery, printed whole.
-   *
-   * A delivery too big for the lead's pane is written immutable to
-   * `<workspace>/deliveries/<id>.md` and the lead is pointed at it. This
-   * hands back one numbered part at a time, each within the lead harness's
-   * verified tool-output budget, because a receiver that keeps only the
-   * tail of a long tool result keeps the end marker and drops the text —
-   * so a single unbounded print would look read and not be.
-   *
-   * The answer's `text` is the part exactly as it must appear: the client
-   * prints it and adds nothing. Printing a part records an ATTEMPT and
-   * never coverage: coverage needs the part's framing AND a matching body
-   * digest in the lead's own tool result, which only `receipt` can see.
-   */
+  /** Explicit reads use the same immutable inbox parts and native receipts as automatic collection. */
   async read(tabId, request) {
     const opId = requireText(request.opId, 'opId')
     return this.#once(tabId, opId, async () => {
@@ -449,36 +444,23 @@ export class Panes {
         throw new PaneError(`a part number is a positive integer, not ${JSON.stringify(part)}`)
       }
       const tab = await this.#tab(tabId)
-      const record = (await this.#store.readDeliveries(tab.directory))[deliveryId]
-      // Two sessions can share a directory, so sharing a workspace is not
-      // being the lead this delivery was addressed to.
-      if (!isRecord(record) || record.target?.tab !== tab.id) {
-        throw new PaneError(`no delivery ${deliveryId} for this session`, {
+      if (!this.#watcher) throw new PaneError('result reader is unavailable', { status: 503 })
+      await this.#watcher.reconcile()
+      const inbox = await this.#store.readInbox(tab.directory)
+      const record =
+        inbox.results[deliveryId] ??
+        Object.values(inbox.results).find(
+          (record) => record.owner === tabId && record.legacy?.some((old) => old.id === deliveryId),
+        )
+      if (record?.owner !== tabId)
+        throw new PaneError(`no result ${deliveryId} for this session`, {
           status: 404,
           code: 'no-such-delivery',
         })
-      }
-      const parts = deliveryParts(record, tab)
-      const chosen = parts[part - 1]
-      if (chosen === undefined) {
-        throw new PaneError(
-          `delivery ${deliveryId} has ${parts.length} part${parts.length === 1 ? '' : 's'}, not ${part}`,
-          { detail: { deliveryId, of: parts.length } },
-        )
-      }
-      await this.#store.deliveryReadAttempt(tab.directory, {
-        id: deliveryId,
-        part,
-        lead: leadIdentity(tab),
-        opId,
-      })
-      return {
-        outcome: 'read',
-        deliveryId,
-        conversation: record.conversation,
-        agent: record.agent,
-        ...chosen,
-      }
+      if (!record.parts[part - 1]) throw new PaneError('invalid result part')
+      if (!inbox.receivers[tabId] || inbox.receivers[tabId].retiredAt !== undefined)
+        throw new PaneError('current coordinator receiver is not ready', { status: 409 })
+      return this.#watcher.readPart(tabId, record.id, part)
     })
   }
 
@@ -687,11 +669,8 @@ export class Panes {
       const part = request.part ?? 1
       if (!Number.isSafeInteger(part) || part < 1)
         throw new PaneError('part must be a positive integer')
-      const saved = Object.values(await this.#store.readDeliveries(pm.directory)).filter(
-        (record) =>
-          record.target?.tab === pm.id &&
-          record.sourceParent === parent.id &&
-          record.manual === true,
+      const saved = Object.values((await this.#store.readInbox(pm.directory)).results).filter(
+        (record) => record.owner === pm.id && record.sourceParent === parent.id,
       )
       let record =
         answerId === undefined
@@ -727,32 +706,28 @@ export class Panes {
             { status: 409 },
           )
         record = saved.find(
-          (record) =>
-            record.answerId === item.id && record.sourceSession === parent.lead.nativeSession,
+          (record) => record.answerId === item.id && record.session === parent.lead.nativeSession,
         )
         if (!record) {
           const id = await this.#store.allocateDeliveryId()
-          const pane = pm.panes.find((pane) => pane.kind === 'lead')
-          ;[record] = plan({
-            items: [item],
-            conversation: `lead-${parent.id}`,
-            agent: 'lead',
-            kind: pm.lead.harness,
-            target: {
-              leadId: leadIdentity(pm),
-              session: pm.lead.nativeSession ?? `held:${pm.id}`,
-              tab: pm.id,
-              pane: pane.id,
-              generation: pane.generation,
-            },
-            newId: () => id,
-            now: Date.now(),
-            manual: true,
-            inlineBudget: 0,
+          record = await this.#store.mutate(pm.directory, 'inbox.parent-read', async (io) => {
+            const state = await io.readInbox()
+            const result = indexResult(state, {
+              id,
+              owner: pm.id,
+              conversation: `lead-${parent.id}`,
+              agent: 'lead',
+              kind: parent.lead.harness,
+              session: parent.lead.nativeSession,
+              answerId: item.id,
+              answer: item.text,
+              now: Date.now(),
+            })
+            result.sourceParent = parent.id
+            result.manualOnly = true
+            await io.writeInbox(state)
+            return result
           })
-          record.sourceParent = parent.id
-          record.sourceSession = parent.lead.nativeSession
-          await this.#store.deliveryUpsert(pm.directory, record)
         }
       }
       return this.read(pm.id, { deliveryId: record.id, part, opId: `${opId}:part` })
@@ -795,7 +770,6 @@ export class Panes {
     await this.#refusable('resume-refused', () => this.#tabs.resume(tabId))
     const lead = await this.#launchLead(tabId, { opened: false })
     const tab = await this.#openTab(tabId)
-    if (tab.role === 'pm') return lead
     const threads = await this.#store.readThreads(tab.directory)
     const workers = []
     for (const pane of tab.panes) {
@@ -1201,12 +1175,29 @@ export class Panes {
 
           const launchId = randomUUID()
           let { evidence, nativeSession } = launchEvidence(agent.kind, name, launchId, row)
+          const role =
+            tab.role === 'pm'
+              ? await this.#prepareRole(agent.kind, {
+                  role: 'advisor',
+                  env: this.#env,
+                  cwd: tab.directory,
+                  executable,
+                })
+              : { args: [], env: {} }
           const configuration = await this.#leadChannel(
             agent.kind,
             launchId,
             tab.directory,
             executable,
+            { ...this.#env, ...role.env },
           )
+          configuration.args.push(...role.args)
+          // Channel setup may extend OpenCode's process configuration; keep that merge.
+          configuration.env = {
+            ...role.env,
+            ...configuration.env,
+            ...(tab.role === 'pm' ? { CONSENSFLOW_ROLE: 'advisor' } : {}),
+          }
           if (agent.kind === 'opencode' && nativeSession === undefined) {
             nativeSession = await openCode.createSession({
               executable,
@@ -1251,6 +1242,11 @@ export class Panes {
    * paste, a window — because they are the same mistake made three ways.
    */
   #refuseHeld(tab, name, record) {
+    if (record?.role === 'advisor' || tab.role === 'pm') {
+      if (record?.role !== 'advisor' || !record?.lead?.startsWith(`tab:${tab.id}:`)) {
+        throw new PaneError(`${name} belongs to another group`, { status: 409, code: 'elsewhere' })
+      }
+    }
     const reserved = isRecord(record?.reserved) ? record.reserved : null
     if (reserved === null) return
     if (reserved.resolvedAt === undefined) {
@@ -1352,12 +1348,15 @@ export class Panes {
       env: {
         ...controllerEnv({ pane: pane.id, app: this.#app(), ticket }),
         CF_DELIVERY_CONFIG: JSON.stringify(admitted.configuration),
+        CONSENSFLOW_NODE: this.#node,
         // Finder's environment does not include installed harness CLIs.
         PATH: [
           ...new Set(
-            [dirname(admitted.executable), ...(this.#env.PATH ?? '').split(delimiter)].filter(
-              Boolean,
-            ),
+            [
+              dirname(CF_CLI),
+              dirname(admitted.executable),
+              ...(this.#env.PATH ?? '').split(delimiter),
+            ].filter(Boolean),
           ),
         ].join(delimiter),
       },
@@ -1700,13 +1699,10 @@ export class Panes {
   /**
    * Opens the lead's window for a tab that already exists.
    *
-   * The order is the whole point. The channel configuration is built FIRST,
-   * because it is what the delivery watcher will need and it must be
-   * recorded with the reservation, not after it — a lead that is already
-   * running with an OpenCode port nobody wrote down cannot be delivered to.
-   * Then the store reserves the lead and mints its launch id inside that
-   * same mutation. Only then does the frame go out, and the reservation is
-   * given back unless it did.
+   * Prepare native integration before reserving the launch, so its task-message
+   * channel belongs to the same reservation as the pane. The receiver gets a
+   * separate capability for collecting results. Release the reservation only
+   * when opening the pane was definitely not transmitted.
    */
   async #launchLead(tabId, options) {
     return this.#trackTabWork(tabId, () => this.#openLead(tabId, options))
@@ -1748,6 +1744,11 @@ export class Panes {
       })
       configuration.args.push(...role.args)
       configuration.env = { ...configuration.env, ...role.env }
+      if (kind === 'claude-code') {
+        const receiver = await prepareClaudeReceiver(this.#env, launchId, this.#node)
+        configuration.args.push(...receiver.args)
+        Object.assign(configuration.env, receiver.env)
+      }
       admitted = await this.#store.leadAdmit(tab.directory, {
         tab: tabId,
         // Decided inside the mutation, from the record the store reads
@@ -1776,12 +1777,17 @@ export class Panes {
     // The runner owns native flags. Bound leads resume; fresh leads carry
     // identity through their native session metadata without a model task.
     const session = this.#leadArgv(kind, admitted)
+    const invocation = withNativeBridge(
+      { command, args: [...configuration.args, ...session.args] },
+      configuration,
+      this.#node,
+    )
     const body = {
       id: admitted.pane.id,
       generation: admitted.pane.generation,
       launch: launchId,
       cwd: tab.directory,
-      argv: [command, ...configuration.args, ...session.args],
+      argv: [invocation.command, ...invocation.args],
       dropEnv: session.dropEnv,
       env: {
         ...leadEnv({
@@ -1795,6 +1801,14 @@ export class Panes {
         }),
         ...configuration.env,
         ...session.env,
+        ...receiverEnv({
+          tab: tabId,
+          pane: admitted.pane.id,
+          launch: launchId,
+          generation: admitted.pane.generation,
+          kind,
+          app: this.#app(),
+        }),
       },
     }
     const sent = { transmitted: false }
@@ -1886,6 +1900,35 @@ export class Panes {
     if (tab === null || reserved === null) return { bound: false, reason: 'no lead launch' }
     if (typeof tab.lead.nativeSession === 'string' && tab.lead.nativeSession.length > 0) {
       return { bound: true, nativeSession: tab.lead.nativeSession, reason: 'already bound' }
+    }
+    if (tab.lead.harness === 'codex' && reserved.channel?.sessionBridge) {
+      const session = await currentCodexSession(reserved.channel)
+      if (!session) return { bound: false, reason: 'native session unavailable' }
+      // This private authenticated launch reports the ID before a rollout exists.
+      // Public transcript binding keeps its stricter originator evidence rule.
+      return this.#store.mutate(tab.directory, 'lead.native-bind', async (io) => {
+        const tabs = await io.readTabs()
+        const current = tabs.find((candidate) => candidate.id === tabId)
+        if (
+          current?.closed ||
+          current?.lead?.reserved?.launchId !== reserved.launchId ||
+          current.lead.generation !== reserved.generation ||
+          current.lead.nativeSession ||
+          !current.panes.some(
+            (pane) => pane.id === reserved.pane && pane.generation === reserved.generation,
+          )
+        )
+          return { bound: false, reason: 'lead launch changed' }
+        current.lead.nativeSession = session
+        current.lead.binding = {
+          evidence: 'reported',
+          launchId: reserved.launchId,
+          generation: reserved.generation,
+          at: new Date().toISOString(),
+        }
+        await io.writeTabs(tabs)
+        return { bound: true, nativeSession: session }
+      })
     }
     const since = Date.parse(reserved.at ?? '')
     let found = null
@@ -1982,22 +2025,19 @@ export class Panes {
     }
   }
 
-  /**
-   * What this harness needs on its command line to be deliverable to.
-   *
-   * Only the harnesses a live probe confirmed have a channel beyond the two
-   * that are always there, and `launchConfiguration` throws for the rest —
-   * so `enabledChannels` is asked first rather than the answer guessed from
-   * a name.
-   */
+  /** Private native integration for explicit task messages and receiver startup. */
   async #leadChannel(kind, launchId, workspace, executable, env = this.#env) {
-    const extra = enabledChannels(kind).filter((channel) => channel !== 'pty-inline')
-    if (!extra.some((channel) => channel !== 'cf-read')) {
+    if (enabledChannels(kind).length === 0) {
       return { args: [], env: {}, channel: null }
     }
-    const extension = kind === 'pi' ? preparePiExtension(env) : null
+    const extension =
+      kind === 'pi'
+        ? preparePiExtension(env)
+        : kind === 'opencode'
+          ? prepareOpenCodeExtension(env)
+          : null
     if (extension && !extension.path)
-      throw new Error(extension.reason ?? 'Pi extension is unavailable')
+      throw new Error(extension.reason ?? `${kind} setup is unavailable`)
     return await this.#prepareChannel(kind, {
       ...(extension ? { extensionPath: extension.path } : {}),
       launchId,
@@ -2257,28 +2297,6 @@ function paneLiveness(tab, pane, record, live) {
     return { live: false, status: 'unresolved' }
   }
   return { live: false, status: 'ended' }
-}
-
-/**
- * The parts of a delivery, as the lead must see them.
- *
- * A `cf-read` record carries the parts it was planned with, under the
- * budget of the lead it was planned FOR — that is the split the pointer
- * promised and the split a receipt would be checked against, so it is used
- * as it stands. A record without them is split here, under this lead
- * harness's own tool-output budget.
- */
-function deliveryParts(record, tab) {
-  if (Array.isArray(record.parts) && record.parts.length > 0) return record.parts
-  if (typeof record.answer !== 'string') {
-    throw new PaneError(`delivery ${record.id} carries no answer to print`, {
-      status: 409,
-      code: 'no-such-delivery',
-    })
-  }
-  const kind = tab.lead?.harness
-  const budget = record.partBudget ?? DEFAULT_PART_BUDGETS[kind] ?? DEFAULT_PART_BUDGETS.default
-  return partsFor(record.answer, record.id, budget)
 }
 
 /**

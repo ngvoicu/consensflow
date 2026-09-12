@@ -6,34 +6,10 @@ import { recordLatestRun, runsRoot } from "./state.js";
 import { createId } from "./utils.js";
 import { spawn } from "node:child_process";
 
-/**
- * An image agent's run: ask codex to draw, rather than impersonate it.
- *
- * This used to call the Codex responses endpoint directly with our own
- * `image_generation` tool definition, presenting codex's token and its
- * originator. That path is closed (probed 2026-08-24):
- *
- *     400 The 'gpt-image-2' model is not supported when using Codex with a
- *         ChatGPT account.
- *
- * The restriction is real and documented upstream — a ChatGPT login is never
- * handed the image tool, and OpenAI's answer is "bring an API key". But codex
- * ITSELF still draws on that same login, because its own sessions are
- * provisioned with the tool we were not. So the fix is to stop imitating codex
- * and simply ask it: one `codex exec`, an instruction to use its image tool,
- * and a path to save to. Verified end to end on a ChatGPT Plus account, with
- * gpt-image-2 and no API key.
- *
- * What this costs is worth naming: reference images are described by path
- * rather than uploaded as parts, and the revised prompt is no longer visible.
- * What it buys is a product with one fewer API client in it — an image agent
- * is now a harness we hand a task to, like every other agent here.
+/** Image agents delegate to Codex's image tool using the existing login.
+ * Codex selects the underlying image model; a preset label cannot select it.
+ * A saved output file, not the assistant's closing text, establishes success.
  */
-// The model codex is asked to draw with. It lived in image.js next to the HTTP
-// client that called it directly; that client is gone, and this is all of
-// image.js that any caller ever wanted.
-export const IMAGE_BACKEND = "gpt-image-2";
-
 const IMAGE_TIMEOUT_MS = 10 * 60_000;
 
 export async function runImageAgent(input) {
@@ -78,7 +54,7 @@ export async function runImageAgent(input) {
     runDir,
     savedPath: drawn ? savedPath : null,
     kind: "image",
-    backend: IMAGE_BACKEND,
+    backend: "codex-image",
     via: "codex exec",
     referenceImages: references,
     ok: drawn,
@@ -161,7 +137,7 @@ export function renderImageRun(result) {
   return [
     `# @${result.agent.id}`,
     "",
-    `Generated an image with **${result.backend}**, drawn by codex on your ChatGPT login.`,
+    `Generated an image with **${result.backend === "codex-image" ? "Codex Images" : result.backend}**, drawn by codex on your ChatGPT login.`,
     result.referenceImages?.length ? `Reference image(s): ${result.referenceImages.join(", ")}` : undefined,
     `Saved: ${result.savedPath}`,
     "",

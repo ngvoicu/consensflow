@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { pointer } from '../../hosts/lib/deliveries.js'
 import { startIntegration } from './harness.mjs'
 
 test('TEST-PANE-75: real CLI reads complete results through the scoped daemon without a terminal write', async () => {
@@ -41,11 +40,11 @@ test('TEST-PANE-75: real CLI reads complete results through the scoped daemon wi
     )
     const read = await app.runCli(['read', conversation], leadEnv)
     assert.equal(read.code, 0, read.stderr)
-    const record = app.deliveries().find((entry) => entry.manualRead === true)
+    const record = app.deliveries().find((entry) => entry.claims.some((claim) => claim.manual))
     assert.ok(record)
     assert.ok(record.parts.length > 1)
-    assert.equal(read.stdout, record.parts[0].text)
-    assert.equal(record.state, 'submitting', 'stdout alone is not a native receipt')
+    assert.ok(read.stdout.includes(record.parts[0].text))
+    assert.equal(record.state, 'collecting', 'stdout alone is not a native receipt')
     assert.equal(
       app.nodeFrames.some((frame) => frame.op === 'pane.write_paste'),
       false,
@@ -57,10 +56,10 @@ test('TEST-PANE-75: real CLI reads complete results through the scoped daemon wi
     await app.requestRust('pane.input', {
       id: lead.id,
       generation: lead.generation,
-      bytes: [...Buffer.from(`${pointer(record)}\r`)],
+      bytes: [...Buffer.from(`@worker answered in ${conversation} — run: cf read ${record.id}\r`)],
     })
     await app.waitFor(
-      () => app.deliveries().find((entry) => entry.id === record.id)?.state === 'accepted',
+      () => app.deliveries().find((entry) => entry.id === record.id)?.state === 'received',
       15_000,
     )
     const final = await app.runCli(['results', '--json'], leadEnv)

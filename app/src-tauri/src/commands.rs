@@ -803,6 +803,8 @@ struct PeerSendRequest {
     epoch: u64,
     socket: PathBuf,
     peer_pid: i32,
+    #[serde(default)]
+    allow_descendant: bool,
     body: String,
     timeout_ms: u64,
 }
@@ -1079,7 +1081,7 @@ fn register_pane_handlers(
         }
         #[cfg(target_os = "macos")]
         {
-            let result = peer_panes.send_peer(&key, &request.socket, request.peer_pid,
+            let result = peer_panes.send_peer(&key, &request.socket, request.peer_pid, request.allow_descendant,
                 request.body.as_bytes(), std::time::Duration::from_millis(request.timeout_ms), || {
                     wait_for_input_blocking(peer_queue.claim_epoch(key.clone(), request.epoch, true)?)
                         .map(|_| ())
@@ -1731,70 +1733,65 @@ pub async fn answers_list<R: Runtime>(
 }
 
 #[tauri::command]
-pub async fn deliver_now<R: Runtime>(
+pub async fn result_body<R: Runtime>(
     app: AppHandle<R>,
-    delivery: Option<String>,
-    tab: Option<String>,
-    conversation: Option<String>,
-    answer_id: Option<String>,
-    resend: Option<bool>,
+    tab: String,
+    result: String,
+    offset: Option<usize>,
 ) -> Value {
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("deliver.now", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "deliver.now".to_string(),
-            json!({
-                "delivery":delivery,
-                "tab":tab,
-                "conversation":conversation,
-                "answerId":answer_id,
-                "resend":resend.unwrap_or(false),
-            }),
-        )
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn deliver_cancel<R: Runtime>(app: AppHandle<R>, delivery: String) -> Value {
-    if let Err(error) = validate_text(&delivery, "delivery") {
+    if let Err(error) = validate_text(&tab, "tab").and_then(|()| validate_text(&result, "result")) {
         return json!({"ok":false,"error":error});
     }
     let (bridge, startup_error) = {
         let state = app.state::<AppRuntime>();
         (state.bridge.clone(), state.startup_error.clone())
     };
-    run_blocking("deliver.cancel", move || {
+    run_blocking("result.body", move || {
         request_node(
             bridge,
             startup_error,
-            "deliver.cancel".to_string(),
-            json!({"delivery":delivery}),
+            "result.body".to_string(),
+            json!({"tab":tab,"result":result,"offset":offset.unwrap_or(0)}),
         )
     })
     .await
 }
 
 #[tauri::command]
-pub async fn held_send<R: Runtime>(app: AppHandle<R>, tab: String) -> Value {
-    if let Err(error) = validate_text(&tab, "tab") {
+pub async fn result_collect<R: Runtime>(app: AppHandle<R>, tab: String, result: String) -> Value {
+    if let Err(error) = validate_text(&tab, "tab").and_then(|()| validate_text(&result, "result")) {
         return json!({"ok":false,"error":error});
     }
     let (bridge, startup_error) = {
         let state = app.state::<AppRuntime>();
         (state.bridge.clone(), state.startup_error.clone())
     };
-    run_blocking("held.send", move || {
+    run_blocking("result.collect", move || {
         request_node(
             bridge,
             startup_error,
-            "held.send".to_string(),
-            json!({"tab":tab}),
+            "result.collect".to_string(),
+            json!({"tab":tab,"result":result}),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn result_cancel<R: Runtime>(app: AppHandle<R>, tab: String, result: String) -> Value {
+    if let Err(error) = validate_text(&tab, "tab").and_then(|()| validate_text(&result, "result")) {
+        return json!({"ok":false,"error":error});
+    }
+    let (bridge, startup_error) = {
+        let state = app.state::<AppRuntime>();
+        (state.bridge.clone(), state.startup_error.clone())
+    };
+    run_blocking("result.cancel", move || {
+        request_node(
+            bridge,
+            startup_error,
+            "result.cancel".to_string(),
+            json!({"tab":tab,"result":result}),
         )
     })
     .await
@@ -2067,9 +2064,9 @@ mod tests {
             "pane_ack",
             "set_policy",
             "answers_list",
-            "deliver_now",
-            "deliver_cancel",
-            "held_send",
+            "result_collect",
+            "result_cancel",
+            "result_body",
             "tab_resume",
             "tab_delete",
             "rename_session",
@@ -2355,7 +2352,7 @@ mod tests {
             pixel_height: 0,
         };
         let blocked_key = PaneKey::new("blocked-command", 1);
-        let _blocked_reader = panes
+        let mut blocked_reader = panes
             .open_at(
                 blocked_key.clone(),
                 Path::new("/tmp"),
@@ -2368,6 +2365,11 @@ mod tests {
                 size,
             )
             .expect("open blocked pane");
+        // Like the production output pump, drain echoed startup bytes. Keeping an
+        // unread PTY master open can block macOS child exit even after SIGKILL.
+        let blocked_output = thread::spawn(move || {
+            let _ = std::io::copy(&mut blocked_reader, &mut std::io::sink());
+        });
         arbiter
             .register(&blocked_key)
             .expect("register blocked pane");
@@ -2481,6 +2483,7 @@ mod tests {
         ack_thread.join().expect("ack thread");
         panes.kill(&blocked_key).expect("kill blocked pane");
         panes.kill(&responsive_key).expect("kill responsive pane");
+        blocked_output.join().expect("drain blocked pane output");
         drop(app);
 
         assert_eq!(
@@ -2962,22 +2965,22 @@ mod tests {
                 json!({"tab":"tab-1","pane":"pane-1","conversation":"answer-1"}),
             ),
             (
-                "deliver_now",
-                json!({"delivery":"delivery-1","tab":"tab-1","conversation":null,"answerId":null,"resend":false}),
-                "deliver.now",
-                json!({"delivery":"delivery-1","tab":"tab-1","conversation":null,"answerId":null,"resend":false}),
+                "result_collect",
+                json!({"tab":"tab-1","result":"d-1"}),
+                "result.collect",
+                json!({"tab":"tab-1","result":"d-1"}),
             ),
             (
-                "deliver_cancel",
-                json!({"delivery":"delivery-1"}),
-                "deliver.cancel",
-                json!({"delivery":"delivery-1"}),
+                "result_cancel",
+                json!({"tab":"tab-1","result":"d-1"}),
+                "result.cancel",
+                json!({"tab":"tab-1","result":"d-1"}),
             ),
             (
-                "held_send",
-                json!({"tab":"tab-1"}),
-                "held.send",
-                json!({"tab":"tab-1"}),
+                "result_body",
+                json!({"tab":"tab-1","result":"d-1","offset":0}),
+                "result.body",
+                json!({"tab":"tab-1","result":"d-1","offset":0}),
             ),
             (
                 "tab_resume",
@@ -3063,9 +3066,9 @@ mod tests {
                 open_consult,
                 set_policy,
                 answers_list,
-                deliver_now,
-                deliver_cancel,
-                held_send,
+                result_collect,
+                result_cancel,
+                result_body,
                 tab_resume,
                 tab_delete,
                 rename_session,

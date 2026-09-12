@@ -723,7 +723,7 @@ test('quiet Codex discovery separates concurrent launches and refuses ambiguous 
 })
 
 test('quiet Codex launch discovery accepts an alias of the exact workspace', async () => {
-  await withStores(async env => {
+  await withStores(async (env) => {
     const actual = path.join(env.HOME, 'actual-workspace')
     const alias = path.join(env.HOME, 'workspace-alias')
     await mkdir(actual)
@@ -731,9 +731,20 @@ test('quiet Codex launch discovery accepts an alias of the exact workspace', asy
     await symlink(actual, alias)
     const launch = { nonce: 'alias-launch', originator: 'consensflow-alias-launch' }
     const id = '00000000-1111-4222-8333-444444444444'
-    await write(path.join(env.HOME, '.codex', 'sessions', `rollout-x-${id}.jsonl`), JSON.stringify({
-      type: 'session_meta', payload: { id, originator: launch.originator, source: 'cli', thread_source: 'user', cwd: actual, timestamp: new Date().toISOString() }
-    }) + '\n')
+    await write(
+      path.join(env.HOME, '.codex', 'sessions', `rollout-x-${id}.jsonl`),
+      `${JSON.stringify({
+        type: 'session_meta',
+        payload: {
+          id,
+          originator: launch.originator,
+          source: 'cli',
+          thread_source: 'user',
+          cwd: actual,
+          timestamp: new Date().toISOString(),
+        },
+      })}\n`,
+    )
     const found = await discoverSessionWithEvidence('codex', alias, Date.now() - 1000, env, launch)
     assert.equal(found?.sessionId, id)
   })

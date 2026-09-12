@@ -671,11 +671,16 @@ impl PaneTable {
     /// Authenticate the connected local process before sending any bytes.
     /// A successful write is transport submission, never native acceptance.
     #[cfg(target_os = "macos")]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Keep peer identity, transport bounds and the admission guard explicit at this boundary"
+    )]
     pub fn send_peer(
         &self,
         key: &PaneKey,
         path: &Path,
         expected_pid: i32,
+        allow_descendant: bool,
         body: &[u8],
         timeout: Duration,
         before_write: impl FnOnce() -> Result<(), String>,
@@ -714,7 +719,8 @@ impl PaneTable {
                 && pid == expected_pid
                 && libc::getpeereid(socket.as_raw_fd(), &mut uid, &mut gid) == 0
                 && uid == libc::getuid()
-                && libc::getpgid(pid) == group
+                && (libc::getpgid(pid) == group
+                    || (allow_descendant && process_owned_by_group(pid, group)))
         };
         if !identity_matches {
             return Err(refused(
@@ -972,6 +978,68 @@ fn signal_for_termination(pane: &mut Pane) -> Result<bool, PaneError> {
     }
 
     Ok(child_exited)
+}
+
+// A continuation can create a new process group while staying below the pane.
+// The caller separately proves the native continued-in chain. Recheck ancestry
+// of the authenticated socket peer immediately before admitting the write.
+#[cfg(target_os = "macos")]
+fn process_owned_by_group(mut pid: i32, group: i32) -> bool {
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..64 {
+        if pid <= 1 || !seen.insert(pid) {
+            return false;
+        }
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of_val(&info);
+        let read = unsafe {
+            libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                (&mut info as *mut libc::proc_bsdinfo).cast(),
+                size as i32,
+            )
+        };
+        if read != size as i32
+            || info.pbi_pid != pid as u32
+            || info.pbi_uid != unsafe { libc::getuid() }
+        {
+            return false;
+        }
+        if info.pbi_pgid == group as u32 {
+            return true;
+        }
+        pid = info.pbi_ppid as i32;
+    }
+    false
+}
+
+#[cfg(all(test, target_os = "macos"))]
+#[test]
+fn continuation_ancestry_accepts_detached_descendant_and_refuses_foreign_group() {
+    use std::os::unix::process::CommandExt;
+    let mut command = std::process::Command::new("/bin/sleep");
+    command.arg("30");
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let mut child = command.spawn().unwrap();
+    let pid = child.id() as i32;
+    let group = unsafe { libc::getpgid(0) };
+    assert_ne!(unsafe { libc::getpgid(pid) }, group);
+    let own = process_owned_by_group(pid, group);
+    let foreign = process_owned_by_group(pid, 1);
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert!(own);
+    assert!(!foreign);
+    assert!(!process_owned_by_group(i32::MAX, group));
 }
 
 #[cfg(unix)]

@@ -2,12 +2,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { after, describe, it } from 'node:test'
-import {
-  installTerminalCommand,
-  removeTerminalCommand,
-  terminalCommandStatus,
-  terminalRuntime,
-} from '../src/terminal.js'
+import { installTerminalCommand, terminalCommandStatus, terminalRuntime } from '../src/terminal.js'
 import { tempEnv } from './helpers.mjs'
 
 describe('the app can put its own CLI on your PATH', () => {
@@ -72,16 +67,24 @@ describe('the app can put its own CLI on your PATH', () => {
     assert.equal(theirs.entry, join(t.root, 'Other.app', 'cf.mjs'))
   })
 
-  it('removes it again', () => {
-    removeTerminalCommand(t.env, { candidates: [bin] })
-    assert.equal(existsSync(join(bin, 'consensflow')), false)
-    assert.equal(terminalCommandStatus(t.env, { candidates: [bin] }).installed, false)
-  })
-
   it('explains itself when no candidate directory can be written', () => {
     assert.throws(
       () => installTerminalCommand(t.env, { candidates: ['/System/nope'] }),
       /could not write|no writable/i,
     )
   })
+})
+
+it('keeps default CLI launchers in ConsensFlow home despite a project bin override', () => {
+  const t = tempEnv()
+  try {
+    t.env.CONSENSFLOW_BIN_DIR = join(t.root, 'project', 'bin')
+    const outcome = installTerminalCommand(t.env)
+    assert.equal(outcome.dir, join(t.env.CONSENSFLOW_HOME, 'bin'))
+    assert.equal(existsSync(t.env.CONSENSFLOW_BIN_DIR), false)
+    assert.equal(existsSync(join(t.env.HOME, '.local', 'bin')), false)
+    assert.equal(existsSync(join(outcome.dir, 'cf')), true)
+  } finally {
+    t.cleanup()
+  }
 })

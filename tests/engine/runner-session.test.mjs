@@ -185,3 +185,45 @@ test('runner: codex resume is not given -C, which it does not accept', () => {
   assert.ok(build(AGENTS.codex).args.includes('-C'))
   assert.ok(build(AGENTS.codex, { sessionId: undefined }).args.includes('-C'))
 })
+
+test('curated low/medium presets reach actual one-shot and interactive argument builders', async () => {
+  const { getPreset } = await import('../../hosts/lib/presets.js')
+  const { interactiveStart } = await import('../../hosts/lib/runners.js')
+  for (const name of [
+    'hemera',
+    'phaethon',
+    'leto',
+    'asterope',
+    'arvakr',
+    'alsvidr',
+    'electra',
+    'maia',
+    'alcyone',
+    'merope',
+    'dagr',
+    'skirnir',
+    'terpsichore',
+    'thalia',
+    'musaeus',
+    'erato',
+    'suttung',
+    'kvasir',
+  ]) {
+    const preset = getPreset(name)
+    assert.ok(preset, name)
+    const effort = preset.effort ?? preset.thinking
+    const oneshot = build(preset)
+    assert.ok(
+      oneshot.args.some((arg) => String(arg).includes(effort)),
+      name,
+    )
+    if (preset.kind !== 'opencode') {
+      const invocation = interactiveStart(preset, 'native-session', 'task')
+      assert.ok(invocation.args.includes(preset.model), name)
+      assert.ok(
+        invocation.args.some((arg) => String(arg).includes(effort)),
+        name,
+      )
+    }
+  }
+})

@@ -274,3 +274,19 @@ worker. Its complete `CF_OC130_AUTO_DONE` result arrived automatically as
 delivery `d-3` in the Claude 2.1.266 lead, which acknowledged it while the
 unsent `CF_UNSENT_DRAFT_266` remained visible. This checks the composed
 worker-to-lead path, separately from completion parsing and direct ingress.
+
+## Claude Code 2.1.268 fresh /clear
+
+`claude-code/v268-clear.jsonl` preserves all five native records from an isolated local-provider CLI probe on 2026-09-11. Only the temporary workspace cwd is replaced with `/fixture/workspace`. The native `system.local_command` parent UUID links to the exact preceding `/clear` user command; no model answer is added. Used to verify readiness before the first model turn and reject missing, foreign, sidechain, wrongly linked or followed-by-work boundaries.
+
+## Claude Code 2.1.268 — late-written user ancestors (TEST-PANE-243)
+
+`claude-code/v268-late-ancestors.jsonl` contains all 11 records, in physical
+order, from the isolated local-provider capture session
+`4e761651-511b-4065-8a65-6ff21582faad` on 2026-09-11 at 14:00:27Z.
+Source: `/private/var/folders/5f/cy8ywl5d2_z_1g1zcn45g7gr0000gn/T/cf-claude-switch-pwwo6m5a/claude/projects/-private-var-folders-5f-cy8ywl5d2-z-1g1zcn45g7gr0000gn-T-cf-claude-switch-pwwo6m5a-workspace/4e761651-511b-4065-8a65-6ff21582faad.jsonl`.
+Only local directory leaf values are redacted to `/tmp/claude-fixture`.
+Assistant record 3 and turn_duration record 4 precede initiating user record 6
+and its four attachment ancestors 7–10. UUIDs, parents, timestamps, native
+fields and full message content are preserved. The provider was local with
+no artificial delay. Negative tests mutate temporary fixture copies only.

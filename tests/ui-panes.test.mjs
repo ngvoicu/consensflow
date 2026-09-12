@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { dirname, isAbsolute, join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { after, before, describe, it } from 'node:test'
-import { answers as harnessAnswers } from '../hosts/lib/completion.js'
-import { plan } from '../hosts/lib/deliveries.js'
+import { emptyInbox, indexResult } from '../hosts/lib/inbox.js'
 import { workspaceKey } from '../hosts/lib/state.js'
 import { Bridge } from '../src/bridge.js'
 import { addAgent, removeAgent } from '../src/roster.js'
 import { startUiServer } from '../src/ui.js'
-import { chooseCmuxMode, tempEnv, testRoleConfiguration } from './helpers.mjs'
+import { tempEnv, testRoleConfiguration } from './helpers.mjs'
 
 /**
  * The pane HTTP surface (Phase 2, TEST-PANE-17) against the REAL server,
@@ -66,7 +66,6 @@ async function paneServer({
 } = {}) {
   const t = tempEnv()
   if (opencodeConfig !== undefined) t.env.OPENCODE_CONFIG_CONTENT = opencodeConfig
-  chooseCmuxMode(t)
   addAgent({ name: 'zeus', harness: 'codex', model: 'gpt-5-codex' }, t.env)
   addAgent({ name: 'nyx', harness: 'claude', model: 'opus' }, t.env)
   addAgent({ name: 'clio', harness: 'pi', model: 'pi-core' }, t.env)
@@ -264,8 +263,10 @@ server.listen(Number(args[args.indexOf('--port') + 1]), '127.0.0.1')
       // `pane.open` of its own. Tests below count the frames a consult or
       // an attach causes, so the lead's is cleared here — it is proved
       // where it belongs, in the `tab.open` and BO10 suites.
+      const frame = seen.open.at(-1)
       seen.open.length = 0
       return {
+        frame,
         ...payload,
         lead: payload.leadEnv.CONSENSFLOW_APP_TOKEN,
         leadPane: payload.tab.panes.find((pane) => pane.kind === 'lead'),
@@ -435,10 +436,16 @@ describe('POST /api/panes/consult applies the continuation rule', () => {
       'CF_DELIVERY_CONFIG',
       'CONSENSFLOW_APP',
       'CONSENSFLOW_LAUNCH',
+      'CONSENSFLOW_NODE',
       'CONSENSFLOW_PANE_ID',
       'PATH',
     ])
-    assert.equal(open.env.PATH, s.env.PATH, 'worker tools use the editor’s discovered PATH')
+    assert.equal(
+      open.env.PATH,
+      `${dirname(open.argv[1])}:${s.env.PATH}`,
+      'workers use the bundled CLI and inherited tool PATH',
+    )
+    assert.equal(open.env.CONSENSFLOW_NODE, open.argv[0])
     assert.equal(open.env.CONSENSFLOW_PANE_ID, first.pane.id)
     assert.notEqual(
       open.env.CONSENSFLOW_LAUNCH,
@@ -1527,7 +1534,6 @@ describe('the controller ops act only for their own launch', () => {
 describe('the pane routes work through the real cf ui wiring', () => {
   it('keeps the handle line first, then opens a pane over the pipe', async () => {
     const t = tempEnv()
-    chooseCmuxMode(t)
     addAgent({ name: 'zeus', harness: 'codex', model: 'gpt-5-codex' }, t.env)
     const workspace = join(t.root, 'workspace')
     mkdirSync(workspace, { recursive: true })
@@ -1648,174 +1654,6 @@ describe('the pane routes work through the real cf ui wiring', () => {
       child.kill()
       t.cleanup()
     }
-  })
-})
-
-describe('POST /api/panes/read prints one part of a delivery', () => {
-  let s
-  let tab
-  let conversation
-  let record
-
-  before(async () => {
-    s = await paneServer()
-    tab = await s.tab('claude-code')
-    const opened = await json(
-      await s.api(tab.lead, '/api/panes/consult', {
-        method: 'POST',
-        body: {
-          tab: tab.tab.id,
-          agent: 'zeus',
-          task: 'a long answer',
-          fresh: true,
-          opId: 'r-open',
-        },
-      }),
-      200,
-    )
-    conversation = opened.conversation
-
-    // A real record, planned by the real planner, with the real allocator's
-    // id — so the parts this route prints are the parts the delivery has.
-    // A literal id here; the allocator that mints them is proved in
-    // `tests/store.test.mjs`.
-    const id = 'd-1'
-    const answer = Array.from({ length: 400 }, (_, at) => `line ${at} of the worker's answer`).join(
-      '\n',
-    )
-    const planned = plan({
-      row: { agent: 'zeus' },
-      items: [{ id: 'msg_7', role: 'assistant', complete: true, text: answer }],
-      policy: { mode: 'auto' },
-      conversation,
-      agent: 'zeus',
-      kind: 'claude-code',
-      target: {
-        leadId: tab.leadEnv.CONSENSFLOW_LEAD_ID,
-        session: 'lead-session',
-        tab: tab.tab.id,
-        pane: tab.leadPane.id,
-        generation: 1,
-      },
-      newId: () => id,
-      now: Date.parse('2026-09-07T10:00:00.000Z'),
-      workspace: s.workspace,
-      partBudget: { 'claude-code': { bytes: 900, lines: 40 } },
-    })
-    assert.equal(planned.length, 1)
-    record = planned[0]
-    assert.equal(record.channel, 'cf-read')
-    assert.ok(record.parts.length > 2, 'the answer is long enough to need several parts')
-    s.seedDelivery(record)
-  })
-  after(async () => {
-    await s.close()
-  })
-
-  it('answers the part it was asked for, verbatim, with its markers', async () => {
-    const answer = await json(
-      await s.api(tab.lead, '/api/panes/read', {
-        method: 'POST',
-        body: { tab: tab.tab.id, deliveryId: record.id, part: 2, opId: 'read-2' },
-      }),
-      200,
-    )
-    const part = record.parts[1]
-    assert.equal(answer.text, part.text, 'the client prints this and adds nothing')
-    assert.equal(answer.k, 2)
-    assert.equal(answer.of, record.parts.length)
-    assert.equal(answer.open, part.open)
-    assert.equal(answer.close, part.close)
-    assert.equal(answer.next, part.next)
-    assert.equal(answer.digest, part.digest)
-    assert.equal(answer.deliveryId, record.id)
-    assert.equal(answer.conversation, conversation)
-    assert.match(answer.text, /^\[part 2 of \d+ — \d+ bytes\]\n/)
-    assert.match(answer.text, new RegExp(`\\[end of part 2 of \\d+ — delivery ${record.id}\\]`))
-    assert.match(answer.next, /--part 3/)
-
-    // The part is under the LEAD harness's budget, which is what the whole
-    // part mechanism exists for: a lead that keeps only the tail of a long
-    // tool result would keep the end marker and drop the answer.
-    const budget = record.partBudget
-    assert.ok(answer.bytes <= budget.bytes, `${answer.bytes} <= ${budget.bytes}`)
-    assert.ok(answer.lines <= budget.lines)
-  })
-
-  it('defaults to the first part and says how many there are', async () => {
-    const answer = await json(
-      await s.api(tab.lead, '/api/panes/read', {
-        method: 'POST',
-        body: { tab: tab.tab.id, deliveryId: record.id, opId: 'read-1' },
-      }),
-      200,
-    )
-    assert.equal(answer.k, 1)
-    assert.equal(answer.text, record.parts[0].text)
-  })
-
-  it('records an ATTEMPT for the part it printed, and never coverage', async () => {
-    const stored = s.deliveries()[record.id]
-    assert.equal(stored.partAttempts['1'], 1)
-    assert.equal(stored.partAttempts['2'], 1)
-    assert.equal(stored.lastRead.lead, tab.leadEnv.CONSENSFLOW_LEAD_ID)
-    assert.equal(stored.partCoverage, undefined, 'reading covers nothing')
-    assert.equal(stored.evidenceIds, undefined)
-    assert.equal(stored.state, 'pending', 'and moves no record along')
-
-    // Replaying one opId is one attempt, not two.
-    await json(
-      await s.api(tab.lead, '/api/panes/read', {
-        method: 'POST',
-        body: { tab: tab.tab.id, deliveryId: record.id, part: 2, opId: 'read-2' },
-      }),
-      200,
-    )
-    assert.equal(s.deliveries()[record.id].partAttempts['2'], 1, 'a replay prints, records once')
-  })
-
-  it('makes a refusal the final answer for its opId', async () => {
-    const attempts = s.deliveries()[record.id].partAttempts['1']
-    const bad = await s.api(tab.lead, '/api/panes/read', {
-      method: 'POST',
-      body: { tab: tab.tab.id, deliveryId: record.id, part: 0, opId: 'read-final' },
-    })
-    assert.equal(bad.status, 400)
-    const corrected = await s.api(tab.lead, '/api/panes/read', {
-      method: 'POST',
-      body: { tab: tab.tab.id, deliveryId: record.id, part: 1, opId: 'read-final' },
-    })
-    assert.equal(corrected.status, 400, 'one opId is one operation, refusals included')
-    assert.equal(
-      s.deliveries()[record.id].partAttempts['1'],
-      attempts,
-      'and the corrected request printed nothing and recorded nothing',
-    )
-  })
-
-  it('refuses a part that does not exist, and a delivery of another session', async () => {
-    for (const [body, status] of [
-      [{ deliveryId: record.id, part: record.parts.length + 1, opId: 'read-e1' }, 400],
-      [{ deliveryId: record.id, part: 0, opId: 'read-e2' }, 400],
-      [{ deliveryId: 'd-99999', part: 1, opId: 'read-e3' }, 404],
-      [{ deliveryId: 'not-an-id', part: 1, opId: 'read-e4' }, 400],
-      [{ deliveryId: record.id, part: 1 }, 400],
-    ]) {
-      const response = await s.api(tab.lead, '/api/panes/read', {
-        method: 'POST',
-        body: { tab: tab.tab.id, ...body },
-      })
-      assert.equal(response.status, status, JSON.stringify(body))
-    }
-
-    // Another session in the same directory shares the workspace, and its
-    // lead may not read a delivery addressed to this one.
-    const other = await s.tab('claude-code')
-    const response = await s.api(other.lead, '/api/panes/read', {
-      method: 'POST',
-      body: { tab: other.tab.id, deliveryId: record.id, part: 1, opId: 'read-e5' },
-    })
-    assert.equal((await json(response, 404)).error, 'no-such-delivery')
   })
 })
 
@@ -2352,18 +2190,9 @@ const RUST_SENDS = [
   ['notify.set', (s) => ({ scope: 'tab', id: s.tabId, mode: 'manual' })],
   ['state.list', () => ({})],
   ['answers.list', (s) => ({ tab: s.tabId, pane: s.paneId, conversation: s.session })],
-  [
-    'deliver.now',
-    (s) => ({
-      delivery: null,
-      tab: s.tabId,
-      conversation: s.session,
-      answerId: 'a-1',
-      resend: false,
-    }),
-  ],
-  ['deliver.cancel', () => ({ delivery: 'd-1' })],
-  ['held.send', (s) => ({ tab: s.tabId })],
+  ['result.body', (s) => ({ tab: s.tabId, result: 'd-1' })],
+  ['result.collect', (s) => ({ tab: s.tabId, result: 'd-1' })],
+  ['result.cancel', (s) => ({ tab: s.tabId, result: 'd-1' })],
 ]
 
 describe('every operation Rust sends over the bridge has a handler', () => {
@@ -2670,36 +2499,8 @@ describe('the rest of the page: panes, policy, state and deliveries', () => {
     assert.equal(worker.agent, 'zeus')
     assert.equal(worker.harness, 'codex')
     assert.equal(typeof worker.conversation, 'string')
-    assert.ok(Array.isArray(state.deliveries))
-    assert.ok(Array.isArray(state.held))
-  })
-
-  it('keeps suspended results out of the current pending count', async () => {
-    for (const [id, suspended] of [
-      ['d-9100', true],
-      ['d-9101', false],
-    ]) {
-      s.seedDelivery({
-        id,
-        target: { tab: tab.tab, pane: tab.pane.id, generation: 1 },
-        conversation: 'old-worker',
-        answerId: id,
-        state: 'pending',
-        suspended,
-        reason: suspended ? 'native-session-changed' : undefined,
-      })
-    }
-    const state = await s.rust.request('state.list', {})
-    const old = state.deliveries.find((record) => record.id === 'd-9100')
-    const current = state.deliveries.find((record) => record.id === 'd-9101')
-    assert.equal(old.state, 'suspended')
-    assert.equal(old.reason, 'native-session-changed')
-    assert.equal(current.state, 'pending')
-    assert.equal(
-      s.deliveries()['d-9100'].state,
-      'pending',
-      'projection preserves the durable record',
-    )
+    assert.ok(Array.isArray(state.results))
+    assert.equal(state.held, undefined)
   })
 
   it('tells Rust that something changed, once per mutation', async () => {
@@ -2737,7 +2538,6 @@ describe('the rest of the page: panes, policy, state and deliveries', () => {
     assert.equal(listed.ok, true, JSON.stringify(listed))
     assert.deepEqual(listed.answers, [])
     assert.equal(listed.unknown, false)
-    assert.equal(listed.reason, 'not bound yet')
 
     const missing = await s.rust.request('answers.list', {
       tab: tab.tab,
@@ -2745,99 +2545,7 @@ describe('the rest of the page: panes, policy, state and deliveries', () => {
       conversation: 'nobody-here',
     })
     assert.equal(missing.ok, false)
-    assert.equal(missing.error, 'no-conversation')
-  })
-
-  it('sends a cancelled answer as a new record, and never invents a transition', async () => {
-    const consulted = await s.rust.request('consult', {
-      tab: tab.tab,
-      agent: 'zeus',
-      task: 'deliveries',
-    })
-    // What the watcher leaves when a manual policy stops an answer: a
-    // record naming the answer, cancelled, with its reason.
-    s.seedDelivery({
-      id: 'd-77',
-      tab: tab.tab,
-      pane: consulted.pane.id,
-      conversation: consulted.conversation,
-      answerId: 'a-9',
-      state: 'cancelled',
-      reason: 'automatic delivery cancelled by manual policy (pane-human)',
-      lead: `tab:${tab.tab}:1`,
-    })
-
-    const sent = await s.rust.request('deliver.now', {
-      delivery: 'd-77',
-      tab: tab.tab,
-      conversation: consulted.conversation,
-      answerId: 'a-9',
-      resend: false,
-    })
-    assert.equal(sent.ok, true, JSON.stringify(sent))
-    // `cancelled` is terminal in `hosts/lib/deliveries.js` and its own
-    // `transition` silently refuses an illegal move — so writing `pending`
-    // onto this record would have reported a success that never happened.
-    // A human sending a cancelled answer gets a NEW record, which is what
-    // `resend` is for, and the cancelled one stays as history.
-    assert.equal(sent.resent, true)
-    assert.notEqual(sent.delivery, 'd-77')
-    assert.match(sent.delivery, /^d-\d+$/, 'its id comes from the store allocator')
-    const fresh = s.deliveries()[sent.delivery]
-    assert.equal(fresh.state, 'pending')
-    assert.equal(fresh.manual, true, 'the one flag the watcher honours against a manual policy')
-    assert.equal(fresh.resendOf, 'd-77')
-    assert.equal(fresh.answerId, 'a-9')
-    assert.equal(s.deliveries()['d-77'].state, 'cancelled', 'and history is not rewritten')
-
-    // A record already pending needs no new identity: it is the state the
-    // watcher acts on, and only the override is missing.
-    const marked = await s.rust.request('deliver.now', {
-      delivery: sent.delivery,
-      tab: tab.tab,
-      conversation: consulted.conversation,
-      answerId: 'a-9',
-      resend: false,
-    })
-    assert.equal(marked.ok, true, JSON.stringify(marked))
-    assert.equal(marked.resent, false)
-    assert.equal(marked.delivery, sent.delivery)
-
-    // ...unless the human explicitly asks to send it again.
-    const again = await s.rust.request('deliver.now', {
-      delivery: sent.delivery,
-      tab: tab.tab,
-      conversation: consulted.conversation,
-      answerId: 'a-9',
-      resend: true,
-    })
-    assert.equal(again.resent, true)
-    assert.notEqual(again.delivery, sent.delivery)
-
-    const cancelled = await s.rust.request('deliver.cancel', { delivery: 'd-77' })
-    assert.equal(cancelled.ok, true, JSON.stringify(cancelled))
-    assert.equal(cancelled.state, 'cancelled')
-    assert.equal(cancelled.changed, false, 'it was already cancelled: nothing moved')
-    const stopped = await s.rust.request('deliver.cancel', { delivery: again.delivery })
-    assert.equal(stopped.changed, true, 'a pending one really is stopped')
-    assert.equal(stopped.state, 'cancelled')
-
-    const unknown = await s.rust.request('deliver.cancel', { delivery: 'd-404' })
-    assert.equal(unknown.ok, false)
-    assert.equal(unknown.error, 'no-delivery')
-
-    // An answer id that is in no transcript names nothing to send. The
-    // refusal is about the ANSWER, not about a missing delivery record — a
-    // record is exactly what a manual policy never has.
-    const early = await s.rust.request('deliver.now', {
-      delivery: null,
-      tab: tab.tab,
-      conversation: consulted.conversation,
-      answerId: 'a-never-seen',
-      resend: false,
-    })
-    assert.equal(early.ok, false)
-    assert.equal(early.error, 'no-answer')
+    assert.match(missing.error, /does not belong/)
   })
 })
 
@@ -3064,166 +2772,6 @@ describe('a lead pane that ends leaves a tab the human can get back', () => {
     await new Promise((resolve) => setTimeout(resolve, 50))
     assert.equal(tabOnDisk(tab.tab).closed, false, 'the resumed tab stays open')
     assert.equal((await leadOf(tab.tab)).alive, true)
-  })
-})
-
-describe('answers.list reads the harness transcript, not the conversation record', () => {
-  let s
-  let tab
-
-  before(async () => {
-    s = await paneServer()
-    tab = await s.rust.request('tab.open', { dir: s.workspace, harness: 'claude-code' })
-  })
-  after(async () => {
-    await s.close()
-  })
-
-  it('lists what the agent said, and nothing the lead said to it', async () => {
-    const consulted = await s.rust.request('consult', {
-      tab: tab.tab,
-      agent: 'nyx',
-      task: 'transcript',
-    })
-    assert.equal(consulted.ok, true, JSON.stringify(consulted))
-
-    // A real Claude Code transcript, carrying user turns AND assistant
-    // turns, where the adapter goes looking for one.
-    const sessionId = '11111111-2222-3333-4444-555555555555'
-    const projects = join(s.env.CLAUDE_CONFIG_DIR, 'projects', 'workspace')
-    mkdirSync(projects, { recursive: true })
-    writeFileSync(
-      join(projects, `${sessionId}.jsonl`),
-      readFileSync('tests/engine/fixtures/completion/claude-code/frontier-history.jsonl', 'utf8'),
-    )
-    // Binding is the controller's job in the real app; the file is where
-    // the truth lives, and the store re-reads it on every mutation.
-    const file = join(
-      s.env.CONSENSFLOW_HOME,
-      'workspaces',
-      workspaceKey(s.workspace),
-      'threads.json',
-    )
-    const threads = JSON.parse(readFileSync(file, 'utf8'))
-    threads[consulted.conversation].sessionId = sessionId
-    writeFileSync(file, `${JSON.stringify(threads, null, 2)}\n`)
-
-    const listed = await s.rust.request('answers.list', {
-      tab: tab.tab,
-      pane: consulted.pane.id,
-      conversation: consulted.conversation,
-    })
-    assert.equal(listed.ok, true, JSON.stringify(listed))
-    assert.equal(listed.unknown, false)
-    // The fixture holds two user turns and one assistant turn. Listing the
-    // lead's own prompts back to it as answers to deliver is a list nobody
-    // can use, so only the assistant's turn is one.
-    assert.equal(listed.answers.length, 1, JSON.stringify(listed.answers))
-    const answer = listed.answers[0]
-    assert.equal(typeof answer.id, 'string')
-    assert.equal(answer.delivered, false, 'nothing has been delivered for this conversation')
-    // This transcript's assistant turn is still streaming, and the adapter
-    // says so with `complete: false`. It is offered WITH that said rather
-    // than hidden: a half-written answer the human can see is better than
-    // an empty list that looks like silence.
-    assert.equal(answer.uncertain, true)
-    assert.equal(answer.ready, false, 'an incomplete answer is visible but not send-ready')
-
-    // A finished transcript previews, so the page can show the answer
-    // without opening it.
-    const settledId = '66666666-7777-8888-9999-000000000000'
-    writeFileSync(
-      join(projects, `${settledId}.jsonl`),
-      readFileSync('tests/engine/fixtures/completion/claude-code/fragments.jsonl', 'utf8'),
-    )
-    const rebound = JSON.parse(readFileSync(file, 'utf8'))
-    rebound[consulted.conversation].sessionId = settledId
-    writeFileSync(file, `${JSON.stringify(rebound, null, 2)}\n`)
-
-    const settled = await s.rust.request('answers.list', {
-      tab: tab.tab,
-      pane: consulted.pane.id,
-      conversation: consulted.conversation,
-    })
-    assert.equal(settled.unknown, false, JSON.stringify(settled))
-    assert.ok(settled.answers.length > 0)
-    assert.ok(
-      settled.answers.every((candidate) => candidate.preview.length > 0),
-      'every answer carries text the page can show',
-    )
-    assert.ok(
-      settled.answers.every((candidate) => candidate.preview.length <= 160),
-      'and none of them is a whole transcript pasted into a list',
-    )
-    assert.ok(
-      settled.answers.some((candidate) => candidate.ready === true),
-      'a complete and settled answer is explicitly send-ready',
-    )
-    const settledAnswer = settled.answers.find((candidate) => candidate.ready)
-    const attempt = {
-      id: 'd-8002',
-      conversation: consulted.conversation,
-      answerId: settledAnswer.id,
-      state: 'uncertain',
-      channel: 'cf-read',
-      parts: [{ k: 1 }, { k: 2 }, { k: 3 }],
-      partCoverage: [[], ['receipt-2'], []],
-    }
-    s.seedDelivery(attempt)
-    s.seedDelivery({ ...attempt, id: 'd-8001', partCoverage: [] })
-    const progress = await s.rust.request('answers.list', {
-      tab: tab.tab,
-      conversation: consulted.conversation,
-    })
-    assert.deepEqual(
-      progress.answers.find((item) => item.id === settledAnswer.id).partProgress,
-      {
-        delivery: 'd-8002',
-        total: 3,
-        uncovered: [1, 3],
-      },
-      'the latest attempt exposes exactly the unconfirmed parts without leaking answer bodies',
-    )
-    s.seedDelivery({ ...attempt, id: 'd-8003', state: 'accepted' })
-    const accepted = await s.rust.request('answers.list', {
-      tab: tab.tab,
-      conversation: consulted.conversation,
-    })
-    assert.equal(
-      accepted.answers.find((item) => item.id === settledAnswer.id).partProgress,
-      undefined,
-    )
-  })
-
-  it('says so plainly when the transcript cannot be read', async () => {
-    const consulted = await s.rust.request('consult', {
-      tab: tab.tab,
-      agent: 'nyx',
-      task: 'no transcript',
-      fresh: true,
-    })
-    const file = join(
-      s.env.CONSENSFLOW_HOME,
-      'workspaces',
-      workspaceKey(s.workspace),
-      'threads.json',
-    )
-    const threads = JSON.parse(readFileSync(file, 'utf8'))
-    threads[consulted.conversation].sessionId = 'a-session-that-is-not-on-disk'
-    writeFileSync(file, `${JSON.stringify(threads, null, 2)}\n`)
-
-    const listed = await s.rust.request('answers.list', {
-      tab: tab.tab,
-      pane: consulted.pane.id,
-      conversation: consulted.conversation,
-    })
-    // `unknown` is the adapter's word for "I could not read this", and it
-    // is not the same as "there are no answers": the page must be able to
-    // tell an empty conversation from one it cannot see.
-    assert.equal(listed.ok, true, JSON.stringify(listed))
-    assert.equal(listed.unknown, true)
-    assert.match(listed.reason, /no claude session/)
-    assert.deepEqual(listed.answers, [])
   })
 })
 
@@ -3716,19 +3264,6 @@ describe('BO1: a lead binds by launch evidence and resumes on what it bound', ()
     assert.deepEqual(s.seen.open.at(-1).argv.slice(-2), ['resume', sessionId])
   })
 
-  it('binds the first Codex turn while the pane stays open and no page is polling', async () => {
-    const opened = await s.rust.request('tab.open', { dir: s.workspace, harness: 'codex' })
-    const originator = tabOnDisk(opened.tab).lead.reserved.originator
-    const sessionId = 'a0000000-1111-4222-8333-444444444444'
-    seedCodexRollout(sessionId, 'First actual human task', originator)
-    await waitFor(() => tabOnDisk(opened.tab).lead.nativeSession === sessionId)
-    assert.equal(tabOnDisk(opened.tab).closed, false)
-    assert.equal(
-      tabOnDisk(opened.tab).panes.some((pane) => pane.id === opened.pane.id),
-      true,
-    )
-  })
-
   it('still resumes a legacy Codex launch that was identified by a prompt marker', async () => {
     const opened = await s.rust.request('tab.open', { dir: s.workspace, harness: 'codex' })
     const file = join(s.env.CONSENSFLOW_HOME, 'app', 'tabs.json')
@@ -3929,135 +3464,6 @@ describe('BO4, BO6, BO7: what a lead launch leaves behind when it does not simpl
   })
 })
 
-describe('BO8, BO9: what the page is told about a delivery', () => {
-  let s
-  let tab
-  let conversation
-
-  before(async () => {
-    s = await paneServer()
-    tab = await s.rust.request('tab.open', { dir: s.workspace, harness: 'claude-code' })
-    const consulted = await s.rust.request('consult', {
-      tab: tab.tab,
-      agent: 'nyx',
-      task: 'projected',
-    })
-    conversation = consulted.conversation
-    // A record the way `plan()` writes one: the tab and pane live on the
-    // TARGET, because a delivery is aimed at a lead, not at the pane that
-    // produced the answer.
-    s.seedDelivery({
-      id: 'd-501',
-      conversation,
-      agent: 'nyx',
-      answerId: 'a-1',
-      answer: 'planned',
-      state: 'pending',
-      kind: 'claude-code',
-      target: {
-        leadId: `tab:${tab.tab}:1`,
-        session: 'lead',
-        tab: tab.tab,
-        pane: tab.pane.id,
-        generation: 1,
-      },
-    })
-  })
-  after(async () => {
-    await s.close()
-  })
-
-  it('BO8: projects the tab and pane a planned record actually names', async () => {
-    const state = await s.rust.request('state.list', {})
-    const record = state.deliveries.find((candidate) => candidate.id === 'd-501')
-    assert.notEqual(record, undefined, JSON.stringify(state.deliveries))
-    // Reading `record.tab` and `record.pane` off a planned record finds
-    // nothing at all, and the page's own pane filter then hides the badge
-    // for a delivery that is perfectly valid.
-    assert.equal(record.tab, tab.tab)
-    assert.equal(record.pane, tab.pane.id)
-    assert.equal(record.generation, tab.pane.generation)
-    assert.equal(record.state, 'pending')
-  })
-
-  it('BO9: an answer is uncertain when its delivery is, not only when it is unfinished', async () => {
-    // A finished answer whose delivery ended `uncertain`: the bytes may or
-    // may not have reached the lead. Reporting that as `delivered: false,
-    // uncertain: false` tells the human it plainly did not arrive, and the
-    // one thing worse than a missing answer is a second copy of one.
-    s.seedDelivery({
-      id: 'd-502',
-      conversation,
-      agent: 'nyx',
-      answerId: 'answer-uncertain',
-      state: 'uncertain',
-      reason: 'the write outcome is unknown',
-      target: {
-        leadId: `tab:${tab.tab}:1`,
-        session: 'lead',
-        tab: tab.tab,
-        pane: tab.pane.id,
-        generation: 1,
-      },
-    })
-    const sessionId = '77777777-8888-9999-aaaa-bbbbbbbbbbbb'
-    const projects = join(s.env.CLAUDE_CONFIG_DIR, 'projects', 'ws')
-    mkdirSync(projects, { recursive: true })
-    writeFileSync(
-      join(projects, `${sessionId}.jsonl`),
-      readFileSync('tests/engine/fixtures/completion/claude-code/fragments.jsonl', 'utf8'),
-    )
-    const file = join(
-      s.env.CONSENSFLOW_HOME,
-      'workspaces',
-      workspaceKey(s.workspace),
-      'threads.json',
-    )
-    const threads = JSON.parse(readFileSync(file, 'utf8'))
-    threads[conversation].sessionId = sessionId
-    writeFileSync(file, `${JSON.stringify(threads, null, 2)}\n`)
-
-    const listed = await s.rust.request('answers.list', {
-      tab: tab.tab,
-      pane: tab.pane.id,
-      conversation,
-    })
-    assert.equal(listed.ok, true, JSON.stringify(listed))
-    const answers = listed.answers
-    assert.ok(answers.length > 0)
-    assert.ok(
-      answers.every((answer) => answer.uncertain === false),
-      'a complete answer with no delivery is not uncertain',
-    )
-
-    // Now aim the uncertain delivery at one of them.
-    const target = answers[0]
-    s.seedDelivery({
-      id: 'd-502',
-      conversation,
-      agent: 'nyx',
-      answerId: target.id,
-      state: 'uncertain',
-      reason: 'the write outcome is unknown',
-      target: {
-        leadId: `tab:${tab.tab}:1`,
-        session: 'lead',
-        tab: tab.tab,
-        pane: tab.pane.id,
-        generation: 1,
-      },
-    })
-    const again = await s.rust.request('answers.list', {
-      tab: tab.tab,
-      pane: tab.pane.id,
-      conversation,
-    })
-    const marked = again.answers.find((answer) => answer.id === target.id)
-    assert.equal(marked.uncertain, true, 'its delivery may or may not have landed')
-    assert.equal(marked.delivered, false, 'and it was never accepted')
-  })
-})
-
 describe('TEST-PANE-141/IMPL-PANE-142: current delivery and startup projection', () => {
   let s
   let tab
@@ -4114,33 +3520,6 @@ describe('TEST-PANE-141/IMPL-PANE-142: current delivery and startup projection',
 
   after(async () => {
     await s.close()
-  })
-
-  it('TEST-PANE-141: counts one current pending answer per latest delivery attempt', async () => {
-    const state = await s.rust.request('state.list', {})
-    const current = state.deliveries.filter(
-      (record) =>
-        record.tab === tab.tab.id &&
-        record.pane === tab.leadPane.id &&
-        record.generation === 1 &&
-        ['pending', 'waiting'].includes(record.state),
-    )
-    assert.deepEqual(
-      current.map((record) => record.id).sort(),
-      ['d-1412', 'd-1416'],
-      'duplicate parts and attempts collapse, while accepted/cancelled latest attempts disappear',
-    )
-    assert.deepEqual(
-      current.map((record) => ({
-        conversation: record.conversation,
-        agent: record.agent,
-        reason: record.reason,
-      })),
-      [
-        { conversation, agent: 'nyx', reason: 'actual worker waiting reason' },
-        { conversation, agent: 'nyx', reason: 'manual retry waiting' },
-      ],
-    )
   })
 
   it('IMPL-PANE-142: exposes only a matching failed startup while the pane stays alive', async () => {
@@ -4211,120 +3590,6 @@ describe('TEST-PANE-141/IMPL-PANE-142: current delivery and startup projection',
   })
 })
 
-describe('BO3, BO5: the human sending and stopping a delivery', () => {
-  let s
-  let tab
-  let conversation
-  let answerId
-
-  before(async () => {
-    s = await paneServer()
-    tab = await s.rust.request('tab.open', { dir: s.workspace, harness: 'claude-code' })
-    const consulted = await s.rust.request('consult', {
-      tab: tab.tab,
-      agent: 'nyx',
-      task: 'manual policy',
-    })
-    conversation = consulted.conversation
-    // The pane is on manual, which is the case that matters: under manual
-    // the watcher plans NOTHING, so there is never a record to mark.
-    await s.rust.request('notify.set', { scope: 'pane', id: consulted.pane.id, mode: 'manual' })
-
-    const sessionId = 'cccccccc-dddd-eeee-ffff-000000000000'
-    const projects = join(s.env.CLAUDE_CONFIG_DIR, 'projects', 'manual')
-    mkdirSync(projects, { recursive: true })
-    writeFileSync(
-      join(projects, `${sessionId}.jsonl`),
-      readFileSync('tests/engine/fixtures/completion/claude-code/fragments.jsonl', 'utf8'),
-    )
-    const file = join(
-      s.env.CONSENSFLOW_HOME,
-      'workspaces',
-      workspaceKey(s.workspace),
-      'threads.json',
-    )
-    const threads = JSON.parse(readFileSync(file, 'utf8'))
-    threads[conversation].sessionId = sessionId
-    writeFileSync(file, `${JSON.stringify(threads, null, 2)}\n`)
-    const listed = await s.rust.request('answers.list', {
-      tab: tab.tab,
-      pane: tab.pane.id,
-      conversation,
-    })
-    answerId = listed.answers[0].id
-  })
-  after(async () => {
-    await s.close()
-  })
-
-  it('BO5: sends an answer the watcher never planned, because the policy is manual', async () => {
-    const sent = await s.rust.request('deliver.now', {
-      delivery: null,
-      tab: tab.tab,
-      conversation,
-      answerId,
-      resend: false,
-    })
-    // "not-seen-yet" was the whole bug: under a manual policy no record is
-    // ever planned, so the one button that exists to override manual could
-    // never do anything at all.
-    assert.equal(sent.ok, true, JSON.stringify(sent))
-    assert.match(sent.delivery, /^d-\d+$/)
-    const record = s.deliveries()[sent.delivery]
-    assert.equal(record.manual, true, 'the override the watcher honours')
-    assert.equal(record.state, 'pending')
-    assert.equal(record.answerId, answerId)
-    assert.equal(record.conversation, conversation)
-    assert.equal(record.target.tab, tab.tab, 'aimed at the lead that is live now')
-    assert.equal(record.target.generation, 1)
-  })
-
-  it('BO3: never overwrites a delivery that was accepted while the click was in flight', async () => {
-    const planned = await s.rust.request('deliver.now', {
-      delivery: null,
-      tab: tab.tab,
-      conversation,
-      answerId,
-      resend: true,
-    })
-    assert.equal(planned.ok, true, JSON.stringify(planned))
-
-    // The watcher accepts it — which is what happens while a human's finger
-    // is still on the button.
-    const accepted = {
-      ...s.deliveries()[planned.delivery],
-      state: 'accepted',
-      acceptedAt: '2026-09-07T00:00:00.000Z',
-    }
-    s.seedDelivery(accepted)
-
-    // Cancelling now must not produce a cancelled record still carrying
-    // acceptedAt. `accepted` is terminal; the decision is made against the
-    // record as it IS, inside the queue, not against the snapshot the page
-    // was looking at.
-    const cancelled = await s.rust.request('deliver.cancel', { delivery: planned.delivery })
-    assert.equal(cancelled.ok, true, JSON.stringify(cancelled))
-    assert.equal(cancelled.changed, false)
-    assert.equal(cancelled.state, 'accepted')
-    assert.equal(s.deliveries()[planned.delivery].state, 'accepted')
-
-    // And sending it again makes a NEW record rather than dragging an
-    // accepted one back to pending.
-    const again = await s.rust.request('deliver.now', {
-      delivery: planned.delivery,
-      tab: tab.tab,
-      conversation,
-      answerId,
-      resend: false,
-    })
-    assert.equal(again.ok, true, JSON.stringify(again))
-    assert.equal(again.resent, true)
-    assert.notEqual(again.delivery, planned.delivery)
-    assert.equal(s.deliveries()[planned.delivery].state, 'accepted', 'history is not rewritten')
-    assert.equal(s.deliveries()[again.delivery].acceptedAt, undefined, 'and the new one is fresh')
-  })
-})
-
 describe('BO10: creating a tab over HTTP opens its lead too', () => {
   it('is the same operation tab.open is, with the same response', async () => {
     const s = await paneServer()
@@ -4364,232 +3629,6 @@ describe('BO10: creating a tab over HTTP opens its lead too', () => {
     } finally {
       await s.close()
     }
-  })
-})
-
-describe('page delivery actions enforce settled transcript identity', () => {
-  let s
-  let tab
-  let consulted
-  let incomplete
-  let nonAssistant
-
-  before(async () => {
-    s = await paneServer()
-    tab = await s.rust.request('tab.open', { dir: s.workspace, harness: 'claude-code' })
-    consulted = await s.rust.request('consult', {
-      tab: tab.tab,
-      agent: 'nyx',
-      task: 'page guards',
-    })
-    await s.rust.request('notify.set', { scope: 'pane', id: consulted.pane.id, mode: 'manual' })
-
-    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
-    const projects = join(s.env.CLAUDE_CONFIG_DIR, 'projects', 'page-guards')
-    mkdirSync(projects, { recursive: true })
-    writeFileSync(
-      join(projects, `${sessionId}.jsonl`),
-      readFileSync('tests/engine/fixtures/completion/claude-code/frontier-history.jsonl', 'utf8'),
-    )
-    const file = join(
-      s.env.CONSENSFLOW_HOME,
-      'workspaces',
-      workspaceKey(s.workspace),
-      'threads.json',
-    )
-    const threads = JSON.parse(readFileSync(file, 'utf8'))
-    threads[consulted.conversation].sessionId = sessionId
-    writeFileSync(file, `${JSON.stringify(threads, null, 2)}\n`)
-
-    const found = await harnessAnswers('claude-code', sessionId, s.env)
-    incomplete = found.items.find((item) => item.role === 'assistant' && item.complete !== true)
-    nonAssistant = found.items.find((item) => item.role !== 'assistant')
-    assert.ok(incomplete, 'fixture must expose an unsettled assistant item')
-    assert.ok(nonAssistant, 'fixture must expose a non-assistant item')
-  })
-
-  after(async () => {
-    await s.close()
-  })
-
-  it('refuses incomplete and non-assistant manual answers without creating a delivery', async () => {
-    const before = s.deliveries()
-    const incompleteResponse = await s.rust.request('deliver.now', {
-      tab: tab.tab,
-      conversation: consulted.conversation,
-      answerId: incomplete.id,
-      resend: false,
-    })
-    assert.equal(incompleteResponse.ok, false, JSON.stringify(incompleteResponse))
-    assert.equal(incompleteResponse.error, 'answer-incomplete')
-
-    const nonAssistantResponse = await s.rust.request('deliver.now', {
-      tab: tab.tab,
-      conversation: consulted.conversation,
-      answerId: nonAssistant.id,
-      resend: false,
-    })
-    assert.equal(nonAssistantResponse.ok, false, JSON.stringify(nonAssistantResponse))
-    assert.equal(nonAssistantResponse.error, 'answer-not-assistant')
-    assert.deepEqual(s.deliveries(), before)
-  })
-
-  it('rejects an unknown explicit delivery instead of falling back to answer planning', async () => {
-    const response = await s.rust.request('deliver.now', {
-      delivery: 'd-does-not-exist',
-      tab: tab.tab,
-      conversation: consulted.conversation,
-      answerId: incomplete.id,
-      resend: false,
-    })
-    assert.equal(response.ok, false, JSON.stringify(response))
-    assert.equal(response.error, 'no-delivery')
-  })
-
-  it('rejects every supplied identity dimension that disagrees with an explicit delivery', async () => {
-    const id = 'd-page-identity'
-    s.seedDelivery({
-      id,
-      conversation: consulted.conversation,
-      answerId: incomplete.id,
-      state: 'pending',
-      target: {
-        leadId: `tab:${tab.tab}:1`,
-        session: 'lead-session',
-        tab: tab.tab,
-        pane: tab.pane.id,
-        generation: 1,
-      },
-    })
-    for (const body of [
-      { tab: 't-wrong' },
-      { conversation: 'wrong-conversation' },
-      { answerId: 'wrong-answer' },
-    ]) {
-      const response = await s.rust.request('deliver.now', {
-        delivery: id,
-        tab: tab.tab,
-        conversation: consulted.conversation,
-        answerId: incomplete.id,
-        resend: false,
-        ...body,
-      })
-      assert.equal(response.ok, false, JSON.stringify(response))
-      assert.equal(response.error, 'delivery-mismatch')
-    }
-    assert.equal(s.deliveries()[id].state, 'pending')
-  })
-})
-
-describe('page delivery lookups stay within the requested tab', () => {
-  let s
-  let first
-  let second
-  let conversation
-  let answerId
-
-  before(async () => {
-    s = await paneServer()
-    first = await s.rust.request('tab.open', { dir: s.workspace, harness: 'claude-code' })
-    second = await s.rust.request('tab.open', { dir: s.workspace, harness: 'claude-code' })
-    const consulted = await s.rust.request('consult', {
-      tab: first.tab,
-      agent: 'nyx',
-      task: 'same workspace ownership',
-    })
-    conversation = consulted.conversation
-
-    const sessionId = 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff'
-    const projects = join(s.env.CLAUDE_CONFIG_DIR, 'projects', 'workspace')
-    mkdirSync(projects, { recursive: true })
-    writeFileSync(
-      join(projects, `${sessionId}.jsonl`),
-      readFileSync('tests/engine/fixtures/completion/claude-code/fragments.jsonl', 'utf8'),
-    )
-    s.bindSession(conversation, sessionId)
-    const found = await harnessAnswers('claude-code', sessionId, s.env)
-    answerId = found.items.find((item) => item.role === 'assistant' && item.complete === true).id
-  })
-
-  after(async () => {
-    await s.close()
-  })
-
-  it('does not let tab B deliver tab A answer A or mutate A record', async () => {
-    const id = 'd-cross-tab'
-    s.seedDelivery({
-      id,
-      conversation,
-      answerId,
-      state: 'pending',
-      target: {
-        leadId: `tab:${first.tab}:1`,
-        session: 'lead-a',
-        tab: first.tab,
-        pane: first.pane.id,
-        generation: 1,
-      },
-    })
-
-    const response = await s.rust.request('deliver.now', {
-      delivery: null,
-      tab: second.tab,
-      conversation,
-      answerId,
-      resend: false,
-    })
-    assert.equal(response.ok, false, JSON.stringify(response))
-    assert.equal(response.error, 'conversation-mismatch')
-    assert.equal(s.deliveries()[id].manual, undefined, 'tab A record was not selected or changed')
-    assert.equal(s.deliveries()[id].target.tab, first.tab)
-  })
-
-  it('does not let tab B read tab A conversation answers from the shared workspace', async () => {
-    const listed = await s.rust.request('answers.list', {
-      tab: second.tab,
-      pane: second.pane.id,
-      conversation,
-    })
-    assert.equal(listed.ok, false, JSON.stringify(listed))
-    assert.equal(listed.error, 'conversation-mismatch')
-  })
-})
-
-describe('closed tabs keep held answers visible but not sendable', () => {
-  let s
-  let tab
-
-  before(async () => {
-    s = await paneServer()
-    tab = await s.rust.request('tab.open', { dir: s.workspace, harness: 'claude-code' })
-    s.seedDelivery({
-      id: 'd-held-closed',
-      conversation: 'worker-closed',
-      answerId: 'answer-closed',
-      state: 'pending',
-      target: {
-        leadId: `tab:${tab.tab}:1`,
-        session: 'lead-session-closed',
-        tab: tab.tab,
-        pane: tab.pane.id,
-        generation: 1,
-      },
-    })
-    s.suspendTab(tab.tab)
-  })
-
-  after(async () => {
-    await s.close()
-  })
-
-  it('lists the held answer while closed and refuses send until resume', async () => {
-    const state = await s.rust.request('state.list', {})
-    assert.equal(state.ok, true, JSON.stringify(state))
-    assert.deepEqual(state.held, [{ id: 'd-held-closed', tab: tab.tab, answerId: 'answer-closed' }])
-
-    const sent = await s.rust.request('held.send', { tab: tab.tab })
-    assert.equal(sent.ok, false, JSON.stringify(sent))
-    assert.equal(sent.error, 'held-refused')
   })
 })
 
@@ -4776,7 +3815,6 @@ describe('a worker pane carries no billing guard of its own', () => {
  */
 async function restartableApp() {
   const t = tempEnv()
-  chooseCmuxMode(t)
   addAgent({ name: 'zeus', harness: 'codex', model: 'gpt-5-codex' }, t.env)
   const workspace = join(t.root, 'workspace')
   const shims = join(t.root, 'shims')
@@ -5301,6 +4339,7 @@ describe('a fresh app reaps the unresolved rows its predecessor left', () => {
 
 it('launches and follows up a native Codex worker without touching a draft (TEST-PANE-109)', async () => {
   const s = await paneServer({ nativeCodex: true })
+  let queue
   const claims = []
   s.rust.on('pane.claim_native_epoch', (body) => {
     claims.push(body)
@@ -5335,6 +4374,7 @@ it('launches and follows up a native Codex worker without touching a draft (TEST
       sessionId: row.sessionId,
     }
     writeFileSync(file, JSON.stringify(threads))
+    queue = await codexQueueFixture(row.reserved.channel, row.sessionId, s.t.root)
     s.state.latched = true
     const body = {
       tab: tab.tab.id,
@@ -5354,6 +4394,7 @@ it('launches and follows up a native Codex worker without touching a draft (TEST
     assert.equal(s.state.latched, true, 'native delivery never clears the input latch')
   } finally {
     await s.close()
+    await queue?.()
   }
 })
 
@@ -5569,7 +4610,7 @@ it('Pi lead loads the prepared private extension instead of mutable source files
   }
 })
 
-it('PM opens separately with only PM instructions and cannot call worker or administration APIs', async () => {
+it('PM owns advisors with private instructions and cannot call other groups or administration APIs', async () => {
   const s = await paneServer()
   try {
     const lead = await s.rust.request('tab.open', { dir: s.workspace, harness: 'codex' })
@@ -5591,15 +4632,26 @@ it('PM opens separately with only PM instructions and cannot call worker or admi
       (
         await s.api(token, '/api/panes/consult', {
           method: 'POST',
-          body: { tab: pm.tab, agent: 'zeus', task: 'forbidden', opId: 'pm-denied' },
+          body: { tab: lead.tab, agent: 'zeus', task: 'forbidden', opId: 'pm-denied' },
         })
       ).status,
-      403,
+      400,
     )
     assert.equal((await s.api(token, '/api/agents')).status, 403)
     const again = await s.rust.request('pm.open', { tab: lead.tab, harness: 'pi' })
     assert.equal(again.tab, pm.tab)
     assert.equal(s.seen.open.length, 2)
+    const advisor = await json(
+      await s.api(token, '/api/panes/consult', {
+        method: 'POST',
+        body: { tab: pm.tab, agent: 'zeus', task: 'review', opId: 'pm-advice' },
+      }),
+      200,
+    )
+    assert.equal(s.threads()[advisor.conversation].role, 'advisor')
+    const config = JSON.parse(s.seen.open.at(-1).env.CF_DELIVERY_CONFIG)
+    assert.equal(config.env.CONSENSFLOW_ROLE, 'advisor')
+    assert.match(config.args.join(' '), /consensflow-advisor/)
   } finally {
     await s.close()
   }
@@ -5611,6 +4663,7 @@ it('PM reads its own lead result completely and keeps immutable parts after the 
     const lead = await s.rust.request('tab.open', { dir: s.workspace, harness: 'claude-code' })
     const pm = await s.rust.request('pm.open', { tab: lead.tab, harness: 'pi' })
     const token = s.seen.open.at(-1).env.CONSENSFLOW_APP_TOKEN
+    await registerTestReceiver(s, s.seen.open.at(-1), 'pm-native')
     const tabsPath = join(s.env.CONSENSFLOW_HOME, 'app', 'tabs.json')
     const envelope = JSON.parse(readFileSync(tabsPath, 'utf8'))
     const parent = envelope.tabs.find((t) => t.id === lead.tab)
@@ -5620,7 +4673,7 @@ it('PM reads its own lead result completely and keeps immutable parts after the 
     const dir = join(s.env.CLAUDE_CONFIG_DIR, 'projects', 'workspace')
     mkdirSync(dir, { recursive: true })
     const nativePath = join(dir, `${session}.jsonl`)
-    const body = 'Complete lead answer. '.repeat(8000) + 'END-OF-ANSWER'
+    const body = `${'Complete lead answer. '.repeat(8000)}END-OF-ANSWER`
     const fixture = readFileSync(
       'tests/engine/fixtures/completion/claude-code/v266-tool-loop.jsonl',
       'utf8',
@@ -5635,7 +4688,7 @@ it('PM reads its own lead result completely and keeps immutable parts after the 
       if (line.type === 'assistant' && line.message?.stop_reason === 'end_turn')
         line.message.content = [{ type: 'text', text: body }]
     }
-    writeFileSync(nativePath, lines.map((line) => JSON.stringify(line)).join('\n') + '\n')
+    writeFileSync(nativePath, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`)
     const first = await json(
       await s.api(token, '/api/panes/lead.read', {
         method: 'POST',
@@ -5644,7 +4697,7 @@ it('PM reads its own lead result completely and keeps immutable parts after the 
       200,
     )
     assert.ok(first.of > 1, JSON.stringify(first))
-    assert.ok(first.text.includes('Complete lead answer.'))
+    assert.ok(first.text.includes('consensflow delivery'))
     rmSync(nativePath)
     const last = await json(
       await s.api(token, '/api/panes/lead.read', {
@@ -5671,6 +4724,7 @@ it('PM reads its own lead result completely and keeps immutable parts after the 
 
 it('PM sends the agreed text once to its own bound lead through the native queue', async () => {
   const s = await paneServer({ nativeCodex: true })
+  let queue
   try {
     const lead = await s.rust.request('tab.open', { dir: s.workspace, harness: 'codex' })
     const pm = await s.rust.request('pm.open', { tab: lead.tab, harness: 'pi' })
@@ -5687,6 +4741,7 @@ it('PM sends the agreed text once to its own bound lead through the native queue
     const session = '11111111-2222-4333-8444-555555555555'
     parent.lead.nativeSession = session
     writeFileSync(tabsPath, JSON.stringify(envelope))
+    queue = await codexQueueFixture(parent.lead.reserved.channel, session, s.t.root)
     const claims = []
     s.rust.on('pane.claim_native_epoch', (request) => {
       claims.push(request)
@@ -5707,6 +4762,7 @@ it('PM sends the agreed text once to its own bound lead through the native queue
     assert.equal(s.seen.paste.length, 0)
   } finally {
     await s.close()
+    await queue?.()
   }
 })
 
@@ -5842,6 +4898,256 @@ it('permanent pane deletion stops only the requested generation and refuses the 
     const current = (await s.rust.request('state.list', {})).tabs.find((row) => row.id === tab.tab)
     assert.equal(current.panes.length, 1)
     assert.equal(current.closed, false)
+  } finally {
+    await s.close()
+  }
+})
+
+// Fake Rust never runs the supervisor. This fixture supplies its native admission boundary.
+async function codexQueueFixture(channel, session, root) {
+  const server = createServer(async (request, response) => {
+    assert.equal(request.headers.authorization, `Bearer ${channel.sessionBridge.token}`)
+    response.setHeader('content-type', 'application/json')
+    if (request.url === '/session')
+      return response.end(JSON.stringify({ launchId: channel.launchId, sessionId: session }))
+    let body = ''
+    for await (const chunk of request) body += chunk
+    const record = JSON.parse(body)
+    assert.equal(record.launchId, channel.launchId)
+    assert.equal(record.sessionId, session)
+    appendFileSync(
+      join(root, 'native-queue.jsonl'),
+      `${JSON.stringify(['queue', '--thread', session, '--message', record.text])}\n`,
+    )
+    response.end(JSON.stringify({ ok: true, admitted: true }))
+  })
+  await new Promise((resolve) =>
+    server.listen(Number(new URL(channel.sessionBridge.endpoint).port), '127.0.0.1', resolve),
+  )
+  return async () => {
+    server.closeAllConnections()
+    await new Promise((resolve) => server.close(resolve))
+  }
+}
+
+for (const kind of ['claude-code', 'codex', 'pi', 'opencode']) {
+  it(`coordinator receiver capability is wired separately for lead and PM: ${kind}`, async () => {
+    const s = await paneServer({ nativeCodex: true })
+    try {
+      const lead = await s.rust.request('tab.open', { dir: s.workspace, harness: kind })
+      const leadLaunch = s.seen.open.at(-1)
+      const pm = await s.rust.request('pm.open', { tab: lead.tab, harness: kind })
+      const pmLaunch = s.seen.open.at(-1)
+      const left = JSON.parse(leadLaunch.env.CF_RESULT_RECEIVER)
+      const right = JSON.parse(pmLaunch.env.CF_RESULT_RECEIVER)
+      assert.equal(left.kind, kind)
+      assert.equal(right.kind, kind)
+      assert.notEqual(left.token, right.token)
+      assert.notEqual(left.token, leadLaunch.env.CONSENSFLOW_APP_TOKEN)
+      for (const [config, tab] of [
+        [left, lead.tab],
+        [right, pm.tab],
+      ]) {
+        const response = await s.api(config.token, '/api/receiver/register', {
+          method: 'POST',
+          body: { session: 'receiver-session', previous: null },
+        })
+        assert.equal((await json(response, 200)).owner, tab)
+      }
+    } finally {
+      await s.close()
+    }
+  })
+}
+
+for (const [kind, agent] of [
+  ['claude-code', 'nyx'],
+  ['codex', 'zeus'],
+  ['pi', 'clio'],
+  ['opencode', 'sage'],
+]) {
+  it(`PM advisor ${kind} keeps its role and native identity when reopened`, async () => {
+    const s = await paneServer()
+    try {
+      if (agent === 'sage')
+        addAgent({ name: agent, harness: 'opencode', model: 'opencode/muse-spark-1' }, s.env)
+      const parent = await s.rust.request('tab.open', { dir: s.workspace, harness: 'pi' })
+      const pm = await s.rust.request('pm.open', { tab: parent.tab, harness: 'pi' })
+      const token = s.seen.open.at(-1).env.CONSENSFLOW_APP_TOKEN
+      const opened = await json(
+        await s.api(token, '/api/panes/consult', {
+          method: 'POST',
+          body: { tab: pm.tab, agent, task: 'research only', opId: 'advisor-first' },
+        }),
+        200,
+      )
+      const config = JSON.parse(s.seen.open.at(-1).env.CF_DELIVERY_CONFIG)
+      assert.match(JSON.stringify(config), /consensflow-advisor/)
+      await s.endPane(opened.pane, token)
+      const native = s.threads()[opened.conversation].sessionId
+      const reopened = await json(
+        await s.api(token, '/api/panes/attach', {
+          method: 'POST',
+          body: { tab: pm.tab, session: opened.conversation, opId: 'advisor-resume' },
+        }),
+        200,
+      )
+      assert.equal(reopened.outcome, 'opened')
+      assert.equal(s.threads()[opened.conversation].sessionId, native)
+      assert.equal(s.threads()[opened.conversation].role, 'advisor')
+      const frame = s.seen.open.at(-1)
+      assert(frame.argv.includes('attach'))
+      assert.match(frame.env.CF_DELIVERY_CONFIG, /consensflow-advisor/)
+      assert.equal(JSON.parse(frame.env.CF_DELIVERY_CONFIG).env.CONSENSFLOW_ROLE, 'advisor')
+      assert.equal(s.threads()[opened.conversation].lead, `tab:${pm.tab}:1`)
+    } finally {
+      await s.close()
+    }
+  })
+}
+
+async function registerTestReceiver(s, frame, session) {
+  const config = JSON.parse(frame.env.CF_RESULT_RECEIVER)
+  const old = await json(
+    await s.api(config.token, '/api/receiver/state', { method: 'POST', body: {} }),
+    200,
+  )
+  return json(
+    await s.api(config.token, '/api/receiver/register', {
+      method: 'POST',
+      body: { session, previous: old?.lease ?? null },
+    }),
+    200,
+  )
+}
+
+it('explicit inbox reads preserve full parts and idempotency without creating receipts or crossing owners', async () => {
+  const s = await paneServer()
+  try {
+    const tab = await s.tab('claude-code')
+    await registerTestReceiver(s, tab.frame, 'reader-session')
+    const state = emptyInbox()
+    const result = indexResult(state, {
+      id: 'd-700',
+      owner: tab.tab.id,
+      conversation: 'long-worker',
+      agent: 'zeus',
+      kind: 'codex',
+      session: 'worker-native',
+      answerId: 'a-long',
+      answer: 'complete line\n'.repeat(5000),
+      now: 1,
+    })
+    const file = join(s.env.CONSENSFLOW_HOME, 'workspaces', workspaceKey(s.workspace), 'inbox.json')
+    const previous = JSON.parse(readFileSync(file, 'utf8'))
+    state.receivers = previous.receivers
+    writeFileSync(file, JSON.stringify(state))
+    const read = (body, token = tab.lead, id = tab.tab.id) =>
+      s.api(token, '/api/panes/read', {
+        method: 'POST',
+        body: { tab: id, deliveryId: result.id, ...body },
+      })
+    const first = await json(await read({ opId: 'read-first' }), 200)
+    assert.equal(first.k, 1)
+    assert.equal(first.of, result.parts.length)
+    assert.ok(first.text.includes(result.parts[0].text))
+    assert.ok(first.bytes < 9500)
+    assert.deepEqual(await json(await read({ opId: 'read-first' }), 200), first)
+    let saved = JSON.parse(readFileSync(file, 'utf8')).results[result.id]
+    assert.equal(saved.claims.length, 1)
+    assert.equal(saved.claims[0].state, 'submitting')
+    assert.equal(saved.claims[0].evidence, undefined)
+    const last = await json(await read({ opId: 'read-last', part: first.of }), 200)
+    assert.ok(last.text.includes(result.parts.at(-1).text))
+    for (const [body, status] of [
+      [{ opId: 'bad-part', part: 0 }, 400],
+      [{ opId: 'past-end', part: first.of + 1 }, 400],
+      [{ opId: 'bad-id', deliveryId: 'd-99999' }, 404],
+      [{ opId: 'bad-shape', deliveryId: '../no' }, 400],
+    ])
+      assert.equal((await read(body)).status, status)
+    assert.equal(
+      (await read({ opId: 'bad-part', part: 1 })).status,
+      400,
+      'refusals are idempotent too',
+    )
+    const other = await s.tab('claude-code')
+    assert.equal((await read({ opId: 'foreign' }, other.lead, other.tab.id)).status, 404)
+    saved = JSON.parse(readFileSync(file, 'utf8')).results[result.id]
+    assert.equal(saved.claims.length, 2)
+    assert.equal(s.seen.paste.length, 0)
+  } finally {
+    await s.close()
+  }
+})
+
+it('PM suspension, advisor restoration and deletion preserve its parent and another session', async () => {
+  const s = await paneServer()
+  const disk = () =>
+    JSON.parse(readFileSync(join(s.env.CONSENSFLOW_HOME, 'app', 'tabs.json'), 'utf8')).tabs
+  try {
+    const parent = await s.rust.request('tab.open', { dir: s.workspace, harness: 'claude-code' })
+    const other = await s.rust.request('tab.open', { dir: s.workspace, harness: 'codex' })
+    const pm = await s.rust.request('pm.open', { tab: parent.tab, harness: 'claude-code' })
+    const token = s.seen.open.at(-1).env.CONSENSFLOW_APP_TOKEN
+    const advisors = []
+    for (let n = 0; n < 2; n++) {
+      const advisor = await json(
+        await s.api(token, '/api/panes/consult', {
+          method: 'POST',
+          body: {
+            tab: pm.tab,
+            agent: 'zeus',
+            task: `advise ${n}`,
+            fresh: true,
+            opId: `pm-life-${n}`,
+          },
+        }),
+        200,
+      )
+      advisors.push(advisor)
+      await s.endPane(advisor.pane, token)
+    }
+    const sessions = advisors.map((a) => s.threads()[a.conversation].sessionId)
+    s.rust.event('pane.exit', { id: pm.pane.id, generation: pm.pane.generation })
+    await waitFor(() => disk().find((t) => t.id === pm.tab).closed)
+    assert.equal(disk().find((t) => t.id === parent.tab).closed, false)
+    assert.equal(disk().find((t) => t.id === other.tab).closed, false)
+    s.state.list = () => ({
+      ok: true,
+      panes: [parent.pane, other.pane].map((p) => ({ ...p, alive: true, idleMs: 0 })),
+    })
+    const before = s.seen.open.length
+    const resumed = await s.rust.request('tab.resume', { tab: pm.tab })
+    assert.equal(resumed.ok, true, JSON.stringify(resumed))
+    assert.equal(resumed.workers.length, 2)
+    assert.equal(
+      s.seen.open.length,
+      before + 3,
+      'one PM and its two advisors, with no parent restart',
+    )
+    for (let n = 0; n < advisors.length; n++) {
+      const row = s.threads()[advisors[n].conversation]
+      assert.equal(row.role, 'advisor')
+      assert.equal(row.sessionId, sessions[n])
+      assert.equal(row.lead, `tab:${pm.tab}:1`)
+    }
+    assert(
+      s.seen.open
+        .slice(before + 1)
+        .every((f) => JSON.parse(f.env.CF_DELIVERY_CONFIG).env.CONSENSFLOW_ROLE === 'advisor'),
+    )
+    const removed = await s.rust.request('tab.delete', {
+      tab: pm.tab,
+      generation: disk().find((t) => t.id === pm.tab).lead.generation,
+    })
+    assert.equal(removed.ok, true, JSON.stringify(removed))
+    assert.equal(
+      disk().some((t) => t.id === pm.tab),
+      false,
+    )
+    assert.equal(disk().find((t) => t.id === parent.tab).closed, false)
+    assert.equal(disk().find((t) => t.id === other.tab).closed, false)
   } finally {
     await s.close()
   }

@@ -5,12 +5,11 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs'
-import { homedir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { configRoot } from './roster.js'
 
 /**
  * The terminal command, installed by the app.
@@ -26,31 +25,13 @@ const NAMES = ['consensflow', 'cf']
 /** The marker that says a launcher is ours to replace or remove. */
 const MARKER = 'Installed by ConsensFlow'
 
-/**
- * Where a user-installed command can go, best first. `/usr/local/bin` is on
- * everyone's PATH but often needs privileges; `~/.local/bin` always belongs
- * to the user. `CONSENSFLOW_BIN_DIR` overrides both — which is also what
- * keeps tests off the real machine.
- */
 function isWindows(env) {
   return process.platform === 'win32' || (env.OS ?? '').toLowerCase().includes('windows')
 }
 
-function home(env) {
-  return env.HOME ?? env.USERPROFILE ?? homedir()
-}
-
+/** Runtime launchers belong to ConsensFlow home, never a project or global bin. */
 function defaultCandidates(env) {
-  const explicit = env.CONSENSFLOW_BIN_DIR
-  if (typeof explicit === 'string' && explicit.length > 0) return [explicit]
-  if (isWindows(env)) {
-    // There is no /usr/local/bin to fall back to: the per-user place Windows
-    // apps put their shims is under LOCALAPPDATA, and it is on PATH for
-    // anything installed the modern way.
-    const local = env.LOCALAPPDATA ?? join(home(env), 'AppData', 'Local')
-    return [join(local, 'Programs', 'ConsensFlow', 'bin')]
-  }
-  return ['/usr/local/bin', join(home(env), '.local', 'bin')]
+  return [join(configRoot(env), 'bin')]
 }
 
 function writable(dir) {
@@ -168,19 +149,4 @@ export function installTerminalCommand(env, options = {}) {
   }
 
   return terminalCommandStatus(env, options)
-}
-
-export function removeTerminalCommand(env, options = {}) {
-  const candidates = options.candidates ?? defaultCandidates(env)
-  const removed = []
-  for (const dir of candidates) {
-    for (const name of launcherNames(env)) {
-      const path = join(dir, name)
-      if (!existsSync(path)) continue
-      if (!readFileSync(path, 'utf8').includes(MARKER)) continue
-      rmSync(path, { force: true })
-      removed.push(path)
-    }
-  }
-  return { removed }
 }

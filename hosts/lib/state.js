@@ -3,10 +3,11 @@ import { realpathSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { readBenchmarkCache, withBenchmarks } from "./benchmarks.js";
 import { nowIso, slugify, stripMention } from "./utils.js";
-import { isOrphanedPreset, syncAgentWithPreset } from "./presets.js";
+import { agentProfile, isOrphanedPreset, syncAgentWithPreset } from "./presets.js";
 
-// "image" is a backend-based kind (Codex Responses → gpt-image-2 via the Codex CLI login), not a
+// "image" is a backend-based kind (Codex image tool via the Codex CLI login), not a
 // CLI runner: it is handled upstream in cf.mjs, and buildRunnerInvocation keeps a loud backstop.
 export const AGENT_KINDS = ["pi", "claude-code", "codex", "opencode", "kimi", "image"];
 export const SKILLS_POLICIES = ["default", "none", "explicit"];
@@ -236,6 +237,7 @@ export function normalizeAgent(input) {
   if (skillPaths.length > 0) agent.skillPaths = skillPaths;
 
   if (input.maxTurns !== undefined) agent.maxTurns = Number(input.maxTurns);
+  agent.profile = withBenchmarks(agent, agentProfile(agent), readBenchmarkCache(configHome()));
   return agent;
 }
 

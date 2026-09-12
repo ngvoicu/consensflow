@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url'
 
 import { expect, test } from '@playwright/test'
 import { Tabs } from '../../src/tabs.js'
+import { startUiServer } from '../../src/ui.js'
+import { tempEnv } from '../../tests/helpers.mjs'
 
 const UI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'ui')
 const ROSTER_ORIGIN = 'http://localhost:43123'
@@ -180,33 +182,20 @@ function cannedState() {
         },
       ],
     },
-    deliveries: [
+    results: [
       {
-        id: 'd-draft',
+        id: 'd-1',
         tab: 't-four',
-        pane: 'p4-lead',
-        generation: 1,
-        state: 'pending',
-        reason: 'draft open',
-      },
-      {
-        id: 'd-busy',
-        tab: 't-four',
-        pane: 'p4-w1',
-        generation: 1,
-        state: 'pending',
-        reason: 'lead busy',
-      },
-      {
-        id: 'd-unbound',
-        tab: 't-four',
-        pane: 'p4-w2',
-        generation: 1,
-        state: 'pending',
-        reason: 'unbound',
+        conversation: 'nyx-coral-lane',
+        agent: 'nyx',
+        answerId: 'answer-one',
+        state: 'waiting',
+        preview: 'worker reply ready',
+        parts: 1,
+        receivedParts: 0,
+        createdAt: 1,
       },
     ],
-    held: [{ id: 'held-1', tab: 't-four', answerId: 'answer-held' }],
   }
 }
 
@@ -231,8 +220,7 @@ function gridState(count) {
       panes,
     },
   ]
-  state.deliveries = []
-  state.held = []
+  state.results = []
   return state
 }
 
@@ -341,6 +329,7 @@ async function installTauriShim(
         const logged = { ...args }
         if (logged.onOutput !== undefined) logged.onOutput = '[channel]'
         window.__calls.push({ command, args: copy(logged) })
+        if (command === 'pane_resize' && window.__resizeGate) await window.__resizeGate
         if (Object.hasOwn(window.__commandResults, command)) {
           return copy(window.__commandResults[command])
         }
@@ -365,6 +354,15 @@ async function installTauriShim(
           return {
             ok: true,
             answers: copy(window.__state.answers[args.conversation] ?? []),
+          }
+        }
+        if (command === 'result_body') {
+          const text = window.__state.resultBodies?.[args.result] ?? ''
+          const end = Math.min((args.offset ?? 0) + 16000, text.length)
+          return {
+            ok: true,
+            text: text.slice(args.offset ?? 0, end),
+            next: end < text.length ? end : null,
           }
         }
         if (command === 'tab_resume') {
@@ -573,12 +571,18 @@ async function installTauriShim(
           effectivePolicy: { mode: 'auto', source: 'tab' },
           alive: true,
         })
-        window.__state.deliveries.push({
-          id: 'd-external',
+        window.__state.results.push({
+          id: 'd-2',
+          conversation: 'clio-external-worker',
+          agent: 'clio',
+          preview: 'worker reply ready',
+          parts: 1,
+          receivedParts: 0,
+          createdAt: 2,
           tab: 't-four',
           pane: 'p4-lead',
           generation: 1,
-          state: 'pending',
+          state: 'waiting',
           reason: 'worker reply ready',
         })
         window.__emitPaneOutput('p4-w3', 1, 1, [
@@ -665,12 +669,12 @@ test('opens Agents full-window and preserves the roster and pane services when c
   await boot(page)
   const dialog = page.getByTestId('roster-panel')
   const iframe = page.getByTestId('roster-frame')
-  const opener = page.getByRole('button', { name: 'Agents', exact: true })
+  const opener = page.getByRole('button', { name: 'Your agents', exact: true })
   await expect(dialog).not.toBeVisible()
   await expect(iframe).toHaveAttribute('src', `${ROSTER_ORIGIN}/?token=ui-token`)
   const before = await page.getByTestId('pane-stage').boundingBox()
   await opener.click()
-  await expect(page.getByRole('dialog', { name: 'Agents', exact: true })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: 'Your agents', exact: true })).toBeVisible()
   const bounds = await dialog.boundingBox()
   const viewport = page.viewportSize()
   expect(bounds.x).toBe(0)
@@ -687,16 +691,142 @@ test('opens Agents full-window and preserves the roster and pane services when c
         (await commandCalls(page, 'pane_ack')).filter((call) => call.args.id === 'p5-w1').length,
     )
     .toBe(8)
-  await page.getByRole('button', { name: 'Close Agents' }).click()
+  await page.getByRole('button', { name: 'Close Your agents' }).click()
   await expect(dialog).not.toBeVisible()
   await expect(opener).toBeFocused()
   await expect(iframe).toHaveCount(1)
   expect(await page.getByTestId('pane-stage').boundingBox()).toEqual(before)
   await opener.click()
-  await page.getByRole('button', { name: 'Close Agents' }).focus()
+  await page.getByRole('button', { name: 'Close Your agents' }).focus()
   await page.keyboard.press('Escape')
   await expect(dialog).not.toBeVisible()
   await expect(opener).toBeFocused()
+  expect(await commandCalls(page, 'close_pane')).toHaveLength(0)
+})
+
+test('opens Agent library beside Your agents and retains both frames with refresh on reopening', async ({
+  page,
+}) => {
+  await boot(page)
+  const own = page.getByRole('button', { name: 'Your agents', exact: true })
+  const library = page.getByRole('button', { name: 'Agent library', exact: true })
+  await expect(page.locator('#roster-toggle + #library-toggle')).toHaveText('Agent library')
+  const frame = page.getByTestId('library-frame')
+  await expect(frame).not.toHaveAttribute('src', /.+/)
+  await library.click()
+  await expect(page.getByRole('dialog', { name: 'Agent library', exact: true })).toBeVisible()
+  await expect(frame).toHaveAttribute('src', `${ROSTER_ORIGIN}/library?token=ui-token`)
+  expect(await page.locator('#library-dialog').boundingBox()).toEqual({
+    x: 0,
+    y: 0,
+    ...page.viewportSize(),
+  })
+  const probe = page.frameLocator('[data-testid="library-frame"]')
+  await probe.locator('main').evaluate((node) => {
+    node.textContent = 'retained library'
+    window.refreshes = 0
+    window.addEventListener('message', (event) => {
+      if (event.data === 'consensflow:refresh-agents') window.refreshes++
+    })
+  })
+  await page.getByRole('button', { name: 'Close Agent library' }).click()
+  await expect(library).toBeFocused()
+  await own.click()
+  await expect(page.getByRole('dialog', { name: 'Your agents', exact: true })).toBeVisible()
+  await expect(page.locator('#library-dialog')).not.toBeVisible()
+  await page.getByRole('button', { name: 'Close Your agents' }).click()
+  await library.click()
+  await expect(probe.locator('main')).toHaveText('retained library')
+  await expect.poll(() => probe.locator('main').evaluate(() => window.refreshes)).toBe(1)
+  await page.getByRole('button', { name: 'Close Agent library' }).focus()
+  await page.keyboard.press('Escape')
+  await expect(library).toBeFocused()
+  expect(await commandCalls(page, 'close_pane')).toHaveLength(0)
+})
+
+test('real agent pages add and remove across native shell screens at the minimum window width', async ({
+  page,
+}) => {
+  const box = tempEnv()
+  const service = await startUiServer(box.env)
+  try {
+    await page.setViewportSize({ width: 560, height: 900 })
+    const state = cannedState()
+    state.roster = { url: service.url, token: service.token }
+    await boot(page, { state })
+    for (const id of ['roster-toggle', 'library-toggle', 'harnesses-toggle']) {
+      const bounds = await page.locator(`#${id}`).boundingBox()
+      expect(bounds.x).toBeGreaterThanOrEqual(0)
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(560)
+    }
+    await page.getByRole('button', { name: 'Your agents', exact: true }).click()
+    const own = page.frameLocator('[data-testid="roster-frame"]')
+    await expect(own.locator('#roster')).toContainText('No agents yet')
+    await own.getByRole('searchbox').fill('Astra')
+    await page.getByRole('button', { name: 'Close Your agents' }).click()
+    await page.getByRole('button', { name: 'Agent library', exact: true }).click()
+    const library = page.frameLocator('[data-testid="library-frame"]')
+    await library.getByRole('searchbox').fill('maia')
+    await library.getByRole('button', { name: 'Add', exact: true }).click()
+    await expect(library.getByRole('button', { name: 'Already added' })).toBeDisabled()
+    await page.getByRole('button', { name: 'Close Agent library' }).click()
+    await page.getByRole('button', { name: 'Your agents', exact: true }).click()
+    await expect(own.locator('.callsign')).toHaveText('maia')
+    await expect(own.getByRole('searchbox')).toHaveValue('Astra')
+    await own.getByRole('button', { name: 'Remove', exact: true }).click()
+    await expect(own.locator('.callsign')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Close Your agents' }).click()
+    await page.getByRole('button', { name: 'Agent library', exact: true }).click()
+    await expect(library.getByRole('button', { name: 'Add', exact: true })).toBeEnabled()
+    await expect(library.getByRole('searchbox')).toHaveValue('maia')
+  } finally {
+    await page.close()
+    await service.close()
+    box.cleanup()
+  }
+})
+
+test('opens Harnesses separately, loads it on demand and keeps Agents drafts and panes alive', async ({
+  page,
+}) => {
+  await boot(page)
+  const opener = page.getByRole('button', { name: 'Harnesses', exact: true })
+  const dialog = page.getByRole('dialog', { name: 'Harnesses', exact: true })
+  const frame = page.getByTestId('harnesses-frame')
+  await expect(frame).not.toHaveAttribute('src', /.+/)
+  await page.getByRole('button', { name: 'Your agents', exact: true }).click()
+  const roster = page.frameLocator('[data-testid="roster-frame"]')
+  await roster.locator('main').evaluate((node) => {
+    const input = document.createElement('input')
+    input.id = 'draft'
+    input.value = 'unfinished agent'
+    node.append(input)
+  })
+  await page.getByRole('button', { name: 'Close Your agents' }).click()
+  const before = await page.getByTestId('pane-stage').boundingBox()
+  await opener.click()
+  await expect(dialog).toBeVisible()
+  await expect(frame).toHaveAttribute('src', `${ROSTER_ORIGIN}/harnesses?token=ui-token`)
+  const bounds = await dialog.boundingBox()
+  expect(bounds).toEqual({ x: 0, y: 0, ...page.viewportSize() })
+  await page.evaluate(() => window.__emitPaneFlood('p5-w1', 1, 8))
+  await expect
+    .poll(
+      async () =>
+        (await commandCalls(page, 'pane_ack')).filter((call) => call.args.id === 'p5-w1').length,
+    )
+    .toBe(8)
+  await page.getByRole('button', { name: 'Close Harnesses' }).click()
+  await expect(dialog).not.toBeVisible()
+  await expect(opener).toBeFocused()
+  expect(await page.getByTestId('pane-stage').boundingBox()).toEqual(before)
+  await opener.click()
+  await page.getByRole('button', { name: 'Close Harnesses' }).focus()
+  await page.keyboard.press('Escape')
+  await expect(dialog).not.toBeVisible()
+  await expect(opener).toBeFocused()
+  await page.getByRole('button', { name: 'Your agents', exact: true }).click()
+  await expect(roster.locator('#draft')).toHaveValue('unfinished agent')
   expect(await commandCalls(page, 'close_pane')).toHaveLength(0)
 })
 
@@ -707,9 +837,8 @@ test('explains reply delivery beside its explicit Automatic or Manual label', as
   const help = page.getByTestId('delivery-help')
   await expect(help).toBeVisible()
   await expect(help).toContainText('complete worker replies')
-  await expect(help).toContainText('typing')
   await expect(help).toContainText('Manual')
-  await expect(help).toContainText('The lead reads results only when you ask')
+  await expect(help).toContainText('Opening it here does not mark it received')
   await expect(help).toContainText('all automatic replies')
   await page.keyboard.press('Escape')
   await expect(help).not.toBeVisible()
@@ -796,7 +925,9 @@ test('renders the exact four- and five-pane templates counted with the lead', as
 test('renders session → lead → numbered workers and shells as a nested tree', async ({ page }) => {
   await boot(page)
   const session = page.getByTestId('session-t-four')
-  const lead = session.locator(':scope > [role="group"] > [data-kind="lead"]')
+  const lead = session.locator(
+    ':scope > [role="group"] > [data-kind="lead-group"] > [role="group"] > [data-kind="lead"]',
+  )
   await expect(session).toContainText('harbour')
   await expect(lead).toContainText('harbour-lead')
   await expect(lead.locator(':scope > [role="group"]')).toContainText('w1 nyx-coral-lane')
@@ -820,13 +951,17 @@ test('renders a lead without workers as a leaf and keeps worker children grouped
   await boot(page, { state })
 
   const leaf = page.getByTestId('session-t-leaf')
-  const leafLead = leaf.locator(':scope > [role="group"] > [data-kind="lead"]')
+  const leafLead = leaf.locator(
+    ':scope > [role="group"] > [data-kind="lead-group"] > [role="group"] > [data-kind="lead"]',
+  )
   await expect(leafLead).not.toHaveAttribute('aria-expanded')
   await expect(leafLead.locator(':scope > [role="group"]')).toHaveCount(0)
 
   const workerLead = page
     .getByTestId('session-t-four')
-    .locator(':scope > [role="group"] > [data-kind="lead"]')
+    .locator(
+      ':scope > [role="group"] > [data-kind="lead-group"] > [role="group"] > [data-kind="lead"]',
+    )
   await expect(workerLead).toHaveAttribute('aria-expanded', 'true')
   await expect(workerLead.locator(':scope > [role="group"]')).toContainText('w1 nyx-coral-lane')
 })
@@ -942,87 +1077,6 @@ test('uses the shared effective-policy rule for the tab manual veto and inherita
   )
 })
 
-test('lists transcript answers with delivered and uncertain marks and requires explicit resend', async ({
-  page,
-}) => {
-  await boot(page)
-  await page.getByTestId('pane-p4-w1').locator('.pane-titlebar').click({ button: 'right' })
-  const menu = page.getByRole('menu', { name: 'Worker actions' })
-  await expect(menu).toContainText('Send reply to lead…')
-  await expect(menu).toContainText('The parser is ready.')
-  await expect(menu).toContainText('Delivered')
-  await expect(menu).toContainText('Uncertain')
-  await expect(menu.getByRole('menuitem', { name: 'Resend answer-sent to lead' })).toBeVisible()
-  await menu.getByRole('menuitem', { name: 'Send answer-fresh to lead' }).click()
-  expect((await commandCalls(page, 'deliver_now')).at(-1)).toEqual({
-    command: 'deliver_now',
-    args: {
-      tab: 't-four',
-      conversation: 'nyx-coral-lane',
-      answerId: 'answer-fresh',
-      resend: false,
-    },
-  })
-
-  await page.getByTestId('pane-p4-w1').locator('.pane-titlebar').click({ button: 'right' })
-  const reopened = page.getByRole('menu', { name: 'Worker actions' })
-  await reopened.getByRole('menuitem', { name: 'Resend answer-sent to lead' }).click()
-  expect((await commandCalls(page, 'deliver_now')).at(-1)).toEqual({
-    command: 'deliver_now',
-    args: {
-      tab: 't-four',
-      conversation: 'nyx-coral-lane',
-      answerId: 'answer-sent',
-      resend: true,
-    },
-  })
-})
-
-test('shows exactly which reply parts are still unconfirmed', async ({ page }) => {
-  const state = cannedState()
-  state.answers['nyx-coral-lane'] = [
-    {
-      id: 'answer-partial',
-      preview: 'A long answer with missing text.',
-      ready: true,
-      delivered: false,
-      uncertain: true,
-      partProgress: { delivery: 'd-8002', total: 3, uncovered: [1, 3] },
-    },
-  ]
-  await boot(page, { state })
-  await page.getByTestId('pane-p4-w1').locator('.pane-titlebar').click({ button: 'right' })
-  const menu = page.getByRole('menu', { name: 'Worker actions' })
-  await expect(menu).toContainText('1 of 3 parts confirmed. Not confirmed: 1, 3.')
-  await expect(menu.getByRole('menuitem', { name: 'Resend answer-partial to lead' })).toBeVisible()
-})
-
-test('shows an unfinished answer as in progress without offering send or resend', async ({
-  page,
-}) => {
-  await boot(page)
-  await page.evaluate(() => {
-    window.__state.answers['nyx-coral-lane'] = [
-      {
-        id: 'answer-writing',
-        preview: 'Still writing.',
-        ready: false,
-        delivered: false,
-        uncertain: true,
-      },
-    ]
-  })
-  await page.getByTestId('pane-p4-w1').locator('.pane-titlebar').click({ button: 'right' })
-  const menu = page.getByRole('menu', { name: 'Worker actions' })
-  await expect(menu).toContainText('Still writing.')
-  await expect(menu).toContainText('In progress')
-  await expect(
-    menu.getByRole('menuitem', { name: 'Waiting for answer-writing to complete' }),
-  ).toBeDisabled()
-  await expect(menu.getByRole('menuitem', { name: /^(Send|Resend) answer-writing/ })).toHaveCount(0)
-  expect(await commandCalls(page, 'deliver_now')).toEqual([])
-})
-
 test('sets Auto, Manual, or Inherit on a worker and exposes tab policy in the header', async ({
   page,
 }) => {
@@ -1051,100 +1105,6 @@ test('sets Auto, Manual, or Inherit on a worker and exposes tab policy in the he
   })
 })
 
-test('summarizes waiting results per pane and opens bounded details with safe actions', async ({
-  page,
-}) => {
-  await boot(page)
-  await expect(page.getByTestId('delivery-summary-p4-lead')).toHaveText('1 pending result')
-  await expect(page.getByTestId('delivery-summary-p4-w1')).toHaveText('1 pending result')
-  await expect(page.getByTestId('delivery-summary-p4-w2')).toHaveText('1 pending result')
-  await expect(page.locator('.delivery-summary')).toHaveCount(3)
-
-  await page.getByTestId('delivery-summary-p4-lead').click()
-  const details = page.getByRole('menu', { name: 'Pending results' })
-  await expect(details).toContainText('draft open')
-  const button = details.getByRole('menuitem', { name: 'Deliver now' })
-  await expect(button).toBeDisabled()
-  await expect(button).toHaveAttribute('title', /draft open/i)
-})
-
-test('offers held answers to the resumed lead', async ({ page }) => {
-  await boot(page)
-  await page.getByRole('button', { name: '1 previous-session reply' }).click()
-  expect((await commandCalls(page, 'held_send')).at(-1)).toEqual({
-    command: 'held_send',
-    args: { tab: 't-four' },
-  })
-})
-
-test('shows the persisted waiting reason without obsolete Claude channel guidance', async ({
-  page,
-}) => {
-  const state = cannedState()
-  state.deliveries[0].reason = 'native-session-unknown'
-  await boot(page, { state })
-  await page.getByTestId('delivery-summary-p4-lead').click()
-  const details = page.getByRole('menu', { name: 'Pending results' })
-  await expect(details).toContainText('native-session-unknown')
-  await expect(details).not.toContainText('Claude reply channel')
-  const deliver = details.getByRole('menuitem', { name: 'Deliver now' })
-  await expect(deliver).toBeDisabled()
-  await expect(deliver).toHaveAttribute(
-    'title',
-    /native-session-unknown.*readiness cannot be bypassed/i,
-  )
-})
-
-test('TEST-PANE-141: shows source agent and reason once for current waiting answers', async ({
-  page,
-}) => {
-  const state = cannedState()
-  state.deliveries = [
-    {
-      id: 'd-current-old',
-      tab: 't-four',
-      pane: 'p4-lead',
-      generation: 1,
-      conversation: 'nyx-coral-lane',
-      agent: 'nyx',
-      answerId: 'answer-current',
-      state: 'pending',
-      reason: 'old reason',
-    },
-    {
-      id: 'd-current-new',
-      tab: 't-four',
-      pane: 'p4-lead',
-      generation: 1,
-      conversation: 'nyx-coral-lane',
-      agent: 'nyx',
-      answerId: 'answer-current',
-      state: 'pending',
-      reason: 'actual waiting reason',
-    },
-    {
-      id: 'd-current-accepted',
-      tab: 't-four',
-      pane: 'p4-w1',
-      generation: 1,
-      conversation: 'nyx-coral-lane',
-      agent: 'nyx',
-      answerId: 'answer-accepted',
-      state: 'accepted',
-      reason: 'already accepted',
-    },
-  ]
-  await boot(page, { state })
-
-  await expect(page.getByTestId('delivery-summary-p4-lead')).toHaveText('1 pending result')
-  await page.getByTestId('delivery-summary-p4-lead').click()
-  const details = page.getByRole('menu', { name: 'Pending results' })
-  await expect(details).toContainText('nyx-coral-lane')
-  await expect(details).toContainText('nyx')
-  await expect(details).toContainText('actual waiting reason')
-  await expect(details).not.toContainText('old reason')
-})
-
 test('IMPL-PANE-142: shows startup failure without disabling its live terminal', async ({
   page,
 }) => {
@@ -1169,38 +1129,6 @@ test('IMPL-PANE-142: shows startup failure without disabling its live terminal',
   await expect
     .poll(async () => (await commandCalls(page, 'pane_input_enqueue')).length)
     .toBeGreaterThan(0)
-})
-
-test('counts only current-generation pending results and labels held replies separately', async ({
-  page,
-}) => {
-  const state = cannedState()
-  state.deliveries.push(
-    {
-      id: 'd-old-generation',
-      tab: 't-four',
-      pane: 'p4-lead',
-      generation: 2,
-      state: 'pending',
-      reason: 'old generation',
-    },
-    {
-      id: 'd-missing-generation',
-      tab: 't-four',
-      pane: 'p4-lead',
-      state: 'pending',
-      reason: 'missing generation',
-    },
-  )
-  state.held.push({ id: 'held-2', tab: 't-four', answerId: 'answer-held-2' })
-  await boot(page, { state })
-
-  await expect(page.getByTestId('delivery-summary-p4-lead')).toHaveText('1 pending result')
-  await page.getByTestId('delivery-summary-p4-lead').click()
-  const details = page.getByRole('menu', { name: 'Pending results' })
-  await expect(details).not.toContainText('old generation')
-  await expect(details).not.toContainText('missing generation')
-  await expect(page.getByRole('button', { name: '2 previous-session replies' })).toBeVisible()
 })
 
 test('uses consistent session labels in the directory and harness flow', async ({ page }) => {
@@ -1497,7 +1425,7 @@ test('TEST-PANE-135: offers a clear close action on every pane, including failed
   await boot(page, { state })
 
   await expect(
-    page.getByTestId('pane-p4-lead').getByRole('button', { name: 'Suspend session' }),
+    page.getByTestId('pane-p4-lead').getByRole('button', { name: 'Suspend lead' }),
   ).toBeVisible()
   for (const id of ['p4-w1', 'p4-w2', 'p4-shell']) {
     await expect(
@@ -1539,7 +1467,7 @@ test('TEST-PANE-135: closing the lead suspends only its session and exposes Resu
 }) => {
   await boot(page)
 
-  await page.getByTestId('pane-p4-lead').getByRole('button', { name: 'Suspend session' }).click()
+  await page.getByTestId('pane-p4-lead').getByRole('button', { name: 'Suspend lead' }).click()
   await expect(page.getByTestId('pane-p4-lead')).toHaveCount(0)
   await expect(page.getByTestId('pane-stage')).toContainText(
     'Resume this session to reopen its lead.',
@@ -1599,8 +1527,7 @@ test('keeps actual xterm terminals full height with hidden and visible failure b
 }) => {
   await page.setViewportSize({ width: 1280, height: 1100 })
   const state = cannedState()
-  state.deliveries = []
-  state.held = []
+  state.results = []
   await boot(page, { state })
 
   const stage = page.getByTestId('pane-stage')
@@ -1639,6 +1566,13 @@ test('keeps actual xterm terminals full height with hidden and visible failure b
       (calls) => calls.filter((call) => call.args.id === 'p4-lead').at(-1)?.args.rows ?? 0,
     )
   const assertTerminalFillsCard = async (expectedFailureDisplay) => {
+    // Native resize stops after exit; wait for the emulator's own next-frame fit.
+    await expect
+      .poll(async () => {
+        const current = await metrics()
+        return Math.abs(current.screenHeight - current.availableHeight) <= current.rowHeight
+      })
+      .toBe(true)
     const current = await metrics()
     const resizeRows = await latestResizeRows()
     expect(current.failureDisplay).toBe(expectedFailureDisplay)
@@ -1659,10 +1593,11 @@ test('keeps actual xterm terminals full height with hidden and visible failure b
       Math.abs(current.screenHeight - current.availableHeight),
       JSON.stringify(current),
     ).toBeLessThanOrEqual(current.rowHeight)
-    expect(
-      Math.abs(resizeRows - current.rowCount),
-      JSON.stringify({ current, resizeRows }),
-    ).toBeLessThanOrEqual(1)
+    if (expectedFailureDisplay === 'none')
+      expect(
+        Math.abs(resizeRows - current.rowCount),
+        JSON.stringify({ current, resizeRows }),
+      ).toBeLessThanOrEqual(1)
     expect(resizeRows).toBeGreaterThan(0)
     expect(current.rowHeight).toBeGreaterThan(0)
   }
@@ -1730,18 +1665,22 @@ test('keeps a compact pending-result count within each pane and the page width',
   page,
 }) => {
   const state = cannedState()
-  state.deliveries = Array.from({ length: 20 }, (_, index) => ({
-    id: `d-many-${index}`,
+  state.results = Array.from({ length: 20 }, (_, index) => ({
+    id: `d-${index + 1}`,
+    conversation: 'nyx-coral-lane',
+    agent: 'nyx',
+    parts: 1,
+    receivedParts: 0,
     tab: 't-four',
     pane: 'p4-w1',
     generation: 1,
-    state: 'pending',
+    state: 'waiting',
     reason: `result ${index} with a very long reason`,
   }))
   await page.setViewportSize({ width: 760, height: 600 })
   await boot(page, { state })
-  const summary = page.getByTestId('delivery-summary-p4-w1')
-  await expect(summary).toHaveText('20 pending results')
+  const summary = page.getByTestId('result-summary-p4-w1')
+  await expect(summary).toHaveText('20 unconfirmed results')
   const bounds = await summary.boundingBox()
   const pane = await page.getByTestId('pane-p4-w1').boundingBox()
   const pageWidth = await page.evaluate(() => document.documentElement.scrollWidth)
@@ -1914,9 +1853,9 @@ test('reconciles Node state changes and consumes output for a worker the page ha
 
   await expect(page.getByTestId('pane-node-p4-w3')).toContainText('w3 clio-external-worker')
   await expect(page.getByTestId('pane-stage').locator('.pane-title')).toContainText('harbour-lead')
-  await expect(page.getByTestId('delivery-summary-p4-lead')).toHaveText('2 pending results')
-  await page.getByTestId('delivery-summary-p4-lead').click()
-  await expect(page.getByRole('menu', { name: 'Pending results' })).toContainText(
+  await expect(page.getByTestId('result-summary-p4-lead')).toHaveText('2 unconfirmed results')
+  await page.getByTestId('result-summary-p4-lead').click()
+  await expect(page.getByRole('dialog', { name: 'Lead results' })).toContainText(
     'worker reply ready',
   )
   await expect
@@ -1938,12 +1877,121 @@ test('reconciles Node state changes and consumes output for a worker the page ha
         (await commandCalls(page, 'pane_ack')).filter((call) => call.args.id === 'p4-w3').length,
     )
     .toBe(2)
+  await page.keyboard.press('Escape')
   await page.getByTestId('pane-node-p4-w3').click()
   await expect(page.getByTestId('pane-p4-w3').locator('.xterm-rows')).toContainText(
     'still connected',
   )
   expect(await commandCalls(page, 'subscribe_output')).toHaveLength(1)
   expect((await commandCalls(page, 'list_state')).length).toBeGreaterThanOrEqual(3)
+})
+
+test('sends the latest terminal size only after the native pane becomes live', async ({ page }) => {
+  const state = gridState(1)
+  const pane = state.tabs[0].panes[0]
+  pane.alive = false
+  pane.starting = true
+  await boot(page, { state })
+  const rows = page.getByTestId(`pane-${pane.id}`).locator('.xterm-rows > div')
+  await expect.poll(() => rows.count()).toBeGreaterThan(24)
+  expect(await commandCalls(page, 'pane_resize')).toEqual([])
+  await page.setViewportSize({ width: 1500, height: 900 })
+  await expect.poll(() => rows.count()).toBeGreaterThan(40)
+  expect(await commandCalls(page, 'pane_resize')).toEqual([])
+  await page.evaluate(async () => {
+    window.__state.tabs[0].panes[0].alive = true
+    delete window.__state.tabs[0].panes[0].starting
+    await window.__emitTauriEvent('state-changed', { reason: 'native launch resolved' })
+  })
+  await expect
+    .poll(async () => (await commandCalls(page, 'pane_resize')).at(-1)?.args.rows)
+    .toBe(await rows.count())
+  const count = (await commandCalls(page, 'pane_resize')).length
+  await page.evaluate(async () => {
+    await window.__emitTauriEvent('state-changed', { reason: 'unchanged state' })
+    await window.__emitTauriEvent('state-changed', { reason: 'unchanged state again' })
+  })
+  expect((await commandCalls(page, 'pane_resize')).length).toBe(count)
+  await expect(page.locator('#status')).toBeHidden()
+})
+
+test('does not show an internal pane-not-open error when a resize races pane lifetime', async ({
+  page,
+}) => {
+  const state = gridState(1)
+  const pane = state.tabs[0].panes[0]
+  await boot(page, { state })
+  await expect.poll(async () => (await commandCalls(page, 'pane_resize')).length).toBeGreaterThan(0)
+  await page.evaluate((pane) => {
+    window.__calls = []
+    window.__commandResults.pane_resize = {
+      ok: false,
+      error: `pane ${pane.id} generation ${pane.generation} is not open`,
+    }
+  }, pane)
+  await page.setViewportSize({ width: 1500, height: 900 })
+  await expect.poll(async () => (await commandCalls(page, 'pane_resize')).length).toBeGreaterThan(0)
+  await expect(page.locator('#status')).toBeHidden()
+  await page.evaluate(async () => {
+    delete window.__commandResults.pane_resize
+    window.__calls = []
+    await window.__emitTauriEvent('state-changed', { reason: 'native pane ready' })
+  })
+  await expect.poll(async () => (await commandCalls(page, 'pane_resize')).length).toBe(1)
+  await page.evaluate(() => {
+    window.__commandResults.pane_resize = { ok: false, error: 'PTY I/O error: resize failed' }
+  })
+  await page.setViewportSize({ width: 1600, height: 950 })
+  await expect(page.locator('#status')).toHaveText('PTY I/O error: resize failed')
+})
+
+test('serializes native terminal sizes and applies the latest geometry after an in-flight resize', async ({
+  page,
+}) => {
+  await boot(page, { state: gridState(1) })
+  await expect.poll(async () => (await commandCalls(page, 'pane_resize')).length).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    window.__calls = []
+    window.__resizeGate = new Promise((resolve) => {
+      window.__releaseResize = resolve
+    })
+  })
+  await page.setViewportSize({ width: 1500, height: 850 })
+  await expect.poll(async () => (await commandCalls(page, 'pane_resize')).length).toBe(1)
+  await page.setViewportSize({ width: 1600, height: 950 })
+  await expect.poll(() => page.locator('.xterm-rows > div').count()).toBeGreaterThan(50)
+  expect((await commandCalls(page, 'pane_resize')).length).toBe(1)
+  await page.evaluate(() => {
+    delete window.__resizeGate
+    window.__releaseResize()
+  })
+  await expect.poll(async () => (await commandCalls(page, 'pane_resize')).length).toBe(2)
+  const latest = (await commandCalls(page, 'pane_resize')).at(-1).args
+  expect(latest.rows).toBe(await page.locator('.xterm-rows > div').count())
+})
+
+test('discards queued terminal sizes when their pane closes during resize', async ({ page }) => {
+  await boot(page, { state: gridState(1) })
+  await expect.poll(async () => (await commandCalls(page, 'pane_resize')).length).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    window.__calls = []
+    window.__resizeGate = new Promise((resolve) => {
+      window.__releaseResize = resolve
+    })
+  })
+  await page.setViewportSize({ width: 1500, height: 850 })
+  await expect.poll(async () => (await commandCalls(page, 'pane_resize')).length).toBe(1)
+  await page.setViewportSize({ width: 1600, height: 950 })
+  await expect.poll(() => page.locator('.xterm-rows > div').count()).toBeGreaterThan(50)
+  await page.evaluate(async () => {
+    window.__state.tabs[0].closed = true
+    await window.__emitTauriEvent('state-changed', { reason: 'pane exited' })
+    delete window.__resizeGate
+    window.__releaseResize()
+  })
+  await expect(page.locator('.xterm')).toHaveCount(0)
+  expect((await commandCalls(page, 'pane_resize')).length).toBe(1)
+  await expect(page.locator('#status')).toBeHidden()
 })
 
 test('preserves startup output while the lead has not been marked alive yet', async ({ page }) => {
@@ -2524,7 +2572,7 @@ test('session keeps a double-width lead fixed while later workers scroll horizon
   await expect(last).toBeInViewport()
 })
 
-test('PM appears above the lead and uses the main full-size pane outside the grid', async ({
+test('PM grid appears above the lead and preserves its terminal across group switches', async ({
   page,
 }) => {
   const state = cannedState()
@@ -2547,9 +2595,9 @@ test('PM appears above the lead and uses the main full-size pane outside the gri
   await expect(stage.locator('[data-pane-id="p-pm"]')).toHaveCount(0)
   await pm.click()
   await expect(stage.getByTestId('pane-p-pm')).toBeVisible()
-  await expect(stage.locator('.pane-title')).not.toContainText('Replies:')
+  await expect(page.getByTestId('view-pm')).toHaveAttribute('aria-pressed', 'true')
   await expect(stage.locator('.pane-card')).toHaveCount(1)
-  await expect(page.locator('#new-pane')).toBeHidden()
+  await expect(page.locator('#new-pane')).toBeVisible()
   await page.evaluate(() =>
     window.__emitPaneOutput('p-pm', 1, 1, [...new TextEncoder().encode('PM-MAIN-OUTPUT')]),
   )
@@ -2565,7 +2613,7 @@ test('PM appears above the lead and uses the main full-size pane outside the gri
   const box = await stage.boundingBox()
   const card = await stage.getByTestId('pane-p-pm').boundingBox()
   expect(Math.abs(box.height - 16 - card.height)).toBeLessThanOrEqual(2)
-  await page.getByTestId('session-t-four-button').click()
+  await page.getByTestId('view-lead').click()
   await expect(stage.locator('[data-pane-id="p-pm"]')).toHaveCount(0)
   await pm.click()
   await expect(stage.locator('.xterm-rows')).toContainText('PM-MAIN-OUTPUT')
@@ -2637,4 +2685,119 @@ test('a closed worker can be deleted from the sidebar without reopening it', asy
   expect(await commandCalls(page, 'open_consult')).toHaveLength(0)
   expect(await commandCalls(page, 'tab_resume')).toHaveLength(0)
   await expect(page.getByTestId('pane-node-p4-w1')).toHaveCount(0)
+})
+
+test('PM and Lead grids isolate the same preset and preserve hidden output and focused navigation', async ({
+  page,
+}) => {
+  const state = cannedState()
+  state.tabs.push({
+    id: 't-pm',
+    role: 'pm',
+    parentTabId: state.tabs[0].id,
+    roleName: 'quiet-river',
+    directory: state.tabs[0].directory,
+    lead: { harness: 'pi', generation: 1 },
+    panes: [
+      pane('p-pm', 'lead'),
+      pane('p-advisor', 'worker', { conversation: 'zeus-advice', agent: 'zeus' }),
+    ],
+  })
+  await boot(page, { state })
+  const stage = page.getByTestId('pane-stage')
+  await page.getByTestId('view-pm').click()
+  await expect(stage.locator('.pane-card')).toHaveCount(2)
+  await expect(page.getByTestId('pane-node-p-advisor')).toContainText('a1')
+  await page.getByTestId('pane-node-p-advisor').click()
+  await expect(stage.locator('.pane-card')).toHaveCount(1)
+  await page.getByTestId('view-lead').click()
+  await expect(stage.getByTestId('pane-p-advisor')).toHaveCount(0)
+  await page.evaluate(() =>
+    window.__emitPaneOutput('p-advisor', 1, 1, [
+      ...new TextEncoder().encode('HIDDEN-ADVISOR-OUTPUT'),
+    ]),
+  )
+  await page.getByTestId('view-pm').click()
+  await expect(stage.locator('.pane-card')).toHaveCount(2)
+  await expect(stage.getByTestId('pane-p-advisor').locator('.xterm-rows')).toContainText(
+    'HIDDEN-ADVISOR-OUTPUT',
+  )
+  expect(await commandCalls(page, 'open_pm')).toHaveLength(0)
+  expect(await commandCalls(page, 'tab_resume')).toHaveLength(0)
+})
+
+test('result inbox counts every reply on its worker and owner and opens complete safe history without receipt', async ({
+  page,
+}) => {
+  const state = cannedState()
+  state.results = Array.from({ length: 25 }, (_, index) => ({
+    id: `d-${index + 1}`,
+    tab: 't-four',
+    conversation: 'nyx-coral-lane',
+    agent: 'nyx',
+    answerId: `answer-${index + 1}`,
+    state: index === 1 ? 'received' : index === 2 ? 'uncertain' : 'waiting',
+    createdAt: index + 1,
+    preview: `Reply ${index + 1}`,
+    parts: 1,
+    receivedParts: 0,
+  }))
+  const body = '<script>window.inboxExecuted=true</script>\n😀 complete text '.repeat(1500)
+  state.resultBodies = { 'd-1': body }
+  await boot(page, { state })
+  await expect(page.getByTestId('result-summary-p4-w1')).toHaveText('24 unconfirmed results')
+  await expect(page.getByTestId('result-summary-p4-lead')).toHaveText('24 unconfirmed results')
+  await expect(page.getByTestId('tree-results-p4-w1')).toHaveText('24')
+  await page.getByTestId('tree-results-p4-w1').click()
+  const history = page.getByRole('dialog', { name: 'Lead results' })
+  await expect(history.locator('.result-row')).toHaveCount(25)
+  await expect(history).toContainText('Received by Lead')
+  await expect(history).toContainText('Receipt unconfirmed')
+  await history.getByRole('button', { name: 'Read result d-1', exact: true }).click()
+  await expect(history.locator('.result-body:visible')).toHaveText(body)
+  expect(await page.evaluate(() => window.inboxExecuted)).toBeUndefined()
+  expect(await commandCalls(page, 'result_collect')).toHaveLength(0)
+  expect(await commandCalls(page, 'result_body')).toHaveLength(Math.ceil(body.length / 16000))
+  await expect(page.getByTestId('result-summary-p4-w1')).toHaveText('24 unconfirmed results')
+})
+
+test('result inbox remains independent between PM advisors and Lead workers', async ({ page }) => {
+  const state = cannedState()
+  state.tabs.push({
+    ...state.tabs[0],
+    id: 't-pm',
+    role: 'pm',
+    parentTabId: 't-four',
+    lead: { harness: 'pi', generation: 1 },
+    panes: [
+      pane('pm-lead', 'lead'),
+      pane('pm-advisor', 'worker', { conversation: 'advice', agent: 'nyx', order: 1 }),
+    ],
+  })
+  state.results = [
+    {
+      id: 'd-1',
+      tab: 't-four',
+      conversation: 'nyx-coral-lane',
+      agent: 'nyx',
+      state: 'waiting',
+      preview: 'lead result',
+    },
+    {
+      id: 'd-2',
+      tab: 't-pm',
+      conversation: 'advice',
+      agent: 'nyx',
+      state: 'uncertain',
+      preview: 'PM findings',
+    },
+  ]
+  await boot(page, { state })
+  await page.getByTestId('view-pm').click()
+  await expect(page.getByTestId('result-summary-pm-advisor')).toHaveText('1 unconfirmed result')
+  await page.getByRole('button', { name: 'Results', exact: true }).click()
+  const history = page.getByRole('dialog', { name: 'PM results' })
+  await expect(history.locator('.result-row')).toHaveCount(1)
+  await expect(history).toContainText('PM findings')
+  await expect(history).not.toContainText('lead result')
 })

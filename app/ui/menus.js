@@ -34,7 +34,8 @@ function separator() {
 }
 
 export class Menus {
-  constructor({ invoke, run, report }) {
+  constructor({ invoke, run, report, openResults }) {
+    this.openResults = openResults
     this.invoke = invoke
     this.run = run
     this.report = report
@@ -140,18 +141,15 @@ export class Menus {
     menu.querySelector('button')?.focus()
   }
 
-  async worker(event, tab, pane) {
+  worker(event, tab, pane) {
     event.preventDefault()
     const menu = document.createElement('div')
     menu.setAttribute('role', 'menu')
-    menu.setAttribute('aria-label', 'Worker actions')
-    menu.append(heading('Send reply to lead…'))
-    const loading = document.createElement('div')
-    loading.className = 'answer-row'
-    loading.textContent = 'Reading transcript…'
-    menu.append(loading)
-    menu.append(separator())
-    menu.append(heading('Reply delivery'))
+    menu.setAttribute('aria-label', tab.role === 'pm' ? 'Advisor actions' : 'Worker actions')
+    menu.append(
+      menuButton('View results', () => this.openResults(tab, pane.conversation ?? pane.name)),
+    )
+    menu.append(separator(), heading('Reply delivery'))
     for (const mode of ['auto', 'manual', 'inherit']) {
       const label =
         mode === 'auto' ? 'Automatic' : mode === 'manual' ? 'Manual' : 'Inherit session setting'
@@ -163,102 +161,13 @@ export class Menus {
       )
     }
     this.place(menu, event)
-
-    let result
-    try {
-      result = await this.invoke('answers_list', {
-        tab: tab.id,
-        pane: pane.id,
-        conversation: pane.conversation ?? pane.name,
-      })
-    } catch (cause) {
-      result = { ok: false, error: cause instanceof Error ? cause.message : String(cause) }
-    }
-    if (!menu.isConnected) return
-    loading.remove()
-    if (result?.ok === false) {
-      const unavailable = document.createElement('div')
-      unavailable.className = 'answer-row'
-      unavailable.textContent =
-        result.error === 'unknown-op' || result.error === 'not-available-yet'
-          ? 'Answers are not available yet'
-          : `Answers unavailable: ${result.error ?? 'unknown error'}`
-      menu.insertBefore(unavailable, menu.querySelector('.menu-separator'))
-      return
-    }
-
-    const answers = asArray(result?.answers ?? result?.items ?? result)
-    if (answers.length === 0) {
-      const empty = document.createElement('div')
-      empty.className = 'answer-row'
-      empty.textContent = 'No completed answers'
-      menu.insertBefore(empty, menu.querySelector('.menu-separator'))
-      return
-    }
-    for (const answer of answers) {
-      const unfinished = answer.ready === false
-      const row = document.createElement('div')
-      row.className = 'answer-row'
-      row.dataset.state = unfinished
-        ? 'in-progress'
-        : answer.uncertain === true
-          ? 'uncertain'
-          : answer.delivered === true
-            ? 'delivered'
-            : 'ready'
-      const preview = document.createElement('span')
-      preview.className = 'answer-preview'
-      preview.textContent = answer.preview ?? answer.text ?? answer.id
-      const mark = document.createElement('span')
-      mark.className = 'answer-mark'
-      mark.textContent = unfinished
-        ? 'In progress'
-        : answer.uncertain === true
-          ? 'Uncertain'
-          : answer.delivered === true
-            ? 'Delivered'
-            : 'Ready'
-      const resend = answer.delivered === true || answer.uncertain === true
-      const actionLabel = unfinished
-        ? `Waiting for ${answer.id} to complete`
-        : resend
-          ? `Resend ${answer.id} to lead`
-          : `Send ${answer.id} to lead`
-      const action = menuButton(
-        unfinished ? 'Waiting for completion' : resend ? 'Resend to lead' : 'Send to lead',
-        async () => {
-          this.closeMenu()
-          await this.run('deliver_now', {
-            tab: tab.id,
-            conversation: pane.conversation ?? pane.name,
-            answerId: answer.id,
-            resend,
-          })
-        },
-        actionLabel,
-      )
-      action.disabled = unfinished
-      row.append(preview, mark, action)
-      if (answer.partProgress !== undefined && answer.delivered !== true) {
-        const progress = document.createElement('span')
-        progress.className = 'answer-mark'
-        const { total, uncovered } = answer.partProgress
-        const missing = asArray(uncovered)
-        progress.textContent = `${total - missing.length} of ${total} parts confirmed.${
-          missing.length > 0 ? ` Not confirmed: ${missing.join(', ')}.` : ''
-        }`
-        row.insertBefore(progress, action)
-      }
-      menu.insertBefore(row, menu.querySelector('.menu-separator'))
-    }
-    this.place(menu, event)
   }
 
   tabPolicy(anchor, tab) {
     const menu = document.createElement('div')
     menu.setAttribute('role', 'menu')
     menu.setAttribute('aria-label', 'Session reply delivery')
-    menu.append(heading('Reply delivery to this lead'))
+    menu.append(heading(`Reply delivery to this ${tab.role === 'pm' ? 'PM' : 'lead'}`))
     for (const mode of ['auto', 'manual']) {
       const label = mode === 'auto' ? 'Automatic' : 'Manual'
       menu.append(
@@ -275,13 +184,13 @@ export class Menus {
     const menu = document.createElement('div')
     menu.setAttribute('role', 'menu')
     menu.setAttribute('aria-label', 'New pane')
-    menu.append(heading('Open beside the lead'))
+    menu.append(heading(`Open beside the ${tab.role === 'pm' ? 'PM' : 'lead'}`))
     menu.append(
       menuButton('Shell', async () => {
         this.closeMenu()
         await this.run('open_shell', { tab: tab.id })
       }),
-      menuButton('Agent', () => {
+      menuButton(tab.role === 'pm' ? 'Advisor' : 'Agent', () => {
         this.closeMenu()
         this.openAgent(tab, agents)
       }),
@@ -291,6 +200,8 @@ export class Menus {
 
   openAgent(tab, agents) {
     this.pendingTab = tab
+    document.querySelector('#agent-dialog-title').textContent =
+      tab.role === 'pm' ? 'Open an advisor pane' : 'Open a worker pane'
     this.agentPicker.replaceChildren()
     const names = [...new Set(asArray(agents).map(agentName).filter(Boolean))]
     for (const name of names) {

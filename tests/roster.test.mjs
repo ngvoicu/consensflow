@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import {
@@ -14,7 +14,7 @@ import {
   rosterPath,
   syncAgents,
 } from '../src/roster.js'
-import { assertOutsideRealHome, tempEnv } from './helpers.mjs'
+import { tempEnv } from './helpers.mjs'
 
 const FIXTURES = join(import.meta.dirname, 'fixtures')
 
@@ -23,14 +23,13 @@ function seedSharedRoster(t) {
   cpSync(join(FIXTURES, 'v1-agents.json'), rosterPath(t.env))
 }
 
-describe('the roster IS the shared v1 file that cc and pi read', () => {
+describe('the saved roster preserves the v1 execution schema', () => {
   const t = tempEnv()
   after(() => t.cleanup())
 
-  it('lives at ~/.consensflow/agents.json under the given HOME', () => {
+  it('uses agents.json inside the explicitly configured private home', () => {
     const path = rosterPath(t.env)
-    assertOutsideRealHome(path)
-    assert.equal(path, rosterPath(t.env))
+    assert.equal(path, join(t.root, 'consensflow', 'agents.json'))
   })
 
   it('reads v1 rows as agents: kind→harness, thinking/effort→effort', () => {
@@ -140,6 +139,39 @@ describe('an absent shared roster is simply empty, and add creates it', () => {
     assert.throws(() => editAgent('nobody', { model: 'm' }, t.env), /nobody/)
     assert.throws(() => removeAgent('nobody', t.env), /nobody/)
   })
+})
+
+it('Kimi effort changes are explicit, validated and persisted without altering inherited saved settings', () => {
+  const t = tempEnv()
+  try {
+    addAgent(
+      { name: 'ilmarinen', harness: 'kimi', model: 'moonshot-ai/kimi-k3', preset: 'ilmarinen' },
+      t.env,
+    )
+    assert.equal(listAgents(t.env)[0].effort, undefined)
+    assert.ok(agentDrift(t.env)[0].changes.some((c) => c.field === 'effort' && c.to === 'max'))
+    syncAgents(t.env, { name: 'ilmarinen' })
+    assert.equal(listAgents(t.env)[0].effort, 'max')
+    editAgent('ilmarinen', { effort: 'low' }, t.env)
+    assert.equal(listAgents(t.env)[0].effort, 'low')
+    const before = readFileSync(rosterPath(t.env), 'utf8')
+    for (const effort of ['medium', 'xhigh', 'ultra', 'off', 'on', 0, false]) {
+      assert.throws(() => editAgent('ilmarinen', { effort }, t.env), /low.*high.*max/)
+      assert.throws(
+        () =>
+          addAgent(
+            { name: 'invalid', harness: 'kimi', model: 'moonshot-ai/kimi-k3', effort },
+            t.env,
+          ),
+        /low.*high.*max/,
+      )
+      assert.equal(readFileSync(rosterPath(t.env), 'utf8'), before)
+    }
+    editAgent('ilmarinen', { effort: '' }, t.env)
+    assert.equal(listAgents(t.env)[0].effort, undefined, 'blank restores native settings')
+  } finally {
+    t.cleanup()
+  }
 })
 
 describe('a catalog agent can be told its model moved', () => {
@@ -273,7 +305,7 @@ describe('CONSENSFLOW_HOME means one root, to both halves', () => {
     assert.equal(configRoot(bare), '/home/someone/.consensflow')
   })
 
-  it("moves an older machine's state into that directory, once", () => {
+  it("imports an older machine's state without writing outside the private home", () => {
     const t = tempEnv()
     try {
       // A machine from before the merge: state under XDG, roster beside it.
@@ -286,9 +318,10 @@ describe('CONSENSFLOW_HOME means one root, to both halves', () => {
       assert.ok(moved, 'it reports what it did')
       assert.ok(existsSync(join(configRoot(t.env), 'mode.json')), 'the mode came along')
       assert.ok(existsSync(join(configRoot(t.env), 'hosts.json')))
-      assert.equal(existsSync(legacy), false, 'and the old root is gone')
+      assert.equal(existsSync(legacy), true, 'the old root is never changed')
+      assert.equal(readFileSync(join(legacy, 'hosts.json'), 'utf8'), JSON.stringify({ hosts: {} }))
 
-      // Running again is a no-op, not a second move.
+      // Running again is a no-op, not a second copy.
       assert.equal(migrateStateRoot(t.env), null)
     } finally {
       t.cleanup()
@@ -311,4 +344,93 @@ describe('CONSENSFLOW_HOME means one root, to both halves', () => {
       t.cleanup()
     }
   })
+})
+
+it('Pi Claude provider updates are explicit and leave custom rows pinned', () => {
+  const t = tempEnv()
+  try {
+    addAgent(
+      {
+        name: 'erato',
+        harness: 'pi',
+        model: 'anthropic/claude-fable-5',
+        effort: 'medium',
+        preset: 'erato',
+      },
+      t.env,
+    )
+    addAgent(
+      {
+        name: 'my-claude',
+        harness: 'pi',
+        model: 'anthropic/claude-opus-5',
+        effort: 'medium',
+        description: 'personal',
+      },
+      t.env,
+    )
+    const before = readFileSync(rosterPath(t.env), 'utf8')
+    assert.equal(listAgents(t.env)[0].model, 'anthropic/claude-fable-5')
+    assert.equal(readFileSync(rosterPath(t.env), 'utf8'), before)
+    assert.ok(
+      agentDrift(t.env)
+        .find((a) => a.name === 'erato')
+        .changes.some((c) => c.to === 'openrouter/anthropic/claude-fable-5.1'),
+    )
+    syncAgents(t.env, { name: 'erato' })
+    const rows = JSON.parse(readFileSync(rosterPath(t.env), 'utf8')).agents
+    assert.equal(rows[0].model, 'openrouter/anthropic/claude-fable-5.1')
+    assert.equal(rows[0].thinking, 'medium')
+    assert.equal(rows[0].effort, undefined)
+    assert.equal(rows[1].model, 'anthropic/claude-opus-5')
+    assert.equal(rows[1].description, 'personal')
+  } finally {
+    t.cleanup()
+  }
+})
+
+it('stores the full UI profile on add, edit and explicit sync', async () => {
+  const { agentProfile } = await import('../src/catalog.js')
+  const t = tempEnv()
+  const raw = () => JSON.parse(readFileSync(rosterPath(t.env), 'utf8')).agents[0]
+  try {
+    addAgent(
+      {
+        name: 'custom',
+        harness: 'codex',
+        model: 'gpt-6-astra',
+        effort: 'medium',
+        preset: 'maia',
+        description: 'Keep my notes',
+      },
+      t.env,
+    )
+    assert.deepEqual(raw().profile, agentProfile(listAgents(t.env)[0]))
+    assert.deepEqual(listAgents(t.env)[0].profile, raw().profile)
+    editAgent('custom', { effort: 'low' }, t.env)
+    assert.deepEqual(raw().profile.categories, ['coding'])
+    assert.equal(raw().description, 'Keep my notes')
+    syncAgents(t.env, { name: 'custom' })
+    assert.deepEqual(raw().profile.categories, ['coding', 'reviewer'])
+  } finally {
+    t.cleanup()
+  }
+})
+
+it('legacy import never copies a link that could redirect a future write outside the home', () => {
+  const t = tempEnv()
+  try {
+    const legacy = legacyConfigRoot(t.env)
+    mkdirSync(legacy, { recursive: true })
+    const outside = join(t.root, 'outside.json')
+    writeFileSync(outside, 'preserve')
+    symlinkSync(outside, join(legacy, 'hosts.json'))
+    writeFileSync(join(legacy, 'mode.json'), JSON.stringify({ mode: 'claude' }))
+    migrateStateRoot(t.env)
+    assert.equal(existsSync(join(configRoot(t.env), 'hosts.json')), false)
+    assert.equal(readFileSync(outside, 'utf8'), 'preserve')
+    assert.equal(readFileSync(join(legacy, 'hosts.json'), 'utf8'), 'preserve')
+  } finally {
+    t.cleanup()
+  }
 })

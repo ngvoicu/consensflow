@@ -70,6 +70,8 @@ function copyCli() {
     const from = join(REPO, part)
     if (existsSync(from)) cpSync(from, join(RESOURCES, part), { recursive: true })
   }
+  // Native Codex transport is bundled; users never run npm to prepare a pane.
+  cpSync(join(REPO, 'node_modules', 'ws'), join(RESOURCES, 'node_modules', 'ws'), { recursive: true })
   // package.json travels too: the CLI reads its own version from it.
   const manifest = JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8'))
   writeFileSync(

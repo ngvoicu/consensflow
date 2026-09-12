@@ -4,6 +4,7 @@ import path from "node:path";
 import { createId, nowIso, resolveInside, truncateText } from "./utils.js";
 import { ensureCfDirs, recordLatestRun, runsRoot } from "./state.js";
 import { adaptLine, pushEvents, renderTrail, surfaceOutput, NO_ANSWER } from "./transcript-events.js";
+import { validateKimiEffort } from "./presets.js";
 
 // Low-level safety net for direct spawnWithInput callers that pass no timeout (e.g. the doctor
 // `--version` liveness probe sets its own 5s cap). Agent runs pass timeoutMs: 0 and run
@@ -17,6 +18,8 @@ const STRIPPED_CONTROL_ENV = new Set([
   "CONSENSFLOW_PANE_ID",
   "CONSENSFLOW_LEAD_ID",
   "CONSENSFLOW_LAUNCH",
+  "CF_RESULT_RECEIVER",
+  "CF_RESULT_SIGNAL",
 ]);
 
 // Every agent subprocess gets this marker so ConsensFlow tooling running inside the child
@@ -124,6 +127,7 @@ export function buildRunnerInvocation(agent, packetPath, cwd, session, packetTex
       return { command: "codex", args, stdinMode: "packet", cwd, env: { ...CHILD_ENV }, dropEnv: ["OPENAI_API_KEY"] };
     }
     case "kimi": {
+      validateKimiEffort(p);
       // Kimi Code takes its prompt in argv and nowhere else: there is no
       // --prompt-file, and `-p -` is a literal "-" rather than stdin (probed
       // 2026-08-24). So the packet travels as the argument, and stdin is idle.
@@ -135,13 +139,13 @@ export function buildRunnerInvocation(agent, packetPath, cwd, session, packetTex
       if (sessionId) args.push("-S", sessionId);
       args.push("--output-format", "stream-json");
       if (p.model) args.push("-m", p.model);
-      // No effort flag exists: kimi reads `default_effort` per model from the
-      // user's own config.toml. A row's effort is deliberately not forced in
-      // here — that file is theirs, and inventing a flag would fail the run.
+      // K3 effort is a process-local runtime override, independent of model
+      // credentials. Unset effort continues to inherit native Kimi settings.
       // No dropEnv either: claude and codex have an env var whose presence
       // silently switches billing, and kimi has none — it authenticates from
       // that same config. The empty guard is a finding, not an omission.
-      return { command: "kimi", args, stdinMode: "none", cwd, env: { ...CHILD_ENV }, dropEnv: [] };
+      return { command: "kimi", args, stdinMode: "none", cwd,
+        env: { ...CHILD_ENV, ...(p.effort ? { KIMI_MODEL_THINKING_EFFORT: p.effort } : {}) }, dropEnv: [] };
     }
     case "opencode": {
       const args = ["run", "--auto", "--format", "json", "--dir", cwd, "--file", packetPath];
@@ -554,10 +558,12 @@ export function interactiveResume(agent, sessionId, seed) {
       return { command: "opencode", args, env: { ...CHILD_ENV }, dropEnv: [] };
     }
     case "kimi": {
+      validateKimiEffort(agent);
       // `-S <id>` without `-p` IS the interactive window on that session.
       // There is no way to seed the first message of an interactive kimi, so
       // a follow-up sent this way arrives as a pane the user types into.
-      return { command: "kimi", args: ["-S", sessionId], env: { ...CHILD_ENV }, dropEnv: [] };
+      return { command: "kimi", args: ["-S", sessionId],
+        env: { ...CHILD_ENV, ...(agent.effort ? { KIMI_MODEL_THINKING_EFFORT: agent.effort } : {}) }, dropEnv: [] };
     }
     default:
       return null;

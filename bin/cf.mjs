@@ -30,18 +30,10 @@ import { loadThreads } from '../hosts/lib/threads.js'
 import { renderEvent } from '../hosts/lib/transcript-events.js'
 import { CATALOG, catalogEntry } from '../src/catalog.js'
 import { seedSession as seedOpenCodeSession } from '../src/channels/opencode.js'
-import { launchConfiguration } from '../src/channels.js'
+import { launchConfiguration, withNativeBridge } from '../src/channels.js'
 import { detectHarnesses } from '../src/harnesses.js'
 import { staleClaudeHooks } from '../src/host-payloads.js'
-import {
-  installEverywhere,
-  installSkill,
-  resetEverything,
-  resetPreview,
-  skillsStatus,
-  turnOff,
-  uninstallSkills,
-} from '../src/install.js'
+import { installEverywhere, installSkill, skillsStatus, uninstallSkills } from '../src/install.js'
 import { preparePiExtension } from '../src/pi-install.js'
 import { appRequester } from '../src/requester.js'
 import {
@@ -113,8 +105,6 @@ Usage: cf <command> [options]
   skills uninstall [--force]                Remove owned private role files
   ui [--json] [--no-open]                     Open the local roster editor
   doctor                                    Inspect runtime, roster and private role files
-  off [--force]                             Remove owned installation; keep agents and history
-  reset [--yes]                             Remove installation, agents and local app history
 
 Run, say, attach, read and results need a pane opened by ConsensFlow.
 The app owns conversation launches, delivery and read marks.
@@ -185,6 +175,12 @@ function resolveAdd(name, values) {
  * when nothing matches — the verbs keep their own error text.
  */
 function pickConversation(threads, asked) {
+  if (env.CONSENSFLOW_TAB)
+    threads = Object.fromEntries(
+      Object.entries(threads).filter(([, row]) =>
+        row.lead?.startsWith(`tab:${env.CONSENSFLOW_TAB}:`),
+      ),
+    )
   const byRecency = (names) =>
     [...names].sort((a, b) =>
       String(threads[b].lastRunAt ?? '').localeCompare(String(threads[a].lastRunAt ?? '')),
@@ -679,6 +675,8 @@ async function runInPane(row, task, values, handoff) {
               cwd: cwdOf(),
               text: seed,
               model: resuming ? undefined : row.model,
+              variant: resuming ? undefined : row.effort,
+              resume: resuming,
               signal,
             })
             // The native endpoint admitted the task. A bookkeeping failure
@@ -873,11 +871,15 @@ async function withDeliveryChannel(invocation, kind, launchId) {
       extensionPath: extension.path,
     })
   }
-  return {
-    ...invocation,
-    args: [...configured.args, ...invocation.args],
-    env: { ...invocation.env, ...configured.env },
-  }
+  return withNativeBridge(
+    {
+      ...invocation,
+      args: [...configured.args, ...invocation.args],
+      env: { ...invocation.env, ...configured.env },
+    },
+    configured,
+    process.execPath,
+  )
 }
 
 /** A binding verdict reported where it cannot become the command's answer. */
@@ -1083,48 +1085,6 @@ async function readVerb(rest) {
   })
   process.stdout.write(String(answer.text ?? ''))
   teachRemainingParts(target, values.answer, answer)
-}
-
-/**
- * Everything ConsensFlow installed, taken back: both host payloads, every
- * file the manifest owns, the roster, and local run artifacts.
- */
-function resetVerb(rest) {
-  const { values } = parseArgs({
-    args: rest,
-    allowPositionals: true,
-    options: { yes: { type: 'boolean', default: false } },
-  })
-
-  // Counting before refusing makes the refusal the preview: the same two
-  // numbers the page puts in its dialog, printed while nothing has been
-  // touched. `off` can be undone by opening the app again. This is not: a roster is typed by hand, and a packet, a transcript
-  // or a generated image exists nowhere else.
-  const { agents, runs } = resetPreview(env)
-  if (!values.yes) {
-    out(`reset would remove ${plural(agents, 'agent')} and ${plural(runs, 'run')} (packets,`)
-    out('transcripts, generated images), every file ConsensFlow installed — including skill')
-    out("files you have edited yourself, the `cf` launcher, and the desktop app's own")
-    out('caches. The ConsensFlow.app bundle itself stays — remove it in Finder if you')
-    out('want it gone.')
-    out('')
-    fail('nothing was touched. Re-run with --yes if that is what you want')
-    return
-  }
-
-  const outcome = resetEverything(env)
-  for (const change of outcome.changes) {
-    const what = change.path ?? change.host
-    if (what !== undefined) out(`${String(change.action ?? 'removed').padEnd(16)} ${what}`)
-  }
-  out(
-    `ConsensFlow is reset — ${plural(outcome.removed.agents, 'agent')} and ${plural(outcome.removed.runs, 'run')} went with it`,
-  )
-  out('The ConsensFlow.app bundle is untouched; remove it in Finder if you want it gone.')
-}
-
-function plural(count, noun) {
-  return `${count} ${noun}${count === 1 ? '' : 's'}`
 }
 
 /** Direct people to the conversation controls in the app. */
@@ -1389,7 +1349,14 @@ async function sessionsVerb(rest) {
     options: { json: { type: 'boolean', default: false } },
   })
   const cwd = process.cwd()
-  const threads = await loadThreads(cwd)
+  const allThreads = await loadThreads(cwd)
+  const threads = env.CONSENSFLOW_TAB
+    ? Object.fromEntries(
+        Object.entries(allThreads).filter(([, row]) =>
+          row.lead?.startsWith(`tab:${env.CONSENSFLOW_TAB}:`),
+        ),
+      )
+    : allThreads
   const sessions = Object.fromEntries(
     Object.entries(threads).map(([name, row]) => {
       if (!row.reserved && !row.binding && !row.lead?.startsWith('tab:')) return [name, row]
@@ -1523,20 +1490,6 @@ function readJsonFile(path) {
   } catch {
     return undefined
   }
-}
-
-function offVerb(rest) {
-  const { values } = parseArgs({
-    args: rest,
-    allowPositionals: true,
-    options: { force: { type: 'boolean', default: false } },
-  })
-  const outcome = turnOff(env, { force: values.force })
-  for (const change of outcome.changes) {
-    const what = change.path ?? `the ${change.host} integration`
-    out(`${String(change.action ?? 'removed').padEnd(16)} ${what}`)
-  }
-  out('ConsensFlow is off — agents are kept in ~/.consensflow/agents.json')
 }
 
 function catalogVerb(rest) {
@@ -1752,7 +1705,7 @@ function doctor() {
   out(`consensflow ${PKG.version}`)
   out(`home:         ${configRoot(env)}`)
   out(
-    `harnesses:    ${harnesses.length > 0 ? harnesses.map((a) => `${a.id}${a.native ? ' (has its own consensflow)' : ''}`).join(', ') : 'none on PATH'}`,
+    `harnesses:    ${harnesses.length > 0 ? harnesses.map((a) => a.id).join(', ') : 'none on PATH'}`,
   )
   if (existsSync(join(configRoot(env), 'mode.json'))) {
     out('legacy:       mode.json is ignored and can be removed')
@@ -1827,9 +1780,12 @@ async function main() {
     return
   }
 
-  if (env.CONSENSFLOW_ROLE === 'pm' && command !== 'lead') {
+  if (
+    env.CONSENSFLOW_ROLE === 'pm' &&
+    !['lead', 'run', 'say', 'attach', 'sessions', 'results', 'read'].includes(command)
+  ) {
     fail(
-      'PM panes can use only cf lead send and cf lead read; worker and administration commands are unavailable.',
+      'PM panes can coordinate their advisors and use cf lead send and cf lead read; administration commands are unavailable.',
     )
     return
   }
@@ -1884,12 +1840,6 @@ async function main() {
       return
     case 'last':
       await lastVerb(rest)
-      return
-    case 'off':
-      offVerb(rest)
-      return
-    case 'reset':
-      resetVerb(rest)
       return
     case 'run':
       await runVerb(rest)

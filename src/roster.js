@@ -1,35 +1,34 @@
 import {
+  cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
-  renameSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { presetDrift, syncAgentWithPreset } from '../hosts/lib/presets.js'
+import { readBenchmarkCache, withBenchmarks } from '../hosts/lib/benchmarks.js'
+import {
+  agentProfile,
+  presetDrift,
+  syncAgentWithPreset,
+  validateKimiEffort,
+} from '../hosts/lib/presets.js'
 
 /**
- * The roster IS the shared ConsensFlow file that the v1 Claude Code plugin
- * (consensflow-cc) and the pi extension (consensflow-pi) already read and
- * write: `~/.consensflow/agents.json`. One roster, three consumers —
- * edit it here and cc/pi see the change on their next invocation.
- *
- * That makes v1-schema fidelity a hard contract: reads map v1 rows to the
- * v3 view (kind→harness, thinking/effort→effort),
- * and writes touch only the mapped keys, preserving every field v3 does not
- * understand (display name, skillsPolicy, preset, anything future). Rows of
- * kinds v3 cannot render as commands (e.g. `image`) are listed and marked,
- * never hidden and never dropped.
+ * agents.json stores the saved execution configuration and display profile.
+ * Reads map native kind/thinking fields to the app's harness/effort view;
+ * writes preserve fields outside the edited configuration, including older
+ * and future schema fields.
  *
  * Every function takes the environment explicitly — nothing reads
  * process.env — so tests run against throwaway homes.
  */
 
 // `image` is a harness in the sense that matters here: it is what runs the
-// agent. There is no CLI behind it — gpt-image-2 is reached through the Codex
+// agent. There is no CLI behind it — image generation is reached through the Codex
 // login — but the roster, the catalog and `cf run` treat it like any other, so
 // @pygmalion works wherever the rest do.
 export const HARNESSES = ['claude', 'codex', 'pi', 'opencode', 'kimi', 'image']
@@ -83,36 +82,26 @@ export function legacyConfigRoot(env) {
   return join(base, 'consensflow')
 }
 
-/**
- * Moves an older machine's state into the one root, once.
- *
- * A rename rather than a copy, and only when there is nothing to overwrite:
- * a machine that already has the new root keeps it, and whatever sits in the
- * old one is reported by `cf doctor` rather than merged behind the user's back.
- */
+/** Import legacy app data without changing anything outside the private home. */
 export function migrateStateRoot(env) {
   const from = legacyConfigRoot(env)
   const to = configRoot(env)
   if (from === to || !existsSync(from) || existsSync(join(to, 'mode.json'))) return null
-  mkdirSync(dirname(to), { recursive: true })
-  if (!existsSync(to)) {
-    renameSync(from, to)
-    return { from, to, moved: 'all' }
-  }
-  // The roster already made the directory; move the state files into it.
-  const moved = []
+  if (lstatSync(from).isSymbolicLink()) return null
+  mkdirSync(to, { recursive: true })
+  const copied = []
   for (const name of readdirSync(from)) {
     const target = join(to, name)
     if (existsSync(target)) continue
-    renameSync(join(from, name), target)
-    moved.push(name)
+    cpSync(join(from, name), target, {
+      recursive: true,
+      force: false,
+      // Imported symlinks could make later private writes escape the home.
+      filter: (source) => !lstatSync(source).isSymbolicLink(),
+    })
+    if (existsSync(target)) copied.push(name)
   }
-  try {
-    if (readdirSync(from).length === 0) rmSync(from, { recursive: true, force: true })
-  } catch {
-    // Something else lives there; leaving it is the safe half of the trade.
-  }
-  return moved.length > 0 ? { from, to, moved } : null
+  return copied.length > 0 ? { from, to, copied } : null
 }
 
 /**
@@ -170,7 +159,9 @@ function loadDocument(env) {
   return { ...rest, schemaVersion: parsed.schemaVersion ?? 1, agents: rows }
 }
 
-function saveDocument(document, env) {
+function saveDocument(document, env, benchmarks = readBenchmarkCache(rosterHome(env))) {
+  for (const row of document.agents)
+    row.profile = withBenchmarks(row, agentProfile(row), benchmarks)
   const path = rosterPath(env)
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`)
@@ -190,6 +181,7 @@ function toView(row) {
     ...(effortOf(row) ? { effort: effortOf(row) } : {}),
     ...(row.description ? { description: row.description } : {}),
     ...(row.preset ? { preset: row.preset } : {}),
+    ...(row.profile ? { profile: row.profile } : {}),
     ...(harness === undefined ? { unsupported: true } : {}),
   }
 }
@@ -204,6 +196,20 @@ function toView(row) {
 export function agentRow(name, env) {
   const wanted = String(name ?? '').replace(/^@/, '')
   return loadDocument(env).agents.find((row) => row.id === wanted)
+}
+
+/** Refresh display metadata only; never change the saved model or custom fields. */
+export function refreshAgentProfiles(env, benchmarks = readBenchmarkCache(rosterHome(env))) {
+  const document = loadDocument(env)
+  if (
+    document.agents.some(
+      (row) =>
+        JSON.stringify(row.profile) !==
+        JSON.stringify(withBenchmarks(row, agentProfile(row), benchmarks)),
+    )
+  ) {
+    saveDocument(document, env, benchmarks)
+  }
 }
 
 export function listAgents(env) {
@@ -228,6 +234,7 @@ function validateAdd(input) {
 
 export function addAgent(input, env) {
   validateAdd(input)
+  validateKimiEffort(input)
   const document = loadDocument(env)
   if (document.agents.some((row) => row.id === input.name)) {
     throw new Error(`an agent named ${input.name} already exists`)
@@ -272,7 +279,7 @@ export function editAgent(name, patch, env) {
 
   // Two different refusals that used to be one: a kind this build cannot run
   // at all, and `image`, which it runs but which has no effort to set —
-  // gpt-image-2 takes a prompt, not a thinking level.
+  // the image route takes a prompt, not a thinking level.
   if (patch.effort !== undefined && (!supported || row.kind === 'image')) {
     throw new Error(
       supported
@@ -295,6 +302,7 @@ export function editAgent(name, patch, env) {
     // Never leave a stale value in the key this kind does not read.
     delete row[key === 'thinking' ? 'effort' : 'thinking']
   }
+  validateKimiEffort(row)
   row.updatedAt = new Date().toISOString()
 
   saveDocument(document, env)

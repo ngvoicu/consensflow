@@ -4,11 +4,14 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resultStatus } from '../../hosts/lib/inbox.js'
 import { workspaceKey } from '../../hosts/lib/state.js'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const CF = join(REPO, 'bin', 'cf.mjs')
-const BRIDGE = join(REPO, 'app', 'src-tauri', 'target', 'debug', 'consensflow-bridge')
+const BRIDGE =
+  process.env.CONSENSFLOW_TEST_BRIDGE ??
+  join(REPO, 'app', 'src-tauri', 'target', 'release', 'consensflow-bridge')
 const EDITOR = fileURLToPath(new URL('./pty-editor.mjs', import.meta.url))
 const FAKE = join(dirname(fileURLToPath(import.meta.url)), 'fake-claude.mjs')
 
@@ -68,7 +71,7 @@ function safeEnvironment(root, fakeBin, harnessFile) {
   return {
     HOME: home,
     CONSENSFLOW_HOME: join(root, 'consensflow'),
-    CONSENSFLOW_BIN_DIR: join(root, 'user-bin'),
+    CONSENSFLOW_BIN_DIR: join(root, 'consensflow', 'bin'),
     CLAUDE_CONFIG_DIR: join(home, '.claude'),
     CODEX_HOME: join(home, '.codex'),
     XDG_CONFIG_HOME: join(home, '.config'),
@@ -310,9 +313,12 @@ export async function startIntegration({ fakeEnv = {}, bridgeEnv = {}, existingR
   }
 
   const deliveries = (dir = workspace) => {
-    const file = join(env.CONSENSFLOW_HOME, 'workspaces', workspaceKey(dir), 'deliveries.json')
+    const file = join(env.CONSENSFLOW_HOME, 'workspaces', workspaceKey(dir), 'inbox.json')
     try {
-      return Object.values(JSON.parse(readFileSync(file, 'utf8')))
+      return Object.values(JSON.parse(readFileSync(file, 'utf8')).results).map((result) => ({
+        ...result,
+        state: resultStatus(result),
+      }))
     } catch {
       return []
     }

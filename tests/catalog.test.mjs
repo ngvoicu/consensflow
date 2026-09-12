@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { CATALOG, catalogEntry, EFFORTS } from '../src/catalog.js'
+import { agentProfile, CATALOG, catalogEntry, EFFORTS } from '../src/catalog.js'
 import { HARNESSES } from '../src/roster.js'
 
 describe('every tool ships a list of ready-made agents', () => {
   it('covers every harness, each with a real list (image has one)', () => {
     assert.deepEqual(Object.keys(CATALOG).sort(), [...HARNESSES].sort())
     for (const [harness, entries] of Object.entries(CATALOG)) {
-      const least = harness === 'image' ? 1 : 3
+      const least = ['image', 'kimi'].includes(harness) ? 1 : 3
       assert.ok(entries.length >= least, `${harness} needs a real list`)
     }
   })
@@ -76,7 +76,8 @@ describe('every tool ships a list of ready-made agents', () => {
   it("keeps each opencode twin at its pi twin's effort", () => {
     const level = (entry) => entry.effort
     for (const entry of CATALOG.opencode) {
-      const twin = CATALOG.pi.find((p) => p.model === entry.model)
+      const twins = CATALOG.pi.filter((p) => p.model === entry.model)
+      const twin = twins.find((p) => level(p) === level(entry)) ?? twins[0]
       if (twin === undefined || level(entry) === undefined) continue
       assert.equal(
         level(entry),
@@ -199,7 +200,11 @@ describe('every tool ships a list of ready-made agents', () => {
         .filter((e) => e.model.includes('gpt-6-astra'))
         .map((e) => e.effort)
         .sort()
-      assert.deepEqual(efforts, ['max', 'xhigh'], `${harness}: both Astra tiers, and no ultra`)
+      assert.deepEqual(
+        efforts,
+        ['low', 'max', 'medium', 'xhigh'],
+        `${harness}: four Astra tiers, and no ultra`,
+      )
     }
   })
 
@@ -252,4 +257,172 @@ describe('every tool ships a list of ready-made agents', () => {
     assert.equal(hyperion.effort, 'max')
     assert.equal(hyperion.description, 'Codex GPT 5.6 Sol MAX')
   })
+})
+
+it('Kimi is K3-only and names its supported effort instead of hiding it', () => {
+  assert.deepEqual(
+    CATALOG.kimi.map((entry) => entry.name),
+    ['ilmarinen'],
+  )
+  const entry = catalogEntry('ilmarinen')
+  assert.equal(entry.model, 'moonshot-ai/kimi-k3')
+  assert.equal(entry.effort, 'max')
+  assert.deepEqual(EFFORTS.kimi, ['low', 'high', 'max'])
+  assert.deepEqual(entry.profile.categories, ['coding', 'reviewer'])
+  for (const effort of ['low', 'xhigh', 'medium'])
+    assert.deepEqual(agentProfile({ ...entry, effort }).categories, ['coding'])
+  assert.deepEqual(agentProfile({ ...entry, effort: 'high' }).categories, ['coding', 'reviewer'])
+  for (const name of ['seppo', 'ahti']) assert.equal(catalogEntry(name), undefined)
+  assert.ok(
+    Object.values(CATALOG)
+      .flat()
+      .every((entry) => !/kimi-k2\.7/.test(entry.model)),
+  )
+})
+
+describe('catalog presentation follows actual model and effort', () => {
+  it('gives every curated entry an explicit model, route and practical description', () => {
+    for (const entries of Object.values(CATALOG)) {
+      for (const entry of entries) {
+        assert.ok(entry.profile?.modelKey, entry.name)
+        assert.ok(entry.profile.modelLabel, entry.name)
+        assert.ok(entry.profile.routeLabel, entry.name)
+        assert.ok(entry.profile.goodFor.length > 15, entry.name)
+        assert.ok(
+          entry.profile.categories.includes(entry.name === 'pygmalion' ? 'images' : 'coding'),
+        )
+      }
+    }
+  })
+
+  it('unifies reviewed provider aliases while keeping model snapshots distinct', () => {
+    assert.equal(catalogEntry('astraeus').profile?.modelKey, 'gpt-6-astra')
+    assert.equal(catalogEntry('phosphoros').profile?.modelKey, 'gpt-6-astra')
+    assert.equal(catalogEntry('aurvandil').profile?.modelKey, 'gpt-6-astra')
+    assert.equal(catalogEntry('logi').profile?.modelKey, catalogEntry('gefjon').profile?.modelKey)
+    assert.notEqual(
+      catalogEntry('freya').profile?.modelKey,
+      catalogEntry('dvalin').profile?.modelKey,
+    )
+  })
+
+  it('recommends roles only for supported actual model and effort combinations', async () => {
+    const { agentProfile } = await import('../src/catalog.js')
+    assert.equal(typeof agentProfile, 'function')
+    const astra = { harness: 'codex', model: 'gpt-6-astra', effort: 'medium' }
+    assert.deepEqual(agentProfile(astra).categories, ['coding', 'reviewer'])
+    for (const effort of ['low', 'off', 'minimal', 'unknown', undefined]) {
+      assert.deepEqual(agentProfile({ ...astra, effort }).categories, ['coding'])
+    }
+    assert.deepEqual(
+      agentProfile({ ...astra, harness: 'pi', model: 'openai-codex/gpt-6-astra', effort: 'ultra' })
+        .categories,
+      ['coding'],
+    )
+    assert.deepEqual(
+      agentProfile({ harness: 'claude', model: 'claude-opus-5', effort: 'medium' }).categories,
+      ['coding', 'reviewer'],
+    )
+    assert.deepEqual(agentProfile({ ...astra, model: 'invented', preset: 'astraeus' }).categories, [
+      'coding',
+    ])
+    assert.deepEqual(agentProfile({ ...astra, harness: 'unknown' }).categories, [])
+    assert.deepEqual(agentProfile({ harness: 'image', model: 'legacy-image' }).categories, [
+      'images',
+    ])
+  })
+})
+
+it('ships all compatible low/medium choices with stable identities and Pi OpenRouter routing', () => {
+  const matrix = [
+    ['codex', 'gpt-5.6-sol', 'hemera', 'phaethon'],
+    ['pi', 'openai-codex/gpt-5.6-sol', 'leto', 'asterope'],
+    ['opencode', 'openrouter/openai/gpt-5.6-sol', 'arvakr', 'alsvidr'],
+    ['codex', 'gpt-6-astra', 'electra', 'maia'],
+    ['pi', 'openai-codex/gpt-6-astra', 'alcyone', 'merope'],
+    ['opencode', 'openrouter/openai/gpt-6-astra', 'dagr', 'skirnir'],
+    ['claude', 'claude-fable-5-1', 'terpsichore', 'thalia'],
+    ['pi', 'openrouter/anthropic/claude-fable-5.1', 'musaeus', 'erato'],
+    ['opencode', 'openrouter/anthropic/claude-fable-5.1', 'suttung', 'kvasir'],
+  ]
+  for (const [harness, model, low, medium] of matrix) {
+    for (const [name, effort] of [
+      [low, 'low'],
+      [medium, 'medium'],
+    ]) {
+      const entry = catalogEntry(name)
+      assert.ok(entry, name)
+      assert.equal(entry.harness, harness)
+      assert.equal(entry.model, model)
+      assert.equal(entry.effort, effort)
+    }
+  }
+  assert.equal(Object.values(CATALOG).flat().length, 98)
+  for (const name of ['orpheus', 'linus', 'erato', 'kronos', 'atlas']) {
+    assert.match(catalogEntry(name).model, /^openrouter\/anthropic\//)
+    assert.equal(catalogEntry(name).profile.routeLabel, 'OpenRouter · API')
+  }
+  assert.equal(
+    CATALOG.claude.some((e) => e.model.includes('astra')),
+    false,
+  )
+  assert.equal(
+    CATALOG.codex.some((e) => e.model.includes('fable')),
+    false,
+  )
+})
+
+it('lead and PM need xhigh or higher; reviewer recommendations begin at medium', async () => {
+  const { agentProfile } = await import('../src/catalog.js')
+  const pairs = [
+    ['codex', 'gpt-6-astra'],
+    ['codex', 'gpt-5.6-sol'],
+    ['claude', 'claude-fable-5-1'],
+    ['claude', 'claude-opus-5'],
+    ['pi', 'openrouter/anthropic/claude-opus-5'],
+    ['opencode', 'openrouter/anthropic/claude-fable-5.1'],
+  ]
+  for (const [harness, model] of pairs) {
+    for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) {
+      const categories = agentProfile({ harness, model, effort }).categories
+      const expected = ['coding']
+      if (['xhigh', 'max'].includes(effort)) expected.push('lead', 'pm')
+      if (effort !== 'low') expected.push('reviewer')
+      assert.deepEqual(categories, expected, model + ' ' + effort)
+    }
+  }
+  assert.deepEqual(
+    agentProfile({ harness: 'codex', model: 'gpt-6-astra', effort: 'ultra' }).categories,
+    ['coding', 'lead', 'pm', 'reviewer'],
+  )
+  assert.deepEqual(
+    agentProfile({ harness: 'codex', model: 'gpt-5.6-luna', effort: 'medium' }).categories,
+    ['coding', 'reviewer'],
+  )
+})
+
+it('Gemini 3.1 Pro Preview is retired on every harness while Gemini 3.8 Flash remains', () => {
+  assert.equal(catalogEntry('helios'), undefined)
+  assert.equal(catalogEntry('heimdall'), undefined)
+  assert.ok(
+    !Object.values(CATALOG)
+      .flat()
+      .some((p) => p.model.includes('gemini-3.1-pro')),
+  )
+  assert.equal(catalogEntry('nike').model, 'openrouter/google/gemini-3.8-flash')
+  assert.equal(catalogEntry('sif').model, 'openrouter/google/gemini-3.8-flash')
+})
+
+it('Muse Contributor variants share model identity while retaining route terms and execution IDs', () => {
+  for (const name of ['eos', 'logi', 'urania', 'odrerir', 'gefjon']) {
+    const p = catalogEntry(name)
+    assert.equal(p.profile.modelKey, 'muse-spark-1.3')
+    assert.equal(p.profile.modelLabel, 'Muse Spark 1.3')
+    if (['urania', 'odrerir', 'gefjon'].includes(name)) {
+      assert.match(p.model, /contributor/)
+      assert.match(p.profile.routeLabel, /Contributor/)
+      assert.equal(p.profile.routeNote, 'Prompts and replies may train Meta models.')
+    } else assert.equal(p.profile.routeNote, undefined)
+  }
+  assert.equal(catalogEntry('gefjon').profile.routeLabel, 'OpenCode Zen · Contributor · Free')
 })

@@ -1,4 +1,4 @@
-// ChatGPT OAuth credentials for the gpt-image-2 backend, read from the Codex CLI's own auth
+// ChatGPT OAuth credentials for the Codex image route, read from the Codex CLI's own auth
 // store (the CC analog of pi's ctx.modelRegistry openai-codex token). Read-only: token refresh
 // stays the codex CLI's job — an expired token surfaces as a 401 with a fix-it hint upstream.
 import fs from "node:fs/promises";
@@ -51,7 +51,7 @@ export async function loadCodexAuth() {
   const tokens = parsed?.tokens;
   const token = typeof tokens?.access_token === "string" && tokens.access_token ? tokens.access_token : undefined;
   if (!token) {
-    throw new Error(`${authPath} has no ChatGPT access token — run \`codex login\` (an API key alone cannot drive the gpt-image-2 backend).`);
+    throw new Error(`${authPath} has no ChatGPT access token — run \`codex login\` (an API key alone cannot drive the Codex image route).`);
   }
   let accountId = typeof tokens.account_id === "string" && tokens.account_id ? tokens.account_id : undefined;
   if (!accountId) {

@@ -3,7 +3,7 @@ import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { it } from 'node:test'
-import { deliver, send } from '../src/channels/codex.js'
+import { send } from '../src/channels/codex.js'
 
 const SESSION = '01a0817b-e6b0-7f32-8e11-370dc000cbc0'
 
@@ -84,19 +84,6 @@ async function fixture(mode = 'success', timeoutMs = 3_000) {
   }
 }
 
-function record(overrides = {}) {
-  return {
-    id: 'd-33',
-    answerId: 'answer-7',
-    conversation: 'worker-one',
-    agent: 'zeus',
-    answer: 'The answer is complete.',
-    channel: 'pty-inline',
-    expiresAt: Date.now() + 3_000,
-    ...overrides,
-  }
-}
-
 it('sends the exact queue argv and canonical text from an absolute launch', async () => {
   const f = await fixture()
   const order = []
@@ -128,36 +115,6 @@ it('sends the exact queue argv and canonical text from an absolute launch', asyn
     assert.equal(entry.openaiApiKey, null)
   } finally {
     await f.cleanup()
-  }
-})
-
-it('uses the canonical envelope and cf-read pointer without rewriting the text', async () => {
-  for (const channel of ['pty-inline', 'cf-read']) {
-    const f = await fixture()
-    f.target.claimEpoch = async () => ({ ok: true })
-    try {
-      await deliver('codex-queue', f.target, record({ channel }))
-      const [entry] = await f.capture()
-      assert.equal(entry.argv[0], 'queue')
-      assert.equal(entry.argv[1], '--thread')
-      assert.equal(entry.argv[2], SESSION)
-      assert.equal(entry.argv[3], '--message')
-      if (channel === 'cf-read') {
-        assert.equal(
-          entry.argv[4],
-          '@zeus answered in worker-one — run: cf read d-33  (it prints everything; read all of it)',
-        )
-      } else {
-        assert.equal(
-          entry.argv[4],
-          '[consensflow delivery d-33 from worker-one #answer-7]\n' +
-            'The answer is complete.\n' +
-            '[end of delivery d-33]\n',
-        )
-      }
-    } finally {
-      await f.cleanup()
-    }
   }
 })
 
@@ -260,30 +217,6 @@ it('turns a stale native claim into an affirmative zero-byte refusal without spa
   }
 })
 
-it('refuses an expired delivery before the native claim or helper spawn', async () => {
-  const f = await fixture()
-  let claims = 0
-  f.target.claimEpoch = async () => {
-    claims += 1
-    return { ok: true }
-  }
-  try {
-    assert.deepEqual(
-      await deliver('codex-queue', f.target, record({ expiresAt: Date.now() - 1 })),
-      {
-        ok: false,
-        admitted: false,
-        error: 'expired',
-        bytesWritten: 0,
-      },
-    )
-    assert.equal(claims, 0)
-    assert.deepEqual(await f.capture(), [])
-  } finally {
-    await f.cleanup()
-  }
-})
-
 it('reports a nonzero helper exit as uncertain and performs no automatic retry', async () => {
   const f = await fixture('failure')
   f.target.claimEpoch = async () => ({ ok: true })
@@ -342,6 +275,61 @@ it('stops a timed-out helper and does not retry the ambiguous queue operation', 
     assert.equal(entries.filter((entry) => entry.kind === 'start').length, 1)
     assert.equal(entries.filter((entry) => entry.kind === 'stopped').length, 1)
   } finally {
+    await f.cleanup()
+  }
+})
+
+it('uses the owned bridge for exact identity and rejects a session switch after the pane claim', async () => {
+  const { createServer } = await import('node:http')
+  const { currentSession } = await import('../src/channels/codex.js')
+  const f = await fixture()
+  let selected = SESSION
+  const received = []
+  const server = createServer(async (request, response) => {
+    response.setHeader('content-type', 'application/json')
+    if (request.url === '/session')
+      return response.end(JSON.stringify({ launchId: 'owned', sessionId: selected }))
+    let text = ''
+    for await (const chunk of request) text += chunk
+    const input = JSON.parse(text)
+    received.push(input)
+    response.end(
+      JSON.stringify(
+        input.sessionId === selected
+          ? { ok: true, admitted: true }
+          : { ok: false, admitted: false, bytesWritten: 0, error: 'native-session-changed' },
+      ),
+    )
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  f.target.launch = {
+    ...f.launch,
+    launchId: 'owned',
+    sessionBridge: {
+      endpoint: `http://127.0.0.1:${server.address().port}`,
+      token: 'private-owned-bridge-token-123',
+    },
+  }
+  try {
+    assert.equal(await currentSession(f.target.launch), SESSION)
+    f.target.claimEpoch = async () => {
+      selected = '01a09094-a559-7db0-bf50-e2309856c3c0'
+      return { ok: true }
+    }
+    assert.deepEqual(await send(f.target, 'complete reply'), {
+      ok: false,
+      admitted: false,
+      bytesWritten: 0,
+      error: 'native-session-changed',
+    })
+    assert.equal(received[0].sessionId, SESSION)
+    assert.deepEqual(await f.capture(), [], 'the old global queue helper must never be spawned')
+    f.target.session = selected
+    assert.deepEqual(await send(f.target, 'complete reply'), { ok: true, admitted: true })
+    assert.equal(received[1].text, 'complete reply')
+  } finally {
+    server.closeAllConnections()
+    await new Promise((resolve) => server.close(resolve))
     await f.cleanup()
   }
 })

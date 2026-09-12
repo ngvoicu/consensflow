@@ -318,10 +318,11 @@ describe('private skill installation is independent of old host integrations', (
     )
   })
 
-  it('doctor reports the native integration too', async () => {
+  it('doctor reports detected harnesses without retired plugin status', async () => {
     const out = await cf(['doctor'], t.env)
     assert.match(out.stdout, /claude/)
-    assert.match(out.stdout, /own consensflow|native/i)
+    assert.match(out.stdout, /harnesses:\s+claude, codex/)
+    assert.doesNotMatch(out.stdout, /own consensflow|native/i)
   })
 })
 
@@ -516,90 +517,34 @@ describe('cf setup readies a machine in one command', () => {
   })
 })
 
-describe('the CLI can undo an install as completely as the app', () => {
-  const t = tempEnv()
-  after(() => t.cleanup())
-
-  it('takes everything back but the roster', async () => {
-    stubCli(t, 'claude')
-    await cf(['agent', 'add', 'zeus', '--harness', 'claude', '--model', 'claude-opus-5'], t.env)
-    await cf(['setup'], t.env)
-    const skill = join(
-      t.env.CONSENSFLOW_HOME,
-      'roles',
-      'lead',
-      '.claude',
-      'skills',
-      'consensflow-lead',
-      'SKILL.md',
-    )
-    assert.ok(existsSync(skill), 'the generated skill is installed for the chosen scope')
-
-    const off = await cf(['off'], t.env)
-    assert.equal(off.code, 0)
-    assert.match(off.stdout, /off/i)
-
-    assert.equal(existsSync(skill), false, 'the skill is taken back')
-    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'hosts')), false, 'no payload survives')
-    assert.equal(existsSync(join(t.env.CLAUDE_CONFIG_DIR, 'commands', 'consensflow.md')), false)
-    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'mode.json')), false)
-
-    // Agents are the user's, and outlive any install.
-    const listed = await cf(['agent', 'list'], t.env)
-    assert.match(listed.stdout, /zeus/)
-  })
-})
-
-describe('cf reset is the clean slate, and refuses until you say so', () => {
-  const t = tempEnv()
-  after(() => t.cleanup())
-
-  const skill = () =>
-    join(
-      t.env.CONSENSFLOW_HOME,
-      'roles',
-      'lead',
-      '.claude',
-      'skills',
-      'consensflow-lead',
-      'SKILL.md',
-    )
-
-  it('prints what it would destroy and touches nothing', async () => {
-    stubCli(t, 'claude')
-    await cf(['agent', 'add', 'zeus', '--harness', 'claude', '--model', 'claude-opus-5'], t.env)
-    await cf(['setup'], t.env)
-    mkdirSync(join(t.env.CONSENSFLOW_HOME, 'workspaces', 'proj', 'runs', 'ask-1'), {
-      recursive: true,
+describe('retired off/reset CLI commands preserve the installation and saved data', () => {
+  for (const args of [['off'], ['off', '--force'], ['reset'], ['reset', '--yes']]) {
+    it(`rejects cf ${args.join(' ')}`, async () => {
+      const t = tempEnv()
+      try {
+        await cf(['agent', 'add', 'zeus', '--harness', 'claude', '--model', 'example'], t.env)
+        assert.equal((await cf(['setup'], t.env)).code, 0)
+        const history = join(t.env.CONSENSFLOW_HOME, 'workspaces', 'project', 'runs', 'run-1')
+        mkdirSync(history, { recursive: true })
+        const files = [
+          rosterPath(t.env),
+          join(t.env.CONSENSFLOW_BIN_DIR, 'cf'),
+          join(history, 'answer.txt'),
+        ]
+        writeFileSync(files[2], 'saved result')
+        const before = files.map((path) => readFileSync(path))
+        const result = await cf(args, t.env)
+        assert.equal(result.code, 1)
+        assert.match(result.stderr, /unknown command/i)
+        assert.deepEqual(
+          files.map((path) => readFileSync(path)),
+          before,
+        )
+      } finally {
+        t.cleanup()
+      }
     })
-    assert.ok(existsSync(skill()))
-
-    const out = await cf(['reset'], t.env)
-
-    // The refusal IS the preview — same two numbers the page puts in its
-    // dialog, printed while everything is still there.
-    assert.notEqual(out.code, 0, 'a destructive default is not a default')
-    assert.match(out.stdout + out.stderr, /1 agent and 1 run/)
-    assert.match(out.stdout + out.stderr, /nothing was touched/)
-    assert.ok(existsSync(skill()), 'the skill survives a refusal')
-    assert.ok(existsSync(rosterPath(t.env)), 'and so does the roster')
-  })
-
-  it('removes everything once told, and says what went', async () => {
-    const out = await cf(['reset', '--yes'], t.env)
-
-    assert.equal(out.code, 0, out.stderr)
-    assert.match(out.stdout, /1 agent and 1 run went with it/)
-    assert.equal(existsSync(skill()), false)
-    assert.equal(existsSync(t.env.CONSENSFLOW_HOME), false, 'the whole root is gone')
-  })
-
-  it('counts nothing, and still works, on a machine with nothing installed', async () => {
-    const out = await cf(['reset', '--yes'], t.env)
-
-    assert.equal(out.code, 0, out.stderr)
-    assert.match(out.stdout, /0 agents and 0 runs/)
-  })
+  }
 })
 
 it('retired skill install/update commands explain bundled skills without creating files', async () => {
@@ -660,7 +605,7 @@ it('PM CLI sends exact file contents and retrieves immutable lead parts in one r
   }
 })
 
-it('PM CLI rejects local roster and worker commands before changing any app files', async () => {
+it('PM CLI rejects local roster and administration commands before changing any app files', async () => {
   const t = tempEnv()
   try {
     const env = {
@@ -672,7 +617,6 @@ it('PM CLI rejects local roster and worker commands before changing any app file
     }
     for (const args of [
       ['agent', 'add', 'forbidden', '--harness', 'codex'],
-      ['run', '@zeus', 'forbidden'],
       ['skills', 'uninstall', '--force'],
       ['reset', '--yes'],
     ]) {

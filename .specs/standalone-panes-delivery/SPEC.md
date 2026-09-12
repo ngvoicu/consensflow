@@ -1,16 +1,22 @@
 ---
 id: standalone-panes-delivery
 title: ConsensFlow owns the panes — standalone mode in the app, results delivered to the lead
-status: active
+status: completed
 created: 2026-09-06
-updated: 2026-09-10
+updated: 2026-09-12
 priority: high
 tags: [app, tauri, pty, panes, delivery, standalone, skill, evals]
 ---
 
 # ConsensFlow owns the panes — standalone mode in the app, results delivered to the lead
 
-**Latest confirmed amendment:** detect every known harness, show its installed
+**Current authorization, 2026-09-12:** finish the shared receiver inbox migration for
+all four coordinator harnesses, remove superseded automatic sender paths, and finish
+PM advisors, separate grids and outstanding verification. Preserve manual user-requested
+PM/lead messages and worker/advisor tasks. The installed/running app remains untouched;
+prepare and verify a separate artifact. This overrides historical install instructions.
+
+**Historical harness-panel amendment:** detect every known harness, show its installed
 version, newer official release availability and evidence-based integration
 status. Version checks are informational, never admission/read/delivery gates.
 Automatically prepare the bundled Pi extension only when Pi is installed;
@@ -18,8 +24,7 @@ missing/failed extension is red with an explanation and retry. Preserve active
 sessions. Skills ship with each ConsensFlow release; remove separate Update
 skills/install skills actions. See plan sections 8–9 for acceptance criteria.
 This supersedes prior no-extension/no-version-inspection statements below.
-The latest instruction authorizes reinstall and native checks after the user closed
-the app; preserve histories and profiles.
+That historical installation authorization is superseded by the current candidate-only boundary above.
 
 **Role-skill planning decision, Gabriel, 2026-09-09:** the app lead receives
 `consensflow-lead`; its PM receives `consensflow-pm`. Neither is installed
@@ -1842,7 +1847,39 @@ are recorded in `implementation-isolation.json`. Alpha.37 is installed; companio
 
 ## Resume Context
 
-2026-09-10 current: Phase 24 is complete. Alpha.43 is installed and published
+2026-09-12: receiver-pull and PM advisors candidate completed (272/272). The old automatic sender/readiness/retry/UI paths are removed. All four native receiver integrations and per-reply inbox/history/counts pass isolated checks; PM advisor permissions, restoration and independent grids/lifecycle are complete. See [candidate acceptance](acceptance-receiver-pull-candidate.md) for exact counts, raw evidence, preserved historical uncertainty and the separate launcher/profile. Installed alpha.61 is unchanged; user live testing and any future installation/publication remain separate.
+
+2026-09-11: Phase 32 complete (247/247). Alpha.61 installed and running; Claude late-written ancestor regression fixed and replayed successfully by the installed parser. User will test live. Storage amendment keeps app-owned CLI/socket/update files under ConsensFlow home. Full Node 1326 passed, 6 skips, 0 failed; Rust 92/92; packaged smoke 2/2. Saved agents and 90 worker identities preserved. Debug build directory deleted, 20.38 GiB removed. No GitHub/NAS publication or commit.
+
+2026-09-11: Phase 31 complete (242/242). Alpha.60 is installed and running. Native new/clear, resume and app restart/resume delivery passed for Claude Code, Codex, OpenCode and Pi using the installed modules and shipping Rust pane host: 16 complete automatic native receipts, one attempt each. Full Node 1307 passed / 0 failed / 6 skips, browser 127/127, packaged smoke 2/2. Bundle signature and 81 hashes verified; 57 state files unchanged at replacement and all 90 original worker identities preserved after startup. Codex uses a private per-pane stock app-server/TUI broker; replies follow the main lead rather than a focused native child. Source roles/config remain intact. Existing unchanged session-binding.test.mjs formatting error remains; whole-tree lint is not green. See the Phase 31 installed acceptance at the end. No pending implementation, commit or publication.
+
+2026-09-11: Phase 30 complete. Alpha.59 installed; OpenCode p-197 fills its pane with no startup toast. Latest terminal dimensions wait for the live native generation and resize calls are serialized. Real installed PTY now 204 columns by 58 rows (previously 80 by 24). Browser 126/126, related Node 154/154, native PTY resize 1/1 and packaged smoke 2/2 pass. Same native OpenCode conversation resumed; saved agents and all 88 worker native identities preserved. No pending implementation.
+
+2026-09-11: Phase 29 complete. Alpha.58 installed. Live Pi identity follows
+/new and /resume, with same-generation worker context preserved for later app
+resume. Real native /new probe and installed Gefjon-to-current-Pi delivery pass;
+d-122 has one complete native receipt. User's actual new native conversation,
+saved agents and all worker identities preserved. No pending implementation.
+
+2026-09-11: Phase 28 complete. Alpha.57 installed locally. Same-native lead
+resume preserves reply routing, and an idle Pi resume restores native settlement.
+The reported SQL reply d-118 arrived automatically exactly once in the original
+Pi lead history; the lead acknowledged it visibly. No pending implementation.
+
+2026-09-11: Phase 27 complete; alpha.55 installed locally. Reproduced OpenCode 1.18.30 readiness request
+stalling while later authenticated probes return 200. Bound individual safe
+health reads; retain the overall startup deadline and single prompt POST.
+RED and GREEN complete (22/22); native response and local reinstall verified.
+
+
+2026-09-10 catalog work: paused while the new
+[`agent-catalog-redesign`](../agent-catalog-redesign/SPEC.md) spec is reviewed.
+Phase 26 remains complete at 203/203 implementation tasks; no existing
+acceptance evidence or pending historical limitation is changed by this switch.
+
+2026-09-10 current: Phase 26 is complete; alpha.45 is installed locally with simplified Harnesses and Agents, retired off/reset features, and no receipt diagnostic, documentation link or command-reference section. Saved state is preserved. Alpha.43 remains the published release.
+
+Previous publication: Phase 24 is complete. Alpha.43 is installed and published
 on GitHub with signed updater assets and a live Alpha feed. Source commit
 b34bd42 and release/feed tags are pushed to both NAS and GitHub. All remote
 asset hashes and the production signature were verified. The actual native
@@ -3018,3 +3055,720 @@ Logs: `/tmp/cf-release43-{node,rust,integration,upgrade,clippy}.log`.
   identity, forward-only pushes, immutable version assets published before the
   rolling feed, pinned-key signature verification and actual native checks.
   Advisor/Context7 tools remained unavailable; no dependencies were added.
+
+
+## Separate Harnesses and remove reset/off — Phase 25 [completed]
+
+Gabriel requested a top-level Harnesses entry beside Agents and explicitly
+confirmed removal of Turn off and Reset everything everywhere, including CLI.
+Extract harness diagnostics into its own authenticated page, loaded when opened;
+retain version checks, installation/update links and Pi extension retry. Agents
+keeps roster editing, catalog filtering and catalog-update feedback. Remove the
+Installed/Runtime/Home facts, their system endpoint/formatter, destructive
+UI/API/CLI paths and helpers used only by those features. Preserve shared role
+preparation, CLI setup/doctor and private skill uninstall. Never execute a reset
+or remove actual saved settings, histories or user files during this cleanup.
+
+- [x] [TEST-PANE-204] RED: separate navigation and real pages; retired API/CLI requests preserve saved data.
+- [x] [IMPL-PANE-205] Extract Harnesses; remove obsolete controls, endpoints, commands, helpers and docs; focused GREEN.
+- [x] [VERIFY-PANE-206] Run relevant regressions, build and reinstall alpha.44, verify both installed screens and retained state.
+
+Authorization covers implementation and reinstall. No new publication is part
+of this amendment. The previously disclosed lifecycle assertion is separate.
+Advisor/Context7 tools are unavailable; no external dependencies are introduced.
+
+Phase 25 RED: Node 52 passed / 9 failed; UI 0 passed / 3 failed. Retired routes and commands still operate, facts remain and Harnesses is absent. Logs: `/tmp/cf-cleanup-red-{node,ui}.log`.
+
+Phase 25 focused GREEN: Node 80/80; navigation 2/2; real Harnesses/Agents pages 4/4, including catalog sync/error feedback and failed-check retry. Shared role preparation and doctor remain; removed exports have no production callers. Targeted lint passes. Full UI initially had one mistaken test expectation (worker command text does not contain the model); corrected to inspect the editor field. Full UI rerun pending.
+
+
+### Phase 25 final verification — 2026-09-10
+
+- Harness diagnostics extracted to `src/harness-page.js`, served at authenticated
+  `/harnesses` and opened by the top-level Harnesses entry beside Agents. The
+  new iframe loads only when requested and retains its content when closed.
+  Existing Agents iframe is retained, including pending edits across navigation.
+- Deleted Installed/Runtime/Home status panel and `/api/system`, its formatter,
+  `cf off`, `cf reset`, their routes, confirmation handlers, reset previews,
+  platform cache deletion and launcher removal helper. Shared setup/doctor and
+  private role generation/uninstall remain. Catalog-update and edit-error
+  feedback now belong to the roster itself.
+- Final focused Node: 82/82, exit 0. Full UI: 93/93, exit 0; packaged app smoke:
+  1/1, exit 0. Modified code passes Biome and `git diff --check`.
+- Whole-repository lint retains three errors in unchanged HEAD files:
+  import order in `src/delivery-watch.js`, formatting in
+  `tests/delivery-watch.test.mjs` and `tests/engine/session-binding.test.mjs`.
+  None was introduced or edited by this cleanup.
+- Initial parallel Node run hit the known lifecycle assertion plus a Codex
+  capability-probe timeout under load. That probe passed its isolated rerun.
+  The sequential full-suite result below supersedes the parallel timing result.
+- Built and installed `3.0.0-alpha.44`; codesign verification passes and all 58
+  installed bundle files match the build. The old alpha.43 app is retained in
+  the temporary installation backup. No commit, remote push or release was made.
+- CuaDriver verified the actual installed app: both top-level entries, separate
+  Harnesses diagnostics for all five known tools, working close controls, and
+  Agents without the removed facts or destructive buttons. Screenshots:
+  `/tmp/cf-cleanup-native-{main,harnesses,agents,final}.png`. Native PID 41560.
+- Saved roster, tab settings, updater preference and workspace artifacts: all
+  31 tracked file hashes unchanged after reinstall and native checks. Zero tabs
+  were saved at replacement time; no conversation was opened for this UI check.
+  Snapshot/previous bundle: path recorded in `/tmp/cf-cleanup-install-path`.
+- Evidence logs: `/tmp/cf-cleanup-focused-final.log`,
+  `/tmp/cf-cleanup-ui-final.log`, `/tmp/cf-cleanup-smoke.log`,
+  `/tmp/cf-cleanup-node-serial.log`, `/tmp/cf-cleanup-lint.log`,
+  `/tmp/cf-cleanup-build.log`. Advisor remains unavailable; final source review
+  checked removal dependencies, auth coverage, roster feedback and bundle identity.
+
+Sequential full Node: tests 1221; pass 1215; fail 1; skipped 5. Exit 1 only for the existing `tests/lifecycle.test.mjs:345` assertion (2 pane.list calls versus 1).
+
+
+## Plain Harnesses information — Phase 26 [completed]
+
+Gabriel asked to remove the confusing Integration/unverified receipt diagnostic
+and clean its code. Remove the Harnesses-only receipt evaluator, its injected
+callback, session/store reads and response field, plus tests of that retired
+feature. Keep the actual delivery engine unchanged. Harnesses shows installation,
+versions and updates; Pi shows only an actionable setup failure with retry.
+Remove the nonworking documentation links and their URL/response plumbing.
+Remove the Talking to an agent command reference and its CSS from Agents;
+keep the actual commands and lead role instructions available. Preserve settings
+and histories, rebuild and reinstall locally. No publication is requested.
+
+- [x] [TEST-PANE-207] RED: checks independent of session storage; no receipt jargon or documentation links; no command-reference section; Pi setup recovery.
+- [x] [IMPL-PANE-208] Delete diagnostic plumbing and simplify Harnesses copy; focused GREEN.
+- [x] [VERIFY-PANE-209] Run UI/API regressions and smoke, reinstall alpha.45 and verify native screen/state.
+
+Advisor/Context7 are unavailable; no external dependency or new architecture is
+needed. This is a bounded continuation of the accepted cleanup.
+
+Phase 26 RED: Node 27 passed / 4 failed; UI 2 passed / 2 failed. Old integration fields, Pi wording and command reference reproduced. Logs: `/tmp/cf-harness-simple-red2-{node,ui}.log`. Gabriel explicitly confirmed removal of the command reference from Agents.
+
+Phase 26 focused GREEN: Node 35/35 and real UI 4/4. Final storage-decoupling test starts the shared server normally, then makes `app/tabs.json` unreadable during the Harnesses request; startup recovery itself remains unchanged. Command implementations and lead instruction files have no Phase 26 changes.
+
+
+### Phase 26 final verification — 2026-09-10
+
+- Deleted the Harnesses receipt evaluator, injected callback, per-check tab and
+  delivery reads, integration response field, UI labels and retired tests.
+  The actual delivery engine and receipts remain unchanged. Healthy Pi setup
+  produces no diagnostic prose; failure offers Pi setup failed and Retry Pi setup.
+- Removed documentation links, their URLs, response field and link styling.
+  Removed the Talking to an agent section and its dedicated `.cmds` styles.
+  CLI verbs and lead role instructions remain available and unchanged by this phase.
+- Regression proof for the removed dependency: in an isolated temporary home,
+  installed alpha.44 returns HTTP 400 for a Harnesses check when session storage
+  becomes unreadable after startup. Alpha.45 returns 200 with version/update
+  information and preserves the unreadable bytes. The fixture restores its
+  temporary file before shutdown; shared server startup/recovery was not modified.
+- Final focused Node: 93/93, exit 0 (UI API, harness administration, Pi setup,
+  CLI and role instruction suites). Full browser UI: 93/93, exit 0. Packaged
+  app smoke: 1/1, exit 0. Changed files pass Biome and `git diff --check`.
+  No additional full-Node/lint-baseline claim: Phase 25's unrelated known
+  lifecycle assertion and three pre-existing repository-wide lint errors remain.
+- Built, signed and installed alpha.45 locally. All 58 installed files match
+  the build; codesign verification passes. Alpha.44 is retained in the backup
+  recorded by `/tmp/cf-harness-simple-install-path`. No commit or publication.
+- Native CuaDriver verification in installed PID 62793: Agents retains roster
+  editing/creation without the command-reference section; Harnesses shows all
+  five version rows without integration prose or documentation links. Screenshots
+  `/tmp/cf-harness-simple-{agents,harnesses}.png`. All 33 recorded settings and
+  history files remain byte-identical, including actual `app/tabs.json`.
+- Logs: `/tmp/cf-harness-simple-{node-final,ui-final,smoke,build,storage-red}.log`.
+  Final dependency search finds no production use of the removed evaluator,
+  response fields, link labels or `.cmds` styles. Advisor remains unavailable.
+
+
+## OpenCode worker startup — Phase 27 [completed]
+
+The screenshot's Gefjon pane has an empty exact native session and a recorded
+60-second startup timeout. A separate real OpenCode 1.18.30 TUI reproduces
+one stalled health request while concurrent probes succeed. No task was sent
+by the diagnostic probe. This failure is separate from the lead provider quota.
+
+Acceptance: bound each readiness request including its body; retry only these
+read-only probes within the existing overall deadline. Authorization failure
+remains terminal; prompt admission is attempted once, with ambiguous outcomes
+never replayed. Verify real native startup, focused regressions and reinstall
+without changing saved agents or conversation identities. No publication.
+Advisor is unavailable in this session; no new dependencies are needed.
+
+- [x] [TEST-PANE-210] RED: startup survives a stalled health response or body once the server becomes healthy.
+- [x] [IMPL-PANE-211] Bound readiness attempts, preserve cancellation and single prompt admission; GREEN and review.
+- [x] [VERIFY-PANE-212] Verify native startup and relevant regressions, reinstall alpha.55, preserve saved state.
+
+Phase 27 TDD: TEST-PANE-210 — `node --test --test-name-pattern="recovers from health" tests/opencode-launch.test.mjs`: 2 tests, 2 failed, both startup timeout (RED).
+
+Phase 27 TDD: IMPL-PANE-211 — OpenCode suite 22/22 passed, exit 0. Readiness reads use a 500 ms attempt signal combined with the existing overall/child lifetime. POST and native settings reads unchanged. Refactor: none; focused Biome and diff check pass. Real TUI readiness now reaches task admission in 2.1 seconds (diagnostic blocks POST deliberately).
+
+
+Phase 27 final verification — 2026-09-11:
+
+- OpenCode launch tests 22/22, channel/CLI/pane regressions 287/287, browser
+  startup output/failure checks 2/2, packaged smoke 2/2; all exit 0.
+- Real OpenCode 1.18.30 with bundled Node reproduced an initial health read
+  hanging while independent reads succeeded. Fixed startup cancels that read
+  after 500 ms, succeeds on the next health check and posts once: HTTP 204
+  at 2.552 s. Exact native history contains one user turn and a completed
+  Muse Spark 1.3 Contributor Free response: "Why don't programmers like
+  nature? Too many bugs." No paid provider or lead quota was used.
+- An earlier completion probe stopped too soon after its own read timeout;
+  the final probe retries read-only transcript requests and verifies the full
+  answer. The initial diagnostic deliberately prevented POST; neither counts
+  as full-answer proof. Logs: `/tmp/cf-opencode-health-probe2.log`,
+  `/tmp/cf-opencode-native-seed2.log`, `/tmp/cf-gefjon-{green,regressions,ui,smoke}.log`.
+- Local build succeeded with `--config '{"bundle":{"createUpdaterArtifacts":false}}'`.
+  The first build produced the app but failed the unrelated updater-signature
+  step; no signing key was requested or publication attempted.
+- Installed 3.0.0-alpha.55; all 59 bundle hashes match, codesign strict/deep
+  verification passes. All 52 captured state/private file hashes were identical
+  across replacement. Relaunch only changed tab lifecycle/delivery bookkeeping;
+  every saved agent and native conversation identity was preserved.
+- Reopened the existing zeespire session in the installed app; both lead and
+  Gefjon native histories are visible. User input is active; no old task was
+  replayed. The separate native probe establishes fresh-task startup/response,
+  not automatic result delivery into this resumed lead.
+- Final review: only readiness GET attempts retry; native settings and POST
+  remain unchanged, cancellation stays bounded, ambiguous admission never
+  replays. No refactor, external dependency, commit or release. Advisor unavailable.
+
+
+## Reply delivery after native lead resume — Phase 28 [completed]
+
+The reported SQL joke is complete in the exact OpenCode worker history but
+d-118 is pending for generation 2 while the same Pi native lead conversation
+has resumed at generation 3. Process generations fence processes, not native
+conversation continuity. Treat a verified same-tab, same-harness, same-native
+lead resume as continuation for future replies and never-attempted pending
+replies. Changed/unknown native contexts remain held. Previously submitted,
+accepted, failed, uncertain or invalidated deliveries never replay. Persist the
+originating native lead context for new workers; use recorded delivery targets
+as evidence for older rows. Verify all harnesses through the shared routing
+logic, recover the reported pending reply, and reinstall locally. No publication.
+Advisor tool unavailable; no new dependency.
+
+- [x] [TEST-PANE-213] RED: same-native resume delivers new and never-sent replies; distinct contexts and attempted records remain fenced.
+- [x] [IMPL-PANE-214] Route verified native continuations and atomically refresh only untouched pending targets; GREEN/review.
+- [x] [TEST-PANE-215] RED: worker admission persists its native lead context independently of future pane generations.
+- [x] [IMPL-PANE-216] Save native lead context for new worker rows; GREEN/review.
+- [x] [TEST-PANE-218] RED: an idle Pi TUI restores settlement from its completed native leaf on session_start; busy, queued, error and incomplete states remain unready.
+- [x] [IMPL-PANE-219] Record native Pi idle evidence on restored completed startup; GREEN/review.
+- [x] [VERIFY-PANE-217] Run focused regressions and packaged gates, reinstall alpha.57 and verify exact SQL reply in the resumed Pi lead history.
+
+Phase 28 RED: TEST-PANE-213 — same-native resume tests: 10 tests, 7 passed, 3 failed (old target generation 1 instead of resumed 2), exit 1.
+
+Phase 28 GREEN: IMPL-PANE-214 — 14/14 focused routing tests pass, exit 0; formatting/refactor rerun 14/14. Atomic target refresh rechecks native identity and untouched pending status; full watcher regression running.
+
+Phase 28 RED: TEST-PANE-215 — missing required launch nonce in the test fixture corrected before implementation; then 1/1 fails because leadContext is undefined, exit 1. Full watcher suite 88/88 passed.
+
+Phase 28 GREEN: IMPL-PANE-216 — store suite 62/62, focused four-harness context case 1/1, exit 0. Test cleanup was corrected to close its Store lock explicitly; no production behavior changed for that fixture issue. Refactor: formatting only.
+
+Installed alpha.56 verification uncovered a second resume blocker: d-118 correctly retargeted to current generation 4, but Pi waits for a new agent_settled event after resume. Native session_start has authoritative isIdle/hasPendingMessages and getLeafEntry, verified in installed Pi sources (agent-session.js:620,2061,2071 and session-manager.d.ts:241). Add startup evidence only for a completed assistant leaf, exact native frontier, idle TUI and no queued messages. This extends Phase 28; no completion claimed.
+
+Phase 28 RED: TEST-PANE-218 — 8 Pi startup checks: 7 pass, 1 fails because restored idle session never publishes native settlement, exit 1.
+
+Phase 28 GREEN: IMPL-PANE-219 — Pi extension, channels and watcher suites 159/159; focused post-format startup checks 8/8, exit 0. Startup evidence requires native idle/no pending messages, TUI, a stopped assistant message at the exact native leaf; new work invalidates it.
+
+Phase 28 final verification — VERIFY-PANE-217:
+
+- Real installed Pi startup probe passes with a completed native session, no
+  submitted prompt, zero model calls and unchanged native history. Evidence:
+  `/tmp/cf-resume-pi-native-final.log`.
+- Store regression 62/62, Pi/channel/watcher regression 159/159, browser
+  resume/delivery checks 6/6 and final packaged smoke 2/2 pass, exit 0.
+  Broader CLI/panes/tabs/lifecycle regression: 268 passed, one unchanged failure
+  at `tests/lifecycle.test.mjs:345` (pane.list count expected 1, actual 2).
+  The pre-existing watcher import-order lint remains; changed Pi/Store checks
+  and `git diff --check` pass. No unrelated cleanup or test weakening.
+- Built and reinstalled 3.0.0-alpha.57. All 59 installed bundle file hashes
+  match the build and `codesign --verify --deep --strict` passes. All 54 captured
+  state/private file hashes were unchanged across bundle replacement; after
+  reopening, saved agents and all 87 recorded native conversation identities
+  remain unchanged. Manifest: `/tmp/cf-resume-final-install.json`.
+- Resumed the user's zeespire tab t-47 through the installed app. The original
+  Pi native session `t-47-lead-205c8659-47dc-4312-88e8-696b0d271a08` is preserved
+  at process generation 5. Pending d-118 reached `accepted` with one submission
+  attempt and native user-message receipt `704b6885`. Its complete body is
+  exactly: “A SQL query walks into a bar, sees two tables and asks: Mind if I
+  join you?” Native history contains the complete d-118 envelope exactly once.
+  Earlier d-114 through d-117 also occur exactly once; no accepted reply replay.
+  Proof: `/tmp/cf-resume-native-proof.json` and installed screenshot
+  `/tmp/cf-resume-final-native.png`, showing the lead acknowledge the SQL joke.
+- Recovery used the ordinary installed automatic watcher. No manual resend,
+  transcript write or user-composer injection. Native startup gates remain
+  fail closed for busy, queued, unfinished, error and mismatched contexts.
+  Advisor unavailable; final local review preserved the no-replay guards.
+  No commit, GitHub release or NAS publication in this work.
+
+## Pi new-session reply routing — Phase 29 [completed]
+
+The user's t-47 Pi lead is on native session
+`01a0902c-c171-7775-becd-05c8e3d4803f` after /new, while the app still records
+the preallocated startup session. Its launch-scoped settlement identifies the
+new native session, but #refreshLeadSession supports only Claude. Ask the live
+Pi extension for its current session through a fresh, bounded, launch-bound
+challenge. Reuse the existing native conversation refresh path before planning
+or reading results. Keep old submitted/uncertain/manual receipt targets intact.
+Verify native /new and local installation, preserving the user's current history.
+No new dependency; installed Pi types/source establish session_start reasons
+startup/reload/new/resume/fork and session_shutdown before replacement. Advisor
+tool unavailable. This is a correction within the authorized delivery workflow.
+
+- [x] [TEST-PANE-220] RED: live Pi identity follows session_start replacement, rejects stale/wrong-launch responses and sends no user message.
+- [x] [IMPL-PANE-221] Add bounded native Pi identity challenge and extension response; GREEN/refactor.
+- [x] [TEST-PANE-222] RED: watcher discovers Pi /new, delivers fresh/pending results to the new native session, preserves attempted receipts and fences unavailable/raced identity.
+- [x] [IMPL-PANE-223] Refresh Pi conversation through the shared guarded store update before delivery/result reads; GREEN/refactor.
+- [x] [TEST-PANE-225] RED: native conversation refresh persists current worker leadContext, so later app resume retains the new destination.
+- [x] [IMPL-PANE-226] Refresh same-generation worker context atomically with the native lead; GREEN/refactor.
+- [x] [VERIFY-PANE-224] Run relevant regressions, real native Pi /new probe, build/reinstall and verify installed automatic delivery into the actual current native conversation.
+
+Phase 29 RED: TEST-PANE-220 — 5 tests fail because currentSession is missing; actual Node runner output in `/tmp/cf-pi-new-identity-red.log`.
+
+Phase 29 GREEN: IMPL-PANE-221 — focused 6/6 and full Pi extension suite 33/33, exit 0 (`/tmp/cf-pi-new-extension-green.log`). Shared bounded probe transport preserves editor response contract; formatter/import cleanup under green.
+
+Phase 29 RED: TEST-PANE-222 — actual watcher runner 4 tests, 2 pass, 2 fail (automatic and reader retain lead-session instead of new-pi-conversation), exit 1; `/tmp/cf-pi-new-routing-red.log`.
+
+Phase 29 GREEN: IMPL-PANE-223 — watcher routing 4/4, combined Pi/channel/watcher/Store regressions 230/230, exit 0 (`/tmp/cf-pi-new-regressions.log`). Native identity refresh also precedes explicit reader snapshots; atomic update fences changed launches and preserves suspended/manual/attempted targets. Refactor: formatting; unrelated baseline formatting restored.
+
+Phase 29 RED: TEST-PANE-225 — 4 tests, 2 pass and 2 fail with missing leadContext, exit 1 (`/tmp/cf-pi-new-context-red.log`). Reinstall review found /new then app resume before another delivery also requires saved worker context to follow the current native conversation.
+
+Phase 29 GREEN: IMPL-PANE-226 — final Pi/channel/watcher/Store suites 230/230, exit 0 (`/tmp/cf-pi-new-final-regressions.log`). Worker context is written before the tab identity commit, under the same store queue; no changes to worker native sessions. Refactor review: none needed.
+
+Phase 29 installed verification evidence:
+
+- Real Pi 0.85.1 TUI starts on an existing session, executes its actual /new
+  command, answers the fresh identity probe with the new native session, and
+  receives one complete delivery through sendUserMessage. The old session is
+  unchanged across /new and delivery. A temporary local provider supplies the
+  test response; zero remote model calls. The probe passes against source and
+  the final packaged extension/adapter (`/tmp/cf-pi-new-final-native-bundle.log`).
+  Probe fixture corrections: keep draining PTY output during adapter requests;
+  capture the original history after native startup metadata writes. No product
+  guards weakened for the fixture.
+- Final focused Node suites: 230/230. Browser resume/delivery checks: 6/6.
+  Final packaged smoke: 2/2. Build and signature verification pass; alpha.58
+  is installed and running. All 59 bundle file hashes match the final build.
+  Evidence: `/tmp/cf-pi-new-final-regressions.log`, `/tmp/cf-pi-new-ui.log`,
+  `/tmp/cf-pi-new-final-smoke.log`, `/tmp/cf-pi-new-final-build.log`.
+- One-time preservation for the already affected session: before quitting
+  alpha.57, its live editor challenge verified native session
+  `01a0902c-c171-7775-becd-05c8e3d4803f`, idle and launch-bound. With the old app
+  stopped, the Store queue corrected t-47's stale native ID and the one worker
+  created under that same lead generation. No delivery records were changed;
+  the user had already read the reported joke manually as d-121. Alpha.58 then
+  resumed the actual new native conversation at generation 7, verified by its
+  live identity probe. No transcript was edited or previous answer replayed.
+- All 55 captured state/private file hashes remained unchanged across bundle
+  replacement. Saved agents and all 88 recorded worker native identities remain
+  unchanged after resume. Manifest: `/tmp/cf-pi-new-install.json`.
+- Installed acceptance: sent one explicit short verification request to the
+  existing free Gefjon worker. Its `CF_PI_NEW_SESSION_OK` answer became d-122,
+  accepted with exactly one submission and one complete native Pi user receipt
+  `85b7621b` in the current conversation. The lead acknowledged the result.
+  Proof: `/tmp/cf-pi-new-installed-receipt.json` and
+  `/tmp/cf-pi-new-final-installed.png`. The lead composer was untouched; delivery
+  used the normal automatic watcher.
+- Final review: fresh bounded challenges, exact launch and generation checks,
+  atomic worker-context refresh, unchanged editor guard and no replay of old
+  attempted/manual/suspended receipts. No new dependency, commit or publication.
+  Advisor unavailable. `git diff --check` and changed adapter/extension lint pass.
+- Final full Node runner: `npm test` — 1285 tests, 1278 passed, 6 skipped,
+  1 failed, exit 1 (`/tmp/cf-pi-new-final-node.log`). The only failure is the
+  previously recorded `tests/lifecycle.test.mjs:345` pane.list-count assertion
+  (this concurrent run: expected 1, actual 4). Focused and installed acceptance
+  are green; the broader suite is not represented as fully green.
+
+Registry count reconciled to all 226 completed task IDs, including the earlier
+unbracketed task entries that the previous totals omitted.
+
+## Native terminal sizing after startup — Phase 30 [completed]
+
+Preserve the displayed startup terminal while waiting for its native pane.
+Cache its latest dimensions and submit them once the same generation is live.
+Serialize changes so an older resize cannot overwrite a newer one. A pane
+ending during resize is a normal lifecycle race and produces no internal-ID
+toast. Keep real resize failures visible and preserve startup output and drafts.
+No harness-specific workaround or CSS change: the page owns this boundary for
+all harnesses. Existing Spec Mint TDD workflow applies; advisor unavailable.
+
+- [x] [TEST-PANE-227] RED: real-xterm browser regressions reproduce initial size before native launch, latest size after adoption, and pane-close resize race.
+- [x] [IMPL-PANE-228] Defer and serialize pending native sizes against current pane state, retire cached sizes and suppress only the expected not-open race; GREEN/refactor.
+- [x] [VERIFY-PANE-229] Run browser and relevant PTY checks, build/reinstall, verify installed OpenCode fills its pane with no startup error, and preserve sessions/settings.
+
+Phase 30 RED: TEST-PANE-227 — browser runner 3/3 fail, exit 1 (`/tmp/cf-size-red.log`): resize sent while starting; internal not-open toast shown; two native resizes overlap. Read-only TIOCGWINSZ on the installed OpenCode lead PID 74069, exact child of app PID 73815, confirms 24 rows × 80 columns in the much larger pane.
+
+Phase 30 GREEN/refactor: initial regressions 3/3 pass (`/tmp/cf-size-green.log`). Full browser suite, including an additional in-flight retirement guard and genuine resize-error visibility: 126/126, exit 0 (`/tmp/cf-size-ui.log`). Related Node session/terminal suites: 154/154, exit 0 (`/tmp/cf-size-node.log`). Rust real-child PTY resize: 1/1, exit 0 (`/tmp/cf-size-rust.log`). One per-generation pending size entry; serialized native writes; unchanged acknowledged dimensions do not resend. No CSS or harness-specific workaround. Changed-file formatting and diff whitespace checks pass (pre-existing test lint info remains).
+
+Phase 30 installed verification:
+- Build alpha.59 passes (`/tmp/cf-size-build.log`); packaged smoke 2/2, exit 0
+  (`/tmp/cf-size-smoke.log`). All 59 installed bundle file hashes match the
+  build and the local signature verifies. No publication.
+- All 56 captured state/private files unchanged across replacement; saved
+  agents and all 88 worker native identities remain unchanged after resume.
+  Manifest: `/tmp/cf-size-install.json`. Same t-48 OpenCode native session
+  `ses_f6fb1c5baffeBZROiIT6nffSqo` resumed as p-197 generation 2.
+- Installed app PID 87370, OpenCode child PID 88007, exact process group and
+  TTY verified. Read-only TIOCGWINSZ confirms 58 rows by 204 columns, replacing
+  the 24 by 80 default. OpenCode fills the pane and AX has no not-open toast.
+  Evidence: `/tmp/cf-size-installed-pty.json`,
+  `/tmp/cf-size-installed-final-ax.json`, `/tmp/cf-size-installed-final.png`.
+  No prompt or remote model call was needed for this check.
+- Final review: pending dimensions belong to the exact pane generation,
+  in-flight writes serialize, retirement discards queued work, and actual
+  resize failures remain visible. Shared UI regression checks cover startup,
+  state adoption, resize order and pane closure. No CSS, dependency or
+  harness adapter changes for this phase. Advisor tool remains unavailable.
+  The full Node suite was not rerun for this frontend-only change; its prior
+  known lifecycle failure is recorded in Phase 29 above.
+
+## Current native conversation across all harnesses — Phase 31 [completed]
+
+The lead remains the same ConsensFlow pane when the human uses native /new,
+/clear or /resume. Untouched worker replies must follow its verified current
+conversation; attempts that may already have been submitted retain their
+original target and must not replay. Native session switching and app
+suspend/restart/resume are separate acceptance cases for Claude Code, Codex,
+OpenCode and Pi. Preserve drafts, provider settings, worker histories and
+same-folder concurrency. Native adapters must not guess session identity from
+cwd, recency, task text or terminal output. Existing native-only restrictions
+apply; any unavailable native identity route must be disclosed rather than
+represented as passing. Advisor and Context7 tools are unavailable.
+
+- [x] [TEST-PANE-230] Reproduce OpenCode current TUI identity and retired-target admission in tests/opencode-extension.test.mjs, with HTTP and native SDK boundaries.
+- [x] [IMPL-PANE-231] Implement the app-private OpenCode TUI bridge with authenticated current-session reads and current-target-only native submission; satisfy TEST-PANE-230.
+- [x] [TEST-PANE-232] Cover automatic OpenCode extension preparation, launch loading, Harnesses repair and watcher retargeting, including retired/unknown target and resume guards.
+- [x] [IMPL-PANE-233] Wire the bundled OpenCode integration through existing installation, channel and watcher boundaries; satisfy TEST-PANE-232.
+- [x] [TEST-PANE-234] Audit and reproduce current-session new/resume delivery gaps for Claude, Codex and Pi, including app restart and in-flight receipt guards.
+- [x] [IMPL-PANE-235] Repair the proven remaining harness/current-target gaps with supported native evidence; satisfy TEST-PANE-234.
+- [x] [TEST-PANE-237] In tests/codex-session.test.mjs reproduce authenticated native main-session tracking, picker/child isolation, retired-target refusal, pending-switch holds, failed-switch restoration, disconnect uncertainty and full queue payloads over real local WebSockets.
+- [x] [IMPL-PANE-238] Implement hosts/codex-session.mjs native broker with bounded authenticated ingress, private upstream transport, correlated main selection and native queue admission; satisfy TEST-PANE-237.
+- [x] [TEST-PANE-239] Cover bundled Codex supervisor, native config/role split, child cleanup and lead/worker launch wiring in tests/codex-session.test.mjs and existing launch/package tests.
+- [x] [IMPL-PANE-240] Wire native Codex supervisor through src/channels.js, src/panes.js, bin/cf.mjs and packaging; preserve config/login/roles and exact child lifetime; satisfy TEST-PANE-239.
+- [x] [TEST-PANE-241] Reproduce Codex watcher current-session retargeting, idle binding, known-zero race and uncertain receipt preservation in tests/codex-channel.test.mjs and tests/delivery-watch.test.mjs.
+- [x] [IMPL-PANE-242] Integrate Codex native identity and guarded delivery into existing channel/watcher/store boundaries; satisfy TEST-PANE-241.
+- [x] [VERIFY-PANE-236] Run focused and native all-four acceptance matrix, build/reinstall, preserve user state and verify current-conversation receipts in the installed implementation. Report unavailable cases explicitly.
+
+Phase 31 read-only installed evidence: worker `gefjon-amber-waves` was dispatched
+by native OpenCode session `ses_f6fa2c52fffe247BpJyPS7Q8sZ`, as shown by its
+structured bash tool result. Its d-125 envelope instead exists as a native
+user turn in the old saved lead `ses_f6fa42a19ffe722SRljeyXlU8K`. The app's
+accepted d-125 record names that old session. This confirms wrong-conversation
+routing after /new, not a provider quota or missing worker response.
+The current OpenCode 1.18.30 native OpenAPI and pinned TUI route source expose
+session selection commands but no read of the selected route; /api/session/active
+lists running server drains, not the displayed TUI. User clarification pending
+on an app-private integration because the earlier no-plugin restriction applies.
+
+User amendment, 2026-09-11: app-private OpenCode integration is authorized;
+it must ship with ConsensFlow and be prepared automatically or repaired through
+the Harnesses screen. No harness binary or global settings edits. This replaces
+the earlier no-plugin restriction for this bounded OpenCode integration.
+User also requests retirement of old conversations as delivery targets across
+all harnesses. Native /new shares a process with the new conversation, so do
+not kill that process or delete history. Verify the current native conversation
+at admission; stop further submissions to retired targets and preserve the
+original receipt identity for any prior possible submission.
+Native checks so far: 39 relevant baseline tests pass. Real Pi /new then native
+/resume selector: identity and complete delivery both pass against a local-only
+provider. Codex 0.154.0 retains both old and new rollout file descriptors after
+/new; process ownership alone therefore does not prove its displayed session.
+Do not implement lsof/newest-file inference. Evidence in /tmp/cf-all-pi-switch.log
+and /tmp/cf-codex-switch-probe3.log.
+
+| [TEST-PANE-230] | node --test tests/opencode-extension.test.mjs: 4 tests, 4 failed — missing app-private TUI module (`/tmp/cf-opencode-extension-red.log`) | — | — |
+
+| [IMPL-PANE-231] | — | Extension boundary tests 4/4 pass, exit 0 (`/tmp/cf-opencode-extension-green.log`) | Formatting, 4/4 still pass (`/tmp/cf-opencode-extension-refactor.log`) |
+
+| [TEST-PANE-232] | OpenCode wiring/default-export/current-session regressions: 5 failed, 0 passed (`/tmp/cf-opencode-wiring-red.log`) | — | — |
+
+| [IMPL-PANE-233] | — | 5/5 new wiring tests; focused run 323/324, only obsolete legacy direct-admission expectation failed; revised that expectation to require zero-byte refusal, channel suite 43/43 | Biome applied; native OpenCode 1.18.30 /new and /resume pass, exact current receipts and retired-target refusals, zero remote model calls (`/tmp/cf-opencode-native-switch.log`) |
+
+Legacy OpenCode channel test now requires refusal without the TUI integration, matching the newly authorized retirement requirement. Previously expected a direct POST to a saved historical session; retaining that expectation would recreate the reported bug. Explicit custom OPENCODE_TUI_CONFIG overrides are preserved and reported as a setup conflict; regular global/project TUI settings continue to merge natively.
+
+| [TEST-PANE-234] | Native captured Claude /clear regression plus Codex held-reply/role regressions: 7 passed, 4 failed (`/tmp/cf-remaining-switch-red.log`) | — | — |
+
+Historical interim assessment (superseded by the user amendment and further research below): stock Codex 0.154.0 accepts queue writes to an old session after native /new. SessionStart hooks are delayed until a turn and may not fire when rejoining a retained conversation; experimental remote protocol tracking also misses cached displayed-thread switches. Neither is sufficient current-selection proof. Apply user retirement requirement by holding automatic Codex replies for explicit reading, without deleting histories or replaying attempted deliveries. User was asked about this fallback; absent optional steering, this is the stated conservative assumption. Native Claude peer identity and old-target refusals pass clear/resume/process restart; its fresh /clear transcript needs recognition of the exact linked native local-command completion boundary. Pi native new/resume passes.
+
+User amendment, 2026-09-11: KEEP current Codex automatic delivery despite its verified native-selection limitation. Removed the temporary Codex hold, admission refusal, role exception and their superseded tests. Codex runtime and role configuration remain unchanged. Do not claim old-target retirement is solved for Codex; user explicitly accepts this exception.
+
+
+Phase 31 latest verification, 2026-09-11:
+
+- Claude's native `/clear` user record is followed by an exact linked native
+  `local_command` completion boundary. The parser now recognizes only that
+  boundary, with session, parent, tool and hook guards; eight regressions pass.
+- Pi's extension can observe a session change after the pane input claim.
+  Its explicit zero-byte `native session changed` refusal now maps to
+  `native-session-changed`, allowing an untouched reply to follow the next
+  verified current session. RED: one failed regression; GREEN: 34/34
+  (`/tmp/cf-pi-admission-race-red.log`, `/tmp/cf-pi-admission-race-green.log`).
+- Real OpenCode 1.18.30 loaded the generated private `tui.json` and installed
+  content-addressed extension through production installer/launch functions.
+  New/resume receipts and retired-target refusal passed with zero remote model
+  calls (`/tmp/cf-opencode-bundled-switch.log`). This is source/native-boundary
+  evidence; installed-app acceptance remains pending.
+- The existing lifecycle test counted unrelated pane-list reads and expected
+  manual worker restoration after tab resume. It now checks one automatic
+  worker reopen, reuse on subsequent attach, exact native history, and old/new
+  credential isolation. This changes test expectations to the existing product
+  lifecycle; it does not remove worker-resume assertions.
+- Full Node command: `node --test --test-concurrency=4 tests/*.test.mjs tests/engine/*.test.mjs`.
+  Result: 1303 tests, 1297 passed, 0 failed, 6 skipped, exit 0
+  (`/tmp/cf-session-all-tests-final.log`).
+- Browser suite: 126 passed, one terminal-height timing failure under concurrent
+  Node load. The unchanged isolated geometry case passed (1/1). New OpenCode
+  Harnesses repair case passed. Logs: `/tmp/cf-session-browser-tests.log`,
+  `/tmp/cf-session-browser-recheck.log`. Do not report a full 127/127 run.
+
+Further Codex research requested by user, 2026-09-11:
+
+The earlier conclusion conflated the primary lead conversation with Codex's
+cached built-in subagent view. Native app-server protocol tracking is a viable
+route for the primary lead across `/new` and `/resume`; no terminal scraping
+or model seed is required. The real local-provider probe passed fresh idle,
+new idle, explicit/loaded resume, native resume picker, TUI restart, full backend
+restart and CLI startup resume picker. A direct queue to the old persisted UUID
+was accepted even when `thread/loaded/list` was empty after backend restart:
+restarting or unloading is not retirement.
+
+Production design and primary sources are recorded in
+[Codex conversation-switch research](research-codex-conversation-switch.md).
+The proposed bundled supervisor/broker must preserve native launch config,
+login, permission behavior, process ownership, complete receipt checks and
+explicit zero-byte refusal semantics. It is a medium integration, not a restart
+flag. Research/prototype evidence does not establish installed support. Codex
+runtime remains unchanged with automatic delivery enabled; packaging and
+reinstallation remain outstanding for Phase 31.
+
+
+Execution amendment, 2026-09-11: user asks why work stopped. Continue the already
+requested implementation and reinstall without another permission gate. Use the
+main lead as recipient; viewing a built-in native child does not change that
+role. The Codex prototype becomes a bundled per-pane native supervisor/broker;
+new/resume do not restart healthy processes. Preserve user history and existing
+subscription/configuration. Use maintained `ws` for native WebSocket transport,
+pinned and included in the app bundle; no global harness modifications. Record
+new RED/GREEN pairs 237–242 before final Phase 31 installed acceptance.
+
+| [TEST-PANE-237] | node --test tests/codex-session.test.mjs: 1 failed, missing hosts/codex-session.mjs (`/tmp/cf-codex-broker-red.log`) | — | — |
+
+| [IMPL-PANE-238] | — | Native WebSocket broker tests 2/2 pass (`/tmp/cf-codex-broker-green.log`) | Formatter, 2/2 still pass (`/tmp/cf-codex-broker-refactor.log`) |
+
+| [TEST-PANE-239] | node --test tests/codex-session.test.mjs: 1 failed, missing codexProcessArguments export; launch-wrapper test also added (`/tmp/cf-codex-supervisor-red.log`) | — | — |
+
+| [IMPL-PANE-240] | — | Supervisor/config/launch tests 4/4, existing launch suites 308/308; real product supervisor native new/resume/restart pass with zero remote calls | 4/4 after formatting; native permission fidelity refinement continues with task 241, app packaging is final gate |
+
+| [TEST-PANE-241] | Codex bridge channel/watcher regressions: 2 failed, missing currentSession and old-target submission during unknown native selection (`/tmp/cf-codex-watcher-red.log`) | — | — |
+
+2026-09-11 Phase 31 Codex integration checkpoint:
+- TEST/IMPL-PANE-241/242: owned-channel/watch tests passed 2/2; additional empty-main, fork and permission regressions first failed 3/7 and now pass 7/7. Empty lead binding first failed 1/1 and now passes 1/1. Full root suite: 1313 tests, 1307 passed, 0 failed, 6 packaged/integration skips, exit 0 (`/tmp/cf-all-switch-final-node.log`).
+- Native Codex product supervisor passed new/resume/backend restart and retired-ID refusals with four local Responses requests, zero remote model calls (`/tmp/cf-codex-product-final.log`). Native follow-up research separately proved full role/model/effort preservation, normal fork, side and actual child focus; see research note.
+- The app binds the main ID through its authenticated launch broker before history exists. A native empty-thread observation supplies the adapter-owned initial cursor; missing history alone never authorizes delivery. Untouched results follow the current main; attempted/uncertain/accepted records retain their original receipt target.
+- Fresh permission intent is applied only to primary starts; successful main resume or native permission changes disable that initial mapping. Native child/picker focus does not redirect external lead replies. Backend/TUI remain stock binaries, privately connected; ws 8.21.3 ships inside the app. No global harness settings are edited.
+- UI fixtures now mock the owned admission endpoint; exact text, single submission and draft preservation assertions remain. Two updated fixture checks pass 2/2. Full browser suite passes 127/127 (`/tmp/cf-all-switch-final-ui.log`).
+- Whole-tree lint reports one existing formatting error in unchanged tests/engine/session-binding.test.mjs:725; owned changed-file checks pass. No unrelated formatting cleanup. git diff --check passes.
+- IMPL-PANE-235 and 242 complete; VERIFY-PANE-236 is current. Build/reinstall and installed native receipt verification remain.
+
+### Phase 31 installed acceptance — alpha.60, 2026-09-11
+
+VERIFY-PANE-236 complete. The built app was replaced at /Applications/ConsensFlow.app and launched using the background app driver. The UI loaded the preserved session tree. The packaged smoke independently exercised the actual Tauri page, real PTY output/input, backpressure and shutdown. The native delivery matrix below used the installed Node/modules and installed consensflow-bridge executable: this is the shipping Rust pane implementation plus the actual UI server/controller/watcher and stock harness TUIs. It is not presented as 16 manual GUI interactions. Models ran against isolated local test providers, with zero remote model calls or user-account quota consumption.
+
+| Lead and worker harness | Fresh | Native new/clear | Native resume | Full app host restart + resume | Evidence log (all exit 0) |
+|---|---|---|---|---|---|
+| Codex 0.154.0 | d-1 | d-2 | d-3 | d-4 | /tmp/cf-installed-codex-app3.log |
+| Claude Code 2.1.268 | d-1 | d-2 | d-3 | d-4 | /tmp/cf-installed-claude-app5.log |
+| OpenCode 1.18.30 | d-1 | d-2 | d-3 | d-4 | /tmp/cf-installed-opencode-app3.log |
+| Pi | d-1 | d-2 | d-3 | d-4 | /tmp/cf-installed-pi-app3.log |
+
+Every listed receipt was automatic, had exactly one recorded submission, matched the selected native lead ID, and contained the entire delivery envelope exactly once in the native user message. Claude wraps its peer envelope in native teammate provenance; Codex represents a user message in both response and event records, so its canonical response-item receipt was counted once. Old histories were checked for absence of the new-session envelope. Claude/OpenCode/Pi reused the same worker for subsequent tasks and restored that worker on app restart; Codex also verified fresh worker binding through the new supervisor. Codex fresh/new receipts arrived before any prior user/model turn. Other harnesses exercised normal lead readiness; Pi included a lead request after native/app resume, as in the reported user flow. Native startup was observed before addressing a resumed worker.
+
+Earlier exploratory local-provider attempts are not counted as acceptance: the first local Codex provider omitted final_answer metadata; the first Pi sandbox lacked its native fd/rg binaries and typed before startup; initial assertions omitted Claude's peer wrapper; early resumed-worker requests preceded native ingress readiness. Those fixture issues were corrected without changing production assertions or replaying uncertain user deliveries. A separate zero-latency Claude stub also exposed native transcript records flushed out of parent order, for which completion currently holds rather than guesses; the final native matrix uses a 250ms provider delay. That broader out-of-order completion case is outside the current-session routing fix and remains a follow-up finding, not a claimed passing case.
+
+Additional installed native boundary probes passed: /tmp/cf-installed-codex-switch.log, /tmp/cf-installed-opencode-switch.log, /tmp/cf-installed-pi-switch.log. They exercised old-target refusal, session identity changes, whole payloads, and Codex complete backend restart. Source-backed native fork/subagent/config proofs are recorded in research-codex-conversation-switch.md.
+
+Build: npm --prefix app run build -- --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}', exit 0 (/tmp/cf-all-switch-alpha60-build.log). Packaged npm run smoke: 2/2, exit 0 (/tmp/cf-all-switch-alpha60-smoke.log). Full Node: 1313 tests, 1307 passed, 0 failed, 6 skips, exit 0 (/tmp/cf-all-switch-final-node.log). Browser: 127/127, exit 0 (/tmp/cf-all-switch-final-ui.log). git diff --check passed. Changed-file Biome checks passed; whole-tree lint still reports the unchanged formatting issue at tests/engine/session-binding.test.mjs:725.
+
+Reinstall manifest: /tmp/cf-all-switch-install.json. All 81 bundle hashes matched staging, installation, and the final check; codesign --verify --deep --strict passed. Ten changed routing/host modules also matched the final source hashes. All 57 captured state/private files were unchanged at replacement; all 90 original native worker identities remained identical after app startup. Temporary rollback app was removed. The app process was verified running from /Applications with version 3.0.0-alpha.60. No harness binary/global settings edits, commit, GitHub release or NAS publication.
+
+
+## Phase 32: Claude late-written turn ancestors [completed]
+
+Scope: user requested only the remaining Claude transcript-order fix, then their own live testing. Preserve all other work. No publication, other harness changes, timing delays or unrelated formatting cleanup. Rebuild/reinstall the scoped fix for that test.
+
+A captured Claude Code 2.1.268 turn writes assistant/end-turn duration records before its initiating user and attachment ancestors. Physical replay currently resets the completed turn to busy. Resolve only a same-session, non-sidechain, unambiguous UUID/parentUuid chain from the completed assistant through attachments to the late user. Unknown, duplicate, cyclic or unrelated links must not authorize readiness. Preserve physical item/boundary cursors and existing queue/tool/hook guards; timestamps cannot establish ancestry. A genuine subsequent user stays busy.
+
+- [x] [TEST-PANE-243] Add native captured out-of-order fixture regression in tests/engine/completion.test.mjs: ready after completed answer plus late ancestors, original cursor freshness, unrelated/missing/cyclic/duplicate/foreign/sidechain links and real subsequent work still block. Run and record RED.
+- [x] [IMPL-PANE-244] Fix hosts/lib/completion.js Claude replay using the proven parent chain; preserve history and boundary identity. Run focused completion/readiness/delivery tests and review. -> satisfies [TEST-PANE-243]
+- [x] [VERIFY-PANE-245] Build/reinstall scoped fix with signature/source checks and preserved user state; user performs live acceptance. Record exact test evidence, no GitHub/NAS publication.
+
+Advisor and Context7 tools are unavailable in this session (tool discovery returned none). Existing native capture and internal adapter/readiness code supply the evidence; no external dependency/API changes are needed.
+
+Phase 32 TDD log:
+
+| Task | Red | Green | Refactor |
+|---|---|---|---|
+| TEST-PANE-243 | node --test --test-name-pattern='late native| late ancestry' tests/engine/completion.test.mjs (actual pattern without space): exit 1; native late-user completion stays inFlight=true, and late ancestry consumes a newer queued matching prompt (0 instead of 1). /tmp/cf-claude-ancestors-red.log | — | — |
+
+| IMPL-PANE-244 | — | 170/170 focused completion, Claude clear, readiness and delivery-watch tests passed, exit 0; same 170/170 after owned-file formatting. /tmp/cf-claude-ancestors-focused.log and /tmp/cf-claude-ancestors-refactor.log | Single consistent record snapshot, UUID-parent proof, unchanged physical cursors. No delay, timestamp ordering or duplicate delivery freshness. |
+
+User storage amendment (2026-09-11): ConsensFlow must keep its own runtime files under ~/.consensflow, never project files. Native harness-owned files remain native; requested source builds and replacing the installed app are development/installation actions. Existing workspace/run/role/extension stores already use ConsensFlow home. Audit found two runtime exceptions: default global CLI launchers and Codex /tmp socket directories. Move both under ConsensFlow home and put the private CLI on pane PATH. The updater's temporary extracted archive must also stage under the configured home (the approved final app replacement remains at the installed application path). No cleanup of other applications or user files.
+
+- [x] [TEST-PANE-246] Cover ConsensFlow-private default CLI/socket paths and update staging; user project and global launcher directories stay untouched.
+- [x] [IMPL-PANE-247] Apply the storage rule to the audited runtime exceptions; keep cf discoverable in app panes. -> satisfies [TEST-PANE-246]
+
+| TEST-PANE-246 | Node private-launcher/socket tests exit 1 (global launcher path, missing socket helper); Rust targeted updater tests exit 101 (missing private staging/preferences functions). /tmp/cf-storage-red-node.log and /tmp/cf-storage-red-rust.log | — | — |
+
+Further audit: updater preferences defaulted to macOS app_config_dir when CONSENSFLOW_HOME was unset. Move that default under ~/.consensflow/app and migrate existing preferences by reading/copying them, leaving the original untouched. Approved bundle replacement is the sole updater write outside the private home. Build outputs are developer artifacts, not installed-app runtime files.
+
+Storage implementation uses existing configured home roots for CLI launchers, private Codex sockets, update preferences and staging. App worker PATH now includes the bundled read-only CLI and exact Node runtime, matching lead behavior without global launcher writes. Existing global launchers and legacy preference files are left untouched. Socket paths too long for macOS are refused before creating directories; no /tmp fallback. The new socket test initially used macOS's long temporary directory, so its isolated fixture was corrected to a short /tmp test home; production behavior/assertions are unchanged. Existing helper bin paths and worker PATH expectations were updated for the explicit new storage rule. User additionally requested removing the debug build directory after ongoing tests complete.
+
+| IMPL-PANE-247 | — | Node storage/install/pane tests 172/172, exit 0; Rust library 92/92, exit 0. Owned formatting/checks and git diff --check pass. | Removed obsolete global-bin defaults, reused configured home and bundled CLI PATH. /tmp/cf-storage-green-node.log; /tmp/cf-alpha61-rust.log. |
+
+Full Node first pass ran concurrently with focused pane tests/Rust compilation: one unchanged native queue capability test hit its 2-second subprocess deadline. That test passed alone (exit 0, /tmp/cf-alpha61-channel-recheck.log). Full suite is being rerun with test-concurrency=4; do not credit the first run as a pass. No timeout increase or weakened assertions.
+
+
+### Phase 32 installed verification — alpha.61, 2026-09-11
+
+- Claude late-written native user/attachment ancestors no longer reopen the completed turn. Same-session UUID parent links are required; unknown/duplicate/cyclic/sidechain/foreign links and real new work cannot authorize readiness. Physical assistant/user/settlement cursors remain unchanged. The installed parser reread the original 2.1.268 capture and returned ready with system.turn_duration; no model calls were needed.
+- Full Node final: 1332 total, 1326 passed, 0 failed, 6 skipped, exit 0; node --test --test-concurrency=4 tests/*.test.mjs tests/engine/*.test.mjs, /tmp/cf-alpha61-node-final.log. Rust library: 92/92, exit 0, /tmp/cf-alpha61-rust.log. Packaged smoke: 2/2, exit 0, /tmp/cf-alpha61-smoke.log. Changed-file Biome and git diff --check pass. Existing unrelated whole-tree formatting issue was not changed.
+- Storage: private CLI launchers under ~/.consensflow/bin; native Codex sockets under ~/.consensflow/tmp; updater preferences, legacy preference migration destination and extracted-archive staging under ~/.consensflow/app. Existing global launchers/preferences remain untouched. App-owned workspace/run/role/extension state already uses the home. Native harness stores, explicit source builds and final installed-app replacement are distinct from runtime bookkeeping. App panes use their bundled CLI/runtime without global launcher writes.
+- Build command: npm --prefix app run build -- --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}', exit 0, /tmp/cf-alpha61-build.log. Installed app was not running before replacement. Staged in ~/.consensflow/tmp, verified, then atomically exchanged with /Applications/ConsensFlow.app. All 81 bundle files match; strict deep codesign verifies. All 59 captured state/private files were unchanged at replacement; saved agents and all 90 original worker identities stayed unchanged after GUI startup. Manifest /tmp/cf-alpha61-install.json. Four changed runtime module hashes match source. Temporary rollback bundle removed.
+- App reopened in the background through cua-driver, PID 76815; GUI window present. User live delivery testing is intentionally left to the user, as requested; no new all-harness live matrix is claimed.
+- User-requested debug cleanup: app/src-tauri/target/debug deleted after Rust tests completed; 21,885,603,840 bytes (20.38 GiB) removed, directory remains absent. Evidence /tmp/cf-alpha61-debug-clean.json. Release build/install and project source preserved.
+- No commit, GitHub release or NAS publication. Advisor remains unavailable; final review checked exact source diff against installed alpha.60, negative regression guards, cursor freshness, state preservation, packaged source/signature and final test exits.
+
+
+### Confirmed design — PM advisors and separate PM/Lead grids, 2026-09-11
+
+Design only; not implemented or present in alpha.61. User requested a PM with its own workers, named advisors, and two grid views inside each session. The user clarified the final boundary: advisors read, search the web, research, plan, review and run tests, then return their findings to the PM. Only the PM creates or revises specifications.
+
+Advisor role:
+
+- Research requested questions; read relevant project code/documents; search the web; compare options and review plans, specifications and implementation.
+- Advise through findings, recommendations and proposed wording in the response to the PM. Advisors do not create or revise specifications or other project documents. The PM alone incorporates advice and writes/revises specifications within the user's request. ConsensFlow's own runtime bookkeeping, role injection and integration files remain under the ConsensFlow home, never in the project.
+- Run existing tests and validation checks as needed for the requested investigation or review, then report the commands, outcomes and relevant evidence. Permission to run tests is not permission to edit or add test files, implementation, dependencies, configuration or specifications. No installs, deployments or commits. Do not describe advisors as unable to run commands or tests.
+- Return complete findings and test results to the owning PM; the PM receives and synthesizes the final advice. Advisor tasks do not authorize direct messages to the lead or its workers, cross-session access, or recursive delegation.
+
+Session and navigation design:
+
+- One user-visible session with PM and Lead view selectors. PM grid contains that PM and only its advisors; Lead grid contains the lead and only its workers.
+- Sidebar groups each coordinator with its own conversations. Selecting a group shows its grid; selecting a pane shows the focused pane. Return to a session restores the last-used group/view. Preserve each group's focus and scroll state independently.
+- View switching only changes what is displayed. Both groups keep running; it must not restart native sessions, change conversation ownership, or redirect delivery. Show activity/pending-result indicators for the other group.
+- Use the same saved agent library for both groups. Advisor/worker is a conversation assignment, not a duplicate saved-agent preset. Using the same saved agent in both groups creates independent conversations and receipts.
+- Advisor responses follow the PM's current native session, with the same automatic delivery and full-result reading machinery used for workers. PM-to-lead send/read remains explicit-user-request-only.
+
+Current implementation seams verified before this design:
+
+- src/tabs.js already gives the PM a distinct tab/pane identity and parentTabId within the same project.
+- src/launch.js currently grants the PM only lead.send/lead.read; its advisor operations need authority scoped to the PM's own tab, never the parent lead's workers.
+- src/delivery-watch.js currently skips all PM tabs; src/panes.js skips PM worker restoration on resume; src/store.js skips PM conversation navigation recovery. All three need advisor-aware behavior while preserving exact receipt and native-session rules.
+- app/ui/sidebar.js currently renders PM as a single row; app/ui/panes.js opens it as a focused pane and hides grid creation/delivery controls. Extend the shared grid/navigation instead of building a second renderer.
+- skill/roles/consensflow-pm/SKILL.md currently forbids all worker delegation. Replace that prohibition with PM-owned advisor coordination and supply the advisor role at launch/resume across Claude Code, Codex, OpenCode and Pi. Existing role instructions and model/provider choices must remain intact. Role instruction tests do not by themselves establish an operating-system sandbox; do not claim one.
+
+Implementation verification must cover advisor research/web/test permissions, PM-only specification writing, complete findings delivered to the PM, advisor ownership, cross-group refusal, shared preset/separate conversations, automatic replies to the current PM, native new/resume/app restart, PM-only versus entire-session suspension/deletion, hidden-grid terminal continuity and size, remembered view state, and migration of existing sessions. Use the four-harness acceptance matrix and preserve user settings/history on reinstall. No runtime code, installed role, build or release changed by this design note.
+
+
+### Phase 33 — PM advisors and separate grids (active)
+
+User authorized implementation of the confirmed design above. Reuse PM tab ownership and the shared grid. Advisor permissions are loaded role instructions, not a claim of OS sandboxing. No advisor tool is available in this environment; review will use source and regression evidence.
+
+- [x] TEST-PANE-248: RED advisor startup across four harnesses, PM scoped capabilities, closed cross-group ownership refusal.
+- [x] IMPL-PANE-249: advisor role and launch/resume context, PM commands, persisted conversation assignment.
+- [x] TEST-PANE-250: RED advisor delivery and recovery; preserve manual PM-to-lead receipts and old unassigned rows.
+- [x] IMPL-PANE-251: PM advisor delivery, restoration and lifecycle isolation.
+- [x] TEST-PANE-252: RED separate grids, group navigation, advisor labels, independent focus/scroll and hidden terminal continuity.
+- [x] IMPL-PANE-253: shared PM/Lead grid selector, sidebar groups and role-aware controls.
+- [x] VERIFY-PANE-254: regression suites and packaged checks in a separate candidate; preserve the installed app, sessions/settings/history (latest user amendment).
+
+
+2026-09-12 user steering: keep the current installed/running ConsensFlow untouched. No restart, reinstall, live-state edits or delivery retries during this work. VERIFY-PANE-254 now means build/verify a separate artifact and report it ready; installation is deferred by explicit user instruction. Also investigate and fix Claude native continued-in successor routing with isolated fixtures; preserve uncertain submissions and predecessor receipt evidence. The live alpha.61 incident was verified read-only: t-51/p-203 still names the predecessor while the transcript explicitly names a background descendant continuation. No live records were changed.
+
+Phase 33 evidence so far: role RED reproduced missing advisor context and PM authority; GREEN 47/47. Delivery RED reproduced skipped PM, then core regression GREEN 392/392, exit 0 (/tmp/cf-advisors-core.log). Closed cross-group ownership is refused. UI RED reproduced absent selectors and hidden PM controls; shared grid implementation under verification. Additional recovery coverage still pending.
+
+
+### Phase 34 — explicit Claude native continuation (completed through receiver migration)
+
+- [x] TEST-PANE-255: RED continued-in retirement and verified descendant successor, old process still alive; unrelated background process refused. RED manual successor receipt without snapshot rewrite.
+- [x] IMPL-PANE-256: explicit continuation parsing, verified process/socket ownership for explicit messages and successor manual-read receipt evidence. Receiver registration supersedes pending-only automatic routing refresh; preserve original uncertainty and submission snapshots.
+- [x] VERIFY-PANE-257: isolated native-process transport, continuation/receipt negative regressions, Rust ancestry and final source/build checks. No installation or live delivery-state writes.
+
+### 2026-09-12 — all-harness delivery approach decision gate
+
+User steering: "if we change the approach we change for all harnesses, we just need to test if another approach is better or we invest time in the old one". Pause further production delivery changes while comparing alternatives. Preserve the earlier instruction not to affect the installed/running ConsensFlow. PM advisors remain authorized work in progress; neither that feature nor the candidate Claude continuation patch is released.
+
+Executed isolated stock-TUI experiments for Claude Code, Codex, OpenCode and Pi with private state under `~/.consensflow/tmp/receiver-pull` and localhost mock providers. The result supports one common immutable result inbox with receiver-owned claims and the existing native adapters. It rejects a plain model-driven fetch/wait loop as an automatic-delivery replacement. Full decision, precise evidence and limitations: [receiver-driven inbox research](research-receiver-pull.md#decision-after-isolated-native-experiments).
+
+The experiments proved complete-body native history and model-request inclusion across basic idle/busy/new/resume flows for all four. Claude also passed an actual native background continuation with the original process alive. They did not establish greater measured production reliability, solve crash/ACK or claim/switch races, or authorize installation. The next implementation needs shared regressions for those boundaries before the same four-harness release gate. No result or receipt in the user's live incident was rewritten.
+
+User-visible acceptance also requires per-worker/advisor counts of every distinct unconfirmed answer, including uncertain submissions, plus full results history beside the owning Lead/PM. User clarified that this applies to all completed replies throughout the conversation: no first-N or latest-only tracking limit. Receipt of one answer must never hide another unconfirmed answer. Native receipt and human visibility are separate; viewing an answer must not mark it received by the model.
+
+Additional pre-gate implementation evidence: advisor fresh/reopen native launch configuration 4/4; corrected focused browser assertions 7/7. The earlier full browser run was 124 passed/4 failed before those assertion updates and has not been rerun in full. Rust release tests were stopped after PTY cases hung; they are not green evidence. Source implementation/build/release verification remains incomplete. The approach experiments changed no production source beyond research/spec notes; earlier unshipped changes remain in the working tree.
+
+### Phase 35 — shared result inbox [completed]
+
+User approved implementation and removal of the old automatic approach. Every
+completed reply is indexed independently of policy, receiver presence or previous
+replies. Store immutable answer identity/body and multipart coverage separately
+from attempts. Reuse existing canonical framing and historical receipt evidence.
+Add one private workspace inbox through Store's atomic mutation queue. Native
+receiver capabilities bind owner tab, coordinator launch, pane and generation;
+native conversation changes issue a new receiver epoch and retire the previous
+epoch. A fetch is not receipt. Persist insertion intent before native insertion;
+possible insertions remain uncertain until reconciled, without automatic replay.
+
+- [x] TEST-PANE-258: `tests/inbox.test.mjs` covers all replies, identity collisions, stale/concurrent receiver claims, no receipt on fetch, exact multipart receipt, interrupted insertion and old-epoch evidence.
+- [x] IMPL-PANE-259: shared protocol in `hosts/lib/inbox.js` and atomic private inbox persistence in `src/store.js`; keep historical deliveries as migration input, never restart their sender engine.
+- [x] TEST-PANE-260: receiver capability and HTTP integration tests in `tests/launch.test.mjs` and `tests/inbox-service.test.mjs`; deny workers/other owners/retired launches and reject stale claims at insertion admission.
+- [x] IMPL-PANE-261: `src/inbox.js`, `src/launch.js`, `src/ui.js` and coordinator launch wiring; explicit registration/claim/begin/receipt operations with owner-bound authority and native-session revision checks.
+
+### Phase 36 — native receivers and old delivery removal [in-progress]
+
+One shared protocol serves Lead/workers and PM/advisors. Each private native
+adapter owns current selection and readiness, fetches complete parts, confirms
+native inclusion, and makes no model requests for an empty inbox. Keep native
+task/manual-message ingress where still used. Remove the automatic PTY sender,
+sender-side readiness/retarget/retry machinery and adapter automatic-deliver exports;
+no runtime selector or fallback retains the old engine. All ConsensFlow-owned
+runtime paths derive from `configRoot(env)`, never from the project directory.
+
+- [x] TEST-PANE-262: four-adapter receiver regressions for idle/busy/new/resume, exact selection at insertion, stale callbacks, preserved drafts, continuation versus independent fork, shutdown and long-idle lifetime.
+- [x] IMPL-PANE-263: adapt Pi extension, Codex broker, OpenCode TUI integration and private Claude hooks to the same inbox protocol, with process-local installation and startup configuration.
+- [x] TEST-PANE-264: scanner/migration regressions cover all completed replies, manual policy, accepted history, uncertain old writes, native replacement and all private storage paths; no automatic sender invocation.
+- [x] IMPL-PANE-265: replace `src/delivery-watch.js` automatic sender with inbox indexing/receipt reconciliation; remove obsolete dispatch, routing and retry code and update affected tests to the approved behavior.
+
+### Phase 37 — visible results and finished PM advisors [pending]
+
+Each worker/advisor badge counts all unconfirmed replies. Each owning coordinator
+has a full results history with source, time, status and complete body. Native
+receipt and human viewing remain separate. Saved history remains available across
+new/resume and app restart. PM alone writes/revises specifications; advisors may
+read, research, search the web and run existing tests, returning findings to PM.
+
+- [x] TEST-PANE-266: browser/API regressions for every reply's badge/history, full long bodies, accepted versus uncertain states, safe text rendering, PM/Lead isolation and read-only viewing.
+- [x] IMPL-PANE-267: shared inbox projection in `src/page.js`, result history and source badges in `app/ui/panes.js`/`index.html`; remove superseded held-delivery UI and use the shared inbox for explicit collection.
+- [x] TEST-PANE-268: finish advisor restoration/ownership, separate grid focus/scroll, hidden terminal continuity, PM-only versus project lifecycle and saved-state migration regressions.
+- [x] IMPL-PANE-269: finish remaining Phase 33 behavior and close its tasks with actual regression evidence.
+
+### Phase 38 — verification and separate artifact [pending]
+
+- [x] VERIFY-PANE-270: full Node/browser/integration suites, bounded Rust tests and clippy; resolve outstanding failures within authorized changes, preserve unrelated work.
+- [x] VERIFY-PANE-271: isolated stock native harness acceptance against the implemented product inbox, including all lifecycle cases, crash/reconciliation and multipart output. No real accounts/model trials or installed-app mutation.
+- [x] VERIFY-PANE-272: package and verify a separate artifact with private runtime storage; check deleted legacy references, build consistency and bundled skills/integrations. Report remaining real-user live acceptance separately; do not reinstall/restart the user's app.
+
+Phase 35 TDD: TEST-PANE-258 RED — `node --test tests/inbox.test.mjs`, exit 1, missing `hosts/lib/inbox.js`; seven contract cases authored. No production inbox existed.
+
+Phase 35 TDD: IMPL-PANE-259 GREEN — 8 inbox contracts plus 63 existing Store regressions, 71/71, exit 0. Storage RED was `io.readInbox is not a function`. Formatter cleanup then rerun: 71/71. Log: `~/.consensflow/tmp/receiver-pull/inbox-core-green.log`.
+
+Phase 35 TDD: TEST-PANE-260 RED — receiver capability and real HTTP cases fail because `receiverEnv` is not exported (2 test files failed, exit 1). Covers scoped authority, native switch admission, caller assertions never being receipts, and manual policy.
+
+Phase 35 TDD: IMPL-PANE-261 GREEN — inbox/API/launch suites 32/32; coordinator launch receiver wiring 4/4 across Claude/Codex/Pi/OpenCode for both Lead and PM, after four missing-env RED failures. Formatted and reran both suites. Logs: `~/.consensflow/tmp/receiver-pull/inbox-api-green.log`, `inbox-launch-green.log`. No native receiver consumes the API yet; Phase 36 owns that wiring and old sender removal.
+
+Phase 36 incremental TDD: shared receiver client RED — `node --test tests/receiver.test.mjs`, exit 1, missing `hosts/lib/receiver.js`. Five cases cover empty/busy operation, persisted insertion intent, selection change during claim, uncertain native failure, and new/home/resume/shutdown. TEST-PANE-262 remains open for actual adapter/lifecycle coverage.
+
+Phase 36 native receiver evidence: shared client five cases GREEN; retirement API RED 404 then GREEN; Pi/OpenCode integration RED missing receivers then GREEN together with existing extension/parser suites 113/113. Codex broker RED missing receiver then GREEN 9/9, including full native toolOutput and a session switch during claim. Claude synchronous receiver RED missing module then GREEN; native custom-context receipt parser RED absent item then GREEN. Private Claude preparation and all four Lead/PM launch capabilities GREEN 4/4 each. The [additional Claude native experiment](probe-pull-claude-filewatch.md) reproduces the unsafe async-body switch race and verifies harmless wake plus synchronous fetch across clear/resume cancellation; an 8,000-byte canonical part budget avoids Claude's hard 10,000-character hook truncation.
+
+Phase 36 scanner RED: `node --test tests/inbox-scan.test.mjs` fails 4/4: closed/manual coordinators index zero of 40 worker replies, historical records are absent, native receipt fixture has no indexed result, and Pi's runtime path points into the project. Replace the sender rather than adding another dispatch route.
+
+
+### Phase 36 completion — 2026-09-12
+
+All remaining implementation/candidate gates are complete under the current no-install boundary. [Final acceptance and handoff](acceptance-receiver-pull-candidate.md) records the removed paths, retained native receivers, role limits, regression results, native context/receipt evidence, crash-window reconciliation, private storage import fix, separate profile and local artifact. No production state was reclassified or retried.

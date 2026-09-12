@@ -1,6 +1,6 @@
 {
   "name": "consensflow",
-  "version": "3.0.0-alpha.43",
+  "version": "3.0.0-alpha.61",
   "description": "Native terminal workspace for a lead, named workers and a project manager.",
   "license": "MIT",
   "type": "module",
@@ -48,5 +48,8 @@
     "pi",
     "second-opinion"
   ],
-  "author": "Gabriel Voicu (https://ngvoicu.dev)"
+  "author": "Gabriel Voicu (https://ngvoicu.dev)",
+  "dependencies": {
+    "ws": "8.21.3"
+  }
 }

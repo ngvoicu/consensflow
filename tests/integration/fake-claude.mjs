@@ -3,6 +3,7 @@ import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
+import { createReceiver } from '../../hosts/lib/receiver.js'
 
 const CF_CLI = fileURLToPath(new URL('../../bin/cf.mjs', import.meta.url))
 
@@ -16,7 +17,9 @@ for (const arg of args) {
   if (skipValue) {
     skipValue = false
   } else if (
-    ['--add-dir', '--append-system-prompt-file', '--system-prompt-snapshot'].includes(arg)
+    ['--settings', '--add-dir', '--append-system-prompt-file', '--system-prompt-snapshot'].includes(
+      arg,
+    )
   ) {
     skipValue = true
   } else if (awaitingSession) {
@@ -40,7 +43,6 @@ const processFile = join(dirname(process.env.CONSENSFLOW_HOME), 'processes.jsonl
 const PASTE_START = '\u001b[200~'
 const PASTE_END = '\u001b[201~'
 const readFault = process.env.CF_INTEGRATION_READ_FAULT ?? ''
-const bridgeFault = process.env.CF_INTEGRATION_BRIDGE_FAULT ?? ''
 const nativeHumanSubmission = process.env.CF_INTEGRATION_NATIVE_HUMAN_SUBMISSION === '1'
 mkdirSync(directory, { recursive: true })
 appendFileSync(pidFile, `${process.pid}\n`)
@@ -211,55 +213,36 @@ if (!worker) {
     process.stdout.write('fake lead resumed\n')
   }
 
-  let pasted = []
-  let bridgeFaulted = false
-  let rawMode = false
-  let rawModeError = null
-  let crSeenBeforeKill = false
-  const observationFile = join(process.env.CONSENSFLOW_HOME, 'paste-observed')
-  const recordObservation = () =>
-    writeFileSync(
-      observationFile,
-      `${JSON.stringify({ sessionId, rawMode, rawModeError, crSeenBeforeKill })}\n`,
-    )
-  const observeBridgePaste = (chunk) => {
-    if (bridgeFault !== 'after-paste-before-cr') {
-      return
-    }
-    const text = String(chunk)
-    if (text.includes('\r')) crSeenBeforeKill = true
-    if (!bridgeFaulted && text.includes(PASTE_START)) {
-      bridgeFaulted = true
-      recordObservation()
-    } else if (bridgeFaulted && crSeenBeforeKill) {
-      recordObservation()
-    }
-  }
-  if (bridgeFault === 'after-paste-before-cr') {
-    if (typeof process.stdin.setRawMode !== 'function') {
-      rawModeError = 'stdin.setRawMode is unavailable'
-      recordObservation()
-    } else {
-      try {
-        process.stdin.setRawMode(true)
-        rawMode = true
-      } catch (cause) {
-        rawModeError = cause instanceof Error ? cause.message : String(cause)
-        recordObservation()
-      }
-    }
-    process.stdin.on('data', observeBridgePaste)
-  }
+  const receiver = process.env.CF_RESULT_RECEIVER
+    ? createReceiver({
+        config: process.env.CF_RESULT_RECEIVER,
+        session: () => sessionId,
+        ready: () => !existsSync(join(process.env.CONSENSFLOW_HOME, 'receiver-busy')),
+        insert: async (claim) => {
+          if (readFault === 'no-receipt') return { admitted: true }
+          const text =
+            readFault === 'tail-only'
+              ? tailOnly(claim.text)
+              : readFault === 'body-loss'
+                ? withoutBody(claim.text)
+                : claim.text
+          user(text)
+          assistant('lead receipt')
+          settle()
+          return { admitted: true }
+        },
+      })
+    : null
+  receiver?.start()
+  process.once('exit', () => receiver?.stop().catch(() => {}))
+
   const handleLine = (line) => {
-    observeBridgePaste(line)
-    if (bridgeFaulted) return
     const withoutStart = line.startsWith(PASTE_START) ? line.slice(PASTE_START.length) : line
     const clean = withoutStart.endsWith(PASTE_END)
       ? withoutStart.slice(0, -PASTE_END.length)
       : withoutStart
     const pointer = /^@[^\n]+ — run: cf read (d-\d+)/.exec(clean)
     if (pointer) {
-      pasted = []
       void readAllParts(pointer[1]).then(
         (parts) => {
           const captured =
@@ -283,11 +266,8 @@ if (!worker) {
       )
       return
     }
-    pasted.push(clean)
-    if (!clean.startsWith('[end of delivery ')) return
-    const body = pasted.join('\n')
-    pasted = []
-    user(body)
+    if (!clean) return
+    user(clean)
     assistant('lead receipt')
     settle()
   }

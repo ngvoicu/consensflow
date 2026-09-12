@@ -2,7 +2,7 @@ use crate::commands::AppRuntime;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_updater::{RemoteRelease, Update, UpdaterExt};
@@ -240,7 +240,8 @@ pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Value {
             let panes = worker.state::<AppRuntime>().pane_table();
             let permit = manager.install(&panes, |bytes, version| {
                 publish(&worker);
-                crate::update_install::install_archive(&target, bytes, version)?;
+                let directory = manager.preferences.parent().ok_or("Invalid preferences path")?.join("updates");
+                crate::update_install::install_archive(&target, bytes, version, &directory)?;
                 swapped_in_worker.store(true, std::sync::atomic::Ordering::Release);
                 Ok(())
             })?;
@@ -295,14 +296,26 @@ fn finish_before_deadline(
     done.recv_timeout(timeout).is_ok()
 }
 
+fn preferences_directory(home: &Path, configured: Option<PathBuf>) -> PathBuf {
+    configured
+        .unwrap_or_else(|| home.join(".consensflow"))
+        .join("app")
+}
+
 pub fn setup(app: &tauri::App) -> tauri::Result<()> {
-    let directory = std::env::var_os("CONSENSFLOW_HOME")
-        .map(PathBuf::from)
-        .map(|p| p.join("app"))
-        .unwrap_or(app.path().app_config_dir()?);
+    let directory = preferences_directory(
+        &app.path().home_dir()?,
+        std::env::var_os("CONSENSFLOW_HOME").map(PathBuf::from),
+    );
+    let preferences = directory.join("updates.json");
+    let legacy = app.path().app_config_dir()?.join("updates.json");
+    if std::env::var_os("CONSENSFLOW_HOME").is_none() && !preferences.exists() && legacy.is_file() {
+        std::fs::create_dir_all(&directory)?;
+        std::fs::copy(legacy, &preferences)?;
+    }
     app.manage(UpdateManager::new(
         &app.package_info().version.to_string(),
-        directory.join("updates.json"),
+        preferences,
     ));
     let menu = tauri::menu::Menu::default(app.handle())?;
     let check = tauri::menu::MenuItem::with_id(
@@ -592,6 +605,19 @@ mod tests {
     }
 
     #[test]
+    fn preferences_use_consensflow_home() {
+        let home = PathBuf::from("/users/test");
+        assert_eq!(
+            preferences_directory(&home, None),
+            home.join(".consensflow/app")
+        );
+        assert_eq!(
+            preferences_directory(&home, Some(PathBuf::from("/isolated/state"))),
+            PathBuf::from("/isolated/state/app")
+        );
+    }
+
+    #[test]
     fn releases_follow_channel_and_version_policy() {
         let current = "3.0.0-alpha.35";
         assert!(validate_release(
@@ -703,7 +729,7 @@ mod tests {
         let mut context = tauri::test::mock_context(tauri::test::noop_assets());
         context.config_mut().plugins.0.insert(
             "updater".into(),
-            json!({"pubkey":"unused-for-metadata-check"}),
+            json!({"pubkey":"unused-for-metadata-check", "dangerousInsecureTransportProtocol":true}),
         );
         let app = tauri::test::mock_builder()
             .plugin(tauri_plugin_updater::Builder::new().build())
@@ -873,11 +899,10 @@ mod tests {
         let public = std::fs::read_to_string(key.with_extension("key.pub")).unwrap();
         let signature = std::fs::read_to_string(archive.with_extension("gz.sig")).unwrap();
         let mut context = tauri::test::mock_context(tauri::test::noop_assets());
-        context
-            .config_mut()
-            .plugins
-            .0
-            .insert("updater".into(), json!({"pubkey":public}));
+        context.config_mut().plugins.0.insert(
+            "updater".into(),
+            json!({"pubkey":public, "dangerousInsecureTransportProtocol":true}),
+        );
         let app = tauri::test::mock_builder()
             .plugin(tauri_plugin_updater::Builder::new().build())
             .build(context)

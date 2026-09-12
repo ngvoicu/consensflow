@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { emptyInbox } from '../hosts/lib/inbox.js'
 import { recordLeadPreference } from '../hosts/lib/policy.js'
 import { bindEvidence } from '../hosts/lib/session-binding.js'
 import { workspaceKey, writeJsonAtomic } from '../hosts/lib/state.js'
@@ -237,6 +238,11 @@ export class Store {
         // Coded rather than bare so a corrupt record cannot read as a
         // routine bad request on its way out.
         throw new AdmissionError(`the tab ${tab} has no lead pane`, 'no-lead-pane')
+      }
+      if (record.lead.harness === 'opencode' && record.lead.nativeSelection === 'home') {
+        record.lead.nativeSession = null
+        delete record.lead.binding
+        delete record.lead.nativeSelection
       }
       const decided = typeof launch === 'function' ? await launch(record) : launch
       const { launchId, ...evidence } = isRecord(decided) ? decided : { launchId: decided }
@@ -532,6 +538,11 @@ export class Store {
     return readJsonMap(deliveriesFile(this.#root, cwd))
   }
 
+  async readInbox(cwd) {
+    requireText(cwd, 'workspace directory')
+    return readInboxFile(inboxFile(this.#root, cwd))
+  }
+
   // --- named ops -----------------------------------------------------------
 
   /**
@@ -655,6 +666,11 @@ export class Store {
           )
         }
       }
+      if (isRecord(row) && (row.role === 'advisor' || tabRecord.role === 'pm')) {
+        if (row.role !== 'advisor' || !row.lead?.startsWith(`tab:${tab}:`)) {
+          throw new AdmissionError(`${name} belongs to another group`, 'elsewhere')
+        }
+      }
       const previousThreads = structuredClone(threads)
 
       if (isRecord(row) && isRecord(row.reserved)) {
@@ -722,6 +738,15 @@ export class Store {
           agent,
           kind,
           lead,
+          role: tabRecord.role === 'pm' ? 'advisor' : 'worker',
+          ...(typeof tabRecord.lead.nativeSession === 'string' && tabRecord.lead.nativeSession
+            ? {
+                leadContext: {
+                  kind: tabRecord.lead.harness,
+                  session: tabRecord.lead.nativeSession,
+                },
+              }
+            : {}),
           sessionId: null,
           runs: 0,
           sent: [],
@@ -1051,87 +1076,6 @@ export class Store {
   }
 
   /**
-   * Records that a part of a delivery was PRINTED — an attempt, never
-   * coverage.
-   *
-   * A part printed is a part sent, and nothing more. Coverage needs the
-   * part's complete framing AND a matching body digest in the lead's own
-   * model-visible tool result: a receiver that keeps only the tail of a
-   * long output keeps the end marker and drops the text, so an end marker
-   * alone would credit a part nobody read. This op therefore writes to its
-   * own fields and to no others — `partCoverage`, `evidenceIds` and
-   * `state` are `receipt`'s alone.
-   *
-   * Counted per part rather than logged, so a delivery read many times
-   * stays bounded by how many parts it has.
-   */
-  async deliveryReadAttempt(cwd, { id, part, lead, opId } = {}) {
-    return this.mutate(cwd, 'delivery.readAttempt', async (io) => {
-      requireText(id, 'delivery id')
-      requireText(lead, 'lead identity')
-      if (!Number.isInteger(part) || part < 1) {
-        throw new Error(`a part number is a positive integer, not ${JSON.stringify(part)}`)
-      }
-      const deliveries = await io.readDeliveries()
-      const record = deliveries[id]
-      if (!isRecord(record)) throw new Error(`no delivery ${id} in this workspace`)
-      const attempts = isRecord(record.partAttempts)
-        ? Object.assign(Object.create(null), record.partAttempts)
-        : Object.create(null)
-      const key = String(part)
-      attempts[key] = (Number.isInteger(attempts[key]) ? attempts[key] : 0) + 1
-      record.partAttempts = attempts
-      record.lastRead = { part, lead, at: nowIso(), ...(opId === undefined ? {} : { opId }) }
-      deliveries[id] = record
-      await io.writeDeliveries(deliveries)
-      return record
-    })
-  }
-
-  /** Inserts or merges one delivery record, by id. */
-  /**
-   * Change one delivery by DECIDING inside the queue.
-   *
-   * `decide(current)` is handed the record as it is at the moment of the
-   * write, not as some caller read it a while ago, and whatever it returns
-   * is written. Choosing a transition from a snapshot is how a cancel
-   * landing beside an acceptance produced a `cancelled` record still
-   * carrying `acceptedAt`: two states at once, and the receipt says the
-   * answer arrived while the page says it never went.
-   *
-   * `decide` must be pure and synchronous — it runs in the queue slot.
-   */
-  async deliveryDecide(cwd, { id, decide } = {}) {
-    return this.mutate(cwd, 'delivery.decide', async (io) => {
-      requireText(id, 'delivery id')
-      if (typeof decide !== 'function') throw new Error('deliveryDecide needs decide(current)')
-      const deliveries = await io.readDeliveries()
-      const current = isRecord(deliveries[id]) ? deliveries[id] : undefined
-      const next = decide(current)
-      if (next === undefined || next === null) {
-        return { changed: false, record: current ?? null }
-      }
-      requireText(next.id, 'delivery id')
-      deliveries[next.id] = next
-      await io.writeDeliveries(deliveries)
-      return { changed: next !== current, record: next }
-    })
-  }
-
-  async deliveryUpsert(cwd, record = {}) {
-    return this.mutate(cwd, 'delivery.upsert', async (io) => {
-      if (!isRecord(record)) throw new Error('a delivery record is an object')
-      requireText(record.id, 'delivery id')
-      const deliveries = await io.readDeliveries()
-      const existing = deliveries[record.id]
-      const merged = existing === undefined ? { ...record } : { ...existing, ...record }
-      deliveries[record.id] = merged
-      await io.writeDeliveries(deliveries)
-      return merged
-    })
-  }
-
-  /**
    * The human policy, from the page only. Tab scope takes `auto|manual`
    * (a tab `manual` vetoes everything under it); pane scope also takes
    * `inherit`, which falls through to the tab's.
@@ -1207,6 +1151,9 @@ export class Store {
       writeThreads: (threads, at) =>
         this.#writeAppJson(threadsFile(this.root, workspace(at)), asMap(threads, 'threads')),
       readDeliveries: (at) => readJsonMap(deliveriesFile(this.root, workspace(at))),
+      readInbox: (at) => readInboxFile(inboxFile(this.root, workspace(at))),
+      writeInbox: (inbox, at) =>
+        this.#writeAppJson(inboxFile(this.root, workspace(at)), requireInbox(inbox)),
       writeDeliveries: (deliveries, at) =>
         this.#writeAppJson(
           deliveriesFile(this.root, workspace(at)),
@@ -1345,7 +1292,6 @@ export class Store {
         for (const tab of tabs) {
           if (
             !isRecord(tab) ||
-            tab.role === 'pm' ||
             typeof tab.directory !== 'string' ||
             !Array.isArray(tab.panes) ||
             !Number.isSafeInteger(tab.lead?.generation)
@@ -1354,6 +1300,7 @@ export class Store {
           const threads = await io.readThreads(tab.directory)
           for (const [name, row] of Object.entries(threads)) {
             if (tab.deletedConversations?.includes(name)) continue
+            if (tab.role === 'pm' && row?.role !== 'advisor') continue
             const owner = typeof row?.lead === 'string' ? row.lead.split(':') : []
             if (
               owner.length !== 3 ||
@@ -1433,6 +1380,23 @@ function deliveriesFile(root, cwd) {
   return path.join(workspaceRoot(root, cwd), 'deliveries.json')
 }
 
+function inboxFile(root, cwd) {
+  return path.join(workspaceRoot(root, cwd), 'inbox.json')
+}
+
+function requireInbox(value) {
+  if (value?.version !== 1 || !isRecord(value.results) || !isRecord(value.receivers))
+    throw new Error('cannot read inbox: unsupported version or invalid records')
+  return value
+}
+
+async function readInboxFile(file) {
+  const state = requireInbox(await readJsonMap(file, emptyInbox))
+  state.results = Object.assign(Object.create(null), state.results)
+  state.receivers = Object.assign(Object.create(null), state.receivers)
+  return state
+}
+
 function tabsFile(root) {
   return path.join(root, 'app', 'tabs.json')
 }
@@ -1444,12 +1408,12 @@ function tabsFile(root) {
  * and no mutation may adopt it as a fresh map. The bytes stay on disk for
  * whoever investigates.
  */
-async function readJsonMap(file) {
+async function readJsonMap(file, missing = () => Object.create(null)) {
   let text
   try {
     text = await fs.readFile(file, 'utf8')
   } catch (error) {
-    if (error?.code === 'ENOENT') return Object.create(null)
+    if (error?.code === 'ENOENT') return missing()
     throw new Error(`cannot read ${file}: ${error?.message ?? error}`)
   }
   let parsed

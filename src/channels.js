@@ -5,51 +5,12 @@ import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { deliver as deliverClaude, send as sendClaude } from './channels/claude-peer.js'
-import { deliver as deliverCodex, send as sendCodex } from './channels/codex.js'
-import {
-  DEFAULT_DEADLINE_MS,
-  deliver as deliverOpenCode,
-  send as sendOpenCode,
-} from './channels/opencode.js'
-import { deliver as deliverPi, send as sendPi } from './channels/pi.js'
-import { deliver as deliverPty } from './channels/pty.js'
+import { send as sendClaude } from './channels/claude-peer.js'
+import { send as sendCodex } from './channels/codex.js'
+import { DEFAULT_DEADLINE_MS, send as sendOpenCode } from './channels/opencode.js'
+import { send as sendPi } from './channels/pi.js'
+import { configRoot } from './roster.js'
 
-/**
- * Delivery channel launch contract.
- *
- * `launchConfiguration('opencode', { launchId, workspace })` returns
- * `{ args: ['--port', port, '--hostname', '127.0.0.1'], env:
- * { OPENCODE_SERVER_PASSWORD }, channel: { kind: 'opencode-server',
- * endpoint, password, ackTimeoutMs } }`. The endpoint and password are copied
- * into the reservation so the adapter can authenticate its POST without
- * rediscovery; `ackTimeoutMs` is the adapter's absolute acknowledgement
- * budget.
- *
- * `launchConfiguration('pi', { launchId, workspace })` returns
- * `{ args: ['--extension', absoluteExtensionPath], env:
- * { CF_DELIVERY_INBOX, CF_DELIVERY_ACK, CF_DELIVERY_QUARANTINE,
- * CF_DELIVERY_SETTLED, CF_DELIVERY_EXPIRED, CF_DELIVERY_LAUNCH_ID,
- * CF_DELIVERY_ACK_TIMEOUT_MS, CF_DELIVERY_EXTENSION_ACK_TIMEOUT_MS },
- * channel: { kind: 'pi-extension', launchId, inbox, ack, quarantine, settled,
- * expired, ackTimeoutMs, extensionAckTimeoutMs } }`. The inbox, ack,
- * settlement, expiry and quarantine directories are launch-scoped children of
- * the supplied workspace. Each inbox record carries the adapter's one
- * absolute expiry; the extension reads it and does not mint another deadline.
- * OpenCode's adapter owns its 3_000 ms HTTP deadline; Pi's launch owns its
- * 30_000 ms acknowledgement timeout. These are independent values.
- *
- * Adapter result error codes are `unknown-channel`, `channel-disabled`,
- * `transport`, `deadline`, `ack-timeout`, `admission-unknown`, `invalid-record`,
- * `expired`, `missing-envelope`, `failed-with-zero-bytes`, `peer-refused`,
- * and `stale-input-epoch`. Transport,
- * deadline, ack-timeout and admission-unknown are returned to callers as
- * `uncertain`. A confirmed zero-byte stale-input-epoch race can re-pend the
- * same delivery; other failed sends need an explicit resend with a new id.
- *
- * The optional entries below are enabled only by the live probes recorded in
- * findings-01.md: P5 for OpenCode and P6 for Pi, both on 2026-09-07.
- */
 const PROBES = Object.freeze({
   'claude-code': Object.freeze({
     channel: 'claude-peer',
@@ -61,21 +22,9 @@ const PROBES = Object.freeze({
   pi: Object.freeze({ channel: 'pi-extension', probe: 'P6', date: '2026-09-07' }),
 })
 
-const CHANNELS = new Map([
-  ['claude-peer', deliverClaude],
-  ['pty-inline', deliverPty],
-  ['cf-read', deliverPty],
-  ['opencode-server', deliverOpenCode],
-  ['codex-queue', deliverCodex],
-  ['pi-extension', deliverPi],
-])
-const ALWAYS_AVAILABLE = new Set(['pty-inline', 'cf-read'])
-
 export function enabledChannels(kind) {
-  const channels = [...ALWAYS_AVAILABLE]
-  const probe = PROBES[kind]
-  if (probe !== undefined) channels.push(probe.channel)
-  return channels
+  const channel = PROBES[kind]?.channel
+  return channel ? [channel] : []
 }
 
 function requireLaunchInput(input) {
@@ -147,11 +96,14 @@ export async function launchConfiguration(kind, input) {
   }
   if (kind === 'codex') {
     if (!(await hasNativeQueue(kind, input.executable))) return { args: [], env: {}, channel: null }
+    const port = await freeLoopbackPort()
+    const token = randomBytes(24).toString('base64url')
     return {
       args: [],
-      env: {},
+      env: { CF_CODEX_SESSION_BRIDGE: JSON.stringify({ launchId, port, token }) },
       channel: {
         kind: 'codex-queue',
+        sessionBridge: { endpoint: `http://127.0.0.1:${port}`, token },
         preservesDraft: 1,
         launchId,
         executable: input.executable,
@@ -161,24 +113,47 @@ export async function launchConfiguration(kind, input) {
     }
   }
   if (kind === 'opencode') {
+    let sessionBridge
+    let integrationEnv = {}
+    if (input.extensionPath) {
+      if (input.env?.OPENCODE_TUI_CONFIG) {
+        throw new Error(
+          'OpenCode has a custom OPENCODE_TUI_CONFIG; its settings were preserved. Remove that launch override to enable ConsensFlow reply delivery.',
+        )
+      }
+      const bridgePort = await freeLoopbackPort()
+      const token = randomBytes(24).toString('base64url')
+      sessionBridge = { endpoint: `http://127.0.0.1:${bridgePort}`, token }
+      integrationEnv = {
+        OPENCODE_TUI_CONFIG: join(dirname(input.extensionPath), 'tui.json'),
+        CF_OPENCODE_SESSION_BRIDGE: JSON.stringify({ launchId, port: bridgePort, token }),
+      }
+    }
     const port = await freeLoopbackPort()
     const password = randomBytes(24).toString('base64url')
     const endpoint = `http://127.0.0.1:${port}`
     return {
       args: ['--port', String(port), '--hostname', '127.0.0.1'],
-      env: { OPENCODE_SERVER_PASSWORD: password, OPENCODE_SERVER_USERNAME: 'opencode' },
+      env: {
+        ...integrationEnv,
+        OPENCODE_SERVER_PASSWORD: password,
+        OPENCODE_SERVER_USERNAME: 'opencode',
+      },
       channel: {
         kind: 'opencode-server',
         preservesDraft: 1,
         launchId,
         endpoint,
         password,
+        ...(sessionBridge ? { sessionBridge } : {}),
         ackTimeoutMs: DEFAULT_DEADLINE_MS,
       },
     }
   }
   if (kind === 'pi') {
-    const root = join(workspace, '.consensflow', 'deliveries', launchId)
+    if (!input.env || typeof input.env !== 'object')
+      throw new Error('Pi launch needs an explicit environment')
+    const root = join(configRoot(input.env), 'integrations', 'pi', launchId)
     const inbox = join(root, 'inbox')
     const ack = join(root, 'ack')
     const quarantine = join(root, 'quarantine')
@@ -225,30 +200,6 @@ export async function launchConfiguration(kind, input) {
   throw new Error(`no launch configuration for harness: ${kind}`)
 }
 
-/**
- * Deliver only through a channel the lead launch explicitly enabled. The
- * launch object remains on target and is passed untouched to the adapter.
- */
-export async function deliver(channel, target, record) {
-  if (!CHANNELS.has(channel)) return { ok: false, error: 'unknown-channel' }
-  if (
-    !ALWAYS_AVAILABLE.has(channel) &&
-    (!Array.isArray(target?.enabledChannels) || !target.enabledChannels.includes(channel))
-  ) {
-    return { ok: false, error: 'channel-disabled' }
-  }
-
-  const result = await CHANNELS.get(channel)(channel, target, record)
-  if (
-    result?.error === 'transport' ||
-    result?.error === 'ack-timeout' ||
-    result?.error === 'deadline'
-  ) {
-    return { ok: false, error: 'uncertain', cause: result.cause ?? result.error }
-  }
-  return result
-}
-
 /** A worker follow-up uses the same launch-owned native ingress as a reply. */
 export async function send(channel, target, text) {
   const sender = {
@@ -259,4 +210,19 @@ export async function send(channel, target, text) {
   }[channel]
   if (!sender) return { ok: false, admitted: false, bytesWritten: 0, error: 'channel-disabled' }
   return await sender(target, text)
+}
+
+/** Keep native argument construction in the runners; only owned Codex panes need a supervisor. */
+export function withNativeBridge(invocation, configuration, node) {
+  if (configuration?.channel?.kind !== 'codex-queue' || !configuration.channel.sessionBridge)
+    return invocation
+  return {
+    ...invocation,
+    command: node,
+    args: [
+      fileURLToPath(new URL('../hosts/codex-session.mjs', import.meta.url)),
+      configuration.channel.executable,
+      ...invocation.args,
+    ],
+  }
 }

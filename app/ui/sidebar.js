@@ -24,7 +24,7 @@ export function paneLabel(tab, pane, workerNumber = null) {
     return text(pane.name, text(tab.lead?.name, text(tab.lead?.harness, 'lead')))
   }
   const name = text(pane.conversation, text(pane.name, text(pane.agent, 'worker')))
-  return workerNumber === null ? name : `w${workerNumber} ${name}`
+  return workerNumber === null ? name : `${tab.role === 'pm' ? 'a' : 'w'}${workerNumber} ${name}`
 }
 
 function button(label, testId, selected, onClick) {
@@ -60,8 +60,11 @@ export function renderSidebar(
   tabs,
   {
     selection,
+    results = [],
+    onOpenResults,
     onSelectSession,
     onSelectPane,
+    onSelectGroup,
     onResume,
     onAttach,
     onRenameSession,
@@ -71,6 +74,26 @@ export function renderSidebar(
   },
 ) {
   container.replaceChildren()
+  const appendResults = (row, tab, pane = null) => {
+    const count = results.filter(
+      (result) =>
+        result.tab === tab.id &&
+        (pane === null || result.conversation === pane.conversation) &&
+        ['waiting', 'collecting', 'uncertain'].includes(result.state),
+    ).length
+    if (!count || !onOpenResults) return
+    const badge = document.createElement('button')
+    badge.className = 'result-summary'
+    badge.type = 'button'
+    badge.textContent = String(count)
+    badge.dataset.testid = `tree-results-${pane?.id ?? tab.id}`
+    badge.setAttribute(
+      'aria-label',
+      `${count} unconfirmed results for ${pane?.conversation ?? (tab.role === 'pm' ? 'PM' : 'Lead')}`,
+    )
+    badge.addEventListener('click', () => onOpenResults(tab, pane?.conversation ?? null))
+    row.append(badge)
+  }
 
   for (const tab of tabs.filter((tab) => tab.role !== 'pm')) {
     const session = document.createElement('li')
@@ -124,103 +147,121 @@ export function renderSidebar(
     }
     session.append(sessionRow)
 
-    const panes = orderedPanes(tab)
-    const leadPane = panes.find((pane) => pane.kind === 'lead')
     const sessionChildren = group()
-    if (leadPane !== undefined) {
-      const lead = document.createElement('li')
-      lead.className = 'tree-node'
-      lead.dataset.kind = 'lead'
-      lead.dataset.paneId = leadPane.id
-      lead.dataset.state = failedPane(leadPane) ? 'failed' : 'live'
-      lead.setAttribute('role', 'treeitem')
-      lead.setAttribute('aria-level', '2')
-      lead.append(
-        row(
-          button(
-            paneLabel(tab, leadPane),
-            `pane-node-${leadPane.id}`,
-            selection.tabId === tab.id &&
-              selection.type === 'pane' &&
-              selection.paneId === leadPane.id,
-            () => onSelectPane(tab, leadPane),
-          ),
-        ),
+    const appendGroup = (tab) => {
+      const item = document.createElement('li')
+      item.className = 'tree-node'
+      item.dataset.kind = tab.role === 'pm' ? 'pm' : 'lead-group'
+      item.setAttribute('role', 'treeitem')
+      item.setAttribute('aria-level', '2')
+      const open = button(
+        tab.role === 'pm' ? 'PM · advisors' : 'Lead · workers',
+        tab.role === 'pm' ? `pm-${tab.id}` : `lead-grid-${tab.id}`,
+        selection.tabId === tab.id && selection.type === 'session',
+        () => onSelectGroup(tab),
       )
-
-      const descendants = group()
-      let workerNumber = 0
-      for (const pane of panes) {
-        if (pane === leadPane) continue
-        if (pane.kind === 'worker') workerNumber += 1
-        const child = document.createElement('li')
-        child.className = 'tree-node'
-        child.dataset.kind = pane.kind
-        child.dataset.paneId = pane.id
-        child.dataset.closed = pane.alive === false || tab.closed === true ? 'true' : 'false'
-        child.dataset.state = failedPane(pane) ? 'failed' : pane.closed === true ? 'closed' : 'live'
-        child.setAttribute('role', 'treeitem')
-        child.setAttribute('aria-level', '3')
-        child.append(
+      const groupRow = row(open)
+      appendResults(groupRow, tab)
+      item.append(groupRow)
+      const groupChildren = group()
+      const panes = orderedPanes(tab)
+      const leadPane = panes.find((pane) => pane.kind === 'lead')
+      if (leadPane !== undefined) {
+        const lead = document.createElement('li')
+        lead.className = 'tree-node'
+        lead.dataset.kind = 'lead'
+        lead.dataset.paneId = leadPane.id
+        lead.dataset.state = failedPane(leadPane) ? 'failed' : 'live'
+        lead.setAttribute('role', 'treeitem')
+        lead.setAttribute('aria-level', '3')
+        lead.append(
           row(
             button(
-              paneLabel(tab, pane, pane.kind === 'worker' ? workerNumber : null),
-              `pane-node-${pane.id}`,
+              paneLabel(tab, leadPane),
+              `pane-node-${leadPane.id}`,
               selection.tabId === tab.id &&
                 selection.type === 'pane' &&
-                selection.paneId === pane.id,
-              () => {
-                if (
-                  pane.kind === 'worker' &&
-                  !failedPane(pane) &&
-                  (tab.closed === true || pane.alive === false)
-                ) {
-                  onAttach(tab, pane)
-                } else {
-                  onSelectPane(tab, pane)
-                }
-              },
+                selection.paneId === leadPane.id,
+              () => onSelectPane(tab, leadPane),
             ),
           ),
         )
-        if (onDeletePane) {
-          const remove = document.createElement('button')
-          remove.type = 'button'
-          remove.className = 'delete-button'
-          remove.textContent = 'Delete'
-          remove.setAttribute('aria-label', `Delete pane ${paneLabel(tab, pane)}`)
-          remove.addEventListener('click', (event) => {
-            event.stopPropagation()
-            onDeletePane(tab, pane)
-          })
-          child.firstElementChild.append(remove)
+
+        const descendants = group()
+        let workerNumber = 0
+        for (const pane of panes) {
+          if (pane === leadPane) continue
+          if (pane.kind === 'worker') workerNumber += 1
+          const child = document.createElement('li')
+          child.className = 'tree-node'
+          child.dataset.kind = pane.kind
+          child.dataset.paneId = pane.id
+          child.dataset.closed = pane.alive === false || tab.closed === true ? 'true' : 'false'
+          child.dataset.state = failedPane(pane)
+            ? 'failed'
+            : pane.closed === true
+              ? 'closed'
+              : 'live'
+          child.setAttribute('role', 'treeitem')
+          child.setAttribute('aria-level', '4')
+          child.append(
+            row(
+              button(
+                paneLabel(tab, pane, pane.kind === 'worker' ? workerNumber : null),
+                `pane-node-${pane.id}`,
+                selection.tabId === tab.id &&
+                  selection.type === 'pane' &&
+                  selection.paneId === pane.id,
+                () => {
+                  if (
+                    pane.kind === 'worker' &&
+                    !failedPane(pane) &&
+                    (tab.closed === true || pane.alive === false)
+                  ) {
+                    onAttach(tab, pane)
+                  } else {
+                    onSelectPane(tab, pane)
+                  }
+                },
+              ),
+            ),
+          )
+          if (pane.kind === 'worker') appendResults(child.firstElementChild, tab, pane)
+          if (onDeletePane) {
+            const remove = document.createElement('button')
+            remove.type = 'button'
+            remove.className = 'delete-button'
+            remove.textContent = 'Delete'
+            remove.setAttribute('aria-label', `Delete pane ${paneLabel(tab, pane)}`)
+            remove.addEventListener('click', (event) => {
+              event.stopPropagation()
+              onDeletePane(tab, pane)
+            })
+            child.firstElementChild.append(remove)
+          }
+          descendants.append(child)
         }
-        descendants.append(child)
+        if (descendants.childElementCount > 0) {
+          lead.setAttribute('aria-expanded', 'true')
+          lead.append(descendants)
+        }
+        groupChildren.append(lead)
       }
-      if (descendants.childElementCount > 0) {
-        lead.setAttribute('aria-expanded', 'true')
-        lead.append(descendants)
-      }
-      sessionChildren.append(lead)
+      item.append(groupChildren)
+      sessionChildren.append(item)
     }
-    if (onOpenPm) {
-      const pm = tabs.find(
-        (candidate) => candidate.role === 'pm' && candidate.parentTabId === tab.id,
-      )
+    const pm = tabs.find((candidate) => candidate.role === 'pm' && candidate.parentTabId === tab.id)
+    if (pm) appendGroup(pm)
+    else if (onOpenPm) {
       const child = document.createElement('li')
       child.className = 'tree-node'
-      child.dataset.kind = 'pm'
-      child.setAttribute('role', 'treeitem')
-      child.setAttribute('aria-level', '2')
-      const open = button(
-        pm ? `pm: ${pm.roleName}` : 'Add project manager',
-        pm ? `pm-${pm.id}` : `add-pm-${tab.id}`,
-        pm?.id === selection.tabId,
-        () => onOpenPm(tab, pm, open),
+      const open = button('Add project manager', `add-pm-${tab.id}`, false, () =>
+        onOpenPm(tab, null, open),
       )
       child.append(row(open))
-      sessionChildren.prepend(child)
+      sessionChildren.append(child)
     }
+    appendGroup(tab)
     if (sessionChildren.childElementCount > 0) {
       session.setAttribute('aria-expanded', 'true')
       session.append(sessionChildren)

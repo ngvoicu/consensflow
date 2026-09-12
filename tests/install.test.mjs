@@ -15,7 +15,7 @@ import { dirname, isAbsolute, join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { detectHarnesses, harnessPath } from '../src/harnesses.js'
 import * as installation from '../src/install.js'
-import { skillsStatus, skillsSummary, uninstallSkills } from '../src/install.js'
+import { skillsStatus, uninstallSkills } from '../src/install.js'
 import { addAgent } from '../src/roster.js'
 import { healOnOpen, refreshInstalledSkill, skillGaps, staleSkills } from '../src/sync.js'
 import { tempEnv } from './helpers.mjs'
@@ -119,7 +119,6 @@ describe('private app skill lifecycle', () => {
       const rows = skillsStatus(t.env)
       assert.equal(rows.length, 1)
       assert.match(readFileSync(rows[0].path, 'utf8'), /cf agent list/)
-      assert.equal(skillsSummary(t.env).skills, 1)
     } finally {
       t.cleanup()
     }
@@ -133,22 +132,6 @@ describe('private app skill lifecycle', () => {
       const next = refreshInstalledSkill(t.env)[0]
       assert.equal(next.action, 'unchanged')
       assert.equal(statSync(first.path).mtimeMs, before)
-    } finally {
-      t.cleanup()
-    }
-  })
-
-  it('reset removes app data and its launcher but leaves global skill cleanup manual', () => {
-    const t = tempEnv()
-    try {
-      const global = join(t.env.HOME, '.claude', 'skills', 'consensflow', 'SKILL.md')
-      mkdirSync(dirname(global), { recursive: true })
-      writeFileSync(global, 'keep for manual cleanup')
-      healOnOpen(t.env)
-      installation.resetEverything(t.env, { force: true })
-      assert.equal(existsSync(t.env.CONSENSFLOW_HOME), false)
-      assert.equal(existsSync(join(t.env.CONSENSFLOW_BIN_DIR, 'cf')), false)
-      assert.equal(readFileSync(global, 'utf8'), 'keep for manual cleanup')
     } finally {
       t.cleanup()
     }

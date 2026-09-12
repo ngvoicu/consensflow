@@ -65,6 +65,8 @@ export function scopeOf(token) {
     ...(scope.tab === undefined ? {} : { tab: scope.tab }),
     ...(scope.launch === undefined ? {} : { launch: scope.launch }),
     ...(scope.generation === undefined ? {} : { generation: scope.generation }),
+    ...(scope.pane === undefined ? {} : { pane: scope.pane }),
+    ...(scope.kind === undefined ? {} : { kind: scope.kind }),
     ops: [...scope.ops],
   }
 }
@@ -139,6 +141,9 @@ export function redeem(ticket) {
  * until it expired.
  */
 export function endLaunch(launch) {
+  for (const [token, scope] of credentials) {
+    if (scope.launch === launch && scope.ops.has('receiver')) credentials.delete(token)
+  }
   const ownerRemoved = owners.delete(launch)
   let ticketRemoved = tickets.delete(launch)
   if (!ticketRemoved) {
@@ -154,6 +159,18 @@ export function endLaunch(launch) {
   capabilities.delete(launch)
   credentials.delete(capability)
   return true
+}
+
+/** Private native integration authority is distinct from the lead's ordinary CLI authority. */
+export function receiverEnv({ tab, pane, launch, generation, kind, app } = {}) {
+  for (const [label, value] of Object.entries({ tab, pane, launch })) requireText(value, label)
+  if (!Number.isSafeInteger(generation) || generation < 1)
+    throw new Error('invalid receiver generation')
+  if (!['claude-code', 'codex', 'pi', 'opencode'].includes(kind))
+    throw new Error('invalid receiver harness')
+  const token = opaqueToken()
+  credentials.set(token, { tab, pane, launch, generation, kind, ops: new Set(['receiver']) })
+  return { CF_RESULT_RECEIVER: JSON.stringify({ url: requireApp(app).url, token, kind }) }
 }
 
 /**
@@ -179,7 +196,7 @@ export function leadEnv({ tab, pane, leadId, app, path, node, role = 'lead' } = 
     CONSENSFLOW_APP: url,
     CONSENSFLOW_APP_TOKEN: scopedToken({
       tab,
-      ops: role === 'pm' ? ['lead.send', 'lead.read'] : LEAD_OPS,
+      ops: role === 'pm' ? [...LEAD_OPS, 'lead.send', 'lead.read'] : LEAD_OPS,
     }),
     ...(role === 'pm' ? { CONSENSFLOW_ROLE: 'pm' } : {}),
     CONSENSFLOW_LEAD_ID: leadId,

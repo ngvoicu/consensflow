@@ -5,7 +5,7 @@ import { PassThrough } from 'node:stream'
 import { describe, it } from 'node:test'
 import { Bridge } from '../src/bridge.js'
 import { stdinIsPipe } from '../src/ui.js'
-import { chooseCmuxMode, tempEnv } from './helpers.mjs'
+import { tempEnv } from './helpers.mjs'
 
 /** Two bridges talking to each other over in-process pipes, like Node and Rust. */
 function pair(options = {}) {
@@ -877,7 +877,6 @@ describe('bridge activation: pipe and --json gate', () => {
 
   it('ignores frames on a regular-file stdin: handle line only, no bridge', async () => {
     const t = tempEnv()
-    chooseCmuxMode(t)
     const { spawn } = await import('node:child_process')
     const cf = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
     const inputPath = join(t.root, 'stdin.txt')
@@ -926,7 +925,6 @@ describe('bridge activation: pipe and --json gate', () => {
 
   it('stays prose without --json: a ping frame gets no answer, EOF still exits', async () => {
     const t = tempEnv()
-    chooseCmuxMode(t)
     const { spawn } = await import('node:child_process')
     const { join } = await import('node:path')
     const cf = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
@@ -981,7 +979,6 @@ describe('bridge activation: pipe and --json gate', () => {
 describe('cf ui --json --no-open speaks the bridge after its handle line', () => {
   it('keeps the handle line first, then answers a ping frame, then exits on EOF', async () => {
     const t = tempEnv()
-    chooseCmuxMode(t)
     const { spawn } = await import('node:child_process')
     const { join } = await import('node:path')
     const cf = join(import.meta.dirname, '..', 'bin', 'cf.mjs')

@@ -475,7 +475,8 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   const resolved = JSON.parse(readFileSync(sink, 'utf8'))
   const bundleRoot = join(found.app, 'Contents', 'Resources', 'cli')
   const outside = resolved.filter(
-    (entry) => entry.url.startsWith('file://') && !entry.url.startsWith(`file://${bundleRoot}/`),
+    (entry) =>
+      entry.url.startsWith('file://') && !fileURLToPath(entry.url).startsWith(`${bundleRoot}/`),
   )
   assert.deepEqual(
     outside,
@@ -483,8 +484,8 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     `the packaged extension resolved files outside the bundle: ${JSON.stringify(outside)}`,
   )
   assert.ok(
-    resolved.some((entry) => entry.url.endsWith('/hosts/lib/deliveries.js')),
-    'the packaged extension never resolved hosts/lib/deliveries.js',
+    resolved.some((entry) => entry.url.endsWith('/hosts/lib/receiver.js')),
+    'the packaged extension never resolved hosts/lib/receiver.js',
   )
   // Not "nothing under the repo": a locally built bundle LIVES under the
   // repo, so that would be trivially false. What must never be touched are
@@ -498,87 +499,26 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     `the packaged extension resolved live sources from this checkout: ${JSON.stringify(leaked)}`,
   )
 
-  // 5b. …and the packaged extension actually DELIVERS. Importing it proves
-  //     its dependencies resolve; only running its own entry point proves the
-  //     bundled copy still works. This drives `consensflowDelivery(pi)` from
-  //     the bundle with a stand-in Pi, a real record in a real inbox, and
-  //     reads back the ack the extension writes.
-  const delivery = await withBundledNode(
+  // The packaged receiver must load without any checkout or global extension dependency.
+  const receiver = await withBundledNode(
     found.node,
     box,
     `
-    import { mkdir, readFile, writeFile } from 'node:fs/promises'
-    import { writeFileSync } from 'node:fs'
-    import { join } from 'node:path'
-    import { envelope } from ${JSON.stringify(join(bundleRoot, 'hosts', 'lib', 'deliveries.js'))}
-    import consensflowDelivery from ${JSON.stringify(extension)}
-
-    const root = process.env.CF_DELIVERY_ROOT
-    const dirs = ['inbox', 'ack', 'quarantine', 'settled', 'expired']
-    for (const dir of dirs) await mkdir(join(root, dir), { recursive: true })
-
-    const record = {
-      id: 'd-1',
-      conversation: 'smoke-worker',
-      answerId: 'a-1',
-      answer: 'the packaged extension delivered this',
-      expiresAt: Date.now() + 30_000,
-    }
-    const text = envelope(record)
-    await writeFile(join(root, 'inbox', 'd-1.json'), JSON.stringify({ ...record, text }), 'utf8')
-
-    // A stand-in Pi: it records the send and then reports the message_start
-    // the extension treats as proof of admission, exactly as Pi does.
-    const handlers = new Map()
-    const sent = []
-    const pi = {
-      on: (name, handler) => handlers.set(name, handler),
-      sendUserMessage: (body) => {
-        sent.push(body)
-        const handler = handlers.get('message_start')
-        if (handler !== undefined) {
-          void handler({ message: { role: 'user', content: body } }, context)
-        }
-      },
-    }
-    const context = { isIdle: () => true, sessionManager: { getSessionId: () => 's-1', getLeafId: () => 'l-1' } }
-
-    consensflowDelivery(pi)
-    await handlers.get('session_start')({}, context)
-
-    let ack = null
-    for (let attempt = 0; attempt < 100 && ack === null; attempt += 1) {
-      try {
-        ack = JSON.parse(await readFile(join(root, 'ack', 'd-1.json'), 'utf8'))
-      } catch {
-        await new Promise((wake) => setTimeout(wake, 50))
-      }
-    }
-    writeFileSync(1, JSON.stringify({ ack, sentMatchesEnvelope: sent[0] === text }) + '\\n')
-    process.exit(0)
-    `,
-    {
-      CF_DELIVERY_ROOT: box.probe,
-      CF_DELIVERY_INBOX: join(box.probe, 'inbox'),
-      CF_DELIVERY_ACK: join(box.probe, 'ack'),
-      CF_DELIVERY_QUARANTINE: join(box.probe, 'quarantine'),
-      CF_DELIVERY_SETTLED: join(box.probe, 'settled'),
-      CF_DELIVERY_EXPIRED: join(box.probe, 'expired'),
-      CF_DELIVERY_LAUNCH_ID: 'smoke-launch',
-    },
+    import assert from 'node:assert/strict'
+    import { createReceiver } from ${JSON.stringify(join(bundleRoot, 'hosts/lib/receiver.js'))}
+    const calls = []
+    const receiver = createReceiver({ session: () => 'native-smoke', ready: () => true,
+      request: async (op) => { calls.push(op); return op === 'state' ? null : op === 'register' ? { session:'native-smoke',lease:'smoke' } : null },
+      insert: () => { throw new Error('empty inbox must never insert') },
+    })
+    await receiver.poll()
+    await receiver.stop()
+    assert.deepEqual(calls, ['state','register','claim','retire'])
+    process.stdout.write('PACKAGED-RECEIVER-OK')
+  `,
   )
-  assert.equal(delivery.code, 0, `the packaged extension could not deliver: ${delivery.err}`)
-  const delivered = JSON.parse(delivery.out.trim().split('\n').at(-1))
-  assert.equal(
-    delivered.sentMatchesEnvelope,
-    true,
-    'the extension sent something other than the envelope',
-  )
-  assert.equal(
-    delivered.ack?.admitted,
-    true,
-    `the packaged extension did not admit: ${JSON.stringify(delivered.ack)}`,
-  )
+  assert.equal(receiver.code, 0, receiver.err)
+  assert.equal(receiver.out, 'PACKAGED-RECEIVER-OK')
 
   // 6. The state root is the app's, held by a kernel lock the bundled node
   //    cannot take a second time.
@@ -611,4 +551,50 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   assert.equal(ended.code, 0, `the app exited ${ended.code} / ${ended.signal}`)
   assert.equal(alive(harnessPid), false, 'the fake harness outlived the app')
   finished = true
+})
+
+test('built Agents catalog serves complete saved profiles and current browsing controls', async (t) => {
+  const found = gate(t)
+  if (found === null) return
+  const box = sandbox()
+  t.after(() => box.cleanup())
+  const cli = join(found.app, 'Contents', 'Resources', 'cli')
+  const result = await withBundledNode(
+    found.node,
+    box,
+    `
+    import assert from 'node:assert/strict'
+    import { existsSync, readFileSync } from 'node:fs'
+    import { METRICS } from ${JSON.stringify(join(cli, 'hosts/lib/benchmarks.js'))}
+    import { CATALOG, catalogEntry } from ${JSON.stringify(join(cli, 'src/catalog.js'))}
+    import { addAgent, rosterPath } from ${JSON.stringify(join(cli, 'src/roster.js'))}
+    import { startUiServer } from ${JSON.stringify(join(cli, 'src/ui.js'))}
+    assert.equal(Object.values(CATALOG).flat().length, 98, 'packaged preset count')
+    assert.equal(METRICS.length, 14)
+    for (const secretFile of ['artificial-analysis-key', 'artificial-analysis-cache.json']) assert.equal(existsSync(${JSON.stringify(cli)} + '/' + secretFile), false)
+    assert.equal(catalogEntry('pygmalion').model, 'codex-image')
+    addAgent(catalogEntry('maia'), process.env)
+    const server = await startUiServer(process.env)
+    try {
+      const headers = { authorization: 'Bearer ' + server.token }
+      const data = await (await fetch(server.url + '/api/agents', { headers })).json()
+      const saved = JSON.parse(readFileSync(rosterPath(process.env), 'utf8')).agents.find(a => a.id === 'maia')
+      assert.deepEqual(saved.profile, data.agents.find(a => a.name === 'maia').profile)
+      assert.deepEqual(saved.profile.categories, ['coding', 'reviewer'])
+      const html = await (await fetch(server.url, { headers })).text()
+      for (const text of ['aria-label="Your agents"', 'Model and reasoning', 'Already added', 'offer__actions', 'category-pill', 'Recommended PM', 'Reviewer / second opinion', 'Sort by', 'benchmark-pills', 'About benchmark scores', 'model-summary', 'model-group', 'AA reasoning level not specified', 'value="model-reasoning" selected']) assert.ok(html.includes(text), text)
+      assert.ok(!html.includes('id="catalog-section"'))
+      const library = await (await fetch(server.url + '/library', { headers })).text()
+      assert.ok(library.includes('aria-label="Agent library"'))
+      assert.ok(!library.includes('id="roster-section"'))
+      assert.equal((await fetch(server.url + '/api/agents/maia', { method: 'DELETE', headers })).status, 204)
+      const after = await (await fetch(server.url + '/api/agents', { headers })).json()
+      assert.equal(after.agents.length, 0)
+      assert.equal(Object.values(after.catalog).flat().length, 98)
+      console.log('packaged catalog and saved profiles verified')
+    } finally { await server.close() }
+  `,
+  )
+  assert.equal(result.code, 0, result.err)
+  assert.match(result.out, /packaged catalog and saved profiles verified/)
 })
