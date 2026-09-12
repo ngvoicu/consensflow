@@ -36,6 +36,9 @@ settings, project bookkeeping, paid model trials, release or commit is authorize
   preserve immutable files already loaded by live processes and historical data.
 - Existing harness, advisor/grid and inbox tests remain green. Verify Devin with
   stock native interfaces and private profiles; distinguish mocks from live proof.
+- Closing or suspending a macOS pane also stops its owned detached children,
+  including inherited children whose intermediate parent exited. Other panes and
+  unrelated processes survive. Native conversation history remains available.
 
 ## Current UI preference
 
@@ -61,6 +64,10 @@ and legacy result import/read evidence: they are still used product behavior.
 ## Tasks
 
 - [x] Research and probe Devin native session, completion and receiving interfaces.
+- [x] [TEST-PROC-01] Reproduce detached and reparented children surviving close;
+  verify isolation from another pane and cleanup on application teardown.
+- [ ] [IMPL-PROC-02] Stop launch-owned children using native process identity;
+  satisfy TEST-PROC-01 without global process-name matching. ← current
 - [ ] Add failing role/launch/completion/inbox tests based on verified contracts.
 - [ ] Implement Devin worker/advisor and coordinator integration and catalog entry.
 - [x] Consolidate private integration installation and remove obsolete paths.
@@ -128,3 +135,9 @@ and legacy result import/read evidence: they are still used product behavior.
   tests/implementation and the integrated candidate remain outstanding.
 - No runtime state, installed app, native installation, current conversation or
   existing candidate changed. Research/spec files and private probe evidence only.
+
+## TDD log
+
+| Task | Red | Green | Refactor |
+| --- | --- | --- | --- |
+| TEST-PROC-01 | cargo test pty::tests::close_stops: 3 tests, 3 failed; drop_stops_detached_children: 1 test, 1 failed. Detached children survived. | — | — |

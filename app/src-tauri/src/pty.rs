@@ -203,6 +203,8 @@ struct Pane {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Box<dyn Child + Send + Sync>,
     process_group_id: Option<i32>,
+    #[cfg(target_os = "macos")]
+    process_tree: crate::process_tree::ProcessTree,
     output_flow: Option<Arc<OutputFlow>>,
     active_writes: Arc<AtomicU64>,
     alive: bool,
@@ -454,6 +456,10 @@ impl PaneTable {
             command.env_remove(name);
         }
         advertise_color_capability(&mut command, env, drop_env);
+        #[cfg(target_os = "macos")]
+        let mut process_tree = crate::process_tree::ProcessTree::new();
+        #[cfg(target_os = "macos")]
+        command.env(crate::process_tree::OWNER_ENV, &process_tree.marker);
         let child = pair
             .slave
             .spawn_command(command)
@@ -462,6 +468,10 @@ impl PaneTable {
 
         #[cfg(unix)]
         let process_group_id = child.process_id().and_then(|pid| i32::try_from(pid).ok());
+        #[cfg(target_os = "macos")]
+        if let Some(pid) = process_group_id {
+            process_tree.attach(pid);
+        }
         #[cfg(not(unix))]
         let process_group_id = None;
         let last_activity = Arc::new(Mutex::new(Instant::now()));
@@ -477,6 +487,8 @@ impl PaneTable {
                 writer: Arc::new(Mutex::new(writer)),
                 child,
                 process_group_id,
+                #[cfg(target_os = "macos")]
+                process_tree,
                 output_flow: None,
                 active_writes: Arc::new(AtomicU64::new(0)),
                 alive: true,
@@ -952,6 +964,14 @@ fn terminate_detached(mut pane: Pane, teardown: Arc<Teardown>) -> Result<(), Pan
 }
 
 fn signal_for_termination(pane: &mut Pane) -> Result<bool, PaneError> {
+    #[cfg(target_os = "macos")]
+    {
+        pane.process_tree.terminate()?;
+        return has_exited(pane);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
     let mut child_exited = has_exited(pane)?;
 
     #[cfg(unix)]
@@ -978,6 +998,7 @@ fn signal_for_termination(pane: &mut Pane) -> Result<bool, PaneError> {
     }
 
     Ok(child_exited)
+    }
 }
 
 // A continuation can create a new process group while staying below the pane.
@@ -1042,12 +1063,12 @@ fn continuation_ancestry_accepts_detached_descendant_and_refuses_foreign_group()
     assert!(!process_owned_by_group(i32::MAX, group));
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn is_permission_denied(error: &PaneError) -> bool {
     matches!(error, PaneError::Io(error) if error.kind() == io::ErrorKind::PermissionDenied)
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, any(test, not(target_os = "macos"))))]
 fn signal_process_group(process_group_id: i32) -> Result<(), PaneError> {
     unsafe extern "C" {
         fn kill(pid: i32, signal: i32) -> i32;
@@ -1418,6 +1439,94 @@ mod tests {
             .kill(&key)
             .expect("a gone process group is already clean");
         assert!(table.list().expect("list after cleanup").is_empty());
+    }
+
+    #[cfg(target_os = "macos")]
+    fn detached_child(table: &PaneTable, parent_exits: bool, clear_environment: bool) -> (PaneKey, i32) {
+        let script = format!(
+            "import subprocess,time; p=subprocess.Popen(['/bin/sleep','60'], start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL{}); print(p.pid, flush=True); {}",
+            if clear_environment { ", env={}" } else { "" },
+            if parent_exits { "" } else { "time.sleep(60)" },
+        );
+        let OpenedPane { key, reader } = table.open(
+            Path::new("/tmp"),
+            &["/usr/bin/python3".into(), "-c".into(), script],
+            &HashMap::new(), terminal_size(24, 80),
+        ).expect("launch a parent with a detached child");
+        let mut reader = BufReader::new(reader);
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        let pid = line.trim().parse::<i32>().expect("native child pid");
+        assert_ne!(unsafe { libc::getpgid(pid) }, table.process_group_id(&key).unwrap());
+        if parent_exits {
+            let mut tail = Vec::new();
+            reader.read_to_end(&mut tail).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while table.list().unwrap().iter().any(|p| p.alive) && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+        (key, pid)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn stopped_with_cleanup(pid: i32) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while process_exists(pid) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        let stopped = !process_exists(pid);
+        // A failing regression must not leave the test's own sleeper behind.
+        if !stopped { unsafe { libc::kill(pid, libc::SIGKILL); } }
+        stopped
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn close_stops_detached_children_but_preserves_other_panes() {
+        let _pty_guard = serial_pty_test();
+        let table = PaneTable::new();
+        let (foreign, foreign_pid) = detached_child(&table, false, false);
+        let (own, own_pid) = detached_child(&table, false, false);
+        table.kill(&own).unwrap();
+        let own_stopped = stopped_with_cleanup(own_pid);
+        let foreign_alive = process_exists(foreign_pid);
+        table.kill(&foreign).unwrap();
+        let foreign_stopped = stopped_with_cleanup(foreign_pid);
+        assert!(own_stopped, "detached child survived pane close");
+        assert!(foreign_alive, "closing a pane killed another pane's child");
+        assert!(foreign_stopped, "second pane's child survived its own close");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn close_stops_reparented_children_after_the_root_exits() {
+        let _pty_guard = serial_pty_test();
+        let table = PaneTable::new();
+        let (key, pid) = detached_child(&table, true, false);
+        assert!(process_exists(pid), "fixture needs a live orphan");
+        table.kill(&key).unwrap();
+        assert!(stopped_with_cleanup(pid), "reparented child survived pane close");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn close_stops_attached_descendants_even_with_a_cleared_environment() {
+        let _pty_guard = serial_pty_test();
+        let table = PaneTable::new();
+        let (key, pid) = detached_child(&table, false, true);
+        table.kill(&key).unwrap();
+        assert!(stopped_with_cleanup(pid), "owned child with empty environment survived");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn drop_stops_detached_children() {
+        let _pty_guard = serial_pty_test();
+        let table = PaneTable::new();
+        let (_, pid) = detached_child(&table, false, false);
+        drop(table);
+        assert!(stopped_with_cleanup(pid), "detached child survived table drop");
     }
 
     #[cfg(unix)]

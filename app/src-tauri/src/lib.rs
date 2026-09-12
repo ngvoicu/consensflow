@@ -6,6 +6,8 @@ use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 pub mod arbiter;
 pub mod bridge;
 pub mod commands;
+#[cfg(target_os = "macos")]
+mod process_tree;
 pub mod pty;
 #[cfg(target_os = "macos")]
 mod update_install;
