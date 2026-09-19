@@ -141,14 +141,16 @@ opens panes or types into them.
 
 ## Resume context
 
-Phase A is done. A vertical slice of phases B, C and D is green: the Claude
-adapter, the dispatcher, the daemon entry, the agents' API and `cf` commands,
-proven end to end through the real Rust pane host with a fake Claude
-(`tests/integration/core-slice.test.mjs`), and a human typing into a window no
-longer blocks later deliveries (TEST-BDC-22). All five adapters exist with
-contract tests. Next: the live bench against the new core with the real
-harnesses (VERIFY-BDC-08), then the role instructions (Phase D) and the board
-page (Phase E).
+Phases A to D are built. B, C and D wait only on live runs (a Claude lead and
+worker on Sonnet, Codex when its quota allows, Pi and Devin as leads) and, for
+TEST-BDC-11, on the switch that deletes the old commands. Phase E: the board
+page is built and committed as `app/ui/core.html`, beside the old page. Next:
+the session team (a member can leave; a new session starts with the last team;
+the coordinators are told who joined or left), the PM (added from the page,
+its window opened by its first message) and the Lead and PM window views that
+keep the old page's session views; then Phase F, the switch. The old page's
+terminal plumbing in `app/ui/panes.js` duplicates `app/ui/terminal-link.js`
+until the switch deletes the old page.
 
 ## TDD log
 
@@ -252,4 +254,19 @@ page (Phase E).
   what waits for a decision). Screenshots at 1440 and 390 px checked by eye;
   the drawer's task number took its state's colour after that review. The old
   page's 138 tests still pass.
-
+- The board page's gate failed in integration TEST-PANE-75 with
+  `bridge writer queue is full`. The headless helper sends pane output over
+  the bridge through the same 32-slot writer queue as responses, and an event
+  that met a full queue closed the whole transport, so a peer pausing for a
+  few milliseconds during an output burst killed the helper and its panes.
+  That the filler was pane output is inferred: the unit test proves the
+  mechanism, not the incident. Rust test first, on a gated writer: three
+  queues' worth of stream events with a request arriving mid-burst. RED
+  against the old `event` (the burst died at the full queue), RED again with
+  streams allowed the whole queue (the mid-burst response closed the bridge),
+  GREEN with `stream_event`: it waits for room and fills at most half the
+  queue. Review then found the count runs one ahead of the channel while the
+  writer holds a job it has taken but not yet counted, so a frame allowed the
+  whole queue now asks the channel itself. Rust 107/107 and 16/16, clippy
+  clean, integration 22/22 on three runs, two gates green. Only the headless
+  helper streams; the app's window draws pane output itself.

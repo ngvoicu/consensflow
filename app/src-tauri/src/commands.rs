@@ -84,7 +84,9 @@ struct OutputHubState {
 }
 
 /// Where one pane's bytes go. `false` means the destination is gone, and the
-/// hub parks what follows until a new one arrives.
+/// hub parks what follows until a new one arrives. The sink runs under the
+/// hub's lock and the headless one waits while its peer is busy, so publish
+/// only from a pane's own output thread, never from a bridge handler.
 type OutputSink = Arc<dyn Fn(PaneOutputMessage) -> bool + Send + Sync>;
 
 struct OutputHub {

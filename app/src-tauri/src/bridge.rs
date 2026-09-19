@@ -777,14 +777,19 @@ impl Bridge {
                     return Err(BridgeError::Eof);
                 };
                 // Counted under the writer lock, so no other sender slips in
-                // between the look and the send.
-                if self.inner.queued.load(Ordering::Acquire) < depth {
+                // between the look and the send. The count runs one ahead of
+                // the channel while the writer holds a job it has taken but not
+                // yet counted, so only a share stops at it: a frame allowed the
+                // whole queue asks the channel itself.
+                if depth < WRITER_QUEUE_CAPACITY
+                    && self.inner.queued.load(Ordering::Acquire) >= depth
+                {
+                    Err(mpsc::TrySendError::Full(job))
+                } else {
                     self.inner.queued.fetch_add(1, Ordering::AcqRel);
                     writer.try_send(job).inspect_err(|_| {
                         self.inner.queued.fetch_sub(1, Ordering::AcqRel);
                     })
-                } else {
-                    Err(mpsc::TrySendError::Full(job))
                 }
             };
             match send_result {
