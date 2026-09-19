@@ -17,7 +17,15 @@ async function withApi(fn) {
   const ledger = openLedger(path.join(dir, 'consensflow.db'))
   const credentials = new Credentials()
   let changes = 0
-  const api = await startApi({ ledger, credentials, changed: () => changes++ })
+  const api = await startApi({
+    ledger,
+    credentials,
+    changed: () => changes++,
+    roster: (agent) =>
+      agent === 'zeus'
+        ? { id: 'zeus', kind: 'claude-code', model: 'claude-sonnet-5', effort: 'high' }
+        : null,
+  })
   const session = ledger.createSession({
     directory: '/work/app',
     name: 'app',
@@ -158,6 +166,15 @@ describe('cf inside a core window', () => {
       assert.equal((await cf(lead, 'whoami')).out, '@lead (lead) in session app')
       const json = await cf(lead, 'task', 'get', 'T-1', '--json')
       assert.equal(JSON.parse(json.out).messages[0].body, 'Write the parser')
+    })
+  })
+
+  it('shows the session team with each member model', async () => {
+    await withApi(async ({ token, cf }) => {
+      assert.equal(
+        (await cf(token('lead'), 'team')).out,
+        '@zeus (worker): claude-code, claude-sonnet-5, effort high',
+      )
     })
   })
 

@@ -111,7 +111,7 @@ opens panes or types into them.
 ### Phase D: CLI, API and role skills [active]
 
 - [ ] [TEST-BDC-11] `cf task add/list/get/accept/reopen`, `cf inbox`, `cf ask`, `cf answer`; team enforcement; the removed commands are gone.
-- [ ] [IMPL-BDC-12] CLI, daemon API and regenerated lead/PM/advisor/worker instructions.
+- [x] [IMPL-BDC-12] CLI (`src/core/cli.js`, incl. `cf team`), daemon API (`src/core/api.js`) and new role instructions for lead, PM, advisor, worker and reviewer (`skill/core/`, `src/core/roles.js`), passed to each window through its adapter. The old commands go at the switch (TEST-BDC-11 stays open until then).
 
 ### Phase E: Board-first UI [planned]
 
@@ -197,4 +197,32 @@ page (Phase E).
   and ends the window, instead of waiting out the launch timeout (RED, GREEN
   16/16). Shared rule for the new adapters: a conversation with no messages and
   nothing in flight reads idle, so a window opened without a task can receive.
+- VERIFY-BDC-08, first live runs of the new core (`npm run bench:core`, free
+  models, an OpenCode lead). Run 1: the human's task reached the lead's window
+  about a second after it opened, before OpenCode had loaded ConsensFlow's
+  plugin; the fetch failed, the core counted it uncertain and gave up after
+  one silent minute. Two fixes, test-first: OpenCode is ready only once its
+  plugin reports that its TUI shows the conversation, and a handover that
+  never shows in the harness record is tried again whether it was admitted or
+  uncertain. Run 2: still nothing. Reading a copy of the ledger showed three
+  attempts; sending the same text by hand through the plugin worked. The
+  adapters passed the pane as `{id, generation}` while OpenCode's channel reads
+  the generation beside the id, so every call threw, and the dispatcher had
+  turned the throw into "uncertain". The adapter tests had replaced the
+  channel with a stand-in and could not see it. Fixes: the adapters pass the
+  pane's id and generation side by side (as the old code did), the OpenCode,
+  Pi and Codex adapter tests now run the real channel against a fake plugin,
+  extension or broker (the OpenCode one failed before the fix), and an adapter
+  that throws fails its attempt with the error as the reason.
+- The gate then failed on an old Pi extension test (a probe answered "native
+  editor unavailable" instead of "lead busy"): the probe gives the extension
+  1 s, which the full suite plus a live bench exceeded. The Stage 2 harness map
+  had noted that `probeEditor` and `currentSession` in `src/channels/pi.js`
+  have no caller, so the extension's branch answering them served nothing.
+  Removed all three and their four tests rather than stretching a dead
+  timeout (flagged to Gabriel, since his global rule is to report
+  pre-existing dead code; his ConsensFlow rule is "never dead code").
+- Run 3 (in progress when committed): the real OpenCode lead ran
+  `cf task add` itself (6 s), the OpenCode worker answered (10 s), the result
+  reached the lead (11 s) and the worker read idle.
 

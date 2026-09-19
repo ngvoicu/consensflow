@@ -6,60 +6,6 @@ import { claimEpoch } from './pty.js'
 const ACK_POLL_MS = 10
 const ACK_GRACE_MS = ACK_POLL_MS * 3
 
-/** Ask the running extension; an old marker or the headless empty fallback is no proof. */
-export async function probeEditor(config, session) {
-  const unavailable = { ready: false, reason: 'native editor unavailable' }
-  if (typeof session !== 'string') return unavailable
-  const response = await probe(config, { session }, 'editor')
-  if (response?.session !== session) return unavailable
-  if (response.ready === true) return { ready: true }
-  return { ready: false, reason: response.reason ?? unavailable.reason }
-}
-
-/** A fresh response from this launch, including after Pi /new or /resume. */
-export async function currentSession(config) {
-  const response = await probe(config, {}, 'session')
-  return typeof response?.sessionId === 'string' && response.sessionId.length > 0
-    ? response.sessionId
-    : null
-}
-
-async function probe(config, fields, type) {
-  if (
-    config?.kind !== 'pi-extension' ||
-    config.editorGuard !== 1 ||
-    typeof config.inbox !== 'string' ||
-    typeof config.ack !== 'string' ||
-    typeof config.launchId !== 'string' ||
-    !/^[A-Za-z0-9._-]+$/.test(config.launchId)
-  )
-    return null
-  const id = `${type}-${randomBytes(16).toString('hex')}`
-  const request = { id, launchId: config.launchId, ...fields, expiresAt: Date.now() + 1000 }
-  const inboxFile = join(config.inbox, `${id}.json`)
-  const ackFile = join(config.ack, `${id}.json`)
-  const temporary = `${inboxFile}.tmp`
-  try {
-    await mkdir(config.inbox, { recursive: true })
-    await writeFile(temporary, `${JSON.stringify(request)}\n`, 'utf8')
-    await rename(temporary, inboxFile)
-    const response = await ackFor(ackFile, id, request.expiresAt)
-    if (
-      response?.launchId !== request.launchId ||
-      response?.expiresAt !== request.expiresAt ||
-      Date.now() >= request.expiresAt
-    )
-      return null
-    return response
-  } catch {
-    return null
-  } finally {
-    await Promise.all(
-      [temporary, inboxFile, ackFile].map((file) => rm(file, { force: true }).catch(() => {})),
-    )
-  }
-}
-
 function launchConfig(target) {
   const launch = target?.launch
   if (launch === null || typeof launch !== 'object') {

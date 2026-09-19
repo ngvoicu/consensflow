@@ -11,9 +11,10 @@ import { randomUUID } from 'node:crypto'
  * - A live window that its harness reports idle (and not waiting for the
  *   human) gets the head of its queue through the adapter's native path.
  * - A delivery counts only when the harness's own record shows the message
- *   (its `[ConsensFlow m-<id> ·` header in a user item). No sign of it in time:
- *   a refused or silent delivery is tried again, up to `maxAttempts`; a launch
- *   whose first message never shows is ended and its task failed.
+ *   (its `[ConsensFlow m-<id> ·` header in a user item). A refused delivery, or
+ *   one that never shows in time (admitted or uncertain), is tried again, up
+ *   to `maxAttempts`; a launch whose first message never shows is ended and its
+ *   task failed. Adapters say when a window can take input at all (`ready`).
  * - A worker's turn that ends after its task's latest message finishes the
  *   task with the answer written after that message. A task waiting on a
  *   question is left alone. Coordinators (lead, PM) finish their own tasks
@@ -64,6 +65,7 @@ export class Dispatcher {
   #credentials
   #paneEnv
   #roster
+  #roles
   #arrivalTimeoutMs
   #launchTimeoutMs
   #maxAttempts
@@ -79,6 +81,7 @@ export class Dispatcher {
     credentials,
     paneEnv = () => ({}),
     roster = () => null,
+    roles = () => undefined,
     arrivalTimeoutMs = 60_000,
     launchTimeoutMs = 180_000,
     maxAttempts = 3,
@@ -90,6 +93,7 @@ export class Dispatcher {
     this.#credentials = credentials
     this.#paneEnv = paneEnv
     this.#roster = roster
+    this.#roles = roles
     this.#arrivalTimeoutMs = arrivalTimeoutMs
     this.#launchTimeoutMs = launchTimeoutMs
     this.#maxAttempts = maxAttempts
@@ -253,9 +257,10 @@ export class Dispatcher {
     }
     if (waited <= this.#arrivalTimeoutMs) return
     runtime.delivering = null
-    this.#settleFailure(delivering, 'the harness record never showed it', {
-      retry: delivering.admitted === true,
-    })
+    // Admitted or uncertain, a message whose header is still missing from the
+    // harness record after the whole window did not land: sending it again is
+    // how it reaches the reader, and the header would show a late duplicate.
+    this.#settleFailure(delivering, 'the harness record never showed it', { retry: true })
   }
 
   #humanEnter({ id, generation, epoch }) {
@@ -337,7 +342,9 @@ export class Dispatcher {
         text: deliveryText(message),
       })
     } catch (cause) {
-      outcome = { admitted: null, reason: cause.message }
+      // Uncertain is for a harness that may have taken it; an adapter that
+      // throws never handed it over, and its error must show.
+      outcome = { admitted: false, reason: `the delivery failed: ${cause.message}` }
     }
     const delivering = {
       messageId: message.id,
@@ -387,6 +394,7 @@ export class Dispatcher {
         resume,
         message: message === null ? null : deliveryText(message),
         agent: participant.agent === null ? null : this.#roster(participant.agent),
+        instructions: this.#roles(participant, session),
       })
     } catch (cause) {
       if (delivering !== null)

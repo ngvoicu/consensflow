@@ -13,6 +13,7 @@ import { resolve } from 'node:path'
  *   cf inbox [read m-12]         what is waiting for you, or one message in full
  *   cf ask "…" [--human]         a question to whoever gave you your task (or the human)
  *   cf answer m-12 "…"           answer a question put to you
+ *   cf team                      the agents on this session's team, with their models
  *   cf whoami                    your session, role and current task
  *
  * The window's token (CONSENSFLOW_TOKEN) is the whole authority: the core
@@ -70,6 +71,22 @@ async function command(verb, rest, call, cwd) {
       })
       return { data: message, text: `m-${message.id} answered @${message.recipient}.` }
     }
+    case 'team': {
+      const { members } = await call('GET', '/api/team')
+      return {
+        data: members,
+        text:
+          members.length === 0
+            ? 'No agents are on this session team yet; the human adds them in the app.'
+            : members
+                .map(
+                  (member) =>
+                    `@${member.handle} (${member.role}): ${member.harness}, ${member.model ?? 'model unknown'}` +
+                    (member.effort ? `, effort ${member.effort}` : ''),
+                )
+                .join('\n'),
+      }
+    }
     case 'whoami': {
       const me = await call('GET', '/api/whoami')
       return {
@@ -81,7 +98,7 @@ async function command(verb, rest, call, cwd) {
     }
     default:
       throw usage(
-        `unknown command ${JSON.stringify(verb ?? '')}: use task, inbox, ask, answer or whoami`,
+        `unknown command ${JSON.stringify(verb ?? '')}: use task, inbox, ask, answer, team or whoami`,
       )
   }
 }

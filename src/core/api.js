@@ -50,7 +50,7 @@ class Refusal extends Error {
   }
 }
 
-export async function startApi({ ledger, credentials, changed = () => {} }) {
+export async function startApi({ ledger, credentials, changed = () => {}, roster = () => null }) {
   const server = createServer((request, reply) => {
     handle(request).then(
       ({ status, body }) => send(reply, status, body),
@@ -76,6 +76,22 @@ export async function startApi({ ledger, credentials, changed = () => {} }) {
         session: { id: session.id, name: session.name, directory: session.directory },
         participant: { handle: participant.handle, role: participant.role },
         task: task === null ? null : summary(task),
+      })
+    }
+    if (at === 'GET /api/team') {
+      return ok({
+        members: session.participants
+          .filter((member) => member.agent !== null)
+          .map((member) => {
+            const row = roster(member.agent)
+            return {
+              handle: member.handle,
+              role: member.role,
+              harness: member.harness,
+              model: row?.model ?? null,
+              effort: row?.effort ?? null,
+            }
+          }),
       })
     }
     if (at === 'GET /api/tasks') {

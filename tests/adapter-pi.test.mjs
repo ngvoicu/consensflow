@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
@@ -95,27 +95,40 @@ describe('the Pi adapter', () => {
     })
   })
 
-  it('delivers through the extension inbox with the window input epoch', async () => {
+  it('delivers through the real channel: an epoch claim, then the extension inbox', async () => {
     await withHome(async ({ env }) => {
-      const sent = []
-      const adapter = piAdapter({
-        env,
-        send: async (target, text) => {
-          sent.push([target, text])
-          return { ok: true, admitted: true }
-        },
-      })
+      const adapter = piAdapter({ env })
       const { launch } = await adapter.prepare(request())
-      const host = { request: async () => ({ ok: true, inputEpoch: 3 }) }
+      const claims = []
+      const host = {
+        async request(op, body) {
+          if (op === 'pane.snapshot') return { ok: true, inputEpoch: 3 }
+          claims.push([op, body])
+          return { ok: true }
+        },
+      }
+      // The extension's part: take the record from the inbox, acknowledge it.
+      const { inbox, ack } = launch.channel
+      const extension = setInterval(async () => {
+        const names = await readdir(inbox).catch(() => [])
+        for (const name of names.filter((n) => n.endsWith('.json'))) {
+          const record = JSON.parse(await readFile(path.join(inbox, name), 'utf8'))
+          await mkdir(ack, { recursive: true })
+          await writeFile(
+            path.join(ack, `${record.id}.json`),
+            JSON.stringify({ id: record.id, admitted: true, mode: 'tui' }),
+          )
+          await rm(path.join(inbox, name), { force: true })
+          clearInterval(extension)
+        }
+      }, 5)
       const pane = { id: 's1-zeus', generation: 2 }
       assert.deepEqual(await adapter.deliver({ launch, pane, host, text: 'hi' }), {
         admitted: true,
       })
-      const [target] = sent[0]
-      assert.deepEqual(
-        { ...target, launch: target.launch.kind, bridge: target.bridge === host },
-        { launch: 'pi-extension', session: launch.nativeSession, bridge: true, pane, epoch: 3 },
-      )
+      assert.deepEqual(claims, [
+        ['pane.claim_native_epoch', { pane: 's1-zeus', generation: 2, epoch: 3 }],
+      ])
     })
   })
 

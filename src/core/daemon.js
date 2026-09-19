@@ -4,10 +4,11 @@ import { fileURLToPath } from 'node:url'
 import { createAdapters } from '../adapters/index.js'
 import { Bridge } from '../bridge.js'
 import { openLedger } from '../ledger/index.js'
-import { agentRow, configRoot } from '../roster.js'
+import { agentRow, configRoot, listAgents } from '../roster.js'
 import { Credentials, startApi } from './api.js'
 import { Dispatcher } from './dispatcher.js'
 import { PaneHost } from './pane-host.js'
+import { roleInstructions } from './roles.js'
 
 /**
  * The new core's daemon: the one process that owns ConsensFlow's state.
@@ -41,7 +42,12 @@ export async function startCore(
 
   const credentials = new Credentials()
   let loop = null
-  const api = await startApi({ ledger, credentials, changed: () => loop?.kick() })
+  const api = await startApi({
+    ledger,
+    credentials,
+    changed: () => loop?.kick(),
+    roster: (agent) => agentRow(agent, env) ?? null,
+  })
   onOut(JSON.stringify({ url: `${api.url}/`, token: null }))
 
   let stopping = null
@@ -62,6 +68,8 @@ export async function startCore(
     adapters: createAdapters(env, { peer }),
     credentials,
     roster: (agent) => agentRow(agent, env) ?? null,
+    roles: (participant, session) =>
+      roleInstructions(participant.role, teamOf(session, participant, env)),
     paneEnv: (participant, session) => ({
       CONSENSFLOW_URL: api.url,
       CONSENSFLOW_SESSION: String(session.id),
@@ -89,6 +97,17 @@ export async function startCore(
     })
     .finally(() => loop.kick())
   return { stop }
+}
+
+/** The agents a coordinator chooses from: the lead's workers and reviewers, the PM's advisors. */
+function teamOf(session, participant, env) {
+  const roles = { lead: ['worker', 'reviewer'], pm: ['advisor'] }[participant.role] ?? []
+  const members = new Set(
+    session.participants
+      .filter((member) => roles.includes(member.role))
+      .map((member) => member.agent),
+  )
+  return listAgents(env).filter((agent) => members.has(agent.name))
 }
 
 /** What the page (and the tests standing in for it) may ask of the core. */

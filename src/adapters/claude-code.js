@@ -34,14 +34,15 @@ export function claudeCodeAdapter({
   return {
     harness: 'claude-code',
 
-    async prepare({ launchId, role, directory, resume, message, agent }) {
+    async prepare({ launchId, role, directory, resume, message, agent, instructions }) {
       const executable = executableFor('claude-code', env)
       const settings = await prepareClaudeSettings(env, launchId)
-      const instructions = await roleConfiguration('claude-code', {
+      const roleSetup = await roleConfiguration('claude-code', {
         role,
         env,
         cwd: directory,
         executable,
+        content: instructions,
       })
       const identity = { kind: 'claude-code', model: agent?.model, effort: agent?.effort }
       const nativeSession = resume ?? randomUUID()
@@ -50,8 +51,8 @@ export function claudeCodeAdapter({
           ? interactiveStart(identity, nativeSession, message)
           : interactiveResume(identity, resume, message)
       return {
-        argv: [executable, ...settings, ...instructions.args, ...runner.args],
-        env: { ...instructions.env },
+        argv: [executable, ...settings, ...roleSetup.args, ...runner.args],
+        env: { ...roleSetup.env },
         dropEnv: runner.dropEnv,
         nativeSession,
         launch: {
@@ -90,7 +91,8 @@ export function claudeCodeAdapter({
         const sent = await sendPeer(
           {
             session: launch.nativeSession,
-            pane,
+            pane: pane.id,
+            generation: pane.generation,
             epoch: snapshot.inputEpoch,
             launch: launch.channel,
             bridge: host,

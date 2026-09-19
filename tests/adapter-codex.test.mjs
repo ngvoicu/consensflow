@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
@@ -104,28 +105,45 @@ describe('the Codex adapter', () => {
     })
   })
 
-  it("queues a message on the broker with the window's input epoch", async () => {
+  it('queues a message through the real channel: an epoch claim, then the broker', async () => {
     await withHome(async ({ env }) => {
-      const sent = []
-      const adapter = codexAdapter({
-        env,
-        send: async (target, text) => {
-          sent.push([target, text])
-          return { ok: true, admitted: true }
-        },
+      const posted = []
+      const broker = createServer(async (request, response) => {
+        let body = ''
+        for await (const chunk of request) body += chunk
+        posted.push({ url: request.url, body: JSON.parse(body) })
+        response.writeHead(200, { 'content-type': 'application/json' })
+        response.end(JSON.stringify({ ok: true, admitted: true }))
       })
-      const thread = '0f8fad5b-d9cb-469f-a165-70867728950e'
-      const { launch } = await adapter.prepare(request({ resume: thread, message: null }))
-      const host = { request: async () => ({ ok: true, inputEpoch: 6 }) }
-      const pane = { id: 's1-diana', generation: 2 }
-      assert.deepEqual(await adapter.deliver({ launch, pane, host, text: 'hi' }), {
-        admitted: true,
-      })
-      const [target] = sent[0]
-      assert.deepEqual(
-        { ...target, launch: target.launch.kind, bridge: target.bridge === host },
-        { launch: 'codex-queue', session: thread, bridge: true, pane, epoch: 6 },
-      )
+      await new Promise((resolve) => broker.listen(0, '127.0.0.1', resolve))
+      try {
+        const adapter = codexAdapter({ env })
+        const thread = '0f8fad5b-d9cb-469f-a165-70867728950e'
+        const { launch } = await adapter.prepare(request({ resume: thread, message: null }))
+        launch.channel.sessionBridge = {
+          endpoint: `http://127.0.0.1:${broker.address().port}`,
+          token: 't'.repeat(32),
+        }
+        const claims = []
+        const host = {
+          async request(op, body) {
+            if (op === 'pane.snapshot') return { ok: true, inputEpoch: 6 }
+            claims.push([op, body])
+            return { ok: true }
+          },
+        }
+        const pane = { id: 's1-diana', generation: 2 }
+        assert.deepEqual(await adapter.deliver({ launch, pane, host, text: 'hi' }), {
+          admitted: true,
+        })
+        assert.deepEqual(claims, [
+          ['pane.claim_native_epoch', { pane: 's1-diana', generation: 2, epoch: 6 }],
+        ])
+        assert.equal(posted[0].url, '/deliver')
+        assert.deepEqual([posted[0].body.sessionId, posted[0].body.text], [thread, 'hi'])
+      } finally {
+        await new Promise((resolve) => broker.close(resolve))
+      }
     })
   })
 

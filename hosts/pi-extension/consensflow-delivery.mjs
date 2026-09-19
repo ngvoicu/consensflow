@@ -5,8 +5,6 @@ import { createReceiver } from '../lib/receiver.js'
 
 const MESSAGE_ID = /^m-[a-f0-9]{32}$/
 const SAFE_PATH_SEGMENT = /^[A-Za-z0-9._-]+$/
-const EDITOR_PROBE_ID = /^editor-[a-f0-9]{32}$/
-const SESSION_PROBE_ID = /^session-[a-f0-9]{32}$/
 const MESSAGE_FIELDS = new Set(['id', 'type', 'launchId', 'session', 'text', 'expiresAt'])
 
 // Interactive Pi reads the expanded editor, including pasted attachment paths.
@@ -249,38 +247,6 @@ export function createDeliveryExtension(
           continue
         }
         const id = record?.id
-        if (
-          editorGuard === 1 &&
-          (EDITOR_PROBE_ID.test(id) || SESSION_PROBE_ID.test(id)) &&
-          file === `${id}.json`
-        ) {
-          // A fresh launch/session-bound challenge, never cached editor text.
-          if (
-            record.launchId === launchId &&
-            validExpiry(record.expiresAt) &&
-            record.expiresAt > Date.now()
-          ) {
-            const response = {
-              id,
-              launchId,
-              expiresAt: record.expiresAt,
-              ...(SESSION_PROBE_ID.test(id)
-                ? {
-                    sessionId:
-                      context?.mode === 'tui' && context.hasUI === true
-                        ? sessionIdOf(context)
-                        : null,
-                  }
-                : { session: record.session, ...nativeEditorState(context, record.session) }),
-            }
-            await mkdir(ack, { recursive: true })
-            const destination = join(ack, file)
-            await writeFile(`${destination}.tmp`, `${JSON.stringify(response)}\n`, 'utf8')
-            await rename(`${destination}.tmp`, destination)
-          }
-          await unlink(path).catch(() => {})
-          continue
-        }
         if (record?.type === 'message') {
           if (!validMessageId(id)) {
             if (typeof quarantine === 'string') {

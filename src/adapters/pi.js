@@ -19,7 +19,16 @@ export function piAdapter({ env, send = sendPi, answers = cachedAnswers() }) {
   return {
     harness: 'pi',
 
-    async prepare({ launchId, participant, role, directory, resume, message, agent }) {
+    async prepare({
+      launchId,
+      participant,
+      role,
+      directory,
+      resume,
+      message,
+      agent,
+      instructions,
+    }) {
       const executable = executableFor('pi', env)
       const extension = preparePiExtension(env)
       if (extension.path === null) {
@@ -31,7 +40,13 @@ export function piAdapter({ env, send = sendPi, answers = cachedAnswers() }) {
         env,
         extensionPath: extension.path,
       })
-      const instructions = await roleConfiguration('pi', { role, env, cwd: directory, executable })
+      const roleSetup = await roleConfiguration('pi', {
+        role,
+        env,
+        cwd: directory,
+        executable,
+        content: instructions,
+      })
       const nativeSession =
         resume ??
         `cf-${participant.sessionId}-${participant.handle}-${randomBytes(4).toString('hex')}`
@@ -41,8 +56,8 @@ export function piAdapter({ env, send = sendPi, answers = cachedAnswers() }) {
           ? interactiveStart(identity, nativeSession, message)
           : interactiveResume(identity, resume, message)
       return {
-        argv: [executable, ...configuration.args, ...instructions.args, ...runner.args],
-        env: { ...configuration.env, ...instructions.env },
+        argv: [executable, ...configuration.args, ...roleSetup.args, ...runner.args],
+        env: { ...configuration.env, ...roleSetup.env },
         dropEnv: runner.dropEnv,
         nativeSession,
         launch: { nativeSession, channel: configuration.channel },
@@ -66,7 +81,8 @@ export function piAdapter({ env, send = sendPi, answers = cachedAnswers() }) {
           launch: launch.channel,
           session: launch.nativeSession,
           bridge: host,
-          pane,
+          pane: pane.id,
+          generation: pane.generation,
           epoch: snapshot.inputEpoch,
         },
         text,

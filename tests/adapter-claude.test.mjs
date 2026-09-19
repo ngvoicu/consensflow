@@ -150,11 +150,13 @@ describe('the Claude Code adapter', () => {
           role: 'lead',
           message: null,
           agent: null,
+          instructions: 'LEAD INSTRUCTIONS',
         }),
       )
       const at = plan.argv.indexOf('--append-system-prompt-file')
       assert.ok(at > 0)
       assert.match(plan.argv[at + 1], /roles\/lead\/.*SKILL\.md$/)
+      assert.equal(await readFile(plan.argv[at + 1], 'utf8'), 'LEAD INSTRUCTIONS')
       assert.equal(plan.argv.includes('--model'), false)
     })
   })

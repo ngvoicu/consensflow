@@ -25,18 +25,19 @@ export function devinAdapter({
   return {
     harness: 'devin',
 
-    async prepare({ launchId, role, directory, resume, message, agent }) {
+    async prepare({ launchId, role, directory, resume, message, agent, instructions }) {
       const executable = executableFor('devin', env)
       const configuration = await prepareDevinIntegration(env, {
         launchId,
         node: env.CONSENSFLOW_NODE ?? process.execPath,
         executable,
       })
-      const instructions = await roleConfiguration('devin', {
+      const roleSetup = await roleConfiguration('devin', {
         role,
         env,
         cwd: directory,
         executable,
+        content: instructions,
       })
       const runner = await prepareDevinPrompt(
         resume === null
@@ -46,7 +47,7 @@ export function devinAdapter({
       )
       return {
         argv: [executable, ...configuration.args, ...runner.args],
-        env: { ...configuration.env, ...instructions.env },
+        env: { ...configuration.env, ...roleSetup.env },
         dropEnv: runner.dropEnv,
         nativeSession: resume,
         launch: { nativeSession: resume, channel: configuration.channel },

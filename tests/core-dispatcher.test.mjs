@@ -159,6 +159,7 @@ async function setup(fn, options = {}) {
         revoke: () => {},
       },
       paneEnv: (participant) => ({ CONSENSFLOW_PARTICIPANT: participant.handle }),
+      roles: (participant) => `instructions for ${participant.role}`,
       arrivalTimeoutMs: 30_000,
       launchTimeoutMs: 120_000,
       maxAttempts: 3,
@@ -198,6 +199,7 @@ describe('the dispatcher', () => {
       assert.equal(lead.env.CONSENSFLOW_TOKEN, 'token-lead')
       assert.equal(context.adapter.prepared[0].message, null, 'a lead opens without a task')
       assert.equal(context.adapter.prepared[0].role, 'lead')
+      assert.equal(context.adapter.prepared[0].instructions, 'instructions for lead')
       const conversation = context.ledger.currentConversation(id('lead'))
       assert.equal(conversation.nativeSession, `native-${lead.launch}`)
       assert.equal(context.dispatcher.activity(id('lead')).state, 'starting')
@@ -302,6 +304,42 @@ describe('the dispatcher', () => {
       await context.dispatcher.pass()
       assert.deepEqual([delivering().state, delivering().attempts], ['delivering', 2])
       assert.equal(delivering().reason, null)
+    })
+  })
+
+  it('tries an uncertain handover again once its arrival window passes with no sign of it', async () => {
+    await setup(async (context) => {
+      const { session, id } = await withTeam(context)
+      const deliver = context.adapter.deliver
+      context.adapter.deliver = async (request) => {
+        if (context.adapter.agent('lead').items.length === 0 && !context.retried) {
+          context.retried = true
+          return { admitted: null, reason: 'the plugin did not answer' }
+        }
+        return deliver(request)
+      }
+      const note = context.ledger.note(session.id, { from: 'zeus', to: 'lead', body: 'hello' })
+      await context.dispatcher.pass()
+      context.clock.advance(31_000)
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const message = context.ledger.inbox(id('lead')).find((m) => m.id === note.id)
+      assert.deepEqual([message.state, message.attempts], ['delivered', 2])
+      assert.equal(context.adapter.agent('lead').items.length, 1, 'delivered once')
+    })
+  })
+
+  it('records an adapter that throws as a failed attempt with its error, not as uncertain', async () => {
+    await setup(async (context) => {
+      const { session, id } = await withTeam(context)
+      context.adapter.deliver = async () => {
+        throw new Error('the channel needs pane, generation and observed epoch')
+      }
+      const note = context.ledger.note(session.id, { from: 'zeus', to: 'lead', body: 'hello' })
+      await context.dispatcher.pass()
+      const message = context.ledger.inbox(id('lead')).find((m) => m.id === note.id)
+      assert.deepEqual([message.state, message.attempts], ['queued', 1])
+      assert.match(message.reason, /the channel needs pane, generation and observed epoch/)
     })
   })
 

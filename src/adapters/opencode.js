@@ -4,6 +4,7 @@ import {
   createSession as createOpenCodeSession,
   seedSession as seedOpenCodeSession,
   send as sendOpenCode,
+  currentSession as shownSession,
 } from '../channels/opencode.js'
 import { launchConfiguration } from '../channels.js'
 import { prepareOpenCodeExtension } from '../opencode-install.js'
@@ -17,28 +18,37 @@ import { admission, executableFor, recordState } from './shared.js'
  * plugin loaded. OpenCode ignores a prompt on a `--session` launch, so the
  * first message goes through that server once it answers, and every later one
  * through the plugin, which posts it to the session the TUI is showing.
+ *
+ * An empty conversation says nothing about the window: until the plugin
+ * reports that the TUI shows this conversation, OpenCode is still loading (or
+ * the human is looking at another one) and nothing is sent.
  */
 export function openCodeAdapter({
   env,
   createSession = createOpenCodeSession,
   seedSession = seedOpenCodeSession,
   send = sendOpenCode,
+  currentSession = shownSession,
   answers = cachedAnswers(),
 }) {
+  const showing = async (launch) =>
+    (await currentSession(launch.channel).catch(() => undefined)) === launch.nativeSession
+
   return {
     harness: 'opencode',
 
-    async prepare({ launchId, role, directory, resume, message, agent }) {
+    async prepare({ launchId, role, directory, resume, message, agent, instructions }) {
       const executable = executableFor('opencode', env)
       const extension = prepareOpenCodeExtension(env)
       if (extension.path === null) {
         throw new Error(`ConsensFlow's OpenCode plugin could not be installed: ${extension.reason}`)
       }
-      const instructions = await roleConfiguration('opencode', {
+      const roleSetup = await roleConfiguration('opencode', {
         role,
         env,
         cwd: directory,
         executable,
+        content: instructions,
       })
       const configuration = await launchConfiguration('opencode', {
         launchId,
@@ -52,7 +62,7 @@ export function openCodeAdapter({
         (await createSession({
           executable,
           cwd: directory,
-          env: childEnv({ ...env, ...instructions.env }),
+          env: childEnv({ ...env, ...roleSetup.env }),
           configuration,
         }))
       const runner =
@@ -61,7 +71,7 @@ export function openCodeAdapter({
           : interactiveResume({ kind: 'opencode' }, resume, null)
       return {
         argv: [executable, ...configuration.args, ...runner.args],
-        env: { ...configuration.env, ...instructions.env },
+        env: { ...configuration.env, ...roleSetup.env },
         dropEnv: runner.dropEnv,
         nativeSession,
         launch: {
@@ -88,6 +98,10 @@ export function openCodeAdapter({
       return {}
     },
 
+    async ready({ launch }) {
+      return showing(launch)
+    },
+
     async deliver({ launch, pane, host, text }) {
       const snapshot = await host.request('pane.snapshot', pane)
       if (snapshot?.ok !== true) {
@@ -101,7 +115,8 @@ export function openCodeAdapter({
           launch: launch.channel,
           session: launch.nativeSession,
           bridge: host,
-          pane,
+          pane: pane.id,
+          generation: pane.generation,
           epoch: snapshot.inputEpoch,
         },
         text,
@@ -110,8 +125,12 @@ export function openCodeAdapter({
     },
 
     async observe({ launch }) {
-      const record = await answers('opencode', launch.nativeSession, env)
-      return { ...recordState(record), waiting: null }
+      const [record, shown] = await Promise.all([
+        answers('opencode', launch.nativeSession, env),
+        showing(launch),
+      ])
+      const state = recordState(record)
+      return { ...state, settled: state.settled && shown, waiting: null }
     },
 
     transcript({ launch }) {

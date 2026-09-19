@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict'
-import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { createDeliveryExtension } from '../hosts/pi-extension/consensflow-delivery.mjs'
-import { currentSession, probeEditor } from '../src/channels/pi.js'
 import { send } from '../src/channels.js'
 
 function fakePi() {
@@ -138,134 +137,6 @@ const envelopeRecord = {
 const envelope = envelopeRecord.text
 
 describe('consensflow Pi extension', () => {
-  it('probes the live Pi conversation after native new-session replacement without sending', async () => {
-    const s = await setup(null, { editorGuard: 1 })
-    const config = {
-      kind: 'pi-extension',
-      editorGuard: 1,
-      inbox: s.inbox,
-      ack: s.ack,
-      launchId: 'launch-pi-test',
-    }
-    try {
-      assert.equal(await currentSession(config), 'native-pi-session')
-      await s.pi.handlers.get('session_shutdown')({ reason: 'new' })
-      const next = { ...s.ctx, ...context(() => false, { sessionId: 'new-native-session' }) }
-      await s.pi.handlers.get('session_start')({ reason: 'new' }, next)
-      assert.equal(await currentSession(config), 'new-native-session', 'identity works while busy')
-      next.mode = 'rpc'
-      assert.equal(await currentSession(config), null, 'only the native TUI is an app lead')
-      next.mode = 'tui'
-      assert.equal(await currentSession({ ...config, launchId: 'wrong-launch' }), null)
-      await s.pi.handlers.get('session_shutdown')({ reason: 'quit' })
-      assert.equal(
-        await currentSession(config),
-        null,
-        'a stopped extension leaves no reusable identity',
-      )
-      assert.deepEqual(s.pi.sent, [])
-      assert.deepEqual(await readdir(s.inbox), [])
-      assert.deepEqual(await readdir(s.ack), [])
-    } finally {
-      await s.close()
-    }
-  })
-
-  for (const corrupt of ['id', 'launchId', 'expiresAt', 'sessionId']) {
-    it(`rejects a Pi identity response with invalid ${corrupt}`, async () => {
-      const s = await setup(null, { editorGuard: 1 })
-      await s.pi.handlers.get('session_shutdown')({ reason: 'quit' })
-      const config = {
-        kind: 'pi-extension',
-        editorGuard: 1,
-        inbox: s.inbox,
-        ack: s.ack,
-        launchId: 'launch-pi-test',
-      }
-      let responder
-      try {
-        responder = setInterval(async () => {
-          for (const file of await readdir(s.inbox)) {
-            if (!file.endsWith('.json')) continue
-            const request = JSON.parse(await readFile(join(s.inbox, file), 'utf8'))
-            const response = { ...request, sessionId: 'forged-session' }
-            response[corrupt] = corrupt === 'expiresAt' ? 0 : ''
-            await mkdir(s.ack, { recursive: true })
-            await writeFile(join(s.ack, file), JSON.stringify(response))
-            clearInterval(responder)
-          }
-        }, 10)
-        assert.equal(await currentSession(config), null)
-      } finally {
-        clearInterval(responder)
-        await s.close()
-      }
-    })
-  }
-
-  it('answers fresh native editor probes without persisting any editor text', async () => {
-    const s = await setup(null, { editorGuard: 1 })
-    const config = {
-      kind: 'pi-extension',
-      editorGuard: 1,
-      inbox: s.inbox,
-      ack: s.ack,
-      launchId: 'launch-pi-test',
-    }
-    try {
-      assert.deepEqual(await probeEditor(config, 'native-pi-session'), { ready: true })
-      s.setEditor('private unfinished text')
-      assert.deepEqual(await probeEditor(config, 'native-pi-session'), {
-        ready: false,
-        reason: 'draft open',
-      })
-      assert.deepEqual(await probeEditor(config, 'old-session'), {
-        ready: false,
-        reason: 'native session changed',
-      })
-      s.setEditor('')
-      s.ctx.mode = 'rpc'
-      assert.deepEqual(await probeEditor(config, 'native-pi-session'), {
-        ready: false,
-        reason: 'native editor unavailable',
-      })
-      s.ctx.mode = 'tui'
-      delete s.ctx.ui.getEditorText
-      assert.deepEqual(await probeEditor(config, 'native-pi-session'), {
-        ready: false,
-        reason: 'native editor unavailable',
-      })
-      assert.deepEqual(s.pi.sent, [])
-    } finally {
-      await s.close()
-    }
-  })
-
-  it('handles a probe while a busy delivery stays queued unchanged', async () => {
-    const s = await setup({ ...envelopeRecord, text: envelope }, { editorGuard: 1, idle: false })
-    try {
-      const file = join(s.inbox, 'm-00000000000000000000000000000051.json')
-      const before = await readFile(file, 'utf8')
-      assert.deepEqual(
-        await probeEditor(
-          {
-            kind: 'pi-extension',
-            editorGuard: 1,
-            inbox: s.inbox,
-            ack: s.ack,
-            launchId: 'launch-pi-test',
-          },
-          'native-pi-session',
-        ),
-        { ready: false, reason: 'lead busy' },
-      )
-      assert.equal(await readFile(file, 'utf8'), before)
-      assert.deepEqual(s.pi.sent, [])
-    } finally {
-      await s.close()
-    }
-  })
-
   for (const [name, options, reason] of [
     ['unsent text', { editor: 'my unfinished question' }, 'draft open'],
     ['whitespace draft', { editor: ' ' }, 'draft open'],

@@ -4,18 +4,22 @@ import { join } from 'node:path'
 import { configRoot, listAgents } from './roster.js'
 import { generateSkill } from './skill.js'
 
-/** Role documents live outside all native global/project discovery directories. */
+/**
+ * Role documents live outside all native global/project discovery directories.
+ * The new core passes each window's `content`; without it, the old core's
+ * lead, PM and advisor texts are generated here and other roles get none.
+ */
 export async function roleConfiguration(
   kind,
-  { role, env, executable, cwd, readInstructions = codexInstructions },
+  { role, env, executable, cwd, content: given, readInstructions = codexInstructions },
 ) {
-  if (!['lead', 'pm', 'advisor'].includes(role)) return { args: [], env: {} }
+  if (given === undefined && !['lead', 'pm', 'advisor'].includes(role)) return { args: [], env: {} }
   const name = `consensflow-${role}`
   const root = join(configRoot(env), 'roles', role)
   const skills = join(root, '.claude', 'skills')
   const directory = join(skills, name)
   const file = join(directory, 'SKILL.md')
-  const content = generateSkill(role === 'advisor' ? [] : listAgents(env), role)
+  const content = given ?? generateSkill(role === 'advisor' ? [] : listAgents(env), role)
   const previous = await readFile(file, 'utf8').catch((error) => {
     if (error.code !== 'ENOENT') throw error
     return null

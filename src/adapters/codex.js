@@ -25,7 +25,7 @@ export function codexAdapter({
   return {
     harness: 'codex',
 
-    async prepare({ launchId, role, directory, resume, message, agent }) {
+    async prepare({ launchId, role, directory, resume, message, agent, instructions }) {
       const executable = executableFor('codex', env)
       const configuration = await launchConfiguration('codex', {
         launchId,
@@ -33,11 +33,12 @@ export function codexAdapter({
         env,
         executable,
       })
-      const instructions = await roleConfiguration('codex', {
+      const roleSetup = await roleConfiguration('codex', {
         role,
         env,
         cwd: directory,
         executable,
+        content: instructions,
       })
       const runner =
         resume === null
@@ -48,13 +49,13 @@ export function codexAdapter({
             )
           : interactiveResume({ kind: 'codex' }, resume, message)
       const invocation = withNativeBridge(
-        { command: executable, args: [...instructions.args, ...runner.args] },
+        { command: executable, args: [...roleSetup.args, ...runner.args] },
         configuration,
         env.CONSENSFLOW_NODE ?? process.execPath,
       )
       return {
         argv: [invocation.command, ...invocation.args],
-        env: { ...configuration.env, ...instructions.env },
+        env: { ...configuration.env, ...roleSetup.env },
         dropEnv: runner.dropEnv,
         nativeSession: resume,
         launch: { nativeSession: resume, channel: configuration.channel },
@@ -102,7 +103,8 @@ export function codexAdapter({
           launch: launch.channel,
           session: launch.nativeSession,
           bridge: host,
-          pane,
+          pane: pane.id,
+          generation: pane.generation,
           epoch: snapshot.inputEpoch,
         },
         text,

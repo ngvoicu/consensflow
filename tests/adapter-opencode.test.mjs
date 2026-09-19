@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
@@ -138,47 +139,88 @@ describe('the OpenCode adapter', () => {
     })
   })
 
-  it('delivers through the plugin with the window input epoch and reports the outcome', async () => {
+  it('delivers through the real channel: an epoch claim, then the plugin', async () => {
     await withHome(async ({ env }) => {
-      const sent = []
-      let outcome = { ok: true }
+      const posted = []
+      let answer = { ok: true, admitted: true }
+      const plugin = createServer(async (request, response) => {
+        let body = ''
+        for await (const chunk of request) body += chunk
+        posted.push({
+          url: request.url,
+          auth: request.headers.authorization,
+          body: JSON.parse(body),
+        })
+        response.writeHead(200, { 'content-type': 'application/json' })
+        response.end(JSON.stringify(answer))
+      })
+      await new Promise((resolve) => plugin.listen(0, '127.0.0.1', resolve))
+      try {
+        const adapter = openCodeAdapter({ env, createSession: async () => 'ses_abc123' })
+        const { launch } = await adapter.prepare(request())
+        launch.channel.sessionBridge = {
+          endpoint: `http://127.0.0.1:${plugin.address().port}`,
+          token: 't'.repeat(32),
+        }
+        const claims = []
+        const host = {
+          async request(op, body) {
+            if (op === 'pane.snapshot') return { ok: true, inputEpoch: 7 }
+            claims.push([op, body])
+            return { ok: true }
+          },
+        }
+        const pane = { id: 's1-zeus', generation: 2 }
+        assert.deepEqual(await adapter.deliver({ launch, pane, host, text: 'hi' }), {
+          admitted: true,
+        })
+        assert.deepEqual(claims, [
+          ['pane.claim_native_epoch', { pane: 's1-zeus', generation: 2, epoch: 7 }],
+        ])
+        assert.equal(posted[0].url, '/deliver')
+        assert.equal(posted[0].auth, `Bearer ${'t'.repeat(32)}`)
+        assert.deepEqual(
+          { ...posted[0].body, expiresAt: typeof posted[0].body.expiresAt },
+          { launchId: 'launch-1', sessionId: 'ses_abc123', text: 'hi', expiresAt: 'number' },
+        )
+        answer = { ok: false, admitted: false, bytesWritten: 0, error: 'native-session-changed' }
+        assert.deepEqual(await adapter.deliver({ launch, pane, host, text: 'hi' }), {
+          admitted: false,
+          reason: 'native-session-changed',
+        })
+      } finally {
+        await new Promise((resolve) => plugin.close(resolve))
+      }
+    })
+  })
+
+  it('is ready for a message only once its plugin shows the conversation', async () => {
+    await withHome(async ({ env }) => {
+      let shown
       const adapter = openCodeAdapter({
         env,
-        createSession: async () => 'ses_abc123',
-        send: async (target, text) => {
-          sent.push([target, text])
-          return outcome
-        },
+        currentSession: async () => shown,
+        answers: async () => ({ items: [], inFlight: false, settlement: { state: 'unknown' } }),
       })
-      const { launch } = await adapter.prepare(request())
-      const host = { request: async () => ({ ok: true, inputEpoch: 7 }) }
-      const pane = { id: 's1-zeus', generation: 2 }
-      assert.deepEqual(await adapter.deliver({ launch, pane, host, text: 'hi' }), {
-        admitted: true,
-      })
-      const [target, text] = sent[0]
-      assert.deepEqual(
-        { ...target, launch: target.launch.kind, bridge: target.bridge === host },
-        { launch: 'opencode-server', session: 'ses_abc123', bridge: true, pane, epoch: 7 },
-      )
-      assert.equal(text, 'hi')
-      outcome = { ok: false, admitted: null, error: 'uncertain' }
-      assert.deepEqual(await adapter.deliver({ launch, pane, host, text: 'hi' }), {
-        admitted: null,
-        reason: 'uncertain',
-      })
-      outcome = { ok: false, admitted: false, error: 'native-session-changed' }
-      assert.deepEqual(await adapter.deliver({ launch, pane, host, text: 'hi' }), {
-        admitted: false,
-        reason: 'native-session-changed',
-      })
+      const launch = { nativeSession: 'ses_abc123', channel: { kind: 'opencode-server' } }
+      assert.equal(await adapter.ready({ launch }), false, 'the TUI has not loaded its plugin yet')
+      assert.equal((await adapter.observe({ launch })).settled, false)
+      shown = 'ses_other'
+      assert.equal(await adapter.ready({ launch }), false, 'the human is looking at another one')
+      shown = 'ses_abc123'
+      assert.equal(await adapter.ready({ launch }), true)
+      assert.equal((await adapter.observe({ launch })).settled, true)
     })
   })
 
   it('reads a conversation with no messages yet as idle, and one mid-turn as working', async () => {
     await withHome(async ({ env }) => {
       let record = { items: [], inFlight: false, settlement: { state: 'unknown' } }
-      const adapter = openCodeAdapter({ env, answers: async () => record })
+      const adapter = openCodeAdapter({
+        env,
+        answers: async () => record,
+        currentSession: async () => 'ses_abc123',
+      })
       const launch = { nativeSession: 'ses_abc123' }
       assert.equal((await adapter.observe({ launch })).settled, true)
       record = {
