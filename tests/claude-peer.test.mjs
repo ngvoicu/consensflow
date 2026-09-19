@@ -119,10 +119,12 @@ test('Claude native peer reports a status row without a messaging socket as an u
   // the refusal it hears for an inbox whose identity is wrong.
   const f = await fixture(t)
   const { procStart, messagingSocketPath, entrypoint, peerProtocol, ...statusOnly } = f.native
-  await writeFile(f.registry, JSON.stringify({ ...statusOnly, status: 'idle' }), { mode: 0o600 })
-  const response = await send(f.target, f.record.answer)
-  assert.equal(response.error, 'native-session-unavailable')
-  assert.equal(response.cause, 'native Claude inbox is not registered')
+  for (const row of [statusOnly, { ...statusOnly, messagingSocketPath: null }]) {
+    await writeFile(f.registry, JSON.stringify({ ...row, status: 'idle' }), { mode: 0o600 })
+    const response = await send(f.target, f.record.answer)
+    assert.equal(response.error, 'native-session-unavailable')
+    assert.equal(response.cause, 'native Claude inbox is not registered')
+  }
   assert.equal(f.calls.length, 0)
 })
 

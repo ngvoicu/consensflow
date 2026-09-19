@@ -60,7 +60,7 @@ async function discover(config, session, deadline, allowBackground = false) {
   const { file, row } = matches[0]
   // A Claude that keeps only its status here (no peer messaging on this
   // build, or it is switched off) has no inbox; its terminal is the way in.
-  if (row.messagingSocketPath === undefined) {
+  if (typeof row.messagingSocketPath !== 'string') {
     const error = Error('native Claude inbox is not registered')
     error.code = 'native-session-unavailable'
     throw error
@@ -77,7 +77,6 @@ async function discover(config, session, deadline, allowBackground = false) {
     (row.kind !== 'interactive' && !(allowBackground && row.kind === 'bg')) ||
     row.entrypoint !== 'cli' ||
     typeof row.procStart !== 'string' ||
-    typeof row.messagingSocketPath !== 'string' ||
     !isAbsolute(row.messagingSocketPath)
   ) {
     throw Error('native Claude inbox has unsupported or inconsistent identity')

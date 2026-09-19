@@ -129,7 +129,7 @@ app is replaced.
 
 - [x] [TEST-BDC-24] The agents screens keep working on the new core: the roster editor (with the new tags field), the agent library and the harness diagnostics are served by the new daemon behind the UI token the app already checks; their routes' tests move with them. `tests/core-agents-server.test.mjs`, `app/tests/core-page.spec.mjs`.
 - [x] [IMPL-BDC-25] `src/core/agents-server.js` (the pages and `/api/agents…` routes out of `src/ui.js`), mounted on the new core's API server; the new daemon's handle carries the UI token; the board page gains the three dialogs; satisfies TEST-BDC-24.
-- [x] [IMPL-BDC-21] `cf ui` runs the new core and `core.html` becomes `index.html`; window geometry and the update flow keep working; the packaged smoke drives the new page; every suite and the live bench are green. Every suite and the packaged smoke green on 2026-09-19; the bench (`npm run bench:core`) is due a rerun on the switched tree, with the free models.
+- [x] [IMPL-BDC-21] `cf ui` runs the new core and `core.html` becomes `index.html`; window geometry and the update flow keep working; the packaged smoke drives the new page; every suite and the live bench are green. Every suite, the packaged smoke and the bench (`npm run bench:core -- opencode pi devin --reviewer devin`, 19/19) green on the switched tree, 2026-09-19 evening.
 - [x] [IMPL-BDC-26] The old core is deleted: `src/ui.js`, `store.js`, `tabs.js`, `panes.js`, `delivery-watch.js`, the inbox, delivery and receiver modules it replaces, `page.js`, `tasks.js`, `launch.js`, `requester.js`, the old page (`app/ui/index.html`, `panes.js`, `sidebar.js`, `tasks.js`, `menus.js`), the old Rust commands, the JSON state and `O_EXLOCK`, and their tests; the Devin hook text stops naming `cf results`. Done 2026-09-19. Still to prune in a follow-up: the one-shot runner the old `cf run` used (`runAgent`, the engines, image runs, packets, harness transcripts, session binding, threads, Codex auth, transcript events) and their tests; image agents have no adapter in the new core.
 - [x] [VERIFY-BDC-27] `npm run candidate` builds, smoke-tests and installs ConsensFlow Candidate; Gabriel is told it is ready. Installed 2026-09-19 21:07 (`~/Applications/ConsensFlow Candidate.app`, 3.0.0-alpha.62, smoke 2/2, the live app unchanged).
 - [ ] [TEST-BDC-03] Import from alpha.62 state (tabs, threads, tasks, inbox results) is complete, idempotent and read-only on the source; replayed against a copy of the live home.
@@ -165,7 +165,7 @@ tests the Candidate (empty board; he creates a project); a follow-up commit
 prunes the one-shot runner code the old `cf run` left behind (`runAgent` in
 `hosts/lib/runners.js`, `codex-auth`, `harness-transcript`, `image-run`,
 `packets`, `session-binding`, `threads` and their tests; image agents have no
-adapter in the new core); the bench reruns on the switched tree; the importer
+adapter in the new core); the importer
 (TEST-BDC-03) waits for the day the live app is replaced. Not built yet:
 removing a PM (the ledger refuses it as `not-a-member`).
 
@@ -368,3 +368,13 @@ removing a PM (the ledger refuses it as `not-a-member`).
   stand-in's hex of `·` was wrong; masked. Smoke 2/2 in 4 s, then
   `npm run candidate` end to end: built, smoke 2/2, installed, live app and
   roster unchanged.
+- After the advisor's review of the switch: the bench reran on the switched
+  tree, 19/19 (OpenCode lead; OpenCode, Pi and Devin workers answered in
+  7-21 s; a Devin reviewer passed an OpenCode result in 19 s; restart on the
+  same session). The peer-inbox rule widened to a `null` socket path (a
+  `null` would have fallen through to the hard refusal), with the test
+  covering both shapes; the later identity check lost its now-redundant type
+  test. The skill file the packaged daemon writes for the lead was checked:
+  it is the new role text (tiers, `--self`, `cf inbox`), no deleted verb.
+  Known and untested: `app/ui/update-selftest.js` on `project.open` and
+  `project.close` (the updater smoke is opt-in and needs two bundles).
