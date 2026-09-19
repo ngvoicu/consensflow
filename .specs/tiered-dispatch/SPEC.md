@@ -129,18 +129,18 @@ is written in the final vocabulary.
 - [x] [TEST-TD-11] An "Open tasks" bay (waiting for a member, per tier, saying why); the human's composer chooses Lead, PM, a worker tier or an advisor tier, with tags; member bays lose "Give a task"; strips show tier, tags and review state ("In review by @x", "Round 2"); a lane out of quota says until when; the team dialog shows each member's tier and tags and the review policy, and warns when review is on with no independent reviewer or a tier has no member; the new-project dialog sets the policy. `app/tests/core-page.spec.mjs`, `tests/core-page.test.mjs`.
 - [x] [IMPL-TD-12] `app/ui/core.html`, `app/ui/core/*.js`, `src/core/page.js`, the Rust allow-list; satisfies TEST-TD-11. Then the dock layout: the board beside one docked window (Gabriel's request).
 
-### Phase E: Live proof [planned]
+### Phase E: Live proof [active]
 
-- [ ] [VERIFY-TD-13] Integration through the real pane host: a fake harness whose record shows a 429 mid-task, and the task moves to the tier's other worker with the requester told; a review round trip with a fake reviewer. `tests/integration/`.
+- [x] [VERIFY-TD-13] Integration through the real pane host: a fake harness whose record shows a 429 mid-task, and the task moves to the tier's other worker with the requester told; a review round trip with a fake reviewer. `tests/integration/`.
 - [ ] [VERIFY-TD-14] Live bench (`npm run bench:core`) on the free models plus Codex (its quota came back on 2026-09-19 at 18:40): a lead giving tiered tasks, the daemon picking, one review round, Codex's usage read from its rollout; Claude after its reset.
 
 ## Resume context
 
-Phases A to D are built and green (ledger 52, dispatcher 30, page protocol
-10, the reader 75, adapters 30, API and cf 18, roles 8, the board page 21,
-the end-to-end slice through the real pane host). Next: Phase E, the live
-proof: the integration test for a 429 mid-task and a review round trip, then
-the live bench on the free models and Codex. The brain's CORE-8 ("coordinators pick the
+Phases A to D are built, green and committed (`23a67eb`, `61d2c3e` and the
+commits between). Phase E: the three integration tests through the real pane
+host pass (`tests/integration/core-tiered.test.mjs`); the live bench on the
+free models and Codex is next (VERIFY-TD-14), then the switch (Phase F of
+`board-daemon-core`). The brain's CORE-8 ("coordinators pick the
 right member") is superseded by this spec's rules (CORE-10 to CORE-15).
 
 ## TDD log
@@ -214,3 +214,14 @@ right member") is superseded by this spec's rules (CORE-10 to CORE-15).
   board was hidden behind the old windows view: it is disabled, and the test
   says so now. Screenshots at 1440 px: the review label wrapped in the strip's
   state column, widened.
+- VERIFY-TD-13: the fake Claude learned three more things (a review brief's
+  `REVIEWER:` line as the fake reviewer's answer; `QUOTA-OUT` refused with a
+  429 record, Claude's way, by the window `CF_TEST_QUOTA_OUT` names; `\n` in a
+  dispatched task). Three tests through the real pane host, 3/3 on the first
+  run: a pass releases the result and the review to the lead; changes twice
+  sends the work back once and then tells the lead to decide; a refused
+  worker loses its task to the other worker of its tier, with the warning in
+  the task and the note to the lead. To prove they can fail, the refusal was
+  switched off (the quota test failed: the first worker kept its task) and
+  reviewer independence was forced false (the review test failed: no review
+  ever came); both restored.

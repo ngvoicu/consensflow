@@ -2,7 +2,7 @@
 
 | ID | Title | Status | Priority | Progress | Updated |
 |---|---|---|---|---|---|
-| tiered-dispatch | Tiered dispatch, review gate and quota — the daemon picks the member | active | critical | 0/14 | 2026-09-19 |
+| tiered-dispatch | Tiered dispatch, review gate and quota — the daemon picks the member | active | critical | 12/14 | 2026-09-19 |
 | board-daemon-core | Board, daemon and inboxes — the Stage 2 rewrite of the daemon core | active | critical | 14/23 | 2026-09-19 |
 | reliable-delivery | Reliable delivery, markers and daemon load (board redesign phase 1) | active | critical | 17/19 | 2026-09-19 |
 | session-task-board | Session task board and operational graph | completed | high | 12/12 | 2026-09-13 |

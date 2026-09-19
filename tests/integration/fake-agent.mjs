@@ -11,8 +11,11 @@ import { fileURLToPath } from 'node:url'
  *
  * Every message is one turn. `Reply with exactly: X` answers X. A line
  * `DISPATCH --tier standard <task>` (or `DISPATCH @lead <task>`) runs `cf task
- * add` with those words and the task, with this window's
- * own token, the way a lead hands out work. Anything else is acknowledged.
+ * add` with those words and the task (`\n` in it becomes a line break), with
+ * this window's own token, the way a lead hands out work. In a review brief,
+ * the task's own `REVIEWER: …` line is the fake reviewer's answer. A task
+ * saying `QUOTA-OUT` is refused with a 429, Claude's way, by the window whose
+ * participant `CF_TEST_QUOTA_OUT` names. Anything else is acknowledged.
  */
 
 const CF = fileURLToPath(new URL('../../bin/cf.mjs', import.meta.url))
@@ -95,7 +98,19 @@ function runCf(words) {
 async function replyTo(text) {
   const dispatch = /^DISPATCH ((?:(?:--\S+ \S+|@\S+) )+)(.+)$/m.exec(text)
   if (dispatch) {
-    return `dispatched: ${await runCf(['task', 'add', ...dispatch[1].trim().split(' '), dispatch[2]])}`
+    const words = dispatch[1].trim().split(' ')
+    const task = dispatch[2].replaceAll('\\n', '\n')
+    return `dispatched: ${await runCf(['task', 'add', ...words, task])}`
+  }
+  const reviewing = /^Review T-\d+ \(round \d+\)/m.test(text)
+    ? /^REVIEWER: (.+)$/m.exec(text)
+    : null
+  if (reviewing) return reviewing[1]
+  if (
+    /QUOTA-OUT/.test(text) &&
+    process.env.CF_TEST_QUOTA_OUT === process.env.CONSENSFLOW_PARTICIPANT
+  ) {
+    return null
   }
   const exact = /Reply with exactly: (\S+)/.exec(text)
   if (exact) return exact[1]
@@ -108,6 +123,22 @@ function turn(text) {
     status('busy')
     append({ type: 'user', message: { role: 'user', content: text } })
     const reply = await replyTo(text)
+    if (reply === null) {
+      // The provider refused: Claude writes the refusal as an assistant record.
+      append({
+        type: 'assistant',
+        isApiErrorMessage: true,
+        apiErrorStatus: 429,
+        error: 'rate_limit',
+        message: {
+          id: `${sessionId}-message-${process.pid}-${ordinal}`,
+          role: 'assistant',
+          content: [{ type: 'text', text: "You've hit your limit. Resets in 2 hours." }],
+        },
+      })
+      status('idle')
+      return
+    }
     append({
       type: 'assistant',
       message: {
