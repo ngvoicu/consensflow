@@ -89,10 +89,10 @@ opens panes or types into them.
 
 ## Phases (each: failing tests first, live bench green, dead code deleted)
 
-### Phase A: Ledger [planned]
+### Phase A: Ledger [completed]
 
-- [ ] [TEST-BDC-01] Ledger schema, migrations and the domain operations (sessions, participants, team, conversations, tasks, messages, events), the instance lock, crash safety and the invariants each operation keeps.
-- [ ] [IMPL-BDC-02] `src/ledger/` on `node:sqlite`; satisfies TEST-BDC-01.
+- [x] [TEST-BDC-01] Ledger schema, migrations and the domain operations (sessions, participants, team, conversations, tasks, messages, events), the instance lock, crash safety and the invariants each operation keeps. `tests/ledger.test.mjs`, 26 tests.
+- [x] [IMPL-BDC-02] `src/ledger/` on `node:sqlite` (`index.js`, `schema.js`); satisfies TEST-BDC-01.
 
 ### Phase B: Harness adapters [planned]
 
@@ -139,5 +139,16 @@ opens panes or types into them.
 
 ## Resume context
 
-Starting Phase A on branch `stage-2/board-daemon-core`; the first unit is
-TEST-BDC-01.
+Phase A is done (the ledger, unwired until the switch by design). Next:
+Phase B, the harness adapters, starting with the contract test TEST-BDC-05.
+
+## TDD log
+
+- TEST-BDC-01 RED: the module did not exist (suite failed to load). GREEN after
+  IMPL-BDC-02: 24/25, the one failure a wrong test (it expected a native
+  session id to be unique across harnesses; it is unique within one harness).
+  Review added three cases: a file that is not a database is refused as
+  `ledger-unreadable`, a question needs its asker, and WAL is asserted. 26/26,
+  three runs. The crash test kills a child writing tasks in a loop after
+  150 ms; every task it left has exactly its one task message, and
+  `integrity_check` is ok.
