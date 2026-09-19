@@ -105,8 +105,8 @@ opens panes or types into them.
 
 - [x] [TEST-BDC-09] Task state machine; per-participant queue delivering one item at a time when idle; receipts; retries; the launch-liveness reaper; restore on start. `tests/core-dispatcher.test.mjs` (13) and, end to end through the real pane host, `tests/integration/core-slice.test.mjs`.
 - [x] [IMPL-BDC-10] Dispatcher (`src/core/dispatcher.js`), pane host (`pane-host.js`) and the daemon entry (`daemon.js`); satisfies TEST-BDC-09.
-- [ ] [TEST-BDC-22] A human's Enter releases the typing latch once the harness records that submission; typing after it keeps the latch. Found by the Stage 2 harness map: no production code ever calls `clear_draft`, so one keystroke blocks every later paste into that window (Devin always pastes).
-- [ ] [IMPL-BDC-23] Rust `draft.clear` bridge operation and the core's use of `pane.enter`; satisfies TEST-BDC-22.
+- [x] [TEST-BDC-22] A human's Enter releases the typing latch once the harness records that submission; typing after it keeps the latch. Found by the Stage 2 harness map: no production code ever calls `clear_draft`, so one keystroke blocks every later paste into that window (Devin always pastes).
+- [x] [IMPL-BDC-23] Rust `draft.clear` bridge operation and the core's use of `pane.enter`; satisfies TEST-BDC-22.
 
 ### Phase D: CLI, API and role skills [active]
 
@@ -144,9 +144,9 @@ opens panes or types into them.
 Phase A is done. A vertical slice of phases B, C and D is green: the Claude
 adapter, the dispatcher, the daemon entry, the agents' API and `cf` commands,
 proven end to end through the real Rust pane host with a fake Claude
-(`tests/integration/core-slice.test.mjs`). Next: TEST-BDC-22 (the typing
-latch), then the OpenCode, Pi, Devin and Codex adapters, then the live bench
-against the new core (VERIFY-BDC-08).
+(`tests/integration/core-slice.test.mjs`), and a human typing into a window no
+longer blocks later deliveries (TEST-BDC-22). Next: the OpenCode, Pi, Devin
+and Codex adapters, then the live bench against the new core (VERIFY-BDC-08).
 
 ## TDD log
 
@@ -175,4 +175,14 @@ against the new core (VERIFY-BDC-08).
 - The slice's integration test passed on its first run (0.8 s). To prove it
   can fail, result delivery was broken on purpose: it timed out, and passed
   again once restored. The API and `cf` commands: 7/7.
+- TEST-BDC-22: Rust first. `draft.clear` now reaches the arbiter's existing,
+  epoch-checked `clear_draft` (Rust 106/106, clippy clean); its test shows a
+  submitted draft released once, and text typed after the Enter kept. Then the
+  core: RED 14/15 (no clear was ever sent), GREEN 15/15. The end-to-end test
+  failed twice more for two different reasons. First, the Enter arrived before
+  the core's first look at the window, so the baseline included the human's
+  own message; the core now counts the human's messages as it opens a window.
+  Second, the test typed before the fake agent was in raw mode and its keys
+  were lost, which a person cannot do; the test now types once the lead reads
+  idle. 2/2 three times; without the release, the typed test fails.
 

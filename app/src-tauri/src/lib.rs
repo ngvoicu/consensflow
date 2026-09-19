@@ -272,7 +272,11 @@ fn prepare_error_log(home: &std::path::Path, limit: u64) -> std::io::Result<std:
 #[cfg(target_os = "macos")]
 fn redirect_stderr(log: &std::path::Path) {
     use std::os::fd::AsRawFd;
-    if let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(log) {
+    if let Ok(file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log)
+    {
         // SAFETY: both descriptors are valid; dup2 replaces fd 2 atomically.
         unsafe { libc::dup2(file.as_raw_fd(), 2) };
     }
@@ -308,7 +312,10 @@ pub fn run() {
     if let Some(home) = std::env::var_os("CONSENSFLOW_HOME")
         .filter(|value| !value.is_empty())
         .map(std::path::PathBuf::from)
-        .or_else(|| home.as_ref().map(|home| std::path::Path::new(home).join(".consensflow")))
+        .or_else(|| {
+            home.as_ref()
+                .map(|home| std::path::Path::new(home).join(".consensflow"))
+        })
     {
         if let Ok(log) = prepare_error_log(&home, 10 * 1024 * 1024) {
             redirect_stderr(&log);

@@ -20,6 +20,9 @@ import { randomUUID } from 'node:crypto'
  *   explicitly, because their turns end while they wait for workers.
  * - A worker window that closes mid-task fails the task, and the requester is
  *   told. A lead window that closes suspends its session.
+ * - A human typing in a window latches it against pastes. Their Enter releases
+ *   the latch once the harness shows a new message of theirs; the pane host
+ *   keeps it if they typed again after that Enter.
  *
  * Harness specifics live in the adapters (`src/adapters/`); the pane host is
  * the Rust PTY host behind the bridge. Time is an argument, so every rule is
@@ -47,6 +50,11 @@ export function deliveryText(message) {
 }
 
 const markerOf = (messageId) => `[ConsensFlow m-${messageId} ·`
+
+/** How many messages in a harness record the human typed (ConsensFlow's own carry its header). */
+const humanMessages = (observed) =>
+  observed.items.filter((item) => item.role === 'user' && !item.text.includes('[ConsensFlow m-'))
+    .length
 
 export class Dispatcher {
   #ledger
@@ -86,6 +94,7 @@ export class Dispatcher {
     this.#launchTimeoutMs = launchTimeoutMs
     this.#maxAttempts = maxAttempts
     host.onExit((pane) => this.paneExited(pane))
+    host.onEnter?.((enter) => this.#humanEnter(enter))
   }
 
   onChange(listener) {
@@ -215,6 +224,7 @@ export class Dispatcher {
         : { state: observed.settled ? 'idle' : 'working' },
     )
     if (runtime.delivering !== null) this.#watchArrival(runtime, observed)
+    await this.#releaseDraft(runtime, observed)
     if (!COORDINATORS.has(participant.role)) this.#collect(session, participant, observed)
     if (runtime.delivering === null && observed.settled && !observed.waiting) {
       const next = this.#ledger.nextDelivery(participant.id)
@@ -246,6 +256,35 @@ export class Dispatcher {
     this.#settleFailure(delivering, 'the harness record never showed it', {
       retry: delivering.admitted === true,
     })
+  }
+
+  #humanEnter({ id, generation, epoch }) {
+    const runtime = [...this.#runtime.values()].find(
+      (candidate) => candidate.pane?.id === id && candidate.pane.generation === generation,
+    )
+    runtime?.enters.push({ epoch, baseline: runtime.humanItems })
+  }
+
+  /** Each Enter counts once a new message of the human's (no ConsensFlow header) is on record. */
+  async #releaseDraft(runtime, observed) {
+    const human = humanMessages(observed)
+    let expected = null
+    let released = null
+    for (const enter of runtime.enters) {
+      enter.baseline ??= runtime.humanItems ?? human
+      expected = Math.max(enter.baseline, expected ?? enter.baseline) + 1
+      if (human >= expected) released = enter
+    }
+    runtime.humanItems = human
+    if (released === null) return
+    runtime.enters = runtime.enters.filter((enter) => enter.epoch > released.epoch)
+    await this.#host
+      .request('draft.clear', {
+        ...runtime.pane,
+        epoch: released.epoch,
+        submission: `human-${human}`,
+      })
+      .catch(() => {})
   }
 
   /** A worker's answer to its task's latest message finishes the task. */
@@ -393,6 +432,8 @@ export class Dispatcher {
       launch: plan.launch,
       token,
       delivering,
+      enters: [],
+      humanItems: null,
       activity: { state: 'starting' },
     })
     const started = await adapter
@@ -401,6 +442,12 @@ export class Dispatcher {
     if (started.nativeSession && started.nativeSession !== plan.nativeSession) {
       this.#ledger.bindConversation(conversationId, started.nativeSession)
     }
+    // The human's messages so far, counted before anyone can type into the
+    // window: an Enter is released only by a message after this count.
+    const opening = await adapter
+      .observe({ launch: plan.launch, pane, host: this.#host })
+      .catch(() => null)
+    if (opening !== null) runtime.humanItems = humanMessages(opening)
     this.#changed()
   }
 
@@ -460,6 +507,8 @@ export class Dispatcher {
         token: null,
         delivering: null,
         busy: false,
+        enters: [],
+        humanItems: null,
         activity: { state: 'closed' },
       }
       this.#runtime.set(participantId, runtime)

@@ -93,10 +93,23 @@ function fakeAdapter(harness = 'claude-code') {
 /** A pane host that opens nothing real and exits panes when told to. */
 function fakeHost() {
   const exits = []
+  const enters = []
   const host = {
     opened: [],
     killed: [],
+    requests: [],
     refuse: false,
+    async request(op, body) {
+      host.requests.push([op, body])
+      return { ok: true, outcome: 'cleared' }
+    },
+    onEnter(listener) {
+      enters.push(listener)
+    },
+    enter(handle, epoch) {
+      const body = host.opened.filter((b) => b.id.endsWith(`-${handle}`)).at(-1)
+      for (const listener of enters) listener({ id: body.id, generation: body.generation, epoch })
+    },
     async open(body) {
       if (host.refuse) {
         host.refuse = false
@@ -367,6 +380,45 @@ describe('the dispatcher', () => {
       const task = context.ledger.task(session.id, 1)
       assert.equal(task.state, 'done')
       assert.equal(task.messages.at(-1).body, 'Parser done, in JSON')
+    })
+  })
+
+  it('releases the typing latch once the harness shows the message the human submitted', async () => {
+    await setup(async (context) => {
+      await withTeam(context)
+      await context.dispatcher.pass()
+      const clears = () => context.host.requests.filter(([op]) => op === 'draft.clear')
+      context.host.enter('lead', 5)
+      await context.dispatcher.pass()
+      assert.deepEqual(clears(), [], 'an Enter alone proves nothing')
+
+      context.adapter.agent('lead').items.push(item('user', 'the human asks something'))
+      await context.dispatcher.pass()
+      const lead = context.host.last('lead')
+      assert.deepEqual(clears(), [
+        [
+          'draft.clear',
+          { id: lead.id, generation: lead.generation, epoch: 5, submission: 'human-1' },
+        ],
+      ])
+      await context.dispatcher.pass()
+      assert.equal(clears().length, 1, 'each Enter is released once')
+    })
+  })
+
+  it('does not count its own deliveries as the human submitting', async () => {
+    await setup(async (context) => {
+      const { session } = await withTeam(context)
+      await context.dispatcher.pass()
+      context.host.enter('lead', 9)
+      context.ledger.note(session.id, { from: 'zeus', to: 'lead', body: 'from zeus' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        context.host.requests.filter(([op]) => op === 'draft.clear'),
+        [],
+        'a ConsensFlow message is not the human submitting their draft',
+      )
     })
   })
 

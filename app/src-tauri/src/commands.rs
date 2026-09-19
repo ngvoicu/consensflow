@@ -13,7 +13,7 @@ use serde_json::{json, Map, Value};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
-use crate::arbiter::{ArbiterError, InputArbiter, PaneEvent};
+use crate::arbiter::{ArbiterError, ClearOutcome, InputArbiter, PaneEvent};
 use crate::bridge::{Bridge, BridgeBuilder, ConnectedBridge};
 use crate::pty::{
     validate_drop_env, PaneEnvironment, PaneKey, PaneOutput, PaneTable, StreamedPane,
@@ -817,6 +817,17 @@ struct ClaimEpochRequest {
     epoch: u64,
 }
 
+/// A human submission the core saw the harness record: the Enter at `epoch`
+/// released the draft, unless the human typed again after it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DraftClearRequest {
+    id: String,
+    generation: u64,
+    epoch: u64,
+    submission: String,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AckRequest {
@@ -1151,6 +1162,29 @@ fn register_pane_handlers(
             })
             .collect::<Vec<_>>();
         Ok(json!({"ok":true,"panes":panes}))
+    });
+
+    let clear_arbiter = Arc::clone(&arbiter);
+    builder.on("draft.clear", move |_bridge, body| {
+        let request: DraftClearRequest = parse_body(body)?;
+        if request.submission.is_empty() || request.submission.len() > 200 {
+            return Err("draft.clear needs a submission id of 1 to 200 bytes".to_string());
+        }
+        Ok(
+            match clear_arbiter.clear_draft(
+                &request.id,
+                request.generation,
+                request.epoch,
+                &request.submission,
+            ) {
+                Ok(ClearOutcome::Cleared) => json!({"ok":true,"outcome":"cleared"}),
+                Ok(ClearOutcome::PreservedNewerInput) => {
+                    json!({"ok":true,"outcome":"preserved-newer-input"})
+                }
+                Err(ArbiterError::Stale) => json!({"ok":false,"error":"stale"}),
+                Err(error) => json!({"ok":false,"error":error.to_string()}),
+            },
+        )
     });
 
     let snapshot_arbiter = Arc::clone(&arbiter);
@@ -2880,6 +2914,119 @@ mod tests {
             "wait_launches_closed failed after the peer closed"
         );
         wait.join().expect("wait thread");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn draft_clear_releases_a_submitted_draft_and_keeps_newer_typing() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+
+        let _pty_guard = crate::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let (event_sender, events) = mpsc::channel();
+        let arbiter = Arc::new(InputArbiter::new(0, event_sender));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let mut builder = BridgeBuilder::new(1024 * 1024);
+        register_pane_handlers(
+            &mut builder,
+            Arc::clone(&panes),
+            arbiter,
+            Arc::new(OutputHub::new()),
+            Arc::new(LaunchRegistry::new()),
+            Arc::clone(&inputs),
+        );
+        let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
+        node_stream
+            .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
+            .expect("write bridge handle");
+        let connected = builder
+            .connect(rust_stream.try_clone().expect("clone socket"), rust_stream)
+            .expect("connect bridge");
+        let mut reader = BufReader::new(node_stream.try_clone().expect("clone node reader"));
+        let mut number = 0;
+        let mut ask = |op: &str, body: Value| -> Value {
+            number += 1;
+            let id = format!("n-draft-{number}");
+            let mut frame =
+                serde_json::to_vec(&json!({"v":1,"id":id,"kind":"req","op":op,"body":body}))
+                    .expect("serialize request");
+            frame.push(b'\n');
+            node_stream.write_all(&frame).expect("write request");
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).expect("read response");
+                let frame: Value = serde_json::from_str(line.trim()).expect("response JSON");
+                if frame["kind"] == "res" && frame["id"] == id.as_str() {
+                    return frame["body"].clone();
+                }
+            }
+        };
+        let pane = json!({"id":"draft-pane","generation":1});
+        let opened = ask(
+            "pane.open",
+            json!({"id":"draft-pane","generation":1,"cwd":"/tmp","argv":["/bin/sh","-c","sleep 30"],
+                   "env":{},"size":{"rows":24,"cols":80},"backlogBytes":1024}),
+        );
+        assert_eq!(opened["ok"], true, "{opened}");
+        let latched = |ask: &mut dyn FnMut(&str, Value) -> Value| {
+            ask("pane.snapshot", pane.clone())["draftLatched"] == true
+        };
+
+        let typed = ask(
+            "pane.input",
+            json!({"id":"draft-pane","generation":1,"bytes":b"hi\r".to_vec()}),
+        );
+        assert_eq!(typed["ok"], true, "{typed}");
+        let PaneEvent::Enter { epoch, .. } = events
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the human Enter is announced");
+        assert!(latched(&mut ask));
+        let cleared = ask(
+            "draft.clear",
+            json!({"id":"draft-pane","generation":1,"epoch":epoch,"submission":"seen-1"}),
+        );
+        assert_eq!(cleared, json!({"ok":true,"outcome":"cleared"}));
+        assert!(!latched(&mut ask));
+        assert_eq!(
+            ask(
+                "draft.clear",
+                json!({"id":"draft-pane","generation":1,"epoch":epoch,"submission":"again"})
+            ),
+            json!({"ok":false,"error":"stale"}),
+            "an Enter is released once",
+        );
+
+        ask(
+            "pane.input",
+            json!({"id":"draft-pane","generation":1,"bytes":b"a\r".to_vec()}),
+        );
+        let PaneEvent::Enter { epoch: second, .. } = events
+            .recv_timeout(Duration::from_secs(1))
+            .expect("second Enter");
+        ask(
+            "pane.input",
+            json!({"id":"draft-pane","generation":1,"bytes":b"still typing".to_vec()}),
+        );
+        assert_eq!(
+            ask(
+                "draft.clear",
+                json!({"id":"draft-pane","generation":1,"epoch":second,"submission":"seen-2"})
+            ),
+            json!({"ok":true,"outcome":"preserved-newer-input"}),
+        );
+        assert!(
+            latched(&mut ask),
+            "text typed after the Enter keeps the latch"
+        );
+
+        panes
+            .kill(&PaneKey::new("draft-pane", 1))
+            .expect("kill the pane");
+        inputs.close_and_drain();
+        drop(reader);
+        drop(node_stream);
+        connected.bridge.wait_closed().expect("bridge closes");
     }
 
     #[cfg(unix)]
