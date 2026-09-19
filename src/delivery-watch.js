@@ -51,8 +51,13 @@ export class Watcher {
     const observed = key && this.activities.get(key)
     return observed?.expiresAt > this.now() ? observed : { state: 'unknown' }
   }
-  #observeActivity(key, native) {
+  #observeActivity(key, native, claude) {
     if (!key) return
+    // Claude records its own live status; it outranks what a transcript implies.
+    if (claude) {
+      this.activities.set(key, { ...claude, expiresAt: this.now() + 10_000 })
+      return
+    }
     const state =
       native?.unknown || native?.replaced || native?.continuedInSessionId
         ? 'unknown'
@@ -67,12 +72,13 @@ export class Watcher {
   }
   attachBridge(bridge) {
     for (const unsubscribe of this.unsubscribe.splice(0)) unsubscribe()
-    for (const event of ['pane.idle', 'pane.exit'])
-      this.unsubscribe.push(
-        bridge.onEvent(event, () => {
-          if (this.started && !this.closed) this.reconcile().catch(this.onError)
-        }),
-      )
+    // Rust announces a pane exit; there is no idle event (activity comes from
+    // native status and transcripts).
+    this.unsubscribe.push(
+      bridge.onEvent('pane.exit', () => {
+        if (this.started && !this.closed) this.reconcile().catch(this.onError)
+      }),
+    )
     return this
   }
   async start() {
@@ -131,6 +137,7 @@ export class Watcher {
   }
   async #workspace(directory, tabs) {
     const threads = await this.store.readThreads(directory)
+    const claude = await claudeStatuses(this.env)
     const observed = []
     const current = await this.store.readInbox(directory)
     const nativeReceipts = new Map()
@@ -144,7 +151,11 @@ export class Watcher {
           directory,
           receiver.session,
         )
-        this.#observeActivity(key, native)
+        this.#observeActivity(
+          key,
+          native,
+          receiver.kind === 'claude-code' ? claude.get(receiver.session) : undefined,
+        )
         nativeReceipts.set(JSON.stringify([receiver.kind, receiver.session]), native)
       }
       for (const [conversation, row] of Object.entries(threads)) {
@@ -155,9 +166,11 @@ export class Watcher {
         const pane = tab.panes.find((pane) => pane.conversation === conversation)
         const key = pane && activityKey(tab, pane, row)
         const visited = new Set()
+        let current = session
         // Native continuation is explicit source ancestry, never newest-file or cwd matching.
         while (session && !visited.has(session) && visited.size < 16) {
           visited.add(session)
+          current = session
           const native = await this.#native(row, directory, session)
           latest = native
           for (const item of complete(native))
@@ -174,7 +187,11 @@ export class Watcher {
           if (native.replaced || native.unknown || row.kind !== 'claude-code') break
           session = native.continuedInSessionId
         }
-        this.#observeActivity(key, latest)
+        this.#observeActivity(
+          key,
+          latest,
+          row.kind === 'claude-code' ? claude.get(current) : undefined,
+        )
       }
     }
     // Allocate outside Store's queue; gaps are harmless, nested mutations would deadlock.
@@ -460,6 +477,48 @@ export class Watcher {
 
 // Cached activity belongs to a live launch and selected native conversation.
 // A /new, resume, or pane replacement invalidates it before the next scan finishes.
+/**
+ * Claude Code's own live status for each running session, from the
+ * `sessions/<pid>.json` files it keeps (the same files peer delivery reads):
+ * busy, idle, or waiting with the reason (a permission prompt, input needed, a
+ * dialog). A file whose process is gone is ignored.
+ */
+async function claudeStatuses(env) {
+  const directory = path.join(
+    env.CLAUDE_CONFIG_DIR ?? path.join(env.HOME ?? '', '.claude'),
+    'sessions',
+  )
+  const statuses = new Map()
+  const names = await fs.readdir(directory).catch(() => [])
+  for (const name of names) {
+    if (!/^\d+\.json$/.test(name)) continue
+    const row = await fs
+      .readFile(path.join(directory, name), 'utf8')
+      .then(JSON.parse)
+      .catch(() => null)
+    if (typeof row?.sessionId !== 'string' || !Number.isSafeInteger(row.pid) || !alive(row.pid))
+      continue
+    const state = { busy: 'working', waiting: 'waiting', idle: 'idle', shell: 'idle' }[row.status]
+    if (!state) continue
+    statuses.set(row.sessionId, {
+      state,
+      ...(state === 'waiting' && typeof row.waitingFor === 'string'
+        ? { reason: row.waitingFor }
+        : {}),
+    })
+  }
+  return statuses
+}
+
+function alive(pid) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return error.code === 'EPERM'
+  }
+}
+
 function activityKey(tab, pane, row, receiver) {
   if (tab.closed || tab.deleting || pane.closed || pane.deleting || pane.failure) return null
   if (pane.kind === 'lead') {

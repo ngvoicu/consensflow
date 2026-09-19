@@ -45,6 +45,7 @@ export function updateActivity(badge, tab, pane) {
               : (pane.activity?.state ?? 'unknown')
   const labels = {
     working: 'Working',
+    waiting: 'Waiting',
     idle: 'Idle',
     starting: 'Starting',
     closed: 'Closed',
@@ -54,8 +55,10 @@ export function updateActivity(badge, tab, pane) {
   }
   badge.dataset.activity = Object.hasOwn(labels, state) ? state : 'unknown'
   badge.textContent = labels[badge.dataset.activity]
+  const reason = typeof pane.activity?.reason === 'string' ? `: ${pane.activity.reason}` : ''
   badge.title = {
     working: 'The agent is processing a task.',
+    waiting: `Waiting for you${reason}.`,
     idle: 'The agent has finished its turn.',
     unknown: 'The current task state could not be confirmed.',
     starting: 'The agent is starting.',

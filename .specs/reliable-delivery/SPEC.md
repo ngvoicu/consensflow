@@ -58,8 +58,8 @@ diagnosis and every decision live in the `consensflow-sme` brain
 
 ## Phase 4: Visibility and restart [active]
 
-- [ ] [TEST-REL-13] A pane waiting on a permission prompt or a question shows "waiting", from each harness's native signal.
-- [ ] [IMPL-REL-14] Wire those signals; remove the never-sent `pane.idle` subscription; satisfies TEST-REL-13.
+- [x] [TEST-REL-13] tests/inbox-scan.test.mjs, app/tests/page.spec.mjs: a Claude pane shows the status Claude records itself (waiting with its reason, busy, idle); the page shows "Waiting" with the reason.
+- [x] [IMPL-REL-14] src/delivery-watch.js (`claudeStatuses`), app/ui/sidebar.js, app/ui/index.html; the never-sent `pane.idle` subscription is removed; satisfies TEST-REL-13. Codex, OpenCode, Pi and Devin waiting signals move to the Stage 2 harness adapters (each adapter owns its native signals); Rust's `idle_ms` stays as Stage 2's silence fallback.
 - [ ] [TEST-REL-15] After an app restart, sessions that were open come back without a manual Resume.
 - [ ] [IMPL-REL-16] Restore on start; satisfies TEST-REL-15.
 - [ ] [IMPL-REL-17] The app's and the daemon's error output goes to a log file inside the home.
@@ -71,8 +71,8 @@ diagnosis and every decision live in the `consensflow-sme` brain
 
 ## Resume context
 
-Phases 1-3 are done. Next: TEST-REL-13 ("waiting" markers from native
-signals), then restore on start and error logs, then the live bench.
+Phases 1-3 and the Claude waiting marker are done. Next: TEST-REL-15 (restore
+open sessions after an app restart), then error logs, then the live bench.
 
 ## TDD log
 
@@ -121,3 +121,7 @@ signals), then restore on start and error logs, then the live bench.
   (`PEER_OK`), and `stop_hook_summary` was recorded. A probe that stopped
   reading its PTY hung the child's exit (the known macOS rule); the probe now
   drains until the child is gone.
+- TEST-REL-13: Claude Code 2.1.278 writes `status` and `statusUpdatedAt` into
+  `~/.claude/sessions/<pid>.json` (read on the live machine, read-only). RED:
+  the pane read `unknown`, and the page had no Waiting label; GREEN: inbox-scan
+  12/12, the Playwright waiting test passes.

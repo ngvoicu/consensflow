@@ -498,6 +498,70 @@ test('scanner recovers a historical native receipt while preserving the original
   assert.equal(s.requests.length, 0)
 })
 
+test('a Claude pane shows the status Claude itself records, including waiting and why', async (t) => {
+  // Claude Code keeps busy / idle / waiting (+ waitingFor) in its own
+  // sessions/<pid>.json. A pane on a permission prompt or a question used to
+  // read "Working" forever; the transcript cannot say it is waiting.
+  const s = await setup(t)
+  const worker = await s.tabs.addPane(s.lead.id, { kind: 'worker', conversation: 'claude-worker' })
+  await s.store.mutate(s.cwd, 'test.claude', async (io) => {
+    const all = await io.readTabs()
+    for (const tab of all) tab.closed = false
+    await io.writeTabs(all)
+    const rows = await io.readThreads()
+    rows['claude-worker'] = {
+      agent: 'calliope',
+      kind: 'claude-code',
+      lead: s.lead.leadId,
+      sessionId: 'claude-native-1',
+      binding: { launchId: 'claude-launch', generation: worker.generation },
+      reserved: {
+        tab: s.lead.id,
+        pane: worker.id,
+        generation: worker.generation,
+        launchId: 'claude-launch',
+        resolvedAt: 'now',
+      },
+    }
+    await io.writeThreads(rows)
+  })
+  const sessions = path.join(s.f.env.CLAUDE_CONFIG_DIR, 'sessions')
+  await fs.mkdir(sessions, { recursive: true })
+  const status = async (fields) =>
+    fs.writeFile(
+      path.join(sessions, `${process.pid}.json`),
+      JSON.stringify({
+        pid: process.pid,
+        sessionId: 'claude-native-1',
+        kind: 'interactive',
+        ...fields,
+      }),
+    )
+  const page = new Page({
+    store: s.store,
+    tabs: s.tabs,
+    watcher: s.watcher,
+    agents: { names: () => [], row: () => null },
+  })
+  const activity = async () =>
+    (await page.state()).tabs
+      .find((tab) => tab.id === s.lead.id)
+      .panes.find((pane) => pane.id === worker.id).activity
+  await status({ status: 'waiting', waitingFor: 'permission prompt' })
+  await s.watcher.reconcile()
+  assert.deepEqual(
+    { state: (await activity()).state, reason: (await activity()).reason },
+    { state: 'waiting', reason: 'permission prompt' },
+  )
+  await status({ status: 'busy' })
+  await s.watcher.reconcile()
+  assert.equal((await activity()).state, 'working')
+  await status({ status: 'idle' })
+  await s.watcher.reconcile()
+  assert.equal((await activity()).state, 'idle')
+  assert.deepEqual(s.errors, [])
+})
+
 test('pane activity follows native task state, current receiver and exact worker generation without changing receipts', async (t) => {
   const s = await setup(t)
   const worker = await s.tabs.addPane(s.lead.id, { kind: 'worker', conversation: 'worker' })

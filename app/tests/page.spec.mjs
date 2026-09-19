@@ -3299,6 +3299,23 @@ test('result inbox remains independent between PM advisors and Lead workers', as
   await expect(history).not.toContainText('lead result')
 })
 
+test('a pane waiting for the human says so, and why', async ({ page }) => {
+  // Before, a pane on a permission prompt or a question read "Working" forever.
+  const state = cannedState()
+  state.tabs[0].panes[1].activity = {
+    state: 'waiting',
+    reason: 'permission prompt',
+    expiresAt: Date.now() + 60_000,
+  }
+  await boot(page, { state })
+  const badge = page.getByTestId('pane-p4-w1').locator('.pane-activity')
+  await expect(badge).toHaveText('Waiting')
+  await expect(badge).toHaveAttribute('title', 'Waiting for you: permission prompt.')
+  await expect(
+    page.getByTestId('pane-node-p4-w1').locator('..').locator('.pane-activity'),
+  ).toHaveText('Waiting')
+})
+
 test('pane headers show automatic activity and expire stale evidence without replacing terminals', async ({
   page,
 }, testInfo) => {
