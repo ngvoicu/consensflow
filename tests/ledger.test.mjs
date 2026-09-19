@@ -380,6 +380,24 @@ describe('tasks and the inbox queue', () => {
     })
   })
 
+  it('hands a coordinator a new task while an earlier one is still open', async () => {
+    await withLedger((ledger) => {
+      const { session, id } = team(ledger)
+      deliver(
+        ledger,
+        ledger.createTask(session.id, { from: 'human', to: 'lead', body: 'Ship v2' }).message,
+      )
+      const second = ledger.createTask(session.id, {
+        from: 'human',
+        to: 'lead',
+        body: 'Also fix the docs',
+      })
+      assert.equal(ledger.nextDelivery(id('lead')).id, second.message.id)
+      deliver(ledger, second.message)
+      assert.equal(ledger.task(session.id, 2).state, 'working')
+    })
+  })
+
   it('still delivers answers and notes to a worker busy with a task', async () => {
     await withLedger((ledger) => {
       const { session, id } = team(ledger)

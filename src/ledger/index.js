@@ -18,8 +18,9 @@ export { SCHEMA_VERSION }
  *   throws and writes nothing. A process killed mid-write leaves the last
  *   committed state.
  * - A recipient has at most one message in delivery. Its queue is delivered
- *   oldest first, and a task message waits while the recipient has another
- *   task in progress; answers and notes do not wait.
+ *   oldest first. A worker, advisor or reviewer does one task at a time: a
+ *   task message waits while it has another in progress (answers and notes do
+ *   not). Coordinators take tasks as they come; theirs end when they say so.
  * - The human never receives through a pane: their messages stay in the inbox
  *   until they are read in the app.
  * - Task states move only along the state machine below; anything else is
@@ -527,16 +528,17 @@ class Ledger {
       .prepare(`SELECT 1 FROM message WHERE recipient_id = ? AND state = 'delivering'`)
       .get(participantId)
     if (busy !== undefined) return null
+    const serial = MEMBER_ROLES.includes(participant.role)
     const row = this.#db
       .prepare(
         `SELECT id FROM message
          WHERE recipient_id = ? AND state = 'queued'
-           AND (kind != 'task' OR NOT EXISTS (
+           AND (kind != 'task' OR ? = 0 OR NOT EXISTS (
              SELECT 1 FROM task WHERE assignee_id = ? AND state IN ('working', 'waiting')
            ))
          ORDER BY id LIMIT 1`,
       )
-      .get(participantId, participantId)
+      .get(participantId, serial ? 1 : 0, participantId)
     return row === undefined ? null : this.#message(row.id)
   }
 
@@ -551,6 +553,7 @@ class Ledger {
         .get(message.recipientId)
       const working =
         message.kind === 'task' &&
+        MEMBER_ROLES.includes(message.recipientRole) &&
         this.#db
           .prepare(`SELECT 1 FROM task WHERE assignee_id = ? AND state IN ('working', 'waiting')`)
           .get(message.recipientId) !== undefined

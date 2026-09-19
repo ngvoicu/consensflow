@@ -62,12 +62,14 @@ async function freeLoopbackPort() {
 const runHelp = promisify(execFile)
 
 // Feature detection uses the resolved executable, never a second CLI from PATH.
+// A timeout here silently downgrades delivery to pasting, so it is generous:
+// a busy machine took more than 2 s to answer `--help`.
 async function hasNativeQueue(kind, executable) {
   if (typeof executable !== 'string' || !isAbsolute(executable)) return false
   if (kind === 'claude-code') return process.platform === 'darwin'
   try {
     const { stdout } = await runHelp(executable, ['queue', '--help'], {
-      timeout: 2000,
+      timeout: 10_000,
       maxBuffer: 128 * 1024,
       encoding: 'utf8',
       env: { ...process.env, OPENAI_API_KEY: undefined, ANTHROPIC_API_KEY: undefined },

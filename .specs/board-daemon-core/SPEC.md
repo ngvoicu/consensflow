@@ -99,7 +99,7 @@ opens panes or types into them.
 - [x] [TEST-BDC-05] Adapter contract (launch, deliver, signals, collect, transcript source) with a fake harness per adapter. The contract is `prepare`, `started`, `ready`, `deliver`, `observe` (documented in `src/core/dispatcher.js`): `tests/adapter-claude.test.mjs` (7), `adapter-opencode` (5), `adapter-pi` (4), `adapter-devin` (5), `adapter-codex` (5).
 - [x] [IMPL-BDC-06] Claude Code adapter (status file, hooks, peer delivery, Stop-hook turn end): `src/adapters/claude-code.js`. Live proof is VERIFY-BDC-08.
 - [x] [IMPL-BDC-07] OpenCode, Pi, Devin and Codex adapters (`src/adapters/`, registered in `index.js`). Waiting signals beyond Claude's are open work for VERIFY-BDC-08; live proof per harness is VERIFY-BDC-08.
-- [ ] [VERIFY-BDC-08] Live bench per adapter, as lead and as worker, with the test models.
+- [ ] [VERIFY-BDC-08] Live bench per adapter, as lead and as worker, with the test models. Green for the free models (run 4, 14/14: an OpenCode lead dispatching to OpenCode, Pi and Devin workers, plus the restart). Open: a Claude lead and worker (Sonnet, after the weekly limit resets), Codex (quota), and OpenCode, Pi and Devin as leads.
 
 ### Phase C: Dispatcher and inbox delivery [active]
 
@@ -225,4 +225,13 @@ page (Phase E).
 - Run 3 (in progress when committed): the real OpenCode lead ran
   `cf task add` itself (6 s), the OpenCode worker answered (10 s), the result
   reached the lead (11 s) and the worker read idle.
+- Run 3 then failed at Pi: the lead had answered its first task without
+  `cf task done`, and the ledger held every later task for it behind that
+  open one. One task at a time is right for a worker, wrong for a coordinator,
+  whose tasks end only when it says so. The rule now applies to workers,
+  advisors and reviewers only (ledger test first, RED then GREEN).
+- Run 4: 14/14. The OpenCode lead ran each `cf task add` itself (2-4 s); the
+  OpenCode, Pi and Devin workers answered (6-22 s); each result was in the
+  lead's window within a second of the answer; every worker read idle; after
+  the restart the lead came back on the same session.
 
