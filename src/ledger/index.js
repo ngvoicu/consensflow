@@ -73,6 +73,8 @@ const REVIEW_STATES = ['open', 'queued', 'working', 'waiting']
 const TAG = /^[a-z0-9][a-z0-9-]{0,31}$/
 const MAX_TAGS = 20
 const ACTIVE_TASK_STATES = ['working', 'waiting']
+/** A task on a member's hands: from assignment until its review is over. */
+const HELD_TASK_STATES = ['queued', 'working', 'waiting', 'review']
 const MAX_BODY = 1_000_000
 const MAX_TITLE = 120
 const AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
@@ -733,6 +735,17 @@ class Ledger {
   }
 
   /** The active members an open task may go to, with what the daemon ranks them by. */
+  /** Whether a member has a task on its hands: one task per member session ends when this is false. */
+  holdsWork(participantId) {
+    return (
+      this.#db
+        .prepare(
+          `SELECT 1 FROM task WHERE assignee_id = ? AND state IN (${HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')})`,
+        )
+        .get(participantId) !== undefined
+    )
+  }
+
   candidates(projectId, number) {
     const task = this.#taskRow(projectId, number)
     return this.members(projectId, task.pool).filter((member) => member.tier === task.tier)
@@ -749,7 +762,7 @@ class Ledger {
         `SELECT p.*,
                 (SELECT COUNT(*) FROM task WHERE assignee_id = p.id) AS taken,
                 EXISTS (
-                  SELECT 1 FROM task WHERE assignee_id = p.id AND state IN ('queued', 'working', 'waiting')
+                  SELECT 1 FROM task WHERE assignee_id = p.id AND state IN (${HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')})
                 ) AS busy
          FROM participant p
          WHERE p.project_id = ? AND p.role = ? AND p.left_at IS NULL ORDER BY p.id`,
@@ -933,7 +946,11 @@ class Ledger {
     })
   }
 
-  /** The head of a participant's queue that may go now, or null. */
+  /**
+   * The head of a participant's queue that may go now, or null. A member's
+   * session is its task's: a task message waits while it holds one, and a
+   * message about no task of its own (a stray note) never opens a window.
+   */
   nextDelivery(participantId) {
     const participant = this.#participantRow(participantId)
     if (participant.role === 'human') return null
@@ -949,9 +966,12 @@ class Ledger {
            AND (kind != 'task' OR ? = 0 OR NOT EXISTS (
              SELECT 1 FROM task WHERE assignee_id = ? AND state IN ('working', 'waiting')
            ))
+           AND (? = 0 OR kind = 'task' OR task_id IN (
+             SELECT id FROM task WHERE assignee_id = ? AND state IN (${HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')})
+           ))
          ORDER BY id LIMIT 1`,
       )
-      .get(participantId, serial ? 1 : 0, participantId)
+      .get(participantId, serial ? 1 : 0, participantId, serial ? 1 : 0, participantId)
     return row === undefined ? null : this.#message(row.id)
   }
 

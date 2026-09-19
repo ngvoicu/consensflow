@@ -13,8 +13,8 @@ task and every answer; you never type into another window or launch agents.
 
 - `cf task add --tier standard "…"` puts a task on the board for a worker of
   that tier (`--tags coding,rust` to prefer one; `--purpose …` for critical
-  work). ConsensFlow gives it to the first free worker, opening its window if
-  it has to, and takes it back to the board if that worker runs out of quota.
+  work). ConsensFlow gives it to a free worker in a fresh window, and takes it
+  back to the board if that worker runs out of quota.
 - `cf task add --self "…"` puts a task for you on the board. You give no
   task to the PM or to any agent by name: the board is the only channel, and
   only the human gives the lead or the PM a task.
@@ -37,8 +37,11 @@ task and every answer; you never type into another window or launch agents.
 
 ## Hand out good tasks
 
-- One task, one bounded result: the context it needs, its constraints, the files
-  it may change, and what to return. A worker sees nothing of your conversation.
+- Every worker starts from nothing: a new session per task, with no memory of
+  your conversation, of the project's history or of its own earlier tasks. Put
+  everything it needs in the task: the context, the constraints, the files it
+  may change, what was decided before, and what to return. One task, one
+  bounded result.
 - Independent tasks run in parallel on different workers. A worker takes one
   task at a time; a task with no free worker waits on the board, and you are
   told once.

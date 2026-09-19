@@ -119,6 +119,11 @@ function route(task) {
 const stateLabel = (task) =>
   task.state === 'review' ? `In review · round ${task.round + 1}` : STATE_LABEL[task.state]
 
+/** A member between tasks: one task per session, so its window is gone until the next. */
+const resting = (participant, activity) =>
+  ['worker', 'advisor', 'reviewer'].includes(participant.role) &&
+  (activity?.state ?? 'closed') === 'closed'
+
 function lamp(activity) {
   const node = element('span', 'lamp')
   node.dataset.testid = 'lamp'
@@ -271,7 +276,9 @@ export class BoardView {
         ? `Out of quota until ${clock(participant.outUntil)}`
         : activity?.state === 'waiting' && activity.reason
           ? `Waiting: ${activity.reason}`
-          : (ACTIVITY_LABEL[activity?.state] ?? 'No window'),
+          : resting(participant, activity)
+            ? 'Free: a window opens with its next task'
+            : (ACTIVITY_LABEL[activity?.state] ?? 'No window'),
     )
     status.dataset.state = out ? 'out' : (activity?.state ?? 'closed')
     const tools = element('div', 'bay-tools')
@@ -438,7 +445,8 @@ export class BoardView {
     field.rows = 3
     field.required = true
     field.setAttribute('aria-label', 'Task')
-    field.placeholder = 'What should be done? Include the context it needs and what to return.'
+    field.placeholder =
+      'What should be done? The member starts from nothing: include every detail it needs and what to return.'
     field.dataset.draft = 'open'
     const submit = element('button', 'primary-button', 'Put on the board')
     submit.type = 'submit'
@@ -486,7 +494,7 @@ export class BoardView {
     field.rows = 3
     field.required = true
     field.setAttribute('aria-label', `Task for ${laneName(participant)}`)
-    field.placeholder = `What should ${laneName(participant)} do? Include the context it needs and what to return.`
+    field.placeholder = `What should ${laneName(participant)} do? Include every detail it needs and what to return.`
     field.dataset.draft = participant.handle
     const submit = element('button', 'primary-button', 'Queue task')
     submit.type = 'submit'

@@ -648,7 +648,7 @@ describe('tasks and the inbox queue', () => {
     })
   })
 
-  it('still delivers answers and notes to a worker busy with a task', async () => {
+  it('still delivers answers and notes about its task to a worker busy with it, and nothing about no task', async () => {
     await withLedger((ledger) => {
       const { project, id } = team(ledger)
       deliver(
@@ -656,8 +656,11 @@ describe('tasks and the inbox queue', () => {
         ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'One' }).message,
       )
       ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Two' })
-      const note = ledger.note(project.id, { from: 'lead', to: 'zeus', body: 'Use JSON' })
+      const stray = ledger.note(project.id, { from: 'lead', to: 'zeus', body: 'Hello there' })
+      assert.equal(ledger.nextDelivery(id('zeus')), null, "a member's session is its task's")
+      const note = ledger.note(project.id, { from: 'lead', to: 'zeus', task: 1, body: 'Use JSON' })
       assert.equal(ledger.nextDelivery(id('zeus')).id, note.id)
+      assert.equal(ledger.message(stray.id).state, 'queued')
     })
   })
 
@@ -1077,6 +1080,28 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
     })
   })
 
+  it('counts a member as holding its work from assignment to the verdict, busy to the assigner meanwhile', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = tiered(ledger)
+      ledger.setReview(project.id, 'members')
+      openTask(ledger, project)
+      const busy = () => ledger.members(project.id, 'worker').find((m) => m.handle === 'zeus').busy
+      assert.deepEqual([ledger.holdsWork(id('zeus')), busy()], [false, false], 'nothing yet')
+      ledger.assignTask(project.id, 1, id('zeus'))
+      assert.deepEqual([ledger.holdsWork(id('zeus')), busy()], [true, true], 'queued')
+      const brief = ledger.task(project.id, 1).messages.find((m) => m.kind === 'task')
+      ledger.beginDelivery(brief.id)
+      ledger.confirmDelivery(brief.id, { item: 'i-1' })
+      assert.deepEqual([ledger.holdsWork(id('zeus')), busy()], [true, true], 'working')
+      ledger.recordResult(project.id, 1, { body: 'Parser done' })
+      assert.equal(ledger.task(project.id, 1).state, 'review')
+      assert.deepEqual([ledger.holdsWork(id('zeus')), busy()], [true, true], 'under review')
+      ledger.skipReview(project.id, 1, { reason: 'no reviewer' })
+      assert.equal(ledger.task(project.id, 1).state, 'done')
+      assert.deepEqual([ledger.holdsWork(id('zeus')), busy()], [false, false], 'done')
+    })
+  })
+
   it('lists the members a task may go to, with their tags and how many tasks each has taken', async () => {
     await withLedger((ledger) => {
       const { project, id } = tiered(ledger)
@@ -1132,6 +1157,12 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
       assert.deepEqual(ledger.members(project.id, 'reviewer'), [])
       deliver(ledger, ledger.task(project.id, 1).messages[0])
       ledger.recordResult(project.id, 1, { body: 'Done' })
+      assert.equal(
+        ledger.members(project.id, 'worker')[0].busy,
+        true,
+        'work under review is still on its hands',
+      )
+      ledger.skipReview(project.id, 1, { reason: 'no reviewer' })
       assert.equal(ledger.members(project.id, 'worker')[0].busy, false, 'finished work is not busy')
     })
   })

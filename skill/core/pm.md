@@ -18,9 +18,12 @@ and acceptance criteria clear.
 
 - `cf task add --tier standard "…"` gives an advisor of that tier a bounded
   question: research, planning, testing or review (`--tags research` to
-  prefer one). ConsensFlow picks the advisor. Its answer comes back as a
-  message headed `[ConsensFlow m-12 · T-3 · result from @advisor]`, only when
-  you are idle; do not poll. Synthesize the advice into your own conclusions.
+  prefer one). ConsensFlow picks the advisor and opens a fresh window for it:
+  the advisor starts from nothing, with no memory of your conversation, of the
+  project or of its earlier tasks, so put everything it needs in the task. Its
+  answer comes back as a message headed `[ConsensFlow m-12 · T-3 · result from
+  @advisor]`, only when you are idle; do not poll. Synthesize the advice into
+  your own conclusions.
 - An advisor's question arrives as `[… question from @advisor]`; answer it with
   `cf answer m-12 "…"`.
 - You give the lead no work, and no agent a task by name: finish your own

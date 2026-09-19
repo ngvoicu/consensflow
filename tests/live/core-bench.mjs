@@ -202,14 +202,15 @@ try {
             lead: (await lane('lead'))?.activity,
           }),
     })
-    const idle = await until(
-      async () => ((await lane(agent.id))?.activity?.state === 'idle' ? true : null),
+    // One task per session: the worker's window closes once its task is done.
+    const closed = await until(
+      async () => ((await lane(agent.id))?.activity?.state === 'closed' ? true : null),
       60_000,
     )
     record(
-      `${name}-marker-idle`,
-      Boolean(idle),
-      idle ? {} : { activity: (await lane(agent.id))?.activity },
+      `${name}-window-closed`,
+      Boolean(closed),
+      closed ? {} : { activity: (await lane(agent.id))?.activity },
     )
   }
 

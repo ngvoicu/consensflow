@@ -132,6 +132,8 @@ app is replaced.
 - [x] [IMPL-BDC-21] `cf ui` runs the new core and `core.html` becomes `index.html`; window geometry and the update flow keep working; the packaged smoke drives the new page; every suite and the live bench are green. Every suite, the packaged smoke and the bench (`npm run bench:core -- opencode pi devin --reviewer devin`, 19/19) green on the switched tree, 2026-09-19 evening.
 - [x] [IMPL-BDC-26] The old core is deleted: `src/ui.js`, `store.js`, `tabs.js`, `panes.js`, `delivery-watch.js`, the inbox, delivery and receiver modules it replaces, `page.js`, `tasks.js`, `launch.js`, `requester.js`, the old page (`app/ui/index.html`, `panes.js`, `sidebar.js`, `tasks.js`, `menus.js`), the old Rust commands, the JSON state and `O_EXLOCK`, and their tests; the Devin hook text stops naming `cf results`. Done 2026-09-19. Still to prune in a follow-up: the one-shot runner the old `cf run` used (`runAgent`, the engines, image runs, packets, harness transcripts, session binding, threads, Codex auth, transcript events) and their tests; image agents have no adapter in the new core.
 - [x] [VERIFY-BDC-27] `npm run candidate` builds, smoke-tests and installs ConsensFlow Candidate; Gabriel is told it is ready. Installed 2026-09-19 21:07 (`~/Applications/ConsensFlow Candidate.app`, 3.0.0-alpha.62, smoke 2/2, the live app unchanged).
+- [x] [TEST-BDC-28] One task per member session (Gabriel, 2026-09-19 evening: "make all workers one task only"; the lead cannot know a worker, so the session rule is the daemon's). Ledger: a member holds its work from assignment to the verdict and is busy meanwhile; only its task's messages reach it. Dispatcher: a worker, advisor or reviewer window closes and its conversation ends once it holds no task; a send-back lands in the author's still-open session; the reviewer closes after its verdict; coordinators never close; a fresh session whose first message is a reopening gets the brief in front; after a restart a member task with no window is given up and one with an answer due resumes its own session; low quota outlives the window until its reset. Page: a member between tasks reads as free. Integration: two tiered tasks, one worker, two native sessions. Bench: the worker's window closes after its task.
+- [x] [IMPL-BDC-29] `holdsWork`, `HELD_TASK_STATES` in `members()` and `nextDelivery`; `#retire`, `retiring`, `#launchText`, the restart give-up and `lowUntil` in the dispatcher; the role texts (workers, advisors and reviewers start from nothing; the lead and PM put everything in the task); the composer placeholders; satisfies TEST-BDC-28.
 - [ ] [TEST-BDC-03] Import from alpha.62 state (tabs, threads, tasks, inbox results) is complete, idempotent and read-only on the source; replayed against a copy of the live home.
 - [ ] [IMPL-BDC-04] Importer; satisfies TEST-BDC-03.
 
@@ -160,7 +162,10 @@ talks to the daemon only through `core_request` and the allow-list in
 `commands.rs`; the agents screens (roster with tags, library, harnesses) are
 served by the daemon at its URL behind the UI token the handle carries. The
 human closes a project from the list (`project.close`: suspended, every window
-killed, tiered work back in the backlog) and resumes it later. Next: Gabriel
+killed, tiered work back in the backlog) and resumes it later. Members run one
+task per session (TEST-BDC-28): their windows close with their task and the
+next task starts fresh, so coordinators are told to put everything in the
+task. Next: Gabriel
 tests the Candidate (empty board; he creates a project); a follow-up commit
 prunes the one-shot runner code the old `cf run` left behind (`runAgent` in
 `hosts/lib/runners.js`, `codex-auth`, `harness-transcript`, `image-run`,
@@ -378,3 +383,26 @@ removing a PM (the ledger refuses it as `not-a-member`).
   it is the new role text (tiers, `--self`, `cf inbox`), no deleted verb.
   Known and untested: `app/ui/update-selftest.js` on `project.open` and
   `project.close` (the updater smoke is opt-in and needs two bundles).
+- TEST-BDC-28 / IMPL-BDC-29, 2026-09-19 evening, one task per member
+  session. Gabriel's rule, after the lead's first answer (reuse with a context
+  budget) contradicted the tier rule: a lead never sees a worker, so a
+  session policy must be the daemon's. RED: 5 dispatcher tests, 1 ledger, 1
+  integration, the bench's idle checks renamed to window-closed. GREEN with
+  four decisions the tests fix: the author under review keeps its window
+  (the send-back lands where the work was done) and is busy to the assigner;
+  a fresh session's first message that is not the brief (a reopening) gets
+  the brief in front, while an answer due after a restart resumes the
+  member's own session; a member's working task with no window and nothing
+  due is given up; low quota is kept in the daemon until its reset, since the
+  window that reported it is gone. Found on the way: the fake pane host never
+  exited a killed window, so every test chaining two tasks through one
+  member hung; it exits at once now, and one test holds the exit to prove
+  the gap between kill and exit is handled (a task assigned meanwhile waits
+  for the fresh window). Also: only a member's own task's messages reach it
+  (a stray note never opens a window). Board: a member between tasks reads
+  "Free: a window opens with its next task"; the composer says the member
+  starts from nothing. Unit 791 pass, 6 skipped of 797; integration 6/6 (two
+  tiered tasks, one worker, two native sessions, the first pid dead before
+  the second opened); page 69/69; bench 19/19 (the three workers' windows
+  closed after their task, a Devin reviewer passed an OpenCode result in
+  22 s, restart on the same session).

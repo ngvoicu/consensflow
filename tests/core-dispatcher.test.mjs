@@ -114,6 +114,7 @@ function fakeHost() {
     requests: [],
     refuse: false,
     hold: null,
+    holdExits: false,
     async request(op, body) {
       host.requests.push([op, body])
       return { ok: true, outcome: 'cleared' }
@@ -136,6 +137,11 @@ function fakeHost() {
     },
     async kill(pane) {
       host.killed.push(pane)
+      // A killed process is gone before the next pass, so its exit lands at
+      // once; a test that wants the gap between the two holds it and sends it.
+      if (!host.holdExits) {
+        for (const listener of exits) await listener({ id: pane.id, generation: pane.generation })
+      }
       return { ok: true }
     },
     onExit(listener) {
@@ -756,8 +762,8 @@ describe('the dispatcher assigns open tasks', () => {
 
 describe('the dispatcher runs the review gate', () => {
   /** A worker's task through to its result, under review. */
-  async function reviewed(context, body = 'Parser done') {
-    const fixture = await withTiers(context, { review: 'members' })
+  async function reviewed(context, body = 'Parser done', options = {}) {
+    const fixture = await withTiers(context, { review: 'members', ...options })
     fixture.open()
     await context.dispatcher.pass()
     await context.dispatcher.pass()
@@ -848,20 +854,21 @@ describe('the dispatcher runs the review gate', () => {
 
   it('waits for a busy reviewer rather than skipping, and replaces one whose window closes', async () => {
     await setup(async (context) => {
-      const { open, task } = await reviewed(context)
+      const { open, task } = await reviewed(context, 'Parser done', { reviewers: ['astraeus'] })
       await context.dispatcher.pass()
       assert.equal(task(2).assignee, 'astraeus')
-      open({ tags: ['rust'], body: 'Lexer' })
+      open({ tags: ['coding'], body: 'Lexer' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      context.adapter.answer('zeus', 'Lexer done')
+      assert.equal(task(3).assignee, 'diana', 'zeus holds its work until the verdict')
+      context.adapter.answer('diana', 'Lexer done')
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       assert.equal(task(3).state, 'review')
       assert.equal(
         context.ledger.reviewsPending(1).length,
         1,
-        "T-3 waits for astraeus: calliope shares its author's model",
+        'T-3 waits for astraeus, the only reviewer',
       )
 
       await context.host.exit('astraeus')
@@ -962,16 +969,21 @@ describe('the dispatcher watches quota', () => {
       open({ tags: ['rust'] })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
+      const question = context.ledger.ask(1, { from: 'zeus', to: 'lead', task: 1, body: 'Which?' })
       context.adapter.agent('zeus').arrive = false
-      context.adapter.answer('zeus', 'done')
+      context.adapter.answer('zeus', 'asked')
       await context.dispatcher.pass()
-      const note = context.ledger.note(1, { from: 'lead', to: 'zeus', body: 'Well done' })
+      context.adapter.answer('lead', 'This one, replying')
+      const answer = context.ledger.answer(question.id, { from: 'lead', body: 'This one' })
       await context.dispatcher.pass()
-      assert.equal(context.ledger.message(note.id).state, 'delivering')
+      assert.equal(context.ledger.message(answer.id).state, 'delivering')
       context.adapter.quota('zeus', { state: 'exhausted', at: context.clock.now().toISOString() })
       await context.dispatcher.pass()
-      assert.equal(context.ledger.message(note.id).state, 'queued', 'the note is not stuck')
-      assert.equal(task(1).state, 'done', 'finished work is left alone')
+      assert.deepEqual(
+        [task(1).state, task(1).assignee, context.ledger.message(answer.id).state],
+        ['open', null, 'cancelled'],
+        'the task goes back to the board and the answer in flight goes with it',
+      )
 
       context.adapter.answer('lead', 'noted')
       const own = context.ledger.createTask(1, { from: 'human', to: 'lead', body: 'Plan' })
@@ -1003,27 +1015,184 @@ describe('the dispatcher watches quota', () => {
       open({ tags: ['rust'] })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      context.adapter.answer('zeus', 'done')
-      await context.dispatcher.pass()
       context.adapter.quota('zeus', { state: 'low', usedPercent: 97 })
+      await context.dispatcher.pass()
+      context.adapter.answer('zeus', 'done')
       await context.dispatcher.pass()
       open({ tags: ['rust'], body: 'Lexer' })
       await context.dispatcher.pass()
       assert.equal(task(2).assignee, 'diana', 'zeus is low on quota')
-
-      context.adapter.quota('zeus', { state: 'exhausted' })
-      await context.dispatcher.pass()
-      assert.equal(
-        context.ledger.project(1).participants.find((p) => p.id === id('zeus')).outUntil,
-        soon(context, 1),
-      )
-      context.adapter.quota('zeus', null)
       open({ body: 'Tests' })
       await context.dispatcher.pass()
-      assert.equal(task(3).state, 'open', 'diana is busy and zeus is out')
+      assert.equal(task(3).state, 'open', 'diana is busy and zeus is low')
       context.clock.advance(2 * 3_600_000)
       await context.dispatcher.pass()
-      assert.equal(task(3).assignee, 'zeus')
+      assert.equal(task(3).assignee, 'zeus', 'eligible again after the hour, in a fresh window')
+      await context.dispatcher.pass()
+      context.adapter.quota('zeus', { state: 'exhausted' })
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        [
+          task(3).state,
+          context.ledger.project(1).participants.find((p) => p.id === id('zeus')).outUntil,
+        ],
+        ['open', soon(context, 1)],
+        'out of quota mid-task: the work goes back, zeus is out for an hour',
+      )
+    })
+  })
+})
+
+describe('one task per member session', () => {
+  const zeusWindows = (context) => context.host.opened.filter((b) => b.id.endsWith('-zeus'))
+
+  /** T-1 to zeus (its rust tag wins), delivered and answered. */
+  async function finished(context, options = {}) {
+    const fixture = await withTiers(context, options)
+    fixture.open({ tags: ['rust'] })
+    await context.dispatcher.pass()
+    await context.dispatcher.pass()
+    assert.equal(fixture.task(1).state, 'working')
+    context.adapter.answer('zeus', 'Parser done')
+    await context.dispatcher.pass()
+    return fixture
+  }
+
+  it("closes a worker's window and ends its conversation with its task, and opens a fresh one for the next", async () => {
+    await setup(async (context) => {
+      const { id, open, task } = await finished(context)
+      const first = context.host.last('zeus')
+      assert.equal(task(1).state, 'done')
+      assert.deepEqual(context.host.killed, [{ id: first.id, generation: first.generation }])
+      assert.equal(context.ledger.currentConversation(id('zeus')), null, 'the conversation ended')
+      assert.equal(context.dispatcher.pane(id('zeus')), null, 'the window went with it')
+
+      open({ body: 'Write the lexer', tags: ['rust'] })
+      await context.dispatcher.pass()
+      const launch = context.adapter.prepared.at(-1)
+      assert.deepEqual(
+        [launch.participant.handle, launch.resume],
+        ['zeus', null],
+        'a fresh session',
+      )
+      assert.match(launch.message, /Write the lexer/)
+      assert.equal(zeusWindows(context).length, 2)
+      assert.notEqual(context.ledger.currentConversation(id('zeus')).nativeSession, first.id)
+    })
+  })
+
+  it('holds a task assigned while the old window is still closing, and opens after it has gone', async () => {
+    await setup(async (context) => {
+      context.host.holdExits = true
+      const { open, task } = await finished(context)
+      open({ body: 'Write the lexer', tags: ['rust'] })
+      await context.dispatcher.pass()
+      assert.equal(task(2).assignee, 'zeus')
+      assert.equal(zeusWindows(context).length, 1, 'nothing opens into a closing window')
+      await context.host.exit('zeus')
+      await context.dispatcher.pass()
+      assert.equal(zeusWindows(context).length, 2)
+      assert.equal(context.adapter.prepared.at(-1).resume, null)
+    })
+  })
+
+  it('keeps the author open through its review, lands the send-back there, and closes the reviewer after its verdict', async () => {
+    await setup(async (context) => {
+      const { task } = await finished(context, { review: 'members' })
+      assert.equal(task(1).state, 'review')
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        [task(2).kind, task(2).assignee, task(2).state],
+        ['review', 'astraeus', 'working'],
+      )
+      assert.deepEqual(context.host.killed, [], 'an author under review keeps its window')
+      const reviewer = context.host.last('astraeus')
+      context.adapter.answer('astraeus', 'Name the error.\n\nVERDICT: changes')
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.deepEqual(context.host.killed, [{ id: reviewer.id, generation: reviewer.generation }])
+      assert.equal(
+        zeusWindows(context).length,
+        1,
+        'the send-back lands in the session that did the work',
+      )
+      assert.match(
+        context.adapter.agent('zeus').items.at(-1).text,
+        /Review round 1 by @astraeus asks for changes:/,
+      )
+    })
+  })
+
+  it('never closes a coordinator: the lead keeps its window after its own task', async () => {
+    await setup(async (context) => {
+      const { project, id } = await withTeam(context)
+      context.ledger.createTask(project.id, { from: 'human', to: 'lead', body: 'Plan the week' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.adapter.answer('lead', 'Planned.')
+      context.ledger.recordResult(project.id, 1, { body: 'Planned.' })
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.task(project.id, 1).state, 'done')
+      assert.deepEqual(context.host.killed, [])
+      assert.notEqual(context.dispatcher.pane(id('lead')), null)
+    })
+  })
+
+  it('after a restart, gives up a member task with no window, and resumes one whose answer is due', async () => {
+    await setup(async (context) => {
+      const { project, id, open, task } = await withTiers(context)
+      open({ tags: ['rust'] })
+      open({ body: 'Write the lexer', tags: ['coding'] })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.deepEqual([task(1).assignee, task(2).assignee], ['zeus', 'diana'])
+      const question = context.ledger.ask(project.id, {
+        from: 'diana',
+        to: 'lead',
+        task: 2,
+        body: 'Which dialect?',
+      })
+      context.adapter.answer('diana', 'I asked the lead.')
+      await context.dispatcher.pass()
+      assert.deepEqual([task(1).state, task(2).state], ['working', 'waiting'])
+      const native = context.ledger.currentConversation(id('diana')).nativeSession
+
+      context.ledger.suspendForRestart()
+      const after = context.make()
+      await after.resumeAfterRestart()
+      context.ledger.answer(question.id, { from: 'lead', body: 'ANSI' })
+      await after.pass()
+      assert.deepEqual(
+        [task(1).state, task(1).assignee],
+        ['open', null],
+        'nobody was working on it any more',
+      )
+      const launch = context.adapter.prepared.at(-1)
+      assert.deepEqual(
+        [launch.participant.handle, launch.resume],
+        ['diana', native],
+        'its own session, with the brief in it',
+      )
+      assert.match(launch.message, /^\[ConsensFlow m-\d+ · T-2 · answer from @lead\]\nANSI$/)
+      await after.pass()
+      assert.equal(task(2).state, 'working')
+    })
+  })
+
+  it('reopens a finished task in a fresh session, with the brief in front of the new instructions', async () => {
+    await setup(async (context) => {
+      const { project, task } = await finished(context)
+      context.ledger.reopenTask(project.id, 1, { by: 'lead', body: 'Handle empty input too' })
+      await context.dispatcher.pass()
+      const launch = context.adapter.prepared.at(-1)
+      assert.deepEqual([launch.participant.handle, launch.resume], ['zeus', null])
+      assert.match(
+        launch.message,
+        /^\[ConsensFlow m-\d+ · T-1 · task from @lead\]\nWrite the parser\n\n\[ConsensFlow m-\d+ · T-1 · task from @lead\]\nHandle empty input too$/,
+      )
+      await context.dispatcher.pass()
+      assert.equal(task(1).state, 'working')
     })
   })
 })

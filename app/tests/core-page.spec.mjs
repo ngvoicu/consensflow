@@ -682,6 +682,18 @@ test("opens the agents screens at the daemon's pages with the app's token, and r
   ).toBe(1)
 })
 
+test('shows a member between tasks as free, its window gone until the next task', async ({
+  page,
+}) => {
+  const data = model()
+  const diana = data.boards[1].lanes.find((lane) => lane.participant.handle === 'diana')
+  diana.participant.outUntil = null
+  await open(page, data)
+  const bay = page.locator('.bay[data-handle="diana"]')
+  await expect(bay.locator('.bay-status')).toHaveText('Free: a window opens with its next task')
+  await expect(bay.getByTestId('lamp')).toHaveAttribute('data-state', 'closed')
+})
+
 test('closes an open project from the list', async ({ page }) => {
   await open(page)
   await page.getByRole('button', { name: 'Close harbour' }).click()

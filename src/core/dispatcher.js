@@ -19,6 +19,13 @@ import { randomUUID } from 'node:crypto'
  *   task with the answer written after that message. A task waiting on a
  *   question is left alone. Coordinators (lead, PM) finish their own tasks
  *   explicitly, because their turns end while they wait for workers.
+ * - One task per member session: a worker, advisor or reviewer window opens
+ *   with its task and is closed, its conversation ended, once it holds no
+ *   task (assigned, working, waiting or under review), so the next task starts
+ *   from nothing; a fresh window whose first message is not the brief (an
+ *   answer, a review's findings) gets the brief in front of it. A member's
+ *   active task with no window and nothing due is given up (tiered work back
+ *   to the board). Coordinators keep their windows and conversations.
  * - A worker window that closes mid-task fails the task, and the requester is
  *   told. A lead window that closes suspends its project. A member who leaves
  *   the team has its window closed once its step in progress ends, and that
@@ -251,6 +258,7 @@ export class Dispatcher {
       launch: null,
       token: null,
       delivering: null,
+      retiring: false,
       activity: { state: 'closed' },
     })
     const project = this.#projectOf(participantId)
@@ -277,10 +285,19 @@ export class Dispatcher {
     if (runtime.pane !== null) return this.#stepOpen(project, participant, runtime)
     if (project.state !== 'open') return
     const next = this.#ledger.nextDelivery(participant.id)
-    if (next !== null) await this.#launch(project, participant, next)
+    if (next !== null) return this.#launch(project, participant, next)
+    if (COORDINATORS.has(participant.role)) return
+    // A member's session is its task's: with the window gone (a restart, a
+    // crash) and nothing due to it, nobody is doing the work any more.
+    const task = this.#ledger.activeTask(participant.id)
+    if (task !== null) {
+      this.#giveUp(project, task, `@${participant.handle}'s window is gone`)
+      this.#changed()
+    }
   }
 
   async #stepOpen(project, participant, runtime) {
+    if (runtime.retiring) return
     let observed
     try {
       observed = await runtime.adapter.observe({
@@ -299,7 +316,15 @@ export class Dispatcher {
         ? { state: 'waiting', reason: observed.waiting.reason ?? null }
         : { state: observed.settled ? 'idle' : 'working' },
     )
-    if (observed.quota !== undefined) runtime.quota = observed.quota ?? null
+    if (observed.quota !== undefined) {
+      runtime.quota = observed.quota ?? null
+      // Low is soft: the current task continues, nothing new comes until the
+      // reset it names (an hour when it names none). It outlives the window,
+      // which closes with the task, so a low member is not asked again at once.
+      if (runtime.quota?.state === 'low') {
+        runtime.lowUntil = runtime.quota.resetsAt ?? new Date(this.#now() + 3_600_000).toISOString()
+      } else if (runtime.quota !== null) runtime.lowUntil = null
+    }
     const out = this.#isOut(participant)
     if (!out && this.#freshRefusal(participant, runtime.quota)) {
       this.#outOfQuota(project, participant, runtime)
@@ -314,11 +339,51 @@ export class Dispatcher {
     }
     if (runtime.delivering !== null) this.#watchArrival(runtime, observed)
     await this.#releaseDraft(runtime, observed)
-    if (!COORDINATORS.has(participant.role)) this.#collect(project, participant, observed)
+    if (!COORDINATORS.has(participant.role)) {
+      this.#collect(project, participant, observed)
+      // The window may have gone during this step (a launch that timed out).
+      if (
+        runtime.pane !== null &&
+        runtime.delivering === null &&
+        !this.#ledger.holdsWork(participant.id)
+      ) {
+        await this.#retire(participant, runtime)
+        return
+      }
+    }
     if (runtime.delivering === null && observed.settled && !observed.waiting) {
       const next = this.#ledger.nextDelivery(participant.id)
       if (next !== null) await this.#deliver(runtime, next)
     }
+  }
+
+  /**
+   * One task per member session: the window and its conversation end with the
+   * work, so the next task starts a fresh session with nothing carried over.
+   */
+  async #retire(participant, runtime) {
+    runtime.retiring = true
+    const conversation = this.#ledger.currentConversation(participant.id)
+    if (conversation !== null) this.#ledger.endConversation(conversation.id)
+    await this.#host.kill(runtime.pane).catch(() => {})
+    this.#changed()
+  }
+
+  /**
+   * A member's fresh session starts from nothing: when its first message is
+   * not the task's own brief (a reopening, a review's findings), the brief
+   * goes in first. A resumed conversation has it already.
+   */
+  #launchText(project, participant, message, resume) {
+    if (resume !== null || COORDINATORS.has(participant.role) || message.taskNumber == null) {
+      return deliveryText(message)
+    }
+    const task = this.#ledger.task(project.id, message.taskNumber)
+    const brief = task?.messages.find(
+      (m) => m.kind === 'task' && m.recipient === participant.handle,
+    )
+    if (brief === undefined || brief.id === message.id) return deliveryText(message)
+    return `${deliveryText(brief)}\n\n${deliveryText(message)}`
   }
 
   #watchArrival(runtime, observed) {
@@ -477,7 +542,7 @@ export class Dispatcher {
         project,
         directory: project.directory,
         resume,
-        message: message === null ? null : deliveryText(message),
+        message: message === null ? null : this.#launchText(project, participant, message, resume),
         agent: participant.agent === null ? null : this.#roster(participant.agent),
         instructions: this.#roles(participant, project),
       })
@@ -605,9 +670,12 @@ export class Dispatcher {
 
   /** Free: nothing on its hands, not out of quota, not low on it. */
   #available(member) {
-    return (
-      !member.busy && !this.#isOut(member) && this.#runtime.get(member.id)?.quota?.state !== 'low'
-    )
+    return !member.busy && !this.#isOut(member) && !this.#isLow(member)
+  }
+
+  #isLow(member) {
+    const until = this.#runtime.get(member.id)?.lowUntil ?? null
+    return until !== null && Date.parse(until) > this.#now()
   }
 
   #isOut(member) {
@@ -635,9 +703,7 @@ export class Dispatcher {
     const out = candidates.filter(
       (m) => m.outUntil !== null && Date.parse(m.outUntil) > this.#now(),
     )
-    const low = candidates.filter(
-      (m) => !out.includes(m) && this.#runtime.get(m.id)?.quota?.state === 'low',
-    )
+    const low = candidates.filter((m) => !out.includes(m) && this.#isLow(m))
     const busy = candidates.filter((m) => !out.includes(m) && !low.includes(m) && m.busy)
     const parts = []
     if (busy.length > 0) {
@@ -761,7 +827,9 @@ export class Dispatcher {
         token: null,
         delivering: null,
         quota: null,
+        lowUntil: null,
         running: null,
+        retiring: false,
         enters: [],
         humanItems: null,
         activity: { state: 'closed' },

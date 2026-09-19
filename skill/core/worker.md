@@ -21,4 +21,7 @@ headed `[ConsensFlow m-12 · T-3 · task from @lead]`.
   never read another agent's session files: the board is your only channel.
   Questions go to your coordinator or the human, never to another member.
 
-Keep this worker role after a new or resumed native session.
+This window is for one task: it opened with the task and closes when the task
+leaves your hands. Nothing from an earlier task is here, and nothing from this
+one carries over, so finish with a result that stands on its own. Keep this
+worker role for the whole session.

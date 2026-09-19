@@ -100,6 +100,48 @@ test('a reviewer on another model passes the work, and the requester gets the re
   }
 })
 
+test('each task runs in its own worker session: the window closes with the task, the next opens a new one', async () => {
+  const app = await startIntegration({
+    editor: CORE_EDITOR,
+    fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
+  })
+  try {
+    team(app)
+    const p = await project(app, { review: 'none', members: [['worker', 'worker']] })
+    const alive = (pid) => {
+      try {
+        process.kill(pid, 0)
+        return true
+      } catch {
+        return false
+      }
+    }
+    const sessions = () => new Set(app.processes().map((entry) => entry.sessionId))
+    for (const [word, expected] of [
+      ['ONE', 2],
+      ['TWO', 3],
+    ]) {
+      await app.requestNode('task.add', {
+        project: p.id,
+        to: 'lead',
+        body: `DISPATCH --tier ${p.tiers.worker} Reply with exactly: ${word}`,
+      })
+      await app.waitFor(
+        async () =>
+          (await p.lane('worker'))?.tasks.some((t) => t.state === 'done' && t.title.includes(word)),
+        60_000,
+      )
+      await app.waitFor(async () => (await p.lane('worker'))?.pane === null, 30_000)
+      assert.equal((await p.lane('worker')).activity.state, 'closed')
+      assert.equal(sessions().size, expected, 'one native session per task, plus the lead')
+    }
+    const workerPids = app.processes().filter((entry) => entry.pid !== app.processes()[0].pid)
+    await app.waitFor(async () => workerPids.every((entry) => !alive(entry.pid)), 30_000)
+  } finally {
+    await app.close()
+  }
+})
+
 test('a reviewer asking for changes twice sends the work back once, then the requester decides', async () => {
   const app = await startIntegration({
     editor: CORE_EDITOR,
