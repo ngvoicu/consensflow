@@ -27,6 +27,52 @@ export function paneLabel(tab, pane, workerNumber = null) {
   return workerNumber === null ? name : `${tab.role === 'pm' ? 'a' : 'w'}${workerNumber} ${name}`
 }
 
+export function updateActivity(badge, tab, pane) {
+  badge._context = { tab, pane }
+  badge.className = 'pane-activity'
+  const state = failedPane(pane)
+    ? 'failed'
+    : tab.closed || pane.closed
+      ? 'closed'
+      : pane.starting
+        ? 'starting'
+        : pane.alive === false
+          ? 'closed'
+          : pane.kind === 'shell'
+            ? 'open'
+            : pane.activity?.expiresAt <= Date.now()
+              ? 'unknown'
+              : (pane.activity?.state ?? 'unknown')
+  const labels = {
+    working: 'Working',
+    idle: 'Idle',
+    starting: 'Starting',
+    closed: 'Closed',
+    failed: 'Failed',
+    unknown: 'Unknown',
+    open: 'Open',
+  }
+  badge.dataset.activity = Object.hasOwn(labels, state) ? state : 'unknown'
+  badge.textContent = labels[badge.dataset.activity]
+  badge.title = {
+    working: 'The agent is processing a task.',
+    idle: 'The agent has finished its turn.',
+    unknown: 'The current task state could not be confirmed.',
+    starting: 'The agent is starting.',
+    closed: 'This pane is closed.',
+    failed: 'The latest task or process failed.',
+    open: 'Shell is open.',
+  }[badge.dataset.activity]
+  badge.setAttribute('aria-label', `Activity: ${badge.textContent}`)
+}
+
+function appendActivity(row, tab, pane) {
+  row.classList.add('has-activity')
+  const badge = document.createElement('span')
+  updateActivity(badge, tab, pane)
+  row.append(badge)
+}
+
 function button(label, testId, selected, onClick) {
   const element = document.createElement('button')
   element.type = 'button'
@@ -187,6 +233,16 @@ export function renderSidebar(
           ),
         )
 
+        appendActivity(lead.firstElementChild, tab, leadPane)
+        if (tab.role === 'pm' && onDeleteSession) {
+          const remove = document.createElement('button')
+          remove.type = 'button'
+          remove.className = 'delete-button'
+          remove.textContent = 'Delete'
+          remove.setAttribute('aria-label', 'Delete PM')
+          remove.addEventListener('click', () => onDeleteSession(tab))
+          lead.firstElementChild.append(remove)
+        }
         const descendants = group()
         let workerNumber = 0
         for (const pane of panes) {
@@ -226,6 +282,7 @@ export function renderSidebar(
               ),
             ),
           )
+          appendActivity(child.firstElementChild, tab, pane)
           if (pane.kind === 'worker') appendResults(child.firstElementChild, tab, pane)
           if (onDeletePane) {
             const remove = document.createElement('button')

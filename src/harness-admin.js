@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { DEVIN_MINIMUM_VERSION, supportedDevinVersion } from './devin-install.js'
 import { harnessPath, knownHarnesses } from './harnesses.js'
 import { prepareOpenCodeExtension } from './opencode-install.js'
 import { preparePiExtension } from './pi-install.js'
@@ -13,6 +14,7 @@ const SOURCES = {
   opencode: 'https://registry.npmjs.org/opencode-ai/latest',
   pi: 'https://registry.npmjs.org/@earendil-works/pi-coding-agent/latest',
   kimi: 'https://pypi.org/pypi/kimi-cli/json',
+  devin: 'https://static.devin.ai/cli/current/manifest.json',
 }
 
 export function releaseSource(id, executable, env) {
@@ -107,7 +109,7 @@ export class HarnessAdmin {
   }
 
   async check(id = null, { refresh = false } = {}) {
-    const ids = knownHarnesses(this.#env).map((row) => row.id)
+    const ids = knownHarnesses().map((row) => row.id)
     if (id !== null && !ids.includes(id)) throw new Error('Unknown harness')
     return Promise.all(
       (id ? [id] : ids).map(async (name) => {
@@ -140,6 +142,9 @@ export class HarnessAdmin {
       version: { state: 'not-installed' },
       update: { state: 'not-checked' },
     }
+    if (id === 'devin')
+      row.receiveNote =
+        'Replies arriving while Devin is idle wait for your next prompt. ConsensFlow sets up reply collection automatically when a pane opens.'
     if (!path) return row
     try {
       const { stdout } = await execute(path, ['--version'], {
@@ -159,6 +164,13 @@ export class HarnessAdmin {
         reason: error.killed ? 'Version check timed out' : 'Version command failed',
       }
     }
+    if (id === 'devin')
+      row.setup = supportedDevinVersion(row.version.value)
+        ? { state: 'ready' }
+        : {
+            state: 'update-required',
+            reason: `Devin ${DEVIN_MINIMUM_VERSION} or newer is required. Update Devin before opening a pane.`,
+          }
     const source = releaseSource(id, path, this.#env)
     row.distribution = source.distribution
     try {

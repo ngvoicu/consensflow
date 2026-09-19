@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import {
   chmodSync,
   existsSync,
@@ -140,7 +141,12 @@ while [ $n -lt ${FLOOD_WIDTH} ]; do
   n=$((n + 1))
 done
 while IFS= read -r line; do
-  if [ "$line" = "FLOOD" ]; then
+  if [ "$line" = "BIGPASTE" ]; then
+    saved=$(stty -g)
+    stty raw -echo
+    "$CFSMOKE_PASTE_NODE" "$CFSMOKE_PASTE_READER"
+    stty "$saved"
+  elif [ "$line" = "FLOOD" ]; then
     n=1
     while [ $n -le ${FLOOD_LINES} ]; do
       printf 'CFSMOKE-FLOOD %s %s\\n' "$n" "$pad"
@@ -192,6 +198,22 @@ function sandbox() {
   const harness = join(paths.bin, 'claude')
   writeFileSync(harness, FAKE_HARNESS, 'utf8')
   chmodSync(harness, 0o755)
+  const pasteReader = join(paths.probe, 'paste-reader.mjs')
+  writeFileSync(
+    pasteReader,
+    `
+import { createHash } from 'node:crypto'
+const chunks = []
+process.stdout.write('CFSMOKE-PASTE-READY\\r\\n')
+process.stdin.on('data', chunk => {
+  chunks.push(chunk)
+  const bytes = Buffer.concat(chunks)
+  if (!bytes.subarray(-6).equals(Buffer.from('\\x1b[201~'))) return
+  const hash = createHash('sha256').update(bytes).digest('base64')
+  process.stdout.write('CFSMOKE-PASTE ' + bytes.length + ' ' + hash + '\\r\\n', () => process.exit(0))
+})
+`,
+  )
   return {
     ...paths,
     tag,
@@ -207,6 +229,7 @@ function sandbox() {
       CONSENSFLOW_SELFTEST_DIR: paths.workspace,
       CONSENSFLOW_SELFTEST_TAG: tag,
       CFSMOKE_PIDFILE: paths.pidFile,
+      CFSMOKE_PASTE_READER: pasteReader,
       CFSMOKE_TAG: tag,
     },
     cleanup: () => rmSync(root, { recursive: true, force: true }),
@@ -362,6 +385,7 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   if (found === null) return
 
   const box = sandbox()
+  box.env.CFSMOKE_PASTE_NODE = found.node
   const app = launch(found.binary, box)
   // A failed smoke leaves its machine behind on purpose: the harness, its pid
   // file, the state root and the app's own launchers are the evidence, and
@@ -406,6 +430,11 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     'the child echoed something other than what was typed',
   )
 
+  const pasted = await app.waitFor('large-paste')
+  const expectedPaste = Buffer.from('\x1b[200~' + '漢字 résumé 🙂\r'.repeat(30_000) + '\x1b[201~')
+  assert.equal(pasted.data.bytes, expectedPaste.length)
+  assert.equal(pasted.data.hash, createHash('sha256').update(expectedPaste).digest('base64'))
+
   // 4. Acks flow. The flood is ~${FLOOD_BYTES} bytes by construction, well
   //    over the 1 MiB unacked-output window, so its LAST line can only be on
   //    screen if the page returned credit for everything before it. The ack
@@ -418,6 +447,13 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   const pm = await app.waitFor('pm-echo')
   assert.equal(pm.data.hex, Buffer.from(pm.data.typed, 'utf8').toString('hex'))
   assert.notEqual(pm.data.pane.id, rendered.data.pane.id)
+  const tasks = await app.waitFor('task-board')
+  assert.equal(tasks.data.total, 2)
+  assert.equal(tasks.data.owners, 2)
+  assert.equal(tasks.data.answer, 'Keep all recorded replies')
+  assert.equal(tasks.data.status, 'blocked', 'answering alone does not accept or unblock work')
+  assert.equal(tasks.data.graph, true)
+  assert.equal(tasks.data.terminalPreserved, true)
 
   const harnessPid = Number(readFileSync(box.pidFile, 'utf8').trim())
   assert.ok(Number.isInteger(harnessPid) && harnessPid > 0, 'the fake harness wrote no pid')
@@ -569,7 +605,7 @@ test('built Agents catalog serves complete saved profiles and current browsing c
     import { CATALOG, catalogEntry } from ${JSON.stringify(join(cli, 'src/catalog.js'))}
     import { addAgent, rosterPath } from ${JSON.stringify(join(cli, 'src/roster.js'))}
     import { startUiServer } from ${JSON.stringify(join(cli, 'src/ui.js'))}
-    assert.equal(Object.values(CATALOG).flat().length, 98, 'packaged preset count')
+    assert.equal(Object.values(CATALOG).flat().length, 99, 'packaged preset count')
     assert.equal(METRICS.length, 14)
     for (const secretFile of ['artificial-analysis-key', 'artificial-analysis-cache.json']) assert.equal(existsSync(${JSON.stringify(cli)} + '/' + secretFile), false)
     assert.equal(catalogEntry('pygmalion').model, 'codex-image')
@@ -581,8 +617,10 @@ test('built Agents catalog serves complete saved profiles and current browsing c
       const saved = JSON.parse(readFileSync(rosterPath(process.env), 'utf8')).agents.find(a => a.id === 'maia')
       assert.deepEqual(saved.profile, data.agents.find(a => a.name === 'maia').profile)
       assert.deepEqual(saved.profile.categories, ['coding', 'reviewer'])
+      assert.equal(saved.profile.workTier, 'standard')
+      assert.equal(Object.hasOwn(saved, 'skillsPolicy'), false)
       const html = await (await fetch(server.url, { headers })).text()
-      for (const text of ['aria-label="Your agents"', 'Model and reasoning', 'Already added', 'offer__actions', 'category-pill', 'Recommended PM', 'Reviewer / second opinion', 'Sort by', 'benchmark-pills', 'About benchmark scores', 'model-summary', 'model-group', 'AA reasoning level not specified', 'value="model-reasoning" selected']) assert.ok(html.includes(text), text)
+      for (const text of ['aria-label="Your agents"', 'Model and reasoning', 'Already added', 'offer__actions', 'category-pill', 'PM candidate', 'Review', 'Sort by', 'benchmark-pills', 'About benchmark scores', 'model-summary', 'model-group', 'AA reasoning level not specified', 'value="model-reasoning" selected', 'Work tier', 'tier-pill', 'Important work only · No coding']) assert.ok(html.includes(text), text)
       assert.ok(!html.includes('id="catalog-section"'))
       const library = await (await fetch(server.url + '/library', { headers })).text()
       assert.ok(library.includes('aria-label="Agent library"'))
@@ -590,7 +628,7 @@ test('built Agents catalog serves complete saved profiles and current browsing c
       assert.equal((await fetch(server.url + '/api/agents/maia', { method: 'DELETE', headers })).status, 204)
       const after = await (await fetch(server.url + '/api/agents', { headers })).json()
       assert.equal(after.agents.length, 0)
-      assert.equal(Object.values(after.catalog).flat().length, 98)
+      assert.equal(Object.values(after.catalog).flat().length, 99)
       console.log('packaged catalog and saved profiles verified')
     } finally { await server.close() }
   `,

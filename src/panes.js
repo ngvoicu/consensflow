@@ -7,6 +7,7 @@ import { discoverSessionWithEvidence } from '../hosts/lib/harness-transcript.js'
 import { indexResult } from '../hosts/lib/inbox.js'
 import { formatLaunchMarker } from '../hosts/lib/packets.js'
 import { effectivePolicy } from '../hosts/lib/policy.js'
+import { taskWithWorkPolicy } from '../hosts/lib/presets.js'
 import { childEnv, interactiveResume, interactiveStart } from '../hosts/lib/runners.js'
 import { newSessionName } from '../hosts/lib/threads.js'
 import { currentSession as currentCodexSession } from './channels/codex.js'
@@ -299,6 +300,7 @@ export class Panes {
       this.#requireBridge()
       const row = this.#agents.row(agent)
       if (row === undefined) throw new PaneError(`no agent named ${agent}`)
+      const assignedTask = taskForPane(row, task, request.purpose)
       const tab = await this.#openTab(tabId)
       const threads = await this.#store.readThreads(tab.directory)
       const name = this.#chooseConversation(tab, threads, { agent: row, fresh, session })
@@ -310,11 +312,17 @@ export class Panes {
       if (admitted.outcome === 'live') {
         // A live conversation takes the task as its next turn: one pane,
         // one process, one session — that is the whole point of continuing.
-        await this.#paste(tab, name, admitted.pane, consultText(request), {
-          opId,
-          kind: 'consult',
-          expect: expectationOf(admitted.row),
-        })
+        await this.#paste(
+          tab,
+          name,
+          admitted.pane,
+          consultText({ ...request, task: assignedTask }),
+          {
+            opId,
+            kind: 'consult',
+            expect: expectationOf(admitted.row),
+          },
+        )
         return {
           outcome: 'said',
           conversation: name,
@@ -328,13 +336,14 @@ export class Panes {
         argv: (native) => [
           'run',
           `@${row.id}`,
-          task,
+          assignedTask,
           '--in-pane',
           '--session',
           name,
           ...(admitted.created ? ['--new'] : []),
           ...flag('--brief', request.brief),
           ...flag('--context', request.context),
+          ...flag('--purpose', request.purpose),
           ...flag('--handoff-file', request.handoffFile),
           ...native,
         ],
@@ -355,6 +364,9 @@ export class Panes {
       if (!isRecord(record)) {
         throw new PaneError(`no conversation named ${session} here`, { status: 404 })
       }
+      const agent = this.#agents.row(record.agent)
+      if (!agent) throw new PaneError(`no saved agent named ${record.agent}`)
+      const assignedText = taskForPane(agent, text, request.purpose)
       this.#refuseHeld(tab, session, record)
       const pane = this.#livePane(tab, record, session)
       if (pane === null) {
@@ -363,7 +375,7 @@ export class Panes {
           code: 'no-live-pane',
         })
       }
-      await this.#paste(tab, session, pane, text, {
+      await this.#paste(tab, session, pane, assignedText, {
         opId,
         kind: 'say',
         expect: expectationOf(record),
@@ -1016,12 +1028,26 @@ export class Panes {
       throw new PaneError('pane is still opening; retry deletion when it settles', { status: 409 })
     await this.#tabs.beginPaneDelete(tab.id, id, generation)
     await this.#drainOpens()
-    const stopped = await this.#requireBridge().request(
-      'pane.kill',
-      { id, generation },
-      { deadlineMs: this.#deadlineMs },
-    )
-    if (stopped?.ok !== true) throw refusedBy(stopped)
+    const bridge = this.#requireBridge()
+    const hosted = async () => {
+      const listed = await bridge.request('pane.list', {}, { deadlineMs: this.#deadlineMs })
+      if (listed?.ok !== true || !Array.isArray(listed.panes) || !listed.panes.every(isListedPane))
+        throw new PaneError('Cannot confirm whether this pane has stopped. Retry deletion.', {
+          status: 503,
+          code: 'pane-list-unavailable',
+        })
+      return listed.panes.some((entry) => entry.id === id && entry.generation === generation)
+    }
+    // Closed panes remain navigable after the host has released their process.
+    // A concurrent close can also remove the key between the list and the kill.
+    if (await hosted()) {
+      const stopped = await bridge.request(
+        'pane.kill',
+        { id, generation },
+        { deadlineMs: this.#deadlineMs },
+      )
+      if (stopped?.ok !== true && (await hosted())) throw refusedBy(stopped)
+    }
     await this.#paneExited({ id, generation })
     await this.#tabs.removePane(tab.id, id, generation)
     return { outcome: 'deleted', tab: tab.id, pane: { id, generation } }
@@ -1513,7 +1539,14 @@ export class Panes {
     await this.#refusable('record-refused', () =>
       this.#store.sentRecord(tab.directory, {
         name,
-        entry: { kind, opId, chars: text.length, pane: pane.id, generation: pane.generation },
+        entry: {
+          kind,
+          opId,
+          chars: text.length,
+          task: text,
+          pane: pane.id,
+          generation: pane.generation,
+        },
         expect,
       }),
     )
@@ -2004,7 +2037,10 @@ export class Panes {
     // Fresh Codex and OpenCode leads wait for the first human message.
     // Codex metadata and OpenCode's API-created ID identify their launch.
     const seed =
-      kind !== 'codex' && kind !== 'opencode' && typeof reserved.nonce === 'string'
+      kind !== 'codex' &&
+      kind !== 'opencode' &&
+      kind !== 'devin' &&
+      typeof reserved.nonce === 'string'
         ? formatLaunchMarker(reserved.nonce)
         : undefined
     const start = interactiveStart(agent, preallocated, seed)
@@ -2213,6 +2249,14 @@ function launchEvidence(kind, name, launchId, row) {
     return { nativeSession: minted, evidence: { preallocatedId: minted } }
   }
   return { nativeSession: undefined, evidence: { nonce: launchId } }
+}
+
+function taskForPane(agent, text, purpose) {
+  try {
+    return taskWithWorkPolicy(agent, text, purpose)
+  } catch (error) {
+    throw new PaneError(error.message)
+  }
 }
 
 /** What the follow-up paste says, when a consult continues a conversation. */

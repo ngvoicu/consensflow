@@ -63,14 +63,14 @@ test('Pi preparation failure is reported, not a crash or false OK', () => {
 })
 
 test('opening the app prepares Pi only when its executable is detected', async () => {
-  const { installEverywhere } = await import('../src/install.js')
+  const { prepareApp } = await import('../src/install.js')
   const t = tempEnv()
   try {
-    assert.equal(installEverywhere(t.env).piExtension.state, 'not-installed')
+    assert.equal(prepareApp(t.env).piExtension.state, 'not-installed')
     mkdirSync(t.env.PATH, { recursive: true })
     writeFileSync(join(t.env.PATH, 'pi'), '#!/bin/sh\nexit 0\n')
     chmodSync(join(t.env.PATH, 'pi'), 0o755)
-    assert.equal(installEverywhere(t.env).piExtension.state, 'installed-unverified')
+    assert.equal(prepareApp(t.env).piExtension.state, 'installed-unverified')
   } finally {
     t.cleanup()
   }

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { roleConfiguration } from '../src/role-skills.js'
+import { addAgent } from '../src/roster.js'
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'cf-role-skills-'))
@@ -81,10 +82,14 @@ lines.on('line', line => {
 })
 
 test('both roles enter native startup context without a skill invocation', async (t) => {
-  for (const kind of ['claude-code', 'codex', 'opencode', 'pi']) {
+  for (const kind of ['claude-code', 'codex', 'opencode', 'pi', 'devin']) {
     for (const role of ['lead', 'pm', 'advisor']) {
       await t.test(`${kind} ${role}`, async (t) => {
         const { env } = await fixture(t)
+        addAgent(
+          { name: 'saved-worker', harness: 'codex', model: 'gpt-6-astra', effort: 'xhigh' },
+          env,
+        )
         const existing = 'User instructions: preserve "quotes", `backticks`, $HOME\nand newlines.'
         const original = {
           theme: 'user',
@@ -133,6 +138,8 @@ test('both roles enter native startup context without a skill invocation', async
             env: { ...env, ...configuration.env },
           })
           assert.deepEqual(JSON.parse(repeated.env.OPENCODE_CONFIG_CONTENT), merged)
+        } else if (kind === 'devin') {
+          instructions = await readFile(configuration.env.CF_DEVIN_ROLE_FILE, 'utf8')
         } else {
           instructions = JSON.parse(configuration.args[1].slice('developer_instructions='.length))
           assert.ok(instructions.startsWith(`${existing}\n\n`))
@@ -143,6 +150,13 @@ test('both roles enter native startup context without a skill invocation', async
         )
         assert.ok(content.includes(role === 'pm' ? '# ConsensFlow PM' : `# ConsensFlow ${role}`))
         assert.ok(!instructions.includes(`name: consensflow-${role === 'pm' ? 'lead' : 'pm'}`))
+        if (role !== 'advisor') {
+          assert.match(instructions, /\| saved-worker \|/)
+          assert.match(instructions, /Complex debugging, architecture and detailed review/)
+          assert.match(instructions, /cross-model review/i)
+        } else {
+          assert.doesNotMatch(instructions, /\| saved-worker \|/)
+        }
         assert.equal(env.OPENCODE_CONFIG_CONTENT, JSON.stringify(original))
       })
     }
@@ -177,29 +191,6 @@ test('workers receive no role instructions across all harnesses', async (t) => {
   await assert.rejects(readFile(join(env.CONSENSFLOW_HOME, 'roles')), { code: 'ENOENT' })
 })
 
-test('app installation and skill removal leave old global skills for manual cleanup', async (t) => {
-  const { root, env } = await fixture(t)
-  const { installSkill, uninstallSkills } = await import('../src/install.js')
-  const global = join(root, '.claude', 'skills', 'consensflow', 'SKILL.md')
-  await mkdir(join(global, '..'), { recursive: true })
-  await writeFile(global, 'old global skill')
-  installSkill(
-    { relPath: 'consensflow/SKILL.md', content: 'new role', source: 'consensflow' },
-    env,
-    {
-      targets: [{ id: 'claude', skillsDir: join(root, '.claude', 'skills') }],
-      force: true,
-    },
-  )
-  assert.equal(await readFile(global, 'utf8'), 'old global skill')
-  const { loadManifest, saveManifest, sha256 } = await import('../src/manifest.js')
-  const manifest = loadManifest(env)
-  manifest.files[global] = { source: 'consensflow', sha256: sha256('old global skill') }
-  saveManifest(manifest, env)
-  uninstallSkills(env, { force: true })
-  assert.equal(await readFile(global, 'utf8'), 'old global skill')
-})
-
 test('advisors can research and run existing tests but only the PM writes specifications', async (t) => {
   const { env } = await fixture(t)
   const configuration = await roleConfiguration('pi', { role: 'advisor', env })
@@ -210,4 +201,29 @@ test('advisors can research and run existing tests but only the PM writes specif
   assert.match(instructions, /Do not edit/)
   assert.match(instructions, /owning PM/)
   assert.match(instructions, /Do not delegate/)
+})
+
+test('launch reads the current roster for its own role and avoids unchanged writes', async (t) => {
+  const { env } = await fixture(t)
+  const { editAgent } = await import('../src/roster.js')
+  const { stat, utimes } = await import('node:fs/promises')
+  addAgent({ name: 'example', harness: 'codex', model: 'gpt-6-astra', effort: 'max' }, env)
+  for (const role of ['lead', 'pm']) {
+    const first = await roleConfiguration('pi', { role, env })
+    const file = first.args[1]
+    const initial = first.args.at(-1)
+    assert.ok(initial.includes('| example |'))
+    await utimes(file, 1, 1)
+    const timestamp = (await stat(file)).mtimeMs
+    assert.deepEqual(await roleConfiguration('pi', { role, env }), first)
+    assert.equal((await stat(file)).mtimeMs, timestamp, 'unchanged role is not rewritten')
+    editAgent('example', { description: `Updated for ${role}` }, env)
+    const refreshed = await roleConfiguration('pi', { role, env })
+    assert.ok(refreshed.args.at(-1).includes(`Updated for ${role}`))
+    assert.equal(await readFile(file, 'utf8'), refreshed.args.at(-1))
+    assert.equal((await stat(file)).mode & 0o777, 0o600)
+  }
+  await assert.rejects(readFile(join(env.CONSENSFLOW_HOME, 'skills-manifest.json')), {
+    code: 'ENOENT',
+  })
 })

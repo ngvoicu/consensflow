@@ -965,13 +965,8 @@ fn terminate_detached(mut pane: Pane, teardown: Arc<Teardown>) -> Result<(), Pan
 
 fn signal_for_termination(pane: &mut Pane) -> Result<bool, PaneError> {
     #[cfg(target_os = "macos")]
-    {
-        pane.process_tree.terminate()?;
-        return has_exited(pane);
-    }
+    pane.process_tree.terminate()?;
 
-    #[cfg(not(target_os = "macos"))]
-    {
     let mut child_exited = has_exited(pane)?;
 
     #[cfg(unix)]
@@ -998,7 +993,6 @@ fn signal_for_termination(pane: &mut Pane) -> Result<bool, PaneError> {
     }
 
     Ok(child_exited)
-    }
 }
 
 // A continuation can create a new process group while staying below the pane.
@@ -1063,12 +1057,12 @@ fn continuation_ancestry_accepts_detached_descendant_and_refuses_foreign_group()
     assert!(!process_owned_by_group(i32::MAX, group));
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(unix)]
 fn is_permission_denied(error: &PaneError) -> bool {
     matches!(error, PaneError::Io(error) if error.kind() == io::ErrorKind::PermissionDenied)
 }
 
-#[cfg(all(unix, any(test, not(target_os = "macos"))))]
+#[cfg(unix)]
 fn signal_process_group(process_group_id: i32) -> Result<(), PaneError> {
     unsafe extern "C" {
         fn kill(pid: i32, signal: i32) -> i32;
@@ -1442,22 +1436,32 @@ mod tests {
     }
 
     #[cfg(target_os = "macos")]
-    fn detached_child(table: &PaneTable, parent_exits: bool, clear_environment: bool) -> (PaneKey, i32) {
+    fn detached_child(
+        table: &PaneTable,
+        parent_exits: bool,
+        clear_environment: bool,
+    ) -> (PaneKey, i32) {
         let script = format!(
             "import subprocess,time; p=subprocess.Popen(['/bin/sleep','60'], start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL{}); print(p.pid, flush=True); {}",
             if clear_environment { ", env={}" } else { "" },
             if parent_exits { "" } else { "time.sleep(60)" },
         );
-        let OpenedPane { key, reader } = table.open(
-            Path::new("/tmp"),
-            &["/usr/bin/python3".into(), "-c".into(), script],
-            &HashMap::new(), terminal_size(24, 80),
-        ).expect("launch a parent with a detached child");
+        let OpenedPane { key, reader } = table
+            .open(
+                Path::new("/tmp"),
+                &["/usr/bin/python3".into(), "-c".into(), script],
+                &HashMap::new(),
+                terminal_size(24, 80),
+            )
+            .expect("launch a parent with a detached child");
         let mut reader = BufReader::new(reader);
         let mut line = String::new();
         reader.read_line(&mut line).unwrap();
         let pid = line.trim().parse::<i32>().expect("native child pid");
-        assert_ne!(unsafe { libc::getpgid(pid) }, table.process_group_id(&key).unwrap());
+        assert_ne!(
+            unsafe { libc::getpgid(pid) },
+            table.process_group_id(&key).unwrap()
+        );
         if parent_exits {
             let mut tail = Vec::new();
             reader.read_to_end(&mut tail).unwrap();
@@ -1477,7 +1481,11 @@ mod tests {
         }
         let stopped = !process_exists(pid);
         // A failing regression must not leave the test's own sleeper behind.
-        if !stopped { unsafe { libc::kill(pid, libc::SIGKILL); } }
+        if !stopped {
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
+        }
         stopped
     }
 
@@ -1495,7 +1503,10 @@ mod tests {
         let foreign_stopped = stopped_with_cleanup(foreign_pid);
         assert!(own_stopped, "detached child survived pane close");
         assert!(foreign_alive, "closing a pane killed another pane's child");
-        assert!(foreign_stopped, "second pane's child survived its own close");
+        assert!(
+            foreign_stopped,
+            "second pane's child survived its own close"
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -1506,7 +1517,10 @@ mod tests {
         let (key, pid) = detached_child(&table, true, false);
         assert!(process_exists(pid), "fixture needs a live orphan");
         table.kill(&key).unwrap();
-        assert!(stopped_with_cleanup(pid), "reparented child survived pane close");
+        assert!(
+            stopped_with_cleanup(pid),
+            "reparented child survived pane close"
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -1516,7 +1530,10 @@ mod tests {
         let table = PaneTable::new();
         let (key, pid) = detached_child(&table, false, true);
         table.kill(&key).unwrap();
-        assert!(stopped_with_cleanup(pid), "owned child with empty environment survived");
+        assert!(
+            stopped_with_cleanup(pid),
+            "owned child with empty environment survived"
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -1526,7 +1543,10 @@ mod tests {
         let table = PaneTable::new();
         let (_, pid) = detached_child(&table, false, false);
         drop(table);
-        assert!(stopped_with_cleanup(pid), "detached child survived table drop");
+        assert!(
+            stopped_with_cleanup(pid),
+            "detached child survived table drop"
+        );
     }
 
     #[cfg(unix)]

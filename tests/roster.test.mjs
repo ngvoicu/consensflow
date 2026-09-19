@@ -50,6 +50,32 @@ describe('the saved roster preserves the v1 execution schema', () => {
   })
 })
 
+it('reports current tiers and tags from legacy rows without writing during discovery', () => {
+  const t = tempEnv()
+  try {
+    mkdirSync(dirname(rosterPath(t.env)), { recursive: true })
+    const original = JSON.stringify({
+      agents: [
+        {
+          id: 'renamed',
+          kind: 'claude-code',
+          model: 'claude-fable-5-1',
+          effort: 'max',
+          skillsPolicy: 'default',
+          profile: { categories: ['coding', 'lead', 'pm'] },
+        },
+      ],
+    })
+    writeFileSync(rosterPath(t.env), original)
+    const [agent] = listAgents(t.env)
+    assert.equal(agent.profile.workTier, 'critical')
+    assert.deepEqual(agent.profile.categories, ['architecture', 'problem-solving', 'reviewer'])
+    assert.equal(readFileSync(rosterPath(t.env), 'utf8'), original)
+  } finally {
+    t.cleanup()
+  }
+})
+
 describe('writes are v1-faithful: cc and pi keep working on the same file', () => {
   const t = tempEnv()
   after(() => t.cleanup())
@@ -64,8 +90,8 @@ describe('writes are v1-faithful: cc and pi keep working on the same file', () =
     assert.equal(zeus.model, 'claude-fable-5-1')
     assert.equal(zeus.effort, 'xhigh')
     assert.equal(zeus.kind, 'claude-code')
-    // v1 keys v3 does not understand must survive untouched:
-    assert.equal(zeus.skillsPolicy, 'default')
+    // Obsolete skill settings are removed; unrelated legacy data survives.
+    assert.equal(Object.hasOwn(zeus, 'skillsPolicy'), false)
     assert.equal(zeus.preset, 'zeus')
     assert.equal(zeus.name, 'Zeus')
     assert.equal(raw.schemaVersion, 1)
@@ -88,6 +114,7 @@ describe('writes are v1-faithful: cc and pi keep working on the same file', () =
     assert.equal(freya.name, 'Freya')
     assert.equal(freya.effort, 'xhigh')
     assert.ok(freya.createdAt)
+    assert.equal(Object.hasOwn(freya, 'skillsPolicy'), false)
   })
 
   it('remove deletes exactly that row, any kind included', () => {
@@ -430,6 +457,57 @@ it('legacy import never copies a link that could redirect a future write outside
     assert.equal(existsSync(join(configRoot(t.env), 'hosts.json')), false)
     assert.equal(readFileSync(outside, 'utf8'), 'preserve')
     assert.equal(readFileSync(join(legacy, 'hosts.json'), 'utf8'), 'preserve')
+  } finally {
+    t.cleanup()
+  }
+})
+
+it('saves user work-tier overrides, preserves them on edits/sync, and restores automatic defaults', async () => {
+  const t = tempEnv()
+  try {
+    addAgent(
+      {
+        name: 'calliope',
+        harness: 'claude',
+        model: 'claude-fable-5-1',
+        effort: 'max',
+        preset: 'calliope',
+      },
+      t.env,
+    )
+    assert.equal(listAgents(t.env)[0].profile.workTier, 'critical')
+    editAgent('calliope', { workTier: 'standard' }, t.env)
+    editAgent('calliope', { effort: 'xhigh' }, t.env)
+    syncAgents(t.env)
+    let row = listAgents(t.env)[0]
+    assert.equal(row.workTier, 'standard')
+    assert.equal(row.profile.workTier, 'standard')
+    const before = readFileSync(rosterPath(t.env), 'utf8')
+    assert.throws(() => editAgent('calliope', { workTier: 'free' }, t.env), /work tier/i)
+    for (const workTier of [['critical'], {}, '__proto__', ''])
+      assert.throws(() => editAgent('calliope', { workTier }, t.env), /work tier/i)
+    assert.equal(readFileSync(rosterPath(t.env), 'utf8'), before)
+    assert.throws(
+      () => addAgent({ name: 'invalid', harness: 'codex', model: 'x', workTier: 'free' }, t.env),
+      /work tier/i,
+    )
+    editAgent('calliope', { workTier: null }, t.env)
+    row = listAgents(t.env)[0]
+    assert.equal(row.workTier, undefined)
+    assert.equal(row.profile.workTier, 'critical')
+    const { normalizeAgent } = await import('../hosts/lib/state.js')
+    const normalized = normalizeAgent({
+      id: 'custom',
+      kind: 'pi',
+      model: 'custom',
+      workTier: 'complex',
+      skillsPolicy: 'explicit',
+      skillPaths: ['old'],
+    })
+    assert.equal(normalized.workTier, 'complex')
+    assert.equal(normalized.profile.workTier, 'complex')
+    assert.equal(Object.hasOwn(normalized, 'skillsPolicy'), false)
+    assert.equal(Object.hasOwn(normalized, 'skillPaths'), false)
   } finally {
     t.cleanup()
   }

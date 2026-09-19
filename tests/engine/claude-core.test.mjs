@@ -13,6 +13,7 @@ import {
 } from '../../hosts/lib/presets.js'
 import {
   buildRunnerInvocation,
+  interactiveStart,
   normalizeProcessOutput,
   runAgent,
   spawnWithInput,
@@ -157,6 +158,7 @@ test('createPacket tells every agent it can work in the project', async () => {
 
 test('agent presets mirror consensflow-pi exactly (image preset included)', () => {
   assert.deepEqual(listPresetIds(), [
+    'devin',
     'hemera',
     'phaethon',
     'leto',
@@ -258,7 +260,15 @@ test('agent presets mirror consensflow-pi exactly (image preset included)', () =
   ])
   // All four engines are integrated, same as consensflow-pi — plus the Codex-backend image kind.
   const kinds = new Set(AGENT_PRESETS.map((preset) => preset.kind))
-  assert.deepEqual([...kinds].sort(), ['claude-code', 'codex', 'image', 'kimi', 'opencode', 'pi'])
+  assert.deepEqual([...kinds].sort(), [
+    'claude-code',
+    'codex',
+    'devin',
+    'image',
+    'kimi',
+    'opencode',
+    'pi',
+  ])
   assert.equal(getPreset('pygmalion').kind, 'image')
   assert.equal(getPreset('zeus').kind, 'claude-code')
   assert.equal(getPreset('gaia').model, 'gpt-5.6-terra')
@@ -398,6 +408,14 @@ test('every preset survives normalize + runner invocation with correct flags (al
     assert.equal(agent.kind, preset.kind, `${preset.preset}: kind`)
     assert.equal(agent.model, preset.model, `${preset.preset}: model`)
 
+    if (preset.kind === 'devin') {
+      const invocation = interactiveStart(agent, null, 'Native task')
+      assert.equal(invocation.command, 'devin')
+      assert.deepEqual(invocation.args, [])
+      assert.equal(invocation.prompt, 'Native task')
+      assert.equal(invocation.env.CONSENSFLOW_CHILD, '1')
+      continue
+    }
     if (preset.kind === 'image') {
       assert.throws(() => buildRunnerInvocation(agent, '/tmp/packet.md', '/repo'), /image agents/)
       continue
@@ -497,7 +515,11 @@ test('runner invocation maps tool policies', () => {
     '/tmp/packet.md',
     '/repo',
   )
-  assert.ok(sterilePi.args.includes('--no-skills'))
+  assert.equal(
+    sterilePi.args.includes('--no-skills'),
+    false,
+    'legacy skill policy no longer changes discovery',
+  )
   const codex = buildRunnerInvocation(
     { kind: 'codex', model: 'gpt-5.5', effort: 'xhigh' },
     '/tmp/packet.md',

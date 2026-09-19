@@ -7,7 +7,7 @@ describe('every tool ships a list of ready-made agents', () => {
   it('covers every harness, each with a real list (image has one)', () => {
     assert.deepEqual(Object.keys(CATALOG).sort(), [...HARNESSES].sort())
     for (const [harness, entries] of Object.entries(CATALOG)) {
-      const least = ['image', 'kimi'].includes(harness) ? 1 : 3
+      const least = ['image', 'kimi', 'devin'].includes(harness) ? 1 : 3
       assert.ok(entries.length >= least, `${harness} needs a real list`)
     }
   })
@@ -289,7 +289,13 @@ describe('catalog presentation follows actual model and effort', () => {
         assert.ok(entry.profile.routeLabel, entry.name)
         assert.ok(entry.profile.goodFor.length > 15, entry.name)
         assert.ok(
-          entry.profile.categories.includes(entry.name === 'pygmalion' ? 'images' : 'coding'),
+          entry.profile.categories.includes(
+            entry.name === 'pygmalion'
+              ? 'images'
+              : entry.profile.workTier === 'critical'
+                ? 'reviewer'
+                : 'coding',
+          ),
         )
       }
     }
@@ -357,7 +363,7 @@ it('ships all compatible low/medium choices with stable identities and Pi OpenRo
       assert.equal(entry.effort, effort)
     }
   }
-  assert.equal(Object.values(CATALOG).flat().length, 98)
+  assert.equal(Object.values(CATALOG).flat().length, 99)
   for (const name of ['orpheus', 'linus', 'erato', 'kronos', 'atlas']) {
     assert.match(catalogEntry(name).model, /^openrouter\/anthropic\//)
     assert.equal(catalogEntry(name).profile.routeLabel, 'OpenRouter · API')
@@ -385,15 +391,16 @@ it('lead and PM need xhigh or higher; reviewer recommendations begin at medium',
   for (const [harness, model] of pairs) {
     for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) {
       const categories = agentProfile({ harness, model, effort }).categories
-      const expected = ['coding']
-      if (['xhigh', 'max'].includes(effort)) expected.push('lead', 'pm')
-      if (effort !== 'low') expected.push('reviewer')
-      assert.deepEqual(categories, expected, model + ' ' + effort)
+      const critical = /astra|fable/.test(model) && effort === 'max'
+      const expected = critical ? ['architecture', 'problem-solving', 'reviewer'] : ['coding']
+      if (!critical && ['xhigh', 'max'].includes(effort)) expected.push('lead', 'pm')
+      if (!critical && effort !== 'low') expected.push('reviewer')
+      assert.deepEqual(categories, expected, `${model} ${effort}`)
     }
   }
   assert.deepEqual(
     agentProfile({ harness: 'codex', model: 'gpt-6-astra', effort: 'ultra' }).categories,
-    ['coding', 'lead', 'pm', 'reviewer'],
+    ['architecture', 'problem-solving', 'reviewer'],
   )
   assert.deepEqual(
     agentProfile({ harness: 'codex', model: 'gpt-5.6-luna', effort: 'medium' }).categories,
@@ -425,4 +432,50 @@ it('Muse Contributor variants share model identity while retaining route terms a
     } else assert.equal(p.profile.routeNote, undefined)
   }
   assert.equal(catalogEntry('gefjon').profile.routeLabel, 'OpenCode Zen · Contributor · Free')
+})
+
+it('Devin preserves the native configured model without inventing effort or benchmark identity', () => {
+  const entry = catalogEntry('devin')
+  assert.equal(entry?.harness, 'devin')
+  assert.equal(entry.model, 'default')
+  assert.equal(entry.effort, undefined)
+  assert.equal(entry.profile.modelKey, 'devin-configured')
+  assert.equal(entry.profile.modelLabel, 'Devin configured model')
+  assert.deepEqual(entry.profile.categories, ['coding', 'reviewer'])
+  assert.deepEqual(EFFORTS.devin, [])
+})
+
+it('assigns four work tiers by model and effort across routes, without agent-name rules', () => {
+  for (const [name, tier] of [
+    ['astraeus', 'critical'],
+    ['calliope', 'critical'],
+    ['phosphoros', 'critical'],
+    ['asteria', 'complex'],
+    ['clio', 'complex'],
+    ['ilmarinen', 'complex'],
+    ['zeus', 'standard'],
+    ['thalia', 'standard'],
+    ['maia', 'standard'],
+    ['hyperion', 'standard'],
+    ['diana', 'light'],
+    ['electra', 'light'],
+    ['pygmalion', 'light'],
+  ]) {
+    const entry = catalogEntry(name)
+    assert.equal(entry.profile.workTier, tier, name)
+    assert.equal(agentProfile({ ...entry, name: 'renamed' }).workTier, tier, name)
+  }
+  for (const [harness, entries] of Object.entries(CATALOG)) {
+    for (const entry of entries) {
+      assert.ok(['critical', 'complex', 'standard', 'light'].includes(entry.profile.workTier))
+      const twin = Object.values(CATALOG)
+        .flat()
+        .find((p) => p.profile.modelKey === entry.profile.modelKey && p.effort === entry.effort)
+      assert.equal(entry.profile.workTier, twin.profile.workTier, harness + entry.name)
+    }
+  }
+  const custom = agentProfile({ harness: 'codex', model: 'custom', workTier: 'critical' })
+  assert.equal(custom.workTier, 'critical')
+  assert.deepEqual(custom.categories, ['architecture', 'problem-solving', 'reviewer'])
+  assert.doesNotMatch(custom.goodFor, /coding|implementation/i)
 })

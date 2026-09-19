@@ -12,6 +12,185 @@ import { addAgent, removeAgent } from '../src/roster.js'
 import { startUiServer } from '../src/ui.js'
 import { tempEnv, testRoleConfiguration } from './helpers.mjs'
 
+it('task board keeps coordinator CRUD scoped while the human combines PM and Lead', async () => {
+  const s = await paneServer()
+  try {
+    const lead = await s.tab('pi')
+    const pm = await s.rust.request('pm.open', { tab: lead.tab.id, harness: 'pi' })
+    const pmToken = s.seen.open.at(-1).env.CONSENSFLOW_APP_TOKEN
+    const change = (token, tab, body) =>
+      s.api(token, '/api/panes/task.change', { method: 'POST', body: { tab, change: body } })
+    const item = await json(
+      await change(lead.lead, lead.tab.id, { action: 'add', title: 'Implement settings' }),
+      200,
+    )
+    const spec = await json(
+      await change(pmToken, pm.tab, {
+        action: 'add',
+        title: 'Write specification',
+        kind: 'specification',
+      }),
+      200,
+    )
+    const own = await json(
+      await s.api(lead.lead, '/api/panes/task.list', {
+        method: 'POST',
+        body: { tab: lead.tab.id, combined: true },
+      }),
+      200,
+    )
+    assert.equal(own.total, 1)
+    assert.equal(own.tasks[0].id, item.id)
+    const both = await s.rust.request('task.list', { tab: lead.tab.id })
+    assert.equal(both.total, 2)
+    assert.equal(
+      (
+        await s.api(lead.lead, '/api/panes/task.get', {
+          method: 'POST',
+          body: { tab: lead.tab.id, id: spec.id },
+        })
+      ).status,
+      404,
+    )
+    const changed = await s.rust.request('task.change', {
+      tab: pm.tab,
+      change: {
+        action: 'update',
+        id: spec.id,
+        revision: spec.revision,
+        question: 'Approve this scope?',
+      },
+    })
+    const question = changed.questions[0].id
+    assert.equal(
+      (
+        await change(pmToken, pm.tab, {
+          action: 'answer',
+          id: spec.id,
+          revision: changed.revision,
+          question,
+          answer: 'Yes',
+        })
+      ).status,
+      403,
+    )
+    const answered = await s.rust.request('task.change', {
+      tab: pm.tab,
+      change: {
+        action: 'answer',
+        id: spec.id,
+        revision: changed.revision,
+        question,
+        answer: 'Yes',
+      },
+    })
+    assert.equal(answered.questions[0].answer, 'Yes')
+    const stale = await s.rust.request('task.change', {
+      tab: pm.tab,
+      change: { action: 'update', id: spec.id, revision: changed.revision, status: 'accepted' },
+    })
+    assert.equal(stale.ok, false)
+    assert.match(stale.reason, /changed/)
+  } finally {
+    await s.close()
+  }
+})
+
+it('task board captures actual seed and followup without duplicating prompts in sent history', async () => {
+  const s = await paneServer()
+  try {
+    const lead = await s.tab('pi')
+    const opened = await json(
+      await s.api(lead.lead, '/api/panes/consult', {
+        method: 'POST',
+        body: { tab: lead.tab.id, agent: 'nyx', task: 'Check parser behavior', opId: 'task-open' },
+      }),
+      200,
+    )
+    const frame = s.seen.open.at(-1)
+    const controller = await json(
+      await s.api(null, '/api/launch/redeem', {
+        method: 'POST',
+        body: { ticket: frame.env.CONSENSFLOW_LAUNCH },
+      }),
+      200,
+    )
+    const send = async (task, opId) =>
+      json(
+        await s.api(controller.capability, '/api/panes/sent.record', {
+          method: 'POST',
+          body: {
+            launch: controller.launch,
+            generation: frame.generation,
+            opId,
+            entry: { kind: 'seed', chars: task.length, task, pane: frame.id },
+          },
+        }),
+        200,
+      )
+    await send('Check parser behavior', 'task-seed')
+    await send('Also check malformed input', 'task-next')
+    await send('Also check malformed input', 'task-next')
+    const listed = await s.rust.request('task.list', { tab: lead.tab.id })
+    assert.equal(listed.total, 1)
+    const item = await s.rust.request('task.get', { tab: lead.tab.id, id: listed.tasks[0].id })
+    assert.equal(item.description, 'Check parser behavior')
+    assert.equal(item.history.length, 2)
+    assert.equal(item.history[1].note, 'Also check malformed input')
+    assert.equal(s.threads()[opened.conversation].sent[0].task, undefined)
+    assert.equal(
+      (
+        await s.api(controller.capability, '/api/panes/task.list', {
+          method: 'POST',
+          body: { launch: controller.launch, generation: frame.generation },
+        })
+      ).status,
+      403,
+    )
+  } finally {
+    await s.close()
+  }
+})
+
+it('task board viewing and acceptance never mutate any result receipts', async () => {
+  const s = await paneServer()
+  try {
+    const lead = await s.tab('pi')
+    const path = join(s.env.CONSENSFLOW_HOME, 'workspaces', workspaceKey(s.workspace), 'inbox.json')
+    const inbox = emptyInbox()
+    for (let i = 1; i <= 3; i++)
+      indexResult(inbox, {
+        id: `d-${i}`,
+        owner: lead.tab.id,
+        conversation: 'recorded-worker',
+        agent: 'nyx',
+        kind: 'claude-code',
+        session: 'native',
+        answerId: `answer-${i}`,
+        answer: `Full answer ${i}`,
+        now: i,
+      })
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, JSON.stringify(inbox))
+    const before = readFileSync(path, 'utf8')
+    const task = await s.rust.request('task.change', {
+      tab: lead.tab.id,
+      change: { action: 'add', title: 'Review implementation' },
+    })
+    assert.equal(task.ok, true)
+    await s.rust.request('task.list', { tab: lead.tab.id })
+    await s.rust.request('task.get', { tab: lead.tab.id, id: task.id })
+    await s.rust.request('task.change', {
+      tab: lead.tab.id,
+      change: { action: 'update', id: task.id, revision: task.revision, status: 'accepted' },
+    })
+    assert.equal(readFileSync(path, 'utf8'), before)
+    assert.equal((await s.rust.request('state.list', {})).results.length, 3)
+  } finally {
+    await s.close()
+  }
+})
+
 /**
  * The pane HTTP surface (Phase 2, TEST-PANE-17) against the REAL server,
  * with this test on the pipe as Rust.
@@ -81,7 +260,7 @@ async function paneServer({
   const shims = join(t.root, 'shims')
   mkdirSync(shims, { recursive: true })
   const shimmed = {}
-  for (const command of ['claude', 'codex', 'pi', 'opencode', 'kimi']) {
+  for (const command of ['claude', 'codex', 'pi', 'opencode', 'kimi', 'devin']) {
     const file = join(shims, command)
     writeFileSync(
       file,
@@ -113,7 +292,9 @@ const server = createServer(async (req, res) => {
 })
 server.listen(Number(args[args.indexOf('--port') + 1]), '127.0.0.1')
 `
-          : '#!/bin/sh\nexit 0\n',
+          : command === 'devin'
+            ? '#!/bin/sh\necho "Devin CLI 3000.10.21"\n'
+            : '#!/bin/sh\nexit 0\n',
     )
     chmodSync(file, 0o755)
     shimmed[command] = file
@@ -385,6 +566,45 @@ server.listen(Number(args[args.indexOf('--port') + 1]), '127.0.0.1')
     },
   }
 }
+
+it('Devin lead and PM start idle with private role hooks; PM advisors have no receiver capability', async () => {
+  const { roleConfiguration } = await import('../src/role-skills.js')
+  const s = await paneServer({ prepareRole: roleConfiguration })
+  try {
+    addAgent({ name: 'devin-review', harness: 'devin', model: 'default' }, s.env)
+    const lead = await s.tab('devin')
+    assert.equal(lead.frame.argv[0], s.shimmed.devin)
+    assert.deepEqual(lead.frame.argv.slice(1, 2), ['--config'])
+    assert.equal(lead.frame.argv.includes('--prompt-file'), false)
+    assert.ok(lead.frame.env.CF_DEVIN_ROLE_FILE)
+    assert.ok(lead.frame.env.CF_RESULT_RECEIVER)
+    const pm = await s.rust.request('pm.open', { tab: lead.tab.id, harness: 'devin' })
+    assert.equal(pm.ok, true)
+    const pmFrame = s.seen.open.at(-1)
+    assert.match(readFileSync(pmFrame.env.CF_DEVIN_ROLE_FILE, 'utf8'), /# ConsensFlow PM/)
+    const opened = await json(
+      await s.api(pmFrame.env.CONSENSFLOW_APP_TOKEN, '/api/panes/consult', {
+        method: 'POST',
+        body: {
+          tab: pm.tab,
+          agent: 'devin-review',
+          task: 'Review only',
+          fresh: true,
+          opId: 'devin-advisor',
+        },
+      }),
+      200,
+    )
+    const frame = s.seen.open.at(-1)
+    assert.ok(opened.conversation)
+    const integration = JSON.parse(frame.env.CF_DELIVERY_CONFIG)
+    assert.match(readFileSync(integration.env.CF_DEVIN_ROLE_FILE, 'utf8'), /advisor/i)
+    assert.equal(frame.env.CF_RESULT_RECEIVER, undefined)
+    assert.equal(integration.channel.kind, 'devin-tui')
+  } finally {
+    await s.close()
+  }
+})
 
 describe('POST /api/panes/consult applies the continuation rule', () => {
   let s
@@ -4873,6 +5093,79 @@ it('resuming a session reopens every bound worker without redispatching its task
   }
 })
 
+it('deleting a closed worker removes its saved pane without killing a different generation', async () => {
+  const s = await paneServer()
+  const killed = []
+  s.rust.on('pane.kill', (body) => {
+    killed.push(body)
+    return { ok: false, error: 'pane is not open' }
+  })
+  try {
+    const tab = await s.tab()
+    const worker = await json(
+      await s.api(tab.lead, '/api/panes/consult', {
+        method: 'POST',
+        body: { tab: tab.tab.id, agent: 'zeus', task: 'work', fresh: true, opId: 'delete-closed' },
+      }),
+      200,
+    )
+    await s.endPane(worker.pane, tab.lead)
+    const history = s.threads()[worker.conversation].sessionId
+    s.state.list = () => ({
+      ok: true,
+      panes: [{ ...worker.pane, generation: worker.pane.generation + 1, alive: true }],
+    })
+    const removed = await s.rust.request('pane.delete', worker.pane)
+    assert.equal(removed.ok, true, JSON.stringify(removed))
+    assert.deepEqual(killed, [])
+    assert.equal(s.threads()[worker.conversation].sessionId, history)
+    const current = (await s.rust.request('state.list', {})).tabs.find(
+      (row) => row.id === tab.tab.id,
+    )
+    assert.equal(
+      current.panes.some((pane) => pane.id === worker.pane.id),
+      false,
+    )
+    assert.equal(current.closed, false)
+  } finally {
+    await s.close()
+  }
+})
+
+it('pane deletion retains entries when host state is unknown or a failed stop leaves the process present', async () => {
+  const s = await paneServer()
+  const killed = []
+  s.rust.on('pane.kill', (body) => {
+    killed.push(body)
+    return { ok: false, error: 'stop failed' }
+  })
+  try {
+    const tab = await s.rust.request('tab.open', { dir: s.workspace, harness: 'claude-code' })
+    const shell = await s.rust.request('shell.open', { tab: tab.tab })
+    s.state.list = () => ({ ok: true, panes: [{ ...shell.pane }] })
+    assert.equal((await s.rust.request('pane.delete', shell.pane)).ok, false)
+    assert.deepEqual(killed, [], 'malformed host list cannot authorize a kill')
+    s.state.list = () => ({ ok: true, panes: [{ ...shell.pane, alive: true }] })
+    assert.equal((await s.rust.request('pane.delete', shell.pane)).ok, false)
+    assert.deepEqual(killed, [shell.pane])
+    const current = (await s.rust.request('state.list', {})).tabs.find((row) => row.id === tab.tab)
+    assert.equal(
+      current.panes.some((pane) => pane.id === shell.pane.id),
+      true,
+    )
+    // Close raced with Delete: a failed kill is only harmless after confirmed absence.
+    let reads = 0
+    s.state.list = () => ({
+      ok: true,
+      panes: ++reads === 1 ? [{ ...shell.pane, alive: true }] : [],
+    })
+    assert.equal((await s.rust.request('pane.delete', shell.pane)).ok, true)
+    assert.equal(reads, 2)
+  } finally {
+    await s.close()
+  }
+})
+
 it('permanent pane deletion stops only the requested generation and refuses the lead', async () => {
   const s = await paneServer()
   const killed = []
@@ -4883,6 +5176,7 @@ it('permanent pane deletion stops only the requested generation and refuses the 
   try {
     const tab = await s.rust.request('tab.open', { dir: s.workspace, harness: 'claude-code' })
     const shell = await s.rust.request('shell.open', { tab: tab.tab })
+    s.state.list = () => ({ ok: true, panes: [{ ...shell.pane, alive: true }] })
     const stale = await s.rust.request('pane.delete', {
       id: shell.pane.id,
       generation: shell.pane.generation + 1,
@@ -4930,7 +5224,7 @@ async function codexQueueFixture(channel, session, root) {
   }
 }
 
-for (const kind of ['claude-code', 'codex', 'pi', 'opencode']) {
+for (const kind of ['claude-code', 'codex', 'pi', 'opencode', 'devin']) {
   it(`coordinator receiver capability is wired separately for lead and PM: ${kind}`, async () => {
     const s = await paneServer({ nativeCodex: true })
     try {
@@ -4965,10 +5259,12 @@ for (const [kind, agent] of [
   ['codex', 'zeus'],
   ['pi', 'clio'],
   ['opencode', 'sage'],
+  ['devin', 'devin'],
 ]) {
   it(`PM advisor ${kind} keeps its role and native identity when reopened`, async () => {
     const s = await paneServer()
     try {
+      if (agent === 'devin') addAgent({ name: agent, harness: 'devin', model: 'default' }, s.env)
       if (agent === 'sage')
         addAgent({ name: agent, harness: 'opencode', model: 'opencode/muse-spark-1' }, s.env)
       const parent = await s.rust.request('tab.open', { dir: s.workspace, harness: 'pi' })
@@ -5148,6 +5444,81 @@ it('PM suspension, advisor restoration and deletion preserve its parent and anot
     )
     assert.equal(disk().find((t) => t.id === parent.tab).closed, false)
     assert.equal(disk().find((t) => t.id === other.tab).closed, false)
+  } finally {
+    await s.close()
+  }
+})
+
+it('critical work requires an allowed purpose on initial tasks and every follow-up, for lead and PM', async () => {
+  const s = await paneServer()
+  try {
+    addAgent({ name: 'specialist', harness: 'codex', model: 'gpt-6-astra', effort: 'max' }, s.env)
+    const tab = await s.tab()
+    const pm = await s.rust.request('pm.open', { tab: tab.tab.id, harness: 'claude-code' })
+    assert.equal(pm.ok, true)
+    const pmToken = s.seen.open.at(-1).env.CONSENSFLOW_APP_TOKEN
+    for (const [owner, token, tabId] of [
+      ['lead', tab.lead, tab.tab.id],
+      ['pm', pmToken, pm.tab],
+    ]) {
+      const consult = (extra) =>
+        s.api(token, '/api/panes/consult', {
+          method: 'POST',
+          body: {
+            tab: tabId,
+            agent: 'specialist',
+            task: 'Assess this decision',
+            fresh: true,
+            ...extra,
+          },
+        })
+      const opens = s.seen.open.length
+      for (const purpose of [undefined, 'coding', 'routine-advice']) {
+        const res = await consult({ opId: owner + String(purpose), purpose })
+        assert.equal(res.status, 400, await res.text())
+      }
+      assert.equal(s.seen.open.length, opens)
+      const opened = await json(
+        await consult({ opId: `${owner}-allowed`, purpose: 'architecture' }),
+        200,
+      )
+      const frame = s.seen.open.at(-1)
+      assert.ok(frame.argv.includes('--purpose'))
+      assert.ok(frame.argv.includes('architecture'))
+      assert.match(frame.argv.join(' '), /No coding/)
+      const body = { tab: tabId, session: opened.conversation, text: 'Check the revised proposal' }
+      const pastes = s.seen.paste.length
+      await json(
+        await s.api(token, '/api/panes/say', {
+          method: 'POST',
+          body: { ...body, opId: `${owner}-say-refused` },
+        }),
+        400,
+      )
+      assert.equal(s.seen.paste.length, pastes)
+      await json(
+        await s.api(token, '/api/panes/say', {
+          method: 'POST',
+          body: { ...body, opId: `${owner}-say-ok`, purpose: 'critical-review' },
+        }),
+        200,
+      )
+      assert.match(s.seen.paste.at(-1).body, /No coding/)
+      assert.match(s.seen.paste.at(-1).body, /Check the revised proposal/)
+      await json(
+        await s.api(token, '/api/panes/consult', {
+          method: 'POST',
+          body: {
+            tab: tabId,
+            agent: 'specialist',
+            session: opened.conversation,
+            task: 'Another question',
+            opId: `${owner}-continued-refused`,
+          },
+        }),
+        400,
+      )
+    }
   } finally {
     await s.close()
   }

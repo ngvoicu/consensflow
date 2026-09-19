@@ -7,7 +7,6 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -15,9 +14,7 @@ import { dirname, isAbsolute, join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { detectHarnesses, harnessPath } from '../src/harnesses.js'
 import * as installation from '../src/install.js'
-import { skillsStatus, uninstallSkills } from '../src/install.js'
 import { addAgent } from '../src/roster.js'
-import { healOnOpen, refreshInstalledSkill, skillGaps, staleSkills } from '../src/sync.js'
 import { tempEnv } from './helpers.mjs'
 
 function stubCli(env, name) {
@@ -27,7 +24,7 @@ function stubCli(env, name) {
   chmodSync(path, 0o755)
 }
 
-describe('harnesses are detected by their CLI on PATH, dirs from their own env', () => {
+describe('harness executable discovery', () => {
   const t = tempEnv()
   after(() => t.cleanup())
 
@@ -39,18 +36,12 @@ describe('harnesses are detected by their CLI on PATH, dirs from their own env',
     assert.deepEqual(harnesses.map((a) => a.id).sort(), ['claude', 'codex'])
   })
 
-  it('honours CLAUDE_CONFIG_DIR and CODEX_HOME for the skills dirs', () => {
-    const byId = Object.fromEntries(detectHarnesses(t.env).map((a) => [a.id, a]))
-    assert.equal(byId.claude.skillsDir, join(t.env.CLAUDE_CONFIG_DIR, 'skills'))
-    assert.equal(byId.codex.skillsDir, join(t.env.CODEX_HOME, 'skills'))
-  })
-
-  it('places opencode under XDG config and pi in its native agent directory', () => {
-    stubCli(t.env, 'opencode')
-    stubCli(t.env, 'pi')
-    const byId = Object.fromEntries(detectHarnesses(t.env).map((a) => [a.id, a]))
-    assert.equal(byId.opencode.skillsDir, join(t.env.XDG_CONFIG_HOME, 'opencode', 'skills'))
-    assert.equal(byId.pi.skillsDir, join(t.env.HOME, '.pi', 'agent', 'skills'))
+  it('detection returns executable identities without unused global skill destinations', () => {
+    for (const name of ['claude', 'codex', 'opencode', 'pi', 'kimi', 'devin']) stubCli(t.env, name)
+    const harnesses = detectHarnesses(t.env)
+    assert.equal(harnesses.length, 6)
+    for (const harness of harnesses)
+      assert.deepEqual(Object.keys(harness).sort(), ['command', 'id'])
   })
 })
 
@@ -81,59 +72,27 @@ describe('BO12: the path a pane is launched with is absolute, whatever PATH says
   })
 })
 
-describe('private app skill lifecycle', () => {
-  for (const force of [false, true])
-    it(`preserves owned and unowned global skills with force=${force}`, () => {
-      const t = tempEnv()
-      try {
-        for (const name of ['claude', 'codex', 'pi', 'opencode']) stubCli(t.env, name)
-        const globals = detectHarnesses(t.env).map((harness) =>
-          join(harness.skillsDir, 'consensflow', 'SKILL.md'),
-        )
-        for (const file of globals) {
-          mkdirSync(dirname(file), { recursive: true })
-          writeFileSync(file, 'global canary')
-        }
-        addAgent({ name: 'zeus', harness: 'claude', model: 'example' }, t.env)
-        installation.installEverywhere(t.env, { force })
-        refreshInstalledSkill(t.env)
-        healOnOpen(t.env)
-        const rows = skillsStatus(t.env)
-        assert.equal(rows.length, 1)
-        assert.ok(rows[0].path.startsWith(t.env.CONSENSFLOW_HOME))
-        assert.match(readFileSync(rows[0].path, 'utf8'), /name: consensflow-lead/)
-        assert.equal(skillGaps(t.env).length, 0)
-        assert.equal(staleSkills(t.env).length, 0)
-        uninstallSkills(t.env, { force })
-        for (const file of globals) assert.equal(readFileSync(file, 'utf8'), 'global canary')
-      } finally {
-        t.cleanup()
-      }
-    })
-
-  it('generates a useful lead skill before any workers are configured', () => {
-    const t = tempEnv()
-    try {
-      healOnOpen(t.env)
-      assert.ok(existsSync(join(t.env.CONSENSFLOW_BIN_DIR, 'cf')))
-      const rows = skillsStatus(t.env)
-      assert.equal(rows.length, 1)
-      assert.match(readFileSync(rows[0].path, 'utf8'), /cf agent list/)
-    } finally {
-      t.cleanup()
+it('app preparation owns its launcher and integrations, not role documents or global skills', () => {
+  const t = tempEnv()
+  try {
+    for (const name of ['claude', 'codex', 'pi', 'opencode']) stubCli(t.env, name)
+    const globals = [
+      t.env.CLAUDE_CONFIG_DIR,
+      t.env.CODEX_HOME,
+      join(t.env.XDG_CONFIG_HOME, 'opencode'),
+      join(t.env.HOME, '.pi', 'agent'),
+    ].map((root) => join(root, 'skills', 'consensflow', 'SKILL.md'))
+    for (const file of globals) {
+      mkdirSync(dirname(file), { recursive: true })
+      writeFileSync(file, 'global canary')
     }
-  })
-
-  it('unchanged private generation preserves the file and reports unchanged', () => {
-    const t = tempEnv()
-    try {
-      const first = refreshInstalledSkill(t.env)[0]
-      const before = statSync(first.path).mtimeMs
-      const next = refreshInstalledSkill(t.env)[0]
-      assert.equal(next.action, 'unchanged')
-      assert.equal(statSync(first.path).mtimeMs, before)
-    } finally {
-      t.cleanup()
-    }
-  })
+    addAgent({ name: 'zeus', harness: 'claude', model: 'example' }, t.env)
+    for (let i = 0; i < 2; i++) installation.prepareApp(t.env)
+    assert.ok(existsSync(join(t.env.CONSENSFLOW_BIN_DIR, 'cf')))
+    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'roles')), false)
+    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'skills-manifest.json')), false)
+    for (const file of globals) assert.equal(readFileSync(file, 'utf8'), 'global canary')
+  } finally {
+    t.cleanup()
+  }
 })

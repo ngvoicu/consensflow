@@ -42,6 +42,26 @@ export class Watcher {
     this.started = false
     this.unsubscribe = []
     this.signals = new Map()
+    this.activities = new Map()
+  }
+  activity(tab, pane, row, receiver) {
+    const key = activityKey(tab, pane, row, receiver)
+    const observed = key && this.activities.get(key)
+    return observed?.expiresAt > this.now() ? observed : { state: 'unknown' }
+  }
+  #observeActivity(key, native) {
+    if (!key) return
+    const state =
+      native?.unknown || native?.replaced || native?.continuedInSessionId
+        ? 'unknown'
+        : native?.inFlight || native?.settlement?.state === 'in-flight'
+          ? 'working'
+          : native?.failed
+            ? 'failed'
+            : native?.settlement?.state === 'settled'
+              ? 'idle'
+              : 'unknown'
+    this.activities.set(key, { state, expiresAt: this.now() + 10_000 })
   }
   attachBridge(bridge) {
     for (const unsubscribe of this.unsubscribe.splice(0)) unsubscribe()
@@ -63,7 +83,13 @@ export class Watcher {
   }
   reconcile() {
     if (this.closed) return this.tail
-    const next = this.tail.then(() => this.#scan())
+    if (this.scanning) return this.scanning
+    const next = this.tail
+      .then(() => this.#scan())
+      .finally(() => {
+        this.scanning = null
+      })
+    this.scanning = next
     this.tail = next.catch(this.onError)
     return next
   }
@@ -87,6 +113,8 @@ export class Watcher {
   }
   async #scan() {
     const tabs = await this.tabs.list()
+    for (const [key, value] of this.activities)
+      if (value.expiresAt <= this.now()) this.activities.delete(key)
     for (const directory of new Set(tabs.map((tab) => tab.directory))) {
       if (this.closed) return
       try {
@@ -102,15 +130,33 @@ export class Watcher {
   async #workspace(directory, tabs) {
     const threads = await this.store.readThreads(directory)
     const observed = []
+    const current = await this.store.readInbox(directory)
+    const nativeReceipts = new Map()
     for (const tab of tabs) {
+      const receiver = current.receivers[tab.id]
+      const pane = tab.panes.find((pane) => pane.kind === 'lead')
+      const key = pane && activityKey(tab, pane, null, receiver)
+      if (key) {
+        const native = await this.#native(
+          { kind: receiver.kind, binding: { launchId: receiver.launch } },
+          directory,
+          receiver.session,
+        )
+        this.#observeActivity(key, native)
+        nativeReceipts.set(JSON.stringify([receiver.kind, receiver.session]), native)
+      }
       for (const [conversation, row] of Object.entries(threads)) {
         if (!belongs(row, tab) || !row.sessionId || !row.binding) continue
         let session = row.sessionId
+        let latest
+        const pane = tab.panes.find((pane) => pane.conversation === conversation)
+        const key = pane && activityKey(tab, pane, row)
         const visited = new Set()
         // Native continuation is explicit source ancestry, never newest-file or cwd matching.
         while (session && !visited.has(session) && visited.size < 16) {
           visited.add(session)
           const native = await this.#native(row, directory, session)
+          latest = native
           for (const item of complete(native))
             observed.push({
               owner: tab.id,
@@ -125,10 +171,10 @@ export class Watcher {
           if (native.replaced || native.unknown || row.kind !== 'claude-code') break
           session = native.continuedInSessionId
         }
+        this.#observeActivity(key, latest)
       }
     }
     // Allocate outside Store's queue; gaps are harmless, nested mutations would deadlock.
-    const current = await this.store.readInbox(directory)
     const legacy = Object.values(await this.store.readDeliveries(directory))
     const additions = observed.filter(
       (item) =>
@@ -166,7 +212,6 @@ export class Watcher {
       if (digest(envelope(old)) !== old.digest) continue
       histories.push({ old, id: await this.store.allocateDeliveryId() })
     }
-    const nativeReceipts = new Map()
     for (const result of Object.values(current.results))
       for (const claim of result.claims) {
         if (!['submitting', 'uncertain'].includes(claim.state)) continue
@@ -330,7 +375,7 @@ export class Watcher {
     }
   }
   async results(tabId) {
-    await this.reconcile()
+    this.reconcile().catch(this.onError)
     const tab = await this.tabs.get(tabId)
     if (!tab) throw new Error(`unknown session ${tabId}`)
     const state = await this.store.readInbox(tab.directory)
@@ -365,7 +410,8 @@ export class Watcher {
     return [...groups.values()]
   }
   async readResult(tabId, conversation, answerId) {
-    await this.reconcile()
+    // A durable report must not wait for unrelated harnesses or native histories.
+    this.reconcile().catch(this.onError)
     const tab = await this.tabs.get(tabId)
     if (!tab) throw new Error(`unknown session ${tabId}`)
     const state = await this.store.readInbox(tab.directory)
@@ -407,4 +453,51 @@ export class Watcher {
       }
     })
   }
+}
+
+// Cached activity belongs to a live launch and selected native conversation.
+// A /new, resume, or pane replacement invalidates it before the next scan finishes.
+function activityKey(tab, pane, row, receiver) {
+  if (tab.closed || tab.deleting || pane.closed || pane.deleting || pane.failure) return null
+  if (pane.kind === 'lead') {
+    if (
+      !tab.lead.reserved?.resolvedAt ||
+      !receiver ||
+      receiver.retiredAt !== undefined ||
+      receiver.owner !== tab.id ||
+      receiver.pane !== pane.id ||
+      receiver.generation !== pane.generation ||
+      receiver.kind !== tab.lead.harness ||
+      receiver.launch !== tab.lead.reserved.launchId
+    )
+      return null
+    return JSON.stringify([
+      tab.id,
+      pane.id,
+      pane.generation,
+      receiver.launch,
+      receiver.session,
+      receiver.lease,
+    ])
+  }
+  if (
+    pane.kind !== 'worker' ||
+    !belongs(row, tab) ||
+    !row.sessionId ||
+    !row.reserved?.resolvedAt ||
+    row.reserved.tab !== tab.id ||
+    row.reserved.pane !== pane.id ||
+    row.reserved.generation !== pane.generation ||
+    row.binding?.generation !== pane.generation ||
+    row.binding?.launchId !== row.reserved.launchId
+  )
+    return null
+  return JSON.stringify([
+    tab.id,
+    pane.id,
+    pane.generation,
+    row.binding.launchId,
+    row.kind,
+    row.sessionId,
+  ])
 }

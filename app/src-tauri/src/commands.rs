@@ -1757,6 +1757,62 @@ pub async fn result_body<R: Runtime>(
     .await
 }
 
+async fn task_operation<R: Runtime>(
+    app: AppHandle<R>,
+    operation: &'static str,
+    body: Value,
+) -> Value {
+    let (bridge, startup_error) = {
+        let state = app.state::<AppRuntime>();
+        (state.bridge.clone(), state.startup_error.clone())
+    };
+    run_blocking(operation, move || {
+        request_node(bridge, startup_error, operation.to_string(), body)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn task_list<R: Runtime>(
+    app: AppHandle<R>,
+    tab: String,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> Value {
+    if let Err(error) = validate_text(&tab, "tab") {
+        return json!({"ok":false,"error":error});
+    }
+    let limit = limit.unwrap_or(100);
+    if !(1..=100).contains(&limit) {
+        return json!({"ok":false,"error":"Task limit must be 1–100"});
+    }
+    task_operation(
+        app,
+        "task.list",
+        json!({"tab":tab,"offset":offset.unwrap_or(0),"limit":limit}),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn task_get<R: Runtime>(app: AppHandle<R>, tab: String, id: String) -> Value {
+    if let Err(error) = validate_text(&tab, "tab").and_then(|()| validate_text(&id, "task id")) {
+        return json!({"ok":false,"error":error});
+    }
+    task_operation(app, "task.get", json!({"tab":tab,"id":id})).await
+}
+
+#[tauri::command]
+pub async fn task_change<R: Runtime>(app: AppHandle<R>, tab: String, change: Value) -> Value {
+    if let Err(error) = validate_text(&tab, "tab") {
+        return json!({"ok":false,"error":error});
+    }
+    if !change.is_object() || change.to_string().len() > 256 * 1024 {
+        return json!({"ok":false,"error":"Task change must be an object no larger than 256 KiB"});
+    }
+    task_operation(app, "task.change", json!({"tab":tab,"change":change})).await
+}
+
 #[tauri::command]
 pub async fn result_collect<R: Runtime>(app: AppHandle<R>, tab: String, result: String) -> Value {
     if let Err(error) = validate_text(&tab, "tab").and_then(|()| validate_text(&result, "result")) {
@@ -2067,6 +2123,9 @@ mod tests {
             "result_collect",
             "result_cancel",
             "result_body",
+            "task_list",
+            "task_get",
+            "task_change",
             "tab_resume",
             "tab_delete",
             "rename_session",
@@ -2923,6 +2982,24 @@ mod tests {
 
         let routes = vec![
             (
+                "task_list",
+                json!({"tab":"tab-1","offset":100,"limit":100}),
+                "task.list",
+                json!({"tab":"tab-1","offset":100,"limit":100}),
+            ),
+            (
+                "task_get",
+                json!({"tab":"tab-1","id":"task-1"}),
+                "task.get",
+                json!({"tab":"tab-1","id":"task-1"}),
+            ),
+            (
+                "task_change",
+                json!({"tab":"tab-1","change":{"action":"update","id":"task-1","revision":3,"status":"review"}}),
+                "task.change",
+                json!({"tab":"tab-1","change":{"action":"update","id":"task-1","revision":3,"status":"review"}}),
+            ),
+            (
                 "rename_session",
                 json!({"tab":"tab-1","name":"Build review"}),
                 "tab.rename",
@@ -3069,6 +3146,9 @@ mod tests {
                 result_collect,
                 result_cancel,
                 result_body,
+                task_list,
+                task_get,
+                task_change,
                 tab_resume,
                 tab_delete,
                 rename_session,
@@ -3080,6 +3160,37 @@ mod tests {
             .build()
             .expect("build mock webview");
 
+        // These must be refused before requesting the bridge: the peer expects only valid routes.
+        for (command, args) in [
+            ("task_list", json!({"tab":"tab-1","limit":0})),
+            ("task_list", json!({"tab":"tab-1","limit":101})),
+            ("task_get", json!({"tab":"tab-1","id":" "})),
+            ("task_change", json!({"tab":"tab-1","change":[]})),
+            (
+                "task_change",
+                json!({"tab":"tab-1","change":{"description":"x".repeat(256 * 1024)}}),
+            ),
+        ] {
+            let response = tauri::test::get_ipc_response(
+                &webview,
+                tauri::webview::InvokeRequest {
+                    cmd: command.into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "tauri://localhost".parse().expect("invoke URL"),
+                    body: tauri::ipc::InvokeBody::Json(args),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.to_string(),
+                },
+            )
+            .expect("validation response")
+            .deserialize::<Value>()
+            .expect("JSON");
+            assert_eq!(
+                response["ok"], false,
+                "invalid {command} accepted: {response}"
+            );
+        }
         for (command, args, _, _) in routes {
             let response = tauri::test::get_ipc_response(
                 &webview,

@@ -105,6 +105,8 @@ struct PaneInputState {
     input_epoch: u64,
     draft_epoch: Option<u64>,
     emitted_enter_epochs: BTreeSet<u64>,
+    human_bracketed_paste: bool,
+    human_marker_position: usize,
     paste_in_flight: bool,
     input_failed: bool,
     queued_human: VecDeque<QueuedHumanInput>,
@@ -121,6 +123,8 @@ impl PaneInputState {
             input_epoch: 0,
             draft_epoch: None,
             emitted_enter_epochs: BTreeSet::new(),
+            human_bracketed_paste: false,
+            human_marker_position: 0,
             paste_in_flight: false,
             input_failed: false,
             queued_human: VecDeque::new(),
@@ -142,6 +146,30 @@ impl PaneInputState {
                 .sum(),
             last_submission_id: self.last_submission_id.clone(),
         }
+    }
+
+    fn human_enter_epochs(&mut self, bytes: &[u8], first_epoch: u64) -> Vec<u64> {
+        let mut enters = Vec::new();
+        for (index, byte) in bytes.iter().copied().enumerate() {
+            let marker = if self.human_bracketed_paste {
+                b"\x1b[201~"
+            } else {
+                b"\x1b[200~"
+            };
+            if byte == marker[self.human_marker_position] {
+                self.human_marker_position += 1;
+                if self.human_marker_position == marker.len() {
+                    self.human_bracketed_paste = !self.human_bracketed_paste;
+                    self.human_marker_position = 0;
+                }
+            } else {
+                self.human_marker_position = usize::from(byte == 0x1b);
+            }
+            if byte == b'\r' && !self.human_bracketed_paste {
+                enters.push(first_epoch + index as u64 + 1);
+            }
+        }
+        enters
     }
 }
 
@@ -273,12 +301,7 @@ impl InputArbiter {
         let next_epoch = first_epoch
             .checked_add(byte_count)
             .ok_or(ArbiterError::EpochOverflow)?;
-        let enter_epochs = bytes
-            .iter()
-            .enumerate()
-            .filter(|(_, byte)| **byte == b'\r')
-            .map(|(index, _)| first_epoch + index as u64 + 1)
-            .collect::<Vec<_>>();
+        let enter_epochs = state.human_enter_epochs(bytes, first_epoch);
         state.input_epoch = next_epoch;
         state.draft_epoch = Some(next_epoch);
 
@@ -734,6 +757,41 @@ mod tests {
                 )));
             }
             Ok(())
+        }
+    }
+
+    #[test]
+    fn multiline_bracketed_paste_does_not_emit_enter_events_even_across_chunk_boundaries() {
+        let body = format!("\x1b[200~{}\x1b[201~", "line\r".repeat(2_000));
+        for chunk_size in 1..=7 {
+            let key = PaneKey::new("human-paste", chunk_size);
+            let (writer, _observed) = RecordingWriter::new(None);
+            let (events, receiver) = mpsc::channel();
+            let arbiter = InputArbiter::new(0, events);
+            arbiter.register(&key).unwrap();
+            for chunk in body.as_bytes().chunks(chunk_size as usize) {
+                arbiter
+                    .write_human_via(writer.as_ref(), &key, chunk)
+                    .unwrap();
+            }
+            assert!(
+                receiver.try_recv().is_err(),
+                "pasted lines must not become submission events"
+            );
+            assert_eq!(
+                arbiter.snapshot(&key).unwrap().input_epoch,
+                body.len() as u64
+            );
+            assert!(arbiter.snapshot(&key).unwrap().draft_latched);
+            arbiter
+                .write_human_via(writer.as_ref(), &key, b"\r")
+                .unwrap();
+            assert!(
+                matches!(receiver.try_recv().unwrap(), PaneEvent::Enter { epoch, .. } if epoch == body.len() as u64 + 1)
+            );
+            assert!(receiver.try_recv().is_err());
+            let written: Vec<u8> = writer.records().into_iter().flat_map(|r| r.bytes).collect();
+            assert_eq!(written, format!("{body}\r").as_bytes());
         }
     }
 

@@ -1,35 +1,9 @@
 #!/usr/bin/env node
 /**
- * Puts THIS repo's CLI into the .app that is already built.
- *
- * `cf` on PATH runs the bundle's copy, not the repo — that is what makes the
- * app self-contained, and it is also a trap for whoever is developing it. An
- * edit to `bin/ src/ hosts/ skill/` reaches nothing on this machine until the
- * bundle is refreshed, and a skill regenerated in between is written from the
- * OLD template. That cost a day on 2026-08-25: the fix was in the repo, the
- * lead was reading a skill the bundle had written.
- *
- * A full `npm run build` also fixes it and takes a Rust compile. This is the
- * short way round for a CLI-only change: re-stage the resources, mirror them
- * into the bundle, done. Mirror rather than copy — a deleted file has to
- * disappear from the bundle too, which a copy-over would leave behind.
- *
- * It writes to TWO places, because on 2026-09-02 writing to one looked exactly
- * like success: the repo's bundle was refreshed, `cf skills install` printed
- * five `unchanged` lines, and every one of them was correct — the launcher on
- * PATH runs /Applications, which this script had never heard of. The blind
- * spot was the one the paragraph above describes, in the script that exists to
- * fix it. `terminalRuntime` already knew; nothing had asked it.
- *
- * On the seal: the comment here used to claim the bundle is adhoc-signed with
- * no sealed resources, so the signature survives. That is true of a bundle
- * `tauri build` left in this repo and FALSE of one installed from a release
- * DMG, which carries `Sealed Resources version=2` — mirroring into it breaks
- * `codesign --verify` (proven, same day). Nothing here touches the Mach-O
- * binary, so the app still runs; but a sealed bundle comes out unverifiable,
- * and only `npm run build` puts a real signature back. This says so when it
- * happens. Regenerating the installed skill is still separate and deliberate:
- * `cf skills install`.
+ * Mirror this checkout's CLI resources into the built app and the copy named by
+ * the cf launcher. Deleted source files are removed from those bundles too.
+ * This is a development command that can modify the installed app and break its
+ * resource signature. Role context refreshes at the next pane start/resume.
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -99,5 +73,5 @@ if (launcher !== null && launcher !== BUNDLE) {
 
 process.stdout.write(
   `${written.map((path) => `cli → ${path}`).join('\n')}\n` +
-    'the skill is unchanged until you run: cf skills install\n',
+    'updated role instructions load when a pane starts or resumes\n',
 )

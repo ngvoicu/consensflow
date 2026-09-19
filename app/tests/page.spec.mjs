@@ -4,7 +4,9 @@ import { dirname, extname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { expect, test } from '@playwright/test'
+import { Store } from '../../src/store.js'
 import { Tabs } from '../../src/tabs.js'
+import { Tasks } from '../../src/tasks.js'
 import { startUiServer } from '../../src/ui.js'
 import { tempEnv } from '../../tests/helpers.mjs'
 
@@ -224,6 +226,300 @@ function gridState(count) {
   return state
 }
 
+function taskBoardState() {
+  const state = cannedState()
+  state.tabs.push({
+    id: 't-pm',
+    role: 'pm',
+    parentTabId: 't-four',
+    roleName: 'quiet-river',
+    directory: '/work/harbour',
+    lead: { harness: 'pi', generation: 1 },
+    panes: [
+      pane('p-pm', 'lead', { harness: 'pi' }),
+      pane('p-advisor', 'worker', { conversation: 'advice', agent: 'nyx', harness: 'codex' }),
+    ],
+  })
+  state.tabs[0].panes[1].activity = { state: 'idle', expiresAt: Date.now() + 60000 }
+  const task = (id, owner, title, extra = {}) => ({
+    id,
+    owner,
+    role: owner === 't-pm' ? 'pm' : 'lead',
+    title,
+    description: 'Original assignment',
+    status: 'active',
+    kind: 'general',
+    source: 'explicit',
+    revision: 1,
+    questions: [],
+    history: [],
+    dependsOn: [],
+    unanswered: 0,
+    updatedAt: 1,
+    ...extra,
+  })
+  state.tasks = [
+    task('task-build', 't-four', 'Implement safe delivery', {
+      conversation: 'nyx-coral-lane',
+      kind: 'implementation',
+    }),
+    task('task-review', 't-four', 'Review delivery changes', {
+      kind: 'review',
+      status: 'review',
+      reviewOf: 'task-build',
+      dependsOn: ['task-build'],
+    }),
+    task('task-spec', 't-pm', 'Agree on acceptance', {
+      status: 'blocked',
+      kind: 'specification',
+      conversation: 'advice',
+      unanswered: 1,
+      questions: [{ id: 'q-1', text: 'Should archived sessions be included?' }],
+    }),
+    task('task-private', 't-five', 'Other session secret'),
+  ]
+  state.results = ['waiting', 'received', 'uncertain'].map((status, index) => ({
+    id: `d-${index + 1}`,
+    tab: 't-four',
+    conversation: 'nyx-coral-lane',
+    state: status,
+    preview: `Reply ${index + 1}`,
+    parts: 1,
+    receivedParts: status === 'received' ? 1 : 0,
+  }))
+  return state
+}
+
+test('task board uses the real store contract for human answers and progress revisions', async ({
+  page,
+}) => {
+  const env = tempEnv()
+  const store = new Store(env.env.CONSENSFLOW_HOME)
+  await store.open()
+  try {
+    const owner = await new Tabs(store).create('/work/harbour', 'claude-code')
+    const tasks = new Tasks(store)
+    const task = await tasks.change(owner.id, {
+      action: 'add',
+      title: 'Real question',
+      question: 'Retain history?',
+    })
+    const state = cannedState()
+    state.tabs = [{ ...state.tabs[0], id: owner.id }]
+    state.results = []
+    await page.exposeFunction('__taskRequest', async (command, args) => {
+      try {
+        if (command === 'task_list')
+          return await tasks.list(args.tab, { combined: true, offset: args.offset })
+        if (command === 'task_get') return await tasks.get(args.tab, args.id)
+        return await tasks.change(args.tab, args.change, 'human')
+      } catch (error) {
+        return { ok: false, reason: error.message }
+      }
+    })
+    await boot(page, { state })
+    await page.getByTestId('view-tasks').click()
+    await page.getByTestId(`task-card-${task.id}`).click()
+    const dialog = page.getByRole('dialog', { name: 'Task details' })
+    await dialog.getByLabel('Answer', { exact: true }).fill('Retain all results.')
+    await dialog.getByRole('button', { name: 'Record answer', exact: true }).click()
+    await expect
+      .poll(async () => (await tasks.get(owner.id, task.id)).questions[0].answer)
+      .toBe('Retain all results.')
+    await dialog.getByLabel('Progress', { exact: true }).selectOption('review')
+    await dialog.getByRole('button', { name: 'Save task', exact: true }).click()
+    await expect.poll(async () => (await tasks.get(owner.id, task.id)).status).toBe('review')
+    expect((await tasks.get(owner.id, task.id)).revision).toBe(3)
+  } finally {
+    await store.close()
+    env.cleanup()
+  }
+})
+
+test('task graph preserves scroll and keyboard focus when refreshed state arrives', async ({
+  page,
+}) => {
+  const state = taskBoardState()
+  state.tasks.push(
+    ...Array.from({ length: 15 }, (_, index) => ({
+      ...state.tasks[0],
+      id: `extra-${index}`,
+      title: `Extra work ${index}`,
+    })),
+  )
+  await boot(page, { state })
+  await page.getByTestId('view-tasks').click()
+  await page.getByTestId('task-view').getByRole('button', { name: 'Graph', exact: true }).click()
+  await page.getByTestId('task-card-extra-8').focus()
+  const before = await page
+    .locator('.task-graph-viewport')
+    .evaluate((el) => ({ top: el.scrollTop, left: el.scrollLeft }))
+  expect(before.top).toBeGreaterThan(500)
+  await page.evaluate(() => window.__emitTauriEvent('state-changed', { reason: 'task-update' }))
+  await expect(page.getByTestId('task-card-extra-8')).toBeFocused()
+  await expect
+    .poll(async () =>
+      page
+        .locator('.task-graph-viewport')
+        .evaluate((el) => ({ top: el.scrollTop, left: el.scrollLeft })),
+    )
+    .toEqual(before)
+})
+
+test('task board combines PM and Lead without leaking another session or equating idle with accepted', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1500, height: 1050 })
+  await boot(page, { state: taskBoardState() })
+  await page.getByTestId('view-tasks').click()
+  const board = page.getByTestId('task-view')
+  await expect(board.getByRole('heading', { name: 'Session tasks', exact: true })).toBeVisible()
+  await expect(board.locator('[data-task]')).toHaveCount(3)
+  await expect(board).not.toContainText('Other session secret')
+  await expect(board.getByTestId('task-card-task-build')).toContainText('In progress')
+  await expect(board.getByTestId('task-card-task-build')).toContainText('3 replies · 2 unconfirmed')
+  await expect(board.locator('[data-agent-pane="p4-w1"]')).toContainText('Idle')
+  await expect(board.locator('[data-agent-pane="p-advisor"]')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('task-board.png') })
+  await board.getByLabel('Task group').selectOption('pm')
+  await expect(board.locator('[data-task]')).toHaveCount(1)
+  await board.getByLabel('Task group').selectOption('all')
+  await board.getByLabel('Task status').selectOption('review')
+  await expect(board.locator('[data-task]')).toHaveCount(1)
+  await board.getByLabel('Task status').selectOption('all')
+  await board.getByLabel('Search tasks').fill('safe delivery')
+  await expect(board.locator('[data-task]')).toHaveCount(1)
+  expect(await commandCalls(page, 'result_collect')).toHaveLength(0)
+})
+
+test('task graph shows ownership, assignment, dependencies and reviews and opens keyboard task details', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1500, height: 1050 })
+  await boot(page, { state: taskBoardState() })
+  await page.getByTestId('view-tasks').click()
+  const view = page.getByTestId('task-view')
+  await view.getByRole('button', { name: 'Graph', exact: true }).click()
+  for (const relation of ['owns', 'assigned', 'depends', 'reviews'])
+    await expect(view.locator(`svg [data-relation="${relation}"]`).first()).toBeVisible()
+  const node = view.getByTestId('task-card-task-review')
+  await node.focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('dialog', { name: 'Task details' })).toContainText(
+    'Review delivery changes',
+  )
+  await page.getByRole('button', { name: 'Close task details', exact: true }).click()
+  await view.getByRole('button', { name: 'Zoom in', exact: true }).click()
+  await expect(view.locator('.task-graph')).toHaveAttribute('data-zoom', '1.15')
+  await view.getByRole('button', { name: 'Fit graph', exact: true }).click()
+  await page.screenshot({ path: testInfo.outputPath('task-graph.png') })
+  expect(await commandCalls(page, 'open_consult')).toHaveLength(0)
+})
+
+test('task details save revisions, retain stale drafts and answer an exact question without sending or reading results', async ({
+  page,
+}) => {
+  await boot(page, { state: taskBoardState() })
+  await page.getByTestId('view-tasks').click()
+  await page.getByTestId('task-card-task-spec').click()
+  const dialog = page.getByRole('dialog', { name: 'Task details' })
+  await dialog.getByLabel('Answer').fill('Include archived sessions in the overview.')
+  await dialog.getByRole('button', { name: 'Record answer', exact: true }).click()
+  await expect(dialog).toContainText('Include archived sessions in the overview.')
+  let calls = await commandCalls(page, 'task_change')
+  expect(calls[0].args).toEqual({
+    tab: 't-pm',
+    change: {
+      action: 'answer',
+      id: 'task-spec',
+      revision: 1,
+      question: 'q-1',
+      answer: 'Include archived sessions in the overview.',
+    },
+  })
+  await dialog.getByLabel('Progress', { exact: true }).selectOption('review')
+  await dialog.getByLabel('Progress note').fill('Acceptance criteria reviewed.')
+  await dialog.getByRole('button', { name: 'Save task', exact: true }).click()
+  await expect.poll(async () => (await commandCalls(page, 'task_change')).length).toBe(2)
+  calls = await commandCalls(page, 'task_change')
+  expect(calls[1].args.change).toMatchObject({
+    id: 'task-spec',
+    revision: 2,
+    status: 'review',
+    note: 'Acceptance criteria reviewed.',
+  })
+  await dialog.getByLabel('Task title').fill('My unsaved correction')
+  await page.evaluate(() => {
+    window.__state.tasks.find((t) => t.id === 'task-spec').revision += 1
+  })
+  await dialog.getByRole('button', { name: 'Save task', exact: true }).click()
+  await expect(dialog.getByRole('alert')).toContainText('Task changed')
+  await expect(dialog.getByLabel('Task title')).toHaveValue('My unsaved correction')
+  for (const command of ['result_collect', 'result_body', 'pane_input_enqueue', 'open_consult'])
+    expect(await commandCalls(page, command)).toHaveLength(0)
+})
+
+test('task view preserves terminal identity, drafts and hidden output across PM, Lead and graph', async ({
+  page,
+}) => {
+  await boot(page, { state: taskBoardState() })
+  const stage = page.getByTestId('pane-stage')
+  await page.evaluate(() => {
+    window.originalTerminal = document.querySelector('[data-pane-id="p4-lead"] .xterm')
+  })
+  await stage.getByTestId('pane-p4-lead').locator('.xterm-helper-textarea').focus()
+  await page.keyboard.type('draft')
+  const inputCount = (await commandCalls(page, 'pane_input_enqueue')).length
+  await page.getByTestId('view-tasks').click()
+  await page.evaluate(() =>
+    window.__emitPaneOutput('p4-lead', 1, 1, [...new TextEncoder().encode('WORK-CONTINUES')]),
+  )
+  await page.getByTestId('task-view').getByRole('button', { name: 'Graph', exact: true }).click()
+  await page.getByTestId('view-pm').click()
+  await page.getByTestId('view-tasks').click()
+  await page.getByTestId('view-lead').click()
+  await expect(stage.getByTestId('pane-p4-lead').locator('.xterm-rows')).toContainText(
+    'WORK-CONTINUES',
+  )
+  expect(
+    await page.evaluate(
+      () => window.originalTerminal === document.querySelector('[data-pane-id="p4-lead"] .xterm'),
+    ),
+  ).toBe(true)
+  expect((await commandCalls(page, 'pane_input_enqueue')).length).toBe(inputCount)
+  expect(await page.evaluate(() => window.__disposedEmulators)).toEqual([])
+  for (const command of ['tab_resume', 'open_pm', 'close_pane'])
+    expect(await commandCalls(page, command)).toHaveLength(0)
+})
+
+test('task board paginates, renders hostile text safely and creates tasks in the selected group', async ({
+  page,
+}) => {
+  const state = taskBoardState()
+  state.tasks = Array.from({ length: 101 }, (_, index) => ({
+    ...state.tasks[0],
+    id: `task-${index}`,
+    title: index === 100 ? '<img src=x onerror=window.taskExecuted=true>' : `Task ${index}`,
+  }))
+  await boot(page, { state })
+  await page.getByTestId('view-tasks').click()
+  const view = page.getByTestId('task-view')
+  await expect(view.locator('[data-task]')).toHaveCount(100)
+  await view.getByRole('button', { name: 'Load more tasks', exact: true }).click()
+  await expect(view.locator('[data-task]')).toHaveCount(101)
+  await expect(view.getByTestId('task-card-task-100')).toContainText('<img src=x')
+  expect(await page.evaluate(() => window.taskExecuted)).toBeUndefined()
+  await view.getByRole('button', { name: 'New task', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'New task' })
+  await dialog.getByLabel('Owner').selectOption('t-pm')
+  await dialog.getByLabel('Task title').fill('Write rollout criteria')
+  await dialog.getByRole('button', { name: 'Create task', exact: true }).click()
+  expect((await commandCalls(page, 'task_change')).at(-1).args).toMatchObject({
+    tab: 't-pm',
+    change: { action: 'add', title: 'Write rollout criteria' },
+  })
+})
+
 async function installTauriShim(
   page,
   { state = cannedState(), geometry = null, emulatorGate = false, listStateGate = false } = {},
@@ -329,6 +625,8 @@ async function installTauriShim(
         const logged = { ...args }
         if (logged.onOutput !== undefined) logged.onOutput = '[channel]'
         window.__calls.push({ command, args: copy(logged) })
+        if (command.startsWith('task_') && typeof window.__taskRequest === 'function')
+          return window.__taskRequest(command, args)
         if (command === 'pane_resize' && window.__resizeGate) await window.__resizeGate
         if (Object.hasOwn(window.__commandResults, command)) {
           return copy(window.__commandResults[command])
@@ -364,6 +662,52 @@ async function installTauriShim(
             text: text.slice(args.offset ?? 0, end),
             next: end < text.length ? end : null,
           }
+        }
+        if (command === 'task_list') {
+          const root = findTab(args.tab)?.parentTabId ?? args.tab
+          const owners = window.__state.tabs.filter((t) => t.id === root || t.parentTabId === root)
+          const tasks = (window.__state.tasks ?? []).filter((t) =>
+            owners.some((o) => o.id === t.owner),
+          )
+          const offset = args.offset ?? 0
+          return {
+            tasks: copy(tasks.slice(offset, offset + 100)),
+            total: tasks.length,
+            offset,
+            next: offset + 100 < tasks.length ? offset + 100 : null,
+            owners: copy(owners.map((t) => ({ id: t.id, role: t.role ?? 'lead' }))),
+            counts: {},
+            questions: tasks.reduce((n, t) => n + t.unanswered, 0),
+          }
+        }
+        if (command === 'task_get')
+          return copy(window.__state.tasks.find((t) => t.id === args.id && t.owner === args.tab))
+        if (command === 'task_change') {
+          const change = args.change
+          let task = window.__state.tasks.find((t) => t.id === change.id && t.owner === args.tab)
+          if (change.action === 'add') {
+            task = {
+              id: 'task-added',
+              owner: args.tab,
+              role: findTab(args.tab)?.role ?? 'lead',
+              status: 'planned',
+              kind: 'general',
+              description: '',
+              questions: [],
+              history: [],
+              dependsOn: [],
+              revision: 0,
+              unanswered: 0,
+            }
+            window.__state.tasks.push(task)
+          } else if (task.revision !== change.revision)
+            return { ok: false, reason: 'Task changed. Reload before editing.' }
+          if (change.action === 'answer') {
+            task.questions.find((q) => q.id === change.question).answer = change.answer
+            task.unanswered -= 1
+          } else Object.assign(task, copy(change))
+          task.revision += 1
+          return copy(task)
         }
         if (command === 'tab_resume') {
           const tab = findTab(args.tab)
@@ -1012,7 +1356,7 @@ test('keeps focus on the lead when a worker opens', async ({ page }) => {
     .getByRole('dialog', { name: 'Open a worker pane' })
     .getByLabel('Agent')
     .selectOption('nyx')
-  await page.getByLabel('Task').fill('Inspect the parser')
+  await page.getByLabel('Task', { exact: true }).fill('Inspect the parser')
   await page.getByRole('button', { name: 'Open agent pane' }).click()
 
   await expect.poll(async () => (await commandCalls(page, 'open_consult')).length).toBe(1)
@@ -1383,7 +1727,7 @@ test('offers only canonical lead harness ids accepted by the tab store', async (
   const harnesses = await page
     .locator('#lead-harness option')
     .evaluateAll((options) => options.map((option) => option.value))
-  expect(harnesses).toEqual(['claude-code', 'codex', 'pi', 'opencode'])
+  expect(harnesses).toEqual(['claude-code', 'codex', 'pi', 'opencode', 'devin'])
   for (const harness of harnesses) {
     const tabs = new Tabs(inMemoryTabStore())
     await expect(tabs.create('/tmp/picker-contract', harness)).resolves.toMatchObject({
@@ -1407,7 +1751,7 @@ test('opens Shell or Agent from the human New pane menu', async ({ page }) => {
     .getByRole('dialog', { name: 'Open a worker pane' })
     .getByLabel('Agent')
     .selectOption('ares')
-  await page.getByLabel('Task').fill('Trace delivery readiness')
+  await page.getByLabel('Task', { exact: true }).fill('Trace delivery readiness')
   await page.getByRole('button', { name: 'Open agent pane' }).click()
   expect((await commandCalls(page, 'open_consult')).at(-1)).toEqual({
     command: 'open_consult',
@@ -1884,6 +2228,65 @@ test('reconciles Node state changes and consumes output for a worker the page ha
   )
   expect(await commandCalls(page, 'subscribe_output')).toHaveLength(1)
   expect((await commandCalls(page, 'list_state')).length).toBeGreaterThanOrEqual(3)
+})
+
+for (const failure of [
+  { ok: false, error: 'Session service timed out' },
+  { ok: true, available: false },
+]) {
+  test(`retains live sessions and retries a failed state refresh: ${JSON.stringify(failure)}`, async ({
+    page,
+  }) => {
+    await boot(page)
+    await page.getByTestId('pane-node-p4-lead').click()
+    const terminal = page.getByTestId('pane-p4-lead')
+    await page.evaluate(async (result) => {
+      window.retainedTerminal = document.querySelector('[data-testid="pane-p4-lead"] .xterm')
+      window.__emitPaneOutput('p4-lead', 1, 1, [...new TextEncoder().encode('Before failure\r\n')])
+      window.__setCommandResult('list_state', result)
+      await window.__emitTauriEvent('state-changed')
+    }, failure)
+    await expect(page.locator('#status')).toContainText(
+      failure.error ?? 'Session controls are not available yet',
+    )
+    await expect(page.getByTestId('pane-node-p4-lead')).toBeVisible()
+    await expect(terminal.locator('.xterm-rows')).toContainText('Before failure')
+    await page.evaluate(() => {
+      window.__emitPaneOutput('p4-lead', 1, 2, [...new TextEncoder().encode('After failure\r\n')])
+      delete window.__commandResults.list_state
+    })
+    // Recovery must not depend on another native event arriving.
+    await expect(page.locator('#status')).toBeHidden()
+    await expect(terminal.locator('.xterm-rows')).toContainText('After failure')
+    expect(
+      await terminal.locator('.xterm').evaluate((node) => node === window.retainedTerminal),
+    ).toBe(true)
+    await terminal.locator('.xterm-helper-textarea').focus()
+    await page.keyboard.type('Still connected')
+    await expect
+      .poll(async () => (await commandCalls(page, 'pane_input_enqueue')).length)
+      .toBeGreaterThan(0)
+    expect(await commandCalls(page, 'subscribe_output')).toHaveLength(1)
+    await page.evaluate(async () => {
+      window.__state.tabs = []
+      await window.__emitTauriEvent('state-changed')
+    })
+    await expect(page.getByTestId('pane-node-p4-lead')).toHaveCount(0)
+    await expect(terminal).toHaveCount(0)
+  })
+}
+
+test('recovers sessions after the first state load fails without another native event', async ({
+  page,
+}) => {
+  await boot(page, { state: { ok: false, error: 'Session service timed out' } })
+  await expect(page.locator('#status')).toContainText('Session service timed out')
+  await page.evaluate((state) => {
+    window.__state = state
+  }, cannedState())
+  await expect(page.getByTestId('pane-node-p4-lead')).toBeVisible()
+  await expect(page.locator('#status')).toBeHidden()
+  expect(await commandCalls(page, 'subscribe_output')).toHaveLength(1)
 })
 
 test('sends the latest terminal size only after the native pane becomes live', async ({ page }) => {
@@ -2413,7 +2816,44 @@ test('shows a bounded pane-input refusal without parking the page', async ({ pag
   expect((await commandCalls(page, 'pane_input_enqueue')).at(-1).args.id).toBe('p4-lead')
 })
 
-test('keeps the next input sequence after an oversized paste is refused', async ({ page }) => {
+test('large Unicode pastes use bounded writes and keep subsequent typing outside the paste', async ({
+  page,
+}) => {
+  const errors = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await boot(page)
+  await page.getByTestId('pane-node-p4-lead').click()
+  await page.evaluate(() =>
+    window.__emitPaneOutput('p4-lead', 1, 1, [27, 91, 63, 50, 48, 48, 52, 104]),
+  )
+  await expect.poll(async () => (await commandCalls(page, 'pane_ack')).length).toBeGreaterThan(0)
+  const textarea = page.getByTestId('pane-p4-lead').locator('.xterm-helper-textarea')
+  await textarea.focus()
+  const text = 'Multibyte text: 漢🙂\n'.repeat(30_000)
+  await textarea.evaluate((element, text) => {
+    const transfer = new DataTransfer()
+    transfer.setData('text/plain', text)
+    element.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, clipboardData: transfer }))
+  }, text)
+  await page.keyboard.type('AFTER')
+  const expected = `\x1b[200~${text.replaceAll('\n', '\r')}\x1b[201~AFTER`
+  await expect
+    .poll(async () => {
+      const calls = await commandCalls(page, 'pane_input_enqueue')
+      return (
+        Buffer.concat(calls.map((call) => Buffer.from(call.args.bytes))).toString('utf8') ===
+        expected
+      )
+    })
+    .toBe(true)
+  const calls = await commandCalls(page, 'pane_input_enqueue')
+  expect(calls.every((call) => call.args.bytes.length <= 65_536)).toBe(true)
+  expect(calls.map((call) => call.args.sequence)).toEqual(calls.map((_, index) => index + 1))
+  expect(errors).toEqual([])
+  await expect(page.locator('#app')).toHaveAttribute('data-ready', 'true')
+})
+
+test('keeps the next input sequence after a paste chunk is refused', async ({ page }) => {
   await boot(page)
   await page.getByTestId('pane-node-p4-lead').click()
   await page.evaluate(() =>
@@ -2435,7 +2875,7 @@ test('keeps the next input sequence after an oversized paste is refused', async 
   await expect.poll(async () => (await commandCalls(page, 'pane_input_enqueue')).length).toBe(1)
   let calls = await commandCalls(page, 'pane_input_enqueue')
   expect(calls[0].args.sequence).toBe(1)
-  expect(calls[0].args.bytes).toHaveLength(65_537)
+  expect(calls[0].args.bytes.length).toBeLessThanOrEqual(65_536)
 
   await page.evaluate(() =>
     window.__setCommandResult('pane_input_enqueue', {
@@ -2800,4 +3240,111 @@ test('result inbox remains independent between PM advisors and Lead workers', as
   await expect(history.locator('.result-row')).toHaveCount(1)
   await expect(history).toContainText('PM findings')
   await expect(history).not.toContainText('lead result')
+})
+
+test('pane headers show automatic activity and expire stale evidence without replacing terminals', async ({
+  page,
+}, testInfo) => {
+  const state = cannedState()
+  state.tabs[0].panes[0].activity = { state: 'working', expiresAt: Date.now() + 60_000 }
+  state.tabs[0].panes[1].activity = { state: 'idle', expiresAt: Date.now() + 60_000 }
+  await boot(page, { state })
+  const card = page.getByTestId('pane-p4-lead')
+  await expect(card.locator('.pane-activity')).toHaveText('Working')
+  await expect(
+    page.getByTestId('pane-node-p4-lead').locator('..').locator('.pane-activity'),
+  ).toHaveText('Working')
+  await expect(page.getByTestId('pane-p4-w1').locator('.pane-activity')).toHaveText('Idle')
+  await card.locator('.terminal-host').evaluate((element) => {
+    window.__activityTerminal = element
+  })
+  await page.evaluate(async () => {
+    window.__state.tabs[0].panes[0].activity = { state: 'idle', expiresAt: Date.now() + 60_000 }
+    window.__state.tabs[0].panes[1].activity = { state: 'working', expiresAt: Date.now() + 1_500 }
+    await window.__emitTauriEvent('state-changed')
+  })
+  await expect(card.locator('.pane-activity')).toHaveText('Idle')
+  await expect(page.getByTestId('pane-p4-w1').locator('.pane-activity')).toHaveText('Working')
+  await expect(page.getByTestId('pane-p4-w1').locator('.pane-activity')).toHaveText('Unknown')
+  await expect(
+    page.getByTestId('pane-node-p4-w1').locator('..').locator('.pane-activity'),
+  ).toHaveText('Unknown')
+  expect(
+    await card
+      .locator('.terminal-host')
+      .evaluate((element) => element === window.__activityTerminal),
+  ).toBe(true)
+  expect(await commandCalls(page, 'subscribe_output')).toHaveLength(1)
+  expect((await page.getByTestId('pane-node-p4-w1').boundingBox()).width).toBeGreaterThan(100)
+  await page.screenshot({ path: testInfo.outputPath('activity-wide.png') })
+  await page.setViewportSize({ width: 560, height: 720 })
+  await expect(card.getByRole('button', { name: 'Delete session', exact: true })).toBeVisible()
+  await expect
+    .poll(() =>
+      card.evaluate((element) => {
+        const bounds = element.getBoundingClientRect()
+        return (
+          bounds.right <= window.innerWidth &&
+          [...element.querySelectorAll('.pane-titlebar button, .pane-activity')].every(
+            (control) => {
+              const box = control.getBoundingClientRect()
+              return box.x >= bounds.x && box.right <= bounds.right + 1
+            },
+          )
+        )
+      }),
+    )
+    .toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('activity-narrow.png') })
+})
+
+test('header Delete removes a worker with confirmation and exposes explicit lead and PM scopes', async ({
+  page,
+}) => {
+  const state = cannedState()
+  state.tabs.push({
+    id: 't-pm',
+    role: 'pm',
+    parentTabId: state.tabs[0].id,
+    roleName: 'quiet-river',
+    directory: state.tabs[0].directory,
+    lead: { harness: 'pi', generation: 1 },
+    panes: [
+      pane('p-pm', 'lead'),
+      pane('p-advisor', 'worker', { conversation: 'zeus-advice', agent: 'zeus' }),
+    ],
+  })
+  await boot(page, { state })
+  await page
+    .getByTestId('pane-p4-w1')
+    .getByRole('button', { name: 'Delete pane', exact: true })
+    .click()
+  const dialog = page.getByRole('dialog', { name: 'Delete pane', exact: true })
+  await expect(dialog).toContainText('Project files and native history remain')
+  await dialog.getByRole('button', { name: 'Delete pane', exact: true }).click()
+  await expect(page.getByTestId('pane-node-p4-w1')).toHaveCount(0)
+  await expect(page.getByTestId('pane-p4-w2')).toBeVisible()
+  await page
+    .getByTestId('pane-p4-lead')
+    .getByRole('button', { name: 'Delete session', exact: true })
+    .click()
+  await expect(page.getByRole('dialog', { name: 'Delete session', exact: true })).toContainText(
+    'all its panes',
+  )
+  await page.keyboard.press('Escape')
+  await page.getByTestId('view-pm').click()
+  await page
+    .getByTestId('pane-p-pm')
+    .getByRole('button', { name: 'Delete PM', exact: true })
+    .click()
+  const pmDialog = page.getByRole('dialog', { name: 'Delete PM', exact: true })
+  await expect(pmDialog).toContainText('PM and its advisors')
+  await pmDialog.getByRole('button', { name: 'Delete PM', exact: true }).click()
+  expect(await commandCalls(page, 'tab_delete')).toEqual([
+    { command: 'tab_delete', args: { tab: 't-pm', generation: 1 } },
+  ])
+  await expect(page.getByTestId('pane-p4-lead')).toBeVisible()
+  expect(await commandCalls(page, 'delete_pane')).toEqual([
+    { command: 'delete_pane', args: { id: 'p4-w1', generation: 1 } },
+  ])
 })

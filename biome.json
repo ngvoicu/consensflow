@@ -12,6 +12,7 @@
       "hosts/lib/inbox.js",
       "hosts/lib/receiver.js",
       "hosts/claude-receiver.mjs",
+      "hosts/devin-receiver.mjs",
       "hosts/lib/policy.js",
       "hosts/lib/session-binding.js",
       "hosts/pi-extension/**",

@@ -73,6 +73,15 @@ import { slugify, stripMention } from "./utils.js";
 // OpenCode trio does: a tier ladder is a choice, and asteria/astraeus were asked for as xhigh and
 // max. Add an ultra row when someone wants the top; the level is there and proven.
 export const AGENT_PRESETS = [
+  {
+    preset: "devin",
+    id: "devin",
+    name: "Devin",
+    label: "Devin configured model",
+    description: "Coding and review using the model selected in your Devin settings.",
+    kind: "devin",
+    model: "default",
+  },
   // Lower-effort choices; existing names and higher tiers stay stable.
   {
     preset: "hemera",
@@ -501,7 +510,6 @@ export const AGENT_PRESETS = [
     kind: "pi",
     model: "openrouter/anthropic/claude-fable-5.1",
     thinking: "xhigh",
-    skillsPolicy: "default",
   },
   {
     preset: "linus",
@@ -512,7 +520,6 @@ export const AGENT_PRESETS = [
     kind: "pi",
     model: "openrouter/anthropic/claude-fable-5.1",
     thinking: "high",
-    skillsPolicy: "default",
   },
   {
     preset: "erato",
@@ -523,7 +530,6 @@ export const AGENT_PRESETS = [
     kind: "pi",
     model: "openrouter/anthropic/claude-fable-5.1",
     thinking: "medium",
-    skillsPolicy: "default",
   },
   {
     preset: "saga",
@@ -565,7 +571,6 @@ export const AGENT_PRESETS = [
     kind: "pi",
     model: "openrouter/anthropic/claude-opus-5",
     thinking: "xhigh",
-    skillsPolicy: "default",
   },
   {
     preset: "atlas",
@@ -576,7 +581,6 @@ export const AGENT_PRESETS = [
     kind: "pi",
     model: "openrouter/anthropic/claude-opus-5",
     thinking: "medium",
-    skillsPolicy: "default",
   },
   // Opus 5 on OpenCode (via OpenRouter). Unlike the 4.8 generation there is no dotted id:
   // it is plainly anthropic/claude-opus-5. Kept at the xhigh/medium tiers the 4.8 pair used.
@@ -622,7 +626,6 @@ export const AGENT_PRESETS = [
     kind: "pi",
     model: "openrouter/google/gemini-3.8-flash",
     thinking: "high",
-    skillsPolicy: "default",
   },
   {
     preset: "freya",
@@ -643,7 +646,6 @@ export const AGENT_PRESETS = [
     kind: "pi",
     model: "openrouter/deepseek/deepseek-v4-flash-0731",
     thinking: "high",
-    skillsPolicy: "default",
   },
   {
     preset: "sif",
@@ -666,7 +668,6 @@ export const AGENT_PRESETS = [
     kind: "pi",
     model: "openrouter/deepseek/deepseek-v4-pro-0813",
     thinking: "high",
-    skillsPolicy: "default",
   },
   {
     preset: "ares",
@@ -677,7 +678,6 @@ export const AGENT_PRESETS = [
     kind: "pi",
     model: "openrouter/x-ai/grok-4.6",
     thinking: "xhigh",
-    skillsPolicy: "default",
   },
   {
     preset: "hephaestus",
@@ -688,7 +688,6 @@ export const AGENT_PRESETS = [
     kind: "pi",
     model: "openrouter/qwen/qwen3.8-max",
     thinking: "xhigh",
-    skillsPolicy: "default",
   },
   {
     preset: "athena",
@@ -699,7 +698,6 @@ export const AGENT_PRESETS = [
     kind: "pi",
     model: "openrouter/qwen/qwen3.8-27b",
     thinking: "xhigh",
-    skillsPolicy: "default",
   },
   {
     preset: "metis",
@@ -709,7 +707,6 @@ export const AGENT_PRESETS = [
     description: "Coding and analysis across longer tasks.",
     kind: "pi",
     model: "openrouter/minimax/minimax-m3",
-    skillsPolicy: "default",
   },
   {
     preset: "prometheus",
@@ -720,7 +717,6 @@ export const AGENT_PRESETS = [
     kind: "pi",
     model: "openrouter/z-ai/glm-5.3",
     thinking: "max",
-    skillsPolicy: "default",
   },
   {
     preset: "endymion",
@@ -731,7 +727,6 @@ export const AGENT_PRESETS = [
     kind: "pi",
     model: "openrouter/moonshotai/kimi-k3",
     thinking: "max",
-    skillsPolicy: "default",
   },
 
   // --- Three OpenRouter models added 2026-08-24, each verified present in
@@ -788,7 +783,6 @@ export const AGENT_PRESETS = [
     kind: "pi",
     model: "openrouter/meta/muse-spark-1.3",
     thinking: "xhigh",
-    skillsPolicy: "default",
   },
 
   // --- opencode model zoo (Norse names) — same models via OpenCode --------
@@ -1249,9 +1243,66 @@ const MODEL_LABELS = {
   'muse-spark-1.3': 'Muse Spark 1.3',
 }
 
-export function agentProfile({ harness, kind, model, effort, thinking }) {
+export const WORK_TIERS = {
+  critical: { label: 'Critical work', description: 'Important reviews, architecture, hard problems and important questions. No coding or routine advice.' },
+  complex: { label: 'Complex work', description: 'Demanding implementation, investigation, planning and substantial reviews.' },
+  standard: { label: 'Standard work', description: 'Feature work, tests, research, planning and ordinary reviews.' },
+  light: { label: 'Light work', description: 'Bounded fixes, lookups and routine tasks; verify the model is suitable.' },
+};
+
+export const CATEGORY_LABELS = {
+  coding: 'Coding', architecture: 'Architecture', 'problem-solving': 'Hard problems',
+  reviewer: 'Review', lead: 'Lead candidate', pm: 'PM candidate', images: 'Images',
+};
+
+export function validateWorkTier(value) {
+  if (value != null && (typeof value !== 'string' || !Object.hasOwn(WORK_TIERS, value)))
+    throw new Error('Work tier must be critical, complex, standard or light');
+}
+
+/** Validate the declared purpose; this is not a semantic classifier or a sandbox. */
+export function taskWithWorkPolicy(agent, task, purpose) {
+  const purposes = ['critical-review', 'architecture', 'hard-problem', 'important-question'];
+  if (purpose !== undefined && !purposes.includes(purpose))
+    throw new Error(`Purpose must be ${purposes.join(', ')}`);
+  if (agentProfile(agent).workTier !== 'critical') return task;
+  if (!purposes.includes(purpose))
+    throw new Error(`Critical work requires --purpose ${purposes.join('|')}; no coding or routine advice`);
+  return `Critical work: ${purpose}. No coding or implementation edits. Do not write or revise specifications. Return analysis, evidence and recommendations to your coordinator.\n\n${task}`;
+}
+
+/** Work tiers express the owner's allocation policy, not benchmark or price ranks. */
+export function agentProfile(agent) {
+  const profile = modelProfile(agent);
+  const harness = agent.harness ?? (agent.kind === 'claude-code' ? 'claude' : agent.kind);
+  const effort = harness === 'pi' ? agent.thinking ?? agent.effort : agent.effort;
+  const known = AGENT_PRESETS.some(p => (p.kind === 'claude-code' ? 'claude' : p.kind) === harness && p.model === agent.model);
+  let tier = 'light';
+  if (known && /kimi-k3$/.test(profile.modelKey)) tier = 'complex';
+  else if (known && (['low', 'medium', 'high', 'xhigh', 'max'].includes(effort) || (harness === 'codex' && effort === 'ultra'))) {
+    if (['gpt-6-astra', 'claude-fable-5.1'].includes(profile.modelKey))
+      tier = ['max', 'ultra'].includes(effort) ? 'critical' : ['high', 'xhigh'].includes(effort) ? 'complex' : effort === 'medium' ? 'standard' : 'light';
+    else if (['gpt-5.6-sol', 'claude-opus-5'].includes(profile.modelKey) && effort !== 'low') tier = 'standard';
+  }
+  validateWorkTier(agent.workTier);
+  profile.workTier = agent.workTier ?? tier;
+  if (profile.workTier === 'critical') {
+    profile.categories = ['architecture', 'problem-solving', 'reviewer'];
+    profile.goodFor = 'Consequential reviews, architecture, discovering solutions to hard problems and answering important questions.';
+  }
+  return profile;
+}
+
+function modelProfile({ harness, kind, model, effort, thinking }) {
   harness ??= kind === "claude-code" ? "claude" : kind
   if (harness === "pi") effort = thinking ?? effort
+  if (harness === 'devin') return {
+    modelKey: model && model !== 'default' ? model : 'devin-configured',
+    modelLabel: model && model !== 'default' ? model : 'Devin configured model',
+    routeLabel: 'Devin account',
+    categories: ['coding', 'reviewer'],
+    goodFor: 'Coding and review using the model selected in your Devin settings.',
+  }
   if (harness === 'image')
     return {
       modelKey: 'codex-image',
@@ -1367,7 +1418,6 @@ export function agentFromPreset(ref, overrides = {}) {
     model: preset.model,
     effort: preset.effort,
     thinking: preset.thinking,
-    skillsPolicy: preset.skillsPolicy,
   };
   delete agent.label;
   return agent;
@@ -1393,7 +1443,7 @@ export function agentFromPreset(ref, overrides = {}) {
 // without asking. The escape hatch is provenance, not wording — an agent added with an explicit
 // --model or --effort carries no `preset` and is never synced at all.
 // Agents with no `preset`, or whose preset has since left the catalog, are left alone.
-export const PRESET_OWNED_FIELDS = ["kind", "model", "effort", "thinking", "skillsPolicy", "description"];
+export const PRESET_OWNED_FIELDS = ["kind", "model", "effort", "thinking", "description"];
 
 // The roster's `description` is the preset's one-line LABEL ("Pi GLM 5.3 Flash MAX") — what an add
 // writes and what the generated skill prints beside the agent's name. The preset's own
@@ -1403,13 +1453,9 @@ function presetOwnedValue(field, preset) {
   return presetFieldValue(field, preset);
 }
 
-// normalizeAgent() fills these in on save, so compare against the same defaults or every
-// non-pi agent reports a phantom skillsPolicy change.
-const PRESET_FIELD_DEFAULTS = { skillsPolicy: "default" };
-
 function presetFieldValue(field, source) {
   const value = source?.[field];
-  if (value === undefined || value === null || value === "") return PRESET_FIELD_DEFAULTS[field];
+  if (value === undefined || value === null || value === "") return undefined;
   return value;
 }
 
@@ -1466,8 +1512,7 @@ function allowedOverrides(overrides) {
 
 export function formatPresetLine(preset) {
   const effort = preset.effort ? ` effort=${preset.effort}` : preset.thinking ? ` thinking=${preset.thinking}` : "";
-  const skills = preset.kind === "pi" ? ` skills=${preset.skillsPolicy ?? "default"}` : "";
-  return `- ${preset.preset} → @${preset.id} (${preset.name}): ${preset.label} [${preset.kind} model=${preset.model}${effort}${skills}]`;
+  return `- ${preset.preset} → @${preset.id} (${preset.name}): ${preset.label} [${preset.kind} model=${preset.model}${effort}]`;
 }
 
 export function formatPresets() {

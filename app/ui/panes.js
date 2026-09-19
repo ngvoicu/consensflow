@@ -1,6 +1,7 @@
 import { Menus } from './menus.js'
 import { runSelftest } from './selftest.js'
-import { orderedPanes, paneLabel, renderSidebar, sessionName } from './sidebar.js'
+import { orderedPanes, paneLabel, renderSidebar, sessionName, updateActivity } from './sidebar.js'
+import { TaskView } from './tasks.js'
 import { EmulatorRegistry, paneKey } from './term.js'
 import { initializeUpdates } from './updates.js'
 import { gridTemplate } from './vendor/layout.js'
@@ -55,6 +56,7 @@ const selectionBySession = new Map()
 const groupViews = document.querySelector('#group-views')
 const pmView = document.querySelector('#view-pm')
 const leadView = document.querySelector('#view-lead')
+const tasksButton = document.querySelector('#view-tasks')
 const focusByTab = new Map()
 const scrollByTab = new Map()
 const workerStage = document.createElement('div')
@@ -65,6 +67,8 @@ workerStage.addEventListener('scroll', () => {
 let resizeFrame = null
 let refreshInFlight = null
 let refreshPending = false
+let refreshRetry = null
+let refreshError = null
 let outputChannel = null
 let unlistenStateChanged = null
 const cards = new Map()
@@ -74,6 +78,8 @@ const outputChains = new Map()
 const retiredKeys = new Set()
 const retiringKeys = new Set()
 const inputSequences = new Map()
+const inputStreams = new Map()
+const INPUT_CHUNK_BYTES = 32 * 1024
 // Set only by the packaged smoke's driver (`selftest.js`), which Rust only
 // lets the page load when the app was started in self-test mode.
 let ackObserver = null
@@ -174,22 +180,57 @@ function nextInputSequence(pane) {
 }
 
 async function enqueueTerminalInput(command, pane, data) {
+  const key = paneKey(pane)
+  const bytes = new TextEncoder().encode(data)
+  const previous = inputStreams.get(key)
+  const submit = async () => {
+    for (let offset = 0; offset < bytes.length; offset += INPUT_CHUNK_BYTES) {
+      if (retiredKeys.has(key) || retiringKeys.has(key)) return
+      const ok = await sendTerminalChunk(
+        command,
+        pane,
+        bytes.subarray(offset, offset + INPUT_CHUNK_BYTES),
+      )
+      if (!ok) return
+    }
+  }
+  // Small keystrokes retain immediate admission. A large paste streams with
+  // backpressure and keeps subsequent input behind its closing bracket.
+  if (!previous && bytes.length <= INPUT_CHUNK_BYTES) return submit()
+  const stream = (previous ?? Promise.resolve()).then(submit)
+  inputStreams.set(key, stream)
+  try {
+    await stream
+  } finally {
+    if (inputStreams.get(key) === stream) inputStreams.delete(key)
+  }
+}
+
+async function sendTerminalChunk(command, pane, bytes) {
   const sequence = nextInputSequence(pane)
-  const bytes = [...new TextEncoder().encode(data)]
   const admitted = await run(
     command,
-    { id: pane.id, generation: pane.generation, sequence, bytes },
+    { id: pane.id, generation: pane.generation, sequence, bytes: Array.from(bytes) },
     { refresh: false },
   )
-  if (admitted?.ok !== true) return
+  if (admitted?.ok !== true) return false
   if (typeof admitted.ticket !== 'string' || admitted.ticket.length === 0) {
     report('pane-input-ticket-missing', 'error')
-    return
+    return false
   }
-  await run('pane_input_wait', { ticket: admitted.ticket }, { refresh: false })
+  const result = await run('pane_input_wait', { ticket: admitted.ticket }, { refresh: false })
+  return result?.ok === true
 }
 
 const menus = new Menus({ invoke: rawInvoke, run, report, openResults: showResults })
+const taskView = new TaskView(document.querySelector('#task-view'), {
+  invoke: rawInvoke,
+  openResults: showResults,
+  openPane: (tab, pane) => {
+    selection = { tabId: tab.id, type: 'pane', paneId: pane.id }
+    render()
+  },
+})
 
 async function syncTerminalSize(key) {
   // Fitting can precede native startup. Keep the size until the live pane
@@ -507,7 +548,24 @@ function createCard(tab, pane) {
       generation: Number(card.dataset.generation),
     })
   })
-  titlebar.append(kind, title, close)
+  const activity = document.createElement('span')
+  updateActivity(activity, tab, pane)
+  const remove = document.createElement('button')
+  remove.type = 'button'
+  remove.className = 'pane-close-button pane-delete-button'
+  remove.textContent = 'Delete'
+  remove.setAttribute(
+    'aria-label',
+    pane.kind === 'lead' ? (tab.role === 'pm' ? 'Delete PM' : 'Delete session') : 'Delete pane',
+  )
+  remove.title = remove.getAttribute('aria-label')
+  remove.addEventListener('click', (event) => {
+    event.stopPropagation()
+    const { tab, pane } = card._context
+    if (pane.kind === 'lead') menus.deleteSession(tab)
+    else menus.deletePane({ ...pane, name: paneLabel(tab, pane) })
+  })
+  titlebar.append(kind, title, activity, close, remove)
   const terminal = document.createElement('div')
   terminal.className = 'terminal-host'
   terminal.setAttribute('aria-label', `${paneLabel(tab, pane)} terminal`)
@@ -580,6 +638,7 @@ function updateCard(card, tab, pane) {
     }[effective.source]
     title.title = `Reply delivery: ${effective.mode === 'manual' ? 'Manual' : 'Automatic'}. ${source}`
   }
+  updateActivity(card.querySelector('.pane-activity'), tab, pane)
   addDeliveryBadges(card.querySelector('.pane-titlebar'), tab, pane)
 }
 
@@ -750,6 +809,16 @@ function showCards(tab, panes, indices, mode, layout) {
 
 function renderPaneView() {
   const tab = activeTab()
+  const tasksActive = tab !== null && selection.type === 'tasks'
+  stage.hidden = tasksActive
+  if (tasksActive) {
+    parkEveryCard()
+    focusNav.hidden = true
+    const root = tab.role === 'pm' ? viewState.tabs.find((t) => t.id === tab.parentTabId) : tab
+    taskView.show(root ?? tab, viewState)
+    return
+  }
+  taskView.hide()
   const panes = tab === null ? [] : orderedPanes(tab).filter((pane) => isVisiblePane(tab, pane))
   if (tab === null || panes.length === 0) {
     parkEveryCard()
@@ -800,7 +869,7 @@ function renderHeader() {
     [pmView, pm, 'PM'],
     [leadView, parent, 'Lead'],
   ]) {
-    button.setAttribute('aria-pressed', String(group?.id === tab?.id))
+    button.setAttribute('aria-pressed', String(selection.type !== 'tasks' && group?.id === tab?.id))
     const count = group
       ? deliveriesFor(
           group,
@@ -810,6 +879,7 @@ function renderHeader() {
     button.textContent = `${label}${count ? ` · ${count} pending` : ''}`
   }
   currentDirectory.textContent = tab?.directory ?? tab?.dir ?? ''
+  tasksButton.setAttribute('aria-pressed', String(selection.type === 'tasks'))
   tabPolicy.hidden = tab === null || tab.closed === true
   deliveryInfo.hidden = tabPolicy.hidden
   newPane.hidden = tab === null || tab.closed === true
@@ -919,6 +989,8 @@ function applyRoster(roster) {
 }
 
 async function refresh() {
+  clearTimeout(refreshRetry)
+  refreshRetry = null
   if (refreshInFlight !== null) {
     refreshPending = true
     return await refreshInFlight
@@ -932,12 +1004,18 @@ async function refresh() {
       } catch (cause) {
         raw = { ok: false, error: cause instanceof Error ? cause.message : String(cause) }
       }
-      viewState = normalizeState(raw)
+      const nextState = normalizeState(raw)
+      const failure = resultFailure(raw)
+      if (failure !== null || !nextState.available) {
+        refreshError = failure ?? 'Session controls are not available yet'
+        report(refreshError, 'error')
+        continue
+      }
+      if (refreshError !== null && status.textContent === refreshError) report('')
+      refreshError = null
+      viewState = nextState
       applyRoster(viewState.roster)
       render()
-      const failure = resultFailure(raw)
-      if (failure !== null) report(failure, 'error')
-      else if (!viewState.available) report('Session controls are not available yet', 'error')
     } while (refreshPending)
   })()
   try {
@@ -945,6 +1023,9 @@ async function refresh() {
   } finally {
     refreshInFlight = null
     if (refreshPending) void refresh()
+    else if (refreshError !== null && typeof invoke === 'function') {
+      refreshRetry = setTimeout(() => void refresh(), 1000)
+    }
   }
 }
 
@@ -1139,6 +1220,12 @@ leadView.addEventListener('click', () => {
   const parent = tab?.role === 'pm' ? viewState.tabs.find((t) => t.id === tab.parentTabId) : tab
   if (parent) selectGroup(parent)
 })
+tasksButton.addEventListener('click', () => {
+  const tab = activeTab()
+  if (!tab) return
+  selection = { tabId: tab.parentTabId ?? tab.id, type: 'tasks', paneId: null }
+  render()
+})
 
 newPane.addEventListener('click', () => {
   const tab = activeTab()
@@ -1157,8 +1244,16 @@ function scheduleLayout() {
   })
 }
 
+// A stalled native scan must not leave yesterday's Working/Idle label on screen.
+const activityTimer = setInterval(() => {
+  for (const badge of document.querySelectorAll('.pane-activity'))
+    updateActivity(badge, badge._context.tab, badge._context.pane)
+}, 1000)
 new ResizeObserver(scheduleLayout).observe(stage)
 window.addEventListener('beforeunload', () => {
+  taskView.hide()
+  clearTimeout(refreshRetry)
+  clearInterval(activityTimer)
   unlistenStateChanged?.()
   registry.dispose()
 })

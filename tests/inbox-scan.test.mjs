@@ -6,6 +6,7 @@ import { digest, envelope } from '../hosts/lib/deliveries.js'
 import { beginInsertion, claimNext, registerReceiver, resultStatus } from '../hosts/lib/inbox.js'
 import { launchConfiguration } from '../src/channels.js'
 import { Watcher } from '../src/delivery-watch.js'
+import { Page } from '../src/page.js'
 import { Store } from '../src/store.js'
 import { Tabs } from '../src/tabs.js'
 import { tempEnv } from './helpers.mjs'
@@ -180,6 +181,64 @@ test('scanner indexes every completed reply for closed/manual/unbound coordinato
   assert.deepEqual(s.requests, [])
   assert.deepEqual(s.errors, [])
   assert.deepEqual(await fs.readdir(s.cwd), [])
+})
+
+test('stored results stay readable while an unrelated background scan is stalled', async (t) => {
+  const s = await setup(t)
+  await writeCodexSession(s.f.env, 'native-worker', [
+    { answer: 'Full saved report', answerId: 'saved' },
+  ])
+  await s.watcher.reconcile()
+  const gate = Promise.withResolvers()
+  const entered = Promise.withResolvers()
+  const list = s.tabs.list.bind(s.tabs)
+  s.tabs.list = async () => {
+    entered.resolve()
+    await gate.promise
+    return list()
+  }
+  const scanning = s.watcher.reconcile()
+  await entered.promise
+  let timer
+  try {
+    const result = await Promise.race([
+      Promise.all([
+        s.watcher.readResult(s.lead.id, 'worker', 'saved'),
+        s.watcher.results(s.lead.id),
+      ]),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('stored read waited on scanning')), 500)
+      }),
+    ])
+    assert.equal(result[0].answer, 'Full saved report')
+    assert.equal(result[1][0].results[0].id, 'saved')
+  } finally {
+    clearTimeout(timer)
+    gate.resolve()
+    await scanning
+  }
+})
+
+test('repeated scan requests share the in-progress scan instead of creating a backlog', async (t) => {
+  const s = await setup(t)
+  const gate = Promise.withResolvers()
+  const entered = Promise.withResolvers()
+  const list = s.tabs.list.bind(s.tabs)
+  let scans = 0
+  s.tabs.list = async () => {
+    scans++
+    entered.resolve()
+    await gate.promise
+    return list()
+  }
+  const first = s.watcher.reconcile()
+  await entered.promise
+  const queued = Array.from({ length: 50 }, () => s.watcher.reconcile())
+  gate.resolve()
+  await Promise.all([first, ...queued])
+  assert.equal(scans, 1)
+  await s.watcher.reconcile()
+  assert.equal(scans, 2, 'a later request still refreshes the inbox')
 })
 
 test('scanner migrates accepted and uncertain historical copies once and preserves evidence with missing native history', async (t) => {
@@ -417,4 +476,137 @@ test('scanner recovers a historical native receipt while preserving the original
   assert.deepEqual(result.legacyEvidence[0].ids, ['legacy-user-id'])
   assert.deepEqual((await s.store.readDeliveries(s.cwd))['d-100'], old)
   assert.equal(s.requests.length, 0)
+})
+
+test('pane activity follows native task state, current receiver and exact worker generation without changing receipts', async (t) => {
+  const s = await setup(t)
+  const worker = await s.tabs.addPane(s.lead.id, { kind: 'worker', conversation: 'worker' })
+  const advisor = await s.tabs.addPane(s.pm.id, { kind: 'worker', conversation: 'advisor' })
+  const shell = await s.tabs.addPane(s.lead.id, { kind: 'shell' })
+  await s.store.mutate(s.cwd, 'test.live', async (io) => {
+    const all = await io.readTabs()
+    const state = await io.readInbox()
+    for (const tab of all) {
+      tab.closed = false
+      tab.lead.harness = 'codex'
+      tab.lead.nativeSession = 'obsolete-lead'
+      tab.lead.reserved = { launchId: `${tab.id}-launch`, resolvedAt: 'now' }
+      registerReceiver(state, {
+        owner: tab.id,
+        launch: tab.lead.reserved.launchId,
+        pane: tab.panes[0].id,
+        generation: 1,
+        kind: 'codex',
+        session: `${tab.id}-current`,
+        lease: `${tab.id}-lease`,
+        previous: null,
+        now: 1,
+      })
+    }
+    const rows = await io.readThreads()
+    for (const [name, pane, owner] of [
+      ['worker', worker, s.lead.id],
+      ['advisor', advisor, s.pm.id],
+    ]) {
+      rows[name].binding.generation = pane.generation
+      rows[name].reserved = {
+        tab: owner,
+        pane: pane.id,
+        generation: pane.generation,
+        launchId: rows[name].binding.launchId,
+        resolvedAt: 'now',
+      }
+    }
+    await io.writeThreads(rows)
+    await io.writeTabs(all)
+    await io.writeInbox(state)
+  })
+  const page = new Page({
+    store: s.store,
+    tabs: s.tabs,
+    watcher: s.watcher,
+    agents: { names: () => [], row: () => null },
+  })
+  const activity = async (owner, id) =>
+    (await page.state()).tabs.find((tab) => tab.id === owner).panes.find((pane) => pane.id === id)
+      .activity.state
+  const leadPane = (await s.tabs.get(s.lead.id)).panes[0]
+  const pmPane = (await s.tabs.get(s.pm.id)).panes[0]
+  assert.equal(await activity(s.lead.id, leadPane.id), 'unknown')
+  await writeCodexSession(s.f.env, 'obsolete-lead', [{ answer: 'old answer' }])
+  await writeCodexSession(s.f.env, `${s.lead.id}-current`, [{}])
+  await writeCodexSession(s.f.env, `${s.pm.id}-current`, [{ answer: 'pm answer' }])
+  await writeCodexSession(s.f.env, 'native-worker', [{}])
+  await writeCodexSession(s.f.env, 'native-advisor', [{ answer: 'advice' }])
+  await s.watcher.reconcile()
+  assert.equal(await activity(s.lead.id, leadPane.id), 'working')
+  assert.equal(await activity(s.pm.id, pmPane.id), 'idle')
+  assert.equal(await activity(s.lead.id, worker.id), 'working')
+  assert.equal(await activity(s.pm.id, advisor.id), 'idle')
+  assert.equal(await activity(s.lead.id, shell.id), 'open')
+  const before = JSON.stringify(await s.store.readInbox(s.cwd))
+  await page.state()
+  assert.equal(JSON.stringify(await s.store.readInbox(s.cwd)), before)
+
+  await writeCodexSession(s.f.env, 'native-worker', [{ answer: 'finished' }])
+  await s.watcher.reconcile()
+  assert.equal(await activity(s.lead.id, worker.id), 'idle')
+  await writeCodexSession(s.f.env, 'native-worker', [{ answer: 'finished' }, {}])
+  await s.watcher.reconcile()
+  assert.equal(await activity(s.lead.id, worker.id), 'working', 'every follow-up counts')
+  s.watcher.now = () => Date.now() + 11_000
+  assert.equal(
+    await activity(s.lead.id, worker.id),
+    'unknown',
+    'a stalled scan cannot leave stale Working visible',
+  )
+  s.watcher.now = Date.now
+
+  await s.store.mutate(s.cwd, 'test.new-session', async (io) => {
+    const state = await io.readInbox()
+    registerReceiver(state, {
+      ...state.receivers[s.lead.id],
+      session: 'selected-new',
+      lease: 'new-lease',
+      previous: state.receivers[s.lead.id].lease,
+      now: 2,
+    })
+    await io.writeInbox(state)
+    const all = await io.readTabs()
+    all.find((tab) => tab.id === s.lead.id).panes.find((pane) => pane.id === worker.id).generation++
+    await io.writeTabs(all)
+  })
+  assert.equal(
+    await activity(s.lead.id, leadPane.id),
+    'unknown',
+    'old selected session does not leak into /new',
+  )
+  assert.equal(
+    await activity(s.lead.id, worker.id),
+    'unknown',
+    'old binding cannot label a replacement pane',
+  )
+  await writeCodexSession(s.f.env, 'selected-new', [{ answer: 'new answer' }])
+  await s.watcher.reconcile()
+  assert.equal(await activity(s.lead.id, leadPane.id), 'idle')
+  const file = await writeCodexSession(s.f.env, 'selected-new', [])
+  await fs.rm(file)
+  await s.watcher.reconcile()
+  assert.equal(
+    await activity(s.lead.id, leadPane.id),
+    'unknown',
+    'unreadable native state is not Idle',
+  )
+  await s.store.mutate(s.cwd, 'test.close', async (io) => {
+    const all = await io.readTabs()
+    all.find((tab) => tab.id === s.lead.id).closed = true
+    const pm = all.find((tab) => tab.id === s.pm.id)
+    delete pm.lead.reserved.resolvedAt
+    pm.panes.find((pane) => pane.id === advisor.id).failure = { message: 'exited' }
+    await io.writeTabs(all)
+  })
+  assert.equal(await activity(s.lead.id, leadPane.id), 'closed')
+  assert.equal(await activity(s.pm.id, pmPane.id), 'starting')
+  assert.equal(await activity(s.pm.id, advisor.id), 'failed')
+  assert.deepEqual(s.errors, [])
 })

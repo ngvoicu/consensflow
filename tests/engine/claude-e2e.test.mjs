@@ -418,9 +418,9 @@ test('authorization scope and name-neutrality stay locked into the lead skill', 
   const skill = generateSkill([
     { name: 'zeus', harness: 'claude', model: 'claude-opus-5', effort: 'max' },
   ])
-  assert.match(skill, /within the authorized/)
-  assert.match(skill, /Worker suggestions do not expand that authorization/)
-  assert.match(skill, /already authorized by the user without asking again/)
+  assert.match(skill, /user's authorized task/)
+  assert.match(skill, /delegate suggestions do not expand authorization/)
+  assert.match(skill, /No retrieval call or new user permission is needed/)
 
   // No host payload ships any more, so no second copy of the gate can drift.
   assert.equal(existsSync(path.join(ROOT, 'hosts', 'claude')), false, 'no claude payload')

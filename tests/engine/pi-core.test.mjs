@@ -15,6 +15,7 @@ import {
 } from '../../hosts/lib/presets.js'
 import {
   buildRunnerInvocation,
+  interactiveStart,
   normalizeProcessOutput,
   runAgent,
   spawnWithInput,
@@ -140,6 +141,7 @@ test('createPacket gives write-capable agents a read-write mode line', async () 
 
 test('agent presets expose the allowed creation list', () => {
   assert.deepEqual(listPresetIds(), [
+    'devin',
     'hemera',
     'phaethon',
     'leto',
@@ -378,6 +380,14 @@ test('every preset survives normalize + runner invocation with correct flags (al
     assert.equal(agent.kind, preset.kind, `${preset.preset}: kind`)
     assert.equal(agent.model, preset.model, `${preset.preset}: model`)
 
+    if (preset.kind === 'devin') {
+      const invocation = interactiveStart(agent, null, 'Native task')
+      assert.equal(invocation.command, 'devin')
+      assert.deepEqual(invocation.args, [])
+      assert.equal(invocation.prompt, 'Native task')
+      assert.equal(invocation.env.CONSENSFLOW_CHILD, '1')
+      continue
+    }
     if (preset.kind === 'image') {
       assert.throws(() => buildRunnerInvocation(agent, '/tmp/packet.md', '/repo'), /image agents/)
       continue
@@ -472,7 +482,11 @@ test('runner invocation maps tool policies', () => {
     '/tmp/packet.md',
     '/repo',
   )
-  assert.ok(sterilePi.args.includes('--no-skills'))
+  assert.equal(
+    sterilePi.args.includes('--no-skills'),
+    false,
+    'legacy skill policy no longer changes discovery',
+  )
   const codex = buildRunnerInvocation(
     { kind: 'codex', model: 'gpt-5.5', effort: 'xhigh' },
     '/tmp/packet.md',
@@ -884,19 +898,16 @@ test('parseAgentPrompt: ask/to verb prefixes and the ask-noise boundary', () => 
 })
 
 test('legacy Pi host payload is absent and lead skill preserves authorization', async () => {
-  // pi used to ship an extension. It registered tools, then only commands,
-  // then only a status line — each removal for the same reason: a request that
-  // took a different shape in pi than in Claude Code or a cmux pane was three
-  // products wearing one name. pi reads the generated skill now, like the rest.
+  // Retired per-harness payloads stay absent; role context comes from the shared generator.
   const root = new URL('../../', import.meta.url)
   assert.equal(existsSync(new URL('hosts/pi', root)), false, 'no pi payload ships')
   assert.equal(existsSync(new URL('hosts/claude', root)), false, 'nor a claude one')
 
-  // The gate it used to carry lives in the generator, the one place left.
+  // Generated role instructions preserve the user's authorization boundary.
   const { generateSkill } = await import('../../src/skill.js')
   const skill = generateSkill([{ name: 'zeus', harness: 'pi', model: 'fake', effort: 'high' }])
-  assert.match(skill, /within the authorized/)
-  assert.match(skill, /Worker suggestions do not expand that authorization/)
+  assert.match(skill, /user's authorized task/)
+  assert.match(skill, /delegate suggestions do not expand authorization/)
 })
 
 // The extension/engine boundary test went with the extension: nothing imports

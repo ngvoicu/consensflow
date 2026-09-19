@@ -221,7 +221,12 @@ export function createDeliveryExtension(
     if (typeof inbox !== 'string' || typeof ack !== 'string') return
     running = true
     try {
-      const files = (await readdir(inbox))
+      // A watcher event or queued rerun can outlive the inbox; nothing to read.
+      const names = await readdir(inbox).catch((cause) => {
+        if (cause?.code === 'ENOENT') return []
+        throw cause
+      })
+      const files = names
         .filter((name) => name.endsWith('.json'))
         .sort(
           (a, b) =>

@@ -205,6 +205,21 @@ export async function runSelftest({
     )
     await report('echo', { typed, hex })
 
+    // Exercise a large Unicode paste through WebKit, IPC and the real PTY.
+    await sendInput(pane, 'BIGPASTE\r')
+    await until('raw paste reader ready', () =>
+      screen(emulator).some((row) => row.includes('CFSMOKE-PASTE-READY')),
+    )
+    await sendInput(pane, '\x1b[200~' + '漢字 résumé 🙂\r'.repeat(30_000) + '\x1b[201~')
+    const pasted = await until('complete large paste reached the child', () => {
+      for (const row of screen(emulator)) {
+        const match = /CFSMOKE-PASTE (\d+) ([A-Za-z0-9+/=]+)/.exec(row)
+        if (match) return { bytes: Number(match[1]), hash: match[2] }
+      }
+      return null
+    })
+    await report('large-paste', pasted)
+
     // Only now the flood, and only because it is asked for. It is bigger than
     // the unacked-output window, so its last line can be on screen only if the
     // page kept returning credit through `pane_ack`. It also pushes far more
@@ -245,6 +260,47 @@ export async function runSelftest({
       pane: pm.pane,
       enqueue: (_action, text) => sendInput(pm.pane, text),
       invoke,
+    })
+    const leadTask = await invoke('task_change', {
+      tab: opened.tab,
+      change: { action: 'add', title: 'Verify worker results', kind: 'implementation' },
+    })
+    const pmTask = await invoke('task_change', {
+      tab: pm.tab,
+      change: { action: 'add', title: 'Agree on reply history', question: 'Retain every reply?' },
+    })
+    if (!leadTask.id || !pmTask.id) throw new Error('Task creation failed')
+    const answered = await invoke('task_change', {
+      tab: pm.tab,
+      change: {
+        action: 'answer',
+        id: pmTask.id,
+        revision: pmTask.revision,
+        question: pmTask.questions[0].id,
+        answer: 'Keep all recorded replies',
+      },
+    })
+    const taskList = await invoke('task_list', { tab: opened.tab })
+    document.querySelector('#view-tasks').click()
+    await until('task board in packaged WebKit', () =>
+      document.querySelector(`[data-task="${pmTask.id}"]`),
+    )
+    const taskView = document.querySelector('#task-view')
+    ;[...taskView.querySelectorAll('button')]
+      .find((button) => button.textContent === 'Graph')
+      .click()
+    const graph = await until('task graph in packaged WebKit', () =>
+      taskView.querySelector('svg [data-relation="owns"]'),
+    )
+    document.querySelector('#view-lead').click()
+    await report('task-board', {
+      total: taskList.total,
+      owners: taskList.owners.length,
+      answer: answered.questions?.[0]?.answer,
+      status: answered.status,
+      graph: !!graph,
+      terminalPreserved:
+        registry.emulators.get(`${pane.id}:${pane.generation}`)?.emulator === emulator,
     })
     await report('settled', { acks, pane })
   } catch (cause) {

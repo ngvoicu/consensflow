@@ -53,7 +53,7 @@ for (const [harness, label] of [
         page.getByText('Role skills included in ConsensFlow', { exact: false }),
       ).toHaveCount(0)
       await expect(page.getByRole('button', { name: 'Update skills', exact: true })).toHaveCount(0)
-      await expect(page.locator('.host')).toHaveCount(5)
+      await expect(page.locator('.host')).toHaveCount(6)
       await expect(page.locator('.host').filter({ hasText: 'claude' })).toContainText(
         'Not installed',
       )
@@ -142,7 +142,7 @@ test('Harnesses reports a failed initial check and allows retry', async ({ page 
     await expect(page.getByRole('status')).toContainText('Harness check failed')
     fail = false
     await page.getByRole('button', { name: 'Check all harnesses' }).click()
-    await expect(page.locator('.host')).toHaveCount(5)
+    await expect(page.locator('.host')).toHaveCount(6)
     await expect(page.getByRole('status')).toBeEmpty()
   } finally {
     await server.close()
@@ -543,7 +543,7 @@ test('model capability order takes precedence over agent names and reasoning eff
     ['custom-fable-model', 'ultra'],
   ]
   const names = ordered.map(
-    (_, index) => 'agent-' + String(ordered.length - index).padStart(2, '0'),
+    (_, index) => `agent-${String(ordered.length - index).padStart(2, '0')}`,
   )
   const fixture = await catalogPage(
     page,
@@ -597,7 +597,7 @@ test('category pills reflect saved profiles and update after edits without chang
   try {
     const categories = (row) => row.getByRole('list', { name: 'Categories' }).getByRole('listitem')
     for (const row of [offer(page, 'maia'), member(fixture.roster, 'maia')]) {
-      await expect(categories(row)).toHaveText(['Coding', 'Reviewer / second opinion'])
+      await expect(categories(row)).toHaveText(['Coding', 'Review'])
       await expect(row.locator('.agent-route')).toHaveText('Codex login')
     }
     await expect(categories(offer(page, 'electra'))).toHaveText(['Coding'])
@@ -612,10 +612,7 @@ test('category pills reflect saved profiles and update after edits without chang
     await expect(categories(maia)).toHaveText(['Coding'])
     await fixture.roster.getByLabel('Category', { exact: true }).selectOption('lead')
     await expect(fixture.roster.locator('.callsign')).toHaveCount(0)
-    await expect(categories(offer(page, 'maia'))).toHaveText([
-      'Coding',
-      'Reviewer / second opinion',
-    ])
+    await expect(categories(offer(page, 'maia'))).toHaveText(['Coding', 'Review'])
   } finally {
     await fixture.close()
   }
@@ -705,21 +702,22 @@ test('each agent list filters independently and supports optional ungrouped and 
         'None',
         'Harness',
         'Model and reasoning',
+        'Work tier',
       ])
       await expect(section.getByRole('heading', { level: 3 })).toHaveCount(0)
     }
     await expect(fixture.roster.locator('#roster-count')).toHaveText('8 of 8 shown')
-    await expect(page.locator('#catalog-count')).toHaveText('98 of 98 shown')
+    await expect(page.locator('#catalog-count')).toHaveText('99 of 99 shown')
     await search.fill('Astra')
     await expect(fixture.roster.locator('#roster-count')).toHaveText('5 of 8 shown')
-    await expect(page.locator('#catalog-count')).toHaveText('98 of 98 shown')
+    await expect(page.locator('#catalog-count')).toHaveText('99 of 99 shown')
     await category.selectOption('lead')
     await expect(own.locator('.callsign')).toHaveText(['lead-one', 'peer-one'])
     await group.selectOption('model-reasoning')
     await expect(own.getByRole('heading', { level: 3 })).toHaveText(['GPT-6 Astra · Xhigh · 2'])
     await ready.getByRole('searchbox').fill('Astra')
     await ready.getByLabel('Group by').selectOption('model-reasoning')
-    await expect(page.locator('#catalog-count')).toHaveText('12 of 98 shown')
+    await expect(page.locator('#catalog-count')).toHaveText('12 of 99 shown')
     await expect(ready.getByRole('heading', { level: 3 })).toHaveText([
       'GPT-6 Astra · Max · 3',
       'GPT-6 Astra · Xhigh · 3',
@@ -735,7 +733,7 @@ test('each agent list filters independently and supports optional ungrouped and 
     await expect(own).toContainText('Personal notes')
     await search.fill('OpenRouter')
     await expect(own).toContainText('No agents match')
-    await expect(page.locator('#catalog-count')).toHaveText('12 of 98 shown')
+    await expect(page.locator('#catalog-count')).toHaveText('12 of 99 shown')
     await own.getByRole('button', { name: 'Clear filters' }).click()
     await expect(search).toHaveValue('')
     await expect(category).toHaveValue('all')
@@ -761,7 +759,7 @@ test('each agent list filters independently and supports optional ungrouped and 
     await expect(ready.getByRole('searchbox')).toHaveValue('')
     await expect(ready.getByLabel('Group by')).toHaveValue('model-reasoning')
     await expect(ready.getByLabel('Category', { exact: true })).toHaveValue('all')
-    await expect(ready.getByRole('heading', { level: 3 })).toHaveCount(36)
+    await expect(ready.getByRole('heading', { level: 3 })).toHaveCount(37)
     await expect(group).toHaveValue('harness')
     await group.selectOption('model-reasoning')
     for (const name of [
@@ -777,7 +775,7 @@ test('each agent list filters independently and supports optional ungrouped and 
     }
     await category.selectOption('images')
     await expect(own.locator('.callsign')).toHaveText(['draw'])
-    await expect(page.locator('#catalog-count')).toHaveText('98 of 98 shown')
+    await expect(page.locator('#catalog-count')).toHaveText('99 of 99 shown')
     await ready.getByLabel('Category', { exact: true }).selectOption('images')
     await expect(ready.locator('.offer__name')).toHaveText(['pygmalion'])
     await expect(own).toContainText('Codex Images')
@@ -811,11 +809,11 @@ test('each agent list filters independently and supports optional ungrouped and 
 const offer = (page, name) =>
   page
     .locator('#catalog .offer')
-    .filter({ has: page.locator('.offer__name', { hasText: new RegExp('^' + name + '$') }) })
+    .filter({ has: page.locator('.offer__name', { hasText: new RegExp(`^${name}$`) }) })
 const member = (page, name) =>
   page
     .locator('#roster .member')
-    .filter({ has: page.locator('.callsign', { hasText: new RegExp('^' + name + '$') }) })
+    .filter({ has: page.locator('.callsign', { hasText: new RegExp(`^${name}$`) }) })
 
 test('shared model cards default to every model and reasoning across all harnesses and providers on both screens', async ({
   page,
@@ -1088,17 +1086,16 @@ test('shared model cards retain differing role recommendations on their own harn
     await expect(card.locator('h3')).toHaveText('GPT-6 Astra · Ultra · 2')
     await expect(card.locator('.model-summary .category-pills')).toHaveCount(0)
     await expect(member(fixture.roster, 'codex-ultra').locator('.category-pill')).toHaveText([
-      'Coding',
-      'Recommended lead',
-      'Recommended PM',
-      'Reviewer / second opinion',
+      'Architecture',
+      'Hard problems',
+      'Review',
     ])
     await expect(member(fixture.roster, 'pi-ultra').locator('.category-pill')).toHaveText([
       'Coding',
     ])
-    await fixture.roster.getByLabel('Category', { exact: true }).selectOption('lead')
+    await fixture.roster.getByLabel('Category', { exact: true }).selectOption('architecture')
     await expect(card.locator('h3')).toHaveText('GPT-6 Astra · Ultra · 1')
-    await expect(card.locator('.model-summary .category-pill')).toHaveCount(4)
+    await expect(card.locator('.model-summary .category-pill')).toHaveCount(3)
     await expect(member(fixture.roster, 'pi-ultra')).toHaveCount(0)
   } finally {
     await fixture.close()
@@ -1137,7 +1134,7 @@ test('catalog entries remain visible after Add and removal restores Add without 
     await expect(
       offer(page, 'maia').getByRole('button', { name: 'Already added', exact: true }),
     ).toBeDisabled({ timeout: 1500 })
-    await expect(page.locator('#catalog-count')).toHaveText('1 of 98 shown')
+    await expect(page.locator('#catalog-count')).toHaveText('1 of 99 shown')
     await offer(page, 'maia').getByRole('button', { name: 'Remove', exact: true }).click()
     await refreshAgents(fixture.roster)
     await expect(member(fixture.roster, 'maia')).toHaveCount(0)
@@ -1235,7 +1232,7 @@ test('removal guards duplicate clicks and keeps the saved row after HTTP and net
   const waiting = new Promise((resolve) => {
     release = resolve
   })
-  await page.route(fixture.server.url + '/api/agents/maia', async (route) => {
+  await page.route(`${fixture.server.url}/api/agents/maia`, async (route) => {
     if (route.request().method() !== 'DELETE') return route.continue()
     deletes++
     if (mode === 'wait') {
@@ -1297,7 +1294,7 @@ test('pending adds reject duplicate clicks and expose server errors and concurre
   const waiting = new Promise((resolve) => {
     release = resolve
   })
-  await page.route(fixture.server.url + '/api/agents', async (route) => {
+  await page.route(`${fixture.server.url}/api/agents`, async (route) => {
     if (route.request().method() !== 'POST') return route.continue()
     posts++
     if (mode === 'wait') {
@@ -1513,7 +1510,7 @@ test('reviewer category and stricter lead tags agree in saved agents and new Sol
     for (const screen of [page, fixture.roster]) {
       await expect(
         screen.getByLabel('Category', { exact: true }).locator('option[value=reviewer]'),
-      ).toHaveText('Reviewer / second opinion')
+      ).toHaveText('Review')
       await screen.getByLabel('Category', { exact: true }).selectOption('reviewer')
     }
     await expect(fixture.roster.locator('.callsign')).toHaveText([
@@ -1535,5 +1532,69 @@ test('reviewer category and stricter lead tags agree in saved agents and new Sol
     await expect(fixture.roster.locator('.callsign')).toHaveText(['astra-xhigh'])
   } finally {
     await fixture.close()
+  }
+})
+
+test('work tiers filter and group both screens, and saved overrides preserve honest model cards', async ({
+  page,
+  context,
+}) => {
+  const t = tempEnv()
+  const server = await startUiServer(t.env)
+  const own = await context.newPage()
+  try {
+    for (const [name, model, effort] of [
+      ['specialist', 'gpt-6-astra', 'max'],
+      ['builder', 'gpt-6-astra', 'xhigh'],
+      ['ordinary', 'gpt-5.6-sol', 'max'],
+    ])
+      addAgent({ name, model, effort, harness: 'codex' }, t.env)
+    await page.goto(`${server.url}/library?token=${server.token}`)
+    await own.goto(`${server.url}/?token=${server.token}`)
+    for (const screen of [page, own]) {
+      await screen.getByLabel('Work tier', { exact: true }).selectOption('critical')
+      await expect(screen.locator('.tier-pill')).not.toHaveCount(0)
+      await expect(screen.locator('[data-category=coding]')).toHaveCount(0)
+      await expect(screen.locator('[data-category=lead], [data-category=pm]')).toHaveCount(0)
+      await expect(screen.locator('.tier-note').first()).toContainText('No coding')
+      await screen.getByRole('button', { name: 'Clear filters' }).click()
+      await expect(screen.getByLabel('Work tier', { exact: true })).toHaveValue('all')
+      await screen.getByLabel('Group by').selectOption('tier')
+      const headings = await screen.locator('.agent-group > h3').allTextContents()
+      expect(headings[0]).toContain('Critical work')
+      expect(headings[1]).toContain('Complex work')
+      expect(headings[2]).toContain('Standard work')
+    }
+    await own.getByLabel('Group by').selectOption('none')
+    const card = own.locator('[data-agent-name=specialist]')
+    await card.getByRole('button', { name: 'Edit', exact: true }).click()
+    await card.getByLabel('Work tier').selectOption('standard')
+    await card.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(card.locator('.tier-pill')).toContainText('Standard work')
+    await expect(card.locator('[data-category=coding]')).toHaveCount(1)
+    expect(listAgents(t.env).find((a) => a.name === 'specialist').workTier).toBe('standard')
+    await own.reload()
+    await own.getByLabel('Group by').selectOption('none')
+    await expect(card.locator('.tier-pill')).toContainText('Standard work')
+    await card.getByRole('button', { name: 'Edit', exact: true }).click()
+    await card.getByLabel('Work tier').selectOption('auto')
+    await card.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(card.locator('.tier-pill')).toContainText('Critical work')
+    expect(listAgents(t.env).find((a) => a.name === 'specialist').workTier).toBeUndefined()
+    // Catalog defaults are independent of saved overrides.
+    await page.getByLabel('Work tier', { exact: true }).selectOption('critical')
+    await expect(page.locator('.offer__name', { hasText: /^astraeus$/ })).toBeVisible()
+    await page.screenshot({
+      path: '/Users/gabrielvoicu/.consensflow/tmp/receiver-pull/tiers-library.png',
+      fullPage: true,
+    })
+    await own.screenshot({
+      path: '/Users/gabrielvoicu/.consensflow/tmp/receiver-pull/tiers-roster.png',
+      fullPage: true,
+    })
+  } finally {
+    await own.close()
+    await server.close()
+    t.cleanup()
   }
 })

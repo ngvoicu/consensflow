@@ -7,6 +7,7 @@ import { bindEvidence } from '../hosts/lib/session-binding.js'
 import { workspaceKey, writeJsonAtomic } from '../hosts/lib/state.js'
 import { newSessionName } from '../hosts/lib/threads.js'
 import { nowIso } from '../hosts/lib/utils.js'
+import { recordAssignment } from './tasks.js'
 
 /**
  * The app-wide serialised store (Phase 2, IMPL-PANE-12).
@@ -965,10 +966,24 @@ export class Store {
       const threads = await io.readThreads()
       const row = requireRow(threads, name)
       requireCurrentLaunch(row, name, expect)
+      const previousThreads = structuredClone(threads)
+      const { task, ...sent } = entry
+      let envelope = null
+      if (typeof task === 'string' && row.reserved?.tab) {
+        envelope = await io.readTabsEnvelope()
+        const tab = findTab(envelope.tabs, row.reserved.tab)
+        recordAssignment(tab, {
+          conversation: name,
+          task,
+          agent: row.agent,
+          opId: entry.opId,
+          initial: !row.sent?.length && entry.kind === 'seed',
+        })
+      }
       if (!Array.isArray(row.sent)) row.sent = []
-      row.sent.push({ ...entry, at: nowIso() })
+      row.sent.push({ ...sent, at: nowIso() })
       row.updatedAt = nowIso()
-      await io.writeThreads(threads)
+      await this.#commitLinkedThreads(io, threads, previousThreads, envelope)
       return row
     })
   }

@@ -4,6 +4,8 @@ import path from "node:path";
 import { piSessionDir } from "../../src/harnesses.js";
 import { stripLaunchMarker, withoutInjectedBlocks } from "./packets.js";
 import { bindEvidence, openingLineCarriesNonce, TURNS_EXAMINED } from "./session-binding.js";
+import { answers } from "./completion.js";
+import { selectedSession } from "../devin-receiver.mjs";
 
 /**
  * What was said in a harness's own session — read, never written.
@@ -36,6 +38,8 @@ export async function harnessTurns(kind, sessionId, env = process.env) {
         return await readOpencode(env, sessionId);
       case "kimi":
         return await readKimi(env, sessionId);
+      case "devin":
+        return (await answers(kind, sessionId, env)).items ?? [];
       default:
         // image agents hold no conversation, and an unknown kind is not ours.
         return [];
@@ -646,9 +650,25 @@ export async function discoverSessionWithEvidence(kind, cwd, since, env = proces
       return await discoverOpencodeWithNonce(cwd, since, env, nonce);
     case "kimi":
       return await discoverKimiWithNonce(cwd, since, env, nonce);
+    case "devin": {
+      if (!/^[A-Za-z0-9_-]{1,200}$/.test(nonce)) return null;
+      const wire = path.join(env.CONSENSFLOW_HOME ?? path.join(home(env), ".consensflow"), "integrations", "devin", nonce, "wire.jsonl");
+      let id;
+      try { id = await selectedSession(wire); } catch { return null; }
+      if (!id) return null;
+      const native = await answers(kind, id, env);
+      const turn = native.items?.filter((item) => item.role === "user").slice(0, TURNS_EXAMINED).find((item) => openingLineCarriesNonce(item.text, nonce));
+      return turn ? { sessionId: id, evidence: "nonce", turn: turn.text } : null;
+    }
     default:
       return null;
   }
+}
+
+export async function discoverDevinSession(cwd, since, env, { seed } = {}) {
+  const { parseLaunchNonce } = await import("./packets.js");
+  const nonce = parseLaunchNonce(String(seed ?? "").split("\n")[0]);
+  return (await discoverSessionWithEvidence("devin", cwd, since, env, { nonce }))?.sessionId ?? null;
 }
 
 async function discoverCodexWithNonce(cwd, since, env, nonce, originator = null) {

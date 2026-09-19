@@ -83,6 +83,8 @@ function renderHarness(row) {
       line.append(retry);
     }
   }
+  if (row.setup?.reason) line.append(el('div', null, row.setup.reason));
+  if (row.receiveNote) line.append(el('small', null, row.receiveNote));
   const check = el('button', null, 'Check again');
   check.onclick = () => checkHarnesses(row.id, check); line.append(check);
   line.append(el('small', null, 'Checked: ' + new Date(row.checkedAt).toLocaleString()));

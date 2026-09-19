@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { launchConfiguration } from '../src/channels.js'
 import { HarnessAdmin } from '../src/harness-admin.js'
-import { installEverywhere } from '../src/install.js'
+import { prepareApp } from '../src/install.js'
 import { tempEnv } from './helpers.mjs'
 
 function detected(t) {
@@ -27,7 +27,7 @@ test('OpenCode preparation is private, immutable, importable and installed with 
   assert.ok(extension.path.startsWith(f.env.CONSENSFLOW_HOME))
   assert.equal(typeof (await import(extension.path)).tui, 'function')
   assert.deepEqual(prepareOpenCodeExtension(f.env), extension)
-  assert.equal(installEverywhere(f.env).opencodeExtension.path, extension.path)
+  assert.equal(prepareApp(f.env).opencodeExtension.path, extension.path)
   assert.equal(readFileSync(global, 'utf8'), '{"plugin":["user-plugin"]}')
   writeFileSync(extension.path, 'drifted')
   assert.equal(prepareOpenCodeExtension(f.env).state, 'error')

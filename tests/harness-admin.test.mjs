@@ -15,7 +15,7 @@ test('administration lists missing harnesses without probing or installing them'
       },
     })
     const rows = await admin.check()
-    assert.equal(rows.length, 5)
+    assert.equal(rows.length, 6)
     assert.ok(rows.every((r) => r.installed === false && r.version.state === 'not-installed'))
     assert.equal(rows.find((r) => r.id === 'kimi').lead, false)
   } finally {
@@ -132,6 +132,27 @@ test('harness checks do not require session storage or expose receipt diagnostic
     if (saved === null) rmSync(tabs, { force: true })
     else writeFileSync(tabs, saved)
     await server.close()
+    t.cleanup()
+  }
+})
+
+test('Devin diagnostics report the minimum native version and idle collection limit', async () => {
+  const t = tempEnv()
+  try {
+    mkdirSync(t.env.HOME, { recursive: true })
+    mkdirSync(t.env.PATH, { recursive: true })
+    writeFileSync(join(t.env.PATH, 'devin'), '#!/bin/sh\necho 3000.6.14\n', { mode: 0o700 })
+    const admin = new HarnessAdmin(t.env, {
+      latest: async (_id, source) => {
+        assert.equal(source.url, 'https://static.devin.ai/cli/current/manifest.json')
+        return '3000.10.21'
+      },
+    })
+    const [row] = await admin.check('devin')
+    assert.equal(row.setup.state, 'update-required')
+    assert.match(row.setup.reason, /3000.10.21/)
+    assert.match(row.receiveNote, /next prompt/)
+  } finally {
     t.cleanup()
   }
 })

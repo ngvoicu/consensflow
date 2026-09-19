@@ -1,13 +1,5 @@
 #!/usr/bin/env node
-/**
- * The `cf` executable — ConsensFlow v3.
- *
- * v3 is skills-first: there is no delegation engine here. `cf` manages the
- * roster of named agents, generates the consensflow skill from it, and
- * installs/updates that skill into every coding
- * harness on the machine (claude, codex, pi, opencode). The skill teaches the
- * harnesses everything else.
- */
+/** App-scoped conversation commands, saved roster administration and runtime diagnostics. */
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
@@ -17,12 +9,14 @@ import { parseArgs } from 'node:util'
 import { answers as harnessAnswers } from '../hosts/lib/completion.js'
 import {
   discoverCodexSession,
+  discoverDevinSession,
   discoverKimiSession,
   discoverOpencodeSession,
   discoverSessionWithEvidence,
 } from '../hosts/lib/harness-transcript.js'
 import { renderImageRun, runImageAgent } from '../hosts/lib/image-run.js'
 import { createPacket, createWindowSeed } from '../hosts/lib/packets.js'
+import { taskWithWorkPolicy } from '../hosts/lib/presets.js'
 import { childEnv, interactiveResume, interactiveStart, runAgent } from '../hosts/lib/runners.js'
 import { openingLineCarriesNonce, TURNS_EXAMINED } from '../hosts/lib/session-binding.js'
 import { runsRoot } from '../hosts/lib/state.js'
@@ -31,9 +25,10 @@ import { renderEvent } from '../hosts/lib/transcript-events.js'
 import { CATALOG, catalogEntry } from '../src/catalog.js'
 import { seedSession as seedOpenCodeSession } from '../src/channels/opencode.js'
 import { launchConfiguration, withNativeBridge } from '../src/channels.js'
+import { prepareDevinPrompt } from '../src/devin-install.js'
 import { detectHarnesses } from '../src/harnesses.js'
 import { staleClaudeHooks } from '../src/host-payloads.js'
-import { installEverywhere, installSkill, skillsStatus, uninstallSkills } from '../src/install.js'
+import { prepareApp } from '../src/install.js'
 import { preparePiExtension } from '../src/pi-install.js'
 import { appRequester } from '../src/requester.js'
 import {
@@ -46,14 +41,6 @@ import {
   removeAgent,
   syncAgents,
 } from '../src/roster.js'
-import { generateSkill } from '../src/skill.js'
-import {
-  healSkillIfStale,
-  refreshInstalledSkill as refreshSkill,
-  skillGaps,
-  skillTargets,
-  staleSkills,
-} from '../src/sync.js'
 import { terminalRuntime } from '../src/terminal.js'
 
 // `cf … | head` closes our stdout mid-stream; dying with an EPIPE stack for
@@ -79,13 +66,15 @@ const USAGE = `consensflow ${PKG.version}
 
 Usage: cf <command> [options]
 
-  setup [--all] [--force]                     Prepare the CLI and bundled role context
+  setup                                     Prepare private launcher and integrations
   run <@agent> "<task>"                       Ask a worker in a ConsensFlow app pane
     [--brief <purpose>] [--context <note>]
     [--prompt-file <file>] [--handoff-file <file>] [--no-handoff]
     [--new | --session <conversation>]        Continue by default; --new mints a name
     [--notify auto|manual] [--image <path>]
-  say <conversation> "<words>"               Continue in that conversation's app pane
+    [--purpose critical-review|architecture|hard-problem|important-question]
+  say <conversation> "<words>" [--purpose <purpose>]
+                                            Continue in that conversation's app pane
   attach <@agent|conversation>                Reopen a conversation through the app
   read <conversation|delivery id>          Read one completed result whole
     [--answer <id>] [--part <k>]
@@ -93,22 +82,29 @@ Usage: cf <command> [options]
   lead read [--answer <id>] [--part <k>]       PM: read a complete lead result
   results [conversation|@agent] [--json]    List completed worker results
   sessions [--json]                          List conversations in this workspace
+  task list [--offset <n>] [--json]           List your group's task summaries
+  task get <id> [--json]                     Read a task, history and questions
+  task add "<title>" [--description <text>] [--kind <kind>] [--json]
+  task update <id> --revision <n> [--title <text>] [--description <text>]
+    [--status planned|active|blocked|review|accepted|cancelled] [--kind <kind>]
+    [--conversation <name>] [--depends-on <id>] [--review-of <id>]
+    [--note <text>] [--question <text>] [--json]
+                                            Link options also apply to task add
   last <conversation|@agent> [--json]         Read the last recorded answer
   catalog [--harness <h>] [--json]            List available agent presets
   agent add <name>                           Add a catalog agent
     [--harness <h>] [--model <m>] [--effort <e>] [--description <d>]
   agent list [--json]
   agent edit <name> [--model <m>] [--effort <e>] [--description <d>]
+    [--work-tier critical|complex|standard|light|auto]
   agent remove <name>
   agent sync [<name>] [--dry-run]             Refresh catalog-owned agent fields
-  skills status                             Inspect private role files
-  skills uninstall [--force]                Remove owned private role files
   ui [--json] [--no-open]                     Open the local roster editor
-  doctor                                    Inspect runtime, roster and private role files
+  doctor                                    Inspect runtime, roster and bundled roles
 
 Run, say, attach, read and results need a pane opened by ConsensFlow.
 The app owns conversation launches, delivery and read marks.
-Role skills ship with the app. Roster changes refresh its private lead context.
+Role instructions ship with the app and load when a pane starts or resumes.
 `
 
 function out(text) {
@@ -129,12 +125,6 @@ function fail(message) {
  */
 function warn(message) {
   process.stderr.write(`cf: ${message}\n`)
-}
-
-function printReport(report) {
-  for (const row of report) {
-    out(`${row.action.padEnd(16)} ${row.path}`)
-  }
 }
 
 /**
@@ -216,7 +206,11 @@ function noConversationHere(asked, names, env) {
   return `no conversation named ${JSON.stringify(asked)} here; you have: ${names.join(', ')}`
 }
 
-const DISCOVER = { opencode: discoverOpencodeSession, codex: discoverCodexSession }
+const DISCOVER = {
+  opencode: discoverOpencodeSession,
+  codex: discoverCodexSession,
+  devin: discoverDevinSession,
+}
 
 const cwdOf = () => process.cwd()
 
@@ -347,6 +341,7 @@ async function runVerb(rest) {
     allowPositionals: true,
     options: {
       brief: { type: 'string' },
+      purpose: { type: 'string' },
       context: { type: 'string' },
       'prompt-file': { type: 'string' },
       'handoff-file': { type: 'string' },
@@ -404,6 +399,8 @@ async function runVerb(rest) {
     fail('give the agent something to do: cf run @name "<task>" (or --prompt-file <file>)')
     return
   }
+
+  taskWithWorkPolicy(row, task, values.purpose)
 
   // Handoff context is explicit: the lead passes a file to the worker.
   const handoff =
@@ -550,6 +547,7 @@ async function runThroughApp(app, row, task, values) {
     opId: randomUUID(),
     agent: row.id,
     task,
+    ...(values.purpose === undefined ? {} : { purpose: values.purpose }),
     ...(values.new === true ? { fresh: true } : {}),
     ...(values.session === undefined ? {} : { session: values.session }),
     ...(typeof values.brief === 'string' ? { brief: values.brief } : {}),
@@ -615,7 +613,7 @@ async function runInPane(row, task, values, handoff) {
   // record of it is a turn the lead cannot account for.
   await controller.post('sent.record', {
     opId: randomUUID(),
-    entry: { kind: 'seed', chars: seed.length, pane: app.pane },
+    entry: { kind: 'seed', chars: seed.length, task, pane: app.pane },
   })
 
   // A session the app named is known before the window is, so it binds
@@ -765,7 +763,7 @@ async function openAndDiscover(controller, row, name, seed, discover, nonce, onF
   const searching = () => windowUp || Date.now() < closingAt
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
   const discoverLaunch = async () =>
-    row.kind === 'opencode'
+    row.kind === 'opencode' || row.kind === 'devin'
       ? ((await discoverSessionWithEvidence(row.kind, cwdOf(), since, env, { nonce }))?.sessionId ??
         null)
       : await discover(cwdOf(), since, env, { seed })
@@ -871,6 +869,7 @@ async function withDeliveryChannel(invocation, kind, launchId) {
       extensionPath: extension.path,
     })
   }
+  if (kind === 'devin') invocation = await prepareDevinPrompt(invocation, configured)
   return withNativeBridge(
     {
       ...invocation,
@@ -923,7 +922,7 @@ async function sayVerb(rest) {
   const { values, positionals } = parseArgs({
     args: rest,
     allowPositionals: true,
-    options: { json: { type: 'boolean', default: false } },
+    options: { json: { type: 'boolean', default: false }, purpose: { type: 'string' } },
   })
   if (childRefused()) return
   const app = requireApp('say')
@@ -934,7 +933,12 @@ async function sayVerb(rest) {
     fail('say which conversation and what: cf say <conversation> "<words>"')
     return
   }
-  const answer = await leadRequester(app).post('say', { opId: randomUUID(), session, text })
+  const answer = await leadRequester(app).post('say', {
+    opId: randomUUID(),
+    session,
+    text,
+    ...(values.purpose === undefined ? {} : { purpose: values.purpose }),
+  })
   out(
     values.json
       ? JSON.stringify(answer, null, 2)
@@ -1085,6 +1089,68 @@ async function readVerb(rest) {
   })
   process.stdout.write(String(answer.text ?? ''))
   teachRemainingParts(target, values.answer, answer)
+}
+
+async function taskVerb(rest) {
+  if (childRefused()) return
+  const [action, ...args] = rest
+  const editing = action === 'add' || action === 'update'
+  if (!['list', 'get', 'add', 'update'].includes(action))
+    return fail('Use cf task list, get, add or update. Answer questions in the app.')
+  const options = { json: { type: 'boolean' } }
+  const names = editing
+    ? [
+        'title',
+        'description',
+        'status',
+        'kind',
+        'conversation',
+        'review-of',
+        'note',
+        'question',
+        ...(action === 'update' ? ['revision'] : []),
+      ]
+    : action === 'list'
+      ? ['offset']
+      : []
+  for (const name of names) options[name] = { type: 'string' }
+  if (editing) options['depends-on'] = { type: 'string', multiple: true }
+  const { values, positionals } = parseArgs({ args, options, allowPositionals: true })
+  if (positionals.length !== (action === 'list' ? 0 : 1))
+    return fail(
+      `cf task ${action} ${action === 'list' ? 'takes no positional arguments' : 'requires exactly one task ID or title'}`,
+    )
+  const integer = (value, label) => {
+    if (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)))
+      throw new Error(`${label} must be a non-negative integer`)
+    return Number(value)
+  }
+  let body = {}
+  if (action === 'list' && values.offset !== undefined)
+    body.offset = integer(values.offset, 'offset')
+  if (action === 'get') body.id = positionals[0]
+  if (editing) {
+    const change =
+      action === 'add'
+        ? { action, title: positionals[0] }
+        : { action, id: positionals[0], revision: integer(values.revision, '--revision') }
+    for (const [key, value] of Object.entries(values)) {
+      if (['json', 'revision'].includes(key)) continue
+      change[key === 'depends-on' ? 'dependsOn' : key === 'review-of' ? 'reviewOf' : key] = value
+    }
+    body = { change }
+  }
+  const app = requireApp('task')
+  if (app === null) return
+  const answer = await leadRequester(app).post(editing ? 'task.change' : `task.${action}`, body)
+  if (values.json || action !== 'list') out(JSON.stringify(answer, null, 2))
+  else {
+    for (const task of answer.tasks ?? [])
+      out(`${task.id} · ${task.status} · r${task.revision} · ${task.title}`)
+    out(
+      `${answer.total} tasks${answer.next == null ? '' : `; next: cf task list --offset ${answer.next}`}`,
+    )
+  }
 }
 
 /** Direct people to the conversation controls in the app. */
@@ -1530,6 +1596,7 @@ function agentVerb(rest) {
       harness: { type: 'string' },
       model: { type: 'string' },
       effort: { type: 'string' },
+      'work-tier': { type: 'string' },
       description: { type: 'string' },
       from: { type: 'string' },
       presets: { type: 'string' },
@@ -1541,8 +1608,15 @@ function agentVerb(rest) {
 
   switch (action) {
     case 'add': {
-      const added = addAgent(resolveAdd(name, values), env)
-      refreshSkill(env)
+      const added = addAgent(
+        {
+          ...resolveAdd(name, values),
+          ...(values['work-tier'] === undefined || values['work-tier'] === 'auto'
+            ? {}
+            : { workTier: values['work-tier'] }),
+        },
+        env,
+      )
       out(`${added.name}  ${added.harness}  ${added.model}`)
       return
     }
@@ -1568,16 +1642,17 @@ function agentVerb(rest) {
           ...(values.model !== undefined ? { model: values.model } : {}),
           ...(values.effort !== undefined ? { effort: values.effort } : {}),
           ...(values.description !== undefined ? { description: values.description } : {}),
+          ...(values['work-tier'] === undefined
+            ? {}
+            : { workTier: values['work-tier'] === 'auto' ? null : values['work-tier'] }),
         },
         env,
       )
-      refreshSkill(env)
       out(`${edited.name}  ${edited.harness}  ${edited.model}`)
       return
     }
     case 'remove': {
       removeAgent(name, env)
-      refreshSkill(env)
       out(`removed ${name}`)
       return
     }
@@ -1605,7 +1680,6 @@ function agentVerb(rest) {
         }
       }
       if (values['dry-run']) out('(dry run: nothing was written)')
-      else refreshSkill(env)
       return
     }
     default:
@@ -1613,91 +1687,15 @@ function agentVerb(rest) {
   }
 }
 
-function skillsVerb(rest) {
-  const action = rest[0]
-  const { values } = parseArgs({
-    args: rest.slice(1),
-    allowPositionals: true,
-    options: {
-      all: { type: 'boolean', default: false },
-      force: { type: 'boolean', default: false },
-    },
-  })
-
-  switch (action) {
-    case 'install':
-    case 'update':
-      out(
-        'Role skills are included with ConsensFlow. Update the application instead; no files were changed.',
-      )
-      return
-    case 'status': {
-      const rows = skillsStatus(env)
-      if (rows.length === 0) {
-        out('no skills installed')
-        return
-      }
-      const behind = new Set(staleSkills(env))
-      for (const row of rows) {
-        // `ok` used to mean two things at once: ours and unedited — and
-        // current. The first two survive an app upgrade; the third does not.
-        const state = behind.has(row.path) ? 'behind' : row.state
-        out(`${state.padEnd(9)} ${row.source.padEnd(20)} ${row.path}`)
-      }
-      if (behind.size > 0) {
-        out('')
-        out(
-          `${behind.size} file${behind.size === 1 ? '' : 's'} carry an older ConsensFlow's text — refresh by updating or reopening ConsensFlow`,
-        )
-      }
-      return
-    }
-    case 'uninstall':
-      printReport(uninstallSkills(env, { force: values.force }))
-      return
-    default:
-      fail('usage: cf skills install|update|status|uninstall')
-  }
-}
-
 function setup(rest) {
-  const { values } = parseArgs({
-    args: rest,
-    allowPositionals: true,
-    options: {
-      all: { type: 'boolean', default: false },
-      force: { type: 'boolean', default: false },
-    },
-  })
-
-  const installed = installEverywhere(env, values)
+  parseArgs({ args: rest, allowPositionals: false, options: {} })
+  const installed = prepareApp(env)
   for (const line of installed.report) out(line)
   const harnesses = detectHarnesses(env)
   out(
-    harnesses.length > 0
-      ? `harnesses: ${harnesses.map((a) => a.id).join(', ')}`
-      : 'harnesses: none found on PATH — install claude, codex, pi or opencode and rerun',
+    `harnesses: ${harnesses.length ? harnesses.map((h) => h.id).join(', ') : 'none found on PATH'}`,
   )
-
-  const agents = listAgents(env)
-  if (agents.length === 0) {
-    // Agents are the user's to create; nothing is seeded for them.
-    out(
-      'agents: none yet — create them with `cf ui` (or `cf agent add`); the skill installs itself on the first one',
-    )
-  } else if (harnesses.length > 0) {
-    printReport(
-      installSkill(
-        {
-          relPath: 'consensflow/SKILL.md',
-          content: generateSkill(agents),
-          source: 'consensflow',
-        },
-        env,
-        { targets: skillTargets(env, { all: values.all }) },
-      ),
-    )
-  }
+  out(`agents: ${listAgents(env).length} saved — manage them with cf ui or cf agent`)
 }
 
 function doctor() {
@@ -1711,17 +1709,7 @@ function doctor() {
     out('legacy:       mode.json is ignored and can be removed')
   }
   out(`agents:       ${listAgents(env).length}`)
-  const privateRoot = `${join(configRoot(env), 'roles')}/`
-  const files = skillsStatus(env).filter((row) => row.path.startsWith(privateRoot))
-  const bad = files.filter((row) => row.state !== 'ok').length
-  const parts = [
-    'bundled lead + PM',
-    `${files.length} prepared private file${files.length === 1 ? '' : 's'}`,
-  ]
-  if (bad > 0) parts.push(`${bad} drifted/missing`)
-  const behind = staleSkills(env).length
-  if (behind > 0) parts.push(`${behind} behind this version`)
-  out(`skills:       ${parts.join(' · ')}`)
+  out('roles:        bundled lead, PM and advisor; prepared when a pane launches')
 
   // The install records the runtime that performed it — from the app, its own
   // bundled Node. If that has moved, the wiring it left behind stops working,
@@ -1740,15 +1728,6 @@ function doctor() {
         : wiring.mine
           ? `runtime:      ${wiring.runtime}`
           : `runtime:      ${wiring.runtime} — another ConsensFlow. \`cf\` runs that one; \`cf setup\` from this one claims the command.`,
-    )
-  }
-
-  // A harness in scope with no skill of ours consults nothing, and every other
-  // line here would still look healthy. Name it.
-  const gaps = skillGaps(env)
-  if (gaps.length > 0) {
-    out(
-      `missing:      ${gaps.join(', ')} ${gaps.length === 1 ? 'is' : 'are'} missing private role context — reopen ConsensFlow`,
     )
   }
 
@@ -1780,9 +1759,11 @@ async function main() {
     return
   }
 
+  const readingRoster = command === 'agent' && rest[0] === 'list'
   if (
     env.CONSENSFLOW_ROLE === 'pm' &&
-    !['lead', 'run', 'say', 'attach', 'sessions', 'results', 'read'].includes(command)
+    !readingRoster &&
+    !['lead', 'run', 'say', 'attach', 'sessions', 'results', 'read', 'task'].includes(command)
   ) {
     fail(
       'PM panes can coordinate their advisors and use cf lead send and cf lead read; administration commands are unavailable.',
@@ -1790,22 +1771,14 @@ async function main() {
     return
   }
 
-  // cc and pi write the shared roster without telling v3; any invocation is
-  // an opportunity to notice and regenerate the installed skill. Skills
-  // verbs manage installation explicitly, so they are exempt.
-  //
-  // `run` belongs here most of all: a lead that only ever consults would
-  // otherwise read a skill generated from the old roster until some other
-  // verb happened to run. The check is one hash compare on the common path.
-  if (['agent', 'setup', 'ui', 'doctor', 'run', 'catalog'].includes(command)) {
-    healSkillIfStale(env)
-  }
-
   switch (command) {
+    case 'task':
+      await taskVerb(rest)
+      return
     case 'use':
     case 'mode':
       fail(
-        'ConsensFlow has one shape now: the standalone app. Open ConsensFlow to install its CLI and skill.',
+        'ConsensFlow has one shape now: the standalone app. Open ConsensFlow to use its panes and CLI.',
       )
       out(USAGE)
       return
@@ -1849,9 +1822,6 @@ async function main() {
       return
     case 'agent':
       agentVerb(rest)
-      return
-    case 'skills':
-      skillsVerb(rest)
       return
     case 'setup':
       setup(rest)

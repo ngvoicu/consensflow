@@ -5,11 +5,11 @@ A native terminal workspace for a lead, its workers, and an optional project man
 Keep a roster of named agents such as `zeus` and `hyperion`, then ask your lead
 to consult them. ConsensFlow opens worker conversations in its own panes and
 delivers completed results back to their lead. Each session can also have a PM
-in a separate window for research, planning and explanations.
+with its own grid of advisors for research, planning and explanations.
 
-The application supplies `consensflow-lead` or `consensflow-pm` only to the
-corresponding role it launches. Workers and ordinary external terminals receive
-neither skill. Your harness profiles and native terminal appearance are preserved.
+The application supplies `consensflow-lead`, `consensflow-pm` or
+`consensflow-advisor` only to the corresponding role it launches. Lead workers
+and ordinary external terminals receive no coordination role. Your harness profiles and native terminal appearance are preserved.
 
 **No accounts, no API keys.** Agents run through the harness CLIs you already
 have installed and logged in — your Claude subscription, your ChatGPT login,
@@ -28,8 +28,8 @@ Linux packaging follow in a later spec; every choice stays compatible with them.
 
 **The app is the installation.** Download it, drag it to Applications, open it.
 It carries its own Node runtime and its own copy of ConsensFlow, so nothing has
-to be installed first, and everything else — agents, which harnesses consult,
-the skills — happens in its window.
+to be installed first. Manage agents and harnesses in its window; role
+instructions load automatically with their panes.
 
 Latest build: **[releases](https://github.com/ngvoicu/consensflow/releases)**
 — `ConsensFlow_<version>_aarch64.dmg`, Apple silicon. (Not `/latest`: every
@@ -67,6 +67,13 @@ Nothing is seeded. Open **Agent library** in the app and pick from the ready-mad
 its harness accepts. The app refreshes its private lead roster context when agents change.
 No separate skill installation or update is needed.
 
+Lead and PM startup instructions include saved model capabilities, reasoning effort,
+provider routes and matched benchmark evidence. Coordinators refresh discovery with
+`cf agent list --json`, choose suitable workers/advisors for the task, and arrange
+cross-model reviews of substantial work from themselves and their delegates.
+Another harness, provider or effort of the same model does not count as independent
+review. The owning coordinator resolves findings; advisors never edit specifications.
+
 **Your agents** and **Agent library** are separate top-level screens, each with independent search, category filters
 and grouping/sorting controls with the same options. Both open with **Model and reasoning**
 cards by default; **Clear filters** restores this view. **None** and **Harness** remain
@@ -74,11 +81,11 @@ available. Shared cards show common tags, descriptions and scores once, with ind
 choices and Add/Remove or Edit/Remove controls beneath. This applies to every repeated
 model/reasoning combination; differing agent metadata stays on its own row. Added presets stay visible
 as Already added, with an adjacent Remove button that removes the saved copy while
-keeping the library choice available. Default sorting uses model family and tier,
+keeping the library choice available. Default sorting uses model family and model rank,
 then Ultra → Max → Xhigh → High → Medium → Low (followed by Minimal, Off and defaults).
 Claude families appear as Fable → Opus → Sonnet → Haiku; GPT as Astra → Sol → Terra → Luna.
 Claude, GPT and Gemini stay together first, followed by the other model families.
-Each agent shows its categories as individual pills, separately from its provider route.
+Each agent shows its work tier, task capabilities and coordinator recommendations as pills, separately from its provider route. Both screens can filter and group by work tier.
 Muse Spark 1.3 Contributor and Contributor Free share the Muse 1.3 model card;
 this grouping follows the provider's description of Contributor as a pricing/data-use
 [tier](https://openrouter.ai/meta/muse-spark-1.3-contributor). Contributor and Free
@@ -86,7 +93,7 @@ remain on their provider rows, including the disclosed use of prompts/replies fo
 [Meta model training](https://opencode.ai/docs/go/#privacy). Execution model IDs
 and separate Add/Remove identities are preserved. Gemini 3.1 Pro Preview is retired.
 Lead and PM recommendations require Fable, Opus, Astra or Sol at Xhigh or above
-where supported. Reviewer / second opinion recommendations start at Medium for
+where supported, excluding Critical work. Review recommendations start at Medium for
 known coding models. These tags do not change how roles are launched. Sol Low and
 Medium are available on Codex, Pi and OpenCode, using their existing provider routes. Pygmalion uses Codex Images through your existing Codex login.
 [OpenAI currently documents GPT Image 2](https://learn.chatgpt.com/docs/image-generation)
@@ -99,6 +106,31 @@ custom-agent creation. These settings reach the Kimi process through its
 without changing native configuration or credentials. An unset effort reads
 **Kimi setting** and follows Kimi's configuration. Existing saved copies keep
 their selection until you use **Update** or **Edit**.
+
+Four **work tiers** govern allocation; they are owner preferences, not prices or
+intelligence rankings. Catalog defaults use the actual model and reasoning effort
+across supported routes. Astra/Fable Max (and supported Ultra) are **Critical work**;
+High/Xhigh and Kimi K3 are **Complex work**; Astra/Fable Medium and Opus/Sol above Low
+are **Standard work**; the remaining choices default to **Light work**. Unknown native
+models still require suitability checks. Image agents remain image specialists.
+
+Critical work is reserved for important reviews, architecture, discovering solutions
+to hard problems and answering consequential questions. It has no Coding or lead/PM
+recommendations. Every initial task and follow-up requires
+`--purpose critical-review|architecture|hard-problem|important-question`, and receives
+no-coding/no-spec-edit instructions. This validates declared purpose and supplies
+instructions; it is not a native tool sandbox or a semantic task classifier.
+Other tiers retain ordinary `cf run` / `cf say` behavior. Ordinary cross-model
+reviews use lower tiers; lead and PM arrange reviews of substantial work from
+themselves and their workers/advisors. Only the PM writes/revises specifications.
+
+Edit a saved agent's **Work tier** to override its default. **Automatic** follows
+model/effort changes again. The optional top-level `workTier` survives preset sync;
+`profile.workTier` records the effective value. CLI equivalents are
+`cf agent edit <name> --work-tier critical|complex|standard|light` and
+`--work-tier auto` to clear the override. Obsolete skill-discovery fields are removed
+on the next saved-roster write or profile refresh; native skill discovery and
+ConsensFlow's separate role instructions remain available.
 
 The roster lives at `~/.consensflow/agents.json`. Each saved agent includes its
 configuration, description and the model, provider route, categories and Good for
@@ -131,14 +163,22 @@ with ConsensFlow.
 
 ## Who can consult
 
-Claude Code, Codex, Pi and OpenCode can be leads or PMs. Kimi is available as a
-worker. A lead can delegate and continue worker conversations; a PM can send to
-or read from its own lead only when you request it. Several sessions can work
+Claude Code, Codex, Pi, OpenCode and Devin can be leads or PMs. Kimi is available
+as a worker. Leads delegate to workers; PMs consult their own advisors. A PM
+communicates with its lead only when you request it. Several sessions can work
 at once, including sessions sharing the same project folder.
 
 Pi uses a bundled extension loaded only into its ConsensFlow process. It is
 prepared automatically if Pi is installed; an installation error is shown with
 a retry action. No global Pi extension or settings are changed.
+
+Devin uses its stock terminal UI and requires CLI 3000.10.21 or newer. Its library
+preset uses the model already selected in Devin settings. ConsensFlow prepares
+private hooks automatically for each pane, preserving native configuration and
+existing hooks. Replies are collected at prompt and Stop boundaries. A reply
+arriving after Devin becomes idle remains pending until the next human prompt;
+`cf results` and `cf read` also expose stored reports. No background model polling
+or separate ConsensFlow chat interface is used.
 
 ## A consult lives in the app
 
@@ -213,7 +253,7 @@ stripped, control variables stripped.
 
 Every completed worker reply or advisor finding is kept in a private result inbox.
 The selected Lead or PM conversation fetches complete numbered parts when ready.
-The same receipt rules apply to Claude Code, Codex, Pi and OpenCode: only full
+The same receipt rules apply to Claude Code, Codex, Pi, OpenCode and Devin: only full
 content in the native conversation confirms receipt. A transport response or
 opening Results in the app does not mark a result received. Unconfirmed writes
 are retained and are never automatically replayed.
@@ -230,6 +270,21 @@ PM and Lead have separate grids within one project session. Advisors return
 research, review and existing-test findings to their owning PM; only the PM
 incorporates that advice into specifications. Switching grids keeps both groups
 running and preserves each group's navigation and terminal output.
+
+**Tasks** combines both groups in a session board and an interactive graph. See
+assignments, progress, questions, review/dependency links, native agent activity
+and every conversation reply. Board and Graph share group, progress and search
+filters. Existing conversations show when their original assignment was not
+recorded. Closed/deleted panes retain task history once it has been recorded or
+linked; task acceptance does not mark a reply received.
+
+Lead and PM maintain their own tasks through `cf task list`, `get`, `add` and
+`update`; worker/advisor assignments and followups are captured automatically.
+The human can correct tasks and record answers in the app. Answers are saved for
+the coordinator to read when it continues; this does not start a model turn.
+Task changes use revisions to refuse stale edits. All bookkeeping stays under
+the ConsensFlow home. Task commands and board records do not replace the native
+reply integrations or grant access to another coordinator's work.
 
 New OpenCode sessions use an empty session created through OpenCode's native
 API and open its exact ID in the ordinary TUI. They wait for the first human
@@ -264,28 +319,30 @@ automatically.
 
 ## App-private role skills
 
-`consensflow-lead` is generated from the roster in ConsensFlow's private data
-folder. The app supplies it only when launching a lead. Native global skill
-folders are never written, refreshed, or cleaned by this installer.
-The old global `consensflow` skill must be removed manually.
+Each role is generated under `~/.consensflow/roles/<role>` when its pane starts
+or resumes. Lead and PM context includes the saved roster and shares the same
+dispatch, complete-result, tier-selection and cross-model review guidance.
+Advisors receive only their PM-owned research/review role. Unchanged role files
+are not rewritten. Roster changes are available through `cf agent list --json`
+and the next pane launch; setup and diagnostic commands do not rewrite roles.
 
-```sh
-cf skills status      # inspect owned files
-cf doctor             # harnesses, agents, skills, runtime
-```
+Role instructions ship with each application release; there are no separate
+skill install, update, status or uninstall commands. `cf doctor` reports bundled
+roles, detected harnesses, the saved roster and runtime wiring. Native global skill
+folders and project instruction files are never installed or cleaned by the app.
 
-Role skills ship with each application release. There is no separate skill update.
-Claude Code, Codex, OpenCode and Pi receive the full assigned role instructions
-as native startup context when a lead or PM launches or resumes. No manual skill
-invocation is needed; existing native instructions and settings are preserved.
+Claude Code, Codex, OpenCode, Pi and Devin receive the full assigned role as startup
+context. No manual invocation is needed; native instructions and settings remain.
 Use **Add project manager** beside a session to choose a PM harness. The PM opens
-in its own maximized window; it shares the project folder and communicates with
-its lead only through explicit `cf lead send --message-file <file>` and
-`cf lead read` requests. It cannot create or control workers.
+in its own grid within the session; it shares the project folder and communicates
+with its lead only through explicit `cf lead send --message-file <file>` and
+`cf lead read` requests. Its advisors can research, read and test; they return
+advice to the PM, which alone writes and revises specifications.
 
 ## Inside the app
 
-**Agents** manages the worker roster. **Harnesses**, beside it, shows installed
+**Your agents** manages the saved roster, and **Agent library** offers presets.
+**Harnesses**, beside them, shows installed
 coding tools, versions and available updates, plus a retry action if Pi setup
 fails. Harness checks run when that screen is first opened or refreshed.
 
@@ -311,7 +368,6 @@ site's logo: the roster designing its own app.
 | Run artifacts | `~/.consensflow/workspaces/<key>/runs/<id>/` |
 | Role documents | `~/.consensflow/roles/` |
 | Private Pi integration | `~/.consensflow/extensions/pi/` |
-| Owned-file manifest | `~/.consensflow/skills-manifest.json` |
 
 A leftover `mode.json` from the old three-mode era is ignored; `cf doctor`
 reports it once as removable. One root; `CONSENSFLOW_HOME` moves all of it. The `cf`/`consensflow` launchers live under `~/.consensflow/bin`; add that directory to your shell PATH to use them outside the app. App panes receive the bundled CLI automatically. Role documents and Pi

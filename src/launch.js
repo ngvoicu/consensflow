@@ -10,6 +10,9 @@ const LEAD_OPS = [
   'read',
   'results.list',
   'results.read',
+  'task.list',
+  'task.get',
+  'task.change',
   'seen',
   'notify.lead',
   'panes',
@@ -166,7 +169,7 @@ export function receiverEnv({ tab, pane, launch, generation, kind, app } = {}) {
   for (const [label, value] of Object.entries({ tab, pane, launch })) requireText(value, label)
   if (!Number.isSafeInteger(generation) || generation < 1)
     throw new Error('invalid receiver generation')
-  if (!['claude-code', 'codex', 'pi', 'opencode'].includes(kind))
+  if (!['claude-code', 'codex', 'pi', 'opencode', 'devin'].includes(kind))
     throw new Error('invalid receiver harness')
   const token = opaqueToken()
   credentials.set(token, { tab, pane, launch, generation, kind, ops: new Set(['receiver']) })

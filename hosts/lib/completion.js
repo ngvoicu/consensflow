@@ -34,6 +34,8 @@ export async function answers(kind, sessionId, env, options = {}) {
         return await kimiAnswers(sessionId, env)
       case 'opencode':
         return await opencodeAnswers(sessionId, env, options)
+      case 'devin':
+        return await devinAnswers(sessionId, env)
       default:
         return { unknown: true, reason: `unknown kind: ${kind}` }
     }
@@ -61,6 +63,7 @@ const cursorKindCodes = Object.freeze(
     pi: 3,
     kimi: 4,
     opencode: 5,
+    devin: 6,
   }),
 )
 const ITEM_ROLES = new Set(['user', 'assistant', 'tool', 'custom'])
@@ -1989,4 +1992,149 @@ async function openOpencodeDb(env) {
   } catch {
     return null
   }
+}
+
+// Devin persists revisions, including cancelled assistant text. Only its main
+// chain plus a matching native request/complete boundary proves a reply.
+async function devinAnswers(sessionId, env) {
+  const { DatabaseSync } = await import('node:sqlite')
+  const file = path.join(
+    env.XDG_DATA_HOME ?? path.join(home(env), '.local', 'share'),
+    'devin',
+    'cli',
+    'sessions.db',
+  )
+  const db = new DatabaseSync(file, { readOnly: true })
+  const result = resultBase()
+  try {
+    db.exec('BEGIN')
+    const session = db.prepare('select main_chain_id from sessions where id = ?').get(sessionId)
+    if (!session) throw new Error('missing Devin session')
+    const rows = db
+      .prepare(
+        'select row_id, node_id, parent_node_id, chat_message, created_at from message_nodes where session_id = ? order by row_id',
+      )
+      .all(sessionId)
+    const nodes = new Map(rows.map((row) => [row.node_id, row]))
+    const chain = [],
+      visited = new Set()
+    let node = session.main_chain_id
+    while (node !== null) {
+      if (visited.has(node)) throw new Error('cyclic Devin main chain')
+      visited.add(node)
+      const row = nodes.get(node)
+      if (!row) throw new Error('missing Devin main chain ancestor')
+      chain.push(row)
+      node = row.parent_node_id
+    }
+    const ids = new Set()
+    let request = null
+    for (const row of chain.reverse()) {
+      const message = JSON.parse(row.chat_message)
+      if (typeof message.message_id !== 'string' || ids.has(message.message_id))
+        throw new Error('invalid Devin message identity')
+      ids.add(message.message_id)
+      const role = message.role === 'system' ? 'custom' : message.role
+      if (role === 'user')
+        request = message.metadata?.extensions?.['chisel/client-message-id'] ?? message.message_id
+      if (!ITEM_ROLES.has(role)) throw new Error('unknown Devin message role')
+      const text =
+        typeof message.content === 'string'
+          ? message.content
+          : Array.isArray(message.content)
+            ? message.content
+                .filter((part) => part.type === 'text')
+                .map((part) => part.text)
+                .join('')
+            : ''
+      const seq = mintCursor('devin', Number(row.row_id))
+      result.items.push({
+        id: message.message_id,
+        role,
+        text,
+        complete: role !== 'assistant',
+        settled: role !== 'assistant',
+        at: message.metadata?.created_at ?? row.created_at,
+        seq,
+        _request: request,
+      })
+      result.cursor = Math.max(result.cursor ?? seq, seq)
+    }
+    db.exec('COMMIT')
+  } finally {
+    db.close()
+  }
+  const root = path.join(
+    env.CONSENSFLOW_HOME ?? path.join(home(env), '.consensflow'),
+    'integrations',
+    'devin',
+  )
+  let launches = []
+  try {
+    launches = await fs.readdir(root, { withFileTypes: true })
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+  }
+  const outcomes = new Map()
+  for (const launch of launches) {
+    if (!launch.isDirectory()) continue
+    let active = null
+    try {
+      await readJsonl(path.join(root, launch.name, 'wire.jsonl'), (event) => {
+        if (event.sessionId !== sessionId) return
+        const update = event.update
+        if (update?.sessionUpdate === 'agent_message_chunk') {
+          const id = update._meta?.['cognition.ai/streamingMessageId']
+          // History replay has timestamps but no streaming UUID.
+          if (typeof id !== 'string' || update.content?.type !== 'text') return
+          if (active?.id !== id) active = { id, text: '', request: null }
+          active.text += update.content.text
+        }
+        if (active && typeof event.turnClientMessageId === 'string')
+          active.request = event.turnClientMessageId
+        if (['complete', 'cancelled', 'error'].includes(event.cause)) {
+          if (active?.request) {
+            const outcome = { ...active, cause: event.cause }
+            const previous = outcomes.get(active.request)
+            if (previous && (previous.text !== outcome.text || previous.cause !== outcome.cause))
+              throw new Error('conflicting Devin completion evidence')
+            outcomes.set(active.request, outcome)
+          }
+          active = null
+        }
+      })
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+    }
+  }
+  const finalByRequest = new Map(
+    result.items
+      .filter((item) => item.role === 'assistant')
+      .map((item) => [item._request, item.id]),
+  )
+  for (const item of result.items) {
+    if (item.role !== 'assistant') continue
+    const outcome = outcomes.get(item._request)
+    item.complete =
+      finalByRequest.get(item._request) === item.id &&
+      outcome?.cause === 'complete' &&
+      outcome.text === item.text
+    item.settled = item.complete
+  }
+  const last = result.items.findLast((item) => item.role !== 'custom')
+  const outcome = outcomes.get(last?._request)
+  result.cancelled = outcome?.cause === 'cancelled'
+  result.failed = outcome?.cause === 'error'
+  result.inFlight =
+    last?.role === 'assistant' && !last.complete && !result.cancelled && !result.failed
+  setSettlement(
+    result,
+    last?.complete || result.cancelled || result.failed ? 'settled' : 'unknown',
+    'native',
+    null,
+    result.cursor,
+    { complete: last?.complete === true, openTools: [], queuedTurns: [], hooksInFlight: [] },
+  )
+  for (const item of result.items) delete item._request
+  return result
 }

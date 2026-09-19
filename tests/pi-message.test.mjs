@@ -275,7 +275,9 @@ describe('consensflow Pi worker followup', () => {
         launchId: 'launch-pi-test',
         session: 'native-pi-session',
         text: 'duplicate followup',
-        expiresAt: Date.now() + 1000,
+        // Expiry is not under test here: a 1 s window expired before the
+        // extension read it when the full suite loaded the machine.
+        expiresAt: Date.now() + 60_000,
       }
       await writeFile(join(s.inbox, `${id}.json`), `${JSON.stringify(record)}\n`)
       await Promise.all([s.extension.consume(), s.extension.consume()])
@@ -300,8 +302,18 @@ describe('consensflow Pi worker followup', () => {
     }
   })
 
+  it('ignores a late consume after its inbox is gone', async () => {
+    // A watcher event or a queued rerun can outlive the inbox (pane closed,
+    // folder cleaned). Inside Pi an unhandled rejection can end the process.
+    const s = await setup()
+    await s.close()
+    await s.extension.consume()
+  })
+
   it('reports uncertain on ack timeout without an automatic retry', async () => {
-    const s = await setup({ ackTimeoutMs: 40 })
+    // The ack timeout is also the message's lifetime: 40 ms expired before the
+    // extension read it under load, which is a refusal, not "admission unknown".
+    const s = await setup({ ackTimeoutMs: 1000 })
     const pump = setInterval(() => void s.extension.consume(), 5)
     pump.unref()
     try {

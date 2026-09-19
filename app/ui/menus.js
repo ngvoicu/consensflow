@@ -105,7 +105,7 @@ export class Menus {
     const menu = document.createElement('div')
     menu.setAttribute('role', 'menu')
     menu.setAttribute('aria-label', 'Project manager harness')
-    for (const harness of ['claude-code', 'codex', 'opencode', 'pi']) {
+    for (const harness of ['claude-code', 'codex', 'opencode', 'pi', 'devin']) {
       menu.append(
         menuButton(harness, async () => {
           this.closeMenu()
@@ -264,10 +264,13 @@ export class Menus {
 
   deleteSession(tab) {
     if (this.deletePending) return
-    this.deleteDialog.querySelector('h2').textContent = 'Delete session'
+    const label = tab.role === 'pm' ? 'Delete PM' : 'Delete session'
+    this.deleteDialog.querySelector('h2').textContent = label
     this.deleteDialog.querySelector('#delete-session-description').textContent =
-      'This stops all its panes and removes it from the app. Project files and native histories remain.'
-    this.deleteConfirm.textContent = 'Delete session'
+      tab.role === 'pm'
+        ? 'This stops the PM and its advisors and removes them from the session. The lead and its workers remain. Project files and native histories remain.'
+        : 'This stops all its panes and removes it from the app. Project files and native histories remain.'
+    this.deleteConfirm.textContent = label
     this.pendingDelete = { id: tab.id, generation: tab.lead.generation }
     this.deleteName.textContent = sessionName(tab)
     this.deleteDialog.showModal()

@@ -5,6 +5,7 @@ import { createServer } from 'node:http'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ArtificialAnalysis, METRICS, withBenchmarks } from '../hosts/lib/benchmarks.js'
+import { CATEGORY_LABELS, WORK_TIERS } from '../hosts/lib/presets.js'
 import { Bridge } from './bridge.js'
 import { agentProfile, CATALOG, EFFORTS } from './catalog.js'
 import { Watcher } from './delivery-watch.js'
@@ -12,7 +13,7 @@ import { HarnessAdmin } from './harness-admin.js'
 import { harnessPage } from './harness-page.js'
 import { harnessPath } from './harnesses.js'
 import { Inbox } from './inbox.js'
-import { uninstallSkills } from './install.js'
+import { prepareApp } from './install.js'
 import {
   controllerEnv as buildControllerEnv,
   leadEnv as buildLeadEnv,
@@ -40,8 +41,8 @@ import {
 } from './roster.js'
 import { agentCommand } from './skill.js'
 import { Store, StoreRefusal } from './store.js'
-import { healOnOpen, refreshInstalledSkill } from './sync.js'
 import { leadIdentity, Tabs } from './tabs.js'
+import { TaskError, Tasks } from './tasks.js'
 
 /**
  * The minimal roster editor: one ephemeral loopback HTTP server, one inline
@@ -119,8 +120,14 @@ function paneOperation(method, pathname) {
  *
  * Returns the `send` arguments so the route stays one line.
  */
-async function runPaneOperation(panes, op, dimensions, body) {
+async function runPaneOperation(panes, tasks, op, dimensions, body) {
   switch (op) {
+    case 'task.list':
+      return [200, await tasks.list(dimensions.tab, { offset: body.offset, limit: body.limit })]
+    case 'task.get':
+      return [200, await tasks.get(dimensions.tab, body.id)]
+    case 'task.change':
+      return [200, await tasks.change(dimensions.tab, body.change)]
     case 'panes':
       return [200, await panes.list(dimensions.tab)]
     case 'consult':
@@ -169,8 +176,12 @@ async function runPaneOperation(panes, op, dimensions, body) {
  * with a person watching, and one minted here would only make a retry
  * silently do nothing.
  */
-function attachPage(bridge, { panes, page, store, tabs }) {
+function attachPage(bridge, { panes, page, store, tabs, tasks }) {
   const ops = {
+    'task.list': (body) =>
+      tasks.list(body.tab, { combined: true, offset: body.offset, limit: body.limit }),
+    'task.get': (body) => tasks.get(body.tab, body.id),
+    'task.change': (body) => tasks.change(body.tab, body.change, 'human'),
     'tab.open': (body) => panes.tabOpen(body),
     'pm.open': (body) => panes.pmOpen(body),
     'tab.resume': (body) => panes.tabResume(body),
@@ -210,6 +221,8 @@ function attachPage(bridge, { panes, page, store, tabs }) {
         // The page shows the person a message, so a refusal says what it
         // was; a fault on this side says only that it was ours.
         if (cause instanceof PaneError) return { ok: false, ...paneErrorBody(cause) }
+        if (cause instanceof TaskError)
+          return { ok: false, error: cause.code, reason: cause.message }
         if (cause instanceof StoreRefusal) {
           return { ok: false, error: cause.code, reason: cause.message }
         }
@@ -275,6 +288,7 @@ export async function startUiServer(
 
   const store = new Store(configRoot(env))
   const tabs = new Tabs(store)
+  const tasks = new Tasks(store)
   const inbox = new Inbox({ store, tabs, env })
   let storePromise
   const storeReady = () => {
@@ -302,6 +316,8 @@ export async function startUiServer(
     ...(prepareRole === undefined ? {} : { prepareRole }),
     ...(prepareChannel === undefined ? {} : { prepareChannel }),
   })
+  // One background scanner serves results and native activity; page reads never await it.
+  const watcher = new Watcher({ store, tabs, env })
   const page = new Page({
     store,
     tabs,
@@ -309,10 +325,8 @@ export async function startUiServer(
       row: (name) => agentRow(name, env),
       names: () => listAgents(env).map((agent) => agent.name),
     },
-    env,
+    watcher,
   })
-  // One scanner indexes complete answers and reconciles native receipts. Receivers collect them.
-  const watcher = new Watcher({ store, tabs, env })
   panes.attachWatcher(watcher)
   let stopAnnouncing = null
 
@@ -398,7 +412,7 @@ export async function startUiServer(
         }
         await storeReady()
         try {
-          return send(...(await runPaneOperation(panes, op, dimensions, body)))
+          return send(...(await runPaneOperation(panes, tasks, op, dimensions, body)))
         } catch (cause) {
           // A pane operation validates what it was given and refuses it in
           // its own words, with a code. Anything else that escapes is a
@@ -407,6 +421,8 @@ export async function startUiServer(
           // sent something wrong and invite it to change the request.
           if (cause instanceof LaunchTicketError) return send(401, { error: 'unauthorized' })
           if (cause instanceof PaneError) return send(cause.status, paneErrorBody(cause))
+          if (cause instanceof TaskError)
+            return send(cause.status, { error: cause.code, reason: cause.message })
           // `internal_error` is the code, and it is the whole answer to
           // "whose fault": ours. The words still come along, because the
           // one reading this is the person who ran the app on their own
@@ -519,18 +535,16 @@ export async function startUiServer(
         const applied = syncAgents(env, {
           ...(typeof body.name === 'string' ? { name: body.name } : {}),
         })
-        if (applied.length > 0) refreshInstalledSkill(env)
         return send(200, { applied, agents: listAgents(env).map(withCommand) })
       }
       if (request.method === 'POST' && url.pathname === '/api/agents') {
         const added = addAgent(body, env)
-        refreshInstalledSkill(env)
         return send(201, { agent: added })
       }
       if (request.method === 'POST' && url.pathname === '/api/harnesses/check') {
         if (
           body.id !== undefined &&
-          !['claude', 'codex', 'opencode', 'pi', 'kimi'].includes(body.id)
+          !['claude', 'codex', 'opencode', 'pi', 'kimi', 'devin'].includes(body.id)
         ) {
           return send(400, { error: 'Unknown harness' })
         }
@@ -538,28 +552,13 @@ export async function startUiServer(
           harnesses: await harnessAdmin.check(body.id ?? null, { refresh: body.refresh === true }),
         })
       }
-      if (request.method === 'POST' && url.pathname === '/api/skills/install') {
-        return send(410, {
-          error: 'Role skills are included with ConsensFlow. Update the application instead.',
-        })
-      }
-      if (request.method === 'POST' && url.pathname === '/api/skills/uninstall') {
-        // A click that removes 300 files says so first; the flag is the say-so.
-        if (body.confirm !== true) {
-          return send(400, { error: 'confirm the removal before it runs' })
-        }
-        return send(200, { report: uninstallSkills(env, { force: body.force === true }) })
-      }
-
       const named = /^\/api\/agents\/([a-z][a-z0-9-]*)$/.exec(url.pathname)
       if (named !== null && request.method === 'PATCH') {
         const edited = editAgent(named[1], body, env)
-        refreshInstalledSkill(env)
         return send(200, { agent: edited })
       }
       if (named !== null && request.method === 'DELETE') {
         removeAgent(named[1], env)
-        refreshInstalledSkill(env)
         reply.writeHead(204)
         return reply.end()
       }
@@ -598,7 +597,7 @@ export async function startUiServer(
       panes.attachBridge(bridge)
       if (bridge !== null && bridge !== undefined) {
         watcher.attachBridge(bridge)
-        stopAnnouncing = attachPage(bridge, { panes, page, store, tabs, env })
+        stopAnnouncing = attachPage(bridge, { panes, page, store, tabs, tasks, env })
       }
       return panes
     },
@@ -653,8 +652,8 @@ export async function serveUi(
     serverOptions = undefined,
   },
 ) {
-  // Opening the app prepares its launcher and private role context.
-  healOnOpen(env)
+  // Opening the app prepares its private launcher and receiver integrations.
+  prepareApp(env)
   const server = await startUiServer(env, serverOptions)
   const url = `${server.url}/?token=${server.token}`
 
@@ -730,11 +729,24 @@ export async function serveUi(
 const BROWSING_CONTROLS = `
   <div class="filters">
     <label class="filter-search">Search agents<input type="search" placeholder="Name, model, harness or task…" autocomplete="off"></label>
-    <label>Category<select name="category" aria-label="Category"><option value="all">All categories</option><option value="coding">Coding</option><option value="lead">Recommended lead</option><option value="pm">Recommended PM</option><option value="reviewer">Reviewer / second opinion</option><option value="images">Images</option></select></label>
-    <label>Group by<select name="group" aria-label="Group by"><option value="none">None</option><option value="harness">Harness</option><option value="model-reasoning" selected>Model and reasoning</option></select></label>
+    <label>Work tier<select name="tier" aria-label="Work tier"><option value="all">All tiers</option>${Object.entries(
+      WORK_TIERS,
+    )
+      .map(([id, tier]) => `<option value="${id}">${tier.label}</option>`)
+      .join('')}</select></label>
+    <label>Category<select name="category" aria-label="Category"><option value="all">All categories</option><optgroup label="Task capabilities">${Object.entries(
+      CATEGORY_LABELS,
+    )
+      .filter(([id]) => !['lead', 'pm'].includes(id))
+      .map(([id, label]) => `<option value="${id}">${label}</option>`)
+      .join(
+        '',
+      )}</optgroup><optgroup label="Coordinator recommendations"><option value="lead">Lead candidate</option><option value="pm">PM candidate</option></optgroup></select></label>
+    <label>Group by<select name="group" aria-label="Group by"><option value="none">None</option><option value="harness">Harness</option><option value="model-reasoning" selected>Model and reasoning</option><option value="tier">Work tier</option></select></label>
     <label>Sort by<select name="sort" aria-label="Sort by"><option value="default">Model and reasoning</option></select></label>
     <button type="button">Clear filters</button>
   </div>
+  <p class="tier-guide">Work tier sets the assignment scope. Capability tags show suitable tasks; lead and PM tags are recommendations.</p>
   <p class="benchmark-source"></p>
   <details class="benchmark-guide"><summary>About benchmark scores</summary><div></div></details>`
 
@@ -870,6 +882,11 @@ const PAGE = (token, library = false) => `<!DOCTYPE html>
   .offer__what p { margin: 4px 0 0; }
   .category-pills { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; padding: 0; margin: 6px 0; }
   .category-pill { border: 1px solid currentColor; border-radius: 999px; padding: 2px 8px; font-size: 11px; line-height: 1.4; white-space: nowrap; color: var(--pill-coding); background: var(--panel); }
+  .tier-pill { display: inline-block; width: fit-content; border: 1px solid var(--muted); border-radius: 999px; padding: 4px 10px; margin: 6px 0; font-size: 12px; color: var(--foam); }
+  .tier-pill[data-tier=critical] { border-color: var(--pill-images); color: var(--pill-images); }
+  .tier-note { margin: 2px 0 8px; font-size: 12px; color: var(--muted); }
+  .tier-guide { color: var(--muted); font-size: 12px; }
+  .category-pill[data-kind=role] { border-style: dashed; }
   .category-pill[data-category=lead] { color: var(--pill-lead); }
   .category-pill[data-category=pm] { color: var(--pill-pm); }
   .category-pill[data-category=reviewer] { color: var(--foam); }
@@ -972,8 +989,9 @@ function renderCommand(entry) {
   return wrap;
 }
 
-const HARNESS_LABELS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi', kimi: 'Kimi', image: 'Images' };
-const CATEGORY_LABELS = { coding: 'Coding', lead: 'Recommended lead', pm: 'Recommended PM', reviewer: 'Reviewer / second opinion', images: 'Images' };
+const HARNESS_LABELS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi', kimi: 'Kimi', devin: 'Devin', image: 'Images' };
+const CATEGORY_LABELS = ${JSON.stringify(CATEGORY_LABELS)};
+const WORK_TIERS = ${JSON.stringify(WORK_TIERS)};
 const EFFORT_ORDER = ['ultra', 'max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'off', 'default', 'kimi-setting', 'not-applicable'];
 const effortValue = p => p.harness === 'image' ? 'not-applicable' : (p.effort || (p.harness === 'kimi' ? 'kimi-setting' : 'default'));
 const effortLabel = value => value === 'not-applicable' ? 'Not applicable' : value === 'kimi-setting' ? 'Kimi setting' : EFFORT_ORDER.includes(value) ? value.charAt(0).toUpperCase() + value.slice(1) : value;
@@ -1013,28 +1031,29 @@ function browsingGroups(entries, sectionId) {
   const section = document.querySelector(sectionId);
   const needle = section.querySelector('input[type=search]').value.trim().toLowerCase();
   const category = section.querySelector('[name=category]').value;
+  const tier = section.querySelector('[name=tier]').value;
   const by = section.querySelector('[name=group]').value;
   const metric = selectedMetric();
-  const filtered = entries.filter(p => (category === 'all' || p.profile.categories.includes(category)) &&
+  const filtered = entries.filter(p => (tier === 'all' || p.profile.workTier === tier) && (category === 'all' || p.profile.categories.includes(category)) &&
     [p.name, p.model, p.description, p.detail, p.harness, HARNESS_LABELS[p.harness], effortLabel(effortValue(p)),
-      p.profile.modelLabel, p.profile.routeLabel, p.profile.routeNote, p.profile.goodFor, ...p.profile.categories.map(c => CATEGORY_LABELS[c])]
+      WORK_TIERS[p.profile.workTier].label, p.profile.modelLabel, p.profile.routeLabel, p.profile.routeNote, p.profile.goodFor, ...p.profile.categories.map(c => CATEGORY_LABELS[c])]
       .filter(Boolean).join(' ').toLowerCase().includes(needle));
   section.querySelector('.section-count').textContent = filtered.length + ' of ' + entries.length + ' shown';
   const groups = new Map();
   for (const p of filtered) {
     const effort = effortValue(p);
-    const key = by === 'model-reasoning' ? JSON.stringify([p.profile.modelKey, effort]) : by === 'harness' ? p.harness : '';
-    const title = by === 'model-reasoning' ? p.profile.modelLabel + ' · ' + effortLabel(effort) : by === 'harness' ? (HARNESS_LABELS[key] || key) : '';
+    const key = by === 'model-reasoning' ? JSON.stringify([p.profile.modelKey, effort]) : by === 'harness' ? p.harness : by === 'tier' ? p.profile.workTier : '';
+    const title = by === 'model-reasoning' ? p.profile.modelLabel + ' · ' + effortLabel(effort) : by === 'harness' ? (HARNESS_LABELS[key] || key) : by === 'tier' ? WORK_TIERS[key].label : '';
     if (!groups.has(key)) groups.set(key, { key, title, modelGroup: by === 'model-reasoning', modelKey: p.profile.modelKey, modelLabel: p.profile.modelLabel, effort, rows: [] });
     groups.get(key).rows.push(p);
   }
   for (const group of groups.values()) {
     group.rows.sort((a, b) => compareScores(a, b, metric) || compareAgents(a, b));
-    group.shared = group.modelGroup ? ['categories', 'goodFor', 'benchmarks'].filter(field =>
+    group.shared = group.modelGroup ? ['workTier', 'categories', 'goodFor', 'benchmarks'].filter(field =>
       group.rows.every(p => JSON.stringify(p.profile[field]) === JSON.stringify(group.rows[0].profile[field]))) : [];
   }
   return [...groups.values()].sort((a, b) =>
-    (by === 'harness' ? rank(Object.keys(HARNESS_LABELS), a.key) - rank(Object.keys(HARNESS_LABELS), b.key) :
+    (by === 'tier' ? rank(Object.keys(WORK_TIERS), a.key) - rank(Object.keys(WORK_TIERS), b.key) : by === 'harness' ? rank(Object.keys(HARNESS_LABELS), a.key) - rank(Object.keys(HARNESS_LABELS), b.key) :
       by === 'model-reasoning' ? compareScores(a.rows[0], b.rows[0], metric) || compareModels(a, b) || compareEffort(a.effort, b.effort) : 0) || compareText(a.title, b.title) || compareText(a.key, b.key));
 }
 function groupSection(group) {
@@ -1047,7 +1066,15 @@ function groupSection(group) {
   } else if (group.title) section.append(el('h3', 'eyebrow eyebrow--tool', group.title + ' · ' + group.rows.length));
   return section;
 }
-function appendProfile(host, p, fields = ['categories', 'goodFor', 'routeLabel', 'benchmarks']) {
+function appendProfile(host, p, fields = ['workTier', 'categories', 'goodFor', 'routeLabel', 'benchmarks']) {
+  if (fields.includes('workTier')) {
+    const tier = WORK_TIERS[p.profile.workTier];
+    const pill = el('span', 'tier-pill', 'T' + (Object.keys(WORK_TIERS).indexOf(p.profile.workTier) + 1) + ' · ' + tier.label);
+    pill.dataset.tier = p.profile.workTier;
+    pill.title = tier.description;
+    host.append(pill);
+    if (p.profile.workTier === 'critical') host.append(el('p', 'tier-note', 'Important work only · No coding'));
+  }
   if (fields.includes('categories') && p.profile.categories.length) {
     const categories = el('ul', 'category-pills');
     categories.setAttribute('aria-label', 'Categories');
@@ -1055,6 +1082,8 @@ function appendProfile(host, p, fields = ['categories', 'goodFor', 'routeLabel',
     for (const category of p.profile.categories) {
       const pill = el('li', 'category-pill', CATEGORY_LABELS[category]);
       pill.dataset.category = category;
+      pill.dataset.kind = ['lead', 'pm'].includes(category) ? 'role' : 'capability';
+      pill.title = ['lead', 'pm'].includes(category) ? 'Coordinator recommendation; does not launch a role.' : CATEGORY_LABELS[category];
       categories.append(pill);
     }
     host.append(categories);
@@ -1143,8 +1172,8 @@ function renderRoster(data) {
   host.innerHTML = '';
   const groups = browsingGroups(data.agents, '#roster-section');
   document.querySelector('#lede').textContent = data.agents.length === 0
-    ? 'Add the first worker your lead can consult by name.'
-    : 'Configure the workers your lead can consult by name.';
+    ? 'Add agents for your lead and PM to consult by name.'
+    : 'Choose the scope and capabilities available to your lead and PM.';
 
   if (data.agents.length === 0) {
     host.appendChild(el('p', 'empty', 'No agents yet. Add one from Agent library, or define your own below.'));
@@ -1188,7 +1217,7 @@ function renderRoster(data) {
       note.append(update);
       card.append(note);
     }
-    appendProfile(card, p, ['categories', 'goodFor', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
+    appendProfile(card, p, ['workTier', 'categories', 'goodFor', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
     if (p.description) card.append(el('p', 'member__desc', p.description));
     if (p.command) card.append(renderCommand(p));
     else card.append(el('p', 'member__desc', p.harness + ' agents are not run by this tool — it leaves them alone.'));
@@ -1215,6 +1244,14 @@ function openEditor(card, agent) {
     input.className = 'full';
     form.append(input);
   }
+  const tierLabel = el('label', 'full', 'Work tier');
+  const tierSelect = document.createElement('select');
+  tierSelect.name = 'workTier';
+  tierSelect.add(new Option('Automatic (model and reasoning)', 'auto'));
+  for (const [id, tier] of Object.entries(WORK_TIERS)) tierSelect.add(new Option(tier.label, id));
+  tierSelect.value = agent.workTier ?? 'auto';
+  tierLabel.append(tierSelect);
+  form.append(tierLabel);
   const save = el('button', 'primary', 'Save');
   save.type = 'submit';
   const cancel = el('button', null, 'Cancel');
@@ -1224,6 +1261,7 @@ function openEditor(card, agent) {
   form.onsubmit = async (event) => {
     event.preventDefault();
     const entries = Object.fromEntries(new FormData(form).entries());
+    if (entries.workTier === 'auto') entries.workTier = null;
     const res = await fetch('/api/agents/' + agent.name, {
       method: 'PATCH',
       headers,
@@ -1288,7 +1326,7 @@ function renderCatalog(data) {
       row.append(el('span', 'offer__name', entry.name));
       const what = el('div', 'offer__what');
       what.append(el('span', 'offer__model', group.modelGroup ? (HARNESS_LABELS[entry.harness] || entry.harness) : entry.profile.modelLabel + ' · ' + (HARNESS_LABELS[entry.harness] || entry.harness) + ' · ' + effortLabel(effortValue(entry))));
-      appendProfile(what, entry, ['categories', 'goodFor', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
+      appendProfile(what, entry, ['workTier', 'categories', 'goodFor', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
       row.append(what);
       const state = catalogState(entry, data.agents);
       const add = el('button', null, state);
@@ -1382,6 +1420,7 @@ for (const [id, render] of [['#roster-section', renderRoster], ['#catalog-sectio
   filters.querySelector('button').onclick = () => {
     filters.querySelector('input').value = '';
     filters.querySelector('[name=category]').value = 'all';
+    filters.querySelector('[name=tier]').value = 'all';
     filters.querySelector('[name=group]').value = 'model-reasoning';
     filters.querySelector('[name=sort]').value = 'default';
     refresh();

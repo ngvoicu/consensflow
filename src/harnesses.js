@@ -2,60 +2,41 @@ import { accessSync, constants, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 
-/**
- * Where each coding harness keeps its skills, and whether it is installed here.
- * Detection is "the CLI resolves on PATH" — the same test the generated
- * commands live or die by. Directories honour each harness's own override
- * variable, which is also what keeps tests off the real machine.
- */
-
-/**
- * Where these CLIs install themselves, beyond whatever PATH we were handed.
- *
- * PATH alone is not a reliable answer to "is this harness on the machine". A
- * .app from Finder inherits almost none, and the login shell we ask instead is
- * NON-interactive — `zsh -lc` reads .zshenv/.zprofile/.zlogin but never
- * .zshrc, which is where per-tool bin directories usually get added. So the
- * app saw claude, codex and pi but not opencode, decided opencode was out of
- * scope, and took its skill back on every mode apply — while a terminal put it
- * straight back. Detection has to be the same answer wherever it runs.
+/** Discover CLI executables on PATH and native user install paths.
+ * Finder-launched apps may lack the interactive shell's tool directories.
  */
 const HOMED = (parts) => (env) => join(home(env), ...parts)
 
 const HARNESSES = [
   {
+    id: 'devin',
+    command: 'devin',
+    locations: [HOMED(['.local', 'bin'])],
+  },
+  {
     id: 'claude',
     command: 'claude',
     locations: [HOMED(['.local', 'bin']), HOMED(['.claude', 'local'])],
-    skillsDir: (env) => join(env.CLAUDE_CONFIG_DIR ?? join(home(env), '.claude'), 'skills'),
   },
   {
     id: 'codex',
     command: 'codex',
     locations: [HOMED(['.codex', 'bin']), HOMED(['.local', 'bin'])],
-    skillsDir: (env) => join(env.CODEX_HOME ?? join(home(env), '.codex'), 'skills'),
   },
   {
     id: 'opencode',
     command: 'opencode',
     locations: [HOMED(['.opencode', 'bin']), HOMED(['.local', 'bin'])],
-    skillsDir: (env) =>
-      join(env.XDG_CONFIG_HOME ?? join(home(env), '.config'), 'opencode', 'skills'),
   },
   {
     id: 'pi',
     command: 'pi',
     locations: [HOMED(['.pi', 'bin']), HOMED(['.local', 'bin'])],
-    skillsDir: (env) => join(piAgentDir(env), 'skills'),
   },
   {
-    // The CLI is `kimi`; the product is Kimi Code, which is why its home is
-    // `.kimi-code`. `KIMI_CODE_HOME` moves the whole thing, its own importer
-    // skill says so, and skills sit at User scope directly under it.
     id: 'kimi',
     command: 'kimi',
     locations: [HOMED(['.kimi-code', 'bin']), HOMED(['.local', 'bin'])],
-    skillsDir: (env) => join(env.KIMI_CODE_HOME ?? join(home(env), '.kimi-code'), 'skills'),
   },
 ]
 
@@ -172,22 +153,14 @@ export function harnessPath(id, env) {
   return harness === undefined ? null : locate(harness, env)
 }
 
-/**
- * Every harness we know of and where its skills live — installed or not.
- *
- * Scope decisions may narrow to what is detected, but REMOVAL must not: a
- * harness that simply did not resolve on this run has not stopped existing,
- * and taking its skill away on that basis is how the same skill flapped in
- * and out on every mode apply.
- */
-export function knownHarnesses(env) {
-  return HARNESSES.map((harness) => ({ id: harness.id, skillsDir: harness.skillsDir(env) }))
+/** All supported harness identities, whether installed or not. */
+export function knownHarnesses() {
+  return HARNESSES.map(({ id }) => ({ id }))
 }
 
 export function detectHarnesses(env) {
   return HARNESSES.filter((harness) => isInstalled(harness, env)).map((harness) => ({
     id: harness.id,
     command: harness.command,
-    skillsDir: harness.skillsDir(env),
   }))
 }

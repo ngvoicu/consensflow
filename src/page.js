@@ -9,10 +9,12 @@ export class Page {
   #store
   #tabs
   #agents
-  constructor({ store, tabs, agents }) {
+  #watcher
+  constructor({ store, tabs, agents, watcher }) {
     this.#store = store
     this.#tabs = tabs
     this.#agents = agents
+    this.#watcher = watcher
   }
   async state() {
     const tabs = await this.#tabs.list()
@@ -21,6 +23,7 @@ export class Page {
     const visited = new Set()
     for (const tab of tabs) {
       const threads = await this.#store.readThreads(tab.directory)
+      const inbox = await this.#store.readInbox(tab.directory)
       drawn.push({
         id: tab.id,
         role: tab.role ?? 'lead',
@@ -38,11 +41,11 @@ export class Page {
           nativeSession: tab.lead.nativeSession ?? null,
           bound: Boolean(tab.lead.nativeSession),
         },
-        panes: tab.panes.map((pane) => this.#pane(tab, pane, threads)),
+        panes: tab.panes.map((pane) => this.#pane(tab, pane, threads, inbox.receivers[tab.id])),
       })
       if (visited.has(tab.directory)) continue
       visited.add(tab.directory)
-      for (const result of Object.values((await this.#store.readInbox(tab.directory)).results)) {
+      for (const result of Object.values(inbox.results)) {
         if (!tabs.some((owner) => owner.id === result.owner)) continue
         results.push(project(result))
       }
@@ -135,7 +138,7 @@ export class Page {
     if (!tab) throw new PaneError('coordinator no longer exists', { status: 404 })
     return tab
   }
-  #pane(tab, pane, threads) {
+  #pane(tab, pane, threads, receiver) {
     const row = pane.conversation === null ? undefined : threads[pane.conversation]
     const reserved = isRecord(row?.reserved) ? row.reserved : null
     const progress =
@@ -157,6 +160,15 @@ export class Page {
       kind: pane.kind,
       order: pane.order,
       alive,
+      activity: pane.failure
+        ? { state: 'failed' }
+        : tab.closed || pane.closed
+          ? { state: 'closed' }
+          : !alive
+            ? { state: 'starting' }
+            : pane.kind === 'shell'
+              ? { state: 'open' }
+              : (this.#watcher?.activity(tab, pane, row, receiver) ?? { state: 'unknown' }),
       // An open lead is published before its native launch resolves. A dead
       // lead closes its tab; an explicit worker failure has its own record.
       ...(!alive && tab.closed !== true && pane.closed !== true && !pane.failure

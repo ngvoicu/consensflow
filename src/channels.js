@@ -7,8 +7,10 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { send as sendClaude } from './channels/claude-peer.js'
 import { send as sendCodex } from './channels/codex.js'
+import { send as sendDevin } from './channels/devin.js'
 import { DEFAULT_DEADLINE_MS, send as sendOpenCode } from './channels/opencode.js'
 import { send as sendPi } from './channels/pi.js'
+import { prepareDevinIntegration } from './devin-install.js'
 import { configRoot } from './roster.js'
 
 const PROBES = Object.freeze({
@@ -20,6 +22,7 @@ const PROBES = Object.freeze({
   codex: Object.freeze({ channel: 'codex-queue', probe: 'P14-Codex', date: '2026-09-08' }),
   opencode: Object.freeze({ channel: 'opencode-server', probe: 'P5', date: '2026-09-07' }),
   pi: Object.freeze({ channel: 'pi-extension', probe: 'P6', date: '2026-09-07' }),
+  devin: Object.freeze({ channel: 'devin-tui', probe: 'Devin-native-TUI', date: '2026-09-12' }),
 })
 
 export function enabledChannels(kind) {
@@ -77,6 +80,12 @@ async function hasNativeQueue(kind, executable) {
 
 export async function launchConfiguration(kind, input) {
   const { launchId, workspace } = requireLaunchInput(input)
+  if (kind === 'devin')
+    return prepareDevinIntegration(input.env, {
+      launchId,
+      node: input.node,
+      executable: input.executable,
+    })
   if (kind === 'claude-code') {
     // Claude registers its own peer inbox. No development channel, native
     // plugin, launch flag, settings or credential file is created by the app.
@@ -205,6 +214,7 @@ export async function send(channel, target, text) {
   const sender = {
     'claude-peer': sendClaude,
     'codex-queue': sendCodex,
+    'devin-tui': sendDevin,
     'opencode-server': sendOpenCode,
     'pi-extension': sendPi,
   }[channel]

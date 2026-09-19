@@ -1240,6 +1240,9 @@ describe('the standalone CLI contract without an app pane', () => {
           .filter((verb) => verb !== undefined),
       ),
     ]
+    assert.equal((result.stdout.match(/^ {2}setup /gm) ?? []).length, 1)
+    assert.doesNotMatch(result.stdout, /setup \[--all\]|skills status|skills uninstall/)
+    assert.match(result.stdout, /--purpose/)
     assert.deepEqual(verbs, [
       'setup',
       'run',
@@ -1249,10 +1252,10 @@ describe('the standalone CLI contract without an app pane', () => {
       'lead',
       'results',
       'sessions',
+      'task',
       'last',
       'catalog',
       'agent',
-      'skills',
       'ui',
       'doctor',
     ])

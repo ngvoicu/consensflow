@@ -5,12 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import { readBenchmarkCache, withBenchmarks } from "./benchmarks.js";
 import { nowIso, slugify, stripMention } from "./utils.js";
-import { agentProfile, isOrphanedPreset, syncAgentWithPreset } from "./presets.js";
+import { agentProfile, isOrphanedPreset, syncAgentWithPreset, validateWorkTier } from "./presets.js";
 
 // "image" is a backend-based kind (Codex image tool via the Codex CLI login), not a
 // CLI runner: it is handled upstream in cf.mjs, and buildRunnerInvocation keeps a loud backstop.
-export const AGENT_KINDS = ["pi", "claude-code", "codex", "opencode", "kimi", "image"];
-export const SKILLS_POLICIES = ["default", "none", "explicit"];
+export const AGENT_KINDS = ["pi", "claude-code", "codex", "opencode", "kimi", "devin", "image"];
 
 // Older builds kept per-tool rosters below the shared home. Keep a one-time migration path so
 // those users do not appear to lose agents when upgrading to the shared roster.
@@ -208,6 +207,7 @@ export async function removeAgent(cwd, ref) {
 }
 
 export function normalizeAgent(input) {
+  validateWorkTier(input.workTier);
   const name = String(input.name ?? input.id ?? "").trim();
   if (!name) throw new Error("Agent name is required");
   const id = slugify(input.id ?? name);
@@ -216,13 +216,12 @@ export function normalizeAgent(input) {
     throw new Error(`Unsupported agent kind '${kind}'. Expected one of: ${AGENT_KINDS.join(", ")}`);
   }
 
-  const skillsPolicy = normalizeEnum(input.skillsPolicy ?? input.skills, SKILLS_POLICIES, "default", "skillsPolicy");
 
   const agent = {
     id,
     name,
     kind,
-    skillsPolicy,
+    ...(input.workTier == null ? {} : { workTier: input.workTier }),
     createdAt: input.createdAt ?? nowIso(),
     updatedAt: input.updatedAt ?? nowIso(),
   };
@@ -233,26 +232,10 @@ export function normalizeAgent(input) {
     }
   }
 
-  const skillPaths = normalizeList(input.skillPaths ?? input.skillPath, []);
-  if (skillPaths.length > 0) agent.skillPaths = skillPaths;
 
   if (input.maxTurns !== undefined) agent.maxTurns = Number(input.maxTurns);
   agent.profile = withBenchmarks(agent, agentProfile(agent), readBenchmarkCache(configHome()));
   return agent;
-}
-
-function normalizeList(value, fallback) {
-  if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
-  if (typeof value === "string") return value.split(",").map((item) => item.trim()).filter(Boolean);
-  return [...fallback];
-}
-
-function normalizeEnum(value, allowed, fallback, label) {
-  const normalized = String(value ?? fallback).trim();
-  if (!allowed.includes(normalized)) {
-    throw new Error(`${label} must be one of: ${allowed.join(", ")}`);
-  }
-  return normalized;
 }
 
 // getAgent resolves @refs by id OR slugified name, so both must be unique across the

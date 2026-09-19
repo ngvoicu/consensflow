@@ -1,0 +1,1833 @@
+{
+  "session": {
+    "id": "unleashed-monitor",
+    "main_chain_id": 39
+  },
+  "rows": [
+    {
+      "row_id": 75,
+      "session_id": "unleashed-monitor",
+      "node_id": 0,
+      "parent_node_id": null,
+      "chat_message": "{\"message_id\": \"0a7e6f2c-aa00-41d3-a259-107f669d37e0\", \"role\": \"system\", \"content\": \"[unrelated native system context redacted]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"extensions\": {\"affogato/cog-context\": {\"key\": \"workspace/context\"}}, \"created_at\": \"2026-09-12T20:09:39.498580Z\", \"telemetry\": {\"source\": \"system\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "null"
+    },
+    {
+      "row_id": 76,
+      "session_id": "unleashed-monitor",
+      "node_id": 1,
+      "parent_node_id": 0,
+      "chat_message": "{\"message_id\": \"f86062ed-95dd-4541-b478-1a596b6e9b7d\", \"role\": \"system\", \"content\": \"CONSENSFLOW_NATIVE_ROLE_PROBE: only PM writes specifications; advisors return advice.\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"created_at\": \"2026-09-12T20:09:39.565833Z\", \"telemetry\": {\"source\": \"system\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "null"
+    },
+    {
+      "row_id": 77,
+      "session_id": "unleashed-monitor",
+      "node_id": 2,
+      "parent_node_id": 1,
+      "chat_message": "{\"message_id\": \"3e3d92e9-4ab2-4a5e-8241-acbdb16ef5af\", \"role\": \"system\", \"content\": \"[consensflow inbox PRODUCT_RESULT_1]\\nComplete worker reply 1.\\n[end PRODUCT_RESULT_1]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"created_at\": \"2026-09-12T20:09:39.642829Z\", \"telemetry\": {\"source\": \"system\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "null"
+    },
+    {
+      "row_id": 78,
+      "session_id": "unleashed-monitor",
+      "node_id": 3,
+      "parent_node_id": 2,
+      "chat_message": "{\"message_id\": \"4602cc90-e9d7-47ad-bd6c-d8ffee797c70\", \"role\": \"user\", \"content\": \"HUMAN_TUI_A\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": true, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"extensions\": {\"chisel/client-message-id\": \"8efa2f69-9c0f-499a-b004-86bc0f719ea9\"}, \"created_at\": \"2026-09-12T20:09:39.643140Z\", \"telemetry\": {\"source\": \"user\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "null"
+    },
+    {
+      "row_id": 79,
+      "session_id": "unleashed-monitor",
+      "node_id": 4,
+      "parent_node_id": null,
+      "chat_message": "{\"message_id\": \"9666feb7-88a1-4e12-8ec3-64567acafc64\", \"role\": \"system\", \"content\": \"[unrelated native system context redacted]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"created_at\": \"2026-09-12T20:09:39.493091Z\", \"telemetry\": {\"source\": \"sysprompt\", \"operation\": \"normal\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":true}"
+    },
+    {
+      "row_id": 80,
+      "session_id": "unleashed-monitor",
+      "node_id": 5,
+      "parent_node_id": 4,
+      "chat_message": "{\"message_id\": \"b1764e6e-1d67-45cf-99a7-14bdbfe14614\", \"role\": \"system\", \"content\": \"[unrelated native system context redacted]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"created_at\": \"2026-09-12T20:09:39.494372Z\", \"telemetry\": {\"source\": \"sysprompt\", \"operation\": \"subagent_profiles\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":true}"
+    },
+    {
+      "row_id": 81,
+      "session_id": "unleashed-monitor",
+      "node_id": 6,
+      "parent_node_id": 5,
+      "chat_message": "{\"message_id\": \"dd8a8323-1e6c-43a3-92b6-c1f2ac8fc7fc\", \"role\": \"system\", \"content\": \"[unrelated native system context redacted]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"created_at\": \"2026-09-12T20:09:39.493993Z\", \"telemetry\": {\"source\": \"system\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":true}"
+    },
+    {
+      "row_id": 82,
+      "session_id": "unleashed-monitor",
+      "node_id": 7,
+      "parent_node_id": 6,
+      "chat_message": "{\"message_id\": \"0a7e6f2c-aa00-41d3-a259-107f669d37e0\", \"role\": \"system\", \"content\": \"[unrelated native system context redacted]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"extensions\": {\"affogato/cog-context\": {\"key\": \"workspace/context\"}}, \"created_at\": \"2026-09-12T20:09:39.498580Z\", \"telemetry\": {\"source\": \"system\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":null,\"extensions\":{\"compact/prior_node_ids\":[0]}}"
+    },
+    {
+      "row_id": 83,
+      "session_id": "unleashed-monitor",
+      "node_id": 8,
+      "parent_node_id": 7,
+      "chat_message": "{\"message_id\": \"f86062ed-95dd-4541-b478-1a596b6e9b7d\", \"role\": \"system\", \"content\": \"CONSENSFLOW_NATIVE_ROLE_PROBE: only PM writes specifications; advisors return advice.\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"created_at\": \"2026-09-12T20:09:39.565833Z\", \"telemetry\": {\"source\": \"system\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":null,\"extensions\":{\"compact/prior_node_ids\":[1]}}"
+    },
+    {
+      "row_id": 84,
+      "session_id": "unleashed-monitor",
+      "node_id": 9,
+      "parent_node_id": 8,
+      "chat_message": "{\"message_id\": \"3e3d92e9-4ab2-4a5e-8241-acbdb16ef5af\", \"role\": \"system\", \"content\": \"[consensflow inbox PRODUCT_RESULT_1]\\nComplete worker reply 1.\\n[end PRODUCT_RESULT_1]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"created_at\": \"2026-09-12T20:09:39.642829Z\", \"telemetry\": {\"source\": \"system\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":null,\"extensions\":{\"compact/prior_node_ids\":[2]}}"
+    },
+    {
+      "row_id": 85,
+      "session_id": "unleashed-monitor",
+      "node_id": 10,
+      "parent_node_id": 9,
+      "chat_message": "{\"message_id\": \"4602cc90-e9d7-47ad-bd6c-d8ffee797c70\", \"role\": \"user\", \"content\": \"HUMAN_TUI_A\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": true, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"extensions\": {\"chisel/client-message-id\": \"8efa2f69-9c0f-499a-b004-86bc0f719ea9\"}, \"created_at\": \"2026-09-12T20:09:39.643140Z\", \"telemetry\": {\"source\": \"user\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":null,\"extensions\":{\"compact/prior_node_ids\":[3]}}"
+    },
+    {
+      "row_id": 86,
+      "session_id": "unleashed-monitor",
+      "node_id": 11,
+      "parent_node_id": null,
+      "chat_message": "{\"message_id\": \"9666feb7-88a1-4e12-8ec3-64567acafc64\", \"role\": \"system\", \"content\": \"[unrelated native system context redacted]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"created_at\": \"2026-09-12T20:09:39.493091Z\", \"telemetry\": {\"source\": \"sysprompt\", \"operation\": \"normal\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":true}"
+    },
+    {
+      "row_id": 87,
+      "session_id": "unleashed-monitor",
+      "node_id": 12,
+      "parent_node_id": 11,
+      "chat_message": "{\"message_id\": \"b1764e6e-1d67-45cf-99a7-14bdbfe14614\", \"role\": \"system\", \"content\": \"[unrelated native system context redacted]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"created_at\": \"2026-09-12T20:09:39.494372Z\", \"telemetry\": {\"source\": \"sysprompt\", \"operation\": \"subagent_profiles\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":true}"
+    },
+    {
+      "row_id": 88,
+      "session_id": "unleashed-monitor",
+      "node_id": 13,
+      "parent_node_id": 12,
+      "chat_message": "{\"message_id\": \"dd8a8323-1e6c-43a3-92b6-c1f2ac8fc7fc\", \"role\": \"system\", \"content\": \"[unrelated native system context redacted]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"created_at\": \"2026-09-12T20:09:39.493993Z\", \"telemetry\": {\"source\": \"system\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":true}"
+    },
+    {
+      "row_id": 89,
+      "session_id": "unleashed-monitor",
+      "node_id": 14,
+      "parent_node_id": 13,
+      "chat_message": "{\"message_id\": \"0a7e6f2c-aa00-41d3-a259-107f669d37e0\", \"role\": \"system\", \"content\": \"[unrelated native system context redacted]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"extensions\": {\"affogato/cog-context\": {\"key\": \"workspace/context\"}}, \"created_at\": \"2026-09-12T20:09:39.498580Z\", \"telemetry\": {\"source\": \"system\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":null,\"extensions\":{\"compact/prior_node_ids\":[0]}}"
+    },
+    {
+      "row_id": 90,
+      "session_id": "unleashed-monitor",
+      "node_id": 15,
+      "parent_node_id": 14,
+      "chat_message": "{\"message_id\": \"f86062ed-95dd-4541-b478-1a596b6e9b7d\", \"role\": \"system\", \"content\": \"CONSENSFLOW_NATIVE_ROLE_PROBE: only PM writes specifications; advisors return advice.\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"created_at\": \"2026-09-12T20:09:39.565833Z\", \"telemetry\": {\"source\": \"system\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":null,\"extensions\":{\"compact/prior_node_ids\":[1]}}"
+    },
+    {
+      "row_id": 91,
+      "session_id": "unleashed-monitor",
+      "node_id": 16,
+      "parent_node_id": 15,
+      "chat_message": "{\"message_id\": \"3e3d92e9-4ab2-4a5e-8241-acbdb16ef5af\", \"role\": \"system\", \"content\": \"[consensflow inbox PRODUCT_RESULT_1]\\nComplete worker reply 1.\\n[end PRODUCT_RESULT_1]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"created_at\": \"2026-09-12T20:09:39.642829Z\", \"telemetry\": {\"source\": \"system\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":null,\"extensions\":{\"compact/prior_node_ids\":[2]}}"
+    },
+    {
+      "row_id": 92,
+      "session_id": "unleashed-monitor",
+      "node_id": 17,
+      "parent_node_id": 16,
+      "chat_message": "{\"message_id\": \"4602cc90-e9d7-47ad-bd6c-d8ffee797c70\", \"role\": \"user\", \"content\": \"HUMAN_TUI_A\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": true, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"extensions\": {\"chisel/client-message-id\": \"8efa2f69-9c0f-499a-b004-86bc0f719ea9\"}, \"created_at\": \"2026-09-12T20:09:39.643140Z\", \"telemetry\": {\"source\": \"user\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":null,\"extensions\":{\"compact/prior_node_ids\":[3]}}"
+    },
+    {
+      "row_id": 93,
+      "session_id": "unleashed-monitor",
+      "node_id": 18,
+      "parent_node_id": 3,
+      "chat_message": "{\"message_id\": \"97fab071-8c10-4d8c-8c09-629f678703d9\", \"role\": \"system\", \"content\": \"[unrelated native system context redacted]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"extensions\": {\"agent-ext/skills-loaded\": {\"skills\": [{\"name\": \"devin-cli\", \"description\": \"Look up Devin CLI documentation (skills, extensibility, configuration, commands, models, troubleshooting)\", \"path\": \"/Users/gabrielvoicu/.consensflow/tmp/devin-native-research/docs/devin-3000.10.21/share/devin/docs\", \"model_invocable\": true, \"provider\": \"builtin\", \"skill_id\": \"builtin:devin-cli\"}, {\"name\": \"declarative-repo-setup\", \"description\": \"Generate and verify a working environment.yaml (Devin snapshot-setup blueprint) for a repo\", \"path\": \"builtin:drs\", \"model_invocable\": true, \"provider\": \"builtin\", \"skill_id\": \"builtin:declarative-repo-setup\"}, {\"name\": \"upload-secrets\", \"description\": \"Securely upload local secrets (dotenv files, env vars, API keys) to the Devin Cloud secrets manager \\u2014 values never enter the conversation\", \"path\": \"builtin:upload-secrets\", \"model_invocable\": true, \"provider\": \"builtin\", \"skill_id\": \"builtin:upload-secrets\"}], \"is_initial_listing\": true}}, \"created_at\": \"2026-09-12T20:09:39.644454Z\", \"telemetry\": {\"source\": \"system\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "null"
+    },
+    {
+      "row_id": 94,
+      "session_id": "unleashed-monitor",
+      "node_id": 19,
+      "parent_node_id": null,
+      "chat_message": "{\"message_id\": \"9666feb7-88a1-4e12-8ec3-64567acafc64\", \"role\": \"system\", \"content\": \"[unrelated native system context redacted]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"created_at\": \"2026-09-12T20:09:39.493091Z\", \"telemetry\": {\"source\": \"sysprompt\", \"operation\": \"normal\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":true}"
+    },
+    {
+      "row_id": 95,
+      "session_id": "unleashed-monitor",
+      "node_id": 20,
+      "parent_node_id": 19,
+      "chat_message": "{\"message_id\": \"b1764e6e-1d67-45cf-99a7-14bdbfe14614\", \"role\": \"system\", \"content\": \"[unrelated native system context redacted]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"created_at\": \"2026-09-12T20:09:39.494372Z\", \"telemetry\": {\"source\": \"sysprompt\", \"operation\": \"subagent_profiles\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":true}"
+    },
+    {
+      "row_id": 96,
+      "session_id": "unleashed-monitor",
+      "node_id": 21,
+      "parent_node_id": 20,
+      "chat_message": "{\"message_id\": \"dd8a8323-1e6c-43a3-92b6-c1f2ac8fc7fc\", \"role\": \"system\", \"content\": \"[unrelated native system context redacted]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"created_at\": \"2026-09-12T20:09:39.493993Z\", \"telemetry\": {\"source\": \"system\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":true}"
+    },
+    {
+      "row_id": 97,
+      "session_id": "unleashed-monitor",
+      "node_id": 22,
+      "parent_node_id": 21,
+      "chat_message": "{\"message_id\": \"0a7e6f2c-aa00-41d3-a259-107f669d37e0\", \"role\": \"system\", \"content\": \"[unrelated native system context redacted]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"extensions\": {\"affogato/cog-context\": {\"key\": \"workspace/context\"}}, \"created_at\": \"2026-09-12T20:09:39.498580Z\", \"telemetry\": {\"source\": \"system\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":null,\"extensions\":{\"compact/prior_node_ids\":[0]}}"
+    },
+    {
+      "row_id": 98,
+      "session_id": "unleashed-monitor",
+      "node_id": 23,
+      "parent_node_id": 22,
+      "chat_message": "{\"message_id\": \"f86062ed-95dd-4541-b478-1a596b6e9b7d\", \"role\": \"system\", \"content\": \"CONSENSFLOW_NATIVE_ROLE_PROBE: only PM writes specifications; advisors return advice.\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"created_at\": \"2026-09-12T20:09:39.565833Z\", \"telemetry\": {\"source\": \"system\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":null,\"extensions\":{\"compact/prior_node_ids\":[1]}}"
+    },
+    {
+      "row_id": 99,
+      "session_id": "unleashed-monitor",
+      "node_id": 24,
+      "parent_node_id": 23,
+      "chat_message": "{\"message_id\": \"3e3d92e9-4ab2-4a5e-8241-acbdb16ef5af\", \"role\": \"system\", \"content\": \"[consensflow inbox PRODUCT_RESULT_1]\\nComplete worker reply 1.\\n[end PRODUCT_RESULT_1]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"created_at\": \"2026-09-12T20:09:39.642829Z\", \"telemetry\": {\"source\": \"system\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":null,\"extensions\":{\"compact/prior_node_ids\":[2]}}"
+    },
+    {
+      "row_id": 100,
+      "session_id": "unleashed-monitor",
+      "node_id": 25,
+      "parent_node_id": 24,
+      "chat_message": "{\"message_id\": \"4602cc90-e9d7-47ad-bd6c-d8ffee797c70\", \"role\": \"user\", \"content\": \"HUMAN_TUI_A\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": true, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"extensions\": {\"chisel/client-message-id\": \"8efa2f69-9c0f-499a-b004-86bc0f719ea9\"}, \"created_at\": \"2026-09-12T20:09:39.643140Z\", \"telemetry\": {\"source\": \"user\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":null,\"extensions\":{\"compact/prior_node_ids\":[3]}}"
+    },
+    {
+      "row_id": 101,
+      "session_id": "unleashed-monitor",
+      "node_id": 26,
+      "parent_node_id": 25,
+      "chat_message": "{\"message_id\": \"97fab071-8c10-4d8c-8c09-629f678703d9\", \"role\": \"system\", \"content\": \"[unrelated native system context redacted]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"extensions\": {\"agent-ext/skills-loaded\": {\"skills\": [{\"name\": \"devin-cli\", \"description\": \"Look up Devin CLI documentation (skills, extensibility, configuration, commands, models, troubleshooting)\", \"path\": \"/Users/gabrielvoicu/.consensflow/tmp/devin-native-research/docs/devin-3000.10.21/share/devin/docs\", \"model_invocable\": true, \"provider\": \"builtin\", \"skill_id\": \"builtin:devin-cli\"}, {\"name\": \"declarative-repo-setup\", \"description\": \"Generate and verify a working environment.yaml (Devin snapshot-setup blueprint) for a repo\", \"path\": \"builtin:drs\", \"model_invocable\": true, \"provider\": \"builtin\", \"skill_id\": \"builtin:declarative-repo-setup\"}, {\"name\": \"upload-secrets\", \"description\": \"Securely upload local secrets (dotenv files, env vars, API keys) to the Devin Cloud secrets manager \\u2014 values never enter the conversation\", \"path\": \"builtin:upload-secrets\", \"model_invocable\": true, \"provider\": \"builtin\", \"skill_id\": \"builtin:upload-secrets\"}], \"is_initial_listing\": true}}, \"created_at\": \"2026-09-12T20:09:39.644454Z\", \"telemetry\": {\"source\": \"system\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":null,\"extensions\":{\"compact/prior_node_ids\":[18]}}"
+    },
+    {
+      "row_id": 102,
+      "session_id": "unleashed-monitor",
+      "node_id": 27,
+      "parent_node_id": 26,
+      "chat_message": "{\"message_id\": \"17d38edd-4766-4df0-ac02-e6e1725798a7\", \"role\": \"assistant\", \"content\": \"LOCAL_NATIVE_REPLY_1\", \"tool_calls\": [], \"metadata\": {\"num_tokens\": 0, \"is_user_input\": null, \"request_id\": null, \"metrics\": {\"ttft_ms\": 1, \"total_time_ms\": 1, \"input_tokens\": null, \"output_tokens\": 0, \"cache_read_tokens\": null, \"cache_creation_tokens\": null, \"tpot_ms\": 0.0, \"tokens_per_sec\": 0.0}, \"finish_reason\": null, \"started_generation_at\": \"2026-09-12T20:09:39.656959Z\", \"created_at\": \"2026-09-12T20:09:39.657252Z\", \"generation_model\": \"swe-1-6-fast\", \"telemetry\": {\"source\": \"assistant\", \"operation\": \"inference\"}}}",
+      "created_at": 1789243781,
+      "metadata": "null"
+    },
+    {
+      "row_id": 103,
+      "session_id": "unleashed-monitor",
+      "node_id": 28,
+      "parent_node_id": 26,
+      "chat_message": "{\"message_id\": \"17d38edd-4766-4df0-ac02-e6e1725798a7\", \"role\": \"assistant\", \"content\": \"LOCAL_NATIVE_REPLY_1\", \"tool_calls\": [], \"metadata\": {\"num_tokens\": 0, \"is_user_input\": null, \"request_id\": null, \"metrics\": {\"ttft_ms\": 1, \"total_time_ms\": 1, \"input_tokens\": null, \"output_tokens\": 0, \"cache_read_tokens\": null, \"cache_creation_tokens\": null, \"tpot_ms\": 0.0, \"tokens_per_sec\": 0.0}, \"finish_reason\": null, \"started_generation_at\": \"2026-09-12T20:09:39.656959Z\", \"created_at\": \"2026-09-12T20:09:39.657252Z\", \"generation_model\": \"swe-1-6-fast\", \"telemetry\": {\"source\": \"assistant\", \"operation\": \"inference\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":null}"
+    },
+    {
+      "row_id": 104,
+      "session_id": "unleashed-monitor",
+      "node_id": 29,
+      "parent_node_id": 28,
+      "chat_message": "{\"message_id\": \"a788d3d9-ebb8-48c4-96d2-cd4c433bd037\", \"role\": \"user\", \"content\": \"[consensflow inbox PRODUCT_RESULT_2]\\nComplete worker reply 2.\\n[end PRODUCT_RESULT_2]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"created_at\": \"2026-09-12T20:09:39.730474Z\", \"telemetry\": {\"source\": \"user\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "null"
+    },
+    {
+      "row_id": 105,
+      "session_id": "unleashed-monitor",
+      "node_id": 30,
+      "parent_node_id": 29,
+      "chat_message": "{\"message_id\": \"7b321ebd-3e20-4634-bc4d-b919b9f90030\", \"role\": \"assistant\", \"content\": \"LOCAL_NATIVE_REPLY_2\", \"tool_calls\": [], \"metadata\": {\"num_tokens\": 0, \"is_user_input\": null, \"request_id\": null, \"metrics\": {\"ttft_ms\": 0, \"total_time_ms\": 0, \"input_tokens\": null, \"output_tokens\": 0, \"cache_read_tokens\": null, \"cache_creation_tokens\": null, \"tpot_ms\": 0.0, \"tokens_per_sec\": 0.0}, \"finish_reason\": null, \"started_generation_at\": \"2026-09-12T20:09:39.731792Z\", \"created_at\": \"2026-09-12T20:09:39.731830Z\", \"generation_model\": \"swe-1-6-fast\", \"telemetry\": {\"source\": \"assistant\", \"operation\": \"inference\"}}}",
+      "created_at": 1789243781,
+      "metadata": "null"
+    },
+    {
+      "row_id": 106,
+      "session_id": "unleashed-monitor",
+      "node_id": 31,
+      "parent_node_id": 29,
+      "chat_message": "{\"message_id\": \"7b321ebd-3e20-4634-bc4d-b919b9f90030\", \"role\": \"assistant\", \"content\": \"LOCAL_NATIVE_REPLY_2\", \"tool_calls\": [], \"metadata\": {\"num_tokens\": 0, \"is_user_input\": null, \"request_id\": null, \"metrics\": {\"ttft_ms\": 0, \"total_time_ms\": 0, \"input_tokens\": null, \"output_tokens\": 0, \"cache_read_tokens\": null, \"cache_creation_tokens\": null, \"tpot_ms\": 0.0, \"tokens_per_sec\": 0.0}, \"finish_reason\": null, \"started_generation_at\": \"2026-09-12T20:09:39.731792Z\", \"created_at\": \"2026-09-12T20:09:39.731830Z\", \"generation_model\": \"swe-1-6-fast\", \"telemetry\": {\"source\": \"assistant\", \"operation\": \"inference\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":null}"
+    },
+    {
+      "row_id": 107,
+      "session_id": "unleashed-monitor",
+      "node_id": 32,
+      "parent_node_id": 31,
+      "chat_message": "{\"message_id\": \"3e1694d3-420c-424f-8e55-f57fdf6f1c5c\", \"role\": \"user\", \"content\": \"[consensflow inbox PRODUCT_RESULT_3]\\nComplete worker reply 3.\\n[end PRODUCT_RESULT_3]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"created_at\": \"2026-09-12T20:09:39.806516Z\", \"telemetry\": {\"source\": \"user\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "null"
+    },
+    {
+      "row_id": 108,
+      "session_id": "unleashed-monitor",
+      "node_id": 33,
+      "parent_node_id": 32,
+      "chat_message": "{\"message_id\": \"b1231636-10f4-41e4-8420-d27a101e6aa5\", \"role\": \"assistant\", \"content\": \"LOCAL_NATIVE_REPLY_3\", \"tool_calls\": [], \"metadata\": {\"num_tokens\": 0, \"is_user_input\": null, \"request_id\": null, \"metrics\": {\"ttft_ms\": 1, \"total_time_ms\": 1, \"input_tokens\": null, \"output_tokens\": 0, \"cache_read_tokens\": null, \"cache_creation_tokens\": null, \"tpot_ms\": 0.0, \"tokens_per_sec\": 0.0}, \"finish_reason\": null, \"started_generation_at\": \"2026-09-12T20:09:39.808145Z\", \"created_at\": \"2026-09-12T20:09:39.808192Z\", \"generation_model\": \"swe-1-6-fast\", \"telemetry\": {\"source\": \"assistant\", \"operation\": \"inference\"}}}",
+      "created_at": 1789243781,
+      "metadata": "null"
+    },
+    {
+      "row_id": 109,
+      "session_id": "unleashed-monitor",
+      "node_id": 34,
+      "parent_node_id": 32,
+      "chat_message": "{\"message_id\": \"b1231636-10f4-41e4-8420-d27a101e6aa5\", \"role\": \"assistant\", \"content\": \"LOCAL_NATIVE_REPLY_3\", \"tool_calls\": [], \"metadata\": {\"num_tokens\": 0, \"is_user_input\": null, \"request_id\": null, \"metrics\": {\"ttft_ms\": 1, \"total_time_ms\": 1, \"input_tokens\": null, \"output_tokens\": 0, \"cache_read_tokens\": null, \"cache_creation_tokens\": null, \"tpot_ms\": 0.0, \"tokens_per_sec\": 0.0}, \"finish_reason\": null, \"started_generation_at\": \"2026-09-12T20:09:39.808145Z\", \"created_at\": \"2026-09-12T20:09:39.808192Z\", \"generation_model\": \"swe-1-6-fast\", \"telemetry\": {\"source\": \"assistant\", \"operation\": \"inference\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":null}"
+    },
+    {
+      "row_id": 110,
+      "session_id": "unleashed-monitor",
+      "node_id": 35,
+      "parent_node_id": 34,
+      "chat_message": "{\"message_id\": \"71207170-24c4-4c2a-80cb-e9b5b6e80c7b\", \"role\": \"system\", \"content\": \"[consensflow inbox PRODUCT_LATE] Complete late result [end PRODUCT_LATE]\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"created_at\": \"2026-09-12T20:09:41.021788Z\", \"telemetry\": {\"source\": \"system\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "null"
+    },
+    {
+      "row_id": 111,
+      "session_id": "unleashed-monitor",
+      "node_id": 36,
+      "parent_node_id": 35,
+      "chat_message": "{\"message_id\": \"3edbabe8-f02f-427e-a65a-65a2199a8e2b\", \"role\": \"user\", \"content\": \"HUMAN_NEXT_PROMPT\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": true, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"extensions\": {\"chisel/client-message-id\": \"46911628-6e20-4894-9c82-aac6514c2b2b\"}, \"created_at\": \"2026-09-12T20:09:41.021832Z\", \"telemetry\": {\"source\": \"user\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "null"
+    },
+    {
+      "row_id": 112,
+      "session_id": "unleashed-monitor",
+      "node_id": 37,
+      "parent_node_id": 36,
+      "chat_message": "{\"message_id\": \"926c7302-0226-4a46-8c6e-57990f4d4af8\", \"role\": \"assistant\", \"content\": \"LOCAL_NATIVE_REPLY_4\", \"tool_calls\": [], \"metadata\": {\"num_tokens\": 0, \"is_user_input\": null, \"request_id\": null, \"metrics\": {\"ttft_ms\": 1, \"total_time_ms\": 1, \"input_tokens\": null, \"output_tokens\": 0, \"cache_read_tokens\": null, \"cache_creation_tokens\": null, \"tpot_ms\": 0.0, \"tokens_per_sec\": 0.0}, \"finish_reason\": null, \"started_generation_at\": \"2026-09-12T20:09:41.023597Z\", \"created_at\": \"2026-09-12T20:09:41.023634Z\", \"generation_model\": \"swe-1-6-fast\", \"telemetry\": {\"source\": \"assistant\", \"operation\": \"inference\"}}}",
+      "created_at": 1789243781,
+      "metadata": "null"
+    },
+    {
+      "row_id": 113,
+      "session_id": "unleashed-monitor",
+      "node_id": 38,
+      "parent_node_id": 36,
+      "chat_message": "{\"message_id\": \"926c7302-0226-4a46-8c6e-57990f4d4af8\", \"role\": \"assistant\", \"content\": \"LOCAL_NATIVE_REPLY_4\", \"tool_calls\": [], \"metadata\": {\"num_tokens\": 0, \"is_user_input\": null, \"request_id\": null, \"metrics\": {\"ttft_ms\": 1, \"total_time_ms\": 1, \"input_tokens\": null, \"output_tokens\": 0, \"cache_read_tokens\": null, \"cache_creation_tokens\": null, \"tpot_ms\": 0.0, \"tokens_per_sec\": 0.0}, \"finish_reason\": null, \"started_generation_at\": \"2026-09-12T20:09:41.023597Z\", \"created_at\": \"2026-09-12T20:09:41.023634Z\", \"generation_model\": \"swe-1-6-fast\", \"telemetry\": {\"source\": \"assistant\", \"operation\": \"inference\"}}}",
+      "created_at": 1789243781,
+      "metadata": "{\"summarized_from\":null,\"num_tokens_preceding\":null,\"is_system_prefix\":null}"
+    },
+    {
+      "row_id": 114,
+      "session_id": "unleashed-monitor",
+      "node_id": 39,
+      "parent_node_id": 38,
+      "chat_message": "{\"message_id\": \"92a7a48d-67c6-42f4-9935-836a832fca38\", \"role\": \"system\", \"content\": \"CONSENSFLOW_NATIVE_ROLE_PROBE: only PM writes specifications; advisors return advice.\", \"metadata\": {\"num_tokens\": null, \"is_user_input\": null, \"request_id\": null, \"metrics\": null, \"finish_reason\": null, \"created_at\": \"2026-09-12T20:09:41.922668Z\", \"telemetry\": {\"source\": \"system\", \"operation\": \"unknown\"}}}",
+      "created_at": 1789243781,
+      "metadata": "null"
+    }
+  ],
+  "wire": [
+    {},
+    {},
+    {
+      "sessionId": "unleashed-monitor",
+      "update": {
+        "sessionUpdate": "config_option_update",
+        "configOptions": [
+          {
+            "id": "mode",
+            "name": "Session Mode",
+            "category": "mode",
+            "type": "select",
+            "currentValue": "normal",
+            "options": [
+              {
+                "value": "normal",
+                "name": "Code",
+                "description": "Write and edit code",
+                "_meta": {
+                  "cognition.ai/icon": "code"
+                }
+              },
+              {
+                "value": "accept-edits",
+                "name": "Code",
+                "description": "Write and edit code",
+                "_meta": {
+                  "cognition.ai/icon": "code"
+                }
+              },
+              {
+                "value": "ask",
+                "name": "Ask",
+                "description": "Answer questions without code changes",
+                "_meta": {
+                  "cognition.ai/icon": "message-circle"
+                }
+              },
+              {
+                "value": "plan",
+                "name": "Plan",
+                "description": "Plan changes before implementing",
+                "_meta": {
+                  "cognition.ai/icon": "file-text"
+                }
+              },
+              {
+                "value": "bypass",
+                "name": "Bypass Permissions",
+                "description": "Auto-approve all tool calls",
+                "_meta": {
+                  "cognition.ai/icon": "shield-off"
+                }
+              }
+            ]
+          },
+          {
+            "id": "model",
+            "name": "Model",
+            "description": "AI model to use",
+            "category": "model",
+            "type": "select",
+            "currentValue": "swe-1-6-fast",
+            "options": []
+          },
+          {
+            "id": "ignore-files",
+            "name": "Ignore Files",
+            "description": "Comma-separated list of ignore filenames to enforce (e.g. .gitignore,.codeiumignore,.windsurfignore,.devinignore)",
+            "category": "_windsurf_ignore_files",
+            "type": "select",
+            "currentValue": "",
+            "options": []
+          },
+          {
+            "id": "max-turn-requests",
+            "name": "Max Turn Requests",
+            "description": "Maximum LLM inference requests per turn (0 = unlimited)",
+            "category": "_windsurf_max_turn_requests",
+            "type": "select",
+            "currentValue": "0",
+            "options": []
+          },
+          {
+            "id": "subagents",
+            "name": "Subagents (Preview)",
+            "description": "Allow the agent to delegate work to subagents. Persisted to the user config (config.json).",
+            "category": "_windsurf_subagents",
+            "type": "select",
+            "currentValue": "enabled",
+            "options": [
+              {
+                "value": "enabled",
+                "name": "Enabled"
+              },
+              {
+                "value": "disabled",
+                "name": "Disabled"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "update": {
+        "sessionUpdate": "current_mode_update",
+        "currentModeId": "normal"
+      }
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "update": {
+        "sessionUpdate": "available_commands_update",
+        "availableCommands": [
+          {
+            "name": "login",
+            "description": "Authenticate with an API key",
+            "input": {
+              "hint": "[api-key]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "log-in",
+              "cognition.ai/category": "Account"
+            }
+          },
+          {
+            "name": "logout",
+            "description": "Clear authentication",
+            "_meta": {
+              "cognition.ai/icon": "log-out",
+              "cognition.ai/category": "Account"
+            }
+          },
+          {
+            "name": "status",
+            "description": "Check authentication status",
+            "_meta": {
+              "cognition.ai/icon": "user-check",
+              "cognition.ai/category": "Account"
+            }
+          },
+          {
+            "name": "workspace",
+            "description": "List workspace directories",
+            "_meta": {
+              "cognition.ai/icon": "folder-open",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "add-dir",
+            "description": "Add additional workspace directory",
+            "input": {
+              "hint": "<path>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "folder-plus",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "undo-add-dir",
+            "description": "Remove a workspace directory",
+            "input": {
+              "hint": "<path>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "folder-minus",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "remove-dir",
+            "description": "Remove a workspace directory",
+            "input": {
+              "hint": "<path>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "folder-minus",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "ask",
+            "description": "Switch to Ask mode (read-only)",
+            "input": {
+              "hint": "[question]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "message-circle",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "plan",
+            "description": "Switch to Plan mode, or plan with a prompt",
+            "input": {
+              "hint": "[prompt]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "file-text",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "code",
+            "description": "Switch to Code mode, or run a prompt in it",
+            "input": {
+              "hint": "[prompt]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "code",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "bypass",
+            "description": "Switch to Bypass Permissions mode, or run a prompt under it",
+            "input": {
+              "hint": "[prompt]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "shield-off",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "compact",
+            "description": "Force conversation compaction",
+            "_meta": {
+              "cognition.ai/icon": "archive",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "context",
+            "description": "Show context window usage",
+            "_meta": {
+              "cognition.ai/icon": "pie-chart",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "fast",
+            "description": "Switch to the fastest model available to you, or run a prompt with it",
+            "input": {
+              "hint": "[prompt]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "zap",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "loop",
+            "description": "Run a prompt then auto-review the diff in a loop",
+            "input": {
+              "hint": "<prompt>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "repeat",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "btw",
+            "description": "Ask a quick side question without disrupting the main conversation",
+            "input": {
+              "hint": "<prompt>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "message-circle-question",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "recap",
+            "description": "Recap the session so far with a short summary",
+            "_meta": {
+              "cognition.ai/icon": "history",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "session-stats",
+            "description": "Show session statistics",
+            "_meta": {
+              "cognition.ai/icon": "bar-chart-2",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "rename",
+            "description": "Rename this session",
+            "input": {
+              "hint": "<new title>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "pencil",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "mcp",
+            "description": "List configured MCP servers and their status",
+            "_meta": {
+              "cognition.ai/icon": "plug",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "bug",
+            "description": "Report a bug to the Devin CLI developers",
+            "input": {
+              "hint": "<description>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "bug",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "help",
+            "description": "Show available commands",
+            "_meta": {
+              "cognition.ai/icon": "help-circle",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "declarative-repo-setup",
+            "description": "Generate and verify a working environment.yaml (Devin snapshot-setup blueprint) for a repo",
+            "input": {
+              "hint": "<owner/repo>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "zap",
+              "cognition.ai/category": "Skills"
+            }
+          },
+          {
+            "name": "upload-secrets",
+            "description": "Securely upload local secrets (dotenv files, env vars, API keys) to the Devin Cloud secrets manager \u2014 values never enter the conversation",
+            "_meta": {
+              "cognition.ai/icon": "zap",
+              "cognition.ai/category": "Skills"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "steps": []
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "steps": [
+        {
+          "stepId": "4602cc90-e9d7-47ad-bd6c-d8ffee797c70",
+          "stepNumber": 1,
+          "kind": "prompt",
+          "userMessageId": "8efa2f69-9c0f-499a-b004-86bc0f719ea9",
+          "revertTargetNodeId": 2,
+          "forkTargetNodeId": 3,
+          "summary": "HUMAN_TUI_A"
+        }
+      ]
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "LOCAL_NATIVE_REPLY_1"
+        },
+        "_meta": {
+          "cognition.ai/streamingMessageId": "23b2947f-e887-461d-893d-4d8600fec75b"
+        }
+      }
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "steps": [
+        {
+          "stepId": "4602cc90-e9d7-47ad-bd6c-d8ffee797c70",
+          "stepNumber": 1,
+          "kind": "prompt",
+          "userMessageId": "8efa2f69-9c0f-499a-b004-86bc0f719ea9",
+          "revertTargetNodeId": 24,
+          "forkTargetNodeId": 28,
+          "summary": "HUMAN_TUI_A"
+        }
+      ]
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "steps": [
+        {
+          "stepId": "4602cc90-e9d7-47ad-bd6c-d8ffee797c70",
+          "stepNumber": 1,
+          "kind": "prompt",
+          "userMessageId": "8efa2f69-9c0f-499a-b004-86bc0f719ea9",
+          "revertTargetNodeId": 24,
+          "forkTargetNodeId": 28,
+          "summary": "HUMAN_TUI_A"
+        },
+        {
+          "stepId": "a788d3d9-ebb8-48c4-96d2-cd4c433bd037",
+          "stepNumber": 2,
+          "kind": "prompt",
+          "userMessageId": "a788d3d9-ebb8-48c4-96d2-cd4c433bd037",
+          "revertTargetNodeId": 28,
+          "forkTargetNodeId": 29,
+          "summary": "[consensflow inbox PRODUCT_RESULT_2]"
+        }
+      ]
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "LOCAL_NATIVE_REPLY_2"
+        },
+        "_meta": {
+          "cognition.ai/streamingMessageId": "4d3571f6-7d84-4ea5-9966-53e52af7251b"
+        }
+      }
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "steps": [
+        {
+          "stepId": "4602cc90-e9d7-47ad-bd6c-d8ffee797c70",
+          "stepNumber": 1,
+          "kind": "prompt",
+          "userMessageId": "8efa2f69-9c0f-499a-b004-86bc0f719ea9",
+          "revertTargetNodeId": 24,
+          "forkTargetNodeId": 28,
+          "summary": "HUMAN_TUI_A"
+        },
+        {
+          "stepId": "a788d3d9-ebb8-48c4-96d2-cd4c433bd037",
+          "stepNumber": 2,
+          "kind": "prompt",
+          "userMessageId": "a788d3d9-ebb8-48c4-96d2-cd4c433bd037",
+          "revertTargetNodeId": 28,
+          "forkTargetNodeId": 31,
+          "summary": "[consensflow inbox PRODUCT_RESULT_2]"
+        },
+        {
+          "stepId": "3e1694d3-420c-424f-8e55-f57fdf6f1c5c",
+          "stepNumber": 3,
+          "kind": "prompt",
+          "userMessageId": "3e1694d3-420c-424f-8e55-f57fdf6f1c5c",
+          "revertTargetNodeId": 31,
+          "forkTargetNodeId": 32,
+          "summary": "[consensflow inbox PRODUCT_RESULT_3]"
+        }
+      ]
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "LOCAL_NATIVE_REPLY_3"
+        },
+        "_meta": {
+          "cognition.ai/streamingMessageId": "ef3837cd-70ad-41fc-92ca-e9b7bd441a9f"
+        }
+      }
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "turnClientMessageId": "8efa2f69-9c0f-499a-b004-86bc0f719ea9"
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "turnClientMessageId": "a788d3d9-ebb8-48c4-96d2-cd4c433bd037"
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "turnClientMessageId": "3e1694d3-420c-424f-8e55-f57fdf6f1c5c"
+    },
+    {
+      "cause": "complete",
+      "stats": {
+        "toolCalls": 0,
+        "filesChanged": 0,
+        "commandsRun": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "ttftMs": 1,
+        "tokensPerSec": 0.0,
+        "totalTimeMs": 1
+      },
+      "sessionId": "unleashed-monitor"
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "steps": [
+        {
+          "stepId": "4602cc90-e9d7-47ad-bd6c-d8ffee797c70",
+          "stepNumber": 1,
+          "kind": "prompt",
+          "userMessageId": "8efa2f69-9c0f-499a-b004-86bc0f719ea9",
+          "revertTargetNodeId": 24,
+          "forkTargetNodeId": 28,
+          "summary": "HUMAN_TUI_A"
+        },
+        {
+          "stepId": "a788d3d9-ebb8-48c4-96d2-cd4c433bd037",
+          "stepNumber": 2,
+          "kind": "prompt",
+          "userMessageId": "a788d3d9-ebb8-48c4-96d2-cd4c433bd037",
+          "revertTargetNodeId": 28,
+          "forkTargetNodeId": 31,
+          "summary": "[consensflow inbox PRODUCT_RESULT_2]"
+        },
+        {
+          "stepId": "3e1694d3-420c-424f-8e55-f57fdf6f1c5c",
+          "stepNumber": 3,
+          "kind": "prompt",
+          "userMessageId": "3e1694d3-420c-424f-8e55-f57fdf6f1c5c",
+          "revertTargetNodeId": 31,
+          "forkTargetNodeId": 35,
+          "summary": "[consensflow inbox PRODUCT_RESULT_3]"
+        },
+        {
+          "stepId": "3edbabe8-f02f-427e-a65a-65a2199a8e2b",
+          "stepNumber": 4,
+          "kind": "prompt",
+          "userMessageId": "46911628-6e20-4894-9c82-aac6514c2b2b",
+          "revertTargetNodeId": 35,
+          "forkTargetNodeId": 36,
+          "summary": "HUMAN_NEXT_PROMPT"
+        }
+      ]
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "LOCAL_NATIVE_REPLY_4"
+        },
+        "_meta": {
+          "cognition.ai/streamingMessageId": "87d869ea-3d89-4c97-b6af-b8c8157f7fce"
+        }
+      }
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "turnClientMessageId": "46911628-6e20-4894-9c82-aac6514c2b2b"
+    },
+    {
+      "cause": "complete",
+      "stats": {
+        "toolCalls": 0,
+        "filesChanged": 0,
+        "commandsRun": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "ttftMs": 1,
+        "tokensPerSec": 0.0,
+        "totalTimeMs": 1
+      },
+      "sessionId": "unleashed-monitor"
+    },
+    {},
+    {},
+    {
+      "sessionId": "sequoia-pastry",
+      "update": {
+        "sessionUpdate": "config_option_update",
+        "configOptions": [
+          {
+            "id": "mode",
+            "name": "Session Mode",
+            "category": "mode",
+            "type": "select",
+            "currentValue": "normal",
+            "options": [
+              {
+                "value": "normal",
+                "name": "Code",
+                "description": "Write and edit code",
+                "_meta": {
+                  "cognition.ai/icon": "code"
+                }
+              },
+              {
+                "value": "accept-edits",
+                "name": "Code",
+                "description": "Write and edit code",
+                "_meta": {
+                  "cognition.ai/icon": "code"
+                }
+              },
+              {
+                "value": "ask",
+                "name": "Ask",
+                "description": "Answer questions without code changes",
+                "_meta": {
+                  "cognition.ai/icon": "message-circle"
+                }
+              },
+              {
+                "value": "plan",
+                "name": "Plan",
+                "description": "Plan changes before implementing",
+                "_meta": {
+                  "cognition.ai/icon": "file-text"
+                }
+              },
+              {
+                "value": "bypass",
+                "name": "Bypass Permissions",
+                "description": "Auto-approve all tool calls",
+                "_meta": {
+                  "cognition.ai/icon": "shield-off"
+                }
+              }
+            ]
+          },
+          {
+            "id": "model",
+            "name": "Model",
+            "description": "AI model to use",
+            "category": "model",
+            "type": "select",
+            "currentValue": "swe-1-6-fast",
+            "options": []
+          },
+          {
+            "id": "ignore-files",
+            "name": "Ignore Files",
+            "description": "Comma-separated list of ignore filenames to enforce (e.g. .gitignore,.codeiumignore,.windsurfignore,.devinignore)",
+            "category": "_windsurf_ignore_files",
+            "type": "select",
+            "currentValue": "",
+            "options": []
+          },
+          {
+            "id": "max-turn-requests",
+            "name": "Max Turn Requests",
+            "description": "Maximum LLM inference requests per turn (0 = unlimited)",
+            "category": "_windsurf_max_turn_requests",
+            "type": "select",
+            "currentValue": "0",
+            "options": []
+          },
+          {
+            "id": "subagents",
+            "name": "Subagents (Preview)",
+            "description": "Allow the agent to delegate work to subagents. Persisted to the user config (config.json).",
+            "category": "_windsurf_subagents",
+            "type": "select",
+            "currentValue": "enabled",
+            "options": [
+              {
+                "value": "enabled",
+                "name": "Enabled"
+              },
+              {
+                "value": "disabled",
+                "name": "Disabled"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "sessionId": "sequoia-pastry",
+      "update": {
+        "sessionUpdate": "current_mode_update",
+        "currentModeId": "normal"
+      }
+    },
+    {
+      "sessionId": "sequoia-pastry",
+      "update": {
+        "sessionUpdate": "available_commands_update",
+        "availableCommands": [
+          {
+            "name": "login",
+            "description": "Authenticate with an API key",
+            "input": {
+              "hint": "[api-key]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "log-in",
+              "cognition.ai/category": "Account"
+            }
+          },
+          {
+            "name": "logout",
+            "description": "Clear authentication",
+            "_meta": {
+              "cognition.ai/icon": "log-out",
+              "cognition.ai/category": "Account"
+            }
+          },
+          {
+            "name": "status",
+            "description": "Check authentication status",
+            "_meta": {
+              "cognition.ai/icon": "user-check",
+              "cognition.ai/category": "Account"
+            }
+          },
+          {
+            "name": "workspace",
+            "description": "List workspace directories",
+            "_meta": {
+              "cognition.ai/icon": "folder-open",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "add-dir",
+            "description": "Add additional workspace directory",
+            "input": {
+              "hint": "<path>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "folder-plus",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "undo-add-dir",
+            "description": "Remove a workspace directory",
+            "input": {
+              "hint": "<path>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "folder-minus",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "remove-dir",
+            "description": "Remove a workspace directory",
+            "input": {
+              "hint": "<path>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "folder-minus",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "ask",
+            "description": "Switch to Ask mode (read-only)",
+            "input": {
+              "hint": "[question]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "message-circle",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "plan",
+            "description": "Switch to Plan mode, or plan with a prompt",
+            "input": {
+              "hint": "[prompt]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "file-text",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "code",
+            "description": "Switch to Code mode, or run a prompt in it",
+            "input": {
+              "hint": "[prompt]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "code",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "bypass",
+            "description": "Switch to Bypass Permissions mode, or run a prompt under it",
+            "input": {
+              "hint": "[prompt]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "shield-off",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "compact",
+            "description": "Force conversation compaction",
+            "_meta": {
+              "cognition.ai/icon": "archive",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "context",
+            "description": "Show context window usage",
+            "_meta": {
+              "cognition.ai/icon": "pie-chart",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "fast",
+            "description": "Switch to the fastest model available to you, or run a prompt with it",
+            "input": {
+              "hint": "[prompt]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "zap",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "loop",
+            "description": "Run a prompt then auto-review the diff in a loop",
+            "input": {
+              "hint": "<prompt>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "repeat",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "btw",
+            "description": "Ask a quick side question without disrupting the main conversation",
+            "input": {
+              "hint": "<prompt>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "message-circle-question",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "recap",
+            "description": "Recap the session so far with a short summary",
+            "_meta": {
+              "cognition.ai/icon": "history",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "session-stats",
+            "description": "Show session statistics",
+            "_meta": {
+              "cognition.ai/icon": "bar-chart-2",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "rename",
+            "description": "Rename this session",
+            "input": {
+              "hint": "<new title>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "pencil",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "mcp",
+            "description": "List configured MCP servers and their status",
+            "_meta": {
+              "cognition.ai/icon": "plug",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "bug",
+            "description": "Report a bug to the Devin CLI developers",
+            "input": {
+              "hint": "<description>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "bug",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "help",
+            "description": "Show available commands",
+            "_meta": {
+              "cognition.ai/icon": "help-circle",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "declarative-repo-setup",
+            "description": "Generate and verify a working environment.yaml (Devin snapshot-setup blueprint) for a repo",
+            "input": {
+              "hint": "<owner/repo>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "zap",
+              "cognition.ai/category": "Skills"
+            }
+          },
+          {
+            "name": "upload-secrets",
+            "description": "Securely upload local secrets (dotenv files, env vars, API keys) to the Devin Cloud secrets manager \u2014 values never enter the conversation",
+            "_meta": {
+              "cognition.ai/icon": "zap",
+              "cognition.ai/category": "Skills"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "sessionId": "sequoia-pastry",
+      "steps": []
+    },
+    {},
+    {},
+    {
+      "sessionId": "unleashed-monitor",
+      "update": {
+        "sessionUpdate": "user_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "HUMAN_TUI_A"
+        },
+        "_meta": {
+          "cognition.ai/clientMessageId": "8efa2f69-9c0f-499a-b004-86bc0f719ea9",
+          "cognition.ai/messageSubIndex": 0,
+          "cognition.ai/timestamp": "2026-09-12T20:09:39.643140+00:00"
+        }
+      }
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "LOCAL_NATIVE_REPLY_1"
+        },
+        "_meta": {
+          "cognition.ai/timestamp": "2026-09-12T20:09:39.657252+00:00"
+        }
+      }
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "update": {
+        "sessionUpdate": "user_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "[consensflow inbox PRODUCT_RESULT_2]\nComplete worker reply 2.\n[end PRODUCT_RESULT_2]"
+        },
+        "_meta": {
+          "cognition.ai/clientMessageId": "a788d3d9-ebb8-48c4-96d2-cd4c433bd037",
+          "cognition.ai/messageSubIndex": 0,
+          "cognition.ai/timestamp": "2026-09-12T20:09:39.730474+00:00"
+        }
+      }
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "LOCAL_NATIVE_REPLY_2"
+        },
+        "_meta": {
+          "cognition.ai/timestamp": "2026-09-12T20:09:39.731830+00:00"
+        }
+      }
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "update": {
+        "sessionUpdate": "user_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "[consensflow inbox PRODUCT_RESULT_3]\nComplete worker reply 3.\n[end PRODUCT_RESULT_3]"
+        },
+        "_meta": {
+          "cognition.ai/clientMessageId": "3e1694d3-420c-424f-8e55-f57fdf6f1c5c",
+          "cognition.ai/messageSubIndex": 0,
+          "cognition.ai/timestamp": "2026-09-12T20:09:39.806516+00:00"
+        }
+      }
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "LOCAL_NATIVE_REPLY_3"
+        },
+        "_meta": {
+          "cognition.ai/timestamp": "2026-09-12T20:09:39.808192+00:00"
+        }
+      }
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "update": {
+        "sessionUpdate": "user_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "HUMAN_NEXT_PROMPT"
+        },
+        "_meta": {
+          "cognition.ai/clientMessageId": "46911628-6e20-4894-9c82-aac6514c2b2b",
+          "cognition.ai/messageSubIndex": 0,
+          "cognition.ai/timestamp": "2026-09-12T20:09:41.021832+00:00"
+        }
+      }
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "LOCAL_NATIVE_REPLY_4"
+        },
+        "_meta": {
+          "cognition.ai/timestamp": "2026-09-12T20:09:41.023634+00:00"
+        }
+      }
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "title": "HUMAN_TUI_A"
+      }
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "update": {
+        "sessionUpdate": "config_option_update",
+        "configOptions": [
+          {
+            "id": "mode",
+            "name": "Session Mode",
+            "category": "mode",
+            "type": "select",
+            "currentValue": "normal",
+            "options": [
+              {
+                "value": "normal",
+                "name": "Code",
+                "description": "Write and edit code",
+                "_meta": {
+                  "cognition.ai/icon": "code"
+                }
+              },
+              {
+                "value": "accept-edits",
+                "name": "Code",
+                "description": "Write and edit code",
+                "_meta": {
+                  "cognition.ai/icon": "code"
+                }
+              },
+              {
+                "value": "ask",
+                "name": "Ask",
+                "description": "Answer questions without code changes",
+                "_meta": {
+                  "cognition.ai/icon": "message-circle"
+                }
+              },
+              {
+                "value": "plan",
+                "name": "Plan",
+                "description": "Plan changes before implementing",
+                "_meta": {
+                  "cognition.ai/icon": "file-text"
+                }
+              },
+              {
+                "value": "bypass",
+                "name": "Bypass Permissions",
+                "description": "Auto-approve all tool calls",
+                "_meta": {
+                  "cognition.ai/icon": "shield-off"
+                }
+              }
+            ]
+          },
+          {
+            "id": "model",
+            "name": "Model",
+            "description": "AI model to use",
+            "category": "model",
+            "type": "select",
+            "currentValue": "swe-1-6-fast",
+            "options": []
+          },
+          {
+            "id": "ignore-files",
+            "name": "Ignore Files",
+            "description": "Comma-separated list of ignore filenames to enforce (e.g. .gitignore,.codeiumignore,.windsurfignore,.devinignore)",
+            "category": "_windsurf_ignore_files",
+            "type": "select",
+            "currentValue": "",
+            "options": []
+          },
+          {
+            "id": "max-turn-requests",
+            "name": "Max Turn Requests",
+            "description": "Maximum LLM inference requests per turn (0 = unlimited)",
+            "category": "_windsurf_max_turn_requests",
+            "type": "select",
+            "currentValue": "0",
+            "options": []
+          },
+          {
+            "id": "subagents",
+            "name": "Subagents (Preview)",
+            "description": "Allow the agent to delegate work to subagents. Persisted to the user config (config.json).",
+            "category": "_windsurf_subagents",
+            "type": "select",
+            "currentValue": "enabled",
+            "options": [
+              {
+                "value": "enabled",
+                "name": "Enabled"
+              },
+              {
+                "value": "disabled",
+                "name": "Disabled"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "update": {
+        "sessionUpdate": "current_mode_update",
+        "currentModeId": "normal"
+      }
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "update": {
+        "sessionUpdate": "available_commands_update",
+        "availableCommands": [
+          {
+            "name": "login",
+            "description": "Authenticate with an API key",
+            "input": {
+              "hint": "[api-key]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "log-in",
+              "cognition.ai/category": "Account"
+            }
+          },
+          {
+            "name": "logout",
+            "description": "Clear authentication",
+            "_meta": {
+              "cognition.ai/icon": "log-out",
+              "cognition.ai/category": "Account"
+            }
+          },
+          {
+            "name": "status",
+            "description": "Check authentication status",
+            "_meta": {
+              "cognition.ai/icon": "user-check",
+              "cognition.ai/category": "Account"
+            }
+          },
+          {
+            "name": "workspace",
+            "description": "List workspace directories",
+            "_meta": {
+              "cognition.ai/icon": "folder-open",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "add-dir",
+            "description": "Add additional workspace directory",
+            "input": {
+              "hint": "<path>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "folder-plus",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "undo-add-dir",
+            "description": "Remove a workspace directory",
+            "input": {
+              "hint": "<path>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "folder-minus",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "remove-dir",
+            "description": "Remove a workspace directory",
+            "input": {
+              "hint": "<path>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "folder-minus",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "ask",
+            "description": "Switch to Ask mode (read-only)",
+            "input": {
+              "hint": "[question]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "message-circle",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "plan",
+            "description": "Switch to Plan mode, or plan with a prompt",
+            "input": {
+              "hint": "[prompt]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "file-text",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "code",
+            "description": "Switch to Code mode, or run a prompt in it",
+            "input": {
+              "hint": "[prompt]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "code",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "bypass",
+            "description": "Switch to Bypass Permissions mode, or run a prompt under it",
+            "input": {
+              "hint": "[prompt]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "shield-off",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "compact",
+            "description": "Force conversation compaction",
+            "_meta": {
+              "cognition.ai/icon": "archive",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "context",
+            "description": "Show context window usage",
+            "_meta": {
+              "cognition.ai/icon": "pie-chart",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "fast",
+            "description": "Switch to the fastest model available to you, or run a prompt with it",
+            "input": {
+              "hint": "[prompt]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "zap",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "loop",
+            "description": "Run a prompt then auto-review the diff in a loop",
+            "input": {
+              "hint": "<prompt>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "repeat",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "btw",
+            "description": "Ask a quick side question without disrupting the main conversation",
+            "input": {
+              "hint": "<prompt>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "message-circle-question",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "recap",
+            "description": "Recap the session so far with a short summary",
+            "_meta": {
+              "cognition.ai/icon": "history",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "session-stats",
+            "description": "Show session statistics",
+            "_meta": {
+              "cognition.ai/icon": "bar-chart-2",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "rename",
+            "description": "Rename this session",
+            "input": {
+              "hint": "<new title>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "pencil",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "mcp",
+            "description": "List configured MCP servers and their status",
+            "_meta": {
+              "cognition.ai/icon": "plug",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "bug",
+            "description": "Report a bug to the Devin CLI developers",
+            "input": {
+              "hint": "<description>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "bug",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "help",
+            "description": "Show available commands",
+            "_meta": {
+              "cognition.ai/icon": "help-circle",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "declarative-repo-setup",
+            "description": "Generate and verify a working environment.yaml (Devin snapshot-setup blueprint) for a repo",
+            "input": {
+              "hint": "<owner/repo>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "zap",
+              "cognition.ai/category": "Skills"
+            }
+          },
+          {
+            "name": "upload-secrets",
+            "description": "Securely upload local secrets (dotenv files, env vars, API keys) to the Devin Cloud secrets manager \u2014 values never enter the conversation",
+            "_meta": {
+              "cognition.ai/icon": "zap",
+              "cognition.ai/category": "Skills"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "turnClientMessageId": "8efa2f69-9c0f-499a-b004-86bc0f719ea9"
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "turnClientMessageId": "a788d3d9-ebb8-48c4-96d2-cd4c433bd037"
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "turnClientMessageId": "3e1694d3-420c-424f-8e55-f57fdf6f1c5c"
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "turnClientMessageId": "46911628-6e20-4894-9c82-aac6514c2b2b"
+    },
+    {
+      "sessionId": "unleashed-monitor",
+      "steps": [
+        {
+          "stepId": "4602cc90-e9d7-47ad-bd6c-d8ffee797c70",
+          "stepNumber": 1,
+          "kind": "prompt",
+          "userMessageId": "8efa2f69-9c0f-499a-b004-86bc0f719ea9",
+          "revertTargetNodeId": 24,
+          "forkTargetNodeId": 28,
+          "summary": "HUMAN_TUI_A"
+        },
+        {
+          "stepId": "a788d3d9-ebb8-48c4-96d2-cd4c433bd037",
+          "stepNumber": 2,
+          "kind": "prompt",
+          "userMessageId": "a788d3d9-ebb8-48c4-96d2-cd4c433bd037",
+          "revertTargetNodeId": 28,
+          "forkTargetNodeId": 31,
+          "summary": "[consensflow inbox PRODUCT_RESULT_2]"
+        },
+        {
+          "stepId": "3e1694d3-420c-424f-8e55-f57fdf6f1c5c",
+          "stepNumber": 3,
+          "kind": "prompt",
+          "userMessageId": "3e1694d3-420c-424f-8e55-f57fdf6f1c5c",
+          "revertTargetNodeId": 31,
+          "forkTargetNodeId": 35,
+          "summary": "[consensflow inbox PRODUCT_RESULT_3]"
+        },
+        {
+          "stepId": "3edbabe8-f02f-427e-a65a-65a2199a8e2b",
+          "stepNumber": 4,
+          "kind": "prompt",
+          "userMessageId": "46911628-6e20-4894-9c82-aac6514c2b2b",
+          "revertTargetNodeId": 35,
+          "forkTargetNodeId": 39,
+          "summary": "HUMAN_NEXT_PROMPT"
+        }
+      ]
+    }
+  ]
+}

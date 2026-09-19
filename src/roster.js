@@ -15,6 +15,7 @@ import {
   presetDrift,
   syncAgentWithPreset,
   validateKimiEffort,
+  validateWorkTier,
 } from '../hosts/lib/presets.js'
 
 /**
@@ -31,7 +32,7 @@ import {
 // agent. There is no CLI behind it — image generation is reached through the Codex
 // login — but the roster, the catalog and `cf run` treat it like any other, so
 // @pygmalion works wherever the rest do.
-export const HARNESSES = ['claude', 'codex', 'pi', 'opencode', 'kimi', 'image']
+export const HARNESSES = ['claude', 'codex', 'pi', 'opencode', 'kimi', 'devin', 'image']
 
 const NAME_PATTERN = /^[a-z][a-z0-9-]*$/
 const KIND_TO_HARNESS = {
@@ -40,6 +41,7 @@ const KIND_TO_HARNESS = {
   pi: 'pi',
   opencode: 'opencode',
   kimi: 'kimi',
+  devin: 'devin',
   image: 'image',
 }
 /**
@@ -57,6 +59,7 @@ const HARNESS_TO_KIND = {
   pi: 'pi',
   opencode: 'opencode',
   kimi: 'kimi',
+  devin: 'devin',
   image: 'image',
 }
 
@@ -160,8 +163,13 @@ function loadDocument(env) {
 }
 
 function saveDocument(document, env, benchmarks = readBenchmarkCache(rosterHome(env))) {
-  for (const row of document.agents)
+  for (const row of document.agents) {
+    delete row.skillsPolicy
+    delete row.skillPaths
+    delete row.skills
+    delete row.skillPath
     row.profile = withBenchmarks(row, agentProfile(row), benchmarks)
+  }
   const path = rosterPath(env)
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`)
@@ -178,10 +186,11 @@ function toView(row) {
     name: row.id,
     harness: harness ?? row.kind,
     model: row.model,
+    ...(row.workTier == null ? {} : { workTier: row.workTier }),
     ...(effortOf(row) ? { effort: effortOf(row) } : {}),
     ...(row.description ? { description: row.description } : {}),
     ...(row.preset ? { preset: row.preset } : {}),
-    ...(row.profile ? { profile: row.profile } : {}),
+    profile: { ...row.profile, ...agentProfile(row) },
     ...(harness === undefined ? { unsupported: true } : {}),
   }
 }
@@ -235,6 +244,7 @@ function validateAdd(input) {
 export function addAgent(input, env) {
   validateAdd(input)
   validateKimiEffort(input)
+  validateWorkTier(input.workTier)
   const document = loadDocument(env)
   if (document.agents.some((row) => row.id === input.name)) {
     throw new Error(`an agent named ${input.name} already exists`)
@@ -246,10 +256,10 @@ export function addAgent(input, env) {
     // The display name cc shows; capitalized to match its convention.
     name: input.name.charAt(0).toUpperCase() + input.name.slice(1),
     kind: HARNESS_TO_KIND[input.harness],
-    skillsPolicy: 'default',
     createdAt: now,
     updatedAt: now,
     model: input.model,
+    ...(input.workTier == null ? {} : { workTier: input.workTier }),
     ...(input.effort
       ? input.harness === 'pi'
         ? { thinking: input.effort }
@@ -273,6 +283,7 @@ function findRow(document, name) {
 }
 
 export function editAgent(name, patch, env) {
+  validateWorkTier(patch.workTier)
   const document = loadDocument(env)
   const row = findRow(document, name)
   const supported = KIND_TO_HARNESS[row.kind] !== undefined
@@ -295,6 +306,10 @@ export function editAgent(name, patch, env) {
     row.model = patch.model
   }
   if (patch.description !== undefined) row.description = patch.description
+  if (patch.workTier !== undefined) {
+    if (patch.workTier === null) delete row.workTier
+    else row.workTier = patch.workTier
+  }
   if (patch.effort !== undefined) {
     const key = row.kind === 'pi' ? 'thinking' : 'effort'
     if (patch.effort === '' || patch.effort === null) delete row[key]
@@ -335,7 +350,7 @@ export function agentDrift(env) {
 
 /**
  * Re-resolves preset-backed agents against the catalog. Every field the preset
- * owns moves — kind, model, effort/thinking, skillsPolicy, and since
+ * owns moves — kind, model, effort/thinking, and since
  * 2026-08-27 the description, because a label naming the wrong model is what
  * the skill table shows a lead. A row with no `preset` is never touched.
  */

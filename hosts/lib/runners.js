@@ -79,10 +79,6 @@ export function buildRunnerInvocation(agent, packetPath, cwd, session, packetTex
       if (sessionId) args.push("--session-id", sessionId);
       else if (!threading) args.push("--no-session");
       args.push("--no-extensions");
-      if (p.skillsPolicy === "none" || p.skillsPolicy === "explicit") args.push("--no-skills");
-      if (p.skillsPolicy === "explicit") {
-        for (const skillPath of p.skillPaths ?? []) args.push("--skill", skillPath);
-      }
       if (p.model) args.push("--model", p.model);
       args.push("--thinking", p.thinking ?? "off");
       args.push("--tools", toolsForPi(), "-p", "Follow the ConsensFlow packet provided on stdin. Return only the requested output.");
@@ -541,6 +537,8 @@ export function interactiveResume(agent, sessionId, seed) {
   if (!sessionId) return null;
   const withSeed = (args) => (seed ? [...args, seed] : args);
   switch (agent.kind) {
+    case "devin":
+      return { command: "devin", args: ["--resume", sessionId], ...(seed ? { prompt: seed } : {}), env: { ...CHILD_ENV }, dropEnv: [] };
     case "codex":
       return { command: "codex", args: withSeed(["resume", sessionId]), env: { ...CHILD_ENV }, dropEnv: interactiveGuards("codex") };
     case "claude-code": {
@@ -584,6 +582,8 @@ export function interactiveResume(agent, sessionId, seed) {
  */
 export function interactiveStart(agent, sessionId, seed) {
   switch (agent.kind) {
+    case "devin":
+      return { command: "devin", args: agent.model && agent.model !== "default" ? ["--model", agent.model] : [], ...(seed ? { prompt: seed } : {}), env: { ...CHILD_ENV }, dropEnv: [] };
     case "claude-code": {
       if (!sessionId) return null;
       const args = ["--session-id", sessionId];

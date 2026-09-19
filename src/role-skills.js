@@ -15,12 +15,16 @@ export async function roleConfiguration(
   const skills = join(root, '.claude', 'skills')
   const directory = join(skills, name)
   const file = join(directory, 'SKILL.md')
-  const content =
-    role === 'lead'
-      ? generateSkill(listAgents(env))
-      : await readFile(new URL(`../skill/roles/${name}/SKILL.md`, import.meta.url), 'utf8')
-  await mkdir(directory, { recursive: true, mode: 0o700 })
-  await writeFile(file, content, { mode: 0o600 })
+  const content = generateSkill(role === 'advisor' ? [] : listAgents(env), role)
+  const previous = await readFile(file, 'utf8').catch((error) => {
+    if (error.code !== 'ENOENT') throw error
+    return null
+  })
+  if (previous !== content) {
+    await mkdir(directory, { recursive: true, mode: 0o700 })
+    await writeFile(file, content, { mode: 0o600 })
+  }
+  if (kind === 'devin') return { args: [], env: { CF_DEVIN_ROLE_FILE: file } }
   if (kind === 'claude-code') {
     // Resumed conversations otherwise retain the system prompt from their first turn.
     return {
