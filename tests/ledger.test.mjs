@@ -43,15 +43,26 @@ async function withLedger(fn) {
   })
 }
 
-/** A project with a lead and two workers, the shape most tests start from. */
+/** A project with a lead and two workers and no review gate, the shape most tests start from. */
 function team(ledger) {
   const project = ledger.createProject({
     directory: '/work/app',
     name: 'app',
     lead: { harness: 'claude-code' },
+    review: 'none',
   })
-  ledger.addMember(project.id, { agent: 'zeus', harness: 'claude-code', role: 'worker' })
-  ledger.addMember(project.id, { agent: 'diana', harness: 'codex', role: 'worker' })
+  ledger.addMember(project.id, {
+    agent: 'zeus',
+    harness: 'claude-code',
+    role: 'worker',
+    tier: 'standard',
+  })
+  ledger.addMember(project.id, {
+    agent: 'diana',
+    harness: 'codex',
+    role: 'worker',
+    tier: 'standard',
+  })
   const id = (handle) => ledger.project(project.id).participants.find((p) => p.handle === handle).id
   return { project, id }
 }
@@ -171,7 +182,7 @@ describe('opening the ledger', () => {
         `import { openLedger } from ${JSON.stringify(LEDGER)}
          const ledger = openLedger(${JSON.stringify(file)})
          const project = ledger.createProject({ directory: '/w', name: 'w', lead: { harness: 'pi' } })
-         ledger.addMember(project.id, { agent: 'zeus', harness: 'pi', role: 'worker' })
+         ledger.addMember(project.id, { agent: 'zeus', harness: 'pi', role: 'worker', tier: 'standard' })
          console.log('ready')
          for (let n = 0; ; n++) ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'task ' + n })`,
         { readyLine: 'ready', killAfterMs: 150 },
@@ -220,7 +231,13 @@ describe('projects and participants', () => {
     await withLedger((ledger) => {
       const { project } = team(ledger)
       assert.throws(
-        () => ledger.addMember(project.id, { agent: 'zeus', harness: 'pi', role: 'worker' }),
+        () =>
+          ledger.addMember(project.id, {
+            agent: 'zeus',
+            harness: 'pi',
+            role: 'worker',
+            tier: 'standard',
+          }),
         { code: 'member-exists' },
       )
       assert.throws(
@@ -228,13 +245,24 @@ describe('projects and participants', () => {
         { code: 'invalid-role' },
       )
       assert.throws(
-        () => ledger.addMember(project.id, { agent: 'hera', harness: 'emacs', role: 'worker' }),
+        () =>
+          ledger.addMember(project.id, {
+            agent: 'hera',
+            harness: 'emacs',
+            role: 'worker',
+            tier: 'standard',
+          }),
         { code: 'invalid-harness' },
       )
       const pm = ledger.addPm(project.id, { harness: 'codex' })
       assert.deepEqual([pm.handle, pm.role, pm.harness], ['pm', 'pm', 'codex'])
       assert.throws(() => ledger.addPm(project.id, { harness: 'pi' }), { code: 'member-exists' })
-      ledger.addMember(project.id, { agent: 'athena', harness: 'opencode', role: 'advisor' })
+      ledger.addMember(project.id, {
+        agent: 'athena',
+        harness: 'opencode',
+        role: 'advisor',
+        tier: 'standard',
+      })
       assert.deepEqual(
         ledger.project(project.id).participants.map((p) => p.handle),
         ['human', 'lead', 'zeus', 'diana', 'pm', 'athena'],
@@ -307,8 +335,8 @@ describe('the project team', () => {
         name: 'app',
         lead: { harness: 'pi' },
         team: [
-          { agent: 'zeus', harness: 'claude-code', role: 'worker' },
-          { agent: 'athena', harness: 'opencode', role: 'advisor' },
+          { agent: 'zeus', harness: 'claude-code', role: 'worker', tier: 'standard' },
+          { agent: 'athena', harness: 'opencode', role: 'advisor', tier: 'standard' },
         ],
       })
       assert.deepEqual(
@@ -438,7 +466,12 @@ describe('the project team', () => {
       const { project, id } = team(ledger)
       const before = id('zeus')
       ledger.removeMember(project.id, 'zeus')
-      const back = ledger.addMember(project.id, { agent: 'zeus', harness: 'pi', role: 'reviewer' })
+      const back = ledger.addMember(project.id, {
+        agent: 'zeus',
+        harness: 'pi',
+        role: 'reviewer',
+        tier: 'standard',
+      })
 
       assert.deepEqual(
         [back.id, back.role, back.harness, back.leftAt],
@@ -462,26 +495,46 @@ describe('the project team', () => {
     await withLedger((ledger) => {
       const { project, id } = team(ledger)
       const pm = ledger.addPm(project.id, { harness: 'pi' })
-      ledger.addMember(project.id, { agent: 'hera', harness: 'pi', role: 'worker' })
-      ledger.addMember(project.id, { agent: 'athena', harness: 'pi', role: 'advisor' })
+      ledger.addMember(project.id, {
+        agent: 'hera',
+        harness: 'pi',
+        role: 'worker',
+        tier: 'standard',
+      })
+      ledger.addMember(project.id, {
+        agent: 'athena',
+        harness: 'pi',
+        role: 'advisor',
+        tier: 'standard',
+      })
       assert.deepEqual(notes(ledger, id('lead')), [], 'no window yet: its launch reads the team')
       assert.deepEqual(notes(ledger, pm.id), [])
 
       ledger.startConversation(id('lead'), { harness: 'claude-code' })
       ledger.startConversation(pm.id, { harness: 'pi' })
-      ledger.addMember(project.id, { agent: 'apollo', harness: 'codex', role: 'worker' })
-      ledger.addMember(project.id, { agent: 'metis', harness: 'codex', role: 'advisor' })
+      ledger.addMember(project.id, {
+        agent: 'apollo',
+        harness: 'codex',
+        role: 'worker',
+        tier: 'standard',
+      })
+      ledger.addMember(project.id, {
+        agent: 'metis',
+        harness: 'codex',
+        role: 'advisor',
+        tier: 'standard',
+      })
       ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' })
       ledger.createTask(project.id, { from: 'pm', to: 'zeus', body: 'Estimate' })
       ledger.createTask(project.id, { from: 'human', to: 'zeus', body: 'Logo' })
       ledger.removeMember(project.id, 'zeus')
 
       assert.deepEqual(notes(ledger, id('lead')), [
-        [null, '@apollo joined the team as a worker. Give it work with: cf task add @apollo "…"'],
+        [null, '@apollo joined the team as a standard worker.'],
         [null, '@zeus left the team; it takes no more tasks. Cancelled with it: T-1, T-2, T-3.'],
       ])
       assert.deepEqual(notes(ledger, pm.id), [
-        [null, '@metis joined the team as an advisor. Give it work with: cf task add @metis "…"'],
+        [null, '@metis joined the team as a standard advisor.'],
         [null, '@zeus left the team; it takes no more tasks. Cancelled with it: T-1, T-2, T-3.'],
       ])
       assert.deepEqual(notes(ledger, id('human')), [])
@@ -847,6 +900,704 @@ describe('views', () => {
       assert.deepEqual(
         ledger.inbox(id('lead')).map((m) => m.id),
         [two.id, one.id],
+      )
+    })
+  })
+})
+
+describe('tiered dispatch: open tasks the daemon assigns', () => {
+  /** A lead with two standard workers, a light worker, a PM and a complex advisor. */
+  function tiered(ledger) {
+    const project = ledger.createProject({
+      directory: '/work/app',
+      name: 'app',
+      lead: { harness: 'claude-code' },
+    })
+    const add = (agent, harness, role, tier, tags) =>
+      ledger.addMember(project.id, { agent, harness, role, tier, tags })
+    add('zeus', 'claude-code', 'worker', 'standard', ['coding', 'rust'])
+    add('diana', 'codex', 'worker', 'standard', ['coding'])
+    add('hera', 'pi', 'worker', 'light', [])
+    ledger.addPm(project.id, { harness: 'pi' })
+    add('athena', 'opencode', 'advisor', 'complex', ['research'])
+    const id = (handle) =>
+      ledger.project(project.id).participants.find((p) => p.handle === handle).id
+    return { project, id }
+  }
+  const openTask = (ledger, project, extra = {}) =>
+    ledger.createTask(project.id, {
+      from: 'lead',
+      pool: 'worker',
+      tier: 'standard',
+      body: 'Write the parser',
+      ...extra,
+    })
+
+  it("records each member's tier and tags, and refuses a member without a tier", async () => {
+    await withLedger((ledger) => {
+      const { project } = tiered(ledger)
+      assert.deepEqual(
+        ledger
+          .project(project.id)
+          .participants.filter((p) => p.role !== 'human')
+          .map((p) => [p.handle, p.tier, p.tags]),
+        [
+          ['lead', null, []],
+          ['zeus', 'standard', ['coding', 'rust']],
+          ['diana', 'standard', ['coding']],
+          ['hera', 'light', []],
+          ['pm', null, []],
+          ['athena', 'complex', ['research']],
+        ],
+      )
+      assert.throws(
+        () => ledger.addMember(project.id, { agent: 'apollo', harness: 'pi', role: 'worker' }),
+        { code: 'invalid-tier' },
+      )
+      assert.throws(
+        () =>
+          ledger.addMember(project.id, {
+            agent: 'apollo',
+            harness: 'pi',
+            role: 'worker',
+            tier: 'max',
+          }),
+        { code: 'invalid-tier' },
+      )
+      assert.throws(
+        () =>
+          ledger.addMember(project.id, {
+            agent: 'apollo',
+            harness: 'pi',
+            role: 'worker',
+            tier: 'light',
+            tags: 'coding',
+          }),
+        { code: 'invalid-tags' },
+      )
+      const next = ledger.createProject({
+        directory: '/work/api',
+        name: 'api',
+        lead: { harness: 'pi' },
+        team: [
+          { agent: 'zeus', harness: 'pi', role: 'reviewer', tier: 'critical', tags: ['review'] },
+        ],
+      })
+      assert.deepEqual(
+        next.participants.at(-1) && [next.participants.at(-1).tier, next.participants.at(-1).tags],
+        ['critical', ['review']],
+      )
+    })
+  })
+
+  it("opens a task for a tier instead of a member; it sits in nobody's lane", async () => {
+    await withLedger((ledger) => {
+      const { project } = tiered(ledger)
+      const { task, message } = openTask(ledger, project, { tags: ['rust'] })
+      assert.deepEqual(
+        [task.state, task.assignee, task.pool, task.tier, task.tags, task.requester, message],
+        ['open', null, 'worker', 'standard', ['rust'], 'lead', null],
+      )
+      const board = ledger.board(project.id)
+      assert.deepEqual(
+        board.open.map((t) => t.number),
+        [1],
+      )
+      assert.deepEqual(
+        board.lanes.flatMap((lane) => lane.tasks),
+        [],
+      )
+      assert.equal(ledger.task(project.id, 1).messages.length, 0)
+      assert.deepEqual(ledger.events(project.id).at(-1).data, {
+        task: 1,
+        from: 'lead',
+        pool: 'worker',
+        tier: 'standard',
+        tags: ['rust'],
+      })
+    })
+  })
+
+  it('refuses what no member could take: a bad tier or pool, an empty tier, critical work without its purpose', async () => {
+    await withLedger((ledger) => {
+      const { project } = tiered(ledger)
+      const refuses = (extra, code) =>
+        assert.throws(() => openTask(ledger, project, extra), { code })
+      refuses({ tier: 'max' }, 'invalid-tier')
+      refuses({ pool: 'lead' }, 'invalid-pool')
+      refuses({ tier: 'critical', purpose: 'architecture' }, 'no-member-of-tier')
+      refuses({ pool: 'worker', tier: 'complex' }, 'no-member-of-tier')
+      refuses({ tags: ['ok', 'not a tag'] }, 'invalid-tags')
+      ledger.addMember(project.id, {
+        agent: 'calliope',
+        harness: 'claude-code',
+        role: 'worker',
+        tier: 'critical',
+        tags: ['architecture'],
+      })
+      refuses({ tier: 'critical' }, 'purpose-required')
+      refuses({ tier: 'critical', purpose: 'coding' }, 'purpose-required')
+      const { task } = openTask(ledger, project, { tier: 'critical', purpose: 'architecture' })
+      assert.deepEqual([task.tier, task.purpose], ['critical', 'architecture'])
+      assert.deepEqual(
+        ledger.board(project.id).open.map((t) => t.number),
+        [task.number],
+        'the refusals created nothing',
+      )
+    })
+  })
+
+  it('lets only coordinators and the human create tasks', async () => {
+    await withLedger((ledger) => {
+      const { project } = tiered(ledger)
+      assert.throws(() => openTask(ledger, project, { from: 'zeus' }), {
+        code: 'not-a-coordinator',
+      })
+      assert.throws(
+        () => ledger.createTask(project.id, { from: 'zeus', to: 'lead', body: 'Do it' }),
+        { code: 'not-a-coordinator' },
+      )
+      assert.equal(
+        ledger.createTask(project.id, { from: 'pm', to: 'lead', body: 'Plan' }).task.assignee,
+        'lead',
+      )
+      assert.equal(
+        ledger.createTask(project.id, { from: 'lead', to: 'lead', body: 'My own' }).task.assignee,
+        'lead',
+      )
+      assert.equal(
+        ledger.createTask(project.id, {
+          from: 'human',
+          pool: 'advisor',
+          tier: 'complex',
+          body: 'Look',
+        }).task.pool,
+        'advisor',
+      )
+    })
+  })
+
+  it('lists the members a task may go to, with their tags and how many tasks each has taken', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = tiered(ledger)
+      openTask(ledger, project)
+      assert.deepEqual(
+        ledger
+          .candidates(project.id, 1)
+          .map((c) => [c.handle, c.tier, c.tags, c.taken, c.outUntil]),
+        [
+          ['zeus', 'standard', ['coding', 'rust'], 0, null],
+          ['diana', 'standard', ['coding'], 0, null],
+        ],
+      )
+      ledger.assignTask(project.id, 1, id('zeus'))
+      openTask(ledger, project)
+      ledger.markOut(id('diana'), { until: '2026-09-19T18:00:00.000Z', reason: 'out of quota' })
+      assert.deepEqual(
+        ledger.candidates(project.id, 2).map((c) => [c.handle, c.taken, c.outUntil]),
+        [
+          ['zeus', 1, null],
+          ['diana', 0, '2026-09-19T18:00:00.000Z'],
+        ],
+      )
+      assert.equal(
+        ledger.project(project.id).participants.find((p) => p.handle === 'diana').outUntil,
+        '2026-09-19T18:00:00.000Z',
+      )
+      ledger.removeMember(project.id, 'zeus')
+      assert.deepEqual(
+        ledger.candidates(project.id, 2).map((c) => c.handle),
+        ['diana'],
+      )
+    })
+  })
+
+  it("lists a role's members with what the daemon ranks them by, busy or not", async () => {
+    await withLedger((ledger) => {
+      const { project, id } = tiered(ledger)
+      openTask(ledger, project)
+      ledger.assignTask(project.id, 1, id('zeus'))
+      assert.deepEqual(
+        ledger.members(project.id, 'worker').map((m) => [m.handle, m.tier, m.busy, m.taken]),
+        [
+          ['zeus', 'standard', true, 1],
+          ['diana', 'standard', false, 0],
+          ['hera', 'light', false, 0],
+        ],
+      )
+      assert.deepEqual(
+        ledger.members(project.id, 'advisor').map((m) => m.handle),
+        ['athena'],
+      )
+      assert.deepEqual(ledger.members(project.id, 'reviewer'), [])
+      deliver(ledger, ledger.task(project.id, 1).messages[0])
+      ledger.recordResult(project.id, 1, { body: 'Done' })
+      assert.equal(ledger.members(project.id, 'worker')[0].busy, false, 'finished work is not busy')
+    })
+  })
+
+  it('withdraws a review so another reviewer can take it', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = tiered(ledger)
+      ledger.setReview(project.id, 'members')
+      ledger.addMember(project.id, {
+        agent: 'apollo',
+        harness: 'pi',
+        role: 'reviewer',
+        tier: 'standard',
+      })
+      openTask(ledger, project)
+      deliver(ledger, ledger.assignTask(project.id, 1, id('zeus')).message)
+      ledger.recordResult(project.id, 1, { body: 'Done' })
+      const review = ledger.createReview(project.id, 1, { reviewer: id('apollo') })
+      deliver(ledger, review.message)
+      const withdrawn = ledger.withdrawReview(project.id, review.task.number, {
+        reason: "@apollo's window closed",
+      })
+      assert.deepEqual([withdrawn.state, ledger.task(project.id, 1).state], ['cancelled', 'review'])
+      assert.deepEqual(
+        ledger.reviewsPending(project.id).map((t) => t.number),
+        [1],
+      )
+      assert.throws(() => ledger.withdrawReview(project.id, 1, { reason: 'x' }), {
+        code: 'not-a-review',
+      })
+      assert.throws(() => ledger.withdrawReview(project.id, review.task.number, { reason: 'x' }), {
+        code: 'invalid-transition',
+      })
+    })
+  })
+
+  it('assigns an open task: it is queued for the member and the log says who was picked', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = tiered(ledger)
+      openTask(ledger, project)
+      const { task, message } = ledger.assignTask(project.id, 1, id('zeus'))
+      assert.deepEqual([task.state, task.assignee], ['queued', 'zeus'])
+      assert.deepEqual(
+        [message.recipient, message.kind, message.state, message.body],
+        ['zeus', 'task', 'queued', 'Write the parser'],
+      )
+      assert.equal(ledger.nextDelivery(id('zeus')).id, message.id)
+      assert.deepEqual(ledger.events(project.id).at(-1), {
+        ...ledger.events(project.id).at(-1),
+        kind: 'task.assigned',
+        data: { task: 1, from: 'open', to: 'queued', assignee: 'zeus', message: message.id },
+      })
+      assert.throws(() => ledger.assignTask(project.id, 1, id('diana')), {
+        code: 'invalid-transition',
+      })
+      openTask(ledger, project, { tier: 'light' })
+      assert.throws(() => ledger.assignTask(project.id, 2, id('zeus')), { code: 'not-a-candidate' })
+      assert.throws(() => ledger.assignTask(project.id, 2, id('athena')), {
+        code: 'not-a-candidate',
+      })
+      assert.equal(ledger.assignTask(project.id, 2, id('hera')).task.assignee, 'hera')
+      const board = ledger.board(project.id)
+      assert.deepEqual(board.open, [])
+      assert.deepEqual(
+        board.lanes.find((lane) => lane.participant.handle === 'hera').tasks.map((t) => t.number),
+        [2],
+      )
+    })
+  })
+
+  it('leads critical work with its purpose when it is delivered', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = tiered(ledger)
+      ledger.addMember(project.id, {
+        agent: 'calliope',
+        harness: 'claude-code',
+        role: 'worker',
+        tier: 'critical',
+        tags: [],
+      })
+      openTask(ledger, project, {
+        tier: 'critical',
+        purpose: 'hard-problem',
+        body: 'Why is it slow?',
+      })
+      const { message } = ledger.assignTask(project.id, 1, id('calliope'))
+      assert.match(
+        message.body,
+        /^Critical work: hard-problem\. No coding or implementation edits\./,
+      )
+      assert.match(message.body, /\n\nWhy is it slow\?$/)
+    })
+  })
+
+  it('takes a task back from a member that ran out, tells the requester, and hands the next member a warning', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = tiered(ledger)
+      openTask(ledger, project)
+      const first = ledger.assignTask(project.id, 1, id('zeus'))
+      deliver(ledger, first.message)
+      assert.equal(ledger.task(project.id, 1).state, 'working')
+      const note = ledger.note(project.id, {
+        from: 'lead',
+        to: 'zeus',
+        body: 'Mind the tests',
+        task: 1,
+      })
+
+      const { task } = ledger.releaseTask(project.id, 1, {
+        because: 'ran out of quota after starting',
+      })
+      assert.deepEqual([task.state, task.assignee], ['open', null])
+      assert.equal(ledger.message(note.id).state, 'cancelled')
+      assert.equal(ledger.message(first.message.id).state, 'delivered', 'history stays')
+      assert.deepEqual(ledger.events(project.id).at(-2).data, {
+        task: 1,
+        from: 'working',
+        to: 'open',
+        member: 'zeus',
+        because: 'ran out of quota after starting',
+      })
+      const told = ledger.inbox(id('lead'))[0]
+      assert.deepEqual(
+        [told.kind, told.taskNumber, told.body],
+        [
+          'note',
+          1,
+          'T-1 was taken back from @zeus (ran out of quota after starting) and waits for another standard worker.',
+        ],
+      )
+      assert.equal(ledger.activeTask(id('zeus')), null)
+
+      const second = ledger.assignTask(project.id, 1, id('diana'))
+      assert.equal(
+        second.message.body,
+        'Write the parser\n\nReassigned from @zeus, which ran out of quota after starting; check the working tree for partial changes.',
+      )
+      deliver(ledger, second.message)
+      ledger.recordResult(project.id, 1, { body: 'Done' })
+      assert.throws(() => ledger.releaseTask(project.id, 1, { because: 'x' }), {
+        code: 'invalid-transition',
+      })
+      const direct = ledger.createTask(project.id, { from: 'human', to: 'lead', body: 'Ship' })
+      assert.throws(() => ledger.releaseTask(project.id, direct.task.number, { because: 'x' }), {
+        code: 'invalid-transition',
+      })
+    })
+  })
+
+  it('cancels an open task; a task queued by handle still follows the old path', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = tiered(ledger)
+      openTask(ledger, project)
+      assert.equal(ledger.cancelTask(project.id, 1, { by: 'lead' }).state, 'cancelled')
+      assert.equal(ledger.task(project.id, 1).messages.length, 0)
+      const direct = ledger.createTask(project.id, { from: 'human', to: 'lead', body: 'Ship it' })
+      assert.deepEqual(
+        [direct.task.state, direct.task.pool, direct.task.tier],
+        ['queued', null, null],
+      )
+      assert.equal(ledger.nextDelivery(id('lead')).id, direct.message.id)
+    })
+  })
+})
+
+describe('tiered dispatch: the review gate', () => {
+  /** A lead, a standard worker and two reviewers; the daemon would pick the reviewer. */
+  function reviewed(ledger, review) {
+    const project = ledger.createProject({
+      directory: '/work/app',
+      name: 'app',
+      lead: { harness: 'claude-code' },
+      ...(review === undefined ? {} : { review }),
+    })
+    const add = (agent, harness, role) =>
+      ledger.addMember(project.id, { agent, harness, role, tier: 'standard', tags: [] })
+    add('zeus', 'claude-code', 'worker')
+    add('diana', 'codex', 'reviewer')
+    add('calliope', 'claude-code', 'reviewer')
+    const id = (handle) =>
+      ledger.project(project.id).participants.find((p) => p.handle === handle).id
+    return { project, id }
+  }
+  /** A worker's task from open to its result: assigned, delivered, answered. */
+  function finished(ledger, project, id, body = 'Parser done') {
+    ledger.createTask(project.id, {
+      from: 'lead',
+      pool: 'worker',
+      tier: 'standard',
+      body: 'Parser',
+    })
+    const number = ledger.board(project.id).open.at(-1).number
+    deliver(ledger, ledger.assignTask(project.id, number, id('zeus')).message)
+    return { number, ...ledger.recordResult(project.id, number, { body }) }
+  }
+  const queued = (ledger, participantId) =>
+    ledger
+      .inbox(participantId)
+      .filter((m) => m.state === 'queued')
+      .reverse()
+      .map((m) => [m.kind, m.taskNumber, m.body])
+
+  it("holds a member's result for review when the project asks, and releases it with the review on pass", async () => {
+    await withLedger((ledger) => {
+      const { project, id } = reviewed(ledger)
+      assert.equal(ledger.project(project.id).review, 'members', 'the default')
+      assert.throws(() => ledger.setReview(project.id, 'twice'), { code: 'invalid-review' })
+
+      const { number, task, message } = finished(ledger, project, id)
+      assert.deepEqual([task.state, task.round, message.state], ['review', 0, 'held'])
+      assert.equal(ledger.nextDelivery(id('lead')), null, 'nothing reaches the requester yet')
+      assert.deepEqual(
+        ledger.reviewsPending(project.id).map((t) => t.number),
+        [number],
+      )
+
+      const review = ledger.createReview(project.id, number, { reviewer: id('diana') })
+      assert.deepEqual(
+        [
+          review.task.number,
+          review.task.kind,
+          review.task.reviewOf,
+          review.task.assignee,
+          review.task.requester,
+          review.task.state,
+          review.task.title,
+        ],
+        [2, 'review', task.id, 'diana', 'lead', 'queued', 'Review T-1'],
+      )
+      assert.match(review.message.body, /^Review T-1 \(round 1\) by @zeus\./)
+      assert.match(review.message.body, /The task:\nParser\n/)
+      assert.match(review.message.body, /The result:\nParser done\n/)
+      assert.match(review.message.body, /VERDICT: pass or VERDICT: changes\.$/)
+      assert.deepEqual(ledger.reviewsPending(project.id), [])
+      assert.throws(() => ledger.createReview(project.id, number, { reviewer: id('calliope') }), {
+        code: 'invalid-transition',
+      })
+
+      deliver(ledger, review.message)
+      assert.equal(ledger.activeTask(id('diana')).number, 2)
+      const verdict = ledger.recordVerdict(project.id, 2, { body: 'Looks right.\n\nVERDICT: pass' })
+      assert.deepEqual(
+        [verdict.verdict, verdict.task.state, verdict.task.round, verdict.review.state],
+        ['pass', 'done', 1, 'done'],
+      )
+      assert.equal(verdict.review.verdict, 'pass')
+      assert.deepEqual(queued(ledger, id('lead')), [
+        ['result', 1, 'Parser done'],
+        ['result', 2, 'Looks right.\n\nVERDICT: pass'],
+      ])
+      assert.deepEqual(ledger.events(project.id).find((e) => e.kind === 'review.verdict').data, {
+        task: 1,
+        review: 2,
+        verdict: 'pass',
+        round: 1,
+      })
+    })
+  })
+
+  it('refuses a reviewer that is not one, or one that wrote the work', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = reviewed(ledger)
+      const { number } = finished(ledger, project, id)
+      assert.throws(() => ledger.createReview(project.id, number, { reviewer: id('zeus') }), {
+        code: 'not-a-reviewer',
+      })
+      assert.throws(() => ledger.createReview(project.id, number, { reviewer: id('lead') }), {
+        code: 'not-a-reviewer',
+      })
+      ledger.addMember(project.id, {
+        agent: 'hera',
+        harness: 'pi',
+        role: 'reviewer',
+        tier: 'light',
+      })
+      ledger.removeMember(project.id, 'hera')
+      assert.throws(
+        () => ledger.createReview(project.id, number, { reviewer: id('lead') - 0 + 99 }),
+        {
+          code: 'unknown-participant',
+        },
+      )
+    })
+  })
+
+  it('sends the work back with the findings, and after a second round lets the requester decide', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = reviewed(ledger)
+      const { number, message: held } = finished(ledger, project, id)
+      const first = ledger.createReview(project.id, number, { reviewer: id('diana') })
+      deliver(ledger, first.message)
+      const back = ledger.recordVerdict(project.id, first.task.number, {
+        body: 'Missing tests.\n\nVERDICT: changes',
+      })
+      assert.deepEqual(
+        [back.verdict, back.task.state, back.task.assignee, back.task.round, back.review.state],
+        ['changes', 'queued', 'zeus', 1, 'done'],
+      )
+      assert.equal(ledger.message(held.id).state, 'cancelled', 'the first result is superseded')
+      const followUp = ledger.nextDelivery(id('zeus'))
+      assert.deepEqual(
+        [followUp.kind, followUp.sender, followUp.taskNumber, followUp.body],
+        [
+          'task',
+          'diana',
+          number,
+          'Review round 1 by @diana asks for changes:\n\nMissing tests.\n\nVERDICT: changes',
+        ],
+      )
+      assert.deepEqual(queued(ledger, id('lead')), [], 'the requester sees nothing yet')
+      assert.equal(
+        ledger.task(project.id, first.task.number).messages.length,
+        1,
+        'no result of its own',
+      )
+
+      deliver(ledger, followUp)
+      const again = ledger.recordResult(project.id, number, { body: 'Tests added' })
+      assert.deepEqual(
+        [again.task.state, again.task.round, again.message.state],
+        ['review', 1, 'held'],
+      )
+      assert.deepEqual(
+        ledger.reviewsPending(project.id).map((t) => t.number),
+        [number],
+      )
+      const second = ledger.createReview(project.id, number, { reviewer: id('calliope') })
+      assert.match(second.message.body, /^Review T-1 \(round 2\) by @zeus\./)
+      deliver(ledger, second.message)
+      const decide = ledger.recordVerdict(project.id, second.task.number, {
+        body: 'Still wrong.\n\nVERDICT: changes',
+      })
+      assert.deepEqual(
+        [decide.verdict, decide.task.state, decide.task.round],
+        ['changes', 'done', 2],
+      )
+      assert.deepEqual(queued(ledger, id('lead')), [
+        ['result', number, 'Tests added'],
+        ['result', second.task.number, 'Still wrong.\n\nVERDICT: changes'],
+        [
+          'note',
+          number,
+          'T-1 asked for changes twice in review (T-2, T-3); its result and the reviews are in your inbox: accept it or send it back.',
+        ],
+      ])
+    })
+  })
+
+  it("reviews coordinators' own work only under the all policy, and nothing under none", async () => {
+    await withLedger((ledger) => {
+      const { project, id } = reviewed(ledger, 'all')
+      const own = ledger.createTask(project.id, { from: 'human', to: 'lead', body: 'Ship it' })
+      deliver(ledger, own.message)
+      const done = ledger.recordResult(project.id, own.task.number, { body: 'Shipped' })
+      assert.deepEqual([done.task.state, done.message.state], ['review', 'held'])
+
+      ledger.setReview(project.id, 'none')
+      assert.equal(ledger.project(project.id).review, 'none')
+      const plain = finished(ledger, project, id)
+      assert.deepEqual([plain.task.state, plain.message.state], ['done', 'queued'])
+
+      ledger.setReview(project.id, 'members')
+      const lead = ledger.createTask(project.id, { from: 'lead', to: 'lead', body: 'My plan' })
+      deliver(ledger, lead.message)
+      assert.equal(
+        ledger.recordResult(project.id, lead.task.number, { body: 'Planned' }).task.state,
+        'done',
+      )
+      assert.deepEqual(
+        ledger
+          .events(project.id)
+          .filter((e) => e.kind === 'project.review')
+          .map((e) => e.data),
+        [
+          { from: 'all', to: 'none' },
+          { from: 'none', to: 'members' },
+        ],
+      )
+    })
+  })
+
+  it('lets a coordinator ask for a review by hand, and skips a review nobody can do', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = reviewed(ledger, 'none')
+      const { number } = finished(ledger, project, id)
+      assert.throws(() => ledger.requestReview(project.id, number, { by: 'zeus' }), {
+        code: 'not-a-coordinator',
+      })
+      const asked = ledger.requestReview(project.id, number, { by: 'lead' })
+      assert.equal(asked.state, 'review')
+      assert.throws(() => ledger.requestReview(project.id, number, { by: 'lead' }), {
+        code: 'invalid-transition',
+      })
+      assert.deepEqual(
+        ledger.reviewsPending(project.id).map((t) => t.number),
+        [number],
+      )
+      const skipped = ledger.skipReview(project.id, number, {
+        reason: 'no independent reviewer on the team',
+      })
+      assert.equal(skipped.state, 'done')
+      assert.deepEqual(queued(ledger, id('lead')), [
+        ['result', number, 'Parser done'],
+        ['note', number, 'T-1 unreviewed: no independent reviewer on the team.'],
+      ])
+
+      ledger.setReview(project.id, 'members')
+      const held = finished(ledger, project, id, 'Lexer done')
+      assert.equal(held.message.state, 'held')
+      ledger.skipReview(project.id, held.number, { reason: 'no independent reviewer on the team' })
+      assert.equal(ledger.message(held.message.id).state, 'queued', 'the held result is released')
+      assert.throws(() => ledger.skipReview(project.id, held.number, { reason: 'x' }), {
+        code: 'invalid-transition',
+      })
+    })
+  })
+
+  it('reads a review with no verdict line as a pass, and says so', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = reviewed(ledger)
+      const { number } = finished(ledger, project, id)
+      const review = ledger.createReview(project.id, number, { reviewer: id('diana') })
+      deliver(ledger, review.message)
+      const verdict = ledger.recordVerdict(project.id, review.task.number, { body: 'Fine by me.' })
+      assert.deepEqual(
+        [verdict.verdict, verdict.task.state, verdict.review.verdict],
+        [null, 'done', null],
+      )
+      assert.deepEqual(queued(ledger, id('lead')).at(-1), [
+        'result',
+        review.task.number,
+        'No VERDICT line; read as pass.\n\nFine by me.',
+      ])
+    })
+  })
+
+  it('takes an open review with its task when the task is cancelled, and finds another reviewer when one leaves', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = reviewed(ledger)
+      const { number } = finished(ledger, project, id)
+      const review = ledger.createReview(project.id, number, { reviewer: id('diana') })
+      assert.equal(ledger.cancelTask(project.id, number, { by: 'lead' }).state, 'cancelled')
+      assert.deepEqual(
+        [
+          ledger.task(project.id, review.task.number).state,
+          ledger.message(review.message.id).state,
+        ],
+        ['cancelled', 'cancelled'],
+      )
+
+      const next = finished(ledger, project, id, 'Lexer done')
+      const again = ledger.createReview(project.id, next.number, { reviewer: id('diana') })
+      ledger.removeMember(project.id, 'diana')
+      assert.equal(ledger.task(project.id, again.task.number).state, 'cancelled')
+      assert.equal(
+        ledger.task(project.id, next.number).state,
+        'review',
+        'the work still waits for a review',
+      )
+      assert.deepEqual(
+        ledger.reviewsPending(project.id).map((t) => t.number),
+        [next.number],
+      )
+      assert.equal(
+        ledger.createReview(project.id, next.number, { reviewer: id('calliope') }).task.assignee,
+        'calliope',
       )
     })
   })

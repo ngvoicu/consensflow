@@ -10,6 +10,7 @@ import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { piSessionDir } from '../../src/harnesses.js'
+import { codexQuota, exhaustedQuota } from './quota.js'
 
 const SUPPORTED = {
   kimi: new Set(['1.5']),
@@ -213,6 +214,7 @@ function resultBase() {
     replaced: false,
     failed: false,
     failure: null,
+    quota: null,
     cursor: null,
     settlement: {
       state: 'unknown',
@@ -670,6 +672,11 @@ async function codexAnswers(sessionId, env, options) {
     const turnId = payload.turn_id ?? currentTurnId
     const turn = codexTurn(turns, turnId)
 
+    if (payload.type === 'token_count') {
+      if (payload.rate_limits) result.quota = codexQuota(payload.rate_limits)
+      return
+    }
+
     if (payload.type === 'task_started') {
       currentTurnId = payload.turn_id
       latestTurnId = payload.turn_id
@@ -1084,6 +1091,8 @@ async function claudeAnswers(sessionId, env, options = {}) {
         result.failed = false
         result.failure = null
       }
+      // The latest assistant record has the last word on quota.
+      result.quota = null
       const item = addAssistant(message.id, at, seq)
       const text = claudeText(message.content)
       updateNativeFragment(item, nativeId(record.uuid, 'claude record', seq), text, '\n')
@@ -1106,6 +1115,9 @@ async function claudeAnswers(sessionId, env, options = {}) {
         turnOpen = false
         result.failed = true
         result.failure = String(record.errorDetails ?? record.error ?? text)
+        if (record.apiErrorStatus === 429 || record.error === 'rate_limit') {
+          result.quota = exhaustedQuota(text, Date.parse(record.timestamp))
+        }
         terminal = {
           provenance: 'native',
           complete: false,
@@ -1435,6 +1447,7 @@ async function piAnswers(sessionId, env, options = {}) {
     }
     result.items.push(item)
 
+    result.quota = null
     if (message.stopReason === 'stop') {
       turnOpen = true
       result.failed = false
@@ -1449,6 +1462,9 @@ async function piAnswers(sessionId, env, options = {}) {
       turnOpen = true
       result.failed = true
       result.failure = String(message.errorMessage ?? 'provider error')
+      if (/^429\b/.test(result.failure)) {
+        result.quota = exhaustedQuota(result.failure, Number(message.timestamp))
+      }
       terminal = {
         provenance: 'derived',
         complete: false,
@@ -1981,9 +1997,13 @@ async function opencodeAnswers(sessionId, env, options) {
         })
       }
 
+      if (completed) result.quota = null
       if (isFailure) {
         result.failed = true
         result.failure = String(data.error?.data?.message ?? visibleText(data.error))
+        if (data.error?.data?.statusCode === 429) {
+          result.quota = exhaustedQuota(result.failure, Number(data.time?.completed ?? at))
+        }
       }
 
       if (closesTurn) {

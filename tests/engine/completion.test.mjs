@@ -1754,3 +1754,158 @@ test('completion: extraction is streamed, snapshot-consistent, and never display
   assert.ok(!/adaptLine\s*\(/.test(source))
   assert.ok(!/from\s+['"][^'"]*transcript-events['"]/.test(source))
 })
+
+// ------------------------------------------------------------------ quota
+
+test('quota/codex: the rollout says how much of the window is used, and when it resets', async () => {
+  const session = '01a077c2-5d0f-7452-a2be-ace096bbe3be'
+  const limits = (used, reached = null) => ({
+    timestamp: '2026-09-06T17:27:06.000Z',
+    ordinal: 2490,
+    type: 'event_msg',
+    payload: {
+      type: 'token_count',
+      info: null,
+      rate_limits: {
+        limit_id: 'codex',
+        primary: { used_percent: used, window_minutes: 10080, resets_at: 1790423393 },
+        secondary: { used_percent: 12.5, window_minutes: 300, resets_at: 1789900000 },
+        rate_limit_reached_type: reached,
+      },
+    },
+  })
+  const read = async (record) => {
+    const { env } = await stageJsonl('codex', session, 'codex/completed.jsonl', {
+      mutate: (records) => [...records, record],
+    })
+    return (await answers('codex', session, env)).quota
+  }
+  assert.deepEqual(await read(limits(5)), {
+    state: 'ok',
+    usedPercent: 12.5,
+    resetsAt: new Date(1789900000 * 1000).toISOString(),
+  })
+  assert.deepEqual(await read(limits(97)), {
+    state: 'low',
+    usedPercent: 97,
+    resetsAt: new Date(1790423393 * 1000).toISOString(),
+  })
+  assert.equal((await read(limits(100, 'primary'))).state, 'exhausted')
+  const { env } = await stageJsonl('codex', session, 'codex/completed.jsonl')
+  assert.equal((await answers('codex', session, env)).quota, null, 'no token_count, no word on it')
+})
+
+test('quota/claude-code: a 429 is exhaustion until a later turn succeeds', async () => {
+  const session = '33383216-87a0-4e6d-a273-07c4b229cdb1'
+  const { env } = await stageJsonl('claude-code', session, 'claude-code/provider-429.jsonl')
+  const refused = await answers('claude-code', session, env)
+  assert.equal(refused.failed, true)
+  assert.deepEqual(refused.quota, { state: 'exhausted', resetsAt: null })
+
+  const later = await stageJsonl('claude-code', session, 'claude-code/provider-429.jsonl', {
+    mutate: (records) => {
+      const error = records.findLast((record) => record.isApiErrorMessage === true)
+      error.message.content = [{ type: 'text', text: "You've hit your limit. Resets in 2 hours." }]
+      error.timestamp = '2026-09-19T10:00:00.000Z'
+      return [
+        ...records,
+        {
+          ...error,
+          uuid: 'after-reset',
+          parentUuid: error.uuid,
+          timestamp: '2026-09-19T13:00:00.000Z',
+          isApiErrorMessage: undefined,
+          apiErrorStatus: undefined,
+          error: undefined,
+          message: {
+            ...error.message,
+            id: 'msg_after_reset',
+            content: [{ type: 'text', text: 'Back to work.' }],
+          },
+        },
+      ]
+    },
+  })
+  const resumed = await answers('claude-code', session, later.env)
+  assert.equal(resumed.quota, null, 'the refusal is history once a turn succeeds')
+  const named = await stageJsonl('claude-code', session, 'claude-code/provider-429.jsonl', {
+    mutate: (records) => {
+      const error = records.findLast((record) => record.isApiErrorMessage === true)
+      error.message.content = [{ type: 'text', text: "You've hit your limit. Resets in 2 hours." }]
+      error.timestamp = '2026-09-19T10:00:00.000Z'
+      return records
+    },
+  })
+  assert.deepEqual((await answers('claude-code', session, named.env)).quota, {
+    state: 'exhausted',
+    resetsAt: '2026-09-19T12:00:00.000Z',
+  })
+})
+
+test('quota/pi: a 429 names its reset in the message; a later stop clears it', async () => {
+  const session = 'hazy-429'
+  const stage = (mutate) => stageJsonl('pi', session, 'pi/provider-429.jsonl', { mutate })
+  const upToError = (records) => {
+    const last = records.findLastIndex((record) => record.message?.stopReason === 'error')
+    return records.slice(0, last + 1)
+  }
+  const refused = await stage((records) => {
+    const cut = upToError(records)
+    const error = cut.at(-1)
+    error.message.errorMessage =
+      '429: {"type":"GoUsageLimitError","message":"Weekly usage limit reached. Resets in 3 days."}'
+    error.message.timestamp = Date.parse('2026-09-19T10:00:00.000Z')
+    return cut
+  })
+  assert.deepEqual((await answers('pi', session, refused.env)).quota, {
+    state: 'exhausted',
+    resetsAt: '2026-09-22T10:00:00.000Z',
+  })
+  const other = await stage((records) => {
+    const cut = upToError(records)
+    cut.at(-1).message.errorMessage = '500: provider down'
+    return cut
+  })
+  assert.equal((await answers('pi', session, other.env)).quota, null, 'a 500 is not quota')
+  const retried = await stage((records) => records)
+  assert.equal(
+    (await answers('pi', session, retried.env)).quota,
+    null,
+    'the fixture retries and succeeds',
+  )
+})
+
+test('quota/opencode: a 429 on the message is exhaustion; a completed turn after it clears it', async () => {
+  const fixture = JSON.parse(
+    await fs.readFile(path.join(FIX, 'opencode/completion-window.json'), 'utf8'),
+  )
+  const sessionId = fixture.session[0].id
+  let completedAt = null
+  const refused = await answers(
+    'opencode',
+    sessionId,
+    await stageOpencode('opencode/completion-window.json', {
+      snapshot: 'after',
+      mutate: ({ messages }) => {
+        const data = JSON.parse(messages[0].data)
+        completedAt = data.time.completed
+        data.error = {
+          name: 'APIError',
+          data: { message: 'Weekly usage limit reached. Resets in 1 day.', statusCode: 429 },
+        }
+        messages[0].data = JSON.stringify(data)
+      },
+    }),
+  )
+  assert.equal(refused.failed, true, JSON.stringify(refused).slice(0, 300))
+  assert.deepEqual(refused.quota, {
+    state: 'exhausted',
+    resetsAt: new Date(completedAt + 86_400_000).toISOString(),
+  })
+  const fine = await answers(
+    'opencode',
+    sessionId,
+    await stageOpencode('opencode/completion-window.json', { snapshot: 'after' }),
+  )
+  assert.equal(fine.quota, null)
+})

@@ -240,4 +240,33 @@ describe('the Claude Code adapter', () => {
       assert.equal(await adapter.ready({ launch, pane, host }), false)
     })
   })
+
+  it('reports a refused request as exhausted quota, with the reset its text names', async () => {
+    await withHome(async ({ env }) => {
+      const adapter = claudeCodeAdapter({ env, peer: false })
+      const session = '2c1a6b64-0d2c-4f4e-9a7b-6f1c5f2e8d90'
+      await transcript(env, session, [
+        userLine(session, 1, '[ConsensFlow m-1 · T-1 · task from @lead]\nWrite the parser'),
+        record(session, 2, {
+          type: 'assistant',
+          isApiErrorMessage: true,
+          apiErrorStatus: 429,
+          error: 'rate_limit',
+          message: {
+            id: `${session}-message-2`,
+            role: 'assistant',
+            content: [{ type: 'text', text: "You've hit your limit. Resets in 2 hours." }],
+          },
+        }),
+      ])
+      const observed = await adapter.observe({ launch: { nativeSession: session } })
+      assert.deepEqual(observed.quota, { state: 'exhausted', resetsAt: '2026-09-19T14:00:02.000Z' })
+      await transcript(env, session, [
+        userLine(session, 1, 'hello'),
+        answerLine(session, 2, 'Hi'),
+        stopLine(session, 3),
+      ])
+      assert.equal((await adapter.observe({ launch: { nativeSession: session } })).quota, null)
+    })
+  })
 })

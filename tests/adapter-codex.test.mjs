@@ -172,4 +172,27 @@ describe('the Codex adapter', () => {
       { queue: false },
     )
   })
+
+  it("passes the harness's word on its quota through", async () => {
+    await withHome(async ({ env }) => {
+      const quota = { state: 'low', usedPercent: 96, resetsAt: '2026-09-26T08:29:53.000Z' }
+      const adapter = codexAdapter({
+        env,
+        answers: async () => ({
+          items: [],
+          inFlight: false,
+          settlement: { state: 'settled' },
+          quota,
+        }),
+      })
+      const observed = await adapter.observe({
+        launch: { nativeSession: 'thread-1', channel: null },
+      })
+      assert.deepEqual([observed.settled, observed.quota], [true, quota])
+      assert.equal(
+        (await adapter.observe({ launch: { nativeSession: null, channel: null } })).quota,
+        null,
+      )
+    })
+  })
 })

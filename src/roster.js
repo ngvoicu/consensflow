@@ -180,8 +180,24 @@ function effortOf(row) {
   return row.kind === 'pi' ? (row.thinking ?? row.effort) : (row.effort ?? undefined)
 }
 
+const TAG = /^[a-z0-9][a-z0-9-]{0,31}$/
+const MAX_TAGS = 20
+
+/** What an agent is good for, as the human says; up to 20 short lowercase words, each once. */
+function validateTags(tags) {
+  if (
+    !Array.isArray(tags) ||
+    tags.length > MAX_TAGS ||
+    !tags.every((tag) => typeof tag === 'string' && TAG.test(tag))
+  ) {
+    throw new Error(`tags are up to ${MAX_TAGS} short lowercase words (letters, digits, dashes)`)
+  }
+  return [...new Set(tags)]
+}
+
 function toView(row) {
   const harness = KIND_TO_HARNESS[row.kind]
+  const profile = { ...row.profile, ...agentProfile(row) }
   return {
     name: row.id,
     harness: harness ?? row.kind,
@@ -190,7 +206,9 @@ function toView(row) {
     ...(effortOf(row) ? { effort: effortOf(row) } : {}),
     ...(row.description ? { description: row.description } : {}),
     ...(row.preset ? { preset: row.preset } : {}),
-    profile: { ...row.profile, ...agentProfile(row) },
+    // The human's tags, else what the profile says the agent is good for.
+    tags: Array.isArray(row.tags) ? row.tags : (profile.categories ?? []),
+    profile,
     ...(harness === undefined ? { unsupported: true } : {}),
   }
 }
@@ -245,6 +263,7 @@ export function addAgent(input, env) {
   validateAdd(input)
   validateKimiEffort(input)
   validateWorkTier(input.workTier)
+  const tags = input.tags == null ? undefined : validateTags(input.tags)
   const document = loadDocument(env)
   if (document.agents.some((row) => row.id === input.name)) {
     throw new Error(`an agent named ${input.name} already exists`)
@@ -260,6 +279,7 @@ export function addAgent(input, env) {
     updatedAt: now,
     model: input.model,
     ...(input.workTier == null ? {} : { workTier: input.workTier }),
+    ...(tags === undefined ? {} : { tags }),
     ...(input.effort
       ? input.harness === 'pi'
         ? { thinking: input.effort }
@@ -284,6 +304,7 @@ function findRow(document, name) {
 
 export function editAgent(name, patch, env) {
   validateWorkTier(patch.workTier)
+  const tags = patch.tags == null ? patch.tags : validateTags(patch.tags)
   const document = loadDocument(env)
   const row = findRow(document, name)
   const supported = KIND_TO_HARNESS[row.kind] !== undefined
@@ -309,6 +330,10 @@ export function editAgent(name, patch, env) {
   if (patch.workTier !== undefined) {
     if (patch.workTier === null) delete row.workTier
     else row.workTier = patch.workTier
+  }
+  if (tags !== undefined) {
+    if (tags === null) delete row.tags
+    else row.tags = tags
   }
   if (patch.effort !== undefined) {
     const key = row.kind === 'pi' ? 'thinking' : 'effort'

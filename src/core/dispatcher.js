@@ -23,6 +23,16 @@ import { randomUUID } from 'node:crypto'
  *   told. A lead window that closes suspends its project. A member who leaves
  *   the team has its window closed once its step in progress ends, and that
  *   exit fails nothing: its open tasks were cancelled when it left.
+ * - A task for a tier of member starts open: each pass gives it to a free
+ *   member of that pool and tier that is not out of quota, the one matching
+ *   most of its tags, then the one with the fewest tasks so far; when none is
+ *   free the requester is told once. Under the project's review policy a
+ *   finished task waits for a reviewer whose model differs from the author's
+ *   (a coordinator's model is taken to be its harness); none on the team and
+ *   the review is skipped with a note, all busy and it waits. A member whose
+ *   harness reports its quota exhausted is out until the reset it names (an
+ *   hour when it names none): its task goes back to open for another member,
+ *   a review it held is withdrawn, and it takes nothing new while low.
  * - A human typing in a window latches it against pastes. Their Enter releases
  *   the latch once the harness shows a new message of theirs; the pane host
  *   keeps it if they typed again after that Enter.
@@ -73,6 +83,7 @@ export class Dispatcher {
   #maxAttempts
   #runtime = new Map()
   #listeners = new Set()
+  #waitingNoted = new Set()
   #generation = 0
 
   constructor({
@@ -119,8 +130,14 @@ export class Dispatcher {
   }
 
   /** A new project: the ledger records it with its team, and its lead window opens. */
-  async openProject({ directory, name, harness, team = [] }) {
-    const project = this.#ledger.createProject({ directory, name, lead: { harness }, team })
+  async openProject({ directory, name, harness, team = [], review }) {
+    const project = this.#ledger.createProject({
+      directory,
+      name,
+      lead: { harness },
+      team,
+      ...(review === undefined ? {} : { review }),
+    })
     const lead = project.participants.find((participant) => participant.handle === 'lead')
     await this.#exclusive(lead.id, () => this.#launch(project, lead, null))
     return this.#ledger.project(project.id)
@@ -180,6 +197,11 @@ export class Dispatcher {
 
   /** One pass over every participant; each moves on its own, so a slow launch holds up no one else. */
   async pass() {
+    for (const project of this.#ledger.projects()) {
+      if (project.state !== 'open') continue
+      this.#assignOpenTasks(project)
+      this.#findReviewers(project)
+    }
     const steps = []
     for (const project of this.#ledger.projects()) {
       for (const participant of project.participants) {
@@ -218,7 +240,7 @@ export class Dispatcher {
       if (project.state === 'open') this.#ledger.setProjectState(project.id, 'suspended')
     } else if (!COORDINATORS.has(participant.role)) {
       const task = this.#ledger.activeTask(participantId)
-      if (task !== null) this.#failTask(project, task, `@${participant.handle}'s window closed`)
+      if (task !== null) this.#giveUp(project, task, `@${participant.handle}'s window closed`)
     }
     this.#changed()
   }
@@ -252,6 +274,11 @@ export class Dispatcher {
         ? { state: 'waiting', reason: observed.waiting.reason ?? null }
         : { state: observed.settled ? 'idle' : 'working' },
     )
+    if (observed.quota !== undefined) runtime.quota = observed.quota ?? null
+    if (runtime.quota?.state === 'exhausted') {
+      this.#outOfQuota(project, participant, runtime)
+      return
+    }
     if (runtime.delivering !== null) this.#watchArrival(runtime, observed)
     await this.#releaseDraft(runtime, observed)
     if (!COORDINATORS.has(participant.role)) this.#collect(project, participant, observed)
@@ -342,9 +369,9 @@ export class Dispatcher {
       .filter((item) => item.role === 'assistant' && item.complete)
       .at(-1)
     if (answer === undefined) return
-    this.#ledger.recordResult(project.id, task.number, {
-      body: answer.text.trim() || '(the agent ended its turn without a written answer)',
-    })
+    const body = answer.text.trim() || '(the agent ended its turn without a written answer)'
+    if (task.kind === 'review') this.#ledger.recordVerdict(project.id, task.number, { body })
+    else this.#ledger.recordResult(project.id, task.number, { body })
     this.#changed()
   }
 
@@ -495,6 +522,123 @@ export class Dispatcher {
     this.#changed()
   }
 
+  // --- assignment and review ------------------------------------------------------------
+
+  /** Each open task goes to the best free member of its tier; the requester hears once when none is. */
+  #assignOpenTasks(project) {
+    for (const task of this.#ledger.board(project.id).open) {
+      const candidates = this.#ledger.candidates(project.id, task.number)
+      const free = candidates.filter((member) => this.#available(member))
+      if (free.length > 0) {
+        this.#ledger.assignTask(project.id, task.number, this.#rank(free, task.tags)[0].id)
+        this.#waitingNoted.delete(task.id)
+        this.#changed()
+      } else if (!this.#waitingNoted.has(task.id)) {
+        this.#waitingNoted.add(task.id)
+        this.#ledger.note(project.id, {
+          to: task.requester,
+          task: task.number,
+          body: `T-${task.number} waits for a free ${task.tier} ${task.pool}: ${this.#whyNotFree(candidates)}.`,
+        })
+        this.#changed()
+      }
+    }
+  }
+
+  /** Each task in review gets a free reviewer on another model, or goes on unreviewed. */
+  #findReviewers(project) {
+    for (const task of this.#ledger.reviewsPending(project.id)) {
+      const author = project.participants.find((p) => p.handle === task.assignee)
+      const authorModel = this.#modelOf(author)
+      const independent = this.#ledger.members(project.id, 'reviewer').filter((reviewer) => {
+        const participant = project.participants.find((p) => p.id === reviewer.id)
+        return this.#modelOf(participant) !== authorModel
+      })
+      if (independent.length === 0) {
+        this.#ledger.skipReview(project.id, task.number, {
+          reason: 'no independent reviewer on the team',
+        })
+        this.#changed()
+        continue
+      }
+      const free = independent.filter((member) => this.#available(member))
+      if (free.length === 0) continue
+      this.#ledger.createReview(project.id, task.number, {
+        reviewer: this.#rank(free, task.tags)[0].id,
+      })
+      this.#changed()
+    }
+  }
+
+  /** Free: nothing on its hands, not out of quota, not low on it. */
+  #available(member) {
+    const out = member.outUntil !== null && Date.parse(member.outUntil) > this.#now()
+    const quota = this.#runtime.get(member.id)?.quota?.state
+    return !member.busy && !out && quota !== 'low' && quota !== 'exhausted'
+  }
+
+  /** Most matching tags first, then the fewest tasks taken, then the earliest joined. */
+  #rank(members, tags) {
+    const matches = (member) => tags.filter((tag) => member.tags.includes(tag)).length
+    return [...members].sort((a, b) => matches(b) - matches(a) || a.taken - b.taken || a.id - b.id)
+  }
+
+  #whyNotFree(candidates) {
+    const names = (list) => list.map((member) => `@${member.handle}`)
+    const out = candidates.filter(
+      (m) => m.outUntil !== null && Date.parse(m.outUntil) > this.#now(),
+    )
+    const low = candidates.filter(
+      (m) => !out.includes(m) && this.#runtime.get(m.id)?.quota?.state === 'low',
+    )
+    const busy = candidates.filter((m) => !out.includes(m) && !low.includes(m) && m.busy)
+    const parts = []
+    if (busy.length > 0) {
+      parts.push(`${names(busy).join(' and ')} ${busy.length === 1 ? 'is' : 'are'} busy`)
+    }
+    for (const member of out)
+      parts.push(`@${member.handle} is out of quota until ${member.outUntil}`)
+    for (const member of low) parts.push(`@${member.handle} is low on quota`)
+    return parts.join('; ')
+  }
+
+  /** What makes two agents the same model: the roster's model identity; a coordinator's is its harness. */
+  #modelOf(participant) {
+    const row = participant.agent === null ? null : this.#roster(participant.agent)
+    return row?.profile?.modelKey ?? row?.model ?? participant.harness
+  }
+
+  /**
+   * A member whose harness reports its quota exhausted: out until the reset
+   * it names (an hour when it names none), its work back on the board.
+   */
+  #outOfQuota(project, participant, runtime) {
+    const until = runtime.quota.resetsAt ?? new Date(this.#now() + 3_600_000).toISOString()
+    this.#setActivity(runtime, { state: 'out', reason: `out of quota until ${until}` })
+    if (participant.outUntil !== null && Date.parse(participant.outUntil) > this.#now()) return
+    this.#ledger.markOut(participant.id, { until, reason: 'out of quota' })
+    runtime.delivering = null
+    const lane = this.#ledger
+      .board(project.id)
+      .lanes.find((l) => l.participant.id === participant.id)
+    for (const task of lane.tasks) {
+      if (!['queued', 'working', 'waiting'].includes(task.state)) continue
+      this.#giveUp(project, task, 'ran out of quota after starting')
+    }
+    this.#changed()
+  }
+
+  /** Work a member cannot go on with: a review is withdrawn for another reviewer, tiered work goes back open, the rest fails. */
+  #giveUp(project, task, because) {
+    if (task.kind === 'review') {
+      this.#ledger.withdrawReview(project.id, task.number, { reason: because })
+    } else if (task.pool !== null) {
+      this.#ledger.releaseTask(project.id, task.number, { because })
+    } else {
+      this.#failTask(project, task, because)
+    }
+  }
+
   // --- failures ----------------------------------------------------------------------
 
   /** A delivery that did not arrive: try again while attempts remain, or give up. */
@@ -558,6 +702,7 @@ export class Dispatcher {
         launch: null,
         token: null,
         delivering: null,
+        quota: null,
         running: null,
         enters: [],
         humanItems: null,

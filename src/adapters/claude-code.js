@@ -139,6 +139,7 @@ export function claudeCodeAdapter({
         settled,
         waiting: live?.state === 'waiting' ? { reason: live.reason ?? null } : null,
         failed: record.failed === true,
+        quota: record.quota ?? null,
       }
     },
 

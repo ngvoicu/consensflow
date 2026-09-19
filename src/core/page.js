@@ -16,11 +16,12 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
   return {
     'projects.list': async () => ({ projects: ledger.projects() }),
 
-    'project.open': change(async ({ directory, name, harness }) => ({
+    'project.open': change(async ({ directory, name, harness, review }) => ({
       project: await dispatcher.openProject({
         directory,
         name: name ?? basename(directory),
         harness,
+        review,
         team: lastTeamNow(ledger, env),
       }),
     })),
@@ -31,11 +32,9 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
 
     'agents.list': async () => ({ agents: listAgents(env) }),
 
-    'member.add': change(async ({ project, agent, role = 'worker' }) => {
-      const row = agentRow(agent, env)
-      if (!row) throw new Error(`no agent named ${agent} in your agents`)
-      return { member: ledger.addMember(project, { agent, harness: row.kind, role }) }
-    }),
+    'member.add': change(async ({ project, agent, role = 'worker' }) => ({
+      member: ledger.addMember(project, { role, ...membership(agent, env) }),
+    })),
 
     'member.remove': change(async ({ project, agent }) => dispatcher.removeMember(project, agent)),
 
@@ -93,10 +92,21 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
   }
 }
 
-/** The last project's team for a new one: members whose agents are still saved, on their harness now. */
+/** A saved agent as the team records it: its harness, and its tier and tags as the roster has them now. */
+function membership(agent, env, agents = listAgents(env)) {
+  const row = agentRow(agent, env)
+  const saved = agents.find((candidate) => candidate.name === agent)
+  if (row === undefined || saved === undefined) {
+    throw new Error(`no agent named ${agent} in your agents`)
+  }
+  return { agent, harness: row.kind, tier: saved.profile.workTier, tags: saved.tags }
+}
+
+/** The last project's team for a new one: the members still saved, as the roster has them now. */
 function lastTeamNow(ledger, env) {
-  return ledger.lastTeam().flatMap(({ agent, role }) => {
-    const row = agentRow(agent, env)
-    return row === undefined ? [] : [{ agent, harness: row.kind, role }]
-  })
+  const agents = listAgents(env)
+  return ledger
+    .lastTeam()
+    .filter(({ agent }) => agents.some((candidate) => candidate.name === agent))
+    .map(({ agent, role }) => ({ role, ...membership(agent, env, agents) }))
 }

@@ -37,6 +37,7 @@ async function withPage(fn) {
         name: request.name,
         lead: { harness: request.harness },
         team: request.team,
+        ...(request.review === undefined ? {} : { review: request.review }),
       })
     },
     async removeMember(project, handle) {
@@ -77,7 +78,9 @@ describe('the page protocol of the new core', () => {
         directory: '/work/app',
         harness: 'pi',
       })
-      assert.deepEqual(opened, [{ directory: '/work/app', name: 'app', harness: 'pi', team: [] }])
+      assert.deepEqual(opened, [
+        { directory: '/work/app', name: 'app', harness: 'pi', review: undefined, team: [] },
+      ])
       assert.equal(kicks(), 1)
       const { projects } = await operations['projects.list']({})
       assert.deepEqual(
@@ -130,7 +133,17 @@ describe('the page protocol of the new core', () => {
         })}\n`,
       )
       const next = await operations['project.open']({ directory: '/work/api', harness: 'pi' })
-      assert.deepEqual(opened[1].team, [{ agent: 'zeus', harness: 'opencode', role: 'worker' }])
+      const [zeus] = (await operations['agents.list']({})).agents
+      assert.deepEqual(opened[1].team, [
+        {
+          role: 'worker',
+          agent: 'zeus',
+          harness: 'opencode',
+          tier: zeus.profile.workTier,
+          tags: zeus.tags,
+        },
+      ])
+      assert.ok(zeus.profile.workTier, 'a saved agent always has a tier')
       assert.deepEqual(
         next.project.participants.map((p) => p.handle),
         ['human', 'lead', 'zeus'],
@@ -182,7 +195,9 @@ describe('the page protocol of the new core', () => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
         harness: 'pi',
+        review: 'none',
       })
+      assert.equal(project.review, 'none')
       await operations['member.add']({ project: project.id, agent: 'zeus' })
       const { task } = await operations['task.add']({
         project: project.id,

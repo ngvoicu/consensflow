@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
@@ -162,7 +162,63 @@ describe('the Devin adapter', () => {
         settled: false,
         waiting: null,
         failed: false,
+        quota: null,
       })
+    })
+  })
+
+  it("reads Devin's own refusal from the wire log, until the next prompt", async () => {
+    await withHome(async ({ env }) => {
+      const adapter = devinAdapter({
+        env,
+        answers: async () => ({ items: [], inFlight: false, settlement: { state: 'settled' } }),
+        discoverEveryMs: 5,
+      })
+      const { launch } = await adapter.prepare(request())
+      await selects(env, 'dev-1')
+      await adapter.started({ launch })
+      const wire = path.join(integration(env), 'wire.jsonl')
+      const line = (event) => appendFile(wire, `${JSON.stringify(event)}\n`)
+      assert.equal((await adapter.observe({ launch })).quota, null)
+
+      await line({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'session/prompt',
+        params: { sessionId: 'dev-1' },
+      })
+      await line({
+        sessionId: 'dev-1',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: {
+            type: 'text',
+            text: 'Reached overall message rate limit. Your limit will reset in 35 minutes.',
+          },
+        },
+      })
+      const before = Date.now()
+      const { quota } = await adapter.observe({ launch })
+      assert.equal(quota.state, 'exhausted')
+      const reset = Date.parse(quota.resetsAt) - before
+      assert.ok(reset >= 34 * 60_000 && reset <= 36 * 60_000, `reset in ${reset} ms`)
+      assert.equal(
+        (await adapter.observe({ launch })).quota.state,
+        'exhausted',
+        'nothing new: still out',
+      )
+
+      await line({
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'session/prompt',
+        params: { sessionId: 'dev-1' },
+      })
+      await line({
+        sessionId: 'dev-1',
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'On it.' } },
+      })
+      assert.equal((await adapter.observe({ launch })).quota, null)
     })
   })
 })

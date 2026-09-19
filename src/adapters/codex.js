@@ -114,7 +114,7 @@ export function codexAdapter({
 
     async observe({ launch }) {
       if (launch.nativeSession === null) {
-        return { items: [], settled: false, waiting: null, failed: false }
+        return { items: [], settled: false, waiting: null, failed: false, quota: null }
       }
       const record = await answers('codex', launch.nativeSession, env)
       return { ...recordState(record), waiting: null }

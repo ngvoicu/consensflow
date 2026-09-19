@@ -39,6 +39,7 @@ function fakeAdapter(harness = 'claude-code') {
         items: [],
         settled: true,
         waiting: null,
+        quota: null,
         admit: true,
         arrive: true,
       }
@@ -74,6 +75,7 @@ function fakeAdapter(harness = 'claude-code') {
         items: [...agent.items],
         settled: agent.settled,
         waiting: agent.waiting,
+        quota: agent.quota,
         failed: false,
       }
     },
@@ -87,7 +89,19 @@ function fakeAdapter(harness = 'claude-code') {
   adapter.busy = (handle) => {
     adapter.agent(handle).settled = false
   }
+  adapter.quota = (handle, quota) => {
+    adapter.agent(handle).quota = quota
+  }
   return adapter
+}
+
+/** The saved model of each fake agent: what makes a reviewer independent of an author. */
+const MODELS = {
+  zeus: 'claude-opus-5',
+  diana: 'gpt-5.6-luna',
+  hera: 'muse-spark',
+  calliope: 'claude-opus-5',
+  astraeus: 'gpt-6-astra',
 }
 
 /** A pane host that opens nothing real and exits panes when told to. */
@@ -162,6 +176,7 @@ async function setup(fn, options = {}) {
       },
       paneEnv: (participant) => ({ CONSENSFLOW_PARTICIPANT: participant.handle }),
       roles: (participant) => `instructions for ${participant.role}`,
+      roster: (name) => ({ id: name, model: MODELS[name], profile: { modelKey: MODELS[name] } }),
       arrivalTimeoutMs: 30_000,
       launchTimeoutMs: 120_000,
       maxAttempts: 3,
@@ -175,13 +190,19 @@ async function setup(fn, options = {}) {
   }
 }
 
-/** A project with its lead window up and its workers (Zeus, unless told) in the team from the start. */
+/** A project with its lead window up, its workers (Zeus, unless told) in the team from the start, and no review gate. */
 async function withTeam(context, workers = ['zeus']) {
   const project = await context.dispatcher.openProject({
     directory: '/work/app',
     name: 'app',
     harness: 'claude-code',
-    team: workers.map((agent) => ({ agent, harness: 'claude-code', role: 'worker' })),
+    review: 'none',
+    team: workers.map((agent) => ({
+      agent,
+      harness: 'claude-code',
+      role: 'worker',
+      tier: 'standard',
+    })),
   })
   const id = (handle) =>
     context.ledger.project(project.id).participants.find((p) => p.handle === handle).id
@@ -487,7 +508,7 @@ describe('the dispatcher', () => {
         directory: '/work/app',
         name: 'app',
         harness: 'claude-code',
-        team: [{ agent: 'zeus', harness: 'claude-code', role: 'worker' }],
+        team: [{ agent: 'zeus', harness: 'claude-code', role: 'worker', tier: 'standard' }],
       })
       assert.deepEqual(
         project.participants.map((p) => p.handle),
@@ -602,5 +623,284 @@ describe('the delivered text', () => {
     })
     assert.ok(text.length < 5_000)
     assert.match(text, /\n… \(20000 characters; read all of it with: cf inbox read m-7\)$/)
+  })
+})
+
+/** A tiered team: two standard workers with tags, a light worker, and reviewers on two models. */
+async function withTiers(context, { review = 'none', reviewers = ['calliope', 'astraeus'] } = {}) {
+  const member = (agent, role, tier, tags) => ({ agent, harness: 'claude-code', role, tier, tags })
+  const project = await context.dispatcher.openProject({
+    directory: '/work/app',
+    name: 'app',
+    harness: 'claude-code',
+    review,
+    team: [
+      member('zeus', 'worker', 'standard', ['coding', 'rust']),
+      member('diana', 'worker', 'standard', ['coding']),
+      member('hera', 'worker', 'light', []),
+      ...reviewers.map((agent) => member(agent, 'reviewer', 'standard', [])),
+    ],
+  })
+  const id = (handle) =>
+    context.ledger.project(project.id).participants.find((p) => p.handle === handle).id
+  const open = (extra = {}) =>
+    context.ledger.createTask(project.id, {
+      from: 'lead',
+      pool: 'worker',
+      tier: 'standard',
+      body: 'Write the parser',
+      ...extra,
+    }).task
+  const task = (number) => context.ledger.task(project.id, number)
+  const notes = (handle) =>
+    context.ledger
+      .inbox(id(handle))
+      .filter((m) => m.kind === 'note')
+      .reverse()
+      .map((m) => m.body)
+  return { project, id, open, task, notes }
+}
+
+describe('the dispatcher assigns open tasks', () => {
+  it('gives an open task to a free member of its tier, preferring matching tags, then the least loaded', async () => {
+    await setup(async (context) => {
+      const { open, task } = await withTiers(context)
+      open({ tags: ['rust'] })
+      await context.dispatcher.pass()
+      assert.deepEqual([task(1).state, task(1).assignee], ['queued', 'zeus'])
+      assert.equal(context.host.last('zeus').id, 'p1-zeus')
+      open({ body: 'Write the docs' })
+      await context.dispatcher.pass()
+      assert.equal(task(2).assignee, 'diana', 'zeus is busy')
+      await context.dispatcher.pass()
+      context.adapter.answer('zeus', 'parser done')
+      context.adapter.answer('diana', 'docs done')
+      await context.dispatcher.pass()
+      assert.deepEqual([task(1).state, task(2).state], ['done', 'done'])
+
+      open({ tags: ['rust'], body: 'Lexer' })
+      await context.dispatcher.pass()
+      assert.equal(task(3).assignee, 'zeus', 'the tag decides between two free members')
+      await context.dispatcher.pass()
+      context.adapter.answer('zeus', 'lexer done')
+      await context.dispatcher.pass()
+      open({ body: 'Tests' })
+      await context.dispatcher.pass()
+      assert.equal(task(4).assignee, 'diana', 'with no tag, the member with fewer tasks so far')
+      open({ tier: 'light', body: 'Rename a file' })
+      await context.dispatcher.pass()
+      assert.equal(task(5).assignee, 'hera')
+    })
+  })
+
+  it('tells the requester once when nobody of the tier is free, and assigns when one frees up', async () => {
+    await setup(async (context) => {
+      const { open, task, notes } = await withTiers(context)
+      open()
+      open({ body: 'Docs' })
+      await context.dispatcher.pass()
+      open({ body: 'Third' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(task(3).state, 'open')
+      assert.deepEqual(notes('lead'), [
+        'T-3 waits for a free standard worker: @zeus and @diana are busy.',
+      ])
+      context.adapter.answer('zeus', 'done')
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.deepEqual([task(3).state, task(3).assignee], ['queued', 'zeus'])
+      assert.equal(notes('lead').length, 1)
+    })
+  })
+})
+
+describe('the dispatcher runs the review gate', () => {
+  /** A worker's task through to its result, under review. */
+  async function reviewed(context, body = 'Parser done') {
+    const fixture = await withTiers(context, { review: 'members' })
+    fixture.open()
+    await context.dispatcher.pass()
+    await context.dispatcher.pass()
+    context.adapter.answer('zeus', body)
+    await context.dispatcher.pass()
+    return fixture
+  }
+  const lead = (context) => context.adapter.agent('lead').items.map((item) => item.text)
+
+  it("puts a member's result in review with an independent reviewer, then releases it on pass", async () => {
+    await setup(async (context) => {
+      const { task } = await reviewed(context)
+      assert.equal(task(1).state, 'review')
+      await context.dispatcher.pass()
+      const review = task(2)
+      assert.deepEqual(
+        [review.kind, review.assignee, review.state],
+        ['review', 'astraeus', 'queued'],
+        "calliope shares the author's model; astraeus does not",
+      )
+      assert.match(context.adapter.prepared.at(-1).message, /Review T-1 \(round 1\) by @zeus\./)
+      await context.dispatcher.pass()
+      assert.equal(task(2).state, 'working')
+      context.adapter.answer('astraeus', 'Looks right.\n\nVERDICT: pass')
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        [task(1).state, task(1).round, task(2).state, task(2).verdict],
+        ['done', 1, 'done', 'pass'],
+      )
+      for (let n = 0; n < 4; n += 1) await context.dispatcher.pass()
+      assert.match(lead(context)[0], /result from @zeus\]\nParser done$/)
+      context.adapter.answer('lead', 'noted')
+      for (let n = 0; n < 3; n += 1) await context.dispatcher.pass()
+      assert.match(
+        lead(context).at(-1),
+        /T-2 · result from @astraeus\]\nLooks right\.\n\nVERDICT: pass$/,
+      )
+    })
+  })
+
+  it('sends the work back once on changes, then lets the requester decide', async () => {
+    await setup(async (context) => {
+      const { task, notes } = await reviewed(context)
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.adapter.answer('astraeus', 'Missing tests.\n\nVERDICT: changes')
+      await context.dispatcher.pass()
+      assert.deepEqual([task(1).state, task(1).assignee, task(1).round], ['queued', 'zeus', 1])
+      await context.dispatcher.pass()
+      assert.match(
+        context.adapter.agent('zeus').items.at(-1).text,
+        /task from @astraeus\]\nReview round 1 by @astraeus asks for changes:\n\nMissing tests\./,
+      )
+      assert.deepEqual(lead(context), [], 'the requester has seen nothing')
+      context.adapter.answer('zeus', 'Tests added')
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        [task(1).state, task(3).kind, task(3).assignee],
+        ['review', 'review', 'astraeus'],
+      )
+      await context.dispatcher.pass()
+      context.adapter.answer('astraeus', 'Still wrong.\n\nVERDICT: changes')
+      await context.dispatcher.pass()
+      assert.deepEqual([task(1).state, task(1).round], ['done', 2])
+      assert.deepEqual(notes('lead'), [
+        'T-1 asked for changes twice in review (T-2, T-3); its result and the reviews are in your inbox: accept it or send it back.',
+      ])
+    })
+  })
+
+  it('skips the review when no independent reviewer is on the team, and says so', async () => {
+    await setup(async (context) => {
+      const fixture = await withTiers(context, { review: 'members', reviewers: ['calliope'] })
+      fixture.open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.adapter.answer('zeus', 'Parser done')
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(fixture.task(1).state, 'done')
+      assert.deepEqual(fixture.notes('lead'), [
+        'T-1 unreviewed: no independent reviewer on the team.',
+      ])
+      assert.equal(context.host.last('calliope'), undefined, 'no review window opened')
+    })
+  })
+
+  it('waits for a busy reviewer rather than skipping, and replaces one whose window closes', async () => {
+    await setup(async (context) => {
+      const { open, task } = await reviewed(context)
+      await context.dispatcher.pass()
+      assert.equal(task(2).assignee, 'astraeus')
+      open({ tags: ['rust'], body: 'Lexer' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.adapter.answer('zeus', 'Lexer done')
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(task(3).state, 'review')
+      assert.equal(
+        context.ledger.reviewsPending(1).length,
+        1,
+        "T-3 waits for astraeus: calliope shares its author's model",
+      )
+
+      await context.host.exit('astraeus')
+      assert.equal(task(2).state, 'cancelled', 'the review went with the window')
+      assert.equal(task(1).state, 'review', 'the work still waits')
+      await context.dispatcher.pass()
+      const again = context.ledger
+        .board(1)
+        .lanes.find((l) => l.participant.handle === 'astraeus').tasks
+      assert.deepEqual(
+        again.filter((t) => t.state === 'queued').map((t) => t.reviewOf),
+        [task(1).id],
+        'a new review of T-1 for a fresh astraeus window',
+      )
+    })
+  })
+})
+
+describe('the dispatcher watches quota', () => {
+  const soon = (context, hours) =>
+    new Date(context.clock.now().getTime() + hours * 3_600_000).toISOString()
+
+  it('takes a task back from a member that ran out and gives it to another, telling the requester', async () => {
+    await setup(async (context) => {
+      const { open, task, notes, id } = await withTiers(context)
+      open({ tags: ['rust'] })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(task(1).state, 'working')
+      context.adapter.quota('zeus', { state: 'exhausted', resetsAt: soon(context, 2) })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.deepEqual([task(1).state, task(1).assignee], ['queued', 'diana'])
+      assert.match(
+        task(1).body,
+        /Reassigned from @zeus, which ran out of quota after starting; check the working tree/,
+      )
+      assert.deepEqual(notes('lead'), [
+        'T-1 was taken back from @zeus (ran out of quota after starting) and waits for another standard worker.',
+      ])
+      assert.equal(
+        context.ledger.project(1).participants.find((p) => p.id === id('zeus')).outUntil,
+        soon(context, 2),
+      )
+      assert.deepEqual(context.dispatcher.activity(id('zeus')), {
+        state: 'out',
+        reason: `out of quota until ${soon(context, 2)}`,
+      })
+    })
+  })
+
+  it('gives no new work to a member low on quota, keeps one out for an hour when its reset is unknown, and takes it again after', async () => {
+    await setup(async (context) => {
+      const { open, task, id } = await withTiers(context)
+      open({ tags: ['rust'] })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.adapter.answer('zeus', 'done')
+      await context.dispatcher.pass()
+      context.adapter.quota('zeus', { state: 'low', usedPercent: 97 })
+      await context.dispatcher.pass()
+      open({ tags: ['rust'], body: 'Lexer' })
+      await context.dispatcher.pass()
+      assert.equal(task(2).assignee, 'diana', 'zeus is low on quota')
+
+      context.adapter.quota('zeus', { state: 'exhausted' })
+      await context.dispatcher.pass()
+      assert.equal(
+        context.ledger.project(1).participants.find((p) => p.id === id('zeus')).outUntil,
+        soon(context, 1),
+      )
+      context.adapter.quota('zeus', null)
+      open({ body: 'Tests' })
+      await context.dispatcher.pass()
+      assert.equal(task(3).state, 'open', 'diana is busy and zeus is out')
+      context.clock.advance(2 * 3_600_000)
+      await context.dispatcher.pass()
+      assert.equal(task(3).assignee, 'zeus')
+    })
   })
 })

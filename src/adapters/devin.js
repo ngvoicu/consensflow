@@ -1,6 +1,8 @@
+import { open } from 'node:fs/promises'
 import { setTimeout as wait } from 'node:timers/promises'
 import { selectedSession } from '../../hosts/devin-receiver.mjs'
 import { cachedAnswers } from '../../hosts/lib/completion.js'
+import { DEVIN_REFUSAL, exhaustedQuota } from '../../hosts/lib/quota.js'
 import { interactiveResume, interactiveStart } from '../../hosts/lib/runners.js'
 import { send as sendDevin } from '../channels/devin.js'
 import { prepareDevinIntegration, prepareDevinPrompt } from '../devin-install.js'
@@ -97,14 +99,57 @@ export function devinAdapter({
 
     async observe({ launch }) {
       if (launch.nativeSession === null) {
-        return { items: [], settled: false, waiting: null, failed: false }
+        return { items: [], settled: false, waiting: null, failed: false, quota: null }
       }
-      const record = await answers('devin', launch.nativeSession, env)
-      return { ...recordState(record), waiting: null }
+      const [record, quota] = await Promise.all([
+        answers('devin', launch.nativeSession, env),
+        wireQuota(launch.channel),
+      ])
+      return { ...recordState(record), waiting: null, quota }
     },
 
     transcript({ launch }) {
       return { harness: 'devin', session: launch.nativeSession, wire: launch.channel.wire }
     },
   }
+}
+
+/**
+ * Devin's own word on its quota, from the wire log of this launch: a refusal
+ * in its message text after the latest prompt ("Reached overall message rate
+ * limit … reset in 35 minutes", "Usage limit reached", "Quota exhausted").
+ * The log only grows, so each look reads what was appended since the last.
+ */
+async function wireQuota(channel) {
+  const file = await open(channel.wire, 'r').catch(() => null)
+  if (file === null) return channel.quota ?? null
+  try {
+    const { size } = await file.stat()
+    let from = channel.wireOffset ?? 0
+    if (size < from) from = 0
+    if (size > from) {
+      const buffer = Buffer.alloc(size - from)
+      await file.read(buffer, 0, size - from, from)
+      channel.wireOffset = size
+      const lines = `${channel.wireCarry ?? ''}${buffer.toString('utf8')}`.split('\n')
+      channel.wireCarry = lines.pop()
+      for (const line of lines) {
+        let event
+        try {
+          event = JSON.parse(line)
+        } catch {
+          continue
+        }
+        if (event.method === 'session/prompt') channel.quota = null
+        const text =
+          event.update?.sessionUpdate === 'agent_message_chunk' ? event.update.content?.text : null
+        if (typeof text === 'string' && DEVIN_REFUSAL.test(text)) {
+          channel.quota = exhaustedQuota(text, Date.now())
+        }
+      }
+    }
+  } finally {
+    await file.close()
+  }
+  return channel.quota ?? null
 }

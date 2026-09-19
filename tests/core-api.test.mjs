@@ -31,7 +31,12 @@ async function withApi(fn) {
     name: 'app',
     lead: { harness: 'claude-code' },
   })
-  ledger.addMember(project.id, { agent: 'zeus', harness: 'claude-code', role: 'worker' })
+  ledger.addMember(project.id, {
+    agent: 'zeus',
+    harness: 'claude-code',
+    role: 'worker',
+    tier: 'standard',
+  })
   const participant = (handle) =>
     ledger.project(project.id).participants.find((p) => p.handle === handle)
   const token = (handle) =>

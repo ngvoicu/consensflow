@@ -233,8 +233,13 @@ describe('the OpenCode adapter', () => {
         items: [{ id: 'u', role: 'user' }],
         inFlight: false,
         settlement: { state: 'settled' },
+        quota: { state: 'exhausted', resetsAt: null },
       }
-      assert.equal((await adapter.observe({ launch })).settled, true)
+      const observed = await adapter.observe({ launch })
+      assert.deepEqual(
+        [observed.settled, observed.quota],
+        [true, { state: 'exhausted', resetsAt: null }],
+      )
     })
   })
 })

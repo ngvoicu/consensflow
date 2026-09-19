@@ -139,11 +139,18 @@ describe('the Pi adapter', () => {
         env,
         answers: async (...call) => {
           calls.push(call)
-          return { items: [], inFlight: false, settlement: { state: 'unknown' } }
+          return {
+            items: [],
+            inFlight: false,
+            settlement: { state: 'unknown' },
+            quota: { state: 'exhausted', resetsAt: '2026-09-22T10:00:00.000Z' },
+          }
         },
       })
       const { launch } = await adapter.prepare(request())
-      assert.equal((await adapter.observe({ launch })).settled, true)
+      const observed = await adapter.observe({ launch })
+      assert.equal(observed.settled, true)
+      assert.deepEqual(observed.quota, { state: 'exhausted', resetsAt: '2026-09-22T10:00:00.000Z' })
       const [kind, session, , options] = calls[0]
       assert.deepEqual([kind, session], ['pi', launch.nativeSession])
       assert.deepEqual(options.piSettlement, {

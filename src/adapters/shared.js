@@ -22,6 +22,7 @@ export function recordState(record) {
     items,
     settled: state === 'settled' || (state !== 'in-flight' && empty),
     failed: record?.failed === true,
+    quota: record?.quota ?? null,
   }
 }
 

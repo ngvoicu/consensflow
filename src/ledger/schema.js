@@ -12,10 +12,12 @@ export const MIGRATIONS = [
     name TEXT NOT NULL,
     state TEXT NOT NULL,
     resume_on_start INTEGER NOT NULL DEFAULT 0,
+    review TEXT NOT NULL DEFAULT 'members',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     CONSTRAINT project_state_check CHECK (state IN ('open', 'suspended')),
-    CONSTRAINT project_resume_on_start_check CHECK (resume_on_start IN (0, 1))
+    CONSTRAINT project_resume_on_start_check CHECK (resume_on_start IN (0, 1)),
+    CONSTRAINT project_review_check CHECK (review IN ('none', 'members', 'all'))
   ) STRICT;
 
   CREATE TABLE participant (
@@ -27,11 +29,16 @@ export const MIGRATIONS = [
     harness TEXT,
     created_at TEXT NOT NULL,
     left_at TEXT,
+    tier TEXT,
+    tags TEXT NOT NULL DEFAULT '[]',
+    out_until TEXT,
     CONSTRAINT participant_project_fk FOREIGN KEY (project_id)
       REFERENCES project (id) ON DELETE CASCADE,
     CONSTRAINT participant_handle_unique UNIQUE (project_id, handle),
     CONSTRAINT participant_role_check
-      CHECK (role IN ('human', 'lead', 'pm', 'advisor', 'worker', 'reviewer'))
+      CHECK (role IN ('human', 'lead', 'pm', 'advisor', 'worker', 'reviewer')),
+    CONSTRAINT participant_tier_check
+      CHECK (tier IS NULL OR tier IN ('critical', 'complex', 'standard', 'light'))
   ) STRICT;
 
   CREATE TABLE conversation (
@@ -55,8 +62,16 @@ export const MIGRATIONS = [
     title TEXT NOT NULL,
     body TEXT NOT NULL,
     requester_id INTEGER NOT NULL,
-    assignee_id INTEGER NOT NULL,
+    assignee_id INTEGER,
     state TEXT NOT NULL,
+    pool TEXT,
+    tier TEXT,
+    tags TEXT NOT NULL DEFAULT '[]',
+    purpose TEXT,
+    kind TEXT NOT NULL DEFAULT 'work',
+    review_of INTEGER,
+    round INTEGER NOT NULL DEFAULT 0,
+    verdict TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     CONSTRAINT task_project_fk FOREIGN KEY (project_id)
@@ -66,9 +81,18 @@ export const MIGRATIONS = [
     CONSTRAINT task_assignee_fk FOREIGN KEY (assignee_id)
       REFERENCES participant (id) ON DELETE CASCADE,
     CONSTRAINT task_number_unique UNIQUE (project_id, number),
+    CONSTRAINT task_review_of_fk FOREIGN KEY (review_of)
+      REFERENCES task (id) ON DELETE CASCADE,
     CONSTRAINT task_state_check CHECK (
-      state IN ('queued', 'working', 'waiting', 'done', 'accepted', 'failed', 'cancelled')
-    )
+      state IN ('open', 'queued', 'working', 'waiting', 'review', 'done', 'accepted', 'failed', 'cancelled')
+    ),
+    CONSTRAINT task_assignee_check
+      CHECK (assignee_id IS NOT NULL OR state IN ('open', 'cancelled', 'failed')),
+    CONSTRAINT task_pool_check CHECK (pool IS NULL OR pool IN ('worker', 'advisor')),
+    CONSTRAINT task_tier_check
+      CHECK (tier IS NULL OR tier IN ('critical', 'complex', 'standard', 'light')),
+    CONSTRAINT task_kind_check CHECK (kind IN ('work', 'review')),
+    CONSTRAINT task_verdict_check CHECK (verdict IS NULL OR verdict IN ('pass', 'changes'))
   ) STRICT;
   CREATE INDEX task_assignee_index ON task (assignee_id, state);
 
@@ -100,7 +124,7 @@ export const MIGRATIONS = [
     CONSTRAINT message_kind_check
       CHECK (kind IN ('task', 'result', 'question', 'answer', 'note')),
     CONSTRAINT message_state_check CHECK (
-      state IN ('queued', 'delivering', 'delivered', 'read', 'failed', 'cancelled')
+      state IN ('queued', 'delivering', 'delivered', 'read', 'held', 'failed', 'cancelled')
     )
   ) STRICT;
   CREATE INDEX message_queue_index ON message (recipient_id, state, id);
