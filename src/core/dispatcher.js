@@ -58,8 +58,12 @@ const OPENING = 3000
 const RECEIVED_ROLES = new Set(['user', 'custom', 'tool'])
 const COORDINATORS = new Set(['lead', 'pm'])
 
-/** How a message reads in the recipient's pane. The header doubles as the arrival marker. */
-export function deliveryText(message) {
+/**
+ * How a message reads in the recipient's pane. The header doubles as the
+ * arrival marker. A result carries its reviews under it, in plain words: one
+ * delivery per finished task, the findings readable in full on the board.
+ */
+export function deliveryText(message, { reviews = [], unreviewed = null } = {}) {
   const from = message.sender === null ? 'ConsensFlow' : `@${message.sender}`
   const task =
     message.taskNumber === null || message.taskNumber === undefined
@@ -70,7 +74,27 @@ export function deliveryText(message) {
       ? message.body
       : `${message.body.slice(0, OPENING)}\n… (${message.body.length} characters; read all of it with: cf inbox read m-${message.id})`
   const footer = message.kind === 'question' ? `\n\nAnswer with: cf answer m-${message.id} "…"` : ''
-  return `[ConsensFlow m-${message.id}${task} · ${message.kind} from ${from}]\n${body}${footer}`
+  return `[ConsensFlow m-${message.id}${task} · ${message.kind} from ${from}]\n${body}${reviewText(reviews, unreviewed)}${footer}`
+}
+
+function reviewText(reviews, unreviewed) {
+  const done = reviews.filter((review) => review.state === 'done')
+  const parts = done.map((review) => {
+    const findings =
+      review.findings === null
+        ? ''
+        : review.findings.length <= OPENING
+          ? `\n${review.findings}`
+          : `\n${review.findings.slice(0, OPENING)}\n… (read all of it with: cf task get T-${review.number})`
+    return `Reviewed by @${review.reviewer}, round ${review.round}: ${review.verdict ?? 'pass (no verdict line)'}${findings}`
+  })
+  if (done.length >= 2 && done.at(-1).verdict === 'changes') {
+    parts.push(
+      'The reviewer asked for changes twice. Accept it, or send it back with what to change.',
+    )
+  }
+  if (unreviewed !== null) parts.push(`Unreviewed: ${unreviewed}.`)
+  return parts.length === 0 ? '' : `\n\n${parts.join('\n\n')}`
 }
 
 const markerOf = (messageId) => `[ConsensFlow m-${messageId} ·`
@@ -353,7 +377,7 @@ export class Dispatcher {
     }
     if (runtime.delivering === null && observed.settled && !observed.waiting) {
       const next = this.#ledger.nextDelivery(participant.id)
-      if (next !== null) await this.#deliver(runtime, next)
+      if (next !== null) await this.#deliver(project, runtime, next)
     }
   }
 
@@ -375,15 +399,27 @@ export class Dispatcher {
    * goes in first. A resumed conversation has it already.
    */
   #launchText(project, participant, message, resume) {
+    const text = this.#textFor(project, message)
     if (resume !== null || COORDINATORS.has(participant.role) || message.taskNumber == null) {
-      return deliveryText(message)
+      return text
     }
     const task = this.#ledger.task(project.id, message.taskNumber)
     const brief = task?.messages.find(
       (m) => m.kind === 'task' && m.recipient === participant.handle,
     )
-    if (brief === undefined || brief.id === message.id) return deliveryText(message)
-    return `${deliveryText(brief)}\n\n${deliveryText(message)}`
+    if (brief === undefined || brief.id === message.id) return text
+    return `${deliveryText(brief)}\n\n${text}`
+  }
+
+  /** A work task's result reads with its reviews under it; anything else reads as it is. */
+  #textFor(project, message) {
+    if (message.kind !== 'result' || message.taskNumber == null) return deliveryText(message)
+    const task = this.#ledger.task(project.id, message.taskNumber)
+    if (task === null || task.kind !== 'work') return deliveryText(message)
+    return deliveryText(message, {
+      reviews: this.#ledger.reviewsOf(project.id, task.number),
+      unreviewed: task.unreviewed,
+    })
   }
 
   #watchArrival(runtime, observed) {
@@ -474,7 +510,7 @@ export class Dispatcher {
     this.#changed()
   }
 
-  async #deliver(runtime, message) {
+  async #deliver(project, runtime, message) {
     if (runtime.adapter.ready !== undefined) {
       const ready = await runtime.adapter.ready({
         launch: runtime.launch,
@@ -490,7 +526,7 @@ export class Dispatcher {
         launch: runtime.launch,
         pane: runtime.pane,
         host: this.#host,
-        text: deliveryText(message),
+        text: this.#textFor(project, message),
       })
     } catch (cause) {
       // Uncertain is for a harness that may have taken it; an adapter that

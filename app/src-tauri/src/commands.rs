@@ -1610,6 +1610,55 @@ pub fn roster_handle<R: Runtime>(app: AppHandle<R>) -> Value {
     }
 }
 
+/// The agents screens (the roster, the library, the harnesses) in their own
+/// window at the daemon's address. The board's page cannot frame them: it
+/// is served over the app's secure scheme and WebKit blocks a plain-HTTP
+/// frame inside it as mixed content. A second window loads the address as a
+/// top-level page, which is allowed. One window, reused: a later call turns
+/// it to the asked page and brings it forward.
+#[tauri::command]
+pub fn open_agents_window<R: Runtime>(app: AppHandle<R>, page: String) -> Value {
+    let Some(roster) = app.state::<AppRuntime>().roster.clone() else {
+        return json!({"ok":false,"error":"the agents screens are not available: the daemon is not up"});
+    };
+    let url = match agents_url(&roster, &page) {
+        Ok(url) => url,
+        Err(error) => return json!({"ok":false,"error":error}),
+    };
+    if let Some(window) = app.get_webview_window(AGENTS_WINDOW) {
+        if let Err(error) = window.navigate(url.clone()) {
+            return json!({"ok":false,"error":format!("the agents window could not turn to {page:?}: {error}")});
+        }
+        let _ = window.set_focus();
+        return json!({"ok":true,"label":AGENTS_WINDOW,"url":url.as_str(),"reused":true});
+    }
+    match tauri::WebviewWindowBuilder::new(&app, AGENTS_WINDOW, tauri::WebviewUrl::External(url.clone()))
+        .title("ConsensFlow agents")
+        .inner_size(1120.0, 820.0)
+        .build()
+    {
+        Ok(_) => json!({"ok":true,"label":AGENTS_WINDOW,"url":url.as_str(),"reused":false}),
+        Err(error) => json!({"ok":false,"error":format!("the agents window could not open: {error}")}),
+    }
+}
+
+const AGENTS_WINDOW: &str = "agents";
+const AGENTS_PAGES: &[&str] = &["", "library", "harnesses"];
+
+/// The daemon's page for one agents screen, carrying the UI token.
+fn agents_url(roster: &RosterHandle, page: &str) -> Result<tauri::Url, String> {
+    if !AGENTS_PAGES.contains(&page) {
+        return Err(format!("no agents screen {page:?}"));
+    }
+    let mut url = tauri::Url::parse(&roster.url)
+        .map_err(|error| format!("the editor handle is not an address: {error}"))?;
+    url.set_path(&format!("/{page}"));
+    url.query_pairs_mut()
+        .clear()
+        .append_pair("token", &roster.token);
+    Ok(url)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1687,6 +1736,29 @@ mod tests {
             "token":"secret",
         }))
         .is_err());
+    }
+
+    #[test]
+    fn agents_screens_open_at_the_daemon_pages_with_the_token() {
+        let roster = RosterHandle::from_value(json!({
+            "url":"http://127.0.0.1:43123/",
+            "token":"secret",
+        }))
+        .unwrap();
+        assert_eq!(
+            agents_url(&roster, "").unwrap().as_str(),
+            "http://localhost:43123/?token=secret"
+        );
+        assert_eq!(
+            agents_url(&roster, "library").unwrap().as_str(),
+            "http://localhost:43123/library?token=secret"
+        );
+        assert_eq!(
+            agents_url(&roster, "harnesses").unwrap().as_str(),
+            "http://localhost:43123/harnesses?token=secret"
+        );
+        assert!(agents_url(&roster, "admin").is_err());
+        assert!(agents_url(&roster, "../etc").is_err());
     }
 
     #[test]

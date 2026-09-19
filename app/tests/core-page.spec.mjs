@@ -646,20 +646,23 @@ test("groups the PM's team after the lead's, on the board and in its own windows
   expect(await page.locator('.bay').count()).toBe(6, 'the board stays beside the dock')
 })
 
-test("opens the agents screens at the daemon's pages with the app's token, and refreshes on close", async ({
+test('opens the agents screens in their own window, and refreshes the agents when this one is back in front', async ({
   page,
 }) => {
   await open(page)
+  const opened = () =>
+    page.evaluate(() =>
+      window.__calls.filter(([c]) => c === 'open_agents_window').map(([, args]) => args.page),
+    )
   await page.getByRole('button', { name: 'Your agents' }).click()
-  const agents = page.getByRole('dialog', { name: 'Your agents' })
-  await expect(agents.locator('iframe')).toHaveAttribute(
-    'src',
-    'http://127.0.0.1:1/?token=ui-token',
-  )
+  await expect.poll(opened).toEqual([''])
+  await page.getByRole('button', { name: 'Agent library' }).click()
+  await page.getByRole('button', { name: 'Harnesses' }).click()
+  await expect.poll(opened).toEqual(['', 'library', 'harnesses'])
   const listed = await page.evaluate(
     () => window.__calls.filter(([, args]) => args?.operation === 'agents.list').length,
   )
-  await agents.getByRole('button', { name: 'Close Your agents' }).click()
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect
     .poll(() =>
       page.evaluate(
@@ -667,19 +670,7 @@ test("opens the agents screens at the daemon's pages with the app's token, and r
       ),
     )
     .toBe(listed + 1)
-  await page.getByRole('button', { name: 'Agent library' }).click()
-  await expect(
-    page.getByRole('dialog', { name: 'Agent library' }).locator('iframe'),
-  ).toHaveAttribute('src', 'http://127.0.0.1:1/library?token=ui-token')
-  await page.getByRole('button', { name: 'Close Agent library' }).click()
-  await page.getByRole('button', { name: 'Harnesses' }).click()
-  await expect(page.getByRole('dialog', { name: 'Harnesses' }).locator('iframe')).toHaveAttribute(
-    'src',
-    'http://127.0.0.1:1/harnesses?token=ui-token',
-  )
-  expect(
-    await page.evaluate(() => window.__calls.filter(([c]) => c === 'roster_handle').length),
-  ).toBe(1)
+  expect(await page.getByRole('dialog').count()).toBe(0)
 })
 
 test('shows a member between tasks as free, its window gone until the next task', async ({

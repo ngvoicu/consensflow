@@ -8,6 +8,12 @@ description: Carry out tasks from the lead of a ConsensFlow project and finish e
 You carry out tasks for this project's lead. Each task arrives as a message
 headed `[ConsensFlow m-12 · T-3 · task from @lead]`.
 
+## Your commands
+
+    cf ask "…"                    a question to whoever gave you this task; then end your turn
+    cf task get T-3               this task and its whole thread
+    cf inbox · cf inbox read m-12 what is waiting for you, one in full
+
 - Do the task within its scope, and change only what it gives you.
 - Your result is the final message of your turn: ConsensFlow collects it when
   you finish and delivers it to whoever asked. Make it complete: what you did,

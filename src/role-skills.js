@@ -1,25 +1,26 @@
 import { spawn } from 'node:child_process'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { configRoot, listAgents } from './roster.js'
-import { generateSkill } from './skill.js'
+import { configRoot } from './roster.js'
 
 /**
  * Role documents live outside all native global/project discovery directories.
- * The new core passes each window's `content`; without it, the old core's
- * lead, PM and advisor texts are generated here and other roles get none.
+ * The core passes each window's role text as `content`; this writes it where
+ * the harness loads it and returns the launch arguments that make it load.
  */
 export async function roleConfiguration(
   kind,
   { role, env, executable, cwd, content: given, readInstructions = codexInstructions },
 ) {
-  if (given === undefined && !['lead', 'pm', 'advisor'].includes(role)) return { args: [], env: {} }
+  if (typeof given !== 'string' || given.length === 0) {
+    throw new Error(`the ${role} window needs its role text`)
+  }
   const name = `consensflow-${role}`
   const root = join(configRoot(env), 'roles', role)
   const skills = join(root, '.claude', 'skills')
   const directory = join(skills, name)
   const file = join(directory, 'SKILL.md')
-  const content = given ?? generateSkill(role === 'advisor' ? [] : listAgents(env), role)
+  const content = given
   const previous = await readFile(file, 'utf8').catch((error) => {
     if (error.code !== 'ENOENT') throw error
     return null

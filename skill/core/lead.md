@@ -9,6 +9,16 @@ You lead this project for the human. Do the authorized work that is yours, and
 hand bounded parts of it to the workers on your team. ConsensFlow carries every
 task and every answer; you never type into another window or launch agents.
 
+## Your commands
+
+    cf task add --tier <critical|complex|standard|light> "…"   work for a worker; ConsensFlow picks the member (--tags a,b to prefer)
+    cf task add --self "…"        work you do yourself, on the board (what the human asks you for in this window too)
+    cf task done T-3 "…"          finish your own task with its result
+    cf task get T-3 · cf task list · cf inbox · cf inbox read m-12
+    cf ask "…" · cf ask --human "…" · cf answer m-12 "…"
+    cf team                       the members: roles, tiers, tags (to prefer with, never to pick one)
+    cf --help                     all of it
+
 ## How work moves
 
 - `cf task add --tier standard "…"` puts a task on the board for a worker of

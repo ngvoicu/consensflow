@@ -41,6 +41,7 @@ const request = (overrides = {}) => ({
   launchId: 'launch-1',
   participant,
   role: 'worker',
+  instructions: '# ConsensFlow worker\n\nRole text for the test.',
   directory: '/work/app',
   resume: null,
   message: '[ConsensFlow m-1 · T-1 · task from @lead]\nWrite the parser',
@@ -58,10 +59,23 @@ describe('the Pi adapter', () => {
         extension,
         /extensions\/pi\/[0-9a-f]+\/hosts\/pi-extension\/consensflow-delivery\.mjs$/,
       )
+      const skill = path.join(
+        env.CONSENSFLOW_HOME,
+        'roles',
+        'worker',
+        '.claude',
+        'skills',
+        'consensflow-worker',
+        'SKILL.md',
+      )
       assert.deepEqual(plan.argv, [
         executable,
         '--extension',
         extension,
+        '--skill',
+        skill,
+        '--append-system-prompt',
+        '# ConsensFlow worker\n\nRole text for the test.',
         '--session-id',
         plan.nativeSession,
         '--model',
@@ -85,7 +99,7 @@ describe('the Pi adapter', () => {
         request({ resume: 'cf-1-zeus-0000abcd', message: null }),
       )
       assert.equal(plan.nativeSession, 'cf-1-zeus-0000abcd')
-      assert.deepEqual(plan.argv.slice(3), [
+      assert.deepEqual(plan.argv.slice(7), [
         '--session-id',
         'cf-1-zeus-0000abcd',
         '--model',

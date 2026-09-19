@@ -85,16 +85,20 @@ test('a reviewer on another model passes the work, and the requester gets the re
     assert.equal((await p.task(review.number)).verdict, 'pass')
     await app.waitFor(async () => {
       const messages = await p.inbox('lead')
-      return messages.filter((m) => m.kind === 'result' && m.state === 'delivered').length === 2
+      return messages.some(
+        (m) => m.kind === 'result' && m.taskNumber === 2 && m.state === 'delivered',
+      )
     }, 60_000)
-    const results = (await p.inbox('lead')).filter((m) => m.kind === 'result').reverse()
+    const results = (await p.inbox('lead')).filter(
+      (m) => m.kind === 'result' && m.state === 'delivered',
+    )
     assert.deepEqual(
       results.map((m) => [m.taskNumber, m.body]),
-      [
-        [2, 'WORKER_OK'],
-        [review.number, 'VERDICT: pass'],
-      ],
+      [[2, 'WORKER_OK']],
+      'one delivery: the result; the findings stay on the review task',
     )
+    const findings = (await p.task(review.number)).messages.find((m) => m.kind === 'result')
+    assert.deepEqual([findings.state, findings.body], ['read', 'VERDICT: pass'])
   } finally {
     await app.close()
   }
@@ -175,10 +179,18 @@ test('a reviewer asking for changes twice sends the work back once, then the req
       async () => (await p.task(2))?.round === 2 && (await p.task(2))?.state === 'done',
       120_000,
     )
+    // One delivery to the lead: the result, with both verdicts written under
+    // it as it goes; no note. The findings stay on the review tasks.
     await app.waitFor(async () => {
-      const notes = (await p.inbox('lead')).filter((m) => m.kind === 'note')
-      return notes.some((m) => m.body.includes('asked for changes twice in review'))
+      const messages = await p.inbox('lead')
+      return messages.some(
+        (m) => m.kind === 'result' && m.taskNumber === 2 && m.state === 'delivered',
+      )
     }, 60_000)
+    assert.ok(
+      !(await p.inbox('lead')).some((m) => m.kind === 'note' && /changes twice/.test(m.body)),
+      'no note about the rounds',
+    )
     const reviews = (await p.lane('checker')).tasks
     assert.deepEqual(
       reviews.map((t) => [t.kind, t.state, t.verdict]),
@@ -187,6 +199,10 @@ test('a reviewer asking for changes twice sends the work back once, then the req
         ['review', 'done', 'changes'],
       ],
     )
+    for (const review of reviews) {
+      const findings = (await p.task(review.number)).messages.find((m) => m.kind === 'result')
+      assert.deepEqual([findings.state, findings.body], ['read', 'VERDICT: changes'])
+    }
   } finally {
     await app.close()
   }

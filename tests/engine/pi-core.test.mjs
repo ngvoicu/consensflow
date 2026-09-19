@@ -908,11 +908,13 @@ test('legacy Pi host payload is absent and lead skill preserves authorization', 
   assert.equal(existsSync(new URL('hosts/pi', root)), false, 'no pi payload ships')
   assert.equal(existsSync(new URL('hosts/claude', root)), false, 'nor a claude one')
 
-  // Generated role instructions preserve the user's authorization boundary.
-  const { generateSkill } = await import('../../src/skill.js')
-  const skill = generateSkill([{ name: 'zeus', harness: 'pi', model: 'fake', effort: 'high' }])
-  assert.match(skill, /user's authorized task/)
-  assert.match(skill, /delegate suggestions do not expand authorization/)
+  // The lead's role text preserves the user's authorization boundary.
+  const { roleInstructions } = await import('../../src/core/roles.js')
+  const skill = roleInstructions('lead', [
+    { name: 'zeus', harness: 'pi', model: 'fake', effort: 'high' },
+  ])
+  assert.match(skill, /authorized work/)
+  assert.match(skill, /only the human gives the lead or the PM a task/)
 })
 
 // The extension/engine boundary test went with the extension: nothing imports

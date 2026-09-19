@@ -285,22 +285,23 @@ try {
       verdict: verdict?.verdict ?? null,
       ...(verdict ? {} : { reviewer: (await lane('bench-reviewer'))?.activity }),
     })
+    // One delivery: the result reaches the lead with the verdict under it;
+    // the reviewer's findings stay on the review task, for the board.
     const delivered = verdict
       ? await until(async () => {
-          const messages = await inbox('lead')
-          const result = messages.find(
+          const result = (await inbox('lead')).find(
             (m) =>
               m.kind === 'result' && m.taskNumber === reviewed.number && m.state === 'delivered',
           )
-          const judgement = messages.find(
-            (m) => m.kind === 'result' && m.taskNumber === review.number && m.state === 'delivered',
-          )
-          return result && judgement ? { result, judgement } : null
+          const findings = (
+            await app.requestNode('task.get', { project, task: review.number })
+          ).task?.messages.find((m) => m.kind === 'result')
+          return result && findings ? { result, findings } : null
         }, 300_000)
       : null
     record('review-received-by-lead', Boolean(delivered), {
       seconds: Math.round((Date.now() - started) / 1000),
-      ...(delivered ? { judgement: delivered.judgement.body.slice(0, 120) } : {}),
+      ...(delivered ? { findings: delivered.findings.body.slice(0, 120) } : {}),
     })
   }
 

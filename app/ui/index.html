@@ -431,15 +431,6 @@
     }
     dialog::backdrop { background: rgba(4, 12, 15, .6); }
     /* The agents screens: the daemon's own pages, full height, in a frame. */
-    dialog.screen {
-      width: min(1100px, calc(100vw - 32px));
-      height: calc(100vh - 32px);
-      padding: 0;
-    }
-    dialog.screen[open] { display: grid; grid-template-rows: 46px minmax(0, 1fr); }
-    .screen-bar { display: flex; align-items: center; gap: 10px; padding: 0 12px 0 18px; border-bottom: 1px solid var(--line-soft); }
-    .screen-bar h2 { margin: 0; flex: 1; font-size: 15px; }
-    dialog.screen iframe { width: 100%; height: 100%; border: 0; background: #fff; }
     .dialog-form { display: grid; gap: 14px; padding: 18px 20px; }
     .dialog-form h2 { margin: 0; font-size: 16px; }
     .dialog-form label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
@@ -492,9 +483,9 @@
       <span class="spacer"></span>
       <button class="quiet-button" id="inbox-button" type="button">Inbox</button>
       <button class="quiet-button" id="team-button" type="button">Team</button>
-      <button class="quiet-button" id="agents-button" type="button" aria-haspopup="dialog" aria-controls="agents-dialog">Your agents</button>
-      <button class="quiet-button" id="library-button" type="button" aria-haspopup="dialog" aria-controls="library-dialog">Agent library</button>
-      <button class="quiet-button" id="harnesses-button" type="button" aria-haspopup="dialog" aria-controls="harnesses-dialog">Harnesses</button>
+      <button class="quiet-button" id="agents-button" type="button">Your agents</button>
+      <button class="quiet-button" id="library-button" type="button">Agent library</button>
+      <button class="quiet-button" id="harnesses-button" type="button">Harnesses</button>
       <button class="primary-button" id="new-project" type="button">New project</button>
     </header>
     <nav class="sidebar" aria-label="Projects">
@@ -513,27 +504,6 @@
   </div>
   <div class="parking" id="parking" aria-hidden="true"></div>
 
-  <dialog class="screen" id="agents-dialog" aria-labelledby="agents-title">
-    <header class="screen-bar">
-      <h2 id="agents-title">Your agents</h2>
-      <button class="quiet-button" type="button" value="cancel" aria-label="Close Your agents" autofocus>Close</button>
-    </header>
-    <iframe title="ConsensFlow roster editor" referrerpolicy="no-referrer" sandbox="allow-forms allow-same-origin allow-scripts"></iframe>
-  </dialog>
-  <dialog class="screen" id="library-dialog" aria-labelledby="library-title">
-    <header class="screen-bar">
-      <h2 id="library-title">Agent library</h2>
-      <button class="quiet-button" type="button" value="cancel" aria-label="Close Agent library" autofocus>Close</button>
-    </header>
-    <iframe title="ConsensFlow agent library" referrerpolicy="no-referrer" sandbox="allow-forms allow-same-origin allow-scripts"></iframe>
-  </dialog>
-  <dialog class="screen" id="harnesses-dialog" aria-labelledby="harnesses-title">
-    <header class="screen-bar">
-      <h2 id="harnesses-title">Harnesses</h2>
-      <button class="quiet-button" type="button" value="cancel" aria-label="Close Harnesses" autofocus>Close</button>
-    </header>
-    <iframe title="ConsensFlow harness diagnostics" referrerpolicy="no-referrer" sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox"></iframe>
-  </dialog>
 
   <dialog id="new-project-dialog" aria-labelledby="new-project-title">
     <form class="dialog-form">

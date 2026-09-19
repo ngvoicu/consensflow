@@ -73,6 +73,7 @@ export const MIGRATIONS = [
     review_of INTEGER,
     round INTEGER NOT NULL DEFAULT 0,
     verdict TEXT,
+    unreviewed TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     CONSTRAINT task_project_fk FOREIGN KEY (project_id)

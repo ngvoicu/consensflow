@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { roleInstructions } from '../src/core/roles.js'
 import { roleConfiguration } from '../src/role-skills.js'
-import { addAgent } from '../src/roster.js'
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'cf-role-skills-'))
@@ -12,47 +12,126 @@ async function fixture(t) {
   return { root, env: { HOME: root, CONSENSFLOW_HOME: join(root, 'app') } }
 }
 
-test('lead skills use a private directory and leave global canaries unchanged', async (t) => {
+const worker = {
+  name: 'saved-worker',
+  harness: 'codex',
+  model: 'gpt-6-astra',
+  effort: 'xhigh',
+  tags: ['coding', 'review'],
+}
+
+test('a role text is written in a private directory, and global skills are left alone', async (t) => {
   const { root, env } = await fixture(t)
   const global = join(root, '.claude', 'skills', 'consensflow')
   await mkdir(global, { recursive: true })
   await writeFile(join(global, 'SKILL.md'), 'global canary')
-  const configuration = await roleConfiguration('claude-code', { role: 'lead', env })
+  const content = roleInstructions('lead', [worker])
+  const configuration = await roleConfiguration('claude-code', { role: 'lead', env, content })
   assert.equal(configuration.args[0], '--add-dir')
   assert.ok(configuration.args[1].startsWith(env.CONSENSFLOW_HOME))
   const text = await readFile(
     join(configuration.args[1], '.claude/skills/consensflow-lead/SKILL.md'),
     'utf8',
   )
-  assert.match(text, /name: consensflow-lead/)
-  assert.doesNotMatch(text, /name: consensflow-pm/)
+  assert.equal(text, content)
   assert.equal(await readFile(join(global, 'SKILL.md'), 'utf8'), 'global canary')
 })
 
-test('workers get no role skill and Pi loads Markdown without extension code', async (t) => {
+test('a window without its role text is refused', async (t) => {
   const { env } = await fixture(t)
-  assert.deepEqual(await roleConfiguration('pi', { role: 'worker', env }), { args: [], env: {} })
-  const configuration = await roleConfiguration('pi', { role: 'lead', env })
-  assert.equal(configuration.args[0], '--skill')
-  assert.match(configuration.args[1], /SKILL.md$/)
-  assert.equal(configuration.args.length, 4)
-  assert.deepEqual(configuration.env, {})
+  await assert.rejects(roleConfiguration('pi', { role: 'worker', env }), /needs its role text/)
+  await assert.rejects(readFile(join(env.CONSENSFLOW_HOME, 'roles')), { code: 'ENOENT' })
 })
 
-test('OpenCode preserves user configuration and adds the role skill path', async (t) => {
-  const { env } = await fixture(t)
-  env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
-    theme: 'user',
-    skills: { paths: ['/user/skills'] },
-  })
-  const configuration = await roleConfiguration('opencode', { role: 'lead', env })
-  const merged = JSON.parse(configuration.env.OPENCODE_CONFIG_CONTENT)
-  assert.equal(merged.theme, 'user')
-  assert.equal(merged.skills.paths[0], '/user/skills')
-  assert.equal(merged.skills.paths.length, 2)
+test('every role enters every harness with its whole text already loaded', async (t) => {
+  for (const kind of ['claude-code', 'codex', 'opencode', 'pi', 'devin']) {
+    for (const role of ['lead', 'pm', 'advisor', 'worker', 'reviewer']) {
+      await t.test(`${kind} ${role}`, async (t) => {
+        const { env } = await fixture(t)
+        const existing = 'User instructions: preserve "quotes", `backticks`, $HOME\nand newlines.'
+        const original = {
+          theme: 'user',
+          skills: { paths: ['/user/skills'], urls: ['https://example.com/skills'] },
+          instructions: ['/user/rules.md'],
+        }
+        env.OPENCODE_CONFIG_CONTENT = JSON.stringify(original)
+        const content = roleInstructions(role, [worker])
+        const configuration = await roleConfiguration(kind, {
+          role,
+          env,
+          content,
+          readInstructions: async () => existing,
+        })
+        const file = join(
+          env.CONSENSFLOW_HOME,
+          'roles',
+          role,
+          '.claude',
+          'skills',
+          `consensflow-${role}`,
+          'SKILL.md',
+        )
+        assert.equal(await readFile(file, 'utf8'), content)
+        let instructions
+        if (kind === 'claude-code') {
+          const index = configuration.args.indexOf('--append-system-prompt-file')
+          assert.notEqual(index, -1, 'the full role must enter the native system prompt')
+          instructions = await readFile(configuration.args[index + 1], 'utf8')
+          assert.equal(
+            configuration.args[configuration.args.indexOf('--system-prompt-snapshot') + 1],
+            'off',
+            'resumed conversations must use the current role instructions',
+          )
+        } else if (kind === 'pi') {
+          assert.equal(configuration.args[0], '--skill')
+          const index = configuration.args.indexOf('--append-system-prompt')
+          assert.notEqual(index, -1, '--skill alone only advertises the role')
+          instructions = configuration.args[index + 1]
+        } else if (kind === 'opencode') {
+          const merged = JSON.parse(configuration.env.OPENCODE_CONFIG_CONTENT)
+          assert.deepEqual(merged.instructions, [...original.instructions, file])
+          assert.equal(merged.theme, original.theme)
+          assert.deepEqual(merged.skills.urls, original.skills.urls)
+          assert.equal(merged.skills.paths[0], original.skills.paths[0])
+          instructions = await readFile(merged.instructions.at(-1), 'utf8')
+          const repeated = await roleConfiguration(kind, {
+            role,
+            env: { ...env, ...configuration.env },
+            content,
+          })
+          assert.deepEqual(JSON.parse(repeated.env.OPENCODE_CONFIG_CONTENT), merged)
+        } else if (kind === 'devin') {
+          instructions = await readFile(configuration.env.CF_DEVIN_ROLE_FILE, 'utf8')
+        } else {
+          instructions = JSON.parse(configuration.args[1].slice('developer_instructions='.length))
+          assert.ok(instructions.startsWith(`${existing}\n\n`))
+        }
+        assert.ok(instructions.includes(content), 'the whole role text is loaded')
+        if (role === 'lead' || role === 'pm') {
+          assert.match(instructions, /\| saved-worker \| [^|]+ \| coding, review \|/)
+        } else {
+          assert.doesNotMatch(instructions, /\| saved-worker \|/)
+        }
+        assert.equal(env.OPENCODE_CONFIG_CONTENT, JSON.stringify(original))
+      })
+    }
+  }
 })
 
-test('Codex appends to native effective instructions using only configuration reads', async (t) => {
+test('OpenCode rejects malformed instruction lists before native launch', async (t) => {
+  for (const instructions of ['rules.md', null, {}, 7, ['rules.md', 7]]) {
+    await t.test(JSON.stringify(instructions), async (t) => {
+      const { env } = await fixture(t)
+      env.OPENCODE_CONFIG_CONTENT = JSON.stringify({ instructions })
+      await assert.rejects(
+        roleConfiguration('opencode', { role: 'pm', env, content: roleInstructions('pm', []) }),
+        /OpenCode instructions must be an array of paths/,
+      )
+    })
+  }
+})
+
+test('Codex appends the role to its own effective instructions, read through configuration only', async (t) => {
   const { root, env } = await fixture(t)
   const executable = join(root, 'codex')
   await writeFile(
@@ -74,6 +153,7 @@ lines.on('line', line => {
     env,
     executable,
     cwd: root,
+    content: roleInstructions('lead', []),
   })
   assert.equal(configuration.args[0], '-c')
   assert.match(configuration.args[1], /existing user instructions/)
@@ -81,149 +161,23 @@ lines.on('line', line => {
   assert.doesNotMatch(configuration.args[1], /consensflow-pm/)
 })
 
-test('both roles enter native startup context without a skill invocation', async (t) => {
-  for (const kind of ['claude-code', 'codex', 'opencode', 'pi', 'devin']) {
-    for (const role of ['lead', 'pm', 'advisor']) {
-      await t.test(`${kind} ${role}`, async (t) => {
-        const { env } = await fixture(t)
-        addAgent(
-          { name: 'saved-worker', harness: 'codex', model: 'gpt-6-astra', effort: 'xhigh' },
-          env,
-        )
-        const existing = 'User instructions: preserve "quotes", `backticks`, $HOME\nand newlines.'
-        const original = {
-          theme: 'user',
-          skills: { paths: ['/user/skills'], urls: ['https://example.com/skills'] },
-          instructions: ['/user/rules.md'],
-        }
-        env.OPENCODE_CONFIG_CONTENT = JSON.stringify(original)
-        const configuration = await roleConfiguration(kind, {
-          role,
-          env,
-          readInstructions: async () => existing,
-        })
-        const file = join(
-          env.CONSENSFLOW_HOME,
-          'roles',
-          role,
-          '.claude',
-          'skills',
-          `consensflow-${role}`,
-          'SKILL.md',
-        )
-        const content = await readFile(file, 'utf8')
-        let instructions
-        if (kind === 'claude-code') {
-          const index = configuration.args.indexOf('--append-system-prompt-file')
-          assert.notEqual(index, -1, 'the full role must enter the native system prompt')
-          instructions = await readFile(configuration.args[index + 1], 'utf8')
-          assert.equal(
-            configuration.args[configuration.args.indexOf('--system-prompt-snapshot') + 1],
-            'off',
-            'resumed conversations must use the current role instructions',
-          )
-        } else if (kind === 'pi') {
-          const index = configuration.args.indexOf('--append-system-prompt')
-          assert.notEqual(index, -1, '--skill alone only advertises the role')
-          instructions = configuration.args[index + 1]
-        } else if (kind === 'opencode') {
-          const merged = JSON.parse(configuration.env.OPENCODE_CONFIG_CONTENT)
-          assert.deepEqual(merged.instructions, [...original.instructions, file])
-          assert.equal(merged.theme, original.theme)
-          assert.deepEqual(merged.skills.urls, original.skills.urls)
-          assert.equal(merged.skills.paths[0], original.skills.paths[0])
-          instructions = await readFile(merged.instructions.at(-1), 'utf8')
-          const repeated = await roleConfiguration(kind, {
-            role,
-            env: { ...env, ...configuration.env },
-          })
-          assert.deepEqual(JSON.parse(repeated.env.OPENCODE_CONFIG_CONTENT), merged)
-        } else if (kind === 'devin') {
-          instructions = await readFile(configuration.env.CF_DEVIN_ROLE_FILE, 'utf8')
-        } else {
-          instructions = JSON.parse(configuration.args[1].slice('developer_instructions='.length))
-          assert.ok(instructions.startsWith(`${existing}\n\n`))
-        }
-        assert.ok(
-          instructions.includes(content),
-          'all role instructions, including the body, must already be loaded',
-        )
-        assert.ok(content.includes(role === 'pm' ? '# ConsensFlow PM' : `# ConsensFlow ${role}`))
-        assert.ok(!instructions.includes(`name: consensflow-${role === 'pm' ? 'lead' : 'pm'}`))
-        if (role !== 'advisor') {
-          assert.match(instructions, /\| saved-worker \|/)
-          assert.match(instructions, /Complex debugging, architecture and detailed review/)
-          assert.match(instructions, /cross-model review/i)
-        } else {
-          assert.doesNotMatch(instructions, /\| saved-worker \|/)
-        }
-        assert.equal(env.OPENCODE_CONFIG_CONTENT, JSON.stringify(original))
-      })
-    }
-  }
-})
-
-test('OpenCode rejects malformed instruction lists before native launch', async (t) => {
-  for (const instructions of ['rules.md', null, {}, 7, ['rules.md', 7]]) {
-    await t.test(JSON.stringify(instructions), async (t) => {
-      const { env } = await fixture(t)
-      env.OPENCODE_CONFIG_CONTENT = JSON.stringify({ instructions })
-      await assert.rejects(
-        roleConfiguration('opencode', { role: 'pm', env }),
-        /OpenCode instructions must be an array of paths/,
-      )
-    })
-  }
-})
-
-test('workers receive no role instructions across all harnesses', async (t) => {
+test('an unchanged role text is not rewritten, a changed one is, always private', async (t) => {
   const { env } = await fixture(t)
-  for (const kind of ['claude-code', 'codex', 'opencode', 'pi', 'kimi']) {
-    assert.deepEqual(
-      await roleConfiguration(kind, {
-        role: 'worker',
-        env,
-        readInstructions: async () => assert.fail('workers must not resolve role instructions'),
-      }),
-      { args: [], env: {} },
-    )
-  }
-  await assert.rejects(readFile(join(env.CONSENSFLOW_HOME, 'roles')), { code: 'ENOENT' })
-})
-
-test('advisors can research and run existing tests but only the PM writes specifications', async (t) => {
-  const { env } = await fixture(t)
-  const configuration = await roleConfiguration('pi', { role: 'advisor', env })
-  const instructions = configuration.args.at(-1)
-  assert.match(instructions, /search the web/)
-  assert.match(instructions, /Run existing tests/)
-  assert.match(instructions, /Only the PM writes or revises specifications/)
-  assert.match(instructions, /Do not edit/)
-  assert.match(instructions, /owning PM/)
-  assert.match(instructions, /Do not delegate/)
-})
-
-test('launch reads the current roster for its own role and avoids unchanged writes', async (t) => {
-  const { env } = await fixture(t)
-  const { editAgent } = await import('../src/roster.js')
-  const { stat, utimes } = await import('node:fs/promises')
-  addAgent({ name: 'example', harness: 'codex', model: 'gpt-6-astra', effort: 'max' }, env)
-  for (const role of ['lead', 'pm']) {
-    const first = await roleConfiguration('pi', { role, env })
-    const file = first.args[1]
-    const initial = first.args.at(-1)
-    assert.ok(initial.includes('| example |'))
-    await utimes(file, 1, 1)
-    const timestamp = (await stat(file)).mtimeMs
-    assert.deepEqual(await roleConfiguration('pi', { role, env }), first)
-    assert.equal((await stat(file)).mtimeMs, timestamp, 'unchanged role is not rewritten')
-    editAgent('example', { description: `Updated for ${role}` }, env)
-    const refreshed = await roleConfiguration('pi', { role, env })
-    assert.ok(refreshed.args.at(-1).includes(`Updated for ${role}`))
-    assert.equal(await readFile(file, 'utf8'), refreshed.args.at(-1))
-    assert.equal((await stat(file)).mode & 0o777, 0o600)
-  }
-  await assert.rejects(readFile(join(env.CONSENSFLOW_HOME, 'skills-manifest.json')), {
-    code: 'ENOENT',
+  const first = await roleConfiguration('pi', { role: 'worker', env, content: 'worker text, v1' })
+  const file = first.args[1]
+  await utimes(file, 1, 1)
+  const timestamp = (await stat(file)).mtimeMs
+  assert.deepEqual(
+    await roleConfiguration('pi', { role: 'worker', env, content: 'worker text, v1' }),
+    first,
+  )
+  assert.equal((await stat(file)).mtimeMs, timestamp, 'unchanged role is not rewritten')
+  const refreshed = await roleConfiguration('pi', {
+    role: 'worker',
+    env,
+    content: 'worker text, v2',
   })
+  assert.equal(await readFile(file, 'utf8'), 'worker text, v2')
+  assert.equal(refreshed.args.at(-1), 'worker text, v2')
+  assert.equal((await stat(file)).mode & 0o777, 0o600)
 })

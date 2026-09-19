@@ -44,6 +44,7 @@ const request = (overrides = {}) => ({
   launchId: 'launch-1',
   participant,
   role: 'worker',
+  instructions: '# ConsensFlow worker\n\nRole text for the test.',
   directory: '/work/app',
   resume: null,
   message: '[ConsensFlow m-1 · T-1 · task from @lead]\nWrite the parser',

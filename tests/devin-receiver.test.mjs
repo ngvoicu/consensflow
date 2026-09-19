@@ -209,7 +209,11 @@ test('private installation preserves native defaults and hooks, and does not edi
   assert.ok(
     configuration.env.CHISEL_PURE_ACP_WIRE_LOG.startsWith(f.env.CONSENSFLOW_HOME + path.sep),
   )
-  const role = await roleConfiguration('devin', { role: 'advisor', env: f.env })
+  const role = await roleConfiguration('devin', {
+    role: 'advisor',
+    env: f.env,
+    content: '# ConsensFlow advisor\n',
+  })
   assert.match(await fs.readFile(role.env.CF_DEVIN_ROLE_FILE, 'utf8'), /advisor/i)
   assert.deepEqual(role.args, [])
 })

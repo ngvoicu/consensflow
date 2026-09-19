@@ -26,8 +26,25 @@ async function withHome(fn, { queue = true } = {}) {
   }
   await mkdir(env.PATH, { recursive: true })
   const executable = path.join(env.PATH, 'codex')
-  const help = queue ? 'echo "Usage: codex queue --thread <id> --message <text>"' : 'exit 2'
-  await writeFile(executable, `#!/bin/sh\nif [ "$1" = queue ]; then ${help}; fi\n`)
+  // A Codex that answers the two things a launch asks of it: whether it has
+  // the native queue, and its effective instructions over the app-server.
+  await writeFile(
+    executable,
+    `#!${process.execPath}
+import { createInterface } from 'node:readline'
+if (process.argv[2] === 'queue') {
+  ${queue ? "console.log('Usage: codex queue --thread <id> --message <text>')" : 'process.exit(2)'}
+} else if (process.argv[2] === 'app-server') {
+  createInterface({ input: process.stdin }).on('line', (line) => {
+    const request = JSON.parse(line)
+    if (request.method === 'initialize') console.log(JSON.stringify({ id: request.id, result: {} }))
+    else if (request.method === 'config/read')
+      console.log(JSON.stringify({ id: request.id, result: { config: { developer_instructions: '' } } }))
+    else if (request.method !== 'initialized') process.exit(20)
+  })
+}
+`,
+  )
   await chmod(executable, 0o755)
   try {
     await fn({ env, executable })
@@ -44,11 +61,21 @@ const participant = {
   agent: 'diana',
   harness: 'codex',
 }
+/** The launch arguments without the role text, which every window carries as `-c developer_instructions=…`. */
+const withoutRole = (argv) => {
+  const at = argv.findIndex((arg) => arg.startsWith('developer_instructions='))
+  assert.notEqual(at, -1, 'the role text rides along')
+  assert.equal(argv[at - 1], '-c')
+  return [...argv.slice(0, at - 1), ...argv.slice(at + 1)]
+}
+
 const request = (overrides = {}) => ({
   launchId: 'launch-1',
   participant,
   role: 'worker',
-  directory: '/work/app',
+  instructions: '# ConsensFlow worker\n\nRole text for the test.',
+  // A real directory: the role text is read back through Codex's app-server, started there.
+  directory: os.tmpdir(),
   resume: null,
   message: '[ConsensFlow m-1 · T-1 · task from @lead]\nWrite the parser',
   agent: { model: 'gpt-5.6-luna', effort: 'low' },
@@ -60,7 +87,7 @@ describe('the Codex adapter', () => {
     await withHome(async ({ env, executable }) => {
       const plan = await codexAdapter({ env }).prepare(request())
       assert.equal(plan.nativeSession, null, 'the broker names the thread')
-      assert.deepEqual(plan.argv, [
+      assert.deepEqual(withoutRole(plan.argv), [
         process.execPath,
         SUPERVISOR,
         executable,
@@ -81,7 +108,7 @@ describe('the Codex adapter', () => {
       const thread = '0f8fad5b-d9cb-469f-a165-70867728950e'
       const plan = await codexAdapter({ env }).prepare(request({ resume: thread, message: null }))
       assert.equal(plan.nativeSession, thread)
-      assert.deepEqual(plan.argv.slice(2), [
+      assert.deepEqual(withoutRole(plan.argv).slice(2), [
         executable,
         'resume',
         thread,

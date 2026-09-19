@@ -437,33 +437,29 @@ teamDialog.querySelector('[value="cancel"]').addEventListener('click', () => tea
 // The human's agents screens: the daemon's own pages, in a frame each, at
 // the URL and token the app was handed. Closing one refreshes the board's
 // view of the agents (a tag or a tier may have changed).
-const screens = [
-  ['#agents-button', '#agents-dialog', ''],
-  ['#library-button', '#library-dialog', 'library'],
-  ['#harnesses-button', '#harnesses-dialog', 'harnesses'],
-]
-let handle = null
-for (const [buttonId, dialogId, page] of screens) {
-  const dialog = $(dialogId)
-  const frame = dialog.querySelector('iframe')
+// The agents screens open in their own window at the daemon's address: the
+// board's page cannot frame them (WebKit blocks a plain-HTTP frame inside the
+// app's secure page). Their edits show here once this window is back in front.
+for (const [buttonId, page] of [
+  ['#agents-button', ''],
+  ['#library-button', 'library'],
+  ['#harnesses-button', 'harnesses'],
+]) {
   $(buttonId).addEventListener('click', () =>
     act(async () => {
-      handle ??= await invoke('roster_handle')
-      if (!handle?.url)
-        throw new Error('The agents screens are not available: the daemon is not up.')
-      const url = new URL(page, handle.url)
-      url.searchParams.set('token', handle.token)
-      if (frame.src !== url.href) frame.src = url.href
-      dialog.showModal()
-    }),
-  )
-  dialog.querySelector('[value="cancel"]').addEventListener('click', () => dialog.close())
-  dialog.addEventListener('close', () =>
-    act(async () => {
-      state.agents = (await core('agents.list')).agents
+      const opened = await invoke('open_agents_window', { page })
+      if (opened?.ok !== true) {
+        throw new Error(opened?.error ?? 'The agents screens are not available.')
+      }
     }),
   )
 }
+window.addEventListener('focus', () => {
+  void act(async () => {
+    state.agents = (await core('agents.list')).agents
+    if (teamDialog.open) renderTeam()
+  })
+})
 
 async function start() {
   if (typeof invoke !== 'function') {

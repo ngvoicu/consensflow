@@ -1421,10 +1421,22 @@ describe('tiered dispatch: the review gate', () => {
         ['pass', 'done', 1, 'done'],
       )
       assert.equal(verdict.review.verdict, 'pass')
-      assert.deepEqual(queued(ledger, id('lead')), [
-        ['result', 1, 'Parser done'],
-        ['result', 2, 'Looks right.\n\nVERDICT: pass'],
+      assert.deepEqual(queued(ledger, id('lead')), [['result', 1, 'Parser done']], 'one delivery')
+      assert.deepEqual(ledger.reviewsOf(project.id, 1), [
+        {
+          number: 2,
+          round: 1,
+          reviewer: 'diana',
+          state: 'done',
+          verdict: 'pass',
+          findings: 'Looks right.\n\nVERDICT: pass',
+        },
       ])
+      assert.equal(
+        ledger.task(project.id, 2).messages.find((m) => m.kind === 'result').state,
+        'read',
+        'the findings stay on the review task, for the board',
+      )
       assert.deepEqual(ledger.events(project.id).find((e) => e.kind === 'review.verdict').data, {
         task: 1,
         review: 2,
@@ -1485,10 +1497,13 @@ describe('tiered dispatch: the review gate', () => {
         ],
       )
       assert.deepEqual(queued(ledger, id('lead')), [], 'the requester sees nothing yet')
-      assert.equal(
-        ledger.task(project.id, first.task.number).messages.length,
-        1,
-        'no result of its own',
+      assert.deepEqual(
+        ledger.task(project.id, first.task.number).messages.map((m) => [m.kind, m.state]),
+        [
+          ['task', 'delivered'],
+          ['result', 'read'],
+        ],
+        'its findings stay on the review task, undelivered',
       )
 
       deliver(ledger, followUp)
@@ -1511,15 +1526,18 @@ describe('tiered dispatch: the review gate', () => {
         [decide.verdict, decide.task.state, decide.task.round],
         ['changes', 'done', 2],
       )
-      assert.deepEqual(queued(ledger, id('lead')), [
-        ['result', number, 'Tests added'],
-        ['result', second.task.number, 'Still wrong.\n\nVERDICT: changes'],
+      assert.deepEqual(
+        queued(ledger, id('lead')),
+        [['result', number, 'Tests added']],
+        'one delivery',
+      )
+      assert.deepEqual(
+        ledger.reviewsOf(project.id, number).map((r) => [r.round, r.verdict, r.findings]),
         [
-          'note',
-          number,
-          'T-1 asked for changes twice in review (T-2, T-3); its result and the reviews are in your inbox: accept it or send it back.',
+          [1, 'changes', 'Missing tests.\n\nVERDICT: changes'],
+          [2, 'changes', 'Still wrong.\n\nVERDICT: changes'],
         ],
-      ])
+      )
     })
   })
 
@@ -1576,10 +1594,11 @@ describe('tiered dispatch: the review gate', () => {
         reason: 'no independent reviewer on the team',
       })
       assert.equal(skipped.state, 'done')
-      assert.deepEqual(queued(ledger, id('lead')), [
-        ['result', number, 'Parser done'],
-        ['note', number, 'T-1 unreviewed: no independent reviewer on the team.'],
-      ])
+      assert.deepEqual(queued(ledger, id('lead')), [['result', number, 'Parser done']])
+      assert.equal(
+        ledger.task(project.id, number).unreviewed,
+        'no independent reviewer on the team',
+      )
 
       ledger.setReview(project.id, 'members')
       const held = finished(ledger, project, id, 'Lexer done')
@@ -1603,11 +1622,15 @@ describe('tiered dispatch: the review gate', () => {
         [verdict.verdict, verdict.task.state, verdict.review.verdict],
         [null, 'done', null],
       )
-      assert.deepEqual(queued(ledger, id('lead')).at(-1), [
-        'result',
-        review.task.number,
+      assert.equal(
+        queued(ledger, id('lead')).at(-1)[1],
+        number,
+        'the work, not the review, is delivered',
+      )
+      assert.equal(
+        ledger.reviewsOf(project.id, number)[0].findings,
         'No VERDICT line; read as pass.\n\nFine by me.',
-      ])
+      )
     })
   })
 

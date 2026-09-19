@@ -1058,7 +1058,7 @@ test('shared model cards keep Fable choices independent through add, remove, fil
     const saved = fixture.roster.locator('.model-group')
     await expect(saved.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 2')
     await expect(saved.locator('.benchmark-details')).toHaveCount(1)
-    await expect(saved.locator('.cmd')).toHaveCount(2)
+    await expect(saved.locator('.member')).toHaveCount(2)
     await expect(member(fixture.roster, 'clio').locator('.member__desc')).toHaveText(
       'My Claude notes',
     )

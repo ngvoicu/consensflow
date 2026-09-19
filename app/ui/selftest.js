@@ -255,6 +255,12 @@ export async function runSelftest({
     }
     await report('board', { task: given.task.number, hex: delivered, delivered: true })
 
+    // The agents screens: their own window at the daemon's address, reused
+    // on the second ask. The daemon's pages themselves are proven elsewhere.
+    const agentsWindow = await invoke('open_agents_window', { page: '' })
+    const again = await invoke('open_agents_window', { page: 'library' })
+    await report('agents-window', { first: agentsWindow, again })
+
     // Exercise a large Unicode paste through WebKit, IPC and the real PTY.
     await sendInput(pane, 'BIGPASTE\r')
     await until('raw paste reader ready', () =>

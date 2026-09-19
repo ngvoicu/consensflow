@@ -343,6 +343,7 @@ pub fn run() {
                     commands::pane_resize,
                     commands::pane_ack,
                     commands::roster_handle,
+                    commands::open_agents_window,
                     commands::subscribe_output,
                     updates::update_status,
                     updates::update_channel,

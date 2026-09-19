@@ -1,28 +1,30 @@
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
-/**
- * `cf` inside a window the new core opened: the agents' commands.
- *
- *   cf task add --tier standard "…"   a task for a worker (or advisor) of that tier; the
- *                                     app picks the member (--tags a,b to prefer one,
- *                                     --purpose for critical work)
- *   cf task add --self "…"            a task for yourself, on the board
- *   cf task list                      the board: what waits for a member, then every lane
- *   cf task get T-3                   one task and its whole thread
- *   cf task done T-3 "…"              finish a task assigned to you (coordinators)
- *   cf task review T-3                ask for an independent review of finished work
- *   cf task accept|cancel T-3         move a task you asked for
- *   cf task reopen T-3 "…"            send a finished or failed task back with a follow-up
- *   cf inbox [read m-12]         what is waiting for you, or one message in full
- *   cf ask "…" [--human]         a question to whoever gave you your task (or the human)
- *   cf answer m-12 "…"           answer a question put to you
- *   cf team                      the agents on this project's team, with their models
- *   cf whoami                    your project, role and current task
- *
- * The window's token (CONSENSFLOW_TOKEN) is the whole authority: the core
- * knows which participant it belongs to. Add `--json` for machine output.
- */
+/** `cf` inside a window the new core opened: the agents' commands (`USAGE` lists them). */
+export const USAGE = `cf inside a ConsensFlow window: the board's commands.
+
+  cf task add --tier <critical|complex|standard|light> "…"
+                                    a task for a member of that tier; ConsensFlow picks
+                                    the member (--tags a,b to prefer one, --purpose for
+                                    critical work)
+  cf task add --self "…"            a task for yourself, on the board
+  cf task list                      the board: what waits for a member, then every lane
+  cf task get T-3                   one task and its whole thread
+  cf task done T-3 "…"              finish a task assigned to you (coordinators)
+  cf task review T-3                ask for an independent review of finished work
+  cf task accept|cancel T-3         move a task you asked for
+  cf task reopen T-3 "…"            send a finished or failed task back with a follow-up
+  cf inbox [read m-12]              what is waiting for you, or one message in full
+  cf ask "…" [--human]              a question to whoever gave you your task (or the human)
+  cf answer m-12 "…"                answer a question put to you
+  cf team                           the members: roles, tiers and tags
+  cf whoami                         your project, role and current task
+
+Add --json for machine output.`
+
+const HELP = new Set(['help', '--help', '-h'])
+
 export async function runCoreCli(args, env, { out, err, cwd = process.cwd() }) {
   const json = args.includes('--json')
   const words = args.filter((arg) => arg !== '--json')
@@ -39,6 +41,7 @@ export async function runCoreCli(args, env, { out, err, cwd = process.cwd() }) {
 }
 
 async function command(verb, rest, call, cwd) {
+  if (verb === undefined || HELP.has(verb)) return { data: { usage: USAGE }, text: USAGE }
   switch (verb) {
     case 'task':
       return taskCommand(rest, call, cwd)
@@ -85,8 +88,7 @@ async function command(verb, rest, call, cwd) {
             : members
                 .map(
                   (member) =>
-                    `@${member.handle} (${member.role}, ${member.tier}${member.tags.length === 0 ? '' : `; ${member.tags.join(', ')}`}): ${member.harness}, ${member.model ?? 'model unknown'}` +
-                    (member.effort ? `, effort ${member.effort}` : ''),
+                    `@${member.handle} · ${member.role} · ${member.tier} · ${member.tags.length === 0 ? 'no tags' : member.tags.join(', ')}`,
                 )
                 .join('\n'),
       }
@@ -108,6 +110,10 @@ async function command(verb, rest, call, cwd) {
 }
 
 async function taskCommand([action, ...rest], call, cwd) {
+  if (HELP.has(action)) {
+    const lines = USAGE.split('\n').filter((line) => /^\s+cf task |^ {36}/.test(line))
+    return { data: { usage: lines.join('\n') }, text: lines.join('\n') }
+  }
   if (action === 'add') {
     const { flags, text, target } = split(
       rest,

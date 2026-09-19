@@ -188,11 +188,11 @@ describe('cf inside a core window', () => {
     })
   })
 
-  it('shows the project team with each member model', async () => {
+  it('shows the project team as roles, tiers and tags, nothing to pick a member by', async () => {
     await withApi(async ({ token, cf }) => {
       assert.equal(
         (await cf(token('lead'), 'team')).out,
-        '@zeus (worker, standard; coding, rust): claude-code, claude-sonnet-5, effort high',
+        '@zeus · worker · standard · coding, rust',
       )
     })
   })
@@ -350,5 +350,32 @@ describe('tiered tasks through the API and cf', () => {
       const human = await cf(token('zeus'), 'ask', '--human', 'Which parser?')
       assert.equal(human.code, 0)
     })
+  })
+})
+
+describe('cf inside a window explains itself', () => {
+  const run = async (args) => {
+    const lines = []
+    const code = await runCoreCli(
+      args,
+      {},
+      { out: (line) => lines.push(line), err: (line) => lines.push(line) },
+    )
+    return { code, text: lines.join('\n') }
+  }
+  it('prints its usage on --help, help, or nothing at all', async () => {
+    for (const args of [['--help'], ['help'], []]) {
+      const { code, text } = await run(args)
+      assert.equal(code, 0)
+      assert.match(text, /cf task add --tier <critical\|complex\|standard\|light>/)
+      assert.match(text, /cf ask "…" \[--human\]/)
+    }
+  })
+  it('prints the task commands on cf task --help', async () => {
+    const { code, text } = await run(['task', '--help'])
+    assert.equal(code, 0)
+    assert.match(text, /cf task add --self/)
+    assert.match(text, /cf task reopen T-3/)
+    assert.doesNotMatch(text, /cf whoami/)
   })
 })

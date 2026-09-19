@@ -303,6 +303,7 @@ const taskView = (row) => ({
   reviewOf: row.review_of_number ?? null,
   round: row.round,
   verdict: row.verdict,
+  unreviewed: row.unreviewed ?? null,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
@@ -1228,31 +1229,24 @@ class Ledger {
           taskId: task.id,
           body: `Review round ${round} by @${reviewer.handle} asks for changes:\n\n${body}`,
         })
-        this.#moveTask(review, 'done', {})
+        this.#moveTask(review, 'done', {
+          result: this.#findings(projectId, review, reviewer, body),
+        })
         this.#moveTask({ ...task, round }, 'queued', { review: number, message: messageId })
       } else {
+        // One delivery: the result goes on its way and the dispatcher writes
+        // the verdicts under it. The findings stay on the review task, where
+        // the board shows them under the work; nobody gets a second message.
         this.#releaseHeld(task.id)
-        const messageId = this.#queue(projectId, {
-          to: review.requester_id,
-          from: reviewer.id,
-          kind: 'result',
-          taskId: review.id,
-          body: verdict === null ? `No VERDICT line; read as pass.\n\n${body}` : body,
+        this.#moveTask(review, 'done', {
+          result: this.#findings(
+            projectId,
+            review,
+            reviewer,
+            verdict === null ? `No VERDICT line; read as pass.\n\n${body}` : body,
+          ),
         })
-        this.#moveTask(review, 'done', { result: messageId })
         this.#moveTask({ ...task, round }, 'done', { review: number, verdict })
-        if (verdict === 'changes') {
-          const reviews = this.#db
-            .prepare(`SELECT number FROM task WHERE review_of = ? ORDER BY number`)
-            .all(task.id)
-            .map((row) => `T-${row.number}`)
-          this.#send(projectId, {
-            to: this.#participantRow(task.requester_id).handle,
-            task: task.number,
-            kind: 'note',
-            body: `T-${task.number} asked for changes twice in review (${reviews.join(', ')}); its result and the reviews are in your inbox: accept it or send it back.`,
-          })
-        }
       }
       return {
         verdict,
@@ -1260,6 +1254,39 @@ class Ledger {
         review: this.#task(review.id),
       }
     })
+  }
+
+  /** The reviewer's findings, kept on the review task for the board: read there, never delivered on their own. */
+  #findings(projectId, review, reviewer, body) {
+    return this.#queue(projectId, {
+      to: review.requester_id,
+      from: reviewer.id,
+      kind: 'result',
+      taskId: review.id,
+      body,
+      state: 'read',
+    })
+  }
+
+  /** A task's reviews in order, each with its state, verdict and the findings the reviewer wrote. */
+  reviewsOf(projectId, number) {
+    const task = this.#taskRow(projectId, number)
+    return this.#db
+      .prepare(
+        `SELECT t.number, t.state, t.verdict, p.handle AS reviewer,
+                (SELECT body FROM message WHERE task_id = t.id AND kind = 'result' ORDER BY id DESC LIMIT 1) AS findings
+         FROM task t JOIN participant p ON p.id = t.assignee_id
+         WHERE t.review_of = ? ORDER BY t.number`,
+      )
+      .all(task.id)
+      .map((row, index) => ({
+        number: row.number,
+        round: index + 1,
+        reviewer: row.reviewer,
+        state: row.state,
+        verdict: row.verdict,
+        findings: row.findings ?? null,
+      }))
   }
 
   /** A review its reviewer cannot finish (its window closed, its quota ran out): the work waits for another. */
@@ -1305,13 +1332,9 @@ class Ledger {
         throw new LedgerError('invalid-transition', `T-${number} is being reviewed`, 409)
       }
       this.#releaseHeld(task.id)
+      // The result says it as it goes (the dispatcher writes the reason under it).
+      this.#db.prepare('UPDATE task SET unreviewed = ? WHERE id = ?').run(reason, task.id)
       this.#moveTask(task, 'done', { unreviewed: reason })
-      this.#send(projectId, {
-        to: this.#participantRow(task.requester_id).handle,
-        task: number,
-        kind: 'note',
-        body: `T-${number} unreviewed: ${reason}.`,
-      })
       return this.#task(task.id)
     })
   }

@@ -836,12 +836,16 @@ describe('the dispatcher runs the review gate', () => {
         ['done', 1, 'done', 'pass'],
       )
       for (let n = 0; n < 4; n += 1) await context.dispatcher.pass()
-      assert.match(lead(context)[0], /result from @zeus\]\nParser done$/)
+      assert.match(
+        lead(context)[0],
+        /T-1 · result from @zeus\]\nParser done\n\nReviewed by @astraeus, round 1: pass\nLooks right\.\n\nVERDICT: pass$/,
+        'one delivery: the result with its review under it',
+      )
       context.adapter.answer('lead', 'noted')
       for (let n = 0; n < 3; n += 1) await context.dispatcher.pass()
-      assert.match(
-        lead(context).at(-1),
-        /T-2 · result from @astraeus\]\nLooks right\.\n\nVERDICT: pass$/,
+      assert.ok(
+        !lead(context).some((text) => text.includes('result from @astraeus')),
+        'no second message for the review',
       )
     })
   })
@@ -871,9 +875,12 @@ describe('the dispatcher runs the review gate', () => {
       context.adapter.answer('astraeus', 'Still wrong.\n\nVERDICT: changes')
       await context.dispatcher.pass()
       assert.deepEqual([task(1).state, task(1).round], ['done', 2])
-      assert.deepEqual(notes('lead'), [
-        'T-1 asked for changes twice in review (T-2, T-3); its result and the reviews are in your inbox: accept it or send it back.',
-      ])
+      assert.deepEqual(notes('lead'), [], 'no note: the result says it')
+      for (let n = 0; n < 4; n += 1) await context.dispatcher.pass()
+      assert.match(
+        lead(context).at(-1),
+        /result from @zeus\]\nTests added\n\nReviewed by @astraeus, round 1: changes\nMissing tests\.\n\nVERDICT: changes\n\nReviewed by @astraeus, round 2: changes\nStill wrong\.\n\nVERDICT: changes\n\nThe reviewer asked for changes twice\. Accept it, or send it back with what to change\.$/,
+      )
     })
   })
 
@@ -887,9 +894,12 @@ describe('the dispatcher runs the review gate', () => {
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       assert.equal(fixture.task(1).state, 'done')
-      assert.deepEqual(fixture.notes('lead'), [
-        'T-1 unreviewed: no independent reviewer on the team.',
-      ])
+      assert.deepEqual(fixture.notes('lead'), [], 'no note: the result says it')
+      for (let n = 0; n < 3; n += 1) await context.dispatcher.pass()
+      assert.match(
+        context.adapter.agent('lead').items.at(-1).text,
+        /Parser done\n\nUnreviewed: no independent reviewer on the team\.$/,
+      )
       assert.equal(context.host.last('calliope'), undefined, 'no review window opened')
     })
   })

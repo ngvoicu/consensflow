@@ -35,6 +35,7 @@ const request = (overrides = {}) => ({
   launchId: 'launch-1',
   participant: worker,
   role: 'worker',
+  instructions: '# ConsensFlow worker\n\nRole text for the test.',
   directory: '/work/app',
   resume: null,
   message: '[ConsensFlow m-1 · T-1 · task from @lead]\nWrite the parser',
@@ -100,10 +101,17 @@ describe('the Claude Code adapter', () => {
         'launch-1',
         'settings.json',
       )
+      const roles = path.join(env.CONSENSFLOW_HOME, 'roles', 'worker')
       assert.deepEqual(plan.argv, [
         executable,
         '--settings',
         settings,
+        '--add-dir',
+        roles,
+        '--append-system-prompt-file',
+        path.join(roles, '.claude', 'skills', 'consensflow-worker', 'SKILL.md'),
+        '--system-prompt-snapshot',
+        'off',
         '--session-id',
         plan.nativeSession,
         '--model',
@@ -131,7 +139,7 @@ describe('the Claude Code adapter', () => {
         request({ resume: session, message: null }),
       )
       assert.equal(plan.nativeSession, session)
-      assert.deepEqual(plan.argv.slice(3), [
+      assert.deepEqual(plan.argv.slice(9), [
         '--resume',
         session,
         '--model',

@@ -18,7 +18,6 @@ import {
   removeAgent,
   syncAgents,
 } from '../roster.js'
-import { agentCommand } from '../skill.js'
 
 /**
  * The human's agents screens, served by the new core: the roster editor
@@ -39,14 +38,9 @@ const VERSION = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json'), 'utf8'),
 ).version
 
-/** The line this agent becomes in the skill — shown verbatim in the UI. */
-export function withCommand(agent, benchmarks) {
-  const command = agentCommand(agent)
-  return {
-    ...agent,
-    profile: withBenchmarks(agent, agentProfile(agent), benchmarks),
-    ...(command === undefined ? {} : { command }),
-  }
+/** The agent with its profile and benchmark scores, as the screens show it. */
+export function withProfile(agent, benchmarks) {
+  return { ...agent, profile: withBenchmarks(agent, agentProfile(agent), benchmarks) }
 }
 
 export function readBody(request) {
@@ -97,13 +91,13 @@ export function agentsUi(env, { token, harnessLatest } = {}) {
           const benchmarks = await artificialAnalysis.refresh()
           refreshAgentProfiles(env, benchmarks)
           return json(200, {
-            agents: listAgents(env).map((agent) => withCommand(agent, benchmarks)),
+            agents: listAgents(env).map((agent) => withProfile(agent, benchmarks)),
             drift: agentDrift(env),
             harnesss: HARNESSES,
             catalog: Object.fromEntries(
               Object.entries(CATALOG).map(([harness, entries]) => [
                 harness,
-                entries.map((entry) => withCommand({ ...entry, harness }, benchmarks)),
+                entries.map((entry) => withProfile({ ...entry, harness }, benchmarks)),
               ]),
             ),
             efforts: EFFORTS,
@@ -121,7 +115,7 @@ export function agentsUi(env, { token, harnessLatest } = {}) {
           const applied = syncAgents(env, {
             ...(typeof body.name === 'string' ? { name: body.name } : {}),
           })
-          return json(200, { applied, agents: listAgents(env).map(withCommand) })
+          return json(200, { applied, agents: listAgents(env).map(withProfile) })
         }
         if (request.method === 'POST' && path === '/api/agents') {
           return json(201, { agent: addAgent(body, env) })
@@ -244,19 +238,15 @@ export const PAGE = (token, library = false) => `<!DOCTYPE html>
   .tag { font-family: var(--mono); font-size: 11px; color: var(--muted); }
   .member__head .spacer { flex: 1; }
   .member__desc, .member__tags { color: var(--muted); font-size: 13px; margin: 0; }
-  .cmd-wrap { position: relative; }
   /* A long command scrolls rather than wrapping (it stays one readable line);
      the fade is the only hint that there is more to the right. */
-  .cmd-wrap::after {
     content: ""; position: absolute; inset: 1px 1px 1px auto; width: 44px; border-radius: 0 4px 4px 0;
     background: linear-gradient(90deg, transparent, var(--panel)); pointer-events: none;
   }
-  .cmd {
     font-family: var(--mono); font-size: 11.5px; line-height: 1.6; color: var(--muted);
     background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
     padding: 9px 11px; margin: 0; overflow-x: auto; white-space: pre; scrollbar-width: thin;
   }
-  .cmd b { color: var(--foam); font-weight: 500; }
 
   button {
     font: inherit; font-size: 13px; color: var(--foam); background: transparent;
@@ -407,22 +397,6 @@ const tagList = text => {
   return tags.length === 0 ? null : tags;
 };
 
-/** The model and effort are what the reader is scanning for: mark them. */
-function renderCommand(entry) {
-  const pre = el('pre', 'cmd');
-  let rest = entry.command;
-  for (const value of [entry.model, entry.effort].filter(Boolean)) {
-    const at = rest.indexOf(value);
-    if (at === -1) continue;
-    pre.append(rest.slice(0, at));
-    pre.append(el('b', null, value));
-    rest = rest.slice(at + value.length);
-  }
-  pre.append(rest);
-  const wrap = el('div', 'cmd-wrap');
-  wrap.append(pre);
-  return wrap;
-}
 
 const HARNESS_LABELS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi', kimi: 'Kimi', devin: 'Devin', image: 'Images' };
 const CATEGORY_LABELS = ${JSON.stringify(CATEGORY_LABELS)};
@@ -655,7 +629,6 @@ function renderRoster(data) {
     appendProfile(card, p, ['workTier', 'categories', 'goodFor', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
     if (p.tags?.length) card.append(el('p', 'member__tags', 'Tags: ' + p.tags.join(', ')));
     if (p.description) card.append(el('p', 'member__desc', p.description));
-    if (p.command) card.append(renderCommand(p));
     else card.append(el('p', 'member__desc', p.harness + ' agents are not run by this tool — it leaves them alone.'));
     if (editors.has(p.name)) card.append(editors.get(p.name));
     section.append(card);
