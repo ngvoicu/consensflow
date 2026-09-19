@@ -8,7 +8,6 @@ import { resolve } from 'node:path'
  *                                     app picks the member (--tags a,b to prefer one,
  *                                     --purpose for critical work)
  *   cf task add --self "…"            a task for yourself, on the board
- *   cf task add @lead "…"             a task for a coordinator by name
  *   cf task list                      the board: what waits for a member, then every lane
  *   cf task get T-3                   one task and its whole thread
  *   cf task done T-3 "…"              finish a task assigned to you (coordinators)
@@ -190,8 +189,7 @@ async function taskCommand([action, ...rest], call, cwd) {
   )
 }
 
-const ADD_USAGE =
-  'cf task add --tier <critical|complex|standard|light> "what to do" (or --self, or @lead / @pm)'
+const ADD_USAGE = 'cf task add --tier <critical|complex|standard|light> "what to do" (or --self)'
 
 /** `--tags coding,rust` as the list the core takes. */
 const tags = (value) =>

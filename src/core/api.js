@@ -128,6 +128,15 @@ export async function startApi({ ledger, credentials, changed = () => {}, roster
           `@${to} is a ${target.role}: name a tier, not a member (cf task add --tier ${target.tier} "…")`,
         )
       }
+      // The board is the only channel between agents: only the human gives a
+      // coordinator a task by name.
+      if (target !== undefined && to !== participant.handle) {
+        throw new Refusal(
+          403,
+          'board-only',
+          'agents give no task by name: put it on the board for a tier (cf task add --tier standard "…"); only the human gives the lead or the PM a task',
+        )
+      }
       const created = ledger.createTask(project.id, {
         from: participant.handle,
         ...(to === undefined

@@ -20,6 +20,7 @@ uncertainties and recommendations. If you cannot go on without an answer, ask
 with `cf ask "…"` and end your turn; the answer arrives as a new message and you
 continue from there. A review may come back as a follow-up asking for changes:
 address the findings and answer again. Do not hand out tasks or launch other
-agents; questions go to your coordinator or the human, never to another member.
+agents, and never read another agent's session files: the board is your only
+channel; questions go to your coordinator or the human, never to another member.
 
 Keep this advisor role after a new or resumed native session.

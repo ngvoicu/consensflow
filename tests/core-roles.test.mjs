@@ -39,11 +39,8 @@ describe('role instructions for the new core', () => {
           'cf team',
         ])
           assert.ok(text.includes(command), `${role} learns ${command}`)
-        assert.doesNotMatch(
-          text,
-          /cf task add @worker|cf task add @advisor/,
-          'nobody names a member',
-        )
+        assert.doesNotMatch(text, /cf task add @/, 'no agent gives another a task by name')
+        assert.match(text, /never read another agent's\s+session files/i)
         assert.match(text, /\| zeus \| claude-sonnet-5/)
         assert.match(text, /Tags: coding, rust\./, 'the team table shows the tags')
         assert.match(text, /Cross-model review/)
@@ -51,6 +48,7 @@ describe('role instructions for the new core', () => {
         assert.ok(text.includes('cf ask'), `${role} can ask`)
         assert.match(text, /final message of your turn/)
         assert.match(text, /never to another member/)
+        assert.match(text, /never read another agent's\s+session files/i)
         assert.doesNotMatch(text, /cf task add/)
         if (role === 'reviewer') assert.match(text, /VERDICT: pass/)
       }

@@ -19,6 +19,7 @@ and how sure you are. End with one line, `VERDICT: pass` or `VERDICT: changes`:
 changes sends the work back to its author with your findings; pass releases it
 to whoever asked, with your review. If you cannot go on without an answer, ask
 with `cf ask "…"` and end your turn; questions go to a coordinator or the human,
-never to another member.
+never to another member. Never read another agent's session files: the board
+is your only channel, and the work to review is in the brief.
 
 Keep this reviewer role after a new or resumed native session.

@@ -203,10 +203,7 @@ describe('cf inside a core window', () => {
       const usage = await cf(lead, 'task', 'add', 'no target')
       assert.deepEqual(
         [usage.code, usage.err],
-        [
-          2,
-          'cf: cf task add --tier <critical|complex|standard|light> "what to do" (or --self, or @lead / @pm)',
-        ],
+        [2, 'cf: cf task add --tier <critical|complex|standard|light> "what to do" (or --self)'],
       )
       const missing = await cf(lead, 'task', 'done', 'T-9', 'x')
       assert.deepEqual([missing.code, missing.err], [1, 'cf: no task T-9 in this project'])
@@ -265,10 +262,7 @@ describe('tiered tasks through the API and cf', () => {
       const noTier = await cf(lead, 'task', 'add', 'Just do it')
       assert.deepEqual(
         [noTier.code, noTier.err],
-        [
-          2,
-          'cf: cf task add --tier <critical|complex|standard|light> "what to do" (or --self, or @lead / @pm)',
-        ],
+        [2, 'cf: cf task add --tier <critical|complex|standard|light> "what to do" (or --self)'],
       )
 
       const own = await cf(lead, 'task', 'add', '--self', 'Plan the release')
@@ -297,10 +291,14 @@ describe('tiered tasks through the API and cf', () => {
       assert.match(advice.out, /^T-3 is on the board for a standard advisor;/)
       assert.equal(ledger.task(project.id, 3).pool, 'advisor')
       const toLead = await cf(token('pm'), 'task', 'add', '@lead', 'Ship it')
-      assert.equal(
-        toLead.out,
-        'T-4 queued for @lead. The result arrives in your inbox when @lead finishes.',
+      assert.deepEqual(
+        [toLead.code, toLead.err],
+        [
+          1,
+          'cf: agents give no task by name: put it on the board for a tier (cf task add --tier standard "…"); only the human gives the lead or the PM a task',
+        ],
       )
+      assert.equal((await cf(lead, 'task', 'add', '@pm', 'Plan it')).code, 1)
 
       assert.equal(
         (await cf(lead, 'task', 'list')).out,
@@ -310,7 +308,6 @@ describe('tiered tasks through the API and cf', () => {
           'T-3 [open] for a standard advisor ← @pm: Compare the two parsers',
           '@lead (lead)',
           'T-2 [queued] @lead ← @lead: Plan the release',
-          'T-4 [queued] @lead ← @pm: Ship it',
         ].join('\n'),
       )
     })

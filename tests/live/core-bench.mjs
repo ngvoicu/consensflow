@@ -221,6 +221,11 @@ try {
     const started = Date.now()
     const worker = AGENTS[wanted[0]]
     const marker = 'BENCH_REVIEW_OK'
+    // Only the task the lead creates from here on counts, not the baseline's.
+    const before = Math.max(
+      0,
+      ...(await board()).lanes.flatMap((l) => l.tasks.map((t) => t.number)),
+    )
     const policy = await app.requestNode('project.review', { project, review: 'members' })
     const reviewer = await app.requestNode('member.add', {
       project,
@@ -239,7 +244,7 @@ try {
     const reviewed = await until(
       async () =>
         (await lane(worker.id))?.tasks.find(
-          (t) => t.requester === 'lead' && ['review', 'done'].includes(t.state),
+          (t) => t.number > before && ['review', 'done'].includes(t.state),
         ),
       300_000,
     )

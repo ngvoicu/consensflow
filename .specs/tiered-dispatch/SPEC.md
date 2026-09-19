@@ -129,18 +129,17 @@ is written in the final vocabulary.
 - [x] [TEST-TD-11] An "Open tasks" bay (waiting for a member, per tier, saying why); the human's composer chooses Lead, PM, a worker tier or an advisor tier, with tags; member bays lose "Give a task"; strips show tier, tags and review state ("In review by @x", "Round 2"); a lane out of quota says until when; the team dialog shows each member's tier and tags and the review policy, and warns when review is on with no independent reviewer or a tier has no member; the new-project dialog sets the policy. `app/tests/core-page.spec.mjs`, `tests/core-page.test.mjs`.
 - [x] [IMPL-TD-12] `app/ui/core.html`, `app/ui/core/*.js`, `src/core/page.js`, the Rust allow-list; satisfies TEST-TD-11. Then the dock layout: the board beside one docked window (Gabriel's request).
 
-### Phase E: Live proof [active]
+### Phase E: Live proof [completed]
 
 - [x] [VERIFY-TD-13] Integration through the real pane host: a fake harness whose record shows a 429 mid-task, and the task moves to the tier's other worker with the requester told; a review round trip with a fake reviewer. `tests/integration/`.
-- [ ] [VERIFY-TD-14] Live bench (`npm run bench:core`) on the free models plus Codex (its quota came back on 2026-09-19 at 18:40): a lead giving tiered tasks, the daemon picking, one review round, Codex's usage read from its rollout; Claude after its reset.
+- [x] [VERIFY-TD-14] Live bench (`npm run bench:core`) on the free models plus Codex (its quota came back on 2026-09-19 at 18:40): a lead giving tiered tasks, the daemon picking, one review round, Codex's usage read from its rollout; Claude after its reset.
 
 ## Resume context
 
-Phases A to D are built, green and committed (`23a67eb`, `61d2c3e` and the
-commits between). Phase E: the three integration tests through the real pane
-host pass (`tests/integration/core-tiered.test.mjs`); the live bench on the
-free models and Codex is next (VERIFY-TD-14), then the switch (Phase F of
-`board-daemon-core`). The brain's CORE-8 ("coordinators pick the
+Every phase is built, green and proven live on the free models (see the log's
+last entries). Open: the same bench with Codex as a worker or reviewer (its
+quota is back) and the opt-in Claude run. Next: the switch, Phase F of
+`board-daemon-core`, so Gabriel can open the Candidate. The brain's CORE-8 ("coordinators pick the
 right member") is superseded by this spec's rules (CORE-10 to CORE-15).
 
 ## TDD log
@@ -240,3 +239,27 @@ right member") is superseded by this spec's rules (CORE-10 to CORE-15).
   after the reset. GREEN 32/32; the two tests then needed the fake harness to
   settle on its refusal and the lead to answer before taking its own task,
   which is what real harnesses do.
+- Gabriel, later the same night: "the lead and workers and pm and advisors
+  should not be able to send tasks to one another; should not be able to read
+  their transcripts from one to another; the glue is the board". The API
+  now refuses a task by name from any agent (`board-only`), the lead and PM
+  included; only the human gives a coordinator a task by name, from the
+  board. Every role text says the board is the agent's only channel and
+  forbids reading another agent's session files (ConsensFlow's own reads are
+  scoped already; a harness's files on disk cannot be locked away from a
+  process running as the same user, which is why it is a rule in the text,
+  not a mechanism). Tests first (API 2 red, roles 3 red), then GREEN 18/18.
+  First live bench with tiered dispatch: 13/13 on the baseline (OpenCode
+  lead; OpenCode, Pi and Devin workers picked by tier and their name tag,
+  results back to the lead in 9-18 s) plus the restart; the review scenario
+  failed on the bench's own predicate (it matched the baseline's finished
+  task), fixed, second run in progress.
+- VERIFY-TD-14, second live run, 19/19: OpenCode lead; OpenCode, Pi and Devin
+  workers each picked by tier and its name tag, dispatched 3-11 s after the
+  lead read its task, answered in 7-16 s, results in the lead's window 2 s
+  later, every worker idle after; then the review gate live: the lead's task
+  went to the OpenCode worker (8 s), the daemon gave the review to the Devin
+  reviewer (9 s), Devin's verdict `pass` came at 19 s, and the lead received
+  the result and the review; the restart brought the project back on the
+  lead's own conversation. The baseline runs without the gate so the two
+  measurements stay apart.

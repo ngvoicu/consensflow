@@ -118,11 +118,22 @@ opens panes or types into them.
 - [x] [TEST-BDC-13] Playwright: lanes per participant, cards and markers, card detail, the human inbox with question answering, the team picker, session views kept. `app/tests/core-page.spec.mjs` (16), with the data side in `tests/core-page.test.mjs` (9). What the old page has and this one does not yet (window geometry, the Agents, Library and Harnesses dialogs, the self-test hook) moves over at the switch, IMPL-BDC-21.
 - [x] [IMPL-BDC-14] The board page on the new core's page protocol: bays grouped by team, the Lead and PM window views, the session team with removal, the PM.
 
-### Phase F: The switch [planned]
+### Phase F: The switch [active]
 
+Decided on 2026-09-19 with Gabriel's "when can we open the app": the first
+hands-on build comes before the importer. The Candidate has its own home
+(`~/.consensflow-candidate`), so it starts with an empty board and he creates
+a project; the live app and its JSON state are never read. The importer
+(TEST-BDC-03, IMPL-BDC-04) moves to the end of the phase, for the day the live
+app is replaced.
+
+- [ ] [TEST-BDC-24] The agents screens keep working on the new core: the roster editor (with the new tags field), the agent library and the harness diagnostics are served by the new daemon behind the UI token the app already checks; their routes' tests move with them. `tests/core-agents-server.test.mjs`, `app/tests/core-page.spec.mjs`.
+- [ ] [IMPL-BDC-25] `src/core/agents-server.js` (the pages and `/api/agents…` routes out of `src/ui.js`), mounted on the new core's API server; the new daemon's handle carries the UI token; the board page gains the three dialogs; satisfies TEST-BDC-24.
+- [ ] [IMPL-BDC-21] `cf ui` runs the new core and `core.html` becomes `index.html`; window geometry and the update flow keep working; the packaged smoke drives the new page; every suite and the live bench are green.
+- [ ] [IMPL-BDC-26] The old core is deleted: `src/ui.js`, `store.js`, `tabs.js`, `panes.js`, `delivery-watch.js`, the inbox, delivery and receiver modules it replaces, `page.js`, `tasks.js`, `launch.js`, `requester.js`, the old page (`app/ui/index.html`, `panes.js`, `sidebar.js`, `tasks.js`, `menus.js`), the old Rust commands, the JSON state and `O_EXLOCK`, and their tests; the Devin hook text stops naming `cf results`.
+- [ ] [VERIFY-BDC-27] `npm run candidate` builds, smoke-tests and installs ConsensFlow Candidate; Gabriel is told it is ready.
 - [ ] [TEST-BDC-03] Import from alpha.62 state (tabs, threads, tasks, inbox results) is complete, idempotent and read-only on the source; replayed against a copy of the live home.
 - [ ] [IMPL-BDC-04] Importer; satisfies TEST-BDC-03.
-- [ ] [IMPL-BDC-21] `cf ui` runs the new core; the old core, its page code, the JSON state and `O_EXLOCK` are deleted; every suite and the live bench are green.
 
 ### Phase G: Transcript copy [planned]
 

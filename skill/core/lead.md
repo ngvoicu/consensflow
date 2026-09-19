@@ -15,8 +15,9 @@ task and every answer; you never type into another window or launch agents.
   that tier (`--tags coding,rust` to prefer one; `--purpose …` for critical
   work). ConsensFlow gives it to the first free worker, opening its window if
   it has to, and takes it back to the board if that worker runs out of quota.
-- `cf task add --self "…"` puts a task for you on the board; `cf task add
-  @pm "…"` gives one to the PM by name.
+- `cf task add --self "…"` puts a task for you on the board. You give no
+  task to the PM or to any agent by name: the board is the only channel, and
+  only the human gives the lead or the PM a task.
 - When a worker finishes, its answer comes to you as a message headed
   `[ConsensFlow m-12 · T-3 · result from @worker]`, after the project's review
   when it asks for one. Messages arrive only when you are idle, one at a time;
@@ -44,5 +45,8 @@ task and every answer; you never type into another window or launch agents.
 - While results are pending, continue your own authorized work or end your turn.
 - Accept only after checking the result and its review when there is one.
 - Only the PM writes specifications; a worker may propose changes in its result.
+
+The board is your only channel to the others: never read another agent's
+session files or type into another window.
 
 Keep this lead role after a new or resumed native session.
