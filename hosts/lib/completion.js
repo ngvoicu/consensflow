@@ -797,6 +797,18 @@ const CLAUDE_INTERRUPT_MARKERS = new Set([
   '[Request interrupted by user for tool use]',
 ])
 
+/**
+ * Whether a queue removal names the same queued message. Claude Code wraps
+ * cross-session messages in an envelope tag whose attributes differ between
+ * the enqueue and the remove record (2.1.275 adds `hop-chain` to one only), so
+ * the envelope's attributes are set aside after an exact match fails.
+ */
+function sameQueuedContent(queued, removed) {
+  if (queued === removed) return true
+  const envelope = (content) => content.replace(/^<([A-Za-z][\w-]*)(?:\s[^>]*)?>/, '<$1>')
+  return envelope(queued) === envelope(removed)
+}
+
 function isClaudeInterrupt(record) {
   if (
     record.type !== 'user' ||
@@ -980,7 +992,7 @@ async function claudeAnswers(sessionId, env) {
         dequeued.push(queued.shift() ?? { id: `queue:${recordIndex}`, content: '' })
       } else if (record.operation === 'popAll') {
         const content = String(record.content ?? '')
-        const queuedIndex = queued.findIndex((entry) => entry.content === content)
+        const queuedIndex = queued.findIndex((entry) => sameQueuedContent(entry.content, content))
         popped.push(
           queuedIndex === -1
             ? { id: `queue:${recordIndex}`, content }
@@ -988,9 +1000,11 @@ async function claudeAnswers(sessionId, env) {
         )
       } else if (record.operation === 'remove') {
         const content = String(record.content ?? '')
-        const queuedIndex = queued.findIndex((entry) => entry.content === content)
+        const queuedIndex = queued.findIndex((entry) => sameQueuedContent(entry.content, content))
         if (queuedIndex !== -1) queued.splice(queuedIndex, 1)
-        const dequeuedIndex = dequeued.findIndex((entry) => entry.content === content)
+        const dequeuedIndex = dequeued.findIndex((entry) =>
+          sameQueuedContent(entry.content, content),
+        )
         if (dequeuedIndex !== -1) dequeued.splice(dequeuedIndex, 1)
       }
       return

@@ -590,6 +590,33 @@ test('completion/claude-code: queued work prevents a settled window through dequ
   assert.equal(nextTurn.inFlight, true, 'the dequeued user turn is now open')
 })
 
+test('completion/claude-code: a removed cross-session message clears its queue entry when the envelope attributes differ', async () => {
+  // Claude Code 2.1.275 logs a mid-turn cross-session message with a
+  // hop-chain attribute on enqueue and without it on remove. Matching the
+  // removal by exact text left the lead "queued" forever, which held every
+  // result from 2026-09-18 11:00 on.
+  const session = '1b09fb15-feb1-4595-9f47-5eb9ff768191'
+  const envelope = (attributes) =>
+    `<cross-session-message from="uds:/tmp/cc-socks/0000.sock"${attributes} from-name="worker-01">worker result</cross-session-message>`
+  const { env, root } = await stageJsonl('claude-code', session, 'claude-code/queued-turn.jsonl', {
+    mutate: ([enqueue, assistant, , stopHooks]) => [
+      { ...enqueue, content: envelope(' hop-chain="ce0e9fe0365a224d1a5ef3fe"') },
+      assistant,
+      { ...enqueue, operation: 'remove', content: envelope('') },
+      stopHooks,
+    ],
+  })
+  try {
+    const result = await answers('claude-code', session, env)
+    shape(result)
+    assert.deepEqual(result.settlement.evidence.queuedTurns, [])
+    assert.equal(result.settlement.state, 'settled')
+    assert.equal(result.inFlight, false)
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
 test('completion/claude-code: the captured interrupt cancels; compaction keeps prior answers', async () => {
   const session = '1b09fb15-feb1-4595-9f47-5eb9ff768191'
   const interruptedStage = await stageJsonl('claude-code', session, 'claude-code/interrupted.jsonl')
