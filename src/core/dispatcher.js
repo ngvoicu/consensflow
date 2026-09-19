@@ -1,0 +1,497 @@
+import { randomUUID } from 'node:crypto'
+
+/**
+ * The dispatcher: the only actor in the daemon. Agents never open panes or
+ * type into them; they change the ledger (a task, a question, an answer), and
+ * the dispatcher makes it happen in the panes.
+ *
+ * On every pass, for each participant with something to do:
+ * - A queued message for a participant without a window launches the window
+ *   with the message as its first input; the launch is the delivery.
+ * - A live window that its harness reports idle (and not waiting for the
+ *   human) gets the head of its queue through the adapter's native path.
+ * - A delivery counts only when the harness's own record shows the message
+ *   (its `[ConsensFlow m-<id> ·` header in a user item). No sign of it in time:
+ *   a refused or silent delivery is tried again, up to `maxAttempts`; a launch
+ *   whose first message never shows is ended and its task failed.
+ * - A worker's turn that ends after its task's latest message finishes the
+ *   task with the answer written after that message. A task waiting on a
+ *   question is left alone. Coordinators (lead, PM) finish their own tasks
+ *   explicitly, because their turns end while they wait for workers.
+ * - A worker window that closes mid-task fails the task, and the requester is
+ *   told. A lead window that closes suspends its session.
+ *
+ * Harness specifics live in the adapters (`src/adapters/`); the pane host is
+ * the Rust PTY host behind the bridge. Time is an argument, so every rule is
+ * testable with explicit passes (`tests/core-dispatcher.test.mjs`).
+ */
+
+const INLINE_LIMIT = 4000
+const OPENING = 3000
+const RECEIVED_ROLES = new Set(['user', 'custom', 'tool'])
+const COORDINATORS = new Set(['lead', 'pm'])
+
+/** How a message reads in the recipient's pane. The header doubles as the arrival marker. */
+export function deliveryText(message) {
+  const from = message.sender === null ? 'ConsensFlow' : `@${message.sender}`
+  const task =
+    message.taskNumber === null || message.taskNumber === undefined
+      ? ''
+      : ` · T-${message.taskNumber}`
+  const body =
+    message.body.length <= INLINE_LIMIT
+      ? message.body
+      : `${message.body.slice(0, OPENING)}\n… (${message.body.length} characters; read all of it with: cf inbox read m-${message.id})`
+  const footer = message.kind === 'question' ? `\n\nAnswer with: cf answer m-${message.id} "…"` : ''
+  return `[ConsensFlow m-${message.id}${task} · ${message.kind} from ${from}]\n${body}${footer}`
+}
+
+const markerOf = (messageId) => `[ConsensFlow m-${messageId} ·`
+
+export class Dispatcher {
+  #ledger
+  #host
+  #adapters
+  #clock
+  #credentials
+  #paneEnv
+  #roster
+  #arrivalTimeoutMs
+  #launchTimeoutMs
+  #maxAttempts
+  #runtime = new Map()
+  #listeners = new Set()
+  #generation = 0
+
+  constructor({
+    ledger,
+    host,
+    adapters,
+    clock = { now: () => new Date() },
+    credentials,
+    paneEnv = () => ({}),
+    roster = () => null,
+    arrivalTimeoutMs = 60_000,
+    launchTimeoutMs = 180_000,
+    maxAttempts = 3,
+  }) {
+    this.#ledger = ledger
+    this.#host = host
+    this.#adapters = adapters
+    this.#clock = clock
+    this.#credentials = credentials
+    this.#paneEnv = paneEnv
+    this.#roster = roster
+    this.#arrivalTimeoutMs = arrivalTimeoutMs
+    this.#launchTimeoutMs = launchTimeoutMs
+    this.#maxAttempts = maxAttempts
+    host.onExit((pane) => this.paneExited(pane))
+  }
+
+  onChange(listener) {
+    this.#listeners.add(listener)
+    return () => this.#listeners.delete(listener)
+  }
+
+  /** What a participant's window is doing: starting, working, idle, waiting (with why), closed. */
+  activity(participantId) {
+    return this.#runtime.get(participantId)?.activity ?? { state: 'closed' }
+  }
+
+  /** The live window of a participant, `{id, generation}`, or null. */
+  pane(participantId) {
+    return this.#runtime.get(participantId)?.pane ?? null
+  }
+
+  /** A new session: the ledger records it and its lead window opens. */
+  async openSession({ directory, name, harness }) {
+    const session = this.#ledger.createSession({ directory, name, lead: { harness } })
+    const lead = session.participants.find((participant) => participant.handle === 'lead')
+    await this.#exclusive(lead.id, () => this.#launch(session, lead, null))
+    return this.#ledger.session(session.id)
+  }
+
+  /** The human's Resume, and the restore after a restart: coordinators come back on their conversations. */
+  async resumeSession(sessionId) {
+    const session = this.#ledger.setSessionState(sessionId, 'open')
+    for (const participant of session.participants) {
+      if (!COORDINATORS.has(participant.role) || this.pane(participant.id) !== null) continue
+      if (participant.role === 'pm' && this.#ledger.currentConversation(participant.id) === null)
+        continue
+      await this.#exclusive(participant.id, () => this.#launch(session, participant, null))
+    }
+    this.#changed()
+    return this.#ledger.session(sessionId)
+  }
+
+  /** Once, at start: the sessions that were open when the previous process ended come back. */
+  async resumeAfterRestart() {
+    const outcomes = []
+    for (const session of this.#ledger.sessions().filter((s) => s.resumeOnStart)) {
+      try {
+        await this.resumeSession(session.id)
+        outcomes.push({ session: session.id, resumed: true })
+      } catch (cause) {
+        outcomes.push({ session: session.id, resumed: false, error: cause.message })
+      } finally {
+        this.#ledger.forgetResume(session.id)
+      }
+    }
+    return outcomes
+  }
+
+  /** One pass over every participant; each moves on its own, so a slow launch holds up no one else. */
+  async pass() {
+    const steps = []
+    for (const session of this.#ledger.sessions()) {
+      for (const participant of session.participants) {
+        if (participant.role === 'human') continue
+        steps.push(this.#exclusive(participant.id, () => this.#step(session, participant)))
+      }
+    }
+    await Promise.all(steps)
+  }
+
+  /** A window ended: `pane.exit` from the pane host. */
+  async paneExited({ id, generation }) {
+    const entry = [...this.#runtime].find(
+      ([, runtime]) => runtime.pane?.id === id && runtime.pane.generation === generation,
+    )
+    if (entry === undefined) return
+    const [participantId, runtime] = entry
+    this.#credentials.revoke(runtime.token)
+    const delivering = runtime.delivering
+    Object.assign(runtime, {
+      pane: null,
+      launch: null,
+      token: null,
+      delivering: null,
+      activity: { state: 'closed' },
+    })
+    const session = this.#sessionOf(participantId)
+    if (session === null) return
+    const participant = session.participants.find((p) => p.id === participantId)
+    if (delivering !== null) {
+      this.#settleFailure(delivering, `@${participant.handle}'s window closed`, {
+        retry: !delivering.launch,
+      })
+    }
+    if (participant.role === 'lead') {
+      if (session.state === 'open') this.#ledger.setSessionState(session.id, 'suspended')
+    } else if (!COORDINATORS.has(participant.role)) {
+      const task = this.#ledger.activeTask(participantId)
+      if (task !== null) this.#failTask(session, task, `@${participant.handle}'s window closed`)
+    }
+    this.#changed()
+  }
+
+  // --- one participant's step ----------------------------------------------------
+
+  async #step(session, participant) {
+    const runtime = this.#runtimeOf(participant.id)
+    if (runtime.pane !== null) return this.#stepOpen(session, participant, runtime)
+    if (session.state !== 'open') return
+    const next = this.#ledger.nextDelivery(participant.id)
+    if (next !== null) await this.#launch(session, participant, next)
+  }
+
+  async #stepOpen(session, participant, runtime) {
+    let observed
+    try {
+      observed = await runtime.adapter.observe({
+        launch: runtime.launch,
+        pane: runtime.pane,
+        conversation: this.#ledger.currentConversation(participant.id),
+        host: this.#host,
+      })
+    } catch (cause) {
+      this.#setActivity(runtime, { state: 'unknown', reason: cause.message })
+      return
+    }
+    this.#setActivity(
+      runtime,
+      observed.waiting
+        ? { state: 'waiting', reason: observed.waiting.reason ?? null }
+        : { state: observed.settled ? 'idle' : 'working' },
+    )
+    if (runtime.delivering !== null) this.#watchArrival(runtime, observed)
+    if (!COORDINATORS.has(participant.role)) this.#collect(session, participant, observed)
+    if (runtime.delivering === null && observed.settled && !observed.waiting) {
+      const next = this.#ledger.nextDelivery(participant.id)
+      if (next !== null) await this.#deliver(runtime, next)
+    }
+  }
+
+  #watchArrival(runtime, observed) {
+    const { delivering } = runtime
+    const arrived = observed.items.find(
+      (item) => RECEIVED_ROLES.has(item.role) && item.text.includes(delivering.marker),
+    )
+    if (arrived !== undefined) {
+      this.#ledger.confirmDelivery(delivering.messageId, { item: arrived.id })
+      runtime.delivering = null
+      this.#changed()
+      return
+    }
+    const waited = this.#now() - delivering.since
+    if (delivering.launch) {
+      if (waited <= this.#launchTimeoutMs) return
+      runtime.delivering = null
+      this.#host.kill(runtime.pane).catch(() => {})
+      this.#settleFailure(delivering, 'the window never showed its first message', { retry: false })
+      return
+    }
+    if (waited <= this.#arrivalTimeoutMs) return
+    runtime.delivering = null
+    this.#settleFailure(delivering, 'the harness record never showed it', {
+      retry: delivering.admitted === true,
+    })
+  }
+
+  /** A worker's answer to its task's latest message finishes the task. */
+  #collect(session, participant, observed) {
+    const task = this.#ledger.activeTask(participant.id)
+    if (task === null || task.state !== 'working') return
+    const latest = task.messages
+      .filter(
+        (message) =>
+          message.recipient === participant.handle &&
+          message.state === 'delivered' &&
+          (message.kind === 'task' || message.kind === 'answer'),
+      )
+      .at(-1)
+    if (latest === undefined) return
+    const start = observed.items.findIndex((item) => item.text.includes(markerOf(latest.id)))
+    if (start === -1) return
+    if (observed.failed) {
+      this.#failTask(session, task, `@${participant.handle}'s harness reported a failure`)
+      return
+    }
+    if (!observed.settled) return
+    const answer = observed.items
+      .slice(start + 1)
+      .filter((item) => item.role === 'assistant' && item.complete)
+      .at(-1)
+    if (answer === undefined) return
+    this.#ledger.recordResult(session.id, task.number, {
+      body: answer.text.trim() || '(the agent ended its turn without a written answer)',
+    })
+    this.#changed()
+  }
+
+  async #deliver(runtime, message) {
+    if (runtime.adapter.ready !== undefined) {
+      const ready = await runtime.adapter.ready({
+        launch: runtime.launch,
+        pane: runtime.pane,
+        host: this.#host,
+      })
+      if (!ready) return
+    }
+    this.#ledger.beginDelivery(message.id)
+    let outcome
+    try {
+      outcome = await runtime.adapter.deliver({
+        launch: runtime.launch,
+        pane: runtime.pane,
+        host: this.#host,
+        text: deliveryText(message),
+      })
+    } catch (cause) {
+      outcome = { admitted: null, reason: cause.message }
+    }
+    const delivering = {
+      messageId: message.id,
+      marker: markerOf(message.id),
+      since: this.#now(),
+      launch: false,
+      admitted: outcome.admitted,
+    }
+    if (outcome.admitted === false) {
+      this.#settleFailure(delivering, outcome.reason ?? 'the harness refused it', { retry: true })
+      return
+    }
+    runtime.delivering = delivering
+    this.#changed()
+  }
+
+  // --- launches --------------------------------------------------------------------
+
+  async #launch(session, participant, message) {
+    const runtime = this.#runtimeOf(participant.id)
+    const adapter = this.#adapters[participant.harness]
+    if (adapter === undefined) throw new Error(`no adapter for ${participant.harness}`)
+    const conversation = this.#ledger.currentConversation(participant.id)
+    const resume = conversation?.nativeSession ?? null
+    const launchId = randomUUID()
+    const generation = this.#nextGeneration()
+    const delivering =
+      message === null
+        ? null
+        : {
+            messageId: message.id,
+            marker: markerOf(message.id),
+            since: this.#now(),
+            launch: true,
+            admitted: true,
+          }
+    if (message !== null) this.#ledger.beginDelivery(message.id)
+
+    let plan
+    try {
+      plan = await adapter.prepare({
+        launchId,
+        participant,
+        role: participant.role,
+        session,
+        directory: session.directory,
+        resume,
+        message: message === null ? null : deliveryText(message),
+        agent: participant.agent === null ? null : this.#roster(participant.agent),
+      })
+    } catch (cause) {
+      if (delivering !== null)
+        this.#settleFailure(delivering, `the launch failed: ${cause.message}`, { retry: false })
+      return
+    }
+    const token = this.#credentials.issue({ participant, session, generation })
+    const pane = { id: `s${session.id}-${participant.handle}`, generation }
+    const opened = await this.#host
+      .open({
+        ...pane,
+        launch: launchId,
+        cwd: session.directory,
+        argv: plan.argv,
+        env: { ...this.#paneEnv(participant, session), ...plan.env, CONSENSFLOW_TOKEN: token },
+        dropEnv: plan.dropEnv,
+      })
+      .catch((cause) => ({ ok: false, error: cause.message }))
+    if (opened?.ok !== true) {
+      this.#credentials.revoke(token)
+      if (delivering !== null) {
+        this.#settleFailure(
+          delivering,
+          `the window did not open: ${opened?.error ?? 'no answer from the pane host'}`,
+          { retry: false },
+        )
+      }
+      return
+    }
+
+    const resumed = resume !== null && plan.nativeSession === resume
+    let conversationId = conversation?.id
+    if (!resumed) {
+      conversationId = this.#ledger.startConversation(participant.id, {
+        harness: participant.harness,
+      }).id
+      if (plan.nativeSession !== null && plan.nativeSession !== undefined)
+        this.#ledger.bindConversation(conversationId, plan.nativeSession)
+    }
+    Object.assign(runtime, {
+      adapter,
+      pane,
+      launch: plan.launch,
+      token,
+      delivering,
+      activity: { state: 'starting' },
+    })
+    const started = await adapter
+      .started({ launch: plan.launch, pane, host: this.#host })
+      .catch((cause) => ({ error: cause.message }))
+    if (started.nativeSession && started.nativeSession !== plan.nativeSession) {
+      this.#ledger.bindConversation(conversationId, started.nativeSession)
+    }
+    this.#changed()
+  }
+
+  // --- failures ----------------------------------------------------------------------
+
+  /** A delivery that did not arrive: try again while attempts remain, or give up. */
+  #settleFailure(delivering, reason, { retry }) {
+    const message = this.#ledger.message(delivering.messageId)
+    if (message === null || message.state !== 'delivering') return
+    if (retry && message.attempts < this.#maxAttempts) {
+      this.#ledger.retryDelivery(message.id, reason)
+    } else {
+      this.#ledger.failDelivery(message.id, reason)
+      if (message.kind === 'task' && message.taskNumber !== null) {
+        const session = this.#ledger.session(message.sessionId)
+        const task = this.#ledger.task(session.id, message.taskNumber)
+        if (task.state === 'failed') this.#tellRequester(session, task, reason)
+      }
+    }
+    this.#changed()
+  }
+
+  #failTask(session, task, reason) {
+    this.#ledger.failTask(session.id, task.number, { reason })
+    this.#tellRequester(session, task, reason)
+  }
+
+  #tellRequester(session, task, reason) {
+    this.#ledger.note(session.id, {
+      to: task.requester,
+      task: task.number,
+      body: `T-${task.number} failed: ${reason}. Reopen it with: cf task reopen T-${task.number} "…"`,
+    })
+  }
+
+  // --- small helpers -------------------------------------------------------------------
+
+  /** Runs `work` for one participant at a time; a pass that finds it busy moves on. */
+  async #exclusive(participantId, work) {
+    const runtime = this.#runtimeOf(participantId)
+    if (runtime.busy) return
+    runtime.busy = true
+    try {
+      await work()
+    } finally {
+      runtime.busy = false
+    }
+  }
+
+  #runtimeOf(participantId) {
+    let runtime = this.#runtime.get(participantId)
+    if (runtime === undefined) {
+      runtime = {
+        adapter: null,
+        pane: null,
+        launch: null,
+        token: null,
+        delivering: null,
+        busy: false,
+        activity: { state: 'closed' },
+      }
+      this.#runtime.set(participantId, runtime)
+    }
+    return runtime
+  }
+
+  #setActivity(runtime, activity) {
+    if (runtime.activity.state === activity.state && runtime.activity.reason === activity.reason)
+      return
+    runtime.activity = activity
+    this.#changed()
+  }
+
+  #sessionOf(participantId) {
+    return (
+      this.#ledger
+        .sessions()
+        .find((session) => session.participants.some((p) => p.id === participantId)) ?? null
+    )
+  }
+
+  #nextGeneration() {
+    this.#generation = Math.max(this.#generation + 1, this.#now())
+    return this.#generation
+  }
+
+  #now() {
+    return this.#clock.now().getTime()
+  }
+
+  #changed() {
+    for (const listener of this.#listeners) listener()
+  }
+}

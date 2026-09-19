@@ -749,6 +749,22 @@ class Ledger {
     }
   }
 
+  /** One message, or null. */
+  message(id) {
+    return this.#message(id)
+  }
+
+  /** The task a participant has in progress (working or waiting on an answer), or null. */
+  activeTask(participantId) {
+    const row = this.#db
+      .prepare(
+        `SELECT session_id, number FROM task
+         WHERE assignee_id = ? AND state IN ('working', 'waiting') ORDER BY id LIMIT 1`,
+      )
+      .get(participantId)
+    return row === undefined ? null : this.task(row.session_id, row.number)
+  }
+
   inbox(participantId, { limit = 100 } = {}) {
     return this.#db
       .prepare(`${MESSAGE_SELECT} WHERE m.recipient_id = ? ORDER BY m.id DESC LIMIT ?`)

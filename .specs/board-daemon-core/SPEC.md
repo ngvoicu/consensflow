@@ -94,19 +94,21 @@ opens panes or types into them.
 - [x] [TEST-BDC-01] Ledger schema, migrations and the domain operations (sessions, participants, team, conversations, tasks, messages, events), the instance lock, crash safety and the invariants each operation keeps. `tests/ledger.test.mjs`, 26 tests.
 - [x] [IMPL-BDC-02] `src/ledger/` on `node:sqlite` (`index.js`, `schema.js`); satisfies TEST-BDC-01.
 
-### Phase B: Harness adapters [planned]
+### Phase B: Harness adapters [active]
 
-- [ ] [TEST-BDC-05] Adapter contract (launch, deliver, signals, collect, transcript source) with a fake harness per adapter.
-- [ ] [IMPL-BDC-06] Claude Code adapter (status file, hooks, peer delivery, Stop-hook turn end).
+- [ ] [TEST-BDC-05] Adapter contract (launch, deliver, signals, collect, transcript source) with a fake harness per adapter. The contract is `prepare`, `started`, `ready`, `deliver`, `observe` (documented in `src/core/dispatcher.js`); Claude's tests are `tests/adapter-claude.test.mjs`. Open: OpenCode, Pi, Devin, Codex.
+- [x] [IMPL-BDC-06] Claude Code adapter (status file, hooks, peer delivery, Stop-hook turn end): `src/adapters/claude-code.js`. Live proof is VERIFY-BDC-08.
 - [ ] [IMPL-BDC-07] OpenCode, Pi, Devin and Codex adapters, including their waiting signals.
 - [ ] [VERIFY-BDC-08] Live bench per adapter, as lead and as worker, with the test models.
 
-### Phase C: Dispatcher and inbox delivery [planned]
+### Phase C: Dispatcher and inbox delivery [active]
 
-- [ ] [TEST-BDC-09] Task state machine; per-participant queue delivering one item at a time when idle; receipts; retries; the launch-liveness reaper; restore on start.
-- [ ] [IMPL-BDC-10] Dispatcher; satisfies TEST-BDC-09.
+- [x] [TEST-BDC-09] Task state machine; per-participant queue delivering one item at a time when idle; receipts; retries; the launch-liveness reaper; restore on start. `tests/core-dispatcher.test.mjs` (13) and, end to end through the real pane host, `tests/integration/core-slice.test.mjs`.
+- [x] [IMPL-BDC-10] Dispatcher (`src/core/dispatcher.js`), pane host (`pane-host.js`) and the daemon entry (`daemon.js`); satisfies TEST-BDC-09.
+- [ ] [TEST-BDC-22] A human's Enter releases the typing latch once the harness records that submission; typing after it keeps the latch. Found by the Stage 2 harness map: no production code ever calls `clear_draft`, so one keystroke blocks every later paste into that window (Devin always pastes).
+- [ ] [IMPL-BDC-23] Rust `draft.clear` bridge operation and the core's use of `pane.enter`; satisfies TEST-BDC-22.
 
-### Phase D: CLI, API and role skills [planned]
+### Phase D: CLI, API and role skills [active]
 
 - [ ] [TEST-BDC-11] `cf task add/list/get/accept/reopen`, `cf inbox`, `cf ask`, `cf answer`; team enforcement; the removed commands are gone.
 - [ ] [IMPL-BDC-12] CLI, daemon API and regenerated lead/PM/advisor/worker instructions.
@@ -139,8 +141,12 @@ opens panes or types into them.
 
 ## Resume context
 
-Phase A is done (the ledger, unwired until the switch by design). Next:
-Phase B, the harness adapters, starting with the contract test TEST-BDC-05.
+Phase A is done. A vertical slice of phases B, C and D is green: the Claude
+adapter, the dispatcher, the daemon entry, the agents' API and `cf` commands,
+proven end to end through the real Rust pane host with a fake Claude
+(`tests/integration/core-slice.test.mjs`). Next: TEST-BDC-22 (the typing
+latch), then the OpenCode, Pi, Devin and Codex adapters, then the live bench
+against the new core (VERIFY-BDC-08).
 
 ## TDD log
 
@@ -152,3 +158,21 @@ Phase B, the harness adapters, starting with the contract test TEST-BDC-05.
   three runs. The crash test kills a child writing tasks in a loop after
   150 ms; every task it left has exactly its one task message, and
   `integrity_check` is ok.
+- The Stage 2 harness map (a read-only survey of today's per-harness launch,
+  delivery, signals and collection, with file:line references) decided the
+  slice: every harness already has a proven native way to push into a live
+  window, so one delivery path per harness serves every participant and the
+  five lead receivers retire at the switch.
+- TEST-BDC-09 RED: the module did not exist. GREEN after IMPL-BDC-10: 13/13 on
+  the first full run (the tests were traced by hand against the design first).
+  The dispatcher needed two ledger reads, `activeTask` and `message`, each added
+  test-first (ledger 27/27).
+- Claude adapter RED: module missing; then 4 failures, all in the tests'
+  assumptions (the answer parser marks user items complete; `harnesses.js`
+  names Claude's CLI `claude`, not `claude-code`). GREEN 7/7. Claude's live
+  status reader moved from the old watcher into the adapter; the old watcher
+  imports it (160/160 old pane and watcher tests, six runs).
+- The slice's integration test passed on its first run (0.8 s). To prove it
+  can fail, result delivery was broken on purpose: it timed out, and passed
+  again once restored. The API and `cf` commands: 7/7.
+

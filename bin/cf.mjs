@@ -1743,6 +1743,16 @@ function doctor() {
 
 async function main() {
   const [command, ...rest] = process.argv.slice(2)
+  // A window the new core opened carries its participant's token; there, `cf`
+  // is the agents' command set (src/core/cli.js).
+  if (env.CONSENSFLOW_TOKEN) {
+    const { runCoreCli } = await import('../src/core/cli.js')
+    process.exitCode = await runCoreCli([command, ...rest], env, {
+      out,
+      err: (line) => process.stderr.write(`${line}\n`),
+    })
+    return
+  }
 
   // A machine set up before the roots were merged keeps its state — it just
   // moves into the one directory, once, and silently: `cf --version` and

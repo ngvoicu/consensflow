@@ -1,0 +1,210 @@
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
+
+/**
+ * `cf` inside a window the new core opened: the agents' commands.
+ *
+ *   cf task add @zeus "…"        a task for Zeus, queued and delivered by the app
+ *   cf task list                 the board: every lane and its tasks
+ *   cf task get T-3              one task and its whole thread
+ *   cf task done T-3 "…"         finish a task assigned to you (coordinators)
+ *   cf task accept|cancel T-3    move a task you asked for
+ *   cf task reopen T-3 "…"       send a finished or failed task back with a follow-up
+ *   cf inbox [read m-12]         what is waiting for you, or one message in full
+ *   cf ask "…" [--human]         a question to whoever gave you your task (or the human)
+ *   cf answer m-12 "…"           answer a question put to you
+ *   cf whoami                    your session, role and current task
+ *
+ * The window's token (CONSENSFLOW_TOKEN) is the whole authority: the core
+ * knows which participant it belongs to. Add `--json` for machine output.
+ */
+export async function runCoreCli(args, env, { out, err, cwd = process.cwd() }) {
+  const json = args.includes('--json')
+  const words = args.filter((arg) => arg !== '--json')
+  const call = client(env)
+  try {
+    const [verb, ...rest] = words
+    const result = await command(verb, rest, call, cwd)
+    out(json ? JSON.stringify(result.data, null, 2) : result.text)
+    return 0
+  } catch (cause) {
+    err(`cf: ${cause.message}`)
+    return cause.usage ? 2 : 1
+  }
+}
+
+async function command(verb, rest, call, cwd) {
+  switch (verb) {
+    case 'task':
+      return taskCommand(rest, call, cwd)
+    case 'inbox': {
+      if (rest[0] === 'read') {
+        const id = messageId(rest[1])
+        const { message } = await call('GET', `/api/inbox/${id}`)
+        return { data: message, text: `${messageLine(message)}\n\n${message.body}` }
+      }
+      const { messages } = await call('GET', '/api/inbox')
+      return {
+        data: messages,
+        text: messages.length === 0 ? 'Your inbox is empty.' : messages.map(messageLine).join('\n'),
+      }
+    }
+    case 'ask': {
+      const { flags, text } = split(rest, ['--human'], ['--to', '--task'])
+      const to = flags['--human'] ? 'human' : handle(flags['--to'])
+      const { message } = await call('POST', '/api/questions', {
+        body: requireText(text, 'cf ask "your question"'),
+        ...(to === undefined ? {} : { to }),
+        ...(flags['--task'] === undefined ? {} : { task: taskNumber(flags['--task']) }),
+      })
+      return {
+        data: message,
+        text: `m-${message.id} asked @${message.recipient}. The answer arrives as a message; end your turn now.`,
+      }
+    }
+    case 'answer': {
+      const [id, ...words] = rest
+      const { message } = await call('POST', '/api/answers', {
+        question: messageId(id),
+        body: requireText(words.join(' '), 'cf answer m-<id> "your answer"'),
+      })
+      return { data: message, text: `m-${message.id} answered @${message.recipient}.` }
+    }
+    case 'whoami': {
+      const me = await call('GET', '/api/whoami')
+      return {
+        data: me,
+        text:
+          `@${me.participant.handle} (${me.participant.role}) in session ${me.session.name}` +
+          (me.task === null ? '' : `, on T-${me.task.number}: ${me.task.title}`),
+      }
+    }
+    default:
+      throw usage(
+        `unknown command ${JSON.stringify(verb ?? '')}: use task, inbox, ask, answer or whoami`,
+      )
+  }
+}
+
+async function taskCommand([action, ...rest], call, cwd) {
+  if (action === 'add') {
+    const { flags, text, target } = split(rest, [], ['--to', '--title', '--file'])
+    const to = handle(flags['--to'] ?? target)
+    if (to === undefined) throw usage('cf task add @agent "what to do"')
+    const body =
+      flags['--file'] === undefined
+        ? requireText(text, 'cf task add @agent "what to do"')
+        : await readFile(resolve(cwd, flags['--file']), 'utf8')
+    const created = await call('POST', '/api/tasks', {
+      to,
+      body,
+      ...(flags['--title'] === undefined ? {} : { title: flags['--title'] }),
+    })
+    return {
+      data: created,
+      text: `T-${created.task.number} queued for @${to}. The result arrives in your inbox when @${to} finishes.`,
+    }
+  }
+  if (action === 'list' || action === undefined) {
+    const { lanes } = await call('GET', '/api/tasks')
+    const lines = lanes.flatMap((lane) =>
+      lane.tasks.length === 0
+        ? []
+        : [`@${lane.handle} (${lane.role})`, ...lane.tasks.map(taskLine)],
+    )
+    return { data: lanes, text: lines.length === 0 ? 'No tasks yet.' : lines.join('\n') }
+  }
+  const number = taskNumber(rest[0])
+  if (action === 'get') {
+    const { task } = await call('GET', `/api/tasks/${number}`)
+    const thread = task.messages.map((m) => `${messageLine(m)}\n${m.body}`).join('\n\n')
+    return { data: task, text: `${taskLine(task)}\n\n${thread}` }
+  }
+  if (['done', 'accept', 'cancel', 'reopen'].includes(action)) {
+    const text = rest.slice(1).join(' ')
+    if ((action === 'done' || action === 'reopen') && text.trim().length === 0) {
+      throw usage(
+        `cf task ${action} T-${number} "${action === 'done' ? 'your result' : 'the follow-up'}"`,
+      )
+    }
+    const { task } = await call(
+      'POST',
+      `/api/tasks/${number}/${action}`,
+      text ? { body: text } : {},
+    )
+    return { data: task, text: taskLine(task) }
+  }
+  throw usage(
+    `unknown task command ${JSON.stringify(action)}: use add, list, get, done, accept, reopen or cancel`,
+  )
+}
+
+function client(env) {
+  const url = env.CONSENSFLOW_URL
+  const token = env.CONSENSFLOW_TOKEN
+  return async (method, path, body) => {
+    if (typeof url !== 'string' || url.length === 0) {
+      throw new Error('CONSENSFLOW_URL is not set: run cf from a window ConsensFlow opened')
+    }
+    const response = await fetch(`${url}${path}`, {
+      method,
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    }).catch((cause) => {
+      throw new Error(`ConsensFlow is not answering at ${url} (${cause.message})`)
+    })
+    const value = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(value.message ?? `ConsensFlow answered ${response.status}`)
+    return value
+  }
+}
+
+/** Positional words, one leading `@target`, and the named flags. */
+function split(words, booleans, valued) {
+  const flags = {}
+  const text = []
+  let target
+  for (let at = 0; at < words.length; at += 1) {
+    const word = words[at]
+    if (booleans.includes(word)) flags[word] = true
+    else if (valued.includes(word)) {
+      flags[word] = words[at + 1]
+      at += 1
+    } else if (target === undefined && text.length === 0 && word.startsWith('@')) target = word
+    else text.push(word)
+  }
+  return { flags, text: text.join(' '), target }
+}
+
+function handle(value) {
+  if (value === undefined) return undefined
+  return value.startsWith('@') ? value.slice(1) : value
+}
+
+function taskNumber(value) {
+  const match = /^(?:T-)?(\d+)$/i.exec(value ?? '')
+  if (match === null) throw usage(`not a task: ${JSON.stringify(value ?? '')} (write T-3)`)
+  return Number(match[1])
+}
+
+function messageId(value) {
+  const match = /^(?:m-)?(\d+)$/i.exec(value ?? '')
+  if (match === null) throw usage(`not a message: ${JSON.stringify(value ?? '')} (write m-12)`)
+  return Number(match[1])
+}
+
+function requireText(text, example) {
+  if (typeof text !== 'string' || text.trim().length === 0) throw usage(`say what: ${example}`)
+  return text
+}
+
+function usage(message) {
+  const error = new Error(message)
+  error.usage = true
+  return error
+}
+
+const taskLine = (task) =>
+  `T-${task.number} [${task.state}] @${task.assignee} ← @${task.requester}: ${task.title}`
+const messageLine = (message) =>
+  `m-${message.id} [${message.state}] ${message.kind}${(message.task ?? message.taskNumber) ? ` T-${message.task ?? message.taskNumber}` : ''} from ${message.sender === null ? 'ConsensFlow' : `@${message.sender}`}${message.preview === undefined ? '' : `: ${message.preview}`}`

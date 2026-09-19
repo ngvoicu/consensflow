@@ -608,6 +608,22 @@ describe('views', () => {
     })
   })
 
+  it('names the task a participant is on, with its thread', async () => {
+    await withLedger((ledger) => {
+      const { session, id } = team(ledger)
+      assert.equal(ledger.activeTask(id('zeus')), null)
+      ledger.createTask(session.id, { from: 'lead', to: 'zeus', body: 'One' })
+      assert.equal(ledger.activeTask(id('zeus')), null, 'a queued task is not started')
+      deliver(ledger, ledger.task(session.id, 1).messages[0])
+      assert.deepEqual(
+        [ledger.activeTask(id('zeus')).number, ledger.activeTask(id('zeus')).messages.length],
+        [1, 1],
+      )
+      ledger.ask(session.id, { from: 'zeus', to: 'lead', task: 1, body: 'Format?' })
+      assert.equal(ledger.activeTask(id('zeus')).state, 'waiting')
+    })
+  })
+
   it('lists an inbox newest first', async () => {
     await withLedger((ledger) => {
       const { session, id } = team(ledger)

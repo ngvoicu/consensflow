@@ -10,6 +10,7 @@ import {
   resultStatus,
   retireReceiver,
 } from '../hosts/lib/inbox.js'
+import { claudeStatuses } from './adapters/claude-code.js'
 import { launchConfiguration } from './channels.js'
 import { receiverSignal } from './claude-install.js'
 
@@ -477,48 +478,6 @@ export class Watcher {
 
 // Cached activity belongs to a live launch and selected native conversation.
 // A /new, resume, or pane replacement invalidates it before the next scan finishes.
-/**
- * Claude Code's own live status for each running session, from the
- * `sessions/<pid>.json` files it keeps (the same files peer delivery reads):
- * busy, idle, or waiting with the reason (a permission prompt, input needed, a
- * dialog). A file whose process is gone is ignored.
- */
-async function claudeStatuses(env) {
-  const directory = path.join(
-    env.CLAUDE_CONFIG_DIR ?? path.join(env.HOME ?? '', '.claude'),
-    'sessions',
-  )
-  const statuses = new Map()
-  const names = await fs.readdir(directory).catch(() => [])
-  for (const name of names) {
-    if (!/^\d+\.json$/.test(name)) continue
-    const row = await fs
-      .readFile(path.join(directory, name), 'utf8')
-      .then(JSON.parse)
-      .catch(() => null)
-    if (typeof row?.sessionId !== 'string' || !Number.isSafeInteger(row.pid) || !alive(row.pid))
-      continue
-    const state = { busy: 'working', waiting: 'waiting', idle: 'idle', shell: 'idle' }[row.status]
-    if (!state) continue
-    statuses.set(row.sessionId, {
-      state,
-      ...(state === 'waiting' && typeof row.waitingFor === 'string'
-        ? { reason: row.waitingFor }
-        : {}),
-    })
-  }
-  return statuses
-}
-
-function alive(pid) {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    return error.code === 'EPERM'
-  }
-}
-
 function activityKey(tab, pane, row, receiver) {
   if (tab.closed || tab.deleting || pane.closed || pane.deleting || pane.failure) return null
   if (pane.kind === 'lead') {
