@@ -1272,6 +1272,29 @@ export function taskWithWorkPolicy(agent, task, purpose) {
 }
 
 /** Work tiers express the owner's allocation policy, not benchmark or price ranks. */
+/**
+ * What an agent is good at, as tags the daemon can match a task's `--tags`
+ * against: read off the profile's own words. The human edits them per agent.
+ */
+const TAG_WORDS = [
+  ['coding', /feature work|implementation|coding|code changes|fixes|code review/i],
+  ['review', /review/i],
+  ['planning', /planning|task breakdown/i],
+  ['architecture', /architecture/i],
+  ['debugging', /debugging/i],
+  ['analysis', /analysis/i],
+  ['hard-problems', /hard problems/i],
+  ['questions', /important questions/i],
+  ['small-changes', /small|focused|routine|everyday/i],
+  ['long-tasks', /longer tasks/i],
+  ['second-opinion', /second opinion/i],
+  ['images', /image/i],
+];
+export function defaultTags(profile) {
+  const text = `${profile.goodFor ?? ''} ${(profile.categories ?? []).join(' ')}`;
+  return TAG_WORDS.filter(([, words]) => words.test(text)).map(([tag]) => tag);
+}
+
 export function agentProfile(agent) {
   const profile = modelProfile(agent);
   const harness = agent.harness ?? (agent.kind === 'claude-code' ? 'claude' : agent.kind);
@@ -1290,6 +1313,7 @@ export function agentProfile(agent) {
     profile.categories = ['architecture', 'problem-solving', 'reviewer'];
     profile.goodFor = 'Consequential reviews, architecture, discovering solutions to hard problems and answering important questions.';
   }
+  profile.tags = defaultTags(profile);
   return profile;
 }
 

@@ -165,7 +165,12 @@ human closes a project from the list (`project.close`: suspended, every window
 killed, tiered work back in the backlog) and resumes it later. Members run one
 task per session (TEST-BDC-28): their windows close with their task and the
 next task starts fresh, so coordinators are told to put everything in the
-task. Next: Gabriel
+task. Live on all four harnesses (2026-09-19 night): the bench passes
+11/11 with a Codex worker, with a Codex reviewer (10/11: its verdict line was
+wrapped in emphasis, now read), and with a Claude lead and worker on Sonnet;
+the Codex socket falls back to the user's temporary directory when the home
+path is too long, and every roster agent carries default tags read off its
+profile. Next: Gabriel
 tests the Candidate (empty board; he creates a project); a follow-up commit
 prunes the one-shot runner code the old `cf run` left behind (`runAgent` in
 `hosts/lib/runners.js`, `codex-auth`, `harness-transcript`, `image-run`,
@@ -406,3 +411,32 @@ removing a PM (the ledger refuses it as `not-a-member`).
   the second opened); page 69/69; bench 19/19 (the three workers' windows
   closed after their task, a Devin reviewer passed an OpenCode result in
   22 s, restart on the same session).
+- Live proof on Codex and Claude, 2026-09-19 night, after Gabriel's
+  checklist ("delivery must work flawless; yolo; markers; quota;
+  transcripts; skills; deterministic") and his word that every harness has
+  quota. Codex worker and reviewer: the window closed at once with
+  "ConsensFlow home makes the Codex socket path too long" (the bench's and
+  integration's homes are long temporary paths; the Candidate's
+  `~/.consensflow-candidate` fits). The supervisor now falls back to
+  `$TMPDIR/consensflow/codex-XXXXXX` (still 0700) when the home does not
+  fit, and refuses only when nothing fits; the socket is a runtime endpoint,
+  not state. Bench: Codex worker 11/11; Codex reviewer 10/11 because its
+  verdict came as `**VERDICT: pass**` and the ledger read only a bare line;
+  `verdictOf` now reads through markdown emphasis and dashes (exported,
+  tested on six shapes). Claude lead and worker: two runs lost to
+  first-run onboarding on the lead's screen, found with a 10 s probe through
+  the harness (the harness now keeps every pane's output and exits, and a
+  failed bench check prints them): with `CLAUDE_CONFIG_DIR` set, Claude keeps
+  its global config inside that directory, so the harness's sandbox default
+  (and, before it, the bench's `~/.claude`, where only a stub exists) showed
+  no completed onboarding. A null override now clears the harness default;
+  the app never sets the variable for panes. Claude bench 11/11: the
+  human's task to a Sonnet lead, a fresh Sonnet worker, the result to the
+  lead through the peer inbox in 11 s, a Devin review, restart on
+  `--resume`. Tags: every catalog preset and every roster agent without
+  hand-set tags now carries tags read off its own "good for" text and
+  categories (`defaultTags`: coding, review, planning, architecture,
+  debugging, analysis, hard-problems, questions, small-changes, long-tasks,
+  second-opinion, images); the human's tags still win. The PM's description
+  line said it hands work to the lead; the body and CORE-12 say the human
+  does; aligned.

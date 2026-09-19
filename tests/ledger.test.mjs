@@ -6,7 +6,7 @@ import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { openLedger, SCHEMA_VERSION } from '../src/ledger/index.js'
+import { openLedger, SCHEMA_VERSION, verdictOf } from '../src/ledger/index.js'
 
 /**
  * The ledger (TEST-BDC-01): one SQLite file in the home that holds every
@@ -1364,6 +1364,18 @@ describe('tiered dispatch: the review gate', () => {
       .filter((m) => m.state === 'queued')
       .reverse()
       .map((m) => [m.kind, m.taskNumber, m.body])
+
+  it('reads the verdict through the emphasis a harness wraps it in', () => {
+    for (const [body, expected] of [
+      ['Fine.\n\nVERDICT: pass', 'pass'],
+      ['Fine.\n\n**VERDICT: pass**', 'pass'],
+      ['Fine.\n\nVerdict: **changes**', 'changes'],
+      ['Fine.\n\n- VERDICT — changes.', 'changes'],
+      ['Fine.\n\nverdict: passable', null],
+      ['VERDICT: pass\n\nBut then more prose.', null],
+    ])
+      assert.equal(verdictOf(body), expected, body)
+  })
 
   it("holds a member's result for review when the project asks, and releases it with the review on pass", async () => {
     await withLedger((ledger) => {

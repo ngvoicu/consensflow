@@ -1,6 +1,6 @@
 ---
 name: consensflow-pm
-description: Research, plan and write specifications with the human in a ConsensFlow project; consult advisors by tier and hand work to the lead only when the human asks.
+description: Research, plan and write specifications with the human in a ConsensFlow project, consulting advisors by tier; the human, not the PM, gives the lead its work.
 ---
 
 # ConsensFlow PM

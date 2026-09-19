@@ -68,7 +68,8 @@ const CRITICAL_RULE =
   'No coding or implementation edits. Do not write or revise specifications. Return analysis, evidence and recommendations to your coordinator.'
 export const REVIEW_POLICIES = ['none', 'members', 'all']
 const REVIEW_ROUNDS = 2
-const VERDICT = /^VERDICT:\s*(pass|changes)\b/i
+/** The reviewer's last word, with whatever emphasis its harness wrapped it in: `**VERDICT: pass**`, `Verdict: **changes**`. */
+const VERDICT = /^[\s*_`#>-]*VERDICT[\s*_`]*[:\-–—][\s*_`]*(pass|changes)\b/i
 const REVIEW_STATES = ['open', 'queued', 'working', 'waiting']
 const TAG = /^[a-z0-9][a-z0-9-]{0,31}$/
 const MAX_TAGS = 20
@@ -218,7 +219,7 @@ function requireMember({ agent, harness, role, tier, tags = [] }) {
 }
 
 /** The verdict on a review's last line that says something, or null. */
-function verdictOf(body) {
+export function verdictOf(body) {
   const line = body
     .split('\n')
     .map((text) => text.trim())

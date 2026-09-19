@@ -517,14 +517,14 @@ describe('tags say what an agent is good for', () => {
   const t = tempEnv()
   after(() => t.cleanup())
 
-  it('shows the profile categories until the human sets tags, and keeps what they set', () => {
+  it('shows what the profile says the agent is good for as tags until the human sets them, and keeps what they set', () => {
     addAgent(
       { name: 'calliope', harness: 'claude', model: 'claude-fable-5-1', effort: 'max' },
       t.env,
     )
     let [agent] = listAgents(t.env)
-    assert.deepEqual(agent.tags, agent.profile.categories)
-    assert.deepEqual(agent.tags, ['architecture', 'problem-solving', 'reviewer'])
+    assert.deepEqual(agent.tags, agent.profile.tags)
+    assert.deepEqual(agent.tags, ['review', 'architecture', 'hard-problems', 'questions'])
 
     editAgent('calliope', { tags: ['rust', 'review', 'rust'] }, t.env)
     ;[agent] = listAgents(t.env)
@@ -547,7 +547,7 @@ describe('tags say what an agent is good for', () => {
 
     editAgent('calliope', { tags: null }, t.env)
     ;[agent] = listAgents(t.env)
-    assert.deepEqual(agent.tags, ['architecture', 'problem-solving', 'reviewer'])
+    assert.deepEqual(agent.tags, ['review', 'architecture', 'hard-problems', 'questions'])
     assert.equal(JSON.parse(readFileSync(rosterPath(t.env), 'utf8')).agents[0].tags, undefined)
 
     assert.deepEqual(

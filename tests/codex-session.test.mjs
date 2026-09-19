@@ -391,8 +391,18 @@ it('keeps native Codex sockets private and inside ConsensFlow home', async (t) =
   assert.ok(directory.startsWith(`${join(home, 'tmp')}/`))
   assert.equal((await stat(directory)).mode & 0o777, 0o700)
   assert.ok(Buffer.byteLength(join(directory, 'native.sock')) < 104)
+  // A home too deep for a Unix socket (a temporary tree) falls back to the
+  // user's own temporary directory, still private; nowhere short and it fails.
+  const deep = join(root, 'x'.repeat(110))
+  const fallback = await codexSession.createSocketDirectory({
+    CONSENSFLOW_HOME: deep,
+    TMPDIR: root,
+  })
+  assert.ok(fallback.startsWith(`${join(root, 'consensflow')}/`))
+  assert.equal((await stat(fallback)).mode & 0o777, 0o700)
+  assert.ok(Buffer.byteLength(join(fallback, 'native.sock')) < 104)
   await assert.rejects(
-    codexSession.createSocketDirectory({ CONSENSFLOW_HOME: join(root, 'x'.repeat(110)) }),
+    codexSession.createSocketDirectory({ CONSENSFLOW_HOME: deep, TMPDIR: deep }),
     /socket path.*too long/i,
   )
 })

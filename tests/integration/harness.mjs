@@ -140,7 +140,13 @@ export async function startIntegration({
   mkdirSync(workspace, { recursive: true })
   const initial = safeEnvironment(root, join(root, 'fake-bin'), FAKE)
   const fakeBin = writeFakeInstall(root, initial)
-  const env = { ...safeEnvironment(root, fakeBin, FAKE), ...fakeEnv }
+  // A null override removes the sandbox default: a run on the real harnesses
+  // must leave CLAUDE_CONFIG_DIR unset, so Claude keeps its own home config.
+  const env = Object.fromEntries(
+    Object.entries({ ...safeEnvironment(root, fakeBin, FAKE), ...fakeEnv }).filter(
+      ([, value]) => value !== null && value !== undefined,
+    ),
+  )
   writeRoster(env)
 
   const ui = spawn(process.execPath, [editor], {
@@ -157,6 +163,9 @@ export async function startIntegration({
   const nodeFrames = []
   const rustFrames = []
   const openFrames = []
+  // What every pane printed and how it ended, for a failure to explain itself.
+  const outputs = new Map()
+  const exits = []
   const nodePending = new Map()
   const rustPending = new Map()
   const rust = spawn(BRIDGE, [], {
@@ -188,6 +197,11 @@ export async function startIntegration({
   const rustToNode = parser((line) => {
     const frame = JSON.parse(line)
     rustFrames.push(frame)
+    if (frame.op === 'pane.output' && Array.isArray(frame.body?.bytes)) {
+      const key = frame.body.id
+      outputs.set(key, [...(outputs.get(key) ?? []), Buffer.from(frame.body.bytes)])
+    }
+    if (frame.op === 'pane.exit') exits.push(frame.body)
     if (frame.kind === 'res' && rustPending.has(frame.id)) {
       rustPending.get(frame.id).resolve(frame.body)
     }
@@ -354,6 +368,17 @@ export async function startIntegration({
     nodeFrames,
     rustFrames,
     openFrames,
+    exits,
+    /** Everything a pane printed so far, control sequences stripped, newest last. */
+    output(paneId) {
+      const esc = String.fromCharCode(27)
+      const bell = String.fromCharCode(7)
+      return Buffer.concat(outputs.get(paneId) ?? [])
+        .toString('utf8')
+        .replace(new RegExp(`${esc}\\[[0-9;?]*[ -/]*[@-~]`, 'g'), '')
+        .replace(new RegExp(`${esc}\\][^${bell}]*${bell}`, 'g'), '')
+        .replaceAll('\r', '')
+    },
     request,
     requestNode,
     requestRust: request,

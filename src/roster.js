@@ -207,7 +207,7 @@ function toView(row) {
     ...(row.description ? { description: row.description } : {}),
     ...(row.preset ? { preset: row.preset } : {}),
     // The human's tags, else what the profile says the agent is good for.
-    tags: Array.isArray(row.tags) ? row.tags : (profile.categories ?? []),
+    tags: Array.isArray(row.tags) ? row.tags : (profile.tags ?? profile.categories ?? []),
     profile,
     ...(harness === undefined ? { unsupported: true } : {}),
   }

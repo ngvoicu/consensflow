@@ -74,7 +74,11 @@ const ENV = {
     '/usr/sbin',
     '/sbin',
   ].join(':'),
-  CLAUDE_CONFIG_DIR: join(H, '.claude'),
+  // Unset on purpose (null removes the harness's sandbox default): with it
+  // set, Claude keeps its global config inside that directory instead of
+  // `~/.claude.json`, finds no completed onboarding there, and opens on the
+  // first-run dialog, never on a prompt. The app never sets it for panes.
+  CLAUDE_CONFIG_DIR: null,
   CODEX_HOME: join(H, '.codex'),
   XDG_CONFIG_HOME: join(H, '.config'),
   ANTHROPIC_MODEL: 'claude-sonnet-5',
@@ -186,6 +190,8 @@ try {
         : {
             worker: (await lane(agent.id))?.activity,
             state: (await lane(agent.id))?.tasks.find((t) => t.number === task.number)?.state,
+            exits: app.exits.filter((exit) => exit.id === `p${project}-${agent.id}`),
+            output: app.output(`p${project}-${agent.id}`).slice(-1500),
           }),
     })
     if (!result) continue

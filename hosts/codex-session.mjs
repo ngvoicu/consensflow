@@ -3,6 +3,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { once } from 'node:events'
 import { chmod, mkdir, mkdtemp, rm, stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import WebSocket, { WebSocketServer } from 'ws'
@@ -398,14 +399,21 @@ export function codexProcessArguments(args) {
   return { backend, tui }
 }
 
+/** Whether a socket at `<prefix>XXXXXX/native.sock` fits sun_path (macOS: 104 bytes with the final NUL). */
+const socketFits = (prefix) => Buffer.byteLength(join(`${prefix}XXXXXX`, 'native.sock')) < 104
+
+/**
+ * The socket's private directory: under the ConsensFlow home, or, when that
+ * path is too long for a Unix socket (a home deep in a temporary tree), under
+ * the user's own temporary directory. The socket is a runtime endpoint, not
+ * state: it is removed with the session.
+ */
 export async function createSocketDirectory(env) {
-  const root = join(configRoot(env), 'tmp')
-  const prefix = join(root, 'codex-')
-  // mkdtemp adds six characters; macOS sun_path includes the final NUL byte.
-  if (Buffer.byteLength(join(`${prefix}XXXXXX`, 'native.sock')) >= 104)
-    throw new Error('ConsensFlow home makes the Codex socket path too long')
+  const homes = [join(configRoot(env), 'tmp'), join(env.TMPDIR ?? tmpdir(), 'consensflow')]
+  const root = homes.find((candidate) => socketFits(join(candidate, 'codex-')))
+  if (root === undefined) throw new Error('ConsensFlow home makes the Codex socket path too long')
   await mkdir(root, { recursive: true, mode: 0o700 })
-  const directory = await mkdtemp(prefix)
+  const directory = await mkdtemp(join(root, 'codex-'))
   await chmod(directory, 0o700)
   return directory
 }
