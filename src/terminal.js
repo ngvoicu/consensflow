@@ -51,15 +51,21 @@ function selfPaths() {
 
 function launcher(env) {
   const { runtime, cli } = selfPaths()
+  // A copy running with its own home (a candidate beside the installed app)
+  // pins it: an ordinary terminal names no home, and the CLI would otherwise
+  // fall back to the live ~/.consensflow.
+  const home = env.CONSENSFLOW_HOME ? configRoot(env) : null
   if (isWindows(env)) {
     // A .cmd shim, because Windows has no shebang: the same idea, spelled the
     // way cmd.exe understands, and `%*` forwards the arguments.
-    return `@echo off\r\nREM ${MARKER}. Runs the app's own runtime and its own copy of\r\nREM the CLI, so the terminal and the window never drift apart.\r\n"${runtime}" "${cli}" %*\r\n`
+    const pin = home ? `setlocal\r\nset "CONSENSFLOW_HOME=${home}"\r\n` : ''
+    return `@echo off\r\nREM ${MARKER}. Runs the app's own runtime and its own copy of\r\nREM the CLI, so the terminal and the window never drift apart.\r\n${pin}"${runtime}" "${cli}" %*\r\n`
   }
+  const pin = home ? `export CONSENSFLOW_HOME="${home}"\n` : ''
   return `#!/bin/sh
 # ${MARKER}. Runs the app's own runtime and its own copy of
 # the CLI, so the terminal and the window never drift apart.
-exec "${runtime}" "${cli}" "$@"
+${pin}exec "${runtime}" "${cli}" "$@"
 `
 }
 
@@ -113,7 +119,29 @@ export function terminalRuntime(env, options = {}) {
   const line = readFileSync(status.path, 'utf8').match(/"([^"]+)"\s+"([^"]+cf\.mjs)"/)
   if (line === null) return null
   const [, runtime, entry] = line
-  return { runtime, entry, exists: existsSync(runtime), mine: runtime === selfPaths().runtime }
+  return {
+    runtime,
+    entry,
+    exists: existsSync(runtime),
+    mine: runtime === selfPaths().runtime,
+    live: insideLiveBundle(entry),
+  }
+}
+
+/**
+ * Whether a CLI entry sits inside a bundle with the installed release's
+ * identity — the live app, which a development command must never write into.
+ * `.../X.app/Contents/Resources/cli/bin/cf.mjs` → `.../X.app/Contents/Info.plist`.
+ */
+function insideLiveBundle(entry) {
+  const plist = join(dirname(dirname(dirname(dirname(entry)))), 'Info.plist')
+  try {
+    return /<key>CFBundleIdentifier<\/key>\s*<string>dev\.ngvoicu\.consensflow<\/string>/.test(
+      readFileSync(plist, 'utf8'),
+    )
+  } catch {
+    return false
+  }
 }
 
 export function installTerminalCommand(env, options = {}) {

@@ -1,6 +1,6 @@
 {
   "name": "consensflow",
-  "version": "3.0.0-alpha.61",
+  "version": "3.0.0-alpha.62",
   "description": "Native terminal workspace for a lead, named workers and a project manager.",
   "license": "MIT",
   "type": "module",
@@ -26,6 +26,7 @@
     "eval": "node evals/run.mjs",
     "test:integration": "node --test tests/integration/*.test.mjs",
     "smoke": "CONSENSFLOW_SMOKE=1 node --test tests/smoke.test.mjs",
+    "candidate": "node app/scripts/candidate.mjs",
     "check:all": "npm run check && cargo test --offline --manifest-path app/src-tauri/Cargo.toml && cargo clippy --offline --manifest-path app/src-tauri/Cargo.toml --all-targets -- -D warnings && npm --prefix app run test:ui && npm run test:integration && npm run smoke"
   },
   "devDependencies": {

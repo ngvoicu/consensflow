@@ -196,8 +196,55 @@ fn selftest_report(event: String, data: Value) -> Value {
     json!({"ok":true})
 }
 
+/// The installed release's bundle identity: the only build that may keep the
+/// live home, `~/.consensflow`.
+pub const PRODUCTION_IDENTIFIER: &str = "dev.ngvoicu.consensflow";
+
+/// The home a build that is NOT the installed release must use instead.
+///
+/// A candidate opened from Finder, or `tauri dev` of the release identity,
+/// starts with no `CONSENSFLOW_HOME`, and every reader then falls back to
+/// `~/.consensflow` — the live instance's state. The kernel lock refuses that
+/// only while the live app runs; after a reboot the newer build would open
+/// and migrate the live state. So the build decides: the release keeps the
+/// default, everything else gets `~/.consensflow-candidate`. An explicit,
+/// non-empty `CONSENSFLOW_HOME` always wins — tests and smokes set one.
+fn isolated_home(
+    identifier: &str,
+    debug: bool,
+    configured: Option<&std::ffi::OsStr>,
+    home: Option<&std::path::Path>,
+) -> Result<Option<std::path::PathBuf>, String> {
+    if configured.is_some_and(|value| !value.is_empty()) {
+        return Ok(None);
+    }
+    if identifier == PRODUCTION_IDENTIFIER && !debug {
+        return Ok(None);
+    }
+    home.map(|home| Some(home.join(".consensflow-candidate")))
+        .ok_or_else(|| "this build needs HOME to find ~/.consensflow-candidate".to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let context = tauri::generate_context!();
+    // Settled before any thread exists, so the updater and the Node process —
+    // which inherits this environment, and passes it to every pane — all see
+    // the one home.
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
+    match isolated_home(
+        &context.config().identifier,
+        cfg!(debug_assertions),
+        std::env::var_os("CONSENSFLOW_HOME").as_deref(),
+        home.as_deref().map(std::path::Path::new),
+    ) {
+        Ok(Some(isolated)) => std::env::set_var("CONSENSFLOW_HOME", isolated),
+        Ok(None) => {}
+        Err(message) => {
+            eprintln!("consensflow: {message}");
+            std::process::exit(1);
+        }
+    }
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -249,8 +296,10 @@ pub fn run() {
         .setup(|app| {
             app.manage(AppRuntime::start(app.handle()));
             updates::setup(app)?;
+            // The product name, so a candidate's window never reads as the live app's.
+            let title = app.package_info().name.clone();
             let mut window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
-                .title("ConsensFlow")
+                .title(title)
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(720.0, 520.0)
                 .maximized(true);
@@ -261,7 +310,7 @@ pub fn run() {
             window.build()?;
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building the ConsensFlow app");
 
     app.run(|handle, event| {
@@ -269,4 +318,76 @@ pub fn run() {
             handle.state::<AppRuntime>().shutdown();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+    use std::path::{Path, PathBuf};
+
+    const HOME: &str = "/Users/test";
+
+    #[test]
+    fn the_installed_release_keeps_the_live_home() {
+        assert_eq!(
+            isolated_home(PRODUCTION_IDENTIFIER, false, None, Some(Path::new(HOME))),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn every_other_build_gets_the_candidate_home() {
+        let candidate = Some(PathBuf::from("/Users/test/.consensflow-candidate"));
+        // A candidate bundle, an old probe bundle, and `tauri dev` of the
+        // release identity all land in the one development home.
+        for (identifier, debug) in [
+            ("dev.ngvoicu.consensflow.candidate", false),
+            ("dev.ngvoicu.consensflow.paste-probe", false),
+            (PRODUCTION_IDENTIFIER, true),
+        ] {
+            assert_eq!(
+                isolated_home(identifier, debug, None, Some(Path::new(HOME))),
+                Ok(candidate.clone()),
+                "{identifier} debug={debug}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_explicit_home_always_wins() {
+        for (identifier, debug) in [
+            (PRODUCTION_IDENTIFIER, false),
+            ("dev.ngvoicu.consensflow.candidate", false),
+            (PRODUCTION_IDENTIFIER, true),
+        ] {
+            assert_eq!(
+                isolated_home(
+                    identifier,
+                    debug,
+                    Some(OsStr::new("/isolated/state")),
+                    Some(Path::new(HOME))
+                ),
+                Ok(None)
+            );
+        }
+    }
+
+    #[test]
+    fn an_empty_home_setting_counts_as_unset() {
+        assert_eq!(
+            isolated_home(
+                "dev.ngvoicu.consensflow.candidate",
+                false,
+                Some(OsStr::new("")),
+                Some(Path::new(HOME))
+            ),
+            Ok(Some(PathBuf::from("/Users/test/.consensflow-candidate")))
+        );
+    }
+
+    #[test]
+    fn a_candidate_without_a_home_directory_refuses_to_start() {
+        assert!(isolated_home("dev.ngvoicu.consensflow.candidate", false, None, None).is_err());
+    }
 }

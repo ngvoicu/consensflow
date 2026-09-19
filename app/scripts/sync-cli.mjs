@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 /**
- * Mirror this checkout's CLI resources into the built app and the copy named by
+ * Mirror this checkout's CLI resources into the built apps and the copy named by
  * the cf launcher. Deleted source files are removed from those bundles too.
- * This is a development command that can modify the installed app and break its
- * resource signature. Role context refreshes at the next pane start/resume.
+ * It never writes into a bundle with the installed release's identity: that is
+ * the live app, and its panes run the files this would replace. Point `cf` at
+ * the candidate (CONSENSFLOW_HOME=~/.consensflow-candidate) to sync into it.
+ * Role context refreshes at the next pane start/resume.
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -13,24 +15,16 @@ import { terminalRuntime } from '../../src/terminal.js'
 
 const APP = dirname(dirname(fileURLToPath(import.meta.url)))
 const STAGED = join(APP, 'src-tauri', 'resources', 'cli')
-const BUNDLE = join(
-  APP,
-  'src-tauri',
-  'target',
-  'release',
-  'bundle',
-  'macos',
-  'ConsensFlow.app',
-  'Contents',
-  'Resources',
-  'cli',
-)
+const BUILT = join(APP, 'src-tauri', 'target', 'release', 'bundle', 'macos')
+const BUNDLES = ['ConsensFlow.app', 'ConsensFlow Candidate.app']
+  .map((name) => join(BUILT, name, 'Contents', 'Resources', 'cli'))
+  .filter((bundle) => existsSync(dirname(bundle)))
 
 execFileSync(process.execPath, [join(APP, 'scripts', 'prepare-sidecar.mjs')], { stdio: 'inherit' })
 
-if (!existsSync(dirname(BUNDLE))) {
+if (BUNDLES.length === 0) {
   process.stderr.write(
-    `no built app at ${BUNDLE}\nthere is nothing to sync into — run \`npm run build\` first\n`,
+    `no built app in ${BUILT}\nthere is nothing to sync into — run \`npm run build\` or \`npm run candidate\` first\n`,
   )
   process.exit(1)
 }
@@ -39,8 +33,8 @@ if (!existsSync(dirname(BUNDLE))) {
 const mirror = (into) =>
   execFileSync('rsync', ['-a', '--delete', `${STAGED}/`, `${into}/`], { stdio: 'inherit' })
 
-mirror(BUNDLE)
-const written = [BUNDLE]
+for (const bundle of BUNDLES) mirror(bundle)
+const written = [...BUNDLES]
 
 /**
  * Where `cf` on PATH keeps its CLI. The launcher names the cf.mjs it runs, so
@@ -48,14 +42,20 @@ const written = [BUNDLE]
  * that does not hold a CLI is not one to rsync `--delete` over.
  */
 const onPath = () => {
-  const entry = terminalRuntime(process.env)?.entry
-  if (entry === undefined) return null
-  const root = dirname(dirname(entry))
+  const runtime = terminalRuntime(process.env)
+  if (runtime === null) return null
+  if (runtime.live) {
+    process.stdout.write(
+      `the command on PATH runs the installed ConsensFlow (${runtime.entry}) — not syncing into the live app\n`,
+    )
+    return null
+  }
+  const root = dirname(dirname(runtime.entry))
   return existsSync(join(root, 'bin', 'cf.mjs')) ? root : null
 }
 
 const launcher = onPath()
-if (launcher !== null && launcher !== BUNDLE) {
+if (launcher !== null && !BUNDLES.includes(launcher)) {
   // Say it BEFORE writing: this is the line that would have saved the day,
   // and a seal broken silently is how a `codesign --verify` failure gets
   // discovered by somebody else's Mac.

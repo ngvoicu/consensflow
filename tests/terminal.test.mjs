@@ -67,6 +67,49 @@ describe('the app can put its own CLI on your PATH', () => {
     assert.equal(theirs.entry, join(t.root, 'Other.app', 'cf.mjs'))
   })
 
+  it('says when the command runs the installed release, which development must never write into', () => {
+    const bundle = (name, identifier) => {
+      const contents = join(t.root, `${name}.app`, 'Contents')
+      mkdirSync(join(contents, 'Resources', 'cli', 'bin'), { recursive: true })
+      writeFileSync(
+        join(contents, 'Info.plist'),
+        `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n\t<key>CFBundleIdentifier</key>\n\t<string>${identifier}</string>\n</dict>\n</plist>\n`,
+      )
+      const entry = join(contents, 'Resources', 'cli', 'bin', 'cf.mjs')
+      writeFileSync(entry, '')
+      writeFileSync(
+        join(bin, 'consensflow'),
+        `#!/bin/sh\n# Installed by ConsensFlow.\nexec "${process.execPath}" "${entry}" "$@"\n`,
+      )
+    }
+    bundle('Live', 'dev.ngvoicu.consensflow')
+    assert.equal(terminalRuntime(t.env, { candidates: [bin] }).live, true)
+    bundle('Candidate', 'dev.ngvoicu.consensflow.candidate')
+    assert.equal(terminalRuntime(t.env, { candidates: [bin] }).live, false)
+    installTerminalCommand(t.env, { candidates: [bin] })
+    assert.equal(
+      terminalRuntime(t.env, { candidates: [bin] }).live,
+      false,
+      'a checkout is not a bundle',
+    )
+  })
+
+  it('keeps a separate home when run from a terminal that does not name one', () => {
+    // The candidate's launcher is run from an ordinary terminal, where no
+    // CONSENSFLOW_HOME is set: without the pin it would fall back to the
+    // live ~/.consensflow.
+    installTerminalCommand(t.env, { candidates: [bin] })
+    const script = readFileSync(join(bin, 'cf'), 'utf8')
+    assert.ok(script.includes(`export CONSENSFLOW_HOME="${t.env.CONSENSFLOW_HOME}"`))
+    assert.equal(terminalRuntime(t.env, { candidates: [bin] }).mine, true)
+
+    const { CONSENSFLOW_HOME, ...defaults } = t.env
+    const plain = join(t.root, 'plain-bin')
+    mkdirSync(plain)
+    installTerminalCommand(defaults, { candidates: [plain] })
+    assert.ok(!readFileSync(join(plain, 'cf'), 'utf8').includes('CONSENSFLOW_HOME'))
+  })
+
   it('explains itself when no candidate directory can be written', () => {
     assert.throws(
       () => installTerminalCommand(t.env, { candidates: ['/System/nope'] }),
