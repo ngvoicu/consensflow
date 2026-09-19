@@ -39,6 +39,10 @@ function firstLine(readable, child) {
       const end = carry.indexOf(0x0a)
       if (end === -1) return
       readable.removeListener('data', onData)
+      // Hold what follows until the router is attached: a flowing stream with
+      // no listener drops it, and the daemon's first frames are its restart
+      // resume. The app's bridge keeps its reader, so it never loses them.
+      readable.pause()
       resolve({
         line: carry.subarray(0, end).toString('utf8').replace(/\r$/, ''),
         rest: carry.subarray(end + 1),
@@ -126,7 +130,12 @@ function waitFor(predicate, timeoutMs = 10_000, intervalMs = 25) {
  * their production JSON-lines pipes. The helper only observes and routes the
  * bytes; pane.open, PTYs, input arbitration and cleanup stay native.
  */
-export async function startIntegration({ fakeEnv = {}, bridgeEnv = {}, existingRoot = null } = {}) {
+export async function startIntegration({
+  fakeEnv = {},
+  bridgeEnv = {},
+  existingRoot = null,
+  editor = EDITOR,
+} = {}) {
   assert.equal(existsSync(BRIDGE), true, `missing built bridge: ${BRIDGE}`)
   const root = existingRoot ?? mkdtempSync(join(tmpdir(), 'consensflow-integration-'))
   const workspace = join(root, 'workspace')
@@ -136,7 +145,7 @@ export async function startIntegration({ fakeEnv = {}, bridgeEnv = {}, existingR
   const env = { ...safeEnvironment(root, fakeBin, FAKE), ...fakeEnv }
   writeRoster(env)
 
-  const ui = spawn(process.execPath, [EDITOR], {
+  const ui = spawn(process.execPath, [editor], {
     cwd: REPO,
     env,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -207,6 +216,8 @@ export async function startIntegration({ fakeEnv = {}, bridgeEnv = {}, existingR
   if (rustHandleLine.rest.length > 0) {
     rustToNode.push(rustHandleLine.rest)
   }
+  ui.stdout.resume()
+  rust.stdout.resume()
   ui.stdin.on('error', () => {})
   rust.stdin.on('error', () => {})
 
@@ -372,6 +383,10 @@ export async function startIntegration({ fakeEnv = {}, bridgeEnv = {}, existingR
     killRust(signal = 'SIGKILL') {
       return rust.kill(signal)
     },
+    /** The app's own quit order: the daemon dies first, then the pane host. */
+    killEditor(signal = 'SIGKILL') {
+      return ui.kill(signal)
+    },
     rustExited() {
       return rust.exitCode !== null || rust.signalCode !== null
     },
@@ -380,6 +395,10 @@ export async function startIntegration({ fakeEnv = {}, bridgeEnv = {}, existingR
     },
     rustPid() {
       return rust.pid
+    },
+    /** What both processes wrote to stderr, for a failing test's message. */
+    stderr() {
+      return { ui: uiErrors.join(''), rust: rustErrors.join('') }
     },
     signalRust(signal) {
       return process.kill(rust.pid, signal)

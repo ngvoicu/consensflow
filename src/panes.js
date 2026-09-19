@@ -1614,6 +1614,9 @@ export class Panes {
           progress.generation === generation
         ) {
           failure = { message: progress.message, exitCode: progress.exitCode ?? null }
+          // Recorded before the reservation goes: in between, the page would
+          // draw a launch that failed as a live pane.
+          if (tab.deleting !== true) await this.#tabs.failPane(tab.id, id, generation, failure)
         }
         // The store compares the exit against the reservation of the
         // moment, inside its queue: a duplicate exit, or one that arrives
@@ -1659,9 +1662,8 @@ export class Panes {
         })
         return
       }
-      if (failure !== null && tab.deleting !== true)
-        await this.#tabs.failPane(tab.id, id, generation, failure)
-      else await this.#tabs.removePane(tab.id, id, generation, { preserveHistory })
+      if (failure === null || tab.deleting === true)
+        await this.#tabs.removePane(tab.id, id, generation, { preserveHistory })
       return
     }
   }

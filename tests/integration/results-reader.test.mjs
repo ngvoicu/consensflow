@@ -14,9 +14,8 @@ test('TEST-PANE-75: real CLI reads complete results through the scoped daemon wi
     assert.equal(consult.code, 0, consult.stderr)
     await app.waitFor(() => Object.values(app.threads()).some((row) => row.sessionId))
     const conversation = Object.keys(app.threads())[0]
-    await app.waitFor(() =>
-      app.transcript(app.threads()[conversation].sessionId).includes('stop_hook_summary'),
-    )
+    // The daemon records the answer on its next scan, not when the file is written.
+    await app.waitFor(() => app.deliveries().some((entry) => entry.conversation === conversation))
 
     const index = await app.runCli(['results', '--json'], leadEnv)
     assert.equal(index.code, 0, index.stderr)

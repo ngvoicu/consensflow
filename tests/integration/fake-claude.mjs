@@ -17,9 +17,13 @@ for (const arg of args) {
   if (skipValue) {
     skipValue = false
   } else if (
-    ['--settings', '--add-dir', '--append-system-prompt-file', '--system-prompt-snapshot'].includes(
-      arg,
-    )
+    [
+      '--settings',
+      '--add-dir',
+      '--append-system-prompt-file',
+      '--system-prompt-snapshot',
+      '--permission-mode',
+    ].includes(arg)
   ) {
     skipValue = true
   } else if (awaitingSession) {

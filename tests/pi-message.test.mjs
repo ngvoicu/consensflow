@@ -308,6 +308,42 @@ describe('consensflow Pi worker followup', () => {
     }
   })
 
+  it('never sends a message id again once it was acknowledged', async () => {
+    // A scan that listed the file before the acknowledgement removed it, or a
+    // second copy written with the same id, must not reach the model twice.
+    const s = await setup()
+    try {
+      const id = `m-${'c'.repeat(32)}`
+      const record = `${JSON.stringify({
+        id,
+        type: 'message',
+        launchId: 'launch-pi-test',
+        session: 'native-pi-session',
+        text: 'acknowledged followup',
+        expiresAt: Date.now() + 60_000,
+      })}\n`
+      await writeFile(join(s.inbox, `${id}.json`), record)
+      await s.extension.consume()
+      const deadline = Date.now() + 2000
+      while (s.pi.sent.length === 0 && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      await s.pi.handlers.get('message_start')(
+        { message: { role: 'user', content: [{ type: 'text', text: 'acknowledged followup' }] } },
+        s.ctx,
+      )
+      await waitFor(join(s.ack, `${id}.json`))
+      while ((await exists(join(s.inbox, `${id}.json`))) && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 5))
+
+      await writeFile(join(s.inbox, `${id}.json`), record)
+      await s.extension.consume()
+      assert.deepEqual(s.pi.sent, ['acknowledged followup'])
+      assert.equal(await exists(join(s.inbox, `${id}.json`)), false)
+    } finally {
+      await s.close()
+    }
+  })
+
   it('ignores a late consume after its inbox is gone', async () => {
     // A watcher event or a queued rerun can outlive the inbox (pane closed,
     // folder cleaned). Inside Pi an unhandled rejection can end the process.

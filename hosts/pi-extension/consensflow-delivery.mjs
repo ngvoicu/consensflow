@@ -113,6 +113,11 @@ export function createDeliveryExtension(
   let running = false
   let queued = false
   const pending = new Map()
+  // Ids settled in this process, sent or refused. A scan that listed a file
+  // before its acknowledgement removed it, or a second copy with the same id,
+  // must never reach the model again; a new process is a new launch, whose
+  // inbox refuses the old launch's records anyway.
+  const settledIds = new Set()
   let resultReceiver
 
   const logError = (...args) => logger?.error?.(...args)
@@ -172,6 +177,7 @@ export function createDeliveryExtension(
     const entry = pending.get(id)
     if (entry === undefined || entry.done) return
     entry.done = true
+    settledIds.add(id)
     if (entry.timer !== null) clearTimeout(entry.timer)
     const response = { id, admitted }
     if (admitted === false && editorGuard === 1) response.bytesWritten = 0
@@ -292,6 +298,10 @@ export function createDeliveryExtension(
             continue
           }
           if (pending.has(id)) continue
+          if (settledIds.has(id)) {
+            await unlink(path).catch(() => {})
+            continue
+          }
           const shapeError = invalidMessageShape(record)
           if (shapeError !== null) {
             logError(`message ${id} is ${shapeError}`)
