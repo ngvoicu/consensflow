@@ -135,6 +135,7 @@ describe('the Codex adapter', () => {
         const pane = { id: 's1-diana', generation: 2 }
         assert.deepEqual(await adapter.deliver({ launch, pane, host, text: 'hi' }), {
           admitted: true,
+          queued: true,
         })
         assert.deepEqual(claims, [
           ['pane.claim_native_epoch', { pane: 's1-diana', generation: 2, epoch: 6 }],

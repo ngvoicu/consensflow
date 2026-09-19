@@ -27,8 +27,8 @@ export function recordState(record) {
 }
 
 /** How the native channels answer a send, as an adapter delivery outcome. */
-export function admission(sent, refusal) {
-  if (sent?.ok === true) return { admitted: true }
+export function admission(sent, refusal, { queued = false } = {}) {
+  if (sent?.ok === true) return queued ? { admitted: true, queued: true } : { admitted: true }
   if (sent?.admitted === null) return { admitted: null, reason: sent.cause ?? sent.error }
   return { admitted: false, reason: sent?.cause ?? sent?.error ?? refusal }
 }

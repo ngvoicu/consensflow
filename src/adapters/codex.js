@@ -109,7 +109,7 @@ export function codexAdapter({
         },
         text,
       )
-      return admission(sent, 'the Codex broker refused it')
+      return admission(sent, 'the Codex broker refused it', { queued: true })
     },
 
     async observe({ launch }) {

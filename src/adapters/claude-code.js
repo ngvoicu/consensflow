@@ -99,7 +99,7 @@ export function claudeCodeAdapter({
           },
           text,
         )
-        if (sent?.ok === true) return { admitted: true }
+        if (sent?.ok === true) return { admitted: true, queued: true }
         if (sent?.admitted === null) return { admitted: null, reason: sent.cause ?? sent.error }
         // An inbox Claude has not registered yet (or never will, on an older
         // build) is not a reason to drop the message: the terminal still works.

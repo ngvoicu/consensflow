@@ -125,6 +125,7 @@ describe('the Pi adapter', () => {
       const pane = { id: 's1-zeus', generation: 2 }
       assert.deepEqual(await adapter.deliver({ launch, pane, host, text: 'hi' }), {
         admitted: true,
+        queued: true,
       })
       assert.deepEqual(claims, [
         ['pane.claim_native_epoch', { pane: 's1-zeus', generation: 2, epoch: 3 }],

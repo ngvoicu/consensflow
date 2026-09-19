@@ -121,7 +121,7 @@ export function openCodeAdapter({
         },
         text,
       )
-      return admission(sent, 'OpenCode refused it')
+      return admission(sent, 'OpenCode refused it', { queued: true })
     },
 
     async observe({ launch }) {

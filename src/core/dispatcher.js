@@ -405,11 +405,12 @@ export class Dispatcher {
       this.#settleFailure(delivering, 'the window never showed its first message', { retry: false })
       return
     }
-    if (waited <= this.#arrivalTimeoutMs) return
+    if (delivering.queued || waited <= this.#arrivalTimeoutMs) return
     runtime.delivering = null
-    // Admitted or uncertain, a message whose header is still missing from the
-    // harness record after the whole window did not land: sending it again is
-    // how it reaches the reader, and the header would show a late duplicate.
+    // A paste the harness record never showed after the whole window did not
+    // land: sending it again is how it reaches the reader, and the header
+    // would show a late duplicate. (A message the harness queued itself waits
+    // for the record, or for the window to close.)
     this.#settleFailure(delivering, 'the harness record never showed it', { retry: true })
   }
 
@@ -502,6 +503,10 @@ export class Dispatcher {
       since: this.#now(),
       launch: false,
       admitted: outcome.admitted,
+      // The harness's own queue took it (a peer inbox, a broker, a plugin):
+      // it shows when the harness gets to it, and sending it again would only
+      // make a duplicate, which Claude even drops as a repeat.
+      queued: outcome.queued === true,
     }
     if (outcome.admitted === false) {
       this.#settleFailure(delivering, outcome.reason ?? 'the harness refused it', { retry: true })

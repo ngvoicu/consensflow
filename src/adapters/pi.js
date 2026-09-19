@@ -87,7 +87,7 @@ export function piAdapter({ env, send = sendPi, answers = cachedAnswers() }) {
         },
         text,
       )
-      return admission(sent, 'Pi refused it')
+      return admission(sent, 'Pi refused it', { queued: true })
     },
 
     async observe({ launch }) {

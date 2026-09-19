@@ -42,6 +42,7 @@ function fakeAdapter(harness = 'claude-code') {
         quota: null,
         admit: true,
         arrive: true,
+        queued: false,
       }
       if (request.message !== null) {
         agent.items.push(item('user', request.message))
@@ -67,7 +68,7 @@ function fakeAdapter(harness = 'claude-code') {
         agent.items.push(item('user', text))
         agent.settled = false
       }
-      return { admitted: true }
+      return agent.queued ? { admitted: true, queued: true } : { admitted: true }
     },
     async observe({ launch }) {
       const agent = agents.get(launch.launchId)
@@ -390,6 +391,47 @@ describe('the dispatcher', () => {
       await context.dispatcher.pass()
       assert.equal(context.ledger.task(project.id, 1).state, 'failed')
       assert.match(context.ledger.task(project.id, 1).messages[0].reason, /refused by the test/)
+    })
+  })
+
+  it('waits on a message a harness queued itself, and re-sends only a paste the record never showed', async () => {
+    await setup(async (context) => {
+      const { project } = await withTeam(context)
+      await context.dispatcher.pass()
+      context.adapter.answer('lead', 'ready')
+      // The lead's own queue took it (a peer inbox, a broker): it will show
+      // when the harness gets to it, maybe minutes later; sending it again
+      // would only make a duplicate the harness may even drop.
+      context.adapter.agent('lead').queued = true
+      context.adapter.agent('lead').arrive = false
+      const note = context.ledger.note(project.id, { from: 'zeus', to: 'lead', body: 'Queued' })
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.message(note.id).state, 'delivering')
+      context.clock.advance(150_000)
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        [context.ledger.message(note.id).state, context.ledger.message(note.id).attempts],
+        ['delivering', 1],
+        'still in flight, not sent again',
+      )
+      context.adapter
+        .agent('lead')
+        .items.push(item('user', `[ConsensFlow m-${note.id} · note from @zeus]\nQueued`))
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.message(note.id).state, 'delivered')
+
+      // A paste has no such receipt: the record is the only proof, and 60 s
+      // without it means the paste was lost.
+      context.adapter.agent('lead').queued = false
+      const pasted = context.ledger.note(project.id, { from: 'zeus', to: 'lead', body: 'Pasted' })
+      await context.dispatcher.pass()
+      context.clock.advance(61_000)
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        [context.ledger.message(pasted.id).state, context.ledger.message(pasted.id).attempts],
+        ['delivering', 2],
+        'sent again',
+      )
     })
   })
 
