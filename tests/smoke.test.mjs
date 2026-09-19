@@ -347,6 +347,14 @@ function launch(binary, box) {
     return lines
   }
 
+  // WebKit reports "ResizeObserver loop completed with undelivered
+  // notifications" as a window error when xterm refits inside a dock that is
+  // still settling: a frame was skipped, nothing in the page failed.
+  const fatal = (event) =>
+    event.event === 'failed' ||
+    event.event === 'page-rejection' ||
+    (event.event === 'page-error' && !/ResizeObserver loop/.test(event.data?.message ?? ''))
+
   async function waitFor(name, timeoutMs = HANDSHAKE_MS) {
     const deadline = Date.now() + timeoutMs
     for (;;) {
@@ -354,9 +362,7 @@ function launch(binary, box) {
       if (found !== undefined) return found
       // A driver that has already given up will never report anything else.
       // Waiting out the rest of the timeout only delays the same failure.
-      const dead = events.find((event) =>
-        ['failed', 'page-error', 'page-rejection'].includes(event.event),
-      )
+      const dead = events.find((event) => fatal(event))
       if (dead !== undefined) {
         throw new Error(
           `the app gave up before reporting "${name}".\n${trouble().join('\n')}\n` +

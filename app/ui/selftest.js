@@ -30,13 +30,20 @@ function sleep(ms) {
   return new Promise((wake) => setTimeout(wake, ms))
 }
 
-/** Every line the emulator has, scrollback included. */
+/**
+ * Every line the emulator has, scrollback included. A line the terminal
+ * wrapped over several rows is one line here: what the child printed is the
+ * proof, not how many columns the window happened to have.
+ */
 function screen(emulator) {
   const buffer = emulator?.terminal?.buffer?.active
   if (buffer === undefined) return []
   const lines = []
   for (let row = 0; row < buffer.length; row += 1) {
-    lines.push(buffer.getLine(row)?.translateToString(true) ?? '')
+    const line = buffer.getLine(row)
+    const text = line?.translateToString(true) ?? ''
+    if (line?.isWrapped && lines.length > 0) lines[lines.length - 1] += text
+    else lines.push(text)
   }
   return lines
 }
@@ -164,7 +171,13 @@ export async function runSelftest({
       }
       return null
     })
-    await report('rendered', { banner: banner.trim(), rows: screen(emulator).length, tools, pane })
+    await report('rendered', {
+      banner: banner.trim(),
+      rows: screen(emulator).length,
+      cols: emulator?.terminal?.cols ?? null,
+      tools,
+      pane,
+    })
 
     // Typed the way a human types it: the page's own input path, the text
     // and then the return, and the child's hex is the only proof it arrived.
