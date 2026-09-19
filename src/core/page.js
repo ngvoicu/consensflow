@@ -30,6 +30,10 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       project: await dispatcher.resumeProject(project),
     })),
 
+    'project.close': change(async ({ project }) => ({
+      project: await dispatcher.closeProject(project),
+    })),
+
     'agents.list': async () => ({ agents: listAgents(env) }),
 
     'member.add': change(async ({ project, agent, role = 'worker' }) => ({

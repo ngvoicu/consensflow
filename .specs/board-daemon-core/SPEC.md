@@ -127,10 +127,10 @@ a project; the live app and its JSON state are never read. The importer
 (TEST-BDC-03, IMPL-BDC-04) moves to the end of the phase, for the day the live
 app is replaced.
 
-- [ ] [TEST-BDC-24] The agents screens keep working on the new core: the roster editor (with the new tags field), the agent library and the harness diagnostics are served by the new daemon behind the UI token the app already checks; their routes' tests move with them. `tests/core-agents-server.test.mjs`, `app/tests/core-page.spec.mjs`.
-- [ ] [IMPL-BDC-25] `src/core/agents-server.js` (the pages and `/api/agents…` routes out of `src/ui.js`), mounted on the new core's API server; the new daemon's handle carries the UI token; the board page gains the three dialogs; satisfies TEST-BDC-24.
-- [ ] [IMPL-BDC-21] `cf ui` runs the new core and `core.html` becomes `index.html`; window geometry and the update flow keep working; the packaged smoke drives the new page; every suite and the live bench are green.
-- [ ] [IMPL-BDC-26] The old core is deleted: `src/ui.js`, `store.js`, `tabs.js`, `panes.js`, `delivery-watch.js`, the inbox, delivery and receiver modules it replaces, `page.js`, `tasks.js`, `launch.js`, `requester.js`, the old page (`app/ui/index.html`, `panes.js`, `sidebar.js`, `tasks.js`, `menus.js`), the old Rust commands, the JSON state and `O_EXLOCK`, and their tests; the Devin hook text stops naming `cf results`.
+- [x] [TEST-BDC-24] The agents screens keep working on the new core: the roster editor (with the new tags field), the agent library and the harness diagnostics are served by the new daemon behind the UI token the app already checks; their routes' tests move with them. `tests/core-agents-server.test.mjs`, `app/tests/core-page.spec.mjs`.
+- [x] [IMPL-BDC-25] `src/core/agents-server.js` (the pages and `/api/agents…` routes out of `src/ui.js`), mounted on the new core's API server; the new daemon's handle carries the UI token; the board page gains the three dialogs; satisfies TEST-BDC-24.
+- [ ] [IMPL-BDC-21] `cf ui` runs the new core and `core.html` becomes `index.html`; window geometry and the update flow keep working; the packaged smoke drives the new page; every suite and the live bench are green. Built and every suite green on 2026-09-19; open until the packaged smoke (VERIFY-BDC-27) and the bench have run on the switched tree.
+- [x] [IMPL-BDC-26] The old core is deleted: `src/ui.js`, `store.js`, `tabs.js`, `panes.js`, `delivery-watch.js`, the inbox, delivery and receiver modules it replaces, `page.js`, `tasks.js`, `launch.js`, `requester.js`, the old page (`app/ui/index.html`, `panes.js`, `sidebar.js`, `tasks.js`, `menus.js`), the old Rust commands, the JSON state and `O_EXLOCK`, and their tests; the Devin hook text stops naming `cf results`. Done 2026-09-19. Still to prune in a follow-up: the one-shot runner the old `cf run` used (`runAgent`, the engines, image runs, packets, harness transcripts, session binding, threads, Codex auth, transcript events) and their tests; image agents have no adapter in the new core.
 - [ ] [VERIFY-BDC-27] `npm run candidate` builds, smoke-tests and installs ConsensFlow Candidate; Gabriel is told it is ready.
 - [ ] [TEST-BDC-03] Import from alpha.62 state (tabs, threads, tasks, inbox results) is complete, idempotent and read-only on the source; replayed against a copy of the live home.
 - [ ] [IMPL-BDC-04] Importer; satisfies TEST-BDC-03.
@@ -152,17 +152,19 @@ app is replaced.
 
 ## Resume context
 
-Phases A to E are built. B, C and D wait only on live runs (a Claude lead and
-worker on Sonnet, Codex when its quota allows, Pi and Devin as leads) and, for
-TEST-BDC-11, on the switch that deletes the old commands. The board page
-(`app/ui/core.html`) sits beside the old page with the session team (members
-leave and rejoin; a new session starts with the last team; running
-coordinators are told), the PM (its window opens with its first task) and the
-Lead and PM window views. Next: Phase F, the switch: the importer from
-alpha.62 state, then `cf ui` on the new core, `core.html` as `index.html`, and
-the old core, page, commands and tests deleted. The old page's terminal
-plumbing in `app/ui/panes.js` duplicates `app/ui/terminal-link.js` until then.
-Not built yet: removing a PM (the ledger refuses it as `not-a-member`).
+The switch is made (2026-09-19): `cf ui` starts the new daemon, the board page
+is `app/ui/index.html`, and the old core, page, commands and tests are gone.
+The app talks to the daemon only through `core_request` and the allow-list in
+`commands.rs`; the agents screens (roster with tags, library, harnesses) are
+served by the daemon at its URL behind the UI token the handle carries. The
+human closes a project from the list (`project.close`: suspended, every window
+killed, tiered work back in the backlog) and resumes it later. Next:
+VERIFY-BDC-27, `npm run candidate` (build, packaged smoke, install), then
+Gabriel tests the Candidate; then a follow-up commit prunes the one-shot
+runner code the old `cf run` left behind; the bench (`npm run bench:core`)
+reruns on the switched tree; the importer (TEST-BDC-03) waits for the day the
+live app is replaced. Not built yet: removing a PM (the ledger refuses it as
+`not-a-member`).
 
 ## TDD log
 
@@ -316,3 +318,29 @@ Not built yet: removing a PM (the ledger refuses it as `not-a-member`).
   and Codex's session channels. The schema could change in place because no
   build has shipped it. Node 108/108 core and adapter tests, page 154/154,
   slice 2/2, Rust 107 + 16. Earlier entries in this file keep the old word.
+- The switch (TEST-BDC-24, IMPL-BDC-25, IMPL-BDC-21, IMPL-BDC-26), 2026-09-19.
+  RED: `tests/core-agents-server.test.mjs` failed to load (no module); the
+  page spec's agents dialogs found no `roster_handle`. GREEN: the pages and
+  `/api/agents…` routes moved out of `src/ui.js` into
+  `src/core/agents-server.js` (7/7), mounted on the core's API server before
+  the token check, the daemon's handle line carries a UI token, and the board
+  opens the three screens as framed dialogs at the daemon's URL. `cf ui` runs
+  `startCore`; the old verbs, modules, page files, Rust commands and their
+  tests were deleted in one cut (a reachability pass over `src/`, `hosts/`
+  and `bin/` decided what was dead; it missed `bin/cf.mjs` once and deleted
+  `host-payloads.js`, restored from HEAD). What the cut broke and how it was
+  fixed: clippy's `-D warnings` on the runtime's never-read `launches`
+  field (removed); `tests/bridge.test.mjs` importing `stdinIsPipe` from the
+  deleted `src/ui.js` (its two tests covered code nothing shipped any more,
+  deleted); the harness page spec starting the old UI server (now `startApi`
+  with `agentsUi`, as the daemon does); the updater page spec faking the old
+  `list_state` and waiting on `#app` (now answers `core_request` with a
+  project whose worker window is the blocker, waits on `body`); the roster
+  card's tags line sharing the description's class (its own class now). The
+  updater self-test needed a way to close its two windows without the old
+  `close_pane`: `project.close` (dispatcher, page, allow-list, a Close button
+  on the project list), tested at the dispatcher (a tiered task returns to
+  the backlog and is taken again after Resume), the page protocol and the
+  page. The Devin hook now names `cf inbox` and `cf task get`. Gate on the
+  staged tree: 783 pass, 6 skipped of 789; integration 5/5; Playwright
+  68/68; Rust 107 + 16, clippy clean.

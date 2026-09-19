@@ -1,10 +1,7 @@
 import assert from 'node:assert/strict'
-import { closeSync, openSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { describe, it } from 'node:test'
 import { Bridge } from '../src/bridge.js'
-import { stdinIsPipe } from '../src/ui.js'
 import { tempEnv } from './helpers.mjs'
 
 /** Two bridges talking to each other over in-process pipes, like Node and Rust. */
@@ -845,134 +842,6 @@ describe('Bridge dispatch never blocks on a handler', () => {
     assert.deepEqual(await slow, { ok: true })
     a.close()
     b.close()
-  })
-})
-
-describe('bridge activation: pipe and --json gate', () => {
-  it('treats a stream without an fd as a pipe unless it is a TTY', () => {
-    assert.equal(stdinIsPipe(new PassThrough()), true)
-    assert.equal(stdinIsPipe({ isTTY: true }), false)
-    assert.equal(stdinIsPipe({ isTTY: false }), true)
-  })
-
-  it('classifies real descriptors: regular file, /dev/null and invalid fds are not pipes', () => {
-    const t = tempEnv()
-    try {
-      const regular = join(t.root, 'stdin.txt')
-      writeFileSync(regular, 'x\n')
-      const fileFd = openSync(regular, 'r')
-      const nullFd = openSync('/dev/null', 'r')
-      try {
-        assert.equal(stdinIsPipe({ fd: fileFd }), false)
-        assert.equal(stdinIsPipe({ fd: nullFd }), false)
-        assert.equal(stdinIsPipe({ fd: 987654 }), false)
-      } finally {
-        closeSync(fileFd)
-        closeSync(nullFd)
-      }
-    } finally {
-      t.cleanup()
-    }
-  })
-
-  it('ignores frames on a regular-file stdin: handle line only, no bridge', async () => {
-    const t = tempEnv()
-    const { spawn } = await import('node:child_process')
-    const cf = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
-    const inputPath = join(t.root, 'stdin.txt')
-    writeFileSync(
-      inputPath,
-      `${JSON.stringify({ v: 1, id: 'r-1', kind: 'req', op: 'ping', body: {} })}\n`,
-    )
-    const inputFd = openSync(inputPath, 'r')
-    const child = spawn(process.execPath, [cf, 'ui', '--json', '--no-open'], {
-      env: t.env,
-      stdio: [inputFd, 'pipe', 'pipe'],
-    })
-    closeSync(inputFd)
-    try {
-      let buffer = ''
-      child.stdout.on('data', (chunk) => {
-        buffer += chunk
-      })
-      const nextLine = (timeoutMs = 10_000) =>
-        new Promise((resolve, reject) => {
-          const started = Date.now()
-          const tick = () => {
-            const end = buffer.indexOf('\n')
-            if (end !== -1) {
-              const line = buffer.slice(0, end)
-              buffer = buffer.slice(end + 1)
-              return resolve(line)
-            }
-            if (Date.now() - started > timeoutMs) return reject(new Error('no line arrived'))
-            setTimeout(tick, 5)
-          }
-          tick()
-        })
-
-      const handleLine = await nextLine()
-      const handle = JSON.parse(handleLine)
-      assert.ok(handle.url.length > 0)
-      // The ping frame sitting in the regular file must produce no response:
-      // a non-pipe stdin never starts the bridge.
-      await assert.rejects(nextLine(500), /no line arrived/)
-    } finally {
-      child.kill()
-      t.cleanup()
-    }
-  })
-
-  it('stays prose without --json: a ping frame gets no answer, EOF still exits', async () => {
-    const t = tempEnv()
-    const { spawn } = await import('node:child_process')
-    const { join } = await import('node:path')
-    const cf = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
-    const child = spawn(process.execPath, [cf, 'ui', '--no-open'], {
-      env: t.env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
-    try {
-      let buffer = ''
-      child.stdout.on('data', (chunk) => {
-        buffer += chunk
-      })
-      const nextLine = (timeoutMs = 10_000) =>
-        new Promise((resolve, reject) => {
-          const started = Date.now()
-          const tick = () => {
-            const end = buffer.indexOf('\n')
-            if (end !== -1) {
-              const line = buffer.slice(0, end)
-              buffer = buffer.slice(end + 1)
-              return resolve(line)
-            }
-            if (Date.now() - started > timeoutMs) return reject(new Error('no line arrived'))
-            setTimeout(tick, 5)
-          }
-          tick()
-        })
-
-      // Prose mode prints two lines, not a handle: drain both first.
-      const first = await nextLine()
-      assert.match(first, /^roster editor: /)
-      await nextLine()
-
-      child.stdin.write(
-        `${JSON.stringify({ v: 1, id: 'r-1', kind: 'req', op: 'ping', body: {} })}\n`,
-      )
-      await assert.rejects(nextLine(500), /no line arrived/)
-
-      child.stdin.end()
-      const code = await new Promise((resolve, reject) => {
-        child.once('exit', resolve)
-        setTimeout(() => reject(new Error('the editor kept serving')), 10_000)
-      })
-      assert.equal(code, 0)
-    } finally {
-      child.kill()
-      t.cleanup()
-    }
   })
 })
 

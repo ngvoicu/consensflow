@@ -273,54 +273,6 @@ test('e2e: runAgent writes a transcript.md backstop (event trail) and sets trans
     assert.match(transcript, /the backstopped answer/, 'transcript includes the answer, in order')
   })
 })
-
-test('e2e: a run has full permissions, and there is still no knob to turn [STRM-25]', async () => {
-  await withTempDir(async (dir) => {
-    const ws = path.join(dir, 'ws')
-    await mkdir(ws, { recursive: true })
-    const fake = await makeFakeEngines(dir)
-    const ctx = { ws, dir, fake }
-    await runCf(['agent', 'add', 'zeus'], ctx) // claude-code
-
-    // Every run is full-permission: no allowlist, no deny list, no prompts.
-    await runEngine('@zeus', 'go', ctx)
-    const claude = JSON.parse(await readFile(path.join(fake.out, 'claude.json'), 'utf8'))
-    assert.ok(
-      claude.argv.includes('--dangerously-skip-permissions'),
-      'default run bypasses prompts',
-    )
-    assert.equal(claude.argv.includes('--allowedTools'), false, 'no allowlist fences the tools')
-    assert.equal(claude.argv.includes('--disallowedTools'), false, 'no deny list')
-
-    const refused = await runCf(['run', '@zeus', 'go', '--tools', 'full-auto'], ctx)
-    assert.equal(refused.exitCode, 1)
-    assert.match(refused.stderr, /Unknown option.*--tools/)
-  })
-})
-
-test('e2e: nested runs are refused and unknown agents error cleanly', async () => {
-  await withTempDir(async (dir) => {
-    const ws = path.join(dir, 'ws')
-    await mkdir(ws, { recursive: true })
-    const fake = await makeFakeEngines(dir)
-    const ctx = { ws, dir, fake }
-    assert.equal((await runCf(['agent', 'add', 'zeus'], ctx)).exitCode, 0)
-
-    const unknown = await runCf(['run', '@ghost', 'hi'], ctx)
-    assert.equal(unknown.exitCode, 1)
-    assert.match(unknown.stderr, /no agent named "ghost"/)
-    assert.match(unknown.stderr, /zeus/, 'it names who you do have')
-
-    const nested = await spawnWithInput(process.execPath, [CF, 'run', '@zeus', 'hi'], {
-      cwd: ws,
-      timeoutMs: 15000,
-      env: { CONSENSFLOW_HOME: path.join(dir, 'home'), CONSENSFLOW_CHILD: '1' },
-    })
-    assert.equal(nested.exitCode, 1)
-    assert.match(nested.stderr, /already an agent run — an agent does not spawn agents/)
-  })
-})
-
 // --- Image agents (Codex backend) -------------------------------------
 
 function fakeJwt(claims) {

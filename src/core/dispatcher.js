@@ -160,6 +160,27 @@ export class Dispatcher {
     return this.#ledger.project(projectId)
   }
 
+  /**
+   * The human's Close: the project is suspended and every window of it goes.
+   * Each window's exit settles what it was doing, the way any closed window
+   * does; Resume brings the coordinators back on their conversations.
+   */
+  async closeProject(projectId) {
+    const project = this.#ledger.setProjectState(projectId, 'suspended')
+    for (const participant of project.participants) {
+      await this.#exclusive(
+        participant.id,
+        async () => {
+          const { pane } = this.#runtimeOf(participant.id)
+          if (pane !== null) await this.#host.kill(pane).catch(() => {})
+        },
+        { wait: true },
+      )
+    }
+    this.#changed()
+    return this.#ledger.project(projectId)
+  }
+
   /** Once, at start: the projects that were open when the previous process ended come back. */
   async resumeAfterRestart() {
     const outcomes = []

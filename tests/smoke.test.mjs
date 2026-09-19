@@ -417,10 +417,11 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     )
   }
 
-  // 2. A tab, a lead pane, and the fake harness's own first line drawn by the
-  //    real xterm — through `open_lead`, the production command.
-  const opened = await app.waitFor('tab')
-  assert.equal(opened.data.ok, true, `open_lead refused: ${JSON.stringify(opened.data)}`)
+  // 2. A project, its lead window docked beside the board, and the fake
+  //    harness's own first line drawn by the real xterm — through
+  //    `project.open`, the production operation.
+  const opened = await app.waitFor('project')
+  assert.equal(opened.data.ok, true, `project.open refused: ${JSON.stringify(opened.data)}`)
 
   const rendered = await app.waitFor('rendered')
   assert.match(rendered.data.banner, new RegExp(`CFSMOKE-READY ${box.tag}`))
@@ -441,6 +442,15 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     'the child echoed something other than what was typed',
   )
 
+  // The board reaches the window: a task the human gave the lead arrived as
+  // a paste the child hexed, header first.
+  const board = await app.waitFor('board')
+  assert.equal(board.data.task, 1)
+  assert.match(
+    Buffer.from(board.data.hex, 'hex').toString('utf8'),
+    /^\[ConsensFlow m-\d+ · T-1 · task from @human\]/,
+  )
+
   const pasted = await app.waitFor('large-paste')
   const expectedPaste = Buffer.from('\x1b[200~' + '漢字 résumé 🙂\r'.repeat(30_000) + '\x1b[201~')
   assert.equal(pasted.data.bytes, expectedPaste.length)
@@ -454,17 +464,6 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   assert.ok(FLOOD_BYTES > 1024 * 1024, 'the flood no longer exceeds the output window')
   assert.equal(drained.data.lastFloodLine, FLOOD_LINES)
   assert.ok(drained.data.acks > 1, `only ${drained.data.acks} acks for ${FLOOD_BYTES} bytes`)
-
-  const pm = await app.waitFor('pm-echo')
-  assert.equal(pm.data.hex, Buffer.from(pm.data.typed, 'utf8').toString('hex'))
-  assert.notEqual(pm.data.pane.id, rendered.data.pane.id)
-  const tasks = await app.waitFor('task-board')
-  assert.equal(tasks.data.total, 2)
-  assert.equal(tasks.data.owners, 2)
-  assert.equal(tasks.data.answer, 'Keep all recorded replies')
-  assert.equal(tasks.data.status, 'blocked', 'answering alone does not accept or unblock work')
-  assert.equal(tasks.data.graph, true)
-  assert.equal(tasks.data.terminalPreserved, true)
 
   const harnessPid = Number(readFileSync(box.pidFile, 'utf8').trim())
   assert.ok(Number.isInteger(harnessPid) && harnessPid > 0, 'the fake harness wrote no pid')
@@ -567,32 +566,33 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   assert.equal(receiver.code, 0, receiver.err)
   assert.equal(receiver.out, 'PACKAGED-RECEIVER-OK')
 
-  // 6. The state root is the app's, held by a kernel lock the bundled node
-  //    cannot take a second time.
+  // 6. The ledger is the app's: its exclusive lock refuses the bundled node a
+  //    second opening while the app runs.
   const lock = await withBundledNode(
     found.node,
     box,
     `
-    import { Store } from ${JSON.stringify(join(bundleRoot, 'src', 'store.js'))}
+    import { openLedger } from ${JSON.stringify(join(bundleRoot, 'src', 'ledger', 'index.js'))}
+    import { join } from 'node:path'
     import { writeFileSync } from 'node:fs'
-    const store = new Store(process.env.CONSENSFLOW_HOME)
     try {
-      await store.open()
+      openLedger(join(process.env.CONSENSFLOW_HOME, 'consensflow.db'))
       writeFileSync(1, 'SECOND-OWNER\\n')
     } catch (error) {
-      writeFileSync(1, 'REFUSED ' + error.message + '\\n')
+      writeFileSync(1, 'REFUSED ' + error.code + ' ' + error.message + '\\n')
     }
     `,
   )
   assert.equal(lock.code, 0, `the lock probe crashed: ${lock.err}`)
   assert.match(
     lock.out,
-    /^REFUSED another ConsensFlow instance holds .*instance\.lock/m,
-    `the bundled node took a second lock on the running app's state root: ${lock.out}`,
+    /^REFUSED ledger-locked another ConsensFlow has .*consensflow\.db open/m,
+    `the bundled node opened the running app's ledger: ${lock.out}`,
   )
 
   // 7. The app's own exit: stdin EOF, `RunEvent::Exit`, and nothing left.
-  await app.waitFor('settled')
+  const settled = await app.waitFor('settled')
+  assert.equal(settled.data.terminalPreserved, true)
   app.quit()
   const ended = await app.exited
   assert.equal(ended.code, 0, `the app exited ${ended.code} / ${ended.signal}`)

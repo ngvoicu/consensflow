@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
+import { agentsUi } from '../src/core/agents-server.js'
+import { Credentials, startApi } from '../src/core/api.js'
 import { HarnessAdmin } from '../src/harness-admin.js'
-import { startUiServer } from '../src/ui.js'
+import { openLedger } from '../src/ledger/index.js'
 import { tempEnv } from './helpers.mjs'
 
 test('administration lists missing harnesses without probing or installing them', async () => {
@@ -108,15 +110,17 @@ test('harness checks do not require session storage or expose receipt diagnostic
   mkdirSync(t.env.CONSENSFLOW_HOME, { recursive: true })
   writeFileSync(join(t.env.PATH, 'codex'), '#!/bin/sh\necho 1.2.3\n')
   chmodSync(join(t.env.PATH, 'codex'), 0o755)
-  mkdirSync(join(t.env.CONSENSFLOW_HOME, 'app'), { recursive: true })
-  const tabs = join(t.env.CONSENSFLOW_HOME, 'app', 'tabs.json')
-  const server = await startUiServer(t.env, { harnessLatest: async () => '1.2.4' })
-  const saved = existsSync(tabs) ? readFileSync(tabs) : null
+  const ledger = openLedger(join(t.env.CONSENSFLOW_HOME, 'consensflow.db'))
+  const token = 'ui-token'
+  const server = await startApi({
+    ledger,
+    credentials: new Credentials(),
+    ui: agentsUi(t.env, { token, harnessLatest: async () => '1.2.4' }),
+  })
   try {
-    writeFileSync(tabs, 'unreadable session state')
     const response = await fetch(`${server.url}/api/harnesses/check`, {
       method: 'POST',
-      headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       body: '{}',
     })
     assert.equal(response.status, 200)
@@ -127,11 +131,9 @@ test('harness checks do not require session storage or expose receipt diagnostic
         (row) => !Object.hasOwn(row, 'integration') && !Object.hasOwn(row, 'instructions'),
       ),
     )
-    assert.equal(readFileSync(tabs, 'utf8'), 'unreadable session state')
   } finally {
-    if (saved === null) rmSync(tabs, { force: true })
-    else writeFileSync(tabs, saved)
     await server.close()
+    ledger.close()
     t.cleanup()
   }
 })

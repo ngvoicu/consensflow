@@ -120,8 +120,14 @@ const drawer = new TaskDrawer($('#task-drawer'), {
     }),
 })
 
+// The packaged smoke watches acks and arrivals here, on the real paths.
+let ackObserver = null
+let outputObserver = null
 const terminals = new TerminalsView(stage, $('#parking'), {
-  invoke: (command, args) => invoke(command, args),
+  invoke: (command, args) => {
+    if (command === 'pane_ack') ackObserver?.(args)
+    return invoke(command, args)
+  },
   report,
   createEmulator: tauri.test?.createEmulator,
 })
@@ -239,15 +245,14 @@ function renderProjects() {
       void refresh()
     })
     item.append(select)
-    if (project.state !== 'open') {
-      const resume = element('button', 'quiet-button', 'Resume')
-      resume.type = 'button'
-      resume.setAttribute('aria-label', `Resume ${project.name}`)
-      resume.addEventListener('click', () =>
-        act(() => core('project.resume', { project: project.id })),
-      )
-      item.append(resume)
-    }
+    const open = project.state === 'open'
+    const toggle = element('button', 'quiet-button', open ? 'Close' : 'Resume')
+    toggle.type = 'button'
+    toggle.setAttribute('aria-label', `${open ? 'Close' : 'Resume'} ${project.name}`)
+    toggle.addEventListener('click', () =>
+      act(() => core(open ? 'project.close' : 'project.resume', { project: project.id })),
+    )
+    item.append(toggle)
     return item
   })
   if (items.length === 0) items.push(element('li', 'projects-empty', 'No projects yet.'))
@@ -429,6 +434,37 @@ teamForm.addEventListener('submit', (event) => {
 })
 teamDialog.querySelector('[value="cancel"]').addEventListener('click', () => teamDialog.close())
 
+// The human's agents screens: the daemon's own pages, in a frame each, at
+// the URL and token the app was handed. Closing one refreshes the board's
+// view of the agents (a tag or a tier may have changed).
+const screens = [
+  ['#agents-button', '#agents-dialog', ''],
+  ['#library-button', '#library-dialog', 'library'],
+  ['#harnesses-button', '#harnesses-dialog', 'harnesses'],
+]
+let handle = null
+for (const [buttonId, dialogId, page] of screens) {
+  const dialog = $(dialogId)
+  const frame = dialog.querySelector('iframe')
+  $(buttonId).addEventListener('click', () =>
+    act(async () => {
+      handle ??= await invoke('roster_handle')
+      if (!handle?.url)
+        throw new Error('The agents screens are not available: the daemon is not up.')
+      const url = new URL(page, handle.url)
+      url.searchParams.set('token', handle.token)
+      if (frame.src !== url.href) frame.src = url.href
+      dialog.showModal()
+    }),
+  )
+  dialog.querySelector('[value="cancel"]').addEventListener('click', () => dialog.close())
+  dialog.addEventListener('close', () =>
+    act(async () => {
+      state.agents = (await core('agents.list')).agents
+    }),
+  )
+}
+
 async function start() {
   if (typeof invoke !== 'function') {
     report('ConsensFlow is not running this page.')
@@ -436,7 +472,10 @@ async function start() {
   }
   if (typeof Channel === 'function') {
     const channel = new Channel()
-    channel.onmessage = (message) => terminals.output(message)
+    channel.onmessage = (message) => {
+      outputObserver?.(message)
+      terminals.output(message)
+    }
     // Once, for the life of the page: a second subscription ends the first.
     await invoke('subscribe_output', { onOutput: channel })
   }
@@ -462,6 +501,24 @@ async function start() {
   }
   await refresh()
   document.body.dataset.ready = 'true'
+  const selftest = window.__CONSENSFLOW_SELFTEST__
+  if (selftest !== null && typeof selftest === 'object') {
+    const { runSelftest } = await import('../selftest.js')
+    void runSelftest({
+      config: selftest,
+      invoke,
+      core: (operation, body) => invoke('core_request', { operation, body }),
+      refresh,
+      registry: terminals.registry,
+      sendInput: (pane, data) => terminals.input(pane, data),
+      onAck: (observer) => {
+        ackObserver = observer
+      },
+      onOutput: (observer) => {
+        outputObserver = observer
+      },
+    })
+  }
   await initializeUpdates({
     invoke,
     listen,

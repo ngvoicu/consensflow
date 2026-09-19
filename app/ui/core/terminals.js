@@ -34,6 +34,16 @@ export class TerminalsView {
     this.#link.output(message, (pane) => this.#emulator(pane, null))
   }
 
+  /** The emulators, keyed `id:generation`: what the packaged smoke reads the screen from. */
+  get registry() {
+    return this.#registry
+  }
+
+  /** Typed input for a pane, on the same path a keystroke takes. */
+  input(pane, data) {
+    return this.#link.input(pane, data)
+  }
+
   /** Keep a window for every lane that has one, and dock the one whose handle is `docked`. */
   render(lanes, { docked }) {
     const live = lanes.filter((lane) => lane.pane !== null)

@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -5,6 +6,7 @@ import { createAdapters } from '../adapters/index.js'
 import { Bridge } from '../bridge.js'
 import { openLedger } from '../ledger/index.js'
 import { agentRow, configRoot, listAgents } from '../roster.js'
+import { agentsUi } from './agents-server.js'
 import { Credentials, startApi } from './api.js'
 import { Dispatcher } from './dispatcher.js'
 import { pageOperations } from './page.js'
@@ -43,13 +45,16 @@ export async function startCore(
 
   const credentials = new Credentials()
   let loop = null
+  // The app's own token: it opens the human's agents screens and nothing else.
+  const token = randomBytes(24).toString('hex')
   const api = await startApi({
     ledger,
     credentials,
     changed: () => loop?.kick(),
     roster: (agent) => agentRow(agent, env) ?? null,
+    ui: agentsUi(env, { token }),
   })
-  onOut(JSON.stringify({ url: `${api.url}/`, token: null }))
+  onOut(JSON.stringify({ url: `${api.url}/`, token }))
 
   let stopping = null
   const stop = () => {

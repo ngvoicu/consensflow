@@ -21,7 +21,10 @@
       --seafoam-dim: #2b7569;
       --buoy: #ff7868;
       --amber: #e7b968;
-      --shadow: rgba(0, 0, 0, .32);
+      --slate: #3d5b62;
+      --strip: #0e252b;
+      --strip-hover: #133139;
+      --shadow: rgba(0, 0, 0, .36);
       --ui: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
       --mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
     }
@@ -31,673 +34,576 @@
     body {
       margin: 0;
       overflow: hidden;
-      background: var(--ink);
+      background:
+        linear-gradient(90deg, rgba(99, 199, 178, .025) 1px, transparent 1px) 0 0 / 24px 24px,
+        var(--ink);
       color: var(--foam);
       font: 13px/1.4 var(--ui);
       -webkit-font-smoothing: antialiased;
     }
-    button, input, select, textarea { font: inherit; }
-    button { color: inherit; }
-    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
-      outline: 2px solid var(--seafoam);
-      outline-offset: 2px;
-    }
+    button, input, select, textarea { font: inherit; color: inherit; }
+    :focus-visible { outline: 2px solid var(--seafoam); outline-offset: 2px; }
     [hidden] { display: none !important; }
 
-    #app {
+    .shell {
       height: 100dvh;
-      min-height: 0;
       display: grid;
-      grid-template-rows: auto minmax(0, 1fr);
-      background:
-        linear-gradient(90deg, rgba(99, 199, 178, .025) 1px, transparent 1px) 0 0 / 24px 24px,
-        var(--ink);
+      grid-template-columns: 224px minmax(0, 1fr);
+      grid-template-rows: 52px minmax(0, 1fr);
+      grid-template-areas: "bar bar" "side main";
     }
 
-    .roster-panel {
-      width: 100vw;
-      height: 100dvh;
-      max-width: none;
-      max-height: none;
-      margin: 0;
-      border: 0;
-      border-radius: 0;
-      background: var(--deep);
+    /* Buttons: one quiet style, one primary, one for what cannot be undone. */
+    .quiet-button, .primary-button, .danger-button {
+      border-radius: 6px;
+      padding: 5px 11px;
+      cursor: pointer;
+      border: 1px solid var(--line);
+      background: transparent;
+      font-size: 12px;
+      white-space: nowrap;
     }
-    .roster-panel[open] { display: grid; grid-template-rows: 66px minmax(0, 1fr); }
-    .roster-bar {
-      padding: 0 20px;
+    .quiet-button:hover:not(:disabled) { background: var(--panel-raised); }
+    .primary-button { background: var(--seafoam); border-color: var(--seafoam); color: var(--ink); font-weight: 650; }
+    .primary-button:hover:not(:disabled) { background: #7bd6c3; }
+    .danger-button { border-color: rgba(255, 120, 104, .55); color: var(--buoy); }
+    .danger-button:hover:not(:disabled) { background: rgba(255, 120, 104, .1); }
+    button:disabled { opacity: .45; cursor: default; }
+
+    /* The command bar: which project, which view, and what waits for you. */
+    .command-bar {
+      grid-area: bar;
       display: flex;
       align-items: center;
       gap: 14px;
+      padding: 0 16px;
       border-bottom: 1px solid var(--line);
+      background: rgba(12, 32, 38, .92);
     }
-    .roster-bar h1 { margin: 0; font-size: 20px; font-weight: 650; }
     .brand {
       font: 700 10px/1 var(--mono);
       letter-spacing: .19em;
       text-transform: uppercase;
       color: var(--seafoam);
     }
+    .session-id { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+    .session-id h1 { margin: 0; font-size: 15px; font-weight: 650; white-space: nowrap; }
+    #project-directory {
+      font: 11px var(--mono);
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .spacer { flex: 1; }
-    .roster-body { min-height: 0; }
-    .roster-body iframe { display: block; width: 100%; height: 100%; border: 0; background: var(--panel); }
-    .delivery-info { width: 27px; padding-inline: 0; border-radius: 50%; font-weight: 700; }
-    .delivery-help {
-      position: fixed;
-      inset: 60px 12px auto auto;
-      margin: 0;
-      width: min(390px, calc(100vw - 24px));
-      padding: 18px 20px;
-      border: 1px solid var(--seafoam-dim);
-      border-radius: 8px;
-      background: var(--panel);
-      color: var(--foam);
-      box-shadow: 0 16px 42px var(--shadow);
-    }
-    .delivery-help h2 { margin: 0 0 10px; font-size: 15px; }
-    .delivery-help p { margin: 8px 0 0; color: var(--muted); }
-    .delivery-help strong { color: var(--foam); }
+    #inbox-button[data-waiting="true"] { border-color: var(--amber); color: var(--amber); }
 
-    .icon-button, .quiet-button, .primary-button, .policy-button {
-      min-height: 30px;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      background: var(--panel);
-      padding: 5px 10px;
-      cursor: default;
-    }
-    .icon-button:hover, .quiet-button:hover, .policy-button:hover { border-color: var(--seafoam-dim); }
-    .primary-button {
-      background: var(--seafoam);
-      color: #071719;
-      border-color: var(--seafoam);
-      font-weight: 700;
-    }
-    .primary-button:hover { background: #7bd4c1; }
-    button:disabled { opacity: .48; cursor: not-allowed; }
-
-    .command-bar {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 8px;
-      min-width: 0;
-      padding: 8px 12px;
-      border-bottom: 1px solid var(--line-soft);
-      background: rgba(12, 32, 38, .96);
-      z-index: 4;
-    }
-    .command-bar .session-context {
-      min-width: 0;
-      display: flex;
-      align-items: baseline;
-      gap: 8px;
-    }
-    #group-views button[aria-pressed="true"] { background: var(--accent); color: var(--bg); }
-    #current-session {
-      min-width: 0;
-      max-width: min(40vw, 30ch);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      font-weight: 650;
-    }
-    #current-directory {
-      color: var(--muted);
-      font: 11px/1.2 var(--mono);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    #results-dialog { width: min(1000px, 90vw); max-height: 90vh; padding: 0; }
-    #results-list { padding: 0 24px 24px; overflow: auto; }
-    .result-row { border-bottom: 1px solid var(--line-soft); padding: 16px 0; }
-    .result-row h3 { margin: 0; font: 14px var(--mono); }
-    .result-meta { color: var(--muted); font-size: 12px; }
-    .result-row[data-state="uncertain"] .result-meta { color: var(--amber); }
-    .result-row button { margin-right: 8px; }
-    .result-body { white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.5 var(--mono); padding: 16px; background: var(--ink); }
-
-    .workspace {
-      position: relative;
-      min-width: 0;
-      min-height: 0;
-      display: grid;
-      grid-template-columns: 248px minmax(0, 1fr);
-      transition: grid-template-columns 150ms ease;
-    }
-    .workspace[data-sidebar-collapsed="true"] { grid-template-columns: 0 minmax(0, 1fr); }
+    /* Projects. */
     .sidebar {
-      min-width: 0;
-      overflow: auto;
+      grid-area: side;
       border-right: 1px solid var(--line);
-      background: rgba(12, 32, 38, .94);
+      background: rgba(12, 32, 38, .7);
+      overflow: auto;
+      padding: 14px 10px;
     }
-    .workspace[data-sidebar-collapsed="true"] .sidebar { overflow: hidden; border-right: 0; }
-    .sidebar-heading {
-      position: sticky;
-      top: 0;
-      z-index: 1;
-      padding: 12px 14px 9px;
-      color: var(--muted);
-      background: var(--deep);
-      font: 700 10px/1 var(--mono);
-      letter-spacing: .15em;
+    .sidebar-title {
+      margin: 0 6px 10px;
+      font: 700 10px var(--mono);
+      letter-spacing: .16em;
       text-transform: uppercase;
+      color: var(--muted);
     }
-    .session-tree, .session-tree ul { list-style: none; margin: 0; padding: 0; }
-    .session-tree { padding: 4px 8px 24px; }
-    .tree-node { position: relative; }
-    .tree-node > [role="group"] {
-      position: relative;
-      margin-left: 12px;
-      padding-left: 12px;
-      border-left: 1px solid var(--line);
-    }
-    .tree-node > [role="group"]::before {
-      content: "";
-      position: absolute;
-      left: -1px;
-      top: 0;
-      width: 1px;
-      height: 17px;
-      background: var(--seafoam);
-    }
-    .tree-row { display: flex; align-items: center; gap: 5px; min-width: 0; }
-    .tree-button {
+    #projects { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+    .project { display: flex; align-items: center; gap: 6px; }
+    .project-select {
       flex: 1;
       min-width: 0;
-      border: 0;
-      border-radius: 5px;
-      background: transparent;
-      padding: 6px 7px;
+      display: grid;
+      gap: 2px;
       text-align: left;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      cursor: default;
-    }
-    .tree-button:hover { background: var(--panel); }
-    .tree-button[aria-current="true"] { background: var(--panel-raised); color: var(--seafoam); }
-    .tree-node[data-kind="session"] > .tree-row > .tree-button { font-weight: 650; }
-    .tree-node[data-closed="true"] { opacity: .48; filter: saturate(.45); }
-    .tree-node[data-state="failed"] { opacity: .9; filter: none; }
-    .tree-node[data-state="failed"] > .tree-row > .tree-button { color: var(--buoy); }
-    .rename-button {
-      flex: 0 0 auto;
-      border: 0;
-      border-radius: 5px;
-      color: var(--muted);
+      padding: 7px 9px;
+      border: 1px solid transparent;
+      border-radius: 7px;
       background: transparent;
-      padding: 3px 5px;
-      font-size: 10px;
-      cursor: default;
+      cursor: pointer;
     }
-    .rename-button:hover { color: var(--seafoam); background: var(--panel); }
-    .delete-button {
-      flex: 0 0 auto;
-      border: 0;
-      border-radius: 5px;
-      color: var(--buoy);
-      background: transparent;
-      padding: 3px 5px;
-      font-size: 10px;
-      cursor: default;
-    }
-    .delete-button:hover { color: var(--foam); background: rgba(255, 120, 104, .16); }
-    .resume-button {
-      border: 1px solid var(--seafoam-dim);
-      border-radius: 5px;
-      color: var(--seafoam);
-      background: transparent;
-      padding: 3px 6px;
-      font-size: 10px;
-    }
-    .worker-index { color: var(--seafoam); font: 10px/1 var(--mono); }
+    .project-select:hover { background: var(--panel); }
+    .project-select[aria-current="true"] { background: var(--panel-raised); border-color: var(--line); }
+    .project-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .project-state { font: 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    .project[data-state="open"] .project-state { color: var(--seafoam); }
+    .projects-empty, .team-empty { color: var(--muted); padding: 6px 9px; }
 
-    .pane-shell { min-width: 0; min-height: 0; position: relative; display: grid; }
-    .pane-stage {
-      --pane-grid-gap: 8px;
-      --pane-grid-padding: 8px;
+    /* The board on the left, one window docked on the right, a third of the width. */
+    .main {
+      grid-area: main;
+      position: relative;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+      grid-template-rows: minmax(0, 1fr);
+    }
+    .dock {
+      display: grid;
+      grid-template-rows: 38px minmax(0, 1fr);
+      min-height: 0;
+      border-left: 1px solid var(--line-soft);
+      background: var(--ink);
+    }
+    .dock-tabs { display: flex; gap: 4px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--line-soft); }
+    .dock-tabs button {
+      padding: 4px 10px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      font: 600 11px var(--mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .dock-tabs button:hover { color: var(--foam); }
+    .dock-tabs button[aria-pressed="true"] { background: var(--panel-raised); color: var(--seafoam); border-color: var(--line); }
+
+    /* The board: one bay per participant, one strip per task. */
+    .board {
+      overflow: auto;
+      padding: 16px 20px 56px;
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+    .board-empty { color: var(--muted); margin: 40px auto; max-width: 420px; text-align: center; }
+    .board-group {
+      margin: 8px 2px -4px;
+      font: 700 10px/1 var(--mono);
+      letter-spacing: .18em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .bay {
+      background: var(--deep);
+      border: 1px solid var(--line-soft);
+      border-radius: 10px;
+      padding: 10px 12px 12px;
+    }
+    .bay-human {
+      border-color: rgba(231, 185, 104, .32);
+      background: linear-gradient(90deg, rgba(231, 185, 104, .07), transparent 45%), var(--deep);
+    }
+    .bay-head { display: flex; align-items: center; gap: 10px; min-height: 30px; flex-wrap: wrap; }
+    .bay-name {
+      margin: 0;
+      font: 700 11px/1 var(--mono);
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    .bay-human .bay-name { color: var(--amber); }
+    .bay-meta { font: 11px var(--mono); color: var(--muted); }
+    .bay-status { margin-left: auto; font: 600 11px var(--mono); color: var(--muted); }
+    .bay-status[data-state="working"] { color: var(--seafoam); }
+    .bay-status[data-state="waiting"] { color: var(--amber); }
+    .bay-human .bay-status { color: var(--amber); }
+    .bay-tools { display: flex; gap: 6px; }
+    .bay-empty { color: var(--muted); font-size: 12px; padding: 2px 2px 0; list-style: none; }
+    .bay-cleared { margin: 8px 2px 0; font: 11px var(--mono); color: var(--muted); }
+
+    .lamp {
+      width: 10px;
+      height: 10px;
+      flex: none;
+      border-radius: 50%;
+      border: 1.5px solid var(--line);
+    }
+    .lamp[data-state="working"] {
+      background: var(--seafoam);
+      border-color: var(--seafoam);
+      box-shadow: 0 0 0 3px rgba(99, 199, 178, .16), 0 0 12px rgba(99, 199, 178, .5);
+      animation: lamp-pulse 1.8s ease-in-out infinite;
+    }
+    .lamp[data-state="waiting"] {
+      background: var(--amber);
+      border-color: var(--amber);
+      box-shadow: 0 0 10px rgba(231, 185, 104, .6);
+    }
+    .lamp[data-state="idle"] { border-color: var(--seafoam-dim); }
+    .lamp[data-state="starting"] { border-color: var(--seafoam); animation: lamp-blink 1s steps(2) infinite; }
+    .lamp[data-state="unknown"] { border-style: dashed; }
+    .lamp[data-state="out"] { border-color: var(--buoy); background: rgba(255, 120, 104, .25); }
+    .bay-status[data-state="out"] { color: var(--buoy); }
+    @keyframes lamp-pulse {
+      50% { box-shadow: 0 0 0 5px rgba(99, 199, 178, .06), 0 0 16px rgba(99, 199, 178, .3); }
+    }
+    @keyframes lamp-blink { 50% { border-color: transparent; } }
+
+    /* A strip: segmented boxes, the number block in the colour of its state. */
+    .strips { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+    .strip {
+      --state: var(--slate);
+      --state-ink: var(--foam);
+      width: 100%;
+      min-height: 38px;
+      display: grid;
+      grid-template-columns: 66px minmax(0, 1fr) minmax(0, auto) 118px 64px;
+      align-items: stretch;
+      padding: 0;
+      background: var(--strip);
+      border: 1px solid var(--line-soft);
+      border-radius: 5px;
+      text-align: left;
+      cursor: pointer;
+      overflow: hidden;
+    }
+    button.strip:hover { background: var(--strip-hover); }
+    .strip > span, .strip-line > span {
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      min-width: 0;
+      border-left: 1px solid var(--line-soft);
+    }
+    .strip-number {
+      justify-content: center;
+      border-left: 0 !important;
+      background: var(--state);
+      color: var(--state-ink);
+      font: 700 12px var(--mono);
+      letter-spacing: .03em;
+    }
+    .strip-title {
+      display: block !important;
+      font-size: 13px;
+      line-height: 38px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .strip-route, .strip-age { font: 11px var(--mono); color: var(--muted); white-space: nowrap; }
+    .strip-age { justify-content: flex-end; }
+    .strip-state {
+      font: 700 10px var(--mono);
+      letter-spacing: .14em;
+      text-transform: uppercase;
+      color: var(--state);
+    }
+    .strip[data-state="queued"] .strip-state { color: var(--muted); }
+    .strip[data-state="working"] { --state: var(--seafoam); --state-ink: var(--ink); }
+    .strip[data-state="waiting"] { --state: var(--amber); --state-ink: var(--ink); }
+    .strip[data-state="done"] { --state: var(--foam); --state-ink: var(--ink); }
+    .strip[data-state="failed"] { --state: var(--buoy); --state-ink: var(--ink); }
+    .strip[data-state="accepted"] { --state: var(--seafoam-dim); }
+
+    .strip-message { display: block; cursor: default; }
+    .strip-line {
+      display: grid;
+      grid-template-columns: 66px minmax(0, 1fr) minmax(0, auto) 70px;
+      min-height: 38px;
+    }
+    .strip-message[data-kind="question"] { --state: var(--amber); --state-ink: var(--ink); }
+    .strip-message[data-kind="result"] { --state: var(--seafoam); --state-ink: var(--ink); }
+    .strip-message[data-kind="answer"] { --state: var(--seafoam-dim); }
+    .strip-body {
+      margin: 0;
+      padding: 8px 12px 0 78px;
+      white-space: pre-wrap;
+      color: var(--foam);
+      font-size: 12px;
+      max-height: 220px;
+      overflow: auto;
+    }
+    .answer, .strip-actions { display: flex; gap: 8px; padding: 8px 12px 10px 78px; align-items: flex-start; }
+    .answer textarea, .composer textarea, .reopen textarea {
+      flex: 1;
+      resize: vertical;
+      min-height: 38px;
+      padding: 7px 9px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: var(--ink);
+    }
+    .composer { display: grid; gap: 8px; margin: 10px 0 2px; }
+    .composer-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+    .composer-fields label { display: grid; gap: 4px; font: 11px var(--mono); color: var(--muted); }
+    .composer-fields select, .composer-fields input {
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: var(--ink);
+      color: var(--foam);
+      font: 12px var(--ui);
+    }
+    .backlog {
+      background: var(--deep);
+      border: 1px dashed var(--slate);
+      border-radius: 10px;
+      padding: 10px 12px 12px;
+    }
+    .backlog .bay-name { color: var(--muted); }
+    .team-warning { margin: 0; font: 12px var(--mono); color: var(--amber); }
+    .composer-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+    /* One task and its thread. */
+    .drawer {
+      position: absolute;
+      inset: 0 0 0 auto;
+      width: min(540px, 100%);
+      background: var(--panel);
+      border-left: 1px solid var(--line);
+      box-shadow: -18px 0 40px var(--shadow);
+      overflow: auto;
+      padding: 16px 18px 28px;
+      z-index: 5;
+    }
+    .drawer-head { display: flex; align-items: center; gap: 10px; }
+    .drawer-title { margin: 0; flex: 1; display: flex; align-items: center; gap: 10px; font-size: 15px; }
+    .drawer-title .strip-number {
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: var(--state, var(--slate));
+      color: var(--state-ink, var(--foam));
+    }
+    .drawer[data-state="working"] { --state: var(--seafoam); --state-ink: var(--ink); }
+    .drawer[data-state="waiting"] { --state: var(--amber); --state-ink: var(--ink); }
+    .drawer[data-state="done"] { --state: var(--foam); --state-ink: var(--ink); }
+    .drawer[data-state="failed"] { --state: var(--buoy); --state-ink: var(--ink); }
+    .drawer[data-state="accepted"] { --state: var(--seafoam-dim); }
+    .drawer-meta { margin: 8px 0 14px; font: 11px var(--mono); color: var(--muted); }
+    .thread { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+    .thread-item { border-left: 3px solid var(--slate); padding: 2px 0 2px 12px; }
+    .thread-item[data-kind="result"] { border-color: var(--seafoam); }
+    .thread-item[data-kind="question"] { border-color: var(--amber); }
+    .thread-head {
+      margin: 0 0 4px;
+      font: 700 10px var(--mono);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .thread-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .drawer-actions { display: grid; gap: 10px; margin-top: 18px; }
+    .reopen { display: flex; gap: 8px; align-items: flex-start; }
+
+    /* The live windows. */
+    .stage { display: grid; padding: 8px; min-height: 0; }
+    .stage-empty { color: var(--muted); margin: 40px auto; }
+    .terminal-card {
       min-width: 0;
       min-height: 0;
       display: grid;
-      gap: var(--pane-grid-gap);
-      padding: var(--pane-grid-padding);
+      grid-template-rows: 30px minmax(0, 1fr);
+      background: var(--deep);
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
       overflow: hidden;
-      grid-auto-rows: minmax(0, 1fr);
-      grid-auto-columns: minmax(0, 1fr);
-      overscroll-behavior: contain;
     }
-    .worker-stage {
-      min-width: 0; min-height: 0; display: grid;
-      grid-auto-flow: column; gap: var(--pane-grid-gap);
-      overflow-x: auto; overflow-y: hidden; overscroll-behavior: contain;
-    }
-    .pane-stage[data-empty="true"] { display: grid; place-items: center; }
-    .empty-state { color: var(--muted); max-width: 34ch; text-align: center; }
-    .focus-nav {
+    .terminal-card[data-focused="true"] { border-color: var(--seafoam); }
+    .terminal-head {
       display: flex;
       align-items: center;
-      flex: 0 0 auto;
-      gap: 6px;
-      margin-left: auto;
-    }
-    .focus-nav .icon-button { min-height: 22px; padding: 2px 6px; font-size: 10px; }
-    .focus-count { min-width: 54px; text-align: center; color: var(--muted); font: 10px/1 var(--mono); }
-
-    .pane-card {
-      min-width: 0;
-      min-height: 180px;
-      overflow: hidden;
-      display: grid;
-      grid-template-rows: auto auto minmax(0, 1fr);
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #07171b;
-      box-shadow: 0 8px 18px rgba(0, 0, 0, .2);
-    }
-    .pane-card[data-kind="lead"] { border-color: var(--seafoam-dim); }
-    .pane-card[data-state="failed"] { border-color: var(--buoy); background: #241719; }
-    .pane-card[data-selected="true"] { box-shadow: 0 0 0 1px var(--seafoam), 0 10px 28px var(--shadow); }
-    .pane-titlebar {
-      min-height: 31px;
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      padding: 5px 8px;
+      gap: 8px;
+      padding: 0 10px;
       border-bottom: 1px solid var(--line-soft);
-      background: var(--panel);
-      min-width: 0;
-      overflow: hidden;
+      font: 11px var(--mono);
     }
-    .pane-titlebar { flex-wrap: wrap; }
-    .pane-card[data-kind="lead"] .pane-titlebar { background: #14322f; }
-    .pane-kind {
-      width: 6px;
-      height: 6px;
-      flex: 0 0 auto;
-      border-radius: 50%;
-      background: var(--muted);
-    }
-    .pane-card[data-kind="lead"] .pane-kind { background: var(--seafoam); }
-    .pane-card[data-state="failed"] .pane-kind { background: var(--buoy); }
-    .pane-title {
-      min-width: 0;
-      flex: 1 1 100px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      font: 11px/1.2 var(--mono);
-    }
-    .pane-close-button {
-      flex: 0 0 auto;
-      border: 1px solid var(--line);
-      border-radius: 5px;
-      color: var(--muted);
-      background: transparent;
-      padding: 3px 6px;
-      font: 10px/1 var(--mono);
-      cursor: default;
-    }
-    .pane-close-button:hover { color: var(--foam); border-color: var(--seafoam-dim); }
-    .pane-delete-button { color: var(--buoy); }
-    .pane-activity {
-      flex: 0 0 auto; color: var(--muted); border: 1px solid var(--line);
-      border-radius: 10px; padding: 2px 5px; font: 10px/1.2 var(--mono); white-space: nowrap;
-    }
-    .pane-activity[data-activity="working"] { color: var(--seafoam); border-color: var(--seafoam-dim); }
-    .pane-activity[data-activity="waiting"] { color: var(--amber); border-color: var(--amber); }
-    .pane-activity[data-activity="idle"] { color: var(--foam); }
-    .pane-activity[data-activity="failed"] { color: var(--buoy); }
-    .tree-row.has-activity {
-      display: grid; grid-template-columns: auto 1fr auto; row-gap: 0; padding-bottom: 5px;
-    }
-    .tree-row.has-activity > .tree-button { grid-column: 1 / -1; }
-    .tree-row.has-activity > .pane-activity { grid-column: 1; margin-left: 7px; }
-    .tree-row.has-activity > .result-summary { grid-column: 2; justify-self: start; }
-    .tree-row.has-activity > .delete-button { grid-column: 3; grid-row: 2; }
-    .tree-row .pane-activity { padding: 1px 4px; }
-    .pane-failure {
-      display: flex;
-      align-items: baseline;
-      gap: 7px;
-      min-width: 0;
-      padding: 6px 8px;
-      border-bottom: 1px solid rgba(255, 120, 104, .35);
-      color: var(--buoy);
-      background: rgba(255, 120, 104, .08);
-      font: 10px/1.25 var(--mono);
-    }
-    .pane-failure-message { min-width: 0; overflow-wrap: anywhere; }
-    .pane-failure-exit { margin-left: auto; flex: 0 0 auto; }
-    .terminal-host { grid-row: 3; min-width: 0; min-height: 0; padding: 5px 3px 3px; }
-    .terminal-host .xterm { height: 100%; }
-    .result-summary {
-      flex: 0 1 auto;
-      min-width: 0;
-      max-width: 112px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      border: 1px solid rgba(231, 185, 104, .45);
-      border-radius: 999px;
-      background: transparent;
-      padding: 2px 7px;
-      color: var(--amber);
-      font-size: 10px;
-      cursor: default;
-    }
-    .result-summary:hover { border-color: var(--amber); }
-    #task-view { position: absolute; inset: 0; overflow: auto; padding: 26px 28px 40px; background: var(--deep); }
-    .task-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
-    .task-heading h1 { font-size: 27px; letter-spacing: -.025em; margin: 7px 0; }
-    .task-heading h2 { margin: 0; font-size: 20px; }
-    .task-eyebrow { font: 10px var(--mono); letter-spacing: .16em; color: var(--seafoam); }
-    .task-modes, .task-filters, .task-graph-controls { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
-    .task-modes [aria-pressed="true"] { border-color: var(--seafoam); background: var(--panel-raised); }
-    .task-overview { margin: 16px 0 22px; color: var(--muted); font: 12px var(--mono); }
-    .task-filters { padding-block: 14px; border-block: 1px solid var(--line); }
-    .task-field { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; }
-    .task-field :is(input,select,textarea) { min-width: 0; color: var(--foam); background: var(--ink); border: 1px solid var(--line); border-radius: 5px; padding: 8px 10px; }
-    .task-field textarea { resize: vertical; }
-    .task-field select[multiple] { min-height: 80px; }
-    .task-filters .task-field:has(input) { flex: 1; min-width: 180px; }
-    .task-message { color: var(--amber); font-size: 12px; }
-    .task-people, .task-board { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 22px; margin-block: 22px; }
-    .task-team { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; align-content: start; }
-    .task-team h2, .task-lane h2 { font-size: 14px; font-weight: 600; margin: 0 0 12px; color: var(--seafoam); }
-    .task-team h2 { grid-column: 1 / -1; }
-    [data-role="pm"] > h2, h2[data-role="pm"] { color: #c9b0d8; }
-    .task-agent { border: 1px solid var(--line); background: var(--panel); padding: 11px; border-radius: 6px; display: flex; gap: 7px; flex-wrap: wrap; align-content: start; align-items: start; min-width: 0; }
-    .task-agent > small { flex-basis: 100%; overflow-wrap: anywhere; }
-    .task-agent-name { background: none; border: 0; padding: 0; text-align: left; font: 12px var(--mono); overflow-wrap: anywhere; flex: 1; cursor: pointer; }
-    .task-agent-name:disabled { opacity: .7; cursor: default; }
-    .task-replies { border: 0; background: none; color: var(--amber); padding: 0; font-size: 11px; text-align: left; cursor: pointer; }
-    .task-columns { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 9px; align-items: start; }
-    .task-column { min-width: 0; min-height: 150px; border-top: 1px solid var(--line); padding-top: 10px; }
-    .task-column h3 { font-size: 11px; font-weight: 500; color: var(--muted); margin: 0 0 12px; }
-    .task-card { display: flex; flex-direction: column; gap: 9px; width: 100%; text-align: left; padding: 13px; margin: 0 0 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; overflow: hidden; }
-    .task-card:hover { border-color: var(--seafoam); background: var(--panel-raised); }
-    .task-card > strong { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
-    .task-card-meta { display: flex; justify-content: space-between; gap: 6px; flex-wrap: wrap; font-size: 10px; }
-    .task-kind { color: var(--muted); text-transform: capitalize; }
-    .task-progress { color: var(--seafoam); }
-    [data-progress="blocked"] { border-left: 3px solid var(--amber); }
-    [data-progress="blocked"] .task-progress, .task-attention { color: var(--amber); }
-    [data-progress="review"] .task-progress { color: #c9b0d8; }
-    [data-progress="unknown"] .task-progress, [data-progress="cancelled"] .task-progress { color: var(--muted); }
-    .task-attention, .task-muted, .task-conversation, .task-empty { font-size: 11px; }
-    .task-muted, .task-empty { color: var(--muted); }
-    .task-conversation { font-family: var(--mono); color: var(--muted); overflow-wrap: anywhere; }
-    .task-failure, .task-error { color: var(--buoy); white-space: pre-wrap; }
-    .task-graph-controls { align-items: center; margin-bottom: 12px; }
-    .task-graph-controls p { flex: 1; }
-    .task-graph-viewport { overflow: auto; max-height: 65vh; border: 1px solid var(--line); border-radius: 6px; background: radial-gradient(var(--line) 1px,transparent 1px) 0 0/20px 20px,var(--ink); }
-    .task-graph-space { position: relative; }
-    .task-graph { position: absolute; transform-origin: top left; }
-    .task-graph svg { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
-    .task-graph path { fill: none; stroke: var(--seafoam-dim); stroke-width: 1.5; }
-    .task-graph [data-relation="reviews"] path { stroke: #c9b0d8; stroke-dasharray: 5 3; }
-    .task-graph [data-relation="depends"] path { stroke: var(--amber); }
-    .task-graph text { fill: var(--muted); font: 10px var(--mono); paint-order: stroke; stroke: var(--ink); stroke-width: 4px; }
-    .task-graph-node { position: absolute; z-index: 1; margin: 0; }
-    .task-graph-lane { position: absolute; left: 16px; right: 16px; margin: 0; border-top: 1px solid var(--line); padding-top: 14px; font-size: 14px; color: var(--seafoam); pointer-events: none; }
-    .task-dialog { width: min(680px,calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow: auto; padding: 24px; color: var(--foam); background: var(--deep); border: 1px solid var(--line); border-radius: 10px; }
-    .task-dialog::backdrop { background: rgba(0,0,0,.65); }
-    .task-editor { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 20px 0; }
-    .task-editor > :nth-child(2), .task-editor > :nth-child(3), .task-editor > :nth-child(9), .task-editor > button { grid-column: 1 / -1; }
-    .task-questions article { border-left: 2px solid var(--amber); padding: 12px; margin: 12px 0; background: var(--panel); white-space: pre-wrap; }
-    .task-questions .task-field { margin: 12px 0; }
-    .task-history { margin-top: 20px; color: var(--muted); }
-    .task-history p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
-    @media (max-width: 1250px) { .task-board { grid-template-columns: 1fr; } }
-    @media (max-width: 800px) { #task-view { padding: 18px; } .task-heading { align-items: start; flex-direction: column; } .task-people { grid-template-columns: 1fr; } .task-columns { grid-template-columns: repeat(3,minmax(170px,1fr)); overflow-x: auto; } }
+    .terminal-name { font-weight: 700; letter-spacing: .08em; }
+    .terminal-meta { color: var(--muted); }
+    .terminal-host { min-height: 0; padding: 4px 2px 2px 6px; }
+    .parking { position: fixed; left: -10000px; top: 0; width: 960px; height: 640px; overflow: hidden; }
 
-    .pane-parking {
-      position: fixed;
-      left: -300vw;
-      top: 0;
-      width: 900px;
-      height: 600px;
-      visibility: hidden;
+    .status {
+      position: absolute;
+      left: 20px;
+      bottom: 10px;
+      margin: 0;
+      font: 11px var(--mono);
+      color: var(--muted);
       pointer-events: none;
     }
-    .pane-parking .pane-card { width: 430px; height: 280px; }
-
-    .menu {
-      position: fixed;
-      z-index: 20;
-      min-width: 220px;
-      max-width: 360px;
-      padding: 6px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #173139;
-      box-shadow: 0 18px 45px rgba(0, 0, 0, .5);
-    }
-    .menu-heading {
-      padding: 6px 8px;
-      color: var(--muted);
-      font: 700 10px/1.2 var(--mono);
-      letter-spacing: .08em;
-      text-transform: uppercase;
-    }
-    .menu-separator { height: 1px; margin: 5px 3px; background: var(--line); }
-    .menu button[role="menuitem"] {
-      width: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      border: 0;
-      border-radius: 5px;
-      background: transparent;
-      padding: 7px 8px;
-      text-align: left;
-    }
-    .menu button[role="menuitem"]:hover { background: var(--panel-raised); }
+    .status[data-tone="error"] { color: var(--buoy); }
 
     dialog {
-      width: min(480px, calc(100vw - 32px));
       border: 1px solid var(--line);
-      border-radius: 10px;
+      border-radius: 12px;
       background: var(--panel);
       color: var(--foam);
-      box-shadow: 0 24px 80px rgba(0, 0, 0, .62);
+      padding: 0;
+      width: min(480px, calc(100vw - 32px));
+    }
+    dialog::backdrop { background: rgba(4, 12, 15, .6); }
+    /* The agents screens: the daemon's own pages, full height, in a frame. */
+    dialog.screen {
+      width: min(1100px, calc(100vw - 32px));
+      height: calc(100vh - 32px);
       padding: 0;
     }
-    dialog::backdrop { background: rgba(2, 11, 13, .68); backdrop-filter: blur(3px); }
-    .dialog-form { display: grid; gap: 14px; padding: 20px; }
-    .dialog-form h2 { margin: 0; font-size: 17px; }
-    .dialog-form label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
-    .dialog-form input, .dialog-form select, .dialog-form textarea {
-      width: 100%;
-      border: 1px solid var(--line);
+    dialog.screen[open] { display: grid; grid-template-rows: 46px minmax(0, 1fr); }
+    .screen-bar { display: flex; align-items: center; gap: 10px; padding: 0 12px 0 18px; border-bottom: 1px solid var(--line-soft); }
+    .screen-bar h2 { margin: 0; flex: 1; font-size: 15px; }
+    dialog.screen iframe { width: 100%; height: 100%; border: 0; background: #fff; }
+    .dialog-form { display: grid; gap: 14px; padding: 18px 20px; }
+    .dialog-form h2 { margin: 0; font-size: 16px; }
+    .dialog-form label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+    .dialog-form input, .dialog-form select {
+      padding: 7px 9px;
       border-radius: 6px;
+      border: 1px solid var(--line);
       background: var(--ink);
       color: var(--foam);
-      padding: 8px 9px;
     }
-    .dialog-form textarea { min-height: 96px; resize: vertical; }
-    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
-
-    .status-toast {
-      position: fixed;
-      z-index: 30;
-      right: 14px;
-      bottom: 14px;
-      max-width: min(460px, calc(100vw - 28px));
-      border: 1px solid var(--line);
-      border-left: 3px solid var(--seafoam);
-      border-radius: 7px;
-      background: var(--panel-raised);
-      padding: 9px 12px;
-      box-shadow: 0 16px 36px var(--shadow);
-    }
-    .status-toast[data-tone="error"] { border-left-color: var(--buoy); }
+    .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    #team-members { margin: 0; padding: 0; list-style: none; color: var(--foam); font: 12px var(--mono); display: grid; gap: 6px; }
+    #team-members li { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; min-height: 28px; }
+    .member-line { flex: 1; }
+    .member-confirm { flex: 1 1 100%; color: var(--buoy); }
+    .team-pm { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+    .team-pm p { margin: 0; font: 12px var(--mono); color: var(--foam); }
+    .team-pm-add { display: flex; align-items: end; gap: 8px; }
+    .team-pm-add label { flex: 1; }
 
     @media (max-width: 760px) {
-      .workspace { grid-template-columns: 210px minmax(0, 1fr); }
-      .command-bar { gap: 5px; }
-      #current-directory { display: none; }
-      .quiet-button, .policy-button { padding-inline: 7px; }
+      .main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) 42vh; }
+      .dock { border-left: 0; border-top: 1px solid var(--line-soft); }
+      .shell {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto minmax(0, 1fr);
+        grid-template-areas: "bar" "side" "main";
+      }
+      .command-bar { flex-wrap: wrap; padding: 8px 12px; gap: 8px; }
+      .sidebar { border-right: 0; border-bottom: 1px solid var(--line); max-height: 30vh; }
+      .strip { grid-template-columns: 58px minmax(0, 1fr) 76px; }
+      .strip-route, .strip-age, .strip-line > .strip-route { display: none !important; }
+      .strip-line { grid-template-columns: 58px minmax(0, 1fr) 60px; }
+      .strip-body, .answer, .strip-actions { padding-left: 12px; }
+      .board { padding: 12px 12px 48px; }
     }
     @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .001ms !important; }
+      .lamp { animation: none !important; }
     }
   </style>
 </head>
-<body>
-  <div id="app" data-ready="false">
+<body data-ready="false">
+  <div class="shell">
     <header class="command-bar">
-      <button class="icon-button" id="sidebar-toggle" type="button" aria-expanded="true">Collapse sessions</button>
-      <div class="session-context">
-        <span id="current-session">No session</span>
-        <span id="current-directory"></span>
-      </div>
-      <div id="group-views" role="group" aria-label="Session view" hidden>
-        <button class="quiet-button" id="view-pm" data-testid="view-pm" type="button" aria-pressed="false">PM</button>
-        <button class="quiet-button" id="view-lead" data-testid="view-lead" type="button" aria-pressed="false">Lead</button>
-        <button class="quiet-button" id="view-tasks" data-testid="view-tasks" type="button" aria-pressed="false">Tasks</button>
+      <span class="brand">ConsensFlow</span>
+      <div class="session-id">
+        <h1 id="project-title">No project</h1>
+        <span id="project-directory"></span>
       </div>
       <span class="spacer"></span>
-      <button class="quiet-button" id="results-toggle" type="button" hidden>Results</button>
-      <button class="policy-button" id="tab-policy" data-testid="tab-policy" type="button" hidden>Reply delivery</button>
-      <button class="icon-button delivery-info" id="delivery-info" type="button" popovertarget="delivery-help" aria-label="About reply delivery" hidden>i</button>
-      <button class="quiet-button" id="roster-toggle" type="button" aria-haspopup="dialog" aria-controls="agents-dialog">Your agents</button>
-      <button class="quiet-button" id="library-toggle" type="button" aria-haspopup="dialog" aria-controls="library-dialog">Agent library</button>
-      <button class="quiet-button" id="harnesses-toggle" type="button" aria-haspopup="dialog" aria-controls="harnesses-dialog">Harnesses</button>
-      <button class="quiet-button" id="new-pane" type="button" hidden>New pane</button>
-      <button class="primary-button" id="new-conversation" type="button">New session</button>
+      <button class="quiet-button" id="inbox-button" type="button">Inbox</button>
+      <button class="quiet-button" id="team-button" type="button">Team</button>
+      <button class="quiet-button" id="agents-button" type="button" aria-haspopup="dialog" aria-controls="agents-dialog">Your agents</button>
+      <button class="quiet-button" id="library-button" type="button" aria-haspopup="dialog" aria-controls="library-dialog">Agent library</button>
+      <button class="quiet-button" id="harnesses-button" type="button" aria-haspopup="dialog" aria-controls="harnesses-dialog">Harnesses</button>
+      <button class="primary-button" id="new-project" type="button">New project</button>
     </header>
-
-    <div class="workspace" data-testid="workspace" data-sidebar-collapsed="false">
-      <aside class="sidebar" aria-label="Sessions">
-        <div class="sidebar-heading">Sessions / panes</div>
-        <ul class="session-tree" id="session-tree" role="tree" aria-label="Session tree"></ul>
+    <nav class="sidebar" aria-label="Projects">
+      <h2 class="sidebar-title">Projects</h2>
+      <ul id="projects" data-testid="projects"></ul>
+    </nav>
+    <main class="main">
+      <section class="board" id="board" aria-label="Board"></section>
+      <aside class="dock" id="dock" aria-label="Terminal dock">
+        <div class="dock-tabs" id="dock-tabs" role="group" aria-label="Docked window"></div>
+        <section class="stage" id="stage" aria-label="Terminals"></section>
       </aside>
-      <main class="pane-shell">
-        <nav class="focus-nav" id="focus-nav" aria-label="Pane navigation" hidden>
-          <button class="icon-button" id="previous-pane" type="button" aria-label="Previous pane">Previous</button>
-          <span class="focus-count" id="focus-count"></span>
-          <button class="icon-button" id="next-pane" type="button" aria-label="Next pane">Next</button>
-        </nav>
-        <section class="pane-stage" id="pane-stage" data-testid="pane-stage" data-mode="grid" aria-label="Panes"></section>
-        <section id="task-view" data-testid="task-view" aria-label="Session tasks" hidden></section>
-      </main>
-    </div>
+      <aside class="drawer" id="task-drawer" hidden></aside>
+      <p class="status" id="status" role="status" aria-live="polite"></p>
+    </main>
   </div>
+  <div class="parking" id="parking" aria-hidden="true"></div>
 
-  <dialog class="roster-panel" id="agents-dialog" data-testid="roster-panel" aria-labelledby="agents-title">
-    <header class="roster-bar">
-      <span class="brand">ConsensFlow</span>
-      <h1 id="agents-title">Your agents</h1>
-      <span class="spacer"></span>
-      <button class="quiet-button" id="roster-close" type="button" aria-label="Close Your agents" autofocus>Close</button>
+  <dialog class="screen" id="agents-dialog" aria-labelledby="agents-title">
+    <header class="screen-bar">
+      <h2 id="agents-title">Your agents</h2>
+      <button class="quiet-button" type="button" value="cancel" aria-label="Close Your agents" autofocus>Close</button>
     </header>
-    <div class="roster-body">
-      <iframe data-testid="roster-frame" title="ConsensFlow roster editor" referrerpolicy="no-referrer" sandbox="allow-forms allow-same-origin allow-scripts"></iframe>
-    </div>
+    <iframe title="ConsensFlow roster editor" referrerpolicy="no-referrer" sandbox="allow-forms allow-same-origin allow-scripts"></iframe>
   </dialog>
-
-  <dialog class="roster-panel" id="library-dialog" data-testid="library-panel" aria-labelledby="library-title">
-    <header class="roster-bar">
-      <span class="brand">ConsensFlow</span>
-      <h1 id="library-title">Agent library</h1>
-      <span class="spacer"></span>
-      <button class="quiet-button" id="library-close" type="button" aria-label="Close Agent library" autofocus>Close</button>
+  <dialog class="screen" id="library-dialog" aria-labelledby="library-title">
+    <header class="screen-bar">
+      <h2 id="library-title">Agent library</h2>
+      <button class="quiet-button" type="button" value="cancel" aria-label="Close Agent library" autofocus>Close</button>
     </header>
-    <div class="roster-body">
-      <iframe data-testid="library-frame" title="ConsensFlow agent library" referrerpolicy="no-referrer" sandbox="allow-forms allow-same-origin allow-scripts"></iframe>
-    </div>
+    <iframe title="ConsensFlow agent library" referrerpolicy="no-referrer" sandbox="allow-forms allow-same-origin allow-scripts"></iframe>
   </dialog>
-
-  <dialog class="roster-panel" id="harnesses-dialog" aria-labelledby="harnesses-title">
-    <header class="roster-bar">
-      <span class="brand">ConsensFlow</span>
-      <h1 id="harnesses-title">Harnesses</h1>
-      <span class="spacer"></span>
-      <button class="quiet-button" id="harnesses-close" type="button" aria-label="Close Harnesses" autofocus>Close</button>
+  <dialog class="screen" id="harnesses-dialog" aria-labelledby="harnesses-title">
+    <header class="screen-bar">
+      <h2 id="harnesses-title">Harnesses</h2>
+      <button class="quiet-button" type="button" value="cancel" aria-label="Close Harnesses" autofocus>Close</button>
     </header>
-    <div class="roster-body">
-      <iframe data-testid="harnesses-frame" title="ConsensFlow harness diagnostics" referrerpolicy="no-referrer" sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox"></iframe>
-    </div>
+    <iframe title="ConsensFlow harness diagnostics" referrerpolicy="no-referrer" sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox"></iframe>
   </dialog>
 
-  <dialog id="results-dialog" aria-labelledby="results-title">
-    <header class="roster-bar"><h1 id="results-title">Results</h1><span class="spacer"></span><button id="results-close" type="button" autofocus>Close</button></header>
-    <div id="results-list"></div>
-  </dialog>
-
-  <aside class="delivery-help" id="delivery-help" data-testid="delivery-help" popover aria-labelledby="delivery-help-title">
-    <h2 id="delivery-help-title">Reply delivery</h2>
-    <p><strong>Automatic</strong> lets the Lead or PM collect complete worker replies and advisor findings when ready.</p>
-    <p><strong>Manual</strong> keeps replies in Results until you ask the Lead or PM to read them or choose <strong>Collect</strong>.</p>
-    <p>Every completed reply stays in Results. Opening it here does not mark it received by the Lead or PM. Unconfirmed counts include all replies without a verified receipt.</p>
-    <p>A Manual session pauses <strong>all automatic replies</strong>, including workers set to Automatic. Workers set to Inherit follow the session setting.</p>
-  </aside>
-
-  <div class="pane-parking" id="pane-parking" aria-hidden="true"></div>
-  <div id="menu-layer"></div>
-
-  <dialog id="new-conversation-dialog" aria-labelledby="new-conversation-title">
-    <form class="dialog-form" method="dialog">
-      <h2 id="new-conversation-title">New session</h2>
-      <label>Directory<input id="conversation-directory" name="directory" readonly></label>
-      <label>Lead harness
-        <select id="lead-harness" name="harness">
+  <dialog id="new-project-dialog" aria-labelledby="new-project-title">
+    <form class="dialog-form">
+      <h2 id="new-project-title">New project</h2>
+      <label>Project folder<input name="directory" readonly></label>
+      <label>The lead runs in
+        <select name="harness">
           <option value="claude-code">Claude Code</option>
           <option value="codex">Codex</option>
-          <option value="pi">Pi</option>
           <option value="opencode">OpenCode</option>
+          <option value="pi">Pi</option>
           <option value="devin">Devin</option>
         </select>
       </label>
+      <label>Second review of
+        <select name="review">
+          <option value="none">Nothing: results go straight to whoever asked</option>
+          <option value="members" selected>Members' work: workers' and advisors' results</option>
+          <option value="all">All work: coordinators' own tasks too</option>
+        </select>
+      </label>
       <div class="dialog-actions">
-        <button class="quiet-button" value="cancel" type="button">Cancel</button>
-        <button class="primary-button" id="start-conversation" type="submit">Start session</button>
+        <button class="quiet-button" type="button" value="cancel">Cancel</button>
+        <button class="primary-button" type="submit">Start project</button>
       </div>
     </form>
   </dialog>
 
-  <dialog id="agent-dialog" aria-labelledby="agent-dialog-title">
-    <form class="dialog-form" method="dialog">
-      <h2 id="agent-dialog-title">Open a worker pane</h2>
-      <label>Agent<select id="agent-picker" name="agent"></select></label>
-      <label>Task<textarea id="agent-task" name="task" required></textarea></label>
+  <dialog id="team-dialog" aria-labelledby="team-title">
+    <form class="dialog-form">
+      <h2 id="team-title">Project team</h2>
+      <ul id="team-members" aria-label="On the team"></ul>
+      <label>Second review of
+        <select id="team-review" name="review">
+          <option value="none">Nothing: results go straight to whoever asked</option>
+          <option value="members">Members' work: workers' and advisors' results</option>
+          <option value="all">All work: coordinators' own tasks too</option>
+        </select>
+      </label>
+      <p class="team-warning" id="team-warning" hidden></p>
+      <div class="team-pm">
+        <p id="team-pm-state">No PM yet.</p>
+        <div class="team-pm-add" id="team-pm-add">
+          <label>The PM runs in
+            <select name="pmHarness">
+              <option value="claude-code">Claude Code</option>
+              <option value="codex">Codex</option>
+              <option value="opencode">OpenCode</option>
+              <option value="pi">Pi</option>
+              <option value="devin">Devin</option>
+            </select>
+          </label>
+          <button class="quiet-button" type="button" id="add-pm">Add a PM</button>
+        </div>
+      </div>
+      <label>Add an agent<select name="agent"></select></label>
+      <label>As
+        <select name="role">
+          <option value="worker">Worker: does tasks for the lead</option>
+          <option value="reviewer">Reviewer: reviews, read-only</option>
+          <option value="advisor">Advisor: researches for the PM</option>
+        </select>
+      </label>
       <div class="dialog-actions">
-        <button class="quiet-button" value="cancel" type="button">Cancel</button>
-        <button class="primary-button" id="open-agent-pane" type="submit">Open agent pane</button>
+        <button class="quiet-button" type="button" value="cancel">Close</button>
+        <button class="primary-button" type="submit">Add to team</button>
       </div>
     </form>
   </dialog>
 
-  <dialog id="rename-session-dialog" aria-labelledby="rename-session-title">
-    <form class="dialog-form" method="dialog">
-      <h2 id="rename-session-title">Rename session</h2>
-      <label>Session name<input id="session-name" name="name" autocomplete="off" required></label>
-      <div class="dialog-actions">
-        <button class="quiet-button" value="cancel" type="button">Cancel</button>
-        <button class="primary-button" type="submit">Save name</button>
-      </div>
-    </form>
-  </dialog>
-
-  <dialog id="delete-session-dialog" aria-labelledby="delete-session-title" aria-describedby="delete-session-description">
-    <form class="dialog-form" method="dialog">
-      <h2 id="delete-session-title">Delete session</h2>
-      <p>Delete <strong id="delete-session-name"></strong>?</p>
-      <p id="delete-session-description">This stops all its panes and removes it from the app. Project files and native histories remain.</p>
-      <div class="dialog-actions">
-        <button class="quiet-button" value="cancel" type="button">Cancel</button>
-        <button class="primary-button" type="submit">Delete session</button>
-      </div>
-    </form>
-  </dialog>
-
-  <div class="status-toast" id="status" role="status" aria-live="polite" hidden></div>
-  <script type="module" src="./panes.js"></script>
+  <script type="module" src="./core/app.js"></script>
 </body>
 </html>

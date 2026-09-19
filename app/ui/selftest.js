@@ -1,15 +1,16 @@
 /**
- * The page's half of the packaged smoke (TEST-PANE-45).
+ * The page's half of the packaged smoke (TEST-PANE-45, on the new core).
  *
  * This module is only ever imported when Rust put `__CONSENSFLOW_SELFTEST__`
  * on the window, which it only does when the app was started with
  * `CONSENSFLOW_SELFTEST=1`. In an ordinary launch the file ships but nothing
  * loads it.
  *
- * It drives the REAL page: the same `open_lead` a human's New conversation
- * runs, the same emulator registry that draws every pane, the same input path
- * a keystroke takes. Nothing here reimplements a production path — a smoke
- * that drove its own copy of the page would prove only that the copy works.
+ * It drives the REAL page: the same `project.open` a human's New project
+ * runs, the same emulator registry that draws the docked window, the same
+ * input path a keystroke takes, and the board's own way of giving the lead a
+ * task. Nothing here reimplements a production path — a smoke that drove its
+ * own copy of the page would prove only that the copy works.
  *
  * What it reports is what it could SEE: rows out of the live xterm buffer,
  * the child's own hex of what was typed, the ack count the page really sent.
@@ -54,16 +55,21 @@ async function until(what, check, { timeoutMs = STEP_MS, note = null } = {}) {
     if (found !== null && found !== undefined && found !== false) return found
     if (Date.now() > deadline) throw new Error(`${what} did not happen within ${timeoutMs} ms`)
     polls += 1
-    // Say what it looked like while waiting. A smoke that only reports the
-    // timeout makes the next person launch the app by hand to learn anything.
     if (note !== null && polls % 30 === 0) await note(what, polls)
     await sleep(100)
   }
 }
 
+function toHex(text) {
+  return [...new TextEncoder().encode(text)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+}
+
 export async function runSelftest({
   config,
   invoke,
+  core,
   refresh,
   registry,
   sendInput,
@@ -74,7 +80,7 @@ export async function runSelftest({
     typeof config?.updaterExpectedVersion === 'string' &&
     config.updaterExpectedVersion.length > 0
   ) {
-    await runUpdateSelftest({ config, invoke, refresh })
+    await runUpdateSelftest({ config, invoke, core, refresh })
     return
   }
 
@@ -84,9 +90,6 @@ export async function runSelftest({
   onAck(() => {
     acks += 1
   })
-  // Counted where the message LANDS, before the emulator sees it. "Nothing
-  // arrived" and "something arrived and stalled" look identical from the
-  // screen, and they have nothing in common as bugs.
   onOutput((message) => {
     arrivals += 1
     arrivedBytes += message?.bytes?.length ?? 0
@@ -99,47 +102,41 @@ export async function runSelftest({
   try {
     await report('boot', {
       protocol: location.protocol,
-      // Everything the document pulled in. The roster iframe is not here on
-      // purpose: it is the one thing that legitimately comes over HTTP, from
-      // the local `cf ui`, and it has no `src` until a tab exists.
+      // Everything the document pulled in. The agents screens are not here on
+      // purpose: they are the one thing that legitimately comes over HTTP,
+      // from the daemon, and they have no `src` until opened.
       assets: [
         ...[...document.querySelectorAll('script[src]')].map((tag) => tag.src),
         ...[...document.querySelectorAll('link[rel="stylesheet"]')].map((tag) => tag.href),
       ],
     })
 
-    // `claude-code` is the canonical kind `Tabs.create` takes; `claude` is
-    // only the name of the binary on PATH. Passing the command name here is
-    // a refusal, not a launch.
-    const opened = await invoke('open_lead', { dir: config.dir, harness: 'claude-code' })
-    await report('tab', opened)
-    if (opened?.ok !== true) {
-      throw new Error(`open_lead refused: ${JSON.stringify(opened)}`)
-    }
-
-    // Draw the tab that was just opened. A human gets this from the
-    // `state-changed` event; asking for it directly means the smoke does not
-    // depend on that event's timing to decide whether panes work.
+    // A project on the smoke's folder, its lead on the fake `claude`.
+    const opened = await core('project.open', {
+      directory: config.dir,
+      harness: 'claude-code',
+      review: 'none',
+    })
+    await report('project', opened)
+    if (opened?.ok !== true) throw new Error(`project.open refused: ${JSON.stringify(opened)}`)
     await refresh()
 
-    // The pane identity comes from the page's own registry: its keys are
-    // `id:generation`, and an emulator exists because the pane is on screen.
-    const [emulator, pane] = await until('a pane emulator appeared', () => {
+    // The lead's window is the one docked beside the board; its emulator is
+    // in the page's own registry, keyed `id:generation`.
+    const [emulator, pane] = await until('the lead window appeared', () => {
       for (const [key, entry] of registry.emulators) {
         const cut = key.lastIndexOf(':')
         const id = key.slice(0, cut)
         const generation = Number(key.slice(cut + 1))
-        if (Number.isInteger(generation)) return [entry.emulator, { id, generation }]
+        if (id.endsWith('-lead') && Number.isInteger(generation)) {
+          return [entry.emulator, { id, generation }]
+        }
       }
       return null
     })
-
     const banner = await until(
       'the harness banner rendered',
-      () => {
-        const line = screen(emulator).find((row) => READY.test(row))
-        return line ?? null
-      },
+      () => screen(emulator).find((row) => READY.test(row)) ?? null,
       {
         note: async (what, polls) => {
           const rows = screen(emulator)
@@ -167,12 +164,7 @@ export async function runSelftest({
       }
       return null
     })
-    await report('rendered', {
-      banner: banner.trim(),
-      rows: screen(emulator).length,
-      tools,
-      pane,
-    })
+    await report('rendered', { banner: banner.trim(), rows: screen(emulator).length, tools, pane })
 
     // Typed the way a human types it: the page's own input path, the text
     // and then the return, and the child's hex is the only proof it arrived.
@@ -205,12 +197,43 @@ export async function runSelftest({
     )
     await report('echo', { typed, hex })
 
+    // A task from the board: the human's composer, the core, the dispatcher,
+    // the pane host's paste, the child. The fake harness has no transcript,
+    // so the core never sees the arrival; the child's hex of the header line
+    // is the proof that the board reaches a window.
+    const given = await core('task.add', { project: opened.project.id, to: 'lead', body: 'SMOKE' })
+    if (given?.ok !== true) throw new Error(`task.add refused: ${JSON.stringify(given)}`)
+    const header = `[ConsensFlow m-${given.message?.id ?? given.task.number} ·`
+    const delivered = await until(
+      'the task reached the lead window',
+      () => {
+        for (const row of screen(emulator)) {
+          const match = HEX.exec(row)
+          if (match?.[1].startsWith(toHex(header))) return match[1]
+        }
+        return null
+      },
+      {
+        note: async (what, polls) => {
+          await report('waiting', {
+            what,
+            polls,
+            wanted: toHex(header),
+            hexLines: screen(emulator)
+              .filter((row) => HEX.test(row))
+              .slice(-3),
+          })
+        },
+      },
+    )
+    await report('board', { task: given.task.number, hex: delivered })
+
     // Exercise a large Unicode paste through WebKit, IPC and the real PTY.
     await sendInput(pane, 'BIGPASTE\r')
     await until('raw paste reader ready', () =>
       screen(emulator).some((row) => row.includes('CFSMOKE-PASTE-READY')),
     )
-    await sendInput(pane, '\x1b[200~' + '漢字 résumé 🙂\r'.repeat(30_000) + '\x1b[201~')
+    await sendInput(pane, `\x1b[200~${'漢字 résumé 🙂\r'.repeat(30_000)}\x1b[201~`)
     const pasted = await until('complete large paste reached the child', () => {
       for (const row of screen(emulator)) {
         const match = /CFSMOKE-PASTE (\d+) ([A-Za-z0-9+/=]+)/.exec(row)
@@ -220,11 +243,9 @@ export async function runSelftest({
     })
     await report('large-paste', pasted)
 
-    // Only now the flood, and only because it is asked for. It is bigger than
-    // the unacked-output window, so its last line can be on screen only if the
-    // page kept returning credit through `pane_ack`. It also pushes far more
-    // rows than xterm keeps, which is exactly why nothing printed BEFORE it
-    // can be looked for afterwards — the banner and the echo are already read.
+    // Only now the flood, and only because it is asked for: it is bigger than
+    // the unacked-output window, so its last line can be on screen only if
+    // the page kept returning credit through `pane_ack`.
     await sendInput(pane, 'FLOOD')
     await sendInput(pane, '\r')
     const flood = await until(
@@ -246,90 +267,13 @@ export async function runSelftest({
       },
     )
     await report('drained', { lastFloodLine: flood.last, acks })
-
-    const pm = await invoke('open_pm', { tab: opened.tab, harness: 'claude-code' })
-    if (!pm.ok) throw new Error(pm.error ?? 'PM did not open')
-    await refresh()
-    document.querySelector(`[data-testid="pm-${pm.tab}"]`)?.click()
-    const pmEmulator = await until(
-      'PM emulator in main registry',
-      () => registry.emulators.get(`${pm.pane.id}:${pm.pane.generation}`)?.emulator,
-    )
-    await runPmSelftest({
-      emulator: pmEmulator,
-      pane: pm.pane,
-      enqueue: (_action, text) => sendInput(pm.pane, text),
-      invoke,
-    })
-    const leadTask = await invoke('task_change', {
-      tab: opened.tab,
-      change: { action: 'add', title: 'Verify worker results', kind: 'implementation' },
-    })
-    const pmTask = await invoke('task_change', {
-      tab: pm.tab,
-      change: { action: 'add', title: 'Agree on reply history', question: 'Retain every reply?' },
-    })
-    if (!leadTask.id || !pmTask.id) throw new Error('Task creation failed')
-    const answered = await invoke('task_change', {
-      tab: pm.tab,
-      change: {
-        action: 'answer',
-        id: pmTask.id,
-        revision: pmTask.revision,
-        question: pmTask.questions[0].id,
-        answer: 'Keep all recorded replies',
-      },
-    })
-    const taskList = await invoke('task_list', { tab: opened.tab })
-    document.querySelector('#view-tasks').click()
-    await until('task board in packaged WebKit', () =>
-      document.querySelector(`[data-task="${pmTask.id}"]`),
-    )
-    const taskView = document.querySelector('#task-view')
-    ;[...taskView.querySelectorAll('button')]
-      .find((button) => button.textContent === 'Graph')
-      .click()
-    const graph = await until('task graph in packaged WebKit', () =>
-      taskView.querySelector('svg [data-relation="owns"]'),
-    )
-    document.querySelector('#view-lead').click()
-    await report('task-board', {
-      total: taskList.total,
-      owners: taskList.owners.length,
-      answer: answered.questions?.[0]?.answer,
-      status: answered.status,
-      graph: !!graph,
+    await report('settled', {
+      acks,
+      pane,
       terminalPreserved:
         registry.emulators.get(`${pane.id}:${pane.generation}`)?.emulator === emulator,
     })
-    await report('settled', { acks, pane })
   } catch (cause) {
     await report('failed', { error: cause instanceof Error ? cause.message : String(cause) })
-  }
-}
-
-function toHex(text) {
-  return [...new TextEncoder().encode(text)]
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')
-}
-
-/** Exercise the PM through the main window's real emulator and input path. */
-async function runPmSelftest({ emulator, pane, enqueue, invoke }) {
-  try {
-    await until('PM terminal banner', () => screen(emulator).some((row) => READY.test(row)))
-    const typed = 'cfsmoke-pm-input'
-    await enqueue('input', typed)
-    await enqueue('input', '\r')
-    const hex = await until('PM input echo', () => {
-      for (const row of screen(emulator)) {
-        const match = HEX.exec(row)
-        if (match?.[1] === toHex(typed)) return match[1]
-      }
-      return null
-    })
-    await invoke('selftest_report', { event: 'pm-echo', data: { pane, typed, hex } })
-  } catch (error) {
-    await invoke('selftest_report', { event: 'failed', data: { error: String(error) } })
   }
 }

@@ -1,57 +1,34 @@
-import { spawn } from 'node:child_process'
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
-import { fstatSync, readFileSync } from 'node:fs'
-import { createServer } from 'node:http'
+import { createHash, timingSafeEqual } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ArtificialAnalysis, METRICS, withBenchmarks } from '../hosts/lib/benchmarks.js'
-import { CATEGORY_LABELS, WORK_TIERS } from '../hosts/lib/presets.js'
-import { Bridge } from './bridge.js'
-import { agentProfile, CATALOG, EFFORTS } from './catalog.js'
-import { Watcher } from './delivery-watch.js'
-import { HarnessAdmin } from './harness-admin.js'
-import { harnessPage } from './harness-page.js'
-import { harnessPath } from './harnesses.js'
-import { Inbox } from './inbox.js'
-import { prepareApp } from './install.js'
-import {
-  controllerEnv as buildControllerEnv,
-  leadEnv as buildLeadEnv,
-  checkScope,
-  issueTicket,
-  LaunchTicketError,
-  redeem,
-  scopeOf,
-} from './launch.js'
-import { Page } from './page.js'
-import { PaneError, Panes, paneErrorBody } from './panes.js'
+import { ArtificialAnalysis, METRICS, withBenchmarks } from '../../hosts/lib/benchmarks.js'
+import { CATEGORY_LABELS, WORK_TIERS } from '../../hosts/lib/presets.js'
+import { agentProfile, CATALOG, EFFORTS } from '../catalog.js'
+import { HarnessAdmin } from '../harness-admin.js'
+import { harnessPage } from '../harness-page.js'
 import {
   addAgent,
   agentDrift,
-  agentRow,
   configRoot,
   editAgent,
   HARNESSES,
-  harnessForKind,
   listAgents,
-  migrateStateRoot,
   refreshAgentProfiles,
   removeAgent,
   syncAgents,
-} from './roster.js'
-import { agentCommand } from './skill.js'
-import { Store, StoreRefusal } from './store.js'
-import { leadIdentity, Tabs } from './tabs.js'
-import { TaskError, Tasks } from './tasks.js'
+} from '../roster.js'
+import { agentCommand } from '../skill.js'
 
 /**
- * The minimal roster editor: one ephemeral loopback HTTP server, one inline
- * page, a random bearer token. No daemon, no lock file — Ctrl-C ends it.
- * Every mutation persists to the roster and regenerates the installed skill,
- * exactly as the CLI verbs do.
+ * The human's agents screens, served by the new core: the roster editor
+ * (`/`, with each agent's tier and tags), the agent library (`/library`) and
+ * the harness diagnostics (`/harnesses`), each an inline page, with the
+ * `/api/agents` routes they call. The app checks the UI token it was handed
+ * and puts it on every request; the agents' own tokens open none of this.
  */
 
-function tokenMatches(presented, token) {
+export function tokenMatches(presented, token) {
   return timingSafeEqual(
     createHash('sha256').update(presented).digest(),
     createHash('sha256').update(token).digest(),
@@ -59,11 +36,11 @@ function tokenMatches(presented, token) {
 }
 
 const VERSION = JSON.parse(
-  readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'),
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json'), 'utf8'),
 ).version
 
 /** The line this agent becomes in the skill — shown verbatim in the UI. */
-function withCommand(agent, benchmarks) {
+export function withCommand(agent, benchmarks) {
   const command = agentCommand(agent)
   return {
     ...agent,
@@ -72,7 +49,7 @@ function withCommand(agent, benchmarks) {
   }
 }
 
-function readBody(request) {
+export function readBody(request) {
   return new Promise((resolve, reject) => {
     let body = ''
     request.on('data', (chunk) => {
@@ -84,660 +61,97 @@ function readBody(request) {
   })
 }
 
-const FORBIDDEN_IDENTITY_FIELDS = ['by', 'lead', 'owner']
-
-/**
- * The runtime this app is running on, which is the runtime everything it
- * launches must run on: inside the bundle it IS the bundled node, and
- * resolving one from PATH instead is how a stale install gets a say.
- */
-const RUNTIME = process.execPath
-
-class InternalInvariantError extends Error {
-  constructor(message) {
-    super(message)
-    this.name = 'InternalInvariantError'
-  }
-}
-
-function isRecord(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-}
-
-function paneOperation(method, pathname) {
-  if (method === 'GET' && pathname === '/api/panes') return 'panes'
-  if (method !== 'POST' || !pathname.startsWith('/api/panes/')) return null
-  const operation = pathname.slice('/api/panes/'.length)
-  return operation.length > 0 && !operation.includes('/') ? operation : null
-}
-
-/**
- * One pane operation, dispatched after the credential has already decided
- * it may run. `dimensions` is what the token proved — the tab for a lead,
- * the launch for a controller — so no operation takes its subject from the
- * body: a lead's tab and a controller's conversation are the credential's,
- * never the caller's.
- *
- * Returns the `send` arguments so the route stays one line.
- */
-async function runPaneOperation(panes, tasks, op, dimensions, body) {
-  switch (op) {
-    case 'task.list':
-      return [200, await tasks.list(dimensions.tab, { offset: body.offset, limit: body.limit })]
-    case 'task.get':
-      return [200, await tasks.get(dimensions.tab, body.id)]
-    case 'task.change':
-      return [200, await tasks.change(dimensions.tab, body.change)]
-    case 'panes':
-      return [200, await panes.list(dimensions.tab)]
-    case 'consult':
-      return [200, await panes.consult(dimensions.tab, body)]
-    case 'say':
-      return [200, await panes.say(dimensions.tab, body)]
-    case 'attach':
-      return [200, await panes.attach(dimensions.tab, body)]
-    case 'session.bind':
-      return [200, await panes.sessionBind(dimensions.launch, body)]
-    case 'progress.set':
-      return [200, await panes.progressSet(dimensions.launch, body)]
-    case 'sent.record':
-      return [200, await panes.sentRecord(dimensions.launch, body)]
-    case 'read':
-      return [200, await panes.read(dimensions.tab, body)]
-    case 'results.list':
-      return [200, await panes.results(dimensions.tab)]
-    case 'lead.send':
-      return [200, await panes.pmSend(dimensions.tab, body)]
-    case 'lead.read':
-      return [200, await panes.pmRead(dimensions.tab, body)]
-    case 'results.read':
-      return [200, await panes.readResult(dimensions.tab, body)]
-    case 'seen':
-      return [200, await panes.seen(dimensions.tab, body)]
-    default:
-      return [404, { error: 'not found' }]
-  }
-}
-
-/**
- * Every request Rust sends over the bridge, answered.
- *
- * `app/src-tauri/src/commands.rs` sends twelve (`grep request_node`); an op
- * with no handler answers `unknown-op`, which Rust turns into
- * `not-available-yet` and the page renders as "not available yet". So this
- * table is the page's whole vocabulary, and a name missing from it is a
- * dead button.
- *
- * The page has no credential and needs none: its authority IS Rust's
- * presence on the pipe, which only the app it is embedded in has. That is
- * why these take their tab from the body where the HTTP routes take it from
- * a lead token. It also means they are not idempotent by an `opId` the way
- * the controller's writes are — a page whose click was lost clicks again,
- * with a person watching, and one minted here would only make a retry
- * silently do nothing.
- */
-function attachPage(bridge, { panes, page, store, tabs, tasks }) {
-  const ops = {
-    'task.list': (body) =>
-      tasks.list(body.tab, { combined: true, offset: body.offset, limit: body.limit }),
-    'task.get': (body) => tasks.get(body.tab, body.id),
-    'task.change': (body) => tasks.change(body.tab, body.change, 'human'),
-    'tab.open': (body) => panes.tabOpen(body),
-    'pm.open': (body) => panes.pmOpen(body),
-    'tab.resume': (body) => panes.tabResume(body),
-    'tab.delete': (body) => panes.tabDelete(body),
-    'tab.rename': async (body) => {
-      const tab = await tabs.rename(body?.tab, body?.name)
-      return { outcome: 'renamed', tab: tab.id, name: tab.name }
-    },
-    'shell.open': (body) => panes.shellOpen(body),
-    consult: (body) => panes.consult(body?.tab, { ...body, opId: randomUUID() }),
-    attach: (body) => panes.attach(body?.tab, { ...body, opId: randomUUID() }),
-    'pane.close': (body) => panes.paneClose(body),
-    'pane.delete': (body) => panes.paneDelete(body),
-    'notify.set': (body) => panes.notifySet(body),
-    'state.list': async () => {
-      const state = await page.state()
-      const stored = await tabs.list()
-      const names = new Map(stored.map((tab) => [tab.id, tab.name]))
-      return {
-        ...state,
-        tabs: state.tabs.map((tab) =>
-          typeof names.get(tab.id) === 'string' ? { ...tab, name: names.get(tab.id) } : tab,
-        ),
-      }
-    },
-    'answers.list': (body) => page.answersList(body),
-    'result.body': (body) => page.resultBody(body),
-    'result.collect': (body) => page.collectResult(body),
-    'result.cancel': (body) => page.cancelResult(body),
-  }
-  for (const [op, run] of Object.entries(ops)) {
-    bridge.on(op, async (body) => {
-      try {
-        const answer = await run(isObject(body) ? body : {})
-        return isObject(answer) ? { ok: true, ...answer } : { ok: true, answer }
-      } catch (cause) {
-        // The page shows the person a message, so a refusal says what it
-        // was; a fault on this side says only that it was ours.
-        if (cause instanceof PaneError) return { ok: false, ...paneErrorBody(cause) }
-        if (cause instanceof TaskError)
-          return { ok: false, error: cause.code, reason: cause.message }
-        if (cause instanceof StoreRefusal) {
-          return { ok: false, error: cause.code, reason: cause.message }
-        }
-        return {
-          ok: false,
-          error: 'internal_error',
-          ...(cause instanceof Error && cause.message.length > 0 ? { reason: cause.message } : {}),
-        }
-      }
-    })
-  }
-  // One notification per mutation, straight off the store's queue. The page
-  // re-reads `state.list` when it arrives, so this carries no state of its
-  // own — a frame that raced the write it describes would be worse than no
-  // frame at all, and this one cannot: the queue announces after the write.
-  return store.onMutation(({ op }) => {
-    bridge.event('state.changed', { op })
-  })
-}
-
-const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
-
-/**
- * True when this descriptor is the parent's end of a pipe. Node's `'pipe'`
- * stdio is a socketpair on macOS and a FIFO elsewhere, so both count; a
- * terminal or /dev/null is neither.
- */
-function isPipe(fd) {
-  try {
-    const stats = fstatSync(fd)
-    return stats.isFIFO() || stats.isSocket()
-  } catch {
-    return false
-  }
-}
-
-/**
- * True when this stream is the parent's end of a pipe. A stream carrying a
- * real fd is checked the way `isPipe` always did; a stream without one (a
- * test double) counts as a pipe unless it says it is a TTY. No stream at all
- * falls back to the historical check on fd 0. Exported for the bridge
- * activation tests; `serveUi` is the real caller.
- */
-export function stdinIsPipe(stream) {
-  if (stream !== null && stream !== undefined) {
-    if (typeof stream.fd === 'number') return isPipe(stream.fd)
-    if (stream.isTTY === true) return false
-    return true
-  }
-  return isPipe(0)
-}
-
-export async function startUiServer(
-  env,
-  { paneOpenDeadlineMs, prepareRole, prepareChannel, harnessLatest } = {},
-) {
+/** The screens and their API, mounted by `startApi` under the UI token. */
+export function agentsUi(env, { token, harnessLatest } = {}) {
+  if (typeof token !== 'string' || token.length === 0)
+    throw new Error('the agents screens need a UI token')
   const harnessAdmin = new HarnessAdmin(env, { latest: harnessLatest })
   const artificialAnalysis = new ArtificialAnalysis(configRoot(env))
-  // The app is an entry point too: a machine from before the merge should not
-  // have to run the CLI once to be tidied up.
-  migrateStateRoot(env)
-  refreshAgentProfiles(env)
-
-  const store = new Store(configRoot(env))
-  const tabs = new Tabs(store)
-  const tasks = new Tasks(store)
-  const inbox = new Inbox({ store, tabs, env })
-  let storePromise
-  const storeReady = () => {
-    storePromise ??= store.open()
-    return storePromise
-  }
-  const token = randomBytes(24).toString('hex')
-  let app = null
-  const panes = new Panes({
-    store,
-    tabs,
-    agents: {
-      row: (name) => agentRow(name, env),
-      names: () => listAgents(env).map((agent) => agent.name),
-    },
-    app: () => app,
-    // The Node deciding is the Node that will run the pane: inside the
-    // bundle this IS the bundled runtime, and `pane.open` refuses a
-    // relative argv[0].
-    node: RUNTIME,
-    harnessPath: (kind) => harnessPath(harnessForKind(kind) ?? kind, env),
-    shell: typeof env.SHELL === 'string' && env.SHELL.length > 0 ? env.SHELL : '/bin/sh',
-    env,
-    ...(paneOpenDeadlineMs === undefined ? {} : { paneOpenDeadlineMs }),
-    ...(prepareRole === undefined ? {} : { prepareRole }),
-    ...(prepareChannel === undefined ? {} : { prepareChannel }),
-  })
-  // One background scanner serves results and native activity; page reads never await it.
-  const watcher = new Watcher({
-    store,
-    tabs,
-    env,
-    // stderr is the app's error log (<home>/app/app.log).
-    onError: (error) => console.error('consensflow watcher:', error?.message ?? error),
-  })
-  const page = new Page({
-    store,
-    tabs,
-    agents: {
-      row: (name) => agentRow(name, env),
-      names: () => listAgents(env).map((agent) => agent.name),
-    },
-    watcher,
-  })
-  panes.attachWatcher(watcher)
-  let stopAnnouncing = null
-
-  const server = createServer(async (request, reply) => {
-    const url = new URL(request.url, 'http://127.0.0.1')
-    const send = (status, body, type = 'application/json') => {
-      reply.writeHead(status, { 'content-type': type })
-      reply.end(typeof body === 'string' ? body : JSON.stringify(body))
-    }
-    let bodyPromise
-    const jsonBody = () => {
-      bodyPromise ??= readBody(request).then((body) => JSON.parse(body || '{}'))
-      return bodyPromise
-    }
-
-    try {
-      let body
-      if (!['GET', 'HEAD'].includes(request.method)) {
-        body = await jsonBody()
-        if (!isRecord(body)) return send(400, { error: 'request body must be an object' })
-        if (FORBIDDEN_IDENTITY_FIELDS.some((field) => Object.hasOwn(body, field))) {
-          return send(400, { error: 'request bodies cannot supply identity' })
-        }
-      }
-
-      if (request.method === 'POST' && url.pathname === '/api/launch/redeem') {
-        return send(200, redeem(body.ticket))
-      }
-
-      const bearer = (request.headers.authorization ?? '').replace(/^Bearer /, '')
-      const pageToken = bearer || (url.searchParams.get('token') ?? '')
-      const uiAuthorized = pageToken.length > 0 && tokenMatches(pageToken, token)
-      const scoped = scopeOf(bearer)
-      if (!uiAuthorized && !scoped) return send(401, { error: 'unauthorized' })
-
-      if (scoped && body !== undefined) {
-        if (Object.hasOwn(body, 'tab') && scoped.tab !== body.tab) {
-          return send(400, { error: 'request tab does not match the token' })
-        }
-        for (const field of ['launch', 'generation']) {
-          if (Object.hasOwn(body, field) && scoped[field] !== body[field]) {
-            return send(403, { error: 'forbidden' })
-          }
-        }
-      }
-
-      const panesPath = url.pathname === '/api/panes' || url.pathname.startsWith('/api/panes/')
-      if (request.method === 'POST' && url.pathname.startsWith('/api/receiver/')) {
-        if (!scoped?.ops.includes('receiver')) return send(403, { error: 'forbidden' })
-        await storeReady()
-        try {
-          return send(
-            200,
-            await inbox.receive(url.pathname.slice('/api/receiver/'.length), scoped, body),
-          )
-        } catch (cause) {
-          return send(cause.status ?? 500, { error: cause.message })
-        }
-      }
-      if (panesPath) {
-        if (uiAuthorized) return send(403, { error: 'forbidden' })
-        const op = paneOperation(request.method, url.pathname)
-        const dimensions = {}
-        if (scoped.tab !== undefined) {
-          if (request.method !== 'GET' && !Object.hasOwn(body, 'tab')) {
-            return send(403, { error: 'forbidden' })
-          }
-          dimensions.tab = body === undefined ? scoped.tab : body.tab
-        }
-        if (scoped.launch !== undefined || scoped.generation !== undefined) {
-          if (
-            body === undefined ||
-            !Object.hasOwn(body, 'launch') ||
-            !Object.hasOwn(body, 'generation')
-          ) {
-            return send(403, { error: 'forbidden' })
-          }
-          dimensions.launch = body.launch
-          dimensions.generation = body.generation
-        }
-        if (op === null || !checkScope(bearer, { ...dimensions, op })) {
-          return send(403, { error: 'forbidden' })
-        }
-        await storeReady()
-        try {
-          return send(...(await runPaneOperation(panes, tasks, op, dimensions, body)))
-        } catch (cause) {
-          // A pane operation validates what it was given and refuses it in
-          // its own words, with a code. Anything else that escapes is a
-          // fault on THIS side — a bug, a broken transport, a store that
-          // could not write — and answering 400 would tell the caller it
-          // sent something wrong and invite it to change the request.
-          if (cause instanceof LaunchTicketError) return send(401, { error: 'unauthorized' })
-          if (cause instanceof PaneError) return send(cause.status, paneErrorBody(cause))
-          if (cause instanceof TaskError)
-            return send(cause.status, { error: cause.code, reason: cause.message })
-          // `internal_error` is the code, and it is the whole answer to
-          // "whose fault": ours. The words still come along, because the
-          // one reading this is the person who ran the app on their own
-          // machine, and "cannot read deliveries.json: not JSON" is the
-          // difference between fixing it and filing a bug.
-          return send(500, {
-            error: 'internal_error',
-            ...(cause instanceof Error && cause.message.length > 0
-              ? { reason: cause.message }
-              : {}),
-          })
-        }
-      }
-
-      if (!uiAuthorized) return send(403, { error: 'forbidden' })
-
-      if (request.method === 'GET' && url.pathname === '/') {
-        return send(200, PAGE(token), 'text/html; charset=utf-8')
-      }
-      if (request.method === 'GET' && url.pathname === '/library') {
-        return send(200, PAGE(token, true), 'text/html; charset=utf-8')
-      }
-      if (request.method === 'GET' && url.pathname === '/harnesses') {
-        return send(200, harnessPage(token), 'text/html; charset=utf-8')
-      }
-      if (request.method === 'POST' && url.pathname === '/api/tabs') {
-        await storeReady()
-        // ONE way to open a tab. This route used to write the records and
-        // stop, so a tab created here had a lead pane in the store and no
-        // process behind it, and nothing else ever launched one. It is the
-        // same operation `tab.open` is; only the response shape is this
-        // route's own, and callers depend on it.
-        try {
-          const launched = await panes.tabOpen({ dir: body?.dir, harness: body?.harness })
-          const tab = await tabs.get(launched.tab)
-          // The response shape is unchanged on purpose: callers depend on
-          // exactly `{tab, leadEnv}`, and the launch is now implied by the
-          // tab existing at all.
-          const pane = tab?.panes?.find((candidate) => candidate.kind === 'lead')
-          if (tab === null || pane === undefined) {
-            throw new InternalInvariantError('the new tab has no lead pane')
-          }
-          return send(201, {
-            tab,
-            leadEnv: buildLeadEnv({
-              tab: tab.id,
-              pane: pane.id,
-              leadId: leadIdentity(tab),
-              app,
-              path: env?.PATH,
-              node: RUNTIME,
-            }),
-          })
-        } catch (cause) {
-          if (cause instanceof PaneError) return send(cause.status, paneErrorBody(cause))
-          throw cause
-        }
-      }
-      if (request.method === 'POST' && url.pathname === '/api/launch') {
-        await storeReady()
-        const tab = await tabs.get(body.tab)
-        if (tab === null) throw new Error(`no tab ${body.tab}`)
-        if (tab.closed === true) throw new Error(`the tab ${tab.id} is closed`)
-        const pane = tab.panes.find((candidate) => candidate.id === body.pane)
-        if (pane === undefined) throw new Error(`no pane ${body.pane} in tab ${tab.id}`)
-        const requester = tab.panes.find((candidate) => candidate.kind === 'lead')
-        if (requester === undefined) {
-          throw new InternalInvariantError(`the tab ${tab.id} has no lead pane`)
-        }
-        const { ticket, launch } = issueTicket({
-          tab: tab.id,
-          pane: pane.id,
-          lead: leadIdentity(tab),
-          requester: requester.id,
-          conversation: body.conversation,
-          generation: pane.generation,
-        })
-        return send(201, {
-          ticket,
-          launch,
-          controllerEnv: buildControllerEnv({ pane: pane.id, app, ticket }),
-        })
-      }
-      if (request.method === 'GET' && url.pathname === '/api/agents') {
-        const benchmarks = await artificialAnalysis.refresh()
-        refreshAgentProfiles(env, benchmarks)
-        return send(200, {
-          agents: listAgents(env).map((agent) => withCommand(agent, benchmarks)),
-          drift: agentDrift(env),
-          harnesss: HARNESSES,
-          catalog: Object.fromEntries(
-            Object.entries(CATALOG).map(([harness, entries]) => [
-              harness,
-              entries.map((entry) => withCommand({ ...entry, harness }, benchmarks)),
-            ]),
-          ),
-          efforts: EFFORTS,
-          benchmarks: {
-            status: benchmarks.status,
-            tier: benchmarks.tier,
-            fetchedAt: benchmarks.fetchedAt,
-            indexVersion: benchmarks.indexVersion,
-            metrics: METRICS,
-          },
-        })
-      }
-      if (request.method === 'POST' && url.pathname === '/api/agents/sync') {
-        // A named operation, like every other one here: it re-resolves
-        // catalog-backed agents and nothing else.
-        const applied = syncAgents(env, {
-          ...(typeof body.name === 'string' ? { name: body.name } : {}),
-        })
-        return send(200, { applied, agents: listAgents(env).map(withCommand) })
-      }
-      if (request.method === 'POST' && url.pathname === '/api/agents') {
-        const added = addAgent(body, env)
-        return send(201, { agent: added })
-      }
-      if (request.method === 'POST' && url.pathname === '/api/harnesses/check') {
-        if (
-          body.id !== undefined &&
-          !['claude', 'codex', 'opencode', 'pi', 'kimi', 'devin'].includes(body.id)
-        ) {
-          return send(400, { error: 'Unknown harness' })
-        }
-        return send(200, {
-          harnesses: await harnessAdmin.check(body.id ?? null, { refresh: body.refresh === true }),
-        })
-      }
-      const named = /^\/api\/agents\/([a-z][a-z0-9-]*)$/.exec(url.pathname)
-      if (named !== null && request.method === 'PATCH') {
-        const edited = editAgent(named[1], body, env)
-        return send(200, { agent: edited })
-      }
-      if (named !== null && request.method === 'DELETE') {
-        removeAgent(named[1], env)
-        reply.writeHead(204)
-        return reply.end()
-      }
-      return send(404, { error: 'not found' })
-    } catch (cause) {
-      if (cause instanceof LaunchTicketError) return send(401, { error: 'unauthorized' })
-      if (cause instanceof PaneError) return send(cause.status, paneErrorBody(cause))
-      if (cause instanceof InternalInvariantError) return send(500, { error: 'internal_error' })
-      return send(400, { error: cause instanceof Error ? cause.message : String(cause) })
-    }
-  })
-
-  try {
-    await storeReady()
-    await watcher.start()
-    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-  } catch (cause) {
-    await watcher.close()
-    await store.close()
-    throw cause
-  }
-  const { port } = server.address()
-  app = { url: `http://127.0.0.1:${port}/`, token }
+  const html = (page) => ({ status: 200, html: page })
+  const json = (status, body) => ({ status, body })
 
   return {
-    url: `http://127.0.0.1:${port}`,
     token,
-    // The pane host arrives after the handle line: `serveUi` builds the
-    // bridge on the stdio it was handed and gives it to the server here.
-    attachBridge: (bridge) => {
-      // `null` is how the app says the pane host is gone. Everything that
-      // hangs off a bridge comes off with it, the store listener included:
-      // a frame written to a dead bridge is a frame nobody reads.
-      stopAnnouncing?.()
-      stopAnnouncing = null
-      panes.attachBridge(bridge)
-      if (bridge !== null && bridge !== undefined) {
-        watcher.attachBridge(bridge)
-        stopAnnouncing = attachPage(bridge, { panes, page, store, tabs, tasks, env })
-        // Sessions that were open when the previous process ended come back.
-        panes
-          .resumeOnStart()
-          .then((outcomes) => {
-            for (const outcome of outcomes)
-              if (outcome.error) console.error(`consensflow resume ${outcome.tab}:`, outcome.error)
+    /** Answers one of these screens' requests, or null when the path is not theirs. */
+    async handle(request, url) {
+      const path = url.pathname
+      const page = ['/', '/library', '/harnesses'].includes(path)
+      const named = /^\/api\/agents\/([a-z][a-z0-9-]*)$/.exec(path)
+      const api =
+        path === '/api/agents' ||
+        path === '/api/agents/sync' ||
+        path === '/api/harnesses/check' ||
+        named !== null
+      if (!page && !api) return null
+      const header = request.headers.authorization ?? ''
+      const bearer = header.startsWith('Bearer ') ? header.slice('Bearer '.length) : ''
+      const presented = bearer || (url.searchParams.get('token') ?? '')
+      if (presented.length === 0 || !tokenMatches(presented, token)) {
+        return json(401, { error: 'unauthorized' })
+      }
+      try {
+        if (request.method === 'GET' && path === '/') return html(PAGE(token))
+        if (request.method === 'GET' && path === '/library') return html(PAGE(token, true))
+        if (request.method === 'GET' && path === '/harnesses') return html(harnessPage(token))
+        if (request.method === 'GET' && path === '/api/agents') {
+          const benchmarks = await artificialAnalysis.refresh()
+          refreshAgentProfiles(env, benchmarks)
+          return json(200, {
+            agents: listAgents(env).map((agent) => withCommand(agent, benchmarks)),
+            drift: agentDrift(env),
+            harnesss: HARNESSES,
+            catalog: Object.fromEntries(
+              Object.entries(CATALOG).map(([harness, entries]) => [
+                harness,
+                entries.map((entry) => withCommand({ ...entry, harness }, benchmarks)),
+              ]),
+            ),
+            efforts: EFFORTS,
+            benchmarks: {
+              status: benchmarks.status,
+              tier: benchmarks.tier,
+              fetchedAt: benchmarks.fetchedAt,
+              indexVersion: benchmarks.indexVersion,
+              metrics: METRICS,
+            },
           })
-          .catch((error) => console.error('consensflow resume:', error?.message ?? error))
+        }
+        const body = request.method === 'GET' ? {} : JSON.parse((await readBody(request)) || '{}')
+        if (request.method === 'POST' && path === '/api/agents/sync') {
+          const applied = syncAgents(env, {
+            ...(typeof body.name === 'string' ? { name: body.name } : {}),
+          })
+          return json(200, { applied, agents: listAgents(env).map(withCommand) })
+        }
+        if (request.method === 'POST' && path === '/api/agents') {
+          return json(201, { agent: addAgent(body, env) })
+        }
+        if (request.method === 'POST' && path === '/api/harnesses/check') {
+          if (
+            body.id !== undefined &&
+            !['claude', 'codex', 'opencode', 'pi', 'kimi', 'devin'].includes(body.id)
+          ) {
+            return json(400, { error: 'Unknown harness' })
+          }
+          return json(200, {
+            harnesses: await harnessAdmin.check(body.id ?? null, {
+              refresh: body.refresh === true,
+            }),
+          })
+        }
+        if (named !== null && request.method === 'PATCH') {
+          return json(200, { agent: editAgent(named[1], body, env) })
+        }
+        if (named !== null && request.method === 'DELETE') {
+          removeAgent(named[1], env)
+          return { status: 204 }
+        }
+        return json(404, { error: 'not found' })
+      } catch (cause) {
+        return json(400, { error: cause instanceof Error ? cause.message : String(cause) })
       }
-      return panes
-    },
-    /**
-     * Drain the scanner and admitted store mutations before closing the server.
-     * Native receivers own insertion; shutdown never submits or retries a result.
-     */
-    drain: async () => {
-      stopAnnouncing?.()
-      await watcher.close()
-      await store.close()
-    },
-    close: async () => {
-      try {
-        await new Promise((resolve, reject) => {
-          server.close((error) => (error === undefined ? resolve() : reject(error)))
-        })
-      } finally {
-        stopAnnouncing?.()
-        await watcher.close()
-        await store.close()
-      }
     },
   }
-}
-
-/**
- * How long the editor may spend finishing its writes when its parent goes.
- *
- * Long enough for a settling delivery and a store queue, short enough that a
- * wedged one still ends the process — the parent is already gone, so nothing
- * is served by waiting longer.
- */
-const DRAIN_MS = 5_000
-
-/**
- * `cf ui`: start, say where it is, run until Ctrl-C.
- *
- * `json` prints one machine-readable handle line first, so a host program
- * (the desktop app) can start the editor and point a window at it instead of
- * scraping prose. `open: false` leaves the browser alone for the same reason.
- */
-export async function serveUi(
-  env,
-  {
-    onOut,
-    json = false,
-    open = true,
-    stdin = null,
-    stdout = null,
-    registerDrain = null,
-    serverOptions = undefined,
-  },
-) {
-  // Opening the app prepares its private launcher and receiver integrations.
-  prepareApp(env)
-  const server = await startUiServer(env, serverOptions)
-  const url = `${server.url}/?token=${server.token}`
-
-  if (json) {
-    onOut(JSON.stringify({ url: `${server.url}/`, token: server.token }))
-  } else {
-    onOut(`roster editor: ${url}`)
-    onOut('Ctrl-C to stop — nothing keeps running after it.')
-  }
-  if (open) spawn('open', [url], { stdio: 'ignore', detached: true }).unref()
-
-  // A parent that holds a pipe to our stdin is telling us it wants to own
-  // this editor's lifetime: when that pipe closes the parent is gone, and an
-  // editor nobody can see must not keep serving. A stdin that is a terminal
-  // or /dev/null says nothing of the sort, so it is left alone. A piped
-  // stdin additionally speaks the JSON-lines bridge (Phase 1), but only in
-  // --json mode: prose and frames must never share one stdout. The streams
-  // arrive the way `env` does, from the entry point, so this module owns no
-  // stdio of its own.
-  const input = stdin ?? process.stdin
-  const output = stdout ?? process.stdout
-
-  /**
-   * The parent is gone, so this editor stops — but not in the same tick.
-   *
-   * `process.exit(0)` here used to end the process synchronously, and a
-   * delivery whose paste the pane accepted and whose Return never landed was
-   * left `submitting` on disk for ever. It reads as "still going", which is
-   * the one thing it is not. The bridge rejects every outstanding request
-   * before this runs, so the write is already settling inside the watcher's
-   * queue; draining lets it reach `uncertain` — never a replay, and never a
-   * pretence that it failed cleanly.
-   *
-   * Bounded, because the parent is not coming back: a drain that will not
-   * finish must still let the process go, and the exit stays 0 either way —
-   * a parent closing its pipe is the ordinary end of a session, not a fault.
-   */
-  let stopping = null
-  const stop = () => {
-    stopping ??= (async () => {
-      const expired = new Promise((resolve) => {
-        const timer = setTimeout(resolve, DRAIN_MS)
-        timer.unref?.()
-      })
-      try {
-        await Promise.race([server.drain(), expired])
-      } catch {
-        // A drain that throws has still had its chance; the parent is gone
-        // and holding the process open over it helps nobody.
-      }
-      process.exit(0)
-    })()
-    return stopping
-  }
-  registerDrain?.(stop)
-
-  if (stdinIsPipe(input)) {
-    if (json) {
-      // A fatal bridge failure ends the session the way stdin EOF does: the
-      // parent is gone or the pipe is broken, and an editor nobody can read
-      // must not keep serving.
-      const bridge = new Bridge({ input, output, onFatal: stop })
-      bridge.on('ping', () => ({ ok: true }))
-      server.attachBridge(bridge)
-    }
-    input.on('end', stop)
-    input.on('close', stop)
-    input.resume()
-  }
-  await new Promise(() => {})
 }
 
 const BROWSING_CONTROLS = `
@@ -764,7 +178,7 @@ const BROWSING_CONTROLS = `
   <p class="benchmark-source"></p>
   <details class="benchmark-guide"><summary>About benchmark scores</summary><div></div></details>`
 
-const PAGE = (token, library = false) => `<!DOCTYPE html>
+export const PAGE = (token, library = false) => `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -829,7 +243,7 @@ const PAGE = (token, library = false) => `<!DOCTYPE html>
   .callsign { font-size: 17px; font-weight: 600; color: var(--accent-text); letter-spacing: -.01em; }
   .tag { font-family: var(--mono); font-size: 11px; color: var(--muted); }
   .member__head .spacer { flex: 1; }
-  .member__desc { color: var(--muted); font-size: 13px; margin: 0; }
+  .member__desc, .member__tags { color: var(--muted); font-size: 13px; margin: 0; }
   .cmd-wrap { position: relative; }
   /* A long command scrolls rather than wrapping (it stays one readable line);
      the fade is the only hint that there is more to the right. */
@@ -928,7 +342,7 @@ const PAGE = (token, library = false) => `<!DOCTYPE html>
   .offer__model { color: var(--foam); opacity: 1; display: block; overflow-wrap: anywhere; }
   .offer__actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; max-width: 220px; }
   .offer__actions button { overflow-wrap: anywhere; max-width: 100%; }
-  .member__desc, .tag { overflow-wrap: anywhere; }
+  .member__desc, .member__tags, .tag { overflow-wrap: anywhere; }
   button:disabled { opacity: .6; cursor: default; }
   @media (max-width: 620px) {
     .filters label { flex: 1 1 45%; min-width: 0; }
@@ -969,6 +383,7 @@ const PAGE = (token, library = false) => `<!DOCTYPE html>
     <input class="full" name="model" placeholder="model — anything this harness accepts" required>
     <input name="effort" list="effort-options" placeholder="effort (optional)">
     <datalist id="effort-options"></datalist>
+    <input class="full" name="tags" placeholder="tags: what it is good for, comma-separated (optional)">
     <button class="primary">Add agent</button>
     <p id="error" class="alert full"></p>
   </form>`
@@ -984,6 +399,12 @@ const el = (tag, className, text) => {
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
+};
+
+/** "coding, rust" as the list the roster keeps; an empty field clears the tags. */
+const tagList = text => {
+  const tags = text.split(',').map(tag => tag.trim()).filter(Boolean);
+  return tags.length === 0 ? null : tags;
 };
 
 /** The model and effort are what the reader is scanning for: mark them. */
@@ -1232,6 +653,7 @@ function renderRoster(data) {
       card.append(note);
     }
     appendProfile(card, p, ['workTier', 'categories', 'goodFor', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
+    if (p.tags?.length) card.append(el('p', 'member__tags', 'Tags: ' + p.tags.join(', ')));
     if (p.description) card.append(el('p', 'member__desc', p.description));
     if (p.command) card.append(renderCommand(p));
     else card.append(el('p', 'member__desc', p.harness + ' agents are not run by this tool — it leaves them alone.'));
@@ -1249,6 +671,7 @@ function openEditor(card, agent) {
     ['model', agent.model, 'model'],
     ['effort', agent.effort ?? '', 'effort (blank for none)'],
     ['description', agent.description ?? '', 'description'],
+    ['tags', (agent.tags ?? []).join(', '), 'tags: what it is good for, comma-separated'],
   ];
   for (const [name, value, placeholder] of fields.filter(([name]) => agent.harness !== 'image' || name === 'description')) {
     const input = document.createElement('input');
@@ -1276,6 +699,7 @@ function openEditor(card, agent) {
     event.preventDefault();
     const entries = Object.fromEntries(new FormData(form).entries());
     if (entries.workTier === 'auto') entries.workTier = null;
+    if (entries.tags !== undefined) entries.tags = tagList(entries.tags);
     const res = await fetch('/api/agents/' + agent.name, {
       method: 'PATCH',
       headers,
@@ -1457,6 +881,7 @@ if (!LIBRARY) document.querySelector('#add').onsubmit = async (event) => {
   event.preventDefault();
   const form = new FormData(event.target);
   const body = Object.fromEntries([...form.entries()].filter(([, v]) => v !== ''));
+  if (body.tags !== undefined) body.tags = tagList(body.tags);
   const res = await fetch('/api/agents', { method: 'POST', headers, body: JSON.stringify(body) });
   const data = await res.json();
   document.querySelector('#error').textContent = res.ok ? '' : data.error;

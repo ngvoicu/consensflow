@@ -4,8 +4,10 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { ArtificialAnalysis, METRICS, withBenchmarks } from '../hosts/lib/benchmarks.js'
 import { agentProfile } from '../src/catalog.js'
+import { agentsUi } from '../src/core/agents-server.js'
+import { Credentials, startApi } from '../src/core/api.js'
+import { openLedger } from '../src/ledger/index.js'
 import { addAgent, editAgent, listAgents } from '../src/roster.js'
-import { startUiServer } from '../src/ui.js'
 import { tempEnv } from './helpers.mjs'
 
 const KEY = 'aa_synthetic_test_credential'
@@ -282,6 +284,7 @@ test('AA retains a daily in-memory cache when the disk cache cannot be written',
 test('API, saved display profiles and edits use the same cache without credentials in responses', async () => {
   const t = setup()
   let server
+  let ledger
   try {
     const aa = new ArtificialAnalysis(t.env.CONSENSFLOW_HOME, {
       fetchImpl: async () => response(page([model()])),
@@ -289,9 +292,14 @@ test('API, saved display profiles and edits use the same cache without credentia
     })
     await aa.refresh()
     addAgent(agent, t.env)
-    server = await startUiServer(t.env)
+    ledger = openLedger(join(t.env.CONSENSFLOW_HOME, 'consensflow.db'))
+    server = await startApi({
+      ledger,
+      credentials: new Credentials(),
+      ui: agentsUi(t.env, { token: 'ui-token' }),
+    })
     const result = await fetch(`${server.url}/api/agents`, {
-      headers: { authorization: `Bearer ${server.token}` },
+      headers: { authorization: 'Bearer ui-token' },
     })
     const data = await result.json()
     assert.equal(data.agents[0].profile.benchmarks.scores.intelligence, 51)
@@ -300,13 +308,14 @@ test('API, saved display profiles and edits use the same cache without credentia
     assert.ok(data.benchmarks.metrics.some((m) => m.id === 'hallucinations'))
     assert.ok(!JSON.stringify(data).includes(KEY))
     for (const path of ['', '/library']) {
-      const html = await (await fetch(`${server.url}${path}?token=${server.token}`)).text()
+      const html = await (await fetch(`${server.url}${path}?token=ui-token`)).text()
       assert.ok(!html.includes(KEY))
     }
     editAgent(agent.name, { effort: 'ultra' }, t.env)
     assert.equal(listAgents(t.env)[0].profile.benchmarks, undefined)
   } finally {
     await server?.close()
+    ledger?.close()
     t.cleanup()
   }
 })
@@ -333,9 +342,9 @@ test('AA model-level scores disclose unspecified reasoning without borrowing oth
     assert.equal(score.slug, slug)
     assert.equal(score.testedModel, name)
     assert.equal(score.scores.coding, 0)
-    const custom = { ...row, model: 'custom/' + modelId }
+    const custom = { ...row, model: `custom/${modelId}` }
     assert.equal(withBenchmarks(custom, agentProfile(custom), cache).benchmarks, undefined)
-    cache.models[slug].name = name + ' (low)'
+    cache.models[slug].name = `${name} (low)`
     assert.equal(withBenchmarks(row, agentProfile(row), cache).benchmarks, undefined)
   }
   cache.models['muse-spark-1-3-xhigh'] = {

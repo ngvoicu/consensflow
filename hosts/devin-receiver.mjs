@@ -28,7 +28,7 @@ export async function runHook(event, { request, selectedSession, instructions = 
           stdout: {
             hookSpecificOutput: {
               hookEventName: name,
-              additionalContext: `${instructions}\n\nDevin reply collection: available worker or advisor replies are fetched at prompt and stop boundaries. A reply arriving after you become idle stays pending until the next human prompt. Use cf results and cf read to check available reports; do not ask the owner to paste a report that is already stored.`,
+              additionalContext: `${instructions}\n\nDevin reply collection: available worker or advisor replies are fetched at prompt and stop boundaries. A reply arriving after you become idle stays pending until the next human prompt. Use cf inbox and cf task get to check what the board holds; do not ask the owner to paste a report that is already on the board.`,
             },
           },
         }

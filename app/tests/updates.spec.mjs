@@ -62,39 +62,40 @@ function updateSnapshot(overrides = {}) {
   }
 }
 
-function uiState(blocker = null) {
+/** What the new core answers the board: one project whose worker window is the blocker, if any. */
+function coreState(blocker = null) {
+  const participant = (id, handle, role) => ({
+    id,
+    projectId: 1,
+    handle,
+    role,
+    agent: role === 'worker' ? handle : null,
+    harness: role === 'human' ? null : 'codex',
+    tier: role === 'worker' ? 'standard' : null,
+    tags: [],
+    outUntil: null,
+  })
+  const lane = (who, pane) => ({ participant: who, tasks: [], activity: { state: 'idle' }, pane })
+  const project = { id: 1, name: 'hidden-session', directory: '/work/hidden', state: 'open' }
   return {
-    ok: true,
-    available: true,
-    tabs:
-      blocker === null
-        ? []
-        : [
-            {
-              id: 'hidden-session',
-              name: 'hidden-session',
-              closed: false,
-              lead: { name: 'hidden-lead', harness: 'codex', generation: 1 },
-              panes: [
-                {
-                  id: blocker.id,
-                  generation: blocker.generation,
-                  kind: 'worker',
-                  name: 'background-worker',
-                  agent: 'diana',
-                  alive: true,
-                },
-              ],
-            },
-          ],
-    agents: [],
-    deliveries: [],
-    held: [],
-    roster: null,
+    projects: [project],
+    boards: {
+      1: {
+        project: { ...project, review: 'none' },
+        open: [],
+        lanes: [
+          lane(participant(1, 'human', 'human'), null),
+          lane(participant(2, 'lead', 'lead'), { id: 'hidden-lead', generation: 1 }),
+          ...(blocker === null
+            ? []
+            : [lane(participant(3, 'background-worker', 'worker'), { ...blocker })]),
+        ],
+      },
+    },
   }
 }
 
-async function installTauriShim(page, { snapshot = updateSnapshot(), state = uiState() } = {}) {
+async function installTauriShim(page, { snapshot = updateSnapshot(), state = coreState() } = {}) {
   await page.addInitScript(
     ({ initialSnapshot, initialState }) => {
       const copy = (value) => JSON.parse(JSON.stringify(value))
@@ -126,8 +127,17 @@ async function installTauriShim(page, { snapshot = updateSnapshot(), state = uiS
         if (Object.hasOwn(window.__commandResults, command)) {
           return copy(window.__commandResults[command])
         }
-        if (command === 'list_state') return copy(initialState)
-        if (command === 'subscribe_output') return { ok: true }
+        if (command === 'core_request') {
+          const { operation, body } = args
+          if (operation === 'projects.list')
+            return copy({ ok: true, projects: initialState.projects })
+          if (operation === 'board.get') {
+            return copy({ ok: true, board: initialState.boards[body.project] })
+          }
+          if (operation === 'inbox.get') return { ok: true, messages: [] }
+          if (operation === 'agents.list') return { ok: true, agents: [] }
+          return { ok: true }
+        }
         if (command === 'update_status' || command === 'update_check') {
           return copy(window.__updateSnapshot)
         }
@@ -216,7 +226,7 @@ async function boot(page, options = {}) {
   await installTauriShim(page, options)
   await page.goto(origin)
   await page.waitForLoadState('networkidle')
-  await expect(page.locator('#app')).toHaveAttribute('data-ready', 'true', { timeout: 2_000 })
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true', { timeout: 2_000 })
 }
 
 function commandCalls(page, command) {
@@ -384,7 +394,7 @@ test('shows active hidden blockers, allows download, and never offers an unsafe 
     available: { version: '3.0.0-alpha.36', notes: 'Ready', date: '2026-09-09' },
     blockers,
   })
-  await boot(page, { snapshot: available, state: uiState(blockers[0]) })
+  await boot(page, { snapshot: available, state: coreState(blockers[0]) })
   await page.evaluate(() => window.__emitTauriEvent('check-updates'))
   const dialog = page.locator('#updates-dialog')
   await expect(dialog).toContainText('background-worker')

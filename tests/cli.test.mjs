@@ -10,108 +10,6 @@ import { tempEnv } from './helpers.mjs'
 const run = promisify(execFile)
 const CF = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
 const FIXTURES = join(import.meta.dirname, 'fixtures')
-
-it('task CLI uses scoped, revision-protected operations for both coordinators', async () => {
-  const { createServer } = await import('node:http')
-  const t = tempEnv()
-  const requests = []
-  const server = createServer(async (request, response) => {
-    let body = ''
-    for await (const chunk of request) body += chunk
-    requests.push({ path: request.url, body: JSON.parse(body) })
-    response.setHeader('content-type', 'application/json')
-    response.end(JSON.stringify({ id: 'task-1', revision: 2, tasks: [], total: 0 }))
-  })
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-  try {
-    for (const role of ['lead', 'pm']) {
-      const env = {
-        ...t.env,
-        CONSENSFLOW_ROLE: role,
-        CONSENSFLOW_APP: `http://127.0.0.1:${server.address().port}`,
-        CONSENSFLOW_APP_TOKEN: 'test-token',
-        CONSENSFLOW_TAB: 't-owner',
-      }
-      const calls = [
-        [['task', 'list', '--offset', '100', '--json'], 'task.list', { offset: 100 }],
-        [['task', 'get', 'task-1', '--json'], 'task.get', { id: 'task-1' }],
-        [
-          [
-            'task',
-            'add',
-            'Review contracts',
-            '--kind',
-            'review',
-            '--review-of',
-            'task-0',
-            '--depends-on',
-            'task-0',
-            '--json',
-          ],
-          'task.change',
-          {
-            change: {
-              action: 'add',
-              title: 'Review contracts',
-              kind: 'review',
-              reviewOf: 'task-0',
-              dependsOn: ['task-0'],
-            },
-          },
-        ],
-        [
-          [
-            'task',
-            'update',
-            'task-1',
-            '--revision',
-            '2',
-            '--status',
-            'blocked',
-            '--question',
-            'Which constraint wins?',
-            '--json',
-          ],
-          'task.change',
-          {
-            change: {
-              action: 'update',
-              id: 'task-1',
-              revision: 2,
-              status: 'blocked',
-              question: 'Which constraint wins?',
-            },
-          },
-        ],
-      ]
-      for (const [args, op, body] of calls) {
-        const result = await cf(args, env)
-        assert.equal(result.code, 0, result.stderr)
-        assert.equal(JSON.parse(result.stdout).revision, 2)
-        assert.deepEqual(requests.at(-1), {
-          path: `/api/panes/${op}`,
-          body: { tab: 't-owner', ...body },
-        })
-      }
-      const before = requests.length
-      for (const args of [
-        ['task', 'update', 'task-1', '--status', 'accepted'],
-        ['task', 'update', 'task-1', '--revision', '-1'],
-        ['task', 'list', '--offset', 'NaN'],
-        ['task', 'answer', 'task-1', 'forged answer'],
-        ['task', 'get', 'task-1', 'extra'],
-      ])
-        assert.equal((await cf(args, env)).code, 1, args.join(' '))
-      assert.equal((await cf(['task', 'list'], { ...env, CONSENSFLOW_CHILD: '1' })).code, 1)
-      assert.equal(requests.length, before)
-    }
-    assert.equal((await cf(['task', 'list'], t.env)).code, 1)
-  } finally {
-    await new Promise((resolve) => server.close(resolve))
-    t.cleanup()
-  }
-})
-
 async function cf(args, env) {
   try {
     const { stdout, stderr } = await run(process.execPath, [CF, ...args], {
@@ -246,21 +144,6 @@ describe('role files belong to pane launch, not CLI administration', () => {
 })
 
 describe('the standalone switch-over (TEST-PANE-47)', () => {
-  it('retires use and mode with the current command list', async () => {
-    const t = tempEnv()
-    try {
-      for (const args of [['mode'], ['use', 'cmux'], ['use', 'claude'], ['use', 'pi']]) {
-        const result = await cf(args, t.env)
-        assert.equal(result.code, 1)
-        assert.match(result.stderr, /ConsensFlow has one shape now/)
-        assert.match(result.stdout + result.stderr, /cf <command>/)
-        assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'mode.json')), false)
-      }
-    } finally {
-      t.cleanup()
-    }
-  })
-
   it('doctor reports a legacy mode file once without treating it as configuration', async () => {
     const t = tempEnv()
     try {
@@ -278,43 +161,11 @@ describe('the standalone switch-over (TEST-PANE-47)', () => {
       t.cleanup()
     }
   })
-
-  it('run outside an app pane refuses without launching or writing conversations', async () => {
-    const t = tempEnv()
-    try {
-      stubCli(t, 'codex')
-      await cf(['agent', 'add', 'diana'], t.env)
-      const result = await cf(['run', '@diana', 'hello', '--new'], t.env)
-      assert.equal(result.code, 1)
-      assert.match(result.stderr, /ConsensFlow.*app|app.*ConsensFlow/i)
-      assert.doesNotMatch(result.stderr, /cmux/)
-      assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'workspaces')), false)
-    } finally {
-      t.cleanup()
-    }
-  })
-
   it('removes direct conversation writes and terminal-window discovery from cf', () => {
     const source = readFileSync(CF, 'utf8')
     assert.doesNotMatch(source, /\bsaveThread\b|liveWindowElsewhere|CMUX_SURFACE_ID|cmux tree/)
   })
 })
-
-describe('app-owned conversation names (TEST-PANE-47)', () => {
-  it('retires pre-minting a name outside the app', async () => {
-    const t = tempEnv()
-    try {
-      await cf(['agent', 'add', 'zeus'], t.env)
-      const result = await cf(['mint', '@zeus'], t.env)
-      assert.equal(result.code, 1)
-      assert.match(result.stderr, /app.*names|names.*app/i)
-      assert.match(result.stderr, /cf run/)
-    } finally {
-      t.cleanup()
-    }
-  })
-})
-
 describe('the host-integration verbs are gone, not hidden', () => {
   const t = tempEnv()
   after(() => t.cleanup())
@@ -441,51 +292,6 @@ describe('retired off/reset CLI commands preserve the installation and saved dat
     })
   }
 })
-
-it('PM CLI sends exact file contents and retrieves immutable lead parts in one request', async () => {
-  const { createServer } = await import('node:http')
-  const t = tempEnv()
-  const requests = []
-  const server = createServer(async (request, response) => {
-    let body = ''
-    for await (const chunk of request) body += chunk
-    requests.push({ path: request.url, body: JSON.parse(body) })
-    response.setHeader('content-type', 'application/json')
-    response.end(
-      JSON.stringify(
-        request.url.endsWith('lead.send')
-          ? { outcome: 'admitted' }
-          : { text: 'whole requested part\n', deliveryId: 'd-12', of: 2, part: 2 },
-      ),
-    )
-  })
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-  try {
-    const env = {
-      ...t.env,
-      CONSENSFLOW_APP: `http://127.0.0.1:${server.address().port}`,
-      CONSENSFLOW_APP_TOKEN: 'pm-token',
-      CONSENSFLOW_TAB: 't-2',
-      CONSENSFLOW_ROLE: 'pm',
-    }
-    const file = join(t.root, 'message.md')
-    writeFileSync(file, 'Exact plan\nwith its final newline.\n')
-    const sent = await cf(['lead', 'send', '--message-file', file], env)
-    assert.equal(sent.code, 0, sent.stderr)
-    assert.equal(requests[0].path, '/api/panes/lead.send')
-    assert.equal(requests[0].body.text, readFileSync(file, 'utf8'))
-    const read = await cf(['lead', 'read', '--answer', 'd-12', '--part', '2'], env)
-    assert.equal(read.code, 0, read.stderr)
-    assert.equal(read.stdout, 'whole requested part\n')
-    assert.equal(requests.length, 2)
-    assert.equal(requests[1].body.answerId, 'd-12')
-    assert.equal(requests[1].body.part, 2)
-  } finally {
-    await new Promise((resolve) => server.close(resolve))
-    t.cleanup()
-  }
-})
-
 it('PM can discover saved capability profiles without refreshing or changing role files', async () => {
   const t = tempEnv()
   try {
@@ -504,80 +310,6 @@ it('PM can discover saved capability profiles without refreshing or changing rol
     assert.ok(agents[0].profile.categories.includes('coding'))
     assert.equal(readFileSync(rosterPath(t.env), 'utf8'), roster)
     assert.equal(readFileSync(role, 'utf8'), 'Keep existing lead context untouched')
-  } finally {
-    t.cleanup()
-  }
-})
-
-it('PM CLI rejects local roster and administration commands before changing any app files', async () => {
-  const t = tempEnv()
-  try {
-    const env = {
-      ...t.env,
-      CONSENSFLOW_ROLE: 'pm',
-      CONSENSFLOW_APP: 'http://127.0.0.1:1',
-      CONSENSFLOW_APP_TOKEN: 'pm-token',
-      CONSENSFLOW_TAB: 't-2',
-    }
-    for (const args of [
-      ['agent', 'add', 'forbidden', '--harness', 'codex'],
-      ['agent', 'edit', 'forbidden', '--model', 'other'],
-      ['agent', 'remove', 'forbidden'],
-      ['agent', 'sync', '--all'],
-      ['skills', 'uninstall', '--force'],
-      ['reset', '--yes'],
-    ]) {
-      const result = await cf(args, env)
-      assert.equal(result.code, 1)
-      assert.match(result.stderr, /PM.*lead send.*lead read/)
-    }
-    assert.equal(existsSync(rosterPath(t.env)), false)
-  } finally {
-    t.cleanup()
-  }
-})
-
-it('CLI exposes tier overrides and refuses unclassified critical tasks before contacting the app', async () => {
-  const t = tempEnv()
-  try {
-    assert.equal((await cf(['agent', 'add', 'calliope'], t.env)).code, 0)
-    const denied = await cf(['run', '@calliope', 'Make a small code change'], t.env)
-    assert.notEqual(denied.code, 0)
-    assert.match(denied.stderr, /--purpose/)
-    const allowed = await cf(
-      ['run', '@calliope', 'Review this architecture', '--purpose', 'architecture'],
-      t.env,
-    )
-    assert.doesNotMatch(allowed.stderr, /Unknown option|requires --purpose/)
-    const edited = await cf(['agent', 'edit', 'calliope', '--work-tier', 'standard'], t.env)
-    assert.equal(edited.code, 0, edited.stderr)
-    const row = JSON.parse((await cf(['agent', 'list', '--json'], t.env)).stdout).agents[0]
-    assert.equal(row.workTier, 'standard')
-    assert.equal(row.profile.workTier, 'standard')
-    assert.equal((await cf(['agent', 'edit', 'calliope', '--work-tier', 'auto'], t.env)).code, 0)
-    assert.equal(
-      (
-        await cf(
-          [
-            'agent',
-            'add',
-            'custom',
-            '--harness',
-            'codex',
-            '--model',
-            'custom-model',
-            '--work-tier',
-            'complex',
-          ],
-          t.env,
-        )
-      ).code,
-      0,
-    )
-    assert.doesNotMatch(
-      (await cf(['say', 'conversation', 'Review', '--purpose', 'critical-review'], t.env)).stderr,
-      /Unknown option/,
-    )
   } finally {
     t.cleanup()
   }

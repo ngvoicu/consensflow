@@ -584,6 +584,45 @@ describe('the dispatcher', () => {
     })
   })
 
+  it('closes a project: its windows go, tiered work returns to the backlog, and Resume brings it back', async () => {
+    await setup(async (context) => {
+      const { project, id } = await withTeam(context)
+      context.ledger.createTask(project.id, {
+        from: 'lead',
+        pool: 'worker',
+        tier: 'standard',
+        body: 'Parser',
+      })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const lead = context.host.last('lead')
+      const zeus = context.host.last('zeus')
+      const native = context.ledger.currentConversation(id('lead')).nativeSession
+      const closed = await context.dispatcher.closeProject(project.id)
+      assert.equal(closed.state, 'suspended')
+      assert.deepEqual(context.host.killed, [
+        { id: lead.id, generation: lead.generation },
+        { id: zeus.id, generation: zeus.generation },
+      ])
+      await context.host.exit('lead')
+      await context.host.exit('zeus')
+      assert.equal(context.dispatcher.pane(id('lead')), null)
+      const task = context.ledger.task(project.id, 1)
+      assert.deepEqual(
+        [task.state, task.assignee],
+        ['open', null],
+        'the work waits for a member again',
+      )
+      await context.dispatcher.pass()
+      assert.equal(context.host.opened.length, 2, 'nothing reopens while suspended')
+
+      await context.dispatcher.resumeProject(project.id)
+      assert.equal(context.adapter.prepared.at(-1).resume, native)
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.task(project.id, 1).assignee, 'zeus')
+    })
+  })
+
   it('brings back the projects that were open before a restart, on their own conversations', async () => {
     await setup(async (context) => {
       const { project, id } = await withTeam(context)

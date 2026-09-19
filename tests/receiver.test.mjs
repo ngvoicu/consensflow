@@ -43,21 +43,6 @@ function fixture(overrides = {}) {
     },
   }
 }
-
-test('empty inbox and busy native receiver never invoke the model insertion API', async () => {
-  const empty = fixture()
-  await empty.receiver.poll()
-  await empty.receiver.poll()
-  assert.equal(empty.inserted.length, 0)
-  const busy = fixture({ ready: () => false })
-  await busy.receiver.poll()
-  assert.deepEqual(
-    busy.calls.map((call) => call.op),
-    ['state', 'register'],
-  )
-  assert.equal(busy.inserted.length, 0)
-})
-
 test('receiver records insertion intent before native insertion and never treats it as receipt', async () => {
   const s = fixture()
   s.queue.push({
@@ -138,65 +123,4 @@ test('new, home route, resume and shutdown use fresh native selection and retire
   const before = s.calls.length
   await s.receiver.poll()
   assert.equal(s.calls.length, before)
-})
-
-test('a lost registration response recovers the same native receiver without letting its predecessor take over', async () => {
-  const { emptyInbox, registerReceiver } = await import('../hosts/lib/inbox.js')
-  const state = emptyInbox()
-  let first = true
-  const receiver = createReceiver({
-    session: () => 'native-a',
-    ready: () => true,
-    insert: () => assert.fail('empty inbox'),
-    request: async (op, body) => {
-      if (op === 'state') return state.receivers.owner ?? null
-      if (op === 'claim') return null
-      if (op === 'register') {
-        const registered = registerReceiver(state, {
-          owner: 'owner',
-          launch: 'launch',
-          pane: 'p-1',
-          generation: 1,
-          kind: 'pi',
-          lease: 'lease-a',
-          now: 1,
-          ...body,
-        })
-        if (first) {
-          first = false
-          throw Error('response lost')
-        }
-        return registered
-      }
-    },
-  })
-  await assert.rejects(receiver.poll(), /response lost/)
-  await receiver.poll()
-  assert.equal(state.receivers.owner.lease, 'lease-a')
-  registerReceiver(state, {
-    owner: 'owner',
-    launch: 'launch',
-    pane: 'p-1',
-    generation: 1,
-    kind: 'pi',
-    session: 'native-b',
-    lease: 'lease-b',
-    previous: 'lease-a',
-    now: 2,
-  })
-  assert.throws(
-    () =>
-      registerReceiver(state, {
-        owner: 'owner',
-        launch: 'launch',
-        pane: 'p-1',
-        generation: 1,
-        kind: 'pi',
-        session: 'native-a',
-        lease: 'lease-c',
-        previous: null,
-        now: 3,
-      }),
-    /receiver changed/,
-  )
 })

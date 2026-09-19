@@ -28,6 +28,7 @@ async function withPage(fn) {
   const ledger = openLedger(path.join(home, 'consensflow.db'))
   const opened = []
   const removed = []
+  const closed = []
   let kicks = 0
   const dispatcher = {
     async openProject(request) {
@@ -47,12 +48,16 @@ async function withPage(fn) {
     async resumeProject(id) {
       return ledger.setProjectState(id, 'open')
     },
+    async closeProject(id) {
+      closed.push(id)
+      return ledger.setProjectState(id, 'suspended')
+    },
     activity: () => ({ state: 'idle' }),
     pane: () => null,
   }
   const operations = pageOperations({ ledger, dispatcher, env, kick: () => kicks++ })
   try {
-    await fn({ ledger, operations, opened, removed, env, kicks: () => kicks })
+    await fn({ ledger, operations, opened, removed, closed, env, kicks: () => kicks })
   } finally {
     ledger.close()
     await rm(home, { recursive: true, force: true })
@@ -221,6 +226,19 @@ describe('the page protocol of the new core', () => {
       )
       const { board } = await operations['board.get']({ project: project.id })
       assert.deepEqual([board.project.review, board.open], ['all', []])
+    })
+  })
+
+  it('closes a project through the dispatcher and lists it as suspended', async () => {
+    await withPage(async ({ operations, closed }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        harness: 'pi',
+      })
+      const result = await operations['project.close']({ project: project.id })
+      assert.deepEqual([closed, result.project.state], [[project.id], 'suspended'])
+      const { projects } = await operations['projects.list']({})
+      assert.equal(projects[0].state, 'suspended')
     })
   })
 

@@ -9,7 +9,7 @@ use futures_channel::oneshot;
 use portable_pty::PtySize;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
@@ -557,7 +557,6 @@ pub struct AppRuntime {
     startup_error: Option<String>,
     output: Arc<OutputHub>,
     inputs: Arc<InputQueue>,
-    launches: Arc<LaunchRegistry>,
     shutting_down: AtomicBool,
 }
 
@@ -590,7 +589,7 @@ impl AppRuntime {
                     Err(error) => {
                         let mut editor = editor;
                         let _ = editor.kill();
-                        return Self::unavailable(panes, output, inputs, launches, error);
+                        return Self::unavailable(panes, output, inputs, error);
                     }
                 };
                 forward_input_events(event_receiver, connected.bridge.clone());
@@ -602,11 +601,10 @@ impl AppRuntime {
                     startup_error: None,
                     output,
                     inputs,
-                    launches,
                     shutting_down: AtomicBool::new(false),
                 }
             }
-            Err(error) => Self::unavailable(panes, output, inputs, launches, error),
+            Err(error) => Self::unavailable(panes, output, inputs, error),
         }
     }
 
@@ -614,7 +612,6 @@ impl AppRuntime {
         panes: Arc<PaneTable>,
         output: Arc<OutputHub>,
         inputs: Arc<InputQueue>,
-        launches: Arc<LaunchRegistry>,
         error: String,
     ) -> Self {
         eprintln!("consensflow: {error}");
@@ -626,7 +623,6 @@ impl AppRuntime {
             startup_error: Some(error),
             output,
             inputs,
-            launches,
             shutting_down: AtomicBool::new(false),
         }
     }
@@ -691,37 +687,6 @@ fn request_node(
         Ok(response) => normalize_node_response(&operation, response),
         Err(error) => json!({"ok":false,"error":error.to_string(),"operation":operation}),
     }
-}
-
-fn compose_state(
-    node: Value,
-    roster: Option<RosterHandle>,
-    startup_error: Option<String>,
-) -> Value {
-    let mut object = match node {
-        Value::Object(object) => object,
-        other => Map::from_iter([
-            ("ok".to_string(), Value::Bool(true)),
-            ("state".to_string(), other),
-        ]),
-    };
-    if let Some(roster) = roster {
-        object.insert(
-            "roster".to_string(),
-            serde_json::to_value(roster).unwrap_or(Value::Null),
-        );
-    }
-    if object.get("error").and_then(Value::as_str) == Some("not-available-yet") {
-        object.insert("available".to_string(), Value::Bool(false));
-    } else {
-        object
-            .entry("available".to_string())
-            .or_insert(Value::Bool(true));
-    }
-    if let Some(error) = startup_error {
-        object.insert("startupError".to_string(), Value::String(error));
-    }
-    Value::Object(object)
 }
 
 impl Drop for AppRuntime {
@@ -1442,159 +1407,6 @@ async fn input_result(result: Result<PageInputCompletion, String>) -> Value {
     }
 }
 
-#[tauri::command]
-pub async fn open_pm<R: Runtime>(app: AppHandle<R>, tab: String, harness: String) -> Value {
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("pm.open", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "pm.open".into(),
-            json!({"tab":tab,"harness":harness}),
-        )
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn open_lead<R: Runtime>(app: AppHandle<R>, dir: String, harness: String) -> Value {
-    if let Err(error) =
-        validate_text(&dir, "directory").and_then(|()| validate_text(&harness, "harness"))
-    {
-        return json!({"ok":false,"error":error});
-    }
-    if !Path::new(&dir).is_absolute() {
-        return json!({"ok":false,"error":"directory must be absolute"});
-    }
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("tab.open", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "tab.open".to_string(),
-            json!({"dir":dir,"harness":harness}),
-        )
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn open_shell<R: Runtime>(app: AppHandle<R>, tab: String) -> Value {
-    if let Err(error) = validate_text(&tab, "tab") {
-        return json!({"ok":false,"error":error});
-    }
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("shell.open", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "shell.open".to_string(),
-            json!({"tab":tab}),
-        )
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn open_consult<R: Runtime>(
-    app: AppHandle<R>,
-    tab: String,
-    agent: String,
-    task: Option<String>,
-    conversation: Option<String>,
-) -> Value {
-    if let Err(error) = validate_text(&tab, "tab").and_then(|()| validate_text(&agent, "agent")) {
-        return json!({"ok":false,"error":error});
-    }
-    let (operation, body) = match task {
-        Some(task) if !task.trim().is_empty() => {
-            ("consult", json!({"tab":tab,"agent":agent,"task":task}))
-        }
-        Some(_) => return json!({"ok":false,"error":"task is required"}),
-        None => match conversation {
-            Some(conversation) if !conversation.trim().is_empty() => (
-                "attach",
-                json!({"tab":tab,"agent":agent,"session":conversation}),
-            ),
-            _ => return json!({"ok":false,"error":"conversation is required when task is absent"}),
-        },
-    };
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking(operation, move || {
-        request_node(bridge, startup_error, operation.to_string(), body)
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn delete_pane<R: Runtime>(app: AppHandle<R>, id: String, generation: u64) -> Value {
-    if let Err(error) = pane_key(&id, generation) {
-        return json!({"ok":false,"error":error});
-    }
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("pane.delete", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "pane.delete".into(),
-            json!({"id":id,"generation":generation}),
-        )
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn close_pane<R: Runtime>(app: AppHandle<R>, id: String, generation: u64) -> Value {
-    let key = match pane_key(&id, generation) {
-        Ok(key) => key,
-        Err(error) => return json!({"ok":false,"error":error}),
-    };
-    let (panes, launches, bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (
-            Arc::clone(&state.panes),
-            Arc::clone(&state.launches),
-            state.bridge.clone(),
-            state.startup_error.clone(),
-        )
-    };
-    run_blocking("pane.close", move || {
-        if let Err(error) = panes.kill(&key) {
-            return json!({"ok":false,"error":error.to_string()});
-        }
-        launches.remove_key(&key);
-        let response = request_node(
-            bridge,
-            startup_error,
-            "pane.close".to_string(),
-            json!({"id":id,"generation":generation}),
-        );
-        if response.get("ok") == Some(&Value::Bool(false)) {
-            let mut object = response.as_object().cloned().unwrap_or_default();
-            object.insert("paneClosed".to_string(), Value::Bool(true));
-            Value::Object(object)
-        } else {
-            response
-        }
-    })
-    .await
-}
-
 fn enqueue_page_input<R: Runtime>(
     app: AppHandle<R>,
     id: String,
@@ -1712,91 +1524,6 @@ pub async fn pane_ack<R: Runtime>(
     }
 }
 
-#[tauri::command]
-pub async fn set_policy<R: Runtime>(
-    app: AppHandle<R>,
-    scope: String,
-    id: String,
-    mode: String,
-) -> Value {
-    let valid = match scope.as_str() {
-        "tab" => matches!(mode.as_str(), "auto" | "manual"),
-        "pane" => matches!(mode.as_str(), "auto" | "manual" | "inherit"),
-        _ => false,
-    };
-    if !valid || id.trim().is_empty() {
-        return json!({"ok":false,"error":"invalid policy scope, id, or mode"});
-    }
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("notify.set", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "notify.set".to_string(),
-            json!({"scope":scope,"id":id,"mode":mode}),
-        )
-    })
-    .await
-}
-
-/// A session's result history, or one conversation's, one page at a time. The
-/// page state carries only unconfirmed results, so the history is asked for.
-#[tauri::command]
-pub async fn answers_list<R: Runtime>(
-    app: AppHandle<R>,
-    tab: String,
-    conversation: Option<String>,
-    offset: Option<usize>,
-) -> Value {
-    if let Err(error) = validate_text(&tab, "tab").and_then(|()| match &conversation {
-        Some(conversation) => validate_text(conversation, "conversation"),
-        None => Ok(()),
-    }) {
-        return json!({"ok":false,"error":error});
-    }
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("answers.list", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "answers.list".to_string(),
-            json!({"tab":tab,"conversation":conversation,"offset":offset.unwrap_or(0)}),
-        )
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn result_body<R: Runtime>(
-    app: AppHandle<R>,
-    tab: String,
-    result: String,
-    offset: Option<usize>,
-) -> Value {
-    if let Err(error) = validate_text(&tab, "tab").and_then(|()| validate_text(&result, "result")) {
-        return json!({"ok":false,"error":error});
-    }
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("result.body", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "result.body".to_string(),
-            json!({"tab":tab,"result":result,"offset":offset.unwrap_or(0)}),
-        )
-    })
-    .await
-}
-
 async fn task_operation<R: Runtime>(
     app: AppHandle<R>,
     operation: &'static str,
@@ -1818,6 +1545,7 @@ const CORE_OPERATIONS: &[&str] = &[
     "projects.list",
     "project.open",
     "project.resume",
+    "project.close",
     "project.review",
     "board.get",
     "inbox.get",
@@ -1849,147 +1577,6 @@ pub async fn core_request<R: Runtime>(app: AppHandle<R>, operation: String, body
     task_operation(app, operation, body).await
 }
 
-#[tauri::command]
-pub async fn task_list<R: Runtime>(
-    app: AppHandle<R>,
-    tab: String,
-    offset: Option<usize>,
-    limit: Option<usize>,
-) -> Value {
-    if let Err(error) = validate_text(&tab, "tab") {
-        return json!({"ok":false,"error":error});
-    }
-    let limit = limit.unwrap_or(100);
-    if !(1..=100).contains(&limit) {
-        return json!({"ok":false,"error":"Task limit must be 1–100"});
-    }
-    task_operation(
-        app,
-        "task.list",
-        json!({"tab":tab,"offset":offset.unwrap_or(0),"limit":limit}),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn task_get<R: Runtime>(app: AppHandle<R>, tab: String, id: String) -> Value {
-    if let Err(error) = validate_text(&tab, "tab").and_then(|()| validate_text(&id, "task id")) {
-        return json!({"ok":false,"error":error});
-    }
-    task_operation(app, "task.get", json!({"tab":tab,"id":id})).await
-}
-
-#[tauri::command]
-pub async fn task_change<R: Runtime>(app: AppHandle<R>, tab: String, change: Value) -> Value {
-    if let Err(error) = validate_text(&tab, "tab") {
-        return json!({"ok":false,"error":error});
-    }
-    if !change.is_object() || change.to_string().len() > 256 * 1024 {
-        return json!({"ok":false,"error":"Task change must be an object no larger than 256 KiB"});
-    }
-    task_operation(app, "task.change", json!({"tab":tab,"change":change})).await
-}
-
-#[tauri::command]
-pub async fn result_collect<R: Runtime>(app: AppHandle<R>, tab: String, result: String) -> Value {
-    if let Err(error) = validate_text(&tab, "tab").and_then(|()| validate_text(&result, "result")) {
-        return json!({"ok":false,"error":error});
-    }
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("result.collect", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "result.collect".to_string(),
-            json!({"tab":tab,"result":result}),
-        )
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn result_cancel<R: Runtime>(app: AppHandle<R>, tab: String, result: String) -> Value {
-    if let Err(error) = validate_text(&tab, "tab").and_then(|()| validate_text(&result, "result")) {
-        return json!({"ok":false,"error":error});
-    }
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("result.cancel", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "result.cancel".to_string(),
-            json!({"tab":tab,"result":result}),
-        )
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn rename_session<R: Runtime>(app: AppHandle<R>, tab: String, name: String) -> Value {
-    if let Err(error) = validate_text(&tab, "tab") {
-        return json!({"ok":false,"error":error});
-    }
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("tab.rename", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "tab.rename".to_string(),
-            json!({"tab":tab,"name":name}),
-        )
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn tab_delete<R: Runtime>(app: AppHandle<R>, tab: String, generation: u64) -> Value {
-    if let Err(error) = validate_text(&tab, "tab") {
-        return json!({"ok":false,"error":error});
-    }
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("tab.delete", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "tab.delete".into(),
-            json!({"tab":tab,"generation":generation}),
-        )
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn tab_resume<R: Runtime>(app: AppHandle<R>, tab: String) -> Value {
-    if let Err(error) = validate_text(&tab, "tab") {
-        return json!({"ok":false,"error":error});
-    }
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("tab.resume", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "tab.resume".to_string(),
-            json!({"tab":tab}),
-        )
-    })
-    .await
-}
-
 /// The page's pane-output subscription, taken ONCE for the life of the page.
 ///
 /// It used to ride on every `state.list`, and that was silently destructive:
@@ -2013,24 +1600,14 @@ pub async fn subscribe_output<R: Runtime>(
     json!({"ok":true})
 }
 
-/// The page's whole picture. Carries no channel, on purpose — see
-/// [`subscribe_output`].
+/// Where the human's agents screens are: the daemon's URL and the UI token it
+/// handed the app, or null while the daemon is not up.
 #[tauri::command]
-pub async fn list_state<R: Runtime>(app: AppHandle<R>) -> Value {
-    let (bridge, startup_error, roster) = {
-        let state = app.state::<AppRuntime>();
-        (
-            state.bridge.clone(),
-            state.startup_error.clone(),
-            state.roster.clone(),
-        )
-    };
-    let state_error = startup_error.clone();
-    run_blocking("state.list", move || {
-        let node = request_node(bridge, startup_error, "state.list".to_string(), json!({}));
-        compose_state(node, roster, state_error)
-    })
-    .await
+pub fn roster_handle<R: Runtime>(app: AppHandle<R>) -> Value {
+    match app.state::<AppRuntime>().roster.clone() {
+        Some(roster) => serde_json::to_value(roster).unwrap_or(Value::Null),
+        None => Value::Null,
+    }
 }
 
 #[cfg(test)]
@@ -2187,26 +1764,9 @@ mod tests {
             );
         }
         for command in [
-            "open_lead",
-            "open_shell",
-            "open_consult",
-            "close_pane",
-            "delete_pane",
             "pane_input_wait",
             "pane_resize",
             "pane_ack",
-            "set_policy",
-            "answers_list",
-            "result_collect",
-            "result_cancel",
-            "result_body",
-            "task_list",
-            "task_get",
-            "task_change",
-            "tab_resume",
-            "tab_delete",
-            "rename_session",
-            "list_state",
         ] {
             assert!(
                 source.contains(&format!("pub async fn {command}")),
@@ -2262,7 +1822,6 @@ mod tests {
             startup_error: None,
             output: Arc::new(OutputHub::new()),
             inputs,
-            launches: Arc::new(LaunchRegistry::new()),
             shutting_down: AtomicBool::new(false),
         };
         let app = tauri::test::mock_builder()
@@ -2372,7 +1931,6 @@ mod tests {
             startup_error: None,
             output: Arc::new(OutputHub::new()),
             inputs,
-            launches: Arc::new(LaunchRegistry::new()),
             shutting_down: AtomicBool::new(false),
         };
         let app = tauri::test::mock_builder()
@@ -2541,7 +2099,6 @@ mod tests {
             startup_error: None,
             output: Arc::new(OutputHub::new()),
             inputs: Arc::clone(&inputs),
-            launches: Arc::new(LaunchRegistry::new()),
             shutting_down: AtomicBool::new(false),
         };
         let app = tauri::test::mock_builder()
@@ -2746,7 +2303,6 @@ mod tests {
             startup_error: None,
             output: Arc::new(OutputHub::new()),
             inputs,
-            launches: Arc::new(LaunchRegistry::new()),
             shutting_down: AtomicBool::new(false),
         });
         node_stream
@@ -2873,7 +2429,6 @@ mod tests {
             startup_error: None,
             output: Arc::new(OutputHub::new()),
             inputs,
-            launches: Arc::new(LaunchRegistry::new()),
             shutting_down: AtomicBool::new(false),
         });
         admitted_receiver
@@ -3183,108 +2738,6 @@ mod tests {
                 "task.add",
                 json!({"project":1,"to":"lead","body":"Ship v2"}),
             ),
-            (
-                "task_list",
-                json!({"tab":"tab-1","offset":100,"limit":100}),
-                "task.list",
-                json!({"tab":"tab-1","offset":100,"limit":100}),
-            ),
-            (
-                "task_get",
-                json!({"tab":"tab-1","id":"task-1"}),
-                "task.get",
-                json!({"tab":"tab-1","id":"task-1"}),
-            ),
-            (
-                "task_change",
-                json!({"tab":"tab-1","change":{"action":"update","id":"task-1","revision":3,"status":"review"}}),
-                "task.change",
-                json!({"tab":"tab-1","change":{"action":"update","id":"task-1","revision":3,"status":"review"}}),
-            ),
-            (
-                "rename_session",
-                json!({"tab":"tab-1","name":"Build review"}),
-                "tab.rename",
-                json!({"tab":"tab-1","name":"Build review"}),
-            ),
-            (
-                "open_lead",
-                json!({"dir":"/tmp","harness":"claude-code"}),
-                "tab.open",
-                json!({"dir":"/tmp","harness":"claude-code"}),
-            ),
-            (
-                "open_shell",
-                json!({"tab":"tab-1"}),
-                "shell.open",
-                json!({"tab":"tab-1"}),
-            ),
-            (
-                "open_consult",
-                json!({"tab":"tab-1","agent":"asteria","task":"review","conversation":null}),
-                "consult",
-                json!({"tab":"tab-1","agent":"asteria","task":"review"}),
-            ),
-            (
-                "open_consult",
-                json!({"tab":"tab-1","agent":"asteria","task":null,"conversation":"answer-1"}),
-                "attach",
-                json!({"tab":"tab-1","agent":"asteria","session":"answer-1"}),
-            ),
-            (
-                "set_policy",
-                json!({"scope":"pane","id":"pane-1","mode":"manual"}),
-                "notify.set",
-                json!({"scope":"pane","id":"pane-1","mode":"manual"}),
-            ),
-            (
-                "answers_list",
-                json!({"tab":"tab-1","conversation":"answer-1","offset":25}),
-                "answers.list",
-                json!({"tab":"tab-1","conversation":"answer-1","offset":25}),
-            ),
-            (
-                "answers_list",
-                json!({"tab":"tab-1"}),
-                "answers.list",
-                json!({"tab":"tab-1","conversation":null,"offset":0}),
-            ),
-            (
-                "result_collect",
-                json!({"tab":"tab-1","result":"d-1"}),
-                "result.collect",
-                json!({"tab":"tab-1","result":"d-1"}),
-            ),
-            (
-                "result_cancel",
-                json!({"tab":"tab-1","result":"d-1"}),
-                "result.cancel",
-                json!({"tab":"tab-1","result":"d-1"}),
-            ),
-            (
-                "result_body",
-                json!({"tab":"tab-1","result":"d-1","offset":0}),
-                "result.body",
-                json!({"tab":"tab-1","result":"d-1","offset":0}),
-            ),
-            (
-                "tab_resume",
-                json!({"tab":"tab-1"}),
-                "tab.resume",
-                json!({"tab":"tab-1"}),
-            ),
-            (
-                "tab_delete",
-                json!({"tab":"tab-1","generation":7}),
-                "tab.delete",
-                json!({"tab":"tab-1","generation":7}),
-            ),
-            (
-                "list_state",
-                json!({"onOutput":"__CHANNEL__:99"}),
-                "state.list",
-                json!({}),
-            ),
         ];
 
         let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
@@ -3340,29 +2793,11 @@ mod tests {
             startup_error: None,
             output: Arc::new(OutputHub::new()),
             inputs,
-            launches: Arc::new(LaunchRegistry::new()),
             shutting_down: AtomicBool::new(false),
         };
         let app = tauri::test::mock_builder()
             .manage(runtime)
-            .invoke_handler(tauri::generate_handler![
-                core_request,
-                open_lead,
-                open_shell,
-                open_consult,
-                set_policy,
-                answers_list,
-                result_collect,
-                result_cancel,
-                result_body,
-                task_list,
-                task_get,
-                task_change,
-                tab_resume,
-                tab_delete,
-                rename_session,
-                list_state,
-            ])
+            .invoke_handler(tauri::generate_handler![core_request])
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("build mock app");
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
@@ -3373,14 +2808,6 @@ mod tests {
         for (command, args) in [
             ("core_request", json!({"operation":"state.list","body":{}})),
             ("core_request", json!({"operation":"board.get","body":[1]})),
-            ("task_list", json!({"tab":"tab-1","limit":0})),
-            ("task_list", json!({"tab":"tab-1","limit":101})),
-            ("task_get", json!({"tab":"tab-1","id":" "})),
-            ("task_change", json!({"tab":"tab-1","change":[]})),
-            (
-                "task_change",
-                json!({"tab":"tab-1","change":{"description":"x".repeat(256 * 1024)}}),
-            ),
         ] {
             let response = tauri::test::get_ipc_response(
                 &webview,
@@ -3418,11 +2845,7 @@ mod tests {
             .expect("command succeeds")
             .deserialize::<Value>()
             .expect("command response JSON");
-            if command == "list_state" {
-                assert_eq!(response, json!({"ok":true,"available":true}));
-            } else {
-                assert_eq!(response, json!({"ok":true}));
-            }
+            assert_eq!(response, json!({"ok":true}), "{command}");
         }
 
         node.join().expect("Node peer");

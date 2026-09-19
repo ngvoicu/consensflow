@@ -4,16 +4,14 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { resultStatus } from '../../hosts/lib/inbox.js'
-import { workspaceKey } from '../../hosts/lib/state.js'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const CF = join(REPO, 'bin', 'cf.mjs')
 const BRIDGE =
   process.env.CONSENSFLOW_TEST_BRIDGE ??
   join(REPO, 'app', 'src-tauri', 'target', 'release', 'consensflow-bridge')
-const EDITOR = fileURLToPath(new URL('./pty-editor.mjs', import.meta.url))
-const FAKE = join(dirname(fileURLToPath(import.meta.url)), 'fake-claude.mjs')
+const EDITOR = fileURLToPath(new URL('./core-editor.mjs', import.meta.url))
+const FAKE = join(dirname(fileURLToPath(import.meta.url)), 'fake-agent.mjs')
 
 function parser(onLine) {
   let carry = Buffer.alloc(0)
@@ -314,27 +312,6 @@ export async function startIntegration({
       })
     })
 
-  const threads = (dir = workspace) => {
-    const file = join(env.CONSENSFLOW_HOME, 'workspaces', workspaceKey(dir), 'threads.json')
-    try {
-      return JSON.parse(readFileSync(file, 'utf8'))
-    } catch {
-      return {}
-    }
-  }
-
-  const deliveries = (dir = workspace) => {
-    const file = join(env.CONSENSFLOW_HOME, 'workspaces', workspaceKey(dir), 'inbox.json')
-    try {
-      return Object.values(JSON.parse(readFileSync(file, 'utf8')).results).map((result) => ({
-        ...result,
-        state: resultStatus(result),
-      }))
-    } catch {
-      return []
-    }
-  }
-
   const transcript = (sessionId) => {
     const file = join(env.CLAUDE_CONFIG_DIR, 'projects', 'integration', `${sessionId}.jsonl`)
     try {
@@ -416,8 +393,6 @@ export async function startIntegration({
         cause.message += `; ui stderr=${uiErrors.join('').trim()} rust stderr=${rustErrors.join('').trim()}`
         throw cause
       }),
-    threads,
-    deliveries,
     transcript,
     processes,
     pidAlive,

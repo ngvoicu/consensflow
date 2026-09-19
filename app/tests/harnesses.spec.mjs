@@ -2,9 +2,31 @@ import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { CATALOG } from '../../src/catalog.js'
+import { agentsUi } from '../../src/core/agents-server.js'
+import { Credentials, startApi } from '../../src/core/api.js'
+import { openLedger } from '../../src/ledger/index.js'
 import { addAgent, listAgents } from '../../src/roster.js'
-import { startUiServer } from '../../src/ui.js'
 import { tempEnv } from '../../tests/helpers.mjs'
+
+/** The agents pages the way the daemon serves them: behind its API, opened with the UI token. */
+async function agentsServer(env, options = {}) {
+  mkdirSync(env.CONSENSFLOW_HOME, { recursive: true })
+  const ledger = openLedger(join(env.CONSENSFLOW_HOME, 'consensflow.db'))
+  const token = 'ui-token'
+  const server = await startApi({
+    ledger,
+    credentials: new Credentials(),
+    ui: agentsUi(env, { token, ...options }),
+  })
+  return {
+    url: server.url,
+    token,
+    async close() {
+      await server.close()
+      ledger.close()
+    },
+  }
+}
 
 for (const [harness, label] of [
   ['pi', 'Pi'],
@@ -21,7 +43,7 @@ for (const [harness, label] of [
     chmodSync(join(t.env.PATH, harness), 0o755)
     writeFileSync(join(t.env.CONSENSFLOW_HOME, 'extensions'), 'installation blocked')
     let checks = 0
-    const server = await startUiServer(t.env, {
+    const server = await agentsServer(t.env, {
       harnessLatest: async () => {
         checks++
         return '1.2.4'
@@ -74,7 +96,7 @@ test('Agents edits its roster without loading harness diagnostics or system fact
   page,
 }) => {
   const t = tempEnv()
-  const server = await startUiServer(t.env)
+  const server = await agentsServer(t.env)
   const requests = []
   page.on('request', (request) => requests.push(new URL(request.url()).pathname))
   try {
@@ -109,7 +131,7 @@ test('Agents retains catalog update feedback after removing the installation pan
     { name: 'diana', harness: 'codex', model: 'gpt-5.5', effort: 'xhigh', preset: 'diana' },
     t.env,
   )
-  const server = await startUiServer(t.env)
+  const server = await agentsServer(t.env)
   try {
     await page.goto(`${server.url}/?token=${server.token}`)
     await page.locator('#roster').getByRole('button', { name: 'Update', exact: true }).click()
@@ -132,7 +154,7 @@ test('Agents retains catalog update feedback after removing the installation pan
 
 test('Harnesses reports a failed initial check and allows retry', async ({ page }) => {
   const t = tempEnv()
-  const server = await startUiServer(t.env)
+  const server = await agentsServer(t.env)
   let fail = true
   await page.route('**/api/harnesses/check', (route) =>
     fail ? route.fulfill({ status: 503, body: '{}' }) : route.continue(),
@@ -160,7 +182,7 @@ async function catalogPage(page, agents = [], benchmarks, group = 'none') {
     )
   }
   for (const agent of agents) addAgent(agent, t.env)
-  const server = await startUiServer(t.env)
+  const server = await agentsServer(t.env)
   const roster = await page.context().newPage()
   await roster.setViewportSize(page.viewportSize())
   await roster.emulateMedia({
@@ -1540,7 +1562,7 @@ test('work tiers filter and group both screens, and saved overrides preserve hon
   context,
 }) => {
   const t = tempEnv()
-  const server = await startUiServer(t.env)
+  const server = await agentsServer(t.env)
   const own = await context.newPage()
   try {
     for (const [name, model, effort] of [

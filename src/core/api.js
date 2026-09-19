@@ -53,10 +53,16 @@ class Refusal extends Error {
   }
 }
 
-export async function startApi({ ledger, credentials, changed = () => {}, roster = () => null }) {
+export async function startApi({
+  ledger,
+  credentials,
+  changed = () => {},
+  roster = () => null,
+  ui = null,
+}) {
   const server = createServer((request, reply) => {
     handle(request).then(
-      ({ status, body }) => send(reply, status, body),
+      ({ status, body, html }) => send(reply, status, body, html),
       (cause) => {
         if (cause instanceof Refusal || cause instanceof LedgerError) {
           send(reply, cause.status, { error: cause.code, message: cause.message })
@@ -69,6 +75,9 @@ export async function startApi({ ledger, credentials, changed = () => {}, roster
 
   async function handle(request) {
     const url = new URL(request.url, 'http://127.0.0.1')
+    // The human's screens, under the app's UI token, before any window's.
+    const screen = ui === null ? null : await ui.handle(request, url)
+    if (screen !== null) return screen
     const caller = callerOf(request)
     const { project, participant } = caller
     const at = `${request.method} ${url.pathname}`
@@ -330,7 +339,17 @@ async function readJson(request) {
   }
 }
 
-function send(reply, status, body) {
+function send(reply, status, body, html) {
+  if (html !== undefined) {
+    reply.writeHead(status, { 'content-type': 'text/html; charset=utf-8' })
+    reply.end(html)
+    return
+  }
+  if (body === undefined) {
+    reply.writeHead(status)
+    reply.end()
+    return
+  }
   reply.writeHead(status, { 'content-type': 'application/json' })
   reply.end(JSON.stringify(body))
 }

@@ -23,7 +23,7 @@ test.beforeAll(async () => {
       const pathname = new URL(request.url, 'http://localhost').pathname
       const file = resolve(
         UI_ROOT,
-        pathname === '/' ? 'core.html' : decodeURIComponent(pathname.slice(1)),
+        pathname === '/' ? 'index.html' : decodeURIComponent(pathname.slice(1)),
       )
       if (file !== UI_ROOT && !file.startsWith(`${UI_ROOT}${sep}`)) {
         response.writeHead(403).end('forbidden')
@@ -263,6 +263,7 @@ async function open(page, data = model()) {
         const handle = operations[args.operation]
         return handle ? handle(args.body) : { ok: true }
       }
+      if (command === 'roster_handle') return { url: 'http://127.0.0.1:1/', token: 'ui-token' }
       if (command === 'subscribe_output') {
         window.__output = args.onOutput
         return { ok: true }
@@ -303,7 +304,7 @@ async function open(page, data = model()) {
       },
     }
   }, data)
-  await page.goto(`${origin}/core.html`)
+  await page.goto(`${origin}/index.html`)
   await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
 }
 
@@ -643,6 +644,49 @@ test("groups the PM's team after the lead's, on the board and in its own windows
   await expect(tabs.getByRole('button')).toHaveText(['Lead', 'PM'])
   expect(await page.evaluate(() => window.__emulators.length)).toBe(4)
   expect(await page.locator('.bay').count()).toBe(6, 'the board stays beside the dock')
+})
+
+test("opens the agents screens at the daemon's pages with the app's token, and refreshes on close", async ({
+  page,
+}) => {
+  await open(page)
+  await page.getByRole('button', { name: 'Your agents' }).click()
+  const agents = page.getByRole('dialog', { name: 'Your agents' })
+  await expect(agents.locator('iframe')).toHaveAttribute(
+    'src',
+    'http://127.0.0.1:1/?token=ui-token',
+  )
+  const listed = await page.evaluate(
+    () => window.__calls.filter(([, args]) => args?.operation === 'agents.list').length,
+  )
+  await agents.getByRole('button', { name: 'Close Your agents' }).click()
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => window.__calls.filter(([, args]) => args?.operation === 'agents.list').length,
+      ),
+    )
+    .toBe(listed + 1)
+  await page.getByRole('button', { name: 'Agent library' }).click()
+  await expect(
+    page.getByRole('dialog', { name: 'Agent library' }).locator('iframe'),
+  ).toHaveAttribute('src', 'http://127.0.0.1:1/library?token=ui-token')
+  await page.getByRole('button', { name: 'Close Agent library' }).click()
+  await page.getByRole('button', { name: 'Harnesses' }).click()
+  await expect(page.getByRole('dialog', { name: 'Harnesses' }).locator('iframe')).toHaveAttribute(
+    'src',
+    'http://127.0.0.1:1/harnesses?token=ui-token',
+  )
+  expect(
+    await page.evaluate(() => window.__calls.filter(([c]) => c === 'roster_handle').length),
+  ).toBe(1)
+})
+
+test('closes an open project from the list', async ({ page }) => {
+  await open(page)
+  await page.getByRole('button', { name: 'Close harbour' }).click()
+  await expect.poll(() => calls(page, 'project.close')).toEqual([{ project: 1 }])
+  await expect(page.getByRole('button', { name: 'Close foundry' })).toHaveCount(0)
 })
 
 test('resumes a suspended project from the list', async ({ page }) => {
