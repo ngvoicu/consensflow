@@ -428,6 +428,21 @@
     .drawer[data-state="failed"] { --state: var(--buoy); --state-ink: var(--ink); }
     .drawer[data-state="accepted"] { --state: var(--seafoam-dim); }
     .drawer-meta { margin: 8px 0 14px; font: 11px var(--mono); color: var(--muted); }
+    .dialog-help { margin: 0 0 12px; font-size: 12px; color: var(--muted); }
+    .team { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 13px; }
+    .team th { text-align: left; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); padding: 4px 8px 6px; }
+    .team th:nth-child(2), .team th:nth-child(3), .team th:nth-child(4) { text-align: center; }
+    .team td { padding: 6px 8px; border-top: 1px solid var(--line-soft); vertical-align: middle; }
+    .team td.role-cell { text-align: center; }
+    .team .member-name { font-family: var(--mono); }
+    .team .member-meta { color: var(--muted); font: 11px var(--mono); }
+    .team-add, .team-pick { border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
+    .team-add legend, .team-pick legend { padding: 0 6px; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+    .team-add { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+    .role-boxes { display: flex; gap: 12px; align-items: center; font-size: 12px; }
+    .role-boxes label { display: flex; align-items: center; gap: 4px; }
+    .team-warning { margin: 0 0 12px; font-size: 12px; color: var(--amber); }
+    .member-confirm { color: var(--buoy); font-size: 12px; margin-right: 8px; }
     .drawer-section { margin: 0 0 14px; }
     .drawer-section h3 {
       margin: 0 0 6px;
@@ -530,7 +545,7 @@
       width: min(480px, calc(100vw - 32px));
     }
     dialog::backdrop { background: rgba(4, 12, 15, .6); }
-    /* The agents screens: the daemon's own pages, full height, in a frame. */
+    /* The dialogs: New project, and the project team. */
     .dialog-form { display: grid; gap: 14px; padding: 18px 20px; }
     .dialog-form h2 { margin: 0; font-size: 16px; }
     .dialog-form label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
@@ -542,10 +557,6 @@
       color: var(--foam);
     }
     .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
-    #team-members { margin: 0; padding: 0; list-style: none; color: var(--foam); font: 12px var(--mono); display: grid; gap: 6px; }
-    #team-members li { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; min-height: 28px; }
-    .member-line { flex: 1; }
-    .member-confirm { flex: 1 1 100%; color: var(--buoy); }
     .team-pm { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
     .team-pm p { margin: 0; font: 12px var(--mono); color: var(--foam); }
     .team-pm-add { display: flex; align-items: end; gap: 8px; }
@@ -616,13 +627,24 @@
           <option value="devin">Devin</option>
         </select>
       </label>
+      <fieldset class="team-pick">
+        <legend>The team</legend>
+        <p class="dialog-help">Tick the roles each agent may hold on this project. The last project's team is ticked already.</p>
+        <table class="team" aria-label="Agents for the team">
+          <thead>
+            <tr><th>Agent</th><th>Worker</th><th>Advisor</th><th>Reviewer</th></tr>
+          </thead>
+          <tbody id="new-project-team"></tbody>
+        </table>
+      </fieldset>
       <label>Second review of
         <select name="review">
           <option value="none">Nothing: results go straight to whoever asked</option>
-          <option value="members" selected>Members' work: workers' and advisors' results</option>
+          <option value="members">Members' work: workers' and advisors' results</option>
           <option value="all">All work: coordinators' own tasks too</option>
         </select>
       </label>
+      <p class="team-warning" id="new-project-warning" hidden></p>
       <div class="dialog-actions">
         <button class="quiet-button" type="button" value="cancel">Cancel</button>
         <button class="primary-button" type="submit">Start project</button>
@@ -633,7 +655,23 @@
   <dialog id="team-dialog" aria-labelledby="team-title">
     <form class="dialog-form">
       <h2 id="team-title">Project team</h2>
-      <ul id="team-members" aria-label="On the team"></ul>
+      <p class="dialog-help">A coordinator names the tier a task needs and ConsensFlow picks a free member of that tier. A member may hold more than one role.</p>
+      <table class="team" aria-label="On the team">
+        <thead>
+          <tr><th>Member</th><th>Worker</th><th>Advisor</th><th>Reviewer</th><th>Tier</th><th>Tags</th><th></th></tr>
+        </thead>
+        <tbody id="team-members"></tbody>
+      </table>
+      <fieldset class="team-add">
+        <legend>Add a member</legend>
+        <label>Agent<select name="agent"></select></label>
+        <span class="role-boxes" role="group" aria-label="Roles for the new member">
+          <label><input type="checkbox" name="roles" value="worker" checked> Worker</label>
+          <label><input type="checkbox" name="roles" value="advisor"> Advisor</label>
+          <label><input type="checkbox" name="roles" value="reviewer"> Reviewer</label>
+        </span>
+        <button class="primary-button" type="submit">Add to team</button>
+      </fieldset>
       <label>Second review of
         <select id="team-review" name="review">
           <option value="none">Nothing: results go straight to whoever asked</option>
@@ -657,17 +695,8 @@
           <button class="quiet-button" type="button" id="add-pm">Add a PM</button>
         </div>
       </div>
-      <label>Add an agent<select name="agent"></select></label>
-      <label>As
-        <select name="role">
-          <option value="worker">Worker: does tasks for the lead</option>
-          <option value="reviewer">Reviewer: reviews, read-only</option>
-          <option value="advisor">Advisor: researches for the PM</option>
-        </select>
-      </label>
       <div class="dialog-actions">
         <button class="quiet-button" type="button" value="cancel">Close</button>
-        <button class="primary-button" type="submit">Add to team</button>
       </div>
     </form>
   </dialog>

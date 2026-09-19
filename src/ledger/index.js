@@ -58,7 +58,6 @@ export { SCHEMA_VERSION }
 export const HARNESSES = ['claude-code', 'codex', 'opencode', 'pi', 'devin', 'kimi']
 const MEMBER_ROLES = ['worker', 'advisor', 'reviewer']
 /** Who hands each kind of member its work, and hears when the team changes. */
-const COORDINATOR_OF = { worker: 'lead', reviewer: 'lead', advisor: 'pm' }
 const COORDINATOR_HANDLES = ['human', 'lead', 'pm']
 const COORDINATOR_ROLES = ['human', 'lead', 'pm']
 export const TIERS = ['critical', 'complex', 'standard', 'light']
@@ -170,6 +169,13 @@ function requireActive(row) {
   return row
 }
 
+const noReviewer = () =>
+  new LedgerError(
+    'no-reviewer',
+    'a review policy needs a reviewer on the team: add one first, or keep the policy at none',
+    409,
+  )
+
 function requireReview(policy) {
   if (!REVIEW_POLICIES.includes(policy)) {
     throw new LedgerError(
@@ -205,17 +211,30 @@ function requireTags(tags) {
   return [...new Set(tags)]
 }
 
-/** Validates a member and returns its tags, normalized. */
-function requireMember({ agent, harness, role, tier, tags = [] }) {
-  if (!MEMBER_ROLES.includes(role)) {
-    throw new LedgerError('invalid-role', `a member is a ${MEMBER_ROLES.join(', ')}, not ${role}`)
+/** A member's roles, one or more of worker, advisor and reviewer; the first one leads. */
+function requireRoles(roles) {
+  if (
+    !Array.isArray(roles) ||
+    roles.length === 0 ||
+    !roles.every((r) => MEMBER_ROLES.includes(r))
+  ) {
+    throw new LedgerError(
+      'invalid-role',
+      `a member is one or more of ${MEMBER_ROLES.join(', ')}, not ${JSON.stringify(roles)}`,
+    )
   }
+  return [...new Set(roles)]
+}
+
+/** Validates a member and returns its tags and roles, normalized. */
+function requireMember({ agent, harness, role, roles, tier, tags = [] }) {
+  const set = requireRoles(roles ?? (role === undefined ? [] : [role]))
   if (typeof agent !== 'string' || !AGENT_ID.test(agent) || COORDINATOR_HANDLES.includes(agent)) {
     throw new LedgerError('invalid-agent', `not an agent id: ${JSON.stringify(agent)}`)
   }
   requireHarness(harness)
   requireTier(tier)
-  return requireTags(tags)
+  return { tags: requireTags(tags), roles: set }
 }
 
 /** The verdict on a review's last line that says something, or null. */
@@ -279,6 +298,7 @@ const participantView = (row) => ({
   leftAt: row.left_at,
   tier: row.tier,
   tags: JSON.parse(row.tags),
+  roles: JSON.parse(row.roles),
   outUntil: row.out_until,
   outSince: row.out_since,
 })
@@ -357,12 +377,17 @@ class Ledger {
   // --- projects and participants ---------------------------------------------
 
   /** A project with its lead and, when given, its team (the last project's, usually). */
-  createProject({ directory, name, lead, team = [], review = 'members' }) {
+  createProject({ directory, name, lead, team = [], review }) {
     requireText(directory, 'directory', 4096)
     requireText(name, 'name', 100)
     requireHarness(lead?.harness)
+    const members = team.map((member) => ({ ...member, ...requireMember(member) }))
+    const reviewer = members.some((member) => member.roles.includes('reviewer'))
+    // A review policy needs someone to review: without a reviewer on the
+    // team nothing is reviewed, and asking for it is refused.
+    review ??= reviewer ? 'members' : 'none'
     requireReview(review)
-    const members = team.map((member) => ({ ...member, tags: requireMember(member) }))
+    if (review !== 'none' && !reviewer) throw noReviewer()
     return this.#write(() => {
       const at = this.#at()
       const { lastInsertRowid: id } = this.#db
@@ -373,8 +398,8 @@ class Ledger {
         .run(directory, name, review, at, at)
       this.#addParticipant(id, { handle: 'human', role: 'human', agent: null, harness: null })
       this.#addParticipant(id, { handle: 'lead', role: 'lead', agent: null, harness: lead.harness })
-      for (const { agent, harness, role, tier, tags } of members) {
-        this.#addParticipant(id, { handle: agent, role, agent, harness, tier, tags })
+      for (const { agent, harness, roles, tier, tags } of members) {
+        this.#addParticipant(id, { handle: agent, roles, agent, harness, tier, tags })
       }
       this.#log(id, 'project.created', { name, directory })
       return this.project(id)
@@ -426,6 +451,7 @@ class Ledger {
   setReview(id, policy) {
     requireReview(policy)
     return this.#write(() => {
+      if (policy !== 'none' && !this.#reviewerOnTeam(id)) throw noReviewer()
       const from = this.#projectRow(id).review
       this.#db
         .prepare('UPDATE project SET review = ?, updated_at = ? WHERE id = ?')
@@ -471,41 +497,72 @@ class Ledger {
   }
 
   /** A member joins the team, or rejoins it in the role, harness, tier and tags given now. */
-  addMember(projectId, { agent, harness, role, tier, tags = [] }) {
-    tags = requireMember({ agent, harness, role, tier, tags })
+  addMember(projectId, { agent, harness, role, roles, tier, tags = [] }) {
+    const member = requireMember({ agent, harness, role, roles, tier, tags })
+    tags = member.tags
+    roles = member.roles
     return this.#write(() => {
       const left = this.#db
         .prepare(
           'SELECT * FROM participant WHERE project_id = ? AND handle = ? AND left_at IS NOT NULL',
         )
         .get(projectId, agent)
-      let member
       if (left === undefined) {
-        member = this.#addParticipant(projectId, {
-          handle: agent,
-          role,
-          agent,
-          harness,
-          tier,
-          tags,
-        })
-      } else {
-        this.#db
-          .prepare(
-            `UPDATE participant SET role = ?, harness = ?, tier = ?, tags = ?, left_at = NULL
-             WHERE id = ?`,
-          )
-          .run(role, harness, tier, JSON.stringify(tags), left.id)
-        this.#log(projectId, 'member.added', { handle: agent, role, harness, rejoined: true })
-        member = participantView(this.#participantRow(left.id))
+        return this.#addParticipant(projectId, { handle: agent, roles, agent, harness, tier, tags })
       }
-      this.#tellIfRunning(
-        projectId,
-        COORDINATOR_OF[role],
-        `@${agent} joined the team as a ${tier} ${role}${tags.length === 0 ? '' : `, good for ${tags.join(', ')}`}.`,
-      )
-      return member
+      this.#db
+        .prepare(
+          `UPDATE participant SET role = ?, roles = ?, harness = ?, tier = ?, tags = ?, left_at = NULL
+           WHERE id = ?`,
+        )
+        .run(roles[0], JSON.stringify(roles), harness, tier, JSON.stringify(tags), left.id)
+      this.#log(projectId, 'member.added', { handle: agent, roles, harness, rejoined: true })
+      return participantView(this.#participantRow(left.id))
     })
+  }
+
+  /** A member's roles change in place; the last reviewer stays while the policy needs one. */
+  setRoles(projectId, handle, roles) {
+    roles = requireRoles(roles)
+    return this.#write(() => {
+      const member = this.#participantByHandle(projectId, handle)
+      if (!MEMBER_ROLES.includes(member.role)) {
+        throw new LedgerError(
+          'not-a-member',
+          `${handle} is the project's ${member.role}, not a member of its team`,
+          409,
+        )
+      }
+      if (!roles.includes('reviewer')) this.#requireAnotherReviewer(projectId, member.id)
+      this.#db
+        .prepare('UPDATE participant SET role = ?, roles = ? WHERE id = ?')
+        .run(roles[0], JSON.stringify(roles), member.id)
+      this.#log(projectId, 'member.roles', { handle, roles })
+      return participantView(this.#participantRow(member.id))
+    })
+  }
+
+  /** Whether an active member can review. */
+  #reviewerOnTeam(projectId, except = null) {
+    return (
+      this.#db
+        .prepare(
+          `SELECT 1 FROM participant p, json_each(p.roles) r
+           WHERE p.project_id = ? AND p.left_at IS NULL AND r.value = 'reviewer' AND p.id != ?`,
+        )
+        .get(projectId, except ?? -1) !== undefined
+    )
+  }
+
+  /** Under a review policy, the last reviewer cannot go. */
+  #requireAnotherReviewer(projectId, memberId) {
+    if (this.#projectRow(projectId).review === 'none') return
+    if (this.#reviewerOnTeam(projectId, memberId)) return
+    throw new LedgerError(
+      'last-reviewer',
+      'the review policy needs a reviewer on the team: add another one, or set the policy to none first',
+      409,
+    )
   }
 
   /**
@@ -522,6 +579,9 @@ class Ledger {
           `${handle} is the project's ${member.role}, not a member of its team`,
           409,
         )
+      }
+      if (JSON.parse(member.roles).includes('reviewer')) {
+        this.#requireAnotherReviewer(projectId, member.id)
       }
       const open = this.#db
         .prepare(
@@ -544,16 +604,12 @@ class Ledger {
       this.#db.prepare('UPDATE participant SET left_at = ? WHERE id = ?').run(this.#at(), member.id)
       const cancelled = open.map((task) => task.number)
       this.#log(projectId, 'member.left', { handle, cancelled })
-      const body = `@${handle} left the team; it takes no more tasks.${
-        cancelled.length === 0
-          ? ''
-          : ` Cancelled with it: ${cancelled.map((number) => `T-${number}`).join(', ')}.`
-      }`
-      for (const coordinator of new Set([
-        COORDINATOR_OF[member.role],
-        ...open.map((task) => task.requester),
-      ])) {
-        if (coordinator !== 'human') this.#tellIfRunning(projectId, coordinator, body)
+      // Only work that went with it is worth a word, and only to whoever asked for it.
+      if (cancelled.length > 0) {
+        const body = `@${handle} left the team; it takes no more tasks. Cancelled with it: ${cancelled.map((number) => `T-${number}`).join(', ')}.`
+        for (const requester of new Set(open.map((task) => task.requester))) {
+          if (requester !== 'human') this.#tellIfRunning(projectId, requester, body)
+        }
       }
       return { member: participantView(this.#participantRow(member.id)), cancelled }
     })
@@ -570,7 +626,7 @@ class Ledger {
   lastTeam() {
     return this.#db
       .prepare(
-        `SELECT agent, harness, role FROM participant
+        `SELECT agent, harness, role, roles FROM participant
          WHERE project_id = (
            SELECT MAX(project_id) FROM participant
            WHERE role IN ('worker', 'advisor', 'reviewer') AND left_at IS NULL
@@ -578,7 +634,12 @@ class Ledger {
          ORDER BY id`,
       )
       .all()
-      .map((row) => ({ agent: row.agent, harness: row.harness, role: row.role }))
+      .map((row) => ({
+        agent: row.agent,
+        harness: row.harness,
+        role: row.role,
+        roles: JSON.parse(row.roles),
+      }))
   }
 
   // --- conversations -----------------------------------------------------------
@@ -776,7 +837,9 @@ class Ledger {
                   SELECT 1 FROM task WHERE assignee_id = p.id AND state IN (${HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')})
                 ) AS busy
          FROM participant p
-         WHERE p.project_id = ? AND p.role = ? AND p.left_at IS NULL ORDER BY p.id`,
+         WHERE p.project_id = ? AND p.left_at IS NULL
+           AND EXISTS (SELECT 1 FROM json_each(p.roles) r WHERE r.value = ?)
+         ORDER BY p.id`,
       )
       .all(projectId, role)
       .map((row) => ({
@@ -784,6 +847,7 @@ class Ledger {
         handle: row.handle,
         tier: row.tier,
         tags: JSON.parse(row.tags),
+        roles: JSON.parse(row.roles),
         taken: row.taken,
         busy: row.busy === 1,
         outUntil: row.out_until,
@@ -1143,7 +1207,7 @@ class Ledger {
       }
       const member = this.#participantRow(reviewer)
       if (
-        member.role !== 'reviewer' ||
+        !JSON.parse(member.roles).includes('reviewer') ||
         member.left_at !== null ||
         member.project_id !== projectId
       ) {
@@ -1538,7 +1602,8 @@ class Ledger {
     return requireActive(row)
   }
 
-  #addParticipant(projectId, { handle, role, agent, harness, tier = null, tags = [] }) {
+  #addParticipant(projectId, { handle, role, roles = [], agent, harness, tier = null, tags = [] }) {
+    role ??= roles[0]
     this.#projectRow(projectId)
     const taken = this.#db
       .prepare('SELECT 1 FROM participant WHERE project_id = ? AND handle = ?')
@@ -1548,12 +1613,22 @@ class Ledger {
     }
     const { lastInsertRowid: id } = this.#db
       .prepare(
-        `INSERT INTO participant (project_id, handle, role, agent, harness, tier, tags, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO participant (project_id, handle, role, roles, agent, harness, tier, tags, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(projectId, handle, role, agent, harness, tier, JSON.stringify(tags), this.#at())
+      .run(
+        projectId,
+        handle,
+        role,
+        JSON.stringify(roles),
+        agent,
+        harness,
+        tier,
+        JSON.stringify(tags),
+        this.#at(),
+      )
     if (role !== 'human' && role !== 'lead') {
-      this.#log(projectId, 'member.added', { handle, role, harness })
+      this.#log(projectId, 'member.added', { handle, role, roles, harness })
     }
     return participantView(this.#participantRow(id))
   }

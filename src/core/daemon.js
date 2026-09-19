@@ -114,7 +114,7 @@ function teamOf(project, participant, env) {
   const roles = { lead: ['worker', 'reviewer'], pm: ['advisor'] }[participant.role] ?? []
   const members = new Set(
     project.participants
-      .filter((member) => roles.includes(member.role))
+      .filter((member) => (member.roles ?? []).some((role) => roles.includes(role)))
       .map((member) => member.agent),
   )
   return listAgents(env).filter((agent) => members.has(agent.name))

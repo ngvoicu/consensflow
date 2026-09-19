@@ -167,14 +167,14 @@ Design, 2026-09-20, before the code:
 - [x] [TEST-CF1-07] Dock: a horizontal strip of every window, lead first, scrolling sideways; an ended window's terminal stays in it, readable and marked ended, until the member's next window or the human closes it.
 - [x] [IMPL-CF1-08] Satisfies TEST-CF1-07.
 
-### Phase C: The team [active]
+### Phase C: The team [completed]
 
-- [ ] [TEST-CF1-09] Ledger: `roles` as a set per member; `members(project, role)` by role; a worker-reviewer under review of its own work is busy and takes no review; `addMember` and `removeMember` and `setReview` refuse a policy with no reviewer role, with a named reason; `lastTeam` carries roles.
-- [ ] [IMPL-CF1-10] Schema (in place; nothing shipped it), ledger, API (`roles`), CLI `cf team`, page operations; satisfies TEST-CF1-09.
-- [ ] [TEST-CF1-11] Page: the team dialog as a list (agent, roles as checkboxes, tier, tags) with an add row and the review policy with its reviewer rule shown; the New project dialog with the team step; the join notes gone from the lead's lane.
-- [ ] [IMPL-CF1-12] Satisfies TEST-CF1-11; the dispatcher launches a member with the text of the role its task needs.
+- [x] [TEST-CF1-09] Ledger: `roles` as a set per member; `members(project, role)` by role; a worker-reviewer under review of its own work is busy and takes no review; `addMember` and `removeMember` and `setReview` refuse a policy with no reviewer role, with a named reason; `lastTeam` carries roles.
+- [x] [IMPL-CF1-10] Schema (in place; nothing shipped it), ledger, API (`roles`), CLI `cf team`, page operations; satisfies TEST-CF1-09.
+- [x] [TEST-CF1-11] Page: the team dialog as a table (agent, roles as checkboxes, tier, tags) with an add row and the review policy with its reviewer rule shown; the New project dialog with the team step; the join notes gone from the lead's lane.
+- [x] [IMPL-CF1-12] Satisfies TEST-CF1-11; the dispatcher launches a member with the text of the role its task needs.
 
-### Phase D: Live proof [planned]
+### Phase D: Live proof [active]
 
 - [ ] [VERIFY-CF1-13] Bench green on the free models and on Claude and Codex after Phases A to C; Candidate rebuilt; Gabriel's second round.
 
@@ -191,7 +191,9 @@ delivery re-send bug is fixed and committed first. Phase A starts with the
 agents window (a blank dialog today) and the command card. The kanban is
 Phase B, the team model Phase C, the question relay Phase E after its
 research. The `board-daemon-core` spec keeps Phases G to I (transcript copy,
-Windows, acceptance) and the importer.
+Windows, acceptance) and the importer. Phases A to C are committed; Phase D
+(the bench on every harness, the Candidate rebuild) is next, and the rebuild
+waits for the running Candidate to be quit.
 
 ## TDD log
 
@@ -239,3 +241,22 @@ Windows, acceptance) and the importer.
   silently disabled every rule after it (the board lost its overflow and the
   dock intercepted clicks on cards); a brace count is now part of the
   checklist for stylesheet edits.
+- 2026-09-20, Phase C. A member holds a set of roles (`roles` JSON column,
+  `role` stays its first): `members(project, role)` reads the set, the
+  reviewer check for a review task reads it, a worker-reviewer under review
+  of its own work is busy and takes no review. A review policy needs a
+  reviewer: `createProject` defaults to `members` when one is on the team,
+  else `none`; `setReview`, `removeMember` and `setRoles` refuse to leave a
+  policy without one (`no-reviewer`, `last-reviewer`). Joining leaves no note
+  for the lead. The dispatcher launches a member with the text of the role
+  its task needs (`#roleFor`: a review task opens the reviewer text). Page:
+  `team.last` operation; the team dialog is a table (member, three role
+  boxes, tier, tags, Remove with its confirm) with an add row of role boxes;
+  the review choices are held at `none` with a warning until a reviewer is
+  ticked; the New project dialog lists every saved agent with the last team's
+  roles ticked and sends the team explicitly. RED: ledger tests for the role
+  set and the reviewer rule, a dispatcher test for the role text, protocol
+  tests for `roles`, seven page tests (two rewritten, five added), the CLI
+  `cf team` line `worker+reviewer`. GREEN: 797/797 node, 73/73 page. Found on
+  the way: Playwright's `uncheck` counts a tick the page puts straight back
+  as a failure, so a refused change is tested with a plain click.

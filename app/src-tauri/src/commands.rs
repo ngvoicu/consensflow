@@ -1551,6 +1551,7 @@ const CORE_OPERATIONS: &[&str] = &[
     "inbox.get",
     "member.add",
     "member.remove",
+    "member.roles",
     "pm.add",
     "task.get",
     "task.add",
@@ -1561,6 +1562,7 @@ const CORE_OPERATIONS: &[&str] = &[
     "message.read",
     "message.answer",
     "agents.list",
+    "team.last",
 ];
 
 #[tauri::command]

@@ -88,7 +88,7 @@ async function command(verb, rest, call, cwd) {
             : members
                 .map(
                   (member) =>
-                    `@${member.handle} · ${member.role} · ${member.tier} · ${member.tags.length === 0 ? 'no tags' : member.tags.join(', ')}`,
+                    `@${member.handle} · ${member.roles.join('+')} · ${member.tier} · ${member.tags.length === 0 ? 'no tags' : member.tags.join(', ')}`,
                 )
                 .join('\n'),
       }

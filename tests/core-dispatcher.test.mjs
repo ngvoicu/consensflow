@@ -1095,6 +1095,84 @@ describe('the dispatcher watches quota', () => {
   })
 })
 
+describe('a member with several roles', () => {
+  it('opens with the text of the role its task needs, and reviews nothing while its own work is reviewed', async () => {
+    await setup(async (context) => {
+      const project = await context.dispatcher.openProject({
+        directory: '/work/app',
+        name: 'app',
+        harness: 'claude-code',
+        review: 'members',
+        team: [
+          {
+            agent: 'zeus',
+            harness: 'claude-code',
+            role: 'worker',
+            tier: 'standard',
+            tags: ['rust'],
+          },
+          {
+            agent: 'hera',
+            harness: 'claude-code',
+            roles: ['worker', 'reviewer'],
+            tier: 'standard',
+            tags: ['docs'],
+          },
+        ],
+      })
+      const task = (number) => context.ledger.task(project.id, number)
+      const launches = (handle) =>
+        context.adapter.prepared
+          .filter((request) => request.participant.handle === handle)
+          .map((request) => [request.role, request.instructions])
+      const open = (body, tags) =>
+        context.ledger.createTask(project.id, {
+          from: 'lead',
+          pool: 'worker',
+          tier: 'standard',
+          tags,
+          body,
+        })
+      open('Write the parser', ['rust'])
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(task(1).assignee, 'zeus')
+      context.adapter.answer('zeus', 'Parser done')
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        [task(1).state, task(2).kind, task(2).assignee],
+        ['review', 'review', 'hera'],
+      )
+      assert.deepEqual(
+        launches('hera'),
+        [['reviewer', 'instructions for reviewer']],
+        'a review opens the reviewer text',
+      )
+      open('Write the docs', ['docs'])
+      await context.dispatcher.pass()
+      assert.equal(
+        task(3).state,
+        'open',
+        'zeus is under review and hera is reviewing: nobody is free',
+      )
+      await context.dispatcher.pass()
+      context.adapter.answer('hera', 'Fine.\n\nVERDICT: pass')
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(task(1).state, 'done')
+      await context.dispatcher.pass()
+      assert.equal(task(3).assignee, 'hera', 'free again, hera takes the work its tag prefers')
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        launches('hera').at(-1),
+        ['worker', 'instructions for worker'],
+        'and opens with the worker text',
+      )
+    })
+  })
+})
+
 describe('one task per member session', () => {
   const zeusWindows = (context) => context.host.opened.filter((b) => b.id.endsWith('-zeus'))
 

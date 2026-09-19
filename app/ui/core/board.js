@@ -332,7 +332,7 @@ export class BoardView {
     }
     const coordinator = participant.role === 'lead' || participant.role === 'pm'
     const identity = [
-      coordinator ? null : participant.role,
+      coordinator ? null : participant.roles.join('+'),
       participant.tier,
       participant.tags.join(', ') || null,
       participant.harness,
@@ -429,7 +429,7 @@ export class BoardView {
     for (const tier of TIERS) {
       for (const pool of POOLS) {
         const names = board.lanes
-          .filter((lane) => lane.participant.role === pool && lane.participant.tier === tier)
+          .filter((lane) => lane.participant.roles.includes(pool) && lane.participant.tier === tier)
           .map((lane) => lane.participant.handle)
         if (names.length === 0) continue
         const option = element('option', null, `A ${tier} ${pool} (${names.join(', ')})`)

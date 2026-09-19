@@ -31,6 +31,7 @@ export const MIGRATIONS = [
     left_at TEXT,
     tier TEXT,
     tags TEXT NOT NULL DEFAULT '[]',
+    roles TEXT NOT NULL DEFAULT '[]',
     out_until TEXT,
     out_since TEXT,
     CONSTRAINT participant_project_fk FOREIGN KEY (project_id)

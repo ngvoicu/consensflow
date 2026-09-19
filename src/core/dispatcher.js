@@ -411,6 +411,18 @@ export class Dispatcher {
     return `${deliveryText(brief)}\n\n${text}`
   }
 
+  /**
+   * The role a window plays: a member with several roles opens with the text
+   * of the one its task needs, a reviewer's for a review, its own otherwise.
+   */
+  #roleFor(project, participant, message) {
+    if (message === null || message.taskNumber == null || COORDINATORS.has(participant.role)) {
+      return participant.role
+    }
+    const task = this.#ledger.task(project.id, message.taskNumber)
+    return task?.kind === 'review' ? 'reviewer' : participant.role
+  }
+
   /** A work task's result reads with its reviews under it; anything else reads as it is. */
   #textFor(project, message) {
     if (message.kind !== 'result' || message.taskNumber == null) return deliveryText(message)
@@ -576,16 +588,17 @@ export class Dispatcher {
 
     let plan
     try {
+      const role = this.#roleFor(project, participant, message)
       plan = await adapter.prepare({
         launchId,
         participant,
-        role: participant.role,
+        role,
         project,
         directory: project.directory,
         resume,
         message: message === null ? null : this.#launchText(project, participant, message, resume),
         agent: participant.agent === null ? null : this.#roster(participant.agent),
-        instructions: this.#roles(participant, project),
+        instructions: this.#roles({ ...participant, role }, project),
       })
     } catch (cause) {
       if (delivering !== null)

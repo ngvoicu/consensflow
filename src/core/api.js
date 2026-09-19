@@ -99,6 +99,7 @@ export async function startApi({
             return {
               handle: member.handle,
               role: member.role,
+              roles: member.roles,
               tier: member.tier,
               tags: member.tags,
               harness: member.harness,

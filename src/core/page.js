@@ -16,13 +16,17 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
   return {
     'projects.list': async () => ({ projects: ledger.projects() }),
 
-    'project.open': change(async ({ directory, name, harness, review }) => ({
+    // The team given, as the roster has those agents now; else the last team.
+    'project.open': change(async ({ directory, name, harness, review, team }) => ({
       project: await dispatcher.openProject({
         directory,
         name: name ?? basename(directory),
         harness,
         review,
-        team: lastTeamNow(ledger, env),
+        team:
+          team === undefined
+            ? lastTeamNow(ledger, env)
+            : team.map(({ agent, roles }) => ({ roles, ...membership(agent, env) })),
       }),
     })),
 
@@ -36,8 +40,14 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
 
     'agents.list': async () => ({ agents: listAgents(env) }),
 
-    'member.add': change(async ({ project, agent, role = 'worker' }) => ({
-      member: ledger.addMember(project, { role, ...membership(agent, env) }),
+    'team.last': async () => ({ team: lastTeamNow(ledger, env) }),
+
+    'member.add': change(async ({ project, agent, role = 'worker', roles }) => ({
+      member: ledger.addMember(project, { roles: roles ?? [role], ...membership(agent, env) }),
+    })),
+
+    'member.roles': change(async ({ project, agent, roles }) => ({
+      member: ledger.setRoles(project, agent, roles),
     })),
 
     'member.remove': change(async ({ project, agent }) => dispatcher.removeMember(project, agent)),
@@ -129,5 +139,5 @@ function lastTeamNow(ledger, env) {
   return ledger
     .lastTeam()
     .filter(({ agent }) => agents.some((candidate) => candidate.name === agent))
-    .map(({ agent, role }) => ({ role, ...membership(agent, env, agents) }))
+    .map(({ agent, roles }) => ({ roles, ...membership(agent, env, agents) }))
 }

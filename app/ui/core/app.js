@@ -242,9 +242,52 @@ inboxButton.addEventListener('click', () => {
   boardRoot.querySelector('[data-handle="human"]')?.scrollIntoView({ block: 'start' })
 })
 
-// New project: the native folder picker first, then the lead's harness.
+const ROLES = ['worker', 'advisor', 'reviewer']
+const ROLE_LABEL = { worker: 'Worker', advisor: 'Advisor', reviewer: 'Reviewer' }
+
+/** A checkbox for one role of a member, or of an agent about to join. */
+function roleBox(role, checked, name, onChange) {
+  const cell = element('td', 'role-cell')
+  const box = element('input')
+  box.type = 'checkbox'
+  box.value = role
+  box.checked = checked
+  box.setAttribute('aria-label', `${ROLE_LABEL[role]} ${name}`)
+  if (onChange) box.addEventListener('change', () => onChange(box))
+  cell.append(box)
+  return cell
+}
+
+/** The roles ticked for each agent in a team table: the agents with none are not on the team. */
+function pickedTeam(rows) {
+  return [...rows.querySelectorAll('tr[data-agent]')]
+    .map((row) => ({
+      agent: row.dataset.agent,
+      roles: [...row.querySelectorAll('input:checked')].map((box) => box.value),
+    }))
+    .filter(({ roles }) => roles.length > 0)
+}
+
+/**
+ * The review choices need a reviewer: without one only "none" can be picked,
+ * and the warning says what to tick.
+ */
+function guardReview(select, warning, team) {
+  const reviewers = team.some(({ roles }) => roles.includes('reviewer'))
+  for (const option of select.options) option.disabled = option.value !== 'none' && !reviewers
+  if (!reviewers) select.value = 'none'
+  warning.textContent = reviewers
+    ? ''
+    : 'Reviews need a reviewer on the team: tick Reviewer for one of the agents.'
+  warning.hidden = reviewers
+}
+
+// New project: the native folder picker first, then the lead's harness, the
+// team (the last project's ticked already) and the review policy.
 const newProjectDialog = $('#new-project-dialog')
 const newProjectForm = newProjectDialog.querySelector('form')
+const newProjectTeam = $('#new-project-team')
+const newProjectWarning = $('#new-project-warning')
 $('#new-project').addEventListener('click', async () => {
   if (typeof tauri.dialog?.open !== 'function') {
     report('The folder picker is not available in this window.')
@@ -257,20 +300,60 @@ $('#new-project').addEventListener('click', async () => {
       multiple: false,
     })
     if (typeof directory !== 'string' || directory.length === 0) return
+    const [{ agents }, { team }] = await Promise.all([core('agents.list'), core('team.last')])
+    state.agents = agents
+    renderNewProjectTeam(team)
     newProjectForm.elements.directory.value = directory
     newProjectDialog.showModal()
   } catch (cause) {
     report(cause)
   }
 })
+
+/** Every saved agent as a row of role boxes, the last team's roles ticked. */
+function renderNewProjectTeam(lastTeam) {
+  const rows = state.agents.map((agent) => {
+    const row = element('tr')
+    row.dataset.agent = agent.name
+    const who = element('td')
+    who.append(
+      element('span', 'member-name', agent.name),
+      element('br'),
+      element('span', 'member-meta', `${agent.harness} · ${agent.model ?? 'model unknown'}`),
+    )
+    row.append(who)
+    const saved = lastTeam.find((member) => member.agent === agent.name)?.roles ?? []
+    for (const role of ROLES) {
+      row.append(roleBox(role, saved.includes(role), agent.name, () => guardNewProjectReview()))
+    }
+    return row
+  })
+  if (rows.length === 0) {
+    const row = element('tr', 'team-empty')
+    const cell = element('td', null, 'No agents saved yet: add some under Agents first.')
+    cell.colSpan = 4
+    row.append(cell)
+    rows.push(row)
+  }
+  newProjectTeam.replaceChildren(...rows)
+  newProjectForm.elements.review.value = lastTeam.some(({ roles }) => roles.includes('reviewer'))
+    ? 'members'
+    : 'none'
+  guardNewProjectReview()
+}
+
+const guardNewProjectReview = () =>
+  guardReview(newProjectForm.elements.review, newProjectWarning, pickedTeam(newProjectTeam))
+
 newProjectForm.addEventListener('submit', (event) => {
   event.preventDefault()
   const directory = newProjectForm.elements.directory.value
   const harness = newProjectForm.elements.harness.value
   const review = newProjectForm.elements.review.value
+  const team = pickedTeam(newProjectTeam)
   newProjectDialog.close()
   void act(async () => {
-    const { project } = await core('project.open', { directory, harness, review })
+    const { project } = await core('project.open', { directory, harness, review, team })
     state.selected = project.id
     state.focus = 'lead'
   })
@@ -297,20 +380,23 @@ function renderTeam() {
   teamList.replaceChildren(
     ...(members.length
       ? members.map((lane) => memberRow(lane.participant))
-      : [element('li', 'team-empty', 'Nobody yet: add the agents this project may use.')]),
+      : [element('tr', 'team-empty')]),
   )
+  if (members.length === 0) {
+    const cell = element('td', null, 'Nobody yet: add the agents this project may use.')
+    cell.colSpan = 7
+    teamList.firstChild.append(cell)
+  }
   const pm = lanes.find((lane) => lane.participant.role === 'pm')
   pmState.textContent =
     pm === undefined ? 'No PM yet.' : `PM · ${pm.participant.harness ?? 'harness unknown'}`
   pmAdd.hidden = pm !== undefined
-  const review = state.board?.project.review ?? 'members'
-  teamReview.value = review
-  const reviewers = lanes.some((lane) => lane.participant.role === 'reviewer')
-  teamWarning.textContent =
-    review !== 'none' && !reviewers
-      ? 'Review is on, but no reviewer is on the team: finished work goes on unreviewed.'
-      : ''
-  teamWarning.hidden = teamWarning.textContent === ''
+  teamReview.value = state.board?.project.review ?? 'none'
+  guardReview(
+    teamReview,
+    teamWarning,
+    members.map((lane) => ({ roles: lane.participant.roles })),
+  )
   const onTeam = new Set(members.map((lane) => lane.participant.agent))
   const choices = state.agents.filter((agent) => !onTeam.has(agent.name))
   const picker = teamForm.elements.agent
@@ -330,48 +416,68 @@ function renderTeam() {
   teamForm.querySelector('[type="submit"]').disabled = choices.length === 0
 }
 
-/** One member, with a Remove that asks first: leaving cancels its open tasks. */
+/** One member: its roles as checkboxes, its tier and tags, and a Remove that asks first. */
 function memberRow(member) {
-  const row = element('li')
+  const row = element('tr')
+  row.dataset.handle = member.handle
   const name = `@${member.handle}`
   const choose = (handle) => () => {
     removing = handle
     renderTeam()
   }
-  if (removing !== member.handle) {
-    const remove = element('button', 'quiet-button', 'Remove')
-    remove.type = 'button'
-    remove.setAttribute('aria-label', `Remove ${name} from the team`)
-    remove.addEventListener('click', choose(member.handle))
-    row.append(
-      element(
-        'span',
-        'member-line',
-        [name, member.role, member.tier, member.tags.join(', ') || null, member.harness]
-          .filter(Boolean)
-          .join(' · '),
-      ),
-      remove,
+  const who = element('td')
+  who.append(
+    element('span', 'member-name', name),
+    element('br'),
+    element('span', 'member-meta', member.harness ?? ''),
+  )
+  row.append(who)
+  if (removing === member.handle) {
+    const cell = element('td')
+    cell.colSpan = 6
+    const keep = element('button', 'quiet-button', `Keep ${name}`)
+    keep.type = 'button'
+    keep.addEventListener('click', choose(null))
+    const yes = element('button', 'danger-button', `Remove ${name}`)
+    yes.type = 'button'
+    yes.addEventListener('click', () =>
+      act(async () => {
+        await core('member.remove', { project: state.selected, agent: member.handle })
+        removing = null
+        note(`${name} left the team.`)
+      }),
     )
+    cell.append(
+      element('span', 'member-confirm', `Remove ${name}? Its open tasks are cancelled. `),
+      keep,
+      yes,
+    )
+    row.append(cell)
     return row
   }
-  const keep = element('button', 'quiet-button', `Keep ${name}`)
-  keep.type = 'button'
-  keep.addEventListener('click', choose(null))
-  const yes = element('button', 'danger-button', `Remove ${name}`)
-  yes.type = 'button'
-  yes.addEventListener('click', () =>
-    act(async () => {
-      await core('member.remove', { project: state.selected, agent: member.handle })
-      removing = null
-      note(`${name} left the team.`)
-    }),
-  )
-  row.append(
-    element('span', 'member-confirm', `Remove ${name}? Its open tasks are cancelled.`),
-    keep,
-    yes,
-  )
+  for (const role of ROLES) {
+    row.append(
+      roleBox(role, member.roles.includes(role), name, (box) => {
+        const roles = ROLES.filter((r) => (r === role ? box.checked : member.roles.includes(r)))
+        if (roles.length === 0) {
+          box.checked = true
+          report(`${name} needs at least one role.`)
+          return
+        }
+        void act(async () => {
+          await core('member.roles', { project: state.selected, agent: member.handle, roles })
+        })
+      }),
+    )
+  }
+  row.append(element('td', null, member.tier ?? ''), element('td', null, member.tags.join(', ')))
+  const remove = element('button', 'quiet-button', 'Remove')
+  remove.type = 'button'
+  remove.setAttribute('aria-label', `Remove ${name} from the team`)
+  remove.addEventListener('click', choose(member.handle))
+  const tools = element('td')
+  tools.append(remove)
+  row.append(tools)
   return row
 }
 
@@ -404,11 +510,17 @@ $('#add-pm').addEventListener('click', () =>
 teamForm.addEventListener('submit', (event) => {
   event.preventDefault()
   const agent = teamForm.elements.agent.value
-  const role = teamForm.elements.role.value
-  teamDialog.close()
+  const roles = [...teamForm.querySelectorAll('input[name="roles"]:checked')].map(
+    (box) => box.value,
+  )
+  if (!agent) return
+  if (roles.length === 0) {
+    report('Tick at least one role for the new member.')
+    return
+  }
   void act(async () => {
-    await core('member.add', { project: state.selected, agent, role })
-    note(`@${agent} joined the team as ${role}.`)
+    await core('member.add', { project: state.selected, agent, roles })
+    note(`@${agent} joined the team as ${roles.join(' and ')}.`)
   })
 })
 teamDialog.querySelector('[value="cancel"]').addEventListener('click', () => teamDialog.close())

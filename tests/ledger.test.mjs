@@ -227,6 +227,115 @@ describe('projects and participants', () => {
     })
   })
 
+  it('lets a member hold several roles, and asks for members by any of them', async () => {
+    await withLedger((ledger) => {
+      const { project } = team(ledger)
+      const both = ledger.addMember(project.id, {
+        agent: 'hera',
+        harness: 'pi',
+        roles: ['worker', 'reviewer'],
+        tier: 'standard',
+        tags: [],
+      })
+      assert.deepEqual(
+        [both.role, both.roles],
+        ['worker', ['worker', 'reviewer']],
+        'the first role leads',
+      )
+      assert.ok(ledger.members(project.id, 'reviewer').some((m) => m.handle === 'hera'))
+      assert.ok(ledger.members(project.id, 'worker').some((m) => m.handle === 'hera'))
+      assert.deepEqual(
+        ledger.project(project.id).participants.find((p) => p.handle === 'zeus').roles,
+        ['worker'],
+        'one role given as before reads as a set of one',
+      )
+      const changed = ledger.setRoles(project.id, 'hera', ['reviewer'])
+      assert.deepEqual([changed.role, changed.roles], ['reviewer', ['reviewer']])
+      assert.ok(!ledger.members(project.id, 'worker').some((m) => m.handle === 'hera'))
+      assert.throws(() => ledger.setRoles(project.id, 'hera', []), { code: 'invalid-role' })
+      assert.throws(() => ledger.setRoles(project.id, 'hera', ['lead']), { code: 'invalid-role' })
+      assert.throws(() => ledger.setRoles(project.id, 'lead', ['worker']), { code: 'not-a-member' })
+      assert.deepEqual(ledger.lastTeam().find((m) => m.agent === 'hera').roles, ['reviewer'])
+    })
+  })
+
+  it('requires a reviewer on the team for any review policy, and keeps the last one', async () => {
+    await withLedger((ledger) => {
+      const { project } = team(ledger)
+      assert.equal(ledger.project(project.id).review, 'none', 'no reviewer, so nothing is reviewed')
+      assert.throws(() => ledger.setReview(project.id, 'members'), { code: 'no-reviewer' })
+      assert.throws(
+        () =>
+          ledger.createProject({
+            directory: '/work/other',
+            name: 'other',
+            lead: { harness: 'pi' },
+            review: 'all',
+            team: [{ agent: 'zeus', harness: 'claude-code', role: 'worker', tier: 'standard' }],
+          }),
+        { code: 'no-reviewer' },
+      )
+      const withReviewer = ledger.createProject({
+        directory: '/work/other',
+        name: 'other',
+        lead: { harness: 'pi' },
+        team: [{ agent: 'hera', harness: 'pi', roles: ['worker', 'reviewer'], tier: 'standard' }],
+      })
+      assert.equal(
+        withReviewer.review,
+        'members',
+        'a reviewer on the team: members are reviewed by default',
+      )
+      ledger.addMember(project.id, {
+        agent: 'hera',
+        harness: 'pi',
+        role: 'reviewer',
+        tier: 'standard',
+      })
+      ledger.setReview(project.id, 'members')
+      assert.throws(() => ledger.removeMember(project.id, 'hera'), { code: 'last-reviewer' })
+      assert.throws(() => ledger.setRoles(project.id, 'hera', ['worker']), {
+        code: 'last-reviewer',
+      })
+      ledger.setReview(project.id, 'none')
+      assert.equal(ledger.removeMember(project.id, 'hera').member.leftAt !== null, true)
+    })
+  })
+
+  it('tells no coordinator about a member joining, only a requester about work cancelled by one leaving', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = team(ledger)
+      const lead =
+        ledger.currentConversation(id('lead')) ??
+        ledger.startConversation(id('lead'), { harness: 'claude-code' })
+      assert.ok(lead)
+      ledger.addMember(project.id, {
+        agent: 'hera',
+        harness: 'pi',
+        role: 'worker',
+        tier: 'standard',
+      })
+      assert.equal(ledger.inbox(id('lead')).length, 0, 'no joining note')
+      ledger.removeMember(project.id, 'hera')
+      assert.equal(ledger.inbox(id('lead')).length, 0, 'nothing cancelled, nothing to say')
+      ledger.addMember(project.id, {
+        agent: 'hera',
+        harness: 'pi',
+        role: 'worker',
+        tier: 'standard',
+      })
+      const given = ledger.createTask(project.id, { from: 'lead', to: 'hera', body: 'Lexer' })
+      deliver(ledger, given.message)
+      ledger.removeMember(project.id, 'hera')
+      const notes = ledger.inbox(id('lead')).filter((m) => m.kind === 'note')
+      assert.equal(notes.length, 1)
+      assert.match(
+        notes[0].body,
+        /^@hera left the team; it takes no more tasks\. Cancelled with it: T-1\.$/,
+      )
+    })
+  })
+
   it('adds members once each, and a PM as the second coordinator', async () => {
     await withLedger((ledger) => {
       const { project } = team(ledger)
@@ -274,8 +383,8 @@ describe('projects and participants', () => {
     await withLedger((ledger) => {
       team(ledger)
       assert.deepEqual(ledger.lastTeam(), [
-        { agent: 'zeus', harness: 'claude-code', role: 'worker' },
-        { agent: 'diana', harness: 'codex', role: 'worker' },
+        { agent: 'zeus', harness: 'claude-code', role: 'worker', roles: ['worker'] },
+        { agent: 'diana', harness: 'codex', role: 'worker', roles: ['worker'] },
       ])
     })
   })
@@ -417,7 +526,9 @@ describe('the project team', () => {
       assert.throws(() => ledger.note(project.id, { from: 'lead', to: 'zeus', body: 'Hi' }), {
         code: 'member-left',
       })
-      assert.deepEqual(ledger.lastTeam(), [{ agent: 'diana', harness: 'codex', role: 'worker' }])
+      assert.deepEqual(ledger.lastTeam(), [
+        { agent: 'diana', harness: 'codex', role: 'worker', roles: ['worker'] },
+      ])
       assert.deepEqual(
         ledger
           .events(project.id)
@@ -530,11 +641,9 @@ describe('the project team', () => {
       ledger.removeMember(project.id, 'zeus')
 
       assert.deepEqual(notes(ledger, id('lead')), [
-        [null, '@apollo joined the team as a standard worker.'],
         [null, '@zeus left the team; it takes no more tasks. Cancelled with it: T-1, T-2, T-3.'],
       ])
       assert.deepEqual(notes(ledger, pm.id), [
-        [null, '@metis joined the team as a standard advisor.'],
         [null, '@zeus left the team; it takes no more tasks. Cancelled with it: T-1, T-2, T-3.'],
       ])
       assert.deepEqual(notes(ledger, id('human')), [])
@@ -923,6 +1032,7 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
     add('hera', 'pi', 'worker', 'light', [])
     ledger.addPm(project.id, { harness: 'pi' })
     add('athena', 'opencode', 'advisor', 'complex', ['research'])
+    add('nemesis', 'pi', 'reviewer', 'standard', [])
     const id = (handle) =>
       ledger.project(project.id).participants.find((p) => p.handle === handle).id
     return { project, id }
@@ -951,6 +1061,7 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
           ['hera', 'light', []],
           ['pm', null, []],
           ['athena', 'complex', ['research']],
+          ['nemesis', 'standard', []],
         ],
       )
       assert.throws(
@@ -1154,8 +1265,12 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
         ledger.members(project.id, 'advisor').map((m) => m.handle),
         ['athena'],
       )
-      assert.deepEqual(ledger.members(project.id, 'reviewer'), [])
+      assert.deepEqual(
+        ledger.members(project.id, 'reviewer').map((m) => m.handle),
+        ['nemesis'],
+      )
       deliver(ledger, ledger.task(project.id, 1).messages[0])
+      ledger.setReview(project.id, 'members')
       ledger.recordResult(project.id, 1, { body: 'Done' })
       assert.equal(
         ledger.members(project.id, 'worker')[0].busy,
@@ -1330,18 +1445,19 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
 
 describe('tiered dispatch: the review gate', () => {
   /** A lead, a standard worker and two reviewers; the daemon would pick the reviewer. */
-  function reviewed(ledger, review) {
+  function reviewed(ledger, review = 'members') {
     const project = ledger.createProject({
       directory: '/work/app',
       name: 'app',
       lead: { harness: 'claude-code' },
-      ...(review === undefined ? {} : { review }),
     })
     const add = (agent, harness, role) =>
       ledger.addMember(project.id, { agent, harness, role, tier: 'standard', tags: [] })
     add('zeus', 'claude-code', 'worker')
     add('diana', 'codex', 'reviewer')
     add('calliope', 'claude-code', 'reviewer')
+    // The policy comes once someone can review: without a reviewer it is refused.
+    ledger.setReview(project.id, review)
     const id = (handle) =>
       ledger.project(project.id).participants.find((p) => p.handle === handle).id
     return { project, id }
@@ -1567,6 +1683,7 @@ describe('tiered dispatch: the review gate', () => {
           .filter((e) => e.kind === 'project.review')
           .map((e) => e.data),
         [
+          { from: 'none', to: 'all' },
           { from: 'all', to: 'none' },
           { from: 'none', to: 'members' },
         ],

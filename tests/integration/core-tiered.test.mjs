@@ -30,21 +30,22 @@ function team(app) {
   )
 }
 
+/** A project opened as the New project dialog opens one: the team and the policy together. */
 async function project(app, { review, members }) {
   const opened = await app.requestNode('project.open', {
     directory: app.workspace,
     harness: 'claude-code',
     review,
+    team: members.map(([agent, role]) => ({ agent, roles: [role] })),
   })
   assert.equal(opened.ok, true, JSON.stringify(opened))
   const id = opened.project.id
-  const tiers = {}
-  for (const [agent, role] of members) {
-    const added = await app.requestNode('member.add', { project: id, agent, role })
-    assert.equal(added.ok, true, JSON.stringify(added))
-    tiers[agent] = added.member.tier
-  }
   const board = async () => (await app.requestNode('board.get', { project: id })).board
+  const tiers = Object.fromEntries(
+    (await board()).lanes
+      .filter((lane) => lane.participant.agent !== null)
+      .map((lane) => [lane.participant.agent, lane.participant.tier]),
+  )
   const task = async (number) =>
     (await app.requestNode('task.get', { project: id, task: number })).task
   const lane = async (handle) =>

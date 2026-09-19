@@ -189,10 +189,15 @@ describe('cf inside a core window', () => {
   })
 
   it('shows the project team as roles, tiers and tags, nothing to pick a member by', async () => {
-    await withApi(async ({ token, cf }) => {
+    await withApi(async ({ token, cf, ledger, project }) => {
       assert.equal(
         (await cf(token('lead'), 'team')).out,
         '@zeus · worker · standard · coding, rust',
+      )
+      ledger.setRoles(project.id, 'zeus', ['worker', 'reviewer'])
+      assert.equal(
+        (await cf(token('lead'), 'team')).out,
+        '@zeus · worker+reviewer · standard · coding, rust',
       )
     })
   })

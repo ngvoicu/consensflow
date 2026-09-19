@@ -141,7 +141,7 @@ describe('the page protocol of the new core', () => {
       const [zeus] = (await operations['agents.list']({})).agents
       assert.deepEqual(opened[1].team, [
         {
-          role: 'worker',
+          roles: ['worker'],
           agent: 'zeus',
           harness: 'opencode',
           tier: zeus.profile.workTier,
@@ -195,6 +195,7 @@ describe('the page protocol of the new core', () => {
         review: 'none',
       })
       await operations['member.add']({ project: project.id, agent: 'zeus' })
+      await operations['member.add']({ project: project.id, agent: 'diana', roles: ['reviewer'] })
       const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
       const { task } = await operations['task.add']({
         project: project.id,
