@@ -262,6 +262,16 @@ async function open(page, data = model()) {
       'team.last': () => answer({ team: data.lastTeam ?? [] }),
       'member.roles': ({ project, agent, roles }) => {
         const lane = data.boards[project].lanes.find((l) => l.participant.handle === agent)
+        const board = data.boards[project]
+        const reviewers = board.lanes.filter(
+          (l) => l.participant.roles.includes('reviewer') && l !== lane,
+        )
+        if (
+          board.project.review !== 'none' &&
+          !roles.includes('reviewer') &&
+          reviewers.length === 0
+        )
+          return { ok: false, error: `@${agent} is the last reviewer: the review policy needs one` }
         lane.participant.roles = roles
         return answer({ member: lane.participant })
       },
@@ -644,6 +654,21 @@ test('keeps a pending removal and the chosen agent when the core redraws the tea
   }
   await expect(dialog.getByText('Remove @zeus? Its open tasks are cancelled.')).toBeVisible()
   await expect(dialog.getByLabel('Agent')).toHaveValue('hera')
+})
+
+test('puts a tick back when the core refuses the change', async ({ page }) => {
+  const data = model()
+  const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'diana')
+  lane.participant.roles = ['worker', 'reviewer']
+  await open(page, data)
+  await page.getByRole('button', { name: 'Team' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project team' })
+  await dialog.getByRole('checkbox', { name: 'Reviewer @diana' }).click()
+  await expect(page.getByRole('status')).toContainText(
+    '@diana is the last reviewer: the review policy needs one',
+  )
+  await expect(dialog.getByRole('checkbox', { name: 'Reviewer @diana' })).toBeChecked()
+  await expect(dialog.getByLabel('Second review of')).toHaveValue('members')
 })
 
 test('sets the review policy from the team dialog once a reviewer is on the team', async ({

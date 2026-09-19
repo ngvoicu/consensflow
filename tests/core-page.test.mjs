@@ -112,7 +112,7 @@ describe('the page protocol of the new core', () => {
       const { member } = await operations['member.add']({
         project: project.id,
         agent: 'diana',
-        role: 'reviewer',
+        roles: ['reviewer'],
       })
       assert.deepEqual([member.handle, member.harness, member.role], ['diana', 'codex', 'reviewer'])
       await assert.rejects(
@@ -129,7 +129,7 @@ describe('the page protocol of the new core', () => {
         harness: 'pi',
       })
       await operations['member.add']({ project: project.id, agent: 'zeus' })
-      await operations['member.add']({ project: project.id, agent: 'diana', role: 'reviewer' })
+      await operations['member.add']({ project: project.id, agent: 'diana', roles: ['reviewer'] })
       await writeFile(
         path.join(env.CONSENSFLOW_HOME, 'agents.json'),
         `${JSON.stringify({

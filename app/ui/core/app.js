@@ -51,14 +51,18 @@ async function core(operation, body = {}) {
   return result
 }
 
-/** Runs an action and redraws; a refusal shows in the status line. */
+/**
+ * Runs an action and redraws; a refusal shows in the status line. The redraw
+ * happens either way, so a control the human already moved (a role box, say)
+ * goes back to what the ledger holds when the core refuses the change.
+ */
 async function act(work) {
   try {
     await work()
-    await refresh()
   } catch (cause) {
     report(cause)
   }
+  await refresh()
 }
 
 const board = new BoardView(boardRoot, {

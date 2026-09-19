@@ -42,8 +42,8 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
 
     'team.last': async () => ({ team: lastTeamNow(ledger, env) }),
 
-    'member.add': change(async ({ project, agent, role = 'worker', roles }) => ({
-      member: ledger.addMember(project, { roles: roles ?? [role], ...membership(agent, env) }),
+    'member.add': change(async ({ project, agent, roles = ['worker'] }) => ({
+      member: ledger.addMember(project, { roles, ...membership(agent, env) }),
     })),
 
     'member.roles': change(async ({ project, agent, roles }) => ({
