@@ -1,5 +1,5 @@
 import { mkdirSync } from 'node:fs'
-import { basename, delimiter, join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createAdapters } from '../adapters/index.js'
 import { Bridge } from '../bridge.js'
@@ -7,6 +7,7 @@ import { openLedger } from '../ledger/index.js'
 import { agentRow, configRoot, listAgents } from '../roster.js'
 import { Credentials, startApi } from './api.js'
 import { Dispatcher } from './dispatcher.js'
+import { pageOperations } from './page.js'
 import { PaneHost } from './pane-host.js'
 import { roleInstructions } from './roles.js'
 
@@ -82,7 +83,11 @@ export async function startCore(
   dispatcher.onChange(
     throttle(() => bridge.event('state.changed', { reason: 'core' }), STATE_EVENT_MS),
   )
-  pageOperations(bridge, { ledger, dispatcher, env, kick: () => loop.kick() })
+  for (const [operation, handle] of Object.entries(
+    pageOperations({ ledger, dispatcher, env, kick: () => loop.kick() }),
+  )) {
+    bridge.on(operation, async (body) => ({ ok: true, ...(await handle(body ?? {})) }))
+  }
   bridge.on('ping', () => ({ ok: true }))
 
   input.on('end', stop)
@@ -108,81 +113,6 @@ function teamOf(session, participant, env) {
       .map((member) => member.agent),
   )
   return listAgents(env).filter((agent) => members.has(agent.name))
-}
-
-/** What the page (and the tests standing in for it) may ask of the core. */
-function pageOperations(bridge, { ledger, dispatcher, env, kick }) {
-  const answer = (work) => async (body) => {
-    const value = await work(body ?? {})
-    kick()
-    return { ok: true, ...value }
-  }
-  bridge.on(
-    'session.open',
-    answer(async ({ directory, name, harness }) => ({
-      session: await dispatcher.openSession({
-        directory,
-        name: name ?? basename(directory),
-        harness,
-      }),
-    })),
-  )
-  bridge.on(
-    'session.resume',
-    answer(async ({ session }) => ({ session: await dispatcher.resumeSession(session) })),
-  )
-  bridge.on(
-    'sessions.list',
-    answer(async () => ({ sessions: ledger.sessions() })),
-  )
-  bridge.on(
-    'member.add',
-    answer(async ({ session, agent, role = 'worker' }) => {
-      const row = agentRow(agent, env)
-      if (!row) throw new Error(`no agent named ${agent} in your agents`)
-      return { member: ledger.addMember(session, { agent, harness: row.kind, role }) }
-    }),
-  )
-  bridge.on(
-    'task.add',
-    answer(async ({ session, to, body, title }) =>
-      ledger.createTask(session, { from: 'human', to, body, title }),
-    ),
-  )
-  bridge.on(
-    'board.get',
-    answer(async ({ session }) => {
-      const board = ledger.board(session)
-      return {
-        board: {
-          ...board,
-          lanes: board.lanes.map((lane) => ({
-            ...lane,
-            activity: dispatcher.activity(lane.participant.id),
-            pane: dispatcher.pane(lane.participant.id),
-          })),
-        },
-      }
-    }),
-  )
-  bridge.on(
-    'inbox.get',
-    answer(async ({ session, participant = 'human' }) => {
-      const owner = ledger.session(session)?.participants.find((p) => p.handle === participant)
-      if (owner === undefined) throw new Error(`${participant} is not in session ${session}`)
-      return { messages: ledger.inbox(owner.id) }
-    }),
-  )
-  bridge.on(
-    'message.read',
-    answer(async ({ message }) => ({ message: ledger.markRead(message) })),
-  )
-  bridge.on(
-    'message.answer',
-    answer(async ({ question, body }) => ({
-      message: ledger.answer(question, { from: 'human', body }),
-    })),
-  )
 }
 
 /** Runs `work` on a timer and on demand, never two at once; a kick during a run runs it again after. */

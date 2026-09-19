@@ -113,7 +113,7 @@ opens panes or types into them.
 - [ ] [TEST-BDC-11] `cf task add/list/get/accept/reopen`, `cf inbox`, `cf ask`, `cf answer`; team enforcement; the removed commands are gone.
 - [x] [IMPL-BDC-12] CLI (`src/core/cli.js`, incl. `cf team`), daemon API (`src/core/api.js`) and new role instructions for lead, PM, advisor, worker and reviewer (`skill/core/`, `src/core/roles.js`), passed to each window through its adapter. The old commands go at the switch (TEST-BDC-11 stays open until then).
 
-### Phase E: Board-first UI [planned]
+### Phase E: Board-first UI [active]
 
 - [ ] [TEST-BDC-13] Playwright: lanes per participant, cards and markers, card detail, the human inbox with question answering, the team picker, session views kept.
 - [ ] [IMPL-BDC-14] The board page on the new core's page protocol.
@@ -234,4 +234,11 @@ page (Phase E).
   OpenCode, Pi and Devin workers answered (6-22 s); each result was in the
   lead's window within a second of the answer; every worker read idle; after
   the restart the lead came back on the same session.
+- Phase E groundwork: the page protocol moved into `src/core/page.js` (tests
+  first: RED, module missing; GREEN 5/5) with the human's new operations
+  (agents list, accept, reopen, cancel), and the Rust app forwards exactly
+  those names through one allow-listed command, `core_request` (its routes and
+  refusals added to the forwarding contract test first; Rust 106/106, clippy
+  clean). The new page is built beside the old one as `app/ui/core.html` and
+  becomes `index.html` at the switch.
 

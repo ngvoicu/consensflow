@@ -1808,6 +1808,38 @@ async fn task_operation<R: Runtime>(
     .await
 }
 
+/// What the board page may ask the new core. The page names the operation and
+/// its body; anything else is refused here, before it reaches the daemon.
+const CORE_OPERATIONS: &[&str] = &[
+    "sessions.list",
+    "session.open",
+    "session.resume",
+    "board.get",
+    "inbox.get",
+    "member.add",
+    "task.add",
+    "task.accept",
+    "task.reopen",
+    "task.cancel",
+    "message.read",
+    "message.answer",
+    "agents.list",
+];
+
+#[tauri::command]
+pub async fn core_request<R: Runtime>(app: AppHandle<R>, operation: String, body: Value) -> Value {
+    let Some(operation) = CORE_OPERATIONS
+        .iter()
+        .find(|allowed| **allowed == operation)
+    else {
+        return json!({"ok":false,"error":format!("unknown core operation {operation}")});
+    };
+    if !body.is_object() {
+        return json!({"ok":false,"error":"a core request body is an object"});
+    }
+    task_operation(app, operation, body).await
+}
+
 #[tauri::command]
 pub async fn task_list<R: Runtime>(
     app: AppHandle<R>,
@@ -3131,6 +3163,18 @@ mod tests {
 
         let routes = vec![
             (
+                "core_request",
+                json!({"operation":"board.get","body":{"session":1}}),
+                "board.get",
+                json!({"session":1}),
+            ),
+            (
+                "core_request",
+                json!({"operation":"task.add","body":{"session":1,"to":"lead","body":"Ship v2"}}),
+                "task.add",
+                json!({"session":1,"to":"lead","body":"Ship v2"}),
+            ),
+            (
                 "task_list",
                 json!({"tab":"tab-1","offset":100,"limit":100}),
                 "task.list",
@@ -3293,6 +3337,7 @@ mod tests {
         let app = tauri::test::mock_builder()
             .manage(runtime)
             .invoke_handler(tauri::generate_handler![
+                core_request,
                 open_lead,
                 open_shell,
                 open_consult,
@@ -3317,6 +3362,8 @@ mod tests {
 
         // These must be refused before requesting the bridge: the peer expects only valid routes.
         for (command, args) in [
+            ("core_request", json!({"operation":"state.list","body":{}})),
+            ("core_request", json!({"operation":"board.get","body":[1]})),
             ("task_list", json!({"tab":"tab-1","limit":0})),
             ("task_list", json!({"tab":"tab-1","limit":101})),
             ("task_get", json!({"tab":"tab-1","id":" "})),
