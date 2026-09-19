@@ -115,6 +115,14 @@ it('Codex launch enables only an installed native queue capability (TEST-PANE-10
 })
 
 const TURN_END = { hooks: [{ type: 'command', command: 'exit 0' }] }
+// Full-permission mode without the one-time acceptance dialog, and messages
+// from ConsensFlow's other sessions delivered instead of held for approval
+// (a bypass-mode session holds them by default and drops them after 5 min).
+const YOLO = {
+  permissions: { defaultMode: 'bypassPermissions' },
+  skipDangerousModePermissionPrompt: true,
+  crossSessionInbound: 'accept',
+}
 
 /** The settings file a Claude launch was given, read back from its flag. */
 async function claudeSettings(configuration, home) {
@@ -152,6 +160,7 @@ describe('retired Claude development channel (TEST-PANE-121)', () => {
         })
         // The only flag is the launch's settings file; no channel of its own.
         assert.deepEqual(await claudeSettings(configuration, home), {
+          ...YOLO,
           hooks: { Stop: [TURN_END] },
         })
         assert.deepEqual(configuration.env, {}, version)
@@ -166,7 +175,10 @@ describe('retired Claude development channel (TEST-PANE-121)', () => {
         env,
       })
       assert.deepEqual({ ...missing, args: [] }, { args: [], env: {}, channel: null })
-      assert.deepEqual(await claudeSettings(missing, home), { hooks: { Stop: [TURN_END] } })
+      assert.deepEqual(await claudeSettings(missing, home), {
+        ...YOLO,
+        hooks: { Stop: [TURN_END] },
+      })
       assert.deepEqual(await readdir(root), ['claude'], 'nothing is written into the project')
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -186,7 +198,10 @@ describe('retired Claude development channel (TEST-PANE-121)', () => {
         workspace: home,
         env,
       })
-      assert.deepEqual(await claudeSettings(worker, home), { hooks: { Stop: [TURN_END] } })
+      assert.deepEqual(await claudeSettings(worker, home), {
+        ...YOLO,
+        hooks: { Stop: [TURN_END] },
+      })
       const receiver = { type: 'command', command: 'receiver', asyncRewake: true }
       const lead = await claudeSettings(
         await launchConfiguration('claude-code', {

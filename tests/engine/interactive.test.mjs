@@ -71,6 +71,42 @@ test('window: claude and pi refuse to open fresh without the id they need', () =
   assert.equal(interactiveStart(AGENTS.pi, null, 'seed'), null)
 })
 
+test('window: every harness opens and resumes in full-permission mode', () => {
+  // Gabriel, 2026-09-19: every harness opens in yolo mode, for every role.
+  // Before this only a fresh Codex window did; OpenCode stalled on prompts.
+  const devin = { id: 'odin', kind: 'devin', model: 'swe-1-6-slow' }
+  const kimi = { id: 'ilmarinen', kind: 'kimi' }
+  const has = (w, ...flags) => {
+    const at = w.args.indexOf(flags[0])
+    return at !== -1 && flags.every((flag, n) => w.args[at + n] === flag)
+  }
+  for (const w of [
+    interactiveStart(AGENTS.claude, 'u', 's'),
+    interactiveResume(AGENTS.claude, 'u', 's'),
+  ])
+    assert.ok(has(w, '--permission-mode', 'bypassPermissions'), w.args.join(' '))
+  for (const w of [
+    interactiveStart(AGENTS.codex, null, 's'),
+    interactiveResume(AGENTS.codex, 't', 's'),
+  ])
+    assert.ok(has(w, '--dangerously-bypass-approvals-and-sandbox'), w.args.join(' '))
+  for (const w of [
+    interactiveStart(AGENTS.opencode, 'ses_1'),
+    interactiveResume(AGENTS.opencode, 'ses_1'),
+  ])
+    assert.ok(has(w, '--auto'), w.args.join(' '))
+  for (const w of [interactiveStart(AGENTS.pi, 'p', 's'), interactiveResume(AGENTS.pi, 'p', 's')])
+    assert.ok(has(w, '--approve'), w.args.join(' '))
+  for (const w of [interactiveStart(devin, null, 's'), interactiveResume(devin, 'd', 's')]) {
+    assert.ok(has(w, '--permission-mode', 'dangerous'), w.args.join(' '))
+    assert.ok(has(w, '--respect-workspace-trust', 'false'), w.args.join(' '))
+  }
+  assert.ok(has(interactiveResume(kimi, 'k'), '--auto'), 'kimi is paused, not exempt')
+  // Seeds stay the last positional.
+  assert.equal(interactiveStart(AGENTS.claude, 'u', 's').args.at(-1), 's')
+  assert.equal(interactiveResume(AGENTS.codex, 't', 's').args.at(-1), 's')
+})
+
 // --- resuming a window, now with a first message ---------------------------
 
 test('window: a resume names the recorded native session on every kind', () => {
@@ -109,7 +145,11 @@ test('window: every resume can carry the follow-up as its seed', () => {
 })
 
 test('window: a resume without a seed stays exactly the hand-over it was', () => {
-  assert.deepEqual(interactiveResume(AGENTS.codex, 'thread-1').args, ['resume', 'thread-1'])
+  assert.deepEqual(interactiveResume(AGENTS.codex, 'thread-1').args, [
+    'resume',
+    'thread-1',
+    '--dangerously-bypass-approvals-and-sandbox',
+  ])
 })
 
 // --- the guards hold on the attached path ----------------------------------
@@ -351,12 +391,13 @@ test('kimi: the window is its own interactive session, resumed', async () => {
   const window = interactiveResume({ id: 'ilmarinen', kind: 'kimi' }, 'session_abc')
 
   assert.equal(window.command, 'kimi')
-  assert.deepEqual(window.args, ['-S', 'session_abc'])
+  assert.deepEqual(window.args, ['-S', 'session_abc', '--auto'])
   // No seed: an interactive kimi takes no first message, so a follow-up sent
   // this way arrives as a pane the user types into.
   assert.deepEqual(interactiveResume({ kind: 'kimi' }, 'session_abc', 'seed').args, [
     '-S',
     'session_abc',
+    '--auto',
   ])
 })
 

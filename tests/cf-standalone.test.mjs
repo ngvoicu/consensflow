@@ -1095,7 +1095,7 @@ process.stdout.write(JSON.stringify({ role: 'assistant', content: 'kimi answered
     const codex = readFileSync(join(bound.bin, 'codex.argv'), 'utf8').trimEnd().split('\n')
     assert.deepEqual(
       JSON.parse(codex.at(-1)),
-      ['resume', bound.sessionId],
+      ['resume', bound.sessionId, '--dangerously-bypass-approvals-and-sandbox'],
       'a reopened pane resumes the bound session — it never starts a second one',
     )
   })

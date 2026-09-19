@@ -103,9 +103,18 @@ test('Devin is a selectable native TUI harness for workers and both coordinators
   assert.equal(harnessForKind('devin'), 'devin')
   const start = interactiveStart({ kind: 'devin', model: 'default' }, null)
   assert.equal(start.command, 'devin')
-  assert.deepEqual(start.args, [])
+  assert.deepEqual(start.args, [
+    '--permission-mode',
+    'dangerous',
+    '--respect-workspace-trust',
+    'false',
+  ])
   const resume = interactiveResume({ kind: 'devin' }, 'exact-native-session')
-  assert.deepEqual(resume.args, ['--resume', 'exact-native-session'])
+  assert.deepEqual(resume.args, [
+    '--resume',
+    'exact-native-session',
+    ...['--permission-mode', 'dangerous', '--respect-workspace-trust', 'false'],
+  ])
   assert.equal(resume.args.includes('--acp'), false)
   const env = receiverEnv({
     tab: 't',
@@ -137,9 +146,9 @@ test('Devin launch installs private hooks and writes the task to a private promp
     interactiveStart({ kind: 'devin' }, null, task),
     configuration,
   )
-  assert.equal(invocation.args[0], '--prompt-file')
-  assert.ok(invocation.args[1].startsWith(f.env.CONSENSFLOW_HOME + path.sep))
-  assert.equal(await fs.readFile(invocation.args[1], 'utf8'), task)
+  const promptFile = invocation.args[invocation.args.indexOf('--prompt-file') + 1]
+  assert.ok(promptFile?.startsWith(f.env.CONSENSFLOW_HOME + path.sep))
+  assert.equal(await fs.readFile(promptFile, 'utf8'), task)
   assert.equal(invocation.prompt, undefined)
   await fs.writeFile(executable, '#!/bin/sh\necho "Devin CLI 3000.6.14"\n')
   await assert.rejects(

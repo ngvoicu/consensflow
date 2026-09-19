@@ -520,6 +520,20 @@ function interactiveGuards(kind) {
 }
 
 /**
+ * Every window, fresh or resumed, for every role, opens in full-permission
+ * ("yolo") mode (the owner's decision, 2026-09-19). Each flag is the harness's own
+ * documented one; Claude's settings file adds the mode's companions.
+ */
+const YOLO = {
+  claude: ["--permission-mode", "bypassPermissions"],
+  codex: ["--dangerously-bypass-approvals-and-sandbox"],
+  opencode: ["--auto"],
+  pi: ["--approve"],
+  devin: ["--permission-mode", "dangerous", "--respect-workspace-trust", "false"],
+  kimi: ["--auto"],
+};
+
+/**
  * The harness's OWN interactive command for a conversation we started.
  *
  * The session a run leaves behind is the same one each harness's TUI can
@@ -538,21 +552,23 @@ export function interactiveResume(agent, sessionId, seed) {
   const withSeed = (args) => (seed ? [...args, seed] : args);
   switch (agent.kind) {
     case "devin":
-      return { command: "devin", args: ["--resume", sessionId], ...(seed ? { prompt: seed } : {}), env: { ...CHILD_ENV }, dropEnv: [] };
+      return { command: "devin", args: ["--resume", sessionId, ...YOLO.devin], ...(seed ? { prompt: seed } : {}), env: { ...CHILD_ENV }, dropEnv: [] };
     case "codex":
-      return { command: "codex", args: withSeed(["resume", sessionId]), env: { ...CHILD_ENV }, dropEnv: interactiveGuards("codex") };
+      return { command: "codex", args: withSeed(["resume", sessionId, ...YOLO.codex]), env: { ...CHILD_ENV }, dropEnv: interactiveGuards("codex") };
     case "claude-code": {
       const args = ["--resume", sessionId];
       if (agent.model) args.push("--model", agent.model);
+      args.push(...YOLO.claude);
       return { command: "claude", args: withSeed(args), env: { ...CHILD_ENV }, dropEnv: interactiveGuards("claude-code") };
     }
     case "pi": {
       const args = ["--session-id", sessionId];
       if (agent.model) args.push("--model", agent.model);
+      args.push(...YOLO.pi);
       return { command: "pi", args: withSeed(args), env: { ...CHILD_ENV }, dropEnv: [] };
     }
     case "opencode": {
-      const args = ["--session", sessionId];
+      const args = ["--session", sessionId, ...YOLO.opencode];
       return { command: "opencode", args, env: { ...CHILD_ENV }, dropEnv: [] };
     }
     case "kimi": {
@@ -560,7 +576,7 @@ export function interactiveResume(agent, sessionId, seed) {
       // `-S <id>` without `-p` IS the interactive window on that session.
       // There is no way to seed the first message of an interactive kimi, so
       // a follow-up sent this way arrives as a pane the user types into.
-      return { command: "kimi", args: ["-S", sessionId],
+      return { command: "kimi", args: ["-S", sessionId, ...YOLO.kimi],
         env: { ...CHILD_ENV, ...(agent.effort ? { KIMI_MODEL_THINKING_EFFORT: agent.effort } : {}) }, dropEnv: [] };
     }
     default:
@@ -583,12 +599,13 @@ export function interactiveResume(agent, sessionId, seed) {
 export function interactiveStart(agent, sessionId, seed) {
   switch (agent.kind) {
     case "devin":
-      return { command: "devin", args: agent.model && agent.model !== "default" ? ["--model", agent.model] : [], ...(seed ? { prompt: seed } : {}), env: { ...CHILD_ENV }, dropEnv: [] };
+      return { command: "devin", args: [...(agent.model && agent.model !== "default" ? ["--model", agent.model] : []), ...YOLO.devin], ...(seed ? { prompt: seed } : {}), env: { ...CHILD_ENV }, dropEnv: [] };
     case "claude-code": {
       if (!sessionId) return null;
       const args = ["--session-id", sessionId];
       if (agent.model) args.push("--model", agent.model);
       if (agent.effort) args.push("--effort", agent.effort);
+      args.push(...YOLO.claude);
       if (seed) args.push(seed);
       return { command: "claude", args, env: { ...CHILD_ENV }, dropEnv: interactiveGuards("claude-code") };
     }
@@ -597,6 +614,7 @@ export function interactiveStart(agent, sessionId, seed) {
       const args = ["--session-id", sessionId];
       if (agent.model) args.push("--model", agent.model);
       if (agent.thinking) args.push("--thinking", agent.thinking);
+      args.push(...YOLO.pi);
       if (seed) args.push(seed);
       return { command: "pi", args, env: { ...CHILD_ENV }, dropEnv: [] };
     }
@@ -604,6 +622,7 @@ export function interactiveStart(agent, sessionId, seed) {
       const args = [];
       if (sessionId) args.push("--session", sessionId);
       if (agent.model) args.push("--model", agent.model);
+      args.push(...YOLO.opencode);
       if (seed && !sessionId) args.push("--prompt", seed);
       return { command: "opencode", args, env: { ...CHILD_ENV }, dropEnv: [] };
     }
@@ -615,7 +634,7 @@ export function interactiveStart(agent, sessionId, seed) {
       const args = [];
       if (agent.model) args.push("--model", agent.model);
       if (agent.effort) args.push("-c", `model_reasoning_effort="${agent.effort}"`);
-      args.push("--dangerously-bypass-approvals-and-sandbox");
+      args.push(...YOLO.codex);
       if (seed) args.push(seed);
       return { command: "codex", args, env: { ...CHILD_ENV }, dropEnv: interactiveGuards("codex") };
     }

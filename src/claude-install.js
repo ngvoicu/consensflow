@@ -28,7 +28,16 @@ export async function prepareClaudeSettings(env, launch, hooks = {}) {
   const settings = join(root, 'settings.json')
   await writeFile(
     settings,
-    JSON.stringify({ hooks: { ...hooks, Stop: [...(hooks.Stop ?? []), turnEnd] } }),
+    JSON.stringify({
+      // Full permission (runners.js passes the flag) without its one-time
+      // acceptance dialog, which no one could answer in a host-started pane.
+      permissions: { defaultMode: 'bypassPermissions' },
+      skipDangerousModePermissionPrompt: true,
+      // A bypass-mode session holds messages from other sessions for approval
+      // and drops them after five minutes; ConsensFlow's own messages must land.
+      crossSessionInbound: 'accept',
+      hooks: { ...hooks, Stop: [...(hooks.Stop ?? []), turnEnd] },
+    }),
     { mode: 0o600 },
   )
   return ['--settings', settings]

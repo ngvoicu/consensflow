@@ -3290,7 +3290,7 @@ describe('the tab lead binds a native session, and resume returns to it', () => 
 
     // The whole point: the PM conversation survives the suspend.
     const argv = s.seen.open.at(-1).argv
-    assert.deepEqual(argv.slice(-2), ['--resume', bound], JSON.stringify(argv))
+    assert.equal(argv[argv.indexOf('--resume') + 1], bound, JSON.stringify(argv))
     assert.equal(resumed.resumedSession, bound)
     assert.equal(tabOnDisk(opened.tab).lead.nativeSession, bound, 'and it is still bound')
   })
@@ -3479,7 +3479,11 @@ describe('BO1: a lead binds by launch evidence and resumes on what it bound', ()
     assert.equal(lead.binding.evidence, 'nonce')
     assert.equal(resumed.cold, false)
     assert.equal(resumed.resumedSession, sessionId)
-    assert.deepEqual(s.seen.open.at(-1).argv.slice(-2), ['resume', sessionId])
+    assert.deepEqual(s.seen.open.at(-1).argv.slice(-3), [
+      'resume',
+      sessionId,
+      '--dangerously-bypass-approvals-and-sandbox',
+    ])
   })
 
   it('still resumes a legacy Codex launch that was identified by a prompt marker', async () => {
@@ -3495,7 +3499,11 @@ describe('BO1: a lead binds by launch evidence and resumes on what it bound', ()
     await waitFor(() => tabOnDisk(opened.tab).closed === true)
     const resumed = await s.rust.request('tab.resume', { tab: opened.tab })
     assert.equal(resumed.resumedSession, sessionId)
-    assert.deepEqual(s.seen.open.at(-1).argv.slice(-2), ['resume', sessionId])
+    assert.deepEqual(s.seen.open.at(-1).argv.slice(-3), [
+      'resume',
+      sessionId,
+      '--dangerously-bypass-approvals-and-sandbox',
+    ])
   })
 
   it('leaves a lead unbound when the transcript carries someone else’s marker', async () => {

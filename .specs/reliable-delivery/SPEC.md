@@ -49,14 +49,14 @@ diagnosis and every decision live in the `consensflow-sme` brain
 - [x] [TEST-REL-07] tests/inbox-page.test.mjs, app/tests/page.spec.mjs, commands.rs forwarding table: the state carries unconfirmed results and per-conversation counts only (under 64 KB with 2,000 received results); history is paged newest first for a session or one conversation, with "Load older results" in the dialog.
 - [x] [IMPL-REL-08] src/page.js (bounded state, `answersList` paging), app/src-tauri/src/commands.rs (`answers_list(tab, conversation?, offset?)`), app/ui/panes.js (dialog pages its history), app/ui/tasks.js (counts); satisfies TEST-REL-07. The unused `answers` state field was removed.
 
-## Phase 3: Launch [active]
+## Phase 3: Launch [completed]
 
-- [ ] [TEST-REL-09] Launch arguments put Claude Code, Codex (fresh and resume), OpenCode, Pi and Devin in full-permission mode for every role.
-- [ ] [IMPL-REL-10] hosts/lib/runners.js and the per-harness settings; satisfies TEST-REL-09.
-- [ ] [TEST-REL-11] Panes and child processes never inherit `CLAUDE_CODE_*` session variables (configuration such as `CLAUDE_CONFIG_DIR` stays).
-- [ ] [IMPL-REL-12] Strip them at launch; satisfies TEST-REL-11.
+- [x] [TEST-REL-09] tests/engine/interactive.test.mjs, tests/channels.test.mjs: every window, fresh and resumed, opens in full-permission mode (Claude `--permission-mode bypassPermissions`, Codex bypass flag, OpenCode `--auto`, Pi `--approve`, Devin `--permission-mode dangerous --respect-workspace-trust false`, Kimi `--auto`); Claude's settings file carries `permissions.defaultMode`, `skipDangerousModePermissionPrompt` and `crossSessionInbound: accept`.
+- [x] [IMPL-REL-10] hosts/lib/runners.js (`YOLO`), src/claude-install.js; satisfies TEST-REL-09. Live-proven for Claude; OpenCode, Pi and Devin are proven by the live bench (VERIFY-REL-18).
+- [x] [TEST-REL-11] app/src-tauri/src/lib.rs: a parent Claude session's identity variables are never inherited; configuration stays.
+- [x] [IMPL-REL-12] lib.rs removes the identity list at startup, before the daemon and panes exist (`2becdcc`); satisfies TEST-REL-11.
 
-## Phase 4: Visibility and restart [pending]
+## Phase 4: Visibility and restart [active]
 
 - [ ] [TEST-REL-13] A pane waiting on a permission prompt or a question shows "waiting", from each harness's native signal.
 - [ ] [IMPL-REL-14] Wire those signals; remove the never-sent `pane.idle` subscription; satisfies TEST-REL-13.
@@ -71,9 +71,8 @@ diagnosis and every decision live in the `consensflow-sme` brain
 
 ## Resume context
 
-Phases 1 and 2 are done. Next: TEST-REL-09 (yolo launch for every harness and
-role). Claude's bypass mode must be proven live first: a bypass-mode lead has to
-keep receiving coordinator messages (cross-session inbound rule).
+Phases 1-3 are done. Next: TEST-REL-13 ("waiting" markers from native
+signals), then restore on start and error logs, then the live bench.
 
 ## TDD log
 
@@ -110,3 +109,15 @@ keep receiving coordinator messages (cross-session inbound rule).
   body (RED); GREEN after IMPL-REL-08: inbox-page 6/6, Rust forwarding 1/1, UI
   137/137 including the new paging test. `answers.list` had no caller; it now
   serves the dialog.
+- TEST-REL-09 facts, checked on the installed binaries and docs before coding:
+  OpenCode's resolved rules keep `doom_loop` and `external_directory` as "ask"
+  under `"permission": "allow"` (the last matching rule wins, and the built-in
+  specific rules come after `*`), so the TUI's documented `--auto` is used.
+  Claude's docs: a bypass-mode session holds messages from other sessions and
+  drops them after 5 minutes unless `crossSessionInbound` is `accept`.
+- Live proof (Claude Code 2.1.278, Sonnet, real TUI in a PTY): launched with the
+  flag and settings file, no bypass-acceptance dialog appeared, a message in
+  ConsensFlow's peer format was delivered to the idle session and answered
+  (`PEER_OK`), and `stop_hook_summary` was recorded. A probe that stopped
+  reading its PTY hung the child's exit (the known macOS rule); the probe now
+  drains until the child is gone.

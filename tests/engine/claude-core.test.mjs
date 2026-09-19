@@ -411,7 +411,12 @@ test('every preset survives normalize + runner invocation with correct flags (al
     if (preset.kind === 'devin') {
       const invocation = interactiveStart(agent, null, 'Native task')
       assert.equal(invocation.command, 'devin')
-      assert.deepEqual(invocation.args, [])
+      assert.deepEqual(invocation.args, [
+        '--permission-mode',
+        'dangerous',
+        '--respect-workspace-trust',
+        'false',
+      ])
       assert.equal(invocation.prompt, 'Native task')
       assert.equal(invocation.env.CONSENSFLOW_CHILD, '1')
       continue
