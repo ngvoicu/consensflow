@@ -48,12 +48,11 @@ const named =
   leadAt === -1 ? args : args.filter((_arg, index) => index !== leadAt && index !== leadAt + 1)
 const reviewerAt = named.indexOf('--reviewer')
 const REVIEWER = reviewerAt === -1 ? 'devin' : named[reviewerAt + 1]
-const wanted = (reviewerAt === -1
-  ? named
-  : named.filter((_arg, index) => index !== reviewerAt && index !== reviewerAt + 1)
-).length
-  ? named.filter((_arg, index) => index !== reviewerAt && index !== reviewerAt + 1)
-  : ['opencode', 'pi', 'devin']
+const workers =
+  reviewerAt === -1
+    ? named
+    : named.filter((_arg, index) => index !== reviewerAt && index !== reviewerAt + 1)
+const wanted = workers.length ? workers : ['opencode', 'pi', 'devin']
 if (!AGENTS[REVIEWER]) throw new Error(`unsupported bench reviewer: ${REVIEWER}`)
 const LEAD_KIND = { claude: 'claude-code', opencode: 'opencode' }[LEAD]
 if (!LEAD_KIND) throw new Error(`unsupported bench lead: ${LEAD}`)
@@ -233,15 +232,17 @@ try {
       0,
       ...(await board()).lanes.flatMap((l) => l.tasks.map((t) => t.number)),
     )
-    const policy = await app.requestNode('project.review', { project, review: 'members' })
+    // The reviewer first: a policy with nobody to review is refused.
     const reviewer = await app.requestNode('member.add', {
       project,
       agent: 'bench-reviewer',
-      role: 'reviewer',
+      roles: ['reviewer'],
     })
+    const policy = await app.requestNode('project.review', { project, review: 'members' })
     record('review-setup', policy.ok === true && reviewer.ok === true, {
       reviewer: REVIEWER,
       ...(reviewer.ok ? {} : { error: reviewer.error }),
+      ...(policy.ok ? {} : { error: policy.error }),
     })
     await app.requestNode('task.add', {
       project,

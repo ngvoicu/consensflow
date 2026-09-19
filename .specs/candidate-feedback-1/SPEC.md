@@ -260,3 +260,13 @@ waits for the running Candidate to be quit.
   `cf team` line `worker+reviewer`. GREEN: 797/797 node, 73/73 page. Found on
   the way: Playwright's `uncheck` counts a tick the page puts straight back
   as a failure, so a refused change is tested with a plain click.
+- 2026-09-20, Phase D, first half. The live bench on the Phase A to C tree,
+  one harness at a time with Devin reviewing: Pi 11/11, Claude (Sonnet lead
+  and worker) 11/11, Codex 11/11, OpenCode 11/11; workers answered in 5-11 s,
+  the lead had each result in 7-13 s, each worker's window closed after its
+  task, every review verdict reached the lead in 20-27 s, every restart came
+  back on the lead's own session. Two bench defects fixed on the way: it set
+  the review policy before adding its reviewer (refused since Phase C), and
+  without `--reviewer` it dropped its first worker (the flag's index of -1
+  plus one is 0), which every earlier run had hidden by naming the reviewer.
+  The Candidate rebuild waits for the running Candidate to be quit.
