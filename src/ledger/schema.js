@@ -32,6 +32,7 @@ export const MIGRATIONS = [
     tier TEXT,
     tags TEXT NOT NULL DEFAULT '[]',
     out_until TEXT,
+    out_since TEXT,
     CONSTRAINT participant_project_fk FOREIGN KEY (project_id)
       REFERENCES project (id) ON DELETE CASCADE,
     CONSTRAINT participant_handle_unique UNIQUE (project_id, handle),

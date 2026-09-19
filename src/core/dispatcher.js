@@ -30,9 +30,13 @@ import { randomUUID } from 'node:crypto'
  *   finished task waits for a reviewer whose model differs from the author's
  *   (a coordinator's model is taken to be its harness); none on the team and
  *   the review is skipped with a note, all busy and it waits. A member whose
- *   harness reports its quota exhausted is out until the reset it names (an
- *   hour when it names none): its task goes back to open for another member,
- *   a review it held is withdrawn, and it takes nothing new while low.
+ *   harness reports a fresh refusal (one after it was last marked out) is out
+ *   until the reset it names (an hour when it names none): its tiered task
+ *   goes back to open for another member, a review it held is withdrawn, a
+ *   delivery in flight is queued again, a coordinator keeps its own tasks for
+ *   after the reset, and nothing reaches it while out. A refusal still in the
+ *   record after the reset is history, not a new one; the member is simply
+ *   eligible again. A member low on quota takes nothing new.
  * - A human typing in a window latches it against pastes. Their Enter releases
  *   the latch once the harness shows a new message of theirs; the pane host
  *   keeps it if they typed again after that Enter.
@@ -275,8 +279,16 @@ export class Dispatcher {
         : { state: observed.settled ? 'idle' : 'working' },
     )
     if (observed.quota !== undefined) runtime.quota = observed.quota ?? null
-    if (runtime.quota?.state === 'exhausted') {
+    const out = this.#isOut(participant)
+    if (!out && this.#freshRefusal(participant, runtime.quota)) {
       this.#outOfQuota(project, participant, runtime)
+      return
+    }
+    if (out) {
+      this.#setActivity(runtime, {
+        state: 'out',
+        reason: `out of quota until ${participant.outUntil}`,
+      })
       return
     }
     if (runtime.delivering !== null) this.#watchArrival(runtime, observed)
@@ -572,9 +584,23 @@ export class Dispatcher {
 
   /** Free: nothing on its hands, not out of quota, not low on it. */
   #available(member) {
-    const out = member.outUntil !== null && Date.parse(member.outUntil) > this.#now()
-    const quota = this.#runtime.get(member.id)?.quota?.state
-    return !member.busy && !out && quota !== 'low' && quota !== 'exhausted'
+    return (
+      !member.busy && !this.#isOut(member) && this.#runtime.get(member.id)?.quota?.state !== 'low'
+    )
+  }
+
+  #isOut(member) {
+    return member.outUntil !== null && Date.parse(member.outUntil) > this.#now()
+  }
+
+  /**
+   * A harness keeps its last record, so a refusal stays in view long after
+   * its reset: only one dated after the member was last marked out is news.
+   */
+  #freshRefusal(participant, quota) {
+    if (quota?.state !== 'exhausted') return false
+    if (participant.outSince === null || !quota.at) return true
+    return Date.parse(quota.at) > Date.parse(participant.outSince)
   }
 
   /** Most matching tags first, then the fewest tasks taken, then the earliest joined. */
@@ -609,21 +635,32 @@ export class Dispatcher {
   }
 
   /**
-   * A member whose harness reports its quota exhausted: out until the reset
-   * it names (an hour when it names none), its work back on the board.
+   * A member whose harness just refused it: out until the reset it names (an
+   * hour when it names none). What it was receiving is queued again, its
+   * tiered work goes back to the board, a review it held is withdrawn; its
+   * own tasks (a coordinator's) wait for it.
    */
   #outOfQuota(project, participant, runtime) {
     const until = runtime.quota.resetsAt ?? new Date(this.#now() + 3_600_000).toISOString()
     this.#setActivity(runtime, { state: 'out', reason: `out of quota until ${until}` })
-    if (participant.outUntil !== null && Date.parse(participant.outUntil) > this.#now()) return
     this.#ledger.markOut(participant.id, { until, reason: 'out of quota' })
-    runtime.delivering = null
+    if (runtime.delivering !== null) {
+      const { delivering } = runtime
+      runtime.delivering = null
+      this.#settleFailure(delivering, 'the harness ran out of quota', { retry: true })
+    }
     const lane = this.#ledger
       .board(project.id)
       .lanes.find((l) => l.participant.id === participant.id)
     for (const task of lane.tasks) {
       if (!['queued', 'working', 'waiting'].includes(task.state)) continue
-      this.#giveUp(project, task, 'ran out of quota after starting')
+      if (task.kind === 'review') {
+        this.#ledger.withdrawReview(project.id, task.number, { reason: 'ran out of quota' })
+      } else if (task.pool !== null) {
+        this.#ledger.releaseTask(project.id, task.number, {
+          because: 'ran out of quota after starting',
+        })
+      }
     }
     this.#changed()
   }

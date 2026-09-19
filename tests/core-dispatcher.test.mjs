@@ -874,6 +874,90 @@ describe('the dispatcher watches quota', () => {
     })
   })
 
+  it('keeps a member out only until its reset, though its harness still shows the old refusal', async () => {
+    await setup(async (context) => {
+      const { open, task, id } = await withTiers(context)
+      open({ tags: ['rust'] })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const refusedAt = context.clock.now().toISOString()
+      // A real transcript keeps its last record: the refusal stays in view
+      // until the member gets a turn, which it cannot while it is out.
+      context.adapter.quota('zeus', {
+        state: 'exhausted',
+        at: refusedAt,
+        resetsAt: soon(context, 1),
+      })
+      context.adapter.agent('zeus').settled = true
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(task(1).assignee, 'diana')
+      context.adapter.answer('diana', 'done')
+      await context.dispatcher.pass()
+
+      context.clock.advance(2 * 3_600_000)
+      open({ tags: ['rust'], body: 'Lexer' })
+      await context.dispatcher.pass()
+      assert.equal(task(2).assignee, 'zeus', 'the old refusal is not a new one')
+      await context.dispatcher.pass()
+      assert.equal(task(2).state, 'working', 'and zeus receives again')
+      assert.equal(context.dispatcher.activity(id('zeus')).state, 'working')
+
+      context.adapter.quota('zeus', {
+        state: 'exhausted',
+        at: context.clock.now().toISOString(),
+        resetsAt: soon(context, 1),
+      })
+      await context.dispatcher.pass()
+      assert.equal(task(2).state, 'open', 'a fresh refusal counts')
+      assert.equal(
+        context.ledger.project(1).participants.find((p) => p.id === id('zeus')).outUntil,
+        soon(context, 1),
+      )
+    })
+  })
+
+  it("queues a delivery in flight at the refusal again, and keeps a coordinator's own tasks for after its reset", async () => {
+    await setup(async (context) => {
+      const { open, task, id } = await withTiers(context)
+      open({ tags: ['rust'] })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.adapter.agent('zeus').arrive = false
+      context.adapter.answer('zeus', 'done')
+      await context.dispatcher.pass()
+      const note = context.ledger.note(1, { from: 'lead', to: 'zeus', body: 'Well done' })
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.message(note.id).state, 'delivering')
+      context.adapter.quota('zeus', { state: 'exhausted', at: context.clock.now().toISOString() })
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.message(note.id).state, 'queued', 'the note is not stuck')
+      assert.equal(task(1).state, 'done', 'finished work is left alone')
+
+      context.adapter.answer('lead', 'noted')
+      const own = context.ledger.createTask(1, { from: 'human', to: 'lead', body: 'Plan' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(task(own.task.number).state, 'working')
+      context.adapter.quota('lead', { state: 'exhausted', at: context.clock.now().toISOString() })
+      context.adapter.agent('lead').settled = true
+      await context.dispatcher.pass()
+      assert.equal(task(own.task.number).state, 'working', 'a coordinator keeps its task')
+      assert.equal(context.dispatcher.activity(id('lead')).state, 'out')
+      const later = context.ledger.note(1, { from: 'zeus', to: 'lead', body: 'Ready' })
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.message(later.id).state, 'queued', 'nothing reaches it while out')
+      context.clock.advance(2 * 3_600_000)
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(
+        context.ledger.message(later.id).state,
+        'delivered',
+        'its queue resumes after the reset',
+      )
+    })
+  })
+
   it('gives no new work to a member low on quota, keeps one out for an hour when its reset is unknown, and takes it again after', async () => {
     await setup(async (context) => {
       const { open, task, id } = await withTiers(context)

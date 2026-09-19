@@ -46,7 +46,15 @@ const leadAt = args.indexOf('--lead')
 const LEAD = leadAt === -1 ? 'opencode' : args[leadAt + 1]
 const named =
   leadAt === -1 ? args : args.filter((_arg, index) => index !== leadAt && index !== leadAt + 1)
-const wanted = named.length ? named : ['opencode', 'pi', 'devin']
+const reviewerAt = named.indexOf('--reviewer')
+const REVIEWER = reviewerAt === -1 ? 'devin' : named[reviewerAt + 1]
+const wanted = (reviewerAt === -1
+  ? named
+  : named.filter((_arg, index) => index !== reviewerAt && index !== reviewerAt + 1)
+).length
+  ? named.filter((_arg, index) => index !== reviewerAt && index !== reviewerAt + 1)
+  : ['opencode', 'pi', 'devin']
+if (!AGENTS[REVIEWER]) throw new Error(`unsupported bench reviewer: ${REVIEWER}`)
 const LEAD_KIND = { claude: 'claude-code', opencode: 'opencode' }[LEAD]
 if (!LEAD_KIND) throw new Error(`unsupported bench lead: ${LEAD}`)
 
@@ -107,7 +115,10 @@ const writeRoster = (home) =>
     `${JSON.stringify(
       {
         schemaVersion: 1,
-        agents: wanted.map((name) => ({ ...AGENTS[name], tags: [AGENTS[name].id] })),
+        agents: [
+          ...wanted.map((name) => ({ ...AGENTS[name], tags: [AGENTS[name].id] })),
+          { ...AGENTS[REVIEWER], id: 'bench-reviewer', tags: ['bench-reviewer'] },
+        ],
       },
       null,
       2,
@@ -118,7 +129,12 @@ let app = await startIntegration({ editor: EDITOR, fakeEnv: ENV })
 const root = app.root
 try {
   writeRoster(app.env.CONSENSFLOW_HOME)
-  const opened = await app.requestNode('project.open', { directory: WORKSPACE, harness: LEAD_KIND })
+  // The baseline measures delivery alone; the review gate is its own scenario below.
+  const opened = await app.requestNode('project.open', {
+    directory: WORKSPACE,
+    harness: LEAD_KIND,
+    review: 'none',
+  })
   if (opened.ok !== true) throw new Error(`project.open: ${JSON.stringify(opened)}`)
   const project = opened.project.id
   const tiers = {}
@@ -195,6 +211,85 @@ try {
       Boolean(idle),
       idle ? {} : { activity: (await lane(agent.id))?.activity },
     )
+  }
+
+  // The review gate, live: a reviewer on another model judges one worker's
+  // result before the lead sees it. The daemon picks the reviewer; if every
+  // worker shares the reviewer's model the work goes on unreviewed, and the
+  // check says so.
+  {
+    const started = Date.now()
+    const worker = AGENTS[wanted[0]]
+    const marker = 'BENCH_REVIEW_OK'
+    const policy = await app.requestNode('project.review', { project, review: 'members' })
+    const reviewer = await app.requestNode('member.add', {
+      project,
+      agent: 'bench-reviewer',
+      role: 'reviewer',
+    })
+    record('review-setup', policy.ok === true && reviewer.ok === true, {
+      reviewer: REVIEWER,
+      ...(reviewer.ok ? {} : { error: reviewer.error }),
+    })
+    await app.requestNode('task.add', {
+      project,
+      to: 'lead',
+      body: `Run exactly this command in your shell, then reply with one line:\ncf task add --tier ${tiers[wanted[0]]} --tags ${worker.id} "Reply with exactly: ${marker}"`,
+    })
+    const reviewed = await until(
+      async () =>
+        (await lane(worker.id))?.tasks.find(
+          (t) => t.requester === 'lead' && ['review', 'done'].includes(t.state),
+        ),
+      300_000,
+    )
+    record('review-work-finished', Boolean(reviewed), {
+      seconds: Math.round((Date.now() - started) / 1000),
+      state: reviewed?.state,
+    })
+    const review = reviewed
+      ? await until(
+          async () =>
+            (await lane('bench-reviewer'))?.tasks.find((t) => t.reviewOf === reviewed.number),
+          120_000,
+        )
+      : null
+    record('review-created', Boolean(review), {
+      seconds: Math.round((Date.now() - started) / 1000),
+      ...(review
+        ? { review: review.number }
+        : { notes: (await inbox('lead')).filter((m) => m.kind === 'note').map((m) => m.body) }),
+    })
+    const verdict = review
+      ? await until(async () => {
+          const current = (await lane('bench-reviewer'))?.tasks.find(
+            (t) => t.number === review.number,
+          )
+          return current?.state === 'done' ? current : null
+        }, 300_000)
+      : null
+    record('review-verdict', Boolean(verdict?.verdict), {
+      seconds: Math.round((Date.now() - started) / 1000),
+      verdict: verdict?.verdict ?? null,
+      ...(verdict ? {} : { reviewer: (await lane('bench-reviewer'))?.activity }),
+    })
+    const delivered = verdict
+      ? await until(async () => {
+          const messages = await inbox('lead')
+          const result = messages.find(
+            (m) =>
+              m.kind === 'result' && m.taskNumber === reviewed.number && m.state === 'delivered',
+          )
+          const judgement = messages.find(
+            (m) => m.kind === 'result' && m.taskNumber === review.number && m.state === 'delivered',
+          )
+          return result && judgement ? { result, judgement } : null
+        }, 300_000)
+      : null
+    record('review-received-by-lead', Boolean(delivered), {
+      seconds: Math.round((Date.now() - started) / 1000),
+      ...(delivered ? { judgement: delivered.judgement.body.slice(0, 120) } : {}),
+    })
   }
 
   // Restart: a new daemon and pane host over the same home, in the app's quit

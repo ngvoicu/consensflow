@@ -1800,7 +1800,11 @@ test('quota/claude-code: a 429 is exhaustion until a later turn succeeds', async
   const { env } = await stageJsonl('claude-code', session, 'claude-code/provider-429.jsonl')
   const refused = await answers('claude-code', session, env)
   assert.equal(refused.failed, true)
-  assert.deepEqual(refused.quota, { state: 'exhausted', resetsAt: null })
+  assert.deepEqual(refused.quota, {
+    state: 'exhausted',
+    at: refused.items.at(-1).at,
+    resetsAt: null,
+  })
 
   const later = await stageJsonl('claude-code', session, 'claude-code/provider-429.jsonl', {
     mutate: (records) => {
@@ -1838,6 +1842,7 @@ test('quota/claude-code: a 429 is exhaustion until a later turn succeeds', async
   })
   assert.deepEqual((await answers('claude-code', session, named.env)).quota, {
     state: 'exhausted',
+    at: '2026-09-19T10:00:00.000Z',
     resetsAt: '2026-09-19T12:00:00.000Z',
   })
 })
@@ -1859,6 +1864,7 @@ test('quota/pi: a 429 names its reset in the message; a later stop clears it', a
   })
   assert.deepEqual((await answers('pi', session, refused.env)).quota, {
     state: 'exhausted',
+    at: '2026-09-19T10:00:00.000Z',
     resetsAt: '2026-09-22T10:00:00.000Z',
   })
   const other = await stage((records) => {
@@ -1900,6 +1906,7 @@ test('quota/opencode: a 429 on the message is exhaustion; a completed turn after
   assert.equal(refused.failed, true, JSON.stringify(refused).slice(0, 300))
   assert.deepEqual(refused.quota, {
     state: 'exhausted',
+    at: new Date(completedAt).toISOString(),
     resetsAt: new Date(completedAt + 86_400_000).toISOString(),
   })
   const fine = await answers(

@@ -16,9 +16,17 @@ export function relativeReset(text, atMs) {
   return new Date(atMs + Number(match[1]) * UNITS[match[2].toLowerCase()]).toISOString()
 }
 
-/** A refused request: exhausted, with the reset the text names when it names one. */
+/**
+ * A refused request: exhausted, with the reset the text names when it names
+ * one, and when it happened, so the daemon can tell an old refusal still in
+ * the record from a new one.
+ */
 export function exhaustedQuota(text, atMs) {
-  return { state: 'exhausted', resetsAt: relativeReset(text, atMs) }
+  return {
+    state: 'exhausted',
+    at: Number.isFinite(atMs) ? new Date(atMs).toISOString() : null,
+    resetsAt: relativeReset(text, atMs),
+  }
 }
 
 /** Codex's `rate_limits` on a `token_count` event: the fullest window decides. */

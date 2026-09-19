@@ -260,7 +260,11 @@ describe('the Claude Code adapter', () => {
         }),
       ])
       const observed = await adapter.observe({ launch: { nativeSession: session } })
-      assert.deepEqual(observed.quota, { state: 'exhausted', resetsAt: '2026-09-19T14:00:02.000Z' })
+      assert.deepEqual(observed.quota, {
+        state: 'exhausted',
+        at: '2026-09-19T12:00:02.000Z',
+        resetsAt: '2026-09-19T14:00:02.000Z',
+      })
       await transcript(env, session, [
         userLine(session, 1, 'hello'),
         answerLine(session, 2, 'Hi'),

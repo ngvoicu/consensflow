@@ -268,6 +268,7 @@ const participantView = (row) => ({
   tier: row.tier,
   tags: JSON.parse(row.tags),
   outUntil: row.out_until,
+  outSince: row.out_since,
 })
 
 const conversationView = (row) =>
@@ -803,7 +804,7 @@ class Ledger {
     })
   }
 
-  /** A member that ran out of quota takes no work until then (an ISO time). */
+  /** A member that ran out of quota takes no work until then (an ISO time); `outSince` says when it was marked. */
   markOut(participantId, { until, reason }) {
     if (Number.isNaN(Date.parse(until))) {
       throw new LedgerError('invalid-time', `not a time: ${JSON.stringify(until)}`)
@@ -811,7 +812,9 @@ class Ledger {
     requireText(reason, 'reason', 1000)
     return this.#write(() => {
       const member = this.#participantRow(participantId)
-      this.#db.prepare('UPDATE participant SET out_until = ? WHERE id = ?').run(until, member.id)
+      this.#db
+        .prepare('UPDATE participant SET out_until = ?, out_since = ? WHERE id = ?')
+        .run(until, this.#at(), member.id)
       this.#log(member.project_id, 'member.out', { handle: member.handle, until, reason })
       return participantView(this.#participantRow(member.id))
     })

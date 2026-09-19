@@ -225,3 +225,18 @@ right member") is superseded by this spec's rules (CORE-10 to CORE-15).
   switched off (the quota test failed: the first worker kept its task) and
   reviewer independence was forced false (the review test failed: no review
   ever came); both restored.
+- Review before the bench (advisor): two holes in the quota path that the
+  dispatcher test had papered over with `adapter.quota('zeus', null)`. A
+  refused Claude, Pi or OpenCode member never came back: its reader reports
+  the 429 until a later turn succeeds, but an out member gets no turn, so
+  after the reset the same old refusal marked it out again, forever. And a
+  delivery in flight at the refusal stayed `delivering` in the ledger, so the
+  recipient counted as busy for good; a coordinator's own task was failed
+  instead of kept. Tests first (RED 2/2): a refusal now carries its time
+  (`at`, from the record) and only one dated after the member was last marked
+  out (`outSince`, new on the participant) is news; a stale one after the
+  reset is history and the member is simply eligible again; a delivery in
+  flight is queued again; a coordinator keeps its tasks and its queue resumes
+  after the reset. GREEN 32/32; the two tests then needed the fake harness to
+  settle on its refusal and the lead to answer before taking its own task,
+  which is what real harnesses do.
