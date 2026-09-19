@@ -225,6 +225,34 @@ fn isolated_home(
         .ok_or_else(|| "this build needs HOME to find ~/.consensflow-candidate".to_string())
 }
 
+/// The variables a Claude Code session exports to its own children. A
+/// ConsensFlow started from inside one (`tauri dev`, a test or bench run) would
+/// hand them to every pane: `CLAUDE_CODE_CHILD_SESSION` switches off transcript
+/// saving, `CLAUDE_CODE_SESSION_ID` impersonates the parent, and the messaging
+/// socket and token reach into the parent session. Only this identity is
+/// removed; configuration such as `CLAUDE_CONFIG_DIR` or
+/// `CLAUDE_CODE_USE_BEDROCK` stays.
+const CLAUDE_SESSION_IDENTITY: [&str; 11] = [
+    "CLAUDECODE",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_BRIDGE_SESSION_ID",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_PID",
+    "CLAUDE_EFFORT",
+];
+
+fn inherited_session_variables<'a>(names: impl IntoIterator<Item = &'a str>) -> Vec<&'a str> {
+    names
+        .into_iter()
+        .filter(|name| CLAUDE_SESSION_IDENTITY.contains(name))
+        .collect()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let context = tauri::generate_context!();
@@ -244,6 +272,12 @@ pub fn run() {
             eprintln!("consensflow: {message}");
             std::process::exit(1);
         }
+    }
+    let names: Vec<String> = std::env::vars_os()
+        .filter_map(|(name, _)| name.into_string().ok())
+        .collect();
+    for name in inherited_session_variables(names.iter().map(String::as_str)) {
+        std::env::remove_var(name);
     }
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -383,6 +417,36 @@ mod tests {
                 Some(Path::new(HOME))
             ),
             Ok(Some(PathBuf::from("/Users/test/.consensflow-candidate")))
+        );
+    }
+
+    #[test]
+    fn a_parent_claude_sessions_identity_is_never_inherited() {
+        // Seen in a live Claude Code 2.1 session's environment on 2026-09-19.
+        let names = [
+            "CLAUDECODE",
+            "CLAUDE_CODE_CHILD_SESSION",
+            "CLAUDE_CODE_SESSION_ID",
+            "CLAUDE_CODE_MESSAGING_SOCKET",
+            "CLAUDE_CODE_MESSAGING_TOKEN",
+            "CLAUDE_PID",
+            "CLAUDE_EFFORT",
+            "CLAUDE_CONFIG_DIR",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "PATH",
+        ];
+        assert_eq!(
+            inherited_session_variables(names),
+            [
+                "CLAUDECODE",
+                "CLAUDE_CODE_CHILD_SESSION",
+                "CLAUDE_CODE_SESSION_ID",
+                "CLAUDE_CODE_MESSAGING_SOCKET",
+                "CLAUDE_CODE_MESSAGING_TOKEN",
+                "CLAUDE_PID",
+                "CLAUDE_EFFORT",
+            ],
+            "configuration (CLAUDE_CONFIG_DIR, CLAUDE_CODE_USE_BEDROCK) stays"
         );
     }
 
