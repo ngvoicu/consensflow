@@ -1,0 +1,20 @@
+import { claudeCodeAdapter } from './claude-code.js'
+import { codexAdapter } from './codex.js'
+import { devinAdapter } from './devin.js'
+import { openCodeAdapter } from './opencode.js'
+import { piAdapter } from './pi.js'
+
+/**
+ * One adapter per supported harness, keyed the way the ledger names them.
+ * Kimi is paused (2026-09-19) and has none. `peer: false` turns Claude's
+ * native inbox off where it cannot work (the integration suite's fake Claude).
+ */
+export function createAdapters(env, { peer } = {}) {
+  return {
+    'claude-code': claudeCodeAdapter({ env, ...(peer === undefined ? {} : { peer }) }),
+    codex: codexAdapter({ env }),
+    devin: devinAdapter({ env }),
+    opencode: openCodeAdapter({ env }),
+    pi: piAdapter({ env }),
+  }
+}

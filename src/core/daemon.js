@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { basename, delimiter, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { claudeCodeAdapter } from '../adapters/claude-code.js'
+import { createAdapters } from '../adapters/index.js'
 import { Bridge } from '../bridge.js'
 import { openLedger } from '../ledger/index.js'
 import { agentRow, configRoot } from '../roster.js'
@@ -59,9 +59,7 @@ export async function startCore(
   const dispatcher = new Dispatcher({
     ledger,
     host,
-    adapters: {
-      'claude-code': claudeCodeAdapter({ env, ...(peer === undefined ? {} : { peer }) }),
-    },
+    adapters: createAdapters(env, { peer }),
     credentials,
     roster: (agent) => agentRow(agent, env) ?? null,
     paneEnv: (participant, session) => ({

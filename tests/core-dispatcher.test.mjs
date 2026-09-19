@@ -349,6 +349,21 @@ describe('the dispatcher', () => {
     })
   })
 
+  it('fails the first message at once when the harness cannot take it after the window opens', async () => {
+    await setup(async (context) => {
+      const { session } = await withTeam(context)
+      context.adapter.started = async () => {
+        throw new Error('the server never answered')
+      }
+      context.ledger.createTask(session.id, { from: 'lead', to: 'zeus', body: 'Parser' })
+      await context.dispatcher.pass()
+      const task = context.ledger.task(session.id, 1)
+      assert.equal(task.state, 'failed')
+      assert.match(task.messages[0].reason, /the server never answered/)
+      assert.equal(context.host.killed.at(-1).id, context.host.last('zeus').id)
+    })
+  })
+
   it('leaves a task waiting on a question alone, and resumes it with the answer', async () => {
     await setup(async (context) => {
       const { session } = await withTeam(context)

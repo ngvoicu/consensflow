@@ -96,9 +96,9 @@ opens panes or types into them.
 
 ### Phase B: Harness adapters [active]
 
-- [ ] [TEST-BDC-05] Adapter contract (launch, deliver, signals, collect, transcript source) with a fake harness per adapter. The contract is `prepare`, `started`, `ready`, `deliver`, `observe` (documented in `src/core/dispatcher.js`); Claude's tests are `tests/adapter-claude.test.mjs`. Open: OpenCode, Pi, Devin, Codex.
+- [x] [TEST-BDC-05] Adapter contract (launch, deliver, signals, collect, transcript source) with a fake harness per adapter. The contract is `prepare`, `started`, `ready`, `deliver`, `observe` (documented in `src/core/dispatcher.js`): `tests/adapter-claude.test.mjs` (7), `adapter-opencode` (5), `adapter-pi` (4), `adapter-devin` (5), `adapter-codex` (5).
 - [x] [IMPL-BDC-06] Claude Code adapter (status file, hooks, peer delivery, Stop-hook turn end): `src/adapters/claude-code.js`. Live proof is VERIFY-BDC-08.
-- [ ] [IMPL-BDC-07] OpenCode, Pi, Devin and Codex adapters, including their waiting signals.
+- [x] [IMPL-BDC-07] OpenCode, Pi, Devin and Codex adapters (`src/adapters/`, registered in `index.js`). Waiting signals beyond Claude's are open work for VERIFY-BDC-08; live proof per harness is VERIFY-BDC-08.
 - [ ] [VERIFY-BDC-08] Live bench per adapter, as lead and as worker, with the test models.
 
 ### Phase C: Dispatcher and inbox delivery [active]
@@ -145,8 +145,10 @@ Phase A is done. A vertical slice of phases B, C and D is green: the Claude
 adapter, the dispatcher, the daemon entry, the agents' API and `cf` commands,
 proven end to end through the real Rust pane host with a fake Claude
 (`tests/integration/core-slice.test.mjs`), and a human typing into a window no
-longer blocks later deliveries (TEST-BDC-22). Next: the OpenCode, Pi, Devin
-and Codex adapters, then the live bench against the new core (VERIFY-BDC-08).
+longer blocks later deliveries (TEST-BDC-22). All five adapters exist with
+contract tests. Next: the live bench against the new core with the real
+harnesses (VERIFY-BDC-08), then the role instructions (Phase D) and the board
+page (Phase E).
 
 ## TDD log
 
@@ -185,4 +187,14 @@ and Codex adapters, then the live bench against the new core (VERIFY-BDC-08).
   Second, the test typed before the fake agent was in raw mode and its keys
   were lost, which a person cannot do; the test now types once the lead reads
   idle. 2/2 three times; without the release, the typed test fails.
+- IMPL-BDC-07: the OpenCode and Pi adapters were written before their tests
+  (a slip). Their tests (9) were then checked against four deliberate breaks
+  (the TUI's server arguments, seeding a window with no task, Pi's settled
+  marker, Pi's extension argument): each was caught. Devin and Codex went
+  test-first: RED (modules missing), GREEN 10/10. The dispatcher gained one
+  rule on the way: a harness that cannot take its first message after the
+  window opens (OpenCode's server never answering) fails that delivery at once
+  and ends the window, instead of waiting out the launch timeout (RED, GREEN
+  16/16). Shared rule for the new adapters: a conversation with no messages and
+  nothing in flight reads idle, so a window opened without a task can receive.
 

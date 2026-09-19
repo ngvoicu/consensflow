@@ -439,6 +439,17 @@ export class Dispatcher {
     const started = await adapter
       .started({ launch: plan.launch, pane, host: this.#host })
       .catch((cause) => ({ error: cause.message }))
+    if (started.error !== undefined && delivering !== null) {
+      runtime.delivering = null
+      this.#host.kill(pane).catch(() => {})
+      this.#settleFailure(
+        delivering,
+        `the window could not take its first message: ${started.error}`,
+        { retry: false },
+      )
+      this.#changed()
+      return
+    }
     if (started.nativeSession && started.nativeSession !== plan.nativeSession) {
       this.#ledger.bindConversation(conversationId, started.nativeSession)
     }

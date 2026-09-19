@@ -6,9 +6,8 @@ import { cachedAnswers } from '../../hosts/lib/completion.js'
 import { interactiveResume, interactiveStart } from '../../hosts/lib/runners.js'
 import { send as sendPeer } from '../channels/claude-peer.js'
 import { prepareClaudeSettings } from '../claude-install.js'
-import { harnessPath } from '../harnesses.js'
 import { roleConfiguration } from '../role-skills.js'
-import { harnessForKind } from '../roster.js'
+import { executableFor } from './shared.js'
 
 /**
  * Claude Code, for the new core (see `src/core/dispatcher.js` for the adapter
@@ -36,8 +35,7 @@ export function claudeCodeAdapter({
     harness: 'claude-code',
 
     async prepare({ launchId, role, directory, resume, message, agent }) {
-      const executable = harnessPath(harnessForKind('claude-code'), env)
-      if (executable === null) throw new Error('claude is not installed on this machine')
+      const executable = executableFor('claude-code', env)
       const settings = await prepareClaudeSettings(env, launchId)
       const instructions = await roleConfiguration('claude-code', {
         role,
