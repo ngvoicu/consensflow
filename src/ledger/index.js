@@ -4,7 +4,7 @@ import { MIGRATIONS, SCHEMA_VERSION } from './schema.js'
 export { SCHEMA_VERSION }
 
 /**
- * The ledger: the one durable record of every session, participant, task and
+ * The ledger: the one durable record of every project, participant, task and
  * inbox message, in `<home>/consensflow.db`. The board and every inbox are
  * views of it.
  *
@@ -133,7 +133,7 @@ function requireHarness(harness) {
   return harness
 }
 
-/** A participant that is still in the session; a member who left is refused. */
+/** A participant that is still in the project; a member who left is refused. */
 function requireActive(row) {
   if (row.left_at !== null) {
     throw new LedgerError('member-left', `@${row.handle} left the team`, 409)
@@ -176,7 +176,7 @@ const TASK_SELECT = `
 
 const participantView = (row) => ({
   id: row.id,
-  sessionId: row.session_id,
+  projectId: row.project_id,
   handle: row.handle,
   role: row.role,
   agent: row.agent,
@@ -199,7 +199,7 @@ const conversationView = (row) =>
 
 const taskView = (row) => ({
   id: row.id,
-  sessionId: row.session_id,
+  projectId: row.project_id,
   number: row.number,
   title: row.title,
   body: row.body,
@@ -212,7 +212,7 @@ const taskView = (row) => ({
 
 const messageView = (row) => ({
   id: row.id,
-  sessionId: row.session_id,
+  projectId: row.project_id,
   recipient: row.recipient,
   recipientId: row.recipient_id,
   recipientRole: row.recipient_role,
@@ -247,10 +247,10 @@ class Ledger {
     return this.#db.prepare('PRAGMA integrity_check').get().integrity_check
   }
 
-  // --- sessions and participants ---------------------------------------------
+  // --- projects and participants ---------------------------------------------
 
-  /** A session with its lead and, when given, its team (the last session's, usually). */
-  createSession({ directory, name, lead, team = [] }) {
+  /** A project with its lead and, when given, its team (the last project's, usually). */
+  createProject({ directory, name, lead, team = [] }) {
     requireText(directory, 'directory', 4096)
     requireText(name, 'name', 100)
     requireHarness(lead?.harness)
@@ -259,7 +259,7 @@ class Ledger {
       const at = this.#at()
       const { lastInsertRowid: id } = this.#db
         .prepare(
-          `INSERT INTO session (directory, name, state, created_at, updated_at)
+          `INSERT INTO project (directory, name, state, created_at, updated_at)
            VALUES (?, ?, 'open', ?, ?)`,
         )
         .run(directory, name, at, at)
@@ -268,13 +268,13 @@ class Ledger {
       for (const { agent, harness, role } of team) {
         this.#addParticipant(id, { handle: agent, role, agent, harness })
       }
-      this.#log(id, 'session.created', { name, directory })
-      return this.session(id)
+      this.#log(id, 'project.created', { name, directory })
+      return this.project(id)
     })
   }
 
-  session(id) {
-    const row = this.#db.prepare('SELECT * FROM session WHERE id = ?').get(id)
+  project(id) {
+    const row = this.#db.prepare('SELECT * FROM project WHERE id = ?').get(id)
     if (row === undefined) return null
     return {
       id: row.id,
@@ -285,90 +285,90 @@ class Ledger {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       participants: this.#db
-        .prepare('SELECT * FROM participant WHERE session_id = ? AND left_at IS NULL ORDER BY id')
+        .prepare('SELECT * FROM participant WHERE project_id = ? AND left_at IS NULL ORDER BY id')
         .all(id)
         .map(participantView),
     }
   }
 
-  sessions() {
+  projects() {
     return this.#db
-      .prepare('SELECT id FROM session ORDER BY id')
+      .prepare('SELECT id FROM project ORDER BY id')
       .all()
-      .map((row) => this.session(row.id))
+      .map((row) => this.project(row.id))
   }
 
-  /** Open or suspend a session by hand; either way it is no longer due a resume. */
-  setSessionState(id, state) {
+  /** Open or suspend a project by hand; either way it is no longer due a resume. */
+  setProjectState(id, state) {
     if (state !== 'open' && state !== 'suspended') {
-      throw new LedgerError('invalid-state', `a session is open or suspended, not ${state}`)
+      throw new LedgerError('invalid-state', `a project is open or suspended, not ${state}`)
     }
     return this.#write(() => {
-      const from = this.#sessionRow(id).state
+      const from = this.#projectRow(id).state
       this.#db
-        .prepare('UPDATE session SET state = ?, resume_on_start = 0, updated_at = ? WHERE id = ?')
+        .prepare('UPDATE project SET state = ?, resume_on_start = 0, updated_at = ? WHERE id = ?')
         .run(state, this.#at(), id)
-      if (from !== state) this.#log(id, 'session.state', { from, to: state })
-      return this.session(id)
+      if (from !== state) this.#log(id, 'project.state', { from, to: state })
+      return this.project(id)
     })
   }
 
   /**
-   * At daemon start: the panes of every open session died with the previous
+   * At daemon start: the panes of every open project died with the previous
    * process, so each becomes suspended and is marked to come back by itself.
    */
   suspendForRestart() {
     return this.#write(() => {
-      const open = this.#db.prepare(`SELECT id FROM session WHERE state = 'open' ORDER BY id`).all()
+      const open = this.#db.prepare(`SELECT id FROM project WHERE state = 'open' ORDER BY id`).all()
       for (const { id } of open) {
         this.#db
           .prepare(
-            `UPDATE session SET state = 'suspended', resume_on_start = 1, updated_at = ?
+            `UPDATE project SET state = 'suspended', resume_on_start = 1, updated_at = ?
              WHERE id = ?`,
           )
           .run(this.#at(), id)
-        this.#log(id, 'session.state', { from: 'open', to: 'suspended', resumeOnStart: true })
+        this.#log(id, 'project.state', { from: 'open', to: 'suspended', resumeOnStart: true })
       }
-      return open.map(({ id }) => this.session(id))
+      return open.map(({ id }) => this.project(id))
     })
   }
 
   /** A resume on start is tried once: after it, success or not, the mark goes. */
   forgetResume(id) {
     return this.#write(() => {
-      this.#sessionRow(id)
-      this.#db.prepare('UPDATE session SET resume_on_start = 0 WHERE id = ?').run(id)
+      this.#projectRow(id)
+      this.#db.prepare('UPDATE project SET resume_on_start = 0 WHERE id = ?').run(id)
     })
   }
 
-  deleteSession(id) {
+  deleteProject(id) {
     return this.#write(() => {
-      this.#sessionRow(id)
-      this.#db.prepare('DELETE FROM session WHERE id = ?').run(id)
+      this.#projectRow(id)
+      this.#db.prepare('DELETE FROM project WHERE id = ?').run(id)
     })
   }
 
   /** A member joins the team, or rejoins it in the role and harness given now. */
-  addMember(sessionId, { agent, harness, role }) {
+  addMember(projectId, { agent, harness, role }) {
     requireMember({ agent, harness, role })
     return this.#write(() => {
       const left = this.#db
         .prepare(
-          'SELECT * FROM participant WHERE session_id = ? AND handle = ? AND left_at IS NOT NULL',
+          'SELECT * FROM participant WHERE project_id = ? AND handle = ? AND left_at IS NOT NULL',
         )
-        .get(sessionId, agent)
+        .get(projectId, agent)
       let member
       if (left === undefined) {
-        member = this.#addParticipant(sessionId, { handle: agent, role, agent, harness })
+        member = this.#addParticipant(projectId, { handle: agent, role, agent, harness })
       } else {
         this.#db
           .prepare('UPDATE participant SET role = ?, harness = ?, left_at = NULL WHERE id = ?')
           .run(role, harness, left.id)
-        this.#log(sessionId, 'member.added', { handle: agent, role, harness, rejoined: true })
+        this.#log(projectId, 'member.added', { handle: agent, role, harness, rejoined: true })
         member = participantView(this.#participantRow(left.id))
       }
       this.#tellIfRunning(
-        sessionId,
+        projectId,
         COORDINATOR_OF[role],
         `@${agent} joined the team as ${MEMBER_ROLE_NAMES[role]}. Give it work with: cf task add @${agent} "…"`,
       )
@@ -381,13 +381,13 @@ class Ledger {
    * still on their way to it and its unread questions; its coordinator and
    * whoever asked for those tasks are told, if their windows run.
    */
-  removeMember(sessionId, handle) {
+  removeMember(projectId, handle) {
     return this.#write(() => {
-      const member = this.#participantByHandle(sessionId, handle)
+      const member = this.#participantByHandle(projectId, handle)
       if (!MEMBER_ROLES.includes(member.role)) {
         throw new LedgerError(
           'not-a-member',
-          `${handle} is the session's ${member.role}, not a member of its team`,
+          `${handle} is the project's ${member.role}, not a member of its team`,
           409,
         )
       }
@@ -411,7 +411,7 @@ class Ledger {
         .run(member.id, member.id)
       this.#db.prepare('UPDATE participant SET left_at = ? WHERE id = ?').run(this.#at(), member.id)
       const cancelled = open.map((task) => task.number)
-      this.#log(sessionId, 'member.left', { handle, cancelled })
+      this.#log(projectId, 'member.left', { handle, cancelled })
       const body = `@${handle} left the team; it takes no more tasks.${
         cancelled.length === 0
           ? ''
@@ -421,26 +421,26 @@ class Ledger {
         COORDINATOR_OF[member.role],
         ...open.map((task) => task.requester),
       ])) {
-        if (coordinator !== 'human') this.#tellIfRunning(sessionId, coordinator, body)
+        if (coordinator !== 'human') this.#tellIfRunning(projectId, coordinator, body)
       }
       return { member: participantView(this.#participantRow(member.id)), cancelled }
     })
   }
 
-  addPm(sessionId, { harness }) {
+  addPm(projectId, { harness }) {
     requireHarness(harness)
     return this.#write(() =>
-      this.#addParticipant(sessionId, { handle: 'pm', role: 'pm', agent: null, harness }),
+      this.#addParticipant(projectId, { handle: 'pm', role: 'pm', agent: null, harness }),
     )
   }
 
-  /** The members of the newest session that has any: the team a new session starts from. */
+  /** The members of the newest project that has any: the team a new project starts from. */
   lastTeam() {
     return this.#db
       .prepare(
         `SELECT agent, harness, role FROM participant
-         WHERE session_id = (
-           SELECT MAX(session_id) FROM participant
+         WHERE project_id = (
+           SELECT MAX(project_id) FROM participant
            WHERE role IN ('worker', 'advisor', 'reviewer') AND left_at IS NULL
          ) AND role IN ('worker', 'advisor', 'reviewer') AND left_at IS NULL
          ORDER BY id`,
@@ -465,7 +465,7 @@ class Ledger {
       const { lastInsertRowid: id } = this.#db
         .prepare('INSERT INTO conversation (participant_id, harness, started_at) VALUES (?, ?, ?)')
         .run(participantId, harness, at)
-      this.#log(participant.session_id, 'conversation.started', {
+      this.#log(participant.project_id, 'conversation.started', {
         participant: participant.handle,
         conversation: id,
       })
@@ -494,7 +494,7 @@ class Ledger {
         .prepare('UPDATE conversation SET native_session = ? WHERE id = ?')
         .run(nativeSession, conversationId)
       const participant = this.#participantRow(conversation.participantId)
-      this.#log(participant.session_id, 'conversation.bound', {
+      this.#log(participant.project_id, 'conversation.bound', {
         conversation: conversationId,
         nativeSession,
       })
@@ -510,7 +510,7 @@ class Ledger {
         .prepare('UPDATE conversation SET ended_at = ? WHERE id = ?')
         .run(this.#at(), conversationId)
       const participant = this.#participantRow(conversation.participantId)
-      this.#log(participant.session_id, 'conversation.ended', { conversation: conversationId })
+      this.#log(participant.project_id, 'conversation.ended', { conversation: conversationId })
       return this.#conversation(conversationId)
     })
   }
@@ -526,31 +526,31 @@ class Ledger {
   // --- tasks and messages ------------------------------------------------------
 
   /** Creates the card and queues it for its assignee, in one step. */
-  createTask(sessionId, { from, to, body, title }) {
+  createTask(projectId, { from, to, body, title }) {
     requireText(body, 'body', MAX_BODY)
     if (title !== undefined) requireText(title, 'title', MAX_TITLE)
     return this.#write(() => {
-      const requester = this.#participantByHandle(sessionId, from)
-      const assignee = this.#participantByHandle(sessionId, to)
+      const requester = this.#participantByHandle(projectId, from)
+      const assignee = this.#participantByHandle(projectId, to)
       const { next } = this.#db
-        .prepare('SELECT COALESCE(MAX(number), 0) + 1 AS next FROM task WHERE session_id = ?')
-        .get(sessionId)
+        .prepare('SELECT COALESCE(MAX(number), 0) + 1 AS next FROM task WHERE project_id = ?')
+        .get(projectId)
       const at = this.#at()
       const { lastInsertRowid: taskId } = this.#db
         .prepare(
-          `INSERT INTO task (session_id, number, title, body, requester_id, assignee_id, state,
+          `INSERT INTO task (project_id, number, title, body, requester_id, assignee_id, state,
                              created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
         )
-        .run(sessionId, next, title ?? titleOf(body), body, requester.id, assignee.id, at, at)
-      const messageId = this.#queue(sessionId, {
+        .run(projectId, next, title ?? titleOf(body), body, requester.id, assignee.id, at, at)
+      const messageId = this.#queue(projectId, {
         to: assignee.id,
         from: requester.id,
         kind: 'task',
         taskId,
         body,
       })
-      this.#log(sessionId, 'task.created', {
+      this.#log(projectId, 'task.created', {
         task: next,
         from: requester.handle,
         to: assignee.handle,
@@ -560,20 +560,20 @@ class Ledger {
     })
   }
 
-  note(sessionId, { from, to, body, task }) {
-    return this.#send(sessionId, { from, to, body, task, kind: 'note' })
+  note(projectId, { from, to, body, task }) {
+    return this.#send(projectId, { from, to, body, task, kind: 'note' })
   }
 
   /** A question for a coordinator or the human; the asker's task waits for the answer. */
-  ask(sessionId, { from, to, body, task }) {
+  ask(projectId, { from, to, body, task }) {
     if (from === undefined) {
       throw new LedgerError('unknown-participant', 'a question names who asks it', 400)
     }
     return this.#write(() => {
-      const message = this.#send(sessionId, { from, to, body, task, kind: 'question' })
+      const message = this.#send(projectId, { from, to, body, task, kind: 'question' })
       if (task !== undefined) {
-        const row = this.#taskRow(sessionId, task)
-        const asker = this.#participantByHandle(sessionId, from)
+        const row = this.#taskRow(projectId, task)
+        const asker = this.#participantByHandle(projectId, from)
         if (row.assignee_id === asker.id && row.state === 'working') {
           this.#moveTask(row, 'waiting')
         }
@@ -597,12 +597,12 @@ class Ledger {
           403,
         )
       }
-      const answerer = this.#participantByHandle(question.sessionId, from)
+      const answerer = this.#participantByHandle(question.projectId, from)
       const asker = this.#db
         .prepare('SELECT sender_id, task_id FROM message WHERE id = ?')
         .get(questionId)
       requireActive(this.#participantRow(asker.sender_id))
-      const id = this.#queue(question.sessionId, {
+      const id = this.#queue(question.projectId, {
         to: asker.sender_id,
         from: answerer.id,
         kind: 'answer',
@@ -610,7 +610,7 @@ class Ledger {
         replyTo: questionId,
         body,
       })
-      this.#log(question.sessionId, 'message.sent', {
+      this.#log(question.projectId, 'message.sent', {
         message: id,
         kind: 'answer',
         from,
@@ -670,7 +670,7 @@ class Ledger {
            WHERE id = ?`,
         )
         .run(messageId)
-      this.#log(message.sessionId, 'delivery.begun', {
+      this.#log(message.projectId, 'delivery.begun', {
         message: messageId,
         attempt: message.attempts + 1,
       })
@@ -687,7 +687,7 @@ class Ledger {
           `UPDATE message SET state = 'delivered', delivered_at = ?, receipt = ? WHERE id = ?`,
         )
         .run(this.#at(), JSON.stringify(receipt ?? null), messageId)
-      this.#log(message.sessionId, 'delivery.confirmed', { message: messageId })
+      this.#log(message.projectId, 'delivery.confirmed', { message: messageId })
       const task = this.#messageTask(messageId)
       if (task !== undefined) {
         if (message.kind === 'task' && task.state === 'queued') this.#moveTask(task, 'working')
@@ -704,7 +704,7 @@ class Ledger {
       this.#db
         .prepare(`UPDATE message SET state = 'queued', reason = ? WHERE id = ?`)
         .run(reason, messageId)
-      this.#log(message.sessionId, 'delivery.retried', { message: messageId, reason })
+      this.#log(message.projectId, 'delivery.retried', { message: messageId, reason })
       return this.#message(messageId)
     })
   }
@@ -716,7 +716,7 @@ class Ledger {
       this.#db
         .prepare(`UPDATE message SET state = 'failed', reason = ? WHERE id = ?`)
         .run(reason, messageId)
-      this.#log(message.sessionId, 'delivery.failed', { message: messageId, reason })
+      this.#log(message.projectId, 'delivery.failed', { message: messageId, reason })
       const task = this.#messageTask(messageId)
       if (message.kind === 'task' && task !== undefined && task.state === 'queued') {
         this.#moveTask(task, 'failed')
@@ -742,7 +742,7 @@ class Ledger {
       this.#db
         .prepare(`UPDATE message SET state = 'read', delivered_at = ? WHERE id = ?`)
         .run(this.#at(), messageId)
-      this.#log(message.sessionId, 'message.read', { message: messageId })
+      this.#log(message.projectId, 'message.read', { message: messageId })
       const task = this.#messageTask(messageId)
       if (message.kind === 'task' && task?.state === 'queued') this.#moveTask(task, 'working')
       return this.#message(messageId)
@@ -750,12 +750,12 @@ class Ledger {
   }
 
   /** The assignee's answer finishes the task and is queued for whoever asked for it. */
-  recordResult(sessionId, number, { body }) {
+  recordResult(projectId, number, { body }) {
     requireText(body, 'body', MAX_BODY)
     return this.#write(() => {
-      const task = this.#taskRow(sessionId, number)
+      const task = this.#taskRow(projectId, number)
       this.#requireTaskState(task, ACTIVE_TASK_STATES, 'record a result for')
-      const messageId = this.#queue(sessionId, {
+      const messageId = this.#queue(projectId, {
         to: task.requester_id,
         from: task.assignee_id,
         kind: 'result',
@@ -767,10 +767,10 @@ class Ledger {
     })
   }
 
-  acceptTask(sessionId, number, { by }) {
+  acceptTask(projectId, number, { by }) {
     return this.#write(() => {
-      this.#participantByHandle(sessionId, by)
-      const task = this.#taskRow(sessionId, number)
+      this.#participantByHandle(projectId, by)
+      const task = this.#taskRow(projectId, number)
       this.#requireTaskState(task, ['done'], 'accept')
       this.#moveTask(task, 'accepted', { by })
       return this.#task(task.id)
@@ -778,14 +778,14 @@ class Ledger {
   }
 
   /** A follow-up on a finished or failed task: it goes back to its assignee's queue. */
-  reopenTask(sessionId, number, { by, body }) {
+  reopenTask(projectId, number, { by, body }) {
     requireText(body, 'body', MAX_BODY)
     return this.#write(() => {
-      const author = this.#participantByHandle(sessionId, by)
-      const task = this.#taskRow(sessionId, number)
+      const author = this.#participantByHandle(projectId, by)
+      const task = this.#taskRow(projectId, number)
       this.#requireTaskState(task, ['done', 'failed'], 'reopen')
       requireActive(this.#participantRow(task.assignee_id))
-      const messageId = this.#queue(sessionId, {
+      const messageId = this.#queue(projectId, {
         to: task.assignee_id,
         from: author.id,
         kind: 'task',
@@ -797,10 +797,10 @@ class Ledger {
     })
   }
 
-  cancelTask(sessionId, number, { by }) {
+  cancelTask(projectId, number, { by }) {
     return this.#write(() => {
-      this.#participantByHandle(sessionId, by)
-      const task = this.#taskRow(sessionId, number)
+      this.#participantByHandle(projectId, by)
+      const task = this.#taskRow(projectId, number)
       this.#requireTaskState(task, ['queued', ...ACTIVE_TASK_STATES], 'cancel')
       this.#dropQueued(task.id)
       this.#moveTask(task, 'cancelled', { by })
@@ -809,10 +809,10 @@ class Ledger {
   }
 
   /** The daemon gives up on a task: its pane died, or its launch never came up. */
-  failTask(sessionId, number, { reason }) {
+  failTask(projectId, number, { reason }) {
     requireText(reason, 'reason', 1000)
     return this.#write(() => {
-      const task = this.#taskRow(sessionId, number)
+      const task = this.#taskRow(projectId, number)
       this.#requireTaskState(task, ['queued', ...ACTIVE_TASK_STATES], 'fail')
       this.#dropQueued(task.id)
       this.#moveTask(task, 'failed', { reason })
@@ -822,16 +822,16 @@ class Ledger {
 
   // --- views -------------------------------------------------------------------
 
-  board(sessionId) {
-    const session = this.session(sessionId)
-    if (session === null) throw new LedgerError('unknown-session', `no session ${sessionId}`, 404)
+  board(projectId) {
+    const project = this.project(projectId)
+    if (project === null) throw new LedgerError('unknown-project', `no project ${projectId}`, 404)
     const tasks = this.#db
-      .prepare(`${TASK_SELECT} WHERE t.session_id = ? ORDER BY t.number`)
-      .all(sessionId)
+      .prepare(`${TASK_SELECT} WHERE t.project_id = ? ORDER BY t.number`)
+      .all(projectId)
       .map(taskView)
     return {
-      session,
-      lanes: session.participants.map((participant) => ({
+      project,
+      lanes: project.participants.map((participant) => ({
         participant,
         tasks: tasks.filter((task) => task.assignee === participant.handle),
       })),
@@ -839,10 +839,10 @@ class Ledger {
   }
 
   /** A task and its whole thread, oldest first; null when there is no such task. */
-  task(sessionId, number) {
+  task(projectId, number) {
     const row = this.#db
-      .prepare(`${TASK_SELECT} WHERE t.session_id = ? AND t.number = ?`)
-      .get(sessionId, number)
+      .prepare(`${TASK_SELECT} WHERE t.project_id = ? AND t.number = ?`)
+      .get(projectId, number)
     if (row === undefined) return null
     return {
       ...taskView(row),
@@ -862,11 +862,11 @@ class Ledger {
   activeTask(participantId) {
     const row = this.#db
       .prepare(
-        `SELECT session_id, number FROM task
+        `SELECT project_id, number FROM task
          WHERE assignee_id = ? AND state IN ('working', 'waiting') ORDER BY id LIMIT 1`,
       )
       .get(participantId)
-    return row === undefined ? null : this.task(row.session_id, row.number)
+    return row === undefined ? null : this.task(row.project_id, row.number)
   }
 
   inbox(participantId, { limit = 100 } = {}) {
@@ -876,13 +876,13 @@ class Ledger {
       .map(messageView)
   }
 
-  events(sessionId, { after = 0, limit = 500 } = {}) {
+  events(projectId, { after = 0, limit = 500 } = {}) {
     return this.#db
-      .prepare('SELECT * FROM event WHERE session_id = ? AND id > ? ORDER BY id LIMIT ?')
-      .all(sessionId, after, limit)
+      .prepare('SELECT * FROM event WHERE project_id = ? AND id > ? ORDER BY id LIMIT ?')
+      .all(projectId, after, limit)
       .map((row) => ({
         id: row.id,
-        sessionId: row.session_id,
+        projectId: row.project_id,
         at: row.at,
         kind: row.kind,
         data: JSON.parse(row.data),
@@ -909,15 +909,15 @@ class Ledger {
     return this.#now().toISOString()
   }
 
-  #log(sessionId, kind, data) {
+  #log(projectId, kind, data) {
     this.#db
-      .prepare('INSERT INTO event (session_id, at, kind, data) VALUES (?, ?, ?, ?)')
-      .run(sessionId, this.#at(), kind, JSON.stringify(data))
+      .prepare('INSERT INTO event (project_id, at, kind, data) VALUES (?, ?, ?, ?)')
+      .run(projectId, this.#at(), kind, JSON.stringify(data))
   }
 
-  #sessionRow(id) {
-    const row = this.#db.prepare('SELECT * FROM session WHERE id = ?').get(id)
-    if (row === undefined) throw new LedgerError('unknown-session', `no session ${id}`, 404)
+  #projectRow(id) {
+    const row = this.#db.prepare('SELECT * FROM project WHERE id = ?').get(id)
+    if (row === undefined) throw new LedgerError('unknown-project', `no project ${id}`, 404)
     return row
   }
 
@@ -927,37 +927,37 @@ class Ledger {
     return row
   }
 
-  #participantByHandle(sessionId, handle) {
-    this.#sessionRow(sessionId)
+  #participantByHandle(projectId, handle) {
+    this.#projectRow(projectId)
     const row = this.#db
-      .prepare('SELECT * FROM participant WHERE session_id = ? AND handle = ?')
-      .get(sessionId, handle)
+      .prepare('SELECT * FROM participant WHERE project_id = ? AND handle = ?')
+      .get(projectId, handle)
     if (row === undefined) {
       throw new LedgerError(
         'unknown-participant',
-        `${JSON.stringify(handle)} is not in session ${sessionId}`,
+        `${JSON.stringify(handle)} is not in project ${projectId}`,
         404,
       )
     }
     return requireActive(row)
   }
 
-  #addParticipant(sessionId, { handle, role, agent, harness }) {
-    this.#sessionRow(sessionId)
+  #addParticipant(projectId, { handle, role, agent, harness }) {
+    this.#projectRow(projectId)
     const taken = this.#db
-      .prepare('SELECT 1 FROM participant WHERE session_id = ? AND handle = ?')
-      .get(sessionId, handle)
+      .prepare('SELECT 1 FROM participant WHERE project_id = ? AND handle = ?')
+      .get(projectId, handle)
     if (taken !== undefined) {
-      throw new LedgerError('member-exists', `${handle} is already in session ${sessionId}`, 409)
+      throw new LedgerError('member-exists', `${handle} is already in project ${projectId}`, 409)
     }
     const { lastInsertRowid: id } = this.#db
       .prepare(
-        `INSERT INTO participant (session_id, handle, role, agent, harness, created_at)
+        `INSERT INTO participant (project_id, handle, role, agent, harness, created_at)
          VALUES (?, ?, ?, ?, ?, ?)`,
       )
-      .run(sessionId, handle, role, agent, harness, this.#at())
+      .run(projectId, handle, role, agent, harness, this.#at())
     if (role !== 'human' && role !== 'lead') {
-      this.#log(sessionId, 'member.added', { handle, role, harness })
+      this.#log(projectId, 'member.added', { handle, role, harness })
     }
     return participantView(this.#participantRow(id))
   }
@@ -967,39 +967,39 @@ class Ledger {
   }
 
   /** A note from ConsensFlow, for a participant whose window has already started. */
-  #tellIfRunning(sessionId, handle, body) {
+  #tellIfRunning(projectId, handle, body) {
     const row = this.#db
-      .prepare('SELECT id FROM participant WHERE session_id = ? AND handle = ? AND left_at IS NULL')
-      .get(sessionId, handle)
+      .prepare('SELECT id FROM participant WHERE project_id = ? AND handle = ? AND left_at IS NULL')
+      .get(projectId, handle)
     if (row === undefined || this.currentConversation(row.id) === null) return
-    this.#send(sessionId, { to: handle, body, kind: 'note' })
+    this.#send(projectId, { to: handle, body, kind: 'note' })
   }
 
-  #queue(sessionId, { to, from, kind, taskId = null, replyTo = null, body }) {
+  #queue(projectId, { to, from, kind, taskId = null, replyTo = null, body }) {
     const { lastInsertRowid: id } = this.#db
       .prepare(
-        `INSERT INTO message (session_id, recipient_id, sender_id, kind, task_id, reply_to, body,
+        `INSERT INTO message (project_id, recipient_id, sender_id, kind, task_id, reply_to, body,
                               state, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?)`,
       )
-      .run(sessionId, to, from, kind, taskId, replyTo, body, this.#at())
+      .run(projectId, to, from, kind, taskId, replyTo, body, this.#at())
     return id
   }
 
-  #send(sessionId, { from, to, body, task, kind }) {
+  #send(projectId, { from, to, body, task, kind }) {
     requireText(body, 'body', MAX_BODY)
     return this.#write(() => {
-      const sender = from === undefined ? null : this.#participantByHandle(sessionId, from)
-      const recipient = this.#participantByHandle(sessionId, to)
-      const taskId = task === undefined ? null : this.#taskRow(sessionId, task).id
-      const id = this.#queue(sessionId, {
+      const sender = from === undefined ? null : this.#participantByHandle(projectId, from)
+      const recipient = this.#participantByHandle(projectId, to)
+      const taskId = task === undefined ? null : this.#taskRow(projectId, task).id
+      const id = this.#queue(projectId, {
         to: recipient.id,
         from: sender?.id ?? null,
         kind,
         taskId,
         body,
       })
-      this.#log(sessionId, 'message.sent', {
+      this.#log(projectId, 'message.sent', {
         message: id,
         kind,
         from: sender?.handle ?? null,
@@ -1037,12 +1037,12 @@ class Ledger {
     return taskView(this.#db.prepare(`${TASK_SELECT} WHERE t.id = ?`).get(id))
   }
 
-  #taskRow(sessionId, number) {
+  #taskRow(projectId, number) {
     const row = this.#db
-      .prepare('SELECT * FROM task WHERE session_id = ? AND number = ?')
-      .get(sessionId, number)
+      .prepare('SELECT * FROM task WHERE project_id = ? AND number = ?')
+      .get(projectId, number)
     if (row === undefined) {
-      throw new LedgerError('unknown-task', `no task T-${number} in session ${sessionId}`, 404)
+      throw new LedgerError('unknown-task', `no task T-${number} in project ${projectId}`, 404)
     }
     return row
   }
@@ -1061,7 +1061,7 @@ class Ledger {
     this.#db
       .prepare('UPDATE task SET state = ?, updated_at = ? WHERE id = ?')
       .run(to, this.#at(), task.id)
-    this.#log(task.session_id, 'task.state', { task: task.number, from: task.state, to, ...detail })
+    this.#log(task.project_id, 'task.state', { task: task.number, from: task.state, to, ...detail })
   }
 
   /** A cancelled or failed task's queued messages are never delivered. */

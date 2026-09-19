@@ -15,7 +15,7 @@ import { roleInstructions } from './roles.js'
  * The new core's daemon: the one process that owns ConsensFlow's state.
  *
  * It opens the ledger (whose lock refuses a second daemon on the same home),
- * marks the sessions that were open for a resume, starts the agents' API,
+ * marks the projects that were open for a resume, starts the agents' API,
  * prints its handle line for the app, then speaks the bridge on stdin/stdout:
  * the pane host's requests and events come in, pane operations go out, and the
  * page's requests are answered here. The dispatcher runs once a second and
@@ -69,11 +69,11 @@ export async function startCore(
     adapters: createAdapters(env, { peer }),
     credentials,
     roster: (agent) => agentRow(agent, env) ?? null,
-    roles: (participant, session) =>
-      roleInstructions(participant.role, teamOf(session, participant, env)),
-    paneEnv: (participant, session) => ({
+    roles: (participant, project) =>
+      roleInstructions(participant.role, teamOf(project, participant, env)),
+    paneEnv: (participant, project) => ({
       CONSENSFLOW_URL: api.url,
-      CONSENSFLOW_SESSION: String(session.id),
+      CONSENSFLOW_PROJECT: String(project.id),
       CONSENSFLOW_PARTICIPANT: participant.handle,
       CONSENSFLOW_NODE: process.execPath,
       PATH: env.PATH ? `${BUNDLE_BIN}${delimiter}${env.PATH}` : BUNDLE_BIN,
@@ -97,7 +97,7 @@ export async function startCore(
     .resumeAfterRestart()
     .then((outcomes) => {
       for (const outcome of outcomes) {
-        if (!outcome.resumed) console.error(`consensflow resume ${outcome.session}:`, outcome.error)
+        if (!outcome.resumed) console.error(`consensflow resume ${outcome.project}:`, outcome.error)
       }
     })
     .finally(() => loop.kick())
@@ -105,10 +105,10 @@ export async function startCore(
 }
 
 /** The agents a coordinator chooses from: the lead's workers and reviewers, the PM's advisors. */
-function teamOf(session, participant, env) {
+function teamOf(project, participant, env) {
   const roles = { lead: ['worker', 'reviewer'], pm: ['advisor'] }[participant.role] ?? []
   const members = new Set(
-    session.participants
+    project.participants
       .filter((member) => roles.includes(member.role))
       .map((member) => member.agent),
   )

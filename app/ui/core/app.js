@@ -3,7 +3,7 @@ import { BoardView, element, TaskDrawer, teamOf } from './board.js'
 import { TerminalsView } from './terminals.js'
 
 /**
- * The page: the sessions on the left, the chosen session's board (or one
+ * The page: the projects on the left, the chosen project's board (or one
  * team's live windows: the lead's or the PM's) on the right. Everything it
  * shows comes from the new core through the app's `core_request`, and it
  * redraws when the core says something changed. It keeps nothing of its own
@@ -16,9 +16,9 @@ const listen = tauri.event?.listen
 const Channel = tauri.core?.Channel
 
 const $ = (selector) => document.querySelector(selector)
-const sessionList = $('#sessions')
-const sessionTitle = $('#session-title')
-const sessionDirectory = $('#session-directory')
+const projectList = $('#projects')
+const projectTitle = $('#project-title')
+const projectDirectory = $('#project-directory')
 const viewButtons = [...document.querySelectorAll('[data-view]')]
 const inboxButton = $('#inbox-button')
 const teamButton = $('#team-button')
@@ -27,7 +27,7 @@ const stage = $('#stage')
 const status = $('#status')
 
 const state = {
-  sessions: [],
+  projects: [],
   selected: null,
   board: null,
   inbox: [],
@@ -67,7 +67,7 @@ const board = new BoardView(boardRoot, {
   onGiveTask: (participant, text) =>
     act(async () => {
       const { task } = await core('task.add', {
-        session: state.selected,
+        project: state.selected,
         to: participant.handle,
         body: text,
       })
@@ -97,11 +97,11 @@ const drawer = new TaskDrawer($('#task-drawer'), {
     drawer.hide()
   },
   onAccept: (task) =>
-    act(() => core('task.accept', { session: state.selected, task: task.number })),
+    act(() => core('task.accept', { project: state.selected, task: task.number })),
   onReopen: (task, text) =>
-    act(() => core('task.reopen', { session: state.selected, task: task.number, body: text })),
+    act(() => core('task.reopen', { project: state.selected, task: task.number, body: text })),
   onCancel: (task) =>
-    act(() => core('task.cancel', { session: state.selected, task: task.number })),
+    act(() => core('task.cancel', { project: state.selected, task: task.number })),
 })
 
 const terminals = new TerminalsView(stage, $('#parking'), {
@@ -111,7 +111,7 @@ const terminals = new TerminalsView(stage, $('#parking'), {
 })
 
 async function openTask(number) {
-  const { task } = await core('task.get', { session: state.selected, task: number })
+  const { task } = await core('task.get', { project: state.selected, task: number })
   state.openTask = number
   drawer.show(task)
 }
@@ -125,18 +125,18 @@ async function refresh() {
   }
   refreshing = (async () => {
     try {
-      const { sessions } = await core('sessions.list')
-      state.sessions = sessions
-      if (!sessions.some((session) => session.id === state.selected)) {
-        state.selected = (sessions.find((s) => s.state === 'open') ?? sessions[0])?.id ?? null
+      const { projects } = await core('projects.list')
+      state.projects = projects
+      if (!projects.some((project) => project.id === state.selected)) {
+        state.selected = (projects.find((s) => s.state === 'open') ?? projects[0])?.id ?? null
       }
       if (state.selected === null) {
         state.board = null
         state.inbox = []
       } else {
         const [{ board: current }, { messages }] = await Promise.all([
-          core('board.get', { session: state.selected }),
-          core('inbox.get', { session: state.selected, participant: 'human' }),
+          core('board.get', { project: state.selected }),
+          core('inbox.get', { project: state.selected, participant: 'human' }),
         ])
         state.board = current
         state.inbox = messages
@@ -158,20 +158,20 @@ async function refresh() {
 }
 
 function render() {
-  renderSessions()
-  const session = state.sessions.find((s) => s.id === state.selected) ?? null
-  sessionTitle.textContent = session?.name ?? 'No session'
-  sessionDirectory.textContent = session?.directory ?? ''
+  renderProjects()
+  const project = state.projects.find((s) => s.id === state.selected) ?? null
+  projectTitle.textContent = project?.name ?? 'No project'
+  projectDirectory.textContent = project?.directory ?? ''
   const waiting = state.inbox.filter((message) => message.state === 'queued').length
   inboxButton.textContent = waiting === 0 ? 'Inbox' : `Inbox (${waiting})`
   inboxButton.dataset.waiting = String(waiting > 0)
-  teamButton.disabled = session === null
+  teamButton.disabled = project === null
   const lanes = state.board?.lanes ?? []
   const hasPm = lanes.some((lane) => lane.participant.role === 'pm')
   if (state.view === 'pm' && !hasPm) state.view = 'board'
   for (const control of viewButtons) {
     control.setAttribute('aria-pressed', String(control.dataset.view === state.view))
-    control.disabled = session === null
+    control.disabled = project === null
     if (control.dataset.view === 'pm') control.hidden = !hasPm
   }
   boardRoot.hidden = state.view !== 'board'
@@ -181,7 +181,7 @@ function render() {
       element(
         'p',
         'board-empty',
-        'Start a session to see its board: choose New session and pick the project folder.',
+        'Start a project to see its board: choose New project and pick the project folder.',
       ),
     )
   } else {
@@ -193,38 +193,38 @@ function render() {
   })
 }
 
-function renderSessions() {
-  const items = state.sessions.map((session) => {
-    const item = element('li', 'session')
-    item.dataset.state = session.state
-    const select = element('button', 'session-select')
+function renderProjects() {
+  const items = state.projects.map((project) => {
+    const item = element('li', 'project')
+    item.dataset.state = project.state
+    const select = element('button', 'project-select')
     select.type = 'button'
-    select.setAttribute('aria-current', String(session.id === state.selected))
+    select.setAttribute('aria-current', String(project.id === state.selected))
     select.append(
-      element('span', 'session-name', session.name),
-      element('span', 'session-state', session.state === 'open' ? 'Open' : 'Suspended'),
+      element('span', 'project-name', project.name),
+      element('span', 'project-state', project.state === 'open' ? 'Open' : 'Suspended'),
     )
     select.addEventListener('click', () => {
-      state.selected = session.id
+      state.selected = project.id
       state.focus = null
       state.openTask = null
       drawer.hide()
       void refresh()
     })
     item.append(select)
-    if (session.state !== 'open') {
+    if (project.state !== 'open') {
       const resume = element('button', 'quiet-button', 'Resume')
       resume.type = 'button'
-      resume.setAttribute('aria-label', `Resume ${session.name}`)
+      resume.setAttribute('aria-label', `Resume ${project.name}`)
       resume.addEventListener('click', () =>
-        act(() => core('session.resume', { session: session.id })),
+        act(() => core('project.resume', { project: project.id })),
       )
       item.append(resume)
     }
     return item
   })
-  if (items.length === 0) items.push(element('li', 'sessions-empty', 'No sessions yet.'))
-  sessionList.replaceChildren(...items)
+  if (items.length === 0) items.push(element('li', 'projects-empty', 'No projects yet.'))
+  projectList.replaceChildren(...items)
 }
 
 for (const control of viewButtons) {
@@ -240,10 +240,10 @@ inboxButton.addEventListener('click', () => {
   boardRoot.querySelector('[data-handle="human"]')?.scrollIntoView({ block: 'start' })
 })
 
-// New session: the native folder picker first, then the lead's harness.
-const newSessionDialog = $('#new-session-dialog')
-const newSessionForm = newSessionDialog.querySelector('form')
-$('#new-session').addEventListener('click', async () => {
+// New project: the native folder picker first, then the lead's harness.
+const newProjectDialog = $('#new-project-dialog')
+const newProjectForm = newProjectDialog.querySelector('form')
+$('#new-project').addEventListener('click', async () => {
   if (typeof tauri.dialog?.open !== 'function') {
     report('The folder picker is not available in this window.')
     return
@@ -255,28 +255,28 @@ $('#new-session').addEventListener('click', async () => {
       multiple: false,
     })
     if (typeof directory !== 'string' || directory.length === 0) return
-    newSessionForm.elements.directory.value = directory
-    newSessionDialog.showModal()
+    newProjectForm.elements.directory.value = directory
+    newProjectDialog.showModal()
   } catch (cause) {
     report(cause)
   }
 })
-newSessionForm.addEventListener('submit', (event) => {
+newProjectForm.addEventListener('submit', (event) => {
   event.preventDefault()
-  const directory = newSessionForm.elements.directory.value
-  const harness = newSessionForm.elements.harness.value
-  newSessionDialog.close()
+  const directory = newProjectForm.elements.directory.value
+  const harness = newProjectForm.elements.harness.value
+  newProjectDialog.close()
   void act(async () => {
-    const { session } = await core('session.open', { directory, harness })
-    state.selected = session.id
+    const { project } = await core('project.open', { directory, harness })
+    state.selected = project.id
     state.view = 'board'
   })
 })
-newSessionDialog
+newProjectDialog
   .querySelector('[value="cancel"]')
-  .addEventListener('click', () => newSessionDialog.close())
+  .addEventListener('click', () => newProjectDialog.close())
 
-// The session team: who the coordinators may hand work to, and the PM.
+// The project team: who the coordinators may hand work to, and the PM.
 const teamDialog = $('#team-dialog')
 const teamForm = teamDialog.querySelector('form')
 const teamList = $('#team-members')
@@ -292,7 +292,7 @@ function renderTeam() {
   teamList.replaceChildren(
     ...(members.length
       ? members.map((lane) => memberRow(lane.participant))
-      : [element('li', 'team-empty', 'Nobody yet: add the agents this session may use.')]),
+      : [element('li', 'team-empty', 'Nobody yet: add the agents this project may use.')]),
   )
   const pm = lanes.find((lane) => lane.participant.role === 'pm')
   pmState.textContent =
@@ -343,7 +343,7 @@ function memberRow(member) {
   yes.type = 'button'
   yes.addEventListener('click', () =>
     act(async () => {
-      await core('member.remove', { session: state.selected, agent: member.handle })
+      await core('member.remove', { project: state.selected, agent: member.handle })
       removing = null
       note(`${name} left the team.`)
     }),
@@ -366,7 +366,7 @@ teamButton.addEventListener('click', () =>
 )
 $('#add-pm').addEventListener('click', () =>
   act(async () => {
-    await core('pm.add', { session: state.selected, harness: teamForm.elements.pmHarness.value })
+    await core('pm.add', { project: state.selected, harness: teamForm.elements.pmHarness.value })
     note('The PM is on the team. Its window opens with its first task.')
   }),
 )
@@ -376,7 +376,7 @@ teamForm.addEventListener('submit', (event) => {
   const role = teamForm.elements.role.value
   teamDialog.close()
   void act(async () => {
-    await core('member.add', { session: state.selected, agent, role })
+    await core('member.add', { project: state.selected, agent, role })
     note(`@${agent} joined the team as ${role}.`)
   })
 })
@@ -422,7 +422,7 @@ async function start() {
       tabs: state.board
         ? [
             {
-              name: state.board.session.name,
+              name: state.board.project.name,
               panes: state.board.lanes
                 .filter((lane) => lane.pane !== null)
                 .map((lane) => ({ ...lane.pane, name: `@${lane.participant.handle}` })),

@@ -14,10 +14,10 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
     return value
   }
   return {
-    'sessions.list': async () => ({ sessions: ledger.sessions() }),
+    'projects.list': async () => ({ projects: ledger.projects() }),
 
-    'session.open': change(async ({ directory, name, harness }) => ({
-      session: await dispatcher.openSession({
+    'project.open': change(async ({ directory, name, harness }) => ({
+      project: await dispatcher.openProject({
         directory,
         name: name ?? basename(directory),
         harness,
@@ -25,26 +25,26 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       }),
     })),
 
-    'session.resume': change(async ({ session }) => ({
-      session: await dispatcher.resumeSession(session),
+    'project.resume': change(async ({ project }) => ({
+      project: await dispatcher.resumeProject(project),
     })),
 
     'agents.list': async () => ({ agents: listAgents(env) }),
 
-    'member.add': change(async ({ session, agent, role = 'worker' }) => {
+    'member.add': change(async ({ project, agent, role = 'worker' }) => {
       const row = agentRow(agent, env)
       if (!row) throw new Error(`no agent named ${agent} in your agents`)
-      return { member: ledger.addMember(session, { agent, harness: row.kind, role }) }
+      return { member: ledger.addMember(project, { agent, harness: row.kind, role }) }
     }),
 
-    'member.remove': change(async ({ session, agent }) => dispatcher.removeMember(session, agent)),
+    'member.remove': change(async ({ project, agent }) => dispatcher.removeMember(project, agent)),
 
-    'pm.add': change(async ({ session, harness }) => ({
-      member: ledger.addPm(session, { harness }),
+    'pm.add': change(async ({ project, harness }) => ({
+      member: ledger.addPm(project, { harness }),
     })),
 
-    'board.get': async ({ session }) => {
-      const board = ledger.board(session)
+    'board.get': async ({ project }) => {
+      const board = ledger.board(project)
       return {
         board: {
           ...board,
@@ -57,32 +57,32 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       }
     },
 
-    'inbox.get': async ({ session, participant = 'human' }) => {
-      const owner = ledger.session(session)?.participants.find((p) => p.handle === participant)
-      if (owner === undefined) throw new Error(`${participant} is not in session ${session}`)
+    'inbox.get': async ({ project, participant = 'human' }) => {
+      const owner = ledger.project(project)?.participants.find((p) => p.handle === participant)
+      if (owner === undefined) throw new Error(`${participant} is not in project ${project}`)
       return { messages: ledger.inbox(owner.id) }
     },
 
-    'task.get': async ({ session, task }) => {
-      const found = ledger.task(session, task)
-      if (found === null) throw new Error(`no task T-${task} in this session`)
+    'task.get': async ({ project, task }) => {
+      const found = ledger.task(project, task)
+      if (found === null) throw new Error(`no task T-${task} in this project`)
       return { task: found }
     },
 
-    'task.add': change(async ({ session, to, body, title }) =>
-      ledger.createTask(session, { from: 'human', to, body, title }),
+    'task.add': change(async ({ project, to, body, title }) =>
+      ledger.createTask(project, { from: 'human', to, body, title }),
     ),
 
-    'task.accept': change(async ({ session, task }) => ({
-      task: ledger.acceptTask(session, task, { by: 'human' }),
+    'task.accept': change(async ({ project, task }) => ({
+      task: ledger.acceptTask(project, task, { by: 'human' }),
     })),
 
-    'task.reopen': change(async ({ session, task, body }) =>
-      ledger.reopenTask(session, task, { by: 'human', body }),
+    'task.reopen': change(async ({ project, task, body }) =>
+      ledger.reopenTask(project, task, { by: 'human', body }),
     ),
 
-    'task.cancel': change(async ({ session, task }) => ({
-      task: ledger.cancelTask(session, task, { by: 'human' }),
+    'task.cancel': change(async ({ project, task }) => ({
+      task: ledger.cancelTask(project, task, { by: 'human' }),
     })),
 
     'message.read': change(async ({ message }) => ({ message: ledger.markRead(message) })),
@@ -93,7 +93,7 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
   }
 }
 
-/** The last session's team for a new one: members whose agents are still saved, on their harness now. */
+/** The last project's team for a new one: members whose agents are still saved, on their harness now. */
 function lastTeamNow(ledger, env) {
   return ledger.lastTeam().flatMap(({ agent, role }) => {
     const row = agentRow(agent, env)

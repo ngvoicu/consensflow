@@ -52,7 +52,7 @@ test.afterAll(async () => {
 const at = (minutesAgo) => new Date(Date.now() - minutesAgo * 60_000).toISOString()
 const participant = (id, handle, role, extra = {}) => ({
   id,
-  sessionId: 1,
+  projectId: 1,
   handle,
   role,
   agent: role === 'human' || role === 'lead' || role === 'pm' ? null : handle,
@@ -61,7 +61,7 @@ const participant = (id, handle, role, extra = {}) => ({
 })
 const task = (number, title, state, requester, assignee, minutesAgo = 3) => ({
   id: number,
-  sessionId: 1,
+  projectId: 1,
   number,
   title,
   body: title,
@@ -74,7 +74,7 @@ const task = (number, title, state, requester, assignee, minutesAgo = 3) => ({
 
 function model() {
   return {
-    sessions: [
+    projects: [
       { id: 1, name: 'harbour', directory: '/work/harbour', state: 'open', resumeOnStart: false },
       {
         id: 2,
@@ -91,7 +91,7 @@ function model() {
     ],
     boards: {
       1: {
-        session: { id: 1, name: 'harbour', directory: '/work/harbour', state: 'open' },
+        project: { id: 1, name: 'harbour', directory: '/work/harbour', state: 'open' },
         lanes: [
           {
             participant: participant(1, 'human', 'human'),
@@ -103,7 +103,7 @@ function model() {
             participant: participant(2, 'lead', 'lead'),
             tasks: [task(1, 'Ship the release notes', 'working', 'human', 'lead', 12)],
             activity: { state: 'working' },
-            pane: { id: 's1-lead', generation: 5 },
+            pane: { id: 'p1-lead', generation: 5 },
           },
           {
             participant: participant(3, 'zeus', 'worker'),
@@ -113,7 +113,7 @@ function model() {
               task(5, 'Old spike', 'accepted', 'lead', 'zeus', 90),
             ],
             activity: { state: 'waiting', reason: 'permission to run a command' },
-            pane: { id: 's1-zeus', generation: 7 },
+            pane: { id: 'p1-zeus', generation: 7 },
           },
           {
             participant: participant(4, 'diana', 'worker', { harness: 'codex' }),
@@ -133,7 +133,7 @@ function model() {
         ],
       },
       2: {
-        session: { id: 2, name: 'foundry', directory: '/work/foundry', state: 'suspended' },
+        project: { id: 2, name: 'foundry', directory: '/work/foundry', state: 'suspended' },
         lanes: [
           {
             participant: participant(9, 'human', 'human'),
@@ -206,13 +206,13 @@ async function open(page, data = model()) {
     window.__listeners = new Map()
     const answer = (value) => JSON.parse(JSON.stringify({ ok: true, ...value }))
     const operations = {
-      'sessions.list': () => answer({ sessions: data.sessions }),
+      'projects.list': () => answer({ projects: data.projects }),
       'agents.list': () => answer({ agents: data.agents }),
-      'board.get': ({ session }) => answer({ board: data.boards[session] }),
-      'inbox.get': ({ session }) => answer({ messages: data.inbox[session] ?? [] }),
-      'task.get': ({ session, task }) => answer({ task: data.tasks[`${session}:${task}`] }),
+      'board.get': ({ project }) => answer({ board: data.boards[project] }),
+      'inbox.get': ({ project }) => answer({ messages: data.inbox[project] ?? [] }),
+      'task.get': ({ project, task }) => answer({ task: data.tasks[`${project}:${task}`] }),
       'task.add': ({ to, body }) => answer({ task: { number: 9, assignee: to, body } }),
-      'session.open': ({ directory }) => answer({ session: { id: 3, name: 'new', directory } }),
+      'project.open': ({ directory }) => answer({ project: { id: 3, name: 'new', directory } }),
     }
     const invoke = async (command, args = {}) => {
       window.__calls.push([
@@ -326,7 +326,7 @@ test('queues a task for a worker from its bay', async ({ page }) => {
   await zeus.getByRole('button', { name: 'Queue task' }).click()
   await expect
     .poll(() => calls(page, 'task.add'))
-    .toEqual([{ session: 1, to: 'zeus', body: 'Profile the parser on the large fixture.' }])
+    .toEqual([{ project: 1, to: 'zeus', body: 'Profile the parser on the large fixture.' }])
   await expect(page.locator('#status')).toHaveText('T-9 queued for @zeus.')
 })
 
@@ -349,7 +349,7 @@ test("opens a strip's thread and accepts the result", async ({ page }) => {
     'Parser done, 14 tests.',
   ])
   await drawer.getByRole('button', { name: 'Accept' }).click()
-  await expect.poll(() => calls(page, 'task.accept')).toEqual([{ session: 1, task: 2 }])
+  await expect.poll(() => calls(page, 'task.accept')).toEqual([{ project: 1, task: 2 }])
 })
 
 test('sends a failed task back with a follow-up', async ({ page }) => {
@@ -360,13 +360,13 @@ test('sends a failed task back with a follow-up', async ({ page }) => {
   await drawer.getByRole('button', { name: 'Send back' }).click()
   await expect
     .poll(() => calls(page, 'task.reopen'))
-    .toEqual([{ session: 1, task: 3, body: 'Try again with the smaller model.' }])
+    .toEqual([{ project: 1, task: 3, body: 'Try again with the smaller model.' }])
 })
 
-test('adds a saved agent to the session team', async ({ page }) => {
+test('adds a saved agent to the project team', async ({ page }) => {
   await open(page)
   await page.getByRole('button', { name: 'Team' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Session team' })
+  const dialog = page.getByRole('dialog', { name: 'Project team' })
   await expect(
     dialog.getByRole('list', { name: 'On the team' }).locator('.member-line'),
   ).toHaveText(['@zeus · worker · claude-code', '@diana · worker · codex'])
@@ -377,13 +377,13 @@ test('adds a saved agent to the session team', async ({ page }) => {
   await dialog.getByRole('button', { name: 'Add to team' }).click()
   await expect
     .poll(() => calls(page, 'member.add'))
-    .toEqual([{ session: 1, agent: 'athena', role: 'advisor' }])
+    .toEqual([{ project: 1, agent: 'athena', role: 'advisor' }])
 })
 
 test('takes a member off the team once the human confirms', async ({ page }) => {
   await open(page)
   await page.getByRole('button', { name: 'Team' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Session team' })
+  const dialog = page.getByRole('dialog', { name: 'Project team' })
   await dialog.getByRole('button', { name: 'Remove @zeus from the team' }).click()
   await expect(dialog.getByText('Remove @zeus? Its open tasks are cancelled.')).toBeVisible()
   await dialog.getByRole('button', { name: 'Keep @zeus' }).click()
@@ -392,7 +392,7 @@ test('takes a member off the team once the human confirms', async ({ page }) => 
 
   await dialog.getByRole('button', { name: 'Remove @zeus from the team' }).click()
   await dialog.getByRole('button', { name: 'Remove @zeus', exact: true }).click()
-  await expect.poll(() => calls(page, 'member.remove')).toEqual([{ session: 1, agent: 'zeus' }])
+  await expect.poll(() => calls(page, 'member.remove')).toEqual([{ project: 1, agent: 'zeus' }])
 })
 
 test('keeps a pending removal and the chosen agent when the core redraws the team', async ({
@@ -402,7 +402,7 @@ test('keeps a pending removal and the chosen agent when the core redraws the tea
   data.agents.push({ name: 'hera', harness: 'pi', model: 'muse-spark' })
   await open(page, data)
   await page.getByRole('button', { name: 'Team' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Session team' })
+  const dialog = page.getByRole('dialog', { name: 'Project team' })
   await dialog.getByLabel('Add an agent').selectOption('hera')
   await dialog.getByRole('button', { name: 'Remove @zeus from the team' }).click()
   const boards = () =>
@@ -420,11 +420,11 @@ test('adds a PM on the harness the human picks', async ({ page }) => {
   await open(page)
   await expect(page.getByRole('button', { name: 'PM', exact: true })).toBeHidden()
   await page.getByRole('button', { name: 'Team' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Session team' })
+  const dialog = page.getByRole('dialog', { name: 'Project team' })
   await expect(dialog.getByText('No PM yet.')).toBeVisible()
   await dialog.getByLabel('The PM runs in').selectOption('codex')
   await dialog.getByRole('button', { name: 'Add a PM' }).click()
-  await expect.poll(() => calls(page, 'pm.add')).toEqual([{ session: 1, harness: 'codex' }])
+  await expect.poll(() => calls(page, 'pm.add')).toEqual([{ project: 1, harness: 'codex' }])
 })
 
 /** The harbour board with a PM and its advisor, the advisor added first. */
@@ -435,13 +435,13 @@ function withPm() {
       participant: participant(5, 'athena', 'advisor', { harness: 'opencode' }),
       tasks: [task(6, 'Research the market', 'working', 'pm', 'athena', 4)],
       activity: { state: 'working' },
-      pane: { id: 's1-athena', generation: 4 },
+      pane: { id: 'p1-athena', generation: 4 },
     },
     {
       participant: participant(6, 'pm', 'pm', { harness: 'codex' }),
       tasks: [],
       activity: { state: 'idle' },
-      pane: { id: 's1-pm', generation: 3 },
+      pane: { id: 'p1-pm', generation: 3 },
     },
   )
   return data
@@ -473,21 +473,21 @@ test("groups the PM's team after the lead's, on the board and in its own windows
   expect(await page.evaluate(() => window.__emulators.length)).toBe(4)
 })
 
-test('resumes a suspended session from the list', async ({ page }) => {
+test('resumes a suspended project from the list', async ({ page }) => {
   await open(page)
   await page.getByRole('button', { name: 'Resume foundry' }).click()
-  await expect.poll(() => calls(page, 'session.resume')).toEqual([{ session: 2 }])
+  await expect.poll(() => calls(page, 'project.resume')).toEqual([{ project: 2 }])
 })
 
-test('starts a session in a chosen folder with the chosen lead', async ({ page }) => {
+test('starts a project in a chosen folder with the chosen lead', async ({ page }) => {
   await open(page)
-  await page.getByRole('button', { name: 'New session' }).click()
-  const dialog = page.getByRole('dialog', { name: 'New session' })
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
   await expect(dialog.getByLabel('Project folder')).toHaveValue('/work/fresh')
   await dialog.getByLabel('The lead runs in').selectOption('opencode')
-  await dialog.getByRole('button', { name: 'Start session' }).click()
+  await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
-    .poll(() => calls(page, 'session.open'))
+    .poll(() => calls(page, 'project.open'))
     .toEqual([{ directory: '/work/fresh', harness: 'opencode' }])
 })
 
@@ -504,13 +504,13 @@ test('shows the live windows, focused on the one asked for, and feeds them their
   )
   await expect(page.getByRole('button', { name: "Open @diana's terminal" })).toHaveCount(0)
   await page.evaluate(() =>
-    window.__output.onmessage({ id: 's1-zeus', generation: 7, seq: 1, bytes: [104, 105] }),
+    window.__output.onmessage({ id: 'p1-zeus', generation: 7, seq: 1, bytes: [104, 105] }),
   )
   await expect
     .poll(() =>
       page.evaluate(() => window.__calls.filter(([c]) => c === 'pane_ack').map(([, a]) => a)),
     )
-    .toEqual([{ id: 's1-zeus', generation: 7, seq: 1 }])
+    .toEqual([{ id: 'p1-zeus', generation: 7, seq: 1 }])
   const subscriptions = await page.evaluate(
     () => window.__calls.filter(([c]) => c === 'subscribe_output').length,
   )

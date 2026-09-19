@@ -30,21 +30,21 @@ async function withPage(fn) {
   const removed = []
   let kicks = 0
   const dispatcher = {
-    async openSession(request) {
+    async openProject(request) {
       opened.push(request)
-      return ledger.createSession({
+      return ledger.createProject({
         directory: request.directory,
         name: request.name,
         lead: { harness: request.harness },
         team: request.team,
       })
     },
-    async removeMember(session, handle) {
-      removed.push([session, handle])
-      return ledger.removeMember(session, handle)
+    async removeMember(project, handle) {
+      removed.push([project, handle])
+      return ledger.removeMember(project, handle)
     },
-    async resumeSession(id) {
-      return ledger.setSessionState(id, 'open')
+    async resumeProject(id) {
+      return ledger.setProjectState(id, 'open')
     },
     activity: () => ({ state: 'idle' }),
     pane: () => null,
@@ -71,18 +71,18 @@ describe('the page protocol of the new core', () => {
     })
   })
 
-  it('opens a session named after its folder and lists it', async () => {
+  it('opens a project named after its folder and lists it', async () => {
     await withPage(async ({ operations, opened, kicks }) => {
-      const { session } = await operations['session.open']({
+      const { project } = await operations['project.open']({
         directory: '/work/app',
         harness: 'pi',
       })
       assert.deepEqual(opened, [{ directory: '/work/app', name: 'app', harness: 'pi', team: [] }])
       assert.equal(kicks(), 1)
-      const { sessions } = await operations['sessions.list']({})
+      const { projects } = await operations['projects.list']({})
       assert.deepEqual(
-        sessions.map((s) => [s.id, s.name]),
-        [[session.id, 'app']],
+        projects.map((s) => [s.id, s.name]),
+        [[project.id, 'app']],
       )
     })
   })
@@ -97,31 +97,31 @@ describe('the page protocol of the new core', () => {
           ['diana', 'codex', 'gpt-5.6-luna'],
         ],
       )
-      const { session } = await operations['session.open']({
+      const { project } = await operations['project.open']({
         directory: '/work/app',
         harness: 'pi',
       })
       const { member } = await operations['member.add']({
-        session: session.id,
+        project: project.id,
         agent: 'diana',
         role: 'reviewer',
       })
       assert.deepEqual([member.handle, member.harness, member.role], ['diana', 'codex', 'reviewer'])
       await assert.rejects(
-        operations['member.add']({ session: session.id, agent: 'ghost' }),
+        operations['member.add']({ project: project.id, agent: 'ghost' }),
         /no agent named ghost/,
       )
     })
   })
 
-  it('starts a new session with the last team, as the saved agents are now', async () => {
+  it('starts a new project with the last team, as the saved agents are now', async () => {
     await withPage(async ({ operations, opened, env }) => {
-      const { session } = await operations['session.open']({
+      const { project } = await operations['project.open']({
         directory: '/work/app',
         harness: 'pi',
       })
-      await operations['member.add']({ session: session.id, agent: 'zeus' })
-      await operations['member.add']({ session: session.id, agent: 'diana', role: 'reviewer' })
+      await operations['member.add']({ project: project.id, agent: 'zeus' })
+      await operations['member.add']({ project: project.id, agent: 'diana', role: 'reviewer' })
       await writeFile(
         path.join(env.CONSENSFLOW_HOME, 'agents.json'),
         `${JSON.stringify({
@@ -129,10 +129,10 @@ describe('the page protocol of the new core', () => {
           agents: [{ id: 'zeus', kind: 'opencode', model: 'opencode/muse-spark-1.3' }],
         })}\n`,
       )
-      const next = await operations['session.open']({ directory: '/work/api', harness: 'pi' })
+      const next = await operations['project.open']({ directory: '/work/api', harness: 'pi' })
       assert.deepEqual(opened[1].team, [{ agent: 'zeus', harness: 'opencode', role: 'worker' }])
       assert.deepEqual(
-        next.session.participants.map((p) => p.handle),
+        next.project.participants.map((p) => p.handle),
         ['human', 'lead', 'zeus'],
       )
     })
@@ -140,21 +140,21 @@ describe('the page protocol of the new core', () => {
 
   it('takes a member off the team through the dispatcher, which closes its window', async () => {
     await withPage(async ({ operations, removed, kicks }) => {
-      const { session } = await operations['session.open']({
+      const { project } = await operations['project.open']({
         directory: '/work/app',
         harness: 'pi',
       })
-      await operations['member.add']({ session: session.id, agent: 'zeus' })
-      await operations['task.add']({ session: session.id, to: 'zeus', body: 'Parser' })
+      await operations['member.add']({ project: project.id, agent: 'zeus' })
+      await operations['task.add']({ project: project.id, to: 'zeus', body: 'Parser' })
       const before = kicks()
       const { member, cancelled } = await operations['member.remove']({
-        session: session.id,
+        project: project.id,
         agent: 'zeus',
       })
-      assert.deepEqual(removed, [[session.id, 'zeus']])
+      assert.deepEqual(removed, [[project.id, 'zeus']])
       assert.deepEqual([member.handle, cancelled], ['zeus', [1]])
       assert.equal(kicks(), before + 1)
-      const { board } = await operations['board.get']({ session: session.id })
+      const { board } = await operations['board.get']({ project: project.id })
       assert.deepEqual(
         board.lanes.map((lane) => lane.participant.handle),
         ['human', 'lead'],
@@ -164,45 +164,45 @@ describe('the page protocol of the new core', () => {
 
   it('adds a PM once, on the harness the human picks', async () => {
     await withPage(async ({ operations }) => {
-      const { session } = await operations['session.open']({
+      const { project } = await operations['project.open']({
         directory: '/work/app',
         harness: 'pi',
       })
-      const { member } = await operations['pm.add']({ session: session.id, harness: 'codex' })
+      const { member } = await operations['pm.add']({ project: project.id, harness: 'codex' })
       assert.deepEqual([member.handle, member.role, member.harness], ['pm', 'pm', 'codex'])
       await assert.rejects(
-        operations['pm.add']({ session: session.id, harness: 'pi' }),
-        /already in session/,
+        operations['pm.add']({ project: project.id, harness: 'pi' }),
+        /already in project/,
       )
     })
   })
 
   it('lets the human hand out, accept, reopen and cancel tasks', async () => {
     await withPage(async ({ ledger, operations }) => {
-      const { session } = await operations['session.open']({
+      const { project } = await operations['project.open']({
         directory: '/work/app',
         harness: 'pi',
       })
-      await operations['member.add']({ session: session.id, agent: 'zeus' })
+      await operations['member.add']({ project: project.id, agent: 'zeus' })
       const { task } = await operations['task.add']({
-        session: session.id,
+        project: project.id,
         to: 'zeus',
         body: 'Write the parser',
       })
       assert.deepEqual([task.number, task.requester, task.assignee], [1, 'human', 'zeus'])
-      const message = ledger.task(session.id, 1).messages[0]
+      const message = ledger.task(project.id, 1).messages[0]
       ledger.beginDelivery(message.id)
       ledger.confirmDelivery(message.id, {})
-      ledger.recordResult(session.id, 1, { body: 'done' })
+      ledger.recordResult(project.id, 1, { body: 'done' })
       const reopened = await operations['task.reopen']({
-        session: session.id,
+        project: project.id,
         task: 1,
         body: 'Add tests',
       })
       assert.equal(reopened.task.state, 'queued')
-      const cancelled = await operations['task.cancel']({ session: session.id, task: 1 })
+      const cancelled = await operations['task.cancel']({ project: project.id, task: 1 })
       assert.equal(cancelled.task.state, 'cancelled')
-      const { task: thread } = await operations['task.get']({ session: session.id, task: 1 })
+      const { task: thread } = await operations['task.get']({ project: project.id, task: 1 })
       assert.deepEqual(
         thread.messages.map((m) => [m.kind, m.sender]),
         [
@@ -211,14 +211,14 @@ describe('the page protocol of the new core', () => {
           ['task', 'human'],
         ],
       )
-      await assert.rejects(operations['task.get']({ session: session.id, task: 9 }), /no task T-9/)
-      await operations['task.add']({ session: session.id, to: 'zeus', body: 'Second' })
-      const second = ledger.task(session.id, 2).messages[0]
+      await assert.rejects(operations['task.get']({ project: project.id, task: 9 }), /no task T-9/)
+      await operations['task.add']({ project: project.id, to: 'zeus', body: 'Second' })
+      const second = ledger.task(project.id, 2).messages[0]
       ledger.beginDelivery(second.id)
       ledger.confirmDelivery(second.id, {})
-      ledger.recordResult(session.id, 2, { body: 'ok' })
+      ledger.recordResult(project.id, 2, { body: 'ok' })
       assert.equal(
-        (await operations['task.accept']({ session: session.id, task: 2 })).task.state,
+        (await operations['task.accept']({ project: project.id, task: 2 })).task.state,
         'accepted',
       )
     })
@@ -226,12 +226,12 @@ describe('the page protocol of the new core', () => {
 
   it("shows the human's inbox and routes an answer back to whoever asked", async () => {
     await withPage(async ({ ledger, operations }) => {
-      const { session } = await operations['session.open']({
+      const { project } = await operations['project.open']({
         directory: '/work/app',
         harness: 'pi',
       })
-      const question = ledger.ask(session.id, { from: 'lead', to: 'human', body: 'Deploy now?' })
-      const { messages } = await operations['inbox.get']({ session: session.id })
+      const question = ledger.ask(project.id, { from: 'lead', to: 'human', body: 'Deploy now?' })
+      const { messages } = await operations['inbox.get']({ project: project.id })
       assert.deepEqual(
         messages.map((m) => [m.id, m.kind, m.state]),
         [[question.id, 'question', 'queued']],
@@ -247,11 +247,11 @@ describe('the page protocol of the new core', () => {
 
   it('draws the board with each lane activity and window', async () => {
     await withPage(async ({ operations }) => {
-      const { session } = await operations['session.open']({
+      const { project } = await operations['project.open']({
         directory: '/work/app',
         harness: 'pi',
       })
-      const { board } = await operations['board.get']({ session: session.id })
+      const { board } = await operations['board.get']({ project: project.id })
       assert.deepEqual(
         board.lanes.map((lane) => [lane.participant.handle, lane.activity.state, lane.pane]),
         [

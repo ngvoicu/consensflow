@@ -294,3 +294,14 @@ Not built yet: removing a PM (the ledger refuses it as `not-a-member`).
   dropping a pending removal (it did, twice over: the other rows' redraw reset
   it), fixed by changing that state only on the Remove and Keep buttons.
   Screenshots at 1440 and 390 px: the confirmation now takes its own line.
+- Gabriel renamed the concept: a *session* is now a *project* (2026-09-19,
+  "we can call sessions Projects"). Done as one mechanical change across the
+  new core only, before the tiered-dispatch work, so that work is written in
+  the final vocabulary: the ledger table and columns, the events, the page
+  operations (`projects.list`, `project.open`, `project.resume`), the Rust
+  allow-list, the pane ids (`p<project>-<handle>`), `CONSENSFLOW_PROJECT`, the
+  role texts and every test. The harnesses' own sessions keep the word:
+  `nativeSession`, `--session-id`, Claude's `sessions/<pid>.json`, OpenCode's
+  and Codex's session channels. The schema could change in place because no
+  build has shipped it. Node 108/108 core and adapter tests, page 154/154,
+  slice 2/2, Rust 107 + 16. Earlier entries in this file keep the old word.

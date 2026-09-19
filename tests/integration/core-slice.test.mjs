@@ -21,32 +21,32 @@ test('a lead hands a task to a worker through the board and the result lands in 
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
-    const opened = await app.requestNode('session.open', {
+    const opened = await app.requestNode('project.open', {
       directory: app.workspace,
       harness: 'claude-code',
     })
     assert.equal(opened.ok, true, JSON.stringify(opened))
-    const session = opened.session.id
-    const added = await app.requestNode('member.add', { session, agent: 'worker' })
+    const project = opened.project.id
+    const added = await app.requestNode('member.add', { project, agent: 'worker' })
     assert.equal(added.ok, true, JSON.stringify(added))
-    const leadFrame = app.openFrames.find((frame) => frame.id === `s${session}-lead`)
+    const leadFrame = app.openFrames.find((frame) => frame.id === `p${project}-lead`)
     assert.ok(leadFrame, 'the lead window opened')
 
     const given = await app.requestNode('task.add', {
-      session,
+      project,
       to: 'lead',
       body: 'DISPATCH @worker Reply with exactly: WORKER_OK',
     })
     assert.equal(given.ok, true, JSON.stringify(given))
 
-    const board = async () => (await app.requestNode('board.get', { session })).board
+    const board = async () => (await app.requestNode('board.get', { project })).board
     const lane = async (handle) =>
       (await board()).lanes.find((candidate) => candidate.participant.handle === handle)
     await app.waitFor(async () => (await lane('worker'))?.tasks[0]?.state === 'done', 30_000)
     const workerTask = (await lane('worker')).tasks[0]
     assert.deepEqual([workerTask.requester, workerTask.number], ['lead', 2])
 
-    const workerFrame = app.openFrames.find((frame) => frame.id === `s${session}-worker`)
+    const workerFrame = app.openFrames.find((frame) => frame.id === `p${project}-worker`)
     assert.match(
       workerFrame.argv.at(-1),
       /^\[ConsensFlow m-\d+ · T-2 · task from @lead\]\nReply with exactly: WORKER_OK$/,
@@ -54,10 +54,10 @@ test('a lead hands a task to a worker through the board and the result lands in 
     assert.ok(workerFrame.argv.includes('bypassPermissions'))
 
     await app.waitFor(async () => {
-      const { messages } = await app.requestNode('inbox.get', { session, participant: 'lead' })
+      const { messages } = await app.requestNode('inbox.get', { project, participant: 'lead' })
       return messages.some((m) => m.kind === 'result' && m.state === 'delivered')
     }, 30_000)
-    const { messages } = await app.requestNode('inbox.get', { session, participant: 'lead' })
+    const { messages } = await app.requestNode('inbox.get', { project, participant: 'lead' })
     const result = messages.find((m) => m.kind === 'result')
     assert.equal(result.body, 'WORKER_OK')
     // The lead's native session is the `--session-id` its window was launched with.
@@ -77,18 +77,18 @@ test('a lead the human typed to still gets its results pasted in', async () => {
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
-    const opened = await app.requestNode('session.open', {
+    const opened = await app.requestNode('project.open', {
       directory: app.workspace,
       harness: 'claude-code',
     })
-    const session = opened.session.id
-    await app.requestNode('member.add', { session, agent: 'worker' })
-    const lead = app.openFrames.find((frame) => frame.id === `s${session}-lead`)
+    const project = opened.project.id
+    await app.requestNode('member.add', { project, agent: 'worker' })
+    const lead = app.openFrames.find((frame) => frame.id === `p${project}-lead`)
 
     // The human types into the lead's own terminal once it is ready, which
     // latches it against pastes until the lead's record shows the submission.
     await app.waitFor(async () => {
-      const { board } = await app.requestNode('board.get', { session })
+      const { board } = await app.requestNode('board.get', { project })
       return board.lanes.find((l) => l.participant.handle === 'lead').activity.state === 'idle'
     })
     const typed = await app.requestRust('pane.input', {
@@ -99,10 +99,10 @@ test('a lead the human typed to still gets its results pasted in', async () => {
     assert.equal(typed.ok, true, JSON.stringify(typed))
 
     await app.waitFor(async () => {
-      const { messages } = await app.requestNode('inbox.get', { session, participant: 'lead' })
+      const { messages } = await app.requestNode('inbox.get', { project, participant: 'lead' })
       return messages.some((m) => m.kind === 'result' && m.state === 'delivered')
     }, 30_000)
-    const { messages } = await app.requestNode('inbox.get', { session, participant: 'lead' })
+    const { messages } = await app.requestNode('inbox.get', { project, participant: 'lead' })
     assert.equal(messages.find((m) => m.kind === 'result').body, 'TYPED_OK')
     const snapshot = await app.requestRust('pane.snapshot', {
       id: lead.id,

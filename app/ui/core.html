@@ -70,7 +70,7 @@
     .danger-button:hover:not(:disabled) { background: rgba(255, 120, 104, .1); }
     button:disabled { opacity: .45; cursor: default; }
 
-    /* The command bar: which session, which view, and what waits for you. */
+    /* The command bar: which project, which view, and what waits for you. */
     .command-bar {
       grid-area: bar;
       display: flex;
@@ -88,7 +88,7 @@
     }
     .session-id { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
     .session-id h1 { margin: 0; font-size: 15px; font-weight: 650; white-space: nowrap; }
-    #session-directory {
+    #project-directory {
       font: 11px var(--mono);
       color: var(--muted);
       overflow: hidden;
@@ -101,7 +101,7 @@
     .spacer { flex: 1; }
     #inbox-button[data-waiting="true"] { border-color: var(--amber); color: var(--amber); }
 
-    /* Sessions. */
+    /* Projects. */
     .sidebar {
       grid-area: side;
       border-right: 1px solid var(--line);
@@ -116,9 +116,9 @@
       text-transform: uppercase;
       color: var(--muted);
     }
-    #sessions { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-    .session { display: flex; align-items: center; gap: 6px; }
-    .session-select {
+    #projects { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+    .project { display: flex; align-items: center; gap: 6px; }
+    .project-select {
       flex: 1;
       min-width: 0;
       display: grid;
@@ -130,12 +130,12 @@
       background: transparent;
       cursor: pointer;
     }
-    .session-select:hover { background: var(--panel); }
-    .session-select[aria-current="true"] { background: var(--panel-raised); border-color: var(--line); }
-    .session-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .session-state { font: 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
-    .session[data-state="open"] .session-state { color: var(--seafoam); }
-    .sessions-empty, .team-empty { color: var(--muted); padding: 6px 9px; }
+    .project-select:hover { background: var(--panel); }
+    .project-select[aria-current="true"] { background: var(--panel-raised); border-color: var(--line); }
+    .project-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .project-state { font: 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    .project[data-state="open"] .project-state { color: var(--seafoam); }
+    .projects-empty, .team-empty { color: var(--muted); padding: 6px 9px; }
 
     .main { grid-area: main; position: relative; min-height: 0; display: grid; }
 
@@ -428,8 +428,8 @@
     <header class="command-bar">
       <span class="brand">ConsensFlow</span>
       <div class="session-id">
-        <h1 id="session-title">No session</h1>
-        <span id="session-directory"></span>
+        <h1 id="project-title">No project</h1>
+        <span id="project-directory"></span>
       </div>
       <div class="views" role="group" aria-label="View">
         <button type="button" data-view="board" aria-pressed="true">Board</button>
@@ -439,11 +439,11 @@
       <span class="spacer"></span>
       <button class="quiet-button" id="inbox-button" type="button">Inbox</button>
       <button class="quiet-button" id="team-button" type="button">Team</button>
-      <button class="primary-button" id="new-session" type="button">New session</button>
+      <button class="primary-button" id="new-project" type="button">New project</button>
     </header>
-    <nav class="sidebar" aria-label="Sessions">
-      <h2 class="sidebar-title">Sessions</h2>
-      <ul id="sessions" data-testid="sessions"></ul>
+    <nav class="sidebar" aria-label="Projects">
+      <h2 class="sidebar-title">Projects</h2>
+      <ul id="projects" data-testid="projects"></ul>
     </nav>
     <main class="main">
       <section class="board" id="board" aria-label="Board"></section>
@@ -454,9 +454,9 @@
   </div>
   <div class="parking" id="parking" aria-hidden="true"></div>
 
-  <dialog id="new-session-dialog" aria-labelledby="new-session-title">
+  <dialog id="new-project-dialog" aria-labelledby="new-project-title">
     <form class="dialog-form">
-      <h2 id="new-session-title">New session</h2>
+      <h2 id="new-project-title">New project</h2>
       <label>Project folder<input name="directory" readonly></label>
       <label>The lead runs in
         <select name="harness">
@@ -469,14 +469,14 @@
       </label>
       <div class="dialog-actions">
         <button class="quiet-button" type="button" value="cancel">Cancel</button>
-        <button class="primary-button" type="submit">Start session</button>
+        <button class="primary-button" type="submit">Start project</button>
       </div>
     </form>
   </dialog>
 
   <dialog id="team-dialog" aria-labelledby="team-title">
     <form class="dialog-form">
-      <h2 id="team-title">Session team</h2>
+      <h2 id="team-title">Project team</h2>
       <ul id="team-members" aria-label="On the team"></ul>
       <div class="team-pm">
         <p id="team-pm-state">No PM yet.</p>

@@ -11,7 +11,7 @@ import { roleConfiguration } from '../src/role-skills.js'
  * board's commands for every role, and for coordinators the team they choose
  * from, the work tiers and the review rule. Nothing from the old transport.
  */
-const OLD_COMMANDS = /\bcf (run|say|attach|read|results|sessions|lead (send|read))\b/
+const OLD_COMMANDS = /\bcf (run|say|attach|read|results|projects|lead (send|read))\b/
 const zeus = {
   name: 'zeus',
   harness: 'claude',

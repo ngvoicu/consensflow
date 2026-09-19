@@ -34,7 +34,7 @@ async function withHome(fn) {
 
 const participant = {
   id: 3,
-  sessionId: 1,
+  projectId: 1,
   handle: 'zeus',
   role: 'worker',
   agent: 'zeus',

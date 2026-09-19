@@ -1815,9 +1815,9 @@ async fn task_operation<R: Runtime>(
 /// What the board page may ask the new core. The page names the operation and
 /// its body; anything else is refused here, before it reaches the daemon.
 const CORE_OPERATIONS: &[&str] = &[
-    "sessions.list",
-    "session.open",
-    "session.resume",
+    "projects.list",
+    "project.open",
+    "project.resume",
     "board.get",
     "inbox.get",
     "member.add",
@@ -3171,15 +3171,15 @@ mod tests {
         let routes = vec![
             (
                 "core_request",
-                json!({"operation":"board.get","body":{"session":1}}),
+                json!({"operation":"board.get","body":{"project":1}}),
                 "board.get",
-                json!({"session":1}),
+                json!({"project":1}),
             ),
             (
                 "core_request",
-                json!({"operation":"task.add","body":{"session":1,"to":"lead","body":"Ship v2"}}),
+                json!({"operation":"task.add","body":{"project":1,"to":"lead","body":"Ship v2"}}),
                 "task.add",
-                json!({"session":1,"to":"lead","body":"Ship v2"}),
+                json!({"project":1,"to":"lead","body":"Ship v2"}),
             ),
             (
                 "task_list",

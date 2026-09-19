@@ -6,7 +6,7 @@
  */
 export const MIGRATIONS = [
   `
-  CREATE TABLE session (
+  CREATE TABLE project (
     id INTEGER PRIMARY KEY,
     directory TEXT NOT NULL,
     name TEXT NOT NULL,
@@ -14,22 +14,22 @@ export const MIGRATIONS = [
     resume_on_start INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    CONSTRAINT session_state_check CHECK (state IN ('open', 'suspended')),
-    CONSTRAINT session_resume_on_start_check CHECK (resume_on_start IN (0, 1))
+    CONSTRAINT project_state_check CHECK (state IN ('open', 'suspended')),
+    CONSTRAINT project_resume_on_start_check CHECK (resume_on_start IN (0, 1))
   ) STRICT;
 
   CREATE TABLE participant (
     id INTEGER PRIMARY KEY,
-    session_id INTEGER NOT NULL,
+    project_id INTEGER NOT NULL,
     handle TEXT NOT NULL,
     role TEXT NOT NULL,
     agent TEXT,
     harness TEXT,
     created_at TEXT NOT NULL,
     left_at TEXT,
-    CONSTRAINT participant_session_fk FOREIGN KEY (session_id)
-      REFERENCES session (id) ON DELETE CASCADE,
-    CONSTRAINT participant_handle_unique UNIQUE (session_id, handle),
+    CONSTRAINT participant_project_fk FOREIGN KEY (project_id)
+      REFERENCES project (id) ON DELETE CASCADE,
+    CONSTRAINT participant_handle_unique UNIQUE (project_id, handle),
     CONSTRAINT participant_role_check
       CHECK (role IN ('human', 'lead', 'pm', 'advisor', 'worker', 'reviewer'))
   ) STRICT;
@@ -50,7 +50,7 @@ export const MIGRATIONS = [
 
   CREATE TABLE task (
     id INTEGER PRIMARY KEY,
-    session_id INTEGER NOT NULL,
+    project_id INTEGER NOT NULL,
     number INTEGER NOT NULL,
     title TEXT NOT NULL,
     body TEXT NOT NULL,
@@ -59,13 +59,13 @@ export const MIGRATIONS = [
     state TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    CONSTRAINT task_session_fk FOREIGN KEY (session_id)
-      REFERENCES session (id) ON DELETE CASCADE,
+    CONSTRAINT task_project_fk FOREIGN KEY (project_id)
+      REFERENCES project (id) ON DELETE CASCADE,
     CONSTRAINT task_requester_fk FOREIGN KEY (requester_id)
       REFERENCES participant (id) ON DELETE CASCADE,
     CONSTRAINT task_assignee_fk FOREIGN KEY (assignee_id)
       REFERENCES participant (id) ON DELETE CASCADE,
-    CONSTRAINT task_number_unique UNIQUE (session_id, number),
+    CONSTRAINT task_number_unique UNIQUE (project_id, number),
     CONSTRAINT task_state_check CHECK (
       state IN ('queued', 'working', 'waiting', 'done', 'accepted', 'failed', 'cancelled')
     )
@@ -74,7 +74,7 @@ export const MIGRATIONS = [
 
   CREATE TABLE message (
     id INTEGER PRIMARY KEY,
-    session_id INTEGER NOT NULL,
+    project_id INTEGER NOT NULL,
     recipient_id INTEGER NOT NULL,
     sender_id INTEGER,
     kind TEXT NOT NULL,
@@ -87,8 +87,8 @@ export const MIGRATIONS = [
     receipt TEXT,
     created_at TEXT NOT NULL,
     delivered_at TEXT,
-    CONSTRAINT message_session_fk FOREIGN KEY (session_id)
-      REFERENCES session (id) ON DELETE CASCADE,
+    CONSTRAINT message_project_fk FOREIGN KEY (project_id)
+      REFERENCES project (id) ON DELETE CASCADE,
     CONSTRAINT message_recipient_fk FOREIGN KEY (recipient_id)
       REFERENCES participant (id) ON DELETE CASCADE,
     CONSTRAINT message_sender_fk FOREIGN KEY (sender_id)
@@ -110,14 +110,14 @@ export const MIGRATIONS = [
 
   CREATE TABLE event (
     id INTEGER PRIMARY KEY,
-    session_id INTEGER NOT NULL,
+    project_id INTEGER NOT NULL,
     at TEXT NOT NULL,
     kind TEXT NOT NULL,
     data TEXT NOT NULL,
-    CONSTRAINT event_session_fk FOREIGN KEY (session_id)
-      REFERENCES session (id) ON DELETE CASCADE
+    CONSTRAINT event_project_fk FOREIGN KEY (project_id)
+      REFERENCES project (id) ON DELETE CASCADE
   ) STRICT;
-  CREATE INDEX event_session_index ON event (session_id, id);
+  CREATE INDEX event_project_index ON event (project_id, id);
   `,
 ]
 

@@ -9,7 +9,7 @@
  * window with the task, the worker must answer in full-permission mode, the
  * core must record the answer as the task's result and deliver it into the
  * lead's window, and the worker must read idle. Then the app restarts and the
- * session must come back on its lead's own conversation.
+ * project must come back on its lead's own conversation.
  *
  * State lives in a throwaway home; the harnesses use the real logins. Opt-in,
  * never part of `npm test`:
@@ -109,17 +109,17 @@ let app = await startIntegration({ editor: EDITOR, fakeEnv: ENV })
 const root = app.root
 try {
   writeRoster(app.env.CONSENSFLOW_HOME)
-  const opened = await app.requestNode('session.open', { directory: WORKSPACE, harness: LEAD_KIND })
-  if (opened.ok !== true) throw new Error(`session.open: ${JSON.stringify(opened)}`)
-  const session = opened.session.id
+  const opened = await app.requestNode('project.open', { directory: WORKSPACE, harness: LEAD_KIND })
+  if (opened.ok !== true) throw new Error(`project.open: ${JSON.stringify(opened)}`)
+  const project = opened.project.id
   for (const name of wanted) {
-    const added = await app.requestNode('member.add', { session, agent: AGENTS[name].id })
+    const added = await app.requestNode('member.add', { project, agent: AGENTS[name].id })
     if (added.ok !== true) throw new Error(`member.add ${name}: ${JSON.stringify(added)}`)
   }
-  const board = async () => (await app.requestNode('board.get', { session })).board
+  const board = async () => (await app.requestNode('board.get', { project })).board
   const lane = async (handle) => (await board()).lanes.find((l) => l.participant.handle === handle)
   const inbox = async (participant) =>
-    (await app.requestNode('inbox.get', { session, participant })).messages
+    (await app.requestNode('inbox.get', { project, participant })).messages
 
   const lead = await until(async () => {
     const leadLane = await lane('lead')
@@ -132,7 +132,7 @@ try {
     const marker = `BENCH_OK_${name.toUpperCase()}`
     const started = Date.now()
     await app.requestNode('task.add', {
-      session,
+      project,
       to: 'lead',
       body: `Run exactly this command in your shell, then reply with one line:\ncf task add @${agent.id} "Reply with exactly: ${marker}"`,
     })
@@ -187,21 +187,21 @@ try {
   }
 
   // Restart: a new daemon and pane host over the same home, in the app's quit
-  // order. The session must come back on its lead's own conversation.
-  const leadFrame = app.openFrames.find((frame) => frame.id === `s${session}-lead`)
+  // order. The project must come back on its lead's own conversation.
+  const leadFrame = app.openFrames.find((frame) => frame.id === `p${project}-lead`)
   app.killEditor()
   await until(() => app.uiExited(), 10_000, 100)
   await app.close({ preserveRoot: true })
   app = await startIntegration({ editor: EDITOR, fakeEnv: ENV, existingRoot: root })
   const back = await until(async () => {
-    const sessions = (await app.requestNode('sessions.list', {})).sessions
-    return sessions.find((s) => s.id === session)?.state === 'open'
+    const projects = (await app.requestNode('projects.list', {})).projects
+    return projects.find((s) => s.id === project)?.state === 'open'
   }, 120_000)
   const reopened = await until(
-    () => app.openFrames.find((frame) => frame.id === `s${session}-lead`),
+    () => app.openFrames.find((frame) => frame.id === `p${project}-lead`),
     60_000,
   )
-  record('restart-restores-session', Boolean(back && reopened), {
+  record('restart-restores-project', Boolean(back && reopened), {
     back: Boolean(back),
     before: leadFrame?.argv?.slice(-4),
     after: reopened?.argv?.slice(-4),

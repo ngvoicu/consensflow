@@ -7,7 +7,7 @@ import { LedgerError } from '../ledger/index.js'
  *
  * Every window gets its own bearer token, issued when the dispatcher opens it
  * and revoked when it closes, so a token names exactly one participant of one
- * session. The API decides who may do what (coordinators hand out tasks, only
+ * project. The API decides who may do what (coordinators hand out tasks, only
  * the assignee finishes one, only the one asked answers), the ledger keeps the
  * state rules, and every write wakes the dispatcher.
  */
@@ -23,11 +23,11 @@ const digest = (token) => createHash('sha256').update(token).digest('hex')
 export class Credentials {
   #byDigest = new Map()
 
-  issue({ participant, session, generation }) {
+  issue({ participant, project, generation }) {
     const token = randomBytes(32).toString('hex')
     this.#byDigest.set(digest(token), {
       participantId: participant.id,
-      sessionId: session.id,
+      projectId: project.id,
       generation,
     })
     return token
@@ -67,20 +67,20 @@ export async function startApi({ ledger, credentials, changed = () => {}, roster
   async function handle(request) {
     const url = new URL(request.url, 'http://127.0.0.1')
     const caller = callerOf(request)
-    const { session, participant } = caller
+    const { project, participant } = caller
     const at = `${request.method} ${url.pathname}`
 
     if (at === 'GET /api/whoami') {
       const task = ledger.activeTask(participant.id)
       return ok({
-        session: { id: session.id, name: session.name, directory: session.directory },
+        project: { id: project.id, name: project.name, directory: project.directory },
         participant: { handle: participant.handle, role: participant.role },
         task: task === null ? null : summary(task),
       })
     }
     if (at === 'GET /api/team') {
       return ok({
-        members: session.participants
+        members: project.participants
           .filter((member) => member.agent !== null)
           .map((member) => {
             const row = roster(member.agent)
@@ -96,7 +96,7 @@ export async function startApi({ ledger, credentials, changed = () => {}, roster
     }
     if (at === 'GET /api/tasks') {
       return ok({
-        lanes: ledger.board(session.id).lanes.map(({ participant: owner, tasks }) => ({
+        lanes: ledger.board(project.id).lanes.map(({ participant: owner, tasks }) => ({
           handle: owner.handle,
           role: owner.role,
           tasks: tasks.map(summary),
@@ -112,7 +112,7 @@ export async function startApi({ ledger, credentials, changed = () => {}, roster
         )
       }
       const body = await readJson(request)
-      const created = ledger.createTask(session.id, {
+      const created = ledger.createTask(project.id, {
         from: participant.handle,
         to: body.to,
         body: body.body,
@@ -131,7 +131,7 @@ export async function startApi({ ledger, credentials, changed = () => {}, roster
       const found = ledger.message(Number(message[1]))
       if (
         found === null ||
-        found.sessionId !== session.id ||
+        found.projectId !== project.id ||
         (found.recipient !== participant.handle && found.sender !== participant.handle)
       ) {
         throw new Refusal(404, 'unknown-message', `no message m-${message[1]} for you`)
@@ -142,7 +142,7 @@ export async function startApi({ ledger, credentials, changed = () => {}, roster
       const body = await readJson(request)
       const active = ledger.activeTask(participant.id)
       const to = body.to ?? active?.requester ?? (participant.role === 'lead' ? 'human' : 'lead')
-      const asked = ledger.ask(session.id, {
+      const asked = ledger.ask(project.id, {
         from: participant.handle,
         to,
         task: body.task ?? active?.number,
@@ -160,9 +160,9 @@ export async function startApi({ ledger, credentials, changed = () => {}, roster
     throw new Refusal(404, 'unknown-route', `no such command: ${at}`)
   }
 
-  async function taskRoute(request, { session, participant }, number, action) {
-    const task = ledger.task(session.id, number)
-    if (task === null) throw new Refusal(404, 'unknown-task', `no task T-${number} in this session`)
+  async function taskRoute(request, { project, participant }, number, action) {
+    const task = ledger.task(project.id, number)
+    if (task === null) throw new Refusal(404, 'unknown-task', `no task T-${number} in this project`)
     if (action === undefined && request.method === 'GET') return ok({ task })
     if (request.method !== 'POST' || action === undefined) {
       throw new Refusal(404, 'unknown-route', 'no such task command')
@@ -172,7 +172,7 @@ export async function startApi({ ledger, credentials, changed = () => {}, roster
       if (task.assignee !== participant.handle) {
         throw new Refusal(403, 'not-yours', `T-${number} is assigned to @${task.assignee}`)
       }
-      const done = ledger.recordResult(session.id, number, { body: body.body })
+      const done = ledger.recordResult(project.id, number, { body: body.body })
       changed()
       return ok({ task: summary(done.task) })
     }
@@ -186,10 +186,10 @@ export async function startApi({ ledger, credentials, changed = () => {}, roster
     const by = participant.handle
     const moved =
       action === 'accept'
-        ? ledger.acceptTask(session.id, number, { by })
+        ? ledger.acceptTask(project.id, number, { by })
         : action === 'cancel'
-          ? ledger.cancelTask(session.id, number, { by })
-          : ledger.reopenTask(session.id, number, { by, body: body.body }).task
+          ? ledger.cancelTask(project.id, number, { by })
+          : ledger.reopenTask(project.id, number, { by, body: body.body }).task
     changed()
     return ok({ task: summary(moved) })
   }
@@ -205,16 +205,16 @@ export async function startApi({ ledger, credentials, changed = () => {}, roster
         'this window has no ConsensFlow access (it may have closed)',
       )
     }
-    const session = ledger.session(identity.sessionId)
-    const participant = session?.participants.find((p) => p.id === identity.participantId)
+    const project = ledger.project(identity.projectId)
+    const participant = project?.participants.find((p) => p.id === identity.participantId)
     if (participant === undefined) {
       throw new Refusal(
         401,
         'unauthorized',
-        'this window belongs to a session that no longer exists',
+        'this window belongs to a project that no longer exists',
       )
     }
-    return { session, participant }
+    return { project, participant }
   }
 
   await new Promise((resolve, reject) => {

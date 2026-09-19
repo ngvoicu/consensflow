@@ -49,7 +49,7 @@ export function piAdapter({ env, send = sendPi, answers = cachedAnswers() }) {
       })
       const nativeSession =
         resume ??
-        `cf-${participant.sessionId}-${participant.handle}-${randomBytes(4).toString('hex')}`
+        `cf-${participant.projectId}-${participant.handle}-${randomBytes(4).toString('hex')}`
       const identity = { kind: 'pi', model: agent?.model, thinking: agent?.thinking }
       const runner =
         resume === null

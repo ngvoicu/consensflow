@@ -13,8 +13,8 @@ import { resolve } from 'node:path'
  *   cf inbox [read m-12]         what is waiting for you, or one message in full
  *   cf ask "…" [--human]         a question to whoever gave you your task (or the human)
  *   cf answer m-12 "…"           answer a question put to you
- *   cf team                      the agents on this session's team, with their models
- *   cf whoami                    your session, role and current task
+ *   cf team                      the agents on this project's team, with their models
+ *   cf whoami                    your project, role and current task
  *
  * The window's token (CONSENSFLOW_TOKEN) is the whole authority: the core
  * knows which participant it belongs to. Add `--json` for machine output.
@@ -77,7 +77,7 @@ async function command(verb, rest, call, cwd) {
         data: members,
         text:
           members.length === 0
-            ? 'No agents are on this session team yet; the human adds them in the app.'
+            ? 'No agents are on this project team yet; the human adds them in the app.'
             : members
                 .map(
                   (member) =>
@@ -92,7 +92,7 @@ async function command(verb, rest, call, cwd) {
       return {
         data: me,
         text:
-          `@${me.participant.handle} (${me.participant.role}) in session ${me.session.name}` +
+          `@${me.participant.handle} (${me.participant.role}) in project ${me.project.name}` +
           (me.task === null ? '' : `, on T-${me.task.number}: ${me.task.title}`),
       }
     }

@@ -38,7 +38,7 @@ async function withHome(fn, { queue = true } = {}) {
 
 const participant = {
   id: 3,
-  sessionId: 1,
+  projectId: 1,
   handle: 'diana',
   role: 'worker',
   agent: 'diana',

@@ -4,7 +4,7 @@ import { teamTable, workTierList } from '../skill.js'
 /**
  * The instructions each window of the new core starts with, one text per role
  * (`skill/core/<role>.md`). Coordinators (lead, PM) also get the rules for
- * choosing who does the work and for cross-model review, with the session team
+ * choosing who does the work and for cross-model review, with the project team
  * they choose from: the lead's workers and reviewers, the PM's advisors.
  */
 const ROLES = ['lead', 'pm', 'advisor', 'worker', 'reviewer']

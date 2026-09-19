@@ -107,7 +107,7 @@ export class BoardView {
 
   /**
    * Redraw from the core's state, keeping an open composer and its text. With
-   * a PM in the session, each team's bays sit under its own label.
+   * a PM in the project, each team's bays sit under its own label.
    */
   render({ board, inbox, agents = [], now = Date.now() }) {
     this.#saveDrafts()

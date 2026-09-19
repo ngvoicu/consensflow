@@ -26,16 +26,16 @@ async function withApi(fn) {
         ? { id: 'zeus', kind: 'claude-code', model: 'claude-sonnet-5', effort: 'high' }
         : null,
   })
-  const session = ledger.createSession({
+  const project = ledger.createProject({
     directory: '/work/app',
     name: 'app',
     lead: { harness: 'claude-code' },
   })
-  ledger.addMember(session.id, { agent: 'zeus', harness: 'claude-code', role: 'worker' })
+  ledger.addMember(project.id, { agent: 'zeus', harness: 'claude-code', role: 'worker' })
   const participant = (handle) =>
-    ledger.session(session.id).participants.find((p) => p.handle === handle)
+    ledger.project(project.id).participants.find((p) => p.handle === handle)
   const token = (handle) =>
-    credentials.issue({ participant: participant(handle), session, generation: 1 })
+    credentials.issue({ participant: participant(handle), project, generation: 1 })
   const call = async (who, method, route, body) => {
     const response = await fetch(`${api.url}${route}`, {
       method,
@@ -58,7 +58,7 @@ async function withApi(fn) {
     return { code, out: out.join('\n'), err: err.join('\n') }
   }
   try {
-    await fn({ ledger, session, token, call, cf, credentials, changes: () => changes })
+    await fn({ ledger, project, token, call, cf, credentials, changes: () => changes })
   } finally {
     await api.close()
     ledger.close()
@@ -99,10 +99,10 @@ describe('the agents API', () => {
   })
 
   it('lets only the assignee finish a task and only a coordinator or the requester move it', async () => {
-    await withApi(async ({ ledger, session, token, call }) => {
+    await withApi(async ({ ledger, project, token, call }) => {
       deliver(
         ledger,
-        ledger.createTask(session.id, { from: 'human', to: 'lead', body: 'Ship v2' }).message,
+        ledger.createTask(project.id, { from: 'human', to: 'lead', body: 'Ship v2' }).message,
       )
       const lead = token('lead')
       const zeus = token('zeus')
@@ -116,16 +116,16 @@ describe('the agents API', () => {
   })
 
   it('sends a question to whoever gave the task, and lets only the one asked answer it', async () => {
-    await withApi(async ({ ledger, session, token, call }) => {
+    await withApi(async ({ ledger, project, token, call }) => {
       deliver(
         ledger,
-        ledger.createTask(session.id, { from: 'lead', to: 'zeus', body: 'Parser' }).message,
+        ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' }).message,
       )
       const zeus = token('zeus')
       const asked = await call(zeus, 'POST', '/api/questions', { body: 'Which format?' })
       assert.equal(asked.status, 201)
       assert.deepEqual([asked.body.message.recipient, asked.body.message.task], ['lead', 1])
-      assert.equal(ledger.task(session.id, 1).state, 'waiting')
+      assert.equal(ledger.task(project.id, 1).state, 'waiting')
       const wrong = await call(zeus, 'POST', '/api/answers', {
         question: asked.body.message.id,
         body: 'JSON',
@@ -140,8 +140,8 @@ describe('the agents API', () => {
   })
 
   it('shows an agent only the messages it sent or received', async () => {
-    await withApi(async ({ ledger, session, token, call }) => {
-      const note = ledger.note(session.id, { from: 'lead', to: 'human', body: 'private' })
+    await withApi(async ({ ledger, project, token, call }) => {
+      const note = ledger.note(project.id, { from: 'lead', to: 'human', body: 'private' })
       assert.equal((await call(token('zeus'), 'GET', `/api/inbox/${note.id}`)).status, 404)
       assert.equal((await call(token('lead'), 'GET', `/api/inbox/${note.id}`)).status, 200)
       assert.deepEqual((await call(token('zeus'), 'GET', '/api/inbox')).body.messages, [])
@@ -163,13 +163,13 @@ describe('cf inside a core window', () => {
         (await cf(lead, 'task', 'list')).out,
         '@zeus (worker)\nT-1 [queued] @zeus ← @lead: Write the parser',
       )
-      assert.equal((await cf(lead, 'whoami')).out, '@lead (lead) in session app')
+      assert.equal((await cf(lead, 'whoami')).out, '@lead (lead) in project app')
       const json = await cf(lead, 'task', 'get', 'T-1', '--json')
       assert.equal(JSON.parse(json.out).messages[0].body, 'Write the parser')
     })
   })
 
-  it('shows the session team with each member model', async () => {
+  it('shows the project team with each member model', async () => {
     await withApi(async ({ token, cf }) => {
       assert.equal(
         (await cf(token('lead'), 'team')).out,
@@ -184,7 +184,7 @@ describe('cf inside a core window', () => {
       const usage = await cf(lead, 'task', 'add', 'no target')
       assert.deepEqual([usage.code, usage.err], [2, 'cf: cf task add @agent "what to do"'])
       const missing = await cf(lead, 'task', 'done', 'T-9', 'x')
-      assert.deepEqual([missing.code, missing.err], [1, 'cf: no task T-9 in this session'])
+      assert.deepEqual([missing.code, missing.err], [1, 'cf: no task T-9 in this project'])
       const outside = await cf('revoked', 'whoami')
       assert.equal(outside.code, 1)
       assert.match(outside.err, /no ConsensFlow access/)

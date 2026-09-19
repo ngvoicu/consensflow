@@ -20,7 +20,7 @@ import { randomUUID } from 'node:crypto'
  *   question is left alone. Coordinators (lead, PM) finish their own tasks
  *   explicitly, because their turns end while they wait for workers.
  * - A worker window that closes mid-task fails the task, and the requester is
- *   told. A lead window that closes suspends its session. A member who leaves
+ *   told. A lead window that closes suspends its project. A member who leaves
  *   the team has its window closed once its step in progress ends, and that
  *   exit fails nothing: its open tasks were cancelled when it left.
  * - A human typing in a window latches it against pastes. Their Enter releases
@@ -118,38 +118,38 @@ export class Dispatcher {
     return this.#runtime.get(participantId)?.pane ?? null
   }
 
-  /** A new session: the ledger records it with its team, and its lead window opens. */
-  async openSession({ directory, name, harness, team = [] }) {
-    const session = this.#ledger.createSession({ directory, name, lead: { harness }, team })
-    const lead = session.participants.find((participant) => participant.handle === 'lead')
-    await this.#exclusive(lead.id, () => this.#launch(session, lead, null))
-    return this.#ledger.session(session.id)
+  /** A new project: the ledger records it with its team, and its lead window opens. */
+  async openProject({ directory, name, harness, team = [] }) {
+    const project = this.#ledger.createProject({ directory, name, lead: { harness }, team })
+    const lead = project.participants.find((participant) => participant.handle === 'lead')
+    await this.#exclusive(lead.id, () => this.#launch(project, lead, null))
+    return this.#ledger.project(project.id)
   }
 
   /** The human's Resume, and the restore after a restart: coordinators come back on their conversations. */
-  async resumeSession(sessionId) {
-    const session = this.#ledger.setSessionState(sessionId, 'open')
-    for (const participant of session.participants) {
+  async resumeProject(projectId) {
+    const project = this.#ledger.setProjectState(projectId, 'open')
+    for (const participant of project.participants) {
       if (!COORDINATORS.has(participant.role) || this.pane(participant.id) !== null) continue
       if (participant.role === 'pm' && this.#ledger.currentConversation(participant.id) === null)
         continue
-      await this.#exclusive(participant.id, () => this.#launch(session, participant, null))
+      await this.#exclusive(participant.id, () => this.#launch(project, participant, null))
     }
     this.#changed()
-    return this.#ledger.session(sessionId)
+    return this.#ledger.project(projectId)
   }
 
-  /** Once, at start: the sessions that were open when the previous process ended come back. */
+  /** Once, at start: the projects that were open when the previous process ended come back. */
   async resumeAfterRestart() {
     const outcomes = []
-    for (const session of this.#ledger.sessions().filter((s) => s.resumeOnStart)) {
+    for (const project of this.#ledger.projects().filter((s) => s.resumeOnStart)) {
       try {
-        await this.resumeSession(session.id)
-        outcomes.push({ session: session.id, resumed: true })
+        await this.resumeProject(project.id)
+        outcomes.push({ project: project.id, resumed: true })
       } catch (cause) {
-        outcomes.push({ session: session.id, resumed: false, error: cause.message })
+        outcomes.push({ project: project.id, resumed: false, error: cause.message })
       } finally {
-        this.#ledger.forgetResume(session.id)
+        this.#ledger.forgetResume(project.id)
       }
     }
     return outcomes
@@ -159,16 +159,16 @@ export class Dispatcher {
    * The human takes a member off the team. It waits for the member's step in
    * progress, so a window that is still opening is closed too, not left behind.
    */
-  async removeMember(sessionId, handle) {
+  async removeMember(projectId, handle) {
     const member = this.#ledger
-      .session(sessionId)
+      .project(projectId)
       ?.participants.find((participant) => participant.handle === handle)
     // Not in the team: the ledger refuses it and says why.
-    if (member === undefined) return this.#ledger.removeMember(sessionId, handle)
+    if (member === undefined) return this.#ledger.removeMember(projectId, handle)
     return this.#exclusive(
       member.id,
       async () => {
-        const removed = this.#ledger.removeMember(sessionId, handle)
+        const removed = this.#ledger.removeMember(projectId, handle)
         const { pane } = this.#runtimeOf(member.id)
         if (pane !== null) await this.#host.kill(pane).catch(() => {})
         this.#changed()
@@ -181,10 +181,10 @@ export class Dispatcher {
   /** One pass over every participant; each moves on its own, so a slow launch holds up no one else. */
   async pass() {
     const steps = []
-    for (const session of this.#ledger.sessions()) {
-      for (const participant of session.participants) {
+    for (const project of this.#ledger.projects()) {
+      for (const participant of project.participants) {
         if (participant.role === 'human') continue
-        steps.push(this.#exclusive(participant.id, () => this.#step(session, participant)))
+        steps.push(this.#exclusive(participant.id, () => this.#step(project, participant)))
       }
     }
     await Promise.all(steps)
@@ -206,34 +206,34 @@ export class Dispatcher {
       delivering: null,
       activity: { state: 'closed' },
     })
-    const session = this.#sessionOf(participantId)
-    if (session === null) return
-    const participant = session.participants.find((p) => p.id === participantId)
+    const project = this.#projectOf(participantId)
+    if (project === null) return
+    const participant = project.participants.find((p) => p.id === participantId)
     if (delivering !== null) {
       this.#settleFailure(delivering, `@${participant.handle}'s window closed`, {
         retry: !delivering.launch,
       })
     }
     if (participant.role === 'lead') {
-      if (session.state === 'open') this.#ledger.setSessionState(session.id, 'suspended')
+      if (project.state === 'open') this.#ledger.setProjectState(project.id, 'suspended')
     } else if (!COORDINATORS.has(participant.role)) {
       const task = this.#ledger.activeTask(participantId)
-      if (task !== null) this.#failTask(session, task, `@${participant.handle}'s window closed`)
+      if (task !== null) this.#failTask(project, task, `@${participant.handle}'s window closed`)
     }
     this.#changed()
   }
 
   // --- one participant's step ----------------------------------------------------
 
-  async #step(session, participant) {
+  async #step(project, participant) {
     const runtime = this.#runtimeOf(participant.id)
-    if (runtime.pane !== null) return this.#stepOpen(session, participant, runtime)
-    if (session.state !== 'open') return
+    if (runtime.pane !== null) return this.#stepOpen(project, participant, runtime)
+    if (project.state !== 'open') return
     const next = this.#ledger.nextDelivery(participant.id)
-    if (next !== null) await this.#launch(session, participant, next)
+    if (next !== null) await this.#launch(project, participant, next)
   }
 
-  async #stepOpen(session, participant, runtime) {
+  async #stepOpen(project, participant, runtime) {
     let observed
     try {
       observed = await runtime.adapter.observe({
@@ -254,7 +254,7 @@ export class Dispatcher {
     )
     if (runtime.delivering !== null) this.#watchArrival(runtime, observed)
     await this.#releaseDraft(runtime, observed)
-    if (!COORDINATORS.has(participant.role)) this.#collect(session, participant, observed)
+    if (!COORDINATORS.has(participant.role)) this.#collect(project, participant, observed)
     if (runtime.delivering === null && observed.settled && !observed.waiting) {
       const next = this.#ledger.nextDelivery(participant.id)
       if (next !== null) await this.#deliver(runtime, next)
@@ -318,7 +318,7 @@ export class Dispatcher {
   }
 
   /** A worker's answer to its task's latest message finishes the task. */
-  #collect(session, participant, observed) {
+  #collect(project, participant, observed) {
     const task = this.#ledger.activeTask(participant.id)
     if (task === null || task.state !== 'working') return
     const latest = task.messages
@@ -333,7 +333,7 @@ export class Dispatcher {
     const start = observed.items.findIndex((item) => item.text.includes(markerOf(latest.id)))
     if (start === -1) return
     if (observed.failed) {
-      this.#failTask(session, task, `@${participant.handle}'s harness reported a failure`)
+      this.#failTask(project, task, `@${participant.handle}'s harness reported a failure`)
       return
     }
     if (!observed.settled) return
@@ -342,7 +342,7 @@ export class Dispatcher {
       .filter((item) => item.role === 'assistant' && item.complete)
       .at(-1)
     if (answer === undefined) return
-    this.#ledger.recordResult(session.id, task.number, {
+    this.#ledger.recordResult(project.id, task.number, {
       body: answer.text.trim() || '(the agent ended its turn without a written answer)',
     })
     this.#changed()
@@ -388,7 +388,7 @@ export class Dispatcher {
 
   // --- launches --------------------------------------------------------------------
 
-  async #launch(session, participant, message) {
+  async #launch(project, participant, message) {
     const runtime = this.#runtimeOf(participant.id)
     const adapter = this.#adapters[participant.harness]
     if (adapter === undefined) throw new Error(`no adapter for ${participant.harness}`)
@@ -414,27 +414,27 @@ export class Dispatcher {
         launchId,
         participant,
         role: participant.role,
-        session,
-        directory: session.directory,
+        project,
+        directory: project.directory,
         resume,
         message: message === null ? null : deliveryText(message),
         agent: participant.agent === null ? null : this.#roster(participant.agent),
-        instructions: this.#roles(participant, session),
+        instructions: this.#roles(participant, project),
       })
     } catch (cause) {
       if (delivering !== null)
         this.#settleFailure(delivering, `the launch failed: ${cause.message}`, { retry: false })
       return
     }
-    const token = this.#credentials.issue({ participant, session, generation })
-    const pane = { id: `s${session.id}-${participant.handle}`, generation }
+    const token = this.#credentials.issue({ participant, project, generation })
+    const pane = { id: `p${project.id}-${participant.handle}`, generation }
     const opened = await this.#host
       .open({
         ...pane,
         launch: launchId,
-        cwd: session.directory,
+        cwd: project.directory,
         argv: plan.argv,
-        env: { ...this.#paneEnv(participant, session), ...plan.env, CONSENSFLOW_TOKEN: token },
+        env: { ...this.#paneEnv(participant, project), ...plan.env, CONSENSFLOW_TOKEN: token },
         dropEnv: plan.dropEnv,
       })
       .catch((cause) => ({ ok: false, error: cause.message }))
@@ -506,21 +506,21 @@ export class Dispatcher {
     } else {
       this.#ledger.failDelivery(message.id, reason)
       if (message.kind === 'task' && message.taskNumber !== null) {
-        const session = this.#ledger.session(message.sessionId)
-        const task = this.#ledger.task(session.id, message.taskNumber)
-        if (task.state === 'failed') this.#tellRequester(session, task, reason)
+        const project = this.#ledger.project(message.projectId)
+        const task = this.#ledger.task(project.id, message.taskNumber)
+        if (task.state === 'failed') this.#tellRequester(project, task, reason)
       }
     }
     this.#changed()
   }
 
-  #failTask(session, task, reason) {
-    this.#ledger.failTask(session.id, task.number, { reason })
-    this.#tellRequester(session, task, reason)
+  #failTask(project, task, reason) {
+    this.#ledger.failTask(project.id, task.number, { reason })
+    this.#tellRequester(project, task, reason)
   }
 
-  #tellRequester(session, task, reason) {
-    this.#ledger.note(session.id, {
+  #tellRequester(project, task, reason) {
+    this.#ledger.note(project.id, {
       to: task.requester,
       task: task.number,
       body: `T-${task.number} failed: ${reason}. Reopen it with: cf task reopen T-${task.number} "…"`,
@@ -575,11 +575,11 @@ export class Dispatcher {
     this.#changed()
   }
 
-  #sessionOf(participantId) {
+  #projectOf(participantId) {
     return (
       this.#ledger
-        .sessions()
-        .find((session) => session.participants.some((p) => p.id === participantId)) ?? null
+        .projects()
+        .find((project) => project.participants.some((p) => p.id === participantId)) ?? null
     )
   }
 
