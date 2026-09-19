@@ -804,6 +804,13 @@ describe('the --in-pane controller takes its ownership from the redemption', () 
 
     const argv = claude.calls().at(-1)
     assert.equal(argv[argv.indexOf('--session-id') + 1], nativeSession)
+    // Every Claude turn ends in a Stop hook: the worker launches with the
+    // settings file the app wrote under this home, not a global one.
+    const settings = argv[argv.indexOf('--settings') + 1]
+    assert.ok(
+      settings?.startsWith(join(s.t.env.CONSENSFLOW_HOME, 'integrations', 'claude')),
+      `worker argv carries the launch's settings file: ${argv.join(' ')}`,
+    )
 
     const row = s.threads()[conversation]
     assert.equal(row.sessionId, nativeSession)

@@ -183,6 +183,26 @@ test('scanner indexes every completed reply for closed/manual/unbound coordinato
   assert.deepEqual(await fs.readdir(s.cwd), [])
 })
 
+test('the scanner never reads a conversation deleted from its session', async (t) => {
+  // 153 of 168 conversations the live daemon re-parsed every second were ones
+  // Gabriel had deleted from the session (2026-09-19 diagnosis).
+  const s = await setup(t)
+  await s.store.mutate(s.cwd, 'test.delete', async (io) => {
+    const all = await io.readTabs()
+    all.find((tab) => tab.id === s.lead.id).deletedConversations = ['worker']
+    await io.writeTabs(all)
+  })
+  await writeCodexSession(s.f.env, 'native-worker', [{ answer: 'deleted reply', answerId: 'gone' }])
+  await writeCodexSession(s.f.env, 'native-advisor', [{ answer: 'kept', answerId: 'kept' }])
+  await s.watcher.reconcile()
+  const results = Object.values((await s.store.readInbox(s.cwd)).results)
+  assert.deepEqual(
+    results.map((r) => r.answer),
+    ['kept'],
+  )
+  assert.deepEqual(s.errors, [])
+})
+
 test('stored results stay readable while an unrelated background scan is stalled', async (t) => {
   const s = await setup(t)
   await writeCodexSession(s.f.env, 'native-worker', [

@@ -44,8 +44,8 @@ diagnosis and every decision live in the `consensflow-sme` brain
 
 ## Phase 2: Daemon load [active]
 
-- [ ] [TEST-REL-05] tests for the watcher: deleted conversations are not parsed; each native session is parsed at most once per scan; an unchanged file is not parsed again; old unconfirmed receipts stop being re-checked after a bound.
-- [ ] [IMPL-REL-06] src/delivery-watch.js (and the transcript reader if needed); satisfies TEST-REL-05.
+- [x] [TEST-REL-05] tests/inbox-scan.test.mjs, tests/engine/completion.test.mjs: a deleted conversation is never read; an unchanged transcript returns the previous result and a grown one is read again.
+- [x] [IMPL-REL-06] hosts/lib/completion.js (`cachedAnswers`, `locateTranscript`), src/delivery-watch.js; satisfies TEST-REL-05. Old unconfirmed receipts are still checked, but each check is now a file stat, so no bound was added.
 - [ ] [TEST-REL-07] The state message the page loads stays bounded as deliveries grow.
 - [ ] [IMPL-REL-08] Page the delivery list; satisfies TEST-REL-07.
 
@@ -71,9 +71,9 @@ diagnosis and every decision live in the `consensflow-sme` brain
 
 ## Resume context
 
-Phase 1 is done. Next: TEST-REL-05 (watcher load). The committed watcher
-already coalesces scans; it still parses every bound conversation each second
-and re-reads the lead's history once per old unconfirmed legacy receipt.
+Phases 1 and half of 2 are done. Next: TEST-REL-07 (bound the state message
+the page loads; it carried about 216 KB of deliveries and grows 30-40 KB a day
+toward the 1 MB bridge frame cap).
 
 ## TDD log
 
@@ -97,3 +97,10 @@ and re-reads the lead's history once per old unconfirmed legacy receipt.
 - The full gate also exposed a third race in the Pi duplicate test: the
   extension's own inbox watcher can start the scan first, so the test now waits
   for the send (30/30 solo runs pass).
+- TEST-REL-05 RED: the deleted conversation's reply was indexed; `cachedAnswers`
+  did not exist. GREEN after IMPL-REL-06: completion 71/71, watcher, Devin and
+  lifecycle suites 28/28.
+- Measured on copies of the live home (read-only source), same machine: the
+  previous commit's watcher took 7.3 s, 23.1 s and 17.7 s for three scans; this
+  change takes 4.0 s, 1.9 s and 0.56 s (about 30-40x faster in steady state).
+  Memory stays about 1.1 GB in both; Stage 2's ledger addresses that.

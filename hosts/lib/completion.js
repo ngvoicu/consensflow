@@ -27,7 +27,7 @@ export async function answers(kind, sessionId, env, options = {}) {
       case 'codex':
         return await codexAnswers(sessionId, env, options)
       case 'claude-code':
-        return await claudeAnswers(sessionId, env)
+        return await claudeAnswers(sessionId, env, options)
       case 'pi':
         return await piAnswers(sessionId, env, options)
       case 'kimi':
@@ -44,6 +44,65 @@ export async function answers(kind, sessionId, env, options = {}) {
       return { unknown: true, reason: error.message }
     }
     return { unknown: true, reason: `unreadable: ${describeError(error)}` }
+  }
+}
+
+/**
+ * `answers` for a caller that re-reads the same sessions every second (the
+ * delivery watcher; the live lead's transcript reached 135 MB). Each JSONL
+ * transcript is located once, and a file whose size and modification time
+ * have not changed returns the previous result instead of being searched for
+ * and parsed again. Calls with options, and harnesses read through a
+ * database query, always read. Results are shared: callers must not mutate them.
+ */
+export function cachedAnswers() {
+  const known = new Map()
+  return async (kind, sessionId, env, options = {}) => {
+    if (
+      Object.keys(options).length > 0 ||
+      !['claude-code', 'codex', 'pi'].includes(kind) ||
+      !sessionId ||
+      env === null ||
+      typeof env !== 'object'
+    )
+      return answers(kind, sessionId, env, options)
+    const key = `${kind}\n${sessionId}`
+    const previous = known.get(key)
+    let file = previous?.file ?? null
+    let stat = file === null ? null : await fs.stat(file).catch(() => null)
+    if (stat === null) {
+      file = await locateTranscript(kind, sessionId, env).catch(() => null)
+      stat = file === null ? null : await fs.stat(file).catch(() => null)
+    }
+    if (stat === null) {
+      known.delete(key)
+      return answers(kind, sessionId, env)
+    }
+    const stamp = `${stat.size}:${stat.mtimeMs}`
+    if (previous?.file === file && previous.stamp === stamp) return previous.result
+    const result = await answers(kind, sessionId, env, { file })
+    known.set(key, { file, stamp, result })
+    return result
+  }
+}
+
+/** Where a JSONL harness keeps one session's transcript, or null. */
+async function locateTranscript(kind, sessionId, env) {
+  switch (kind) {
+    case 'claude-code':
+      return findFile(
+        path.join(env.CLAUDE_CONFIG_DIR ?? path.join(home(env), '.claude'), 'projects'),
+        (name) => name === `${sessionId}.jsonl`,
+      )
+    case 'codex':
+      return findFile(
+        path.join(env.CODEX_HOME ?? path.join(home(env), '.codex'), 'sessions'),
+        (name) => name.includes(sessionId),
+      )
+    case 'pi':
+      return findFile(piSessionDir(env), (name) => name.includes(sessionId))
+    default:
+      return null
   }
 }
 
@@ -502,8 +561,7 @@ function codexTurn(turns, turnId) {
 }
 
 async function codexAnswers(sessionId, env, options) {
-  const root = path.join(env.CODEX_HOME ?? path.join(home(env), '.codex'), 'sessions')
-  const file = await findFile(root, (name) => name.includes(sessionId))
+  const file = options.file ?? (await locateTranscript('codex', sessionId, env))
   if (file === null) {
     // Only a current authenticated native observation proves an empty thread.
     // The adapter owns its initial cursor; missing history alone proves nothing.
@@ -827,9 +885,8 @@ function isClaudeInterrupt(record) {
   )
 }
 
-async function claudeAnswers(sessionId, env) {
-  const root = path.join(env.CLAUDE_CONFIG_DIR ?? path.join(home(env), '.claude'), 'projects')
-  const file = await findFile(root, (name) => name === `${sessionId}.jsonl`)
+async function claudeAnswers(sessionId, env, options = {}) {
+  const file = options.file ?? (await locateTranscript('claude-code', sessionId, env))
   if (file === null) {
     return { unknown: true, reason: `unreadable: no claude session ${sessionId}` }
   }
@@ -1289,8 +1346,7 @@ async function piSettlementEvidence(sessionId, env, options) {
 }
 
 async function piAnswers(sessionId, env, options = {}) {
-  const root = piSessionDir(env)
-  const file = await findFile(root, (name) => name.includes(sessionId))
+  const file = options.file ?? (await locateTranscript('pi', sessionId, env))
   if (file === null) return { unknown: true, reason: `unreadable: no pi session ${sessionId}` }
 
   const result = resultBase()

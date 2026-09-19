@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { answers, itemsAfterCursor } from '../hosts/lib/completion.js'
+import { cachedAnswers, itemsAfterCursor } from '../hosts/lib/completion.js'
 import { digest, envelope, legacyReceipt } from '../hosts/lib/deliveries.js'
 import {
   claimForRead,
@@ -43,6 +43,8 @@ export class Watcher {
     this.unsubscribe = []
     this.signals = new Map()
     this.activities = new Map()
+    // Every bound session is re-read each scan; unchanged transcripts are not re-parsed.
+    this.answers = cachedAnswers()
   }
   activity(tab, pane, row, receiver) {
     const key = activityKey(tab, pane, row, receiver)
@@ -109,7 +111,7 @@ export class Watcher {
       })
       options = { piSettlement: { directory: channel.settled, launchId: channel.launchId } }
     }
-    return answers(row.kind, session, this.env, options)
+    return this.answers(row.kind, session, this.env, options)
   }
   async #scan() {
     const tabs = await this.tabs.list()
@@ -147,6 +149,7 @@ export class Watcher {
       }
       for (const [conversation, row] of Object.entries(threads)) {
         if (!belongs(row, tab) || !row.sessionId || !row.binding) continue
+        if (tab.deletedConversations?.includes(conversation)) continue
         let session = row.sessionId
         let latest
         const pane = tab.panes.find((pane) => pane.conversation === conversation)
@@ -219,7 +222,7 @@ export class Watcher {
         if (!nativeReceipts.has(key))
           nativeReceipts.set(
             key,
-            await answers(claim.receiver.kind, claim.receiver.session, this.env),
+            await this.answers(claim.receiver.kind, claim.receiver.session, this.env),
           )
       }
     const historicalReceipts = []
@@ -233,7 +236,7 @@ export class Watcher {
         )
           continue
         let session = old.snapshot.targetSession
-        const native = await answers(old.kind, session, this.env)
+        const native = await this.answers(old.kind, session, this.env)
         if (native.unknown || native.replaced) continue
         let proof = legacyReceipt(old, {
           session,
@@ -247,7 +250,7 @@ export class Watcher {
             at: Date.parse(native.continuedAt),
           }
           session = continuation.to
-          const successor = await answers(old.kind, session, this.env)
+          const successor = await this.answers(old.kind, session, this.env)
           if (!successor.unknown && !successor.replaced)
             proof = legacyReceipt(old, { session, items: successor.items, continuation })
         }
