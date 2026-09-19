@@ -23,6 +23,11 @@ export { SCHEMA_VERSION }
  *   not). Coordinators take tasks as they come; theirs end when they say so.
  * - The human never receives through a pane: their messages stay in the inbox
  *   until they are read in the app.
+ * - A member who leaves the team keeps its history but gets nothing new: its
+ *   open tasks are cancelled, its undelivered messages and its unread
+ *   questions too, and it is refused as a recipient (`member-left`) until it
+ *   rejoins. The coordinators whose windows already run are told when the
+ *   team changes; a window that has not started reads the team at launch.
  * - Task states move only along the state machine below; anything else is
  *   refused with `invalid-transition`.
  *
@@ -37,6 +42,9 @@ export { SCHEMA_VERSION }
 
 export const HARNESSES = ['claude-code', 'codex', 'opencode', 'pi', 'devin', 'kimi']
 const MEMBER_ROLES = ['worker', 'advisor', 'reviewer']
+/** Who hands each kind of member its work, and hears when the team changes. */
+const COORDINATOR_OF = { worker: 'lead', reviewer: 'lead', advisor: 'pm' }
+const MEMBER_ROLE_NAMES = { worker: 'a worker', reviewer: 'a reviewer', advisor: 'an advisor' }
 const COORDINATOR_HANDLES = ['human', 'lead', 'pm']
 const ACTIVE_TASK_STATES = ['working', 'waiting']
 const MAX_BODY = 1_000_000
@@ -125,6 +133,24 @@ function requireHarness(harness) {
   return harness
 }
 
+/** A participant that is still in the session; a member who left is refused. */
+function requireActive(row) {
+  if (row.left_at !== null) {
+    throw new LedgerError('member-left', `@${row.handle} left the team`, 409)
+  }
+  return row
+}
+
+function requireMember({ agent, harness, role }) {
+  if (!MEMBER_ROLES.includes(role)) {
+    throw new LedgerError('invalid-role', `a member is a ${MEMBER_ROLES.join(', ')}, not ${role}`)
+  }
+  if (typeof agent !== 'string' || !AGENT_ID.test(agent) || COORDINATOR_HANDLES.includes(agent)) {
+    throw new LedgerError('invalid-agent', `not an agent id: ${JSON.stringify(agent)}`)
+  }
+  requireHarness(harness)
+}
+
 /** A card title: the first line that says something, shortened to fit. */
 function titleOf(body) {
   const line = body
@@ -156,6 +182,7 @@ const participantView = (row) => ({
   agent: row.agent,
   harness: row.harness,
   createdAt: row.created_at,
+  leftAt: row.left_at,
 })
 
 const conversationView = (row) =>
@@ -222,10 +249,12 @@ class Ledger {
 
   // --- sessions and participants ---------------------------------------------
 
-  createSession({ directory, name, lead }) {
+  /** A session with its lead and, when given, its team (the last session's, usually). */
+  createSession({ directory, name, lead, team = [] }) {
     requireText(directory, 'directory', 4096)
     requireText(name, 'name', 100)
     requireHarness(lead?.harness)
+    for (const member of team) requireMember(member)
     return this.#write(() => {
       const at = this.#at()
       const { lastInsertRowid: id } = this.#db
@@ -236,6 +265,9 @@ class Ledger {
         .run(directory, name, at, at)
       this.#addParticipant(id, { handle: 'human', role: 'human', agent: null, harness: null })
       this.#addParticipant(id, { handle: 'lead', role: 'lead', agent: null, harness: lead.harness })
+      for (const { agent, harness, role } of team) {
+        this.#addParticipant(id, { handle: agent, role, agent, harness })
+      }
       this.#log(id, 'session.created', { name, directory })
       return this.session(id)
     })
@@ -253,7 +285,7 @@ class Ledger {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       participants: this.#db
-        .prepare('SELECT * FROM participant WHERE session_id = ? ORDER BY id')
+        .prepare('SELECT * FROM participant WHERE session_id = ? AND left_at IS NULL ORDER BY id')
         .all(id)
         .map(participantView),
     }
@@ -316,17 +348,83 @@ class Ledger {
     })
   }
 
+  /** A member joins the team, or rejoins it in the role and harness given now. */
   addMember(sessionId, { agent, harness, role }) {
-    if (!MEMBER_ROLES.includes(role)) {
-      throw new LedgerError('invalid-role', `a member is a ${MEMBER_ROLES.join(', ')}, not ${role}`)
-    }
-    if (typeof agent !== 'string' || !AGENT_ID.test(agent) || COORDINATOR_HANDLES.includes(agent)) {
-      throw new LedgerError('invalid-agent', `not an agent id: ${JSON.stringify(agent)}`)
-    }
-    requireHarness(harness)
-    return this.#write(() =>
-      this.#addParticipant(sessionId, { handle: agent, role, agent, harness }),
-    )
+    requireMember({ agent, harness, role })
+    return this.#write(() => {
+      const left = this.#db
+        .prepare(
+          'SELECT * FROM participant WHERE session_id = ? AND handle = ? AND left_at IS NOT NULL',
+        )
+        .get(sessionId, agent)
+      let member
+      if (left === undefined) {
+        member = this.#addParticipant(sessionId, { handle: agent, role, agent, harness })
+      } else {
+        this.#db
+          .prepare('UPDATE participant SET role = ?, harness = ?, left_at = NULL WHERE id = ?')
+          .run(role, harness, left.id)
+        this.#log(sessionId, 'member.added', { handle: agent, role, harness, rejoined: true })
+        member = participantView(this.#participantRow(left.id))
+      }
+      this.#tellIfRunning(
+        sessionId,
+        COORDINATOR_OF[role],
+        `@${agent} joined the team as ${MEMBER_ROLE_NAMES[role]}. Give it work with: cf task add @${agent} "…"`,
+      )
+      return member
+    })
+  }
+
+  /**
+   * A member leaves the team. Its open tasks are cancelled, with the messages
+   * still on their way to it and its unread questions; its coordinator and
+   * whoever asked for those tasks are told, if their windows run.
+   */
+  removeMember(sessionId, handle) {
+    return this.#write(() => {
+      const member = this.#participantByHandle(sessionId, handle)
+      if (!MEMBER_ROLES.includes(member.role)) {
+        throw new LedgerError(
+          'not-a-member',
+          `${handle} is the session's ${member.role}, not a member of its team`,
+          409,
+        )
+      }
+      const open = this.#db
+        .prepare(
+          `SELECT t.*, q.handle AS requester FROM task t JOIN participant q ON q.id = t.requester_id
+           WHERE t.assignee_id = ? AND t.state IN ('queued', 'working', 'waiting')
+           ORDER BY t.number`,
+        )
+        .all(member.id)
+      for (const task of open) {
+        this.#dropQueued(task.id)
+        this.#moveTask(task, 'cancelled', { reason: `@${handle} left the team` })
+      }
+      this.#db
+        .prepare(
+          `UPDATE message SET state = 'cancelled'
+           WHERE (recipient_id = ? AND state IN ('queued', 'delivering'))
+              OR (sender_id = ? AND kind = 'question' AND state = 'queued')`,
+        )
+        .run(member.id, member.id)
+      this.#db.prepare('UPDATE participant SET left_at = ? WHERE id = ?').run(this.#at(), member.id)
+      const cancelled = open.map((task) => task.number)
+      this.#log(sessionId, 'member.left', { handle, cancelled })
+      const body = `@${handle} left the team; it takes no more tasks.${
+        cancelled.length === 0
+          ? ''
+          : ` Cancelled with it: ${cancelled.map((number) => `T-${number}`).join(', ')}.`
+      }`
+      for (const coordinator of new Set([
+        COORDINATOR_OF[member.role],
+        ...open.map((task) => task.requester),
+      ])) {
+        if (coordinator !== 'human') this.#tellIfRunning(sessionId, coordinator, body)
+      }
+      return { member: participantView(this.#participantRow(member.id)), cancelled }
+    })
   }
 
   addPm(sessionId, { harness }) {
@@ -342,8 +440,9 @@ class Ledger {
       .prepare(
         `SELECT agent, harness, role FROM participant
          WHERE session_id = (
-           SELECT MAX(session_id) FROM participant WHERE role IN ('worker', 'advisor', 'reviewer')
-         ) AND role IN ('worker', 'advisor', 'reviewer')
+           SELECT MAX(session_id) FROM participant
+           WHERE role IN ('worker', 'advisor', 'reviewer') AND left_at IS NULL
+         ) AND role IN ('worker', 'advisor', 'reviewer') AND left_at IS NULL
          ORDER BY id`,
       )
       .all()
@@ -502,6 +601,7 @@ class Ledger {
       const asker = this.#db
         .prepare('SELECT sender_id, task_id FROM message WHERE id = ?')
         .get(questionId)
+      requireActive(this.#participantRow(asker.sender_id))
       const id = this.#queue(question.sessionId, {
         to: asker.sender_id,
         from: answerer.id,
@@ -684,6 +784,7 @@ class Ledger {
       const author = this.#participantByHandle(sessionId, by)
       const task = this.#taskRow(sessionId, number)
       this.#requireTaskState(task, ['done', 'failed'], 'reopen')
+      requireActive(this.#participantRow(task.assignee_id))
       const messageId = this.#queue(sessionId, {
         to: task.assignee_id,
         from: author.id,
@@ -838,7 +939,7 @@ class Ledger {
         404,
       )
     }
-    return row
+    return requireActive(row)
   }
 
   #addParticipant(sessionId, { handle, role, agent, harness }) {
@@ -863,6 +964,15 @@ class Ledger {
 
   #conversation(id) {
     return conversationView(this.#db.prepare('SELECT * FROM conversation WHERE id = ?').get(id))
+  }
+
+  /** A note from ConsensFlow, for a participant whose window has already started. */
+  #tellIfRunning(sessionId, handle, body) {
+    const row = this.#db
+      .prepare('SELECT id FROM participant WHERE session_id = ? AND handle = ? AND left_at IS NULL')
+      .get(sessionId, handle)
+    if (row === undefined || this.currentConversation(row.id) === null) return
+    this.#send(sessionId, { to: handle, body, kind: 'note' })
   }
 
   #queue(sessionId, { to, from, kind, taskId = null, replyTo = null, body }) {

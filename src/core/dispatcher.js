@@ -20,7 +20,9 @@ import { randomUUID } from 'node:crypto'
  *   question is left alone. Coordinators (lead, PM) finish their own tasks
  *   explicitly, because their turns end while they wait for workers.
  * - A worker window that closes mid-task fails the task, and the requester is
- *   told. A lead window that closes suspends its session.
+ *   told. A lead window that closes suspends its session. A member who leaves
+ *   the team has its window closed once its step in progress ends, and that
+ *   exit fails nothing: its open tasks were cancelled when it left.
  * - A human typing in a window latches it against pastes. Their Enter releases
  *   the latch once the harness shows a new message of theirs; the pane host
  *   keeps it if they typed again after that Enter.
@@ -116,9 +118,9 @@ export class Dispatcher {
     return this.#runtime.get(participantId)?.pane ?? null
   }
 
-  /** A new session: the ledger records it and its lead window opens. */
-  async openSession({ directory, name, harness }) {
-    const session = this.#ledger.createSession({ directory, name, lead: { harness } })
+  /** A new session: the ledger records it with its team, and its lead window opens. */
+  async openSession({ directory, name, harness, team = [] }) {
+    const session = this.#ledger.createSession({ directory, name, lead: { harness }, team })
     const lead = session.participants.find((participant) => participant.handle === 'lead')
     await this.#exclusive(lead.id, () => this.#launch(session, lead, null))
     return this.#ledger.session(session.id)
@@ -151,6 +153,29 @@ export class Dispatcher {
       }
     }
     return outcomes
+  }
+
+  /**
+   * The human takes a member off the team. It waits for the member's step in
+   * progress, so a window that is still opening is closed too, not left behind.
+   */
+  async removeMember(sessionId, handle) {
+    const member = this.#ledger
+      .session(sessionId)
+      ?.participants.find((participant) => participant.handle === handle)
+    // Not in the team: the ledger refuses it and says why.
+    if (member === undefined) return this.#ledger.removeMember(sessionId, handle)
+    return this.#exclusive(
+      member.id,
+      async () => {
+        const removed = this.#ledger.removeMember(sessionId, handle)
+        const { pane } = this.#runtimeOf(member.id)
+        if (pane !== null) await this.#host.kill(pane).catch(() => {})
+        this.#changed()
+        return removed
+      },
+      { wait: true },
+    )
   }
 
   /** One pass over every participant; each moves on its own, so a slow launch holds up no one else. */
@@ -504,16 +529,24 @@ export class Dispatcher {
 
   // --- small helpers -------------------------------------------------------------------
 
-  /** Runs `work` for one participant at a time; a pass that finds it busy moves on. */
-  async #exclusive(participantId, work) {
+  /**
+   * Runs `work` for one participant at a time. A pass that finds it busy moves
+   * on; `wait` queues behind the step in progress instead.
+   */
+  async #exclusive(participantId, work, { wait = false } = {}) {
     const runtime = this.#runtimeOf(participantId)
-    if (runtime.busy) return
-    runtime.busy = true
-    try {
-      await work()
-    } finally {
-      runtime.busy = false
+    while (runtime.running !== null) {
+      if (!wait) return undefined
+      await runtime.running.catch(() => {})
     }
+    runtime.running = (async () => {
+      try {
+        return await work()
+      } finally {
+        runtime.running = null
+      }
+    })()
+    return runtime.running
   }
 
   #runtimeOf(participantId) {
@@ -525,7 +558,7 @@ export class Dispatcher {
         launch: null,
         token: null,
         delivering: null,
-        busy: false,
+        running: null,
         enters: [],
         humanItems: null,
         activity: { state: 'closed' },

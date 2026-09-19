@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
@@ -27,6 +27,7 @@ async function withPage(fn) {
   )
   const ledger = openLedger(path.join(home, 'consensflow.db'))
   const opened = []
+  const removed = []
   let kicks = 0
   const dispatcher = {
     async openSession(request) {
@@ -35,7 +36,12 @@ async function withPage(fn) {
         directory: request.directory,
         name: request.name,
         lead: { harness: request.harness },
+        team: request.team,
       })
+    },
+    async removeMember(session, handle) {
+      removed.push([session, handle])
+      return ledger.removeMember(session, handle)
     },
     async resumeSession(id) {
       return ledger.setSessionState(id, 'open')
@@ -45,7 +51,7 @@ async function withPage(fn) {
   }
   const operations = pageOperations({ ledger, dispatcher, env, kick: () => kicks++ })
   try {
-    await fn({ ledger, operations, opened, kicks: () => kicks })
+    await fn({ ledger, operations, opened, removed, env, kicks: () => kicks })
   } finally {
     ledger.close()
     await rm(home, { recursive: true, force: true })
@@ -53,13 +59,25 @@ async function withPage(fn) {
 }
 
 describe('the page protocol of the new core', () => {
+  it('is exactly what the app forwards: the Rust allow-list names every operation', async () => {
+    const source = await readFile(
+      new URL('../app/src-tauri/src/commands.rs', import.meta.url),
+      'utf8',
+    )
+    const list = source.match(/const CORE_OPERATIONS: &\[&str\] = &\[([^\]]*)\]/)[1]
+    const forwarded = [...list.matchAll(/"([^"]+)"/g)].map((match) => match[1])
+    await withPage(async ({ operations }) => {
+      assert.deepEqual(Object.keys(operations).sort(), forwarded.sort())
+    })
+  })
+
   it('opens a session named after its folder and lists it', async () => {
     await withPage(async ({ operations, opened, kicks }) => {
       const { session } = await operations['session.open']({
         directory: '/work/app',
         harness: 'pi',
       })
-      assert.deepEqual(opened, [{ directory: '/work/app', name: 'app', harness: 'pi' }])
+      assert.deepEqual(opened, [{ directory: '/work/app', name: 'app', harness: 'pi', team: [] }])
       assert.equal(kicks(), 1)
       const { sessions } = await operations['sessions.list']({})
       assert.deepEqual(
@@ -92,6 +110,69 @@ describe('the page protocol of the new core', () => {
       await assert.rejects(
         operations['member.add']({ session: session.id, agent: 'ghost' }),
         /no agent named ghost/,
+      )
+    })
+  })
+
+  it('starts a new session with the last team, as the saved agents are now', async () => {
+    await withPage(async ({ operations, opened, env }) => {
+      const { session } = await operations['session.open']({
+        directory: '/work/app',
+        harness: 'pi',
+      })
+      await operations['member.add']({ session: session.id, agent: 'zeus' })
+      await operations['member.add']({ session: session.id, agent: 'diana', role: 'reviewer' })
+      await writeFile(
+        path.join(env.CONSENSFLOW_HOME, 'agents.json'),
+        `${JSON.stringify({
+          schemaVersion: 1,
+          agents: [{ id: 'zeus', kind: 'opencode', model: 'opencode/muse-spark-1.3' }],
+        })}\n`,
+      )
+      const next = await operations['session.open']({ directory: '/work/api', harness: 'pi' })
+      assert.deepEqual(opened[1].team, [{ agent: 'zeus', harness: 'opencode', role: 'worker' }])
+      assert.deepEqual(
+        next.session.participants.map((p) => p.handle),
+        ['human', 'lead', 'zeus'],
+      )
+    })
+  })
+
+  it('takes a member off the team through the dispatcher, which closes its window', async () => {
+    await withPage(async ({ operations, removed, kicks }) => {
+      const { session } = await operations['session.open']({
+        directory: '/work/app',
+        harness: 'pi',
+      })
+      await operations['member.add']({ session: session.id, agent: 'zeus' })
+      await operations['task.add']({ session: session.id, to: 'zeus', body: 'Parser' })
+      const before = kicks()
+      const { member, cancelled } = await operations['member.remove']({
+        session: session.id,
+        agent: 'zeus',
+      })
+      assert.deepEqual(removed, [[session.id, 'zeus']])
+      assert.deepEqual([member.handle, cancelled], ['zeus', [1]])
+      assert.equal(kicks(), before + 1)
+      const { board } = await operations['board.get']({ session: session.id })
+      assert.deepEqual(
+        board.lanes.map((lane) => lane.participant.handle),
+        ['human', 'lead'],
+      )
+    })
+  })
+
+  it('adds a PM once, on the harness the human picks', async () => {
+    await withPage(async ({ operations }) => {
+      const { session } = await operations['session.open']({
+        directory: '/work/app',
+        harness: 'pi',
+      })
+      const { member } = await operations['pm.add']({ session: session.id, harness: 'codex' })
+      assert.deepEqual([member.handle, member.role, member.harness], ['pm', 'pm', 'codex'])
+      await assert.rejects(
+        operations['pm.add']({ session: session.id, harness: 'pi' }),
+        /already in session/,
       )
     })
   })

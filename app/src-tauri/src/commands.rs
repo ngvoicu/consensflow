@@ -1821,6 +1821,8 @@ const CORE_OPERATIONS: &[&str] = &[
     "board.get",
     "inbox.get",
     "member.add",
+    "member.remove",
+    "pm.add",
     "task.get",
     "task.add",
     "task.accept",

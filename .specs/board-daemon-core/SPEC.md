@@ -91,7 +91,7 @@ opens panes or types into them.
 
 ### Phase A: Ledger [completed]
 
-- [x] [TEST-BDC-01] Ledger schema, migrations and the domain operations (sessions, participants, team, conversations, tasks, messages, events), the instance lock, crash safety and the invariants each operation keeps. `tests/ledger.test.mjs`, 26 tests.
+- [x] [TEST-BDC-01] Ledger schema, migrations and the domain operations (sessions, participants, team, conversations, tasks, messages, events), the instance lock, crash safety and the invariants each operation keeps. `tests/ledger.test.mjs`, 34 tests (the session team among them).
 - [x] [IMPL-BDC-02] `src/ledger/` on `node:sqlite` (`index.js`, `schema.js`); satisfies TEST-BDC-01.
 
 ### Phase B: Harness adapters [active]
@@ -103,7 +103,7 @@ opens panes or types into them.
 
 ### Phase C: Dispatcher and inbox delivery [active]
 
-- [x] [TEST-BDC-09] Task state machine; per-participant queue delivering one item at a time when idle; receipts; retries; the launch-liveness reaper; restore on start. `tests/core-dispatcher.test.mjs` (13) and, end to end through the real pane host, `tests/integration/core-slice.test.mjs`.
+- [x] [TEST-BDC-09] Task state machine; per-participant queue delivering one item at a time when idle; receipts; retries; the launch-liveness reaper; restore on start. `tests/core-dispatcher.test.mjs` (22) and, end to end through the real pane host, `tests/integration/core-slice.test.mjs`.
 - [x] [IMPL-BDC-10] Dispatcher (`src/core/dispatcher.js`), pane host (`pane-host.js`) and the daemon entry (`daemon.js`); satisfies TEST-BDC-09.
 - [x] [TEST-BDC-22] A human's Enter releases the typing latch once the harness records that submission; typing after it keeps the latch. Found by the Stage 2 harness map: no production code ever calls `clear_draft`, so one keystroke blocks every later paste into that window (Devin always pastes).
 - [x] [IMPL-BDC-23] Rust `draft.clear` bridge operation and the core's use of `pane.enter`; satisfies TEST-BDC-22.
@@ -113,10 +113,10 @@ opens panes or types into them.
 - [ ] [TEST-BDC-11] `cf task add/list/get/accept/reopen`, `cf inbox`, `cf ask`, `cf answer`; team enforcement; the removed commands are gone.
 - [x] [IMPL-BDC-12] CLI (`src/core/cli.js`, incl. `cf team`), daemon API (`src/core/api.js`) and new role instructions for lead, PM, advisor, worker and reviewer (`skill/core/`, `src/core/roles.js`), passed to each window through its adapter. The old commands go at the switch (TEST-BDC-11 stays open until then).
 
-### Phase E: Board-first UI [active]
+### Phase E: Board-first UI [completed]
 
-- [ ] [TEST-BDC-13] Playwright: lanes per participant, cards and markers, card detail, the human inbox with question answering, the team picker, session views kept. `app/tests/core-page.spec.mjs` (12) covers all but the PM session view; the switch adds geometry, the Agents/Library/Harnesses dialogs and the self-test hook.
-- [ ] [IMPL-BDC-14] The board page on the new core's page protocol.
+- [x] [TEST-BDC-13] Playwright: lanes per participant, cards and markers, card detail, the human inbox with question answering, the team picker, session views kept. `app/tests/core-page.spec.mjs` (16), with the data side in `tests/core-page.test.mjs` (9). What the old page has and this one does not yet (window geometry, the Agents, Library and Harnesses dialogs, the self-test hook) moves over at the switch, IMPL-BDC-21.
+- [x] [IMPL-BDC-14] The board page on the new core's page protocol: bays grouped by team, the Lead and PM window views, the session team with removal, the PM.
 
 ### Phase F: The switch [planned]
 
@@ -141,16 +141,17 @@ opens panes or types into them.
 
 ## Resume context
 
-Phases A to D are built. B, C and D wait only on live runs (a Claude lead and
+Phases A to E are built. B, C and D wait only on live runs (a Claude lead and
 worker on Sonnet, Codex when its quota allows, Pi and Devin as leads) and, for
-TEST-BDC-11, on the switch that deletes the old commands. Phase E: the board
-page is built and committed as `app/ui/core.html`, beside the old page. Next:
-the session team (a member can leave; a new session starts with the last team;
-the coordinators are told who joined or left), the PM (added from the page,
-its window opened by its first message) and the Lead and PM window views that
-keep the old page's session views; then Phase F, the switch. The old page's
-terminal plumbing in `app/ui/panes.js` duplicates `app/ui/terminal-link.js`
-until the switch deletes the old page.
+TEST-BDC-11, on the switch that deletes the old commands. The board page
+(`app/ui/core.html`) sits beside the old page with the session team (members
+leave and rejoin; a new session starts with the last team; running
+coordinators are told), the PM (its window opens with its first task) and the
+Lead and PM window views. Next: Phase F, the switch: the importer from
+alpha.62 state, then `cf ui` on the new core, `core.html` as `index.html`, and
+the old core, page, commands and tests deleted. The old page's terminal
+plumbing in `app/ui/panes.js` duplicates `app/ui/terminal-link.js` until then.
+Not built yet: removing a PM (the ledger refuses it as `not-a-member`).
 
 ## TDD log
 
@@ -270,3 +271,26 @@ until the switch deletes the old page.
   whole queue now asks the channel itself. Rust 107/107 and 16/16, clippy
   clean, integration 22/22 on three runs, two gates green. Only the headless
   helper streams; the app's window draws pane output itself.
+- The session team and the PM, after review found `addPm` and `lastTeam` with
+  no production caller. Ledger first (RED 6/7, GREEN 34/34): a member who
+  leaves has its open tasks cancelled with the messages still on their way to
+  it and its unread questions, is refused as a recipient (`member-left`),
+  including answers and reopened tasks, and rejoins on the same row in its new
+  role and harness; a new session takes the team it is given; a coordinator
+  whose window runs is told who joined or left and which tasks went with them
+  (one whose window has not started reads the team at launch). The join note
+  broke five dispatcher tests whose fixture added the worker after the lead's
+  window opened; the fixture now builds the team at launch, as a real session
+  does. Dispatcher (22/22): removal waits for the member's step in progress,
+  so a window still opening is closed too (the naive version, checked on
+  purpose, left it open), and that window's exit fails nothing; a PM's window
+  opens with its first task. Page protocol (9/9): `member.remove`, `pm.add`,
+  and `session.open` passing the last team as the saved agents are now (a
+  deleted agent drops out, a changed harness is used). A new contract test
+  reads the Rust allow-list and fails when it and the page operations differ
+  (it failed until the two new names were added). The page (16/16): Board,
+  Lead and PM views, the PM's team grouped after the lead's, a Remove that asks
+  first, and a PM section; one more test caught the team dialog's redraw
+  dropping a pending removal (it did, twice over: the other rows' redraw reset
+  it), fixed by changing that state only on the Remove and Keep buttons.
+  Screenshots at 1440 and 390 px: the confirmation now takes its own line.

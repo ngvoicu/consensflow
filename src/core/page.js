@@ -21,6 +21,7 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
         directory,
         name: name ?? basename(directory),
         harness,
+        team: lastTeamNow(ledger, env),
       }),
     })),
 
@@ -35,6 +36,12 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       if (!row) throw new Error(`no agent named ${agent} in your agents`)
       return { member: ledger.addMember(session, { agent, harness: row.kind, role }) }
     }),
+
+    'member.remove': change(async ({ session, agent }) => dispatcher.removeMember(session, agent)),
+
+    'pm.add': change(async ({ session, harness }) => ({
+      member: ledger.addPm(session, { harness }),
+    })),
 
     'board.get': async ({ session }) => {
       const board = ledger.board(session)
@@ -84,4 +91,12 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       message: ledger.answer(question, { from: 'human', body }),
     })),
   }
+}
+
+/** The last session's team for a new one: members whose agents are still saved, on their harness now. */
+function lastTeamNow(ledger, env) {
+  return ledger.lastTeam().flatMap(({ agent, role }) => {
+    const row = agentRow(agent, env)
+    return row === undefined ? [] : [{ agent, harness: row.kind, role }]
+  })
 }

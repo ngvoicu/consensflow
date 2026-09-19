@@ -292,6 +292,203 @@ describe('sessions and participants', () => {
   })
 })
 
+describe('the session team', () => {
+  const notes = (ledger, participantId) =>
+    ledger
+      .inbox(participantId)
+      .filter((message) => message.kind === 'note')
+      .map((message) => [message.sender, message.body])
+      .reverse()
+
+  it('starts a session with the team it is given, or not at all', async () => {
+    await withLedger((ledger) => {
+      const session = ledger.createSession({
+        directory: '/work/app',
+        name: 'app',
+        lead: { harness: 'pi' },
+        team: [
+          { agent: 'zeus', harness: 'claude-code', role: 'worker' },
+          { agent: 'athena', harness: 'opencode', role: 'advisor' },
+        ],
+      })
+      assert.deepEqual(
+        session.participants.map((p) => [p.handle, p.role, p.harness]),
+        [
+          ['human', 'human', null],
+          ['lead', 'lead', 'pi'],
+          ['zeus', 'worker', 'claude-code'],
+          ['athena', 'advisor', 'opencode'],
+        ],
+      )
+      assert.throws(
+        () =>
+          ledger.createSession({
+            directory: '/work/other',
+            name: 'other',
+            lead: { harness: 'pi' },
+            team: [{ agent: 'hera', harness: 'pi', role: 'lead' }],
+          }),
+        { code: 'invalid-role' },
+      )
+      assert.deepEqual(
+        ledger.sessions().map((s) => s.name),
+        ['app'],
+      )
+    })
+  })
+
+  it('cancels the open work of a member who leaves, and nothing new reaches it', async () => {
+    await withLedger((ledger) => {
+      const { session, id } = team(ledger)
+      const zeus = id('zeus')
+      const first = ledger.createTask(session.id, { from: 'lead', to: 'zeus', body: 'Parser' })
+      deliver(ledger, first.message)
+      ledger.createTask(session.id, { from: 'lead', to: 'zeus', body: 'Lexer' })
+      ledger.createTask(session.id, { from: 'lead', to: 'diana', body: 'Docs' })
+      const note = ledger.note(session.id, { from: 'lead', to: 'zeus', body: 'Mind the tests' })
+      ledger.beginDelivery(note.id)
+      const question = ledger.ask(session.id, {
+        from: 'zeus',
+        to: 'human',
+        body: 'Which parser?',
+        task: 1,
+      })
+
+      const { member, cancelled } = ledger.removeMember(session.id, 'zeus')
+
+      assert.equal(member.handle, 'zeus')
+      assert.notEqual(member.leftAt, null)
+      assert.deepEqual(cancelled, [1, 2])
+      assert.deepEqual(
+        ledger
+          .board(session.id)
+          .lanes.map((lane) => [lane.participant.handle, lane.tasks.map((task) => task.state)]),
+        [
+          ['human', []],
+          ['lead', []],
+          ['diana', ['queued']],
+        ],
+      )
+      assert.deepEqual(
+        [1, 2].map((number) => ledger.task(session.id, number).state),
+        ['cancelled', 'cancelled'],
+      )
+      assert.deepEqual(
+        ledger.inbox(zeus).map((message) => [message.kind, message.state]),
+        [
+          ['note', 'cancelled'],
+          ['task', 'cancelled'],
+          ['task', 'delivered'],
+        ],
+      )
+      assert.equal(ledger.message(question.id).state, 'cancelled')
+      assert.throws(
+        () => ledger.createTask(session.id, { from: 'lead', to: 'zeus', body: 'More' }),
+        { code: 'member-left' },
+      )
+      assert.throws(() => ledger.note(session.id, { from: 'lead', to: 'zeus', body: 'Hi' }), {
+        code: 'member-left',
+      })
+      assert.deepEqual(ledger.lastTeam(), [{ agent: 'diana', harness: 'codex', role: 'worker' }])
+      assert.deepEqual(
+        ledger
+          .events(session.id)
+          .filter((event) => event.kind === 'member.left')
+          .map((event) => event.data),
+        [{ handle: 'zeus', cancelled: [1, 2] }],
+      )
+    })
+  })
+
+  it('answers and follow-ups never go to a member who left', async () => {
+    await withLedger((ledger) => {
+      const { session } = team(ledger)
+      const task = ledger.createTask(session.id, { from: 'lead', to: 'zeus', body: 'Parser' })
+      deliver(ledger, task.message)
+      ledger.recordResult(session.id, 1, { body: 'Done' })
+      const question = ledger.ask(session.id, { from: 'zeus', to: 'lead', body: 'More?' })
+      deliver(ledger, question)
+      ledger.removeMember(session.id, 'zeus')
+
+      assert.throws(() => ledger.reopenTask(session.id, 1, { by: 'lead', body: 'Again' }), {
+        code: 'member-left',
+      })
+      assert.throws(() => ledger.answer(question.id, { from: 'lead', body: 'No' }), {
+        code: 'member-left',
+      })
+      assert.throws(() => ledger.removeMember(session.id, 'zeus'), { code: 'member-left' })
+    })
+  })
+
+  it('only team members leave', async () => {
+    await withLedger((ledger) => {
+      const { session } = team(ledger)
+      ledger.addPm(session.id, { harness: 'pi' })
+      for (const handle of ['human', 'lead', 'pm']) {
+        assert.throws(() => ledger.removeMember(session.id, handle), { code: 'not-a-member' })
+      }
+      assert.throws(() => ledger.removeMember(session.id, 'nobody'), {
+        code: 'unknown-participant',
+      })
+    })
+  })
+
+  it('takes a member back in the role and harness it rejoins with', async () => {
+    await withLedger((ledger) => {
+      const { session, id } = team(ledger)
+      const before = id('zeus')
+      ledger.removeMember(session.id, 'zeus')
+      const back = ledger.addMember(session.id, { agent: 'zeus', harness: 'pi', role: 'reviewer' })
+
+      assert.deepEqual(
+        [back.id, back.role, back.harness, back.leftAt],
+        [before, 'reviewer', 'pi', null],
+      )
+      assert.equal(
+        ledger.createTask(session.id, { from: 'lead', to: 'zeus', body: 'Review' }).task.assignee,
+        'zeus',
+      )
+      assert.deepEqual(
+        ledger
+          .events(session.id)
+          .filter((event) => event.kind === 'member.added' && event.data.handle === 'zeus')
+          .map((event) => event.data.rejoined ?? false),
+        [false, true],
+      )
+    })
+  })
+
+  it('tells a running coordinator who joined or left, and whose tasks went with them', async () => {
+    await withLedger((ledger) => {
+      const { session, id } = team(ledger)
+      const pm = ledger.addPm(session.id, { harness: 'pi' })
+      ledger.addMember(session.id, { agent: 'hera', harness: 'pi', role: 'worker' })
+      ledger.addMember(session.id, { agent: 'athena', harness: 'pi', role: 'advisor' })
+      assert.deepEqual(notes(ledger, id('lead')), [], 'no window yet: its launch reads the team')
+      assert.deepEqual(notes(ledger, pm.id), [])
+
+      ledger.startConversation(id('lead'), { harness: 'claude-code' })
+      ledger.startConversation(pm.id, { harness: 'pi' })
+      ledger.addMember(session.id, { agent: 'apollo', harness: 'codex', role: 'worker' })
+      ledger.addMember(session.id, { agent: 'metis', harness: 'codex', role: 'advisor' })
+      ledger.createTask(session.id, { from: 'lead', to: 'zeus', body: 'Parser' })
+      ledger.createTask(session.id, { from: 'pm', to: 'zeus', body: 'Estimate' })
+      ledger.createTask(session.id, { from: 'human', to: 'zeus', body: 'Logo' })
+      ledger.removeMember(session.id, 'zeus')
+
+      assert.deepEqual(notes(ledger, id('lead')), [
+        [null, '@apollo joined the team as a worker. Give it work with: cf task add @apollo "…"'],
+        [null, '@zeus left the team; it takes no more tasks. Cancelled with it: T-1, T-2, T-3.'],
+      ])
+      assert.deepEqual(notes(ledger, pm.id), [
+        [null, '@metis joined the team as an advisor. Give it work with: cf task add @metis "…"'],
+        [null, '@zeus left the team; it takes no more tasks. Cancelled with it: T-1, T-2, T-3.'],
+      ])
+      assert.deepEqual(notes(ledger, id('human')), [])
+    })
+  })
+})
+
 describe('conversations', () => {
   it('gives a participant one current conversation, and a native session to one conversation', async () => {
     await withLedger((ledger) => {

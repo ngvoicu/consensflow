@@ -63,6 +63,25 @@ export function age(iso, now = Date.now()) {
   return `${Math.round(hours / 24)}d`
 }
 
+const TEAM_OF_ROLE = { lead: 'lead', worker: 'lead', reviewer: 'lead', pm: 'pm', advisor: 'pm' }
+const COORDINATORS = ['human', 'lead', 'pm']
+
+/** Whose team a participant is on: the lead's (with workers and reviewers) or the PM's (with advisors). */
+export const teamOf = (participant) => TEAM_OF_ROLE[participant.role] ?? null
+
+/** The human first, then the lead's team and the PM's, each coordinator ahead of its members. */
+export function laneOrder(lanes) {
+  const rank = ({ participant }) => [
+    [null, 'lead', 'pm'].indexOf(teamOf(participant)),
+    COORDINATORS.includes(participant.role) ? 0 : 1,
+    participant.id,
+  ]
+  return [...lanes].sort((a, b) => {
+    const [x, y] = [rank(a), rank(b)]
+    return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]
+  })
+}
+
 const who = (handle) => (handle === null || handle === undefined ? 'ConsensFlow' : `@${handle}`)
 const laneName = (participant) =>
   ({ human: 'You', lead: 'Lead', pm: 'PM' })[participant.handle] ?? `@${participant.handle}`
@@ -86,16 +105,29 @@ export class BoardView {
     this.#actions = actions
   }
 
-  /** Redraw from the core's state, keeping an open composer and its text. */
+  /**
+   * Redraw from the core's state, keeping an open composer and its text. With
+   * a PM in the session, each team's bays sit under its own label.
+   */
   render({ board, inbox, agents = [], now = Date.now() }) {
     this.#saveDrafts()
     const models = new Map(agents.map((agent) => [agent.name, agent]))
-    const bays = board.lanes.map((lane) =>
-      lane.participant.role === 'human'
-        ? this.#humanBay(lane, inbox, now)
-        : this.#agentBay(lane, models.get(lane.participant.agent), now),
-    )
-    this.#root.replaceChildren(...bays)
+    const grouped = board.lanes.some((lane) => lane.participant.role === 'pm')
+    const nodes = []
+    let team = null
+    for (const lane of laneOrder(board.lanes)) {
+      const next = teamOf(lane.participant)
+      if (grouped && next !== team) {
+        nodes.push(element('p', 'board-group', next === 'pm' ? "PM's team" : "Lead's team"))
+      }
+      team = next
+      nodes.push(
+        lane.participant.role === 'human'
+          ? this.#humanBay(lane, inbox, now)
+          : this.#agentBay(lane, models.get(lane.participant.agent), now),
+      )
+    }
+    this.#root.replaceChildren(...nodes)
     this.#restoreDrafts()
   }
 

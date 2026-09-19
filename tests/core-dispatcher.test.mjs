@@ -99,6 +99,7 @@ function fakeHost() {
     killed: [],
     requests: [],
     refuse: false,
+    hold: null,
     async request(op, body) {
       host.requests.push([op, body])
       return { ok: true, outcome: 'cleared' }
@@ -115,6 +116,7 @@ function fakeHost() {
         host.refuse = false
         return { ok: false, error: 'refused by the test' }
       }
+      await host.hold
       host.opened.push(body)
       return { ok: true, id: body.id, generation: body.generation }
     },
@@ -173,14 +175,14 @@ async function setup(fn, options = {}) {
   }
 }
 
-/** A session with its lead window up and one worker, Zeus, in the team. */
-async function withTeam(context) {
+/** A session with its lead window up and its workers (Zeus, unless told) in the team from the start. */
+async function withTeam(context, workers = ['zeus']) {
   const session = await context.dispatcher.openSession({
     directory: '/work/app',
     name: 'app',
     harness: 'claude-code',
+    team: workers.map((agent) => ({ agent, harness: 'claude-code', role: 'worker' })),
   })
-  context.ledger.addMember(session.id, { agent: 'zeus', harness: 'claude-code', role: 'worker' })
   const id = (handle) =>
     context.ledger.session(session.id).participants.find((p) => p.handle === handle).id
   return { session, id }
@@ -241,12 +243,7 @@ describe('the dispatcher', () => {
 
   it('delivers results to an idle lead one at a time and proves each arrived', async () => {
     await setup(async (context) => {
-      const { session, id } = await withTeam(context)
-      context.ledger.addMember(session.id, {
-        agent: 'diana',
-        harness: 'claude-code',
-        role: 'worker',
-      })
+      const { session, id } = await withTeam(context, ['zeus', 'diana'])
       context.ledger.createTask(session.id, { from: 'lead', to: 'zeus', body: 'One' })
       context.ledger.createTask(session.id, { from: 'lead', to: 'diana', body: 'Two' })
       await context.dispatcher.pass()
@@ -481,6 +478,88 @@ describe('the dispatcher', () => {
       await context.host.exit('lead')
       assert.equal(context.ledger.session(session.id).state, 'suspended')
       assert.equal(context.ledger.session(session.id).resumeOnStart, false)
+    })
+  })
+
+  it('opens a session with the team it is given, and only the lead window', async () => {
+    await setup(async (context) => {
+      const session = await context.dispatcher.openSession({
+        directory: '/work/app',
+        name: 'app',
+        harness: 'claude-code',
+        team: [{ agent: 'zeus', harness: 'claude-code', role: 'worker' }],
+      })
+      assert.deepEqual(
+        session.participants.map((p) => p.handle),
+        ['human', 'lead', 'zeus'],
+      )
+      assert.deepEqual(
+        context.host.opened.map((pane) => pane.id),
+        [`s${session.id}-lead`],
+      )
+    })
+  })
+
+  it('closes the window of a member who leaves, and its exit fails nothing', async () => {
+    await setup(async (context) => {
+      const { session, id } = await withTeam(context)
+      const zeus = id('zeus')
+      context.ledger.createTask(session.id, { from: 'lead', to: 'zeus', body: 'Parser' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+
+      const { cancelled } = await context.dispatcher.removeMember(session.id, 'zeus')
+      assert.deepEqual(cancelled, [1])
+      const pane = context.host.last('zeus')
+      assert.deepEqual(context.host.killed, [{ id: pane.id, generation: pane.generation }])
+
+      await context.host.exit('zeus')
+      await context.dispatcher.pass()
+      const task = context.ledger.task(session.id, 1)
+      assert.equal(task.state, 'cancelled')
+      assert.deepEqual(
+        task.messages.map((message) => message.kind),
+        ['task'],
+        'no "window closed" note for a member who left',
+      )
+      assert.equal(context.dispatcher.pane(zeus), null)
+      assert.equal(context.host.opened.filter((b) => b.id.endsWith('-zeus')).length, 1)
+    })
+  })
+
+  it('waits for a window still opening before closing it for a member who leaves', async () => {
+    await setup(async (context) => {
+      const { session } = await withTeam(context)
+      context.ledger.createTask(session.id, { from: 'lead', to: 'zeus', body: 'Parser' })
+      let open
+      context.host.hold = new Promise((resolve) => {
+        open = resolve
+      })
+      const passing = context.dispatcher.pass()
+      const removing = context.dispatcher.removeMember(session.id, 'zeus')
+      await new Promise((resolve) => setImmediate(resolve))
+      assert.deepEqual(context.host.killed, [], 'the launch is still in progress')
+
+      open()
+      await passing
+      const { cancelled } = await removing
+      const pane = context.host.last('zeus')
+      assert.deepEqual(cancelled, [1])
+      assert.deepEqual(context.host.killed, [{ id: pane.id, generation: pane.generation }])
+    })
+  })
+
+  it("opens a PM's window with its first message, not before", async () => {
+    await setup(async (context) => {
+      const { session } = await withTeam(context)
+      context.ledger.addPm(session.id, { harness: 'claude-code' })
+      await context.dispatcher.pass()
+      assert.equal(context.host.last('pm'), undefined)
+
+      context.ledger.createTask(session.id, { from: 'human', to: 'pm', body: 'Plan the release' })
+      await context.dispatcher.pass()
+      assert.equal(context.host.last('pm').id, `s${session.id}-pm`)
+      assert.match(context.adapter.prepared.at(-1).message, /task from @human\]\nPlan the release/)
     })
   })
 

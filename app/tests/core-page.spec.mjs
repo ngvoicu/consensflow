@@ -367,10 +367,9 @@ test('adds a saved agent to the session team', async ({ page }) => {
   await open(page)
   await page.getByRole('button', { name: 'Team' }).click()
   const dialog = page.getByRole('dialog', { name: 'Session team' })
-  await expect(dialog.getByRole('list', { name: 'On the team' }).locator('li')).toHaveText([
-    '@zeus · worker · claude-code',
-    '@diana · worker · codex',
-  ])
+  await expect(
+    dialog.getByRole('list', { name: 'On the team' }).locator('.member-line'),
+  ).toHaveText(['@zeus · worker · claude-code', '@diana · worker · codex'])
   await expect(dialog.getByLabel('Add an agent').locator('option')).toHaveText([
     'athena · opencode · muse-spark',
   ])
@@ -379,6 +378,99 @@ test('adds a saved agent to the session team', async ({ page }) => {
   await expect
     .poll(() => calls(page, 'member.add'))
     .toEqual([{ session: 1, agent: 'athena', role: 'advisor' }])
+})
+
+test('takes a member off the team once the human confirms', async ({ page }) => {
+  await open(page)
+  await page.getByRole('button', { name: 'Team' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Session team' })
+  await dialog.getByRole('button', { name: 'Remove @zeus from the team' }).click()
+  await expect(dialog.getByText('Remove @zeus? Its open tasks are cancelled.')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Keep @zeus' }).click()
+  await expect(dialog.getByText('Remove @zeus? Its open tasks are cancelled.')).toHaveCount(0)
+  expect(await calls(page, 'member.remove')).toEqual([])
+
+  await dialog.getByRole('button', { name: 'Remove @zeus from the team' }).click()
+  await dialog.getByRole('button', { name: 'Remove @zeus', exact: true }).click()
+  await expect.poll(() => calls(page, 'member.remove')).toEqual([{ session: 1, agent: 'zeus' }])
+})
+
+test('keeps a pending removal and the chosen agent when the core redraws the team', async ({
+  page,
+}) => {
+  const data = model()
+  data.agents.push({ name: 'hera', harness: 'pi', model: 'muse-spark' })
+  await open(page, data)
+  await page.getByRole('button', { name: 'Team' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Session team' })
+  await dialog.getByLabel('Add an agent').selectOption('hera')
+  await dialog.getByRole('button', { name: 'Remove @zeus from the team' }).click()
+  const boards = () =>
+    page.evaluate(() => window.__calls.filter(([, args]) => args.operation === 'board.get').length)
+  for (let redraw = 0; redraw < 2; redraw += 1) {
+    const before = await boards()
+    await page.evaluate(() => window.__listeners.get('state-changed')())
+    await expect.poll(boards).toBeGreaterThan(before)
+  }
+  await expect(dialog.getByText('Remove @zeus? Its open tasks are cancelled.')).toBeVisible()
+  await expect(dialog.getByLabel('Add an agent')).toHaveValue('hera')
+})
+
+test('adds a PM on the harness the human picks', async ({ page }) => {
+  await open(page)
+  await expect(page.getByRole('button', { name: 'PM', exact: true })).toBeHidden()
+  await page.getByRole('button', { name: 'Team' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Session team' })
+  await expect(dialog.getByText('No PM yet.')).toBeVisible()
+  await dialog.getByLabel('The PM runs in').selectOption('codex')
+  await dialog.getByRole('button', { name: 'Add a PM' }).click()
+  await expect.poll(() => calls(page, 'pm.add')).toEqual([{ session: 1, harness: 'codex' }])
+})
+
+/** The harbour board with a PM and its advisor, the advisor added first. */
+function withPm() {
+  const data = model()
+  data.boards[1].lanes.push(
+    {
+      participant: participant(5, 'athena', 'advisor', { harness: 'opencode' }),
+      tasks: [task(6, 'Research the market', 'working', 'pm', 'athena', 4)],
+      activity: { state: 'working' },
+      pane: { id: 's1-athena', generation: 4 },
+    },
+    {
+      participant: participant(6, 'pm', 'pm', { harness: 'codex' }),
+      tasks: [],
+      activity: { state: 'idle' },
+      pane: { id: 's1-pm', generation: 3 },
+    },
+  )
+  return data
+}
+
+test("groups the PM's team after the lead's, on the board and in its own windows", async ({
+  page,
+}) => {
+  await open(page, withPm())
+  await expect(page.locator('.board-group')).toHaveText(["Lead's team", "PM's team"])
+  expect(
+    await page.locator('.bay').evaluateAll((bays) => bays.map((bay) => bay.dataset.handle)),
+  ).toEqual(['human', 'lead', 'zeus', 'diana', 'pm', 'athena'])
+
+  const stage = page.getByRole('region', { name: 'Terminals' })
+  const staged = () =>
+    stage.locator('.terminal-card').evaluateAll((cards) => cards.map((c) => c.dataset.handle))
+  await page.getByRole('button', { name: 'PM', exact: true }).click()
+  await expect.poll(staged).toEqual(['pm', 'athena'])
+  await page.getByRole('button', { name: 'Lead', exact: true }).click()
+  await expect.poll(staged).toEqual(['lead', 'zeus'])
+  await page.getByRole('button', { name: 'Board', exact: true }).click()
+  await page.getByRole('button', { name: "Open @athena's terminal" }).click()
+  await expect.poll(staged).toEqual(['pm', 'athena'])
+  await expect(stage.locator('.terminal-card[data-focused="true"]')).toHaveAttribute(
+    'data-handle',
+    'athena',
+  )
+  expect(await page.evaluate(() => window.__emulators.length)).toBe(4)
 })
 
 test('resumes a suspended session from the list', async ({ page }) => {

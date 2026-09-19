@@ -26,6 +26,7 @@ export const MIGRATIONS = [
     agent TEXT,
     harness TEXT,
     created_at TEXT NOT NULL,
+    left_at TEXT,
     CONSTRAINT participant_session_fk FOREIGN KEY (session_id)
       REFERENCES session (id) ON DELETE CASCADE,
     CONSTRAINT participant_handle_unique UNIQUE (session_id, handle),

@@ -1,12 +1,13 @@
 import { initializeUpdates } from '../updates.js'
-import { BoardView, element, TaskDrawer } from './board.js'
+import { BoardView, element, TaskDrawer, teamOf } from './board.js'
 import { TerminalsView } from './terminals.js'
 
 /**
- * The page: the sessions on the left, the chosen session's board (or its live
- * windows) on the right. Everything it shows comes from the new core through
- * the app's `core_request`, and it redraws when the core says something
- * changed. It keeps nothing of its own but what is on screen.
+ * The page: the sessions on the left, the chosen session's board (or one
+ * team's live windows: the lead's or the PM's) on the right. Everything it
+ * shows comes from the new core through the app's `core_request`, and it
+ * redraws when the core says something changed. It keeps nothing of its own
+ * but what is on screen.
  */
 
 const tauri = window.__TAURI__ ?? {}
@@ -83,7 +84,7 @@ const board = new BoardView(boardRoot, {
   onRead: (message) => act(() => core('message.read', { message: message.id })),
   onOpenTask: (number) => act(() => openTask(number)),
   onOpenTerminal: (participant) => {
-    state.view = 'terminals'
+    state.view = teamOf(participant)
     state.focus = participant.handle
     render()
   },
@@ -142,6 +143,7 @@ async function refresh() {
       }
       if (state.openTask !== null && drawer.open) await openTask(state.openTask)
       render()
+      if (teamDialog.open) renderTeam()
     } catch (cause) {
       report(cause)
     } finally {
@@ -164,13 +166,16 @@ function render() {
   inboxButton.textContent = waiting === 0 ? 'Inbox' : `Inbox (${waiting})`
   inboxButton.dataset.waiting = String(waiting > 0)
   teamButton.disabled = session === null
+  const lanes = state.board?.lanes ?? []
+  const hasPm = lanes.some((lane) => lane.participant.role === 'pm')
+  if (state.view === 'pm' && !hasPm) state.view = 'board'
   for (const control of viewButtons) {
     control.setAttribute('aria-pressed', String(control.dataset.view === state.view))
     control.disabled = session === null
+    if (control.dataset.view === 'pm') control.hidden = !hasPm
   }
-  const lanes = state.board?.lanes ?? []
   boardRoot.hidden = state.view !== 'board'
-  stage.hidden = state.view !== 'terminals'
+  stage.hidden = state.view === 'board'
   if (state.board === null) {
     boardRoot.replaceChildren(
       element(
@@ -182,7 +187,10 @@ function render() {
   } else {
     board.render({ board: state.board, inbox: state.inbox, agents: state.agents })
   }
-  terminals.render(lanes, { visible: state.view === 'terminals', focus: state.focus })
+  terminals.render(lanes, {
+    team: state.view === 'board' ? null : state.view,
+    focus: state.focus,
+  })
 }
 
 function renderSessions() {
@@ -268,46 +276,98 @@ newSessionDialog
   .querySelector('[value="cancel"]')
   .addEventListener('click', () => newSessionDialog.close())
 
-// The session team: who the coordinators may hand work to.
+// The session team: who the coordinators may hand work to, and the PM.
 const teamDialog = $('#team-dialog')
 const teamForm = teamDialog.querySelector('form')
+const teamList = $('#team-members')
+const pmState = $('#team-pm-state')
+const pmAdd = $('#team-pm-add')
+/** The member whose removal waits for the human's yes, kept across redraws. */
+let removing = null
+
+/** Draws the team from the board, in place, so it stays current while open. */
+function renderTeam() {
+  const lanes = state.board?.lanes ?? []
+  const members = lanes.filter((lane) => lane.participant.agent !== null)
+  teamList.replaceChildren(
+    ...(members.length
+      ? members.map((lane) => memberRow(lane.participant))
+      : [element('li', 'team-empty', 'Nobody yet: add the agents this session may use.')]),
+  )
+  const pm = lanes.find((lane) => lane.participant.role === 'pm')
+  pmState.textContent =
+    pm === undefined ? 'No PM yet.' : `PM · ${pm.participant.harness ?? 'harness unknown'}`
+  pmAdd.hidden = pm !== undefined
+  const onTeam = new Set(members.map((lane) => lane.participant.agent))
+  const choices = state.agents.filter((agent) => !onTeam.has(agent.name))
+  const picker = teamForm.elements.agent
+  const chosen = picker.value
+  picker.replaceChildren(
+    ...choices.map((agent) => {
+      const option = element(
+        'option',
+        null,
+        `${agent.name} · ${agent.harness} · ${agent.model ?? 'model unknown'}`,
+      )
+      option.value = agent.name
+      return option
+    }),
+  )
+  if (choices.some((agent) => agent.name === chosen)) picker.value = chosen
+  teamForm.querySelector('[type="submit"]').disabled = choices.length === 0
+}
+
+/** One member, with a Remove that asks first: leaving cancels its open tasks. */
+function memberRow(member) {
+  const row = element('li')
+  const name = `@${member.handle}`
+  const choose = (handle) => () => {
+    removing = handle
+    renderTeam()
+  }
+  if (removing !== member.handle) {
+    const remove = element('button', 'quiet-button', 'Remove')
+    remove.type = 'button'
+    remove.setAttribute('aria-label', `Remove ${name} from the team`)
+    remove.addEventListener('click', choose(member.handle))
+    row.append(
+      element('span', 'member-line', `${name} · ${member.role} · ${member.harness}`),
+      remove,
+    )
+    return row
+  }
+  const keep = element('button', 'quiet-button', `Keep ${name}`)
+  keep.type = 'button'
+  keep.addEventListener('click', choose(null))
+  const yes = element('button', 'danger-button', `Remove ${name}`)
+  yes.type = 'button'
+  yes.addEventListener('click', () =>
+    act(async () => {
+      await core('member.remove', { session: state.selected, agent: member.handle })
+      removing = null
+      note(`${name} left the team.`)
+    }),
+  )
+  row.append(
+    element('span', 'member-confirm', `Remove ${name}? Its open tasks are cancelled.`),
+    keep,
+    yes,
+  )
+  return row
+}
+
 teamButton.addEventListener('click', () =>
   act(async () => {
-    const { agents } = await core('agents.list')
-    state.agents = agents
-    const members = new Set(
-      (state.board?.lanes ?? []).map((lane) => lane.participant.agent).filter(Boolean),
-    )
-    const list = $('#team-members')
-    const rows = (state.board?.lanes ?? [])
-      .filter((lane) => lane.participant.agent !== null)
-      .map((lane) =>
-        element(
-          'li',
-          null,
-          `@${lane.participant.handle} · ${lane.participant.role} · ${lane.participant.harness}`,
-        ),
-      )
-    list.replaceChildren(
-      ...(rows.length
-        ? rows
-        : [element('li', 'team-empty', 'Nobody yet: add the agents this session may use.')]),
-    )
-    const picker = teamForm.elements.agent
-    const choices = agents.filter((agent) => !members.has(agent.name))
-    picker.replaceChildren(
-      ...choices.map((agent) => {
-        const option = element(
-          'option',
-          null,
-          `${agent.name} · ${agent.harness} · ${agent.model ?? 'model unknown'}`,
-        )
-        option.value = agent.name
-        return option
-      }),
-    )
-    teamForm.querySelector('[type="submit"]').disabled = choices.length === 0
+    state.agents = (await core('agents.list')).agents
+    removing = null
+    renderTeam()
     teamDialog.showModal()
+  }),
+)
+$('#add-pm').addEventListener('click', () =>
+  act(async () => {
+    await core('pm.add', { session: state.selected, harness: teamForm.elements.pmHarness.value })
+    note('The PM is on the team. Its window opens with its first task.')
   }),
 )
 teamForm.addEventListener('submit', (event) => {
