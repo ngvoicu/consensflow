@@ -42,14 +42,14 @@ diagnosis and every decision live in the `consensflow-sme` brain
 - [x] [TEST-REL-03] tests/channels.test.mjs, tests/claude-receiver.test.mjs: every Claude launch carries one `--settings` file under `<home>/integrations/claude/<launch>/` whose Stop hooks end with a no-op turn-end hook, merged with a coordinator's receiver hooks; a launch without a home is refused.
 - [x] [IMPL-REL-04] src/claude-install.js (`prepareClaudeSettings`, receiver returns hooks), src/channels.js, src/panes.js; satisfies TEST-REL-03.
 
-## Phase 2: Daemon load [active]
+## Phase 2: Daemon load [completed]
 
 - [x] [TEST-REL-05] tests/inbox-scan.test.mjs, tests/engine/completion.test.mjs: a deleted conversation is never read; an unchanged transcript returns the previous result and a grown one is read again.
 - [x] [IMPL-REL-06] hosts/lib/completion.js (`cachedAnswers`, `locateTranscript`), src/delivery-watch.js; satisfies TEST-REL-05. Old unconfirmed receipts are still checked, but each check is now a file stat, so no bound was added.
-- [ ] [TEST-REL-07] The state message the page loads stays bounded as deliveries grow.
-- [ ] [IMPL-REL-08] Page the delivery list; satisfies TEST-REL-07.
+- [x] [TEST-REL-07] tests/inbox-page.test.mjs, app/tests/page.spec.mjs, commands.rs forwarding table: the state carries unconfirmed results and per-conversation counts only (under 64 KB with 2,000 received results); history is paged newest first for a session or one conversation, with "Load older results" in the dialog.
+- [x] [IMPL-REL-08] src/page.js (bounded state, `answersList` paging), app/src-tauri/src/commands.rs (`answers_list(tab, conversation?, offset?)`), app/ui/panes.js (dialog pages its history), app/ui/tasks.js (counts); satisfies TEST-REL-07. The unused `answers` state field was removed.
 
-## Phase 3: Launch [pending]
+## Phase 3: Launch [active]
 
 - [ ] [TEST-REL-09] Launch arguments put Claude Code, Codex (fresh and resume), OpenCode, Pi and Devin in full-permission mode for every role.
 - [ ] [IMPL-REL-10] hosts/lib/runners.js and the per-harness settings; satisfies TEST-REL-09.
@@ -71,9 +71,9 @@ diagnosis and every decision live in the `consensflow-sme` brain
 
 ## Resume context
 
-Phases 1 and half of 2 are done. Next: TEST-REL-07 (bound the state message
-the page loads; it carried about 216 KB of deliveries and grows 30-40 KB a day
-toward the 1 MB bridge frame cap).
+Phases 1 and 2 are done. Next: TEST-REL-09 (yolo launch for every harness and
+role). Claude's bypass mode must be proven live first: a bypass-mode lead has to
+keep receiving coordinator messages (cross-session inbound rule).
 
 ## TDD log
 
@@ -104,3 +104,9 @@ toward the 1 MB bridge frame cap).
   previous commit's watcher took 7.3 s, 23.1 s and 17.7 s for three scans; this
   change takes 4.0 s, 1.9 s and 0.56 s (about 30-40x faster in steady state).
   Memory stays about 1.1 GB in both; Stage 2's ledger addresses that.
+- TEST-REL-07 measured first: on a copy of the live home the committed code's
+  state message was 489 KB, 485 KB of it the 1,154-result history (alpha.61:
+  216 KB). RED: 3 Node tests; the Rust forwarding test hung waiting for the new
+  body (RED); GREEN after IMPL-REL-08: inbox-page 6/6, Rust forwarding 1/1, UI
+  137/137 including the new paging test. `answers.list` had no caller; it now
+  serves the dialog.

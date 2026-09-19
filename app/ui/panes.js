@@ -37,6 +37,9 @@ const resultsToggle = document.querySelector('#results-toggle')
 const resultsDialog = document.querySelector('#results-dialog')
 const resultsList = document.querySelector('#results-list')
 let resultsOwner = null
+// The Results dialog's history, paged from `answers_list`: the page state carries
+// only unconfirmed results and counts, never the whole history.
+let resultsPage = { items: [], more: false }
 const newPane = document.querySelector('#new-pane')
 const newConversation = document.querySelector('#new-conversation')
 const focusNav = document.querySelector('#focus-nav')
@@ -105,6 +108,7 @@ function normalizeState(raw) {
     tabs: array(inner.tabs ?? inner.sessions ?? outer.tabs ?? outer.sessions),
     agents: array(inner.agents ?? outer.agents),
     results: array(inner.results ?? outer.results),
+    resultCounts: array(inner.resultCounts ?? outer.resultCounts),
     roster: inner.roster ?? outer.roster ?? null,
   }
 }
@@ -397,10 +401,37 @@ function deliveriesFor(tab, pane) {
 function showResults(tab, conversation = null) {
   menus.closeMenu()
   resultsOwner = { tab: tab.id, conversation }
+  resultsPage = { items: [], more: false }
   document.querySelector('#results-title').textContent =
     `${tab.role === 'pm' ? 'PM' : 'Lead'} results`
   resultsList.replaceChildren()
   if (!resultsDialog.open) resultsDialog.showModal()
+  void loadResults(0)
+}
+
+/**
+ * One page of the owner's result history, newest first. Offset 0 refreshes the
+ * newest page and keeps older pages already loaded; a later offset appends.
+ */
+async function loadResults(offset) {
+  const owner = resultsOwner
+  if (!owner) return
+  const page = await rawInvoke('answers_list', {
+    tab: owner.tab,
+    ...(owner.conversation ? { conversation: owner.conversation } : {}),
+    offset,
+  })
+  if (owner !== resultsOwner) return
+  if (page?.ok === false || !Array.isArray(page?.results)) {
+    report(page?.error ?? 'Results are unavailable', 'error')
+    return
+  }
+  const fresh = new Set(page.results.map((result) => result.id))
+  const kept = resultsPage.items.filter((result) => !fresh.has(result.id))
+  resultsPage =
+    offset === 0
+      ? { items: [...page.results, ...kept], more: resultsPage.more || page.next !== null }
+      : { items: [...kept, ...page.results], more: page.next !== null }
   renderResults()
 }
 
@@ -412,11 +443,7 @@ function renderResults() {
     return
   }
   const recipient = tab.role === 'pm' ? 'PM' : 'Lead'
-  const results = viewState.results.filter(
-    (r) =>
-      r.tab === tab.id &&
-      (!resultsOwner.conversation || r.conversation === resultsOwner.conversation),
-  )
+  const results = resultsPage.items
   for (const result of results) {
     let row = [...resultsList.children].find((row) => row.dataset.result === result.id)
     if (!row) {
@@ -494,6 +521,18 @@ function renderResults() {
     empty.textContent = 'No completed results yet.'
     resultsList.append(empty)
   } else if (results.length) empty?.remove()
+  let older = resultsList.querySelector('.results-older')
+  if (resultsPage.more && !older) {
+    older = document.createElement('button')
+    older.type = 'button'
+    older.className = 'results-older'
+    older.textContent = 'Load older results'
+    older.addEventListener('click', () => void loadResults(resultsPage.items.length))
+  }
+  if (older) {
+    if (resultsPage.more) resultsList.append(older)
+    else older.remove()
+  }
 }
 
 function addDeliveryBadges(titlebar, tab, pane) {
@@ -949,7 +988,7 @@ function render() {
       }),
   })
   renderHeader()
-  renderResults()
+  if (resultsDialog.open && resultsOwner) void loadResults(0)
   renderPaneView()
 }
 

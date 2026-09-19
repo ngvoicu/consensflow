@@ -2749,19 +2749,17 @@ describe('the rest of the page: panes, policy, state and deliveries', () => {
     })
     const listed = await s.rust.request('answers.list', {
       tab: tab.tab,
-      pane: consulted.pane.id,
       conversation: consulted.conversation,
     })
-    // Nothing has bound a native session yet, so there is no transcript to
-    // read. That is an empty list with a reason, never an error: the page
-    // draws a conversation that has not spoken yet.
+    // Nothing has answered yet: an empty first page, never an error, because
+    // the page draws a conversation that has not spoken yet.
     assert.equal(listed.ok, true, JSON.stringify(listed))
-    assert.deepEqual(listed.answers, [])
-    assert.equal(listed.unknown, false)
+    assert.deepEqual(listed.results, [])
+    assert.equal(listed.total, 0)
+    assert.equal(listed.next, null)
 
     const missing = await s.rust.request('answers.list', {
       tab: tab.tab,
-      pane: consulted.pane.id,
       conversation: 'nobody-here',
     })
     assert.equal(missing.ok, false)

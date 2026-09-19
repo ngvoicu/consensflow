@@ -48,18 +48,70 @@ async function fixture(t) {
     page: new Page({ store, tabs, env: f.env, agents: { names: () => [], row: () => null } }),
   }
 }
-test('page projects every distinct result independently of lead generation, including unconfirmed replies', async (t) => {
+test('page state carries unconfirmed results and per-conversation counts, never the whole history', async (t) => {
+  // The live state message reached 489 KB of result history (1,154 results)
+  // on 2026-09-19 and grows toward the bridge's 1 MB frame cap. The history
+  // is paged on demand (answersList); the state keeps what badges need.
   const s = await fixture(t)
   const snapshot = await s.page.state()
-  assert.equal(snapshot.results.length, 41)
-  assert.equal(
-    snapshot.results.filter((r) => r.tab === s.lead.id && r.state !== 'received').length,
-    39,
+  assert.deepEqual(
+    snapshot.results.map((r) => r.id).sort(),
+    Array.from({ length: 41 }, (_, n) => `d-${n + 1}`)
+      .filter((id) => id !== 'd-2')
+      .sort(),
+    'every unconfirmed result, and no received one',
   )
   assert.equal(snapshot.results.find((r) => r.id === 'd-3').state, 'uncertain')
-  assert.equal(snapshot.results.filter((r) => r.tab === s.pm.id).length, 1)
+  assert.deepEqual(
+    snapshot.resultCounts.sort((a, b) => a.tab.localeCompare(b.tab)),
+    [
+      { tab: s.lead.id, conversation: 'worker', total: 40, unconfirmed: 39 },
+      { tab: s.pm.id, conversation: 'advisor', total: 1, unconfirmed: 1 },
+    ].sort((a, b) => a.tab.localeCompare(b.tab)),
+  )
   assert.equal(snapshot.deliveries, undefined)
   assert.equal(snapshot.held, undefined)
+})
+test('a session with thousands of received results keeps the state message small', async (t) => {
+  const s = await fixture(t)
+  await s.store.mutate(s.cwd, 'test.history', async (io) => {
+    const state = await io.readInbox()
+    for (let n = 100; n < 2100; n++) {
+      indexResult(state, {
+        id: `d-${n}`,
+        owner: s.lead.id,
+        conversation: `worker-${n % 50}`,
+        agent: 'zeus',
+        kind: 'codex',
+        session: 'source',
+        answerId: `answer-${n}`,
+        answer: `a long reply ${n} `.repeat(40),
+        now: n,
+      })
+      state.results[`d-${n}`].legacyReceived = true
+    }
+    await io.writeInbox(state)
+  })
+  const snapshot = await s.page.state()
+  assert.equal(snapshot.results.length, 40, 'only the unconfirmed ones ride along')
+  assert.ok(Buffer.byteLength(JSON.stringify(snapshot)) < 64 * 1024)
+})
+test('result history is paged newest first, for a whole session or one conversation', async (t) => {
+  const s = await fixture(t)
+  const first = await s.page.answersList({ tab: s.lead.id, offset: 0 })
+  assert.equal(first.total, 40)
+  assert.equal(first.results.length, 25)
+  assert.equal(first.results[0].id, 'd-40', 'newest first')
+  assert.equal(first.next, 25)
+  const second = await s.page.answersList({ tab: s.lead.id, offset: first.next })
+  assert.equal(second.results.length, 15)
+  assert.equal(second.next, null)
+  const one = await s.page.answersList({ tab: s.pm.id, conversation: 'advisor' })
+  assert.deepEqual(
+    one.results.map((r) => r.id),
+    ['d-41'],
+  )
+  await assert.rejects(s.page.answersList({ tab: s.lead.id, offset: -1 }), /offset/)
 })
 test('human result viewing returns the complete paged body and never grants native receipt or changes claims', async (t) => {
   const s = await fixture(t)

@@ -1704,17 +1704,19 @@ pub async fn set_policy<R: Runtime>(
     .await
 }
 
+/// A session's result history, or one conversation's, one page at a time. The
+/// page state carries only unconfirmed results, so the history is asked for.
 #[tauri::command]
 pub async fn answers_list<R: Runtime>(
     app: AppHandle<R>,
     tab: String,
-    pane: String,
-    conversation: String,
+    conversation: Option<String>,
+    offset: Option<usize>,
 ) -> Value {
-    if let Err(error) = validate_text(&tab, "tab")
-        .and_then(|()| validate_text(&pane, "pane"))
-        .and_then(|()| validate_text(&conversation, "conversation"))
-    {
+    if let Err(error) = validate_text(&tab, "tab").and_then(|()| match &conversation {
+        Some(conversation) => validate_text(conversation, "conversation"),
+        None => Ok(()),
+    }) {
         return json!({"ok":false,"error":error});
     }
     let (bridge, startup_error) = {
@@ -1726,7 +1728,7 @@ pub async fn answers_list<R: Runtime>(
             bridge,
             startup_error,
             "answers.list".to_string(),
-            json!({"tab":tab,"pane":pane,"conversation":conversation}),
+            json!({"tab":tab,"conversation":conversation,"offset":offset.unwrap_or(0)}),
         )
     })
     .await
@@ -3037,9 +3039,15 @@ mod tests {
             ),
             (
                 "answers_list",
-                json!({"tab":"tab-1","pane":"pane-1","conversation":"answer-1"}),
+                json!({"tab":"tab-1","conversation":"answer-1","offset":25}),
                 "answers.list",
-                json!({"tab":"tab-1","pane":"pane-1","conversation":"answer-1"}),
+                json!({"tab":"tab-1","conversation":"answer-1","offset":25}),
+            ),
+            (
+                "answers_list",
+                json!({"tab":"tab-1"}),
+                "answers.list",
+                json!({"tab":"tab-1","conversation":null,"offset":0}),
             ),
             (
                 "result_collect",

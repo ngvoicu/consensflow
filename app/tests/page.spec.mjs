@@ -643,15 +643,46 @@ async function installTauriShim(
             throw new Error('state refresh must not replace the output subscription')
           }
           const snapshot = copy(window.__state)
+          // Like the server: unconfirmed results ride along with per-conversation
+          // counts; the history is paged by answers_list.
+          const all = snapshot.results ?? []
+          const counts = new Map()
+          for (const result of all) {
+            const key = `${result.tab}\n${result.conversation}`
+            const count = counts.get(key) ?? {
+              tab: result.tab,
+              conversation: result.conversation,
+              total: 0,
+              unconfirmed: 0,
+            }
+            count.total += 1
+            if (['waiting', 'collecting', 'uncertain'].includes(result.state))
+              count.unconfirmed += 1
+            counts.set(key, count)
+          }
+          snapshot.resultCounts ??= [...counts.values()]
+          snapshot.results = all.filter((result) =>
+            ['waiting', 'collecting', 'uncertain'].includes(result.state),
+          )
           listStateCalls += 1
           if (listStateCalls === 1 && firstListStateGate !== null) await firstListStateGate
           if (window.__pendingListState !== undefined) await window.__pendingListState
           return snapshot
         }
         if (command === 'answers_list') {
+          const rows = (window.__state.results ?? [])
+            .filter(
+              (r) =>
+                r.tab === args.tab && (!args.conversation || r.conversation === args.conversation),
+            )
+            .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+          const offset = args.offset ?? 0
+          const end = Math.min(offset + 25, rows.length)
           return {
             ok: true,
-            answers: copy(window.__state.answers[args.conversation] ?? []),
+            total: rows.length,
+            next: end < rows.length ? end : null,
+            results: copy(rows.slice(offset, end)),
           }
         }
         if (command === 'result_body') {
@@ -3199,6 +3230,32 @@ test('result inbox counts every reply on its worker and owner and opens complete
   expect(await commandCalls(page, 'result_collect')).toHaveLength(0)
   expect(await commandCalls(page, 'result_body')).toHaveLength(Math.ceil(body.length / 16000))
   await expect(page.getByTestId('result-summary-p4-w1')).toHaveText('24 unconfirmed results')
+})
+
+test('result history is paged: newest first, older results on request', async ({ page }) => {
+  // The page state carries only unconfirmed results; the dialog asks for history.
+  const state = cannedState()
+  state.results = Array.from({ length: 30 }, (_, index) => ({
+    id: `d-${index + 1}`,
+    tab: 't-four',
+    conversation: 'nyx-coral-lane',
+    agent: 'nyx',
+    answerId: `answer-${index + 1}`,
+    state: 'received',
+    createdAt: index + 1,
+    preview: `Reply ${index + 1}`,
+    parts: 1,
+    receivedParts: 1,
+  }))
+  await boot(page, { state })
+  await page.getByRole('button', { name: 'Results', exact: true }).click()
+  const history = page.getByRole('dialog', { name: 'Lead results' })
+  await expect(history.locator('.result-row')).toHaveCount(25)
+  await expect(history.locator('.result-row').first()).toContainText('Reply 30')
+  await history.getByRole('button', { name: 'Load older results' }).click()
+  await expect(history.locator('.result-row')).toHaveCount(30)
+  await expect(history.locator('.result-row').last()).toContainText('Reply 1')
+  await expect(history.getByRole('button', { name: 'Load older results' })).toHaveCount(0)
 })
 
 test('result inbox remains independent between PM advisors and Lead workers', async ({ page }) => {

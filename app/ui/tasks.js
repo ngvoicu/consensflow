@@ -10,7 +10,6 @@ const states = {
   unknown: 'Not recorded',
 }
 const kinds = ['general', 'implementation', 'research', 'specification', 'review']
-const pending = (result) => ['waiting', 'collecting', 'uncertain'].includes(result.state)
 const roleName = (owner) => (owner.role === 'pm' ? 'PM' : 'Lead')
 const time = (value) => (value ? new Date(value).toLocaleString() : 'Time not recorded')
 function element(tag, className = '', text) {
@@ -196,10 +195,17 @@ export class TaskView {
     }
   }
 
-  results(owner, conversation) {
-    return this.state.results.filter(
-      (r) => r.tab === owner && (!conversation || r.conversation === conversation),
-    )
+  /** Reply counts for a coordinator, or one of its conversations (the state carries counts). */
+  replies(owner, conversation) {
+    return (this.state.resultCounts ?? [])
+      .filter((c) => c.tab === owner && (!conversation || c.conversation === conversation))
+      .reduce(
+        (sum, c) => ({ total: sum.total + c.total, unconfirmed: sum.unconfirmed + c.unconfirmed }),
+        {
+          total: 0,
+          unconfirmed: 0,
+        },
+      )
   }
 
   agent(owner, pane, graph = false) {
@@ -219,12 +225,11 @@ export class TaskView {
       .filter(Boolean)
       .join(' · ')
     row.append(focus, activity, element('small', 'task-muted', detail))
-    const replies = this.results(owner.id, pane.kind === 'lead' ? null : pane.conversation)
-    const count = replies.filter(pending).length
-    if (replies.length)
+    const replies = this.replies(owner.id, pane.kind === 'lead' ? null : pane.conversation)
+    if (replies.total)
       row.append(
         button(
-          `${replies.length} replies · ${count} unconfirmed`,
+          `${replies.total} replies · ${replies.unconfirmed} unconfirmed`,
           () => this.openResults(owner, pane.kind === 'lead' ? null : pane.conversation),
           'task-replies',
         ),
@@ -267,12 +272,12 @@ export class TaskView {
     if (task.source === 'historical')
       card.append(element('small', 'task-muted', 'Original assignment not recorded'))
     if (task.conversation) {
-      const replies = this.results(task.owner, task.conversation)
+      const replies = this.replies(task.owner, task.conversation)
       card.append(
         element(
           'small',
           'task-muted',
-          `${replies.length} replies · ${replies.filter(pending).length} unconfirmed`,
+          `${replies.total} replies · ${replies.unconfirmed} unconfirmed`,
         ),
       )
     }
@@ -291,8 +296,17 @@ export class TaskView {
     const oldViewport = this.content.querySelector('.task-graph-viewport')
     const scroll = oldViewport && { top: oldViewport.scrollTop, left: oldViewport.scrollLeft }
     const pageTop = this.container.scrollTop
-    const results = this.state.results.filter((r) => this.owners.some((o) => o.id === r.tab))
-    this.overview.textContent = `${this.page?.total ?? 0} tasks · ${this.page?.questions ?? 0} unanswered questions · ${results.length} replies · ${results.filter(pending).length} unconfirmed`
+    const replies = this.owners.reduce(
+      (sum, owner) => {
+        const counted = this.replies(owner.id, null)
+        return {
+          total: sum.total + counted.total,
+          unconfirmed: sum.unconfirmed + counted.unconfirmed,
+        }
+      },
+      { total: 0, unconfirmed: 0 },
+    )
+    this.overview.textContent = `${this.page?.total ?? 0} tasks · ${this.page?.questions ?? 0} unanswered questions · ${replies.total} replies · ${replies.unconfirmed} unconfirmed`
     this.boardButton.setAttribute('aria-pressed', String(this.mode === 'board'))
     this.graphButton.setAttribute('aria-pressed', String(this.mode === 'graph'))
     const owners = this.owners.filter(

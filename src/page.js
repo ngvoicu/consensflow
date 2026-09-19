@@ -4,6 +4,10 @@ import { effectivePolicy } from '../hosts/lib/policy.js'
 import { PaneError } from './panes.js'
 import { LEAD_HARNESSES } from './tabs.js'
 
+const UNCONFIRMED = new Set(['waiting', 'collecting', 'uncertain'])
+const MAX_UNCONFIRMED = 500
+const RESULTS_PAGE = 25
+
 /** Shared page projection. Human viewing never creates a model receipt. */
 export class Page {
   #store
@@ -18,8 +22,12 @@ export class Page {
   }
   async state() {
     const tabs = await this.#tabs.list()
+    // The state carries what badges need: unconfirmed results and counts. The
+    // history is paged on demand (answersList); it reached 489 KB of the 1 MB
+    // bridge frame in the live app.
     const drawn = [],
-      results = []
+      results = [],
+      counts = new Map()
     const visited = new Set()
     for (const tab of tabs) {
       const threads = await this.#store.readThreads(tab.directory)
@@ -47,7 +55,20 @@ export class Page {
       visited.add(tab.directory)
       for (const result of Object.values(inbox.results)) {
         if (!tabs.some((owner) => owner.id === result.owner)) continue
-        results.push(project(result))
+        const projected = project(result)
+        const key = `${projected.tab}\n${projected.conversation}`
+        const count = counts.get(key) ?? {
+          tab: projected.tab,
+          conversation: projected.conversation,
+          total: 0,
+          unconfirmed: 0,
+        }
+        count.total += 1
+        if (UNCONFIRMED.has(projected.state)) {
+          count.unconfirmed += 1
+          results.push(projected)
+        }
+        counts.set(key, count)
       }
     }
     return {
@@ -59,32 +80,37 @@ export class Page {
         harness: this.#agents.row(name)?.kind ?? this.#agents.row(name)?.harness ?? null,
       })),
       tabs: drawn,
-      results: results.sort((a, b) => a.createdAt - b.createdAt),
-      answers: {},
+      results: results.sort((a, b) => a.createdAt - b.createdAt).slice(-MAX_UNCONFIRMED),
+      resultCounts: [...counts.values()],
     }
   }
+  /** A session's result history, or one conversation's, newest first, one page at a time. */
   async answersList(request) {
     const tab = await this.#tab(request.tab)
-    const conversation = requireText(request.conversation, 'conversation')
+    const conversation =
+      request.conversation === undefined || request.conversation === null
+        ? null
+        : requireText(request.conversation, 'conversation')
+    const offset = request.offset ?? 0
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new PaneError('invalid results offset')
     const state = await this.#store.readInbox(tab.directory)
-    const rows = await this.#store.readThreads(tab.directory)
-    const results = Object.values(state.results).filter(
-      (r) => r.owner === tab.id && r.conversation === conversation,
-    )
-    if (!results.length && !rows[conversation]?.lead?.startsWith(`tab:${tab.id}:`))
-      throw new PaneError('conversation does not belong to this coordinator', { status: 403 })
+    const results = Object.values(state.results)
+      .filter(
+        (r) => r.owner === tab.id && (conversation === null || r.conversation === conversation),
+      )
+      .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))
+    if (conversation !== null && !results.length) {
+      const rows = await this.#store.readThreads(tab.directory)
+      if (!rows[conversation]?.lead?.startsWith(`tab:${tab.id}:`))
+        throw new PaneError('conversation does not belong to this coordinator', { status: 403 })
+    }
+    const end = Math.min(offset + RESULTS_PAGE, results.length)
     return {
       ok: true,
       conversation,
-      unknown: false,
-      answers: results.map((r) => ({
-        ...project(r),
-        id: r.answerId,
-        result: r.id,
-        ready: true,
-        delivered: resultStatus(r) === 'received',
-        uncertain: resultStatus(r) === 'uncertain',
-      })),
+      total: results.length,
+      next: end < results.length ? end : null,
+      results: results.slice(offset, end).map(project),
     }
   }
   async resultBody(request) {
