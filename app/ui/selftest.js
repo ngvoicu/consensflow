@@ -198,9 +198,10 @@ export async function runSelftest({
     await report('echo', { typed, hex })
 
     // A task from the board: the human's composer, the core, the dispatcher,
-    // the pane host's paste, the child. The fake harness has no transcript,
-    // so the core never sees the arrival; the child's hex of the header line
-    // is the proof that the board reaches a window.
+    // the pane host's paste, the child. The child's hex of the header line is
+    // the proof that the board reaches a window; the core's own confirmation,
+    // read back from the record the fake harness keeps, is the proof that it
+    // knows it did.
     const given = await core('task.add', { project: opened.project.id, to: 'lead', body: 'SMOKE' })
     if (given?.ok !== true) throw new Error(`task.add refused: ${JSON.stringify(given)}`)
     const header = `[ConsensFlow m-${given.message?.id ?? given.task.number} ·`
@@ -226,7 +227,20 @@ export async function runSelftest({
         },
       },
     )
-    await report('board', { task: given.task.number, hex: delivered })
+    const confirmedBy = Date.now() + STEP_MS
+    let state = null
+    while (state !== 'delivered') {
+      if (Date.now() > confirmedBy) {
+        throw new Error(`the core did not confirm the delivery (the message is ${state})`)
+      }
+      await sleep(200)
+      const { task } = await core('task.get', {
+        project: opened.project.id,
+        task: given.task.number,
+      })
+      state = task.messages.find((message) => message.kind === 'task')?.state ?? null
+    }
+    await report('board', { task: given.task.number, hex: delivered, delivered: true })
 
     // Exercise a large Unicode paste through WebKit, IPC and the real PTY.
     await sendInput(pane, 'BIGPASTE\r')

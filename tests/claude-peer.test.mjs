@@ -113,6 +113,19 @@ for (const [label, fields] of [
     assert.equal(f.calls.length, 0)
   })
 
+test('Claude native peer reports a status row without a messaging socket as an unregistered inbox', async (t) => {
+  // A Claude build that keeps only its status here has no inbox to reach; the
+  // terminal still takes a paste, so the caller must hear "unavailable", not
+  // the refusal it hears for an inbox whose identity is wrong.
+  const f = await fixture(t)
+  const { procStart, messagingSocketPath, entrypoint, peerProtocol, ...statusOnly } = f.native
+  await writeFile(f.registry, JSON.stringify({ ...statusOnly, status: 'idle' }), { mode: 0o600 })
+  const response = await send(f.target, f.record.answer)
+  assert.equal(response.error, 'native-session-unavailable')
+  assert.equal(response.cause, 'native Claude inbox is not registered')
+  assert.equal(f.calls.length, 0)
+})
+
 test('Claude native peer rejects an ambiguous live session and a symlinked key', async (t) => {
   const f = await fixture(t)
   await writeFile(join(f.root, 'sessions', '99999.json'), JSON.stringify(f.native))

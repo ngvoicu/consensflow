@@ -129,9 +129,9 @@ app is replaced.
 
 - [x] [TEST-BDC-24] The agents screens keep working on the new core: the roster editor (with the new tags field), the agent library and the harness diagnostics are served by the new daemon behind the UI token the app already checks; their routes' tests move with them. `tests/core-agents-server.test.mjs`, `app/tests/core-page.spec.mjs`.
 - [x] [IMPL-BDC-25] `src/core/agents-server.js` (the pages and `/api/agents…` routes out of `src/ui.js`), mounted on the new core's API server; the new daemon's handle carries the UI token; the board page gains the three dialogs; satisfies TEST-BDC-24.
-- [ ] [IMPL-BDC-21] `cf ui` runs the new core and `core.html` becomes `index.html`; window geometry and the update flow keep working; the packaged smoke drives the new page; every suite and the live bench are green. Built and every suite green on 2026-09-19; open until the packaged smoke (VERIFY-BDC-27) and the bench have run on the switched tree.
+- [x] [IMPL-BDC-21] `cf ui` runs the new core and `core.html` becomes `index.html`; window geometry and the update flow keep working; the packaged smoke drives the new page; every suite and the live bench are green. Every suite and the packaged smoke green on 2026-09-19; the bench (`npm run bench:core`) is due a rerun on the switched tree, with the free models.
 - [x] [IMPL-BDC-26] The old core is deleted: `src/ui.js`, `store.js`, `tabs.js`, `panes.js`, `delivery-watch.js`, the inbox, delivery and receiver modules it replaces, `page.js`, `tasks.js`, `launch.js`, `requester.js`, the old page (`app/ui/index.html`, `panes.js`, `sidebar.js`, `tasks.js`, `menus.js`), the old Rust commands, the JSON state and `O_EXLOCK`, and their tests; the Devin hook text stops naming `cf results`. Done 2026-09-19. Still to prune in a follow-up: the one-shot runner the old `cf run` used (`runAgent`, the engines, image runs, packets, harness transcripts, session binding, threads, Codex auth, transcript events) and their tests; image agents have no adapter in the new core.
-- [ ] [VERIFY-BDC-27] `npm run candidate` builds, smoke-tests and installs ConsensFlow Candidate; Gabriel is told it is ready.
+- [x] [VERIFY-BDC-27] `npm run candidate` builds, smoke-tests and installs ConsensFlow Candidate; Gabriel is told it is ready. Installed 2026-09-19 21:07 (`~/Applications/ConsensFlow Candidate.app`, 3.0.0-alpha.62, smoke 2/2, the live app unchanged).
 - [ ] [TEST-BDC-03] Import from alpha.62 state (tabs, threads, tasks, inbox results) is complete, idempotent and read-only on the source; replayed against a copy of the live home.
 - [ ] [IMPL-BDC-04] Importer; satisfies TEST-BDC-03.
 
@@ -152,19 +152,22 @@ app is replaced.
 
 ## Resume context
 
-The switch is made (2026-09-19): `cf ui` starts the new daemon, the board page
-is `app/ui/index.html`, and the old core, page, commands and tests are gone.
-The app talks to the daemon only through `core_request` and the allow-list in
+The switch is made and installed (2026-09-19 evening): `cf ui` starts the new
+daemon, the board page is `app/ui/index.html`, the old core, page, commands
+and tests are gone, and ConsensFlow Candidate (`~/Applications`, home
+`~/.consensflow-candidate`) carries it; the live app is untouched. The app
+talks to the daemon only through `core_request` and the allow-list in
 `commands.rs`; the agents screens (roster with tags, library, harnesses) are
 served by the daemon at its URL behind the UI token the handle carries. The
 human closes a project from the list (`project.close`: suspended, every window
-killed, tiered work back in the backlog) and resumes it later. Next:
-VERIFY-BDC-27, `npm run candidate` (build, packaged smoke, install), then
-Gabriel tests the Candidate; then a follow-up commit prunes the one-shot
-runner code the old `cf run` left behind; the bench (`npm run bench:core`)
-reruns on the switched tree; the importer (TEST-BDC-03) waits for the day the
-live app is replaced. Not built yet: removing a PM (the ledger refuses it as
-`not-a-member`).
+killed, tiered work back in the backlog) and resumes it later. Next: Gabriel
+tests the Candidate (empty board; he creates a project); a follow-up commit
+prunes the one-shot runner code the old `cf run` left behind (`runAgent` in
+`hosts/lib/runners.js`, `codex-auth`, `harness-transcript`, `image-run`,
+`packets`, `session-binding`, `threads` and their tests; image agents have no
+adapter in the new core); the bench reruns on the switched tree; the importer
+(TEST-BDC-03) waits for the day the live app is replaced. Not built yet:
+removing a PM (the ledger refuses it as `not-a-member`).
 
 ## TDD log
 
@@ -344,3 +347,24 @@ live app is replaced. Not built yet: removing a PM (the ledger refuses it as
   page. The Devin hook now names `cf inbox` and `cf task get`. Gate on the
   staged tree: 783 pass, 6 skipped of 789; integration 5/5; Playwright
   68/68; Rust 107 + 16, clippy clean.
+- VERIFY-BDC-27, 2026-09-19 evening. The first `npm run candidate` failed its
+  packaged smoke twice, each time on something real. (1) The smoke's catalog
+  probe still started the old UI server (now `startApi` with `agentsUi`, as
+  the daemon does). (2) The self-test's board step never saw its task: the
+  core delivers only to a settled window whose typed draft is released, and
+  both come from the harness record, which the smoke's shell stand-in did not
+  keep. It now keeps what a Claude window keeps: `sessions/<pid>.json` (idle
+  or busy) and a transcript where every line it reads is a user turn answered
+  by an assistant turn, so the latch releases and the core confirms the
+  delivery from the record (the self-test now waits for that confirmation and
+  the smoke asserts it). (3) With that status file in place the packaged app,
+  which uses Claude's peer inbox on macOS, refused the delivery outright:
+  `claude-peer.js` treated a status row without the messaging identity as an
+  inconsistent inbox (a hard refusal, three attempts, task failed) instead of
+  an unregistered one (paste instead). That is a product bug for a Claude
+  build without peer messaging; a row with no `messagingSocketPath` is now
+  `native-session-unavailable`, with a test that failed first
+  (`peer-refused`). (4) `/bin/sh` printf sign-extends bytes above 0x7f, so the
+  stand-in's hex of `·` was wrong; masked. Smoke 2/2 in 4 s, then
+  `npm run candidate` end to end: built, smoke 2/2, installed, live app and
+  roster unchanged.

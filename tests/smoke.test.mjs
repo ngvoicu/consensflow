@@ -122,33 +122,74 @@ function gate(t) {
   return found
 }
 
-const FAKE_HARNESS = `#!/bin/sh
+const FAKE_HARNESS = String.raw`#!/bin/sh
 # The smoke's stand-in harness. It exists to be recognisable on screen, to
 # prove that what the human types reaches a real child — every line it reads
 # comes back as hex, which no echo, no replay and no cached frame could
 # produce — and, on request, to out-run the output window.
 #
+# It also keeps the two records a Claude window keeps, because the core reads
+# them before it delivers and after: sessions/<pid>.json says the window is
+# idle, and the transcript holds every line the window took as a user turn
+# answered by an assistant turn. The human's Enter releases the typing latch
+# on the first; a delivery from the board is confirmed by the second.
+#
 # The flood is asked for rather than printed at start-up: 1.5 MiB of wrapped
 # lines pushes far more rows than xterm keeps, so a banner printed before it
 # is gone by the time anything can look for it. The page says when it has
 # seen the banner; only then does the flood run.
+LC_ALL=C
+export LC_ALL
 echo $$ > "$CFSMOKE_PIDFILE"
-printf 'CFSMOKE-READY %s\\n' "$CFSMOKE_TAG"
+session=''
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --session-id|--resume) session="$2"; shift ;;
+  esac
+  shift
+done
+config="${'$'}{CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+transcript="$config/projects/smoke/$session.jsonl"
+status="$config/sessions/$$.json"
+mkdir -p "$config/projects/smoke" "$config/sessions"
+trap 'rm -f "$status"' EXIT
+n=0
+stamp() { date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo 1970-01-01T00:00:00Z; }
+state() {
+  printf '{"pid":%s,"sessionId":"%s","kind":"interactive","status":"%s"}' "$$" "$session" "$1" > "$status"
+}
+record() {
+  n=$((n + 1))
+  printf '{"sessionId":"%s","version":"2.1.277","timestamp":"%s","uuid":"%s-%s-%s",%s}\n' \
+    "$session" "$(stamp)" "$session" "$$" "$n" "$1" >> "$transcript"
+}
+# One line read is one turn, the way the integration suite's fake agent does it.
+turn() {
+  state busy
+  record "\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"$1\"}"
+  record "\"type\":\"assistant\",\"message\":{\"id\":\"$session-message-$$-$n\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"noted\"}],\"stop_reason\":\"end_turn\"}"
+  record "\"type\":\"system\",\"subtype\":\"stop_hook_summary\",\"preventedContinuation\":false,\"hookCount\":1"
+  state idle
+}
+state idle
+printf 'CFSMOKE-READY %s\n' "$CFSMOKE_TAG"
 # Says whether the pane inherited a usable PATH. A lead whose PATH holds only
 # ConsensFlow's own directories cannot run git, ripgrep or any of what a real
 # harness shells out to, and every test that stubs the environment would still
 # pass. One system command settles it.
 if command -v uname >/dev/null 2>&1; then
-  printf 'CFSMOKE-TOOLS ok\\n'
+  printf 'CFSMOKE-TOOLS ok\n'
 else
-  printf 'CFSMOKE-TOOLS missing\\n'
+  printf 'CFSMOKE-TOOLS missing\n'
 fi
 pad=''
 n=0
 while [ $n -lt ${FLOOD_WIDTH} ]; do
-  pad="\${pad}x"
+  pad="${'$'}{pad}x"
   n=$((n + 1))
 done
+n=0
+esc=$(printf '\033')
 while IFS= read -r line; do
   if [ "$line" = "BIGPASTE" ]; then
     saved=$(stty -g)
@@ -158,23 +199,34 @@ while IFS= read -r line; do
   elif [ "$line" = "FLOOD" ]; then
     n=1
     while [ $n -le ${FLOOD_LINES} ]; do
-      printf 'CFSMOKE-FLOOD %s %s\\n' "$n" "$pad"
+      printf 'CFSMOKE-FLOOD %s %s\n' "$n" "$pad"
       n=$((n + 1))
     done
-    printf 'CFSMOKE-FLOODED %s\\n' "$CFSMOKE_TAG"
+    printf 'CFSMOKE-FLOODED %s\n' "$CFSMOKE_TAG"
   else
+    # A paste arrives bracketed; the record and the hex are of the text.
+    line=${'$'}{line#"$esc[200~"}
+    line=${'$'}{line%"$esc[201~"}
     # Shell builtins only, on purpose. A lead pane's PATH once carried just
     # ConsensFlow's own bin directories — this fixture is what found that,
     # by failing on a missing \`od\` — and it is fixed now. Keeping the hex in
     # the shell means this test measures the app, not the machine's coreutils.
     hex=''
+    json=''
     rest=$line
     while [ -n "$rest" ]; do
-      ch=$\{rest%"$\{rest#?}"}
-      hex="$hex$(printf '%02x' "'$ch")"
-      rest=$\{rest#?}
+      ch=${'$'}{rest%"${'$'}{rest#?}"}
+      # Bytes above 0x7f come back sign-extended from printf; keep the byte.
+      hex="$hex$(printf '%02x' $(( $(printf '%d' "'$ch") & 255 )))"
+      case "$ch" in
+        \\) json="$json\\\\" ;;
+        \") json="$json\\\"" ;;
+        *) json="$json$ch" ;;
+      esac
+      rest=${'$'}{rest#?}
     done
-    printf 'CFSMOKE-HEX %s\\n' "$hex"
+    turn "$json"
+    printf 'CFSMOKE-HEX %s\n' "$hex"
   fi
 done
 `
@@ -450,6 +502,7 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     Buffer.from(board.data.hex, 'hex').toString('utf8'),
     /^\[ConsensFlow m-\d+ · T-1 · task from @human\]/,
   )
+  assert.equal(board.data.delivered, true, 'the core never confirmed the delivery from the record')
 
   const pasted = await app.waitFor('large-paste')
   const expectedPaste = Buffer.from('\x1b[200~' + '漢字 résumé 🙂\r'.repeat(30_000) + '\x1b[201~')
@@ -611,19 +664,26 @@ test('built Agents catalog serves complete saved profiles and current browsing c
     box,
     `
     import assert from 'node:assert/strict'
-    import { existsSync, readFileSync } from 'node:fs'
+    import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+    import { join } from 'node:path'
     import { METRICS } from ${JSON.stringify(join(cli, 'hosts/lib/benchmarks.js'))}
     import { CATALOG, catalogEntry } from ${JSON.stringify(join(cli, 'src/catalog.js'))}
+    import { agentsUi } from ${JSON.stringify(join(cli, 'src/core/agents-server.js'))}
+    import { Credentials, startApi } from ${JSON.stringify(join(cli, 'src/core/api.js'))}
+    import { openLedger } from ${JSON.stringify(join(cli, 'src/ledger/index.js'))}
     import { addAgent, rosterPath } from ${JSON.stringify(join(cli, 'src/roster.js'))}
-    import { startUiServer } from ${JSON.stringify(join(cli, 'src/ui.js'))}
     assert.equal(Object.values(CATALOG).flat().length, 99, 'packaged preset count')
     assert.equal(METRICS.length, 14)
     for (const secretFile of ['artificial-analysis-key', 'artificial-analysis-cache.json']) assert.equal(existsSync(${JSON.stringify(cli)} + '/' + secretFile), false)
     assert.equal(catalogEntry('pygmalion').model, 'codex-image')
     addAgent(catalogEntry('maia'), process.env)
-    const server = await startUiServer(process.env)
+    // The agents pages the way the daemon serves them: behind its API, opened with the UI token.
+    mkdirSync(process.env.CONSENSFLOW_HOME, { recursive: true })
+    const ledger = openLedger(join(process.env.CONSENSFLOW_HOME, 'consensflow.db'))
+    const token = 'smoke-ui-token'
+    const server = await startApi({ ledger, credentials: new Credentials(), ui: agentsUi(process.env, { token }) })
     try {
-      const headers = { authorization: 'Bearer ' + server.token }
+      const headers = { authorization: 'Bearer ' + token }
       const data = await (await fetch(server.url + '/api/agents', { headers })).json()
       const saved = JSON.parse(readFileSync(rosterPath(process.env), 'utf8')).agents.find(a => a.id === 'maia')
       assert.deepEqual(saved.profile, data.agents.find(a => a.name === 'maia').profile)
@@ -641,7 +701,10 @@ test('built Agents catalog serves complete saved profiles and current browsing c
       assert.equal(after.agents.length, 0)
       assert.equal(Object.values(after.catalog).flat().length, 99)
       console.log('packaged catalog and saved profiles verified')
-    } finally { await server.close() }
+    } finally {
+      await server.close()
+      ledger.close()
+    }
   `,
   )
   assert.equal(result.code, 0, result.err)

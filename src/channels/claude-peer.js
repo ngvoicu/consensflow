@@ -58,6 +58,13 @@ async function discover(config, session, deadline, allowBackground = false) {
     throw error
   }
   const { file, row } = matches[0]
+  // A Claude that keeps only its status here (no peer messaging on this
+  // build, or it is switched off) has no inbox; its terminal is the way in.
+  if (row.messagingSocketPath === undefined) {
+    const error = Error('native Claude inbox is not registered')
+    error.code = 'native-session-unavailable'
+    throw error
+  }
   if (row.kind === 'bg' && !allowBackground) {
     const error = Error('native Claude background inbox requires verified continuation ownership')
     error.code = 'background-peer'
