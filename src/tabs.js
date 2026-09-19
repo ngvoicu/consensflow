@@ -278,12 +278,26 @@ export class Tabs {
         throw new StoreRefusal(`the tab ${tabId} is not suspended`, 'not-suspended')
       }
       tab.closed = false
+      delete tab.resumeOnStart
       tab.lead.generation += 1
       const leadPane = tab.panes.find((candidate) => candidate.kind === 'lead')
       if (leadPane !== undefined) leadPane.generation += 1
       tab.updatedAt = nowIso()
       await io.writeTabs(tabs)
       return { id: tab.id, generation: tab.lead.generation, leadId: leadIdentity(tab) }
+    })
+  }
+
+  /** Stops an automatic restart resume from being tried again. */
+  async forgetResume(tabId) {
+    requireText(tabId, 'tab id')
+    return this.store.mutate(await this.#tabDirectory(tabId), 'tab.forget-resume', async (io) => {
+      const tabs = await io.readTabs()
+      const tab = findTab(tabs, tabId)
+      if (tab.resumeOnStart === undefined) return false
+      delete tab.resumeOnStart
+      await io.writeTabs(tabs)
+      return true
     })
   }
 

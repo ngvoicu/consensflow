@@ -770,6 +770,29 @@ export class Panes {
     return this.#trackTabWork(request?.tab, () => this.#resumeTab(request))
   }
 
+  /**
+   * After a restart, bring back the sessions that were open when the previous
+   * process ended, through the same path as the human's Resume: leads before
+   * PMs, one at a time. Each is tried once; a failure leaves it suspended.
+   */
+  async resumeOnStart() {
+    const marked = (await this.#tabs.list()).filter(
+      (tab) => tab.resumeOnStart === true && tab.deleting !== true,
+    )
+    marked.sort((a, b) => Number(a.role === 'pm') - Number(b.role === 'pm'))
+    const outcomes = []
+    for (const tab of marked) {
+      try {
+        outcomes.push({ tab: tab.id, ...(await this.tabResume({ tab: tab.id })) })
+      } catch (cause) {
+        outcomes.push({ tab: tab.id, error: cause.message })
+      } finally {
+        await this.#tabs.forgetResume(tab.id).catch(() => {})
+      }
+    }
+    return outcomes
+  }
+
   async #resumeTab(request) {
     const tabId = requireText(request?.tab, 'tab')
     // Before the tab takes its next generation: a pane row is only Node's

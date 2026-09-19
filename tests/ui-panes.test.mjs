@@ -4513,6 +4513,38 @@ describe('a shell frame that never left strands nothing', () => {
   })
 })
 
+describe('a restarted app brings back the sessions that were open', () => {
+  it('resumes an open session on its bound lead session, and leaves a suspended one closed', async () => {
+    // Gabriel's report: after a restart the app came back blank, and every
+    // session needed a manual Resume ("you have to restart it again").
+    const app = await restartableApp()
+    try {
+      const open = await app.rust.request('tab.open', {
+        dir: app.workspace,
+        harness: 'claude-code',
+      })
+      const suspended = await app.rust.request('tab.open', {
+        dir: app.workspace,
+        harness: 'claude-code',
+      })
+      const bound = app.tab(open.tab).lead.nativeSession
+      app.rust.event('pane.exit', { id: suspended.pane.id, generation: suspended.pane.generation })
+      await waitFor(() => app.tab(suspended.tab).closed === true)
+      const opened = app.seen.open.length
+
+      await app.restart()
+      await waitFor(() => app.tab(open.tab).closed === false)
+      const resumed = app.seen.open.slice(opened)
+      assert.equal(resumed.length, 1, 'only the session that was open comes back')
+      assert.equal(resumed[0].argv[resumed[0].argv.indexOf('--resume') + 1], bound)
+      assert.equal(app.tab(open.tab).resumeOnStart, undefined, 'the marker is used once')
+      assert.equal(app.tab(suspended.tab).closed, true)
+    } finally {
+      await app.close()
+    }
+  })
+})
+
 describe('a fresh app reaps the unresolved rows its predecessor left', () => {
   it('reaps a row no live process is protecting, on the first resume', async () => {
     const app = await restartableApp()
@@ -4537,16 +4569,10 @@ describe('a fresh app reaps the unresolved rows its predecessor left', () => {
       assert.equal(app.threads()[unknown.conversation].reserved.resolvedAt, undefined)
 
       // A new Panes instance over the same store: it sent no frames, so it
-      // protects nothing, and `Store.open()` reads every tab closed.
+      // protects nothing. `Store.open()` reads the tab closed and, because it
+      // was open, the app resumes it by itself; that first resume reaps.
       await app.restart()
-      assert.equal(app.tab(tab.tab).closed, true, 'a restart reads its tabs closed')
-      assert.equal(
-        app.tab(tab.tab).panes.some((pane) => pane.id === unknown.pane.id),
-        true,
-        'with the stale row still on it',
-      )
-
-      assert.equal((await app.rust.request('tab.resume', { tab: tab.tab })).ok, true)
+      await waitFor(() => app.tab(tab.tab).closed === false)
       assert.equal(
         app.tab(tab.tab).panes.some((pane) => pane.id === unknown.pane.id && pane.closed !== true),
         false,

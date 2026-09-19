@@ -56,23 +56,23 @@ diagnosis and every decision live in the `consensflow-sme` brain
 - [x] [TEST-REL-11] app/src-tauri/src/lib.rs: a parent Claude session's identity variables are never inherited; configuration stays.
 - [x] [IMPL-REL-12] lib.rs removes the identity list at startup, before the daemon and panes exist (`2becdcc`); satisfies TEST-REL-11.
 
-## Phase 4: Visibility and restart [active]
+## Phase 4: Visibility and restart [completed]
 
 - [x] [TEST-REL-13] tests/inbox-scan.test.mjs, app/tests/page.spec.mjs: a Claude pane shows the status Claude records itself (waiting with its reason, busy, idle); the page shows "Waiting" with the reason.
 - [x] [IMPL-REL-14] src/delivery-watch.js (`claudeStatuses`), app/ui/sidebar.js, app/ui/index.html; the never-sent `pane.idle` subscription is removed; satisfies TEST-REL-13. Codex, OpenCode, Pi and Devin waiting signals move to the Stage 2 harness adapters (each adapter owns its native signals); Rust's `idle_ms` stays as Stage 2's silence fallback.
-- [ ] [TEST-REL-15] After an app restart, sessions that were open come back without a manual Resume.
-- [ ] [IMPL-REL-16] Restore on start; satisfies TEST-REL-15.
-- [ ] [IMPL-REL-17] The app's and the daemon's error output goes to a log file inside the home.
+- [x] [TEST-REL-15] tests/ui-panes.test.mjs: after a restart, a session that was open resumes on its bound lead session by itself (once), and a suspended one stays closed.
+- [x] [IMPL-REL-16] src/store.js marks open sessions `resumeOnStart` at recovery; src/panes.js `resumeOnStart()` resumes them (leads before PMs, lead and bound workers, through the human's Resume path) when the pane host attaches (src/ui.js); src/tabs.js clears the marker; satisfies TEST-REL-15.
+- [x] [IMPL-REL-17] lib.rs points stderr at `<home>/app/app.log` (one previous file kept past 10 MB, macOS), so the daemon's and the app's errors are kept; the watcher and the automatic resume now log their errors instead of discarding them; the packaged smoke quotes app.log on failure.
 
-## Phase 5: Acceptance [pending]
+## Phase 5: Acceptance [active]
 
 - [ ] [VERIFY-REL-18] Live bench in the Candidate with the test models: dispatch, delivery to the lead, markers, permission mode and restart, per harness.
 - [ ] [VERIFY-REL-19] Full suites, candidate rebuild with the packaged smoke, brain status and progress updated.
 
 ## Resume context
 
-Phases 1-3 and the Claude waiting marker are done. Next: TEST-REL-15 (restore
-open sessions after an app restart), then error logs, then the live bench.
+Phases 1-4 are done. Next: VERIFY-REL-18, the live bench in the Candidate with
+the test models, then VERIFY-REL-19.
 
 ## TDD log
 
@@ -125,3 +125,7 @@ open sessions after an app restart), then error logs, then the live bench.
   `~/.claude/sessions/<pid>.json` (read on the live machine, read-only). RED:
   the pane read `unknown`, and the page had no Waiting label; GREEN: inbox-scan
   12/12, the Playwright waiting test passes.
+- TEST-REL-15 RED: the open session never came back (timed out); GREEN after
+  IMPL-REL-16. The older reaping test raced the automatic resume, so it now
+  waits for it (5/5 runs pass). IMPL-REL-17: Rust 105/105 including the log
+  rotation test; clippy clean.

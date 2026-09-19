@@ -48,6 +48,15 @@ const FLOOD_WIDTH = 384
  */
 const FLOOD_BYTES = FLOOD_LINES * (FLOOD_WIDTH + 'CFSMOKE-FLOOD 1234 '.length + 1)
 
+/** The app writes its error output to <home>/app/app.log, not to its stderr. */
+function appLog(box) {
+  try {
+    return readFileSync(join(box.env.CONSENSFLOW_HOME, 'app', 'app.log'), 'utf8').slice(-4000)
+  } catch {
+    return '(none)'
+  }
+}
+
 function candidateApp() {
   const override = process.env.CONSENSFLOW_SMOKE_APP
   if (typeof override === 'string' && override.length > 0) return resolve(override)
@@ -299,7 +308,8 @@ function launch(binary, box) {
       if (dead !== undefined) {
         throw new Error(
           `the app gave up before reporting "${name}".\n${trouble().join('\n')}\n` +
-            `sandbox kept at ${box.root}\nstderr: ${stderr.join('').slice(-4000)}`,
+            `sandbox kept at ${box.root}\nstderr: ${stderr.join('').slice(-4000)}\n` +
+            `app.log: ${appLog(box)}`,
         )
       }
       const left = deadline - Date.now()
@@ -314,7 +324,8 @@ function launch(binary, box) {
             `reported: ${events.map((event) => event.event).join(', ') || '(nothing)'}\n` +
             `${seen.length > 0 ? `${seen.join('\n')}\n` : ''}` +
             `sandbox kept at ${box.root}\n` +
-            `stderr: ${stderr.join('').slice(-4000)}`,
+            `stderr: ${stderr.join('').slice(-4000)}\n` +
+            `app.log: ${appLog(box)}`,
         )
       }
       await new Promise((wake) => {

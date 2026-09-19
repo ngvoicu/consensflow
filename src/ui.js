@@ -317,7 +317,13 @@ export async function startUiServer(
     ...(prepareChannel === undefined ? {} : { prepareChannel }),
   })
   // One background scanner serves results and native activity; page reads never await it.
-  const watcher = new Watcher({ store, tabs, env })
+  const watcher = new Watcher({
+    store,
+    tabs,
+    env,
+    // stderr is the app's error log (<home>/app/app.log).
+    onError: (error) => console.error('consensflow watcher:', error?.message ?? error),
+  })
   const page = new Page({
     store,
     tabs,
@@ -598,6 +604,14 @@ export async function startUiServer(
       if (bridge !== null && bridge !== undefined) {
         watcher.attachBridge(bridge)
         stopAnnouncing = attachPage(bridge, { panes, page, store, tabs, tasks, env })
+        // Sessions that were open when the previous process ended come back.
+        panes
+          .resumeOnStart()
+          .then((outcomes) => {
+            for (const outcome of outcomes)
+              if (outcome.error) console.error(`consensflow resume ${outcome.tab}:`, outcome.error)
+          })
+          .catch((error) => console.error('consensflow resume:', error?.message ?? error))
       }
       return panes
     },

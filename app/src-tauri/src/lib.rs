@@ -253,6 +253,31 @@ fn inherited_session_variables<'a>(names: impl IntoIterator<Item = &'a str>) -> 
         .collect()
 }
 
+/// Where the app and its daemon write their error output: `<home>/app/app.log`,
+/// with one previous file kept once it passes `limit` bytes. A Finder-launched
+/// app's stderr is /dev/null, so panics and daemon errors used to leave no
+/// trace at all.
+fn prepare_error_log(home: &std::path::Path, limit: u64) -> std::io::Result<std::path::PathBuf> {
+    let directory = home.join("app");
+    std::fs::create_dir_all(&directory)?;
+    let log = directory.join("app.log");
+    if std::fs::metadata(&log).is_ok_and(|meta| meta.len() > limit) {
+        std::fs::rename(&log, directory.join("app.log.1"))?;
+    }
+    Ok(log)
+}
+
+/// Points this process's stderr, and so the daemon's and every pane host
+/// message, at the error log. Best effort: the app runs without it.
+#[cfg(target_os = "macos")]
+fn redirect_stderr(log: &std::path::Path) {
+    use std::os::fd::AsRawFd;
+    if let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(log) {
+        // SAFETY: both descriptors are valid; dup2 replaces fd 2 atomically.
+        unsafe { libc::dup2(file.as_raw_fd(), 2) };
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let context = tauri::generate_context!();
@@ -278,6 +303,16 @@ pub fn run() {
         .collect();
     for name in inherited_session_variables(names.iter().map(String::as_str)) {
         std::env::remove_var(name);
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(home) = std::env::var_os("CONSENSFLOW_HOME")
+        .filter(|value| !value.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| home.as_ref().map(|home| std::path::Path::new(home).join(".consensflow")))
+    {
+        if let Ok(log) = prepare_error_log(&home, 10 * 1024 * 1024) {
+            redirect_stderr(&log);
+        }
     }
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -447,6 +482,23 @@ mod tests {
                 "CLAUDE_EFFORT",
             ],
             "configuration (CLAUDE_CONFIG_DIR, CLAUDE_CODE_USE_BEDROCK) stays"
+        );
+    }
+
+    #[test]
+    fn the_error_log_lives_in_the_home_and_keeps_one_previous_file() {
+        let home = tempfile::tempdir().expect("home");
+        let log = prepare_error_log(home.path(), 16).expect("prepare");
+        assert_eq!(log, home.path().join("app").join("app.log"));
+        std::fs::write(&log, "small").expect("write");
+        prepare_error_log(home.path(), 16).expect("small stays");
+        assert_eq!(std::fs::read_to_string(&log).expect("read"), "small");
+        std::fs::write(&log, "far more than sixteen bytes").expect("grow");
+        prepare_error_log(home.path(), 16).expect("rotate");
+        assert!(!log.exists(), "a large log is moved aside");
+        assert_eq!(
+            std::fs::read_to_string(home.path().join("app").join("app.log.1")).expect("previous"),
+            "far more than sixteen bytes"
         );
     }
 

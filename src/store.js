@@ -1300,7 +1300,10 @@ export class Store {
             named = true
           }
           if (isRecord(tab) && tab.closed !== true) {
+            // Its panes died with the old process. It was open, so the app
+            // brings it back once the pane host is attached (resumeOnStart).
             tab.closed = true
+            tab.resumeOnStart = true
             closed += 1
           }
         }
