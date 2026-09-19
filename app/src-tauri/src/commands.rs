@@ -1279,12 +1279,14 @@ pub fn run_headless() -> Result<(), String> {
         )
         .map_err(|error| error.to_string())?;
 
-    // No page to draw into, so a pane's bytes go back over the same bridge.
-    // Registered after `serve` on purpose: whatever a pane produced in between
-    // is parked in the hub and drains into this sink the moment it attaches.
+    // No page to draw into, so a pane's bytes go back over the same bridge, as
+    // a stream: a burst waits for the peer to read instead of closing the
+    // bridge. Registered after `serve` on purpose: whatever a pane produced in
+    // between is parked in the hub and drains into this sink the moment it
+    // attaches.
     let sink = bridge.clone();
     output.register_sink(Arc::new(move |message: PaneOutputMessage| {
-        sink.event("pane.output", json!(message)).is_ok()
+        sink.stream_event("pane.output", json!(message)).is_ok()
     }));
     forward_input_events(event_receiver, bridge.clone());
 
