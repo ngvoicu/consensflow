@@ -71,8 +71,12 @@ diagnosis and every decision live in the `consensflow-sme` brain
 
 ## Resume context
 
-Phases 1-4 are done. Next: VERIFY-REL-18, the live bench in the Candidate with
-the test models, then VERIFY-REL-19.
+Phases 1-4 are done. VERIFY-REL-18 is green for the free-model harnesses
+(`7532da6`: 14/14 with an OpenCode lead and OpenCode, Pi and Devin workers,
+restart included). Still open in it: a Claude lead and worker on Sonnet
+(opt-in, after Claude's weekly limit resets on 2026-09-19 18:00 Bucharest; the
+first Claude-lead run never read idle, cause not diagnosed) and Codex on luna
+when its quota returns. Then VERIFY-REL-19.
 
 ## TDD log
 
@@ -129,3 +133,24 @@ the test models, then VERIFY-REL-19.
   IMPL-REL-16. The older reaping test raced the automatic resume, so it now
   waits for it (5/5 runs pass). IMPL-REL-17: Rust 105/105 including the log
   rotation test; clippy clean.
+- VERIFY-REL-18, free models (`npm run bench:live`, the production daemon, the
+  real Rust pane host and the real TUIs). Run 2: 5/6, the restart failed. The
+  cause was the integration harness, not the app: it read the daemon's handle
+  line and left the stream flowing with no listener until the pane host was
+  up, so the daemon's first frames (its restart resume) were dropped. The
+  app's bridge keeps its reader and loses nothing. Run 3: 12/14; Devin's
+  result waited 310 s behind a free-model lead that explored the machine for
+  minutes after each result (delivery waits for idle, as designed). The bench
+  now gives every agent a one-line brief. Run 4: 14/14; workers answered in
+  3-10 s, the lead received each within 4-10 s, the restart resumed the lead
+  with `--session <id>`.
+- The same work found three test-suite defects and one product bug. TEST-PANE-61
+  had failed since the yolo launch (the fake Claude read `--permission-mode`'s
+  value as its seed; the integration suite is not in `npm run check`, so the
+  gate now runs it too). TEST-PANE-75 and the new restart test checked before
+  the daemon acted; the suite now runs one file at a time. TEST-PANE-83 caught a
+  real ordering flicker: a failed worker's reservation was released before its
+  failure was recorded. The Pi duplicate test's third failure was a real bug:
+  the extension forgot an id once it acknowledged it, so a stale scan or a
+  second copy was sent again (new deterministic test, RED then GREEN).
+

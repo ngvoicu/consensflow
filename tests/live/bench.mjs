@@ -206,6 +206,7 @@ try {
     record(`${name}-received-by-lead`, Boolean(received), {
       seconds: Math.round((Date.now() - started) / 1000),
       state: app.deliveries(WORKSPACE).find((r) => r.id === answered.id)?.state,
+      ...(!received && LEAD === 'claude' ? { claudeStatus: claudeStatus(leadSession) } : {}),
     })
     const idle = await until(async () => {
       const worker = await pane((candidate) => candidate.conversation === conversation)
@@ -213,6 +214,9 @@ try {
     }, 60_000)
     record(`${name}-marker-idle`, Boolean(idle), {
       activity: idle ? undefined : (await pane((c) => c.conversation === conversation))?.activity,
+      ...(!idle && name === 'claude'
+        ? { claudeStatus: claudeStatus(app.threads(WORKSPACE)[conversation]?.sessionId) }
+        : {}),
     })
   }
 

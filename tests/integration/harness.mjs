@@ -396,10 +396,6 @@ export async function startIntegration({
     rustPid() {
       return rust.pid
     },
-    /** What both processes wrote to stderr, for a failing test's message. */
-    stderr() {
-      return { ui: uiErrors.join(''), rust: rustErrors.join('') }
-    },
     signalRust(signal) {
       return process.kill(rust.pid, signal)
     },
@@ -413,7 +409,13 @@ export async function startIntegration({
       return opened.body
     },
     runCli,
-    waitFor,
+    // A timeout names what both processes said on stderr: an automatic resume
+    // that failed, for one, logs there and nowhere else.
+    waitFor: (predicate, timeoutMs, intervalMs) =>
+      waitFor(predicate, timeoutMs, intervalMs).catch((cause) => {
+        cause.message += `; ui stderr=${uiErrors.join('').trim()} rust stderr=${rustErrors.join('').trim()}`
+        throw cause
+      }),
     threads,
     deliveries,
     transcript,
