@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ConsensFlow</title>
+  <link rel="stylesheet" href="./vendor/xterm.css">
+  <link rel="stylesheet" href="./updates.css">
+  <style>
+    :root {
+      --ink: #08181d;
+      --deep: #0c2026;
+      --panel: #112a31;
+      --panel-raised: #17343c;
+      --line: #28464d;
+      --line-soft: #1c373e;
+      --foam: #e9f1ef;
+      --muted: #8ea8ad;
+      --seafoam: #63c7b2;
+      --seafoam-dim: #2b7569;
+      --buoy: #ff7868;
+      --amber: #e7b968;
+      --slate: #3d5b62;
+      --strip: #0e252b;
+      --strip-hover: #133139;
+      --shadow: rgba(0, 0, 0, .36);
+      --ui: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+      --mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background:
+        linear-gradient(90deg, rgba(99, 199, 178, .025) 1px, transparent 1px) 0 0 / 24px 24px,
+        var(--ink);
+      color: var(--foam);
+      font: 13px/1.4 var(--ui);
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input, select, textarea { font: inherit; color: inherit; }
+    :focus-visible { outline: 2px solid var(--seafoam); outline-offset: 2px; }
+    [hidden] { display: none !important; }
+
+    .shell {
+      height: 100dvh;
+      display: grid;
+      grid-template-columns: 224px minmax(0, 1fr);
+      grid-template-rows: 52px minmax(0, 1fr);
+      grid-template-areas: "bar bar" "side main";
+    }
+
+    /* Buttons: one quiet style, one primary, one for what cannot be undone. */
+    .quiet-button, .primary-button, .danger-button, .views button {
+      border-radius: 6px;
+      padding: 5px 11px;
+      cursor: pointer;
+      border: 1px solid var(--line);
+      background: transparent;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .quiet-button:hover:not(:disabled), .views button:hover:not(:disabled) { background: var(--panel-raised); }
+    .primary-button { background: var(--seafoam); border-color: var(--seafoam); color: var(--ink); font-weight: 650; }
+    .primary-button:hover:not(:disabled) { background: #7bd6c3; }
+    .danger-button { border-color: rgba(255, 120, 104, .55); color: var(--buoy); }
+    .danger-button:hover:not(:disabled) { background: rgba(255, 120, 104, .1); }
+    button:disabled { opacity: .45; cursor: default; }
+
+    /* The command bar: which session, which view, and what waits for you. */
+    .command-bar {
+      grid-area: bar;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(12, 32, 38, .92);
+    }
+    .brand {
+      font: 700 10px/1 var(--mono);
+      letter-spacing: .19em;
+      text-transform: uppercase;
+      color: var(--seafoam);
+    }
+    .session-id { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+    .session-id h1 { margin: 0; font-size: 15px; font-weight: 650; white-space: nowrap; }
+    #session-directory {
+      font: 11px var(--mono);
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .views { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+    .views button { border: 0; border-radius: 0; }
+    .views button[aria-pressed="true"] { background: var(--panel-raised); color: var(--seafoam); }
+    .spacer { flex: 1; }
+    #inbox-button[data-waiting="true"] { border-color: var(--amber); color: var(--amber); }
+
+    /* Sessions. */
+    .sidebar {
+      grid-area: side;
+      border-right: 1px solid var(--line);
+      background: rgba(12, 32, 38, .7);
+      overflow: auto;
+      padding: 14px 10px;
+    }
+    .sidebar-title {
+      margin: 0 6px 10px;
+      font: 700 10px var(--mono);
+      letter-spacing: .16em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    #sessions { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+    .session { display: flex; align-items: center; gap: 6px; }
+    .session-select {
+      flex: 1;
+      min-width: 0;
+      display: grid;
+      gap: 2px;
+      text-align: left;
+      padding: 7px 9px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      background: transparent;
+      cursor: pointer;
+    }
+    .session-select:hover { background: var(--panel); }
+    .session-select[aria-current="true"] { background: var(--panel-raised); border-color: var(--line); }
+    .session-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-state { font: 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    .session[data-state="open"] .session-state { color: var(--seafoam); }
+    .sessions-empty, .team-empty { color: var(--muted); padding: 6px 9px; }
+
+    .main { grid-area: main; position: relative; min-height: 0; display: grid; }
+
+    /* The board: one bay per participant, one strip per task. */
+    .board {
+      overflow: auto;
+      padding: 16px 20px 56px;
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+    .board-empty { color: var(--muted); margin: 40px auto; max-width: 420px; text-align: center; }
+    .bay {
+      background: var(--deep);
+      border: 1px solid var(--line-soft);
+      border-radius: 10px;
+      padding: 10px 12px 12px;
+    }
+    .bay-human {
+      border-color: rgba(231, 185, 104, .32);
+      background: linear-gradient(90deg, rgba(231, 185, 104, .07), transparent 45%), var(--deep);
+    }
+    .bay-head { display: flex; align-items: center; gap: 10px; min-height: 30px; flex-wrap: wrap; }
+    .bay-name {
+      margin: 0;
+      font: 700 11px/1 var(--mono);
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    .bay-human .bay-name { color: var(--amber); }
+    .bay-meta { font: 11px var(--mono); color: var(--muted); }
+    .bay-status { margin-left: auto; font: 600 11px var(--mono); color: var(--muted); }
+    .bay-status[data-state="working"] { color: var(--seafoam); }
+    .bay-status[data-state="waiting"] { color: var(--amber); }
+    .bay-human .bay-status { color: var(--amber); }
+    .bay-tools { display: flex; gap: 6px; }
+    .bay-empty { color: var(--muted); font-size: 12px; padding: 2px 2px 0; list-style: none; }
+    .bay-cleared { margin: 8px 2px 0; font: 11px var(--mono); color: var(--muted); }
+
+    .lamp {
+      width: 10px;
+      height: 10px;
+      flex: none;
+      border-radius: 50%;
+      border: 1.5px solid var(--line);
+    }
+    .lamp[data-state="working"] {
+      background: var(--seafoam);
+      border-color: var(--seafoam);
+      box-shadow: 0 0 0 3px rgba(99, 199, 178, .16), 0 0 12px rgba(99, 199, 178, .5);
+      animation: lamp-pulse 1.8s ease-in-out infinite;
+    }
+    .lamp[data-state="waiting"] {
+      background: var(--amber);
+      border-color: var(--amber);
+      box-shadow: 0 0 10px rgba(231, 185, 104, .6);
+    }
+    .lamp[data-state="idle"] { border-color: var(--seafoam-dim); }
+    .lamp[data-state="starting"] { border-color: var(--seafoam); animation: lamp-blink 1s steps(2) infinite; }
+    .lamp[data-state="unknown"] { border-style: dashed; }
+    @keyframes lamp-pulse {
+      50% { box-shadow: 0 0 0 5px rgba(99, 199, 178, .06), 0 0 16px rgba(99, 199, 178, .3); }
+    }
+    @keyframes lamp-blink { 50% { border-color: transparent; } }
+
+    /* A strip: segmented boxes, the number block in the colour of its state. */
+    .strips { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+    .strip {
+      --state: var(--slate);
+      --state-ink: var(--foam);
+      width: 100%;
+      min-height: 38px;
+      display: grid;
+      grid-template-columns: 66px minmax(0, 1fr) minmax(0, auto) 88px 70px;
+      align-items: stretch;
+      padding: 0;
+      background: var(--strip);
+      border: 1px solid var(--line-soft);
+      border-radius: 5px;
+      text-align: left;
+      cursor: pointer;
+      overflow: hidden;
+    }
+    button.strip:hover { background: var(--strip-hover); }
+    .strip > span, .strip-line > span {
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      min-width: 0;
+      border-left: 1px solid var(--line-soft);
+    }
+    .strip-number {
+      justify-content: center;
+      border-left: 0 !important;
+      background: var(--state);
+      color: var(--state-ink);
+      font: 700 12px var(--mono);
+      letter-spacing: .03em;
+    }
+    .strip-title {
+      display: block !important;
+      font-size: 13px;
+      line-height: 38px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .strip-route, .strip-age { font: 11px var(--mono); color: var(--muted); white-space: nowrap; }
+    .strip-age { justify-content: flex-end; }
+    .strip-state {
+      font: 700 10px var(--mono);
+      letter-spacing: .14em;
+      text-transform: uppercase;
+      color: var(--state);
+    }
+    .strip[data-state="queued"] .strip-state { color: var(--muted); }
+    .strip[data-state="working"] { --state: var(--seafoam); --state-ink: var(--ink); }
+    .strip[data-state="waiting"] { --state: var(--amber); --state-ink: var(--ink); }
+    .strip[data-state="done"] { --state: var(--foam); --state-ink: var(--ink); }
+    .strip[data-state="failed"] { --state: var(--buoy); --state-ink: var(--ink); }
+    .strip[data-state="accepted"] { --state: var(--seafoam-dim); }
+
+    .strip-message { display: block; cursor: default; }
+    .strip-line {
+      display: grid;
+      grid-template-columns: 66px minmax(0, 1fr) minmax(0, auto) 70px;
+      min-height: 38px;
+    }
+    .strip-message[data-kind="question"] { --state: var(--amber); --state-ink: var(--ink); }
+    .strip-message[data-kind="result"] { --state: var(--seafoam); --state-ink: var(--ink); }
+    .strip-message[data-kind="answer"] { --state: var(--seafoam-dim); }
+    .strip-body {
+      margin: 0;
+      padding: 8px 12px 0 78px;
+      white-space: pre-wrap;
+      color: var(--foam);
+      font-size: 12px;
+      max-height: 220px;
+      overflow: auto;
+    }
+    .answer, .strip-actions { display: flex; gap: 8px; padding: 8px 12px 10px 78px; align-items: flex-start; }
+    .answer textarea, .composer textarea, .reopen textarea {
+      flex: 1;
+      resize: vertical;
+      min-height: 38px;
+      padding: 7px 9px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: var(--ink);
+    }
+    .composer { display: grid; gap: 8px; margin: 10px 0 2px; }
+    .composer-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+    /* One task and its thread. */
+    .drawer {
+      position: absolute;
+      inset: 0 0 0 auto;
+      width: min(540px, 100%);
+      background: var(--panel);
+      border-left: 1px solid var(--line);
+      box-shadow: -18px 0 40px var(--shadow);
+      overflow: auto;
+      padding: 16px 18px 28px;
+      z-index: 5;
+    }
+    .drawer-head { display: flex; align-items: center; gap: 10px; }
+    .drawer-title { margin: 0; flex: 1; display: flex; align-items: center; gap: 10px; font-size: 15px; }
+    .drawer-title .strip-number {
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: var(--state, var(--slate));
+      color: var(--state-ink, var(--foam));
+    }
+    .drawer[data-state="working"] { --state: var(--seafoam); --state-ink: var(--ink); }
+    .drawer[data-state="waiting"] { --state: var(--amber); --state-ink: var(--ink); }
+    .drawer[data-state="done"] { --state: var(--foam); --state-ink: var(--ink); }
+    .drawer[data-state="failed"] { --state: var(--buoy); --state-ink: var(--ink); }
+    .drawer[data-state="accepted"] { --state: var(--seafoam-dim); }
+    .drawer-meta { margin: 8px 0 14px; font: 11px var(--mono); color: var(--muted); }
+    .thread { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+    .thread-item { border-left: 3px solid var(--slate); padding: 2px 0 2px 12px; }
+    .thread-item[data-kind="result"] { border-color: var(--seafoam); }
+    .thread-item[data-kind="question"] { border-color: var(--amber); }
+    .thread-head {
+      margin: 0 0 4px;
+      font: 700 10px var(--mono);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .thread-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .drawer-actions { display: grid; gap: 10px; margin-top: 18px; }
+    .reopen { display: flex; gap: 8px; align-items: flex-start; }
+
+    /* The live windows. */
+    .stage { display: grid; gap: 8px; padding: 8px; min-height: 0; }
+    .stage-empty { color: var(--muted); margin: 40px auto; }
+    .terminal-card {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: 30px minmax(0, 1fr);
+      background: var(--deep);
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .terminal-card[data-focused="true"] { border-color: var(--seafoam); }
+    .terminal-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px;
+      border-bottom: 1px solid var(--line-soft);
+      font: 11px var(--mono);
+    }
+    .terminal-name { font-weight: 700; letter-spacing: .08em; }
+    .terminal-meta { color: var(--muted); }
+    .terminal-host { min-height: 0; padding: 4px 2px 2px 6px; }
+    .parking { position: fixed; left: -10000px; top: 0; width: 960px; height: 640px; overflow: hidden; }
+
+    .status {
+      position: absolute;
+      left: 20px;
+      bottom: 10px;
+      margin: 0;
+      font: 11px var(--mono);
+      color: var(--muted);
+      pointer-events: none;
+    }
+    .status[data-tone="error"] { color: var(--buoy); }
+
+    dialog {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+      color: var(--foam);
+      padding: 0;
+      width: min(480px, calc(100vw - 32px));
+    }
+    dialog::backdrop { background: rgba(4, 12, 15, .6); }
+    .dialog-form { display: grid; gap: 14px; padding: 18px 20px; }
+    .dialog-form h2 { margin: 0; font-size: 16px; }
+    .dialog-form label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+    .dialog-form input, .dialog-form select {
+      padding: 7px 9px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: var(--ink);
+      color: var(--foam);
+    }
+    .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    #team-members { margin: 0; padding-left: 18px; color: var(--foam); font: 12px var(--mono); display: grid; gap: 4px; }
+
+    @media (max-width: 760px) {
+      .shell {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto minmax(0, 1fr);
+        grid-template-areas: "bar" "side" "main";
+      }
+      .command-bar { flex-wrap: wrap; padding: 8px 12px; gap: 8px; }
+      .sidebar { border-right: 0; border-bottom: 1px solid var(--line); max-height: 30vh; }
+      .strip { grid-template-columns: 58px minmax(0, 1fr) 76px; }
+      .strip-route, .strip-age, .strip-line > .strip-route { display: none !important; }
+      .strip-line { grid-template-columns: 58px minmax(0, 1fr) 60px; }
+      .strip-body, .answer, .strip-actions { padding-left: 12px; }
+      .board { padding: 12px 12px 48px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .lamp { animation: none !important; }
+    }
+  </style>
+</head>
+<body data-ready="false">
+  <div class="shell">
+    <header class="command-bar">
+      <span class="brand">ConsensFlow</span>
+      <div class="session-id">
+        <h1 id="session-title">No session</h1>
+        <span id="session-directory"></span>
+      </div>
+      <div class="views" role="group" aria-label="View">
+        <button type="button" data-view="board" aria-pressed="true">Board</button>
+        <button type="button" data-view="terminals" aria-pressed="false">Terminals</button>
+      </div>
+      <span class="spacer"></span>
+      <button class="quiet-button" id="inbox-button" type="button">Inbox</button>
+      <button class="quiet-button" id="team-button" type="button">Team</button>
+      <button class="primary-button" id="new-session" type="button">New session</button>
+    </header>
+    <nav class="sidebar" aria-label="Sessions">
+      <h2 class="sidebar-title">Sessions</h2>
+      <ul id="sessions" data-testid="sessions"></ul>
+    </nav>
+    <main class="main">
+      <section class="board" id="board" aria-label="Board"></section>
+      <section class="stage" id="stage" aria-label="Terminals" hidden></section>
+      <aside class="drawer" id="task-drawer" hidden></aside>
+      <p class="status" id="status" role="status" aria-live="polite"></p>
+    </main>
+  </div>
+  <div class="parking" id="parking" aria-hidden="true"></div>
+
+  <dialog id="new-session-dialog" aria-labelledby="new-session-title">
+    <form class="dialog-form">
+      <h2 id="new-session-title">New session</h2>
+      <label>Project folder<input name="directory" readonly></label>
+      <label>The lead runs in
+        <select name="harness">
+          <option value="claude-code">Claude Code</option>
+          <option value="codex">Codex</option>
+          <option value="opencode">OpenCode</option>
+          <option value="pi">Pi</option>
+          <option value="devin">Devin</option>
+        </select>
+      </label>
+      <div class="dialog-actions">
+        <button class="quiet-button" type="button" value="cancel">Cancel</button>
+        <button class="primary-button" type="submit">Start session</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="team-dialog" aria-labelledby="team-title">
+    <form class="dialog-form">
+      <h2 id="team-title">Session team</h2>
+      <ul id="team-members" aria-label="On the team"></ul>
+      <label>Add an agent<select name="agent"></select></label>
+      <label>As
+        <select name="role">
+          <option value="worker">Worker: does tasks for the lead</option>
+          <option value="reviewer">Reviewer: reviews, read-only</option>
+          <option value="advisor">Advisor: researches for the PM</option>
+        </select>
+      </label>
+      <div class="dialog-actions">
+        <button class="quiet-button" type="button" value="cancel">Close</button>
+        <button class="primary-button" type="submit">Add to team</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="./core/app.js"></script>
+</body>
+</html>

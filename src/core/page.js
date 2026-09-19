@@ -56,6 +56,12 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       return { messages: ledger.inbox(owner.id) }
     },
 
+    'task.get': async ({ session, task }) => {
+      const found = ledger.task(session, task)
+      if (found === null) throw new Error(`no task T-${task} in this session`)
+      return { task: found }
+    },
+
     'task.add': change(async ({ session, to, body, title }) =>
       ledger.createTask(session, { from: 'human', to, body, title }),
     ),

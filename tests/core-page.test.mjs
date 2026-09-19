@@ -121,6 +121,16 @@ describe('the page protocol of the new core', () => {
       assert.equal(reopened.task.state, 'queued')
       const cancelled = await operations['task.cancel']({ session: session.id, task: 1 })
       assert.equal(cancelled.task.state, 'cancelled')
+      const { task: thread } = await operations['task.get']({ session: session.id, task: 1 })
+      assert.deepEqual(
+        thread.messages.map((m) => [m.kind, m.sender]),
+        [
+          ['task', 'human'],
+          ['result', 'zeus'],
+          ['task', 'human'],
+        ],
+      )
+      await assert.rejects(operations['task.get']({ session: session.id, task: 9 }), /no task T-9/)
       await operations['task.add']({ session: session.id, to: 'zeus', body: 'Second' })
       const second = ledger.task(session.id, 2).messages[0]
       ledger.beginDelivery(second.id)

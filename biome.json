@@ -6,6 +6,7 @@
       "bin/**",
       "tests/**",
       "app/ui/*.js",
+      "app/ui/core/**",
       "app/tests/**",
       "hosts/lib/completion.js",
       "hosts/lib/deliveries.js",

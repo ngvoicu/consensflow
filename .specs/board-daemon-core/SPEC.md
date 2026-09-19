@@ -115,7 +115,7 @@ opens panes or types into them.
 
 ### Phase E: Board-first UI [active]
 
-- [ ] [TEST-BDC-13] Playwright: lanes per participant, cards and markers, card detail, the human inbox with question answering, the team picker, session views kept.
+- [ ] [TEST-BDC-13] Playwright: lanes per participant, cards and markers, card detail, the human inbox with question answering, the team picker, session views kept. `app/tests/core-page.spec.mjs` (12) covers all but the PM session view; the switch adds geometry, the Agents/Library/Harnesses dialogs and the self-test hook.
 - [ ] [IMPL-BDC-14] The board page on the new core's page protocol.
 
 ### Phase F: The switch [planned]
@@ -241,4 +241,15 @@ page (Phase E).
   refusals added to the forwarding contract test first; Rust 106/106, clippy
   clean). The new page is built beside the old one as `app/ui/core.html` and
   becomes `index.html` at the switch.
+- The board page (`app/ui/core.html`, `app/ui/core/`, `app/ui/terminal-link.js`):
+  one bay per participant with its lamp, each task a strip (a control room's
+  flight strip: segmented boxes, the number block in its state's colour), the
+  human's bay first with questions to answer in place, a composer per bay, a
+  drawer with a task's thread and accept/reopen/cancel, the team picker, the
+  new-session flow and the live terminals behind every bay. Written test-first
+  against a stand-in app (12 Playwright tests; one expectation was wrong about
+  strip order and was corrected: the live task first, then the queue, then
+  what waits for a decision). Screenshots at 1440 and 390 px checked by eye;
+  the drawer's task number took its state's colour after that review. The old
+  page's 138 tests still pass.
 
