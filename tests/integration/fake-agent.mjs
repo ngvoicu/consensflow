@@ -10,7 +10,8 @@ import { fileURLToPath } from 'node:url'
  * TUI does: a bracketed paste followed by Enter is one message.
  *
  * Every message is one turn. `Reply with exactly: X` answers X. A line
- * `DISPATCH @agent <task>` runs `cf task add @agent <task>` with this window's
+ * `DISPATCH --tier standard <task>` (or `DISPATCH @lead <task>`) runs `cf task
+ * add` with those words and the task, with this window's
  * own token, the way a lead hands out work. Anything else is acknowledged.
  */
 
@@ -92,8 +93,10 @@ function runCf(words) {
 }
 
 async function replyTo(text) {
-  const dispatch = /^DISPATCH @(\S+) (.+)$/m.exec(text)
-  if (dispatch) return `dispatched: ${await runCf(['task', 'add', `@${dispatch[1]}`, dispatch[2]])}`
+  const dispatch = /^DISPATCH ((?:(?:--\S+ \S+|@\S+) )+)(.+)$/m.exec(text)
+  if (dispatch) {
+    return `dispatched: ${await runCf(['task', 'add', ...dispatch[1].trim().split(' '), dispatch[2]])}`
+  }
   const exact = /Reply with exactly: (\S+)/.exec(text)
   if (exact) return exact[1]
   return `noted: ${text.split('\n')[0]}`

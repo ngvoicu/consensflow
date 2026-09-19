@@ -95,6 +95,11 @@ is written in the final vocabulary.
   `review`; task states gain `open` (no assignee yet) and `review`; message
   states gain `held` (a result waiting for its review). Edited in place: no
   build has shipped the schema.
+- **The layout** (Gabriel, 2026-09-19, on seeing the board): the board on the
+  left, and on the right, a third of the width, one live window docked: the
+  lead's, the PM's (a tab each), or a member's for a while when its bay's
+  Terminal button is pressed; the human reads the board and talks to the
+  coordinator at once. The three-way Board / Lead / PM view switcher went.
 - Out of scope: per-project tier overrides, reviewer tiers, cost accounting,
   Windows (Phase H of `board-daemon-core`).
 
@@ -114,15 +119,15 @@ is written in the final vocabulary.
 - [x] [TEST-TD-07] Every adapter's `observe()` reports quota from synthetic records shaped like the real ones above; an unknown harness record reports `null`. `tests/adapter-*.test.mjs`.
 - [x] [IMPL-TD-08] `hosts/lib/quota.js`, the shared reader `hosts/lib/completion.js` (each harness's records already pass through it), `src/adapters/*.js`; satisfies TEST-TD-07.
 
-### Phase C: Commands and roles [planned]
+### Phase C: Commands and roles [completed]
 
-- [ ] [TEST-TD-09] `cf task add --tier <t> [--tags a,b] [--purpose p] "…"`, `--self`, `@lead` and `@pm` between coordinators, `@worker` refused with the tier hint, `cf task review T-n`, a member's question to a member refused, `cf team` with tiers and tags. `tests/core-api.test.mjs`, `tests/core-cli.test.mjs`.
-- [ ] [IMPL-TD-10] `src/core/api.js`, `src/core/cli.js`, `skill/core/*.md` (choose the tier, not the worker; review is the project's rule; `cf task review` by hand); satisfies TEST-TD-09.
+- [x] [TEST-TD-09] `cf task add --tier <t> [--tags a,b] [--purpose p] "…"`, `--self`, `@lead` and `@pm` between coordinators, `@worker` refused with the tier hint, `cf task review T-n`, a member's question to a member refused, `cf team` with tiers and tags. `tests/core-api.test.mjs`, `tests/core-cli.test.mjs`.
+- [x] [IMPL-TD-10] `src/core/api.js`, `src/core/cli.js`, `skill/core/*.md` (choose the tier, not the worker; review is the project's rule; `cf task review` by hand); satisfies TEST-TD-09.
 
-### Phase D: Board [planned]
+### Phase D: Board [completed]
 
-- [ ] [TEST-TD-11] An "Open tasks" bay (waiting for a member, per tier, saying why); the human's composer chooses Lead, PM, a worker tier or an advisor tier, with tags; member bays lose "Give a task"; strips show tier, tags and review state ("In review by @x", "Round 2"); a lane out of quota says until when; the team dialog shows each member's tier and tags and the review policy, and warns when review is on with no independent reviewer or a tier has no member; the new-project dialog sets the policy. `app/tests/core-page.spec.mjs`, `tests/core-page.test.mjs`.
-- [ ] [IMPL-TD-12] `app/ui/core.html`, `app/ui/core/*.js`, `src/core/page.js`, the Rust allow-list; satisfies TEST-TD-11.
+- [x] [TEST-TD-11] An "Open tasks" bay (waiting for a member, per tier, saying why); the human's composer chooses Lead, PM, a worker tier or an advisor tier, with tags; member bays lose "Give a task"; strips show tier, tags and review state ("In review by @x", "Round 2"); a lane out of quota says until when; the team dialog shows each member's tier and tags and the review policy, and warns when review is on with no independent reviewer or a tier has no member; the new-project dialog sets the policy. `app/tests/core-page.spec.mjs`, `tests/core-page.test.mjs`.
+- [x] [IMPL-TD-12] `app/ui/core.html`, `app/ui/core/*.js`, `src/core/page.js`, the Rust allow-list; satisfies TEST-TD-11. Then the dock layout: the board beside one docked window (Gabriel's request).
 
 ### Phase E: Live proof [planned]
 
@@ -131,9 +136,11 @@ is written in the final vocabulary.
 
 ## Resume context
 
-Phases A and B are built and green (ledger 52, dispatcher 30, page 9, the
-reader 75, adapters 30, the end-to-end slice). Next: Phase C (commands and
-role texts), then Phase D (the board). The brain's CORE-8 ("coordinators pick the
+Phases A to D are built and green (ledger 52, dispatcher 30, page protocol
+10, the reader 75, adapters 30, API and cf 18, roles 8, the board page 21,
+the end-to-end slice through the real pane host). Next: Phase E, the live
+proof: the integration test for a 429 mid-task and a review round trip, then
+the live bench on the free models and Codex. The brain's CORE-8 ("coordinators pick the
 right member") is superseded by this spec's rules (CORE-10 to CORE-15).
 
 ## TDD log
@@ -172,3 +179,38 @@ right member") is superseded by this spec's rules (CORE-10 to CORE-15).
   no reader signal, so its adapter scans its own wire log for the refusal
   phrases other users report, reading only what was appended since the last
   look; unverified against a real Devin refusal. Adapters 30/30, reader 75/75.
+- TEST-TD-09 RED 3/3, GREEN after IMPL-TD-10 with two older tests moved from
+  `@zeus` to `--tier standard` (naming a member is what the API now refuses,
+  with the tier it would take) and one expectation of mine corrected again:
+  the purpose check comes before the member check. The role texts teach the
+  tier, not the member, the automatic review and `cf task review`; the
+  reviewer's text ends every review with its `VERDICT:` line, which is what
+  the gate reads; every member's text says questions go upward only. The team
+  table coordinators read shows the human's tags in place of the derived
+  category labels.
+- TEST-TD-11: nine page tests written against the stand-in app (21 in all),
+  RED, then GREEN 20/21 on the first implementation; the one failure was an
+  older selector (`As`) that a new label now shadows, made exact. The board
+  gained an "Open tasks" bay after the human's, its composer offering the
+  coordinators by name and then, per tier, the members the team actually has
+  ("A standard worker (zeus)"), with tags and, for critical work, the purpose;
+  member bays lost "Give a task"; strips say "for a standard worker · docs"
+  and "In review · round 2"; a review's strip says "review of T-8 for @lead";
+  a member out of quota shows until when, with a red lamp; the team dialog
+  shows tier and tags per member, sets the review policy and warns when it is
+  on with no reviewer; the new-project dialog sets the policy. A review task
+  now names the task it reviews by number, not id, on every view. The end-to-
+  end slice and the live bench dispatch by tier (the fake lead runs
+  `cf task add --tier …`; each bench agent is tagged with its own name so the
+  lead can still aim a task at it). Rust 107 + 16 with the two new
+  allow-list names.
+- The dock: Gabriel asked, on seeing the board, for the board on the left and
+  the lead or PM on the right, a third of the width, "so that you can talk to
+  them". Two window tests rewritten first (the dock holds one card, Lead and
+  PM tabs, a member's tab while its window is docked, the other windows kept
+  off stage with their emulators), then the terminals view lost its grid and
+  the controller its view switcher. 21/21; one older assertion expected a
+  windowless member's Terminal button to be absent, which only held while the
+  board was hidden behind the old windows view: it is disabled, and the test
+  says so now. Screenshots at 1440 px: the review label wrapped in the strip's
+  state column, widened.

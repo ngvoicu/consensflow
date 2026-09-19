@@ -59,7 +59,6 @@ export const HARNESSES = ['claude-code', 'codex', 'opencode', 'pi', 'devin', 'ki
 const MEMBER_ROLES = ['worker', 'advisor', 'reviewer']
 /** Who hands each kind of member its work, and hears when the team changes. */
 const COORDINATOR_OF = { worker: 'lead', reviewer: 'lead', advisor: 'pm' }
-const MEMBER_ROLE_NAMES = { worker: 'a worker', reviewer: 'a reviewer', advisor: 'an advisor' }
 const COORDINATOR_HANDLES = ['human', 'lead', 'pm']
 const COORDINATOR_ROLES = ['human', 'lead', 'pm']
 export const TIERS = ['critical', 'complex', 'standard', 'light']
@@ -251,10 +250,11 @@ const MESSAGE_SELECT = `
   LEFT JOIN task t ON t.id = m.task_id`
 
 const TASK_SELECT = `
-  SELECT t.*, q.handle AS requester, a.handle AS assignee
+  SELECT t.*, q.handle AS requester, a.handle AS assignee, o.number AS review_of_number
   FROM task t
   JOIN participant q ON q.id = t.requester_id
-  LEFT JOIN participant a ON a.id = t.assignee_id`
+  LEFT JOIN participant a ON a.id = t.assignee_id
+  LEFT JOIN task o ON o.id = t.review_of`
 
 const participantView = (row) => ({
   id: row.id,
@@ -296,7 +296,7 @@ const taskView = (row) => ({
   tags: JSON.parse(row.tags),
   purpose: row.purpose,
   kind: row.kind,
-  reviewOf: row.review_of,
+  reviewOf: row.review_of_number ?? null,
   round: row.round,
   verdict: row.verdict,
   createdAt: row.created_at,

@@ -14,7 +14,10 @@ import { LedgerError } from '../ledger/index.js'
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024
 const COORDINATORS = new Set(['lead', 'pm', 'human'])
-const TASK_ROUTE = /^\/api\/tasks\/(\d+)(?:\/(done|accept|reopen|cancel))?$/
+const MEMBERS = new Set(['worker', 'advisor', 'reviewer'])
+/** Whose pool a coordinator's tiered task draws from. */
+const POOL_OF = { lead: 'worker', pm: 'advisor', human: 'worker' }
+const TASK_ROUTE = /^\/api\/tasks\/(\d+)(?:\/(done|accept|reopen|cancel|review))?$/
 const MESSAGE_ROUTE = /^\/api\/inbox\/(\d+)$/
 
 const digest = (token) => createHash('sha256').update(token).digest('hex')
@@ -87,6 +90,8 @@ export async function startApi({ ledger, credentials, changed = () => {}, roster
             return {
               handle: member.handle,
               role: member.role,
+              tier: member.tier,
+              tags: member.tags,
               harness: member.harness,
               model: row?.model ?? null,
               effort: row?.effort ?? null,
@@ -95,8 +100,10 @@ export async function startApi({ ledger, credentials, changed = () => {}, roster
       })
     }
     if (at === 'GET /api/tasks') {
+      const board = ledger.board(project.id)
       return ok({
-        lanes: ledger.board(project.id).lanes.map(({ participant: owner, tasks }) => ({
+        open: board.open.map(summary),
+        lanes: board.lanes.map(({ participant: owner, tasks }) => ({
           handle: owner.handle,
           role: owner.role,
           tasks: tasks.map(summary),
@@ -112,14 +119,33 @@ export async function startApi({ ledger, credentials, changed = () => {}, roster
         )
       }
       const body = await readJson(request)
+      const to = body.self === true ? participant.handle : body.to
+      const target = to === undefined ? undefined : memberByHandle(project, to)
+      if (target !== undefined && MEMBERS.has(target.role)) {
+        throw new Refusal(
+          403,
+          'name-a-tier',
+          `@${to} is a ${target.role}: name a tier, not a member (cf task add --tier ${target.tier} "…")`,
+        )
+      }
       const created = ledger.createTask(project.id, {
         from: participant.handle,
-        to: body.to,
+        ...(to === undefined
+          ? {
+              pool: body.pool ?? POOL_OF[participant.role],
+              tier: body.tier,
+              tags: body.tags ?? [],
+              purpose: body.purpose,
+            }
+          : { to }),
         body: body.body,
         title: body.title,
       })
       changed()
-      return { status: 201, body: { task: summary(created.task), message: created.message.id } }
+      return {
+        status: 201,
+        body: { task: summary(created.task), message: created.message?.id ?? null },
+      }
     }
     const task = TASK_ROUTE.exec(url.pathname)
     if (task !== null) return taskRoute(request, caller, Number(task[1]), task[2])
@@ -142,6 +168,13 @@ export async function startApi({ ledger, credentials, changed = () => {}, roster
       const body = await readJson(request)
       const active = ledger.activeTask(participant.id)
       const to = body.to ?? active?.requester ?? (participant.role === 'lead' ? 'human' : 'lead')
+      if (MEMBERS.has(memberByHandle(project, to)?.role)) {
+        throw new Refusal(
+          403,
+          'not-addressable',
+          `questions go to your coordinator or the human, not to @${to}`,
+        )
+      }
       const asked = ledger.ask(project.id, {
         from: participant.handle,
         to,
@@ -176,6 +209,11 @@ export async function startApi({ ledger, credentials, changed = () => {}, roster
       changed()
       return ok({ task: summary(done.task) })
     }
+    if (action === 'review') {
+      const reviewed = ledger.requestReview(project.id, number, { by: participant.handle })
+      changed()
+      return ok({ task: summary(reviewed) })
+    }
     if (!COORDINATORS.has(participant.role) && task.requester !== participant.handle) {
       throw new Refusal(
         403,
@@ -192,6 +230,10 @@ export async function startApi({ ledger, credentials, changed = () => {}, roster
           : ledger.reopenTask(project.id, number, { by, body: body.body }).task
     changed()
     return ok({ task: summary(moved) })
+  }
+
+  function memberByHandle(project, handle) {
+    return ledger.project(project.id)?.participants.find((p) => p.handle === handle)
   }
 
   function callerOf(request) {
@@ -237,8 +279,12 @@ function summary(task) {
     number: task.number,
     title: task.title,
     state: task.state,
+    kind: task.kind,
     requester: task.requester,
     assignee: task.assignee,
+    pool: task.pool,
+    tier: task.tier,
+    tags: task.tags,
     updatedAt: task.updatedAt,
   }
 }

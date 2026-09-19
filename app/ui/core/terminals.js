@@ -1,15 +1,14 @@
 import { EmulatorRegistry, paneKey } from '../term.js'
 import { TerminalLink } from '../terminal-link.js'
-import { gridTemplate } from '../vendor/layout.js'
-import { element, laneOrder, teamOf } from './board.js'
+import { element } from './board.js'
 
 /**
  * The live windows behind the board: one terminal per participant that has a
- * pane, shown one team at a time (the lead's or the PM's), its coordinator
- * first. A terminal outlives the view: while the board or the other team is
- * shown, its card waits in an off-screen parking lot so the emulator keeps
- * receiving output and keeps its scrollback, its size and the human's
- * half-typed input.
+ * pane, and one of them docked beside the board at a time (the lead's, the
+ * PM's, or a member's for a while). A terminal outlives the dock: while
+ * another window is docked, its card waits in an off-screen parking lot so
+ * the emulator keeps receiving output and keeps its scrollback, its size and
+ * the human's half-typed input.
  */
 export class TerminalsView {
   #stage
@@ -35,11 +34,8 @@ export class TerminalsView {
     this.#link.output(message, (pane) => this.#emulator(pane, null))
   }
 
-  /**
-   * Keep a window for every lane that has one; `team` ('lead' or 'pm') puts
-   * that team's on stage, and null shows none. `focus` names one.
-   */
-  render(lanes, { team = null, focus = null }) {
+  /** Keep a window for every lane that has one, and dock the one whose handle is `docked`. */
+  render(lanes, { docked }) {
     const live = lanes.filter((lane) => lane.pane !== null)
     const keys = new Set(live.map((lane) => paneKey(lane.pane)))
     for (const key of [...this.#cards.keys()]) {
@@ -49,39 +45,28 @@ export class TerminalsView {
       this.#link.retire(key)
     }
     const cards = new Map(live.map((lane) => [lane, this.#card(lane.pane, lane)]))
-    const shown = laneOrder(live).filter((lane) => teamOf(lane.participant) === team)
-    for (const [lane, card] of cards) if (!shown.includes(lane)) this.#parking.append(card)
-    if (shown.length === 0) {
+    const shown = live.find((lane) => lane.participant.handle === docked) ?? null
+    for (const [lane, card] of cards) if (lane !== shown) this.#parking.append(card)
+    if (shown === null) {
+      const wanted = lanes.find((lane) => lane.participant.handle === docked)
       this.#stage.replaceChildren(
-        ...(team === null
-          ? []
-          : [
-              element(
-                'p',
-                'stage-empty',
-                `No windows are open on ${team === 'pm' ? "the PM's" : "the lead's"} team yet.`,
-              ),
-            ]),
+        element(
+          'p',
+          'stage-empty',
+          wanted === undefined
+            ? 'No window is open yet.'
+            : `${laneName(wanted.participant)} has no window open.`,
+        ),
       )
       return
     }
-    for (const [index, lane] of shown.entries()) {
-      const card = cards.get(lane)
-      card.style.gridArea = index === 0 ? 'lead' : `w${index}`
-      card.dataset.focused = String(lane.participant.handle === focus)
-    }
-    const layout = gridTemplate(shown.length)
-    this.#stage.style.gridTemplateAreas = layout.areas
-    this.#stage.style.gridTemplateColumns = `repeat(${layout.cols}, minmax(0, 1fr))`
-    this.#stage.style.gridTemplateRows = `repeat(${layout.rows}, minmax(0, 1fr))`
-    this.#stage.replaceChildren(...shown.map((lane) => cards.get(lane)))
-    for (const lane of shown) this.#registry.fit(lane.pane.id, lane.pane.generation)
-    const focused = shown.find((lane) => lane.participant.handle === focus)
-    if (focused) {
-      requestAnimationFrame(() =>
-        this.#registry.get(focused.pane.id, focused.pane.generation)?.terminal?.focus(),
-      )
-    }
+    const card = cards.get(shown)
+    card.dataset.focused = 'true'
+    this.#stage.replaceChildren(card)
+    this.#registry.fit(shown.pane.id, shown.pane.generation)
+    requestAnimationFrame(() =>
+      this.#registry.get(shown.pane.id, shown.pane.generation)?.terminal?.focus(),
+    )
   }
 
   #card(pane, lane) {
@@ -98,8 +83,7 @@ export class TerminalsView {
       this.#registry.ensure(pane, host)
     }
     if (lane !== null) {
-      const name =
-        { lead: 'Lead', pm: 'PM' }[lane.participant.handle] ?? `@${lane.participant.handle}`
+      const name = laneName(lane.participant)
       const lamp = element('span', 'lamp')
       lamp.dataset.state = lane.activity?.state ?? 'closed'
       lamp.setAttribute('aria-hidden', 'true')
@@ -119,3 +103,6 @@ export class TerminalsView {
     return this.#registry.get(pane.id, pane.generation)
   }
 }
+
+const laneName = (participant) =>
+  ({ lead: 'Lead', pm: 'PM' })[participant.handle] ?? `@${participant.handle}`

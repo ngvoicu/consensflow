@@ -50,16 +50,20 @@ test.afterAll(async () => {
 })
 
 const at = (minutesAgo) => new Date(Date.now() - minutesAgo * 60_000).toISOString()
+const MEMBER = ['worker', 'advisor', 'reviewer']
 const participant = (id, handle, role, extra = {}) => ({
   id,
   projectId: 1,
   handle,
   role,
-  agent: role === 'human' || role === 'lead' || role === 'pm' ? null : handle,
+  agent: MEMBER.includes(role) ? handle : null,
   harness: role === 'human' ? null : 'claude-code',
+  tier: MEMBER.includes(role) ? 'standard' : null,
+  tags: [],
+  outUntil: null,
   ...extra,
 })
-const task = (number, title, state, requester, assignee, minutesAgo = 3) => ({
+const task = (number, title, state, requester, assignee, minutesAgo = 3, extra = {}) => ({
   id: number,
   projectId: 1,
   number,
@@ -68,8 +72,17 @@ const task = (number, title, state, requester, assignee, minutesAgo = 3) => ({
   state,
   requester,
   assignee,
+  pool: null,
+  tier: null,
+  tags: [],
+  purpose: null,
+  kind: 'work',
+  reviewOf: null,
+  round: 0,
+  verdict: null,
   createdAt: at(minutesAgo + 1),
   updatedAt: at(minutesAgo),
+  ...extra,
 })
 
 function model() {
@@ -91,7 +104,20 @@ function model() {
     ],
     boards: {
       1: {
-        project: { id: 1, name: 'harbour', directory: '/work/harbour', state: 'open' },
+        project: {
+          id: 1,
+          name: 'harbour',
+          directory: '/work/harbour',
+          state: 'open',
+          review: 'members',
+        },
+        open: [
+          task(6, 'Write the docs', 'open', 'lead', null, 1, {
+            pool: 'worker',
+            tier: 'standard',
+            tags: ['docs'],
+          }),
+        ],
         lanes: [
           {
             participant: participant(1, 'human', 'human'),
@@ -106,7 +132,7 @@ function model() {
             pane: { id: 'p1-lead', generation: 5 },
           },
           {
-            participant: participant(3, 'zeus', 'worker'),
+            participant: participant(3, 'zeus', 'worker', { tags: ['coding', 'rust'] }),
             tasks: [
               task(2, 'Write the parser', 'done', 'lead', 'zeus', 2),
               task(4, 'Add the tests', 'queued', 'lead', 'zeus', 1),
@@ -116,7 +142,11 @@ function model() {
             pane: { id: 'p1-zeus', generation: 7 },
           },
           {
-            participant: participant(4, 'diana', 'worker', { harness: 'codex' }),
+            participant: participant(4, 'diana', 'worker', {
+              harness: 'codex',
+              tier: 'light',
+              outUntil: at(-90),
+            }),
             tasks: [
               task(
                 3,
@@ -133,7 +163,14 @@ function model() {
         ],
       },
       2: {
-        project: { id: 2, name: 'foundry', directory: '/work/foundry', state: 'suspended' },
+        project: {
+          id: 2,
+          name: 'foundry',
+          directory: '/work/foundry',
+          state: 'suspended',
+          review: 'none',
+        },
+        open: [],
         lanes: [
           {
             participant: participant(9, 'human', 'human'),
@@ -211,7 +248,10 @@ async function open(page, data = model()) {
       'board.get': ({ project }) => answer({ board: data.boards[project] }),
       'inbox.get': ({ project }) => answer({ messages: data.inbox[project] ?? [] }),
       'task.get': ({ project, task }) => answer({ task: data.tasks[`${project}:${task}`] }),
-      'task.add': ({ to, body }) => answer({ task: { number: 9, assignee: to, body } }),
+      'task.add': ({ to, tier, pool, body }) =>
+        answer({
+          task: { number: 9, assignee: to ?? null, tier: tier ?? null, pool: pool ?? null, body },
+        }),
       'project.open': ({ directory }) => answer({ project: { id: 3, name: 'new', directory } }),
     }
     const invoke = async (command, args = {}) => {
@@ -318,26 +358,130 @@ test("answers a question in the human's bay and routes it back", async ({ page }
   await expect(page.locator('#status')).toHaveText('Answer sent to @lead.')
 })
 
-test('queues a task for a worker from its bay', async ({ page }) => {
+test('shows the tasks waiting for a member in their own bay, with the tier each waits for', async ({
+  page,
+}) => {
   await open(page)
-  const zeus = page.locator('.bay[data-handle="zeus"]')
-  await zeus.getByRole('button', { name: 'Give @zeus a task' }).click()
-  await zeus.getByLabel('Task for @zeus').fill('Profile the parser on the large fixture.')
-  await zeus.getByRole('button', { name: 'Queue task' }).click()
-  await expect
-    .poll(() => calls(page, 'task.add'))
-    .toEqual([{ project: 1, to: 'zeus', body: 'Profile the parser on the large fixture.' }])
-  await expect(page.locator('#status')).toHaveText('T-9 queued for @zeus.')
+  const backlog = page.getByRole('region', { name: 'Open tasks' })
+  await expect(backlog.locator('.bay-status')).toHaveText('1 waiting for a member')
+  const strip = backlog.locator('button.strip[data-task="6"]')
+  await expect(strip.locator('.strip-route')).toHaveText('for a standard worker · docs')
+  await expect(strip.locator('.strip-state')).toHaveText('Open')
+  await expect(page.locator('.bay[data-handle="zeus"] .bay-meta')).toHaveText(
+    'worker · standard · coding, rust · claude-code · claude-sonnet-5',
+  )
 })
 
-test('keeps a half-written task when the board redraws', async ({ page }) => {
+test('gives a task to a tier of member, never to a member by name', async ({ page }) => {
   await open(page)
-  const zeus = page.locator('.bay[data-handle="zeus"]')
-  await zeus.getByRole('button', { name: 'Give @zeus a task' }).click()
-  await zeus.getByLabel('Task for @zeus').fill('Half a thought')
+  await expect(page.getByRole('button', { name: 'Give @zeus a task' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Give Lead a task' })).toHaveCount(1)
+  const backlog = page.getByRole('region', { name: 'Open tasks' })
+  await backlog.getByRole('button', { name: 'New task' }).click()
+  const composer = backlog.locator('form.composer')
+  await composer.getByLabel('For').selectOption('worker:light')
+  await composer.getByLabel('Tags').fill('docs, review')
+  await expect(composer.getByLabel('Purpose')).toBeHidden()
+  await composer.getByLabel('Task').fill('Profile the parser on the large fixture.')
+  await composer.getByRole('button', { name: 'Put on the board' }).click()
+  await expect
+    .poll(() => calls(page, 'task.add'))
+    .toEqual([
+      {
+        project: 1,
+        pool: 'worker',
+        tier: 'light',
+        tags: ['docs', 'review'],
+        body: 'Profile the parser on the large fixture.',
+      },
+    ])
+  await expect(page.locator('#status')).toHaveText('T-9 is on the board for a light worker.')
+})
+
+test('asks for the purpose of critical work, and offers only the tiers the team has', async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].lanes.push({
+    participant: participant(8, 'calliope', 'worker', { tier: 'critical' }),
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  const backlog = page.getByRole('region', { name: 'Open tasks' })
+  await backlog.getByRole('button', { name: 'New task' }).click()
+  const composer = backlog.locator('form.composer')
+  await expect(composer.getByLabel('For').locator('option')).toHaveText([
+    'Lead',
+    'A critical worker (calliope)',
+    'A standard worker (zeus)',
+    'A light worker (diana)',
+  ])
+  await composer.getByLabel('For').selectOption('worker:critical')
+  await composer.getByLabel('Purpose').selectOption('architecture')
+  await composer.getByLabel('Task').fill('Why does the parser leak memory?')
+  await composer.getByRole('button', { name: 'Put on the board' }).click()
+  await expect
+    .poll(() => calls(page, 'task.add'))
+    .toEqual([
+      {
+        project: 1,
+        pool: 'worker',
+        tier: 'critical',
+        tags: [],
+        purpose: 'architecture',
+        body: 'Why does the parser leak memory?',
+      },
+    ])
+})
+
+test('gives a coordinator a task by name from its bay, and keeps a half-written one when the board redraws', async ({
+  page,
+}) => {
+  await open(page)
+  const lead = page.locator('.bay[data-handle="lead"]')
+  await lead.getByRole('button', { name: 'Give Lead a task' }).click()
+  await lead.getByLabel('Task for Lead').fill('Half a thought')
   await page.evaluate(() => window.__listeners.get('state-changed')())
   await expect.poll(async () => (await calls(page, 'board.get')).length).toBeGreaterThan(1)
-  await expect(zeus.getByLabel('Task for @zeus')).toHaveValue('Half a thought')
+  await expect(lead.getByLabel('Task for Lead')).toHaveValue('Half a thought')
+  await lead.getByRole('button', { name: 'Queue task' }).click()
+  await expect
+    .poll(() => calls(page, 'task.add'))
+    .toEqual([{ project: 1, to: 'lead', body: 'Half a thought' }])
+  await expect(page.locator('#status')).toHaveText('T-9 queued for the lead.')
+})
+
+test('shows a member out of quota, and work in review with its round', async ({ page }) => {
+  const data = model()
+  data.boards[1].lanes[2].tasks.push(
+    task(8, 'Add the lexer', 'review', 'lead', 'zeus', 1, { round: 1 }),
+  )
+  data.boards[1].lanes.push({
+    participant: participant(7, 'hera', 'reviewer', { harness: 'pi' }),
+    tasks: [task(9, 'Review T-8', 'working', 'lead', 'hera', 1, { kind: 'review', reviewOf: 8 })],
+    activity: { state: 'working' },
+    pane: { id: 'p1-hera', generation: 2 },
+  })
+  await open(page, data)
+  const diana = page.locator('.bay[data-handle="diana"]')
+  await expect(diana.getByTestId('lamp')).toHaveAttribute('data-state', 'out')
+  await expect(diana.locator('.bay-status')).toHaveText(/^Out of quota until \d\d:\d\d$/)
+  const lexer = page.locator('.bay[data-handle="zeus"] button.strip[data-task="8"]')
+  await expect(lexer.locator('.strip-state')).toHaveText('In review · round 2')
+  await expect(page.locator('.bay[data-handle="hera"] .strip-title')).toHaveText('Review T-8')
+  await expect(page.locator('.bay[data-handle="hera"] .strip-route')).toHaveText(
+    'review of T-8 for @lead',
+  )
+})
+
+test('asks for a review of finished work from the drawer', async ({ page }) => {
+  await open(page)
+  await page.locator('.bay[data-handle="zeus"] button.strip[data-task="2"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-2' })
+  await drawer.getByRole('button', { name: 'Ask for a review' }).click()
+  await expect.poll(() => calls(page, 'task.review')).toEqual([{ project: 1, task: 2 }])
 })
 
 test("opens a strip's thread and accepts the result", async ({ page }) => {
@@ -369,11 +513,14 @@ test('adds a saved agent to the project team', async ({ page }) => {
   const dialog = page.getByRole('dialog', { name: 'Project team' })
   await expect(
     dialog.getByRole('list', { name: 'On the team' }).locator('.member-line'),
-  ).toHaveText(['@zeus · worker · claude-code', '@diana · worker · codex'])
+  ).toHaveText([
+    '@zeus · worker · standard · coding, rust · claude-code',
+    '@diana · worker · light · codex',
+  ])
   await expect(dialog.getByLabel('Add an agent').locator('option')).toHaveText([
     'athena · opencode · muse-spark',
   ])
-  await dialog.getByLabel('As').selectOption('advisor')
+  await dialog.locator('select[name="role"]').selectOption('advisor')
   await dialog.getByRole('button', { name: 'Add to team' }).click()
   await expect
     .poll(() => calls(page, 'member.add'))
@@ -416,6 +563,20 @@ test('keeps a pending removal and the chosen agent when the core redraws the tea
   await expect(dialog.getByLabel('Add an agent')).toHaveValue('hera')
 })
 
+test('sets the review policy from the team dialog, and warns when nobody can review', async ({
+  page,
+}) => {
+  await open(page)
+  await page.getByRole('button', { name: 'Team' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project team' })
+  await expect(dialog.getByLabel('Second review of')).toHaveValue('members')
+  await expect(dialog.locator('.team-warning')).toHaveText(
+    'Review is on, but no reviewer is on the team: finished work goes on unreviewed.',
+  )
+  await dialog.getByLabel('Second review of').selectOption('all')
+  await expect.poll(() => calls(page, 'project.review')).toEqual([{ project: 1, review: 'all' }])
+})
+
 test('adds a PM on the harness the human picks', async ({ page }) => {
   await open(page)
   await expect(page.getByRole('button', { name: 'PM', exact: true })).toBeHidden()
@@ -456,21 +617,32 @@ test("groups the PM's team after the lead's, on the board and in its own windows
     await page.locator('.bay').evaluateAll((bays) => bays.map((bay) => bay.dataset.handle)),
   ).toEqual(['human', 'lead', 'zeus', 'diana', 'pm', 'athena'])
 
-  const stage = page.getByRole('region', { name: 'Terminals' })
-  const staged = () =>
-    stage.locator('.terminal-card').evaluateAll((cards) => cards.map((c) => c.dataset.handle))
-  await page.getByRole('button', { name: 'PM', exact: true }).click()
-  await expect.poll(staged).toEqual(['pm', 'athena'])
-  await page.getByRole('button', { name: 'Lead', exact: true }).click()
-  await expect.poll(staged).toEqual(['lead', 'zeus'])
-  await page.getByRole('button', { name: 'Board', exact: true }).click()
+  // The dock on the right holds one window beside the board: the lead's, the
+  // PM's, or a member's for a while; every other window waits off stage.
+  const dock = page.getByRole('complementary', { name: 'Terminal dock' })
+  const tabs = dock.getByRole('group', { name: 'Docked window' })
+  const docked = () =>
+    dock.locator('.terminal-card').evaluateAll((cards) => cards.map((c) => c.dataset.handle))
+  await expect.poll(docked).toEqual(['lead'])
+  await expect(tabs.getByRole('button')).toHaveText(['Lead', 'PM'])
+  await tabs.getByRole('button', { name: 'PM', exact: true }).click()
+  await expect.poll(docked).toEqual(['pm'])
+  await expect(tabs.getByRole('button', { name: 'PM', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
   await page.getByRole('button', { name: "Open @athena's terminal" }).click()
-  await expect.poll(staged).toEqual(['pm', 'athena'])
-  await expect(stage.locator('.terminal-card[data-focused="true"]')).toHaveAttribute(
+  await expect.poll(docked).toEqual(['athena'])
+  await expect(tabs.getByRole('button')).toHaveText(['Lead', 'PM', '@athena'])
+  await expect(dock.locator('.terminal-card[data-focused="true"]')).toHaveAttribute(
     'data-handle',
     'athena',
   )
+  await tabs.getByRole('button', { name: 'Lead', exact: true }).click()
+  await expect.poll(docked).toEqual(['lead'])
+  await expect(tabs.getByRole('button')).toHaveText(['Lead', 'PM'])
   expect(await page.evaluate(() => window.__emulators.length)).toBe(4)
+  expect(await page.locator('.bay').count()).toBe(6, 'the board stays beside the dock')
 })
 
 test('resumes a suspended project from the list', async ({ page }) => {
@@ -485,24 +657,28 @@ test('starts a project in a chosen folder with the chosen lead', async ({ page }
   const dialog = page.getByRole('dialog', { name: 'New project' })
   await expect(dialog.getByLabel('Project folder')).toHaveValue('/work/fresh')
   await dialog.getByLabel('The lead runs in').selectOption('opencode')
+  await dialog.getByLabel('Second review of').selectOption('none')
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
     .poll(() => calls(page, 'project.open'))
-    .toEqual([{ directory: '/work/fresh', harness: 'opencode' }])
+    .toEqual([{ directory: '/work/fresh', harness: 'opencode', review: 'none' }])
 })
 
 test('shows the live windows, focused on the one asked for, and feeds them their output', async ({
   page,
 }) => {
   await open(page)
+  const dock = page.getByRole('complementary', { name: 'Terminal dock' })
+  await expect(dock.getByRole('group', { name: 'Docked window' }).getByRole('button')).toHaveText([
+    'Lead',
+  ])
   await page.getByRole('button', { name: "Open @zeus's terminal" }).click()
-  const stage = page.getByRole('region', { name: 'Terminals' })
-  await expect(stage.locator('.terminal-card')).toHaveCount(2)
-  await expect(stage.locator('.terminal-card[data-focused="true"]')).toHaveAttribute(
+  await expect(dock.locator('.terminal-card')).toHaveCount(1)
+  await expect(dock.locator('.terminal-card[data-focused="true"]')).toHaveAttribute(
     'data-handle',
     'zeus',
   )
-  await expect(page.getByRole('button', { name: "Open @diana's terminal" })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: "Open @diana's terminal" })).toBeDisabled()
   await page.evaluate(() =>
     window.__output.onmessage({ id: 'p1-zeus', generation: 7, seq: 1, bytes: [104, 105] }),
   )

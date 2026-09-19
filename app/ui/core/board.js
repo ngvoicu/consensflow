@@ -9,13 +9,24 @@
  * the callbacks; the controller calls the core and redraws.
  */
 
-const ACTIVE = ['working', 'waiting', 'queued']
+const ACTIVE = ['working', 'waiting', 'queued', 'review', 'open']
 const OPEN = [...ACTIVE, 'done', 'failed']
-const STATE_ORDER = ['waiting', 'working', 'queued', 'done', 'failed', 'accepted', 'cancelled']
+const STATE_ORDER = [
+  'review',
+  'waiting',
+  'working',
+  'queued',
+  'done',
+  'failed',
+  'accepted',
+  'cancelled',
+]
 const STATE_LABEL = {
+  open: 'Open',
   queued: 'Queued',
   working: 'Working',
   waiting: 'Waiting',
+  review: 'In review',
   done: 'Done',
   accepted: 'Accepted',
   failed: 'Failed',
@@ -28,7 +39,12 @@ const ACTIVITY_LABEL = {
   starting: 'Starting',
   closed: 'No window',
   unknown: 'Unknown',
+  out: 'Out of quota',
 }
+/** The work tiers, in the order the composer offers them. */
+const TIERS = ['critical', 'complex', 'standard', 'light']
+const POOLS = ['worker', 'advisor']
+const PURPOSES = ['critical-review', 'architecture', 'hard-problem', 'important-question']
 const KIND_LABEL = {
   task: 'Task',
   result: 'Result',
@@ -83,8 +99,25 @@ export function laneOrder(lanes) {
 }
 
 const who = (handle) => (handle === null || handle === undefined ? 'ConsensFlow' : `@${handle}`)
+/** "18:30": when a member out of quota is back. */
+const clock = (iso) =>
+  new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+const outOfQuota = (participant, now) =>
+  participant.outUntil !== null && Date.parse(participant.outUntil) > now
 const laneName = (participant) =>
   ({ human: 'You', lead: 'Lead', pm: 'PM' })[participant.handle] ?? `@${participant.handle}`
+
+/** Where a task is going or came from, on its strip. */
+function route(task) {
+  if (task.kind === 'review') return `review of T-${task.reviewOf} for ${who(task.requester)}`
+  if (task.assignee === null) {
+    return `for a ${task.tier} ${task.pool}${task.tags.length === 0 ? '' : ` · ${task.tags.join(', ')}`}`
+  }
+  return `from ${who(task.requester)}`
+}
+
+const stateLabel = (task) =>
+  task.state === 'review' ? `In review · round ${task.round + 1}` : STATE_LABEL[task.state]
 
 function lamp(activity) {
   const node = element('span', 'lamp')
@@ -98,6 +131,7 @@ export class BoardView {
   #root
   #actions
   #composing = null
+  #composingOpen = false
   #drafts = new Map()
 
   constructor(root, actions) {
@@ -126,6 +160,7 @@ export class BoardView {
           ? this.#humanBay(lane, inbox, now)
           : this.#agentBay(lane, models.get(lane.participant.agent), now),
       )
+      if (lane.participant.role === 'human') nodes.push(this.#backlogBay(board, now))
     }
     this.#root.replaceChildren(...nodes)
     this.#restoreDrafts()
@@ -218,21 +253,27 @@ export class BoardView {
     bay.dataset.handle = participant.handle
     bay.dataset.role = participant.role
     const head = element('header', 'bay-head')
+    const coordinator = participant.role === 'lead' || participant.role === 'pm'
     const identity = [
-      participant.role === 'lead' || participant.role === 'pm' ? null : participant.role,
+      coordinator ? null : participant.role,
+      participant.tier,
+      participant.tags.join(', ') || null,
       participant.harness,
       agent?.model,
     ]
       .filter(Boolean)
       .join(' · ')
+    const out = outOfQuota(participant, now)
     const status = element(
       'span',
       'bay-status',
-      activity?.state === 'waiting' && activity.reason
-        ? `Waiting: ${activity.reason}`
-        : (ACTIVITY_LABEL[activity?.state] ?? 'No window'),
+      out
+        ? `Out of quota until ${clock(participant.outUntil)}`
+        : activity?.state === 'waiting' && activity.reason
+          ? `Waiting: ${activity.reason}`
+          : (ACTIVITY_LABEL[activity?.state] ?? 'No window'),
     )
-    status.dataset.state = activity?.state ?? 'closed'
+    status.dataset.state = out ? 'out' : (activity?.state ?? 'closed')
     const tools = element('div', 'bay-tools')
     tools.append(
       button(
@@ -241,16 +282,21 @@ export class BoardView {
         () => this.#actions.onOpenTerminal(participant),
         `Open ${laneName(participant)}'s terminal`,
       ),
-      button(
-        'Give a task',
-        'quiet-button',
-        () => this.#compose(participant.handle),
-        `Give ${laneName(participant)} a task`,
-      ),
     )
     if (pane === null) tools.firstChild.disabled = true
+    // Only a coordinator takes a task by name; members get theirs from the board by tier.
+    if (coordinator) {
+      tools.append(
+        button(
+          'Give a task',
+          'quiet-button',
+          () => this.#compose(participant.handle),
+          `Give ${laneName(participant)} a task`,
+        ),
+      )
+    }
     head.append(
-      lamp(activity),
+      lamp(out ? { state: 'out' } : activity),
       element('h2', 'bay-name', laneName(participant)),
       element('span', 'bay-meta', identity),
       status,
@@ -286,12 +332,151 @@ export class BoardView {
     strip.append(
       element('span', 'strip-number', `T-${task.number}`),
       element('span', 'strip-title', task.title),
-      element('span', 'strip-route', `from ${who(task.requester)}`),
-      element('span', 'strip-state', STATE_LABEL[task.state]),
+      element('span', 'strip-route', route(task)),
+      element('span', 'strip-state', stateLabel(task)),
       element('span', 'strip-age', age(task.updatedAt, now)),
     )
     item.append(strip)
     return item
+  }
+
+  /** The tasks waiting for a member of their tier, and where the human puts a new one. */
+  #backlogBay(board, now) {
+    const bay = element('section', 'backlog')
+    bay.setAttribute('role', 'region')
+    bay.setAttribute('aria-label', 'Open tasks')
+    const head = element('header', 'bay-head')
+    const waiting = board.open.length
+    head.append(
+      element('h2', 'bay-name', 'Open tasks'),
+      element('span', 'bay-meta', 'Waiting for a member of their tier'),
+      element(
+        'span',
+        'bay-status',
+        waiting === 0 ? 'Nothing waiting' : `${waiting} waiting for a member`,
+      ),
+      button('New task', 'quiet-button', () => {
+        this.#composingOpen = !this.#composingOpen
+        this.#actions.onRedraw()
+      }),
+    )
+    bay.append(head)
+    if (this.#composingOpen) bay.append(this.#openComposer(board))
+    const strips = element('ol', 'strips')
+    strips.setAttribute('aria-label', 'Tasks waiting for a member')
+    for (const task of board.open) strips.append(this.#taskStrip(task, now))
+    if (waiting === 0) {
+      strips.append(
+        element(
+          'li',
+          'bay-empty',
+          'A task for a tier waits here until a member of that tier is free.',
+        ),
+      )
+    }
+    bay.append(strips)
+    return bay
+  }
+
+  /**
+   * A new task: for a coordinator by name, or for a tier of member on the
+   * team; tags prefer a member, and critical work names its purpose.
+   */
+  #openComposer(board) {
+    const form = element('form', 'composer')
+    const fields = element('div', 'composer-fields')
+    const address = element('select')
+    address.name = 'address'
+    address.setAttribute('aria-label', 'For')
+    for (const lane of board.lanes) {
+      if (lane.participant.role !== 'lead' && lane.participant.role !== 'pm') continue
+      const option = element('option', null, laneName(lane.participant))
+      option.value = lane.participant.handle
+      address.append(option)
+    }
+    for (const tier of TIERS) {
+      for (const pool of POOLS) {
+        const names = board.lanes
+          .filter((lane) => lane.participant.role === pool && lane.participant.tier === tier)
+          .map((lane) => lane.participant.handle)
+        if (names.length === 0) continue
+        const option = element('option', null, `A ${tier} ${pool} (${names.join(', ')})`)
+        option.value = `${pool}:${tier}`
+        address.append(option)
+      }
+    }
+    const tags = element('input')
+    tags.name = 'tags'
+    tags.type = 'text'
+    tags.placeholder = 'coding, rust'
+    tags.setAttribute('aria-label', 'Tags')
+    const purpose = element('select')
+    purpose.name = 'purpose'
+    purpose.setAttribute('aria-label', 'Purpose')
+    for (const value of PURPOSES) {
+      const option = element('option', null, value)
+      option.value = value
+      purpose.append(option)
+    }
+    const labelled = (text, control) => {
+      const label = element('label', null, text)
+      label.append(control)
+      return label
+    }
+    const purposeLabel = labelled('Purpose', purpose)
+    const tagsLabel = labelled('Tags', tags)
+    const tiered = () => address.value.includes(':')
+    const arrange = () => {
+      tagsLabel.hidden = !tiered()
+      purposeLabel.hidden = !tiered() || !address.value.endsWith(':critical')
+    }
+    address.addEventListener('change', arrange)
+    arrange()
+    fields.append(labelled('For', address), tagsLabel, purposeLabel)
+    const field = element('textarea')
+    field.name = 'task'
+    field.rows = 3
+    field.required = true
+    field.setAttribute('aria-label', 'Task')
+    field.placeholder = 'What should be done? Include the context it needs and what to return.'
+    field.dataset.draft = 'open'
+    const submit = element('button', 'primary-button', 'Put on the board')
+    submit.type = 'submit'
+    const actions = element('div', 'composer-actions')
+    actions.append(
+      button('Cancel', 'quiet-button', () => {
+        this.#composingOpen = false
+        this.#actions.onRedraw()
+      }),
+      submit,
+    )
+    form.append(fields, field, actions)
+    form.addEventListener('submit', (event) => {
+      event.preventDefault()
+      const text = field.value.trim()
+      if (!text) return
+      this.#drafts.delete('open')
+      this.#composingOpen = false
+      if (!tiered()) {
+        this.#actions.onGiveTask({ handle: address.value }, text)
+        return
+      }
+      const [pool, tier] = address.value.split(':')
+      this.#actions.onPutTask(
+        {
+          pool,
+          tier,
+          tags: tags.value
+            .split(',')
+            .map((tag) => tag.trim())
+            .filter(Boolean),
+          ...(tier === 'critical' ? { purpose: purpose.value } : {}),
+        },
+        text,
+      )
+    })
+    requestAnimationFrame(() => field.focus())
+    return form
   }
 
   #composer(participant) {
@@ -372,7 +557,7 @@ export class TaskDrawer {
     const meta = element(
       'p',
       'drawer-meta',
-      `${who(task.requester)} asked ${who(task.assignee)} · ${STATE_LABEL[task.state]} · updated ${age(task.updatedAt, now)} ago`,
+      `${who(task.requester)} asked ${task.assignee === null ? `for a ${task.tier} ${task.pool}` : who(task.assignee)} · ${stateLabel(task)} · updated ${age(task.updatedAt, now)} ago`,
     )
     meta.dataset.state = task.state
     const thread = element('ol', 'thread')
@@ -393,6 +578,11 @@ export class TaskDrawer {
     const actions = element('div', 'drawer-actions')
     if (task.state === 'done') {
       actions.append(button('Accept', 'primary-button', () => this.#actions.onAccept(task)))
+      if (task.kind === 'work') {
+        actions.append(
+          button('Ask for a review', 'quiet-button', () => this.#actions.onReview(task)),
+        )
+      }
     }
     if (task.state === 'done' || task.state === 'failed') {
       const form = element('form', 'reopen')

@@ -4,12 +4,17 @@ import { resolve } from 'node:path'
 /**
  * `cf` inside a window the new core opened: the agents' commands.
  *
- *   cf task add @zeus "…"        a task for Zeus, queued and delivered by the app
- *   cf task list                 the board: every lane and its tasks
- *   cf task get T-3              one task and its whole thread
- *   cf task done T-3 "…"         finish a task assigned to you (coordinators)
- *   cf task accept|cancel T-3    move a task you asked for
- *   cf task reopen T-3 "…"       send a finished or failed task back with a follow-up
+ *   cf task add --tier standard "…"   a task for a worker (or advisor) of that tier; the
+ *                                     app picks the member (--tags a,b to prefer one,
+ *                                     --purpose for critical work)
+ *   cf task add --self "…"            a task for yourself, on the board
+ *   cf task add @lead "…"             a task for a coordinator by name
+ *   cf task list                      the board: what waits for a member, then every lane
+ *   cf task get T-3                   one task and its whole thread
+ *   cf task done T-3 "…"              finish a task assigned to you (coordinators)
+ *   cf task review T-3                ask for an independent review of finished work
+ *   cf task accept|cancel T-3         move a task you asked for
+ *   cf task reopen T-3 "…"            send a finished or failed task back with a follow-up
  *   cf inbox [read m-12]         what is waiting for you, or one message in full
  *   cf ask "…" [--human]         a question to whoever gave you your task (or the human)
  *   cf answer m-12 "…"           answer a question put to you
@@ -81,7 +86,7 @@ async function command(verb, rest, call, cwd) {
             : members
                 .map(
                   (member) =>
-                    `@${member.handle} (${member.role}): ${member.harness}, ${member.model ?? 'model unknown'}` +
+                    `@${member.handle} (${member.role}, ${member.tier}${member.tags.length === 0 ? '' : `; ${member.tags.join(', ')}`}): ${member.harness}, ${member.model ?? 'model unknown'}` +
                     (member.effort ? `, effort ${member.effort}` : ''),
                 )
                 .join('\n'),
@@ -105,37 +110,66 @@ async function command(verb, rest, call, cwd) {
 
 async function taskCommand([action, ...rest], call, cwd) {
   if (action === 'add') {
-    const { flags, text, target } = split(rest, [], ['--to', '--title', '--file'])
+    const { flags, text, target } = split(
+      rest,
+      ['--self'],
+      ['--to', '--title', '--file', '--tier', '--tags', '--purpose'],
+    )
     const to = handle(flags['--to'] ?? target)
-    if (to === undefined) throw usage('cf task add @agent "what to do"')
+    const tier = flags['--tier']
+    if (to === undefined && tier === undefined && flags['--self'] !== true) throw usage(ADD_USAGE)
     const body =
       flags['--file'] === undefined
-        ? requireText(text, 'cf task add @agent "what to do"')
+        ? requireText(text, ADD_USAGE)
         : await readFile(resolve(cwd, flags['--file']), 'utf8')
+    const address = flags['--self']
+      ? { self: true }
+      : to !== undefined
+        ? { to }
+        : {
+            tier,
+            ...(flags['--tags'] === undefined ? {} : { tags: tags(flags['--tags']) }),
+            ...(flags['--purpose'] === undefined ? {} : { purpose: flags['--purpose'] }),
+          }
     const created = await call('POST', '/api/tasks', {
-      to,
+      ...address,
       body,
       ...(flags['--title'] === undefined ? {} : { title: flags['--title'] }),
     })
+    const { number, pool } = created.task
     return {
       data: created,
-      text: `T-${created.task.number} queued for @${to}. The result arrives in your inbox when @${to} finishes.`,
+      text: flags['--self']
+        ? `T-${number} is yours; finish it with: cf task done T-${number} "what you did".`
+        : to !== undefined
+          ? `T-${number} queued for @${to}. The result arrives in your inbox when @${to} finishes.`
+          : `T-${number} is on the board for a ${tier} ${pool}; the first free one gets it, and its result arrives in your inbox.`,
     }
   }
   if (action === 'list' || action === undefined) {
-    const { lanes } = await call('GET', '/api/tasks')
-    const lines = lanes.flatMap((lane) =>
-      lane.tasks.length === 0
-        ? []
-        : [`@${lane.handle} (${lane.role})`, ...lane.tasks.map(taskLine)],
-    )
-    return { data: lanes, text: lines.length === 0 ? 'No tasks yet.' : lines.join('\n') }
+    const board = await call('GET', '/api/tasks')
+    const lines = [
+      ...(board.open.length === 0 ? [] : ['Waiting for a member', ...board.open.map(taskLine)]),
+      ...board.lanes.flatMap((lane) =>
+        lane.tasks.length === 0
+          ? []
+          : [`@${lane.handle} (${lane.role})`, ...lane.tasks.map(taskLine)],
+      ),
+    ]
+    return { data: board, text: lines.length === 0 ? 'No tasks yet.' : lines.join('\n') }
   }
   const number = taskNumber(rest[0])
   if (action === 'get') {
     const { task } = await call('GET', `/api/tasks/${number}`)
     const thread = task.messages.map((m) => `${messageLine(m)}\n${m.body}`).join('\n\n')
     return { data: task, text: `${taskLine(task)}\n\n${thread}` }
+  }
+  if (action === 'review') {
+    const { task } = await call('POST', `/api/tasks/${number}/review`, {})
+    return {
+      data: task,
+      text: `T-${number} goes to an independent reviewer; the verdict arrives in your inbox.`,
+    }
   }
   if (['done', 'accept', 'cancel', 'reopen'].includes(action)) {
     const text = rest.slice(1).join(' ')
@@ -152,9 +186,19 @@ async function taskCommand([action, ...rest], call, cwd) {
     return { data: task, text: taskLine(task) }
   }
   throw usage(
-    `unknown task command ${JSON.stringify(action)}: use add, list, get, done, accept, reopen or cancel`,
+    `unknown task command ${JSON.stringify(action)}: use add, list, get, done, review, accept, reopen or cancel`,
   )
 }
+
+const ADD_USAGE =
+  'cf task add --tier <critical|complex|standard|light> "what to do" (or --self, or @lead / @pm)'
+
+/** `--tags coding,rust` as the list the core takes. */
+const tags = (value) =>
+  String(value)
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter(Boolean)
 
 function client(env) {
   const url = env.CONSENSFLOW_URL
@@ -222,6 +266,6 @@ function usage(message) {
 }
 
 const taskLine = (task) =>
-  `T-${task.number} [${task.state}] @${task.assignee} ← @${task.requester}: ${task.title}`
+  `T-${task.number} [${task.state}] ${task.assignee === null ? `for a ${task.tier} ${task.pool}` : `@${task.assignee}`} ← @${task.requester}: ${task.title}`
 const messageLine = (message) =>
   `m-${message.id} [${message.state}] ${message.kind}${(message.task ?? message.taskNumber) ? ` T-${message.task ?? message.taskNumber}` : ''} from ${message.sender === null ? 'ConsensFlow' : `@${message.sender}`}${message.preview === undefined ? '' : `: ${message.preview}`}`

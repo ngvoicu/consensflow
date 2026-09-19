@@ -68,9 +68,26 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       return { task: found }
     },
 
-    'task.add': change(async ({ project, to, body, title }) =>
-      ledger.createTask(project, { from: 'human', to, body, title }),
-    ),
+    'task.add': change(async ({ project, to, pool, tier, tags = [], purpose, body, title }) => {
+      const member = ledger.project(project)?.participants.find((p) => p.handle === to)
+      if (member !== undefined && member.agent !== null) {
+        throw new Error(`@${to} is a ${member.role}: name a tier, not a member`)
+      }
+      return ledger.createTask(project, {
+        from: 'human',
+        ...(to === undefined ? { pool, tier, tags, purpose } : { to }),
+        body,
+        title,
+      })
+    }),
+
+    'task.review': change(async ({ project, task }) => ({
+      task: ledger.requestReview(project, task, { by: 'human' }),
+    })),
+
+    'project.review': change(async ({ project, review }) => ({
+      project: ledger.setReview(project, review),
+    })),
 
     'task.accept': change(async ({ project, task }) => ({
       task: ledger.acceptTask(project, task, { by: 'human' }),

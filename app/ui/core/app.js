@@ -1,13 +1,14 @@
 import { initializeUpdates } from '../updates.js'
-import { BoardView, element, TaskDrawer, teamOf } from './board.js'
+import { BoardView, element, TaskDrawer } from './board.js'
 import { TerminalsView } from './terminals.js'
 
 /**
- * The page: the projects on the left, the chosen project's board (or one
- * team's live windows: the lead's or the PM's) on the right. Everything it
- * shows comes from the new core through the app's `core_request`, and it
- * redraws when the core says something changed. It keeps nothing of its own
- * but what is on screen.
+ * The page: the projects on the left, the chosen project's board in the
+ * middle, and one live window docked on the right (the lead's, the PM's, or a
+ * member's for a while) so the human reads the board and talks to the
+ * coordinator at once. Everything it shows comes from the new core through
+ * the app's `core_request`, and it redraws when the core says something
+ * changed. It keeps nothing of its own but what is on screen.
  */
 
 const tauri = window.__TAURI__ ?? {}
@@ -19,11 +20,11 @@ const $ = (selector) => document.querySelector(selector)
 const projectList = $('#projects')
 const projectTitle = $('#project-title')
 const projectDirectory = $('#project-directory')
-const viewButtons = [...document.querySelectorAll('[data-view]')]
 const inboxButton = $('#inbox-button')
 const teamButton = $('#team-button')
 const boardRoot = $('#board')
 const stage = $('#stage')
+const dockTabs = $('#dock-tabs')
 const status = $('#status')
 
 const state = {
@@ -32,8 +33,7 @@ const state = {
   board: null,
   inbox: [],
   agents: [],
-  view: 'board',
-  focus: null,
+  dock: 'lead',
   openTask: null,
 }
 
@@ -75,6 +75,18 @@ const board = new BoardView(boardRoot, {
         `T-${task.number} queued for ${participant.handle === 'lead' ? 'the lead' : `@${participant.handle}`}.`,
       )
     }),
+  onPutTask: ({ pool, tier, tags, purpose }, text) =>
+    act(async () => {
+      const { task } = await core('task.add', {
+        project: state.selected,
+        pool,
+        tier,
+        tags,
+        ...(purpose === undefined ? {} : { purpose }),
+        body: text,
+      })
+      note(`T-${task.number} is on the board for a ${tier} ${pool}.`)
+    }),
   onAnswer: (message, text) =>
     act(async () => {
       await core('message.answer', { question: message.id, body: text })
@@ -84,8 +96,7 @@ const board = new BoardView(boardRoot, {
   onRead: (message) => act(() => core('message.read', { message: message.id })),
   onOpenTask: (number) => act(() => openTask(number)),
   onOpenTerminal: (participant) => {
-    state.view = teamOf(participant)
-    state.focus = participant.handle
+    state.dock = participant.handle
     render()
   },
   onRedraw: () => render(),
@@ -102,6 +113,11 @@ const drawer = new TaskDrawer($('#task-drawer'), {
     act(() => core('task.reopen', { project: state.selected, task: task.number, body: text })),
   onCancel: (task) =>
     act(() => core('task.cancel', { project: state.selected, task: task.number })),
+  onReview: (task) =>
+    act(async () => {
+      await core('task.review', { project: state.selected, task: task.number })
+      note(`T-${task.number} goes to an independent reviewer.`)
+    }),
 })
 
 const terminals = new TerminalsView(stage, $('#parking'), {
@@ -167,15 +183,8 @@ function render() {
   inboxButton.dataset.waiting = String(waiting > 0)
   teamButton.disabled = project === null
   const lanes = state.board?.lanes ?? []
-  const hasPm = lanes.some((lane) => lane.participant.role === 'pm')
-  if (state.view === 'pm' && !hasPm) state.view = 'board'
-  for (const control of viewButtons) {
-    control.setAttribute('aria-pressed', String(control.dataset.view === state.view))
-    control.disabled = project === null
-    if (control.dataset.view === 'pm') control.hidden = !hasPm
-  }
-  boardRoot.hidden = state.view !== 'board'
-  stage.hidden = state.view === 'board'
+  if (!lanes.some((lane) => lane.participant.handle === state.dock)) state.dock = 'lead'
+  renderDockTabs(lanes)
   if (state.board === null) {
     boardRoot.replaceChildren(
       element(
@@ -187,10 +196,28 @@ function render() {
   } else {
     board.render({ board: state.board, inbox: state.inbox, agents: state.agents })
   }
-  terminals.render(lanes, {
-    team: state.view === 'board' ? null : state.view,
-    focus: state.focus,
-  })
+  terminals.render(lanes, { docked: state.dock })
+}
+
+/** Lead, PM when there is one, and the member docked for a while. */
+function renderDockTabs(lanes) {
+  const handles = [
+    'lead',
+    ...(lanes.some((lane) => lane.participant.role === 'pm') ? ['pm'] : []),
+    ...(state.dock === 'lead' || state.dock === 'pm' ? [] : [state.dock]),
+  ]
+  dockTabs.replaceChildren(
+    ...handles.map((handle) => {
+      const tab = element('button', null, { lead: 'Lead', pm: 'PM' }[handle] ?? `@${handle}`)
+      tab.type = 'button'
+      tab.setAttribute('aria-pressed', String(handle === state.dock))
+      tab.addEventListener('click', () => {
+        state.dock = handle
+        render()
+      })
+      return tab
+    }),
+  )
 }
 
 function renderProjects() {
@@ -206,7 +233,7 @@ function renderProjects() {
     )
     select.addEventListener('click', () => {
       state.selected = project.id
-      state.focus = null
+      state.dock = 'lead'
       state.openTask = null
       drawer.hide()
       void refresh()
@@ -227,16 +254,7 @@ function renderProjects() {
   projectList.replaceChildren(...items)
 }
 
-for (const control of viewButtons) {
-  control.addEventListener('click', () => {
-    state.view = control.dataset.view
-    render()
-  })
-}
-
 inboxButton.addEventListener('click', () => {
-  state.view = 'board'
-  render()
   boardRoot.querySelector('[data-handle="human"]')?.scrollIntoView({ block: 'start' })
 })
 
@@ -265,11 +283,12 @@ newProjectForm.addEventListener('submit', (event) => {
   event.preventDefault()
   const directory = newProjectForm.elements.directory.value
   const harness = newProjectForm.elements.harness.value
+  const review = newProjectForm.elements.review.value
   newProjectDialog.close()
   void act(async () => {
-    const { project } = await core('project.open', { directory, harness })
+    const { project } = await core('project.open', { directory, harness, review })
     state.selected = project.id
-    state.view = 'board'
+    state.dock = 'lead'
   })
 })
 newProjectDialog
@@ -282,6 +301,8 @@ const teamForm = teamDialog.querySelector('form')
 const teamList = $('#team-members')
 const pmState = $('#team-pm-state')
 const pmAdd = $('#team-pm-add')
+const teamReview = $('#team-review')
+const teamWarning = $('#team-warning')
 /** The member whose removal waits for the human's yes, kept across redraws. */
 let removing = null
 
@@ -298,6 +319,14 @@ function renderTeam() {
   pmState.textContent =
     pm === undefined ? 'No PM yet.' : `PM · ${pm.participant.harness ?? 'harness unknown'}`
   pmAdd.hidden = pm !== undefined
+  const review = state.board?.project.review ?? 'members'
+  teamReview.value = review
+  const reviewers = lanes.some((lane) => lane.participant.role === 'reviewer')
+  teamWarning.textContent =
+    review !== 'none' && !reviewers
+      ? 'Review is on, but no reviewer is on the team: finished work goes on unreviewed.'
+      : ''
+  teamWarning.hidden = teamWarning.textContent === ''
   const onTeam = new Set(members.map((lane) => lane.participant.agent))
   const choices = state.agents.filter((agent) => !onTeam.has(agent.name))
   const picker = teamForm.elements.agent
@@ -331,7 +360,13 @@ function memberRow(member) {
     remove.setAttribute('aria-label', `Remove ${name} from the team`)
     remove.addEventListener('click', choose(member.handle))
     row.append(
-      element('span', 'member-line', `${name} · ${member.role} · ${member.harness}`),
+      element(
+        'span',
+        'member-line',
+        [name, member.role, member.tier, member.tags.join(', ') || null, member.harness]
+          .filter(Boolean)
+          .join(' · '),
+      ),
       remove,
     )
     return row
@@ -362,6 +397,18 @@ teamButton.addEventListener('click', () =>
     removing = null
     renderTeam()
     teamDialog.showModal()
+  }),
+)
+teamReview.addEventListener('change', () =>
+  act(async () => {
+    await core('project.review', { project: state.selected, review: teamReview.value })
+    note(
+      {
+        none: 'Finished work goes straight to whoever asked.',
+        members: "Members' finished work gets a second review.",
+        all: 'All finished work gets a second review.',
+      }[teamReview.value],
+    )
   }),
 )
 $('#add-pm').addEventListener('click', () =>

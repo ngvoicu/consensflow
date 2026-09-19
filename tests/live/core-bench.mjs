@@ -3,7 +3,9 @@
  * The live bench for the new core (VERIFY-BDC-08): its daemon, the real Rust
  * pane host and the REAL harness TUIs on cheap models, driven by code.
  *
- * The human gives the lead one task per worker: run `cf task add` for it. The
+ * The human gives the lead one task per worker: run `cf task add` for its tier,
+ * with the worker's own name as the preferred tag (each bench agent is tagged
+ * with its name), so the daemon's choice is the worker meant. The
  * lead (OpenCode on the free Muse Spark model by default; `--lead claude` for a
  * Claude Code lead on Sonnet) must run it itself; the core opens the worker's
  * window with the task, the worker must answer in full-permission mode, the
@@ -102,7 +104,14 @@ process.stdout.write(
 const writeRoster = (home) =>
   writeFileSync(
     join(home, 'agents.json'),
-    `${JSON.stringify({ schemaVersion: 1, agents: wanted.map((name) => AGENTS[name]) }, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        agents: wanted.map((name) => ({ ...AGENTS[name], tags: [AGENTS[name].id] })),
+      },
+      null,
+      2,
+    )}\n`,
   )
 
 let app = await startIntegration({ editor: EDITOR, fakeEnv: ENV })
@@ -112,9 +121,11 @@ try {
   const opened = await app.requestNode('project.open', { directory: WORKSPACE, harness: LEAD_KIND })
   if (opened.ok !== true) throw new Error(`project.open: ${JSON.stringify(opened)}`)
   const project = opened.project.id
+  const tiers = {}
   for (const name of wanted) {
     const added = await app.requestNode('member.add', { project, agent: AGENTS[name].id })
     if (added.ok !== true) throw new Error(`member.add ${name}: ${JSON.stringify(added)}`)
+    tiers[name] = added.member.tier
   }
   const board = async () => (await app.requestNode('board.get', { project })).board
   const lane = async (handle) => (await board()).lanes.find((l) => l.participant.handle === handle)
@@ -134,7 +145,7 @@ try {
     await app.requestNode('task.add', {
       project,
       to: 'lead',
-      body: `Run exactly this command in your shell, then reply with one line:\ncf task add @${agent.id} "Reply with exactly: ${marker}"`,
+      body: `Run exactly this command in your shell, then reply with one line:\ncf task add --tier ${tiers[name]} --tags ${agent.id} "Reply with exactly: ${marker}"`,
     })
     const task = await until(
       async () => (await lane(agent.id))?.tasks.find((t) => t.requester === 'lead'),

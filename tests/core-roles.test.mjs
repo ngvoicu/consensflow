@@ -18,6 +18,7 @@ const zeus = {
   model: 'claude-sonnet-5',
   effort: 'high',
   description: 'Careful implementer',
+  tags: ['coding', 'rust'],
 }
 
 describe('role instructions for the new core', () => {
@@ -29,19 +30,29 @@ describe('role instructions for the new core', () => {
       assert.doesNotMatch(text, /\{\{/, 'every placeholder is filled')
       if (role === 'lead' || role === 'pm') {
         for (const command of [
-          'cf task add',
+          'cf task add --tier',
+          'cf task add --self',
+          'cf task review',
           'cf answer',
           'cf task done',
           'cf ask --human',
           'cf team',
         ])
           assert.ok(text.includes(command), `${role} learns ${command}`)
+        assert.doesNotMatch(
+          text,
+          /cf task add @worker|cf task add @advisor/,
+          'nobody names a member',
+        )
         assert.match(text, /\| zeus \| claude-sonnet-5/)
+        assert.match(text, /Tags: coding, rust\./, 'the team table shows the tags')
         assert.match(text, /Cross-model review/)
       } else {
         assert.ok(text.includes('cf ask'), `${role} can ask`)
         assert.match(text, /final message of your turn/)
+        assert.match(text, /never to another member/)
         assert.doesNotMatch(text, /cf task add/)
+        if (role === 'reviewer') assert.match(text, /VERDICT: pass/)
       }
     })
   }

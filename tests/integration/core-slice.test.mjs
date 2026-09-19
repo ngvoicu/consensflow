@@ -7,7 +7,7 @@ import { startIntegration } from './harness.mjs'
  * The new core end to end (TEST-BDC-09 through the real pane host): its daemon,
  * the real Rust headless bridge and PTYs, and fake Claude agents in them. The
  * human gives the lead a task on the board; the lead hands part of it to a
- * worker with `cf task add`; the core opens the worker's window with the task,
+ * worker's tier with `cf task add`; the core picks the worker and opens its window with the task,
  * collects the worker's answer as the result and delivers it into the lead's
  * window, where the lead's own transcript shows it arrived.
  */
@@ -35,7 +35,7 @@ test('a lead hands a task to a worker through the board and the result lands in 
     const given = await app.requestNode('task.add', {
       project,
       to: 'lead',
-      body: 'DISPATCH @worker Reply with exactly: WORKER_OK',
+      body: `DISPATCH --tier ${added.member.tier} Reply with exactly: WORKER_OK`,
     })
     assert.equal(given.ok, true, JSON.stringify(given))
 
@@ -82,7 +82,7 @@ test('a lead the human typed to still gets its results pasted in', async () => {
       harness: 'claude-code',
     })
     const project = opened.project.id
-    await app.requestNode('member.add', { project, agent: 'worker' })
+    const { member } = await app.requestNode('member.add', { project, agent: 'worker' })
     const lead = app.openFrames.find((frame) => frame.id === `p${project}-lead`)
 
     // The human types into the lead's own terminal once it is ready, which
@@ -94,7 +94,7 @@ test('a lead the human typed to still gets its results pasted in', async () => {
     const typed = await app.requestRust('pane.input', {
       id: lead.id,
       generation: lead.generation,
-      bytes: [...Buffer.from('DISPATCH @worker Reply with exactly: TYPED_OK\r')],
+      bytes: [...Buffer.from(`DISPATCH --tier ${member.tier} Reply with exactly: TYPED_OK\r`)],
     })
     assert.equal(typed.ok, true, JSON.stringify(typed))
 

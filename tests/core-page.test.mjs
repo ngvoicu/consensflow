@@ -152,13 +152,20 @@ describe('the page protocol of the new core', () => {
   })
 
   it('takes a member off the team through the dispatcher, which closes its window', async () => {
-    await withPage(async ({ operations, removed, kicks }) => {
+    await withPage(async ({ ledger, operations, removed, kicks }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
         harness: 'pi',
       })
       await operations['member.add']({ project: project.id, agent: 'zeus' })
-      await operations['task.add']({ project: project.id, to: 'zeus', body: 'Parser' })
+      const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
+      await operations['task.add']({
+        project: project.id,
+        pool: 'worker',
+        tier: zeus.tier,
+        body: 'Parser',
+      })
+      ledger.assignTask(project.id, 1, zeus.id)
       const before = kicks()
       const { member, cancelled } = await operations['member.remove']({
         project: project.id,
@@ -172,6 +179,48 @@ describe('the page protocol of the new core', () => {
         board.lanes.map((lane) => lane.participant.handle),
         ['human', 'lead'],
       )
+    })
+  })
+
+  it('puts a task on the board for a tier, asks for a review, and sets the review policy', async () => {
+    await withPage(async ({ ledger, operations }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        harness: 'pi',
+        review: 'none',
+      })
+      await operations['member.add']({ project: project.id, agent: 'zeus' })
+      const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
+      const { task } = await operations['task.add']({
+        project: project.id,
+        pool: 'worker',
+        tier: zeus.tier,
+        tags: ['docs'],
+        body: 'Write the docs',
+      })
+      assert.deepEqual(
+        [task.state, task.assignee, task.pool, task.tags],
+        ['open', null, 'worker', ['docs']],
+      )
+      await assert.rejects(
+        operations['task.add']({ project: project.id, to: 'zeus', body: 'By name' }),
+        /name a tier, not a member/,
+      )
+      ledger.assignTask(project.id, 1, zeus.id)
+      const message = ledger.task(project.id, 1).messages[0]
+      ledger.beginDelivery(message.id)
+      ledger.confirmDelivery(message.id, {})
+      ledger.recordResult(project.id, 1, { body: 'done' })
+      assert.equal(
+        (await operations['task.review']({ project: project.id, task: 1 })).task.state,
+        'review',
+      )
+      assert.equal(
+        (await operations['project.review']({ project: project.id, review: 'all' })).project.review,
+        'all',
+      )
+      const { board } = await operations['board.get']({ project: project.id })
+      assert.deepEqual([board.project.review, board.open], ['all', []])
     })
   })
 
@@ -199,12 +248,15 @@ describe('the page protocol of the new core', () => {
       })
       assert.equal(project.review, 'none')
       await operations['member.add']({ project: project.id, agent: 'zeus' })
+      const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
       const { task } = await operations['task.add']({
         project: project.id,
-        to: 'zeus',
+        pool: 'worker',
+        tier: zeus.tier,
         body: 'Write the parser',
       })
-      assert.deepEqual([task.number, task.requester, task.assignee], [1, 'human', 'zeus'])
+      assert.deepEqual([task.number, task.requester, task.assignee], [1, 'human', null])
+      ledger.assignTask(project.id, 1, zeus.id)
       const message = ledger.task(project.id, 1).messages[0]
       ledger.beginDelivery(message.id)
       ledger.confirmDelivery(message.id, {})
@@ -227,7 +279,13 @@ describe('the page protocol of the new core', () => {
         ],
       )
       await assert.rejects(operations['task.get']({ project: project.id, task: 9 }), /no task T-9/)
-      await operations['task.add']({ project: project.id, to: 'zeus', body: 'Second' })
+      await operations['task.add']({
+        project: project.id,
+        pool: 'worker',
+        tier: zeus.tier,
+        body: 'Second',
+      })
+      ledger.assignTask(project.id, 2, zeus.id)
       const second = ledger.task(project.id, 2).messages[0]
       ledger.beginDelivery(second.id)
       ledger.confirmDelivery(second.id, {})

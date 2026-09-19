@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { METRICS } from '../hosts/lib/benchmarks.js'
-import { agentProfile, CATEGORY_LABELS, WORK_TIERS } from '../hosts/lib/presets.js'
+import { agentProfile, WORK_TIERS } from '../hosts/lib/presets.js'
 import { HARNESSES } from './roster.js'
 
 export function agentCommand(agent) {
@@ -165,7 +165,7 @@ export function teamTable(agents, noun) {
       agent.effort ?? 'Native setting (unknown)',
       `${agent.harness} / ${profile.routeLabel}`,
       WORK_TIERS[profile.workTier].label,
-      `${profile.goodFor} Categories: ${profile.categories.map((c) => CATEGORY_LABELS[c]).join(', ') || 'unspecified'}. ${agent.description ?? ''}`,
+      `${profile.goodFor} Tags: ${(agent.tags ?? profile.categories).join(', ') || 'none'}. ${agent.description ?? ''}`,
       benchmarkSummary(agent, profile),
     ]
       .map(cell)

@@ -1359,7 +1359,7 @@ describe('tiered dispatch: the review gate', () => {
           review.task.state,
           review.task.title,
         ],
-        [2, 'review', task.id, 'diana', 'lead', 'queued', 'Review T-1'],
+        [2, 'review', 1, 'diana', 'lead', 'queued', 'Review T-1'],
       )
       assert.match(review.message.body, /^Review T-1 \(round 1\) by @zeus\./)
       assert.match(review.message.body, /The task:\nParser\n/)

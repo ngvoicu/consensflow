@@ -834,7 +834,7 @@ describe('the dispatcher runs the review gate', () => {
         .lanes.find((l) => l.participant.handle === 'astraeus').tasks
       assert.deepEqual(
         again.filter((t) => t.state === 'queued').map((t) => t.reviewOf),
-        [task(1).id],
+        [1],
         'a new review of T-1 for a fresh astraeus window',
       )
     })
