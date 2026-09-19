@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -114,6 +114,16 @@ it('Codex launch enables only an installed native queue capability (TEST-PANE-10
   }
 })
 
+const TURN_END = { hooks: [{ type: 'command', command: 'exit 0' }] }
+
+/** The settings file a Claude launch was given, read back from its flag. */
+async function claudeSettings(configuration, home) {
+  assert.equal(configuration.args.length, 2)
+  assert.equal(configuration.args[0], '--settings')
+  assert.ok(configuration.args[1].startsWith(join(home, 'integrations', 'claude')))
+  return JSON.parse(await readFile(configuration.args[1], 'utf8'))
+}
+
 describe('retired Claude development channel (TEST-PANE-121)', () => {
   async function claudeExecutable(root) {
     const executable = join(root, 'claude')
@@ -128,6 +138,8 @@ describe('retired Claude development channel (TEST-PANE-121)', () => {
 
   it('opens Claude without development channels regardless of version', async () => {
     const root = await mkdtemp(join(tmpdir(), 'cf-claude-retired-'))
+    const home = await mkdtemp(join(tmpdir(), 'cf-claude-home-'))
+    const env = { HOME: home, CONSENSFLOW_HOME: home }
     try {
       for (const version of ['2.1.263', '2.1.265', '2.1.262', '2.2.0']) {
         const executable = await claudeExecutable(root)
@@ -136,24 +148,64 @@ describe('retired Claude development channel (TEST-PANE-121)', () => {
           workspace: root,
           executable,
           node: process.execPath,
+          env,
         })
-        assert.deepEqual(configuration.args, [], version)
+        // The only flag is the launch's settings file; no channel of its own.
+        assert.deepEqual(await claudeSettings(configuration, home), {
+          hooks: { Stop: [TURN_END] },
+        })
         assert.deepEqual(configuration.env, {}, version)
         if (process.platform === 'darwin') {
           assert.equal(configuration.channel?.kind, 'claude-peer', version)
           assert.equal(configuration.channel?.preservesDraft, 1)
         } else assert.equal(configuration.channel, null, version)
       }
-      assert.deepEqual(
-        await launchConfiguration('claude-code', {
-          launchId: 'retired-missing',
-          workspace: root,
-        }),
-        { args: [], env: {}, channel: null },
-      )
-      assert.deepEqual(await readdir(root), ['claude'], 'no delivery directories are authored')
+      const missing = await launchConfiguration('claude-code', {
+        launchId: 'retired-missing',
+        workspace: root,
+        env,
+      })
+      assert.deepEqual({ ...missing, args: [] }, { args: [], env: {}, channel: null })
+      assert.deepEqual(await claudeSettings(missing, home), { hooks: { Stop: [TURN_END] } })
+      assert.deepEqual(await readdir(root), ['claude'], 'nothing is written into the project')
     } finally {
       await rm(root, { recursive: true, force: true })
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('ends every Claude turn in a Stop hook, merged with any coordinator hooks', async () => {
+    // Claude omits its turn_duration record on some turns (every Calliope turn
+    // on 2.1.274), and those answers never counted as finished. A Stop hook
+    // makes Claude record stop_hook_summary at the end of every turn.
+    const home = await mkdtemp(join(tmpdir(), 'cf-claude-turn-end-'))
+    const env = { HOME: home, CONSENSFLOW_HOME: home }
+    try {
+      const worker = await launchConfiguration('claude-code', {
+        launchId: 'turn-end',
+        workspace: home,
+        env,
+      })
+      assert.deepEqual(await claudeSettings(worker, home), { hooks: { Stop: [TURN_END] } })
+      const receiver = { type: 'command', command: 'receiver', asyncRewake: true }
+      const lead = await claudeSettings(
+        await launchConfiguration('claude-code', {
+          launchId: 'turn-end-lead',
+          workspace: home,
+          env,
+          hooks: { SessionStart: [{ hooks: [receiver] }], Stop: [{ hooks: [receiver] }] },
+        }),
+        home,
+      )
+      assert.deepEqual(lead.hooks.SessionStart, [{ hooks: [receiver] }])
+      assert.deepEqual(lead.hooks.Stop, [{ hooks: [receiver] }, TURN_END])
+      await assert.rejects(
+        launchConfiguration('claude-code', { launchId: 'no-home', workspace: home }),
+        /ConsensFlow environment/,
+        'a launch without a home never falls back to the live one',
+      )
+    } finally {
+      await rm(home, { recursive: true, force: true })
     }
   })
 

@@ -10,6 +10,7 @@ import { send as sendCodex } from './channels/codex.js'
 import { send as sendDevin } from './channels/devin.js'
 import { DEFAULT_DEADLINE_MS, send as sendOpenCode } from './channels/opencode.js'
 import { send as sendPi } from './channels/pi.js'
+import { prepareClaudeSettings } from './claude-install.js'
 import { prepareDevinIntegration } from './devin-install.js'
 import { configRoot } from './roster.js'
 
@@ -87,12 +88,15 @@ export async function launchConfiguration(kind, input) {
       executable: input.executable,
     })
   if (kind === 'claude-code') {
-    // Claude registers its own peer inbox. No development channel, native
-    // plugin, launch flag, settings or credential file is created by the app.
-    if (!(await hasNativeQueue(kind, input.executable))) return { args: [], env: {}, channel: null }
-    const env = input.env ?? process.env
+    // Claude registers its own peer inbox. The app writes one settings file per
+    // launch: a Stop hook on every turn, plus a coordinator's receiver hooks.
+    if (!input.env || typeof input.env !== 'object')
+      throw new Error('Claude launch configuration needs the ConsensFlow environment')
+    const env = input.env
+    const args = await prepareClaudeSettings(env, launchId, input.hooks)
+    if (!(await hasNativeQueue(kind, input.executable))) return { args, env: {}, channel: null }
     return {
-      args: [],
+      args,
       env: {},
       channel: {
         kind: 'claude-peer',

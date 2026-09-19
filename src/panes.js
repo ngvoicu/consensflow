@@ -1771,17 +1771,18 @@ export class Panes {
         cwd: tab.directory,
         executable: command,
       })
-      configuration = await this.#leadChannel(kind, launchId, tab.directory, command, {
-        ...this.#env,
-        ...role.env,
-      })
+      const receiver =
+        kind === 'claude-code' ? await prepareClaudeReceiver(this.#env, launchId, this.#node) : null
+      configuration = await this.#leadChannel(
+        kind,
+        launchId,
+        tab.directory,
+        command,
+        { ...this.#env, ...role.env },
+        receiver?.hooks,
+      )
       configuration.args.push(...role.args)
-      configuration.env = { ...configuration.env, ...role.env }
-      if (kind === 'claude-code') {
-        const receiver = await prepareClaudeReceiver(this.#env, launchId, this.#node)
-        configuration.args.push(...receiver.args)
-        Object.assign(configuration.env, receiver.env)
-      }
+      configuration.env = { ...configuration.env, ...role.env, ...receiver?.env }
       admitted = await this.#store.leadAdmit(tab.directory, {
         tab: tabId,
         // Decided inside the mutation, from the record the store reads
@@ -2062,7 +2063,7 @@ export class Panes {
   }
 
   /** Private native integration for explicit task messages and receiver startup. */
-  async #leadChannel(kind, launchId, workspace, executable, env = this.#env) {
+  async #leadChannel(kind, launchId, workspace, executable, env = this.#env, hooks = undefined) {
     if (enabledChannels(kind).length === 0) {
       return { args: [], env: {}, channel: null }
     }
@@ -2076,6 +2077,7 @@ export class Panes {
       throw new Error(extension.reason ?? `${kind} setup is unavailable`)
     return await this.#prepareChannel(kind, {
       ...(extension ? { extensionPath: extension.path } : {}),
+      ...(hooks ? { hooks } : {}),
       launchId,
       workspace,
       executable,

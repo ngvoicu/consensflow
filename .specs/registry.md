@@ -2,7 +2,7 @@
 
 | ID | Title | Status | Priority | Progress | Updated |
 |---|---|---|---|---|---|
-| reliable-delivery | Reliable delivery, markers and daemon load (board redesign phase 1) | active | critical | 2/19 | 2026-09-19 |
+| reliable-delivery | Reliable delivery, markers and daemon load (board redesign phase 1) | active | critical | 4/19 | 2026-09-19 |
 | session-task-board | Session task board and operational graph | completed | high | 12/12 | 2026-09-13 |
 | devin-and-receiver-cleanup | Devin roles and receiver integration cleanup | paused | high | 38/39 | 2026-09-13 |
 | consensflow-v3-skills-first | ConsensFlow v3 — Skills-First (SPEC.md missing) | completed | high | 12/12 | 2026-08-19 |

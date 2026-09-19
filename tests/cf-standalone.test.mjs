@@ -802,7 +802,8 @@ describe('the --in-pane controller takes its ownership from the redemption', () 
     )
     assert.equal(result.code, 0, `${result.stdout}${result.stderr}`)
 
-    assert.deepEqual(claude.calls().at(-1).slice(0, 2), ['--session-id', nativeSession])
+    const argv = claude.calls().at(-1)
+    assert.equal(argv[argv.indexOf('--session-id') + 1], nativeSession)
 
     const row = s.threads()[conversation]
     assert.equal(row.sessionId, nativeSession)

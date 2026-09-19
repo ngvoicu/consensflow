@@ -35,14 +35,14 @@ diagnosis and every decision live in the `consensflow-sme` brain
   delivery (Gabriel, 2026-09-19), board-driven dispatch, removal of `cf run`,
   ConsensFlow's own copy of transcripts (Gabriel, 2026-09-19), Windows.
 
-## Phase 1: Evidence the gate can trust [active]
+## Phase 1: Evidence the gate can trust [completed]
 
 - [x] [TEST-REL-01] tests/engine/completion.test.mjs: a cross-session message queued with an extra envelope attribute and removed without it leaves no queued turn.
 - [x] [IMPL-REL-02] hosts/lib/completion.js: match queue removals and pops on content with the envelope tag's attributes set aside after an exact match fails; satisfies TEST-REL-01.
-- [ ] [TEST-REL-03] Claude turns that finish without `turn_duration` (Calliope, Fable 5.1 at max effort) are recognised as finished from another native proof, after reading real records read-only.
-- [ ] [IMPL-REL-04] hosts/lib/completion.js: that proof; satisfies TEST-REL-03.
+- [x] [TEST-REL-03] tests/channels.test.mjs, tests/claude-receiver.test.mjs: every Claude launch carries one `--settings` file under `<home>/integrations/claude/<launch>/` whose Stop hooks end with a no-op turn-end hook, merged with a coordinator's receiver hooks; a launch without a home is refused.
+- [x] [IMPL-REL-04] src/claude-install.js (`prepareClaudeSettings`, receiver returns hooks), src/channels.js, src/panes.js; satisfies TEST-REL-03.
 
-## Phase 2: Daemon load [pending]
+## Phase 2: Daemon load [active]
 
 - [ ] [TEST-REL-05] tests for the watcher: deleted conversations are not parsed; each native session is parsed at most once per scan; an unchanged file is not parsed again; old unconfirmed receipts stop being re-checked after a bound.
 - [ ] [IMPL-REL-06] src/delivery-watch.js (and the transcript reader if needed); satisfies TEST-REL-05.
@@ -71,9 +71,9 @@ diagnosis and every decision live in the `consensflow-sme` brain
 
 ## Resume context
 
-Unit 1 (TEST-REL-01/IMPL-REL-02) is done. The next unit is TEST-REL-03: read
-a Calliope transcript (read-only) to find what marks the end of a turn when
-`turn_duration` is missing.
+Phase 1 is done. Next: TEST-REL-05 (watcher load). The committed watcher
+already coalesces scans; it still parses every bound conversation each second
+and re-reads the lead's history once per old unconfirmed legacy receipt.
 
 ## TDD log
 
@@ -83,3 +83,17 @@ a Calliope transcript (read-only) to find what marks the end of a turn when
   `5f7ecad7…` (135.7 MB): installed alpha.61 code says in-flight, 10 queued,
   1,355 settled answers, last 2026-09-18 07:49:40Z; the fixed source says
   settled, 0 queued, 1,505 settled answers, last 2026-09-19 05:55:57Z.
+- TEST-REL-03 research (read-only): across all tracked Claude sessions,
+  `turn_duration` appears on only some turns in every version, and
+  `stop_hook_summary` never appears (no worker pane had a Stop hook). Six
+  Calliope sessions (2.1.274/2.1.276) have neither, so their answers never
+  settled. Live probes (Sonnet): a Stop hook, from a file or inline JSON with
+  `exit 0`, makes Claude 2.1.277 record `stop_hook_summary` after the final
+  answer, which the completion model already accepts. TEST-REL-03 RED: args
+  length 0; GREEN after IMPL-REL-04: channels and receiver suites 10/10.
+  First version passed the settings inline; the full gate showed the lead's
+  launch frame grow past a test's deliberately small frame cap (3,069 bytes),
+  so settings moved to a per-launch file under the home, like Devin and Pi.
+- The full gate also exposed a third race in the Pi duplicate test: the
+  extension's own inbox watcher can start the scan first, so the test now waits
+  for the send (30/30 solo runs pass).

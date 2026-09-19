@@ -102,20 +102,20 @@ test('Claude startup installs a private native file watch; selection change afte
 test('Claude receiver preparation ships immutable process-local hooks and signal under configured home', async (t) => {
   const f = tempEnv()
   t.after(f.cleanup)
+  // The hooks go into the launch's one inline --settings flag (channels.js),
+  // so preparation writes only the signal, never a settings file.
   const prepared = await prepareClaudeReceiver(f.env, 'launch-one', process.execPath)
-  assert.ok(prepared.args[1].startsWith(f.env.CONSENSFLOW_HOME + path.sep))
-  const settings = JSON.parse(await fs.readFile(prepared.args[1], 'utf8'))
-  assert.equal(prepared.args[0], '--settings')
   assert.ok(prepared.env.CF_RESULT_SIGNAL.startsWith(f.env.CONSENSFLOW_HOME + path.sep))
   assert.equal(await fs.readFile(prepared.env.CF_RESULT_SIGNAL, 'utf8'), '')
+  assert.deepEqual(await fs.readdir(path.dirname(prepared.env.CF_RESULT_SIGNAL)), ['signal'])
   for (const name of ['SessionStart', 'UserPromptSubmit', 'FileChanged', 'Stop', 'SessionEnd']) {
-    const hook = settings.hooks[name][0].hooks[0]
+    const hook = prepared.hooks[name][0].hooks[0]
     assert.ok(hook.command.includes(f.env.CONSENSFLOW_HOME))
     assert.equal(hook.asyncRewake, ['FileChanged', 'Stop'].includes(name) ? true : undefined)
   }
-  assert.equal(
-    (await prepareClaudeReceiver(f.env, 'launch-one', process.execPath)).args[1],
-    prepared.args[1],
+  assert.deepEqual(
+    (await prepareClaudeReceiver(f.env, 'launch-one', process.execPath)).hooks,
+    prepared.hooks,
   )
   await assert.rejects(prepareClaudeReceiver(f.env, '../outside', process.execPath), /launch/)
 })

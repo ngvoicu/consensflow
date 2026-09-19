@@ -280,7 +280,13 @@ describe('consensflow Pi worker followup', () => {
         expiresAt: Date.now() + 60_000,
       }
       await writeFile(join(s.inbox, `${id}.json`), `${JSON.stringify(record)}\n`)
+      // The extension's own inbox watcher may start the scan first; a consume
+      // that finds a scan running only queues a rerun and returns, so wait for
+      // the send instead of assuming these two calls made it.
       await Promise.all([s.extension.consume(), s.extension.consume()])
+      const deadline = Date.now() + 2000
+      while (s.pi.sent.length === 0 && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 5))
       assert.deepEqual(s.pi.sent, ['duplicate followup'])
       await s.pi.handlers.get('message_start')(
         {
