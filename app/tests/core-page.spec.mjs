@@ -134,7 +134,9 @@ function model() {
           {
             participant: participant(3, 'zeus', 'worker', { tags: ['coding', 'rust'] }),
             tasks: [
-              task(2, 'Write the parser', 'done', 'lead', 'zeus', 2),
+              task(2, 'Write the parser', 'done', 'lead', 'zeus', 2, {
+                result: 'Parser done, 14 tests.',
+              }),
               task(4, 'Add the tests', 'queued', 'lead', 'zeus', 1),
               task(5, 'Old spike', 'accepted', 'lead', 'zeus', 90),
             ],
@@ -208,6 +210,16 @@ function model() {
     tasks: {
       '1:2': {
         ...task(2, 'Write the parser', 'done', 'lead', 'zeus', 2),
+        reviews: [
+          {
+            number: 10,
+            round: 1,
+            reviewer: 'hera',
+            state: 'done',
+            verdict: 'pass',
+            findings: 'Looks right.\n\nVERDICT: pass',
+          },
+        ],
         messages: [
           {
             id: 20,
@@ -240,6 +252,7 @@ function model() {
 async function open(page, data = model()) {
   await page.addInitScript((data) => {
     window.__calls = []
+    window.__model = data
     window.__listeners = new Map()
     const answer = (value) => JSON.parse(JSON.stringify({ ok: true, ...value }))
     const operations = {
@@ -317,33 +330,46 @@ const calls = (page, operation) =>
     operation,
   )
 
-test('draws a bay per participant with its lamp, and its open tasks as strips', async ({
+test('draws the kanban: a row per participant, a column per state, and cards that stay when done', async ({
   page,
 }) => {
   await open(page)
   await expect(page.getByRole('heading', { name: 'harbour' })).toBeVisible()
-  const bays = page.locator('.bay')
-  await expect(bays).toHaveCount(4)
-  await expect(bays.locator('.bay-name')).toHaveText(['You', 'Lead', '@zeus', '@diana'])
-  const zeus = page.locator('.bay[data-handle="zeus"]')
+  const table = page.getByRole('table', { name: 'Tasks' })
+  await expect(table.locator('thead th')).toHaveText([
+    'Team',
+    'Backlog',
+    'Queued',
+    'Working',
+    'Waiting',
+    'In review',
+    'Done',
+    'Accepted',
+    'Ended',
+  ])
+  const rows = table.locator('tbody tr')
+  await expect(rows).toHaveCount(4)
+  await expect(rows.locator('.row-name')).toHaveText(['You', 'Lead', '@zeus', '@diana'])
+  const zeus = table.locator('tr[data-handle="zeus"]')
   await expect(zeus.getByTestId('lamp')).toHaveAttribute('data-state', 'waiting')
-  await expect(zeus.locator('.bay-status')).toHaveText('Waiting: permission to run a command')
-  // The live task first, then the queue, then what is finished and waits for a decision.
-  await expect(zeus.locator('button.strip .strip-number')).toHaveText(['T-4', 'T-2'])
-  await expect(zeus.locator('.bay-cleared')).toHaveText('1 cleared (accepted or cancelled)')
-  await expect(page.locator('.bay[data-handle="lead"] .strip')).toHaveAttribute(
-    'data-state',
-    'working',
-  )
-  await expect(page.locator('#inbox-button')).toHaveText('Inbox (2)')
+  await expect(zeus.locator('.row-status')).toHaveText('Waiting: permission to run a command')
+  await expect(zeus.locator('td[data-state="queued"] .card-title')).toHaveText(['Add the tests'])
+  const done = zeus.locator('td[data-state="done"] button.card[data-task="2"]')
+  await expect(done.locator('.card-title')).toHaveText('Write the parser')
+  await expect(done.locator('.card-result')).toHaveText('Parser done, 14 tests.')
+  await expect(zeus.locator('td[data-state="accepted"] .card-title')).toHaveText(['Old spike'])
+  await expect(
+    page.locator('tr[data-handle="diana"] td[data-state="ended"] .card-title'),
+  ).toHaveText('<img src=x onerror=window.__pwned=1> hostile title')
+  expect(await page.evaluate(() => window.__pwned)).toBeUndefined()
 })
 
 test('shows an agent-written title as text, never as markup', async ({ page }) => {
   await open(page)
-  const strip = page.locator('.bay[data-handle="diana"] .strip-title')
-  await expect(strip).toHaveText('<img src=x onerror=window.__pwned=1> hostile title')
+  const title = page.locator('tr[data-handle="diana"] .card-title')
+  await expect(title).toHaveText('<img src=x onerror=window.__pwned=1> hostile title')
   expect(await page.evaluate(() => window.__pwned)).toBeUndefined()
-  await expect(page.locator('.bay[data-handle="diana"] img')).toHaveCount(0)
+  await expect(page.locator('tr[data-handle="diana"] img')).toHaveCount(0)
 })
 
 test("answers a question in the human's bay and routes it back", async ({ page }) => {
@@ -359,16 +385,17 @@ test("answers a question in the human's bay and routes it back", async ({ page }
   await expect(page.locator('#status')).toHaveText('Answer sent to @lead.')
 })
 
-test('shows the tasks waiting for a member in their own bay, with the tier each waits for', async ({
+test("shows a task waiting for a member in its requester's backlog, with the tier it waits for", async ({
   page,
 }) => {
   await open(page)
-  const backlog = page.getByRole('region', { name: 'Open tasks' })
-  await expect(backlog.locator('.bay-status')).toHaveText('1 waiting for a member')
-  const strip = backlog.locator('button.strip[data-task="6"]')
-  await expect(strip.locator('.strip-route')).toHaveText('for a standard worker · docs')
-  await expect(strip.locator('.strip-state')).toHaveText('Open')
-  await expect(page.locator('.bay[data-handle="zeus"] .bay-meta')).toHaveText(
+  const foryou = page.getByRole('region', { name: 'For you' })
+  await expect(foryou.locator('.foryou-status')).toHaveText('2 waiting')
+  const card = page.locator(
+    'tr[data-handle="lead"] td[data-state="open"] button.card[data-task="6"]',
+  )
+  await expect(card.locator('.card-route')).toHaveText('for a standard worker · docs')
+  await expect(page.locator('tr[data-handle="zeus"] .row-meta')).toHaveText(
     'worker · standard · coding, rust · claude-code · claude-sonnet-5',
   )
 })
@@ -377,7 +404,7 @@ test('gives a task to a tier of member, never to a member by name', async ({ pag
   await open(page)
   await expect(page.getByRole('button', { name: 'Give @zeus a task' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Give Lead a task' })).toHaveCount(1)
-  const backlog = page.getByRole('region', { name: 'Open tasks' })
+  const backlog = page.getByRole('region', { name: 'For you' })
   await backlog.getByRole('button', { name: 'New task' }).click()
   const composer = backlog.locator('form.composer')
   await composer.getByLabel('For').selectOption('worker:light')
@@ -410,7 +437,7 @@ test('asks for the purpose of critical work, and offers only the tiers the team 
     pane: null,
   })
   await open(page, data)
-  const backlog = page.getByRole('region', { name: 'Open tasks' })
+  const backlog = page.getByRole('region', { name: 'For you' })
   await backlog.getByRole('button', { name: 'New task' }).click()
   const composer = backlog.locator('form.composer')
   await expect(composer.getByLabel('For').locator('option')).toHaveText([
@@ -441,7 +468,7 @@ test('gives a coordinator a task by name from its bay, and keeps a half-written 
   page,
 }) => {
   await open(page)
-  const lead = page.locator('.bay[data-handle="lead"]')
+  const lead = page.locator('tr[data-handle="lead"]')
   await lead.getByRole('button', { name: 'Give Lead a task' }).click()
   await lead.getByLabel('Task for Lead').fill('Half a thought')
   await page.evaluate(() => window.__listeners.get('state-changed')())
@@ -454,44 +481,71 @@ test('gives a coordinator a task by name from its bay, and keeps a half-written 
   await expect(page.locator('#status')).toHaveText('T-9 queued for the lead.')
 })
 
-test('shows a member out of quota, and work in review with its round', async ({ page }) => {
+test("shows a member out of quota, and a task's reviews under it, never as cards of their own", async ({
+  page,
+}) => {
   const data = model()
   data.boards[1].lanes[2].tasks.push(
     task(8, 'Add the lexer', 'review', 'lead', 'zeus', 1, { round: 1 }),
   )
   data.boards[1].lanes.push({
     participant: participant(7, 'hera', 'reviewer', { harness: 'pi' }),
-    tasks: [task(9, 'Review T-8', 'working', 'lead', 'hera', 1, { kind: 'review', reviewOf: 8 })],
+    tasks: [
+      task(9, 'Review T-8', 'working', 'lead', 'hera', 1, {
+        kind: 'review',
+        reviewOf: 8,
+        round: 2,
+      }),
+      task(10, 'Review T-2', 'done', 'lead', 'hera', 2, {
+        kind: 'review',
+        reviewOf: 2,
+        round: 1,
+        verdict: 'pass',
+      }),
+    ],
     activity: { state: 'working' },
     pane: { id: 'p1-hera', generation: 2 },
   })
   await open(page, data)
-  const diana = page.locator('.bay[data-handle="diana"]')
+  const diana = page.locator('tr[data-handle="diana"]')
   await expect(diana.getByTestId('lamp')).toHaveAttribute('data-state', 'out')
-  await expect(diana.locator('.bay-status')).toHaveText(/^Out of quota until \d\d:\d\d$/)
-  const lexer = page.locator('.bay[data-handle="zeus"] button.strip[data-task="8"]')
-  await expect(lexer.locator('.strip-state')).toHaveText('In review · round 2')
-  await expect(page.locator('.bay[data-handle="hera"] .strip-title')).toHaveText('Review T-8')
-  await expect(page.locator('.bay[data-handle="hera"] .strip-route')).toHaveText(
-    'review of T-8 for @lead',
+  await expect(diana.locator('.row-status')).toHaveText(/^Out of quota until \d\d:\d\d$/)
+  const lexer = page.locator(
+    'tr[data-handle="zeus"] td[data-state="review"] li.card-item:has(button[data-task="8"])',
   )
+  await expect(lexer.locator('.card-state')).toHaveText('In review · round 2')
+  await expect(lexer.locator('.reviews li')).toHaveText(['@hera is reviewing, round 2'])
+  const parser = page.locator(
+    'tr[data-handle="zeus"] td[data-state="done"] li.card-item:has(button[data-task="2"])',
+  )
+  await expect(parser.locator('.reviews li')).toHaveText(['Reviewed by @hera, round 1: pass'])
+  const hera = page.locator('tr[data-handle="hera"]')
+  await expect(hera.locator('button.card')).toHaveCount(0)
+  await expect(hera.locator('td[data-state="working"] .reviewing')).toHaveText('Reviewing T-8')
 })
 
 test('asks for a review of finished work from the drawer', async ({ page }) => {
   await open(page)
-  await page.locator('.bay[data-handle="zeus"] button.strip[data-task="2"]').click()
+  await page.locator('button.card[data-task="2"]').click()
   const drawer = page.getByRole('complementary', { name: 'Task T-2' })
   await drawer.getByRole('button', { name: 'Ask for a review' }).click()
   await expect.poll(() => calls(page, 'task.review')).toEqual([{ project: 1, task: 2 }])
 })
 
-test("opens a strip's thread and accepts the result", async ({ page }) => {
+test("opens a card's drawer with the result apart from the brief and the reviews under it, and accepts", async ({
+  page,
+}) => {
   await open(page)
-  await page.locator('.bay[data-handle="zeus"] button.strip[data-task="2"]').click()
+  await page.locator('button.card[data-task="2"]').click()
   const drawer = page.getByRole('complementary', { name: 'Task T-2' })
-  await expect(drawer.locator('.thread-body')).toHaveText([
-    'Write the parser',
-    'Parser done, 14 tests.',
+  await expect(drawer.locator('.drawer-brief')).toHaveText('Write the parser')
+  await expect(drawer.getByRole('heading', { name: 'Result' })).toBeVisible()
+  await expect(drawer.locator('.drawer-result')).toHaveText('Parser done, 14 tests.')
+  await expect(drawer.locator('.drawer-review .drawer-review-head')).toHaveText([
+    'Reviewed by @hera, round 1: pass',
+  ])
+  await expect(drawer.locator('.drawer-review .drawer-review-body')).toHaveText([
+    'Looks right.\n\nVERDICT: pass',
   ])
   await drawer.getByRole('button', { name: 'Accept' }).click()
   await expect.poll(() => calls(page, 'task.accept')).toEqual([{ project: 1, task: 2 }])
@@ -499,7 +553,7 @@ test("opens a strip's thread and accepts the result", async ({ page }) => {
 
 test('sends a failed task back with a follow-up', async ({ page }) => {
   await open(page)
-  await page.locator('.bay[data-handle="diana"] button.strip').click()
+  await page.locator('tr[data-handle="diana"] button.card').click()
   const drawer = page.getByRole('complementary', { name: 'Task T-3' })
   await drawer.getByLabel('Follow-up for T-3').fill('Try again with the smaller model.')
   await drawer.getByRole('button', { name: 'Send back' }).click()
@@ -609,41 +663,37 @@ function withPm() {
   return data
 }
 
-test("groups the PM's team after the lead's, on the board and in its own windows", async ({
+test("groups the PM's team after the lead's, on the board and in the dock's strip of windows", async ({
   page,
 }) => {
   await open(page, withPm())
   await expect(page.locator('.board-group')).toHaveText(["Lead's team", "PM's team"])
   expect(
-    await page.locator('.bay').evaluateAll((bays) => bays.map((bay) => bay.dataset.handle)),
+    await page
+      .locator('tbody tr[data-handle]')
+      .evaluateAll((rows) => rows.map((row) => row.dataset.handle)),
   ).toEqual(['human', 'lead', 'zeus', 'diana', 'pm', 'athena'])
 
-  // The dock on the right holds one window beside the board: the lead's, the
-  // PM's, or a member's for a while; every other window waits off stage.
+  // The dock on the right is a strip of every window, the lead first, then
+  // the PM, then the members; a row's Terminal button brings its card into view.
   const dock = page.getByRole('complementary', { name: 'Terminal dock' })
-  const tabs = dock.getByRole('group', { name: 'Docked window' })
-  const docked = () =>
+  const cards = () =>
     dock.locator('.terminal-card').evaluateAll((cards) => cards.map((c) => c.dataset.handle))
-  await expect.poll(docked).toEqual(['lead'])
-  await expect(tabs.getByRole('button')).toHaveText(['Lead', 'PM'])
-  await tabs.getByRole('button', { name: 'PM', exact: true }).click()
-  await expect.poll(docked).toEqual(['pm'])
-  await expect(tabs.getByRole('button', { name: 'PM', exact: true })).toHaveAttribute(
-    'aria-pressed',
-    'true',
+  await expect.poll(cards).toEqual(['lead', 'zeus', 'pm', 'athena'])
+  await expect(dock.locator('.terminal-card[data-focused="true"]')).toHaveAttribute(
+    'data-handle',
+    'lead',
   )
   await page.getByRole('button', { name: "Open @athena's terminal" }).click()
-  await expect.poll(docked).toEqual(['athena'])
-  await expect(tabs.getByRole('button')).toHaveText(['Lead', 'PM', '@athena'])
   await expect(dock.locator('.terminal-card[data-focused="true"]')).toHaveAttribute(
     'data-handle',
     'athena',
   )
-  await tabs.getByRole('button', { name: 'Lead', exact: true }).click()
-  await expect.poll(docked).toEqual(['lead'])
-  await expect(tabs.getByRole('button')).toHaveText(['Lead', 'PM'])
   expect(await page.evaluate(() => window.__emulators.length)).toBe(4)
-  expect(await page.locator('.bay').count()).toBe(6, 'the board stays beside the dock')
+  expect(await page.locator('tbody tr[data-handle]').count()).toBe(
+    6,
+    'the board stays beside the dock',
+  )
 })
 
 test('opens the agents screens in their own window, and refreshes the agents when this one is back in front', async ({
@@ -680,9 +730,9 @@ test('shows a member between tasks as free, its window gone until the next task'
   const diana = data.boards[1].lanes.find((lane) => lane.participant.handle === 'diana')
   diana.participant.outUntil = null
   await open(page, data)
-  const bay = page.locator('.bay[data-handle="diana"]')
-  await expect(bay.locator('.bay-status')).toHaveText('Free: a window opens with its next task')
-  await expect(bay.getByTestId('lamp')).toHaveAttribute('data-state', 'closed')
+  const row = page.locator('tr[data-handle="diana"]')
+  await expect(row.locator('.row-status')).toHaveText('Free: a window opens with its next task')
+  await expect(row.getByTestId('lamp')).toHaveAttribute('data-state', 'closed')
 })
 
 test('closes an open project from the list', async ({ page }) => {
@@ -711,16 +761,17 @@ test('starts a project in a chosen folder with the chosen lead', async ({ page }
     .toEqual([{ directory: '/work/fresh', harness: 'opencode', review: 'none' }])
 })
 
-test('shows the live windows, focused on the one asked for, and feeds them their output', async ({
+test('shows every live window in the strip, brings the asked one into view, and feeds them their output', async ({
   page,
 }) => {
   await open(page)
   const dock = page.getByRole('complementary', { name: 'Terminal dock' })
-  await expect(dock.getByRole('group', { name: 'Docked window' }).getByRole('button')).toHaveText([
-    'Lead',
-  ])
+  await expect(dock.locator('.terminal-card')).toHaveCount(2)
+  await expect(dock.locator('.terminal-card[data-focused="true"]')).toHaveAttribute(
+    'data-handle',
+    'lead',
+  )
   await page.getByRole('button', { name: "Open @zeus's terminal" }).click()
-  await expect(dock.locator('.terminal-card')).toHaveCount(1)
   await expect(dock.locator('.terminal-card[data-focused="true"]')).toHaveAttribute(
     'data-handle',
     'zeus',
@@ -738,6 +789,26 @@ test('shows the live windows, focused on the one asked for, and feeds them their
     () => window.__calls.filter(([c]) => c === 'subscribe_output').length,
   )
   expect(subscriptions).toBe(1)
+})
+
+test("keeps an ended window's terminal in the strip until the human closes it", async ({
+  page,
+}) => {
+  await open(page)
+  const dock = page.getByRole('complementary', { name: 'Terminal dock' })
+  await expect(dock.locator('.terminal-card[data-handle="zeus"]')).toHaveCount(1)
+  await page.evaluate(() => {
+    const lane = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+    lane.pane = null
+    lane.activity = { state: 'closed' }
+    window.__listeners.get('state-changed')()
+  })
+  const ended = dock.locator('.terminal-card[data-handle="zeus"]')
+  await expect(ended).toHaveAttribute('data-ended', 'true')
+  await expect(ended.getByText('ended')).toBeVisible()
+  await ended.getByRole('button', { name: "Close @zeus's ended window" }).click()
+  await expect(dock.locator('.terminal-card[data-handle="zeus"]')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: "Open @zeus's terminal" })).toBeDisabled()
 })
 
 test('offers no terminal for a participant without a window', async ({ page }) => {

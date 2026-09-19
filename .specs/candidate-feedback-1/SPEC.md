@@ -132,7 +132,7 @@ reviewer, and wrote down what he saw. His words, in the order they came:
 - [x] [TEST-CF1-03] `cf --help` and `cf task --help` print the usage; the lead, PM, worker, advisor and reviewer texts open with the command card; `cf team` and the skill table carry no descriptions; the coordinators' texts say tags prefer, names are not theirs to pick.
 - [x] [IMPL-CF1-04] Satisfies TEST-CF1-03.
 
-### Phase B: The kanban [active]
+### Phase B: The kanban [completed]
 
 Design, 2026-09-20, before the code:
 
@@ -162,12 +162,12 @@ Design, 2026-09-20, before the code:
   it or the human closes it. The dock tabs go.
 
 
-- [ ] [TEST-CF1-05] Page: columns by state, rows by participant, cards that stay when done with the result's first line, the drawer from a card, the failed and cancelled fold, the lamp on the row head, the composer where the Open tasks bay was. Data: `board.get` returns every task of the project, not the active ones.
-- [ ] [IMPL-CF1-06] Satisfies TEST-CF1-05.
-- [ ] [TEST-CF1-07] Dock: a horizontal strip of every window, lead first, scrolling sideways; an ended window's terminal stays in it, readable and marked ended, until the member's next window or the human closes it.
-- [ ] [IMPL-CF1-08] Satisfies TEST-CF1-07.
+- [x] [TEST-CF1-05] Page: columns by state, rows by participant, cards that stay when done with the result's first line, the drawer from a card, the failed and cancelled fold, the lamp on the row head, the composer where the Open tasks bay was. Data: `board.get` returns every task of the project, not the active ones.
+- [x] [IMPL-CF1-06] Satisfies TEST-CF1-05.
+- [x] [TEST-CF1-07] Dock: a horizontal strip of every window, lead first, scrolling sideways; an ended window's terminal stays in it, readable and marked ended, until the member's next window or the human closes it.
+- [x] [IMPL-CF1-08] Satisfies TEST-CF1-07.
 
-### Phase C: The team [planned]
+### Phase C: The team [active]
 
 - [ ] [TEST-CF1-09] Ledger: `roles` as a set per member; `members(project, role)` by role; a worker-reviewer under review of its own work is busy and takes no review; `addMember` and `removeMember` and `setReview` refuse a policy with no reviewer role, with a named reason; `lastTeam` carries roles.
 - [ ] [IMPL-CF1-10] Schema (in place; nothing shipped it), ledger, API (`roles`), CLI `cf team`, page operations; satisfies TEST-CF1-09.
@@ -221,3 +221,21 @@ Windows, acceptance) and the importer.
   every window gets its role text from the core, and a launch without one is
   refused (role-skills tests rewritten, 18 cases across five harnesses and
   five roles).
+- 2026-09-20, Phase B. The board is a kanban: a table with a row per
+  participant (the human's row holds its backlog) and a column per state,
+  Failed and Cancelled sharing the last one; cards stay where they end and
+  a done card shows the first line of its result (`board.get` gives every
+  task its `result` line); a task's reviews sit under its card, one line
+  each, and a reviewer's row shows "Reviewing T-n" while it works; "For
+  you" above the grid keeps the questions, results and the composer. The
+  drawer shows the brief, the result as its own block, each review with its
+  findings (`task.get` carries `reviews`), then the rest of the thread. The
+  dock is a horizontal strip of every window in row order; a row's Terminal
+  button brings its card into view; an ended window stays, marked ended,
+  until the member's next window or its Close. RED: nine page tests
+  rewritten and one added (an ended window kept, then closed), a ledger
+  test for the result line and the reviews. GREEN: 70/70 page tests, 55/55
+  ledger. Found on the way: a stray brace left by the tab-styles removal
+  silently disabled every rule after it (the board lost its overflow and the
+  dock intercepted clicks on cards); a brace count is now part of the
+  checklist for stylesheet edits.

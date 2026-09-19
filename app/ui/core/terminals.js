@@ -1,25 +1,25 @@
 import { EmulatorRegistry, paneKey } from '../term.js'
 import { TerminalLink } from '../terminal-link.js'
-import { element } from './board.js'
+import { element, laneOrder } from './board.js'
 
 /**
- * The live windows behind the board: one terminal per participant that has a
- * pane, and one of them docked beside the board at a time (the lead's, the
- * PM's, or a member's for a while). A terminal outlives the dock: while
- * another window is docked, its card waits in an off-screen parking lot so
- * the emulator keeps receiving output and keeps its scrollback, its size and
- * the human's half-typed input.
+ * The live windows beside the board: a horizontal strip of one terminal per
+ * participant that has a pane, the lead first, then the PM, then the members,
+ * scrolling sideways. A window that ended stays in the strip, marked ended
+ * and still readable, until its participant opens a new one or the human
+ * closes it; the emulator keeps its scrollback, its size and the human's
+ * half-typed input the whole time.
  */
 export class TerminalsView {
   #stage
-  #parking
   #registry
   #link
   #cards = new Map()
+  #onChange
 
-  constructor(stage, parking, { invoke, report, createEmulator }) {
+  constructor(stage, { invoke, report, createEmulator, onChange = () => {} }) {
     this.#stage = stage
-    this.#parking = parking
+    this.#onChange = onChange
     this.#registry = new EmulatorRegistry({
       ...(createEmulator ? { createEmulator } : {}),
       onData: (pane, data) => void this.#link.input(pane, data),
@@ -31,7 +31,7 @@ export class TerminalsView {
 
   /** Bytes from the pane host; a pane the board has not drawn yet still gets them. */
   output(message) {
-    this.#link.output(message, (pane) => this.#emulator(pane, null))
+    this.#link.output(message, (pane) => this.#emulator(pane))
   }
 
   /** The emulators, keyed `id:generation`: what the packaged smoke reads the screen from. */
@@ -44,51 +44,75 @@ export class TerminalsView {
     return this.#link.input(pane, data)
   }
 
-  /** Keep a window for every lane that has one, and dock the one whose handle is `docked`. */
-  render(lanes, { docked }) {
-    const live = lanes.filter((lane) => lane.pane !== null)
-    const keys = new Set(live.map((lane) => paneKey(lane.pane)))
-    for (const key of [...this.#cards.keys()]) {
-      if (keys.has(key)) continue
-      this.#cards.get(key).card.remove()
-      this.#cards.delete(key)
-      this.#link.retire(key)
+  /** Whether a participant has a window in the strip, live or ended. */
+  has(handle) {
+    return [...this.#cards.values()].some((entry) => entry.handle === handle)
+  }
+
+  /**
+   * Keep a window for every lane that has one, in lane order; keep an ended
+   * window until its participant opens a new one; bring `focused` into view.
+   */
+  render(lanes, { focused }) {
+    const ordered = laneOrder(lanes)
+    for (const [order, lane] of ordered.entries()) {
+      if (lane.pane === null) continue
+      for (const [key, entry] of this.#cards) {
+        if (entry.handle === lane.participant.handle && key !== paneKey(lane.pane)) this.#drop(key)
+      }
+      this.#card(lane.pane, lane, order)
     }
-    const cards = new Map(live.map((lane) => [lane, this.#card(lane.pane, lane)]))
-    const shown = live.find((lane) => lane.participant.handle === docked) ?? null
-    for (const [lane, card] of cards) if (lane !== shown) this.#parking.append(card)
-    if (shown === null) {
-      const wanted = lanes.find((lane) => lane.participant.handle === docked)
-      this.#stage.replaceChildren(
-        element(
-          'p',
-          'stage-empty',
-          wanted === undefined
-            ? 'No window is open yet.'
-            : `${laneName(wanted.participant)} has no window open.`,
-        ),
-      )
+    for (const entry of this.#cards.values()) {
+      const lane = ordered.find((lane) => lane.participant.handle === entry.handle)
+      const live = lane !== undefined && lane.pane !== null && paneKey(lane.pane) === entry.key
+      entry.card.dataset.ended = String(!live)
+      entry.ended.hidden = live
+    }
+    const cards = [...this.#cards.values()].sort((a, b) => a.order - b.order)
+    if (cards.length === 0) {
+      this.#stage.replaceChildren(element('p', 'stage-empty', 'No window is open yet.'))
       return
     }
-    const card = cards.get(shown)
-    card.dataset.focused = 'true'
-    this.#stage.replaceChildren(card)
-    this.#registry.fit(shown.pane.id, shown.pane.generation)
+    this.#stage.replaceChildren(...cards.map((entry) => entry.card))
+    const shown = cards.find((entry) => entry.handle === focused) ?? cards[0]
+    for (const entry of cards) entry.card.dataset.focused = String(entry === shown)
+    for (const entry of cards) {
+      const [id, generation] = [entry.pane.id, entry.pane.generation]
+      this.#registry.fit(id, generation)
+    }
+    shown.card.scrollIntoView({ inline: 'nearest', block: 'nearest' })
     requestAnimationFrame(() =>
       this.#registry.get(shown.pane.id, shown.pane.generation)?.terminal?.focus(),
     )
   }
 
-  #card(pane, lane) {
+  /** The human closes an ended window's card; a live one stays. */
+  close(handle) {
+    for (const [key, entry] of this.#cards) {
+      if (entry.handle === handle && entry.card.dataset.ended === 'true') this.#drop(key)
+    }
+    this.#onChange()
+  }
+
+  #drop(key) {
+    const entry = this.#cards.get(key)
+    if (entry === undefined) return
+    entry.card.remove()
+    this.#cards.delete(key)
+    this.#link.retire(key)
+  }
+
+  #card(pane, lane, order = Number.MAX_SAFE_INTEGER) {
     const key = paneKey(pane)
     let entry = this.#cards.get(key)
     if (entry === undefined) {
       const card = element('section', 'terminal-card')
       const head = element('header', 'terminal-head')
       const host = element('div', 'terminal-host')
+      const ended = element('span', 'terminal-ended', 'ended')
+      ended.hidden = true
       card.append(head, host)
-      this.#parking.append(card)
-      entry = { card, head, host }
+      entry = { key, pane, card, head, host, ended, handle: null, order: Number.MAX_SAFE_INTEGER }
       this.#cards.set(key, entry)
       this.#registry.ensure(pane, host)
     }
@@ -97,13 +121,21 @@ export class TerminalsView {
       const lamp = element('span', 'lamp')
       lamp.dataset.state = lane.activity?.state ?? 'closed'
       lamp.setAttribute('aria-hidden', 'true')
+      const close = element('button', 'quiet-button terminal-close', 'Close')
+      close.type = 'button'
+      close.setAttribute('aria-label', `Close ${name}'s ended window`)
+      close.addEventListener('click', () => this.close(lane.participant.handle))
       entry.head.replaceChildren(
         lamp,
         element('span', 'terminal-name', name),
         element('span', 'terminal-meta', lane.participant.harness ?? ''),
+        entry.ended,
+        close,
       )
       entry.card.setAttribute('aria-label', `${name}'s terminal`)
       entry.card.dataset.handle = lane.participant.handle
+      entry.handle = lane.participant.handle
+      entry.order = order
     }
     return entry.card
   }

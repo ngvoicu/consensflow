@@ -1611,6 +1611,55 @@ describe('tiered dispatch: the review gate', () => {
     })
   })
 
+  it("gives the board each task's result line, and a task its reviews for the drawer", async () => {
+    await withLedger((ledger) => {
+      const { project, id } = reviewed(ledger)
+      const zeusCard = () =>
+        ledger.board(project.id).lanes.find((l) => l.participant.handle === 'zeus').tasks[0]
+      const { number } = finished(
+        ledger,
+        project,
+        id,
+        '  \nParser done: 14 tests.\nMore lines follow.',
+      )
+      assert.equal(
+        zeusCard().result,
+        'Parser done: 14 tests.',
+        'the first line that says something',
+      )
+      const review = ledger.createReview(project.id, number, { reviewer: id('diana') })
+      deliver(ledger, review.message)
+      ledger.recordVerdict(project.id, review.task.number, {
+        body: 'Looks right.\n\nVERDICT: pass',
+      })
+      assert.deepEqual(ledger.task(project.id, number).reviews, [
+        {
+          number: review.task.number,
+          round: 1,
+          reviewer: 'diana',
+          state: 'done',
+          verdict: 'pass',
+          findings: 'Looks right.\n\nVERDICT: pass',
+        },
+      ])
+      assert.deepEqual(
+        ledger.task(project.id, review.task.number).reviews,
+        [],
+        'a review has none of its own',
+      )
+      const open = ledger.createTask(project.id, {
+        from: 'lead',
+        pool: 'worker',
+        tier: 'standard',
+        body: 'Lexer',
+      })
+      assert.equal(
+        ledger.board(project.id).open.find((t) => t.number === open.task.number).result,
+        null,
+      )
+    })
+  })
+
   it('reads a review with no verdict line as a pass, and says so', async () => {
     await withLedger((ledger) => {
       const { project, id } = reviewed(ledger)

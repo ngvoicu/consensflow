@@ -235,6 +235,15 @@ const deliveryBody = (task) =>
     ? task.body
     : `Critical work: ${task.purpose}. ${CRITICAL_RULE}\n\n${task.body}`
 
+/** A result as its card shows it: the first line that says something, or null. */
+const firstLine = (body) =>
+  body === undefined
+    ? null
+    : (body
+        .split('\n')
+        .map((line) => line.trim())
+        .find(Boolean) ?? null)
+
 /** A card title: the first line that says something, shortened to fit. */
 function titleOf(body) {
   const line = body
@@ -1401,10 +1410,19 @@ class Ledger {
   board(projectId) {
     const project = this.project(projectId)
     if (project === null) throw new LedgerError('unknown-project', `no project ${projectId}`, 404)
+    const results = new Map(
+      this.#db
+        .prepare(
+          `SELECT task_id, body FROM message WHERE project_id = ? AND kind = 'result' ORDER BY id`,
+        )
+        .all(projectId)
+        .map((row) => [row.task_id, row.body]),
+    )
+    // Each task with the first line of its latest result: what its card shows.
     const tasks = this.#db
       .prepare(`${TASK_SELECT} WHERE t.project_id = ? ORDER BY t.number`)
       .all(projectId)
-      .map(taskView)
+      .map((row) => ({ ...taskView(row), result: firstLine(results.get(row.id)) }))
     return {
       project,
       open: tasks.filter((task) => task.state === 'open'),
@@ -1427,6 +1445,7 @@ class Ledger {
         .prepare(`${MESSAGE_SELECT} WHERE m.task_id = ? ORDER BY m.id`)
         .all(row.id)
         .map(messageView),
+      reviews: row.kind === 'work' ? this.reviewsOf(projectId, number) : [],
     }
   }
 

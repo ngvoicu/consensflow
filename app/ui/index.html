@@ -145,27 +145,13 @@
     }
     .dock {
       display: grid;
-      grid-template-rows: 38px minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr);
       min-height: 0;
       border-left: 1px solid var(--line-soft);
       background: var(--ink);
     }
-    .dock-tabs { display: flex; gap: 4px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--line-soft); }
-    .dock-tabs button {
-      padding: 4px 10px;
-      border: 1px solid transparent;
-      border-radius: 6px;
-      background: transparent;
-      color: var(--muted);
-      font: 600 11px var(--mono);
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      cursor: pointer;
-    }
-    .dock-tabs button:hover { color: var(--foam); }
-    .dock-tabs button[aria-pressed="true"] { background: var(--panel-raised); color: var(--seafoam); border-color: var(--line); }
 
-    /* The board: one bay per participant, one strip per task. */
+    /* The board: what waits for the human, then the kanban of every task. */
     .board {
       overflow: auto;
       padding: 16px 20px 56px;
@@ -174,39 +160,73 @@
       align-content: start;
     }
     .board-empty { color: var(--muted); margin: 40px auto; max-width: 420px; text-align: center; }
-    .board-group {
-      margin: 8px 2px -4px;
+    .foryou {
+      border: 1px solid rgba(231, 185, 104, .32);
+      border-radius: 10px;
+      padding: 10px 12px 12px;
+      background: linear-gradient(90deg, rgba(231, 185, 104, .07), transparent 45%), var(--deep);
+    }
+    .foryou-head { display: flex; align-items: center; gap: 10px; min-height: 30px; flex-wrap: wrap; }
+    .foryou-name {
+      margin: 0;
+      font: 700 11px/1 var(--mono);
+      letter-spacing: .16em;
+      text-transform: uppercase;
+      color: var(--amber);
+    }
+    .foryou-status { margin-left: auto; font: 600 11px var(--mono); color: var(--amber); }
+    .bay-empty { color: var(--muted); font-size: 12px; padding: 2px 2px 0; list-style: none; }
+
+    /* The kanban: a row per participant, a column per state. */
+    .kanban {
+      border-collapse: separate;
+      border-spacing: 0;
+      width: 100%;
+      min-width: 1180px;
+      table-layout: fixed;
+    }
+    .kanban thead th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--ink);
+      padding: 6px 8px;
+      text-align: left;
+      font: 700 10px/1 var(--mono);
+      letter-spacing: .16em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .kanban .kanban-team { width: 220px; }
+    .kanban th[data-state="ended"] { color: var(--muted); }
+    .kanban tbody td, .kanban tbody th {
+      vertical-align: top;
+      padding: 8px;
+      border-bottom: 1px solid var(--line-soft);
+      border-left: 1px solid var(--line-soft);
+    }
+    .kanban tbody th { border-left: 0; }
+    .kanban td[data-state="ended"] { background: rgba(0, 0, 0, .12); }
+    .kanban .board-group td {
+      padding: 12px 8px 4px;
+      border: 0;
       font: 700 10px/1 var(--mono);
       letter-spacing: .18em;
       text-transform: uppercase;
       color: var(--muted);
     }
-    .bay {
-      background: var(--deep);
-      border: 1px solid var(--line-soft);
-      border-radius: 10px;
-      padding: 10px 12px 12px;
-    }
-    .bay-human {
-      border-color: rgba(231, 185, 104, .32);
-      background: linear-gradient(90deg, rgba(231, 185, 104, .07), transparent 45%), var(--deep);
-    }
-    .bay-head { display: flex; align-items: center; gap: 10px; min-height: 30px; flex-wrap: wrap; }
-    .bay-name {
-      margin: 0;
-      font: 700 11px/1 var(--mono);
-      letter-spacing: .16em;
-      text-transform: uppercase;
-    }
-    .bay-human .bay-name { color: var(--amber); }
-    .bay-meta { font: 11px var(--mono); color: var(--muted); }
-    .bay-status { margin-left: auto; font: 600 11px var(--mono); color: var(--muted); }
-    .bay-status[data-state="working"] { color: var(--seafoam); }
-    .bay-status[data-state="waiting"] { color: var(--amber); }
-    .bay-human .bay-status { color: var(--amber); }
-    .bay-tools { display: flex; gap: 6px; }
-    .bay-empty { color: var(--muted); font-size: 12px; padding: 2px 2px 0; list-style: none; }
-    .bay-cleared { margin: 8px 2px 0; font: 11px var(--mono); color: var(--muted); }
+    .row-head { text-align: left; font-weight: normal; }
+    .row-title { display: flex; align-items: center; gap: 8px; }
+    .row-name { font: 700 11px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; }
+    tr[data-handle="human"] .row-name { color: var(--amber); }
+    .row-meta { display: block; margin-top: 6px; font: 11px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+    .row-status { display: block; margin-top: 6px; font: 600 11px var(--mono); color: var(--muted); }
+    .row-status[data-state="working"] { color: var(--seafoam); }
+    .row-status[data-state="waiting"] { color: var(--amber); }
+    .row-status[data-state="out"] { color: var(--buoy); }
+    .row-tools { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+    .row-head .composer { margin-top: 8px; }
 
     .lamp {
       width: 10px;
@@ -230,23 +250,23 @@
     .lamp[data-state="starting"] { border-color: var(--seafoam); animation: lamp-blink 1s steps(2) infinite; }
     .lamp[data-state="unknown"] { border-style: dashed; }
     .lamp[data-state="out"] { border-color: var(--buoy); background: rgba(255, 120, 104, .25); }
-    .bay-status[data-state="out"] { color: var(--buoy); }
     @keyframes lamp-pulse {
       50% { box-shadow: 0 0 0 5px rgba(99, 199, 178, .06), 0 0 16px rgba(99, 199, 178, .3); }
     }
     @keyframes lamp-blink { 50% { border-color: transparent; } }
 
-    /* A strip: segmented boxes, the number block in the colour of its state. */
-    .strips { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
-    .strip {
+    /* A card: the number block in the colour of its state, the result on it when done. */
+    .cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+    .card {
       --state: var(--slate);
       --state-ink: var(--foam);
       width: 100%;
-      min-height: 38px;
       display: grid;
-      grid-template-columns: 66px minmax(0, 1fr) minmax(0, auto) 118px 64px;
-      align-items: stretch;
-      padding: 0;
+      grid-template-columns: auto minmax(0, 1fr);
+      grid-template-areas: "number title" "number route" "number result";
+      column-gap: 10px;
+      row-gap: 2px;
+      padding: 0 10px 0 0;
       background: var(--strip);
       border: 1px solid var(--line-soft);
       border-radius: 5px;
@@ -254,8 +274,60 @@
       cursor: pointer;
       overflow: hidden;
     }
-    button.strip:hover { background: var(--strip-hover); }
-    .strip > span, .strip-line > span {
+    .card:hover { background: var(--strip-hover); }
+    .card-number {
+      grid-area: number;
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      background: var(--state);
+      color: var(--state-ink);
+      font: 700 11px var(--mono);
+      letter-spacing: .03em;
+    }
+    .card-title { grid-area: title; padding-top: 6px; font-size: 13px; overflow-wrap: anywhere; }
+    .card-route { grid-area: route; font: 11px var(--mono); color: var(--muted); }
+    .card-state, .card-age { display: none; }
+    .card-result {
+      grid-area: result;
+      padding-bottom: 6px;
+      font-size: 12px;
+      color: var(--seafoam);
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .card:not(:has(.card-result)) .card-route { padding-bottom: 6px; }
+    .card[data-state="working"] { --state: var(--seafoam); --state-ink: var(--ink); }
+    .card[data-state="waiting"] { --state: var(--amber); --state-ink: var(--ink); }
+    .card[data-state="review"] { --state: var(--amber); --state-ink: var(--ink); }
+    .card[data-state="done"] { --state: var(--foam); --state-ink: var(--ink); }
+    .card[data-state="failed"] { --state: var(--buoy); --state-ink: var(--ink); }
+    .card[data-state="accepted"] { --state: var(--seafoam-dim); }
+    .card[data-state="cancelled"] { opacity: .6; }
+    td[data-state="review"] .card-state { display: block; grid-area: route; }
+    td[data-state="review"] .card-route { display: none; }
+    .reviews { list-style: none; margin: 4px 0 0; padding: 0 0 0 10px; font: 11px var(--mono); color: var(--muted); }
+    .reviews li { border-left: 2px solid var(--line); padding: 2px 8px; }
+    .reviewing { list-style: none; font: 11px var(--mono); color: var(--amber); padding: 6px 2px; }
+
+    /* A message waiting for the human: a strip with its answer box. */
+    .strips { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+    .strip {
+      --state: var(--slate);
+      --state-ink: var(--foam);
+      width: 100%;
+      min-height: 38px;
+      display: grid;
+      align-items: stretch;
+      padding: 0;
+      background: var(--strip);
+      border: 1px solid var(--line-soft);
+      border-radius: 5px;
+      text-align: left;
+      overflow: hidden;
+    }
+    .strip-line > span {
       display: flex;
       align-items: center;
       padding: 0 12px;
@@ -280,18 +352,6 @@
     }
     .strip-route, .strip-age { font: 11px var(--mono); color: var(--muted); white-space: nowrap; }
     .strip-age { justify-content: flex-end; }
-    .strip-state {
-      font: 700 10px var(--mono);
-      letter-spacing: .14em;
-      text-transform: uppercase;
-      color: var(--state);
-    }
-    .strip[data-state="queued"] .strip-state { color: var(--muted); }
-    .strip[data-state="working"] { --state: var(--seafoam); --state-ink: var(--ink); }
-    .strip[data-state="waiting"] { --state: var(--amber); --state-ink: var(--ink); }
-    .strip[data-state="done"] { --state: var(--foam); --state-ink: var(--ink); }
-    .strip[data-state="failed"] { --state: var(--buoy); --state-ink: var(--ink); }
-    .strip[data-state="accepted"] { --state: var(--seafoam-dim); }
 
     .strip-message { display: block; cursor: default; }
     .strip-line {
@@ -356,7 +416,7 @@
     }
     .drawer-head { display: flex; align-items: center; gap: 10px; }
     .drawer-title { margin: 0; flex: 1; display: flex; align-items: center; gap: 10px; font-size: 15px; }
-    .drawer-title .strip-number {
+    .drawer-title .card-number {
       padding: 3px 8px;
       border-radius: 4px;
       background: var(--state, var(--slate));
@@ -368,6 +428,25 @@
     .drawer[data-state="failed"] { --state: var(--buoy); --state-ink: var(--ink); }
     .drawer[data-state="accepted"] { --state: var(--seafoam-dim); }
     .drawer-meta { margin: 8px 0 14px; font: 11px var(--mono); color: var(--muted); }
+    .drawer-section { margin: 0 0 14px; }
+    .drawer-section h3 {
+      margin: 0 0 6px;
+      font: 700 10px/1 var(--mono);
+      letter-spacing: .16em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .drawer-brief, .drawer-result, .drawer-review-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .drawer-result-section {
+      padding: 10px 12px;
+      border: 1px solid var(--seafoam-dim);
+      border-left: 3px solid var(--seafoam);
+      border-radius: 6px;
+      background: rgba(99, 199, 178, .06);
+    }
+    .drawer-result-section h3 { color: var(--seafoam); }
+    .drawer-review { padding: 8px 12px; border-left: 3px solid var(--amber); }
+    .drawer-review-head { color: var(--amber); }
     .thread { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
     .thread-item { border-left: 3px solid var(--slate); padding: 2px 0 2px 12px; }
     .thread-item[data-kind="result"] { border-color: var(--seafoam); }
@@ -384,7 +463,16 @@
     .reopen { display: flex; gap: 8px; align-items: flex-start; }
 
     /* The live windows. */
-    .stage { display: grid; padding: 8px; min-height: 0; }
+    .stage {
+      display: flex;
+      gap: 8px;
+      padding: 8px;
+      min-height: 0;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scroll-snap-type: x proximity;
+    }
+    .stage .terminal-card { flex: 0 0 min(100%, 720px); scroll-snap-align: start; }
     .stage-empty { color: var(--muted); margin: 40px auto; }
     .terminal-card {
       min-width: 0;
@@ -407,8 +495,20 @@
     }
     .terminal-name { font-weight: 700; letter-spacing: .08em; }
     .terminal-meta { color: var(--muted); }
+    .terminal-ended {
+      margin-left: auto;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: var(--panel-raised);
+      color: var(--muted);
+      font: 700 10px var(--mono);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .terminal-close { display: none; }
+    .terminal-card[data-ended="true"] { border-style: dashed; }
+    .terminal-card[data-ended="true"] .terminal-close { display: inline-block; }
     .terminal-host { min-height: 0; padding: 4px 2px 2px 6px; }
-    .parking { position: fixed; left: -10000px; top: 0; width: 960px; height: 640px; overflow: hidden; }
 
     .status {
       position: absolute;
@@ -495,14 +595,12 @@
     <main class="main">
       <section class="board" id="board" aria-label="Board"></section>
       <aside class="dock" id="dock" aria-label="Terminal dock">
-        <div class="dock-tabs" id="dock-tabs" role="group" aria-label="Docked window"></div>
         <section class="stage" id="stage" aria-label="Terminals"></section>
       </aside>
       <aside class="drawer" id="task-drawer" hidden></aside>
       <p class="status" id="status" role="status" aria-live="polite"></p>
     </main>
   </div>
-  <div class="parking" id="parking" aria-hidden="true"></div>
 
 
   <dialog id="new-project-dialog" aria-labelledby="new-project-title">

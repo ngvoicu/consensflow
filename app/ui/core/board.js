@@ -1,8 +1,9 @@
 /**
- * The board: one bay per participant, each task a strip in its assignee's bay,
- * the way a control room keeps one strip per flight in each controller's bay.
- * The human's bay comes first and holds what waits for them: questions to
- * answer, results and notes to read, tasks given to them.
+ * The board: a kanban of the project's tasks. One row per participant, one
+ * column per state, every task a card that stays where it ended, with its
+ * result on it. A task's reviews sit under its card, never as cards of their
+ * own. Above the grid, what waits for the human: questions to answer, results
+ * and notes to read, and the composer that puts a new task on the board.
  *
  * Everything here is drawn from the core's state with `textContent`, never
  * markup, so an agent-written title cannot become HTML. Actions go out through
@@ -10,17 +11,19 @@
  */
 
 const ACTIVE = ['working', 'waiting', 'queued', 'review', 'open']
-const OPEN = [...ACTIVE, 'done', 'failed']
-const STATE_ORDER = [
-  'review',
-  'waiting',
-  'working',
-  'queued',
-  'done',
-  'failed',
-  'accepted',
-  'cancelled',
+/** The columns, in reading order; failed and cancelled share the last one. */
+const COLUMNS = [
+  ['open', 'Backlog'],
+  ['queued', 'Queued'],
+  ['working', 'Working'],
+  ['waiting', 'Waiting'],
+  ['review', 'In review'],
+  ['done', 'Done'],
+  ['accepted', 'Accepted'],
+  ['ended', 'Ended'],
 ]
+const columnOf = (task) =>
+  task.state === 'failed' || task.state === 'cancelled' ? 'ended' : task.state
 const STATE_LABEL = {
   open: 'Open',
   queued: 'Queued',
@@ -107,9 +110,8 @@ const outOfQuota = (participant, now) =>
 const laneName = (participant) =>
   ({ human: 'You', lead: 'Lead', pm: 'PM' })[participant.handle] ?? `@${participant.handle}`
 
-/** Where a task is going or came from, on its strip. */
+/** Where a task is going or came from, on its card. */
 function route(task) {
-  if (task.kind === 'review') return `review of T-${task.reviewOf} for ${who(task.requester)}`
   if (task.assignee === null) {
     return `for a ${task.tier} ${task.pool}${task.tags.length === 0 ? '' : ` · ${task.tags.join(', ')}`}`
   }
@@ -118,6 +120,12 @@ function route(task) {
 
 const stateLabel = (task) =>
   task.state === 'review' ? `In review · round ${task.round + 1}` : STATE_LABEL[task.state]
+
+/** One line per review, as it reads under the task it reviews. */
+const reviewLine = (review) =>
+  review.state === 'done'
+    ? `Reviewed by ${who(review.reviewer)}, round ${review.round}: ${review.verdict ?? 'pass (no verdict line)'}`
+    : `${who(review.reviewer)} is reviewing, round ${review.round}`
 
 /** A member between tasks: one task per session, so its window is gone until the next. */
 const resting = (participant, activity) =>
@@ -144,50 +152,39 @@ export class BoardView {
     this.#actions = actions
   }
 
-  /**
-   * Redraw from the core's state, keeping an open composer and its text. With
-   * a PM in the project, each team's bays sit under its own label.
-   */
+  /** Redraw from the core's state, keeping an open composer and its text. */
   render({ board, inbox, agents = [], now = Date.now() }) {
     this.#saveDrafts()
     const models = new Map(agents.map((agent) => [agent.name, agent]))
-    const grouped = board.lanes.some((lane) => lane.participant.role === 'pm')
-    const nodes = []
-    let team = null
-    for (const lane of laneOrder(board.lanes)) {
-      const next = teamOf(lane.participant)
-      if (grouped && next !== team) {
-        nodes.push(element('p', 'board-group', next === 'pm' ? "PM's team" : "Lead's team"))
-      }
-      team = next
-      nodes.push(
-        lane.participant.role === 'human'
-          ? this.#humanBay(lane, inbox, now)
-          : this.#agentBay(lane, models.get(lane.participant.agent), now),
-      )
-      if (lane.participant.role === 'human') nodes.push(this.#backlogBay(board, now))
-    }
-    this.#root.replaceChildren(...nodes)
+    this.#root.replaceChildren(this.#forYou(inbox, board, now), this.#kanban(board, models, now))
     this.#restoreDrafts()
   }
 
-  #humanBay(lane, inbox, now) {
+  /** What waits for the human, and where a new task starts. */
+  #forYou(inbox, board, now) {
     const waiting = inbox.filter((message) => message.state === 'queued')
-    const tasks = lane.tasks.filter((task) => ACTIVE.includes(task.state))
-    const bay = element('article', 'bay bay-human')
-    bay.dataset.handle = 'human'
-    const head = element('header', 'bay-head')
-    const count = waiting.length + tasks.length
+    const section = element('section', 'foryou')
+    section.setAttribute('role', 'region')
+    section.setAttribute('aria-label', 'For you')
+    const head = element('header', 'foryou-head')
     head.append(
-      element('h2', 'bay-name', 'You'),
-      element('span', 'bay-meta', 'Questions, results and notes for you'),
-      element('span', 'bay-status', count === 0 ? 'Nothing waiting' : `${count} waiting`),
+      element('h2', 'foryou-name', 'For you'),
+      element(
+        'span',
+        'foryou-status',
+        waiting.length === 0 ? 'Nothing waiting' : `${waiting.length} waiting`,
+      ),
+      button('New task', 'quiet-button', () => {
+        this.#composingOpen = !this.#composingOpen
+        this.#actions.onRedraw()
+      }),
     )
+    section.append(head)
+    if (this.#composingOpen) section.append(this.#openComposer(board))
     const strips = element('ol', 'strips')
     strips.setAttribute('aria-label', 'Waiting for you')
     for (const message of waiting) strips.append(this.#messageStrip(message, now))
-    for (const task of tasks) strips.append(this.#taskStrip(task, now))
-    if (count === 0) {
+    if (waiting.length === 0) {
       strips.append(
         element(
           'li',
@@ -196,8 +193,8 @@ export class BoardView {
         ),
       )
     }
-    bay.append(head, strips)
-    return bay
+    section.append(strips)
+    return section
   }
 
   #messageStrip(message, now) {
@@ -252,12 +249,87 @@ export class BoardView {
     return item
   }
 
-  #agentBay(lane, agent, now) {
+  /** The grid: a row per participant in lane order, a column per state. */
+  #kanban(board, models, now) {
+    const table = element('table', 'kanban')
+    table.setAttribute('aria-label', 'Tasks')
+    const head = element('thead')
+    const headRow = element('tr')
+    headRow.append(element('th', 'kanban-team', 'Team'))
+    for (const [state, label] of COLUMNS) {
+      const cell = element('th', null, label)
+      cell.dataset.state = state
+      headRow.append(cell)
+    }
+    head.append(headRow)
+    const body = element('tbody')
+    // Reviews hang under the task they review, wherever the reviewer sits.
+    const reviews = new Map()
+    for (const lane of board.lanes) {
+      for (const task of lane.tasks) {
+        if (task.kind !== 'review') continue
+        const list = reviews.get(task.reviewOf) ?? []
+        list.push({ ...task, reviewer: lane.participant.handle })
+        reviews.set(task.reviewOf, list)
+      }
+    }
+    const grouped = board.lanes.some((lane) => lane.participant.role === 'pm')
+    let team = null
+    for (const lane of laneOrder(board.lanes)) {
+      const next = teamOf(lane.participant)
+      if (grouped && next !== team) {
+        const row = element('tr', 'board-group')
+        const cell = element('td', null, next === 'pm' ? "PM's team" : "Lead's team")
+        cell.colSpan = COLUMNS.length + 1
+        row.append(cell)
+        body.append(row)
+      }
+      team = next
+      body.append(this.#row(lane, board, models.get(lane.participant.agent), reviews, now))
+    }
+    table.append(head, body)
+    return table
+  }
+
+  #row(lane, board, agent, reviews, now) {
     const { participant, activity, pane } = lane
-    const bay = element('article', 'bay')
-    bay.dataset.handle = participant.handle
-    bay.dataset.role = participant.role
-    const head = element('header', 'bay-head')
+    const row = element('tr')
+    row.dataset.handle = participant.handle
+    row.dataset.role = participant.role
+    row.append(this.#rowHead(lane, agent, now))
+    // A task waiting for a member sits in its requester's backlog.
+    const mine = [
+      ...lane.tasks.filter((task) => task.kind !== 'review'),
+      ...board.open.filter((task) => task.requester === participant.handle),
+    ].sort((a, b) => b.number - a.number)
+    const reviewing = lane.tasks.filter((task) => task.kind === 'review' && task.state !== 'done')
+    for (const [state] of COLUMNS) {
+      const cell = element('td')
+      cell.dataset.state = state
+      const list = element('ol', 'cards')
+      for (const task of mine) {
+        if (columnOf(task) !== state) continue
+        list.append(this.#card(task, reviews.get(task.number) ?? [], now))
+      }
+      for (const review of reviewing) {
+        if (columnOf(review) !== state) continue
+        list.append(element('li', 'reviewing', `Reviewing T-${review.reviewOf}`))
+      }
+      if (list.childElementCount > 0) cell.append(list)
+      row.append(cell)
+    }
+    if (pane === null && !resting(participant, activity)) row.dataset.window = 'none'
+    return row
+  }
+
+  #rowHead(lane, agent, now) {
+    const { participant, activity, pane } = lane
+    const head = element('th', 'row-head')
+    head.setAttribute('scope', 'row')
+    if (participant.role === 'human') {
+      head.append(element('span', 'row-name', 'You'))
+      return head
+    }
     const coordinator = participant.role === 'lead' || participant.role === 'pm'
     const identity = [
       coordinator ? null : participant.role,
@@ -271,7 +343,7 @@ export class BoardView {
     const out = outOfQuota(participant, now)
     const status = element(
       'span',
-      'bay-status',
+      'row-status',
       out
         ? `Out of quota until ${clock(participant.outUntil)}`
         : activity?.state === 'waiting' && activity.reason
@@ -281,7 +353,7 @@ export class BoardView {
             : (ACTIVITY_LABEL[activity?.state] ?? 'No window'),
     )
     status.dataset.state = out ? 'out' : (activity?.state ?? 'closed')
-    const tools = element('div', 'bay-tools')
+    const tools = element('div', 'row-tools')
     tools.append(
       button(
         'Terminal',
@@ -290,7 +362,7 @@ export class BoardView {
         `Open ${laneName(participant)}'s terminal`,
       ),
     )
-    if (pane === null) tools.firstChild.disabled = true
+    if (pane === null && !lane.ended) tools.firstChild.disabled = true
     // Only a coordinator takes a task by name; members get theirs from the board by tier.
     if (coordinator) {
       tools.append(
@@ -302,87 +374,40 @@ export class BoardView {
         ),
       )
     }
-    head.append(
+    const title = element('div', 'row-title')
+    title.append(
       lamp(out ? { state: 'out' } : activity),
-      element('h2', 'bay-name', laneName(participant)),
-      element('span', 'bay-meta', identity),
-      status,
-      tools,
+      element('span', 'row-name', laneName(participant)),
     )
-    bay.append(head)
-    if (this.#composing === participant.handle) bay.append(this.#composer(participant))
-
-    const tasks = [...lane.tasks].sort(
-      (a, b) => STATE_ORDER.indexOf(a.state) - STATE_ORDER.indexOf(b.state) || b.number - a.number,
-    )
-    const open = tasks.filter((task) => OPEN.includes(task.state))
-    const cleared = tasks.length - open.length
-    const strips = element('ol', 'strips')
-    strips.setAttribute('aria-label', `${laneName(participant)}'s tasks`)
-    for (const task of open) strips.append(this.#taskStrip(task, now))
-    if (open.length === 0) strips.append(element('li', 'bay-empty', 'No tasks.'))
-    bay.append(strips)
-    if (cleared > 0)
-      bay.append(element('p', 'bay-cleared', `${cleared} cleared (accepted or cancelled)`))
-    return bay
+    head.append(title, element('span', 'row-meta', identity), status, tools)
+    if (this.#composing === participant.handle) head.append(this.#composer(participant))
+    return head
   }
 
-  #taskStrip(task, now) {
-    const item = element('li')
-    const strip = button('', 'strip', () => this.#actions.onOpenTask(task.number))
-    strip.dataset.task = String(task.number)
-    strip.dataset.state = task.state
-    strip.setAttribute(
+  #card(task, reviews, now) {
+    const item = element('li', 'card-item')
+    const card = button('', 'card', () => this.#actions.onOpenTask(task.number))
+    card.dataset.task = String(task.number)
+    card.dataset.state = task.state
+    card.setAttribute(
       'aria-label',
       `T-${task.number}, ${task.title}, ${STATE_LABEL[task.state]}, from ${who(task.requester)}`,
     )
-    strip.append(
-      element('span', 'strip-number', `T-${task.number}`),
-      element('span', 'strip-title', task.title),
-      element('span', 'strip-route', route(task)),
-      element('span', 'strip-state', stateLabel(task)),
-      element('span', 'strip-age', age(task.updatedAt, now)),
+    card.append(
+      element('span', 'card-number', `T-${task.number}`),
+      element('span', 'card-title', task.title),
+      element('span', 'card-route', route(task)),
+      element('span', 'card-state', stateLabel(task)),
+      element('span', 'card-age', age(task.updatedAt, now)),
     )
-    item.append(strip)
-    return item
-  }
-
-  /** The tasks waiting for a member of their tier, and where the human puts a new one. */
-  #backlogBay(board, now) {
-    const bay = element('section', 'backlog')
-    bay.setAttribute('role', 'region')
-    bay.setAttribute('aria-label', 'Open tasks')
-    const head = element('header', 'bay-head')
-    const waiting = board.open.length
-    head.append(
-      element('h2', 'bay-name', 'Open tasks'),
-      element('span', 'bay-meta', 'Waiting for a member of their tier'),
-      element(
-        'span',
-        'bay-status',
-        waiting === 0 ? 'Nothing waiting' : `${waiting} waiting for a member`,
-      ),
-      button('New task', 'quiet-button', () => {
-        this.#composingOpen = !this.#composingOpen
-        this.#actions.onRedraw()
-      }),
-    )
-    bay.append(head)
-    if (this.#composingOpen) bay.append(this.#openComposer(board))
-    const strips = element('ol', 'strips')
-    strips.setAttribute('aria-label', 'Tasks waiting for a member')
-    for (const task of board.open) strips.append(this.#taskStrip(task, now))
-    if (waiting === 0) {
-      strips.append(
-        element(
-          'li',
-          'bay-empty',
-          'A task for a tier waits here until a member of that tier is free.',
-        ),
-      )
+    if (task.result) card.append(element('span', 'card-result', task.result))
+    item.append(card)
+    if (reviews.length > 0) {
+      const list = element('ul', 'reviews')
+      for (const review of reviews) list.append(element('li', null, reviewLine(review)))
+      item.append(list)
     }
-    bay.append(strips)
-    return bay
+    return item
   }
 
   /**
@@ -537,7 +562,10 @@ export class BoardView {
   }
 }
 
-/** One task and its whole thread, with what the human may do next. */
+/**
+ * One task: its brief, its result apart from it, its reviews with their
+ * findings, the rest of its thread, and what the human may do next.
+ */
 export class TaskDrawer {
   #root
   #actions
@@ -555,7 +583,7 @@ export class TaskDrawer {
     const head = element('header', 'drawer-head')
     const title = element('h2', 'drawer-title')
     title.append(
-      element('span', 'strip-number', `T-${task.number}`),
+      element('span', 'card-number', `T-${task.number}`),
       element('span', null, task.title),
     )
     head.append(
@@ -568,20 +596,46 @@ export class TaskDrawer {
       `${who(task.requester)} asked ${task.assignee === null ? `for a ${task.tier} ${task.pool}` : who(task.assignee)} · ${stateLabel(task)} · updated ${age(task.updatedAt, now)} ago`,
     )
     meta.dataset.state = task.state
-    const thread = element('ol', 'thread')
-    thread.setAttribute('aria-label', `T-${task.number}'s thread`)
-    for (const message of task.messages) {
-      const item = element('li', 'thread-item')
-      item.dataset.kind = message.kind
-      item.append(
-        element(
-          'p',
-          'thread-head',
-          `${KIND_LABEL[message.kind] ?? message.kind} from ${who(message.sender)} to ${who(message.recipient)} · ${message.state}${message.reason ? ` (${message.reason})` : ''}`,
-        ),
-        element('p', 'thread-body', message.body),
-      )
-      thread.append(item)
+    const sections = [head, meta]
+    const brief = element('section', 'drawer-section')
+    brief.append(element('h3', null, 'Brief'), element('p', 'drawer-brief', task.body))
+    sections.push(brief)
+    const result = task.messages.findLast((message) => message.kind === 'result')
+    if (result !== undefined) {
+      const block = element('section', 'drawer-section drawer-result-section')
+      block.append(element('h3', null, 'Result'), element('p', 'drawer-result', result.body))
+      sections.push(block)
+    }
+    for (const review of task.reviews ?? []) {
+      const block = element('section', 'drawer-section drawer-review')
+      block.dataset.review = String(review.number)
+      block.append(element('h3', 'drawer-review-head', reviewLine(review)))
+      if (review.findings !== null) {
+        block.append(element('p', 'drawer-review-body', review.findings))
+      }
+      sections.push(block)
+    }
+    // The rest of the thread: follow-ups, questions and answers, notes.
+    const rest = task.messages.filter(
+      (message) => message !== result && !(message.kind === 'task' && message.body === task.body),
+    )
+    if (rest.length > 0) {
+      const thread = element('ol', 'thread')
+      thread.setAttribute('aria-label', `T-${task.number}'s thread`)
+      for (const message of rest) {
+        const item = element('li', 'thread-item')
+        item.dataset.kind = message.kind
+        item.append(
+          element(
+            'p',
+            'thread-head',
+            `${KIND_LABEL[message.kind] ?? message.kind} from ${who(message.sender)} to ${who(message.recipient)} · ${message.state}${message.reason ? ` (${message.reason})` : ''}`,
+          ),
+          element('p', 'thread-body', message.body),
+        )
+        thread.append(item)
+      }
+      sections.push(thread)
     }
     const actions = element('div', 'drawer-actions')
     if (task.state === 'done') {
@@ -613,7 +667,7 @@ export class TaskDrawer {
     }
     this.#root.setAttribute('aria-label', `Task T-${task.number}`)
     this.#root.dataset.state = task.state
-    this.#root.replaceChildren(head, meta, thread, actions)
+    this.#root.replaceChildren(...sections, actions)
     this.#root.hidden = false
   }
 

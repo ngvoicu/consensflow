@@ -4,9 +4,8 @@ import { TerminalsView } from './terminals.js'
 
 /**
  * The page: the projects on the left, the chosen project's board in the
- * middle, and one live window docked on the right (the lead's, the PM's, or a
- * member's for a while) so the human reads the board and talks to the
- * coordinator at once. Everything it shows comes from the new core through
+ * middle, and the live windows on the right in a strip that scrolls sideways,
+ * the lead first, so the human reads the board and talks to any of them. Everything it shows comes from the new core through
  * the app's `core_request`, and it redraws when the core says something
  * changed. It keeps nothing of its own but what is on screen.
  */
@@ -24,7 +23,6 @@ const inboxButton = $('#inbox-button')
 const teamButton = $('#team-button')
 const boardRoot = $('#board')
 const stage = $('#stage')
-const dockTabs = $('#dock-tabs')
 const status = $('#status')
 
 const state = {
@@ -33,7 +31,7 @@ const state = {
   board: null,
   inbox: [],
   agents: [],
-  dock: 'lead',
+  focus: 'lead',
   openTask: null,
 }
 
@@ -96,7 +94,7 @@ const board = new BoardView(boardRoot, {
   onRead: (message) => act(() => core('message.read', { message: message.id })),
   onOpenTask: (number) => act(() => openTask(number)),
   onOpenTerminal: (participant) => {
-    state.dock = participant.handle
+    state.focus = participant.handle
     render()
   },
   onRedraw: () => render(),
@@ -123,13 +121,14 @@ const drawer = new TaskDrawer($('#task-drawer'), {
 // The packaged smoke watches acks and arrivals here, on the real paths.
 let ackObserver = null
 let outputObserver = null
-const terminals = new TerminalsView(stage, $('#parking'), {
+const terminals = new TerminalsView(stage, {
   invoke: (command, args) => {
     if (command === 'pane_ack') ackObserver?.(args)
     return invoke(command, args)
   },
   report,
   createEmulator: tauri.test?.createEmulator,
+  onChange: () => render(),
 })
 
 async function openTask(number) {
@@ -189,8 +188,9 @@ function render() {
   inboxButton.dataset.waiting = String(waiting > 0)
   teamButton.disabled = project === null
   const lanes = state.board?.lanes ?? []
-  if (!lanes.some((lane) => lane.participant.handle === state.dock)) state.dock = 'lead'
-  renderDockTabs(lanes)
+  if (!lanes.some((lane) => lane.participant.handle === state.focus)) state.focus = 'lead'
+  // A row's Terminal button stays live while an ended window is still readable.
+  for (const lane of lanes) lane.ended = terminals.has(lane.participant.handle)
   if (state.board === null) {
     boardRoot.replaceChildren(
       element(
@@ -202,28 +202,7 @@ function render() {
   } else {
     board.render({ board: state.board, inbox: state.inbox, agents: state.agents })
   }
-  terminals.render(lanes, { docked: state.dock })
-}
-
-/** Lead, PM when there is one, and the member docked for a while. */
-function renderDockTabs(lanes) {
-  const handles = [
-    'lead',
-    ...(lanes.some((lane) => lane.participant.role === 'pm') ? ['pm'] : []),
-    ...(state.dock === 'lead' || state.dock === 'pm' ? [] : [state.dock]),
-  ]
-  dockTabs.replaceChildren(
-    ...handles.map((handle) => {
-      const tab = element('button', null, { lead: 'Lead', pm: 'PM' }[handle] ?? `@${handle}`)
-      tab.type = 'button'
-      tab.setAttribute('aria-pressed', String(handle === state.dock))
-      tab.addEventListener('click', () => {
-        state.dock = handle
-        render()
-      })
-      return tab
-    }),
-  )
+  terminals.render(lanes, { focused: state.focus })
 }
 
 function renderProjects() {
@@ -239,7 +218,7 @@ function renderProjects() {
     )
     select.addEventListener('click', () => {
       state.selected = project.id
-      state.dock = 'lead'
+      state.focus = 'lead'
       state.openTask = null
       drawer.hide()
       void refresh()
@@ -293,7 +272,7 @@ newProjectForm.addEventListener('submit', (event) => {
   void act(async () => {
     const { project } = await core('project.open', { directory, harness, review })
     state.selected = project.id
-    state.dock = 'lead'
+    state.focus = 'lead'
   })
 })
 newProjectDialog
