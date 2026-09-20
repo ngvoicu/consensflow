@@ -1137,7 +1137,7 @@ test('engine persistence stores and refreshes the full agent display profile', a
     )
     await upsertAgent(cwd, { ...saved, thinking: 'low' })
     saved = JSON.parse(await readFile(agentsPath(cwd), 'utf8')).agents[0]
-    assert.deepEqual(saved.profile.categories, ['worker'])
+    assert.deepEqual(saved.profile.categories, ['worker', 'reviewer'])
     assert.equal(saved.description, 'Keep these notes')
   })
 })

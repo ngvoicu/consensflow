@@ -269,9 +269,8 @@ it('Kimi is K3-only and names its supported effort instead of hiding it', () => 
   assert.equal(entry.effort, 'max')
   assert.deepEqual(EFFORTS.kimi, ['low', 'high', 'max'])
   assert.deepEqual(entry.profile.categories, ['worker', 'reviewer'])
-  for (const effort of ['low', 'xhigh', 'medium'])
-    assert.deepEqual(agentProfile({ ...entry, effort }).categories, ['worker'])
-  assert.deepEqual(agentProfile({ ...entry, effort: 'high' }).categories, ['worker', 'reviewer'])
+  for (const effort of ['low', 'xhigh', 'medium', 'high'])
+    assert.deepEqual(agentProfile({ ...entry, effort }).categories, ['worker', 'reviewer'])
   for (const name of ['seppo', 'ahti']) assert.equal(catalogEntry(name), undefined)
   assert.ok(
     Object.values(CATALOG)
@@ -317,12 +316,12 @@ describe('catalog presentation follows actual model and effort', () => {
     const astra = { harness: 'codex', model: 'gpt-6-astra', effort: 'medium' }
     assert.deepEqual(agentProfile(astra).categories, ['worker', 'reviewer'])
     for (const effort of ['low', 'off', 'minimal', 'unknown', undefined]) {
-      assert.deepEqual(agentProfile({ ...astra, effort }).categories, ['worker'])
+      assert.deepEqual(agentProfile({ ...astra, effort }).categories, ['worker', 'reviewer'])
     }
     assert.deepEqual(
       agentProfile({ ...astra, harness: 'pi', model: 'openai-codex/gpt-6-astra', effort: 'ultra' })
         .categories,
-      ['worker'],
+      ['worker', 'reviewer'],
     )
     assert.deepEqual(
       agentProfile({ harness: 'claude', model: 'claude-opus-5', effort: 'medium' }).categories,
@@ -330,6 +329,7 @@ describe('catalog presentation follows actual model and effort', () => {
     )
     assert.deepEqual(agentProfile({ ...astra, model: 'invented', preset: 'astraeus' }).categories, [
       'worker',
+      'reviewer',
     ])
     assert.deepEqual(agentProfile({ ...astra, harness: 'unknown' }).categories, [])
     assert.deepEqual(agentProfile({ harness: 'image', model: 'legacy-image' }).categories, [])
@@ -375,7 +375,7 @@ it('ships all compatible low/medium choices with stable identities and Pi OpenRo
   )
 })
 
-it('lead and PM need xhigh or higher; reviewer recommendations begin at medium', async () => {
+it('lead and advisor need xhigh or higher; every worker model is a reviewer too', async () => {
   const { agentProfile } = await import('../src/catalog.js')
   const pairs = [
     ['codex', 'gpt-6-astra'],
@@ -389,20 +389,17 @@ it('lead and PM need xhigh or higher; reviewer recommendations begin at medium',
     for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) {
       const categories = agentProfile({ harness, model, effort }).categories
       const critical = /astra|fable/.test(model) && effort === 'max'
-      // Lead candidate, Advisor, Worker, Reviewer: a model fit to lead is fit to advise.
+      // Lead candidate, Advisor, Worker, Reviewer: a model fit to lead is fit to
+      // advise, and the reviewers are the workers for now.
       const expected = critical
-        ? ['advisor', 'reviewer']
-        : [
-            ...(['xhigh', 'max'].includes(effort) ? ['lead', 'advisor'] : []),
-            'worker',
-            ...(effort !== 'low' ? ['reviewer'] : []),
-          ]
+        ? ['advisor']
+        : [...(['xhigh', 'max'].includes(effort) ? ['lead', 'advisor'] : []), 'worker', 'reviewer']
       assert.deepEqual(categories, expected, `${model} ${effort}`)
     }
   }
   assert.deepEqual(
     agentProfile({ harness: 'codex', model: 'gpt-6-astra', effort: 'ultra' }).categories,
-    ['advisor', 'reviewer'],
+    ['advisor'],
   )
   assert.deepEqual(
     agentProfile({ harness: 'codex', model: 'gpt-5.6-luna', effort: 'medium' }).categories,
@@ -481,6 +478,6 @@ it('assigns four work tiers by model and effort across routes, without agent-nam
   }
   const custom = agentProfile({ harness: 'codex', model: 'custom', workTier: 'critical' })
   assert.equal(custom.workTier, 'critical')
-  assert.deepEqual(custom.categories, ['advisor', 'reviewer'])
+  assert.deepEqual(custom.categories, ['advisor'])
   assert.doesNotMatch(custom.goodFor, /coding|implementation/i)
 })

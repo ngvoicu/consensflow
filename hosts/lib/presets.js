@@ -1317,7 +1317,7 @@ export function agentProfile(agent) {
   validateWorkTier(agent.workTier);
   profile.workTier = agent.workTier ?? tier;
   if (profile.workTier === 'critical') {
-    profile.categories = ['advisor', 'reviewer'];
+    profile.categories = ['advisor'];
     profile.goodFor = 'Consequential reviews, architecture, discovering solutions to hard problems and answering important questions.';
   }
   return profile;
@@ -1353,7 +1353,6 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
     : (model ?? "default")
   const worker = ['claude', 'codex', 'pi', 'opencode', 'kimi'].includes(harness)
   let lead = false
-  let reviewer = false
   const contributor = known && key === 'muse-spark-1.3' && model.includes('-contributor')
   const routeLabel = model?.startsWith('openrouter/')
     ? 'OpenRouter · API'
@@ -1392,15 +1391,12 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
     if (supportedEffort) {
       const roleModel = ['gpt-6-astra', 'claude-fable-5.1', 'gpt-5.6-sol', 'claude-opus-5'].includes(key)
       lead = roleModel && ['xhigh', 'max', 'ultra'].includes(effort)
-      reviewer = effort !== 'low'
     }
   }
-  // A model fit to lead is fit to advise; critical work adds advisor and reviewer itself.
-  const categories = [
-    ...(lead ? ['lead', 'advisor'] : []),
-    ...(worker ? ['worker'] : []),
-    ...(reviewer ? ['reviewer'] : []),
-  ]
+  // A model fit to lead is fit to advise; every worker model reviews too (the
+  // two roles keep their own pills, on the same models for now); critical work
+  // is advice alone.
+  const categories = [...(lead ? ['lead', 'advisor'] : []), ...(worker ? ['worker', 'reviewer'] : [])]
   return {
     modelKey: key,
     modelLabel: (known && MODEL_LABELS[key]) || model || "Default",

@@ -696,14 +696,14 @@ test('a saved agent shows its tier and route in its entry’s place; a catalog r
     await expect(member(page, 'draw').locator('.tier-pill')).toHaveText('T4 · Light work')
     // The pills name the roles a model suits: an image agent suits none.
     await expect(offer(page, 'pygmalion').getByRole('list', { name: 'Roles' })).toHaveCount(0)
-    await expect(pills(offer(page, 'astraeus'), 'Roles')).toHaveText(['Advisor', 'Reviewer'])
+    await expect(pills(offer(page, 'astraeus'), 'Roles')).toHaveText(['Advisor'])
     await expect(pills(offer(page, 'asteria'), 'Roles')).toHaveText([
       'Lead candidate',
       'Advisor',
       'Worker',
       'Reviewer',
     ])
-    await expect(pills(offer(page, 'electra'), 'Roles')).toHaveCount(0)
+    await expect(pills(offer(page, 'dagr'), 'Roles')).toHaveText(['Worker', 'Reviewer'])
     await expect(offer(page, 'skirnir').locator('.agent-route')).toHaveText('OpenRouter · API')
     // The tier follows the agent's own model and reasoning.
     await maia.getByRole('button', { name: 'Edit', exact: true }).click()
@@ -1204,7 +1204,7 @@ test('shared model cards keep each saved agent’s own tier on its row when the 
     await expect(member(second, 'pi-ultra').locator('.tier-pill')).toHaveText('T4 · Light work')
     await second.getByLabel('Suits', { exact: true }).selectOption('advisor')
     await expect(card.locator('h3')).toHaveText('GPT-6 Astra · Ultra · 1')
-    await expect(card.locator('.model-summary .category-pill')).toHaveText(['Advisor', 'Reviewer'])
+    await expect(card.locator('.model-summary .category-pill')).toHaveText(['Advisor'])
     await expect(card.locator('.model-summary .tier-pill')).toHaveCount(1)
     await expect(member(second, 'codex-ultra').locator('.tier-pill')).toHaveCount(0)
     await expect(member(second, 'pi-ultra')).toHaveCount(0)
@@ -1596,13 +1596,13 @@ test('the Reviewer and Lead candidate roles filter saved agents and catalog entr
     }
     await expect(second.locator('.callsign')).toHaveText(['opus-high', 'astra-xhigh', 'sol-medium'])
     await page.getByRole('searchbox').fill('Sol')
-    for (const name of ['phaethon', 'asterope', 'alsvidr'])
+    // Every worker model reviews too, the low efforts included.
+    for (const name of ['phaethon', 'asterope', 'alsvidr', 'hemera', 'leto', 'arvakr'])
       await expect(offer(page, name)).toBeVisible()
-    for (const name of ['hemera', 'leto', 'arvakr']) await expect(offer(page, name)).toHaveCount(0)
     for (const screen of [page, second])
       await screen.getByLabel('Suits', { exact: true }).selectOption('lead')
     await expect(second.locator('.callsign')).toHaveText(['astra-xhigh'])
-    for (const name of ['phaethon', 'asterope', 'alsvidr'])
+    for (const name of ['phaethon', 'asterope', 'alsvidr', 'hemera'])
       await expect(offer(page, name)).toHaveCount(0)
   } finally {
     await fixture.close()
