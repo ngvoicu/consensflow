@@ -76,6 +76,9 @@ const ACTIVE_TASK_STATES = ['working', 'waiting']
 /** A task on a member's hands: from assignment until its review is over. */
 const HELD_TASK_STATES = ['queued', 'working', 'waiting', 'review']
 const MAX_BODY = 1_000_000
+/** How long a coordinator may leave a question before the human sees it too. */
+export const OVERDUE_MS = 10 * 60_000
+const MAX_QUESTIONS = 4
 const MAX_TITLE = 120
 const AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
 
@@ -352,9 +355,98 @@ const messageView = (row) => ({
   attempts: row.attempts,
   reason: row.reason,
   receipt: row.receipt === null ? null : JSON.parse(row.receipt),
+  questions: row.questions === null ? null : JSON.parse(row.questions),
+  choices: row.choices === null ? null : JSON.parse(row.choices),
   createdAt: row.created_at,
   deliveredAt: row.delivered_at,
 })
+
+const badQuestions = (why) => new LedgerError('bad-questions', `questions: ${why}`, 400)
+const shortText = (value, field) => {
+  if (typeof value !== 'string' || value.trim().length === 0 || value.length > MAX_TITLE * 10) {
+    throw badQuestions(`${field} is a short text`)
+  }
+  return value.trim()
+}
+
+/**
+ * Questions with options as a harness's question tool asks them: one to four,
+ * each with its text, a short header, its options (a label, maybe a
+ * description) and whether several may be picked.
+ */
+function requireQuestions(questions) {
+  if (!Array.isArray(questions) || questions.length === 0 || questions.length > MAX_QUESTIONS) {
+    throw badQuestions(`one to ${MAX_QUESTIONS} questions`)
+  }
+  return questions.map((question) => {
+    if (question === null || typeof question !== 'object' || !Array.isArray(question.options)) {
+      throw badQuestions('each question is an object with an options array')
+    }
+    return {
+      question: shortText(question.question, 'question'),
+      header: shortText(question.header, 'header'),
+      options: question.options.map((option) => ({
+        label: shortText(option?.label, 'an option label'),
+        description:
+          typeof option.description === 'string' && option.description.trim().length > 0
+            ? option.description.trim()
+            : null,
+      })),
+      multiple: question.multiple === true,
+    }
+  })
+}
+
+/** A question with options as text: what an inbox or a window shows. */
+const renderQuestions = (questions) =>
+  questions
+    .map((q) =>
+      [
+        `${q.header}: ${q.question}`,
+        ...q.options.map(
+          (o) => `- ${o.label}${o.description === null ? '' : `: ${o.description}`}`,
+        ),
+      ].join('\n'),
+    )
+    .join('\n\n')
+
+const badChoices = (why) => new LedgerError('bad-choices', `answer: ${why}`, 400)
+
+/**
+ * The choices for a question with options: one array of picks per question,
+ * from explicit `choices` or from text, one line per question, the labels
+ * matched regardless of case and free text kept as it is.
+ */
+function requireChoices(questions, { choices, body }) {
+  const picks =
+    choices !== undefined
+      ? choices
+      : String(body ?? '')
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line, at) => (questions[at]?.multiple ? line.split(',') : [line]))
+  if (!Array.isArray(picks) || picks.length !== questions.length) {
+    throw badChoices(`one answer per question (${questions.length})`)
+  }
+  return picks.map((pick, at) => {
+    const question = questions[at]
+    if (!Array.isArray(pick) || pick.length === 0 || (!question.multiple && pick.length > 1)) {
+      throw badChoices(
+        `${question.header}: ${question.multiple ? 'one or more picks' : 'one pick'}`,
+      )
+    }
+    return pick.map((text) => {
+      const wanted = String(text).trim()
+      if (wanted.length === 0 || wanted.length > MAX_TITLE * 10) throw badChoices('empty pick')
+      const label = question.options.find((o) => o.label.toLowerCase() === wanted.toLowerCase())
+      return label === undefined ? wanted : label.label
+    })
+  })
+}
+
+const renderChoices = (questions, choices) =>
+  questions.map((q, at) => `${q.header}: ${choices[at].join(', ')}`).join('\n')
 
 class Ledger {
   #db
@@ -965,13 +1057,25 @@ class Ledger {
     return this.#send(projectId, { from, to, body, task, kind: 'note' })
   }
 
-  /** A question for a coordinator or the human; the asker's task waits for the answer. */
-  ask(projectId, { from, to, body, task }) {
+  /**
+   * A question for a coordinator or the human; the asker's task waits for the
+   * answer. With `questions`, the question carries options as a harness's own
+   * question tool asked them, and its text is rendered from them.
+   */
+  ask(projectId, { from, to, body, task, questions }) {
     if (from === undefined) {
       throw new LedgerError('unknown-participant', 'a question names who asks it', 400)
     }
+    const options = questions === undefined ? null : requireQuestions(questions)
     return this.#write(() => {
-      const message = this.#send(projectId, { from, to, body, task, kind: 'question' })
+      const message = this.#send(projectId, {
+        from,
+        to,
+        body: options === null ? body : renderQuestions(options),
+        task,
+        kind: 'question',
+        questions: options,
+      })
       if (task !== undefined) {
         const row = this.#taskRow(projectId, task)
         const asker = this.#participantByHandle(projectId, from)
@@ -983,21 +1087,34 @@ class Ledger {
     })
   }
 
-  /** The answer goes back to whoever asked; only the one asked may answer. */
-  answer(questionId, { from, body }) {
-    requireText(body, 'body', MAX_BODY)
+  /**
+   * The answer goes back to whoever asked; the one asked or the human may
+   * answer. A plain question's answer is delivered into the asker's window. A
+   * question with options is answered by choice (or by text, one line per
+   * question): that answer is read at once and never delivered, because the
+   * harness door that asked collects it and the tool call completes with it;
+   * the asker's task resumes here.
+   */
+  answer(questionId, { from, body, choices }) {
     return this.#write(() => {
       const question = this.#message(questionId)
       if (question === null || question.kind !== 'question') {
         throw new LedgerError('not-a-question', `message ${questionId} is not a question`, 409)
       }
-      if (question.recipient !== from) {
+      if (question.recipient !== from && from !== 'human') {
         throw new LedgerError(
           'not-your-question',
           `the question was put to ${question.recipient}, not ${from}`,
           403,
         )
       }
+      if (this.answerTo(questionId) !== null) {
+        throw new LedgerError('already-answered', `m-${questionId} has its answer`, 409)
+      }
+      const picks =
+        question.questions === null ? null : requireChoices(question.questions, { choices, body })
+      const text = picks === null ? body : renderChoices(question.questions, picks)
+      requireText(text, 'body', MAX_BODY)
       const answerer = this.#participantByHandle(question.projectId, from)
       const asker = this.#db
         .prepare('SELECT sender_id, task_id FROM message WHERE id = ?')
@@ -1009,7 +1126,8 @@ class Ledger {
         kind: 'answer',
         taskId: asker.task_id,
         replyTo: questionId,
-        body,
+        body: text,
+        ...(picks === null ? {} : { state: 'read', choices: picks }),
       })
       this.#log(question.projectId, 'message.sent', {
         message: id,
@@ -1017,8 +1135,33 @@ class Ledger {
         from,
         to: question.sender,
       })
+      if (picks !== null && asker.task_id !== null) {
+        const task = this.#db.prepare('SELECT * FROM task WHERE id = ?').get(asker.task_id)
+        if (task.state === 'waiting') this.#moveTask(task, 'working')
+      }
       return this.#message(id)
     })
+  }
+
+  /** Whether a question on the task still waits for its answer. */
+  #unanswered(taskId) {
+    return (
+      this.#db
+        .prepare(
+          `SELECT 1 FROM message q WHERE q.task_id = ? AND q.kind = 'question'
+             AND NOT EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer')
+           LIMIT 1`,
+        )
+        .get(taskId) !== undefined
+    )
+  }
+
+  /** The answer to a question, or null while it waits. */
+  answerTo(questionId) {
+    const row = this.#db
+      .prepare(`${MESSAGE_SELECT} WHERE m.reply_to = ? AND m.kind = 'answer' ORDER BY m.id LIMIT 1`)
+      .get(questionId)
+    return row === undefined ? null : messageView(row)
   }
 
   /**
@@ -1098,7 +1241,10 @@ class Ledger {
       this.#log(message.projectId, 'delivery.confirmed', { message: messageId })
       const task = this.#messageTask(messageId)
       if (task !== undefined) {
-        if (message.kind === 'task' && task.state === 'queued') this.#moveTask(task, 'working')
+        // A task whose window already asked a question arrives waiting, not working.
+        if (message.kind === 'task' && task.state === 'queued') {
+          this.#moveTask(task, this.#unanswered(task.id) ? 'waiting' : 'working')
+        }
         if (message.kind === 'answer' && task.state === 'waiting') this.#moveTask(task, 'working')
       }
       return this.#message(messageId)
@@ -1494,7 +1640,23 @@ class Ledger {
         participant,
         tasks: tasks.filter((task) => task.assignee === participant.handle),
       })),
+      overdue: this.#overdueQuestions(projectId),
     }
+  }
+
+  /** Questions a coordinator has left unanswered for OVERDUE_MS: the human sees them too. */
+  #overdueQuestions(projectId) {
+    const before = new Date(this.#now().getTime() - OVERDUE_MS).toISOString()
+    return this.#db
+      .prepare(
+        `${MESSAGE_SELECT}
+         WHERE m.project_id = ? AND m.kind = 'question' AND r.role IN ('lead', 'pm')
+           AND m.created_at <= ?
+           AND NOT EXISTS (SELECT 1 FROM message a WHERE a.reply_to = m.id AND a.kind = 'answer')
+         ORDER BY m.id`,
+      )
+      .all(projectId, before)
+      .map(messageView)
   }
 
   /** A task and its whole thread, oldest first; null when there is no such task. */
@@ -1518,12 +1680,16 @@ class Ledger {
     return this.#message(id)
   }
 
-  /** The task a participant has in progress (working or waiting on an answer), or null. */
+  /**
+   * The task a participant is on: working, waiting on an answer, or queued
+   * while its delivery is still being confirmed (a window may ask its first
+   * question before the record that confirms the task's arrival is read).
+   */
   activeTask(participantId) {
     const row = this.#db
       .prepare(
         `SELECT project_id, number FROM task
-         WHERE assignee_id = ? AND state IN ('working', 'waiting') ORDER BY id LIMIT 1`,
+         WHERE assignee_id = ? AND state IN ('queued', 'working', 'waiting') ORDER BY id LIMIT 1`,
       )
       .get(participantId)
     return row === undefined ? null : this.task(row.project_id, row.number)
@@ -1660,14 +1826,39 @@ class Ledger {
     this.#send(projectId, { to: handle, body, kind: 'note' })
   }
 
-  #queue(projectId, { to, from, kind, taskId = null, replyTo = null, body, state = 'queued' }) {
+  #queue(
+    projectId,
+    {
+      to,
+      from,
+      kind,
+      taskId = null,
+      replyTo = null,
+      body,
+      state = 'queued',
+      questions = null,
+      choices = null,
+    },
+  ) {
     const { lastInsertRowid: id } = this.#db
       .prepare(
         `INSERT INTO message (project_id, recipient_id, sender_id, kind, task_id, reply_to, body,
-                              state, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                              state, questions, choices, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(projectId, to, from, kind, taskId, replyTo, body, state, this.#at())
+      .run(
+        projectId,
+        to,
+        from,
+        kind,
+        taskId,
+        replyTo,
+        body,
+        state,
+        questions === null ? null : JSON.stringify(questions),
+        choices === null ? null : JSON.stringify(choices),
+        this.#at(),
+      )
     return id
   }
 
@@ -1694,7 +1885,7 @@ class Ledger {
       .all(taskId, ...REVIEW_STATES)
   }
 
-  #send(projectId, { from, to, body, task, kind }) {
+  #send(projectId, { from, to, body, task, kind, questions = null }) {
     requireText(body, 'body', MAX_BODY)
     return this.#write(() => {
       const sender = from === undefined ? null : this.#participantByHandle(projectId, from)
@@ -1706,6 +1897,7 @@ class Ledger {
         kind,
         taskId,
         body,
+        questions,
       })
       this.#log(projectId, 'message.sent', {
         message: id,

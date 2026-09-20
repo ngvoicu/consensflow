@@ -117,8 +117,12 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
 
     'message.read': change(async ({ message }) => ({ message: ledger.markRead(message) })),
 
-    'message.answer': change(async ({ question, body }) => ({
-      message: ledger.answer(question, { from: 'human', body }),
+    'message.answer': change(async ({ question, body, choices }) => ({
+      message: ledger.answer(question, {
+        from: 'human',
+        body,
+        ...(choices === undefined ? {} : { choices }),
+      }),
     })),
   }
 }

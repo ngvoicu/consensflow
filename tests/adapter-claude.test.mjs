@@ -129,6 +129,16 @@ describe('the Claude Code adapter', () => {
       assert.equal(written.skipDangerousModePermissionPrompt, true)
       assert.equal(written.crossSessionInbound, 'accept')
       assert.deepEqual(written.hooks.Stop, [{ hooks: [{ type: 'command', command: 'exit 0' }] }])
+      assert.deepEqual(
+        written.hooks.PreToolUse,
+        [
+          {
+            matcher: 'AskUserQuestion',
+            hooks: [{ type: 'command', command: 'cf hook claude', timeout: 3600 }],
+          },
+        ],
+        "Claude's question tool is answered from the board, for an hour, then in the window",
+      )
     })
   })
 

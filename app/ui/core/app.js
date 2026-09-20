@@ -89,10 +89,15 @@ const board = new BoardView(boardRoot, {
       })
       note(`T-${task.number} is on the board for a ${tier} ${pool}.`)
     }),
-  onAnswer: (message, text) =>
+  // A question put to a coordinator and left unanswered is answered here too;
+  // it was never in the human's inbox, so there is nothing to mark read.
+  onAnswer: (message, text, choices) =>
     act(async () => {
-      await core('message.answer', { question: message.id, body: text })
-      await core('message.read', { message: message.id })
+      await core('message.answer', {
+        question: message.id,
+        ...(choices === undefined ? { body: text } : { choices }),
+      })
+      if (!message.overdue) await core('message.read', { message: message.id })
       note(`Answer sent to @${message.sender}.`)
     }),
   onRead: (message) => act(() => core('message.read', { message: message.id })),

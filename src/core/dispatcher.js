@@ -73,7 +73,12 @@ export function deliveryText(message, { reviews = [], unreviewed = null } = {}) 
     message.body.length <= INLINE_LIMIT
       ? message.body
       : `${message.body.slice(0, OPENING)}\n… (${message.body.length} characters; read all of it with: cf inbox read m-${message.id})`
-  const footer = message.kind === 'question' ? `\n\nAnswer with: cf answer m-${message.id} "…"` : ''
+  const footer =
+    message.kind !== 'question'
+      ? ''
+      : message.questions
+        ? `\n\nAnswer with: cf answer m-${message.id} "…" (a label or your own words${message.questions.length > 1 ? '; one line per question' : ''})`
+        : `\n\nAnswer with: cf answer m-${message.id} "…"`
   return `[ConsensFlow m-${message.id}${task} · ${message.kind} from ${from}]\n${body}${reviewText(reviews, unreviewed)}${footer}`
 }
 

@@ -4,6 +4,7 @@ import { preparePrivateIntegration } from './private-integration.js'
 import { configRoot } from './roster.js'
 
 const FILES = ['hosts/claude-receiver.mjs', 'hosts/lib/receiver.js', 'package.json']
+const QUESTION_HOOK_SECONDS = 3600
 const quote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`
 
 export function receiverSignal(env, launch) {
@@ -25,6 +26,14 @@ export async function prepareClaudeSettings(env, launch, hooks = {}) {
   const root = join(configRoot(env), 'integrations', 'claude', launch)
   await mkdir(root, { recursive: true, mode: 0o700 })
   const turnEnd = { hooks: [{ type: 'command', command: 'exit 0' }] }
+  // Claude's question tool prompts even in full-permission mode. The board
+  // answers it through this hook (`cf` is first on a pane's PATH); when nobody
+  // answers within the hour, the hook is cancelled and the window shows
+  // Claude's own dialog, where the human can still answer.
+  const question = {
+    matcher: 'AskUserQuestion',
+    hooks: [{ type: 'command', command: 'cf hook claude', timeout: QUESTION_HOOK_SECONDS }],
+  }
   const settings = join(root, 'settings.json')
   await writeFile(
     settings,
@@ -36,7 +45,11 @@ export async function prepareClaudeSettings(env, launch, hooks = {}) {
       // A bypass-mode session holds messages from other sessions for approval
       // and drops them after five minutes; ConsensFlow's own messages must land.
       crossSessionInbound: 'accept',
-      hooks: { ...hooks, Stop: [...(hooks.Stop ?? []), turnEnd] },
+      hooks: {
+        ...hooks,
+        PreToolUse: [...(hooks.PreToolUse ?? []), question],
+        Stop: [...(hooks.Stop ?? []), turnEnd],
+      },
     }),
     { mode: 0o600 },
   )

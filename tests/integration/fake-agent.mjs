@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -15,7 +15,11 @@ import { fileURLToPath } from 'node:url'
  * this window's own token, the way a lead hands out work. In a review brief,
  * the task's own `REVIEWER: …` line is the fake reviewer's answer. A task
  * saying `QUOTA-OUT` is refused with a 429, Claude's way, by the window whose
- * participant `CF_TEST_QUOTA_OUT` names. Anything else is acknowledged.
+ * participant `CF_TEST_QUOTA_OUT` names. A line `ASK <questions JSON>` asks
+ * through Claude's question tool: the PreToolUse hook of the settings file
+ * this window was launched with runs on a synthetic AskUserQuestion event, and
+ * the turn answers with what the hook handed back. A question whose text says
+ * `REPLY <words>` is answered with `cf answer`. Anything else is acknowledged.
  */
 
 const CF = fileURLToPath(new URL('../../bin/cf.mjs', import.meta.url))
@@ -34,9 +38,11 @@ const PASTE_END = '\u001b[201~'
 let sessionId = null
 let resuming = false
 let seed = null
+let settingsFile = null
 const args = process.argv.slice(2)
 for (let at = 0; at < args.length; at += 1) {
   const arg = args[at]
+  if (arg === '--settings') settingsFile = args[at + 1]
   if (VALUE_FLAGS.has(arg)) at += 1
   else if (arg === '--session-id' || arg === '--resume') {
     sessionId = args[at + 1]
@@ -95,7 +101,50 @@ function runCf(words) {
   })
 }
 
+/** Claude's question tool: the settings' PreToolUse hook answers, or the window's dialog would. */
+function askThroughHook(questions) {
+  const settings = JSON.parse(readFileSync(settingsFile, 'utf8'))
+  const command = settings.hooks.PreToolUse.find((h) => h.matcher === 'AskUserQuestion').hooks[0]
+    .command
+  const event = {
+    session_id: sessionId,
+    cwd: process.cwd(),
+    permission_mode: 'bypassPermissions',
+    hook_event_name: 'PreToolUse',
+    tool_name: 'AskUserQuestion',
+    tool_input: { questions },
+  }
+  return new Promise((resolve) => {
+    const child = spawn('/bin/sh', ['-c', command], {
+      env: process.env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    let output = ''
+    let errors = ''
+    child.stdout.on('data', (chunk) => {
+      output += chunk
+    })
+    child.stderr.on('data', (chunk) => {
+      errors += chunk
+    })
+    child.on('close', (code) => {
+      try {
+        const answers = JSON.parse(output).hookSpecificOutput.updatedInput.answers
+        resolve(`answered: ${questions.map((q) => answers[q.question]).join(' | ')}`)
+      } catch {
+        resolve(`unanswered (exit ${code}): ${errors.trim() || 'no output'}`.slice(0, 600))
+      }
+    })
+    child.stdin.end(JSON.stringify(event))
+  })
+}
+
 async function replyTo(text) {
+  const ask = /^ASK (.+)$/m.exec(text)
+  if (ask) return askThroughHook(JSON.parse(ask[1]))
+  const asked = /^\[ConsensFlow m-(\d+)[^\]]*question from @/m.exec(text)
+  const reply = /REPLY (.+)$/m.exec(text)
+  if (asked && reply) return `replied: ${await runCf(['answer', `m-${asked[1]}`, reply[1]])}`
   const dispatch = /^DISPATCH ((?:(?:--\S+ \S+|@\S+) )+)(.+)$/m.exec(text)
   if (dispatch) {
     const words = dispatch[1].trim().split(' ')

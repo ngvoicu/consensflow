@@ -694,6 +694,15 @@ describe('the delivered text', () => {
       deliveryText({ ...base, kind: 'question' }),
       '[ConsensFlow m-12 · T-3 · question from @zeus]\nWhich format?\n\nAnswer with: cf answer m-12 "…"',
     )
+    const options = [{ question: 'Which?', header: 'Format', options: [], multiple: false }]
+    assert.equal(
+      deliveryText({ ...base, kind: 'question', questions: options }),
+      '[ConsensFlow m-12 · T-3 · question from @zeus]\nWhich format?\n\nAnswer with: cf answer m-12 "…" (a label or your own words)',
+    )
+    assert.equal(
+      deliveryText({ ...base, kind: 'question', questions: [...options, ...options] }),
+      '[ConsensFlow m-12 · T-3 · question from @zeus]\nWhich format?\n\nAnswer with: cf answer m-12 "…" (a label or your own words; one line per question)',
+    )
     assert.equal(
       deliveryText({ ...base, kind: 'note', sender: null, taskNumber: null, body: 'hi' }),
       '[ConsensFlow m-12 · note from ConsensFlow]\nhi',

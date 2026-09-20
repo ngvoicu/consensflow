@@ -19,6 +19,11 @@ const MEMBERS = new Set(['worker', 'advisor', 'reviewer'])
 const POOL_OF = { lead: 'worker', pm: 'advisor', human: 'worker' }
 const TASK_ROUTE = /^\/api\/tasks\/(\d+)(?:\/(done|accept|reopen|cancel|review))?$/
 const MESSAGE_ROUTE = /^\/api\/inbox\/(\d+)$/
+const QUESTION_ROUTE = /^\/api\/questions\/(\d+)$/
+/** The longest one poll for an answer may hold; a door polls again. */
+const MAX_WAIT_MS = 25_000
+const POLL_MS = 250
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const digest = (token) => createHash('sha256').update(token).digest('hex')
 
@@ -199,13 +204,43 @@ export async function startApi({
         to,
         task: body.task ?? active?.number,
         body: body.body,
+        ...(body.questions === undefined ? {} : { questions: body.questions }),
       })
       changed()
       return { status: 201, body: { message: messageSummary(asked) } }
     }
+    // A door waiting for the answer to the question it put on the board.
+    const question = QUESTION_ROUTE.exec(url.pathname)
+    if (question !== null && request.method === 'GET') {
+      const asked = ledger.message(Number(question[1]))
+      if (asked === null || asked.kind !== 'question' || asked.projectId !== project.id) {
+        throw new Refusal(404, 'unknown-message', `no question m-${question[1]}`)
+      }
+      if (asked.sender !== participant.handle) {
+        throw new Refusal(403, 'not-your-question', `m-${asked.id} was asked by @${asked.sender}`)
+      }
+      const wait = Math.min(MAX_WAIT_MS, Math.max(0, Number(url.searchParams.get('wait')) || 0))
+      const until = Date.now() + wait
+      let answer = ledger.answerTo(asked.id)
+      while (answer === null && Date.now() < until) {
+        await sleep(Math.min(POLL_MS, until - Date.now()))
+        answer = ledger.answerTo(asked.id)
+      }
+      return ok({
+        question: messageSummary(asked),
+        answer:
+          answer === null
+            ? null
+            : { id: answer.id, from: answer.sender, body: answer.body, choices: answer.choices },
+      })
+    }
     if (at === 'POST /api/answers') {
       const body = await readJson(request)
-      const answer = ledger.answer(body.question, { from: participant.handle, body: body.body })
+      const answer = ledger.answer(body.question, {
+        from: participant.handle,
+        body: body.body,
+        ...(body.choices === undefined ? {} : { choices: body.choices }),
+      })
       changed()
       return { status: 201, body: { message: messageSummary(answer) } }
     }
@@ -317,6 +352,8 @@ function messageSummary(message) {
     recipient: message.recipient,
     task: message.taskNumber,
     preview: message.body.split('\n')[0].slice(0, 160),
+    questions: message.questions,
+    choices: message.choices,
     createdAt: message.createdAt,
   }
 }

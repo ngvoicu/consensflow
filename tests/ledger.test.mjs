@@ -6,7 +6,8 @@ import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { openLedger, SCHEMA_VERSION, verdictOf } from '../src/ledger/index.js'
+import { OVERDUE_MS, openLedger, SCHEMA_VERSION, verdictOf } from '../src/ledger/index.js'
+import { MIGRATIONS } from '../src/ledger/schema.js'
 
 /**
  * The ledger (TEST-BDC-01): one SQLite file in the home that holds every
@@ -203,6 +204,53 @@ describe('opening the ledger', () => {
       } finally {
         ledger.close()
       }
+    })
+  })
+})
+
+describe('upgrading a home', () => {
+  it('gives a home written by the first schema the role sets, the unreviewed reason and the question options', async () => {
+    await withDir(async (dir) => {
+      const file = path.join(dir, 'consensflow.db')
+      const old = new DatabaseSync(file)
+      old.exec(MIGRATIONS[0])
+      old.exec('PRAGMA user_version = 1')
+      const at = '2026-09-19T21:00:00.000Z'
+      old
+        .prepare(
+          `INSERT INTO project (id, directory, name, state, review, created_at, updated_at)
+           VALUES (1, '/work/app', 'app', 'open', 'members', ?, ?)`,
+        )
+        .run(at, at)
+      old
+        .prepare(
+          `INSERT INTO participant (project_id, handle, role, agent, harness, tier, created_at) VALUES
+           (1, 'human', 'human', NULL, NULL, NULL, ?),
+           (1, 'lead', 'lead', NULL, 'claude-code', NULL, ?),
+           (1, 'zeus', 'worker', 'zeus', 'claude-code', 'standard', ?),
+           (1, 'hera', 'reviewer', 'hera', 'codex', 'standard', ?)`,
+        )
+        .run(at, at, at, at)
+      old.close()
+      const ledger = openLedger(file)
+      try {
+        const roles = Object.fromEntries(
+          ledger.project(1).participants.map((p) => [p.handle, p.roles]),
+        )
+        assert.deepEqual(roles, { human: [], lead: [], zeus: ['worker'], hera: ['reviewer'] })
+        assert.deepEqual(
+          ledger.members(1, 'reviewer').map((m) => m.handle),
+          ['hera'],
+          'the review policy still has its reviewer',
+        )
+        const question = ledger.ask(1, { from: 'lead', to: 'human', body: 'Still here?' })
+        assert.equal(question.questions, null)
+      } finally {
+        ledger.close()
+      }
+      const upgraded = new DatabaseSync(file)
+      assert.equal(upgraded.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION)
+      upgraded.close()
     })
   })
 })
@@ -845,6 +893,186 @@ describe('tasks and the inbox queue', () => {
     })
   })
 
+  const OPTIONS = [
+    {
+      question: 'Which colour?',
+      header: 'Colour',
+      options: [{ label: 'red', description: 'Warm' }, { label: 'blue' }],
+    },
+    { question: 'Ship it?', header: 'Ship', options: [{ label: 'yes' }, { label: 'no' }] },
+  ]
+  const NORMALIZED = [
+    {
+      question: 'Which colour?',
+      header: 'Colour',
+      options: [
+        { label: 'red', description: 'Warm' },
+        { label: 'blue', description: null },
+      ],
+      multiple: false,
+    },
+    {
+      question: 'Ship it?',
+      header: 'Ship',
+      options: [
+        { label: 'yes', description: null },
+        { label: 'no', description: null },
+      ],
+      multiple: false,
+    },
+  ]
+
+  /** Zeus on T-1, asking the lead a question with options. */
+  function asked(ledger, questions = OPTIONS) {
+    const { project, id } = team(ledger)
+    deliver(
+      ledger,
+      ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' }).message,
+    )
+    const question = ledger.ask(project.id, { from: 'zeus', to: 'lead', task: 1, questions })
+    deliver(ledger, question)
+    return { project, id, question }
+  }
+
+  it('asks with options: the question reads as text, keeps the options, and a bad shape is refused', async () => {
+    await withLedger((ledger) => {
+      const { project, question } = asked(ledger)
+      assert.deepEqual(question.questions, NORMALIZED)
+      assert.equal(
+        question.body,
+        'Colour: Which colour?\n- red: Warm\n- blue\n\nShip: Ship it?\n- yes\n- no',
+      )
+      assert.equal(ledger.task(project.id, 1).state, 'waiting')
+      for (const bad of [
+        [],
+        [{ question: 'x' }],
+        [{ question: 'x', header: 'h', options: 'none' }],
+        [{ question: 'x', header: 'h', options: [{ description: 'no label' }] }],
+        Array.from({ length: 5 }, () => OPTIONS[0]),
+      ]) {
+        assert.throws(
+          () => ledger.ask(project.id, { from: 'zeus', to: 'lead', task: 1, questions: bad }),
+          { code: 'bad-questions' },
+        )
+      }
+    })
+  })
+
+  it('answers a question with options by choice: the answer is read at once, never delivered, and the task resumes', async () => {
+    await withLedger((ledger) => {
+      const { project, id, question } = asked(ledger)
+      assert.equal(ledger.answerTo(question.id), null)
+      const answer = ledger.answer(question.id, { from: 'lead', choices: [['blue'], ['yes']] })
+      assert.deepEqual(
+        [answer.kind, answer.recipient, answer.replyTo, answer.state, answer.choices, answer.body],
+        ['answer', 'zeus', question.id, 'read', [['blue'], ['yes']], 'Colour: blue\nShip: yes'],
+      )
+      assert.equal(ledger.task(project.id, 1).state, 'working', 'the door resumes the task')
+      assert.equal(ledger.nextDelivery(id('zeus')), null, 'nothing is pasted into the window')
+      assert.deepEqual(ledger.answerTo(question.id).choices, [['blue'], ['yes']])
+      assert.throws(
+        () => ledger.answer(question.id, { from: 'lead', choices: [['red'], ['no']] }),
+        {
+          code: 'already-answered',
+        },
+      )
+    })
+  })
+
+  it('keeps a question asked before the task arrived on that task, which then arrives waiting', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = team(ledger)
+      const { message } = ledger.createTask(project.id, {
+        from: 'lead',
+        to: 'zeus',
+        body: 'Parser',
+      })
+      assert.equal(ledger.activeTask(id('zeus')).number, 1, 'queued counts: the window may be up')
+      const question = ledger.ask(project.id, {
+        from: 'zeus',
+        to: 'lead',
+        task: 1,
+        questions: OPTIONS,
+      })
+      assert.equal(ledger.task(project.id, 1).state, 'queued')
+      deliver(ledger, message)
+      assert.equal(ledger.task(project.id, 1).state, 'waiting')
+      ledger.answer(question.id, { from: 'lead', choices: [['red'], ['no']] })
+      assert.equal(ledger.task(project.id, 1).state, 'working')
+    })
+  })
+
+  it('maps a text answer onto the options, one line per question, and keeps free text', async () => {
+    await withLedger((ledger) => {
+      const { question } = asked(ledger)
+      assert.throws(() => ledger.answer(question.id, { from: 'lead', body: 'blue' }), {
+        code: 'bad-choices',
+      })
+      const answer = ledger.answer(question.id, { from: 'lead', body: 'BLUE\nmaybe later' })
+      assert.deepEqual(answer.choices, [['blue'], ['maybe later']])
+      assert.equal(answer.body, 'Colour: blue\nShip: maybe later')
+    })
+  })
+
+  it('takes several labels for a question that allows them', async () => {
+    await withLedger((ledger) => {
+      const { question } = asked(ledger, [
+        {
+          question: 'Which?',
+          header: 'Which',
+          options: [{ label: 'a' }, { label: 'b' }, { label: 'c' }],
+          multiple: true,
+        },
+      ])
+      assert.throws(
+        () => ledger.answer(question.id, { from: 'lead', choices: [['a'], ['b']] }),
+        { code: 'bad-choices' },
+        'one array of labels per question',
+      )
+      const answer = ledger.answer(question.id, { from: 'lead', body: 'a, C' })
+      assert.deepEqual([answer.choices, answer.body], [[['a', 'c']], 'Which: a, c'])
+    })
+  })
+
+  it("lets the human answer any question, and shows a coordinator's unanswered question as overdue", async () => {
+    await withDir((dir) => {
+      let at = Date.parse('2026-09-19T10:00:00.000Z')
+      const ledger = openLedger(path.join(dir, 'consensflow.db'), { now: () => new Date(at) })
+      try {
+        const { project } = team(ledger)
+        deliver(
+          ledger,
+          ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' }).message,
+        )
+        const question = ledger.ask(project.id, {
+          from: 'zeus',
+          to: 'lead',
+          task: 1,
+          body: 'Which format?',
+        })
+        at += OVERDUE_MS - 1000
+        assert.deepEqual(ledger.board(project.id).overdue, [])
+        at += 2000
+        assert.deepEqual(
+          ledger.board(project.id).overdue.map((m) => [m.id, m.recipient]),
+          [[question.id, 'lead']],
+        )
+        const answer = ledger.answer(question.id, { from: 'human', body: 'JSON' })
+        assert.deepEqual(
+          [answer.recipient, answer.state, answer.choices],
+          ['zeus', 'queued', null],
+          'a plain question is answered in text, delivered as before',
+        )
+        assert.deepEqual(ledger.board(project.id).overdue, [])
+        assert.throws(() => ledger.answer(question.id, { from: 'diana', body: 'CSV' }), {
+          code: 'not-your-question',
+        })
+      } finally {
+        ledger.close()
+      }
+    })
+  })
+
   it('keeps messages for the human in the human inbox until they are read', async () => {
     await withLedger((ledger) => {
       const { project, id } = team(ledger)
@@ -993,7 +1221,11 @@ describe('views', () => {
       const { project, id } = team(ledger)
       assert.equal(ledger.activeTask(id('zeus')), null)
       ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'One' })
-      assert.equal(ledger.activeTask(id('zeus')), null, 'a queued task is not started')
+      assert.equal(
+        ledger.activeTask(id('zeus')).state,
+        'queued',
+        "a queued task is already the window's",
+      )
       deliver(ledger, ledger.task(project.id, 1).messages[0])
       assert.deepEqual(
         [ledger.activeTask(id('zeus')).number, ledger.activeTask(id('zeus')).messages.length],

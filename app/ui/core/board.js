@@ -162,7 +162,11 @@ export class BoardView {
 
   /** What waits for the human, and where a new task starts. */
   #forYou(inbox, board, now) {
-    const waiting = inbox.filter((message) => message.state === 'queued')
+    // The human's own inbox, then the questions a coordinator has left unanswered too long.
+    const waiting = [
+      ...inbox.filter((message) => message.state === 'queued'),
+      ...(board.overdue ?? []).map((message) => ({ ...message, overdue: true })),
+    ]
     const section = element('section', 'foryou')
     section.setAttribute('role', 'region')
     section.setAttribute('aria-label', 'For you')
@@ -197,6 +201,73 @@ export class BoardView {
     return section
   }
 
+  /** A plain question: the answer is typed. */
+  #answerForm(message) {
+    const form = element('form', 'answer')
+    const field = element('textarea')
+    field.name = 'answer'
+    field.rows = 2
+    field.required = true
+    field.setAttribute('aria-label', `Answer to m-${message.id}`)
+    field.placeholder = `Answer ${who(message.sender)}`
+    form.append(field, element('button', 'primary-button', 'Send answer'))
+    form.querySelector('button').type = 'submit'
+    form.addEventListener('submit', (event) => {
+      event.preventDefault()
+      if (field.value.trim()) this.#actions.onAnswer(message, field.value.trim())
+    })
+    return form
+  }
+
+  /**
+   * A question with options, as the agent's own question tool asked it: each
+   * question's options to pick (one, or several when it allows), and a line
+   * for something else; every question needs a pick before the answer goes.
+   */
+  #choiceForm(message) {
+    const form = element('form', 'answer answer-choices')
+    form.setAttribute('aria-label', `Answer to m-${message.id}`)
+    const groups = message.questions.map((question, at) => {
+      const group = element('fieldset', 'choice')
+      group.append(element('legend', null, `${question.header}: ${question.question}`))
+      for (const option of question.options) {
+        const label = element('label', 'choice-option')
+        const input = element('input')
+        input.type = question.multiple ? 'checkbox' : 'radio'
+        input.name = `pick-${at}`
+        input.value = option.label
+        label.append(input, element('span', 'choice-label', option.label))
+        if (option.description) label.append(element('span', 'choice-desc', option.description))
+        group.append(label)
+      }
+      const custom = element('input', 'choice-custom')
+      custom.type = 'text'
+      custom.name = `custom-${at}`
+      custom.placeholder = 'Something else'
+      custom.setAttribute('aria-label', `Something else for ${question.header}`)
+      group.append(custom)
+      return group
+    })
+    const send = element('button', 'primary-button', 'Send answer')
+    send.type = 'submit'
+    form.append(...groups, send)
+    form.addEventListener('submit', (event) => {
+      event.preventDefault()
+      const choices = message.questions.map((_question, at) => {
+        const picked = [...form.querySelectorAll(`input[name="pick-${at}"]:checked`)].map(
+          (input) => input.value,
+        )
+        const custom = form.elements[`custom-${at}`].value.trim()
+        return custom ? [...picked, custom] : picked
+      })
+      for (const [at, group] of groups.entries()) {
+        group.classList.toggle('choice-missing', choices[at].length === 0)
+      }
+      if (choices.every((picks) => picks.length > 0)) this.#actions.onAnswer(message, null, choices)
+    })
+    return form
+  }
+
   #messageStrip(message, now) {
     const item = element('li', 'strip strip-message')
     item.dataset.kind = message.kind
@@ -208,27 +279,17 @@ export class BoardView {
       element(
         'span',
         'strip-route',
-        `${KIND_LABEL[message.kind] ?? message.kind} from ${who(message.sender)}${message.taskNumber ? ` · T-${message.taskNumber}` : ''}`,
+        `${KIND_LABEL[message.kind] ?? message.kind} from ${who(message.sender)}${message.overdue ? ` to ${who(message.recipient)}` : ''}${message.taskNumber ? ` · T-${message.taskNumber}` : ''}${message.overdue ? ' · unanswered' : ''}`,
       ),
       element('span', 'strip-age', age(message.createdAt, now)),
     )
+    if (message.overdue) item.dataset.overdue = 'true'
     item.append(line)
-    if (message.body.includes('\n')) item.append(element('p', 'strip-body', message.body))
+    if (message.body.includes('\n') && !message.questions) {
+      item.append(element('p', 'strip-body', message.body))
+    }
     if (message.kind === 'question') {
-      const form = element('form', 'answer')
-      const field = element('textarea')
-      field.name = 'answer'
-      field.rows = 2
-      field.required = true
-      field.setAttribute('aria-label', `Answer to m-${message.id}`)
-      field.placeholder = `Answer ${who(message.sender)}`
-      form.append(field, element('button', 'primary-button', 'Send answer'))
-      form.querySelector('button').type = 'submit'
-      form.addEventListener('submit', (event) => {
-        event.preventDefault()
-        if (field.value.trim()) this.#actions.onAnswer(message, field.value.trim())
-      })
-      item.append(form)
+      item.append(message.questions ? this.#choiceForm(message) : this.#answerForm(message))
     } else {
       const actions = element('div', 'strip-actions')
       if (message.taskNumber) {

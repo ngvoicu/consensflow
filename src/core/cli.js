@@ -25,18 +25,84 @@ Add --json for machine output.`
 
 const HELP = new Set(['help', '--help', '-h'])
 
-export async function runCoreCli(args, env, { out, err, cwd = process.cwd() }) {
+export async function runCoreCli(
+  args,
+  env,
+  { out, err, cwd = process.cwd(), input = readStandardInput },
+) {
   const json = args.includes('--json')
   const words = args.filter((arg) => arg !== '--json')
   const call = client(env)
   try {
     const [verb, ...rest] = words
+    // A harness hook is not a command the model runs: it prints only what the
+    // harness must read, and nothing at all when it has nothing to say.
+    if (verb === 'hook') {
+      const output = await hook(rest[0], call, env, input)
+      if (output !== null) out(JSON.stringify(output))
+      return 0
+    }
     const result = await command(verb, rest, call, cwd)
     out(json ? JSON.stringify(result.data, null, 2) : result.text)
     return 0
   } catch (cause) {
     err(`cf: ${cause.message}`)
     return cause.usage ? 2 : 1
+  }
+}
+
+async function readStandardInput() {
+  const chunks = []
+  for await (const chunk of process.stdin) chunks.push(chunk)
+  return Buffer.concat(chunks).toString('utf8')
+}
+
+/** How long a door waits for the board before the harness's own dialog takes over. */
+const QUESTION_WAIT_MS = 3_500_000
+const POLL_WAIT_MS = 20_000
+
+/**
+ * A harness's question tool, answered from the board. `claude`: Claude Code's
+ * PreToolUse hook for AskUserQuestion. The questions go to whoever gave the
+ * task, the hook waits for the answer, and returns it as the tool's input, the
+ * way Claude documents it. Anything that goes wrong (no ConsensFlow, a timeout,
+ * another tool) ends silently: Claude then shows its own dialog in the window.
+ */
+async function hook(harness, call, env, input) {
+  if (harness !== 'claude') return null
+  try {
+    const event = JSON.parse(await input())
+    const questions = event.tool_input?.questions
+    if (event.tool_name !== 'AskUserQuestion' || !Array.isArray(questions)) return null
+    const { message } = await call('POST', '/api/questions', {
+      questions: questions.map((q) => ({
+        question: q.question,
+        header: q.header,
+        options: (q.options ?? []).map((o) => ({ label: o.label, description: o.description })),
+        multiple: q.multiSelect === true,
+      })),
+    })
+    const until = Date.now() + (Number(env.CONSENSFLOW_QUESTION_WAIT_MS) || QUESTION_WAIT_MS)
+    let answer = null
+    while (answer === null && Date.now() < until) {
+      const wait = Math.min(POLL_WAIT_MS, until - Date.now())
+      answer = (await call('GET', `/api/questions/${message.id}?wait=${wait}`)).answer
+    }
+    if (answer === null) return null
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+        updatedInput: {
+          ...event.tool_input,
+          answers: Object.fromEntries(
+            questions.map((q, at) => [q.question, (answer.choices?.[at] ?? []).join(', ')]),
+          ),
+        },
+      },
+    }
+  } catch {
+    return null
   }
 }
 

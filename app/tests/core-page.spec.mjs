@@ -194,7 +194,38 @@ function model() {
           recipient: 'human',
           taskNumber: 1,
           body: 'Ship it to production today?',
+          questions: null,
           createdAt: at(2),
+        },
+        {
+          id: 14,
+          kind: 'question',
+          state: 'queued',
+          sender: 'lead',
+          recipient: 'human',
+          taskNumber: 1,
+          body: 'Colour: Which colour?\n- red: Warm\n- blue\n\nTools: Which tools?\n- vite\n- esbuild',
+          questions: [
+            {
+              question: 'Which colour?',
+              header: 'Colour',
+              options: [
+                { label: 'red', description: 'Warm' },
+                { label: 'blue', description: null },
+              ],
+              multiple: false,
+            },
+            {
+              question: 'Which tools?',
+              header: 'Tools',
+              options: [
+                { label: 'vite', description: null },
+                { label: 'esbuild', description: null },
+              ],
+              multiple: true,
+            },
+          ],
+          createdAt: at(1),
         },
         {
           id: 9,
@@ -389,9 +420,72 @@ test('shows an agent-written title as text, never as markup', async ({ page }) =
   await expect(page.locator('tr[data-handle="diana"] img')).toHaveCount(0)
 })
 
+test('answers a question with options by picking, one pick per question at least', async ({
+  page,
+}) => {
+  await open(page)
+  const question = page.locator('.strip-message[data-message="14"]')
+  await expect(question.locator('.strip-body')).toHaveCount(0)
+  const form = question.getByRole('form', { name: 'Answer to m-14' })
+  await expect(form.getByRole('group', { name: 'Colour: Which colour?' })).toContainText('Warm')
+  await form.getByRole('radio', { name: 'blue' }).check()
+  await form.getByRole('button', { name: 'Send answer' }).click()
+  expect(await calls(page, 'message.answer')).toEqual([])
+  await expect(form.getByRole('group', { name: 'Tools: Which tools?' })).toHaveClass(
+    /choice-missing/,
+  )
+  await form.getByRole('checkbox', { name: 'vite' }).check()
+  await form.getByRole('checkbox', { name: 'esbuild' }).check()
+  await form.getByLabel('Something else for Colour').fill('purple')
+  await form.getByRole('button', { name: 'Send answer' }).click()
+  await expect
+    .poll(() => calls(page, 'message.answer'))
+    .toEqual([
+      {
+        question: 14,
+        choices: [
+          ['blue', 'purple'],
+          ['vite', 'esbuild'],
+        ],
+      },
+    ])
+  await expect.poll(() => calls(page, 'message.read')).toEqual([{ message: 14 }])
+})
+
+test("shows a coordinator's unanswered question in For you and answers it without a read", async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].overdue = [
+    {
+      id: 15,
+      kind: 'question',
+      state: 'delivered',
+      sender: 'zeus',
+      recipient: 'lead',
+      taskNumber: 2,
+      body: 'Which parser?',
+      questions: null,
+      createdAt: at(12),
+    },
+  ]
+  await open(page, data)
+  const strip = page.locator('.strip-message[data-message="15"]')
+  await expect(strip).toHaveAttribute('data-overdue', 'true')
+  await expect(strip.locator('.strip-route')).toHaveText(
+    'Question from @zeus to @lead · T-2 · unanswered',
+  )
+  await strip.getByLabel('Answer to m-15').fill('The recursive one.')
+  await strip.getByRole('button', { name: 'Send answer' }).click()
+  await expect
+    .poll(() => calls(page, 'message.answer'))
+    .toEqual([{ question: 15, body: 'The recursive one.' }])
+  expect(await calls(page, 'message.read')).toEqual([])
+})
+
 test("answers a question in the human's bay and routes it back", async ({ page }) => {
   await open(page)
-  const question = page.locator('.strip-message[data-kind="question"]')
+  const question = page.locator('.strip-message[data-message="12"]')
   await expect(question.locator('.strip-route')).toHaveText('Question from @lead · T-1')
   await question.getByLabel('Answer to m-12').fill('Yes, after the smoke passes.')
   await question.getByRole('button', { name: 'Send answer' }).click()
@@ -407,7 +501,7 @@ test("shows a task waiting for a member in its requester's backlog, with the tie
 }) => {
   await open(page)
   const foryou = page.getByRole('region', { name: 'For you' })
-  await expect(foryou.locator('.foryou-status')).toHaveText('2 waiting')
+  await expect(foryou.locator('.foryou-status')).toHaveText('3 waiting')
   const card = page.locator(
     'tr[data-handle="lead"] td[data-state="open"] button.card[data-task="6"]',
   )

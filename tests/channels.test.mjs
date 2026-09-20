@@ -115,6 +115,11 @@ it('Codex launch enables only an installed native queue capability (TEST-PANE-10
 })
 
 const TURN_END = { hooks: [{ type: 'command', command: 'exit 0' }] }
+// Claude's question tool, answered from the board through `cf hook claude`.
+const QUESTION = {
+  matcher: 'AskUserQuestion',
+  hooks: [{ type: 'command', command: 'cf hook claude', timeout: 3600 }],
+}
 // Full-permission mode without the one-time acceptance dialog, and messages
 // from ConsensFlow's other sessions delivered instead of held for approval
 // (a bypass-mode session holds them by default and drops them after 5 min).
@@ -161,7 +166,7 @@ describe('retired Claude development channel (TEST-PANE-121)', () => {
         // The only flag is the launch's settings file; no channel of its own.
         assert.deepEqual(await claudeSettings(configuration, home), {
           ...YOLO,
-          hooks: { Stop: [TURN_END] },
+          hooks: { PreToolUse: [QUESTION], Stop: [TURN_END] },
         })
         assert.deepEqual(configuration.env, {}, version)
         if (process.platform === 'darwin') {
@@ -177,7 +182,7 @@ describe('retired Claude development channel (TEST-PANE-121)', () => {
       assert.deepEqual({ ...missing, args: [] }, { args: [], env: {}, channel: null })
       assert.deepEqual(await claudeSettings(missing, home), {
         ...YOLO,
-        hooks: { Stop: [TURN_END] },
+        hooks: { PreToolUse: [QUESTION], Stop: [TURN_END] },
       })
       assert.deepEqual(await readdir(root), ['claude'], 'nothing is written into the project')
     } finally {
@@ -200,7 +205,7 @@ describe('retired Claude development channel (TEST-PANE-121)', () => {
       })
       assert.deepEqual(await claudeSettings(worker, home), {
         ...YOLO,
-        hooks: { Stop: [TURN_END] },
+        hooks: { PreToolUse: [QUESTION], Stop: [TURN_END] },
       })
       const receiver = { type: 'command', command: 'receiver', asyncRewake: true }
       const lead = await claudeSettings(

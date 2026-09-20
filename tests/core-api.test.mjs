@@ -12,6 +12,9 @@ import { openLedger } from '../src/ledger/index.js'
  * one participant, the API decides who may do what, and `cf` turns it into
  * plain sentences and exit codes.
  */
+const participantId = (ledger, project, handle) =>
+  ledger.project(project.id).participants.find((p) => p.handle === handle).id
+
 async function withApi(fn) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-core-api-'))
   const ledger = openLedger(path.join(dir, 'consensflow.db'))
@@ -51,6 +54,7 @@ async function withApi(fn) {
     return { status: response.status, body: await response.json() }
   }
   const cf = async (who, ...args) => {
+    const options = typeof args.at(-1) === 'object' ? args.pop() : {}
     const out = []
     const err = []
     const code = await runCoreCli(
@@ -59,6 +63,7 @@ async function withApi(fn) {
       {
         out: (line) => out.push(line),
         err: (line) => err.push(line),
+        ...(options.input === undefined ? {} : { input: async () => options.input }),
       },
     )
     return { code, out: out.join('\n'), err: err.join('\n') }
@@ -152,6 +157,64 @@ describe('the agents API', () => {
         body: 'JSON',
       })
       assert.deepEqual([answered.status, answered.body.message.recipient], [201, 'zeus'])
+    })
+  })
+
+  const COLOUR = {
+    question: 'Which colour?',
+    header: 'Colour',
+    options: [{ label: 'red', description: 'Warm' }, { label: 'blue' }],
+  }
+
+  it('relays a question with options: the asker collects the answer the coordinator gives by label', async () => {
+    await withApi(async ({ ledger, project, token, call }) => {
+      deliver(
+        ledger,
+        ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' }).message,
+      )
+      const zeus = token('zeus')
+      const asked = await call(zeus, 'POST', '/api/questions', { questions: [COLOUR] })
+      assert.equal(asked.status, 201, JSON.stringify(asked.body))
+      const id = asked.body.message.id
+      assert.deepEqual(
+        [asked.body.message.recipient, asked.body.message.questions[0].header],
+        ['lead', 'Colour'],
+      )
+      assert.equal(ledger.task(project.id, 1).state, 'waiting')
+      const bad = await call(zeus, 'POST', '/api/questions', { questions: [{ question: 'x' }] })
+      assert.deepEqual([bad.status, bad.body.error], [400, 'bad-questions'])
+
+      const waiting = await call(zeus, 'GET', `/api/questions/${id}`)
+      assert.deepEqual(
+        [waiting.status, waiting.body.answer, waiting.body.question.questions.length],
+        [200, null, 1],
+      )
+      const started = Date.now()
+      const polled = await call(zeus, 'GET', `/api/questions/${id}?wait=300`)
+      assert.equal(polled.body.answer, null)
+      assert.ok(Date.now() - started >= 250, 'a poll with wait holds until its time is up')
+      const others = await call(token('lead'), 'GET', `/api/questions/${id}`)
+      assert.deepEqual([others.status, others.body.error], [403, 'not-your-question'])
+
+      const answered = await call(token('lead'), 'POST', '/api/answers', {
+        question: id,
+        body: 'Blue',
+      })
+      assert.deepEqual(
+        [answered.status, answered.body.message.choices, answered.body.message.state],
+        [201, [['blue']], 'read'],
+      )
+      const collected = await call(zeus, 'GET', `/api/questions/${id}?wait=5000`)
+      assert.deepEqual(
+        [collected.body.answer.choices, collected.body.answer.body, collected.body.answer.from],
+        [[['blue']], 'Colour: blue', 'lead'],
+      )
+      assert.equal(ledger.task(project.id, 1).state, 'working')
+      const chosen = await call(token('lead'), 'POST', '/api/answers', {
+        question: id,
+        choices: [['red']],
+      })
+      assert.deepEqual([chosen.status, chosen.body.error], [409, 'already-answered'])
     })
   })
 
@@ -354,6 +417,86 @@ describe('tiered tasks through the API and cf', () => {
       assert.equal(upward.code, 0)
       const human = await cf(token('zeus'), 'ask', '--human', 'Which parser?')
       assert.equal(human.code, 0)
+    })
+  })
+})
+
+describe("cf hook claude: Claude's question tool answered from the board", () => {
+  const EVENT = {
+    session_id: 'abc',
+    hook_event_name: 'PreToolUse',
+    tool_name: 'AskUserQuestion',
+    tool_input: {
+      questions: [
+        {
+          question: 'Which colour?',
+          header: 'Colour',
+          options: [{ label: 'red', description: 'Warm' }, { label: 'blue' }],
+          multiSelect: false,
+        },
+        {
+          question: 'Which tools?',
+          header: 'Tools',
+          options: [{ label: 'vite' }, { label: 'esbuild' }],
+          multiSelect: true,
+        },
+      ],
+    },
+  }
+
+  it('puts the questions on the board, waits for the answer, and hands it back as updatedInput', async () => {
+    await withApi(async ({ ledger, project, token, call, cf }) => {
+      deliver(
+        ledger,
+        ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' }).message,
+      )
+      const hook = cf(token('zeus'), 'hook', 'claude', { input: JSON.stringify(EVENT) })
+      let question = null
+      for (let tries = 0; question === null && tries < 50; tries += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        question = ledger.inbox(participantId(ledger, project, 'lead'))[0] ?? null
+      }
+      assert.ok(question, 'the lead has the question')
+      assert.equal(
+        question.body,
+        'Colour: Which colour?\n- red: Warm\n- blue\n\nTools: Which tools?\n- vite\n- esbuild',
+      )
+      const answered = await call(token('lead'), 'POST', '/api/answers', {
+        question: question.id,
+        body: 'blue\nvite, esbuild',
+      })
+      assert.equal(answered.status, 201)
+      const { code, out } = await hook
+      assert.equal(code, 0)
+      assert.deepEqual(JSON.parse(out), {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'allow',
+          updatedInput: {
+            ...EVENT.tool_input,
+            answers: { 'Which colour?': 'blue', 'Which tools?': 'vite, esbuild' },
+          },
+        },
+      })
+    })
+  })
+
+  it('stays silent for any other tool, and when ConsensFlow cannot be reached', async () => {
+    await withApi(async ({ token, cf }) => {
+      const other = await cf(token('zeus'), 'hook', 'claude', {
+        input: JSON.stringify({ ...EVENT, tool_name: 'Bash', tool_input: { command: 'ls' } }),
+      })
+      assert.deepEqual([other.code, other.out, other.err], [0, '', ''])
+      const gone = await runCoreCli(
+        ['hook', 'claude'],
+        { CONSENSFLOW_URL: 'http://127.0.0.1:1', CONSENSFLOW_TOKEN: 'x' },
+        {
+          out: () => assert.fail('nothing is printed: the window shows its own dialog'),
+          err: () => assert.fail('nothing is printed'),
+          input: async () => JSON.stringify(EVENT),
+        },
+      )
+      assert.equal(gone, 0)
     })
   })
 })

@@ -178,11 +178,11 @@ Design, 2026-09-20, before the code:
 
 - [ ] [VERIFY-CF1-13] Bench green on the free models and on Claude and Codex after Phases A to C; Candidate rebuilt; Gabriel's second round.
 
-### Phase E: Questions relayed to the board [planned]
+### Phase E: Questions relayed to the board [active]
 
-- [ ] [TEST-CF1-14] Research note per harness in the brain: how a pending question is seen and answered (Claude hook, Codex app-server, OpenCode and Pi plugins, Devin none), with the exact fields.
-- [ ] [TEST-CF1-15] Ledger and dispatcher: a relayed question with options becomes a board question to the requester (human for coordinators); the answer returns through the harness's own door; the task waits meanwhile; a question nobody answers is shown in the human's row after a set time.
-- [ ] [IMPL-CF1-16] Claude first, then Codex, then OpenCode and Pi; each proven with the fake harness and once live.
+- [x] [TEST-CF1-14] Research note per harness in the brain: how a pending question is seen and answered (Claude hook, Codex app-server, OpenCode and Pi plugins, Devin none), with the exact fields.
+- [x] [TEST-CF1-15] Ledger and dispatcher: a relayed question with options becomes a board question to the requester (human for coordinators); the answer returns through the harness's own door; the task waits meanwhile; a question nobody answers is shown in the human's row after a set time.
+- [ ] [IMPL-CF1-16] Claude first (done: the hook, proven with the fake harness; the live Sonnet run is next), then OpenCode, then Codex behind its feature flag; Pi and Devin have no question tool, so nothing to build for them.
 
 ## Resume context
 
@@ -270,3 +270,26 @@ waits for the running Candidate to be quit.
   without `--reviewer` it dropped its first worker (the flag's index of -1
   plus one is 0), which every earlier run had hidden by naming the reviewer.
   The Candidate rebuild waits for the running Candidate to be quit.
+- 2026-09-20, Phase E, the Claude door. Research per harness in the brain
+  (`research/native-questions-per-harness.md`), then three live probes of
+  Claude Sonnet in a real terminal: the `PreToolUse` hook fires for
+  `AskUserQuestion` under `bypassPermissions`, the window shows only the
+  spinner while the hook holds, the answer given as `updatedInput` lands
+  ("User answered Claude's questions"), free text is accepted, and a hook
+  cancelled at its timeout leaves Claude's own dialog, which Enter answers.
+  Built test-first: a second schema migration (the first is back to its
+  shipped shape; `roles`, `unreviewed`, `questions` and `choices` come with
+  the upgrade and a test opens a home written by the first schema); the
+  ledger's question with options (`questions`, rendered text), the answer by
+  choice or by text mapped onto the labels (`bad-questions`, `bad-choices`,
+  `already-answered`), read at once and never delivered, the task resumed by
+  the door, the human allowed to answer any question, `board().overdue` after
+  ten minutes; the API's `questions`, `choices` and the asker's long poll
+  `GET /api/questions/:id?wait=`; the hidden `cf hook claude`; the settings
+  file's `PreToolUse` entry with a one-hour timeout; the fake agent asking
+  through the real hook and answering as its inbox says; the page's pick
+  form and the overdue strip. Found on the way: a window can ask before the
+  record that confirms its task's arrival is read, so a queued task now
+  counts as the window's task and lands waiting when a question is already
+  pending. Ledger 65/65, API and CLI 27/27, dispatcher 41/41, integration
+  7/7, page 76/76.

@@ -31,7 +31,6 @@ export const MIGRATIONS = [
     left_at TEXT,
     tier TEXT,
     tags TEXT NOT NULL DEFAULT '[]',
-    roles TEXT NOT NULL DEFAULT '[]',
     out_until TEXT,
     out_since TEXT,
     CONSTRAINT participant_project_fk FOREIGN KEY (project_id)
@@ -74,7 +73,6 @@ export const MIGRATIONS = [
     review_of INTEGER,
     round INTEGER NOT NULL DEFAULT 0,
     verdict TEXT,
-    unreviewed TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     CONSTRAINT task_project_fk FOREIGN KEY (project_id)
@@ -145,6 +143,15 @@ export const MIGRATIONS = [
       REFERENCES project (id) ON DELETE CASCADE
   ) STRICT;
   CREATE INDEX event_project_index ON event (project_id, id);
+  `,
+  `
+  -- A member holds a set of roles (Phase C); a task remembers why it went
+  -- unreviewed; a question may carry its options and its answer the choices.
+  ALTER TABLE participant ADD COLUMN roles TEXT NOT NULL DEFAULT '[]';
+  UPDATE participant SET roles = json_array(role) WHERE role IN ('worker', 'advisor', 'reviewer');
+  ALTER TABLE task ADD COLUMN unreviewed TEXT;
+  ALTER TABLE message ADD COLUMN questions TEXT;
+  ALTER TABLE message ADD COLUMN choices TEXT;
   `,
 ]
 
