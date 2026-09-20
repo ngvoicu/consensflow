@@ -246,6 +246,9 @@ function suspendedBanner(project) {
   return banner
 }
 
+/** The closed project whose deletion waits for the human's yes, kept across redraws. */
+let deleting = null
+
 function renderProjects() {
   const items = state.projects.map((project) => {
     const item = element('li', 'project')
@@ -266,6 +269,44 @@ function renderProjects() {
     })
     item.append(select)
     const open = project.state === 'open'
+    // A closed project may go for good; the ask is confirmed in place.
+    if (!open) {
+      if (deleting === project.id) {
+        const keep = element('button', 'quiet-button', 'Keep')
+        keep.type = 'button'
+        keep.setAttribute('aria-label', `Keep ${project.name}`)
+        keep.addEventListener('click', () => {
+          deleting = null
+          render()
+        })
+        const yes = element('button', 'danger-button', 'Delete for good')
+        yes.type = 'button'
+        yes.setAttribute('aria-label', `Delete ${project.name} for good`)
+        yes.addEventListener('click', () =>
+          act(async () => {
+            await core('project.delete', { project: project.id })
+            deleting = null
+            if (state.selected === project.id) state.selected = null
+            note(`${project.name} is deleted.`)
+          }),
+        )
+        item.append(
+          select,
+          element('span', 'project-confirm', 'Its board and every message go too.'),
+          keep,
+          yes,
+        )
+        return item
+      }
+      const remove = element('button', 'quiet-button', 'Delete')
+      remove.type = 'button'
+      remove.setAttribute('aria-label', `Delete ${project.name}`)
+      remove.addEventListener('click', () => {
+        deleting = project.id
+        render()
+      })
+      item.append(remove)
+    }
     const toggle = element('button', 'quiet-button', open ? 'Close' : 'Resume')
     toggle.type = 'button'
     toggle.setAttribute('aria-label', `${open ? 'Close' : 'Resume'} ${project.name}`)

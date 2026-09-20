@@ -52,6 +52,9 @@ async function withPage(fn) {
       closed.push(id)
       return ledger.setProjectState(id, 'suspended')
     },
+    async deleteProject(id) {
+      return ledger.deleteProject(id)
+    },
     activity: () => ({ state: 'idle' }),
     pane: () => null,
   }
@@ -240,6 +243,22 @@ describe('the page protocol of the new core', () => {
       assert.deepEqual([closed, result.project.state], [[project.id], 'suspended'])
       const { projects } = await operations['projects.list']({})
       assert.equal(projects[0].state, 'suspended')
+    })
+  })
+
+  it('deletes a closed project and lists it no more', async () => {
+    await withPage(async ({ operations }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        harness: 'pi',
+      })
+      await assert.rejects(operations['project.delete']({ project: project.id }), {
+        code: 'project-open',
+      })
+      await operations['project.close']({ project: project.id })
+      const result = await operations['project.delete']({ project: project.id })
+      assert.deepEqual(result.project, { id: project.id, name: 'app' })
+      assert.deepEqual((await operations['projects.list']({})).projects, [])
     })
   })
 

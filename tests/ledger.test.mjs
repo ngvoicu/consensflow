@@ -233,6 +233,42 @@ describe('opening the ledger', () => {
   })
 })
 
+describe('deleting a project', () => {
+  it('deletes a closed project with everything in it, and refuses an open one', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = team(ledger)
+      const { message } = ledger.createTask(project.id, {
+        from: 'lead',
+        to: 'zeus',
+        body: 'Parser',
+      })
+      deliver(ledger, message)
+      ledger.ask(project.id, { from: 'zeus', to: 'lead', task: 1, body: 'Which?' })
+      const other = ledger.createProject({
+        directory: '/work/other',
+        name: 'other',
+        lead: { harness: 'pi' },
+        review: 'none',
+      })
+      const leadId = id('lead')
+      assert.throws(() => ledger.deleteProject(project.id), { code: 'project-open' })
+      ledger.setProjectState(project.id, 'suspended')
+      assert.deepEqual(ledger.deleteProject(project.id), { id: project.id, name: 'app' })
+      assert.deepEqual(
+        ledger.projects().map((p) => p.name),
+        ['other'],
+        'the other project is untouched',
+      )
+      assert.equal(ledger.project(project.id), null)
+      assert.throws(() => ledger.deleteProject(project.id), { code: 'unknown-project' })
+      assert.equal(ledger.events(other.id).length > 0, true)
+      assert.deepEqual(ledger.events(project.id), [], 'nothing of it is left')
+      assert.equal(ledger.task(project.id, 1), null)
+      assert.equal(ledger.inbox(leadId).length, 0, 'its messages went with it')
+    })
+  })
+})
+
 describe('upgrading a home', () => {
   it('gives a home written by the first schema the role sets, the unreviewed reason and the question options', async () => {
     await withDir(async (dir) => {
@@ -501,17 +537,6 @@ describe('projects and participants', () => {
       assert.equal(ledger.project(open.id).resumeOnStart, false)
       ledger.setProjectState(open.id, 'suspended')
       assert.equal(ledger.project(open.id).resumeOnStart, false)
-    })
-  })
-
-  it('deletes a project with everything in it', async () => {
-    await withLedger((ledger) => {
-      const { project } = team(ledger)
-      ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' })
-      ledger.deleteProject(project.id)
-      assert.equal(ledger.project(project.id), null)
-      assert.deepEqual(ledger.projects(), [])
-      assert.deepEqual(ledger.events(project.id), [])
     })
   })
 })

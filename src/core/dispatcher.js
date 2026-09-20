@@ -217,6 +217,19 @@ export class Dispatcher {
     return this.#ledger.project(projectId)
   }
 
+  /** A closed project goes for good; the ledger refuses an open one. Its windows are already gone. */
+  async deleteProject(projectId) {
+    const project = this.#ledger.project(projectId)
+    const deleted = this.#ledger.deleteProject(projectId)
+    for (const participant of project?.participants ?? []) {
+      const runtime = this.#runtime.get(participant.id)
+      if (runtime?.token) this.#credentials.revoke(runtime.token)
+      this.#runtime.delete(participant.id)
+    }
+    this.#changed()
+    return deleted
+  }
+
   /** Once, at start: the projects that were open when the previous process ended come back. */
   async resumeAfterRestart() {
     const outcomes = []

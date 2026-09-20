@@ -38,6 +38,10 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       project: await dispatcher.closeProject(project),
     })),
 
+    'project.delete': change(async ({ project }) => ({
+      project: await dispatcher.deleteProject(project),
+    })),
+
     'agents.list': async () => ({ agents: listAgents(env) }),
 
     'team.last': async () => ({ team: lastTeamNow(ledger, env) }),

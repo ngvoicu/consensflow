@@ -558,6 +558,22 @@ class Ledger {
     })
   }
 
+  /**
+   * A closed project goes for good: its participants, conversations, tasks,
+   * messages and events with it (the schema cascades). An open one is
+   * refused: close it first, so nothing runs while its record disappears.
+   */
+  deleteProject(id) {
+    return this.#write(() => {
+      const row = this.#projectRow(id)
+      if (row.state !== 'suspended') {
+        throw new LedgerError('project-open', `${row.name} is open: close it first`, 409)
+      }
+      this.#db.prepare('DELETE FROM project WHERE id = ?').run(id)
+      return { id: row.id, name: row.name }
+    })
+  }
+
   /** Which finished work gets a second review from now on: none, members' or all. */
   setReview(id, policy) {
     requireReview(policy)
@@ -597,13 +613,6 @@ class Ledger {
     return this.#write(() => {
       this.#projectRow(id)
       this.#db.prepare('UPDATE project SET resume_on_start = 0 WHERE id = ?').run(id)
-    })
-  }
-
-  deleteProject(id) {
-    return this.#write(() => {
-      this.#projectRow(id)
-      this.#db.prepare('DELETE FROM project WHERE id = ?').run(id)
     })
   }
 

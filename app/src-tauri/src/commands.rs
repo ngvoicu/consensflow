@@ -1546,6 +1546,7 @@ const CORE_OPERATIONS: &[&str] = &[
     "project.open",
     "project.resume",
     "project.close",
+    "project.delete",
     "project.review",
     "board.get",
     "inbox.get",

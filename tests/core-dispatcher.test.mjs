@@ -692,6 +692,21 @@ describe('the dispatcher', () => {
     })
   })
 
+  it('deletes a closed project for good, and refuses an open one', async () => {
+    await setup(async (context) => {
+      const { project } = await withTeam(context)
+      await assert.rejects(context.dispatcher.deleteProject(project.id), { code: 'project-open' })
+      await context.dispatcher.closeProject(project.id)
+      assert.deepEqual(await context.dispatcher.deleteProject(project.id), {
+        id: project.id,
+        name: 'app',
+      })
+      assert.deepEqual(context.ledger.projects(), [])
+      await context.dispatcher.pass()
+      assert.equal(context.host.opened.length, 1, 'nothing reopens')
+    })
+  })
+
   it('brings back the projects that were open before a restart, on their own conversations', async () => {
     await setup(async (context) => {
       const { project, id } = await withTeam(context)

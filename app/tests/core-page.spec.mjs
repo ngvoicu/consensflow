@@ -1017,6 +1017,22 @@ test('shows a closed project read-only: dimmed, no actions, no windows, and a Re
   await expect(page.getByRole('button', { name: 'Team' })).toBeEnabled()
 })
 
+test('deletes a closed project for good once the human confirms, never an open one', async ({
+  page,
+}) => {
+  await open(page)
+  await expect(page.getByRole('button', { name: 'Delete harbour' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Delete foundry' }).click()
+  await expect(page.getByText('Its board and every message go too.')).toBeVisible()
+  await page.getByRole('button', { name: 'Keep foundry' }).click()
+  await expect(page.getByText('Its board and every message go too.')).toHaveCount(0)
+  expect(await calls(page, 'project.delete')).toEqual([])
+  await page.getByRole('button', { name: 'Delete foundry' }).click()
+  await page.getByRole('button', { name: 'Delete foundry for good' }).click()
+  await expect.poll(() => calls(page, 'project.delete')).toEqual([{ project: 2 }])
+  await expect(page.locator('#status')).toHaveText('foundry is deleted.')
+})
+
 test('resumes a suspended project from the list', async ({ page }) => {
   await open(page)
   await page.getByRole('button', { name: 'Resume foundry' }).click()
