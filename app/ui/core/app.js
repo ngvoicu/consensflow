@@ -544,6 +544,44 @@ teamDialog.querySelector('[value="cancel"]').addEventListener('click', () => tea
 // The agents screens open in their own window at the daemon's address: the
 // board's page cannot frame them (WebKit blocks a plain-HTTP frame inside the
 // app's secure page). Their edits show here once this window is back in front.
+// The two side panels fold away and stay folded in this browser (a
+// per-viewer convenience: storage may be missing, so every touch is guarded).
+const shell = $('.shell')
+const main = $('.main')
+const FOLDS = [
+  ['projects', shell, 'data-projects', $('#toggle-projects'), 'projects'],
+  ['dock', main, 'data-dock', $('#toggle-dock'), 'windows'],
+]
+const foldKey = (name) => `cf.layout.${name}`
+function readFold(name) {
+  try {
+    return localStorage.getItem(foldKey(name)) === 'hidden' ? 'hidden' : 'shown'
+  } catch {
+    return 'shown'
+  }
+}
+function applyFolds() {
+  for (const [name, host, attribute, button, noun] of FOLDS) {
+    const hidden = readFold(name) === 'hidden'
+    host.setAttribute(attribute, hidden ? 'hidden' : 'shown')
+    button.setAttribute('aria-pressed', String(!hidden))
+    button.setAttribute('aria-label', `${hidden ? 'Show' : 'Hide'} ${noun}`)
+  }
+}
+for (const [name, , , button] of FOLDS) {
+  button.addEventListener('click', () => {
+    const next = readFold(name) === 'hidden' ? 'shown' : 'hidden'
+    try {
+      localStorage.setItem(foldKey(name), next)
+    } catch {
+      // No storage: the fold still applies for this page.
+    }
+    applyFolds()
+    render()
+  })
+}
+applyFolds()
+
 const settingsDialog = $('#settings-dialog')
 $('#settings-button').addEventListener('click', () => settingsDialog.showModal())
 for (const entry of settingsDialog.querySelectorAll('[data-agents-page]')) {

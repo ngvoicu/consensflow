@@ -1000,6 +1000,27 @@ test('resumes a suspended project from the list', async ({ page }) => {
   await expect.poll(() => calls(page, 'project.resume')).toEqual([{ project: 2 }])
 })
 
+test('folds the projects sidebar and the terminal dock away, and remembers it in this browser', async ({
+  page,
+}) => {
+  await open(page)
+  const sidebar = page.getByRole('navigation', { name: 'Projects' })
+  const dock = page.getByRole('complementary', { name: 'Terminal dock' })
+  await expect(sidebar).toBeVisible()
+  await expect(dock).toBeVisible()
+  await page.getByRole('button', { name: 'Hide projects' }).click()
+  await expect(sidebar).toBeHidden()
+  await page.getByRole('button', { name: 'Hide windows' }).click()
+  await expect(dock).toBeHidden()
+  await page.reload()
+  await expect(page.getByRole('navigation', { name: 'Projects' })).toBeHidden()
+  await expect(page.getByRole('complementary', { name: 'Terminal dock' })).toBeHidden()
+  await page.getByRole('button', { name: 'Show projects' }).click()
+  await page.getByRole('button', { name: 'Show windows' }).click()
+  await expect(page.getByRole('navigation', { name: 'Projects' })).toBeVisible()
+  await expect(page.getByRole('complementary', { name: 'Terminal dock' })).toBeVisible()
+})
+
 test('starts a project in a chosen folder with the chosen lead, the team ticked from the last one', async ({
   page,
 }) => {
