@@ -292,7 +292,7 @@ describe('retired off/reset CLI commands preserve the installation and saved dat
     })
   }
 })
-it('PM can discover saved capability profiles without refreshing or changing role files', async () => {
+it('the lead can discover saved capability profiles without refreshing or changing role files', async () => {
   const t = tempEnv()
   try {
     const added = await cf(['agent', 'add', 'hyperion'], t.env)
@@ -307,7 +307,7 @@ it('PM can discover saved capability profiles without refreshing or changing rol
     assert.equal(agents.length, 1)
     assert.equal(agents[0].name, 'hyperion')
     assert.ok(agents[0].profile.goodFor.length > 0)
-    assert.ok(agents[0].profile.categories.includes('coding'))
+    assert.ok(agents[0].profile.categories.includes('worker'))
     assert.equal(readFileSync(rosterPath(t.env), 'utf8'), roster)
     assert.equal(readFileSync(role, 'utf8'), 'Keep existing lead context untouched')
   } finally {

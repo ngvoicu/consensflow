@@ -268,10 +268,10 @@ it('Kimi is K3-only and names its supported effort instead of hiding it', () => 
   assert.equal(entry.model, 'moonshot-ai/kimi-k3')
   assert.equal(entry.effort, 'max')
   assert.deepEqual(EFFORTS.kimi, ['low', 'high', 'max'])
-  assert.deepEqual(entry.profile.categories, ['coding', 'reviewer'])
+  assert.deepEqual(entry.profile.categories, ['worker', 'reviewer'])
   for (const effort of ['low', 'xhigh', 'medium'])
-    assert.deepEqual(agentProfile({ ...entry, effort }).categories, ['coding'])
-  assert.deepEqual(agentProfile({ ...entry, effort: 'high' }).categories, ['coding', 'reviewer'])
+    assert.deepEqual(agentProfile({ ...entry, effort }).categories, ['worker'])
+  assert.deepEqual(agentProfile({ ...entry, effort: 'high' }).categories, ['worker', 'reviewer'])
   for (const name of ['seppo', 'ahti']) assert.equal(catalogEntry(name), undefined)
   assert.ok(
     Object.values(CATALOG)
@@ -288,15 +288,14 @@ describe('catalog presentation follows actual model and effort', () => {
         assert.ok(entry.profile.modelLabel, entry.name)
         assert.ok(entry.profile.routeLabel, entry.name)
         assert.ok(entry.profile.goodFor.length > 15, entry.name)
-        assert.ok(
-          entry.profile.categories.includes(
-            entry.name === 'pygmalion'
-              ? 'images'
-              : entry.profile.workTier === 'critical'
-                ? 'reviewer'
-                : 'coding',
-          ),
-        )
+        // The pills name roles: an image agent suits none of them.
+        if (entry.name === 'pygmalion') assert.deepEqual(entry.profile.categories, [])
+        else
+          assert.ok(
+            entry.profile.categories.includes(
+              entry.profile.workTier === 'critical' ? 'advisor' : 'worker',
+            ),
+          )
       }
     }
   })
@@ -316,26 +315,24 @@ describe('catalog presentation follows actual model and effort', () => {
     const { agentProfile } = await import('../src/catalog.js')
     assert.equal(typeof agentProfile, 'function')
     const astra = { harness: 'codex', model: 'gpt-6-astra', effort: 'medium' }
-    assert.deepEqual(agentProfile(astra).categories, ['coding', 'reviewer'])
+    assert.deepEqual(agentProfile(astra).categories, ['worker', 'reviewer'])
     for (const effort of ['low', 'off', 'minimal', 'unknown', undefined]) {
-      assert.deepEqual(agentProfile({ ...astra, effort }).categories, ['coding'])
+      assert.deepEqual(agentProfile({ ...astra, effort }).categories, ['worker'])
     }
     assert.deepEqual(
       agentProfile({ ...astra, harness: 'pi', model: 'openai-codex/gpt-6-astra', effort: 'ultra' })
         .categories,
-      ['coding'],
+      ['worker'],
     )
     assert.deepEqual(
       agentProfile({ harness: 'claude', model: 'claude-opus-5', effort: 'medium' }).categories,
-      ['coding', 'reviewer'],
+      ['worker', 'reviewer'],
     )
     assert.deepEqual(agentProfile({ ...astra, model: 'invented', preset: 'astraeus' }).categories, [
-      'coding',
+      'worker',
     ])
     assert.deepEqual(agentProfile({ ...astra, harness: 'unknown' }).categories, [])
-    assert.deepEqual(agentProfile({ harness: 'image', model: 'legacy-image' }).categories, [
-      'images',
-    ])
+    assert.deepEqual(agentProfile({ harness: 'image', model: 'legacy-image' }).categories, [])
   })
 })
 
@@ -392,19 +389,24 @@ it('lead and PM need xhigh or higher; reviewer recommendations begin at medium',
     for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) {
       const categories = agentProfile({ harness, model, effort }).categories
       const critical = /astra|fable/.test(model) && effort === 'max'
-      const expected = critical ? ['architecture', 'problem-solving', 'reviewer'] : ['coding']
-      if (!critical && ['xhigh', 'max'].includes(effort)) expected.push('lead')
-      if (!critical && effort !== 'low') expected.push('reviewer')
+      // Lead candidate, Advisor, Worker, Reviewer: a model fit to lead is fit to advise.
+      const expected = critical
+        ? ['advisor', 'reviewer']
+        : [
+            ...(['xhigh', 'max'].includes(effort) ? ['lead', 'advisor'] : []),
+            'worker',
+            ...(effort !== 'low' ? ['reviewer'] : []),
+          ]
       assert.deepEqual(categories, expected, `${model} ${effort}`)
     }
   }
   assert.deepEqual(
     agentProfile({ harness: 'codex', model: 'gpt-6-astra', effort: 'ultra' }).categories,
-    ['architecture', 'problem-solving', 'reviewer'],
+    ['advisor', 'reviewer'],
   )
   assert.deepEqual(
     agentProfile({ harness: 'codex', model: 'gpt-5.6-luna', effort: 'medium' }).categories,
-    ['coding', 'reviewer'],
+    ['worker', 'reviewer'],
   )
 })
 
@@ -441,7 +443,7 @@ it('Devin preserves the native configured model without inventing effort or benc
   assert.equal(entry.effort, undefined)
   assert.equal(entry.profile.modelKey, 'devin-configured')
   assert.equal(entry.profile.modelLabel, 'Devin configured model')
-  assert.deepEqual(entry.profile.categories, ['coding', 'reviewer'])
+  assert.deepEqual(entry.profile.categories, ['worker', 'reviewer'])
   assert.deepEqual(EFFORTS.devin, [])
 })
 
@@ -476,6 +478,6 @@ it('assigns four work tiers by model and effort across routes, without agent-nam
   }
   const custom = agentProfile({ harness: 'codex', model: 'custom', workTier: 'critical' })
   assert.equal(custom.workTier, 'critical')
-  assert.deepEqual(custom.categories, ['architecture', 'problem-solving', 'reviewer'])
+  assert.deepEqual(custom.categories, ['advisor', 'reviewer'])
   assert.doesNotMatch(custom.goodFor, /coding|implementation/i)
 })

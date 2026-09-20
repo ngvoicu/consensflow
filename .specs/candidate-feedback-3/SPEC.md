@@ -101,3 +101,11 @@ Gabriel, on the Candidate built from `87c45f5`, 2026-09-20 afternoon:
   to whichever worker got it. Second run 22/22: tasks, `--after`
   continuation, OpenCode's question door, the review (work to Pi in 18 s,
   verdict in 35 s, result with the review under it in 37 s) and the restart.
+- Gabriel, on the rebuilt Candidate: the category pills "should be only 4
+  options, Lead candidate, Advisor, Worker/Coding, Reviewer". The pills now
+  name the roles a model suits, in that order: Lead candidate and Advisor
+  for the role models at xhigh or above (a model fit to lead is fit to
+  advise), Worker for every coding model outside critical work, Reviewer
+  above low effort; critical-tier models are Advisor and Reviewer; an image
+  agent suits none. The filter reads "Suits: Any role"; Architecture, Hard
+  problems, Coding and Images are gone.

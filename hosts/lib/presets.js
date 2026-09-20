@@ -1250,10 +1250,8 @@ export const WORK_TIERS = {
   light: { label: 'Light work', description: 'Bounded fixes, lookups and routine tasks; verify the model is suitable.' },
 };
 
-export const CATEGORY_LABELS = {
-  coding: 'Coding', architecture: 'Architecture', 'problem-solving': 'Hard problems',
-  reviewer: 'Review', lead: 'Lead candidate', images: 'Images',
-};
+/** The roles a model suits, in the order the pills show them; a pill launches nothing. */
+export const CATEGORY_LABELS = { lead: 'Lead candidate', advisor: 'Advisor', worker: 'Worker', reviewer: 'Reviewer' };
 
 export function validateWorkTier(value) {
   if (value != null && (typeof value !== 'string' || !Object.hasOwn(WORK_TIERS, value)))
@@ -1287,7 +1285,7 @@ export function agentProfile(agent) {
   validateWorkTier(agent.workTier);
   profile.workTier = agent.workTier ?? tier;
   if (profile.workTier === 'critical') {
-    profile.categories = ['architecture', 'problem-solving', 'reviewer'];
+    profile.categories = ['advisor', 'reviewer'];
     profile.goodFor = 'Consequential reviews, architecture, discovering solutions to hard problems and answering important questions.';
   }
   return profile;
@@ -1300,7 +1298,7 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
     modelKey: model && model !== 'default' ? model : 'devin-configured',
     modelLabel: model && model !== 'default' ? model : 'Devin configured model',
     routeLabel: 'Devin account',
-    categories: ['coding', 'reviewer'],
+    categories: ['worker', 'reviewer'],
     goodFor: 'Coding and review using the model selected in your Devin settings.',
   }
   if (harness === 'image')
@@ -1308,7 +1306,7 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
       modelKey: 'codex-image',
       modelLabel: 'Codex Images',
       routeLabel: 'Codex login',
-      categories: ['images'],
+      categories: [],
       goodFor: 'Generate illustrations and edit reference images.',
     }
   const known = AGENT_PRESETS.some((p) => (p.kind === "claude-code" ? "claude" : p.kind) === harness && p.model === model)
@@ -1321,9 +1319,9 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
         // Contributor/free are reviewed pricing and data-use routes for Muse 1.3.
         .replace(/^muse-spark-1\.3-contributor(?:-free)?$/, 'muse-spark-1.3')
     : (model ?? "default")
-  const categories = ['claude', 'codex', 'pi', 'opencode', 'kimi'].includes(harness)
-    ? ['coding']
-    : []
+  const worker = ['claude', 'codex', 'pi', 'opencode', 'kimi'].includes(harness)
+  let lead = false
+  let reviewer = false
   const contributor = known && key === 'muse-spark-1.3' && model.includes('-contributor')
   const routeLabel = model?.startsWith('openrouter/')
     ? 'OpenRouter · API'
@@ -1338,9 +1336,7 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
             : ({ claude: 'Claude Code account', codex: 'Codex login', kimi: 'Kimi Code account' }[
                 harness
               ] ?? harness)
-  let goodFor = categories.length
-    ? 'Use your chosen model for coding tasks.'
-    : 'Use your custom harness and model.'
+  let goodFor = worker ? 'Use your chosen model for coding tasks.' : 'Use your custom harness and model.'
   if (known) {
     if (['gpt-6-astra', 'claude-fable-5.1'].includes(key) || (key === 'gpt-5.6-sol' && ['low', 'medium'].includes(effort))) {
       goodFor =
@@ -1363,10 +1359,16 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
       (harness === 'codex' && effort === 'ultra')
     if (supportedEffort) {
       const roleModel = ['gpt-6-astra', 'claude-fable-5.1', 'gpt-5.6-sol', 'claude-opus-5'].includes(key)
-      if (roleModel && ['xhigh', 'max', 'ultra'].includes(effort)) categories.push('lead')
-      if (effort !== 'low') categories.push('reviewer')
+      lead = roleModel && ['xhigh', 'max', 'ultra'].includes(effort)
+      reviewer = effort !== 'low'
     }
   }
+  // A model fit to lead is fit to advise; critical work adds advisor and reviewer itself.
+  const categories = [
+    ...(lead ? ['lead', 'advisor'] : []),
+    ...(worker ? ['worker'] : []),
+    ...(reviewer ? ['reviewer'] : []),
+  ]
   return {
     modelKey: key,
     modelLabel: (known && MODEL_LABELS[key]) || model || "Default",

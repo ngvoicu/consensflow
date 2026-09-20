@@ -156,19 +156,16 @@ const BROWSING_CONTROLS = `
     )
       .map(([id, tier]) => `<option value="${id}">${tier.label}</option>`)
       .join('')}</select></label>
-    <label>Category<select name="category" aria-label="Category"><option value="all">All categories</option><optgroup label="Task capabilities">${Object.entries(
+    <label>Suits<select name="category" aria-label="Suits"><option value="all">Any role</option>${Object.entries(
       CATEGORY_LABELS,
     )
-      .filter(([id]) => id !== 'lead')
       .map(([id, label]) => `<option value="${id}">${label}</option>`)
-      .join(
-        '',
-      )}</optgroup><optgroup label="Recommendations"><option value="lead">Lead candidate</option></optgroup></select></label>
+      .join('')}</select></label>
     <label>Group by<select name="group" aria-label="Group by"><option value="none">None</option><option value="harness">Harness</option><option value="model-reasoning" selected>Model and reasoning</option><option value="tier">Work tier</option></select></label>
     <label>Sort by<select name="sort" aria-label="Sort by"><option value="default">Model and reasoning</option></select></label>
     <button type="button">Clear filters</button>
   </div>
-  <p class="tier-guide">The work tier is what a task finds an agent by. Categories say what a model suits; Lead candidate is a recommendation.</p>
+  <p class="tier-guide">The work tier is what a task finds an agent by. The role pills say which roles a model suits; a pill launches nothing.</p>
   <p class="benchmark-source"></p>
   <details class="benchmark-guide"><summary>About benchmark scores</summary><div></div></details>`
 
@@ -193,7 +190,7 @@ export const PAGE = (token) => `<!DOCTYPE html>
        while keeping seafoam for fills and borders. */
     --accent-text: #63C7B2;
     --buoy: #FF6B5A;
-    --pill-coding: #63C7B2; --pill-lead: #ABC9F1; --pill-images: #EAC58B;
+    --pill-worker: #63C7B2; --pill-lead: #ABC9F1; --pill-advisor: #EAC58B;
     --ui: Archivo, "Helvetica Neue", system-ui, sans-serif;
     --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   }
@@ -201,7 +198,7 @@ export const PAGE = (token) => `<!DOCTYPE html>
     :root {
       --ink: #E9F1EF; --panel: #FFFFFF; --line: #C9DAD8; --foam: #0C1E23;
       --muted: #52717A; --accent-text: #16766A; --buoy: #C2402F;
-      --pill-coding: #176B5F; --pill-lead: #285A9C; --pill-images: #835D15;
+      --pill-worker: #176B5F; --pill-lead: #285A9C; --pill-advisor: #835D15;
     }
   }
   * { box-sizing: border-box; }
@@ -298,15 +295,14 @@ export const PAGE = (token) => `<!DOCTYPE html>
   .offer__what { min-width: 0; overflow-wrap: anywhere; }
   .offer__what p { margin: 4px 0 0; }
   .category-pills { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; padding: 0; margin: 6px 0; }
-  .category-pill { border: 1px solid currentColor; border-radius: 999px; padding: 2px 8px; font-size: 11px; line-height: 1.4; white-space: nowrap; color: var(--pill-coding); background: var(--panel); }
+  .category-pill { border: 1px solid currentColor; border-radius: 999px; padding: 2px 8px; font-size: 11px; line-height: 1.4; white-space: nowrap; color: var(--pill-worker); background: var(--panel); }
   .tier-pill { display: inline-block; width: fit-content; border: 1px solid var(--muted); border-radius: 999px; padding: 4px 10px; margin: 6px 0; font-size: 12px; color: var(--foam); background: var(--panel); }
-  .tier-pill[data-tier=critical] { border-color: var(--pill-images); color: var(--pill-images); }
+  .tier-pill[data-tier=critical] { border-color: var(--pill-advisor); color: var(--pill-advisor); }
   .tier-note { margin: 2px 0 8px; font-size: 12px; color: var(--muted); }
   .tier-guide { color: var(--muted); font-size: 12px; }
-  .category-pill[data-kind=role] { border-style: dashed; }
   .category-pill[data-category=lead] { color: var(--pill-lead); }
+  .category-pill[data-category=advisor] { color: var(--pill-advisor); }
   .category-pill[data-category=reviewer] { color: var(--foam); }
-  .category-pill[data-category=images] { color: var(--pill-images); }
   .benchmark-source, .benchmark-guide, .benchmark-details, .benchmark-missing, .benchmark-context { font-size: 12px; color: var(--muted); }
   .benchmark-source { margin: -16px 0 4px; }
   .benchmark-guide { margin: 0 0 22px; }
@@ -463,13 +459,12 @@ function appendProfile(host, p, fields) {
   }
   if (fields.includes('categories') && p.profile.categories.length) {
     const categories = el('ul', 'category-pills');
-    categories.setAttribute('aria-label', 'Categories');
+    categories.setAttribute('aria-label', 'Roles');
     categories.setAttribute('role', 'list');
     for (const category of p.profile.categories) {
       const pill = el('li', 'category-pill', CATEGORY_LABELS[category]);
       pill.dataset.category = category;
-      pill.dataset.kind = category === 'lead' ? 'role' : 'capability';
-      pill.title = category === 'lead' ? 'A recommendation for the lead; does not launch a role.' : CATEGORY_LABELS[category];
+      pill.title = 'Suits the ' + CATEGORY_LABELS[category].toLowerCase() + ' role; launches nothing.';
       categories.append(pill);
     }
     host.append(categories);

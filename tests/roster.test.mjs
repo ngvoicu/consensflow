@@ -69,7 +69,7 @@ it('reports current tiers from legacy rows without writing during discovery', ()
     writeFileSync(rosterPath(t.env), original)
     const [agent] = listAgents(t.env)
     assert.equal(agent.profile.workTier, 'critical')
-    assert.deepEqual(agent.profile.categories, ['architecture', 'problem-solving', 'reviewer'])
+    assert.deepEqual(agent.profile.categories, ['advisor', 'reviewer'])
     assert.equal(readFileSync(rosterPath(t.env), 'utf8'), original)
   } finally {
     t.cleanup()
@@ -435,10 +435,10 @@ it('stores the full UI profile on add, edit and explicit sync', async () => {
     assert.deepEqual(raw().profile, agentProfile(listAgents(t.env)[0]))
     assert.deepEqual(listAgents(t.env)[0].profile, raw().profile)
     editAgent('custom', { effort: 'low' }, t.env)
-    assert.deepEqual(raw().profile.categories, ['coding'])
+    assert.deepEqual(raw().profile.categories, ['worker'])
     assert.equal(raw().description, 'Keep my notes')
     syncAgents(t.env, { name: 'custom' })
-    assert.deepEqual(raw().profile.categories, ['coding', 'reviewer'])
+    assert.deepEqual(raw().profile.categories, ['worker', 'reviewer'])
   } finally {
     t.cleanup()
   }
