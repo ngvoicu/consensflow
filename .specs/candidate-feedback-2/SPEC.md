@@ -76,7 +76,7 @@ Gabriel opened the Candidate built from `891adf8` on the morning of
   review; the review reads under the reviewed task's card, and the reviewer's
   row status says "Reviewing T-n".
 
-### Phase B: Named worker sessions [active]
+### Phase B: Named worker sessions [completed]
 
 - [x] [TEST-CF2-03] Ledger: a session participant per assignment with a
   generated `agent-adjective-noun` handle unique in the project; a member's
@@ -89,7 +89,7 @@ Gabriel opened the Candidate built from `891adf8` on the morning of
 - [x] [TEST-CF2-05] Board: a lane per session under its member, folding when
   ended; the dock strip per session; the drawer names the session.
 - [x] [IMPL-CF2-06] Satisfies TEST-CF2-05.
-- [ ] [VERIFY-CF2-07] Integration with the fake harness (two sessions of one
+- [x] [VERIFY-CF2-07] Integration with the fake harness (two sessions of one
   member in parallel; a continuation on the same native session); the bench
   with a continuation on Claude, Codex and OpenCode; Candidate rebuilt.
 
@@ -145,3 +145,11 @@ continuation run and the Candidate rebuild close it.
   because the bench matched the question's sender to the member's name
   while the session asked; the workers had asked and been answered. The
   check now matches the session; rerun pending.
+- 2026-09-20, Phase B closed. Bench rerun `claude opencode` on `39bebf6`,
+  25/25: continuation on the same session for both (`bench-claude-vivid-
+  willow`, `bench-opencode-sunny-lagoon`, 6 s each), the question door from a
+  session for both (asked in 8-9 s, the lead's answer back in 15-19 s), the
+  review and the restart. Codex's continuation was proven in the first run
+  (`bench-codex-pale-harbor`); its question door under a session was not
+  rerun, the code being the same as before sessions. The Candidate is
+  rebuilt from `39bebf6`.
