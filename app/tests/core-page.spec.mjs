@@ -831,10 +831,15 @@ test('shows the team as one row per member and role, and adds a saved agent in a
   await expect
     .poll(() => calls(page, 'member.roles'))
     .toEqual([{ project: 1, agent: 'zeus', roles: ['worker', 'reviewer'] }])
-  // Nobody's model suits the image designer here.
+  // Nobody's model suits the image designer here, and the dialog says so.
   await dialog.getByLabel('Role').selectOption('designer')
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveCount(0)
   await expect(dialog.getByRole('button', { name: 'Add to team' })).toBeDisabled()
+  await expect(dialog.locator('#team-hint')).toHaveText(
+    'No saved agent suits Image designer yet: add one under Settings, Agents.',
+  )
+  await dialog.getByLabel('Role').selectOption('advisor')
+  await expect(dialog.locator('#team-hint')).toBeHidden()
 })
 
 test("drops one role from a member's row, and asks before its last", async ({ page }) => {

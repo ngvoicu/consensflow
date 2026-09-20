@@ -338,7 +338,7 @@ const agentLabel = (agent) =>
  * whose model suits it and do not hold it yet. The chosen agent survives a
  * redraw when it is still on offer.
  */
-function rolePicker(roleSelect, agentSelect, holding, onRefill = () => {}) {
+function rolePicker(roleSelect, agentSelect, hint, holding, onRefill = () => {}) {
   if (roleSelect.options.length === 0) {
     for (const role of ROLES) {
       const option = element('option', null, ROLE_LABEL[role])
@@ -360,6 +360,14 @@ function rolePicker(roleSelect, agentSelect, holding, onRefill = () => {}) {
     )
     if (choices.some((agent) => agent.name === chosen)) agentSelect.value = chosen
     agentSelect.disabled = choices.length === 0
+    // An empty list says why, so the answer is in the dialog, not in a guess.
+    hint.textContent =
+      choices.length === 0
+        ? state.agents.some((agent) => suits(agent, role))
+          ? `Every saved agent that suits ${ROLE_LABEL[role]} is on the team in that role already.`
+          : `No saved agent suits ${ROLE_LABEL[role]} yet: add one under Settings, Agents.`
+        : ''
+    hint.hidden = choices.length > 0
     onRefill()
   }
   refill()
@@ -469,8 +477,11 @@ function drawNewProjectTeam() {
     rows.push(row)
   }
   newProjectTeam.replaceChildren(...rows)
-  rolePicker(newProjectForm.elements.pickRole, newProjectForm.elements.pickAgent, (agent, role) =>
-    picked.some((pick) => pick.agent === agent && pick.role === role),
+  rolePicker(
+    newProjectForm.elements.pickRole,
+    newProjectForm.elements.pickAgent,
+    $('#new-project-hint'),
+    (agent, role) => picked.some((pick) => pick.agent === agent && pick.role === role),
   )
 }
 
@@ -544,6 +555,7 @@ function renderTeam() {
   rolePicker(
     teamForm.elements.role,
     teamForm.elements.agent,
+    $('#team-hint'),
     (agent, role) =>
       members.some((member) => member.agent === agent && member.roles.includes(role)),
     () => {

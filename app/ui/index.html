@@ -522,6 +522,7 @@
     .team-add label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
     .team-pick .team-add { border: 0; padding: 4px 0 0; margin-bottom: 0; }
     .team-warning { margin: 0 0 12px; font-size: 12px; color: var(--amber); }
+    .team-hint { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--muted); }
     .member-confirm { color: var(--buoy); font-size: 12px; margin-right: 8px; }
     .drawer-section { margin: 0 0 14px; }
     .drawer-section h3 {
@@ -760,6 +761,7 @@
           <label>Agent<select name="pickAgent"></select></label>
           <button class="quiet-button" type="button" id="new-project-add">Add</button>
         </div>
+        <p class="team-hint" id="new-project-hint" hidden></p>
       </fieldset>
       <label>Second review of
         <select name="review">
@@ -790,6 +792,7 @@
         <label>Role<select name="role"></select></label>
         <label>Agent<select name="agent"></select></label>
         <button class="primary-button" type="submit">Add to team</button>
+        <p class="team-hint" id="team-hint" hidden></p>
       </fieldset>
       <label>Second review of
         <select id="team-review" name="review">
