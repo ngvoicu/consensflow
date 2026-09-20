@@ -237,7 +237,6 @@ export const PAGE = (token, library = false) => `<!DOCTYPE html>
   .callsign { font-size: 17px; font-weight: 600; color: var(--accent-text); letter-spacing: -.01em; }
   .tag { font-family: var(--mono); font-size: 11px; color: var(--muted); }
   .member__head .spacer { flex: 1; }
-  .member__desc, .member__tags { color: var(--muted); font-size: 13px; margin: 0; }
   /* A long command scrolls rather than wrapping (it stays one readable line);
      the fade is the only hint that there is more to the right. */
     content: ""; position: absolute; inset: 1px 1px 1px auto; width: 44px; border-radius: 0 4px 4px 0;
@@ -309,6 +308,8 @@ export const PAGE = (token, library = false) => `<!DOCTYPE html>
   .category-pill[data-category=pm] { color: var(--pill-pm); }
   .category-pill[data-category=reviewer] { color: var(--foam); }
   .category-pill[data-category=images] { color: var(--pill-images); }
+  .tag-pills { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; padding: 0; margin: 6px 0; }
+  .tag-pill { border: 1px solid var(--muted); border-radius: 999px; padding: 2px 8px; font: 11px/1.4 var(--mono); white-space: nowrap; color: var(--foam); background: var(--panel); }
   .benchmark-source, .benchmark-guide, .benchmark-details, .benchmark-missing, .benchmark-context { font-size: 12px; color: var(--muted); }
   .benchmark-source { margin: -16px 0 4px; }
   .benchmark-guide { margin: 0 0 22px; }
@@ -332,7 +333,7 @@ export const PAGE = (token, library = false) => `<!DOCTYPE html>
   .offer__model { color: var(--foam); opacity: 1; display: block; overflow-wrap: anywhere; }
   .offer__actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; max-width: 220px; }
   .offer__actions button { overflow-wrap: anywhere; max-width: 100%; }
-  .member__desc, .member__tags, .tag { overflow-wrap: anywhere; }
+  .tag { overflow-wrap: anywhere; }
   button:disabled { opacity: .6; cursor: default; }
   @media (max-width: 620px) {
     .filters label { flex: 1 1 45%; min-width: 0; }
@@ -484,6 +485,17 @@ function appendProfile(host, p, fields = ['workTier', 'categories', 'goodFor', '
     host.append(pill);
     if (p.profile.workTier === 'critical') host.append(el('p', 'tier-note', 'Important work only · No coding'));
   }
+  if (fields.includes('tags') && p.tags?.length) {
+    const tags = el('ul', 'tag-pills');
+    tags.setAttribute('aria-label', 'Tags');
+    tags.setAttribute('role', 'list');
+    for (const tag of p.tags) {
+      const pill = el('li', 'tag-pill', tag);
+      pill.dataset.tag = tag;
+      tags.append(pill);
+    }
+    host.append(tags);
+  }
   if (fields.includes('categories') && p.profile.categories.length) {
     const categories = el('ul', 'category-pills');
     categories.setAttribute('aria-label', 'Categories');
@@ -626,27 +638,24 @@ function renderRoster(data) {
       note.append(update);
       card.append(note);
     }
-    appendProfile(card, p, ['workTier', 'categories', 'goodFor', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
-    if (p.tags?.length) card.append(el('p', 'member__tags', 'Tags: ' + p.tags.join(', ')));
-    if (p.description) card.append(el('p', 'member__desc', p.description));
-    else card.append(el('p', 'member__desc', p.harness + ' agents are not run by this tool — it leaves them alone.'));
+    // A saved agent shows what the daemon picks it by: its tier and its tags.
+    appendProfile(card, p, ['workTier', 'tags', 'goodFor', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
     if (editors.has(p.name)) card.append(editors.get(p.name));
     section.append(card);
     }
   }
 }
 
-/** Editing an agent is changing its model, effort or description. */
+/** Editing an agent is changing its model, effort, tags or tier. */
 function openEditor(card, agent) {
   if (card.querySelector('form')) return;
   const form = el('form', 'form');
   const fields = [
     ['model', agent.model, 'model'],
     ['effort', agent.effort ?? '', 'effort (blank for none)'],
-    ['description', agent.description ?? '', 'description'],
     ['tags', (agent.tags ?? []).join(', '), 'tags: what it is good for, comma-separated'],
   ];
-  for (const [name, value, placeholder] of fields.filter(([name]) => agent.harness !== 'image' || name === 'description')) {
+  for (const [name, value, placeholder] of fields.filter(([name]) => agent.harness !== 'image' || name === 'tags')) {
     const input = document.createElement('input');
     input.name = name;
     input.value = value;

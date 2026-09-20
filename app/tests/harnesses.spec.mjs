@@ -617,24 +617,35 @@ test('category pills reflect saved profiles and update after edits without chang
     { name: 'draw', harness: 'image', model: 'codex-image' },
   ])
   try {
-    const categories = (row) => row.getByRole('list', { name: 'Categories' }).getByRole('listitem')
+    const pills = (row, name) => row.getByRole('list', { name }).getByRole('listitem')
+    await expect(pills(offer(page, 'maia'), 'Categories')).toHaveText(['Coding', 'Review'])
     for (const row of [offer(page, 'maia'), member(fixture.roster, 'maia')]) {
-      await expect(categories(row)).toHaveText(['Coding', 'Review'])
       await expect(row.locator('.agent-route')).toHaveText('Codex login')
     }
-    await expect(categories(offer(page, 'electra'))).toHaveText(['Coding'])
-    await expect(categories(member(fixture.roster, 'custom'))).toHaveText(['Coding'])
-    await expect(categories(offer(page, 'pygmalion'))).toHaveText(['Images'])
-    await expect(categories(member(fixture.roster, 'draw'))).toHaveText(['Images'])
+    // A saved agent shows its tags, what the daemon picks it by, in place of the catalog's categories.
+    await expect(pills(member(fixture.roster, 'maia'), 'Tags')).toHaveText([
+      'coding',
+      'review',
+      'planning',
+    ])
+    await expect(
+      member(fixture.roster, 'maia').getByRole('list', { name: 'Categories' }),
+    ).toHaveCount(0)
+    await expect(pills(offer(page, 'electra'), 'Categories')).toHaveText(['Coding'])
+    await expect(pills(member(fixture.roster, 'custom'), 'Tags')).toHaveText(['coding'])
+    await expect(pills(offer(page, 'pygmalion'), 'Categories')).toHaveText(['Images'])
+    await expect(pills(member(fixture.roster, 'draw'), 'Tags')).toHaveText(['images'])
     await expect(offer(page, 'skirnir').locator('.agent-route')).toHaveText('OpenRouter · API')
     const maia = member(fixture.roster, 'maia')
     await maia.getByRole('button', { name: 'Edit', exact: true }).click()
     await maia.locator('[name=effort]').fill('low')
     await maia.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(categories(maia)).toHaveText(['Coding'])
+    await expect(pills(maia, 'Tags')).toHaveText(
+      listAgents(fixture.t.env).find((a) => a.name === 'maia').tags,
+    )
     await fixture.roster.getByLabel('Category', { exact: true }).selectOption('lead')
     await expect(fixture.roster.locator('.callsign')).toHaveCount(0)
-    await expect(categories(offer(page, 'maia'))).toHaveText(['Coding', 'Review'])
+    await expect(pills(offer(page, 'maia'), 'Categories')).toHaveText(['Coding', 'Review'])
   } finally {
     await fixture.close()
   }
@@ -663,14 +674,14 @@ test('separate agent screens refresh saved changes while preserving filters and 
     ])
     const edited = member(fixture.roster, 'electra')
     await edited.getByRole('button', { name: 'Edit', exact: true }).click()
-    await edited.locator('[name=description]').fill('Unfinished personal draft')
+    await edited.locator('[name=tags]').fill('coding, drafts')
     await fixture.roster.locator('#add [name=name]').fill('another-draft')
     await page.getByRole('searchbox').fill('maia')
     await offer(page, 'maia').getByRole('button', { name: 'Add', exact: true }).click()
     await expect(offer(page, 'maia').getByRole('button', { name: 'Already added' })).toBeDisabled()
     await refreshAgents(fixture.roster)
     await expect(member(fixture.roster, 'maia')).toBeVisible()
-    await expect(edited.locator('[name=description]')).toHaveValue('Unfinished personal draft')
+    await expect(edited.locator('[name=tags]')).toHaveValue('coding, drafts')
     await expect(fixture.roster.locator('#add [name=name]')).toHaveValue('another-draft')
     await expect(own.getByRole('searchbox')).toHaveValue('Astra')
     await expect(own.getByLabel('Group by')).toHaveValue('model-reasoning')
@@ -683,7 +694,7 @@ test('separate agent screens refresh saved changes while preserving filters and 
       offer(page, 'maia').getByRole('button', { name: 'Add', exact: true }),
     ).toBeEnabled()
     await expect(page.getByRole('searchbox')).toHaveValue('maia')
-    await expect(edited.locator('[name=description]')).toHaveValue('Unfinished personal draft')
+    await expect(edited.locator('[name=tags]')).toHaveValue('coding, drafts')
   } finally {
     await fixture.close()
   }
@@ -1059,14 +1070,11 @@ test('shared model cards keep Fable choices independent through add, remove, fil
     await expect(saved.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 2')
     await expect(saved.locator('.benchmark-details')).toHaveCount(1)
     await expect(saved.locator('.member')).toHaveCount(2)
-    await expect(member(fixture.roster, 'clio').locator('.member__desc')).toHaveText(
-      'My Claude notes',
-    )
+    await expect(member(fixture.roster, 'clio').locator('.member__desc')).toHaveCount(0)
     for (const name of ['clio', 'orpheus'])
       await member(fixture.roster, name).getByRole('button', { name: 'Edit', exact: true }).click()
-    await member(fixture.roster, 'clio')
-      .locator('[name=description]')
-      .fill('Keep this unfinished draft')
+    await expect(member(fixture.roster, 'clio').locator('[name=description]')).toHaveCount(0)
+    await member(fixture.roster, 'clio').locator('[name=tags]').fill('coding, drafts')
     const edited = member(fixture.roster, 'orpheus')
     await edited.locator('[name=effort]').fill('low')
     await edited.getByRole('button', { name: 'Save', exact: true }).click()
@@ -1074,8 +1082,8 @@ test('shared model cards keep Fable choices independent through add, remove, fil
       'Claude Fable 5.1 · Xhigh · 1',
       'Claude Fable 5.1 · Low · 1',
     ])
-    await expect(member(fixture.roster, 'clio').locator('[name=description]')).toHaveValue(
-      'Keep this unfinished draft',
+    await expect(member(fixture.roster, 'clio').locator('[name=tags]')).toHaveValue(
+      'coding, drafts',
     )
     await refreshAgents(page)
     await offer(page, 'orpheus').getByRole('button', { name: 'Remove', exact: true }).click()
@@ -1107,13 +1115,17 @@ test('shared model cards retain differing role recommendations on their own harn
     const card = fixture.roster.locator('.model-group')
     await expect(card.locator('h3')).toHaveText('GPT-6 Astra · Ultra · 2')
     await expect(card.locator('.model-summary .category-pills')).toHaveCount(0)
-    await expect(member(fixture.roster, 'codex-ultra').locator('.category-pill')).toHaveText([
-      'Architecture',
-      'Hard problems',
-      'Review',
+    await expect(member(fixture.roster, 'codex-ultra').locator('.tag-pill')).toHaveText([
+      'review',
+      'architecture',
+      'hard-problems',
+      'questions',
     ])
-    await expect(member(fixture.roster, 'pi-ultra').locator('.category-pill')).toHaveText([
-      'Coding',
+    await expect(member(fixture.roster, 'pi-ultra').locator('.tag-pill')).toHaveText([
+      'coding',
+      'review',
+      'architecture',
+      'debugging',
     ])
     await fixture.roster.getByLabel('Category', { exact: true }).selectOption('architecture')
     await expect(card.locator('h3')).toHaveText('GPT-6 Astra · Ultra · 1')
@@ -1379,9 +1391,9 @@ test('image agents keep the Codex route and offer only meaningful editing fields
     await old.getByRole('button', { name: 'Edit', exact: true }).click()
     await expect(old.locator('[name=model]')).toHaveCount(0)
     await expect(old.locator('[name=effort]')).toHaveCount(0)
-    await old.locator('[name=description]').fill('Updated image notes')
+    await old.locator('[name=tags]').fill('images, drafts')
     await old.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(old).toContainText('Updated image notes')
+    await expect(old.locator('.tag-pill')).toHaveText(['images', 'drafts'])
     await expect(offer(page, 'pygmalion')).toContainText('Codex Images')
     await expect(offer(page, 'pygmalion')).not.toContainText(/gpt-image-2|Sunburst|Flare/)
     const form = fixture.roster.locator('#add')
@@ -1593,7 +1605,9 @@ test('work tiers filter and group both screens, and saved overrides preserve hon
     await card.getByLabel('Work tier').selectOption('standard')
     await card.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(card.locator('.tier-pill')).toContainText('Standard work')
-    await expect(card.locator('[data-category=coding]')).toHaveCount(1)
+    await expect(card.locator('.tag-pill')).toHaveText(
+      listAgents(t.env).find((a) => a.name === 'specialist').tags,
+    )
     expect(listAgents(t.env).find((a) => a.name === 'specialist').workTier).toBe('standard')
     await own.reload()
     await own.getByLabel('Group by').selectOption('none')

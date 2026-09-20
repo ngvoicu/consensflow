@@ -683,7 +683,10 @@ test('shows the team as a table of roles, and adds a saved agent with the roles 
   await expect(table.locator('tbody tr')).toHaveCount(2)
   await expect(table.locator('tbody tr').first()).toContainText('@zeus')
   await expect(table.locator('tbody tr').first()).toContainText('standard')
-  await expect(table.locator('tbody tr').first()).toContainText('coding, rust')
+  await expect(table.locator('tbody tr').first().locator('.tag-chip')).toHaveText([
+    'coding',
+    'rust',
+  ])
   await expect(dialog.getByRole('checkbox', { name: 'Worker @zeus' })).toBeChecked()
   await expect(dialog.getByRole('checkbox', { name: 'Reviewer @zeus' })).not.toBeChecked()
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
@@ -871,10 +874,15 @@ test('opens the agents screens in their own window, and refreshes the agents whe
     page.evaluate(() =>
       window.__calls.filter(([c]) => c === 'open_agents_window').map(([, args]) => args.page),
     )
-  await page.getByRole('button', { name: 'Your agents' }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settings.getByRole('button', { name: 'Your agents' }).click()
   await expect.poll(opened).toEqual([''])
-  await page.getByRole('button', { name: 'Agent library' }).click()
-  await page.getByRole('button', { name: 'Harnesses' }).click()
+  await expect(settings).toBeHidden()
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settings.getByRole('button', { name: 'Agent library' }).click()
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settings.getByRole('button', { name: 'Harnesses' }).click()
   await expect.poll(opened).toEqual(['', 'library', 'harnesses'])
   const listed = await page.evaluate(
     () => window.__calls.filter(([, args]) => args?.operation === 'agents.list').length,

@@ -479,7 +479,11 @@ function memberRow(member) {
       }),
     )
   }
-  row.append(element('td', null, member.tier ?? ''), element('td', null, member.tags.join(', ')))
+  const tags = element('td', 'tags-cell')
+  const chips = element('span', 'tag-chips')
+  chips.append(...member.tags.map((tag) => element('span', 'tag-chip', tag)))
+  tags.append(chips)
+  row.append(element('td', null, member.tier ?? ''), tags)
   const remove = element('button', 'quiet-button', 'Remove')
   remove.type = 'button'
   remove.setAttribute('aria-label', `Remove ${name} from the team`)
@@ -540,13 +544,13 @@ teamDialog.querySelector('[value="cancel"]').addEventListener('click', () => tea
 // The agents screens open in their own window at the daemon's address: the
 // board's page cannot frame them (WebKit blocks a plain-HTTP frame inside the
 // app's secure page). Their edits show here once this window is back in front.
-for (const [buttonId, page] of [
-  ['#agents-button', ''],
-  ['#library-button', 'library'],
-  ['#harnesses-button', 'harnesses'],
-]) {
-  $(buttonId).addEventListener('click', () =>
+const settingsDialog = $('#settings-dialog')
+$('#settings-button').addEventListener('click', () => settingsDialog.showModal())
+for (const entry of settingsDialog.querySelectorAll('[data-agents-page]')) {
+  const page = entry.dataset.agentsPage
+  entry.addEventListener('click', () =>
     act(async () => {
+      settingsDialog.close()
       const opened = await invoke('open_agents_window', { page })
       if (opened?.ok !== true) {
         throw new Error(opened?.error ?? 'The agents screens are not available.')
