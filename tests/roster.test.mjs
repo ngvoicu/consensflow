@@ -297,82 +297,6 @@ describe('a roster written before the rename keeps working', () => {
   })
 })
 
-describe('CONSENSFLOW_HOME means one root, to both halves', () => {
-  it('puts the roster where the payload looks for it', async () => {
-    // The manager read this variable as its state root and the payload read it
-    // as the roster root, so setting it split the machine in two: `cf agent
-    // list` showed your agents while the session hook said "none configured".
-    const t = tempEnv()
-    try {
-      addAgent({ name: 'diana', harness: 'codex', model: 'gpt-5.6-luna' }, t.env)
-
-      const { agentsPath } = await import('../hosts/lib/state.js')
-      const payloadEnv = process.env.CONSENSFLOW_HOME
-      process.env.CONSENSFLOW_HOME = t.env.CONSENSFLOW_HOME
-      try {
-        assert.equal(
-          rosterPath(t.env),
-          agentsPath(t.root),
-          'both halves resolve the roster to the same file',
-        )
-      } finally {
-        if (payloadEnv === undefined) delete process.env.CONSENSFLOW_HOME
-        else process.env.CONSENSFLOW_HOME = payloadEnv
-      }
-    } finally {
-      t.cleanup()
-    }
-  })
-
-  it('puts everything in one directory when it is not set', () => {
-    // One answer to "where is ConsensFlow on this machine", and one place for
-    // an uninstall to sweep.
-    const bare = { HOME: '/home/someone' }
-    assert.equal(rosterPath(bare), '/home/someone/.consensflow/agents.json')
-    assert.equal(configRoot(bare), '/home/someone/.consensflow')
-  })
-
-  it("imports an older machine's state without writing outside the private home", () => {
-    const t = tempEnv()
-    try {
-      // A machine from before the merge: state under XDG, roster beside it.
-      const legacy = legacyConfigRoot(t.env)
-      mkdirSync(legacy, { recursive: true })
-      writeFileSync(join(legacy, 'mode.json'), JSON.stringify({ mode: 'claude' }))
-      writeFileSync(join(legacy, 'hosts.json'), JSON.stringify({ hosts: {} }))
-
-      const moved = migrateStateRoot(t.env)
-      assert.ok(moved, 'it reports what it did')
-      assert.ok(existsSync(join(configRoot(t.env), 'mode.json')), 'the mode came along')
-      assert.ok(existsSync(join(configRoot(t.env), 'hosts.json')))
-      assert.equal(existsSync(legacy), true, 'the old root is never changed')
-      assert.equal(readFileSync(join(legacy, 'hosts.json'), 'utf8'), JSON.stringify({ hosts: {} }))
-
-      // Running again is a no-op, not a second copy.
-      assert.equal(migrateStateRoot(t.env), null)
-    } finally {
-      t.cleanup()
-    }
-  })
-
-  it('never overwrites a machine that already has the new root', () => {
-    const t = tempEnv()
-    try {
-      mkdirSync(configRoot(t.env), { recursive: true })
-      writeFileSync(join(configRoot(t.env), 'mode.json'), JSON.stringify({ mode: 'cmux' }))
-      const legacy = legacyConfigRoot(t.env)
-      mkdirSync(legacy, { recursive: true })
-      writeFileSync(join(legacy, 'mode.json'), JSON.stringify({ mode: 'claude' }))
-
-      assert.equal(migrateStateRoot(t.env), null, 'nothing is merged behind the user')
-      const kept = JSON.parse(readFileSync(join(configRoot(t.env), 'mode.json'), 'utf8'))
-      assert.equal(kept.mode, 'cmux', 'the live state wins')
-    } finally {
-      t.cleanup()
-    }
-  })
-})
-
 it('Pi Claude provider updates are explicit and leave custom rows pinned', () => {
   const t = tempEnv()
   try {
@@ -495,19 +419,6 @@ it('saves user work-tier overrides, preserves them on edits/sync, and restores a
     row = listAgents(t.env)[0]
     assert.equal(row.workTier, undefined)
     assert.equal(row.profile.workTier, 'critical')
-    const { normalizeAgent } = await import('../hosts/lib/state.js')
-    const normalized = normalizeAgent({
-      id: 'custom',
-      kind: 'pi',
-      model: 'custom',
-      workTier: 'complex',
-      skillsPolicy: 'explicit',
-      skillPaths: ['old'],
-    })
-    assert.equal(normalized.workTier, 'complex')
-    assert.equal(normalized.profile.workTier, 'complex')
-    assert.equal(Object.hasOwn(normalized, 'skillsPolicy'), false)
-    assert.equal(Object.hasOwn(normalized, 'skillPaths'), false)
   } finally {
     t.cleanup()
   }

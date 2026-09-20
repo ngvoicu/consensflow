@@ -1,5 +1,5 @@
 import { cachedAnswers } from '../../hosts/lib/completion.js'
-import { childEnv, interactiveResume, interactiveStart } from '../../hosts/lib/runners.js'
+import { childEnv, interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
 import {
   createSession as createOpenCodeSession,
   seedSession as seedOpenCodeSession,

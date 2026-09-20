@@ -7,7 +7,7 @@ const FILES = ['hosts/claude-receiver.mjs', 'hosts/lib/receiver.js', 'package.js
 const QUESTION_HOOK_SECONDS = 3600
 const quote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`
 
-export function receiverSignal(env, launch) {
+function receiverSignal(env, launch) {
   if (!/^[A-Za-z0-9_-]{1,200}$/.test(launch)) throw new Error('invalid receiver launch')
   return join(configRoot(env), 'receivers', launch, 'signal')
 }
@@ -38,7 +38,7 @@ export async function prepareClaudeSettings(env, launch, hooks = {}) {
   await writeFile(
     settings,
     JSON.stringify({
-      // Full permission (runners.js passes the flag) without its one-time
+      // Full permission (windows.js passes the flag) without its one-time
       // acceptance dialog, which no one could answer in a host-started pane.
       permissions: { defaultMode: 'bypassPermissions' },
       skipDangerousModePermissionPrompt: true,

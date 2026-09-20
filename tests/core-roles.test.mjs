@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
@@ -79,6 +80,26 @@ describe('role instructions for the new core', () => {
 
   it('refuses an unknown role', () => {
     assert.throws(() => roleInstructions('king', []), /no role instructions for king/)
+  })
+
+  it('keeps the authorization boundary in the lead text, ships no harness payload and no personal name', async () => {
+    const skill = roleInstructions('lead', [
+      { name: 'zeus', roles: ['worker'], workTier: 'critical' },
+    ])
+    assert.match(skill, /authorized work/)
+    assert.match(skill, /never type into another window or launch agents/)
+    assert.match(skill, /only the human gives you a task/)
+    // One role text per role, read by the core: no host payload carries a second copy.
+    const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
+    assert.equal(existsSync(path.join(root, 'hosts', 'claude')), false, 'no claude payload')
+    assert.equal(existsSync(path.join(root, 'hosts', 'pi')), false, 'no pi payload')
+    // The personal name must not appear in anything that ships.
+    for (const base of ['hosts', 'bin', 'src', 'skill'].map((d) => path.join(root, d))) {
+      for (const file of await readdir(base, { recursive: true })) {
+        const content = await readFile(path.join(base, file), 'utf8').catch(() => '')
+        assert.doesNotMatch(content, /Gabriel/, `${base}/${file}`)
+      }
+    }
   })
 
   it('are written where each harness loads them, for any role', async () => {

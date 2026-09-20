@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { cachedAnswers } from '../../hosts/lib/completion.js'
-import { interactiveResume, interactiveStart } from '../../hosts/lib/runners.js'
+import { interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
 import { send as sendPeer } from '../channels/claude-peer.js'
 import { prepareClaudeSettings } from '../claude-install.js'
 import { roleConfiguration } from '../role-skills.js'
@@ -155,7 +155,7 @@ export function claudeCodeAdapter({
  * busy, idle, or waiting with the reason (a permission prompt, input needed, a
  * dialog). A file whose process is gone is ignored.
  */
-export async function claudeStatuses(env) {
+async function claudeStatuses(env) {
   const directory = path.join(
     env.CLAUDE_CONFIG_DIR ?? path.join(env.HOME ?? '', '.claude'),
     'sessions',

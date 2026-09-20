@@ -65,7 +65,7 @@ function piPath(configured, env) {
   return configured
 }
 
-export function piAgentDir(env) {
+function piAgentDir(env) {
   return piPath(env.PI_CODING_AGENT_DIR || join(home(env), '.pi', 'agent'), env)
 }
 

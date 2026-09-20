@@ -128,43 +128,6 @@ const cursorKindCodes = Object.freeze(
 )
 const ITEM_ROLES = new Set(['user', 'assistant', 'tool', 'custom'])
 
-/**
- * Return items strictly after an adapter-minted cursor. An empty array is a
- * verified empty suffix; null means the items or cursor could not be parsed by
- * that adapter. Cursors are opaque to consumers even though their current wire
- * representation is a safe integer; only this adapter decodes or compares it.
- */
-export function itemsAfterCursor(kind, items, cursor) {
-  if (!Array.isArray(items)) return null
-  for (const item of items) {
-    if (!isNormalisedItem(kind, item)) return null
-  }
-  if (cursorPosition(kind, cursor) === null) return null
-  const after = []
-  for (const item of items) {
-    if (compareCursors(kind, item.seq, cursor) > 0) after.push(item)
-  }
-  return after
-}
-
-function isNormalisedItem(kind, item) {
-  if (item === null || typeof item !== 'object' || Array.isArray(item)) return false
-  for (const field of ['id', 'role', 'text', 'complete', 'settled', 'at', 'seq']) {
-    if (!Object.hasOwn(item, field)) return false
-  }
-  return (
-    typeof item.id === 'string' &&
-    item.id.length > 0 &&
-    ITEM_ROLES.has(item.role) &&
-    typeof item.text === 'string' &&
-    typeof item.complete === 'boolean' &&
-    typeof item.settled === 'boolean' &&
-    item.at !== null &&
-    item.at !== undefined &&
-    cursorPosition(kind, item.seq) !== null
-  )
-}
-
 function cursorKindCode(kind) {
   if (typeof kind !== 'string' || !Object.hasOwn(cursorKindCodes, kind)) return null
   return cursorKindCodes[kind]
@@ -181,21 +144,6 @@ function mintCursor(kind, position) {
     throw new Error(`invalid ${kind} native cursor position`)
   }
   return CURSOR_NAMESPACE + code * CURSOR_KIND_SPAN + position
-}
-
-function cursorPosition(kind, cursor) {
-  const code = cursorKindCode(kind)
-  if (code === null || !Number.isSafeInteger(cursor)) return null
-  const start = CURSOR_NAMESPACE + code * CURSOR_KIND_SPAN
-  if (cursor < start || cursor >= start + CURSOR_KIND_SPAN) return null
-  return cursor - start
-}
-
-function compareCursors(kind, left, right) {
-  const leftPosition = cursorPosition(kind, left)
-  const rightPosition = cursorPosition(kind, right)
-  if (leftPosition === null || rightPosition === null) throw new Error('unrecognised cursor')
-  return leftPosition - rightPosition
 }
 
 function checkedVersion(kind, value) {

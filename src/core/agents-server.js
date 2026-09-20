@@ -27,7 +27,7 @@ import {
  * and puts it on every request; the agents' own tokens open none of this.
  */
 
-export function tokenMatches(presented, token) {
+function tokenMatches(presented, token) {
   return timingSafeEqual(
     createHash('sha256').update(presented).digest(),
     createHash('sha256').update(token).digest(),
@@ -39,11 +39,11 @@ const VERSION = JSON.parse(
 ).version
 
 /** The agent with its profile and benchmark scores, as the screens show it. */
-export function withProfile(agent, benchmarks) {
+function withProfile(agent, benchmarks) {
   return { ...agent, profile: withBenchmarks(agent, agentProfile(agent), benchmarks) }
 }
 
-export function readBody(request) {
+function readBody(request) {
   return new Promise((resolve, reject) => {
     let body = ''
     request.on('data', (chunk) => {
@@ -169,7 +169,7 @@ const BROWSING_CONTROLS = `
   <p class="benchmark-source"></p>
   <details class="benchmark-guide"><summary>About benchmark scores</summary><div></div></details>`
 
-export const PAGE = (token) => `<!DOCTYPE html>
+const PAGE = (token) => `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">

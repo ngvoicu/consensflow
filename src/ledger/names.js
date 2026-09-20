@@ -3,7 +3,7 @@
  * handle, `diana-amber-pine`, easy to say aloud and to tell apart on the
  * board. Thirty-two of each gives a thousand names per member.
  */
-export const ADJECTIVES = [
+const ADJECTIVES = [
   'amber',
   'brisk',
   'calm',
@@ -37,7 +37,7 @@ export const ADJECTIVES = [
   'windy',
   'zesty',
 ]
-export const NOUNS = [
+const NOUNS = [
   'anchor',
   'birch',
   'brook',

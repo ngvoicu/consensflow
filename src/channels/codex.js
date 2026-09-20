@@ -188,7 +188,7 @@ export async function currentSession(config) {
   return (await currentSessionState(config))?.sessionId
 }
 
-export async function currentSessionState(config) {
+async function currentSessionState(config) {
   if (!config?.sessionBridge || !config.launchId) return undefined
   try {
     const response = await fetch(new URL('/session', config.sessionBridge.endpoint), {

@@ -62,11 +62,11 @@ const MEMBER_ROLES = ['worker', 'advisor', 'reviewer']
 const COORDINATOR_HANDLES = ['human', 'lead']
 const COORDINATOR_ROLES = ['human', 'lead']
 export const TIERS = ['critical', 'complex', 'standard', 'light']
-export const POOLS = ['worker', 'advisor']
+const POOLS = ['worker', 'advisor']
 export const PURPOSES = ['critical-review', 'architecture', 'hard-problem', 'important-question']
 const CRITICAL_RULE =
   'No coding or implementation edits. Do not write or revise specifications. Return analysis, evidence and recommendations to your coordinator.'
-export const REVIEW_POLICIES = ['none', 'members']
+const REVIEW_POLICIES = ['none', 'members']
 const REVIEW_ROUNDS = 2
 /** The reviewer's last word, with whatever emphasis its harness wrapped it in: `**VERDICT: pass**`, `Verdict: **changes**`. */
 const VERDICT = /^[\s*_`#>-]*VERDICT[\s*_`]*[:\-–—][\s*_`]*(pass|changes)\b/i

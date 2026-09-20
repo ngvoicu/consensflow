@@ -1,6 +1,6 @@
 import { setTimeout as wait } from 'node:timers/promises'
 import { cachedAnswers } from '../../hosts/lib/completion.js'
-import { interactiveResume, interactiveStart } from '../../hosts/lib/runners.js'
+import { interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
 import { currentSession as brokerSession, send as sendCodex } from '../channels/codex.js'
 import { launchConfiguration, withNativeBridge } from '../channels.js'
 import { roleConfiguration } from '../role-skills.js'

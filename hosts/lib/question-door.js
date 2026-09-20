@@ -9,7 +9,7 @@
  */
 
 /** How long a door waits for the board before the harness's own dialog takes over. */
-export const DOOR_WAIT_MS = 3_500_000
+const DOOR_WAIT_MS = 3_500_000
 const POLL_WAIT_MS = 20_000
 
 /** A request to the board's API as the window's participant; `null` outside a window. */

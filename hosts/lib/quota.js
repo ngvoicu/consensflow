@@ -10,7 +10,7 @@ const LOW_PERCENT = 95
 const UNITS = { second: 1_000, minute: 60_000, hour: 3_600_000, day: 86_400_000 }
 
 /** "Resets in 3 days", "reset in 35 minutes": the time that names, from `atMs`; null otherwise. */
-export function relativeReset(text, atMs) {
+function relativeReset(text, atMs) {
   const match = /resets?\s+in\s+(\d+)\s*(second|minute|hour|day)s?/i.exec(String(text ?? ''))
   if (match === null || !Number.isFinite(atMs)) return null
   return new Date(atMs + Number(match[1]) * UNITS[match[2].toLowerCase()]).toISOString()

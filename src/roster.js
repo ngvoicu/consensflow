@@ -118,7 +118,7 @@ export function migrateStateRoot(env) {
  * lives under it; when it is not, the roster stays at `~/.consensflow`, which
  * is where the payload has always kept it.
  */
-export function rosterHome(env) {
+function rosterHome(env) {
   const override = env?.CONSENSFLOW_HOME
   if (typeof override === 'string' && override.length > 0) return override
   return join(env?.HOME ?? homedir(), '.consensflow')

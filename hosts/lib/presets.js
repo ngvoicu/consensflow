@@ -1290,17 +1290,6 @@ export function validateWorkTier(value) {
     throw new Error('Work tier must be critical, complex, standard or light');
 }
 
-/** Validate the declared purpose; this is not a semantic classifier or a sandbox. */
-export function taskWithWorkPolicy(agent, task, purpose) {
-  const purposes = ['critical-review', 'architecture', 'hard-problem', 'important-question'];
-  if (purpose !== undefined && !purposes.includes(purpose))
-    throw new Error(`Purpose must be ${purposes.join(', ')}`);
-  if (agentProfile(agent).workTier !== 'critical') return task;
-  if (!purposes.includes(purpose))
-    throw new Error(`Critical work requires --purpose ${purposes.join('|')}; no coding or routine advice`);
-  return `Critical work: ${purpose}. No coding or implementation edits. Do not write or revise specifications. Return analysis, evidence and recommendations to your coordinator.\n\n${task}`;
-}
-
 /** Work tiers express the owner's allocation policy, not benchmark or price ranks. */
 export function agentProfile(agent) {
   const profile = modelProfile(agent);
@@ -1416,41 +1405,9 @@ export function validateKimiEffort(agent) {
   }
 }
 
-export function getPreset(ref) {
+function getPreset(ref) {
   const id = slugify(stripMention(ref));
   return AGENT_PRESETS.find((preset) => preset.preset === id || preset.id === id || slugify(preset.name) === id) ?? null;
-}
-
-export function listPresetIds() {
-  return AGENT_PRESETS.map((preset) => preset.preset);
-}
-
-export function agentFromPreset(ref, overrides = {}) {
-  const preset = getPreset(ref);
-  if (!preset) return null;
-  const nameOverride = stringOverride(overrides.name);
-  const idOverride = stringOverride(overrides.id);
-  const name = nameOverride ?? preset.name;
-  // Keep the preset's canonical id; only derive a new id when the caller renames (--name) or sets
-  // an explicit id.
-  const id = slugify(idOverride ?? nameOverride ?? preset.id);
-  const agent = {
-    ...preset,
-    // The label, not the catalog card's paragraph: a roster row's description is the
-    // one-liner the skill table prints, and sync now keeps it current — a row created
-    // with the paragraph would drift the moment it was written.
-    description: preset.label ?? preset.description,
-    ...allowedOverrides(overrides),
-    preset: preset.preset,
-    id,
-    name,
-    kind: preset.kind,
-    model: preset.model,
-    effort: preset.effort,
-    thinking: preset.thinking,
-  };
-  delete agent.label;
-  return agent;
 }
 
 // --- Catalog drift -------------------------------------------------------
@@ -1473,7 +1430,7 @@ export function agentFromPreset(ref, overrides = {}) {
 // without asking. The escape hatch is provenance, not wording — an agent added with an explicit
 // --model or --effort carries no `preset` and is never synced at all.
 // Agents with no `preset`, or whose preset has since left the catalog, are left alone.
-export const PRESET_OWNED_FIELDS = ["kind", "model", "effort", "thinking", "description"];
+const PRESET_OWNED_FIELDS = ["kind", "model", "effort", "thinking", "description"];
 
 // The roster's `description` is the preset's one-line LABEL ("Pi GLM 5.3 Flash MAX") — what an add
 // writes and what the generated skill prints beside the agent's name. The preset's own
@@ -1489,14 +1446,8 @@ function presetFieldValue(field, source) {
   return value;
 }
 
-export function presetForAgent(agent) {
+function presetForAgent(agent) {
   return agent?.preset ? getPreset(agent.preset) : null;
-}
-
-// True when the entry names a preset the catalog no longer carries (e.g. the GPT 5.5 presets
-// retired in 1.7.0). Those stay pinned to what they were created with — sync never touches them.
-export function isOrphanedPreset(agent) {
-  return Boolean(agent?.preset) && !getPreset(agent.preset);
 }
 
 export function presetDrift(agent) {
@@ -1520,31 +1471,4 @@ export function syncAgentWithPreset(agent) {
     else synced[field] = to;
   }
   return { agent: synced, changes };
-}
-
-export function driftedAgents(agents) {
-  return (agents ?? []).filter((agent) => presetDrift(agent).length > 0);
-}
-
-function stringOverride(value) {
-  if (value === undefined || value === null || value === true) return undefined;
-  const trimmed = String(value).trim();
-  return trimmed || undefined;
-}
-
-function allowedOverrides(overrides) {
-  const result = {};
-  for (const key of ["cwd", "description"]) {
-    if (overrides[key] !== undefined) result[key] = overrides[key];
-  }
-  return result;
-}
-
-export function formatPresetLine(preset) {
-  const effort = preset.effort ? ` effort=${preset.effort}` : preset.thinking ? ` thinking=${preset.thinking}` : "";
-  return `- ${preset.preset} → @${preset.id} (${preset.name}): ${preset.label} [${preset.kind} model=${preset.model}${effort}]`;
-}
-
-export function formatPresets() {
-  return ["# ConsensFlow agent presets", "", ...AGENT_PRESETS.map(formatPresetLine), "", "Add one with `/consensflow:agents add <preset>`, or `/consensflow:agents add all`."].join("\n");
 }

@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { cachedAnswers } from '../../hosts/lib/completion.js'
-import { interactiveResume, interactiveStart } from '../../hosts/lib/runners.js'
+import { interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
 import { send as sendPi } from '../channels/pi.js'
 import { launchConfiguration } from '../channels.js'
 import { preparePiExtension } from '../pi-install.js'

@@ -228,7 +228,7 @@ export async function send(channel, target, text) {
   return await sender(target, text)
 }
 
-/** Keep native argument construction in the runners; only owned Codex panes need a supervisor. */
+/** Native argument construction stays in the window builders; only owned Codex panes need a supervisor. */
 export function withNativeBridge(invocation, configuration, node) {
   if (configuration?.channel?.kind !== 'codex-queue' || !configuration.channel.sessionBridge)
     return invocation
