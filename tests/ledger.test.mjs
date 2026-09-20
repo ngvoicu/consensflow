@@ -2385,6 +2385,20 @@ describe("sessions: a member's named windows", () => {
     })
   })
 
+  it("refuses a session's handle where a member's is meant", async () => {
+    await withLedger((ledger) => {
+      const { project, id } = opened(ledger)
+      ledger.assignTask(project.id, 1, id('zeus'))
+      assert.throws(() => ledger.removeMember(project.id, 'zeus-amber-pine'), {
+        code: 'not-a-member',
+      })
+      assert.throws(() => ledger.setRoles(project.id, 'zeus-amber-pine', ['reviewer']), {
+        code: 'not-a-member',
+      })
+      assert.ok(sessionOf(ledger, project.id, 'zeus-amber-pine'), 'the session is untouched')
+    })
+  })
+
   it('removes a member with its live sessions, cancelling their work', async () => {
     await withLedger((ledger) => {
       const { project, id } = opened(ledger)

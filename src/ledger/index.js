@@ -637,6 +637,7 @@ class Ledger {
     roles = requireRoles(roles)
     return this.#write(() => {
       const member = this.#participantByHandle(projectId, handle)
+      this.#requireMemberRow(member.id, 'changes roles')
       if (!MEMBER_ROLES.includes(member.role)) {
         throw new LedgerError(
           'not-a-member',
@@ -684,6 +685,7 @@ class Ledger {
   removeMember(projectId, handle) {
     return this.#write(() => {
       const member = this.#participantByHandle(projectId, handle)
+      this.#requireMemberRow(member.id, 'leaves the team')
       if (!MEMBER_ROLES.includes(member.role)) {
         throw new LedgerError(
           'not-a-member',

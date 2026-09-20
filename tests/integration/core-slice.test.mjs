@@ -119,3 +119,49 @@ test('a lead the human typed to still gets its results pasted in', async () => {
     await app.close()
   }
 })
+
+test('one member runs two tasks at once, each in a session and window of its own', async () => {
+  const app = await startIntegration({
+    editor: CORE_EDITOR,
+    fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
+  })
+  try {
+    const opened = await app.requestNode('project.open', {
+      directory: app.workspace,
+      harness: 'claude-code',
+      review: 'none',
+    })
+    assert.equal(opened.ok, true, JSON.stringify(opened))
+    const project = opened.project.id
+    const added = await app.requestNode('member.add', { project, agent: 'worker' })
+    assert.equal(added.ok, true, JSON.stringify(added))
+    for (const word of ['ONE', 'TWO']) {
+      const given = await app.requestNode('task.add', {
+        project,
+        to: 'lead',
+        body: `DISPATCH --tier ${added.member.tier} Reply with exactly: ${word}`,
+      })
+      assert.equal(given.ok, true, JSON.stringify(given))
+    }
+    const board = async () => (await app.requestNode('board.get', { project })).board
+    const dispatched = async () =>
+      (await board()).lanes
+        .filter((lane) => lane.participant.member === 'worker')
+        .flatMap((lane) => lane.tasks)
+    await app.waitFor(
+      async () => (await dispatched()).filter((t) => t.state === 'done').length === 2,
+      60_000,
+    )
+    const sessions = (await dispatched()).map((t) => t.assignee)
+    assert.equal(new Set(sessions).size, 2, `two sessions: ${sessions}`)
+    for (const handle of sessions) assert.match(handle, /^worker-[a-z]+-[a-z]+$/)
+    const windows = app.openFrames.filter((frame) => frame.id.startsWith(`p${project}-worker-`))
+    assert.deepEqual(
+      windows.map((frame) => frame.id).sort(),
+      sessions.map((handle) => `p${project}-${handle}`).sort(),
+      'each session had a window of its own',
+    )
+  } finally {
+    await app.close()
+  }
+})
