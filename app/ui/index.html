@@ -139,26 +139,53 @@
       color: var(--muted);
     }
     #projects { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-    /* A project: its name on one line, its buttons on the next, so a long name never pushes them out. */
-    .project { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px 6px; margin-bottom: 6px; }
-    .project .quiet-button { padding: 3px 9px; font-size: 12px; }
-    .project-select {
-      flex: 1 1 100%;
-      min-width: 0;
+    /* A project is a card: its name and state on top, its buttons in a footer of their own. */
+    .project {
       display: grid;
-      gap: 2px;
+      margin-bottom: 8px;
+      border: 1px solid var(--line-soft);
+      border-radius: 9px;
+      background: rgba(255, 255, 255, .02);
+      overflow: hidden;
+    }
+    .project[data-current="true"] {
+      border-color: var(--seafoam-dim);
+      background: var(--panel-raised);
+      box-shadow: inset 3px 0 0 var(--seafoam);
+    }
+    .project-select {
+      display: grid;
+      gap: 5px;
+      width: 100%;
+      min-width: 0;
       text-align: left;
-      padding: 7px 9px;
-      border: 1px solid transparent;
-      border-radius: 7px;
+      padding: 10px 12px 9px;
+      border: 0;
       background: transparent;
       cursor: pointer;
     }
     .project-select:hover { background: var(--panel); }
-    .project-select[aria-current="true"] { background: var(--panel-raised); border-color: var(--line); }
     .project-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .project-state { font: 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    .project-state {
+      width: fit-content;
+      padding: 1px 7px;
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      font: 10px/1.5 var(--mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
     .project[data-state="open"] .project-state { color: var(--seafoam); }
+    .project-tools {
+      display: flex;
+      justify-content: flex-end;
+      gap: 6px;
+      padding: 6px 8px;
+      border-top: 1px solid var(--line-soft);
+      background: rgba(0, 0, 0, .12);
+    }
+    .project-tools .quiet-button { padding: 3px 9px; font-size: 12px; }
     .projects-empty, .team-empty { color: var(--muted); padding: 6px 9px; }
 
     /* The board on the left, one window docked on the right, a third of the width. */

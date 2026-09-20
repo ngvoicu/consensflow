@@ -273,6 +273,7 @@ function renderProjects() {
   const items = state.projects.map((project) => {
     const item = element('li', 'project')
     item.dataset.state = project.state
+    item.dataset.current = String(project.id === state.selected)
     const select = element('button', 'project-select')
     select.type = 'button'
     select.setAttribute('aria-current', String(project.id === state.selected))
@@ -289,13 +290,14 @@ function renderProjects() {
     })
     item.append(select)
     const open = project.state === 'open'
+    const tools = element('div', 'project-tools')
     // A closed project may go for good; the ask is confirmed in a dialog.
     if (!open) {
       const remove = element('button', 'quiet-button', 'Delete')
       remove.type = 'button'
       remove.setAttribute('aria-label', `Delete ${project.name}`)
       remove.addEventListener('click', () => askToDelete(project))
-      item.append(remove)
+      tools.append(remove)
     }
     const toggle = element('button', 'quiet-button', open ? 'Close' : 'Resume')
     toggle.type = 'button'
@@ -303,7 +305,8 @@ function renderProjects() {
     toggle.addEventListener('click', () =>
       act(() => core(open ? 'project.close' : 'project.resume', { project: project.id })),
     )
-    item.append(toggle)
+    tools.append(toggle)
+    item.append(tools)
     return item
   })
   if (items.length === 0) items.push(element('li', 'projects-empty', 'No projects yet.'))
