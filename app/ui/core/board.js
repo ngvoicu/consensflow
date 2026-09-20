@@ -118,10 +118,15 @@ function sessionsNote(lane, board) {
     : `${open} window${open === 1 ? '' : 's'} open, one per task`
 }
 
-/** Where a task is going or came from, on its card. */
+/** "T-3, T-4": task numbers in a sentence. */
+const tasks = (numbers) => numbers.map((number) => `T-${number}`).join(', ')
+
+/** Where a task is going or came from, on its card; what it waits for first. */
 function route(task) {
   if (task.assignee === null) {
-    return task.pool === 'designer' ? 'for an image designer' : `for a ${task.tier} ${task.pool}`
+    const who =
+      task.pool === 'designer' ? 'for an image designer' : `for a ${task.tier} ${task.pool}`
+    return task.blockedBy.length === 0 ? who : `blocked by ${tasks(task.blockedBy)} · ${who}`
   }
   return `from ${who(task.requester)}`
 }
@@ -735,7 +740,7 @@ export class TaskDrawer {
     const meta = element(
       'p',
       'drawer-meta',
-      `${who(task.requester)} asked ${task.assignee === null ? `for a ${task.tier} ${task.pool}` : who(task.assignee)} · ${stateLabel(task)} · updated ${age(task.updatedAt, now)} ago`,
+      `${who(task.requester)} asked ${task.assignee === null ? `for a ${task.tier} ${task.pool}` : who(task.assignee)} · ${stateLabel(task)} · updated ${age(task.updatedAt, now)} ago${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
     )
     meta.dataset.state = task.state
     const sections = [head, meta]

@@ -40,6 +40,12 @@ credentials, takes no API key, and writes only inside its own home.
   reviewer must run a different model than the author; a request for changes
   goes back to the author once, and after a second round the lead decides with
   both reviews in hand.
+- **A plan on the board.** A task may need others first: `cf task add
+  --needs T-3,T-4 "…"` waits, blocked, until each is accepted, and the daemon
+  gives out only unblocked tasks, so a plan of many tasks runs in its own
+  order with parallel work where the plan allows it. When a result uncovers
+  work that must come first, `--before T-9,T-10` puts a new task ahead of
+  tasks still on the board. The board is the plan's memory.
 - **Human approval required.** With this project setting on, every message
   between two agents (a task, a result after its review, a question, an
   answer) waits in your bay until you pass it on. You may also decline a task

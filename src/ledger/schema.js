@@ -330,6 +330,19 @@ export const MIGRATIONS = [
         CREATE UNIQUE INDEX message_delivering_unique
           ON message (recipient_id) WHERE state = 'delivering';
   `),
+  `
+  -- A plan on the board: a task may need other tasks accepted before the
+  -- daemon gives it out. One row per need; both ends go with their task.
+  CREATE TABLE task_need (
+    task_id INTEGER NOT NULL,
+    needs_id INTEGER NOT NULL,
+    CONSTRAINT task_need_pk PRIMARY KEY (task_id, needs_id),
+    CONSTRAINT task_need_task_fk FOREIGN KEY (task_id) REFERENCES task (id) ON DELETE CASCADE,
+    CONSTRAINT task_need_needs_fk FOREIGN KEY (needs_id) REFERENCES task (id) ON DELETE CASCADE,
+    CONSTRAINT task_need_self_check CHECK (task_id != needs_id)
+  ) STRICT;
+  CREATE INDEX task_need_needs_index ON task_need (needs_id);
+  `,
 ]
 
 /**

@@ -166,6 +166,8 @@ export async function startApi({
             : { to }),
         body: body.body,
         title: body.title,
+        ...(body.needs === undefined ? {} : { needs: body.needs }),
+        ...(body.before === undefined ? {} : { before: body.before }),
       })
       changed()
       // With human approval required, the brief waits for the human before it
@@ -352,6 +354,8 @@ function summary(task) {
     assignee: task.assignee,
     pool: task.pool,
     tier: task.tier,
+    needs: task.needs,
+    blockedBy: task.blockedBy,
     updatedAt: task.updatedAt,
   }
 }

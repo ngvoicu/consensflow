@@ -184,6 +184,14 @@ function requireActive(row) {
   return row
 }
 
+/** Task numbers a task needs or comes before: a list of distinct positive integers. */
+const requireNumbers = (value, field) => {
+  if (!Array.isArray(value) || value.some((number) => !Number.isInteger(number) || number <= 0)) {
+    throw new LedgerError('invalid-needs', `${field} is a list of task numbers (T-3, T-4)`)
+  }
+  return [...new Set(value)]
+}
+
 const requireGate = (gate) => {
   if (typeof gate !== 'boolean') {
     throw new LedgerError('invalid-gate', 'human approval is required (true) or not (false)')
@@ -288,7 +296,10 @@ const MESSAGE_SELECT = `
 
 const TASK_SELECT = `
   SELECT t.*, q.handle AS requester, a.handle AS assignee, o.number AS review_of_number,
-         am.handle AS assignee_member, a.left_at AS assignee_left_at
+         am.handle AS assignee_member, a.left_at AS assignee_left_at,
+         (SELECT json_group_array(json_object('number', d.number, 'state', d.state))
+            FROM (SELECT d.number, d.state FROM task_need n JOIN task d ON d.id = n.needs_id
+                  WHERE n.task_id = t.id ORDER BY d.number) d) AS needs
   FROM task t
   JOIN participant q ON q.id = t.requester_id
   LEFT JOIN participant a ON a.id = t.assignee_id
@@ -331,6 +342,15 @@ const conversationView = (row) =>
         endedAt: row.ended_at,
       }
 
+/** The tasks a task needs, each with its state, and the ones not yet accepted: what blocks it. */
+const needsView = (json) => {
+  const needs = JSON.parse(json)
+  return {
+    needs,
+    blockedBy: needs.filter((need) => need.state !== 'accepted').map((need) => need.number),
+  }
+}
+
 const taskView = (row) => ({
   id: row.id,
   projectId: row.project_id,
@@ -349,6 +369,7 @@ const taskView = (row) => ({
   verdict: row.verdict,
   unreviewed: row.unreviewed ?? null,
   session: row.assignee_member ? row.assignee : null,
+  ...needsView(row.needs),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
@@ -860,10 +881,23 @@ class Ledger {
    * a `pool` and `tier` instead, it opens for the daemon to assign to a member
    * of that pool and tier (work for a worker, advice from an advisor; an image
    * from a designer, which has no tier), and critical work names its `purpose`.
+   * A task on the board may `needs` other tasks: it waits until each is
+   * accepted. With `before`, tasks still on the board wait for this one.
    */
-  createTask(projectId, { from, to, after, pool, tier, purpose, body, title }) {
+  createTask(
+    projectId,
+    { from, to, after, pool, tier, purpose, body, title, needs = [], before = [] },
+  ) {
     requireText(body, 'body', MAX_BODY)
     if (title !== undefined) requireText(title, 'title', MAX_TITLE)
+    const needed = requireNumbers(needs, 'needs')
+    const blocking = requireNumbers(before, 'before')
+    if ((needed.length > 0 || blocking.length > 0) && (to !== undefined || after !== undefined)) {
+      throw new LedgerError(
+        'needs-on-the-board',
+        'needs go with a task on the board (for a tier, or the designer)',
+      )
+    }
     if (to === undefined && after === undefined) {
       if (!POOLS.includes(pool)) {
         throw new LedgerError('invalid-pool', `a pool is ${POOLS.join(', ')}, not ${pool}`)
@@ -931,7 +965,40 @@ class Ledger {
           at,
         )
       if (assignee === null) {
-        this.#log(projectId, 'task.opened', { task: next, from: requester.handle, pool, tier })
+        for (const number of needed) {
+          const need = this.#taskRow(projectId, number)
+          if (need.state === 'cancelled') {
+            throw new LedgerError(
+              'need-cancelled',
+              `T-${number} is cancelled: nothing waits for it`,
+              409,
+            )
+          }
+          this.#db
+            .prepare('INSERT INTO task_need (task_id, needs_id) VALUES (?, ?)')
+            .run(taskId, need.id)
+        }
+        for (const number of blocking) {
+          const waits = this.#taskRow(projectId, number)
+          if (waits.state !== 'open') {
+            throw new LedgerError(
+              'not-on-the-board',
+              `T-${number} is ${waits.state}: only a task still on the board can wait for a new one`,
+              409,
+            )
+          }
+          this.#db
+            .prepare('INSERT INTO task_need (task_id, needs_id) VALUES (?, ?)')
+            .run(waits.id, taskId)
+        }
+        this.#log(projectId, 'task.opened', {
+          task: next,
+          from: requester.handle,
+          pool,
+          tier,
+          ...(needed.length === 0 ? {} : { needs: needed }),
+          ...(blocking.length === 0 ? {} : { before: blocking }),
+        })
         return { task: this.#task(taskId), message: null }
       }
       const messageId = this.#queue(projectId, {

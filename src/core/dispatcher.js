@@ -718,9 +718,14 @@ export class Dispatcher {
 
   // --- assignment and review ------------------------------------------------------------
 
-  /** Each open task goes to the best free member of its tier; the requester hears once when none is. */
+  /**
+   * Each open task goes to the best free member of its tier; the requester
+   * hears once when none is. A task that needs others waits for them to be
+   * accepted, in silence: its card says what it waits for.
+   */
   #assignOpenTasks(project) {
     for (const task of this.#ledger.board(project.id).open) {
+      if (task.blockedBy.length > 0) continue
       const candidates = this.#ledger.candidates(project.id, task.number)
       const free = candidates.filter((member) => this.#available(member))
       if (free.length > 0) {

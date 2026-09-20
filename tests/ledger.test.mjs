@@ -391,6 +391,13 @@ describe('upgrading a home', () => {
             .run(at2),
         /UNIQUE constraint failed: message.recipient_id/,
       )
+      // The needs table came with the plan: no task needs itself or a task that is not there.
+      assert.throws(() =>
+        upgraded.prepare('INSERT INTO task_need (task_id, needs_id) VALUES (1, 1)').run(),
+      )
+      assert.throws(() =>
+        upgraded.prepare('INSERT INTO task_need (task_id, needs_id) VALUES (1, 99)').run(),
+      )
       assert.equal(upgraded.prepare('PRAGMA foreign_keys').get().foreign_keys, 1)
       assert.equal(upgraded.prepare('SELECT COUNT(*) AS n FROM task').get().n, 1)
       assert.equal(upgraded.prepare('PRAGMA foreign_key_check').all().length, 0, 'nothing dangles')
@@ -2931,6 +2938,116 @@ describe('human approval required: the gate', () => {
       ledger.removeMember(project.id, 'zeus')
       assert.equal(ledger.message(second.message.id).state, 'cancelled')
       assert.deepEqual(gatedIds(ledger, project), [])
+    })
+  })
+})
+
+describe('a plan on the board: needs', () => {
+  /** A lead and two standard workers, with T-1 open for a worker. */
+  function planned(ledger) {
+    const { project, id } = team(ledger)
+    ledger.createTask(project.id, { from: 'lead', pool: 'worker', tier: 'standard', body: 'Lexer' })
+    return { project, id }
+  }
+  const open = (ledger, project, body, extra = {}) =>
+    ledger.createTask(project.id, {
+      from: 'lead',
+      pool: 'worker',
+      tier: 'standard',
+      body,
+      ...extra,
+    }).task
+  /** A worker's task through to done: assigned, delivered, answered. */
+  function finish(ledger, project, id, number) {
+    deliver(ledger, ledger.assignTask(project.id, number, id('zeus')).message)
+    ledger.recordResult(project.id, number, { body: 'Done' })
+  }
+
+  it('waits for the tasks it needs until each is accepted, and says which block it', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = planned(ledger)
+      const parser = open(ledger, project, 'Parser', { needs: [1] })
+      assert.deepEqual([parser.needs, parser.blockedBy], [[{ number: 1, state: 'open' }], [1]])
+      assert.deepEqual(
+        ledger.board(project.id).open.map((t) => [t.number, t.blockedBy]),
+        [
+          [1, []],
+          [2, [1]],
+        ],
+        'both wait on the board; only the first may go',
+      )
+      finish(ledger, project, id, 1)
+      assert.deepEqual(ledger.task(project.id, 2).blockedBy, [1], 'done is not accepted')
+      ledger.acceptTask(project.id, 1, { by: 'lead' })
+      const freed = ledger.task(project.id, 2)
+      assert.deepEqual([freed.needs, freed.blockedBy], [[{ number: 1, state: 'accepted' }], []])
+      assert.deepEqual(
+        ledger.events(project.id).find((e) => e.kind === 'task.opened' && e.data.task === 2).data,
+        { task: 2, from: 'lead', pool: 'worker', tier: 'standard', needs: [1] },
+      )
+      // A need already accepted blocks nothing; one named twice counts once.
+      const cli = open(ledger, project, 'CLI', { needs: [1, 2, 2] })
+      assert.deepEqual(cli.blockedBy, [2])
+      assert.equal(id('lead') > 0, true)
+    })
+  })
+
+  it('puts a new task before tasks still on the board, and refuses one already in a window', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = planned(ledger)
+      open(ledger, project, 'Parser', { needs: [1] })
+      const fix = open(ledger, project, 'Fix the lexer bug', { before: [1, 2] })
+      assert.deepEqual(fix.blockedBy, [])
+      assert.deepEqual(ledger.task(project.id, 1).blockedBy, [3])
+      assert.deepEqual(ledger.task(project.id, 2).blockedBy, [1, 3])
+      assert.deepEqual(
+        ledger.events(project.id).find((e) => e.kind === 'task.opened' && e.data.task === 3).data
+          .before,
+        [1, 2],
+      )
+      finish(ledger, project, id, 3)
+      ledger.acceptTask(project.id, 3, { by: 'lead' })
+      assert.deepEqual(ledger.task(project.id, 1).blockedBy, [])
+      ledger.assignTask(project.id, 1, id('zeus'))
+      assert.throws(() => open(ledger, project, 'Too late', { before: [1] }), {
+        code: 'not-on-the-board',
+        message: /T-1 is queued/,
+      })
+      assert.equal(ledger.task(project.id, 4), null, 'nothing of the refused task is left')
+    })
+  })
+
+  it('refuses a need that does not exist or is cancelled, and needs on a task that is not on the board', async () => {
+    await withLedger((ledger) => {
+      const { project } = planned(ledger)
+      assert.throws(() => open(ledger, project, 'Parser', { needs: [9] }), { code: 'unknown-task' })
+      assert.throws(() => open(ledger, project, 'Parser', { needs: ['T-1'] }), {
+        code: 'invalid-needs',
+      })
+      ledger.cancelTask(project.id, 1, { by: 'lead' })
+      assert.throws(() => open(ledger, project, 'Parser', { needs: [1] }), {
+        code: 'need-cancelled',
+      })
+      for (const address of [{ to: 'lead' }, { to: 'zeus' }]) {
+        assert.throws(
+          () =>
+            ledger.createTask(project.id, { from: 'lead', ...address, body: 'Plan', needs: [1] }),
+          { code: 'needs-on-the-board' },
+        )
+      }
+      assert.equal(ledger.board(project.id).open.length, 0)
+    })
+  })
+
+  it('keeps a task blocked by a need that was cancelled, and says so', async () => {
+    await withLedger((ledger) => {
+      const { project } = planned(ledger)
+      open(ledger, project, 'Parser', { needs: [1] })
+      ledger.cancelTask(project.id, 1, { by: 'lead' })
+      const parser = ledger.task(project.id, 2)
+      assert.deepEqual([parser.needs, parser.blockedBy], [[{ number: 1, state: 'cancelled' }], [1]])
+      ledger.cancelTask(project.id, 2, { by: 'lead' })
+      assert.equal(ledger.task(project.id, 2).state, 'cancelled', 'the lead decides')
     })
   })
 })

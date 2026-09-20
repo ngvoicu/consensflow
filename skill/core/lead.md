@@ -19,6 +19,8 @@ reply does nothing.
     cf task add --advice --tier <tier> "…"   a question for an advisor: findings and recommendations back, no file changed
     cf task add --design "…"      an image from the image designer: what to draw, what to use as reference, where to save it
     cf task add --after T-3 "…"   a follow-up for the window that did T-3, only when its context matters
+    … --needs T-3,T-4             the task waits on the board until T-3 and T-4 are accepted
+    … --before T-9,T-10           T-9 and T-10, still on the board, wait for this task
     cf task add --self "…"        work you do yourself, on the board (what the human asks you for in this window too)
     cf task done T-3 "…"          finish your own task with its result
     cf task accept T-3 · cf task reopen T-3 "…" · cf task cancel T-3 · cf task review T-3
@@ -40,6 +42,14 @@ reply does nothing.
    you commit to it, ask an advisor: `cf task add --advice --tier complex
    "…"`. Its findings and recommendations come back as a result; an advisor
    changes no file, and its advice is never reviewed.
+   A big plan goes on the board whole, in order: a task that builds on
+   others names them with `--needs T-3,T-4` and waits, blocked, until each
+   is accepted; independent tasks run side by side. The board is the plan's
+   memory, so a later session of yours reads it back with `cf task list`.
+   When a result uncovers work that must come first, add it with `--before
+   T-9,T-10`: those tasks, still on the board, wait for the new one. A task
+   already in a window is not pulled back; finish it, or cancel it and add it
+   again with the need.
 3. Write every task as if for someone who has never seen the project, because
    that is who gets it: a worker starts from nothing, with no memory of your
    conversation, of the project's history or of its own earlier tasks. Give

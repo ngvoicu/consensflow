@@ -320,6 +320,65 @@ describe('cf inside a core window', () => {
     })
   })
 
+  it('orders the board with --needs and --before, and says what waits for what', async () => {
+    await withApi(async ({ ledger, project, token, cf }) => {
+      const lead = token('lead')
+      assert.equal((await cf(lead, 'task', 'add', '--tier', 'standard', 'Lexer')).code, 0)
+      const parser = await cf(lead, 'task', 'add', '--tier', 'standard', '--needs', 'T-1', 'Parser')
+      assert.equal(
+        parser.out,
+        'T-2 is on the board for a standard worker; the first free one gets it, and its result arrives in your inbox. It waits until T-1 is accepted.',
+      )
+      const fix = await cf(lead, 'task', 'add', '--tier', 'standard', '--before', 'T-1,T-2', 'Fix')
+      assert.equal(
+        fix.out,
+        'T-3 is on the board for a standard worker; the first free one gets it, and its result arrives in your inbox. T-1, T-2 wait for it.',
+      )
+      assert.equal(
+        (await cf(lead, 'task', 'list')).out,
+        [
+          'Waiting for a member',
+          'T-1 [open] blocked by T-3 · for a standard worker ← @lead: Lexer',
+          'T-2 [open] blocked by T-1, T-3 · for a standard worker ← @lead: Parser',
+          'T-3 [open] for a standard worker ← @lead: Fix',
+        ].join('\n'),
+      )
+      assert.deepEqual(JSON.parse((await cf(lead, 'task', 'get', 'T-2', '--json')).out).needs, [
+        { number: 1, state: 'open' },
+        { number: 3, state: 'open' },
+      ])
+      const both = await cf(
+        lead,
+        'task',
+        'add',
+        '--tier',
+        'standard',
+        '--needs',
+        'T-1',
+        '--before',
+        'T-2',
+        'Between',
+      )
+      assert.equal(
+        both.out,
+        'T-4 is on the board for a standard worker; the first free one gets it, and its result arrives in your inbox. It waits until T-1 is accepted. T-2 waits for it.',
+      )
+      const wrong = await cf(lead, 'task', 'add', '--self', '--needs', 'T-1', 'Plan')
+      assert.deepEqual(
+        [wrong.code, wrong.err],
+        [2, 'cf: --needs and --before go with a task for a tier (or --design)'],
+      )
+      const bad = await cf(lead, 'task', 'add', '--tier', 'standard', '--needs', 'one', 'Lexer')
+      assert.deepEqual([bad.code, bad.err], [2, 'cf: not a task: "one" (write T-3)'])
+      ledger.assignTask(project.id, 3, participantId(ledger, project, 'zeus'))
+      const late = await cf(lead, 'task', 'add', '--tier', 'standard', '--before', 'T-3', 'Late')
+      assert.deepEqual(
+        [late.code, late.err],
+        [1, 'cf: T-3 is queued: only a task still on the board can wait for a new one'],
+      )
+    })
+  })
+
   it('shows the project team as roles and tiers, nothing to pick a member by', async () => {
     await withApi(async ({ token, cf, ledger, project }) => {
       assert.equal((await cf(token('lead'), 'team')).out, '@zeus · worker · standard')
@@ -336,7 +395,7 @@ describe('cf inside a core window', () => {
         [usage.code, usage.err],
         [
           2,
-          'cf: cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor; or --design, --after T-3, or --self)',
+          'cf: cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor; or --design, --after T-3, or --self; --needs T-3,T-4 and --before T-9,T-10 order the board)',
         ],
       )
       const missing = await cf(lead, 'task', 'done', 'T-9', 'x')
@@ -386,7 +445,7 @@ describe('tiered tasks through the API and cf', () => {
         [noTier.code, noTier.err],
         [
           2,
-          'cf: cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor; or --design, --after T-3, or --self)',
+          'cf: cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor; or --design, --after T-3, or --self; --needs T-3,T-4 and --before T-9,T-10 order the board)',
         ],
       )
 

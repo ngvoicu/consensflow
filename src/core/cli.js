@@ -16,6 +16,8 @@ export const USAGE = `cf inside a ConsensFlow window: the board's commands.
   cf task add --after T-3 "…"       a follow-up for the window that did T-3, which
                                     keeps its context; only when that context matters
   cf task add --self "…"            a task for yourself, on the board
+  … --needs T-3,T-4                 the task waits on the board until T-3 and T-4 are accepted
+  … --before T-9,T-10               T-9 and T-10 (still on the board) wait for this task
   cf task list                      the board: what waits for a member, then every lane
   cf task get T-3                   one task and its whole thread
   cf task done T-3 "…"              finish a task assigned to you (the lead)
@@ -197,11 +199,19 @@ async function taskCommand([action, ...rest], call, cwd) {
     const { flags, text, target } = split(
       rest,
       ['--self', '--advice', '--design'],
-      ['--to', '--title', '--file', '--tier', '--purpose', '--after'],
+      ['--to', '--title', '--file', '--tier', '--purpose', '--after', '--needs', '--before'],
     )
     const to = handle(flags['--to'] ?? target)
     const tier = flags['--tier']
     const after = flags['--after'] === undefined ? undefined : taskNumber(flags['--after'])
+    const needs = taskNumbers(flags['--needs'])
+    const before = taskNumbers(flags['--before'])
+    if (
+      (needs !== undefined || before !== undefined) &&
+      (to !== undefined || after !== undefined || flags['--self'] === true)
+    ) {
+      throw usage('--needs and --before go with a task for a tier (or --design)')
+    }
     if (
       to === undefined &&
       tier === undefined &&
@@ -230,6 +240,8 @@ async function taskCommand([action, ...rest], call, cwd) {
               }
     const created = await call('POST', '/api/tasks', {
       ...address,
+      ...(needs === undefined ? {} : { needs }),
+      ...(before === undefined ? {} : { before }),
       body,
       ...(flags['--title'] === undefined ? {} : { title: flags['--title'] }),
     })
@@ -237,6 +249,12 @@ async function taskCommand([action, ...rest], call, cwd) {
     // With human approval required, nothing moves until the human passes it on.
     const gated =
       created.gated && !flags['--self'] ? ' The human approves each message before it moves.' : ''
+    const waits =
+      created.task.blockedBy.length === 0
+        ? ''
+        : ` It waits until ${tasks(created.task.blockedBy)} ${created.task.blockedBy.length === 1 ? 'is' : 'are'} accepted.`
+    const holds =
+      before === undefined ? '' : ` ${tasks(before)} wait${before.length === 1 ? 's' : ''} for it.`
     return {
       data: created,
       text: flags['--self']
@@ -245,7 +263,7 @@ async function taskCommand([action, ...rest], call, cwd) {
           ? `T-${number} continues in @${assignee}, the window that did T-${after}; its result arrives in your inbox.${gated}`
           : to !== undefined
             ? `T-${number} queued for @${to}. The result arrives in your inbox when @${to} finishes.${gated}`
-            : `T-${number} is on the board for ${aPool(pool, tier)}; the first free one gets it, and its result arrives in your inbox.${gated}`,
+            : `T-${number} is on the board for ${aPool(pool, tier)}; the first free one gets it, and its result arrives in your inbox.${waits}${holds}${gated}`,
     }
   }
   if (action === 'list' || action === undefined) {
@@ -293,10 +311,12 @@ async function taskCommand([action, ...rest], call, cwd) {
 }
 
 const ADD_USAGE =
-  'cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor; or --design, --after T-3, or --self)'
+  'cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor; or --design, --after T-3, or --self; --needs T-3,T-4 and --before T-9,T-10 order the board)'
 
 /** "a standard worker", "an image designer": who an open task waits for. */
 const aPool = (pool, tier) => (pool === 'designer' ? 'an image designer' : `a ${tier} ${pool}`)
+/** "T-3, T-4": task numbers in a sentence. */
+const tasks = (numbers) => numbers.map((number) => `T-${number}`).join(', ')
 
 function client(env) {
   const url = env.CONSENSFLOW_URL
@@ -347,6 +367,12 @@ function taskNumber(value) {
   return Number(match[1])
 }
 
+/** "T-3,T-4" as numbers; undefined when the flag was not given. */
+function taskNumbers(value) {
+  if (value === undefined) return undefined
+  return value.split(',').map((part) => taskNumber(part.trim()))
+}
+
 function messageId(value) {
   const match = /^(?:m-)?(\d+)$/i.exec(value ?? '')
   if (match === null) throw usage(`not a message: ${JSON.stringify(value ?? '')} (write m-12)`)
@@ -365,6 +391,6 @@ function usage(message) {
 }
 
 const taskLine = (task) =>
-  `T-${task.number} [${task.state}] ${task.assignee === null ? `for ${aPool(task.pool, task.tier)}` : `@${task.assignee}`} ← @${task.requester}: ${task.title}`
+  `T-${task.number} [${task.state}] ${task.assignee === null ? `${task.blockedBy.length === 0 ? '' : `blocked by ${tasks(task.blockedBy)} · `}for ${aPool(task.pool, task.tier)}` : `@${task.assignee}`} ← @${task.requester}: ${task.title}`
 const messageLine = (message) =>
   `m-${message.id} [${message.state}] ${message.kind}${(message.task ?? message.taskNumber) ? ` T-${message.task ?? message.taskNumber}` : ''} from ${message.sender === null ? 'ConsensFlow' : `@${message.sender}`}${message.preview === undefined ? '' : `: ${message.preview}`}`

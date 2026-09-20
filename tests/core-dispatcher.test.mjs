@@ -331,6 +331,40 @@ describe('the dispatcher', () => {
     })
   })
 
+  it('gives out a task only once every task it needs is accepted, and says nothing while it waits', async () => {
+    await setup(async (context) => {
+      const { project, id } = await withTeam(context, ['zeus', 'diana'])
+      const add = (body, extra = {}) =>
+        context.ledger.createTask(project.id, {
+          from: 'lead',
+          pool: 'worker',
+          tier: 'standard',
+          body,
+          ...extra,
+        }).task
+      add('Lexer')
+      add('Parser', { needs: [1] })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const states = () => [1, 2].map((number) => context.ledger.task(project.id, number).state)
+      assert.deepEqual(states(), ['working', 'open'], 'the parser waits for the lexer')
+      assert.equal(
+        context.ledger.inbox(id('lead')).some((m) => m.kind === 'note'),
+        false,
+        'no "waits for a free worker" note: it waits for its need',
+      )
+      context.adapter.answer('zeus', 'Lexer done')
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.deepEqual(states(), ['done', 'open'], 'done is not accepted')
+      context.ledger.acceptTask(project.id, 1, { by: 'lead' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.deepEqual(states(), ['accepted', 'working'])
+      assert.match(context.adapter.prepared.at(-1).message, /T-2 · task from @lead\]\nParser$/)
+    })
+  })
+
   it('delivers results to an idle lead one at a time and proves each arrived', async () => {
     await setup(async (context) => {
       const { project, id } = await withTeam(context, ['zeus', 'diana'])

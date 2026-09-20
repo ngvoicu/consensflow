@@ -93,6 +93,8 @@ const task = (number, title, state, requester, assignee, minutesAgo = 3, extra =
   reviewOf: null,
   round: 0,
   verdict: null,
+  needs: [],
+  blockedBy: [],
   createdAt: at(minutesAgo + 1),
   updatedAt: at(minutesAgo),
   ...extra,
@@ -599,6 +601,34 @@ test("shows a task waiting for a member in its requester's backlog, with the tie
   await expect(page.locator('tr[data-handle="zeus"] .row-meta')).toHaveText(
     'worker · standard · claude-code · claude-sonnet-5',
   )
+})
+
+test('shows what a task on the board waits for, on its card and in its drawer', async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].open.push(
+    task(7, 'Wire the parser', 'open', 'lead', null, 1, {
+      pool: 'worker',
+      tier: 'standard',
+      needs: [
+        { number: 2, state: 'done' },
+        { number: 6, state: 'open' },
+      ],
+      blockedBy: [2, 6],
+    }),
+  )
+  data.tasks['1:7'] = { ...data.boards[1].open[1], messages: [], reviews: [] }
+  await open(page, data)
+  const card = page.locator(
+    'tr[data-handle="lead"] td[data-state="open"] button.card[data-task="7"]',
+  )
+  await expect(card.locator('.card-route')).toHaveText(
+    'blocked by T-2, T-6 · for a standard worker',
+  )
+  await card.click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-7' })
+  await expect(drawer.locator('.drawer-meta')).toContainText('needs T-2 (done), T-6 (open)')
 })
 
 test('gives a task to a tier of member, never to a member by name', async ({ page }) => {
