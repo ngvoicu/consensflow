@@ -1496,14 +1496,25 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
         ledger.createTask(project.id, { from: 'lead', to: 'lead', body: 'My own' }).task.assignee,
         'lead',
       )
+      assert.throws(
+        () =>
+          ledger.createTask(project.id, {
+            from: 'human',
+            pool: 'advisor',
+            tier: 'complex',
+            body: 'Look',
+          }),
+        { code: 'advice-for-the-lead' },
+        'advice is for the lead alone to ask',
+      )
       assert.equal(
         ledger.createTask(project.id, {
           from: 'human',
-          pool: 'advisor',
-          tier: 'complex',
+          pool: 'worker',
+          tier: 'standard',
           body: 'Look',
         }).task.pool,
-        'advisor',
+        'worker',
       )
     })
   })

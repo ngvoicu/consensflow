@@ -46,7 +46,6 @@ const ACTIVITY_LABEL = {
 }
 /** The work tiers, in the order the composer offers them. */
 const TIERS = ['critical', 'complex', 'standard', 'light']
-const POOLS = ['worker', 'advisor']
 const PURPOSES = ['critical-review', 'architecture', 'hard-problem', 'important-question']
 const KIND_LABEL = {
   task: 'Task',
@@ -484,8 +483,8 @@ export class BoardView {
   }
 
   /**
-   * A new task: for the lead by name, for a tier of worker on the team, or
-   * advice from a tier of advisor; critical work names its purpose.
+   * A new task: for the lead by name, or for a tier of worker on the team;
+   * critical work names its purpose. Advice is the lead's alone to ask.
    */
   #openComposer(board) {
     const form = element('form', 'composer')
@@ -499,27 +498,19 @@ export class BoardView {
       option.value = lane.participant.handle
       address.append(option)
     }
-    for (const pool of POOLS) {
-      for (const tier of TIERS) {
-        const names = board.lanes
-          .filter(
-            (lane) =>
-              lane.participant.member === null &&
-              lane.participant.roles.includes(pool) &&
-              lane.participant.tier === tier,
-          )
-          .map((lane) => lane.participant.handle)
-        if (names.length === 0) continue
-        const option = element(
-          'option',
-          null,
-          pool === 'advisor'
-            ? `Advice from a ${tier} advisor (${names.join(', ')})`
-            : `A ${tier} worker (${names.join(', ')})`,
+    for (const tier of TIERS) {
+      const names = board.lanes
+        .filter(
+          (lane) =>
+            lane.participant.member === null &&
+            lane.participant.roles.includes('worker') &&
+            lane.participant.tier === tier,
         )
-        option.value = `${pool}:${tier}`
-        address.append(option)
-      }
+        .map((lane) => lane.participant.handle)
+      if (names.length === 0) continue
+      const option = element('option', null, `A ${tier} worker (${names.join(', ')})`)
+      option.value = `worker:${tier}`
+      address.append(option)
     }
     const purpose = element('select')
     purpose.name = 'purpose'

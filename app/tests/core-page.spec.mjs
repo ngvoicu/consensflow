@@ -603,7 +603,7 @@ test('gives a task to a tier of member, never to a member by name', async ({ pag
   await expect(page.locator('#status')).toHaveText('T-9 is on the board for a light worker.')
 })
 
-test('asks for the purpose of critical work, and offers only the tiers the team has, advice included', async ({
+test('asks for the purpose of critical work, and offers only the tiers of worker the team has', async ({
   page,
 }) => {
   const data = model()
@@ -625,12 +625,12 @@ test('asks for the purpose of critical work, and offers only the tiers the team 
   const backlog = page.getByRole('region', { name: 'For you' })
   await backlog.getByRole('button', { name: 'New task' }).click()
   const composer = backlog.locator('form.composer')
+  // Advice is the lead's alone to ask: athena, an advisor, is no address here.
   await expect(composer.getByLabel('For').locator('option')).toHaveText([
     'Lead',
     'A critical worker (calliope)',
     'A standard worker (zeus)',
     'A light worker (diana)',
-    'Advice from a complex advisor (athena)',
   ])
   await composer.getByLabel('For').selectOption('worker:critical')
   await composer.getByLabel('Purpose').selectOption('architecture')
@@ -647,20 +647,6 @@ test('asks for the purpose of critical work, and offers only the tiers the team 
         body: 'Why does the parser leak memory?',
       },
     ])
-  await backlog.getByRole('button', { name: 'New task' }).click()
-  await composer.getByLabel('For').selectOption('advisor:complex')
-  await expect(composer.getByLabel('Purpose')).toBeHidden()
-  await composer.getByLabel('Task').fill('Which parser design should we keep?')
-  await composer.getByRole('button', { name: 'Put on the board' }).click()
-  await expect
-    .poll(async () => (await calls(page, 'task.add')).at(-1))
-    .toEqual({
-      project: 1,
-      pool: 'advisor',
-      tier: 'complex',
-      body: 'Which parser design should we keep?',
-    })
-  await expect(page.locator('#status')).toHaveText('T-9 is on the board for a complex advisor.')
 })
 
 test('gives a coordinator a task by name from its bay, and keeps a half-written one when the board redraws', async ({

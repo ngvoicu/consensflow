@@ -851,6 +851,15 @@ class Ledger {
           403,
         )
       }
+      // Advice is the lead's alone to ask: the human gives the lead work, not its advisors.
+      if (
+        pool === 'advisor' &&
+        to === undefined &&
+        after === undefined &&
+        requester.role !== 'lead'
+      ) {
+        throw new LedgerError('advice-for-the-lead', 'only the lead asks an advisor', 403)
+      }
       // A follow-up on a finished task goes to the session that did it, while
       // it is still there and free: the one case a coordinator names a window.
       const assignee =
