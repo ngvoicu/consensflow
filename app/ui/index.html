@@ -158,7 +158,6 @@
     .project-state { font: 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
     .project[data-state="open"] .project-state { color: var(--seafoam); }
     .projects-empty, .team-empty { color: var(--muted); padding: 6px 9px; }
-    .project-confirm { flex: 1 1 100%; color: var(--buoy); font-size: 12px; padding: 2px 6px; }
 
     /* The board on the left, one window docked on the right, a third of the width. */
     .main {
@@ -699,6 +698,16 @@
   </div>
 
 
+  <dialog id="delete-dialog" class="settings" aria-labelledby="delete-title">
+    <form class="dialog-form" method="dialog">
+      <h2 id="delete-title">Delete this project?</h2>
+      <p class="dialog-help" id="delete-help">Its board, team, sessions and every message go for good. This cannot be undone.</p>
+      <div class="dialog-actions">
+        <button class="quiet-button" type="submit" value="keep">Keep</button>
+        <button class="danger-button" type="button" id="delete-confirm">Delete for good</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="settings-dialog" class="settings" aria-labelledby="settings-title">
     <form class="dialog-form" method="dialog">
       <h2 id="settings-title">Settings</h2>
