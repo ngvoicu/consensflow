@@ -563,8 +563,7 @@ teamReview.addEventListener('change', () =>
     note(
       {
         none: 'Finished work goes straight to whoever asked.',
-        members: "Members' finished work gets a second review.",
-        all: 'All finished work gets a second review.',
+        members: "Workers' finished work gets a second review.",
       }[teamReview.value],
     )
   }),

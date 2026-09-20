@@ -859,8 +859,12 @@ test('sets the review policy from the team dialog once a reviewer is on the team
   const dialog = page.getByRole('dialog', { name: 'Project team' })
   await expect(dialog.getByLabel('Second review of')).toHaveValue('members')
   await expect(dialog.locator('.team-warning')).toBeHidden()
-  await dialog.getByLabel('Second review of').selectOption('all')
-  await expect.poll(() => calls(page, 'project.review')).toEqual([{ project: 1, review: 'all' }])
+  await expect(dialog.getByLabel('Second review of').locator('option')).toHaveText([
+    'Nothing: results go straight to whoever asked',
+    "Workers' work: what a worker finishes",
+  ])
+  await dialog.getByLabel('Second review of').selectOption('none')
+  await expect.poll(() => calls(page, 'project.review')).toEqual([{ project: 1, review: 'none' }])
 })
 
 test('holds the review choices until a reviewer is on the team', async ({ page }) => {
@@ -876,9 +880,7 @@ test('holds the review choices until a reviewer is on the team', async ({ page }
   await expect(
     dialog.getByLabel('Second review of').locator('option[value="members"]'),
   ).toHaveJSProperty('disabled', true)
-  await expect(
-    dialog.getByLabel('Second review of').locator('option[value="all"]'),
-  ).toHaveJSProperty('disabled', true)
+  await expect(dialog.getByLabel('Second review of').locator('option')).toHaveCount(2)
   expect(await calls(page, 'project.review')).toEqual([])
 })
 
@@ -1071,7 +1073,7 @@ test('starts a project in a chosen folder with the chosen lead, the team ticked 
   await dialog.getByLabel('The lead runs in').selectOption('opencode')
   await dialog.getByRole('checkbox', { name: 'Advisor athena' }).check()
   await dialog.getByRole('checkbox', { name: 'Worker diana' }).uncheck()
-  await dialog.getByLabel('Second review of').selectOption('all')
+  await dialog.getByLabel('Second review of').selectOption('none')
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
     .poll(() => calls(page, 'project.open'))
@@ -1079,7 +1081,7 @@ test('starts a project in a chosen folder with the chosen lead, the team ticked 
       {
         directory: '/work/fresh',
         harness: 'opencode',
-        review: 'all',
+        review: 'none',
         team: [
           { agent: 'zeus', roles: ['worker', 'reviewer'] },
           { agent: 'athena', roles: ['advisor'] },
@@ -1097,7 +1099,7 @@ test('starts a project without reviews when nobody ticked is a reviewer', async 
     'Reviews need a reviewer on the team: tick Reviewer for one of the agents.',
   )
   await expect(
-    dialog.getByLabel('Second review of').locator('option[value="all"]'),
+    dialog.getByLabel('Second review of').locator('option[value="members"]'),
   ).toHaveJSProperty('disabled', true)
   await dialog.getByRole('checkbox', { name: 'Reviewer athena' }).check()
   await expect(dialog.locator('.team-warning')).toBeHidden()

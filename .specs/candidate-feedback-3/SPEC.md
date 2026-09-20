@@ -115,3 +115,10 @@ Gabriel, on the Candidate built from `87c45f5`, 2026-09-20 afternoon:
 - Gabriel: "DEFINE YOUR OWN doesn't have all options the others have". The
   Define-your-own form now offers the work tier (Automatic, or one of the
   four) beside the effort, the same choices a catalog agent's editor has.
+- Gabriel: "advice stays lead's alone" (the ledger refuses an advice task
+  from anyone but the lead; the composer offers workers' tiers only); "for
+  reviewers we need only the models that are now also workers" (the Reviewer
+  pill sits on the Worker models; critical work is Advisor alone); "all work
+  reviewed should go away" (the review policy is none or workers' work; a
+  fifth migration reads a home's `all` as `members`; the lead asks for a
+  review of its own work by hand with `cf task review`).

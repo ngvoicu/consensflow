@@ -66,7 +66,7 @@ export const POOLS = ['worker', 'advisor']
 export const PURPOSES = ['critical-review', 'architecture', 'hard-problem', 'important-question']
 const CRITICAL_RULE =
   'No coding or implementation edits. Do not write or revise specifications. Return analysis, evidence and recommendations to your coordinator.'
-export const REVIEW_POLICIES = ['none', 'members', 'all']
+export const REVIEW_POLICIES = ['none', 'members']
 const REVIEW_ROUNDS = 2
 /** The reviewer's last word, with whatever emphasis its harness wrapped it in: `**VERDICT: pass**`, `Verdict: **changes**`. */
 const VERDICT = /^[\s*_`#>-]*VERDICT[\s*_`]*[:\-–—][\s*_`]*(pass|changes)\b/i
@@ -2061,15 +2061,12 @@ class Ledger {
 
   /**
    * Whether a finished task waits for a review under the project's policy:
-   * workers' work under `members`, the lead's own too under `all`. Advice is
-   * for the lead to weigh and is never reviewed.
+   * a worker's work under `members`, nothing under `none`. Advice and the
+   * lead's own tasks are never reviewed by policy; the lead asks by hand.
    */
   #reviewDue(projectId, task) {
-    const policy = this.#projectRow(projectId).review
-    if (policy === 'none') return false
-    const role = this.#participantRow(task.assignee_id).role
-    if (role === 'advisor') return false
-    return policy === 'all' || role === 'worker'
+    if (this.#projectRow(projectId).review === 'none') return false
+    return this.#participantRow(task.assignee_id).role === 'worker'
   }
 
   #openReviews(taskId) {

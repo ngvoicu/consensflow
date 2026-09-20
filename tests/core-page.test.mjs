@@ -220,11 +220,16 @@ describe('the page protocol of the new core', () => {
         'review',
       )
       assert.equal(
-        (await operations['project.review']({ project: project.id, review: 'all' })).project.review,
-        'all',
+        (await operations['project.review']({ project: project.id, review: 'members' })).project
+          .review,
+        'members',
+      )
+      await assert.rejects(
+        operations['project.review']({ project: project.id, review: 'all' }),
+        /a review policy is none, members/,
       )
       const { board } = await operations['board.get']({ project: project.id })
-      assert.deepEqual([board.project.review, board.open], ['all', []])
+      assert.deepEqual([board.project.review, board.open], ['members', []])
     })
   })
 

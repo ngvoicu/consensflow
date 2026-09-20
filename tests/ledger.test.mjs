@@ -280,9 +280,10 @@ describe('upgrading a home', () => {
       old
         .prepare(
           `INSERT INTO project (id, directory, name, state, review, created_at, updated_at)
-           VALUES (1, '/work/app', 'app', 'open', 'members', ?, ?)`,
+           VALUES (1, '/work/app', 'app', 'open', 'members', ?, ?),
+                  (2, '/work/all', 'all', 'suspended', 'all', ?, ?)`,
         )
-        .run(at, at)
+        .run(at, at, at, at)
       old
         .prepare(
           `INSERT INTO participant (project_id, handle, role, agent, harness, tier, created_at) VALUES
@@ -320,6 +321,7 @@ describe('upgrading a home', () => {
         )
         assert.equal(ledger.task(1, 2), null, 'and so is the task it asked for, with its message')
         assert.equal(ledger.inbox(3).length, 0)
+        assert.equal(ledger.project(2).review, 'members', "'all work' reads as workers' work now")
         assert.deepEqual(
           ledger.members(1, 'reviewer').map((m) => m.handle),
           ['hera'],
@@ -416,7 +418,7 @@ describe('projects and participants', () => {
             directory: '/work/other',
             name: 'other',
             lead: { harness: 'pi' },
-            review: 'all',
+            review: 'members',
             team: [{ agent: 'zeus', harness: 'claude-code', role: 'worker', tier: 'standard' }],
           }),
         { code: 'no-reviewer' },
@@ -2002,9 +2004,9 @@ describe('tiered dispatch: the review gate', () => {
     })
   })
 
-  it('never reviews advice, under any policy, even from a member that is a worker too', async () => {
+  it('never reviews advice, even from a member that is a worker too', async () => {
     await withLedger((ledger) => {
-      const { project, id } = reviewed(ledger, 'all')
+      const { project, id } = reviewed(ledger, 'members')
       ledger.addMember(project.id, {
         agent: 'athena',
         harness: 'codex',
@@ -2033,13 +2035,14 @@ describe('tiered dispatch: the review gate', () => {
     })
   })
 
-  it("reviews the lead's own work only under the all policy, and nothing under none", async () => {
+  it("never reviews the lead's own work by policy, and nothing under none; there is no third policy", async () => {
     await withLedger((ledger) => {
-      const { project, id } = reviewed(ledger, 'all')
+      const { project, id } = reviewed(ledger, 'members')
       const own = ledger.createTask(project.id, { from: 'human', to: 'lead', body: 'Ship it' })
       deliver(ledger, own.message)
       const done = ledger.recordResult(project.id, own.task.number, { body: 'Shipped' })
-      assert.deepEqual([done.task.state, done.message.state], ['review', 'held'])
+      assert.deepEqual([done.task.state, done.message.state], ['done', 'queued'])
+      assert.throws(() => ledger.setReview(project.id, 'all'), { code: 'invalid-review' })
 
       ledger.setReview(project.id, 'none')
       assert.equal(ledger.project(project.id).review, 'none')
@@ -2059,8 +2062,8 @@ describe('tiered dispatch: the review gate', () => {
           .filter((e) => e.kind === 'project.review')
           .map((e) => e.data),
         [
-          { from: 'none', to: 'all' },
-          { from: 'all', to: 'none' },
+          { from: 'none', to: 'members' },
+          { from: 'members', to: 'none' },
           { from: 'none', to: 'members' },
         ],
       )

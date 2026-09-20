@@ -170,6 +170,13 @@ export const MIGRATIONS = [
   ALTER TABLE participant DROP COLUMN tags;
   ALTER TABLE task DROP COLUMN tags;
   `,
+  `
+  -- The "all work" review policy goes (candidate-feedback-3): a project reviews
+  -- its workers' work or nothing; the lead asks for a review of its own by
+  -- hand. The review constraint keeps 'all' in its list for the reason the
+  -- role constraint keeps 'pm'.
+  UPDATE project SET review = 'members' WHERE review = 'all';
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length
