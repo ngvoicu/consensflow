@@ -116,12 +116,14 @@ function model() {
         name: 'zeus',
         harness: 'claude',
         model: 'claude-sonnet-5',
+        effort: 'high',
         profile: { categories: ['worker', 'reviewer'] },
       },
       {
         name: 'diana',
         harness: 'codex',
         model: 'gpt-5.6-luna',
+        effort: 'low',
         profile: { categories: ['worker', 'reviewer'] },
       },
       {
@@ -818,9 +820,10 @@ test('shows the team as one row per member and role, and adds a saved agent in a
     .toEqual([{ project: 1, agent: 'athena', roles: ['advisor'] }])
   // A second role for a member already on the team adds to its roles.
   await dialog.getByLabel('Role').selectOption('reviewer')
+  // Each choice says what it runs, the model's effort level included.
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
-    'zeus · claude · claude-sonnet-5',
-    'diana · codex · gpt-5.6-luna',
+    'zeus · claude · claude-sonnet-5 · high',
+    'diana · codex · gpt-5.6-luna · low',
     'athena · opencode · muse-spark',
   ])
   await dialog.getByLabel('Agent').selectOption('zeus')
@@ -1127,9 +1130,9 @@ test('starts a project in a chosen folder with the chosen lead, the team ticked 
   const table = dialog.getByRole('table', { name: 'Agents for the team' })
   // The last team, one row per agent and role.
   await expect(table.locator('tbody tr')).toHaveText([
-    /zeus.*Worker/,
+    /zeus.*claude · claude-sonnet-5 · high.*Worker/,
     /zeus.*Reviewer/,
-    /diana.*Worker/,
+    /diana.*codex · gpt-5.6-luna · low.*Worker/,
   ])
   await expect(dialog.getByLabel('Second review of')).toHaveValue('members')
   await dialog.getByLabel('The lead runs in').selectOption('opencode')

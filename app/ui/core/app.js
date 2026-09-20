@@ -327,6 +327,11 @@ const ROLE_LABEL = {
 }
 /** Whether a saved agent's model suits a role, as the Agents screen's pills say. */
 const suits = (agent, role) => (agent.profile?.categories ?? []).includes(role)
+/** "zeus · claude · claude-sonnet-5 · high": what an agent runs, effort included when it has one. */
+const agentLabel = (agent) =>
+  [agent.name, agent.harness, agent.model ?? 'model unknown', agent.effort]
+    .filter(Boolean)
+    .join(' · ')
 
 /**
  * The two selects that add a member: a role first, then the saved agents
@@ -348,11 +353,7 @@ function rolePicker(roleSelect, agentSelect, holding, onRefill = () => {}) {
     const choices = state.agents.filter((agent) => suits(agent, role) && !holding(agent.name, role))
     agentSelect.replaceChildren(
       ...choices.map((agent) => {
-        const option = element(
-          'option',
-          null,
-          `${agent.name} · ${agent.harness} · ${agent.model ?? 'model unknown'}`,
-        )
+        const option = element('option', null, agentLabel(agent))
         option.value = agent.name
         return option
       }),
@@ -440,7 +441,7 @@ function drawNewProjectTeam() {
     who.append(
       element('span', 'member-name', agent),
       element('br'),
-      element('span', 'member-meta', `${saved.harness} · ${saved.model ?? 'model unknown'}`),
+      element('span', 'member-meta', agentLabel(saved).slice(agent.length + 3)),
     )
     const remove = element('button', 'quiet-button', 'Remove')
     remove.type = 'button'

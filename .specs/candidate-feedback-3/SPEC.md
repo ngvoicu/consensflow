@@ -150,3 +150,6 @@ Gabriel, on the Candidate built from `87c45f5`, 2026-09-20 afternoon:
   pick a role, then an agent whose model suits it (the Agents screen's
   pills), one row per member and role, Remove per row, the last role asking
   first; no checkboxes. The board composer offers "An image designer".
+- Gabriel: the agent picker in the team needs the model's effort level. Each
+  choice reads name · harness · model · effort, in both dialogs and in the
+  New project rows.
