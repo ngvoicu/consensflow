@@ -25,6 +25,8 @@ Gabriel opened the Candidate built from `891adf8` on the morning of
 - On each saved agent's card, delete our description and the "Tags: …"
   line: the card already shows chips ("T4 · Light work", "Coding",
   "Review").
+- "Reviews should not be a new lane": a worker's task that gets reviewed
+  shows its review on the same lane, never on another.
 
 ## Decisions and scope
 
@@ -57,6 +59,9 @@ Gabriel opened the Candidate built from `891adf8` on the morning of
     closes; a continued session comes back on the same conversation.
   - Reopening a task goes back to the session that did it (the same rule),
     not to a fresh one.
+  - A **review** runs in a reviewer's session (a window in the dock) but on
+    the board it lives under the reviewed task, on the worker's lane; a
+    reviewer session never gets a lane of its own.
 
 ## Phases (each: failing tests first, suites green, one Candidate rebuild)
 
@@ -67,6 +72,9 @@ Gabriel opened the Candidate built from `891adf8` on the morning of
   card shows tag chips, no description, no "Tags:" line, and its editor has
   no description field.
 - [x] [IMPL-CF2-02] Satisfies TEST-CF2-01 (`57fdc74`).
+- [x] [TEST-CF2-02b] Page: the reviewer's row holds no card and no note for a
+  review; the review reads under the reviewed task's card, and the reviewer's
+  row status says "Reviewing T-n".
 
 ### Phase B: Named worker sessions [planned, awaiting Gabriel's answer]
 
