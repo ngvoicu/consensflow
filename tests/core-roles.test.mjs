@@ -28,6 +28,11 @@ describe('role instructions for the new core', () => {
       assert.match(text, new RegExp(`^---\\nname: consensflow-${role}\\n`))
       assert.doesNotMatch(text, OLD_COMMANDS)
       assert.doesNotMatch(text, /\{\{/, 'every placeholder is filled')
+      assert.match(
+        text,
+        /## Your commands\n\nRun each of these in your shell \(your Bash or terminal tool\)/,
+        `${role} knows the commands are shell commands`,
+      )
       if (role === 'lead' || role === 'pm') {
         for (const command of [
           'cf task add --tier',

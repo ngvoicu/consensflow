@@ -12,6 +12,10 @@ existing checks when useful; report commands, outcomes and evidence.
 
 ## Your commands
 
+Run each of these in your shell (your Bash or terminal tool). `cf` is on this
+window's PATH and its output says what happened; a command written in your
+reply does nothing.
+
     cf ask "…"                    a question to whoever gave you this task; then end your turn
     cf task get T-3               this task and its whole thread
     cf inbox · cf inbox read m-12 what is waiting for you, one in full

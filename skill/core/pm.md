@@ -16,6 +16,10 @@ and acceptance criteria clear.
 
 ## Your commands
 
+Run each of these in your shell (your Bash or terminal tool). `cf` is on this
+window's PATH and its output says what happened; a command written in your
+reply does nothing.
+
     cf task add --tier <critical|complex|standard|light> "…"   work for an advisor; ConsensFlow picks the member (--tags a,b to prefer)
     cf task add --after T-3 "…"   a follow-up for the window that did T-3, only when its context matters
     cf task add --self "…"        work you do yourself, on the board (what the human asks you for in this window too)
