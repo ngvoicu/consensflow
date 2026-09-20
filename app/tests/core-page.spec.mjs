@@ -630,9 +630,11 @@ test("shows a member out of quota, and a task's reviews under it, never as cards
     'tr[data-handle="zeus"] td[data-state="done"] li.card-item:has(button[data-task="2"])',
   )
   await expect(parser.locator('.reviews li')).toHaveText(['Reviewed by @hera, round 1: pass'])
+  // The review lives on the worker's lane; the reviewer's row only says what it is doing.
   const hera = page.locator('tr[data-handle="hera"]')
   await expect(hera.locator('button.card')).toHaveCount(0)
-  await expect(hera.locator('td[data-state="working"] .reviewing')).toHaveText('Reviewing T-8')
+  await expect(hera.locator('td li')).toHaveCount(0)
+  await expect(hera.locator('.row-status')).toHaveText('Reviewing T-8')
 })
 
 test('asks for a review of finished work from the drawer', async ({ page }) => {

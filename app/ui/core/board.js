@@ -363,7 +363,8 @@ export class BoardView {
       ...lane.tasks.filter((task) => task.kind !== 'review'),
       ...board.open.filter((task) => task.requester === participant.handle),
     ].sort((a, b) => b.number - a.number)
-    const reviewing = lane.tasks.filter((task) => task.kind === 'review' && task.state !== 'done')
+    // A review is never a card of its own: it hangs under the task it reviews,
+    // and the reviewer's row only says so in its status.
     for (const [state] of COLUMNS) {
       const cell = element('td')
       cell.dataset.state = state
@@ -371,10 +372,6 @@ export class BoardView {
       for (const task of mine) {
         if (columnOf(task) !== state) continue
         list.append(this.#card(task, reviews.get(task.number) ?? [], now))
-      }
-      for (const review of reviewing) {
-        if (columnOf(review) !== state) continue
-        list.append(element('li', 'reviewing', `Reviewing T-${review.reviewOf}`))
       }
       if (list.childElementCount > 0) cell.append(list)
       row.append(cell)
@@ -402,6 +399,7 @@ export class BoardView {
       .filter(Boolean)
       .join(' · ')
     const out = outOfQuota(participant, now)
+    const reviewing = lane.tasks.find((task) => task.kind === 'review' && task.state !== 'done')
     const status = element(
       'span',
       'row-status',
@@ -409,9 +407,11 @@ export class BoardView {
         ? `Out of quota until ${clock(participant.outUntil)}`
         : activity?.state === 'waiting' && activity.reason
           ? `Waiting: ${activity.reason}`
-          : resting(participant, activity)
-            ? 'Free: a window opens with its next task'
-            : (ACTIVITY_LABEL[activity?.state] ?? 'No window'),
+          : reviewing !== undefined
+            ? `Reviewing T-${reviewing.reviewOf}`
+            : resting(participant, activity)
+              ? 'Free: a window opens with its next task'
+              : (ACTIVITY_LABEL[activity?.state] ?? 'No window'),
     )
     status.dataset.state = out ? 'out' : (activity?.state ?? 'closed')
     const tools = element('div', 'row-tools')
