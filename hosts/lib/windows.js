@@ -80,6 +80,7 @@ export function interactiveResume(agent, sessionId, seed) {
         dropEnv: [],
       }
     case 'codex':
+    case 'image':
       return {
         command: 'codex',
         args: withSeed(['resume', sessionId, ...YOLO.codex]),
@@ -178,12 +179,17 @@ export function interactiveStart(agent, sessionId, seed) {
       if (seed && !sessionId) args.push('--prompt', seed)
       return { command: 'opencode', args, env: { ...CHILD_ENV }, dropEnv: [] }
     }
-    case 'codex': {
+    case 'codex':
+    case 'image': {
       // `codex [PROMPT]` opens the real window seeded with that prompt; it
       // announces no id, so the caller finds the thread in Codex's own store.
+      // An image agent is Codex too, on its own default model: its image
+      // tool draws, whatever reasoning model answers.
       const args = []
-      if (agent.model) args.push('--model', agent.model)
-      if (agent.effort) args.push('-c', `model_reasoning_effort="${agent.effort}"`)
+      if (agent.kind === 'codex' && agent.model) args.push('--model', agent.model)
+      if (agent.kind === 'codex' && agent.effort) {
+        args.push('-c', `model_reasoning_effort="${agent.effort}"`)
+      }
       args.push(...YOLO.codex)
       if (seed) args.push(seed)
       return { command: 'codex', args, env: { ...CHILD_ENV }, dropEnv: interactiveGuards('codex') }

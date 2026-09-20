@@ -59,11 +59,21 @@ test('window: codex opens cold on a positional prompt, id found afterwards', () 
   assert.deepEqual(w.dropEnv, ['OPENAI_API_KEY'], 'the billing guard holds in a window too')
 })
 
-test('window: kimi is the one that cannot be seeded, and image has no window', () => {
+test('window: kimi is the one that cannot be seeded; an image agent opens Codex on its default model', () => {
   // `-p` is defined as non-interactive and kimi has no positional prompt, so
   // no flag it owns can open a seeded window. It streams turn one instead.
   assert.equal(interactiveStart({ id: 'ilmarinen', kind: 'kimi' }, 'anything', 'seed'), null)
-  assert.equal(interactiveStart({ kind: 'image' }, 'x', 'seed'), null)
+  // The image designer draws with Codex's image tool, whatever model answers:
+  // its window is Codex's own, with no model or effort of its own.
+  const image = interactiveStart({ kind: 'image', model: 'codex-image' }, null, 'seed')
+  assert.deepEqual(
+    [image.command, image.args, image.dropEnv],
+    ['codex', ['--dangerously-bypass-approvals-and-sandbox', 'seed'], ['OPENAI_API_KEY']],
+  )
+  assert.deepEqual(interactiveResume({ kind: 'image' }, 'thread-9').args.slice(0, 2), [
+    'resume',
+    'thread-9',
+  ])
 })
 
 test('window: claude and pi refuse to open fresh without the id they need', () => {

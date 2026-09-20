@@ -132,3 +132,21 @@ Gabriel, on the Candidate built from `87c45f5`, 2026-09-20 afternoon:
   and the name-neutrality check stayed (the last one now sweeps hosts, bin,
   src and skill). The README describes the board, the roles, the tiers and
   the screens as they are.
+- Gabriel, on the result a Claude lead receives: the harness frames a board
+  message as a teammate's request, so every delivered result now ends with
+  "Decide with: cf task accept T-n · cf task reopen T-n · cf task review
+  T-n", the way a question ends with how to answer it.
+- Gabriel: an image agent needs a pill and a role of its own, and the team
+  is picked role-first. A fifth member role, the *image designer*, drawn by
+  Codex's own image tool in a Codex window (`hosts/lib/windows.js` opens an
+  `image` harness as Codex on its default model; `designer.md` is its
+  text); the lead asks with `cf task add --design "…"`, a task with no
+  tier that goes to a free designer and is never reviewed; the catalog's
+  image entry carries the Image designer pill. A sixth migration rebuilds
+  the project, participant and task tables the way SQLite documents it
+  (foreign keys off, copy, drop, rename, check): the role constraint knows
+  the designer and has forgotten the PM, the pool constraint the designer,
+  the review constraint the all policy. Both team dialogs are role-first:
+  pick a role, then an agent whose model suits it (the Agents screen's
+  pills), one row per member and role, Remove per row, the last role asking
+  first; no checkboxes. The board composer offers "An image designer".

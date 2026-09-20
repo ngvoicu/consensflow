@@ -120,7 +120,9 @@ function sessionsNote(lane, board) {
 
 /** Where a task is going or came from, on its card. */
 function route(task) {
-  if (task.assignee === null) return `for a ${task.tier} ${task.pool}`
+  if (task.assignee === null) {
+    return task.pool === 'designer' ? 'for an image designer' : `for a ${task.tier} ${task.pool}`
+  }
   return `from ${who(task.requester)}`
 }
 
@@ -483,8 +485,9 @@ export class BoardView {
   }
 
   /**
-   * A new task: for the lead by name, or for a tier of worker on the team;
-   * critical work names its purpose. Advice is the lead's alone to ask.
+   * A new task: for the lead by name, for a tier of worker on the team, or an
+   * image from the designer; critical work names its purpose. Advice is the
+   * lead's alone to ask.
    */
   #openComposer(board) {
     const form = element('form', 'composer')
@@ -512,6 +515,16 @@ export class BoardView {
       option.value = `worker:${tier}`
       address.append(option)
     }
+    const designers = board.lanes
+      .filter(
+        (lane) => lane.participant.member === null && lane.participant.roles.includes('designer'),
+      )
+      .map((lane) => lane.participant.handle)
+    if (designers.length > 0) {
+      const option = element('option', null, `An image designer (${designers.join(', ')})`)
+      option.value = 'designer'
+      address.append(option)
+    }
     const purpose = element('select')
     purpose.name = 'purpose'
     purpose.setAttribute('aria-label', 'Purpose')
@@ -526,9 +539,9 @@ export class BoardView {
       return label
     }
     const purposeLabel = labelled('Purpose', purpose)
-    const tiered = () => address.value.includes(':')
+    const tiered = () => address.value.includes(':') || address.value === 'designer'
     const arrange = () => {
-      purposeLabel.hidden = !tiered() || !address.value.endsWith(':critical')
+      purposeLabel.hidden = !address.value.endsWith(':critical')
     }
     address.addEventListener('change', arrange)
     arrange()
@@ -560,6 +573,10 @@ export class BoardView {
       this.#composingOpen = false
       if (!tiered()) {
         this.#actions.onGiveTask({ handle: address.value }, text)
+        return
+      }
+      if (address.value === 'designer') {
+        this.#actions.onPutTask({ pool: 'designer' }, text)
         return
       }
       const [pool, tier] = address.value.split(':')

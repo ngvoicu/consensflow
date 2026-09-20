@@ -308,7 +308,10 @@ describe('the dispatcher', () => {
       lead().settled = true
       await context.dispatcher.pass()
       assert.equal(lead().items.length, 1)
-      assert.match(lead().items[0].text, /result from @zeus\]\none done$/)
+      assert.match(
+        lead().items[0].text,
+        /result from @zeus\]\none done\n\nDecide with: cf task accept T-1/,
+      )
       await context.dispatcher.pass()
       const [first, second] = context.ledger.inbox(id('lead')).reverse()
       assert.equal(first.state, 'delivered')
@@ -319,7 +322,10 @@ describe('the dispatcher', () => {
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       assert.equal(context.ledger.inbox(id('lead'))[0].state, 'delivered')
-      assert.match(lead().items.at(-1).text, /result from @diana\]\ntwo done$/)
+      assert.match(
+        lead().items.at(-1).text,
+        /result from @diana\]\ntwo done\n\nDecide with: cf task accept T-2/,
+      )
     })
   })
 
@@ -729,6 +735,11 @@ describe('the delivered text', () => {
       deliveryText({ ...base, kind: 'note', sender: null, taskNumber: null, body: 'hi' }),
       '[ConsensFlow m-12 · note from ConsensFlow]\nhi',
     )
+    assert.equal(
+      deliveryText({ ...base, kind: 'result', body: 'Parser done' }),
+      '[ConsensFlow m-12 · T-3 · result from @zeus]\nParser done\n\nDecide with: cf task accept T-3 · cf task reopen T-3 "…" · cf task review T-3',
+      'a result says what to do with it: it is not a request',
+    )
   })
 
   it('sends a long body as its opening and the command that reads the rest', () => {
@@ -740,7 +751,10 @@ describe('the delivered text', () => {
       body: 'x'.repeat(20_000),
     })
     assert.ok(text.length < 5_000)
-    assert.match(text, /\n… \(20000 characters; read all of it with: cf inbox read m-7\)$/)
+    assert.match(
+      text,
+      /\n… \(20000 characters; read all of it with: cf inbox read m-7\)\n\nDecide with: /,
+    )
   })
 })
 
@@ -879,7 +893,7 @@ describe('the dispatcher runs the review gate', () => {
       for (let n = 0; n < 4; n += 1) await context.dispatcher.pass()
       assert.match(
         lead(context)[0],
-        /T-1 · result from @zeus-amber-pine\]\nParser done\n\nReviewed by @astraeus-brisk-birch, round 1: pass\nLooks right\.\n\nVERDICT: pass$/,
+        /T-1 · result from @zeus-amber-pine\]\nParser done\n\nReviewed by @astraeus-brisk-birch, round 1: pass\nLooks right\.\n\nVERDICT: pass\n\nDecide with: cf task accept T-1 · cf task reopen T-1 "…" · cf task review T-1$/,
         'one delivery: the result with its review under it',
       )
       context.adapter.answer('lead', 'noted')
@@ -923,7 +937,7 @@ describe('the dispatcher runs the review gate', () => {
       for (let n = 0; n < 4; n += 1) await context.dispatcher.pass()
       assert.match(
         lead(context).at(-1),
-        /result from @zeus-amber-pine\]\nTests added\n\nReviewed by @astraeus-brisk-birch, round 1: changes\nMissing tests\.\n\nVERDICT: changes\n\nReviewed by @astraeus-calm-brook, round 2: changes\nStill wrong\.\n\nVERDICT: changes\n\nThe reviewer asked for changes twice\. Accept it, or send it back with what to change\.$/,
+        /result from @zeus-amber-pine\]\nTests added\n\nReviewed by @astraeus-brisk-birch, round 1: changes\nMissing tests\.\n\nVERDICT: changes\n\nReviewed by @astraeus-calm-brook, round 2: changes\nStill wrong\.\n\nVERDICT: changes\n\nThe reviewer asked for changes twice\. Accept it, or send it back with what to change\.\n\nDecide with: /,
       )
     })
   })
@@ -942,7 +956,7 @@ describe('the dispatcher runs the review gate', () => {
       for (let n = 0; n < 3; n += 1) await context.dispatcher.pass()
       assert.match(
         context.adapter.agent('lead').items.at(-1).text,
-        /Parser done\n\nUnreviewed: no independent reviewer on the team\.$/,
+        /Parser done\n\nUnreviewed: no independent reviewer on the team\.\n\nDecide with: /,
       )
       assert.equal(context.host.last('calliope'), undefined, 'no review window opened')
     })

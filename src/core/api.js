@@ -150,14 +150,16 @@ export async function startApi({
       }
       // A follow-up that needs the context of the window that did T-n goes
       // back to that window (`after`); everything else is fresh work for a
-      // tier of worker, or advice from a tier of advisor.
+      // tier of worker, advice from a tier of advisor, or an image from the
+      // designer.
       const created = ledger.createTask(project.id, {
         from: participant.handle,
         ...(body.after !== undefined
           ? { after: Number(body.after) }
           : to === undefined
             ? {
-                pool: body.advice === true ? 'advisor' : 'worker',
+                pool:
+                  body.design === true ? 'designer' : body.advice === true ? 'advisor' : 'worker',
                 tier: body.tier,
                 purpose: body.purpose,
               }

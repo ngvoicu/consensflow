@@ -16,7 +16,7 @@ const OLD_COMMANDS = /\bcf (run|say|attach|read|results|projects|lead (send|read
 const zeus = { name: 'zeus', roles: ['worker', 'reviewer'], workTier: 'standard' }
 
 describe('role instructions for the new core', () => {
-  for (const role of ['lead', 'advisor', 'worker', 'reviewer']) {
+  for (const role of ['lead', 'advisor', 'worker', 'reviewer', 'designer']) {
     it(`teach the ${role} only the board's commands`, () => {
       const text = roleInstructions(role, [zeus])
       assert.match(text, new RegExp(`^---\\nname: consensflow-${role}\\n`))
@@ -31,6 +31,7 @@ describe('role instructions for the new core', () => {
         for (const command of [
           'cf task add --tier',
           'cf task add --advice --tier',
+          'cf task add --design',
           'cf task add --self',
           'cf task review',
           'cf answer',
@@ -61,6 +62,7 @@ describe('role instructions for the new core', () => {
         assert.doesNotMatch(text, /PM\b|coordinator/, `${role} answers to the lead`)
         if (role === 'reviewer') assert.match(text, /VERDICT: pass/)
         if (role === 'advisor') assert.match(text, /You advise this project's lead/)
+        if (role === 'designer') assert.match(text, /image generation tool/)
       }
     })
   }

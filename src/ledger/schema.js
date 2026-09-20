@@ -2,7 +2,9 @@
  * The ledger's schema, as an ordered list of migrations. Migration `n` takes
  * the database from `PRAGMA user_version = n` to `n + 1`; the version is the
  * list's length. A migration is never edited once it has shipped: a change is
- * a new entry at the end.
+ * a new entry at the end. A migration is SQL run inside one transaction, or a
+ * function that manages its own (a table rebuild must switch foreign keys off
+ * first, which no transaction allows).
  */
 export const MIGRATIONS = [
   `
@@ -177,6 +179,131 @@ export const MIGRATIONS = [
   -- role constraint keeps 'pm'.
   UPDATE project SET review = 'members' WHERE review = 'all';
   `,
+  rebuildConstraints,
 ]
+
+/**
+ * The image designer joins the roles (candidate-feedback-3), and the
+ * constraints catch up with everything that left: no 'pm' role, no 'all'
+ * policy, and a task pool may be 'designer'. A CHECK cannot change in place,
+ * so the three tables are rebuilt the way SQLite documents it: foreign keys
+ * off, copy into a new table, drop the old, rename, check, foreign keys on.
+ */
+function rebuildConstraints(db, version) {
+  db.exec('PRAGMA foreign_keys = OFF')
+  try {
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      db.exec(`
+        CREATE TABLE project_next (
+          id INTEGER PRIMARY KEY,
+          directory TEXT NOT NULL,
+          name TEXT NOT NULL,
+          state TEXT NOT NULL,
+          resume_on_start INTEGER NOT NULL DEFAULT 0,
+          review TEXT NOT NULL DEFAULT 'members',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          CONSTRAINT project_state_check CHECK (state IN ('open', 'suspended')),
+          CONSTRAINT project_resume_on_start_check CHECK (resume_on_start IN (0, 1)),
+          CONSTRAINT project_review_check CHECK (review IN ('none', 'members'))
+        ) STRICT;
+        INSERT INTO project_next SELECT id, directory, name, state, resume_on_start, review, created_at, updated_at FROM project;
+        DROP TABLE project;
+        ALTER TABLE project_next RENAME TO project;
+
+        CREATE TABLE participant_next (
+          id INTEGER PRIMARY KEY,
+          project_id INTEGER NOT NULL,
+          handle TEXT NOT NULL,
+          role TEXT NOT NULL,
+          agent TEXT,
+          harness TEXT,
+          created_at TEXT NOT NULL,
+          left_at TEXT,
+          tier TEXT,
+          out_until TEXT,
+          out_since TEXT,
+          roles TEXT NOT NULL DEFAULT '[]',
+          member_id INTEGER,
+          CONSTRAINT participant_project_fk FOREIGN KEY (project_id)
+            REFERENCES project (id) ON DELETE CASCADE,
+          CONSTRAINT participant_member_fk FOREIGN KEY (member_id)
+            REFERENCES participant (id) ON DELETE CASCADE,
+          CONSTRAINT participant_handle_unique UNIQUE (project_id, handle),
+          CONSTRAINT participant_role_check
+            CHECK (role IN ('human', 'lead', 'advisor', 'worker', 'reviewer', 'designer')),
+          CONSTRAINT participant_tier_check
+            CHECK (tier IS NULL OR tier IN ('critical', 'complex', 'standard', 'light'))
+        ) STRICT;
+        INSERT INTO participant_next
+          SELECT id, project_id, handle, role, agent, harness, created_at, left_at, tier,
+                 out_until, out_since, roles, member_id
+          FROM participant;
+        DROP TABLE participant;
+        ALTER TABLE participant_next RENAME TO participant;
+        CREATE INDEX participant_member_index ON participant (member_id, left_at);
+
+        CREATE TABLE task_next (
+          id INTEGER PRIMARY KEY,
+          project_id INTEGER NOT NULL,
+          number INTEGER NOT NULL,
+          title TEXT NOT NULL,
+          body TEXT NOT NULL,
+          requester_id INTEGER NOT NULL,
+          assignee_id INTEGER,
+          state TEXT NOT NULL,
+          pool TEXT,
+          tier TEXT,
+          purpose TEXT,
+          kind TEXT NOT NULL DEFAULT 'work',
+          review_of INTEGER,
+          round INTEGER NOT NULL DEFAULT 0,
+          verdict TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          unreviewed TEXT,
+          CONSTRAINT task_project_fk FOREIGN KEY (project_id)
+            REFERENCES project (id) ON DELETE CASCADE,
+          CONSTRAINT task_requester_fk FOREIGN KEY (requester_id)
+            REFERENCES participant (id) ON DELETE CASCADE,
+          CONSTRAINT task_assignee_fk FOREIGN KEY (assignee_id)
+            REFERENCES participant (id) ON DELETE CASCADE,
+          CONSTRAINT task_number_unique UNIQUE (project_id, number),
+          CONSTRAINT task_review_of_fk FOREIGN KEY (review_of)
+            REFERENCES task (id) ON DELETE CASCADE,
+          CONSTRAINT task_state_check CHECK (
+            state IN ('open', 'queued', 'working', 'waiting', 'review', 'done', 'accepted', 'failed', 'cancelled')
+          ),
+          CONSTRAINT task_assignee_check
+            CHECK (assignee_id IS NOT NULL OR state IN ('open', 'cancelled', 'failed')),
+          CONSTRAINT task_pool_check CHECK (pool IS NULL OR pool IN ('worker', 'advisor', 'designer')),
+          CONSTRAINT task_tier_check
+            CHECK (tier IS NULL OR tier IN ('critical', 'complex', 'standard', 'light')),
+          CONSTRAINT task_kind_check CHECK (kind IN ('work', 'review')),
+          CONSTRAINT task_verdict_check CHECK (verdict IS NULL OR verdict IN ('pass', 'changes'))
+        ) STRICT;
+        INSERT INTO task_next
+          SELECT id, project_id, number, title, body, requester_id, assignee_id, state, pool, tier,
+                 purpose, kind, review_of, round, verdict, created_at, updated_at, unreviewed
+          FROM task;
+        DROP TABLE task;
+        ALTER TABLE task_next RENAME TO task;
+        CREATE INDEX task_assignee_index ON task (assignee_id, state);
+      `)
+      const dangling = db.prepare('PRAGMA foreign_key_check').all()
+      if (dangling.length > 0) {
+        throw new Error(`the rebuild left ${dangling.length} rows without their parent`)
+      }
+      db.exec(`PRAGMA user_version = ${version}`)
+      db.exec('COMMIT')
+    } catch (cause) {
+      db.exec('ROLLBACK')
+      throw cause
+    }
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON')
+  }
+}
 
 export const SCHEMA_VERSION = MIGRATIONS.length

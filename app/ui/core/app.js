@@ -82,11 +82,13 @@ const board = new BoardView(boardRoot, {
       const { task } = await core('task.add', {
         project: state.selected,
         pool,
-        tier,
+        ...(tier === undefined ? {} : { tier }),
         ...(purpose === undefined ? {} : { purpose }),
         body: text,
       })
-      note(`T-${task.number} is on the board for a ${tier} ${pool}.`)
+      note(
+        `T-${task.number} is on the board for ${pool === 'designer' ? 'an image designer' : `a ${tier} ${pool}`}.`,
+      )
     }),
   // A question put to a coordinator and left unanswered is answered here too;
   // it was never in the human's inbox, so there is nothing to mark read.
@@ -316,30 +318,61 @@ inboxButton.addEventListener('click', () => {
   boardRoot.querySelector('[data-handle="human"]')?.scrollIntoView({ block: 'start' })
 })
 
-const ROLES = ['worker', 'advisor', 'reviewer']
-const ROLE_LABEL = { worker: 'Worker', advisor: 'Advisor', reviewer: 'Reviewer' }
+const ROLES = ['worker', 'advisor', 'reviewer', 'designer']
+const ROLE_LABEL = {
+  worker: 'Worker',
+  advisor: 'Advisor',
+  reviewer: 'Reviewer',
+  designer: 'Image designer',
+}
+/** Whether a saved agent's model suits a role, as the Agents screen's pills say. */
+const suits = (agent, role) => (agent.profile?.categories ?? []).includes(role)
 
-/** A checkbox for one role of a member, or of an agent about to join. */
-function roleBox(role, checked, name, onChange) {
-  const cell = element('td', 'role-cell')
-  const box = element('input')
-  box.type = 'checkbox'
-  box.value = role
-  box.checked = checked
-  box.setAttribute('aria-label', `${ROLE_LABEL[role]} ${name}`)
-  if (onChange) box.addEventListener('change', () => onChange(box))
-  cell.append(box)
-  return cell
+/**
+ * The two selects that add a member: a role first, then the saved agents
+ * whose model suits it and do not hold it yet. The chosen agent survives a
+ * redraw when it is still on offer.
+ */
+function rolePicker(roleSelect, agentSelect, holding, onRefill = () => {}) {
+  if (roleSelect.options.length === 0) {
+    for (const role of ROLES) {
+      const option = element('option', null, ROLE_LABEL[role])
+      option.value = role
+      roleSelect.append(option)
+    }
+    roleSelect.addEventListener('change', () => refill())
+  }
+  const refill = () => {
+    const role = roleSelect.value
+    const chosen = agentSelect.value
+    const choices = state.agents.filter((agent) => suits(agent, role) && !holding(agent.name, role))
+    agentSelect.replaceChildren(
+      ...choices.map((agent) => {
+        const option = element(
+          'option',
+          null,
+          `${agent.name} · ${agent.harness} · ${agent.model ?? 'model unknown'}`,
+        )
+        option.value = agent.name
+        return option
+      }),
+    )
+    if (choices.some((agent) => agent.name === chosen)) agentSelect.value = chosen
+    agentSelect.disabled = choices.length === 0
+    onRefill()
+  }
+  refill()
 }
 
-/** The roles ticked for each agent in a team table: the agents with none are not on the team. */
-function pickedTeam(rows) {
-  return [...rows.querySelectorAll('tr[data-agent]')]
-    .map((row) => ({
-      agent: row.dataset.agent,
-      roles: [...row.querySelectorAll('input:checked')].map((box) => box.value),
-    }))
-    .filter(({ roles }) => roles.length > 0)
+/** One row of a team table: the agent, one of its roles, and a Remove for that role. */
+function teamRow(who, role, remove) {
+  const row = element('tr')
+  row.dataset.role = role
+  row.append(who, element('td', null, ROLE_LABEL[role]))
+  const tools = element('td')
+  tools.append(remove)
+  row.append(tools)
+  return row
 }
 
 /**
@@ -352,7 +385,7 @@ function guardReview(select, warning, team) {
   if (!reviewers) select.value = 'none'
   warning.textContent = reviewers
     ? ''
-    : 'Reviews need a reviewer on the team: tick Reviewer for one of the agents.'
+    : 'Reviews need a reviewer on the team: add one of the agents as Reviewer.'
   warning.hidden = reviewers
 }
 
@@ -384,47 +417,90 @@ $('#new-project').addEventListener('click', async () => {
   }
 })
 
-/** Every saved agent as a row of role boxes, the last team's roles ticked. */
+/** The agents and roles picked for the new project, the last team's to start with. */
+let picked = []
+
 function renderNewProjectTeam(lastTeam) {
-  const rows = state.agents.map((agent) => {
-    const row = element('tr')
-    row.dataset.agent = agent.name
-    const who = element('td')
-    who.append(
-      element('span', 'member-name', agent.name),
-      element('br'),
-      element('span', 'member-meta', `${agent.harness} · ${agent.model ?? 'model unknown'}`),
-    )
-    row.append(who)
-    const saved = lastTeam.find((member) => member.agent === agent.name)?.roles ?? []
-    for (const role of ROLES) {
-      row.append(roleBox(role, saved.includes(role), agent.name, () => guardNewProjectReview()))
-    }
-    return row
-  })
-  if (rows.length === 0) {
-    const row = element('tr', 'team-empty')
-    const cell = element('td', null, 'No agents saved yet: add some under Agents first.')
-    cell.colSpan = 4
-    row.append(cell)
-    rows.push(row)
-  }
-  newProjectTeam.replaceChildren(...rows)
-  newProjectForm.elements.review.value = lastTeam.some(({ roles }) => roles.includes('reviewer'))
+  picked = lastTeam.flatMap(({ agent, roles }) =>
+    state.agents.some((saved) => saved.name === agent)
+      ? roles.map((role) => ({ agent, role }))
+      : [],
+  )
+  drawNewProjectTeam()
+  newProjectForm.elements.review.value = picked.some(({ role }) => role === 'reviewer')
     ? 'members'
     : 'none'
   guardNewProjectReview()
 }
 
+function drawNewProjectTeam() {
+  const rows = picked.map(({ agent, role }, at) => {
+    const saved = state.agents.find((candidate) => candidate.name === agent)
+    const who = element('td')
+    who.append(
+      element('span', 'member-name', agent),
+      element('br'),
+      element('span', 'member-meta', `${saved.harness} · ${saved.model ?? 'model unknown'}`),
+    )
+    const remove = element('button', 'quiet-button', 'Remove')
+    remove.type = 'button'
+    remove.setAttribute('aria-label', `Remove ${ROLE_LABEL[role]} ${agent}`)
+    remove.addEventListener('click', () => {
+      picked.splice(at, 1)
+      drawNewProjectTeam()
+      guardNewProjectReview()
+    })
+    const row = teamRow(who, role, remove)
+    row.dataset.agent = agent
+    return row
+  })
+  if (rows.length === 0) {
+    const row = element('tr', 'team-empty')
+    const cell = element(
+      'td',
+      null,
+      state.agents.length === 0
+        ? 'No agents saved yet: add some under Agents first.'
+        : 'Nobody yet: pick a role, then an agent whose model suits it.',
+    )
+    cell.colSpan = 3
+    row.append(cell)
+    rows.push(row)
+  }
+  newProjectTeam.replaceChildren(...rows)
+  rolePicker(newProjectForm.elements.pickRole, newProjectForm.elements.pickAgent, (agent, role) =>
+    picked.some((pick) => pick.agent === agent && pick.role === role),
+  )
+}
+
+$('#new-project-add').addEventListener('click', () => {
+  const role = newProjectForm.elements.pickRole.value
+  const agent = newProjectForm.elements.pickAgent.value
+  if (!agent) return
+  picked.push({ agent, role })
+  drawNewProjectTeam()
+  guardNewProjectReview()
+})
+
+/** The picked rows as the core takes a team: each agent once, with its roles. */
+function pickedTeam() {
+  const team = new Map()
+  for (const { agent, role } of picked) {
+    if (!team.has(agent)) team.set(agent, { agent, roles: [] })
+    team.get(agent).roles.push(role)
+  }
+  return [...team.values()]
+}
+
 const guardNewProjectReview = () =>
-  guardReview(newProjectForm.elements.review, newProjectWarning, pickedTeam(newProjectTeam))
+  guardReview(newProjectForm.elements.review, newProjectWarning, pickedTeam())
 
 newProjectForm.addEventListener('submit', (event) => {
   event.preventDefault()
   const directory = newProjectForm.elements.directory.value
   const harness = newProjectForm.elements.harness.value
   const review = newProjectForm.elements.review.value
-  const team = pickedTeam(newProjectTeam)
+  const team = pickedTeam()
   newProjectDialog.close()
   void act(async () => {
     const { project } = await core('project.open', { directory, harness, review, team })
@@ -448,64 +524,60 @@ let removing = null
 /** Draws the team from the board, in place, so it stays current while open. */
 function renderTeam() {
   const lanes = state.board?.lanes ?? []
-  const members = lanes.filter((lane) => lane.participant.agent !== null)
-  teamList.replaceChildren(
-    ...(members.length
-      ? members.map((lane) => memberRow(lane.participant))
-      : [element('tr', 'team-empty')]),
-  )
-  if (members.length === 0) {
+  const members = lanes
+    .filter((lane) => lane.participant.agent !== null)
+    .map((lane) => lane.participant)
+  const rows = members.flatMap((member) => memberRows(member))
+  teamList.replaceChildren(...(rows.length ? rows : [element('tr', 'team-empty')]))
+  if (rows.length === 0) {
     const cell = element('td', null, 'Nobody yet: add the agents this project may use.')
-    cell.colSpan = 6
+    cell.colSpan = 4
     teamList.firstChild.append(cell)
   }
   teamReview.value = state.board?.project.review ?? 'none'
   guardReview(
     teamReview,
     teamWarning,
-    members.map((lane) => ({ roles: lane.participant.roles })),
+    members.map((member) => ({ roles: member.roles })),
   )
-  const onTeam = new Set(members.map((lane) => lane.participant.agent))
-  const choices = state.agents.filter((agent) => !onTeam.has(agent.name))
-  const picker = teamForm.elements.agent
-  const chosen = picker.value
-  picker.replaceChildren(
-    ...choices.map((agent) => {
-      const option = element(
-        'option',
-        null,
-        `${agent.name} · ${agent.harness} · ${agent.model ?? 'model unknown'}`,
-      )
-      option.value = agent.name
-      return option
-    }),
+  rolePicker(
+    teamForm.elements.role,
+    teamForm.elements.agent,
+    (agent, role) =>
+      members.some((member) => member.agent === agent && member.roles.includes(role)),
+    () => {
+      teamForm.querySelector('[type="submit"]').disabled = teamForm.elements.agent.disabled
+    },
   )
-  if (choices.some((agent) => agent.name === chosen)) picker.value = chosen
-  teamForm.querySelector('[type="submit"]').disabled = choices.length === 0
 }
 
-/** One member: its roles as checkboxes, its tier, and a Remove that asks first. */
-function memberRow(member) {
-  const row = element('tr')
-  row.dataset.handle = member.handle
+/**
+ * A member's rows, one per role: Remove drops that role, or, for its last
+ * role, asks first and takes the member off the team.
+ */
+function memberRows(member) {
   const name = `@${member.handle}`
-  const choose = (handle) => () => {
-    removing = handle
-    renderTeam()
-  }
-  const who = element('td')
-  who.append(
-    element('span', 'member-name', name),
-    element('br'),
-    element('span', 'member-meta', member.harness ?? ''),
-  )
-  row.append(who)
-  if (removing === member.handle) {
+  const who = () => {
     const cell = element('td')
-    cell.colSpan = 5
+    cell.append(
+      element('span', 'member-name', name),
+      element('br'),
+      element('span', 'member-meta', `${member.harness ?? ''} · ${member.tier ?? ''}`),
+    )
+    return cell
+  }
+  if (removing === member.handle) {
+    const row = element('tr')
+    row.dataset.handle = member.handle
+    row.append(who())
+    const cell = element('td')
+    cell.colSpan = 3
     const keep = element('button', 'quiet-button', `Keep ${name}`)
     keep.type = 'button'
-    keep.addEventListener('click', choose(null))
+    keep.addEventListener('click', () => {
+      removing = null
+      renderTeam()
+    })
     const yes = element('button', 'danger-button', `Remove ${name}`)
     yes.type = 'button'
     yes.addEventListener('click', () =>
@@ -521,32 +593,30 @@ function memberRow(member) {
       yes,
     )
     row.append(cell)
-    return row
+    return [row]
   }
-  for (const role of ROLES) {
-    row.append(
-      roleBox(role, member.roles.includes(role), name, (box) => {
-        const roles = ROLES.filter((r) => (r === role ? box.checked : member.roles.includes(r)))
-        if (roles.length === 0) {
-          box.checked = true
-          report(`${name} needs at least one role.`)
-          return
-        }
-        void act(async () => {
-          await core('member.roles', { project: state.selected, agent: member.handle, roles })
+  return member.roles.map((role) => {
+    const remove = element('button', 'quiet-button', 'Remove')
+    remove.type = 'button'
+    remove.setAttribute('aria-label', `Remove ${ROLE_LABEL[role]} ${name}`)
+    remove.addEventListener('click', () => {
+      if (member.roles.length === 1) {
+        removing = member.handle
+        renderTeam()
+        return
+      }
+      void act(async () => {
+        await core('member.roles', {
+          project: state.selected,
+          agent: member.handle,
+          roles: member.roles.filter((held) => held !== role),
         })
-      }),
-    )
-  }
-  row.append(element('td', null, member.tier ?? ''))
-  const remove = element('button', 'quiet-button', 'Remove')
-  remove.type = 'button'
-  remove.setAttribute('aria-label', `Remove ${name} from the team`)
-  remove.addEventListener('click', choose(member.handle))
-  const tools = element('td')
-  tools.append(remove)
-  row.append(tools)
-  return row
+      })
+    })
+    const row = teamRow(who(), role, remove)
+    row.dataset.handle = member.handle
+    return row
+  })
 }
 
 teamButton.addEventListener('click', () =>
@@ -570,18 +640,22 @@ teamReview.addEventListener('change', () =>
 )
 teamForm.addEventListener('submit', (event) => {
   event.preventDefault()
+  const role = teamForm.elements.role.value
   const agent = teamForm.elements.agent.value
-  const roles = [...teamForm.querySelectorAll('input[name="roles"]:checked')].map(
-    (box) => box.value,
-  )
   if (!agent) return
-  if (roles.length === 0) {
-    report('Tick at least one role for the new member.')
-    return
-  }
+  const member = (state.board?.lanes ?? []).find((lane) => lane.participant.agent === agent)
   void act(async () => {
-    await core('member.add', { project: state.selected, agent, roles })
-    note(`@${agent} joined the team as ${roles.join(' and ')}.`)
+    if (member === undefined) {
+      await core('member.add', { project: state.selected, agent, roles: [role] })
+      note(`@${agent} joined the team as ${ROLE_LABEL[role]}.`)
+      return
+    }
+    await core('member.roles', {
+      project: state.selected,
+      agent,
+      roles: [...member.participant.roles, role],
+    })
+    note(`@${agent} is ${ROLE_LABEL[role]} now too.`)
   })
 })
 teamDialog.querySelector('[value="cancel"]').addEventListener('click', () => teamDialog.close())

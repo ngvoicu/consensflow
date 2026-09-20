@@ -1283,7 +1283,9 @@ export const WORK_TIERS = {
 };
 
 /** The roles a model suits, in the order the pills show them; a pill launches nothing. */
-export const CATEGORY_LABELS = { lead: 'Lead candidate', advisor: 'Advisor', worker: 'Worker', reviewer: 'Reviewer' };
+export const CATEGORY_LABELS = {
+  lead: 'Lead candidate', advisor: 'Advisor', worker: 'Worker', reviewer: 'Reviewer', designer: 'Image designer',
+};
 
 export function validateWorkTier(value) {
   if (value != null && (typeof value !== 'string' || !Object.hasOwn(WORK_TIERS, value)))
@@ -1327,7 +1329,7 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
       modelKey: 'codex-image',
       modelLabel: 'Codex Images',
       routeLabel: 'Codex login',
-      categories: [],
+      categories: ['designer'],
       goodFor: 'Generate illustrations and edit reference images.',
     }
   const known = AGENT_PRESETS.some((p) => (p.kind === "claude-code" ? "claude" : p.kind) === harness && p.model === model)

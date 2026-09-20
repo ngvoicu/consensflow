@@ -56,14 +56,18 @@ export { SCHEMA_VERSION }
  * clock are arguments, and every refusal is a `LedgerError` with a stable code.
  */
 
-export const HARNESSES = ['claude-code', 'codex', 'opencode', 'pi', 'devin', 'kimi']
-const MEMBER_ROLES = ['worker', 'advisor', 'reviewer']
+export const HARNESSES = ['claude-code', 'codex', 'opencode', 'pi', 'devin', 'kimi', 'image']
+const MEMBER_ROLES = ['worker', 'advisor', 'reviewer', 'designer']
 /** Who hands out work and hears when the team changes: the human and the lead. */
 const COORDINATOR_HANDLES = ['human', 'lead']
 const COORDINATOR_ROLES = ['human', 'lead']
 export const TIERS = ['critical', 'complex', 'standard', 'light']
-const POOLS = ['worker', 'advisor']
+/** Who takes a tiered task: a worker, an advisor (advice), or an image designer (no tier). */
+const POOLS = ['worker', 'advisor', 'designer']
 export const PURPOSES = ['critical-review', 'architecture', 'hard-problem', 'important-question']
+/** "standard worker", "image designer": who an open task waits for; `aPool` adds the article. */
+const poolName = (pool, tier) => (pool === 'designer' ? 'image designer' : `${tier} ${pool}`)
+const aPool = (pool, tier) => `${pool === 'designer' ? 'an' : 'a'} ${poolName(pool, tier)}`
 const CRITICAL_RULE =
   'No coding or implementation edits. Do not write or revise specifications. Return analysis, evidence and recommendations to your coordinator.'
 const REVIEW_POLICIES = ['none', 'members']
@@ -138,9 +142,14 @@ function migrate(db) {
     )
   }
   for (let from = version; from < SCHEMA_VERSION; from += 1) {
+    const migration = MIGRATIONS[from]
+    if (typeof migration === 'function') {
+      migration(db, from + 1)
+      continue
+    }
     db.exec('BEGIN IMMEDIATE')
     try {
-      db.exec(MIGRATIONS[from])
+      db.exec(migration)
       db.exec(`PRAGMA user_version = ${from + 1}`)
       db.exec('COMMIT')
     } catch (cause) {
@@ -824,17 +833,18 @@ class Ledger {
    * A task, from the lead or the human. Given `to`, it is queued for that
    * participant at once (the lead, the human, or the requester itself). Given
    * a `pool` and `tier` instead, it opens for the daemon to assign to a member
-   * of that pool and tier (work for a worker, advice from an advisor), and
-   * critical work names its `purpose`.
+   * of that pool and tier (work for a worker, advice from an advisor; an image
+   * from a designer, which has no tier), and critical work names its `purpose`.
    */
   createTask(projectId, { from, to, after, pool, tier, purpose, body, title }) {
     requireText(body, 'body', MAX_BODY)
     if (title !== undefined) requireText(title, 'title', MAX_TITLE)
     if (to === undefined && after === undefined) {
-      requireTier(tier)
       if (!POOLS.includes(pool)) {
-        throw new LedgerError('invalid-pool', `a pool is ${POOLS.join(' or ')}, not ${pool}`)
+        throw new LedgerError('invalid-pool', `a pool is ${POOLS.join(', ')}, not ${pool}`)
       }
+      if (pool === 'designer') tier = null
+      else requireTier(tier)
       if (tier === 'critical' && !PURPOSES.includes(purpose)) {
         throw new LedgerError(
           'purpose-required',
@@ -869,7 +879,7 @@ class Ledger {
             ? null
             : this.#participantByHandle(projectId, to)
       if (assignee === null && this.#members(projectId, pool, tier).length === 0) {
-        throw new LedgerError('no-member-of-tier', `no ${tier} ${pool} is on the team`, 409)
+        throw new LedgerError('no-member-of-tier', `no ${poolName(pool, tier)} is on the team`, 409)
       }
       const { next } = this.#db
         .prepare('SELECT COALESCE(MAX(number), 0) + 1 AS next FROM task WHERE project_id = ?')
@@ -930,7 +940,9 @@ class Ledger {
 
   candidates(projectId, number) {
     const task = this.#taskRow(projectId, number)
-    return this.members(projectId, task.pool).filter((member) => member.tier === task.tier)
+    return this.members(projectId, task.pool).filter(
+      (member) => task.tier === null || member.tier === task.tier,
+    )
   }
 
   /**
@@ -1079,11 +1091,11 @@ class Ledger {
         member.left_at === null &&
         member.project_id === projectId &&
         JSON.parse(member.roles).includes(task.pool) &&
-        member.tier === task.tier
+        (task.tier === null || member.tier === task.tier)
       if (!candidate) {
         throw new LedgerError(
           'not-a-candidate',
-          `@${member.handle} is not a ${task.tier} ${task.pool} on this team`,
+          `@${member.handle} is not ${aPool(task.pool, task.tier)} on this team`,
           409,
         )
       }
@@ -1214,7 +1226,7 @@ class Ledger {
         to: requester.handle,
         task: number,
         kind: 'note',
-        body: `T-${number} was taken back from @${member.handle} (${because}) and waits for another ${task.tier} ${task.pool}.`,
+        body: `T-${number} was taken back from @${member.handle} (${because}) and waits for another ${poolName(task.pool, task.tier)}.`,
       })
       return { task: this.#task(task.id) }
     })
@@ -1987,16 +1999,16 @@ class Ledger {
   }
 
   /** The active members of one pool and tier, in join order. */
-  /** The team's members of one role and tier, whatever role they were saved with first. */
+  /** The team's members of one role and tier (any tier when null), whatever role they were saved with first. */
   #members(projectId, pool, tier) {
     return this.#db
       .prepare(
         `SELECT * FROM participant p
-         WHERE p.project_id = ? AND p.tier = ? AND p.left_at IS NULL AND p.member_id IS NULL
+         WHERE p.project_id = ? AND (? IS NULL OR p.tier = ?) AND p.left_at IS NULL AND p.member_id IS NULL
            AND EXISTS (SELECT 1 FROM json_each(p.roles) r WHERE r.value = ?)
          ORDER BY p.id`,
       )
-      .all(projectId, tier, pool)
+      .all(projectId, tier, tier, pool)
   }
 
   #taskById(id) {

@@ -303,6 +303,7 @@ const PAGE = (token) => `<!DOCTYPE html>
   .category-pill[data-category=lead] { color: var(--pill-lead); }
   .category-pill[data-category=advisor] { color: var(--pill-advisor); }
   .category-pill[data-category=reviewer] { color: var(--foam); }
+  .category-pill[data-category=designer] { color: var(--pill-lead); }
   .benchmark-source, .benchmark-guide, .benchmark-details, .benchmark-missing, .benchmark-context { font-size: 12px; color: var(--muted); }
   .benchmark-source { margin: -16px 0 4px; }
   .benchmark-guide { margin: 0 0 22px; }

@@ -23,6 +23,7 @@ const QUESTION_TOOL = [
 
 export function codexAdapter({
   env,
+  harness = 'codex',
   send = sendCodex,
   currentSession = brokerSession,
   answers = cachedAnswers(),
@@ -30,7 +31,7 @@ export function codexAdapter({
   discoverForMs = 60_000,
 }) {
   return {
-    harness: 'codex',
+    harness,
 
     async prepare({ launchId, role, directory, resume, message, agent, instructions }) {
       const executable = executableFor('codex', env)
@@ -50,11 +51,11 @@ export function codexAdapter({
       const runner =
         resume === null
           ? interactiveStart(
-              { kind: 'codex', model: agent?.model, effort: agent?.effort },
+              { kind: harness, model: agent?.model, effort: agent?.effort },
               null,
               message,
             )
-          : interactiveResume({ kind: 'codex' }, resume, message)
+          : interactiveResume({ kind: harness }, resume, message)
       // Codex's question tool (request_user_input) is behind a feature still
       // marked under development; the broker answers it from the board.
       const invocation = withNativeBridge(

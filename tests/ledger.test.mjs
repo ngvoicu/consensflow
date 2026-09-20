@@ -349,6 +349,24 @@ describe('upgrading a home', () => {
           .map((row) => row.name)
         assert.ok(!columns.includes('tags'), `${table} keeps no tags`)
       }
+      // The rebuilt constraints know the designer and have forgotten the PM and the all policy.
+      const at2 = '2026-09-20T12:00:00.000Z'
+      upgraded
+        .prepare(
+          `INSERT INTO participant (project_id, handle, role, roles, agent, harness, tier, created_at)
+           VALUES (1, 'pygmalion', 'designer', '["designer"]', 'pygmalion', 'image', 'light', ?)`,
+        )
+        .run(at2)
+      assert.throws(() =>
+        upgraded
+          .prepare(
+            `INSERT INTO participant (project_id, handle, role, roles, agent, harness, created_at)
+             VALUES (1, 'pm', 'pm', '[]', NULL, 'codex', ?)`,
+          )
+          .run(at2),
+      )
+      assert.throws(() => upgraded.prepare("UPDATE project SET review = 'all' WHERE id = 1").run())
+      assert.equal(upgraded.prepare('PRAGMA foreign_keys').get().foreign_keys, 1)
       assert.equal(upgraded.prepare('SELECT COUNT(*) AS n FROM task').get().n, 1)
       assert.equal(upgraded.prepare('PRAGMA foreign_key_check').all().length, 0, 'nothing dangles')
       upgraded.close()
@@ -1464,6 +1482,50 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
         ledger.board(project.id).open.map((t) => t.number),
         [task.number],
         'the refusals created nothing',
+      )
+    })
+  })
+
+  it('opens an image task for the designer with no tier, and hands it to a free designer', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = tiered(ledger)
+      assert.throws(
+        () => ledger.createTask(project.id, { from: 'lead', pool: 'designer', body: 'A logo' }),
+        {
+          code: 'no-member-of-tier',
+        },
+      )
+      ledger.addMember(project.id, {
+        agent: 'pygmalion',
+        harness: 'image',
+        role: 'designer',
+        tier: 'light',
+      })
+      const { task } = ledger.createTask(project.id, {
+        from: 'lead',
+        pool: 'designer',
+        tier: 'critical',
+        body: 'A logo: a compass rose, teal on white; save it as images/logo.png',
+      })
+      assert.deepEqual(
+        [task.pool, task.tier, task.state],
+        ['designer', null, 'open'],
+        'no tier: any designer',
+      )
+      assert.deepEqual(
+        ledger.candidates(project.id, task.number).map((c) => c.handle),
+        ['pygmalion'],
+      )
+      const { message } = ledger.assignTask(project.id, task.number, id('pygmalion'))
+      deliver(ledger, message)
+      ledger.setReview(project.id, 'members')
+      const done = ledger.recordResult(project.id, task.number, {
+        body: '/work/app/images/logo.png',
+      })
+      assert.deepEqual(
+        [done.task.state, done.message.recipient],
+        ['done', 'lead'],
+        'a drawing is never reviewed',
       )
     })
   })

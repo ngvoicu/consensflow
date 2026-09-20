@@ -39,7 +39,7 @@ test('a window without its role text is refused', async (t) => {
 
 test('every role enters every harness with its whole text already loaded', async (t) => {
   for (const kind of ['claude-code', 'codex', 'opencode', 'pi', 'devin']) {
-    for (const role of ['lead', 'advisor', 'worker', 'reviewer']) {
+    for (const role of ['lead', 'advisor', 'worker', 'reviewer', 'designer']) {
       await t.test(`${kind} ${role}`, async (t) => {
         const { env } = await fixture(t)
         const existing = 'User instructions: preserve "quotes", `backticks`, $HOME\nand newlines.'

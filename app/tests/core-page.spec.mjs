@@ -110,10 +110,26 @@ function model() {
         resumeOnStart: false,
       },
     ],
+    // Each saved agent carries the roles its model suits, as the Agents screen's pills say.
     agents: [
-      { name: 'zeus', harness: 'claude', model: 'claude-sonnet-5' },
-      { name: 'diana', harness: 'codex', model: 'gpt-5.6-luna' },
-      { name: 'athena', harness: 'opencode', model: 'muse-spark' },
+      {
+        name: 'zeus',
+        harness: 'claude',
+        model: 'claude-sonnet-5',
+        profile: { categories: ['worker', 'reviewer'] },
+      },
+      {
+        name: 'diana',
+        harness: 'codex',
+        model: 'gpt-5.6-luna',
+        profile: { categories: ['worker', 'reviewer'] },
+      },
+      {
+        name: 'athena',
+        harness: 'opencode',
+        model: 'muse-spark',
+        profile: { categories: ['advisor', 'worker', 'reviewer'] },
+      },
     ],
     boards: {
       1: {
@@ -620,6 +636,12 @@ test('asks for the purpose of critical work, and offers only the tiers of worker
       activity: { state: 'closed' },
       pane: null,
     },
+    {
+      participant: participant(10, 'pygmalion', 'designer', { harness: 'image', tier: 'light' }),
+      tasks: [],
+      activity: { state: 'closed' },
+      pane: null,
+    },
   )
   await open(page, data)
   const backlog = page.getByRole('region', { name: 'For you' })
@@ -631,6 +653,7 @@ test('asks for the purpose of critical work, and offers only the tiers of worker
     'A critical worker (calliope)',
     'A standard worker (zeus)',
     'A light worker (diana)',
+    'An image designer (pygmalion)',
   ])
   await composer.getByLabel('For').selectOption('worker:critical')
   await composer.getByLabel('Purpose').selectOption('architecture')
@@ -647,6 +670,19 @@ test('asks for the purpose of critical work, and offers only the tiers of worker
         body: 'Why does the parser leak memory?',
       },
     ])
+  await backlog.getByRole('button', { name: 'New task' }).click()
+  await composer.getByLabel('For').selectOption('designer')
+  await expect(composer.getByLabel('Purpose')).toBeHidden()
+  await composer.getByLabel('Task').fill('A logo: a compass rose; save it as images/logo.png')
+  await composer.getByRole('button', { name: 'Put on the board' }).click()
+  await expect
+    .poll(async () => (await calls(page, 'task.add')).at(-1))
+    .toEqual({
+      project: 1,
+      pool: 'designer',
+      body: 'A logo: a compass rose; save it as images/logo.png',
+    })
+  await expect(page.locator('#status')).toHaveText('T-9 is on the board for an image designer.')
 })
 
 test('gives a coordinator a task by name from its bay, and keeps a half-written one when the board redraws', async ({
@@ -749,65 +785,84 @@ test('sends a failed task back with a follow-up', async ({ page }) => {
     .toEqual([{ project: 1, task: 3, body: 'Try again with the smaller model.' }])
 })
 
-test('shows the team as a table of roles, and adds a saved agent with the roles ticked', async ({
+test('shows the team as one row per member and role, and adds a saved agent in a role its model suits', async ({
   page,
 }) => {
   await open(page)
   await page.getByRole('button', { name: 'Team' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project team' })
   const table = dialog.getByRole('table', { name: 'On the team' })
+  await expect(table.locator('thead th')).toHaveText(['Member', 'Role', ''])
   await expect(table.locator('tbody tr')).toHaveCount(2)
   await expect(table.locator('tbody tr').first()).toContainText('@zeus')
   await expect(table.locator('tbody tr').first()).toContainText('standard')
-  await expect(table.locator('thead th')).toHaveText([
-    'Member',
+  await expect(table.locator('tbody tr').first().locator('td').nth(1)).toHaveText('Worker')
+  await expect(dialog.getByLabel('Role').locator('option')).toHaveText([
     'Worker',
     'Advisor',
     'Reviewer',
-    'Tier',
-    '',
+    'Image designer',
   ])
-  await expect(dialog.getByRole('checkbox', { name: 'Worker @zeus' })).toBeChecked()
-  await expect(dialog.getByRole('checkbox', { name: 'Reviewer @zeus' })).not.toBeChecked()
+  // A worker: every saved agent that does not hold the role yet.
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
     'athena · opencode · muse-spark',
   ])
-  const roles = dialog.getByRole('group', { name: 'Roles for the new member' })
-  await roles.getByRole('checkbox', { name: 'Worker' }).uncheck()
-  await roles.getByRole('checkbox', { name: 'Advisor' }).check()
-  await roles.getByRole('checkbox', { name: 'Reviewer' }).check()
+  // An advisor: only the agents whose model suits advising.
+  await dialog.getByLabel('Role').selectOption('advisor')
+  await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
+    'athena · opencode · muse-spark',
+  ])
   await dialog.getByRole('button', { name: 'Add to team' }).click()
   await expect
     .poll(() => calls(page, 'member.add'))
-    .toEqual([{ project: 1, agent: 'athena', roles: ['advisor', 'reviewer'] }])
-})
-
-test("changes a member's roles from its row, and keeps at least one", async ({ page }) => {
-  await open(page)
-  await page.getByRole('button', { name: 'Team' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Project team' })
-  await dialog.getByRole('checkbox', { name: 'Reviewer @zeus' }).check()
+    .toEqual([{ project: 1, agent: 'athena', roles: ['advisor'] }])
+  // A second role for a member already on the team adds to its roles.
+  await dialog.getByLabel('Role').selectOption('reviewer')
+  await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
+    'zeus · claude · claude-sonnet-5',
+    'diana · codex · gpt-5.6-luna',
+    'athena · opencode · muse-spark',
+  ])
+  await dialog.getByLabel('Agent').selectOption('zeus')
+  await dialog.getByRole('button', { name: 'Add to team' }).click()
   await expect
     .poll(() => calls(page, 'member.roles'))
     .toEqual([{ project: 1, agent: 'zeus', roles: ['worker', 'reviewer'] }])
-  // A plain click: the page puts the tick back at once, which `uncheck` would count as a failure.
-  await dialog.getByRole('checkbox', { name: 'Worker @diana' }).click()
-  await expect(dialog.getByRole('checkbox', { name: 'Worker @diana' })).toBeChecked()
-  await expect(page.getByRole('status')).toContainText('@diana needs at least one role.')
-  expect(await calls(page, 'member.roles')).toHaveLength(1)
+  // Nobody's model suits the image designer here.
+  await dialog.getByLabel('Role').selectOption('designer')
+  await expect(dialog.getByLabel('Agent').locator('option')).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: 'Add to team' })).toBeDisabled()
+})
+
+test("drops one role from a member's row, and asks before its last", async ({ page }) => {
+  const data = model()
+  const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'diana')
+  lane.participant.roles = ['worker', 'reviewer']
+  await open(page, data)
+  await page.getByRole('button', { name: 'Team' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project team' })
+  const table = dialog.getByRole('table', { name: 'On the team' })
+  await expect(table.locator('tbody tr[data-handle="diana"]')).toHaveCount(2)
+  await dialog.getByRole('button', { name: 'Remove Worker @diana' }).click()
+  await expect
+    .poll(() => calls(page, 'member.roles'))
+    .toEqual([{ project: 1, agent: 'diana', roles: ['reviewer'] }])
+  await dialog.getByRole('button', { name: 'Remove Worker @zeus' }).click()
+  await expect(dialog.getByText('Remove @zeus? Its open tasks are cancelled.')).toBeVisible()
+  expect(await calls(page, 'member.remove')).toEqual([])
 })
 
 test('takes a member off the team once the human confirms', async ({ page }) => {
   await open(page)
   await page.getByRole('button', { name: 'Team' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project team' })
-  await dialog.getByRole('button', { name: 'Remove @zeus from the team' }).click()
+  await dialog.getByRole('button', { name: 'Remove Worker @zeus' }).click()
   await expect(dialog.getByText('Remove @zeus? Its open tasks are cancelled.')).toBeVisible()
   await dialog.getByRole('button', { name: 'Keep @zeus' }).click()
   await expect(dialog.getByText('Remove @zeus? Its open tasks are cancelled.')).toHaveCount(0)
   expect(await calls(page, 'member.remove')).toEqual([])
 
-  await dialog.getByRole('button', { name: 'Remove @zeus from the team' }).click()
+  await dialog.getByRole('button', { name: 'Remove Worker @zeus' }).click()
   await dialog.getByRole('button', { name: 'Remove @zeus', exact: true }).click()
   await expect.poll(() => calls(page, 'member.remove')).toEqual([{ project: 1, agent: 'zeus' }])
 })
@@ -816,12 +871,17 @@ test('keeps a pending removal and the chosen agent when the core redraws the tea
   page,
 }) => {
   const data = model()
-  data.agents.push({ name: 'hera', harness: 'pi', model: 'muse-spark' })
+  data.agents.push({
+    name: 'hera',
+    harness: 'pi',
+    model: 'muse-spark',
+    profile: { categories: ['worker', 'reviewer'] },
+  })
   await open(page, data)
   await page.getByRole('button', { name: 'Team' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project team' })
   await dialog.getByLabel('Agent').selectOption('hera')
-  await dialog.getByRole('button', { name: 'Remove @zeus from the team' }).click()
+  await dialog.getByRole('button', { name: 'Remove Worker @zeus' }).click()
   const boards = () =>
     page.evaluate(() => window.__calls.filter(([, args]) => args.operation === 'board.get').length)
   for (let redraw = 0; redraw < 2; redraw += 1) {
@@ -833,18 +893,18 @@ test('keeps a pending removal and the chosen agent when the core redraws the tea
   await expect(dialog.getByLabel('Agent')).toHaveValue('hera')
 })
 
-test('puts a tick back when the core refuses the change', async ({ page }) => {
+test('keeps the row when the core refuses to drop the last reviewer', async ({ page }) => {
   const data = model()
   const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'diana')
   lane.participant.roles = ['worker', 'reviewer']
   await open(page, data)
   await page.getByRole('button', { name: 'Team' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project team' })
-  await dialog.getByRole('checkbox', { name: 'Reviewer @diana' }).click()
+  await dialog.getByRole('button', { name: 'Remove Reviewer @diana' }).click()
   await expect(page.getByRole('status')).toContainText(
     '@diana is the last reviewer: the review policy needs one',
   )
-  await expect(dialog.getByRole('checkbox', { name: 'Reviewer @diana' })).toBeChecked()
+  await expect(dialog.getByRole('button', { name: 'Remove Reviewer @diana' })).toBeVisible()
   await expect(dialog.getByLabel('Second review of')).toHaveValue('members')
 })
 
@@ -875,7 +935,7 @@ test('holds the review choices until a reviewer is on the team', async ({ page }
   const dialog = page.getByRole('dialog', { name: 'Project team' })
   await expect(dialog.getByLabel('Second review of')).toHaveValue('none')
   await expect(dialog.locator('.team-warning')).toHaveText(
-    'Reviews need a reviewer on the team: tick Reviewer for one of the agents.',
+    'Reviews need a reviewer on the team: add one of the agents as Reviewer.',
   )
   await expect(
     dialog.getByLabel('Second review of').locator('option[value="members"]'),
@@ -1065,14 +1125,21 @@ test('starts a project in a chosen folder with the chosen lead, the team ticked 
   const dialog = page.getByRole('dialog', { name: 'New project' })
   await expect(dialog.getByLabel('Project folder')).toHaveValue('/work/fresh')
   const table = dialog.getByRole('table', { name: 'Agents for the team' })
-  await expect(table.locator('tbody tr')).toHaveCount(3)
-  await expect(dialog.getByRole('checkbox', { name: 'Reviewer zeus' })).toBeChecked()
-  await expect(dialog.getByRole('checkbox', { name: 'Worker diana' })).toBeChecked()
-  await expect(dialog.getByRole('checkbox', { name: 'Worker athena' })).not.toBeChecked()
+  // The last team, one row per agent and role.
+  await expect(table.locator('tbody tr')).toHaveText([
+    /zeus.*Worker/,
+    /zeus.*Reviewer/,
+    /diana.*Worker/,
+  ])
   await expect(dialog.getByLabel('Second review of')).toHaveValue('members')
   await dialog.getByLabel('The lead runs in').selectOption('opencode')
-  await dialog.getByRole('checkbox', { name: 'Advisor athena' }).check()
-  await dialog.getByRole('checkbox', { name: 'Worker diana' }).uncheck()
+  await dialog.locator('[name="pickRole"]').selectOption('advisor')
+  await expect(dialog.locator('[name="pickAgent"]').locator('option')).toHaveText([
+    'athena · opencode · muse-spark',
+  ])
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Remove Worker diana' }).click()
+  await expect(table.locator('tbody tr')).toHaveCount(3)
   await dialog.getByLabel('Second review of').selectOption('none')
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
@@ -1096,15 +1163,17 @@ test('starts a project without reviews when nobody ticked is a reviewer', async 
   const dialog = page.getByRole('dialog', { name: 'New project' })
   await expect(dialog.getByLabel('Second review of')).toHaveValue('none')
   await expect(dialog.locator('.team-warning')).toHaveText(
-    'Reviews need a reviewer on the team: tick Reviewer for one of the agents.',
+    'Reviews need a reviewer on the team: add one of the agents as Reviewer.',
   )
   await expect(
     dialog.getByLabel('Second review of').locator('option[value="members"]'),
   ).toHaveJSProperty('disabled', true)
-  await dialog.getByRole('checkbox', { name: 'Reviewer athena' }).check()
+  await dialog.locator('[name="pickRole"]').selectOption('reviewer')
+  await dialog.locator('[name="pickAgent"]').selectOption('athena')
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
   await expect(dialog.locator('.team-warning')).toBeHidden()
   await dialog.getByLabel('Second review of').selectOption('members')
-  await dialog.getByRole('checkbox', { name: 'Reviewer athena' }).uncheck()
+  await dialog.getByRole('button', { name: 'Remove Reviewer athena' }).click()
   await expect(dialog.getByLabel('Second review of')).toHaveValue('none')
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect

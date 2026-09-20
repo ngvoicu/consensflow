@@ -11,6 +11,8 @@ export const USAGE = `cf inside a ConsensFlow window: the board's commands.
   cf task add --advice --tier <tier> "…"
                                     a question for an advisor of that tier: findings and
                                     recommendations back, no file changed
+  cf task add --design "…"          an image from the image designer: what to draw, what
+                                    to use as reference, where to save it
   cf task add --after T-3 "…"       a follow-up for the window that did T-3, which
                                     keeps its context; only when that context matters
   cf task add --self "…"            a task for yourself, on the board
@@ -177,13 +179,19 @@ async function taskCommand([action, ...rest], call, cwd) {
   if (action === 'add') {
     const { flags, text, target } = split(
       rest,
-      ['--self', '--advice'],
+      ['--self', '--advice', '--design'],
       ['--to', '--title', '--file', '--tier', '--purpose', '--after'],
     )
     const to = handle(flags['--to'] ?? target)
     const tier = flags['--tier']
     const after = flags['--after'] === undefined ? undefined : taskNumber(flags['--after'])
-    if (to === undefined && tier === undefined && after === undefined && flags['--self'] !== true) {
+    if (
+      to === undefined &&
+      tier === undefined &&
+      after === undefined &&
+      flags['--self'] !== true &&
+      flags['--design'] !== true
+    ) {
       throw usage(ADD_USAGE)
     }
     const body =
@@ -196,11 +204,13 @@ async function taskCommand([action, ...rest], call, cwd) {
         ? { after }
         : to !== undefined
           ? { to }
-          : {
-              tier,
-              ...(flags['--advice'] ? { advice: true } : {}),
-              ...(flags['--purpose'] === undefined ? {} : { purpose: flags['--purpose'] }),
-            }
+          : flags['--design']
+            ? { design: true }
+            : {
+                tier,
+                ...(flags['--advice'] ? { advice: true } : {}),
+                ...(flags['--purpose'] === undefined ? {} : { purpose: flags['--purpose'] }),
+              }
     const created = await call('POST', '/api/tasks', {
       ...address,
       body,
@@ -215,7 +225,7 @@ async function taskCommand([action, ...rest], call, cwd) {
           ? `T-${number} continues in @${assignee}, the window that did T-${after}; its result arrives in your inbox.`
           : to !== undefined
             ? `T-${number} queued for @${to}. The result arrives in your inbox when @${to} finishes.`
-            : `T-${number} is on the board for a ${tier} ${pool}; the first free one gets it, and its result arrives in your inbox.`,
+            : `T-${number} is on the board for ${aPool(pool, tier)}; the first free one gets it, and its result arrives in your inbox.`,
     }
   }
   if (action === 'list' || action === undefined) {
@@ -263,7 +273,10 @@ async function taskCommand([action, ...rest], call, cwd) {
 }
 
 const ADD_USAGE =
-  'cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor; or --after T-3, or --self)'
+  'cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor; or --design, --after T-3, or --self)'
+
+/** "a standard worker", "an image designer": who an open task waits for. */
+const aPool = (pool, tier) => (pool === 'designer' ? 'an image designer' : `a ${tier} ${pool}`)
 
 function client(env) {
   const url = env.CONSENSFLOW_URL
@@ -332,6 +345,6 @@ function usage(message) {
 }
 
 const taskLine = (task) =>
-  `T-${task.number} [${task.state}] ${task.assignee === null ? `for a ${task.tier} ${task.pool}` : `@${task.assignee}`} ← @${task.requester}: ${task.title}`
+  `T-${task.number} [${task.state}] ${task.assignee === null ? `for ${aPool(task.pool, task.tier)}` : `@${task.assignee}`} ← @${task.requester}: ${task.title}`
 const messageLine = (message) =>
   `m-${message.id} [${message.state}] ${message.kind}${(message.task ?? message.taskNumber) ? ` T-${message.task ?? message.taskNumber}` : ''} from ${message.sender === null ? 'ConsensFlow' : `@${message.sender}`}${message.preview === undefined ? '' : `: ${message.preview}`}`

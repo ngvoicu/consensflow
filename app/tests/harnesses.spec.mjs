@@ -694,8 +694,8 @@ test('a saved agent shows its tier and route in its entry’s place; a catalog r
     await expect(maia.locator('.agent-focus')).toHaveCount(0)
     await expect(member(page, 'custom').locator('.agent-route')).toHaveText('Codex login')
     await expect(member(page, 'draw').locator('.tier-pill')).toHaveText('T4 · Light work')
-    // The pills name the roles a model suits: an image agent suits none.
-    await expect(offer(page, 'pygmalion').getByRole('list', { name: 'Roles' })).toHaveCount(0)
+    // The pills name the roles a model suits: an image agent is the image designer.
+    await expect(pills(offer(page, 'pygmalion'), 'Roles')).toHaveText(['Image designer'])
     await expect(pills(offer(page, 'astraeus'), 'Roles')).toHaveText(['Advisor'])
     await expect(pills(offer(page, 'asteria'), 'Roles')).toHaveText([
       'Lead candidate',
@@ -719,6 +719,7 @@ test('a saved agent shows its tier and route in its entry’s place; a catalog r
       'Advisor',
       'Worker',
       'Reviewer',
+      'Image designer',
     ])
   } finally {
     await fixture.close()
@@ -963,7 +964,7 @@ test('shared model cards default to every model and reasoning across all harness
       await expect(screen.locator('#agents .offer')).toHaveCount(0)
       for (const card of summaries) {
         expect(card.profiles).toBe(1)
-        expect(card.categories).toBe(card.names.includes('pygmalion') ? 0 : 1)
+        expect(card.categories).toBe(1)
         expect(card.repeated).toBe(0)
         expect(card.routes).toBe(card.names.length)
       }

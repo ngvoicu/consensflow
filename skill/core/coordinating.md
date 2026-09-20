@@ -3,8 +3,10 @@
 
 Name the tier a task needs: a worker of that tier does the work; an advisor
 of that tier (`--advice`) answers a question with findings and
-recommendations and changes no file. ConsensFlow gives the task to a free
-member of that role and tier on this project's team (`cf team` shows the
+recommendations and changes no file. An image comes from the image designer
+(`--design`, no tier): say what to draw, what to use as reference and where
+to save it, and its result names the file. ConsensFlow gives the task to a
+free member of that role and tier on this project's team (`cf team` shows the
 team). You never pick the member: the team listing shows names so you can
 read the board, nothing more; never write a task with one member in mind, and
 never reason about who will get it. A task for a tier with no member of that

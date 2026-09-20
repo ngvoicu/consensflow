@@ -287,8 +287,8 @@ describe('catalog presentation follows actual model and effort', () => {
         assert.ok(entry.profile.modelLabel, entry.name)
         assert.ok(entry.profile.routeLabel, entry.name)
         assert.ok(entry.profile.goodFor.length > 15, entry.name)
-        // The pills name roles: an image agent suits none of them.
-        if (entry.name === 'pygmalion') assert.deepEqual(entry.profile.categories, [])
+        // The pills name roles: an image agent is the image designer.
+        if (entry.name === 'pygmalion') assert.deepEqual(entry.profile.categories, ['designer'])
         else
           assert.ok(
             entry.profile.categories.includes(
@@ -332,7 +332,9 @@ describe('catalog presentation follows actual model and effort', () => {
       'reviewer',
     ])
     assert.deepEqual(agentProfile({ ...astra, harness: 'unknown' }).categories, [])
-    assert.deepEqual(agentProfile({ harness: 'image', model: 'legacy-image' }).categories, [])
+    assert.deepEqual(agentProfile({ harness: 'image', model: 'legacy-image' }).categories, [
+      'designer',
+    ])
   })
 })
 

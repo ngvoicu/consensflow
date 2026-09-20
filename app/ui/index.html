@@ -513,16 +513,14 @@
     .dialog-help { margin: 0 0 12px; font-size: 12px; color: var(--muted); }
     .team { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 13px; }
     .team th { text-align: left; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); padding: 4px 8px 6px; }
-    .team th:nth-child(2), .team th:nth-child(3), .team th:nth-child(4) { text-align: center; }
     .team td { padding: 10px 10px; border-top: 1px solid var(--line-soft); vertical-align: middle; font-size: 14px; }
-    .team td.role-cell { text-align: center; width: 90px; }
     .team .member-name { font-family: var(--mono); }
     .team .member-meta { color: var(--muted); font: 11px var(--mono); }
     .team-add, .team-pick { border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
     .team-add legend, .team-pick legend { padding: 0 6px; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
     .team-add { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
-    .role-boxes { display: flex; gap: 12px; align-items: center; font-size: 12px; }
-    .role-boxes label { display: flex; align-items: center; gap: 4px; }
+    .team-add label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+    .team-pick .team-add { border: 0; padding: 4px 0 0; margin-bottom: 0; }
     .team-warning { margin: 0 0 12px; font-size: 12px; color: var(--amber); }
     .member-confirm { color: var(--buoy); font-size: 12px; margin-right: 8px; }
     .drawer-section { margin: 0 0 14px; }
@@ -750,13 +748,18 @@
       </label>
       <fieldset class="team-pick">
         <legend>The team</legend>
-        <p class="dialog-help">Tick the roles each agent may hold on this project. The last project's team is ticked already.</p>
+        <p class="dialog-help">Pick a role, then an agent whose model suits it. The last project's team is here already.</p>
         <table class="team" aria-label="Agents for the team">
           <thead>
-            <tr><th>Agent</th><th>Worker</th><th>Advisor</th><th>Reviewer</th></tr>
+            <tr><th>Agent</th><th>Role</th><th></th></tr>
           </thead>
           <tbody id="new-project-team"></tbody>
         </table>
+        <div class="team-add">
+          <label>Role<select name="pickRole"></select></label>
+          <label>Agent<select name="pickAgent"></select></label>
+          <button class="quiet-button" type="button" id="new-project-add">Add</button>
+        </div>
       </fieldset>
       <label>Second review of
         <select name="review">
@@ -775,21 +778,17 @@
   <dialog id="team-dialog" aria-labelledby="team-title">
     <form class="dialog-form">
       <h2 id="team-title">Project team</h2>
-      <p class="dialog-help">The lead names the tier a task needs and ConsensFlow picks a free member of that tier: a worker does the work, an advisor advises the lead, a reviewer reviews workers' work. A member may hold more than one role.</p>
+      <p class="dialog-help">The lead names the tier a task needs and ConsensFlow picks a free member of that tier: a worker does the work, an advisor advises the lead, a reviewer reviews workers' work, an image designer draws. A member may hold more than one role: one row here per role.</p>
       <table class="team" aria-label="On the team">
         <thead>
-          <tr><th>Member</th><th>Worker</th><th>Advisor</th><th>Reviewer</th><th>Tier</th><th></th></tr>
+          <tr><th>Member</th><th>Role</th><th></th></tr>
         </thead>
         <tbody id="team-members"></tbody>
       </table>
       <fieldset class="team-add">
         <legend>Add a member</legend>
+        <label>Role<select name="role"></select></label>
         <label>Agent<select name="agent"></select></label>
-        <span class="role-boxes" role="group" aria-label="Roles for the new member">
-          <label><input type="checkbox" name="roles" value="worker" checked> Worker</label>
-          <label><input type="checkbox" name="roles" value="advisor"> Advisor</label>
-          <label><input type="checkbox" name="roles" value="reviewer"> Reviewer</label>
-        </span>
         <button class="primary-button" type="submit">Add to team</button>
       </fieldset>
       <label>Second review of

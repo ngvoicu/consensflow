@@ -72,12 +72,17 @@ export function deliveryText(message, { reviews = [], unreviewed = null } = {}) 
     message.body.length <= INLINE_LIMIT
       ? message.body
       : `${message.body.slice(0, OPENING)}\n… (${message.body.length} characters; read all of it with: cf inbox read m-${message.id})`
+  // A question says how to answer it; a result says what to do with it, so
+  // the reader decides on the board even when its harness frames the message
+  // as a request.
   const footer =
-    message.kind !== 'question'
-      ? ''
-      : message.questions
+    message.kind === 'question'
+      ? message.questions
         ? `\n\nAnswer with: cf answer m-${message.id} "…" (a label or your own words${message.questions.length > 1 ? '; one line per question' : ''})`
         : `\n\nAnswer with: cf answer m-${message.id} "…"`
+      : message.kind === 'result' && message.taskNumber != null
+        ? `\n\nDecide with: cf task accept T-${message.taskNumber} · cf task reopen T-${message.taskNumber} "…" · cf task review T-${message.taskNumber}`
+        : ''
   return `[ConsensFlow m-${message.id}${task} · ${message.kind} from ${from}]\n${body}${reviewText(reviews, unreviewed)}${footer}`
 }
 
@@ -726,7 +731,7 @@ export class Dispatcher {
         this.#ledger.note(project.id, {
           to: task.requester,
           task: task.number,
-          body: `T-${task.number} waits for a free ${task.tier} ${task.pool}: ${this.#whyNotFree(candidates)}.`,
+          body: `T-${task.number} waits for a free ${task.pool === 'designer' ? 'image designer' : `${task.tier} ${task.pool}`}: ${this.#whyNotFree(candidates)}.`,
         })
         this.#changed()
       }

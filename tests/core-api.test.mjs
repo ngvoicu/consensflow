@@ -273,7 +273,7 @@ describe('cf inside a core window', () => {
         [usage.code, usage.err],
         [
           2,
-          'cf: cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor; or --after T-3, or --self)',
+          'cf: cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor; or --design, --after T-3, or --self)',
         ],
       )
       const missing = await cf(lead, 'task', 'done', 'T-9', 'x')
@@ -323,7 +323,7 @@ describe('tiered tasks through the API and cf', () => {
         [noTier.code, noTier.err],
         [
           2,
-          'cf: cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor; or --after T-3, or --self)',
+          'cf: cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor; or --design, --after T-3, or --self)',
         ],
       )
 
@@ -354,6 +354,24 @@ describe('tiered tasks through the API and cf', () => {
       )
       assert.match(advice.out, /^T-3 is on the board for a standard advisor;/)
       assert.equal(ledger.task(project.id, 3).pool, 'advisor')
+      ledger.addMember(project.id, {
+        agent: 'pygmalion',
+        harness: 'image',
+        role: 'designer',
+        tier: 'light',
+      })
+      const drawing = await cf(
+        lead,
+        'task',
+        'add',
+        '--design',
+        'A logo: a compass rose; save it as images/logo.png',
+      )
+      assert.match(drawing.out, /^T-4 is on the board for an image designer;/)
+      assert.deepEqual(
+        [ledger.task(project.id, 4).pool, ledger.task(project.id, 4).tier],
+        ['designer', null],
+      )
       const fromAdvisor = await cf(token('athena'), 'task', 'add', '--tier', 'standard', 'Do it')
       assert.deepEqual(
         [fromAdvisor.code, fromAdvisor.err],
@@ -371,6 +389,7 @@ describe('tiered tasks through the API and cf', () => {
           'Waiting for a member',
           'T-1 [open] for a standard worker ← @lead: Write the parser',
           'T-3 [open] for a standard advisor ← @lead: Compare the two parsers',
+          'T-4 [open] for an image designer ← @lead: A logo: a compass rose; save it as images/logo.png',
           '@lead (lead)',
           'T-2 [queued] @lead ← @lead: Plan the release',
         ].join('\n'),

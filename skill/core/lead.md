@@ -17,6 +17,7 @@ reply does nothing.
 
     cf task add --tier <critical|complex|standard|light> "…"   work for a worker; ConsensFlow picks the member
     cf task add --advice --tier <tier> "…"   a question for an advisor: findings and recommendations back, no file changed
+    cf task add --design "…"      an image from the image designer: what to draw, what to use as reference, where to save it
     cf task add --after T-3 "…"   a follow-up for the window that did T-3, only when its context matters
     cf task add --self "…"        work you do yourself, on the board (what the human asks you for in this window too)
     cf task done T-3 "…"          finish your own task with its result
