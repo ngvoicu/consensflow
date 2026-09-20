@@ -286,7 +286,6 @@ describe('catalog presentation follows actual model and effort', () => {
         assert.ok(entry.profile?.modelKey, entry.name)
         assert.ok(entry.profile.modelLabel, entry.name)
         assert.ok(entry.profile.routeLabel, entry.name)
-        assert.ok(entry.profile.goodFor.length > 15, entry.name)
         // The pills name roles: an image agent is the image designer.
         if (entry.name === 'pygmalion') assert.deepEqual(entry.profile.categories, ['designer'])
         else
@@ -481,5 +480,4 @@ it('assigns four work tiers by model and effort across routes, without agent-nam
   const custom = agentProfile({ harness: 'codex', model: 'custom', workTier: 'critical' })
   assert.equal(custom.workTier, 'critical')
   assert.deepEqual(custom.categories, ['advisor'])
-  assert.doesNotMatch(custom.goodFor, /coding|implementation/i)
 })

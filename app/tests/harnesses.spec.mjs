@@ -691,7 +691,6 @@ test('a saved agent shows its tier and route in its entry’s place; a catalog r
     await expect(maia.locator('.agent-route')).toHaveText('Codex login')
     await expect(maia.getByRole('list', { name: 'Roles' })).toHaveCount(0)
     await expect(maia.getByRole('list', { name: 'Tags' })).toHaveCount(0)
-    await expect(maia.locator('.agent-focus')).toHaveCount(0)
     await expect(member(page, 'custom').locator('.agent-route')).toHaveText('Codex login')
     await expect(member(page, 'draw').locator('.tier-pill')).toHaveText('T4 · Light work')
     // The pills name the roles a model suits: an image agent is the image designer.
@@ -892,7 +891,8 @@ test('Show, search, category and grouping work per tab, saved agents and catalog
     await expect(offer(page, 'astraeus')).toBeVisible()
     await expect(offer(page, 'maia')).toHaveCount(0)
     await expect(page.locator('.callsign')).toHaveText(['lead-one', 'peer-one'])
-    await expect(page.locator('#agents')).toContainText('Good for: Consequential reviews')
+    // No description of a model anywhere: its pills, tier and scores say it all.
+    await expect(page.locator('#agents')).not.toContainText('Good for')
     await category.selectOption('worker')
     await expect(own.locator('.callsign')).toHaveCount(7, 'every saved agent but the image one')
     await search.fill('<custom-model>')
@@ -948,10 +948,9 @@ test('shared model cards default to every model and reasoning across all harness
           names: [...node.querySelectorAll('.offer__name, .callsign')]
             .map((n) => n.textContent)
             .sort(),
-          profiles: node.querySelectorAll('.model-summary .agent-focus').length,
           categories: node.querySelectorAll('.model-summary .category-pills').length,
           repeated: node.querySelectorAll(
-            '.offer .agent-focus, .member .agent-focus, .offer .category-pills, .member .category-pills, .offer .benchmark-details, .member .benchmark-details',
+            '.offer .category-pills, .member .category-pills, .offer .benchmark-details, .member .benchmark-details',
           ).length,
           routes: node.querySelectorAll('.offer .agent-route, .member .agent-route').length,
         })),
@@ -963,7 +962,6 @@ test('shared model cards default to every model and reasoning across all harness
       // under it is a member card with its route, and nothing repeated.
       await expect(screen.locator('#agents .offer')).toHaveCount(0)
       for (const card of summaries) {
-        expect(card.profiles).toBe(1)
         expect(card.categories).toBe(1)
         expect(card.repeated).toBe(0)
         expect(card.routes).toBe(card.names.length)
@@ -1076,7 +1074,7 @@ test('shared model cards return after reload and Clear filters in both tabs', as
       const card = screen.locator('.model-group').filter({
         has: screen.getByRole('heading', { name: 'Claude Fable 5.1 · Xhigh · 3', exact: true }),
       })
-      await expect(card.locator('.agent-focus')).toHaveCount(1)
+      await expect(card.locator('.model-summary .category-pills')).toHaveCount(1)
       for (const alternate of ['none', 'harness']) {
         await screen.getByLabel('Group by').selectOption(alternate)
         await expect(screen.locator('.model-summary')).toHaveCount(0)
@@ -1084,12 +1082,12 @@ test('shared model cards return after reload and Clear filters in both tabs', as
         await screen.getByRole('button', { name: 'Clear filters' }).click()
         await expect(screen.getByLabel('Group by')).toHaveValue('model-reasoning')
         await expect(screen.getByRole('searchbox')).toHaveValue('')
-        await expect(card.locator('.agent-focus')).toHaveCount(1)
+        await expect(card.locator('.model-summary .category-pills')).toHaveCount(1)
         await expect(card.locator('.offer, .member')).toHaveCount(3)
       }
       await screen.reload()
       await expect(screen.getByLabel('Group by')).toHaveValue('model-reasoning')
-      await expect(card.locator('.agent-focus')).toHaveCount(1)
+      await expect(card.locator('.model-summary .category-pills')).toHaveCount(1)
     }
   } finally {
     await fixture.close()
@@ -1123,7 +1121,6 @@ test('shared model cards keep Fable choices independent through add, remove, fil
       .filter({ has: page.getByRole('heading', { name: /^Claude Fable 5.1 · Xhigh ·/ }) })
     await expect(card.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 3')
     await expect(card.locator('.category-pills')).toHaveCount(1)
-    await expect(card.locator('.agent-focus')).toHaveCount(1)
     await expect(card.locator('.benchmark-details')).toHaveCount(1)
     await expect(card.locator('.model-summary .benchmark-pill')).toHaveText([
       'Intelligence 53.2',

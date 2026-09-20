@@ -153,3 +153,6 @@ Gabriel, on the Candidate built from `87c45f5`, 2026-09-20 afternoon:
 - Gabriel: the agent picker in the team needs the model's effort level. Each
   choice reads name · harness · model · effort, in both dialogs and in the
   New project rows.
+- Gabriel: the "Good for" description was still on some model cards. The
+  description is gone from the profile and the screen: a model's card says
+  its tier, the roles it suits and its scores, nothing else.

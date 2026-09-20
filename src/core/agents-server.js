@@ -318,12 +318,10 @@ const PAGE = (token) => `<!DOCTYPE html>
   .model-group { border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin: 16px 0; }
   .model-summary { padding-bottom: 14px; overflow-wrap: anywhere; }
   .model-summary h3 { color: var(--foam); font-size: 18px; font-weight: 600; margin: 0 0 10px; }
-  .model-summary .agent-focus { margin: 8px 0; }
   .model-group .offer, .model-group .member { padding: 12px 0; border-top: 1px solid var(--line); }
   .model-group .offer:last-child, .model-group .member:last-child { padding-bottom: 0; border-bottom: none; }
-  .agent-focus { color: var(--foam); font-size: 13px; }
   .agent-route, .agent-route-note { color: var(--muted); font-size: 11px; }
-  .member .agent-focus, .member .agent-route, .member .agent-route-note { margin: 0; }
+  .member .agent-route, .member .agent-route-note { margin: 0; }
   .offer__model { color: var(--foam); opacity: 1; display: block; overflow-wrap: anywhere; }
   .offer__actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; max-width: 220px; }
   .offer__actions button { overflow-wrap: anywhere; max-width: 100%; }
@@ -422,7 +420,7 @@ function browsingGroups(entries, sectionId) {
   const metric = selectedMetric();
   const filtered = entries.filter(p => (tier === 'all' || p.profile.workTier === tier) && (category === 'all' || p.profile.categories.includes(category)) &&
     [p.name, p.model, p.description, p.detail, p.harness, HARNESS_LABELS[p.harness], effortLabel(effortValue(p)),
-      WORK_TIERS[p.profile.workTier].label, p.profile.modelLabel, p.profile.routeLabel, p.profile.routeNote, p.profile.goodFor, ...p.profile.categories.map(c => CATEGORY_LABELS[c])]
+      WORK_TIERS[p.profile.workTier].label, p.profile.modelLabel, p.profile.routeLabel, p.profile.routeNote, ...p.profile.categories.map(c => CATEGORY_LABELS[c])]
       .filter(Boolean).join(' ').toLowerCase().includes(needle));
   section.querySelector('.section-count').textContent = filtered.length + ' of ' + entries.length + ' shown';
   const groups = new Map();
@@ -435,7 +433,7 @@ function browsingGroups(entries, sectionId) {
   }
   for (const group of groups.values()) {
     group.rows.sort((a, b) => compareScores(a, b, metric) || compareAgents(a, b));
-    group.shared = group.modelGroup ? ['workTier', 'categories', 'goodFor', 'benchmarks'].filter(field =>
+    group.shared = group.modelGroup ? ['workTier', 'categories', 'benchmarks'].filter(field =>
       group.rows.every(p => JSON.stringify(p.profile[field]) === JSON.stringify(group.rows[0].profile[field]))) : [];
     // The tier's note goes with the tier pill: said once on the card when the tier is.
     if (group.shared.includes('workTier')) group.shared.push('tierNote');
@@ -475,7 +473,6 @@ function appendProfile(host, p, fields) {
     }
     host.append(categories);
   }
-  if (fields.includes('goodFor')) host.append(el('p', 'agent-focus', 'Good for: ' + p.profile.goodFor));
   if (fields.includes('routeLabel')) {
     host.append(el('p', 'agent-route', p.profile.routeLabel));
     if (p.profile.routeNote) host.append(el('p', 'agent-route-note', p.profile.routeNote));
@@ -615,7 +612,7 @@ function renderAgents(data) {
     host.append(all);
   }
   for (const group of groups) {
-    const section = groupSection(group, ['workTier', 'tierNote', 'categories', 'goodFor', 'benchmarks']);
+    const section = groupSection(group, ['workTier', 'tierNote', 'categories', 'benchmarks']);
     for (const entry of group.rows) {
       const saved = entry.custom ? [entry] : catalogMatches(entry, data.agents);
       if (saved.length === 0) section.append(offerRow(entry, group, data));
@@ -716,7 +713,7 @@ function offerRow(entry, group, data) {
   row.append(el('span', 'offer__name', entry.name));
   const what = el('div', 'offer__what');
   what.append(el('span', 'offer__model', group.modelGroup ? (HARNESS_LABELS[entry.harness] || entry.harness) : entry.profile.modelLabel + ' · ' + (HARNESS_LABELS[entry.harness] || entry.harness) + ' · ' + effortLabel(effortValue(entry))));
-  appendProfile(what, entry, ['workTier', 'tierNote', 'categories', 'goodFor', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
+  appendProfile(what, entry, ['workTier', 'tierNote', 'categories', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
   row.append(what);
   const state = catalogState(entry, data.agents);
   const add = el('button', null, state);

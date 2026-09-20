@@ -1309,7 +1309,6 @@ export function agentProfile(agent) {
   profile.workTier = agent.workTier ?? tier;
   if (profile.workTier === 'critical') {
     profile.categories = ['advisor'];
-    profile.goodFor = 'Consequential reviews, architecture, discovering solutions to hard problems and answering important questions.';
   }
   return profile;
 }
@@ -1322,7 +1321,6 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
     modelLabel: model && model !== 'default' ? model : 'Devin configured model',
     routeLabel: 'Devin account',
     categories: ['worker', 'reviewer'],
-    goodFor: 'Coding and review using the model selected in your Devin settings.',
   }
   if (harness === 'image')
     return {
@@ -1330,7 +1328,6 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
       modelLabel: 'Codex Images',
       routeLabel: 'Codex login',
       categories: ['designer'],
-      goodFor: 'Generate illustrations and edit reference images.',
     }
   const known = AGENT_PRESETS.some((p) => (p.kind === "claude-code" ? "claude" : p.kind) === harness && p.model === model)
   // Strip provider paths only AFTER an exact curated model/harness match.
@@ -1358,24 +1355,7 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
             : ({ claude: 'Claude Code account', codex: 'Codex login', kimi: 'Kimi Code account' }[
                 harness
               ] ?? harness)
-  let goodFor = worker ? 'Use your chosen model for coding tasks.' : 'Use your custom harness and model.'
   if (known) {
-    if (['gpt-6-astra', 'claude-fable-5.1'].includes(key) || (key === 'gpt-5.6-sol' && ['low', 'medium'].includes(effort))) {
-      goodFor =
-        effort === 'low'
-          ? 'Small code changes and focused reviews.'
-          : effort === 'medium'
-            ? 'Implementation, code review and planning.'
-            : 'Complex debugging, architecture and detailed review.'
-    } else if (/sol|opus/.test(key)) goodFor = 'Feature work, code review and technical planning.'
-    else if (/terra|sonnet/.test(key)) goodFor = 'Everyday implementation and tests.'
-    else if (/luna/.test(key)) goodFor = 'Small fixes and focused coding tasks.'
-    else if (/flash/.test(key)) goodFor = 'Routine coding and second opinions.'
-    else if (/laguna/.test(key)) goodFor = 'Code changes and repository tasks.'
-    else if (/muse/.test(key)) goodFor = 'Collaborative coding and task breakdown.'
-    else if (/27b|minimax|kimi|nemotron/.test(key))
-      goodFor = 'Coding and analysis across longer tasks.'
-    else goodFor = 'Complex code changes and analysis.'
     const supportedEffort =
       (harness === 'kimi' ? KIMI_EFFORTS : ['low', 'medium', 'high', 'xhigh', 'max']).includes(effort) ||
       (harness === 'codex' && effort === 'ultra')
@@ -1394,7 +1374,6 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
     routeLabel: routeLabel + (contributor ? (model.endsWith('-free') ? ' · Contributor · Free' : ' · Contributor') : ''),
     ...(contributor ? { routeNote: 'Prompts and replies may train Meta models.' } : {}),
     categories,
-    goodFor,
   }
 }
 
