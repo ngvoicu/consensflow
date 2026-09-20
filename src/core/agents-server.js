@@ -466,24 +466,24 @@ function browsingGroups(entries, sectionId) {
     (by === 'tier' ? rank(Object.keys(WORK_TIERS), a.key) - rank(Object.keys(WORK_TIERS), b.key) : by === 'harness' ? rank(Object.keys(HARNESS_LABELS), a.key) - rank(Object.keys(HARNESS_LABELS), b.key) :
       by === 'model-reasoning' ? compareScores(a.rows[0], b.rows[0], metric) || compareModels(a, b) || compareEffort(a.effort, b.effort) : 0) || compareText(a.title, b.title) || compareText(a.key, b.key));
 }
-function groupSection(group) {
+function groupSection(group, fields = group.shared) {
   const section = el('section', group.modelGroup ? 'agent-group model-group' : 'agent-group');
   if (group.modelGroup) {
     const summary = el('header', 'model-summary');
     summary.append(el('h3', null, group.title + ' · ' + group.rows.length));
-    appendProfile(summary, group.rows[0], group.shared);
+    appendProfile(summary, group.rows[0], fields.filter(field => group.shared.includes(field)));
     section.append(summary);
   } else if (group.title) section.append(el('h3', 'eyebrow eyebrow--tool', group.title + ' · ' + group.rows.length));
   return section;
 }
-function appendProfile(host, p, fields = ['workTier', 'categories', 'goodFor', 'routeLabel', 'benchmarks']) {
+function appendProfile(host, p, fields = ['workTier', 'tierNote', 'categories', 'goodFor', 'routeLabel', 'benchmarks']) {
   if (fields.includes('workTier')) {
     const tier = WORK_TIERS[p.profile.workTier];
     const pill = el('span', 'tier-pill', 'T' + (Object.keys(WORK_TIERS).indexOf(p.profile.workTier) + 1) + ' · ' + tier.label);
     pill.dataset.tier = p.profile.workTier;
     pill.title = tier.description;
     host.append(pill);
-    if (p.profile.workTier === 'critical') host.append(el('p', 'tier-note', 'Important work only · No coding'));
+    if (fields.includes('tierNote') && p.profile.workTier === 'critical') host.append(el('p', 'tier-note', 'Important work only · No coding'));
   }
   if (fields.includes('tags') && p.tags?.length) {
     const tags = el('ul', 'tag-pills');
@@ -613,7 +613,7 @@ function renderRoster(data) {
     host.append(all);
   }
   for (const group of groups) {
-    const section = groupSection(group);
+    const section = groupSection(group, ['workTier', 'benchmarks']);
     host.append(section);
     for (const p of group.rows) {
     const card = el('div', 'member');
@@ -638,8 +638,9 @@ function renderRoster(data) {
       note.append(update);
       card.append(note);
     }
-    // A saved agent shows what the daemon picks it by: its tier and its tags.
-    appendProfile(card, p, ['workTier', 'tags', 'goodFor', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
+    // A saved agent shows what the daemon picks it by, its tier and its tags,
+    // and how it is billed; the catalog's words about the model stay in the library.
+    appendProfile(card, p, ['workTier', 'tags', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
     if (editors.has(p.name)) card.append(editors.get(p.name));
     section.append(card);
     }
@@ -740,13 +741,13 @@ function renderCatalog(data) {
   const entries = Object.entries(data.catalog).flatMap(([harness, entries]) => entries.map(p => ({ ...p, harness })));
   const groups = browsingGroups(entries, '#catalog-section');
   for (const group of groups) {
-    const section = groupSection(group);
+    const section = groupSection(group, ['workTier', 'tierNote', 'categories', 'goodFor', 'benchmarks']);
     for (const entry of group.rows) {
       const row = el('div', 'offer');
       row.append(el('span', 'offer__name', entry.name));
       const what = el('div', 'offer__what');
       what.append(el('span', 'offer__model', group.modelGroup ? (HARNESS_LABELS[entry.harness] || entry.harness) : entry.profile.modelLabel + ' · ' + (HARNESS_LABELS[entry.harness] || entry.harness) + ' · ' + effortLabel(effortValue(entry))));
-      appendProfile(what, entry, ['workTier', 'categories', 'goodFor', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
+      appendProfile(what, entry, ['workTier', 'tierNote', 'categories', 'goodFor', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
       row.append(what);
       const state = catalogState(entry, data.agents);
       const add = el('button', null, state);

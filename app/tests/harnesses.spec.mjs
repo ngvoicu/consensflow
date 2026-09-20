@@ -886,9 +886,11 @@ test('shared model cards default to every model and reasoning across all harness
       expect(summaries.map((s) => s.names.join(',')).sort()).toEqual(
         [...expected.values()].map((names) => names.sort().join(',')).sort(),
       )
+      // The library describes the model; the roster's card says only its tier and scores.
+      const roster = screen === fixture.roster
       for (const card of summaries) {
-        expect(card.profiles).toBe(1)
-        expect(card.categories).toBe(1)
+        expect(card.profiles).toBe(roster ? 0 : 1)
+        expect(card.categories).toBe(roster ? 0 : 1)
         expect(card.repeated).toBe(0)
         expect(card.routes).toBe(card.names.length)
       }
@@ -1001,7 +1003,8 @@ test('shared model cards return after reload and Clear filters on both screens',
       const card = screen.locator('.model-group').filter({
         has: screen.getByRole('heading', { name: 'Claude Fable 5.1 · Xhigh · 3', exact: true }),
       })
-      await expect(card.locator('.agent-focus')).toHaveCount(1)
+      // The library says what the model is good for; the roster's card does not.
+      await expect(card.locator('.agent-focus')).toHaveCount(screen === page ? 1 : 0)
       for (const alternate of ['none', 'harness']) {
         await screen.getByLabel('Group by').selectOption(alternate)
         await expect(screen.locator('.model-summary')).toHaveCount(0)
@@ -1129,7 +1132,8 @@ test('shared model cards retain differing role recommendations on their own harn
     ])
     await fixture.roster.getByLabel('Category', { exact: true }).selectOption('architecture')
     await expect(card.locator('h3')).toHaveText('GPT-6 Astra · Ultra · 1')
-    await expect(card.locator('.model-summary .category-pill')).toHaveCount(3)
+    await expect(card.locator('.model-summary .category-pill')).toHaveCount(0)
+    await expect(card.locator('.model-summary .tier-pill')).toHaveCount(1)
     await expect(member(fixture.roster, 'pi-ultra')).toHaveCount(0)
   } finally {
     await fixture.close()
@@ -1486,7 +1490,7 @@ for (const colorScheme of ['light', 'dark']) {
         await page.screenshot({ path: `/tmp/cf-model-card-${colorScheme}-${width}.png` })
         for (const screen of [page, fixture.roster]) {
           await screen.getByRole('button', { name: 'Clear filters' }).click()
-          const pills = screen.locator('.category-pill')
+          const pills = screen.locator(screen === page ? '.category-pill' : '.tag-pill')
           expect(await pills.count()).toBeGreaterThan(0)
           for (const pill of await pills.all()) {
             const checks = await pill.evaluate((node) => {
@@ -1590,7 +1594,9 @@ test('work tiers filter and group both screens, and saved overrides preserve hon
       await expect(screen.locator('.tier-pill')).not.toHaveCount(0)
       await expect(screen.locator('[data-category=coding]')).toHaveCount(0)
       await expect(screen.locator('[data-category=lead], [data-category=pm]')).toHaveCount(0)
-      await expect(screen.locator('.tier-note').first()).toContainText('No coding')
+      if (screen === page)
+        await expect(screen.locator('.tier-note').first()).toContainText('No coding')
+      else await expect(screen.locator('.tier-note')).toHaveCount(0)
       await screen.getByRole('button', { name: 'Clear filters' }).click()
       await expect(screen.getByLabel('Work tier', { exact: true })).toHaveValue('all')
       await screen.getByLabel('Group by').selectOption('tier')
