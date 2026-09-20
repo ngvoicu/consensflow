@@ -77,17 +77,22 @@ const board = new BoardView(boardRoot, {
         `T-${task.number} queued for ${participant.handle === 'lead' ? 'the lead' : `@${participant.handle}`}.`,
       )
     }),
-  onPutTask: ({ pool, tier, purpose }, text) =>
+  onPutTask: ({ pool, tier, purpose, needs }, text) =>
     act(async () => {
       const { task } = await core('task.add', {
         project: state.selected,
         pool,
         ...(tier === undefined ? {} : { tier }),
         ...(purpose === undefined ? {} : { purpose }),
+        ...(needs === undefined ? {} : { needs }),
         body: text,
       })
+      const waits =
+        task.blockedBy.length === 0
+          ? ''
+          : ` It waits until ${task.blockedBy.map((number) => `T-${number}`).join(', ')} ${task.blockedBy.length === 1 ? 'is' : 'are'} accepted.`
       note(
-        `T-${task.number} is on the board for ${pool === 'designer' ? 'an image designer' : `a ${tier} ${pool}`}.`,
+        `T-${task.number} is on the board for ${pool === 'designer' ? 'an image designer' : `a ${tier} ${pool}`}.${waits}`,
       )
     }),
   // A question put to the lead (left unanswered, or still waiting for the

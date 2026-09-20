@@ -36,7 +36,8 @@ Then: "you decide and build … just ship."
 - **A cancelled or failed need keeps its dependents blocked**, and the card
   says so: the lead re-adds the need or cancels the chain.
 - **Needs go with tasks on the board only.** `--self`, `--after` and a task
-  for a member by name refuse them.
+  for a member by name refuse them. The human's composer has an "Only after"
+  field for a task put on the board for a tier or the designer.
 - **A plan has no circles.** A `--before` target that the new task waits
   for, directly or through its needs, refuses the add (`circular-needs`):
   otherwise both would wait forever with nothing to say but "blocked by".

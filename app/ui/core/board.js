@@ -611,13 +611,23 @@ export class BoardView {
       return label
     }
     const purposeLabel = labelled('Purpose', purpose)
+    // What the task waits for first: task numbers, checked by the browser.
+    const needs = element('input')
+    needs.name = 'needs'
+    needs.type = 'text'
+    needs.placeholder = 'T-3, T-4'
+    needs.pattern = String.raw`\s*((T-?)?\d+\s*(,\s*(T-?)?\d+\s*)*)?`
+    needs.title = 'Task numbers, like T-3, T-4'
+    needs.setAttribute('aria-label', 'Only after')
+    const needsLabel = labelled('Only after', needs)
     const tiered = () => address.value.includes(':') || address.value === 'designer'
     const arrange = () => {
       purposeLabel.hidden = !address.value.endsWith(':critical')
+      needsLabel.hidden = !tiered()
     }
     address.addEventListener('change', arrange)
     arrange()
-    fields.append(labelled('For', address), purposeLabel)
+    fields.append(labelled('For', address), purposeLabel, needsLabel)
     const field = element('textarea')
     field.name = 'task'
     field.rows = 3
@@ -647,13 +657,15 @@ export class BoardView {
         this.#actions.onGiveTask({ handle: address.value }, text)
         return
       }
+      const after = [...needs.value.matchAll(/\d+/g)].map((match) => Number(match[0]))
+      const waits = after.length === 0 ? {} : { needs: after }
       if (address.value === 'designer') {
-        this.#actions.onPutTask({ pool: 'designer' }, text)
+        this.#actions.onPutTask({ pool: 'designer', ...waits }, text)
         return
       }
       const [pool, tier] = address.value.split(':')
       this.#actions.onPutTask(
-        { pool, tier, ...(tier === 'critical' ? { purpose: purpose.value } : {}) },
+        { pool, tier, ...(tier === 'critical' ? { purpose: purpose.value } : {}), ...waits },
         text,
       )
     })

@@ -378,6 +378,26 @@ describe('the page protocol of the new core', () => {
     })
   })
 
+  it('lets the human put a task on the board that waits for others', async () => {
+    await withPage(async ({ ledger, operations }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        harness: 'pi',
+        review: 'none',
+      })
+      await operations['member.add']({ project: project.id, agent: 'zeus' })
+      const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
+      const first = { project: project.id, pool: 'worker', tier: zeus.tier, body: 'Lexer' }
+      await operations['task.add'](first)
+      const { task } = await operations['task.add']({ ...first, needs: [1], body: 'Parser' })
+      assert.deepEqual([task.number, task.blockedBy], [2, [1]])
+      await assert.rejects(
+        operations['task.add']({ ...first, needs: [9], body: 'Nowhere' }),
+        /no task T-9/,
+      )
+    })
+  })
+
   it("shows the human's inbox and routes an answer back to whoever asked", async () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({
