@@ -17,12 +17,13 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
     'projects.list': async () => ({ projects: ledger.projects() }),
 
     // The team given, as the roster has those agents now; else the last team.
-    'project.open': change(async ({ directory, name, harness, review, team }) => ({
+    'project.open': change(async ({ directory, name, harness, review, gate, team }) => ({
       project: await dispatcher.openProject({
         directory,
         name: name ?? basename(directory),
         harness,
         review,
+        gate,
         team:
           team === undefined
             ? lastTeamNow(ledger, env)
@@ -103,6 +104,10 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       project: ledger.setReview(project, review),
     })),
 
+    'project.gate': change(async ({ project, gate }) => ({
+      project: ledger.setGate(project, gate),
+    })),
+
     'task.accept': change(async ({ project, task }) => ({
       task: ledger.acceptTask(project, task, { by: 'human' }),
     })),
@@ -116,6 +121,17 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
     })),
 
     'message.read': change(async ({ message }) => ({ message: ledger.markRead(message) })),
+
+    'message.approve': change(async ({ message }) => ({
+      message: ledger.approveMessage(message, { by: 'human' }),
+    })),
+
+    'message.decline': change(async ({ message, reason }) => ({
+      message: ledger.declineMessage(message, {
+        by: 'human',
+        ...(reason === undefined ? {} : { reason }),
+      }),
+    })),
 
     'message.answer': change(async ({ question, body, choices }) => ({
       message: ledger.answer(question, {

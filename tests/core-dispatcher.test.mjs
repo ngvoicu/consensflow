@@ -290,6 +290,47 @@ describe('the dispatcher', () => {
     })
   })
 
+  it('opens no window for a brief the human has not approved, and delivers a result only once approved', async () => {
+    await setup(async (context) => {
+      const { project, id } = await withTeam(context)
+      context.ledger.setGate(project.id, true)
+      context.ledger.createTask(project.id, {
+        from: 'lead',
+        pool: 'worker',
+        tier: 'standard',
+        body: 'Write the parser',
+      })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const brief = context.ledger.task(project.id, 1).messages[0]
+      assert.deepEqual(
+        [context.ledger.task(project.id, 1).state, brief.state],
+        ['queued', 'gated'],
+        'assigned, but held for the human',
+      )
+      assert.equal(context.host.last('zeus'), undefined, 'no window yet')
+      context.ledger.approveMessage(brief.id, { by: 'human' })
+      await context.dispatcher.pass()
+      assert.equal(context.adapter.prepared.at(-1).participant.handle, brief.recipient)
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.task(project.id, 1).state, 'working')
+      context.adapter.answer('zeus', 'Parser done')
+      await context.dispatcher.pass()
+      const result = context.ledger.task(project.id, 1).messages.find((m) => m.kind === 'result')
+      assert.equal(result.state, 'gated')
+      await context.dispatcher.pass()
+      assert.equal(context.adapter.agent('lead').items.length, 0, 'the lead waits for the human')
+      context.ledger.approveMessage(result.id, { by: 'human' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.inbox(id('lead'))[0].state, 'delivered')
+      assert.match(
+        context.adapter.agent('lead').items.at(-1).text,
+        /result from @zeus-amber-pine\]\nParser done/,
+      )
+    })
+  })
+
   it('delivers results to an idle lead one at a time and proves each arrived', async () => {
     await setup(async (context) => {
       const { project, id } = await withTeam(context, ['zeus', 'diana'])

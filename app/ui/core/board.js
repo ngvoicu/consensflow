@@ -175,9 +175,11 @@ export class BoardView {
 
   /** What waits for the human, and where a new task starts. */
   #forYou(inbox, board, now) {
-    // The human's own inbox, then the questions a coordinator has left unanswered too long.
+    // The human's own inbox, what waits for the human's approval, then the
+    // questions a coordinator has left unanswered too long.
     const waiting = [
       ...inbox.filter((message) => message.state === 'queued'),
+      ...(board.gated ?? []),
       ...(board.overdue ?? []).map((message) => ({ ...message, overdue: true })),
     ]
     const section = element('section', 'foryou')
@@ -206,7 +208,9 @@ export class BoardView {
         element(
           'li',
           'bay-empty',
-          'Questions from your agents and the results you asked for appear here.',
+          board.project?.gate
+            ? 'Every task, result, question and answer between your agents waits here for your approval.'
+            : 'Questions from your agents and the results you asked for appear here.',
         ),
       )
     }
@@ -285,6 +289,8 @@ export class BoardView {
     const item = element('li', 'strip strip-message')
     item.dataset.kind = message.kind
     item.dataset.message = String(message.id)
+    const gated = message.state === 'gated'
+    const toSomeone = message.overdue || gated
     const line = element('div', 'strip-line')
     line.append(
       element('span', 'strip-number', `m-${message.id}`),
@@ -292,16 +298,19 @@ export class BoardView {
       element(
         'span',
         'strip-route',
-        `${KIND_LABEL[message.kind] ?? message.kind} from ${who(message.sender)}${message.overdue ? ` to ${who(message.recipient)}` : ''}${message.taskNumber ? ` · T-${message.taskNumber}` : ''}${message.overdue ? ' · unanswered' : ''}`,
+        `${KIND_LABEL[message.kind] ?? message.kind} from ${who(message.sender)}${toSomeone ? ` to ${who(message.recipient)}` : ''}${message.taskNumber ? ` · T-${message.taskNumber}` : ''}${message.overdue ? ' · unanswered' : ''}${gated ? ' · needs your approval' : ''}`,
       ),
       element('span', 'strip-age', age(message.createdAt, now)),
     )
     if (message.overdue) item.dataset.overdue = 'true'
+    if (gated) item.dataset.gated = 'true'
     item.append(line)
     if (message.body.includes('\n') && !message.questions) {
       item.append(element('p', 'strip-body', message.body))
     }
-    if (message.kind === 'question') {
+    if (gated) {
+      item.append(this.#gateActions(message))
+    } else if (message.kind === 'question') {
       item.append(message.questions ? this.#choiceForm(message) : this.#answerForm(message))
     } else {
       const actions = element('div', 'strip-actions')
@@ -321,6 +330,62 @@ export class BoardView {
       item.append(actions)
     }
     return item
+  }
+
+  /**
+   * What the human may do with a message that waits for approval: pass it on
+   * as it is, or the one other thing its kind allows. A task or an answer is
+   * declined with a word to its sender; a result goes back to its window with
+   * a follow-up; a question is answered here instead of by the one asked.
+   */
+  #gateActions(message) {
+    const actions = element('div', 'strip-actions')
+    actions.append(
+      button(
+        'Approve',
+        'primary-button',
+        () => this.#actions.onApprove(message),
+        `Approve m-${message.id} for ${who(message.recipient)}`,
+      ),
+    )
+    if (message.kind === 'result') {
+      const form = element('form', 'reopen')
+      const field = element('textarea')
+      field.rows = 2
+      field.required = true
+      field.setAttribute('aria-label', `Follow-up for T-${message.taskNumber}`)
+      field.placeholder = `What should ${who(message.sender)} change?`
+      const submit = element('button', 'quiet-button', 'Send back')
+      submit.type = 'submit'
+      form.append(field, submit)
+      form.addEventListener('submit', (event) => {
+        event.preventDefault()
+        if (field.value.trim()) this.#actions.onSendBack(message, field.value.trim())
+      })
+      actions.append(form)
+    } else if (message.kind === 'question') {
+      actions.append(message.questions ? this.#choiceForm(message) : this.#answerForm(message))
+    } else {
+      const form = element('form', 'decline')
+      const field = element('input')
+      field.type = 'text'
+      field.setAttribute('aria-label', `Why m-${message.id} is declined`)
+      field.placeholder = 'Why (optional)'
+      const submit = element('button', 'quiet-button', 'Decline')
+      submit.type = 'submit'
+      form.append(field, submit)
+      form.addEventListener('submit', (event) => {
+        event.preventDefault()
+        this.#actions.onDecline(message, field.value.trim())
+      })
+      actions.append(form)
+    }
+    if (message.taskNumber) {
+      actions.append(
+        button('Open task', 'quiet-button', () => this.#actions.onOpenTask(message.taskNumber)),
+      )
+    }
+    return actions
   }
 
   /** The grid: a row per participant in lane order, a column per state. */

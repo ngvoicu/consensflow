@@ -333,6 +333,10 @@ async function open(page, data = model()) {
         return answer({ member: lane.participant })
       },
       'board.get': ({ project }) => answer({ board: data.boards[project] }),
+      'project.gate': ({ project, gate }) => {
+        data.boards[project].project.gate = gate
+        return answer({ project: data.boards[project].project })
+      },
       'inbox.get': ({ project }) => answer({ messages: data.inbox[project] ?? [] }),
       'task.get': ({ project, task }) => answer({ task: data.tasks[`${project}:${task}`] }),
       'task.add': ({ to, tier, pool, body }) =>
@@ -916,6 +920,104 @@ test('keeps the row when the core refuses to drop the last reviewer', async ({ p
   await expect(dialog.getByLabel('Second review of')).toHaveValue('members')
 })
 
+test('starts a project with human approval required, and posts the checkbox with the team', async ({
+  page,
+}) => {
+  await open(page)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const gate = dialog.getByLabel('Human approval required', { exact: false })
+  await expect(gate).not.toBeChecked()
+  await gate.check()
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      { directory: '/work/fresh', harness: 'claude-code', review: 'none', gate: true, team: [] },
+    ])
+})
+
+test('shows and sets human approval from the team dialog', async ({ page }) => {
+  const data = model()
+  data.boards[1].project.gate = true
+  await open(page, data)
+  await page.getByRole('button', { name: 'Team' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project team' })
+  const gate = dialog.getByLabel('Human approval required', { exact: false })
+  await expect(gate).toBeChecked()
+  await gate.uncheck()
+  await expect.poll(() => calls(page, 'project.gate')).toEqual([{ project: 1, gate: false }])
+  await expect(page.locator('#status')).toHaveText(
+    'Messages between agents go straight through again.',
+  )
+})
+
+test('lists what waits for approval in For you, and approves, declines, sends back or answers it', async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].project.gate = true
+  const gated = (id, kind, sender, recipient, taskNumber, body, extra = {}) => ({
+    id,
+    kind,
+    state: 'gated',
+    sender,
+    recipient,
+    taskNumber,
+    body,
+    questions: null,
+    choices: null,
+    createdAt: at(3),
+    ...extra,
+  })
+  data.boards[1].gated = [
+    gated(30, 'task', 'lead', 'zeus-amber-pine', 4, 'Add the tests\nCover the parser.'),
+    gated(31, 'result', 'zeus-amber-pine', 'lead', 2, 'Parser done, 14 tests.'),
+    gated(32, 'question', 'zeus-amber-pine', 'lead', 4, 'Which parser?'),
+    gated(33, 'answer', 'lead', 'zeus-amber-pine', 4, 'The recursive one.', { replyTo: 32 }),
+  ]
+  await open(page, data)
+  const bay = page.getByRole('region', { name: 'For you' })
+  await expect(bay.locator('.foryou-status')).toHaveText('7 waiting')
+  const brief = bay.locator('.strip-message[data-message="30"]')
+  await expect(brief).toHaveAttribute('data-gated', 'true')
+  await expect(brief.locator('.strip-route')).toHaveText(
+    'Task from @lead to @zeus-amber-pine · T-4 · needs your approval',
+  )
+  await expect(brief.locator('.strip-body')).toHaveText('Add the tests\nCover the parser.')
+  await brief.getByRole('button', { name: 'Approve m-30 for @zeus-amber-pine' }).click()
+  await expect.poll(() => calls(page, 'message.approve')).toEqual([{ message: 30 }])
+  await expect(page.locator('#status')).toHaveText('m-30 goes on to @zeus-amber-pine.')
+
+  const answer = bay.locator('.strip-message[data-message="33"]')
+  await expect(answer.locator('.strip-route')).toHaveText(
+    'Answer from @lead to @zeus-amber-pine · T-4 · needs your approval',
+  )
+  await answer.getByLabel('Why m-33 is declined').fill('Say the iterative one')
+  await answer.getByRole('button', { name: 'Decline' }).click()
+  await expect
+    .poll(() => calls(page, 'message.decline'))
+    .toEqual([{ message: 33, reason: 'Say the iterative one' }])
+
+  const result = bay.locator('.strip-message[data-message="31"]')
+  await expect(result.locator('.strip-route')).toHaveText(
+    'Result from @zeus-amber-pine to @lead · T-2 · needs your approval',
+  )
+  await result.getByLabel('Follow-up for T-2').fill('Add the lexer tests too.')
+  await result.getByRole('button', { name: 'Send back' }).click()
+  await expect
+    .poll(() => calls(page, 'task.reopen'))
+    .toEqual([{ project: 1, task: 2, body: 'Add the lexer tests too.' }])
+
+  const question = bay.locator('.strip-message[data-message="32"]')
+  await question.getByLabel('Answer to m-32').fill('The recursive one.')
+  await question.getByRole('button', { name: 'Send answer' }).click()
+  await expect
+    .poll(() => calls(page, 'message.answer'))
+    .toEqual([{ question: 32, body: 'The recursive one.' }])
+  expect(await calls(page, 'message.read')).toEqual([], 'a gated question was never in the inbox')
+})
+
 test('sets the review policy from the team dialog once a reviewer is on the team', async ({
   page,
 }) => {
@@ -1157,6 +1259,7 @@ test('starts a project in a chosen folder with the chosen lead, the team ticked 
         directory: '/work/fresh',
         harness: 'opencode',
         review: 'none',
+        gate: false,
         team: [
           { agent: 'zeus', roles: ['worker', 'reviewer'] },
           { agent: 'athena', roles: ['advisor'] },
@@ -1186,7 +1289,9 @@ test('starts a project without reviews when nobody ticked is a reviewer', async 
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
     .poll(() => calls(page, 'project.open'))
-    .toEqual([{ directory: '/work/fresh', harness: 'claude-code', review: 'none', team: [] }])
+    .toEqual([
+      { directory: '/work/fresh', harness: 'claude-code', review: 'none', gate: false, team: [] },
+    ])
 })
 
 test('shows every live window in the strip, brings the asked one into view, and feeds them their output', async ({

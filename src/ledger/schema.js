@@ -179,22 +179,10 @@ export const MIGRATIONS = [
   -- role constraint keeps 'pm'.
   UPDATE project SET review = 'members' WHERE review = 'all';
   `,
-  rebuildConstraints,
-]
-
-/**
- * The image designer joins the roles (candidate-feedback-3), and the
- * constraints catch up with everything that left: no 'pm' role, no 'all'
- * policy, and a task pool may be 'designer'. A CHECK cannot change in place,
- * so the three tables are rebuilt the way SQLite documents it: foreign keys
- * off, copy into a new table, drop the old, rename, check, foreign keys on.
- */
-function rebuildConstraints(db, version) {
-  db.exec('PRAGMA foreign_keys = OFF')
-  try {
-    db.exec('BEGIN IMMEDIATE')
-    try {
-      db.exec(`
+  // The image designer joins the roles (candidate-feedback-3), and the
+  // constraints catch up with everything that left: no 'pm' role, no 'all'
+  // policy, and a task pool may be 'designer'.
+  rebuilding(`
         CREATE TABLE project_next (
           id INTEGER PRIMARY KEY,
           directory TEXT NOT NULL,
@@ -290,19 +278,85 @@ function rebuildConstraints(db, version) {
         DROP TABLE task;
         ALTER TABLE task_next RENAME TO task;
         CREATE INDEX task_assignee_index ON task (assignee_id, state);
-      `)
-      const dangling = db.prepare('PRAGMA foreign_key_check').all()
-      if (dangling.length > 0) {
-        throw new Error(`the rebuild left ${dangling.length} rows without their parent`)
+  `),
+  // Human approval required (candidate-feedback-3, Phase C): a project may
+  // gate every message between two agents, and such a message waits in a
+  // state of its own until the human passes it on or declines it.
+  rebuilding(`
+        ALTER TABLE project ADD COLUMN gate INTEGER NOT NULL DEFAULT 0
+          CONSTRAINT project_gate_check CHECK (gate IN (0, 1));
+
+        CREATE TABLE message_next (
+          id INTEGER PRIMARY KEY,
+          project_id INTEGER NOT NULL,
+          recipient_id INTEGER NOT NULL,
+          sender_id INTEGER,
+          kind TEXT NOT NULL,
+          task_id INTEGER,
+          reply_to INTEGER,
+          body TEXT NOT NULL,
+          state TEXT NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          reason TEXT,
+          receipt TEXT,
+          created_at TEXT NOT NULL,
+          delivered_at TEXT,
+          questions TEXT,
+          choices TEXT,
+          CONSTRAINT message_project_fk FOREIGN KEY (project_id)
+            REFERENCES project (id) ON DELETE CASCADE,
+          CONSTRAINT message_recipient_fk FOREIGN KEY (recipient_id)
+            REFERENCES participant (id) ON DELETE CASCADE,
+          CONSTRAINT message_sender_fk FOREIGN KEY (sender_id)
+            REFERENCES participant (id) ON DELETE CASCADE,
+          CONSTRAINT message_task_fk FOREIGN KEY (task_id)
+            REFERENCES task (id) ON DELETE CASCADE,
+          CONSTRAINT message_reply_to_fk FOREIGN KEY (reply_to)
+            REFERENCES message (id) ON DELETE CASCADE,
+          CONSTRAINT message_kind_check
+            CHECK (kind IN ('task', 'result', 'question', 'answer', 'note')),
+          CONSTRAINT message_state_check CHECK (
+            state IN ('queued', 'delivering', 'delivered', 'read', 'held', 'gated', 'failed', 'cancelled')
+          )
+        ) STRICT;
+        INSERT INTO message_next
+          SELECT id, project_id, recipient_id, sender_id, kind, task_id, reply_to, body, state,
+                 attempts, reason, receipt, created_at, delivered_at, questions, choices
+          FROM message;
+        DROP TABLE message;
+        ALTER TABLE message_next RENAME TO message;
+        CREATE INDEX message_queue_index ON message (recipient_id, state, id);
+        CREATE INDEX message_task_index ON message (task_id, id);
+        CREATE UNIQUE INDEX message_delivering_unique
+          ON message (recipient_id) WHERE state = 'delivering';
+  `),
+]
+
+/**
+ * A migration that changes what a CHECK allows: SQLite cannot alter one in
+ * place, so the table is rebuilt the way SQLite documents it: foreign keys
+ * off, copy into a new table, drop the old, rename, check, foreign keys on.
+ */
+function rebuilding(sql) {
+  return (db, version) => {
+    db.exec('PRAGMA foreign_keys = OFF')
+    try {
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        db.exec(sql)
+        const dangling = db.prepare('PRAGMA foreign_key_check').all()
+        if (dangling.length > 0) {
+          throw new Error(`the rebuild left ${dangling.length} rows without their parent`)
+        }
+        db.exec(`PRAGMA user_version = ${version}`)
+        db.exec('COMMIT')
+      } catch (cause) {
+        db.exec('ROLLBACK')
+        throw cause
       }
-      db.exec(`PRAGMA user_version = ${version}`)
-      db.exec('COMMIT')
-    } catch (cause) {
-      db.exec('ROLLBACK')
-      throw cause
+    } finally {
+      db.exec('PRAGMA foreign_keys = ON')
     }
-  } finally {
-    db.exec('PRAGMA foreign_keys = ON')
   }
 }
 

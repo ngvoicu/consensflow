@@ -173,29 +173,45 @@ Gabriel, on the Candidate built from `87c45f5`, 2026-09-20 afternoon:
   is that door, installed per launch in Devin's private config with the
   hour-long timeout; the bench gets a Devin question step.
 
-### Phase C: Everything through the human [planned]
+### Phase C: Human approval required [done]
 
 Gabriel, 2026-09-20 evening: "a way where the human must approve all tasks
 and responses (if responses have review enabled from another agent, after
 the review), so any movement of info between lead, workers, advisors and
 vice versa must be a task for the human; a checkbox in the project settings
-can enable/disable this."
+can enable/disable this." On the first draft (questions and answers direct):
+"Human approval required is the name - all gated."
 
-Design to confirm before building:
+- [x] [TEST-CF3-06] Ledger: a project setting `gate` (off by default; a sixth
+  migration adds the column and rebuilds `message` so its state check admits
+  `gated`). With the gate on, every message from one agent to another lands
+  *gated* instead of queued: a task brief (assigned by the daemon, `--after`,
+  a reopen, a review brief, a reviewer's send-back), a result (after its
+  review, when the policy asks for one), a question, an answer (a choice
+  answer too, which lands *read* for the door once approved). What the human
+  sends or receives, what an agent tells itself and ConsensFlow's own notes
+  pass. `approveMessage` queues it; `declineMessage` cancels a task (a
+  declined review brief withdraws the review and the work goes on
+  unreviewed) or an answer (its question is open again) and tells the sender
+  why; a result is passed on or sent back (a reopen withdraws it), a
+  question passed on or answered by the human (which withdraws it from the
+  lead). A gated question is not overdue; an agent's inbox, its `cf task get`
+  thread and `cf inbox read` never show a gated message; accept, reopen,
+  cancel, fail and a member leaving withdraw them. `board().gated` lists
+  them for the bay.
+- [x] [TEST-CF3-07] Page and app: `project.open` takes `gate`; `project.gate`,
+  `message.approve`, `message.decline` (Rust allow-list). A checkbox "Human
+  approval required" in New project and Team. The bay lists every gated
+  message with Approve and the one other thing its kind allows: Decline with
+  a reason (task, answer), Send back with a follow-up (result), the answer
+  form (question). The dispatcher opens no window for a gated brief and
+  delivers a result only once approved (unit test); an integration scenario
+  runs the whole round through the real pane host with fake agents.
+- [x] [IMPL-CF3-08] Satisfies both; the lead's text says a task, an answer or
+  a result may wait for the human; README.
 
-- A project setting, `gate` (off by default; a checkbox in New project and
-  Team, "Everything through me").
-- With the gate on, a task the lead puts on the board (work, advice, design,
-  `--after`) opens in a new state, *proposed*, in the human's bay: Approve
-  opens it for the daemon as today; Decline cancels it with a note to the
-  lead saying why. The lead's own `--self` tasks are its own and pass.
-- With the gate on, a finished result (after its review, when the policy
-  asks for one) is *held for the human* instead of going to the lead: the
-  human reads it on the card and Passes it on (delivered to the lead as
-  today), Sends it back (a reopen with the human's follow-up, to the same
-  window) or Cancels it.
-- Questions and answers stay direct: a member's question still reaches the
-  lead at once, the lead's answer the member, both visible on the card. If
-  Gabriel wants them gated too, that is a second step.
-- The lead's text says a task or a result may wait for the human, so a
-  quiet board is not a stuck board. The bench gets a gated scenario.
+Stated choice: "all gated" is read as the uniform rule (sender and recipient
+both agents, and not the same one), so a review brief and a reviewer's
+send-back wait too: a reviewed task takes three approvals (brief, review
+brief, result) plus one per round of changes. Excluding the review machinery
+is a one-line change in `#queue` if Gabriel wants fewer.

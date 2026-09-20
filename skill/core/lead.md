@@ -62,6 +62,11 @@ reply does nothing.
 Messages arrive only when you are idle, one at a time; never poll for them.
 While results are pending, continue your own work or end your turn.
 
+When the project requires human approval, every task you add, every answer
+you give and every result on its way to you waits for the human first; a
+quiet board may be a waiting board. The human may answer a worker's question
+before you see it, or decline what you sent and tell you why.
+
 ## What you never do
 
 - Give a task to a worker by name, or write a task with one worker in mind:

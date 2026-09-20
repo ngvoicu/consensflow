@@ -40,6 +40,12 @@ credentials, takes no API key, and writes only inside its own home.
   reviewer must run a different model than the author; a request for changes
   goes back to the author once, and after a second round the lead decides with
   both reviews in hand.
+- **Human approval required.** With this project setting on, every message
+  between two agents (a task, a result after its review, a question, an
+  answer) waits in your bay until you pass it on. You may also decline a task
+  or an answer with a word to its sender, send a result back with a
+  follow-up, or answer a question yourself. What you send, what reaches you
+  and what ConsensFlow itself notes never wait.
 
 ## Install
 
@@ -60,9 +66,10 @@ projects.
   reviews. The lead's window is docked beside the board; a strip holds every
   live window.
 - **New project.** A folder, the lead's harness, the team (the last project's
-  ticked already) and the review policy.
+  ticked already), the review policy and whether human approval is required.
 - **Team.** Which saved agents this project may use, each with its roles and
-  tier. The daemon assigns work only within the team.
+  tier, plus the review policy and the approval setting. The daemon assigns
+  work only within the team.
 - **Agents** (Settings). The catalog and the agents you saved, as one list by
   model. Each model's card says its work tier, the roles it suits (Lead
   candidate, Advisor, Worker, Reviewer) and its benchmark scores once; a saved

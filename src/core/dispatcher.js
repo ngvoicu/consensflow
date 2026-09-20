@@ -174,13 +174,14 @@ export class Dispatcher {
   }
 
   /** A new project: the ledger records it with its team, and its lead window opens. */
-  async openProject({ directory, name, harness, team = [], review }) {
+  async openProject({ directory, name, harness, team = [], review, gate }) {
     const project = this.#ledger.createProject({
       directory,
       name,
       lead: { harness },
       team,
       ...(review === undefined ? {} : { review }),
+      ...(gate === undefined ? {} : { gate }),
     })
     const lead = project.participants.find((participant) => participant.handle === 'lead')
     await this.#exclusive(lead.id, () => this.#launch(project, lead, null))

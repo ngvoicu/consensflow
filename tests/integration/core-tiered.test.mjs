@@ -31,11 +31,12 @@ function team(app) {
 }
 
 /** A project opened as the New project dialog opens one: the team and the policy together. */
-async function project(app, { review, members }) {
+async function project(app, { review, gate, members }) {
   const opened = await app.requestNode('project.open', {
     directory: app.workspace,
     harness: 'claude-code',
     review,
+    ...(gate === undefined ? {} : { gate }),
     team: members.map(([agent, role]) => ({ agent, roles: [role] })),
   })
   assert.equal(opened.ok, true, JSON.stringify(opened))
@@ -262,6 +263,56 @@ test('a worker refused by its provider mid-task loses the task to the other work
     await app.waitFor(async () => {
       const results = (await p.inbox('lead')).filter((m) => m.kind === 'result')
       return results.some((m) => m.body === 'WORKER_OK' && m.state === 'delivered')
+    }, 60_000)
+  } finally {
+    await app.close()
+  }
+})
+
+test('with human approval required, the brief and the result each wait for the human before they move', async () => {
+  const app = await startIntegration({
+    editor: CORE_EDITOR,
+    fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
+  })
+  try {
+    team(app)
+    const p = await project(app, { review: 'none', gate: true, members: [['worker', 'worker']] })
+    assert.equal((await p.board()).project.gate, true)
+    const given = await app.requestNode('task.add', {
+      project: p.id,
+      to: 'lead',
+      body: `DISPATCH --tier ${p.tiers.worker} Reply with exactly: WORKER_OK`,
+    })
+    assert.equal(given.ok, true, JSON.stringify(given))
+
+    // The lead's brief is assigned, then held: no worker window opens for it.
+    await app.waitFor(async () => (await p.board()).gated.length === 1, 60_000)
+    const [brief] = (await p.board()).gated
+    assert.deepEqual([brief.kind, brief.sender, brief.taskNumber], ['task', 'lead', 2])
+    assert.equal((await p.task(2)).state, 'queued')
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    assert.equal(
+      app.openFrames.some((frame) => frame.id === `p${p.id}-${brief.recipient}`),
+      false,
+      'nothing opened while the human had not approved',
+    )
+    const approved = await app.requestNode('message.approve', { message: brief.id })
+    assert.equal(approved.ok, true, JSON.stringify(approved))
+    await app.waitFor(async () => (await p.task(2))?.state === 'done', 60_000)
+
+    // The result waits the same way; the lead's window gets nothing until it is passed on.
+    await app.waitFor(async () => (await p.board()).gated.length === 1, 60_000)
+    const [result] = (await p.board()).gated
+    assert.deepEqual([result.kind, result.recipient, result.body], ['result', 'lead', 'WORKER_OK'])
+    assert.deepEqual(
+      (await p.inbox('lead')).filter((m) => m.kind === 'result'),
+      [],
+      "not in the lead's inbox yet",
+    )
+    await app.requestNode('message.approve', { message: result.id })
+    await app.waitFor(async () => {
+      const messages = await p.inbox('lead')
+      return messages.some((m) => m.id === result.id && m.state === 'delivered')
     }, 60_000)
   } finally {
     await app.close()

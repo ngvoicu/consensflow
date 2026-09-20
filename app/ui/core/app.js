@@ -90,18 +90,38 @@ const board = new BoardView(boardRoot, {
         `T-${task.number} is on the board for ${pool === 'designer' ? 'an image designer' : `a ${tier} ${pool}`}.`,
       )
     }),
-  // A question put to a coordinator and left unanswered is answered here too;
-  // it was never in the human's inbox, so there is nothing to mark read.
+  // A question put to the lead (left unanswered, or still waiting for the
+  // human's approval) is answered here too; it was never in the human's
+  // inbox, so there is nothing to mark read.
   onAnswer: (message, text, choices) =>
     act(async () => {
       await core('message.answer', {
         question: message.id,
         ...(choices === undefined ? { body: text } : { choices }),
       })
-      if (!message.overdue) await core('message.read', { message: message.id })
+      if (message.recipient === 'human') await core('message.read', { message: message.id })
       note(`Answer sent to @${message.sender}.`)
     }),
   onRead: (message) => act(() => core('message.read', { message: message.id })),
+  // What waits for the human's approval goes on, goes back, or is declined with a word to its sender.
+  onApprove: (message) =>
+    act(async () => {
+      await core('message.approve', { message: message.id })
+      note(`m-${message.id} goes on to @${message.recipient}.`)
+    }),
+  onDecline: (message, reason) =>
+    act(async () => {
+      await core('message.decline', {
+        message: message.id,
+        ...(reason ? { reason } : {}),
+      })
+      note(`m-${message.id} declined; @${message.sender} is told.`)
+    }),
+  onSendBack: (message, text) =>
+    act(async () => {
+      await core('task.reopen', { project: state.selected, task: message.taskNumber, body: text })
+      note(`T-${message.taskNumber} goes back to @${message.sender}.`)
+    }),
   onOpenTask: (number) => act(() => openTask(number)),
   onOpenTerminal: (participant) => {
     state.focus = participant.handle
@@ -512,10 +532,11 @@ newProjectForm.addEventListener('submit', (event) => {
   const directory = newProjectForm.elements.directory.value
   const harness = newProjectForm.elements.harness.value
   const review = newProjectForm.elements.review.value
+  const gate = newProjectForm.elements.gate.checked
   const team = pickedTeam()
   newProjectDialog.close()
   void act(async () => {
-    const { project } = await core('project.open', { directory, harness, review, team })
+    const { project } = await core('project.open', { directory, harness, review, gate, team })
     state.selected = project.id
     state.focus = 'lead'
   })
@@ -529,6 +550,7 @@ const teamDialog = $('#team-dialog')
 const teamForm = teamDialog.querySelector('form')
 const teamList = $('#team-members')
 const teamReview = $('#team-review')
+const teamGate = $('#team-gate')
 const teamWarning = $('#team-warning')
 /** The member whose removal waits for the human's yes, kept across redraws. */
 let removing = null
@@ -547,6 +569,7 @@ function renderTeam() {
     teamList.firstChild.append(cell)
   }
   teamReview.value = state.board?.project.review ?? 'none'
+  teamGate.checked = state.board?.project.gate ?? false
   guardReview(
     teamReview,
     teamWarning,
@@ -648,6 +671,16 @@ teamReview.addEventListener('change', () =>
         none: 'Finished work goes straight to whoever asked.',
         members: "Workers' finished work gets a second review.",
       }[teamReview.value],
+    )
+  }),
+)
+teamGate.addEventListener('change', () =>
+  act(async () => {
+    await core('project.gate', { project: state.selected, gate: teamGate.checked })
+    note(
+      teamGate.checked
+        ? 'Every message between agents now waits for your approval.'
+        : 'Messages between agents go straight through again.',
     )
   }),
 )

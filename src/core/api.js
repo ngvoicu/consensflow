@@ -181,10 +181,12 @@ export async function startApi({
     const message = MESSAGE_ROUTE.exec(url.pathname)
     if (message !== null && request.method === 'GET') {
       const found = ledger.message(Number(message[1]))
+      // What still waits for the human is not yet the recipient's to read.
       if (
         found === null ||
         found.projectId !== project.id ||
-        (found.recipient !== participant.handle && found.sender !== participant.handle)
+        (found.recipient !== participant.handle && found.sender !== participant.handle) ||
+        (found.state === 'gated' && found.recipient === participant.handle)
       ) {
         throw new Refusal(404, 'unknown-message', `no message m-${message[1]} for you`)
       }
@@ -253,7 +255,10 @@ export async function startApi({
   async function taskRoute(request, { project, participant }, number, action) {
     const task = ledger.task(project.id, number)
     if (task === null) throw new Refusal(404, 'unknown-task', `no task T-${number} in this project`)
-    if (action === undefined && request.method === 'GET') return ok({ task })
+    if (action === undefined && request.method === 'GET') {
+      // The thread as far as the human has let it go: a gated message waits unseen.
+      return ok({ task: { ...task, messages: task.messages.filter((m) => m.state !== 'gated') } })
+    }
     if (request.method !== 'POST' || action === undefined) {
       throw new Refusal(404, 'unknown-route', 'no such task command')
     }

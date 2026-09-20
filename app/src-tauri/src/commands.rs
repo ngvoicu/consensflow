@@ -1548,6 +1548,7 @@ const CORE_OPERATIONS: &[&str] = &[
     "project.close",
     "project.delete",
     "project.review",
+    "project.gate",
     "board.get",
     "inbox.get",
     "member.add",
@@ -1561,6 +1562,8 @@ const CORE_OPERATIONS: &[&str] = &[
     "task.review",
     "message.read",
     "message.answer",
+    "message.approve",
+    "message.decline",
     "agents.list",
     "team.last",
 ];

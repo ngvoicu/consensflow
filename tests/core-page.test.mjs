@@ -39,6 +39,7 @@ async function withPage(fn) {
         lead: { harness: request.harness },
         team: request.team,
         ...(request.review === undefined ? {} : { review: request.review }),
+        ...(request.gate === undefined ? {} : { gate: request.gate }),
       })
     },
     async removeMember(project, handle) {
@@ -87,7 +88,14 @@ describe('the page protocol of the new core', () => {
         harness: 'pi',
       })
       assert.deepEqual(opened, [
-        { directory: '/work/app', name: 'app', harness: 'pi', review: undefined, team: [] },
+        {
+          directory: '/work/app',
+          name: 'app',
+          harness: 'pi',
+          review: undefined,
+          gate: undefined,
+          team: [],
+        },
       ])
       assert.equal(kicks(), 1)
       const { projects } = await operations['projects.list']({})
@@ -230,6 +238,56 @@ describe('the page protocol of the new core', () => {
       )
       const { board } = await operations['board.get']({ project: project.id })
       assert.deepEqual([board.project.review, board.open], ['members', []])
+    })
+  })
+
+  it('opens a project with human approval required, sets it by hand, and approves or declines what waits', async () => {
+    await withPage(async ({ ledger, operations, opened, kicks }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        harness: 'pi',
+        review: 'none',
+        gate: true,
+      })
+      assert.equal(project.gate, true)
+      assert.equal(opened[0].gate, true)
+      assert.equal(
+        (await operations['project.gate']({ project: project.id, gate: false })).project.gate,
+        false,
+      )
+      await assert.rejects(
+        operations['project.gate']({ project: project.id, gate: 'yes' }),
+        /required \(true\) or not \(false\)/,
+      )
+      await operations['project.gate']({ project: project.id, gate: true })
+      await operations['member.add']({ project: project.id, agent: 'zeus' })
+      const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
+      ledger.createTask(project.id, { from: 'lead', pool: 'worker', tier: zeus.tier, body: 'One' })
+      ledger.createTask(project.id, { from: 'lead', pool: 'worker', tier: zeus.tier, body: 'Two' })
+      const first = ledger.assignTask(project.id, 1, zeus.id).message
+      const second = ledger.assignTask(project.id, 2, zeus.id).message
+      const { board } = await operations['board.get']({ project: project.id })
+      assert.deepEqual(
+        board.gated.map((m) => [m.id, m.kind, m.sender, m.taskNumber]),
+        [
+          [first.id, 'task', 'lead', 1],
+          [second.id, 'task', 'lead', 2],
+        ],
+      )
+      const before = kicks()
+      const approved = await operations['message.approve']({ message: first.id })
+      assert.equal(approved.message.state, 'queued')
+      const declined = await operations['message.decline']({
+        message: second.id,
+        reason: 'One at a time',
+      })
+      assert.deepEqual(
+        [declined.message.state, declined.message.reason],
+        ['cancelled', 'declined by @human: One at a time'],
+      )
+      assert.equal(ledger.task(project.id, 2).state, 'cancelled')
+      assert.equal(kicks(), before + 2, 'each decision wakes the dispatcher')
+      assert.deepEqual((await operations['board.get']({ project: project.id })).board.gated, [])
     })
   })
 

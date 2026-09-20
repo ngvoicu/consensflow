@@ -224,6 +224,34 @@ describe('the agents API', () => {
     })
   })
 
+  it('shows an agent nothing that still waits for the human', async () => {
+    await withApi(async ({ ledger, project, token, call, cf }) => {
+      ledger.setGate(project.id, true)
+      const lead = token('lead')
+      const opened = await cf(lead, 'task', 'add', '--tier', 'standard', 'Write the parser')
+      assert.equal(opened.code, 0, opened.err)
+      const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
+      const { message } = ledger.assignTask(project.id, 1, zeus.id)
+      assert.equal(message.state, 'gated')
+      const session = token(message.recipient)
+      assert.deepEqual((await call(session, 'GET', '/api/inbox')).body.messages, [])
+      assert.equal((await call(session, 'GET', `/api/inbox/${message.id}`)).status, 404)
+      assert.equal(
+        (await call(lead, 'GET', `/api/inbox/${message.id}`)).status,
+        200,
+        'the sender may read its own',
+      )
+      assert.deepEqual((await call(lead, 'GET', '/api/tasks/1')).body.task.messages, [])
+      ledger.approveMessage(message.id, { by: 'human' })
+      assert.deepEqual(
+        (await call(session, 'GET', '/api/inbox')).body.messages.map((m) => m.state),
+        ['queued'],
+      )
+      assert.equal((await call(session, 'GET', `/api/inbox/${message.id}`)).status, 200)
+      assert.equal((await call(lead, 'GET', '/api/tasks/1')).body.task.messages.length, 1)
+    })
+  })
+
   it('shows an agent only the messages it sent or received', async () => {
     await withApi(async ({ ledger, project, token, call }) => {
       const note = ledger.note(project.id, { from: 'lead', to: 'human', body: 'private' })

@@ -305,9 +305,10 @@ describe('upgrading a home', () => {
       old
         .prepare(
           `INSERT INTO message (project_id, recipient_id, sender_id, kind, task_id, body, state, created_at)
-           VALUES (1, 3, 5, 'task', 2, 'Estimate the parser', 'queued', ?)`,
+           VALUES (1, 3, 5, 'task', 2, 'Estimate the parser', 'queued', ?),
+                  (1, 3, 2, 'task', 1, 'Write the parser', 'delivering', ?)`,
         )
-        .run(at)
+        .run(at, at)
       old.close()
       const ledger = openLedger(file)
       try {
@@ -320,7 +321,11 @@ describe('upgrading a home', () => {
           'the PM is gone with the concept',
         )
         assert.equal(ledger.task(1, 2), null, 'and so is the task it asked for, with its message')
-        assert.equal(ledger.inbox(3).length, 0)
+        assert.deepEqual(
+          ledger.inbox(3).map((m) => [m.taskNumber, m.state]),
+          [[1, 'delivering']],
+          "the lead's own delivery stays",
+        )
         assert.equal(ledger.project(2).review, 'members', "'all work' reads as workers' work now")
         assert.deepEqual(
           ledger.members(1, 'reviewer').map((m) => m.handle),
@@ -366,6 +371,26 @@ describe('upgrading a home', () => {
           .run(at2),
       )
       assert.throws(() => upgraded.prepare("UPDATE project SET review = 'all' WHERE id = 1").run())
+      // The gate is off for a home that never knew it, and the rebuilt message
+      // table admits a gated message while still refusing a second delivery.
+      assert.equal(upgraded.prepare('SELECT gate FROM project WHERE id = 1').get().gate, 0)
+      assert.throws(() => upgraded.prepare('UPDATE project SET gate = 2 WHERE id = 1').run())
+      upgraded
+        .prepare(
+          `INSERT INTO message (project_id, recipient_id, sender_id, kind, task_id, body, state, created_at)
+           VALUES (1, 3, 2, 'note', 1, 'Held for the human', 'gated', ?)`,
+        )
+        .run(at2)
+      assert.throws(
+        () =>
+          upgraded
+            .prepare(
+              `INSERT INTO message (project_id, recipient_id, sender_id, kind, task_id, body, state, created_at)
+               VALUES (1, 3, 2, 'note', 1, 'A second delivery', 'delivering', ?)`,
+            )
+            .run(at2),
+        /UNIQUE constraint failed: message.recipient_id/,
+      )
       assert.equal(upgraded.prepare('PRAGMA foreign_keys').get().foreign_keys, 1)
       assert.equal(upgraded.prepare('SELECT COUNT(*) AS n FROM task').get().n, 1)
       assert.equal(upgraded.prepare('PRAGMA foreign_key_check').all().length, 0, 'nothing dangles')
@@ -2546,6 +2571,366 @@ describe("sessions: a member's named windows", () => {
         ledger.members(project.id, 'worker').map((m) => m.handle),
         ['diana'],
       )
+    })
+  })
+})
+
+describe('human approval required: the gate', () => {
+  /** A lead, a standard worker and a reviewer on another model, with the gate on. */
+  function gated(ledger, review = 'none') {
+    const project = ledger.createProject({
+      directory: '/work/app',
+      name: 'app',
+      lead: { harness: 'claude-code' },
+      gate: true,
+    })
+    const add = (agent, harness, role) =>
+      ledger.addMember(project.id, { agent, harness, role, tier: 'standard' })
+    add('zeus', 'claude-code', 'worker')
+    add('diana', 'codex', 'reviewer')
+    ledger.setReview(project.id, review)
+    const id = (handle) =>
+      ledger.project(project.id).participants.find((p) => p.handle === handle).id
+    return { project, id }
+  }
+  /** The lead's task for a worker, assigned by the daemon: the task and its brief. */
+  function briefed(ledger, project, id) {
+    ledger.createTask(project.id, {
+      from: 'lead',
+      pool: 'worker',
+      tier: 'standard',
+      body: 'Parser',
+    })
+    const number = ledger.board(project.id).open.at(-1).number
+    return { number, ...ledger.assignTask(project.id, number, id('zeus')) }
+  }
+  /** A worker's task from its brief to its window: approved by the human and delivered. */
+  function working(ledger, project, id) {
+    const { number, message } = briefed(ledger, project, id)
+    deliver(ledger, ledger.approveMessage(message.id, { by: 'human' }))
+    return { number, message, session: message.recipient }
+  }
+  const gatedIds = (ledger, project) => ledger.board(project.id).gated.map((m) => m.id)
+  const noteTo = (ledger, participantId) =>
+    ledger
+      .inbox(participantId)
+      .filter((m) => m.kind === 'note')
+      .map((m) => [m.sender, m.taskNumber, m.state, m.body])
+
+  it('is off unless asked for, set by hand, and refused when not a yes or no', async () => {
+    await withLedger((ledger) => {
+      const { project } = team(ledger)
+      assert.equal(ledger.project(project.id).gate, false)
+      assert.equal(ledger.setGate(project.id, true).gate, true)
+      assert.equal(ledger.setGate(project.id, true).gate, true, 'a second yes changes nothing')
+      assert.deepEqual(
+        ledger
+          .events(project.id)
+          .filter((e) => e.kind === 'project.gate')
+          .map((e) => e.data),
+        [{ from: false, to: true }],
+      )
+      assert.throws(() => ledger.setGate(project.id, 'yes'), { code: 'invalid-gate' })
+      assert.throws(
+        () =>
+          ledger.createProject({
+            directory: '/work/x',
+            name: 'x',
+            lead: { harness: 'pi' },
+            gate: 1,
+          }),
+        { code: 'invalid-gate' },
+      )
+      assert.equal(ledger.projects().length, 1, 'nothing was created')
+    })
+  })
+
+  it("holds the lead's brief for the human, who passes it on: nothing reaches the worker before", async () => {
+    await withLedger((ledger) => {
+      const { project, id } = gated(ledger)
+      const { number, task, message } = briefed(ledger, project, id)
+      assert.deepEqual([task.state, message.state], ['queued', 'gated'])
+      assert.equal(ledger.nextDelivery(message.recipientId), null, 'no window opens for it')
+      assert.deepEqual(gatedIds(ledger, project), [message.id])
+      assert.equal(ledger.inbox(message.recipientId).length, 0, 'the worker cannot see it')
+      assert.equal(
+        ledger.task(project.id, number).messages[0].state,
+        'gated',
+        'the human sees it on the card',
+      )
+      const approved = ledger.approveMessage(message.id, { by: 'human' })
+      assert.equal(approved.state, 'queued')
+      assert.equal(ledger.nextDelivery(message.recipientId).id, message.id)
+      assert.deepEqual(gatedIds(ledger, project), [])
+      assert.deepEqual(
+        ledger
+          .events(project.id)
+          .filter((e) => e.kind === 'message.approved')
+          .map((e) => e.data),
+        [{ message: message.id, by: 'human' }],
+      )
+      assert.throws(() => ledger.approveMessage(message.id, { by: 'human' }), {
+        code: 'invalid-transition',
+      })
+    })
+  })
+
+  it('declines a brief: the task is cancelled, its session over, and the lead told why', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = gated(ledger)
+      const { number, message } = briefed(ledger, project, id)
+      const declined = ledger.declineMessage(message.id, { by: 'human', reason: 'Not now' })
+      assert.deepEqual(
+        [declined.state, declined.reason],
+        ['cancelled', 'declined by @human: Not now'],
+      )
+      assert.equal(ledger.task(project.id, number).state, 'cancelled')
+      assert.deepEqual(noteTo(ledger, id('lead')), [
+        ['human', number, 'queued', '@human declined T-1 (Parser): Not now. It is cancelled.'],
+      ])
+      assert.equal(ledger.nextDelivery(id('lead')).kind, 'note', 'the note goes without the gate')
+      assert.equal(
+        ledger.project(project.id).participants.some((p) => p.member === 'zeus'),
+        false,
+        'the session that never opened is over',
+      )
+      assert.deepEqual(gatedIds(ledger, project), [])
+      // Without a reason, the note says only what happened.
+      const again = briefed(ledger, project, id)
+      ledger.declineMessage(again.message.id, { by: 'human' })
+      assert.equal(
+        noteTo(ledger, id('lead'))[0][3],
+        `@human declined T-${again.number} (Parser). It is cancelled.`,
+      )
+      assert.throws(() => ledger.declineMessage(again.message.id, { by: 'human' }), {
+        code: 'invalid-transition',
+      })
+    })
+  })
+
+  it('holds a result for the human, who passes it on, sends it back or accepts it, never declines it', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = gated(ledger)
+      const first = working(ledger, project, id)
+      const { task, message } = ledger.recordResult(project.id, first.number, { body: 'Done' })
+      assert.deepEqual([task.state, message.state], ['done', 'gated'])
+      assert.equal(ledger.nextDelivery(id('lead')), null, 'the lead waits')
+      assert.throws(() => ledger.declineMessage(message.id, { by: 'human' }), {
+        code: 'not-declinable',
+        message: /passed on or sent back/,
+      })
+      assert.equal(ledger.approveMessage(message.id, { by: 'human' }).state, 'queued')
+      assert.equal(ledger.nextDelivery(id('lead')).id, message.id)
+
+      const second = working(ledger, project, id)
+      const held = ledger.recordResult(project.id, second.number, { body: 'Half done' }).message
+      const back = ledger.reopenTask(project.id, second.number, { by: 'human', body: 'Add tests' })
+      assert.deepEqual(
+        [ledger.message(held.id).state, ledger.message(held.id).reason],
+        ['cancelled', 'sent back by @human'],
+      )
+      assert.deepEqual([back.task.state, back.message.state], ['queued', 'queued'])
+      assert.equal(back.message.sender, 'human', "the human's own follow-up passes the gate")
+
+      const third = working(ledger, project, id)
+      const done = ledger.recordResult(project.id, third.number, { body: 'All done' }).message
+      ledger.acceptTask(project.id, third.number, { by: 'human' })
+      assert.deepEqual(
+        [ledger.message(done.id).state, ledger.message(done.id).reason],
+        ['cancelled', 'accepted by @human'],
+      )
+      assert.deepEqual(gatedIds(ledger, project), [])
+    })
+  })
+
+  it('holds a review brief before the review and the reviewed result after its verdict', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = gated(ledger, 'members')
+      const { number } = working(ledger, project, id)
+      const result = ledger.recordResult(project.id, number, { body: 'Done' }).message
+      assert.equal(result.state, 'held', 'the review comes first')
+      const review = ledger.createReview(project.id, number, { reviewer: id('diana') })
+      assert.equal(review.message.state, 'gated', "the worker's result goes to another agent")
+      assert.deepEqual(gatedIds(ledger, project), [review.message.id])
+      deliver(ledger, ledger.approveMessage(review.message.id, { by: 'human' }))
+      ledger.recordVerdict(project.id, review.task.number, { body: 'Fine.\n\nVERDICT: pass' })
+      assert.equal(ledger.task(project.id, number).state, 'done')
+      assert.equal(ledger.message(result.id).state, 'gated', 'released through the gate')
+      assert.equal(ledger.nextDelivery(id('lead')), null)
+      assert.equal(ledger.approveMessage(result.id, { by: 'human' }).state, 'queued')
+      assert.equal(ledger.nextDelivery(id('lead')).id, result.id)
+
+      // Declining the review brief: the work goes on unreviewed, through the gate.
+      const again = working(ledger, project, id)
+      const later = ledger.recordResult(project.id, again.number, { body: 'Done too' }).message
+      const second = ledger.createReview(project.id, again.number, { reviewer: id('diana') })
+      ledger.declineMessage(second.message.id, { by: 'human', reason: 'No review needed' })
+      assert.equal(ledger.task(project.id, second.task.number).state, 'cancelled')
+      const work = ledger.task(project.id, again.number)
+      assert.deepEqual(
+        [work.state, work.unreviewed],
+        ['done', '@human declined the review: No review needed'],
+      )
+      assert.equal(ledger.message(later.id).state, 'gated')
+      assert.equal(
+        noteTo(ledger, id('lead'))[0][3],
+        `@human declined the review of T-${again.number}: No review needed. The result goes on unreviewed.`,
+      )
+    })
+  })
+
+  it("holds a worker's question for the human, who passes it to the lead or answers it", async () => {
+    await withDir(async (dir) => {
+      let at = Date.parse('2026-09-20T10:00:00.000Z')
+      const ledger = openLedger(path.join(dir, 'consensflow.db'), {
+        now: () => {
+          at += 1000
+          return new Date(at)
+        },
+        names: names(),
+      })
+      try {
+        const { project, id } = gated(ledger)
+        const { number, session } = working(ledger, project, id)
+        const question = ledger.ask(project.id, {
+          from: session,
+          to: 'lead',
+          task: number,
+          body: 'Which colour?',
+        })
+        assert.equal(question.state, 'gated')
+        assert.equal(ledger.task(project.id, number).state, 'waiting')
+        assert.equal(ledger.nextDelivery(id('lead')), null)
+        at += OVERDUE_MS
+        assert.deepEqual(
+          ledger.board(project.id).overdue,
+          [],
+          'gated is not overdue: it is in the bay',
+        )
+        assert.throws(() => ledger.declineMessage(question.id, { by: 'human' }), {
+          code: 'not-declinable',
+          message: /passed on or answered/,
+        })
+        ledger.approveMessage(question.id, { by: 'human' })
+        assert.equal(ledger.nextDelivery(id('lead')).id, question.id)
+        assert.deepEqual(
+          ledger.board(project.id).overdue.map((m) => m.id),
+          [question.id],
+          'and overdue once on its way to the lead',
+        )
+
+        const other = ledger.ask(project.id, {
+          from: session,
+          to: 'lead',
+          task: number,
+          body: 'Which size?',
+        })
+        const answer = ledger.answer(other.id, { from: 'human', body: 'Large' })
+        assert.deepEqual([answer.state, answer.recipient], ['queued', question.sender])
+        assert.deepEqual(
+          [ledger.message(other.id).state, ledger.message(other.id).reason],
+          ['cancelled', 'answered by @human'],
+          'the lead never gets a question the human answered',
+        )
+        assert.equal(ledger.answerTo(other.id).id, answer.id)
+        assert.deepEqual(gatedIds(ledger, project), [])
+      } finally {
+        ledger.close()
+      }
+    })
+  })
+
+  it("holds the lead's answer for the human, who passes it on or declines it for another", async () => {
+    await withLedger((ledger) => {
+      const { project, id } = gated(ledger)
+      const { number, session } = working(ledger, project, id)
+      const question = ledger.ask(project.id, {
+        from: session,
+        to: 'lead',
+        task: number,
+        body: 'Which colour?',
+      })
+      deliver(ledger, ledger.approveMessage(question.id, { by: 'human' }))
+      const answer = ledger.answer(question.id, { from: 'lead', body: 'Blue' })
+      assert.equal(answer.state, 'gated')
+      assert.equal(ledger.answerTo(question.id), null, 'the door keeps waiting')
+      assert.throws(() => ledger.answer(question.id, { from: 'lead', body: 'Red' }), {
+        code: 'already-answered',
+      })
+      const declined = ledger.declineMessage(answer.id, { by: 'human', reason: 'Say red' })
+      assert.equal(declined.state, 'cancelled')
+      assert.equal(
+        noteTo(ledger, id('lead'))[0][3],
+        `@human declined your answer to m-${question.id}: Say red. Answer it again: cf answer m-${question.id} "…"`,
+      )
+      const again = ledger.answer(question.id, { from: 'lead', body: 'Red' })
+      assert.equal(again.state, 'gated', 'the question was open for another answer')
+      assert.equal(ledger.approveMessage(again.id, { by: 'human' }).state, 'queued')
+      assert.equal(ledger.answerTo(question.id).id, again.id)
+      assert.equal(
+        ledger.nextDelivery(again.recipientId).id,
+        again.id,
+        'into the window that asked',
+      )
+    })
+  })
+
+  it('holds a choice answer too, and lands it read for the door once approved', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = gated(ledger)
+      const { number, session } = working(ledger, project, id)
+      const question = ledger.ask(project.id, {
+        from: session,
+        to: 'lead',
+        task: number,
+        questions: [{ question: 'Colour?', header: 'Colour', options: [{ label: 'red' }] }],
+      })
+      deliver(ledger, ledger.approveMessage(question.id, { by: 'human' }))
+      const answer = ledger.answer(question.id, { from: 'lead', choices: [['red']] })
+      assert.deepEqual([answer.state, answer.choices], ['gated', [['red']]])
+      assert.equal(ledger.task(project.id, number).state, 'waiting', 'the task waits on')
+      assert.equal(ledger.answerTo(question.id), null)
+      const approved = ledger.approveMessage(answer.id, { by: 'human' })
+      assert.equal(approved.state, 'read', 'collected by the door, never pasted')
+      assert.equal(ledger.task(project.id, number).state, 'working')
+      assert.equal(ledger.nextDelivery(answer.recipientId), null)
+      assert.equal(ledger.answerTo(question.id).id, answer.id)
+    })
+  })
+
+  it("lets the human's own messages, an agent's word to itself and ConsensFlow's notes pass", async () => {
+    await withLedger((ledger) => {
+      const { project, id } = gated(ledger)
+      const byHand = ledger.createTask(project.id, { from: 'human', to: 'zeus', body: 'Parser' })
+      assert.equal(byHand.message.state, 'queued', 'the human gave it')
+      const own = ledger.createTask(project.id, { from: 'lead', to: 'lead', body: 'Plan' })
+      assert.equal(own.message.state, 'queued', "the lead's own work")
+      assert.equal(
+        ledger.ask(project.id, { from: 'lead', to: 'human', body: 'Ship it?' }).state,
+        'queued',
+        'a question for the human',
+      )
+      assert.equal(
+        ledger.note(project.id, { to: 'lead', body: 'T-9 waits for a free worker.' }).state,
+        'queued',
+        "ConsensFlow's own note",
+      )
+      ledger.setGate(project.id, false)
+      const open = briefed(ledger, project, id)
+      assert.equal(open.message.state, 'queued', 'gate off: straight through')
+    })
+  })
+
+  it('drops a gated message with its task, or with the member who leaves', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = gated(ledger)
+      const first = briefed(ledger, project, id)
+      ledger.cancelTask(project.id, first.number, { by: 'lead' })
+      assert.equal(ledger.message(first.message.id).state, 'cancelled')
+      const second = briefed(ledger, project, id)
+      ledger.removeMember(project.id, 'zeus')
+      assert.equal(ledger.message(second.message.id).state, 'cancelled')
+      assert.deepEqual(gatedIds(ledger, project), [])
     })
   })
 })

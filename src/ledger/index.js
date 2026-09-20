@@ -184,6 +184,12 @@ function requireActive(row) {
   return row
 }
 
+const requireGate = (gate) => {
+  if (typeof gate !== 'boolean') {
+    throw new LedgerError('invalid-gate', 'human approval is required (true) or not (false)')
+  }
+}
+
 const noReviewer = () =>
   new LedgerError(
     'no-reviewer',
@@ -478,10 +484,11 @@ class Ledger {
   // --- projects and participants ---------------------------------------------
 
   /** A project with its lead and, when given, its team (the last project's, usually). */
-  createProject({ directory, name, lead, team = [], review }) {
+  createProject({ directory, name, lead, team = [], review, gate = false }) {
     requireText(directory, 'directory', 4096)
     requireText(name, 'name', 100)
     requireHarness(lead?.harness)
+    requireGate(gate)
     const members = team.map((member) => ({ ...member, roles: requireMember(member) }))
     const reviewer = members.some((member) => member.roles.includes('reviewer'))
     // A review policy needs someone to review: without a reviewer on the
@@ -493,10 +500,10 @@ class Ledger {
       const at = this.#at()
       const { lastInsertRowid: id } = this.#db
         .prepare(
-          `INSERT INTO project (directory, name, state, review, created_at, updated_at)
-           VALUES (?, ?, 'open', ?, ?, ?)`,
+          `INSERT INTO project (directory, name, state, review, gate, created_at, updated_at)
+           VALUES (?, ?, 'open', ?, ?, ?, ?)`,
         )
-        .run(directory, name, review, at, at)
+        .run(directory, name, review, gate ? 1 : 0, at, at)
       this.#addParticipant(id, { handle: 'human', role: 'human', agent: null, harness: null })
       this.#addParticipant(id, { handle: 'lead', role: 'lead', agent: null, harness: lead.harness })
       for (const { agent, harness, roles, tier } of members) {
@@ -516,6 +523,7 @@ class Ledger {
       name: row.name,
       state: row.state,
       review: row.review,
+      gate: row.gate === 1,
       resumeOnStart: row.resume_on_start === 1,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -574,6 +582,23 @@ class Ledger {
         .prepare('UPDATE project SET review = ?, updated_at = ? WHERE id = ?')
         .run(policy, this.#at(), id)
       if (from !== policy) this.#log(id, 'project.review', { from, to: policy })
+      return this.project(id)
+    })
+  }
+
+  /**
+   * Human approval required: with the gate on, every message between two
+   * agents waits for the human, who passes it on or declines it. What is
+   * already gated stays so when the gate goes off; the human decides it.
+   */
+  setGate(id, gate) {
+    requireGate(gate)
+    return this.#write(() => {
+      const from = this.#projectRow(id).gate === 1
+      this.#db
+        .prepare('UPDATE project SET gate = ?, updated_at = ? WHERE id = ?')
+        .run(gate ? 1 : 0, this.#at(), id)
+      if (from !== gate) this.#log(id, 'project.gate', { from, to: gate })
       return this.project(id)
     })
   }
@@ -713,8 +738,8 @@ class Ledger {
         this.#db
           .prepare(
             `UPDATE message SET state = 'cancelled'
-             WHERE (recipient_id = ? AND state IN ('queued', 'delivering'))
-                OR (sender_id = ? AND kind = 'question' AND state = 'queued')`,
+             WHERE (recipient_id = ? AND state IN ('queued', 'delivering', 'gated'))
+                OR (sender_id = ? AND kind = 'question' AND state IN ('queued', 'gated'))`,
           )
           .run(row.id, row.id)
       }
@@ -1290,7 +1315,7 @@ class Ledger {
           403,
         )
       }
-      if (this.answerTo(questionId) !== null) {
+      if (this.#answered(questionId)) {
         throw new LedgerError('already-answered', `m-${questionId} has its answer`, 409)
       }
       const picks =
@@ -1309,7 +1334,7 @@ class Ledger {
         taskId: asker.task_id,
         replyTo: questionId,
         body: text,
-        ...(picks === null ? {} : { state: 'read', choices: picks }),
+        ...(picks === null ? {} : { collected: true, choices: picks }),
       })
       this.#log(question.projectId, 'message.sent', {
         message: id,
@@ -1317,12 +1342,19 @@ class Ledger {
         from,
         to: question.sender,
       })
-      if (picks !== null && asker.task_id !== null) {
-        const task = this.#db.prepare('SELECT * FROM task WHERE id = ?').get(asker.task_id)
-        if (task.state === 'waiting') this.#moveTask(task, 'working')
-      }
-      return this.#message(id)
+      // A question still gated is answered before the one asked saw it: it goes no further.
+      if (question.state === 'gated') this.#withdraw(questionId, `answered by @${from}`)
+      const answer = this.#message(id)
+      if (answer.state === 'read') this.#resume(asker.task_id)
+      return answer
     })
+  }
+
+  /** A choice answer is read by the door that asked, at once: the asker's task goes on. */
+  #resume(taskId) {
+    if (taskId === null) return
+    const task = this.#db.prepare('SELECT * FROM task WHERE id = ?').get(taskId)
+    if (task.state === 'waiting') this.#moveTask(task, 'working')
   }
 
   /** Whether a question on the task still waits for its answer. */
@@ -1331,17 +1363,35 @@ class Ledger {
       this.#db
         .prepare(
           `SELECT 1 FROM message q WHERE q.task_id = ? AND q.kind = 'question'
-             AND NOT EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer')
+             AND NOT EXISTS (
+               SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer'
+                 AND a.state NOT IN ('gated', 'cancelled')
+             )
            LIMIT 1`,
         )
         .get(taskId) !== undefined
     )
   }
 
-  /** The answer to a question, or null while it waits. */
+  /** Whether a question has an answer, on its way or still gated; a declined one never counts. */
+  #answered(questionId) {
+    return (
+      this.#db
+        .prepare(
+          `SELECT 1 FROM message WHERE reply_to = ? AND kind = 'answer' AND state != 'cancelled'`,
+        )
+        .get(questionId) !== undefined
+    )
+  }
+
+  /** The answer to a question, or null while it waits: for the one asked, or for the human's approval. */
   answerTo(questionId) {
     const row = this.#db
-      .prepare(`${MESSAGE_SELECT} WHERE m.reply_to = ? AND m.kind = 'answer' ORDER BY m.id LIMIT 1`)
+      .prepare(
+        `${MESSAGE_SELECT} WHERE m.reply_to = ? AND m.kind = 'answer'
+           AND m.state NOT IN ('gated', 'cancelled')
+         ORDER BY m.id LIMIT 1`,
+      )
       .get(questionId)
     return row === undefined ? null : messageView(row)
   }
@@ -1481,6 +1531,76 @@ class Ledger {
       this.#log(message.projectId, 'message.read', { message: messageId })
       const task = this.#messageTask(messageId)
       if (message.kind === 'task' && task?.state === 'queued') this.#moveTask(task, 'working')
+      return this.#message(messageId)
+    })
+  }
+
+  /** The human passes a gated message on: it goes the way it would have gone without the gate. */
+  approveMessage(messageId, { by }) {
+    return this.#write(() => {
+      const message = this.#requireMessage(messageId, 'gated')
+      this.#participantByHandle(message.projectId, by)
+      const landing = message.choices === null ? 'queued' : 'read'
+      this.#db.prepare('UPDATE message SET state = ? WHERE id = ?').run(landing, messageId)
+      this.#log(message.projectId, 'message.approved', { message: messageId, by })
+      if (landing === 'read') this.#resume(this.#messageTask(messageId)?.id ?? null)
+      return this.#message(messageId)
+    })
+  }
+
+  /**
+   * The human declines a gated message, and whoever sent it is told why. A
+   * declined task is cancelled (a declined review goes on unreviewed); a
+   * declined answer leaves its question open for another. A result is passed
+   * on or sent back, a question passed on or answered: never declined.
+   */
+  declineMessage(messageId, { by, reason }) {
+    if (reason !== undefined) requireText(reason, 'reason', 1000)
+    return this.#write(() => {
+      const message = this.#requireMessage(messageId, 'gated')
+      this.#participantByHandle(message.projectId, by)
+      if (message.kind !== 'task' && message.kind !== 'answer') {
+        throw new LedgerError(
+          'not-declinable',
+          `a ${message.kind} is passed on${message.kind === 'result' ? ' or sent back' : message.kind === 'question' ? ' or answered' : ''}, not declined`,
+          409,
+        )
+      }
+      const why = reason === undefined ? '' : `: ${reason}`
+      this.#withdraw(messageId, `declined by @${by}${why}`)
+      this.#log(message.projectId, 'message.declined', {
+        message: messageId,
+        by,
+        reason: reason ?? null,
+      })
+      const task = this.#messageTask(messageId)
+      let told = message.sender
+      let word = `@${by} declined your answer to m-${message.replyTo}${why}. Answer it again: cf answer m-${message.replyTo} "…"`
+      if (message.kind === 'task') {
+        told = this.#participantRow(task.requester_id).handle
+        if (task.kind === 'review') {
+          const reviewed = this.#db
+            .prepare('SELECT number FROM task WHERE id = ?')
+            .get(task.review_of)
+          this.withdrawReview(message.projectId, task.number, { reason: `declined by @${by}` })
+          this.skipReview(message.projectId, reviewed.number, {
+            reason: `@${by} declined the review${why}`,
+          })
+          word = `@${by} declined the review of T-${reviewed.number}${why}. The result goes on unreviewed.`
+        } else {
+          this.cancelTask(message.projectId, task.number, { by })
+          word = `@${by} declined T-${task.number} (${task.title})${why}. It is cancelled.`
+        }
+      }
+      if (told !== by) {
+        this.#send(message.projectId, {
+          from: by,
+          to: told,
+          task: task?.number,
+          body: word,
+          kind: 'note',
+        })
+      }
       return this.#message(messageId)
     })
   }
@@ -1750,6 +1870,7 @@ class Ledger {
       this.#participantByHandle(projectId, by)
       const task = this.#taskRow(projectId, number)
       this.#requireTaskState(task, ['done'], 'accept')
+      this.#withdrawGated(task.id, `accepted by @${by}`)
       this.#moveTask(task, 'accepted', { by })
       this.#endSessionIfIdle(task.assignee_id, `T-${number} accepted`)
       return this.#task(task.id)
@@ -1772,6 +1893,7 @@ class Ledger {
         )
       }
       requireActive(assignee)
+      this.#withdrawGated(task.id, `sent back by @${by}`)
       const messageId = this.#queue(projectId, {
         to: task.assignee_id,
         from: author.id,
@@ -1848,7 +1970,16 @@ class Ledger {
         tasks: tasks.filter((task) => laneOf.get(task.id) === participant.handle),
       })),
       overdue: this.#overdueQuestions(projectId),
+      gated: this.#gatedMessages(projectId),
     }
+  }
+
+  /** What waits for the human's approval, oldest first. */
+  #gatedMessages(projectId) {
+    return this.#db
+      .prepare(`${MESSAGE_SELECT} WHERE m.project_id = ? AND m.state = 'gated' ORDER BY m.id`)
+      .all(projectId)
+      .map(messageView)
   }
 
   /** Questions a coordinator has left unanswered for OVERDUE_MS: the human sees them too. */
@@ -1858,7 +1989,7 @@ class Ledger {
       .prepare(
         `${MESSAGE_SELECT}
          WHERE m.project_id = ? AND m.kind = 'question' AND r.role = 'lead'
-           AND m.created_at <= ?
+           AND m.state != 'gated' AND m.created_at <= ?
            AND NOT EXISTS (SELECT 1 FROM message a WHERE a.reply_to = m.id AND a.kind = 'answer')
          ORDER BY m.id`,
       )
@@ -1904,9 +2035,12 @@ class Ledger {
     return row === undefined ? null : this.task(row.project_id, row.number)
   }
 
+  /** A participant's messages, newest first: what reached it or is on its way, never what still waits for the human. */
   inbox(participantId, { limit = 100 } = {}) {
     return this.#db
-      .prepare(`${MESSAGE_SELECT} WHERE m.recipient_id = ? ORDER BY m.id DESC LIMIT ?`)
+      .prepare(
+        `${MESSAGE_SELECT} WHERE m.recipient_id = ? AND m.state != 'gated' ORDER BY m.id DESC LIMIT ?`,
+      )
       .all(participantId, limit)
       .map(messageView)
   }
@@ -2038,10 +2172,15 @@ class Ledger {
       replyTo = null,
       body,
       state = 'queued',
+      collected = false,
       questions = null,
       choices = null,
     },
   ) {
+    // A message on its way (queued, or collected: read at once by the door
+    // that asked) waits for the human instead when the project gates it.
+    const gated = (state === 'queued' || collected) && this.#gateHolds(projectId, from, to)
+    const landing = gated ? 'gated' : collected ? 'read' : state
     const { lastInsertRowid: id } = this.#db
       .prepare(
         `INSERT INTO message (project_id, recipient_id, sender_id, kind, task_id, reply_to, body,
@@ -2056,7 +2195,7 @@ class Ledger {
         taskId,
         replyTo,
         body,
-        state,
+        landing,
         questions === null ? null : JSON.stringify(questions),
         choices === null ? null : JSON.stringify(choices),
         this.#at(),
@@ -2066,9 +2205,42 @@ class Ledger {
 
   /** A held result goes on its way once its review is over. */
   #releaseHeld(taskId) {
+    const held = this.#db
+      .prepare(
+        `SELECT id, project_id, sender_id, recipient_id FROM message WHERE task_id = ? AND state = 'held'`,
+      )
+      .all(taskId)
+    for (const row of held) {
+      const gated = this.#gateHolds(row.project_id, row.sender_id, row.recipient_id)
+      this.#db
+        .prepare('UPDATE message SET state = ? WHERE id = ?')
+        .run(gated ? 'gated' : 'queued', row.id)
+    }
+  }
+
+  /**
+   * Whether the project's gate holds a message: one agent's word to another,
+   * when the human approves every hand-off. What the human sends or receives,
+   * what ConsensFlow itself notes, and what an agent tells itself pass.
+   */
+  #gateHolds(projectId, from, to) {
+    if (from === null || from === to || this.#projectRow(projectId).gate !== 1) return false
+    return this.#participantRow(from).role !== 'human' && this.#participantRow(to).role !== 'human'
+  }
+
+  /** A gated message the human never passed on: declined, answered, or overtaken. */
+  #withdraw(messageId, reason) {
     this.#db
-      .prepare(`UPDATE message SET state = 'queued' WHERE task_id = ? AND state = 'held'`)
-      .run(taskId)
+      .prepare(`UPDATE message SET state = 'cancelled', reason = ? WHERE id = ?`)
+      .run(reason, messageId)
+  }
+
+  #withdrawGated(taskId, reason) {
+    this.#db
+      .prepare(
+        `UPDATE message SET state = 'cancelled', reason = ? WHERE task_id = ? AND state = 'gated'`,
+      )
+      .run(reason, taskId)
   }
 
   /**
@@ -2172,7 +2344,7 @@ class Ledger {
   #dropQueued(taskId) {
     this.#db
       .prepare(
-        `UPDATE message SET state = 'cancelled' WHERE task_id = ? AND state IN ('queued', 'held')`,
+        `UPDATE message SET state = 'cancelled' WHERE task_id = ? AND state IN ('queued', 'held', 'gated')`,
       )
       .run(taskId)
   }

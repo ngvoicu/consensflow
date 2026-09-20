@@ -38,17 +38,33 @@ const QUESTION_TOOL = {
   devin: 'ask_user_question tool',
 }
 
+// Each harness's worker keeps a tier of its own: the daemon picks a member
+// by tier alone, and a step that needs one harness's question tool must land
+// on that harness. Critical work names a purpose; the flag carries it.
 const AGENTS = {
-  claude: { id: 'bench-claude', kind: 'claude-code', model: 'claude-sonnet-5' },
+  claude: {
+    id: 'bench-claude',
+    kind: 'claude-code',
+    model: 'claude-sonnet-5',
+    workTier: 'complex',
+  },
   opencode: {
     id: 'bench-opencode',
     kind: 'opencode',
     model: 'opencode/muse-spark-1.3-contributor-free',
+    workTier: 'light',
   },
-  pi: { id: 'bench-pi', kind: 'pi', model: 'opencode-go/muse-spark-1.3-contributor' },
-  devin: { id: 'bench-devin', kind: 'devin', model: 'swe-1-6-slow' },
-  codex: { id: 'bench-codex', kind: 'codex', model: 'gpt-5.6-luna' },
+  pi: {
+    id: 'bench-pi',
+    kind: 'pi',
+    model: 'opencode-go/muse-spark-1.3-contributor',
+    workTier: 'standard',
+  },
+  devin: { id: 'bench-devin', kind: 'devin', model: 'swe-1-6-slow', workTier: 'critical' },
+  codex: { id: 'bench-codex', kind: 'codex', model: 'gpt-5.6-luna', workTier: 'critical' },
 }
+const tierFlag = (tier) =>
+  tier === 'critical' ? '--tier critical --purpose hard-problem' : `--tier ${tier}`
 const args = process.argv.slice(2)
 const leadAt = args.indexOf('--lead')
 const LEAD = leadAt === -1 ? 'opencode' : args[leadAt + 1]
@@ -148,11 +164,8 @@ try {
   })
   if (opened.ok !== true) throw new Error(`project.open: ${JSON.stringify(opened)}`)
   const project = opened.project.id
-  // Each task names its worker's tier. Two bench workers of one tier are told
-  // apart by the daemon's own rule, fewest tasks taken then join order: the
-  // per-worker steps run in join order, one task at a time, so each round
-  // goes around the tier's workers in that order; a scenario that cannot
-  // count on a balanced round follows the task to whichever worker got it.
+  // Each task names its worker's tier, and each bench worker has its own;
+  // the review scenario still follows the task to whichever worker got it.
   const tiers = {}
   for (const name of wanted) {
     const added = await app.requestNode('member.add', { project, agent: AGENTS[name].id })
@@ -184,7 +197,7 @@ try {
     await app.requestNode('task.add', {
       project,
       to: 'lead',
-      body: `Run exactly this command in your shell, then reply with one line:\ncf task add --tier ${tiers[name]} "Reply with exactly: ${marker}"`,
+      body: `Run exactly this command in your shell, then reply with one line:\ncf task add ${tierFlag(tiers[name])} "Reply with exactly: ${marker}"\nWhen its result arrives, do not accept it yet: reply with one line and wait for my next message.`,
     })
     const task = await until(
       async () => (await lane(agent.id))?.tasks.find((t) => t.requester === 'lead'),
@@ -313,7 +326,7 @@ try {
     await app.requestNode('task.add', {
       project,
       to: 'lead',
-      body: `Run exactly this command in your shell, then reply with one line:\ncf task add --tier ${tiers[name]} "Use your ${QUESTION_TOOL[name]} to ask me which colour I prefer, with the options red and blue. After I answer, reply with exactly one line: COLOUR=<the answer>"`,
+      body: `Run exactly this command in your shell, then reply with one line:\ncf task add ${tierFlag(tiers[name])} "Use your ${QUESTION_TOOL[name]} to ask me which colour I prefer, with the options red and blue. After I answer, reply with exactly one line: COLOUR=<the answer>"`,
     })
     const question = await until(
       async () =>
@@ -417,7 +430,7 @@ try {
     await app.requestNode('task.add', {
       project,
       to: 'lead',
-      body: `Run exactly this command in your shell, then reply with one line:\ncf task add --tier ${tiers[wanted[0]]} "Reply with exactly: ${marker}"`,
+      body: `Run exactly this command in your shell, then reply with one line:\ncf task add ${tierFlag(tiers[wanted[0]])} "Reply with exactly: ${marker}"`,
     })
     const reviewed = await until(
       async () =>
