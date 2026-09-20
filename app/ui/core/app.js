@@ -195,9 +195,16 @@ function render() {
   const waiting = state.inbox.filter((message) => message.state === 'queued').length
   inboxButton.textContent = waiting === 0 ? 'Inbox' : `Inbox (${waiting})`
   inboxButton.dataset.waiting = String(waiting > 0)
-  teamButton.disabled = project === null
+  // A closed project is read-only: nothing runs, so nothing here may act on it.
+  const suspended = project?.state === 'suspended'
+  main.dataset.suspended = String(suspended)
+  teamButton.disabled = project === null || suspended
   const lanes = state.board?.lanes ?? []
   if (!lanes.some((lane) => lane.participant.handle === state.focus)) state.focus = 'lead'
+  if (suspended) {
+    terminals.clear()
+    drawer.hide()
+  }
   // A row's Terminal button stays live while an ended window is still readable.
   for (const lane of lanes) lane.ended = terminals.has(lane.participant.handle)
   if (state.board === null) {
@@ -210,8 +217,33 @@ function render() {
     )
   } else {
     board.render({ board: state.board, inbox: state.inbox, agents: state.agents })
+    if (suspended) boardRoot.prepend(suspendedBanner(project))
   }
   terminals.render(lanes, { focused: state.focus })
+}
+
+/** What a closed project shows in place of its actions: why it is still, and the one way on. */
+function suspendedBanner(project) {
+  const banner = element('section', 'suspended')
+  banner.setAttribute('role', 'status')
+  banner.append(
+    element('strong', null, `${project.name} is closed.`),
+    element(
+      'span',
+      null,
+      ' Its windows are gone, its open work went back to the backlog, and nothing is delivered until you resume it.',
+    ),
+  )
+  const resume = element('button', 'primary-button', 'Resume project')
+  resume.type = 'button'
+  resume.addEventListener('click', () =>
+    act(async () => {
+      await core('project.resume', { project: project.id })
+      state.focus = 'lead'
+    }),
+  )
+  banner.append(resume)
+  return banner
 }
 
 function renderProjects() {

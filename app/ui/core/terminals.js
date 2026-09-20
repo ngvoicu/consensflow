@@ -86,6 +86,11 @@ export class TerminalsView {
     )
   }
 
+  /** Every card goes: a closed project has no windows to read. */
+  clear() {
+    for (const key of [...this.#cards.keys()]) this.#drop(key)
+  }
+
   /** The human closes an ended window's card; a live one stays. */
   close(handle) {
     for (const [key, entry] of this.#cards) {

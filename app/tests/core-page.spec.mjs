@@ -994,6 +994,29 @@ test('closes an open project from the list', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Close foundry' })).toHaveCount(0)
 })
 
+test('shows a closed project read-only: dimmed, no actions, no windows, and a Resume banner', async ({
+  page,
+}) => {
+  await open(page)
+  await page.locator('.project-select', { hasText: 'foundry' }).click()
+  const main = page.locator('main.main')
+  await expect(main).toHaveAttribute('data-suspended', 'true')
+  const banner = page.getByRole('status').filter({ hasText: 'foundry is closed.' })
+  await expect(banner).toContainText('nothing is delivered until you resume it')
+  await expect(page.getByRole('button', { name: 'Team' })).toBeDisabled()
+  await expect(page.locator('table[aria-label="Tasks"]')).toHaveCSS('pointer-events', 'none')
+  await expect(page.getByRole('complementary', { name: 'Terminal dock' })).toHaveCSS(
+    'pointer-events',
+    'none',
+  )
+  await expect(page.locator('.terminal-card')).toHaveCount(0)
+  await banner.getByRole('button', { name: 'Resume project' }).click()
+  await expect.poll(() => calls(page, 'project.resume')).toEqual([{ project: 2 }])
+  await page.locator('.project-select', { hasText: 'harbour' }).click()
+  await expect(main).toHaveAttribute('data-suspended', 'false')
+  await expect(page.getByRole('button', { name: 'Team' })).toBeEnabled()
+})
+
 test('resumes a suspended project from the list', async ({ page }) => {
   await open(page)
   await page.getByRole('button', { name: 'Resume foundry' }).click()

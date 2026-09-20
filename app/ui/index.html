@@ -193,6 +193,24 @@
       align-content: start;
     }
     .board-empty { color: var(--muted); margin: 40px auto; max-width: 420px; text-align: center; }
+    /* A closed project: the board and the dock read, nothing acts. */
+    .suspended {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 12px 14px;
+      border: 1px solid rgba(231, 185, 104, .45);
+      border-left: 4px solid var(--amber);
+      border-radius: 8px;
+      background: rgba(231, 185, 104, .08);
+      font-size: 13px;
+    }
+    .suspended strong { color: var(--amber); }
+    .suspended .primary-button { margin-left: auto; }
+    .main[data-suspended="true"] .foryou,
+    .main[data-suspended="true"] .kanban,
+    .main[data-suspended="true"] .dock { opacity: .45; pointer-events: none; }
     .foryou {
       border: 1px solid rgba(231, 185, 104, .32);
       border-radius: 10px;
