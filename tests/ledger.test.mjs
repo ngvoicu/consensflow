@@ -987,7 +987,11 @@ describe('tasks and the inbox queue', () => {
         to: 'zeus',
         body: 'Parser',
       })
-      assert.equal(ledger.activeTask(id('zeus')).number, 1, 'queued counts: the window may be up')
+      assert.equal(
+        ledger.activeTask(id('zeus'), { queued: true }).number,
+        1,
+        'the window may be up',
+      )
       const question = ledger.ask(project.id, {
         from: 'zeus',
         to: 'lead',
@@ -1234,11 +1238,8 @@ describe('views', () => {
       const { project, id } = team(ledger)
       assert.equal(ledger.activeTask(id('zeus')), null)
       ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'One' })
-      assert.equal(
-        ledger.activeTask(id('zeus')).state,
-        'queued',
-        "a queued task is already the window's",
-      )
+      assert.equal(ledger.activeTask(id('zeus')), null, 'a queued task is not started')
+      assert.equal(ledger.activeTask(id('zeus'), { queued: true }).state, 'queued')
       deliver(ledger, ledger.task(project.id, 1).messages[0])
       assert.deepEqual(
         [ledger.activeTask(id('zeus')).number, ledger.activeTask(id('zeus')).messages.length],

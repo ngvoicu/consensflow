@@ -232,6 +232,27 @@ try {
   for (const name of wanted.filter((candidate) => QUESTION_TOOL[candidate])) {
     const started = Date.now()
     const worker = AGENTS[name]
+    // A lead may put the worker's question to the human, whose preference it
+    // is; the bench answers as the human would, on the board, and says so.
+    const humanAnswers = []
+    const answerAsHuman = async () => {
+      for (const m of await inbox('human')) {
+        if (m.kind !== 'question' || m.state !== 'queued') continue
+        const answered = await app.requestNode('message.answer', {
+          question: m.id,
+          ...(m.questions
+            ? { choices: m.questions.map((q) => [q.options[0]?.label ?? 'blue']) }
+            : { body: 'blue' }),
+        })
+        await app.requestNode('message.read', { message: m.id })
+        humanAnswers.push({
+          id: m.id,
+          from: m.sender,
+          options: m.questions !== null,
+          ok: answered.ok,
+        })
+      }
+    }
     await app.requestNode('task.add', {
       project,
       to: 'lead',
@@ -256,9 +277,19 @@ try {
     })
     if (!question) continue
     const answer = await until(async () => {
+      await answerAsHuman()
       const found = (await inbox(worker.id)).find((m) => m.replyTo === question.id)
       return found?.state === 'read' ? found : null
     }, 300_000)
+    if (humanAnswers.length > 0) {
+      record(
+        `${name}-question-forwarded-to-human`,
+        humanAnswers.every((a) => a.ok),
+        {
+          answered: humanAnswers,
+        },
+      )
+    }
     record(`${name}-question-answered-by-lead`, Boolean(answer), {
       seconds: Math.round((Date.now() - started) / 1000),
       ...(answer
@@ -269,6 +300,7 @@ try {
           }),
     })
     const done = await until(async () => {
+      await answerAsHuman()
       const current = (await lane(worker.id))?.tasks.find((t) => t.number === question.taskNumber)
       return current?.state === 'done' ? current : null
     }, 300_000)

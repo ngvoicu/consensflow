@@ -182,7 +182,7 @@ Design, 2026-09-20, before the code:
 
 - [x] [TEST-CF1-14] Research note per harness in the brain: how a pending question is seen and answered (Claude hook, Codex app-server, OpenCode and Pi plugins, Devin none), with the exact fields.
 - [x] [TEST-CF1-15] Ledger and dispatcher: a relayed question with options becomes a board question to the requester (human for coordinators); the answer returns through the harness's own door; the task waits meanwhile; a question nobody answers is shown in the human's row after a set time.
-- [ ] [IMPL-CF1-16] Claude first (done: the hook, proven with the fake harness; the live Sonnet run is next), then OpenCode, then Codex behind its feature flag; Pi and Devin have no question tool, so nothing to build for them.
+- [ ] [IMPL-CF1-16] Claude (the hook), OpenCode (the plugin), Codex (the broker, the tool on behind its flag): each built and proven with a fake; Pi and Devin have no question tool, so nothing to build for them. Live: Claude's question reached the lead in 6 s; the free-model lead forwarded it to the human through its own tool, so the bench now answers as the human; the three-harness live run is the last proof.
 
 ## Resume context
 
@@ -293,3 +293,18 @@ waits for the running Candidate to be quit.
   counts as the window's task and lands waiting when a question is already
   pending. Ledger 65/65, API and CLI 27/27, dispatcher 41/41, integration
   7/7, page 76/76.
+- 2026-09-20, Phase E, the other doors. `7ba2e75`: one door module
+  (`hosts/lib/question-door.js`) for posting, waiting, giving up in time and
+  recording a window's own answer on the board; the OpenCode plugin listens
+  for `question.v2.asked` and replies through the API (three plugin tests
+  against a fake board); the Codex adapter turns `request_user_input` on
+  (proven in a real terminal first: the TUI drew the question with a
+  recommended option and "None of the above") and the broker holds
+  `item/tool/requestUserInput`, asks the board and answers the backend, or
+  hands the request to the TUI when nobody answers (two broker tests); the
+  Claude hook uses the same door; the ledger lets the asker record its
+  window's answer. Unit 813/813, integration 7/7. First live run with a
+  Claude worker: the question reached the lead in 6 s; the free-model lead
+  forwarded it to the human through its own question tool ("Forwarding the
+  worker's colour question to you"), which is the relay working, so the
+  bench answers as the human and notes when that happened.

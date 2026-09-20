@@ -1684,15 +1684,17 @@ class Ledger {
   }
 
   /**
-   * The task a participant is on: working, waiting on an answer, or queued
-   * while its delivery is still being confirmed (a window may ask its first
-   * question before the record that confirms the task's arrival is read).
+   * The task a participant has in progress (working or waiting on an answer),
+   * or null. With `queued`, one whose delivery is still being confirmed
+   * counts too: a window may ask its first question before the record that
+   * confirms the task's arrival is read.
    */
-  activeTask(participantId) {
+  activeTask(participantId, { queued = false } = {}) {
     const row = this.#db
       .prepare(
         `SELECT project_id, number FROM task
-         WHERE assignee_id = ? AND state IN ('queued', 'working', 'waiting') ORDER BY id LIMIT 1`,
+         WHERE assignee_id = ? AND state IN (${queued ? "'queued', " : ''}'working', 'waiting')
+         ORDER BY id LIMIT 1`,
       )
       .get(participantId)
     return row === undefined ? null : this.task(row.project_id, row.number)

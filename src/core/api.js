@@ -190,8 +190,10 @@ export async function startApi({
     }
     if (at === 'POST /api/questions') {
       const body = await readJson(request)
-      const active = ledger.activeTask(participant.id)
-      const to = body.to ?? active?.requester ?? (participant.role === 'lead' ? 'human' : 'lead')
+      const active = ledger.activeTask(participant.id, { queued: true })
+      // A coordinator's question goes to the human; a member's to its coordinator.
+      const to =
+        body.to ?? active?.requester ?? (COORDINATORS.has(participant.role) ? 'human' : 'lead')
       if (MEMBERS.has(memberByHandle(project, to)?.role)) {
         throw new Refusal(
           403,

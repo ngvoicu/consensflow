@@ -218,6 +218,16 @@ describe('the agents API', () => {
     })
   })
 
+  it("sends a PM's question with no task to the human, like a lead's", async () => {
+    await withApi(async ({ ledger, project, token, call }) => {
+      ledger.addPm(project.id, { harness: 'claude-code' })
+      const asked = await call(token('pm'), 'POST', '/api/questions', { body: 'Scope?' })
+      assert.deepEqual([asked.status, asked.body.message.recipient], [201, 'human'])
+      const lead = await call(token('lead'), 'POST', '/api/questions', { body: 'Ship?' })
+      assert.equal(lead.body.message.recipient, 'human')
+    })
+  })
+
   it('shows an agent only the messages it sent or received', async () => {
     await withApi(async ({ ledger, project, token, call }) => {
       const note = ledger.note(project.id, { from: 'lead', to: 'human', body: 'private' })
