@@ -1466,6 +1466,18 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
     })
   })
 
+  it('counts a member for every role it holds when a tier is checked, not only its first', async () => {
+    await withLedger((ledger) => {
+      const { project } = tiered(ledger)
+      assert.throws(() => openTask(ledger, project, { pool: 'advisor', tier: 'light' }), {
+        code: 'no-member-of-tier',
+      })
+      ledger.setRoles(project.id, 'hera', ['worker', 'advisor'])
+      const { task } = openTask(ledger, project, { pool: 'advisor', tier: 'light' })
+      assert.deepEqual([task.pool, task.tier, task.state], ['advisor', 'light', 'open'])
+    })
+  })
+
   it('lets only the lead and the human create tasks', async () => {
     await withLedger((ledger) => {
       const { project } = tiered(ledger)
@@ -1979,13 +1991,13 @@ describe('tiered dispatch: the review gate', () => {
     })
   })
 
-  it('never reviews advice, under any policy', async () => {
+  it('never reviews advice, under any policy, even from a member that is a worker too', async () => {
     await withLedger((ledger) => {
       const { project, id } = reviewed(ledger, 'all')
       ledger.addMember(project.id, {
         agent: 'athena',
         harness: 'codex',
-        role: 'advisor',
+        roles: ['worker', 'advisor'],
         tier: 'standard',
       })
       const advice = ledger.createTask(project.id, {
@@ -1994,7 +2006,13 @@ describe('tiered dispatch: the review gate', () => {
         tier: 'standard',
         body: 'Which parser?',
       })
-      deliver(ledger, ledger.assignTask(project.id, advice.task.number, id('athena')).message)
+      const { task, message } = ledger.assignTask(project.id, advice.task.number, id('athena'))
+      assert.equal(
+        ledger.project(project.id).participants.find((p) => p.handle === task.assignee).role,
+        'advisor',
+        "the session plays the task's role, not the member's first one",
+      )
+      deliver(ledger, message)
       const done = ledger.recordResult(project.id, advice.task.number, { body: 'The second.' })
       assert.deepEqual(
         [done.task.state, done.message.state, done.message.recipient],

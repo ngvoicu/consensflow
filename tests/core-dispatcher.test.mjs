@@ -1163,7 +1163,7 @@ describe('a member with several roles', () => {
           {
             agent: 'hera',
             harness: 'claude-code',
-            roles: ['worker', 'reviewer'],
+            roles: ['worker', 'reviewer', 'advisor'],
             tier: 'complex',
           },
         ],
@@ -1173,8 +1173,8 @@ describe('a member with several roles', () => {
         context.adapter.prepared
           .filter((request) => request.participant.handle.startsWith(`${handle}-`))
           .map((request) => [request.role, request.instructions])
-      const open = (body, tier) =>
-        context.ledger.createTask(project.id, { from: 'lead', pool: 'worker', tier, body })
+      const open = (body, tier, pool = 'worker') =>
+        context.ledger.createTask(project.id, { from: 'lead', pool, tier, body })
       open('Write the parser', 'standard')
       await context.dispatcher.pass()
       await context.dispatcher.pass()
@@ -1210,6 +1210,23 @@ describe('a member with several roles', () => {
         ['worker', 'instructions for worker'],
         'and opens with the worker text',
       )
+      context.adapter.answer(task(3).assignee, 'Docs done')
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      open('Which parser design?', 'complex', 'advisor')
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        launches('hera').at(-1),
+        ['advisor', 'instructions for advisor'],
+        'advice opens with the advisor text, whatever role the member was saved with first',
+      )
+      assert.match(task(4).assignee, /^hera-/)
+      context.adapter.answer(task(4).assignee, 'The second.')
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(task(4).state, 'done', 'advice is never reviewed')
+      assert.equal(context.ledger.task(project.id, 4).messages.at(-1).recipient, 'lead')
     })
   })
 })

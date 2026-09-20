@@ -86,3 +86,9 @@ Gabriel, on the Candidate built from `87c45f5`, 2026-09-20 afternoon:
   and its tasks from Candidate projects; the catalog's category pills stay
   (only tags go); advice is never reviewed; the lead's old "never write
   specifications" line is dropped with the PM and not replaced.
+- Advisor review found a gap: the ledger's tier check at task creation read
+  the primary `role` column, so a member saved as worker+advisor did not
+  count as an advisor and `cf task add --advice` was refused; `#members` now
+  reads the roles set (and skips sessions). Tests: a worker-first advisor's
+  advice opens with the advisor text and is never reviewed (ledger and
+  dispatcher); a member counts for every role it holds.

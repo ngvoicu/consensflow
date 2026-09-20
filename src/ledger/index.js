@@ -1978,13 +1978,16 @@ class Ledger {
   }
 
   /** The active members of one pool and tier, in join order. */
+  /** The team's members of one role and tier, whatever role they were saved with first. */
   #members(projectId, pool, tier) {
     return this.#db
       .prepare(
-        `SELECT * FROM participant
-         WHERE project_id = ? AND role = ? AND tier = ? AND left_at IS NULL ORDER BY id`,
+        `SELECT * FROM participant p
+         WHERE p.project_id = ? AND p.tier = ? AND p.left_at IS NULL AND p.member_id IS NULL
+           AND EXISTS (SELECT 1 FROM json_each(p.roles) r WHERE r.value = ?)
+         ORDER BY p.id`,
       )
-      .all(projectId, pool, tier)
+      .all(projectId, tier, pool)
   }
 
   #taskById(id) {
