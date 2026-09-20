@@ -312,7 +312,11 @@ try {
     const question = await until(
       async () =>
         (await inbox('lead')).find(
-          (m) => m.kind === 'question' && m.sender === worker.id && m.questions !== null,
+          (m) =>
+            m.kind === 'question' &&
+            m.sender !== null &&
+            m.sender.startsWith(worker.id) &&
+            m.questions !== null,
         ),
       300_000,
     )

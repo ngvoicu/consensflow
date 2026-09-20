@@ -136,3 +136,12 @@ continuation run and the Candidate rebuild close it.
   after the pass's steps, or a removal racing a launch wins the lock first;
   by-name tasks stay direct to their participant (only tests use them), so
   sessions come with tiered work, reviews and continuation.
+- 2026-09-20, Phase B live. Bench `claude opencode codex` on `0551371`,
+  Devin reviewing: every worker's task, result and closed window as before;
+  each window continued with `cf task add --after T-n` came back as the same
+  session (`bench-claude-coral-pine`, `bench-opencode-gentle-canyon`,
+  `bench-codex-pale-harbor`) in 2-3 s and answered `BENCH_AGAIN_*` in 6-13 s;
+  the review gate and the restart green. The three question checks timed out
+  because the bench matched the question's sender to the member's name
+  while the session asked; the workers had asked and been answered. The
+  check now matches the session; rerun pending.
