@@ -178,11 +178,11 @@ Design, 2026-09-20, before the code:
 
 - [ ] [VERIFY-CF1-13] Bench green on the free models and on Claude and Codex after Phases A to C; Candidate rebuilt; Gabriel's second round.
 
-### Phase E: Questions relayed to the board [active]
+### Phase E: Questions relayed to the board [completed]
 
 - [x] [TEST-CF1-14] Research note per harness in the brain: how a pending question is seen and answered (Claude hook, Codex app-server, OpenCode and Pi plugins, Devin none), with the exact fields.
 - [x] [TEST-CF1-15] Ledger and dispatcher: a relayed question with options becomes a board question to the requester (human for coordinators); the answer returns through the harness's own door; the task waits meanwhile; a question nobody answers is shown in the human's row after a set time.
-- [ ] [IMPL-CF1-16] Claude (the hook), OpenCode (the plugin), Codex (the broker, the tool on behind its flag): each built and proven with a fake; Pi and Devin have no question tool, so nothing to build for them. Live: Claude's question reached the lead in 6 s; the free-model lead forwarded it to the human through its own tool, so the bench now answers as the human; the three-harness live run is the last proof.
+- [x] [IMPL-CF1-16] Claude (the hook), OpenCode (the plugin), Codex (the broker, the tool on behind its flag): each built, proven with a fake, and proven live under a free-model OpenCode lead: the worker's question in the lead's inbox in 5-10 s, the lead's `cf answer` back through the door, the worker's `COLOUR=<answer>` in 12-21 s. Pi and Devin have no question tool, so nothing to build for them.
 
 ## Resume context
 
@@ -308,3 +308,16 @@ waits for the running Candidate to be quit.
   forwarded it to the human through its own question tool ("Forwarding the
   worker's colour question to you"), which is the relay working, so the
   bench answers as the human and notes when that happened.
+- 2026-09-20, Phase E closed. The three-harness live bench (`claude opencode
+  codex`, Devin reviewing) 25/26: Claude's question to the lead in 10 s,
+  answered "red" by `cf answer` in 19 s, `COLOUR=red` in 21 s; Codex's in
+  8 s, back in 12 s (its model labels an option "red (Recommended)", so
+  the lead's "red" went through as its own words and Codex took it);
+  OpenCode's never reached the board. A logging TUI plugin in a real
+  OpenCode showed why: the TUI bus names the events `question.asked` and
+  `question.replied`, not the `question.v2.*` the SDK's types promise, with
+  the v2 shape. The plugin hears both names; the OpenCode run is then
+  14/14 with its question answered "blue" in 11 s and returned through
+  `question.reply` in 15 s. Two fixes on the way: a PM's question with no
+  task goes to the human like a lead's; the dispatcher keeps its own rule
+  for a task in progress (a queued task counts only for the question route).

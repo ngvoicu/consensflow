@@ -233,7 +233,7 @@ const ASKED = {
 test("OpenCode's question tool is answered from the board through the plugin", async (t) => {
   const board = await fakeBoard(t)
   const f = await fixture(t, false, board.url)
-  f.emit('question.v2.asked', ASKED)
+  f.emit('question.asked', ASKED)
   await new Promise((resolve) => setTimeout(resolve, 100))
   assert.deepEqual(board.state.posted, [
     {
@@ -261,10 +261,10 @@ test("OpenCode's question tool is answered from the board through the plugin", a
 test('OpenCode: a question answered in the window first is recorded on the board, never replied twice', async (t) => {
   const board = await fakeBoard(t)
   const f = await fixture(t, false, board.url)
-  f.emit('question.v2.asked', ASKED)
+  f.emit('question.asked', ASKED)
   await new Promise((resolve) => setTimeout(resolve, 100))
   assert.equal(board.state.posted.length, 1)
-  f.emit('question.v2.replied', { sessionID: 'ses_first', requestID: 'q-1', answers: [['red']] })
+  f.emit('question.replied', { sessionID: 'ses_first', requestID: 'q-1', answers: [['red']] })
   for (let i = 0; i < 100 && board.state.answered.length === 0; i++)
     await new Promise((r) => setTimeout(r, 10))
   assert.deepEqual(board.state.answered, [{ question: 41, choices: [['red']] }])
@@ -274,7 +274,7 @@ test('OpenCode: a question answered in the window first is recorded on the board
 test('OpenCode: a question of another session, or outside a window, is left to the TUI', async (t) => {
   const board = await fakeBoard(t)
   const f = await fixture(t, false, board.url)
-  f.emit('question.v2.asked', { ...ASKED, sessionID: 'ses_other' })
+  f.emit('question.asked', { ...ASKED, sessionID: 'ses_other' })
   await new Promise((resolve) => setTimeout(resolve, 100))
   assert.deepEqual(board.state.posted, [])
   const outside = await fixture(t)

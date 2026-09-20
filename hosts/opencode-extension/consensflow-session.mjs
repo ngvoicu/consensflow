@@ -93,11 +93,15 @@ export async function tui(api, options) {
     if (answers !== undefined) control.window = answers
     control.abort()
   }
-  api.event?.on('question.v2.asked', (event) => void relay(event.properties))
-  api.event?.on('question.v2.replied', (event) =>
-    settle(event.properties.requestID, event.properties.answers),
-  )
-  api.event?.on('question.v2.rejected', (event) => settle(event.properties.requestID))
+  // OpenCode 1.18.31's TUI bus carries these under their plain names, with
+  // the v2 shape its types describe under `question.v2.*`; both are heard.
+  for (const suffix of ['', 'v2.']) {
+    api.event?.on(`question.${suffix}asked`, (event) => void relay(event.properties))
+    api.event?.on(`question.${suffix}replied`, (event) =>
+      settle(event.properties.requestID, event.properties.answers),
+    )
+    api.event?.on(`question.${suffix}rejected`, (event) => settle(event.properties.requestID))
+  }
 
   const server = createServer(async (request, response) => {
     const reply = (status, value) => {
