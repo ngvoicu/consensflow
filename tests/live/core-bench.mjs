@@ -3,9 +3,9 @@
  * The live bench for the new core (VERIFY-BDC-08): its daemon, the real Rust
  * pane host and the REAL harness TUIs on cheap models, driven by code.
  *
- * The human gives the lead one task per worker: run `cf task add` for its tier,
- * with the worker's own name as the preferred tag (each bench agent is tagged
- * with its name), so the daemon's choice is the worker meant. The
+ * The human gives the lead one task per worker: run `cf task add` for its tier;
+ * the daemon picks the worker (the free one of that tier with the fewest tasks
+ * so far, the earliest joined first), which the steps below lean on. The
  * lead (OpenCode on the free Muse Spark model by default; `--lead claude` for a
  * Claude Code lead on Sonnet) must run it itself; the core opens the worker's
  * window with the task, the worker must answer in full-permission mode, the
@@ -149,8 +149,9 @@ try {
   const project = opened.project.id
   // Each task names its worker's tier. Two bench workers of one tier are told
   // apart by the daemon's own rule, fewest tasks taken then join order: the
-  // steps below run once per worker, in join order, one task at a time, so
-  // each round goes around the tier's workers in that order.
+  // per-worker steps run in join order, one task at a time, so each round
+  // goes around the tier's workers in that order; a scenario that cannot
+  // count on a balanced round follows the task to whichever worker got it.
   const tiers = {}
   for (const name of wanted) {
     const added = await app.requestNode('member.add', { project, agent: AGENTS[name].id })
@@ -388,12 +389,12 @@ try {
   }
 
   // The review gate, live: a reviewer on another model judges one worker's
-  // result before the lead sees it. The daemon picks the reviewer; if every
-  // worker shares the reviewer's model the work goes on unreviewed, and the
-  // check says so.
+  // result before the lead sees it. The daemon picks the worker (the one
+  // with the fewest tasks so far, so not necessarily the first) and the
+  // reviewer; if every worker shares the reviewer's model the work goes on
+  // unreviewed, and the check says so.
   {
     const started = Date.now()
-    const worker = AGENTS[wanted[0]]
     const marker = 'BENCH_REVIEW_OK'
     // Only the task the lead creates from here on counts, not the baseline's.
     const before = Math.max(
@@ -419,14 +420,18 @@ try {
     })
     const reviewed = await until(
       async () =>
-        (await lane(worker.id))?.tasks.find(
-          (t) => t.number > before && ['review', 'done'].includes(t.state),
-        ),
+        (await board()).lanes
+          .filter((l) => l.participant.agent !== null && !l.participant.roles.includes('reviewer'))
+          .flatMap((l) => l.tasks)
+          .find(
+            (t) => t.number > before && t.kind === 'work' && ['review', 'done'].includes(t.state),
+          ),
       300_000,
     )
     record('review-work-finished', Boolean(reviewed), {
       seconds: Math.round((Date.now() - started) / 1000),
       state: reviewed?.state,
+      worker: reviewed?.assignee,
     })
     const review = reviewed
       ? await until(

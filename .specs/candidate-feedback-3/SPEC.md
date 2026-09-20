@@ -92,3 +92,12 @@ Gabriel, on the Candidate built from `87c45f5`, 2026-09-20 afternoon:
   reads the roles set (and skips sessions). Tests: a worker-first advisor's
   advice opens with the advisor text and is never reviewed (ledger and
   dispatcher); a member counts for every role it holds.
+- Live bench on the cut (`npm run bench:core -- opencode pi`, one tier for
+  both workers, Devin reviewing): first run 18/22, the four review checks
+  failing because the bench watched the first worker's lane while the daemon
+  had given the review's work to Pi, the worker with fewer tasks (the
+  question step runs only for harnesses with a question tool, so the round
+  was not balanced). The daemon was right; the bench now follows the task
+  to whichever worker got it. Second run 22/22: tasks, `--after`
+  continuation, OpenCode's question door, the review (work to Pi in 18 s,
+  verdict in 35 s, result with the review under it in 37 s) and the restart.
