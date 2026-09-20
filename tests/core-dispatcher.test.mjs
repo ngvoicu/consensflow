@@ -639,20 +639,6 @@ describe('the dispatcher', () => {
     })
   })
 
-  it("opens a PM's window with its first message, not before", async () => {
-    await setup(async (context) => {
-      const { project } = await withTeam(context)
-      context.ledger.addPm(project.id, { harness: 'claude-code' })
-      await context.dispatcher.pass()
-      assert.equal(context.host.last('pm'), undefined)
-
-      context.ledger.createTask(project.id, { from: 'human', to: 'pm', body: 'Plan the release' })
-      await context.dispatcher.pass()
-      assert.equal(context.host.last('pm').id, `p${project.id}-pm`)
-      assert.match(context.adapter.prepared.at(-1).message, /task from @human\]\nPlan the release/)
-    })
-  })
-
   it('closes a project: its windows go, tiered work returns to the backlog, and Resume brings it back', async () => {
     await setup(async (context) => {
       const { project, id } = await withTeam(context)
@@ -758,19 +744,21 @@ describe('the delivered text', () => {
   })
 })
 
-/** A tiered team: two standard workers with tags, a light worker, and reviewers on two models. */
-async function withTiers(context, { review = 'none', reviewers = ['calliope', 'astraeus'] } = {}) {
-  const member = (agent, role, tier, tags) => ({ agent, harness: 'claude-code', role, tier, tags })
+/** A tiered team: standard workers (zeus and diana, unless told), a light worker, and reviewers on two models. */
+async function withTiers(
+  context,
+  { review = 'none', workers = ['zeus', 'diana'], reviewers = ['calliope', 'astraeus'] } = {},
+) {
+  const member = (agent, role, tier) => ({ agent, harness: 'claude-code', role, tier })
   const project = await context.dispatcher.openProject({
     directory: '/work/app',
     name: 'app',
     harness: 'claude-code',
     review,
     team: [
-      member('zeus', 'worker', 'standard', ['coding', 'rust']),
-      member('diana', 'worker', 'standard', ['coding']),
-      member('hera', 'worker', 'light', []),
-      ...reviewers.map((agent) => member(agent, 'reviewer', 'standard', [])),
+      ...workers.map((agent) => member(agent, 'worker', 'standard')),
+      member('hera', 'worker', 'light'),
+      ...reviewers.map((agent) => member(agent, 'reviewer', 'standard')),
     ],
   })
   const id = (handle) =>
@@ -794,10 +782,10 @@ async function withTiers(context, { review = 'none', reviewers = ['calliope', 'a
 }
 
 describe('the dispatcher assigns open tasks', () => {
-  it('gives an open task to a free member of its tier, preferring matching tags, then the least loaded', async () => {
+  it('gives an open task to the free member of its tier with the fewest tasks so far, the earliest joined first', async () => {
     await setup(async (context) => {
       const { open, task } = await withTiers(context)
-      open({ tags: ['rust'] })
+      open()
       await context.dispatcher.pass()
       assert.deepEqual([task(1).state, task(1).assignee], ['queued', 'zeus-amber-pine'])
       assert.equal(context.host.last('zeus').id, 'p1-zeus-amber-pine')
@@ -810,15 +798,19 @@ describe('the dispatcher assigns open tasks', () => {
       await context.dispatcher.pass()
       assert.deepEqual([task(1).state, task(2).state], ['done', 'done'])
 
-      open({ tags: ['rust'], body: 'Lexer' })
+      open({ body: 'Lexer' })
       await context.dispatcher.pass()
-      assert.match(task(3).assignee, /^zeus-/, 'the tag decides between two free members')
+      assert.match(
+        task(3).assignee,
+        /^zeus-/,
+        'one task each: the earliest joined of two free members',
+      )
       await context.dispatcher.pass()
       context.adapter.answer('zeus', 'lexer done')
       await context.dispatcher.pass()
       open({ body: 'Tests' })
       await context.dispatcher.pass()
-      assert.match(task(4).assignee, /^diana-/, 'with no tag, the member with fewer tasks so far')
+      assert.match(task(4).assignee, /^diana-/, 'the member with fewer tasks so far')
       open({ tier: 'light', body: 'Rename a file' })
       await context.dispatcher.pass()
       assert.match(task(5).assignee, /^hera-/)
@@ -961,7 +953,7 @@ describe('the dispatcher runs the review gate', () => {
       const { open, task } = await reviewed(context, 'Parser done', { reviewers: ['astraeus'] })
       await context.dispatcher.pass()
       assert.match(task(2).assignee, /^astraeus-/)
-      open({ tags: ['coding'], body: 'Lexer' })
+      open({ body: 'Lexer' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       assert.match(task(3).assignee, /^diana-/, 'zeus holds its work until the verdict')
@@ -1001,7 +993,7 @@ describe('the dispatcher watches quota', () => {
   it('takes a task back from a member that ran out and gives it to another, telling the requester', async () => {
     await setup(async (context) => {
       const { open, task, notes, id } = await withTiers(context)
-      open({ tags: ['rust'] })
+      open()
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       assert.equal(task(1).state, 'working')
@@ -1031,7 +1023,7 @@ describe('the dispatcher watches quota', () => {
   it('keeps a member out only until its reset, though its harness still shows the old refusal', async () => {
     await setup(async (context) => {
       const { open, task, id } = await withTiers(context)
-      open({ tags: ['rust'] })
+      open()
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       const refusedAt = context.clock.now().toISOString()
@@ -1050,7 +1042,7 @@ describe('the dispatcher watches quota', () => {
       await context.dispatcher.pass()
 
       context.clock.advance(2 * 3_600_000)
-      open({ tags: ['rust'], body: 'Lexer' })
+      open({ body: 'Lexer' })
       await context.dispatcher.pass()
       assert.match(task(2).assignee, /^zeus-/, 'the old refusal is not a new one')
       await context.dispatcher.pass()
@@ -1074,7 +1066,7 @@ describe('the dispatcher watches quota', () => {
   it("queues a delivery in flight at the refusal again, and keeps a coordinator's own tasks for after its reset", async () => {
     await setup(async (context) => {
       const { open, task, id } = await withTiers(context)
-      open({ tags: ['rust'] })
+      open()
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       const question = context.ledger.ask(1, {
@@ -1125,14 +1117,14 @@ describe('the dispatcher watches quota', () => {
   it('gives no new work to a member low on quota, keeps one out for an hour when its reset is unknown, and takes it again after', async () => {
     await setup(async (context) => {
       const { open, task, id } = await withTiers(context)
-      open({ tags: ['rust'] })
+      open()
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       context.adapter.quota('zeus', { state: 'low', usedPercent: 97 })
       await context.dispatcher.pass()
       context.adapter.answer('zeus', 'done')
       await context.dispatcher.pass()
-      open({ tags: ['rust'], body: 'Lexer' })
+      open({ body: 'Lexer' })
       await context.dispatcher.pass()
       assert.match(task(2).assignee, /^diana-/, 'zeus is low on quota')
       open({ body: 'Tests' })
@@ -1167,19 +1159,12 @@ describe('a member with several roles', () => {
         harness: 'claude-code',
         review: 'members',
         team: [
-          {
-            agent: 'zeus',
-            harness: 'claude-code',
-            role: 'worker',
-            tier: 'standard',
-            tags: ['rust'],
-          },
+          { agent: 'zeus', harness: 'claude-code', role: 'worker', tier: 'standard' },
           {
             agent: 'hera',
             harness: 'claude-code',
             roles: ['worker', 'reviewer'],
-            tier: 'standard',
-            tags: ['docs'],
+            tier: 'complex',
           },
         ],
       })
@@ -1188,15 +1173,9 @@ describe('a member with several roles', () => {
         context.adapter.prepared
           .filter((request) => request.participant.handle.startsWith(`${handle}-`))
           .map((request) => [request.role, request.instructions])
-      const open = (body, tags) =>
-        context.ledger.createTask(project.id, {
-          from: 'lead',
-          pool: 'worker',
-          tier: 'standard',
-          tags,
-          body,
-        })
-      open('Write the parser', ['rust'])
+      const open = (body, tier) =>
+        context.ledger.createTask(project.id, { from: 'lead', pool: 'worker', tier, body })
+      open('Write the parser', 'standard')
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       assert.equal(task(1).assignee, 'zeus-amber-pine')
@@ -1212,7 +1191,7 @@ describe('a member with several roles', () => {
         [['reviewer', 'instructions for reviewer']],
         'a review opens the reviewer text',
       )
-      open('Write the docs', ['docs'])
+      open('Write the docs', 'complex')
       await context.dispatcher.pass()
       assert.match(
         task(3).assignee,
@@ -1238,10 +1217,10 @@ describe('a member with several roles', () => {
 describe('one task per member session', () => {
   const zeusWindows = (context) => context.host.opened.filter((b) => windowOf(b.id, 'zeus'))
 
-  /** T-1 to zeus (its rust tag wins), delivered and answered. */
+  /** T-1 to zeus, the only standard worker here, delivered and answered. */
   async function finished(context, options = {}) {
-    const fixture = await withTiers(context, options)
-    fixture.open({ tags: ['rust'] })
+    const fixture = await withTiers(context, { workers: ['zeus'], ...options })
+    fixture.open()
     await context.dispatcher.pass()
     await context.dispatcher.pass()
     assert.equal(fixture.task(1).state, 'working')
@@ -1263,7 +1242,7 @@ describe('one task per member session', () => {
       )
       assert.equal(context.dispatcher.pane(session), null, 'the window went with the task')
 
-      open({ body: 'Write the lexer', tags: ['rust'] })
+      open({ body: 'Write the lexer' })
       await context.dispatcher.pass()
       const launch = context.adapter.prepared.at(-1)
       assert.deepEqual(
@@ -1288,7 +1267,7 @@ describe('one task per member session', () => {
     await setup(async (context) => {
       context.host.holdExits = true
       const { open, task } = await finished(context)
-      open({ body: 'Write the lexer', tags: ['rust'] })
+      open({ body: 'Write the lexer' })
       await context.dispatcher.pass()
       assert.equal(task(2).assignee, 'zeus-brisk-birch')
       assert.equal(zeusWindows(context).length, 2, 'a session of its own waits for no window')
@@ -1345,8 +1324,8 @@ describe('one task per member session', () => {
   it('after a restart, gives up a member task with no window, and resumes one whose answer is due', async () => {
     await setup(async (context) => {
       const { project, id, open, task } = await withTiers(context)
-      open({ tags: ['rust'] })
-      open({ body: 'Write the lexer', tags: ['coding'] })
+      open()
+      open({ body: 'Write the lexer' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       assert.deepEqual(
@@ -1451,7 +1430,7 @@ describe('one task per member session', () => {
       )
       assert.equal(task(1).state, 'done', 'its work stays for the lead to accept')
 
-      open({ tags: ['coding'], body: 'Docs' })
+      open({ body: 'Docs' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       const working = task(2)

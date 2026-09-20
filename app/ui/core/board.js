@@ -82,26 +82,18 @@ export function age(iso, now = Date.now()) {
   return `${Math.round(hours / 24)}d`
 }
 
-const TEAM_OF_ROLE = { lead: 'lead', worker: 'lead', reviewer: 'lead', pm: 'pm', advisor: 'pm' }
-const COORDINATORS = ['human', 'lead', 'pm']
+const COORDINATORS = ['human', 'lead']
 
-/** Whose team a participant is on: the lead's (with workers and reviewers) or the PM's (with advisors). */
-export const teamOf = (participant) => TEAM_OF_ROLE[participant.role] ?? null
-
-/**
- * The human first, then the lead's team and the PM's, each coordinator ahead
- * of its members, and each member's sessions right under it.
- */
+/** The human and the lead first, then each member with its sessions right under it. */
 export function laneOrder(lanes) {
   const rank = ({ participant }) => [
-    [null, 'lead', 'pm'].indexOf(teamOf(participant)),
     COORDINATORS.includes(participant.role) ? 0 : 1,
     participant.memberId ?? participant.id,
     participant.memberId === null ? 0 : participant.id,
   ]
   return [...lanes].sort((a, b) => {
     const [x, y] = [rank(a), rank(b)]
-    return x[0] - y[0] || x[1] - y[1] || x[2] - y[2] || x[3] - y[3]
+    return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]
   })
 }
 
@@ -115,7 +107,7 @@ const outOfQuota = (participant, now) =>
 const laneName = (participant) =>
   participant.member
     ? `@${participant.member} · ${participant.session}`
-    : ({ human: 'You', lead: 'Lead', pm: 'PM' }[participant.handle] ?? `@${participant.handle}`)
+    : ({ human: 'You', lead: 'Lead' }[participant.handle] ?? `@${participant.handle}`)
 
 /** A member's row: how many of its windows are open now. */
 function sessionsNote(lane, board) {
@@ -129,9 +121,7 @@ function sessionsNote(lane, board) {
 
 /** Where a task is going or came from, on its card. */
 function route(task) {
-  if (task.assignee === null) {
-    return `for a ${task.tier} ${task.pool}${task.tags.length === 0 ? '' : ` · ${task.tags.join(', ')}`}`
-  }
+  if (task.assignee === null) return `for a ${task.tier} ${task.pool}`
   return `from ${who(task.requester)}`
 }
 
@@ -356,18 +346,7 @@ export class BoardView {
         reviews.set(task.reviewOf, list)
       }
     }
-    const grouped = board.lanes.some((lane) => lane.participant.role === 'pm')
-    let team = null
     for (const lane of laneOrder(board.lanes)) {
-      const next = teamOf(lane.participant)
-      if (grouped && next !== team) {
-        const row = element('tr', 'board-group')
-        const cell = element('td', null, next === 'pm' ? "PM's team" : "Lead's team")
-        cell.colSpan = COLUMNS.length + 1
-        row.append(cell)
-        body.append(row)
-      }
-      team = next
       body.append(this.#row(lane, board, models.get(lane.participant.agent), reviews, now))
     }
     table.append(head, body)
@@ -411,7 +390,7 @@ export class BoardView {
       head.append(element('span', 'row-name', 'You'))
       return head
     }
-    const coordinator = participant.role === 'lead' || participant.role === 'pm'
+    const coordinator = participant.role === 'lead'
     // A session's row says whose window it is; the member's row says what it is.
     const identity = (
       participant.member
@@ -423,7 +402,6 @@ export class BoardView {
         : [
             coordinator ? null : participant.roles.join('+'),
             participant.tier,
-            participant.tags.join(', ') || null,
             participant.harness,
             agent?.model,
           ]
@@ -458,7 +436,7 @@ export class BoardView {
       ),
     )
     if (pane === null && !lane.ended) tools.firstChild.disabled = true
-    // Only a coordinator takes a task by name; members get theirs from the board by tier.
+    // Only the lead takes a task by name; members get theirs from the board by tier.
     if (coordinator) {
       tools.append(
         button(
@@ -506,8 +484,8 @@ export class BoardView {
   }
 
   /**
-   * A new task: for a coordinator by name, or for a tier of member on the
-   * team; tags prefer a member, and critical work names its purpose.
+   * A new task: for the lead by name, for a tier of worker on the team, or
+   * advice from a tier of advisor; critical work names its purpose.
    */
   #openComposer(board) {
     const form = element('form', 'composer')
@@ -516,13 +494,13 @@ export class BoardView {
     address.name = 'address'
     address.setAttribute('aria-label', 'For')
     for (const lane of board.lanes) {
-      if (lane.participant.role !== 'lead' && lane.participant.role !== 'pm') continue
+      if (lane.participant.role !== 'lead') continue
       const option = element('option', null, laneName(lane.participant))
       option.value = lane.participant.handle
       address.append(option)
     }
-    for (const tier of TIERS) {
-      for (const pool of POOLS) {
+    for (const pool of POOLS) {
+      for (const tier of TIERS) {
         const names = board.lanes
           .filter(
             (lane) =>
@@ -532,16 +510,17 @@ export class BoardView {
           )
           .map((lane) => lane.participant.handle)
         if (names.length === 0) continue
-        const option = element('option', null, `A ${tier} ${pool} (${names.join(', ')})`)
+        const option = element(
+          'option',
+          null,
+          pool === 'advisor'
+            ? `Advice from a ${tier} advisor (${names.join(', ')})`
+            : `A ${tier} worker (${names.join(', ')})`,
+        )
         option.value = `${pool}:${tier}`
         address.append(option)
       }
     }
-    const tags = element('input')
-    tags.name = 'tags'
-    tags.type = 'text'
-    tags.placeholder = 'coding, rust'
-    tags.setAttribute('aria-label', 'Tags')
     const purpose = element('select')
     purpose.name = 'purpose'
     purpose.setAttribute('aria-label', 'Purpose')
@@ -556,15 +535,13 @@ export class BoardView {
       return label
     }
     const purposeLabel = labelled('Purpose', purpose)
-    const tagsLabel = labelled('Tags', tags)
     const tiered = () => address.value.includes(':')
     const arrange = () => {
-      tagsLabel.hidden = !tiered()
       purposeLabel.hidden = !tiered() || !address.value.endsWith(':critical')
     }
     address.addEventListener('change', arrange)
     arrange()
-    fields.append(labelled('For', address), tagsLabel, purposeLabel)
+    fields.append(labelled('For', address), purposeLabel)
     const field = element('textarea')
     field.name = 'task'
     field.rows = 3
@@ -596,15 +573,7 @@ export class BoardView {
       }
       const [pool, tier] = address.value.split(':')
       this.#actions.onPutTask(
-        {
-          pool,
-          tier,
-          tags: tags.value
-            .split(',')
-            .map((tag) => tag.trim())
-            .filter(Boolean),
-          ...(tier === 'critical' ? { purpose: purpose.value } : {}),
-        },
+        { pool, tier, ...(tier === 'critical' ? { purpose: purpose.value } : {}) },
         text,
       )
     })

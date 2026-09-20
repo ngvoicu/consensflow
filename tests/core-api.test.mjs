@@ -39,7 +39,6 @@ async function withApi(fn) {
     harness: 'claude-code',
     role: 'worker',
     tier: 'standard',
-    tags: ['coding', 'rust'],
   })
   const participant = (handle) =>
     ledger.project(project.id).participants.find((p) => p.handle === handle)
@@ -218,13 +217,10 @@ describe('the agents API', () => {
     })
   })
 
-  it("sends a PM's question with no task to the human, like a lead's", async () => {
-    await withApi(async ({ ledger, project, token, call }) => {
-      ledger.addPm(project.id, { harness: 'claude-code' })
-      const asked = await call(token('pm'), 'POST', '/api/questions', { body: 'Scope?' })
-      assert.deepEqual([asked.status, asked.body.message.recipient], [201, 'human'])
+  it("sends the lead's question with no task to the human", async () => {
+    await withApi(async ({ token, call }) => {
       const lead = await call(token('lead'), 'POST', '/api/questions', { body: 'Ship?' })
-      assert.equal(lead.body.message.recipient, 'human')
+      assert.deepEqual([lead.status, lead.body.message.recipient], [201, 'human'])
     })
   })
 
@@ -261,17 +257,11 @@ describe('cf inside a core window', () => {
     })
   })
 
-  it('shows the project team as roles, tiers and tags, nothing to pick a member by', async () => {
+  it('shows the project team as roles and tiers, nothing to pick a member by', async () => {
     await withApi(async ({ token, cf, ledger, project }) => {
-      assert.equal(
-        (await cf(token('lead'), 'team')).out,
-        '@zeus · worker · standard · coding, rust',
-      )
+      assert.equal((await cf(token('lead'), 'team')).out, '@zeus · worker · standard')
       ledger.setRoles(project.id, 'zeus', ['worker', 'reviewer'])
-      assert.equal(
-        (await cf(token('lead'), 'team')).out,
-        '@zeus · worker+reviewer · standard · coding, rust',
-      )
+      assert.equal((await cf(token('lead'), 'team')).out, '@zeus · worker+reviewer · standard')
     })
   })
 
@@ -283,7 +273,7 @@ describe('cf inside a core window', () => {
         [usage.code, usage.err],
         [
           2,
-          'cf: cf task add --tier <critical|complex|standard|light> "what to do" (or --after T-3, or --self)',
+          'cf: cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor; or --after T-3, or --self)',
         ],
       )
       const missing = await cf(lead, 'task', 'done', 'T-9', 'x')
@@ -299,26 +289,14 @@ describe('tiered tasks through the API and cf', () => {
   it('opens a task for a tier, never for a member by name', async () => {
     await withApi(async ({ ledger, project, token, cf }) => {
       const lead = token('lead')
-      const opened = await cf(
-        lead,
-        'task',
-        'add',
-        '--tier',
-        'standard',
-        '--tags',
-        'coding,rust',
-        'Write the parser',
-      )
+      const opened = await cf(lead, 'task', 'add', '--tier', 'standard', 'Write the parser')
       assert.deepEqual(opened, {
         code: 0,
         out: 'T-1 is on the board for a standard worker; the first free one gets it, and its result arrives in your inbox.',
         err: '',
       })
       const task = ledger.task(project.id, 1)
-      assert.deepEqual(
-        [task.state, task.pool, task.tier, task.tags],
-        ['open', 'worker', 'standard', ['coding', 'rust']],
-      )
+      assert.deepEqual([task.state, task.pool, task.tier], ['open', 'worker', 'standard'])
 
       const named = await cf(lead, 'task', 'add', '@zeus', 'Write the lexer')
       assert.deepEqual(
@@ -345,7 +323,7 @@ describe('tiered tasks through the API and cf', () => {
         [noTier.code, noTier.err],
         [
           2,
-          'cf: cf task add --tier <critical|complex|standard|light> "what to do" (or --after T-3, or --self)',
+          'cf: cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor; or --after T-3, or --self)',
         ],
       )
 
@@ -357,39 +335,42 @@ describe('tiered tasks through the API and cf', () => {
       })
       assert.equal(ledger.task(project.id, 2).assignee, 'lead')
 
-      ledger.addPm(project.id, { harness: 'pi' })
       ledger.addMember(project.id, {
         agent: 'athena',
         harness: 'opencode',
         role: 'advisor',
         tier: 'standard',
       })
+      const noAdvisor = await cf(lead, 'task', 'add', '--advice', '--tier', 'light', 'Which one?')
+      assert.deepEqual([noAdvisor.code, noAdvisor.err], [1, 'cf: no light advisor is on the team'])
       const advice = await cf(
-        token('pm'),
+        lead,
         'task',
         'add',
+        '--advice',
         '--tier',
         'standard',
         'Compare the two parsers',
       )
       assert.match(advice.out, /^T-3 is on the board for a standard advisor;/)
       assert.equal(ledger.task(project.id, 3).pool, 'advisor')
-      const toLead = await cf(token('pm'), 'task', 'add', '@lead', 'Ship it')
+      const fromAdvisor = await cf(token('athena'), 'task', 'add', '--tier', 'standard', 'Do it')
+      assert.deepEqual(
+        [fromAdvisor.code, fromAdvisor.err],
+        [1, 'cf: members do not hand out tasks: ask your lead instead (cf ask)'],
+      )
+      const toLead = await cf(token('zeus'), 'task', 'add', '@lead', 'Ship it')
       assert.deepEqual(
         [toLead.code, toLead.err],
-        [
-          1,
-          'cf: agents give no task by name: put it on the board for a tier (cf task add --tier standard "…"); only the human gives the lead or the PM a task',
-        ],
+        [1, 'cf: members do not hand out tasks: ask your lead instead (cf ask)'],
       )
-      assert.equal((await cf(lead, 'task', 'add', '@pm', 'Plan it')).code, 1)
 
       assert.equal(
         (await cf(lead, 'task', 'list')).out,
         [
           'Waiting for a member',
           'T-1 [open] for a standard worker ← @lead: Write the parser',
-          'T-3 [open] for a standard advisor ← @pm: Compare the two parsers',
+          'T-3 [open] for a standard advisor ← @lead: Compare the two parsers',
           '@lead (lead)',
           'T-2 [queued] @lead ← @lead: Plan the release',
         ].join('\n'),
@@ -427,7 +408,7 @@ describe('tiered tasks through the API and cf', () => {
       const sideways = await cf(token('zeus'), 'ask', '--to', '@diana', 'Which parser?')
       assert.deepEqual(
         [sideways.code, sideways.err],
-        [1, 'cf: questions go to your coordinator or the human, not to @diana'],
+        [1, 'cf: questions go to the lead or the human, not to @diana'],
       )
       const upward = await cf(token('zeus'), 'ask', '--to', '@lead', 'Which parser?')
       assert.equal(upward.code, 0)

@@ -1553,7 +1553,6 @@ const CORE_OPERATIONS: &[&str] = &[
     "member.add",
     "member.remove",
     "member.roles",
-    "pm.add",
     "task.get",
     "task.add",
     "task.accept",
@@ -1613,7 +1612,7 @@ pub fn roster_handle<R: Runtime>(app: AppHandle<R>) -> Value {
     }
 }
 
-/// The agents screens (the roster, the library, the harnesses) in their own
+/// The agents screens (the agents, the harnesses) in their own
 /// window at the daemon's address. The board's page cannot frame them: it
 /// is served over the app's secure scheme and WebKit blocks a plain-HTTP
 /// frame inside it as mixed content. A second window loads the address as a
@@ -1646,7 +1645,7 @@ pub fn open_agents_window<R: Runtime>(app: AppHandle<R>, page: String) -> Value 
 }
 
 const AGENTS_WINDOW: &str = "agents";
-const AGENTS_PAGES: &[&str] = &["", "library", "harnesses"];
+const AGENTS_PAGES: &[&str] = &["", "harnesses"];
 
 /// The daemon's page for one agents screen, carrying the UI token.
 fn agents_url(roster: &RosterHandle, page: &str) -> Result<tauri::Url, String> {
@@ -1753,8 +1752,8 @@ mod tests {
             "http://localhost:43123/?token=secret"
         );
         assert_eq!(
-            agents_url(&roster, "library").unwrap().as_str(),
-            "http://localhost:43123/library?token=secret"
+            agents_url(&roster, "harnesses").unwrap().as_str(),
+            "http://localhost:43123/harnesses?token=secret"
         );
         assert_eq!(
             agents_url(&roster, "harnesses").unwrap().as_str(),

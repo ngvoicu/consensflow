@@ -58,9 +58,9 @@ export { SCHEMA_VERSION }
 
 export const HARNESSES = ['claude-code', 'codex', 'opencode', 'pi', 'devin', 'kimi']
 const MEMBER_ROLES = ['worker', 'advisor', 'reviewer']
-/** Who hands each kind of member its work, and hears when the team changes. */
-const COORDINATOR_HANDLES = ['human', 'lead', 'pm']
-const COORDINATOR_ROLES = ['human', 'lead', 'pm']
+/** Who hands out work and hears when the team changes: the human and the lead. */
+const COORDINATOR_HANDLES = ['human', 'lead']
+const COORDINATOR_ROLES = ['human', 'lead']
 export const TIERS = ['critical', 'complex', 'standard', 'light']
 export const POOLS = ['worker', 'advisor']
 export const PURPOSES = ['critical-review', 'architecture', 'hard-problem', 'important-question']
@@ -71,8 +71,6 @@ const REVIEW_ROUNDS = 2
 /** The reviewer's last word, with whatever emphasis its harness wrapped it in: `**VERDICT: pass**`, `Verdict: **changes**`. */
 const VERDICT = /^[\s*_`#>-]*VERDICT[\s*_`]*[:\-–—][\s*_`]*(pass|changes)\b/i
 const REVIEW_STATES = ['open', 'queued', 'working', 'waiting']
-const TAG = /^[a-z0-9][a-z0-9-]{0,31}$/
-const MAX_TAGS = 20
 const ACTIVE_TASK_STATES = ['working', 'waiting']
 /** A task on a member's hands: from assignment until its review is over. */
 const HELD_TASK_STATES = ['queued', 'working', 'waiting', 'review']
@@ -204,21 +202,6 @@ function requireTier(tier) {
   return tier
 }
 
-/** Tags are short lowercase words; the same tag twice counts once. */
-function requireTags(tags) {
-  if (
-    !Array.isArray(tags) ||
-    tags.length > MAX_TAGS ||
-    !tags.every((tag) => typeof tag === 'string' && TAG.test(tag))
-  ) {
-    throw new LedgerError(
-      'invalid-tags',
-      `tags are up to ${MAX_TAGS} short lowercase words (letters, digits, dashes)`,
-    )
-  }
-  return [...new Set(tags)]
-}
-
 /** A member's roles, one or more of worker, advisor and reviewer; the first one leads. */
 function requireRoles(roles) {
   if (
@@ -234,15 +217,15 @@ function requireRoles(roles) {
   return [...new Set(roles)]
 }
 
-/** Validates a member and returns its tags and roles, normalized. */
-function requireMember({ agent, harness, role, roles, tier, tags = [] }) {
+/** Validates a member and returns its roles, normalized. */
+function requireMember({ agent, harness, role, roles, tier }) {
   const set = requireRoles(roles ?? (role === undefined ? [] : [role]))
   if (typeof agent !== 'string' || !AGENT_ID.test(agent) || COORDINATOR_HANDLES.includes(agent)) {
     throw new LedgerError('invalid-agent', `not an agent id: ${JSON.stringify(agent)}`)
   }
   requireHarness(harness)
   requireTier(tier)
-  return { tags: requireTags(tags), roles: set }
+  return set
 }
 
 /** The verdict on a review's last line that says something, or null. */
@@ -313,7 +296,6 @@ const participantView = (row) => ({
   createdAt: row.created_at,
   leftAt: row.left_at,
   tier: row.tier,
-  tags: JSON.parse(row.tags),
   roles: JSON.parse(row.roles),
   outUntil: row.out_until,
   outSince: row.out_since,
@@ -345,7 +327,6 @@ const taskView = (row) => ({
   assignee: row.assignee ?? null,
   pool: row.pool,
   tier: row.tier,
-  tags: JSON.parse(row.tags),
   purpose: row.purpose,
   kind: row.kind,
   reviewOf: row.review_of_number ?? null,
@@ -492,7 +473,7 @@ class Ledger {
     requireText(directory, 'directory', 4096)
     requireText(name, 'name', 100)
     requireHarness(lead?.harness)
-    const members = team.map((member) => ({ ...member, ...requireMember(member) }))
+    const members = team.map((member) => ({ ...member, roles: requireMember(member) }))
     const reviewer = members.some((member) => member.roles.includes('reviewer'))
     // A review policy needs someone to review: without a reviewer on the
     // team nothing is reviewed, and asking for it is refused.
@@ -509,8 +490,8 @@ class Ledger {
         .run(directory, name, review, at, at)
       this.#addParticipant(id, { handle: 'human', role: 'human', agent: null, harness: null })
       this.#addParticipant(id, { handle: 'lead', role: 'lead', agent: null, harness: lead.harness })
-      for (const { agent, harness, roles, tier, tags } of members) {
-        this.#addParticipant(id, { handle: agent, roles, agent, harness, tier, tags })
+      for (const { agent, harness, roles, tier } of members) {
+        this.#addParticipant(id, { handle: agent, roles, agent, harness, tier })
       }
       this.#log(id, 'project.created', { name, directory })
       return this.project(id)
@@ -616,11 +597,9 @@ class Ledger {
     })
   }
 
-  /** A member joins the team, or rejoins it in the role, harness, tier and tags given now. */
-  addMember(projectId, { agent, harness, role, roles, tier, tags = [] }) {
-    const member = requireMember({ agent, harness, role, roles, tier, tags })
-    tags = member.tags
-    roles = member.roles
+  /** A member joins the team, or rejoins it in the roles, harness and tier given now. */
+  addMember(projectId, { agent, harness, role, roles, tier }) {
+    roles = requireMember({ agent, harness, role, roles, tier })
     return this.#write(() => {
       const left = this.#db
         .prepare(
@@ -628,14 +607,14 @@ class Ledger {
         )
         .get(projectId, agent)
       if (left === undefined) {
-        return this.#addParticipant(projectId, { handle: agent, roles, agent, harness, tier, tags })
+        return this.#addParticipant(projectId, { handle: agent, roles, agent, harness, tier })
       }
       this.#db
         .prepare(
-          `UPDATE participant SET role = ?, roles = ?, harness = ?, tier = ?, tags = ?, left_at = NULL
+          `UPDATE participant SET role = ?, roles = ?, harness = ?, tier = ?, left_at = NULL
            WHERE id = ?`,
         )
-        .run(roles[0], JSON.stringify(roles), harness, tier, JSON.stringify(tags), left.id)
+        .run(roles[0], JSON.stringify(roles), harness, tier, left.id)
       this.#log(projectId, 'member.added', { handle: agent, roles, harness, rejoined: true })
       return participantView(this.#participantRow(left.id))
     })
@@ -745,13 +724,6 @@ class Ledger {
     })
   }
 
-  addPm(projectId, { harness }) {
-    requireHarness(harness)
-    return this.#write(() =>
-      this.#addParticipant(projectId, { handle: 'pm', role: 'pm', agent: null, harness }),
-    )
-  }
-
   /** The members of the newest project that has any: the team a new project starts from. */
   lastTeam() {
     return this.#db
@@ -849,16 +821,15 @@ class Ledger {
   // --- tasks and messages ------------------------------------------------------
 
   /**
-   * A task, from a coordinator or the human. Given `to`, it is queued for that
-   * participant at once (a coordinator, the human, or the requester itself).
-   * Given a `pool` and `tier` instead, it opens for the daemon to assign to a
-   * member of that pool and tier; `tags` say which member it prefers, and
+   * A task, from the lead or the human. Given `to`, it is queued for that
+   * participant at once (the lead, the human, or the requester itself). Given
+   * a `pool` and `tier` instead, it opens for the daemon to assign to a member
+   * of that pool and tier (work for a worker, advice from an advisor), and
    * critical work names its `purpose`.
    */
-  createTask(projectId, { from, to, after, pool, tier, tags = [], purpose, body, title }) {
+  createTask(projectId, { from, to, after, pool, tier, purpose, body, title }) {
     requireText(body, 'body', MAX_BODY)
     if (title !== undefined) requireText(title, 'title', MAX_TITLE)
-    tags = requireTags(tags)
     if (to === undefined && after === undefined) {
       requireTier(tier)
       if (!POOLS.includes(pool)) {
@@ -898,8 +869,8 @@ class Ledger {
       const { lastInsertRowid: taskId } = this.#db
         .prepare(
           `INSERT INTO task (project_id, number, title, body, requester_id, assignee_id, state,
-                             pool, tier, tags, purpose, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                             pool, tier, purpose, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           projectId,
@@ -911,19 +882,12 @@ class Ledger {
           assignee === null ? 'open' : 'queued',
           assignee === null ? pool : null,
           assignee === null ? tier : null,
-          JSON.stringify(tags),
           purpose ?? null,
           at,
           at,
         )
       if (assignee === null) {
-        this.#log(projectId, 'task.opened', {
-          task: next,
-          from: requester.handle,
-          pool,
-          tier,
-          tags,
-        })
+        this.#log(projectId, 'task.opened', { task: next, from: requester.handle, pool, tier })
         return { task: this.#task(taskId), message: null }
       }
       const messageId = this.#queue(projectId, {
@@ -962,8 +926,8 @@ class Ledger {
 
   /**
    * The active members of one role, in join order, with what the daemon ranks
-   * them by: their tier and tags, how many tasks they have taken, whether one
-   * is on their hands now, and until when they are out of quota.
+   * them by: their tier, how many tasks they have taken, whether one is on
+   * their hands now, and until when they are out of quota.
    */
   members(projectId, role) {
     const held = HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')
@@ -986,7 +950,6 @@ class Ledger {
         id: row.id,
         handle: row.handle,
         tier: row.tier,
-        tags: JSON.parse(row.tags),
         roles: JSON.parse(row.roles),
         taken: row.taken,
         sessions: row.sessions,
@@ -1009,8 +972,8 @@ class Ledger {
 
   /**
    * A member's new session: its own participant, named after the member,
-   * with the member's agent, harness, tier and tags and the role its task
-   * needs. It starts from nothing and ends with its work (CORE-19).
+   * with the member's agent, harness and tier and the role its task needs.
+   * It starts from nothing and ends with its work (CORE-19).
    */
   #startSession(projectId, member, role) {
     for (let attempt = 0; attempt < 16; attempt += 1) {
@@ -1021,8 +984,8 @@ class Ledger {
       if (taken !== undefined) continue
       const { lastInsertRowid: id } = this.#db
         .prepare(
-          `INSERT INTO participant (project_id, handle, role, roles, agent, harness, tier, tags, member_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO participant (project_id, handle, role, roles, agent, harness, tier, member_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           projectId,
@@ -1032,7 +995,6 @@ class Ledger {
           member.agent,
           member.harness,
           member.tier,
-          member.tags,
           member.id,
           this.#at(),
         )
@@ -1874,7 +1836,7 @@ class Ledger {
     return this.#db
       .prepare(
         `${MESSAGE_SELECT}
-         WHERE m.project_id = ? AND m.kind = 'question' AND r.role IN ('lead', 'pm')
+         WHERE m.project_id = ? AND m.kind = 'question' AND r.role = 'lead'
            AND m.created_at <= ?
            AND NOT EXISTS (SELECT 1 FROM message a WHERE a.reply_to = m.id AND a.kind = 'answer')
          ORDER BY m.id`,
@@ -1994,7 +1956,7 @@ class Ledger {
     return requireActive(row)
   }
 
-  #addParticipant(projectId, { handle, role, roles = [], agent, harness, tier = null, tags = [] }) {
+  #addParticipant(projectId, { handle, role, roles = [], agent, harness, tier = null }) {
     role ??= roles[0]
     this.#projectRow(projectId)
     const taken = this.#db
@@ -2005,20 +1967,10 @@ class Ledger {
     }
     const { lastInsertRowid: id } = this.#db
       .prepare(
-        `INSERT INTO participant (project_id, handle, role, roles, agent, harness, tier, tags, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO participant (project_id, handle, role, roles, agent, harness, tier, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(
-        projectId,
-        handle,
-        role,
-        JSON.stringify(roles),
-        agent,
-        harness,
-        tier,
-        JSON.stringify(tags),
-        this.#at(),
-      )
+      .run(projectId, handle, role, JSON.stringify(roles), agent, harness, tier, this.#at())
     if (role !== 'human' && role !== 'lead') {
       this.#log(projectId, 'member.added', { handle, role, roles, harness })
     }
@@ -2095,12 +2047,17 @@ class Ledger {
       .run(taskId)
   }
 
-  /** Whether a finished task waits for a review under the project's policy. */
+  /**
+   * Whether a finished task waits for a review under the project's policy:
+   * workers' work under `members`, the lead's own too under `all`. Advice is
+   * for the lead to weigh and is never reviewed.
+   */
   #reviewDue(projectId, task) {
     const policy = this.#projectRow(projectId).review
     if (policy === 'none') return false
-    if (policy === 'all') return true
-    return MEMBER_ROLES.includes(this.#participantRow(task.assignee_id).role)
+    const role = this.#participantRow(task.assignee_id).role
+    if (role === 'advisor') return false
+    return policy === 'all' || role === 'worker'
   }
 
   #openReviews(taskId) {

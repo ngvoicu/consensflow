@@ -288,14 +288,6 @@
     }
     .kanban tbody th { border-left: 0; }
     .kanban td[data-state="ended"] { background: rgba(0, 0, 0, .12); }
-    .kanban .board-group td {
-      padding: 12px 8px 4px;
-      border: 0;
-      font: 700 10px/1 var(--mono);
-      letter-spacing: .18em;
-      text-transform: uppercase;
-      color: var(--muted);
-    }
     .row-head { text-align: left; font-weight: normal; }
     .row-title { display: flex; align-items: center; gap: 8px; }
     .row-name { font: 700 11px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; }
@@ -524,9 +516,6 @@
     .team th:nth-child(2), .team th:nth-child(3), .team th:nth-child(4) { text-align: center; }
     .team td { padding: 10px 10px; border-top: 1px solid var(--line-soft); vertical-align: middle; font-size: 14px; }
     .team td.role-cell { text-align: center; width: 90px; }
-    .team td.tags-cell { width: 40%; }
-    .tag-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-    .tag-chip { border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; font: 12px var(--mono); color: var(--foam); white-space: nowrap; }
     .team .member-name { font-family: var(--mono); }
     .team .member-meta { color: var(--muted); font: 11px var(--mono); }
     .team-add, .team-pick { border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
@@ -658,10 +647,6 @@
     .settings-menu { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
     .settings-menu li { display: grid; grid-template-columns: 150px minmax(0, 1fr); align-items: center; gap: 12px; font-size: 13px; color: var(--muted); }
     .settings-menu .quiet-button { width: 100%; }
-    .team-pm { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
-    .team-pm p { margin: 0; font: 12px var(--mono); color: var(--foam); }
-    .team-pm-add { display: flex; align-items: end; gap: 8px; }
-    .team-pm-add label { flex: 1; }
 
     @media (max-width: 760px) {
       .main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) 42vh; }
@@ -740,10 +725,9 @@
   <dialog id="settings-dialog" class="settings" aria-labelledby="settings-title">
     <form class="dialog-form" method="dialog">
       <h2 id="settings-title">Settings</h2>
-      <p class="dialog-help">Your agents, the library and the harnesses open in their own window.</p>
+      <p class="dialog-help">Agents and harnesses open in their own window.</p>
       <menu class="settings-menu">
-        <li><button class="quiet-button" type="button" data-agents-page="">Your agents</button><span>The agents you saved: model, effort, tier and tags.</span></li>
-        <li><button class="quiet-button" type="button" data-agents-page="library">Agent library</button><span>The catalog to add agents from.</span></li>
+        <li><button class="quiet-button" type="button" data-agents-page="">Agents</button><span>The catalog and the agents you saved from it: model, effort, tier and tags.</span></li>
         <li><button class="quiet-button" type="button" data-agents-page="harnesses">Harnesses</button><span>Which coding tools are installed and logged in.</span></li>
       </menu>
       <div class="dialog-actions">
@@ -777,8 +761,8 @@
       <label>Second review of
         <select name="review">
           <option value="none">Nothing: results go straight to whoever asked</option>
-          <option value="members">Members' work: workers' and advisors' results</option>
-          <option value="all">All work: coordinators' own tasks too</option>
+          <option value="members">Workers' work: what a worker finishes</option>
+          <option value="all">All work: the lead's own tasks too</option>
         </select>
       </label>
       <p class="team-warning" id="new-project-warning" hidden></p>
@@ -792,10 +776,10 @@
   <dialog id="team-dialog" aria-labelledby="team-title">
     <form class="dialog-form">
       <h2 id="team-title">Project team</h2>
-      <p class="dialog-help">A coordinator names the tier a task needs and ConsensFlow picks a free member of that tier. A member may hold more than one role.</p>
+      <p class="dialog-help">The lead names the tier a task needs and ConsensFlow picks a free member of that tier: a worker does the work, an advisor advises the lead, a reviewer reviews workers' work. A member may hold more than one role.</p>
       <table class="team" aria-label="On the team">
         <thead>
-          <tr><th>Member</th><th>Worker</th><th>Advisor</th><th>Reviewer</th><th>Tier</th><th>Tags</th><th></th></tr>
+          <tr><th>Member</th><th>Worker</th><th>Advisor</th><th>Reviewer</th><th>Tier</th><th></th></tr>
         </thead>
         <tbody id="team-members"></tbody>
       </table>
@@ -812,26 +796,11 @@
       <label>Second review of
         <select id="team-review" name="review">
           <option value="none">Nothing: results go straight to whoever asked</option>
-          <option value="members">Members' work: workers' and advisors' results</option>
-          <option value="all">All work: coordinators' own tasks too</option>
+          <option value="members">Workers' work: what a worker finishes</option>
+          <option value="all">All work: the lead's own tasks too</option>
         </select>
       </label>
       <p class="team-warning" id="team-warning" hidden></p>
-      <div class="team-pm">
-        <p id="team-pm-state">No PM yet.</p>
-        <div class="team-pm-add" id="team-pm-add">
-          <label>The PM runs in
-            <select name="pmHarness">
-              <option value="claude-code">Claude Code</option>
-              <option value="codex">Codex</option>
-              <option value="opencode">OpenCode</option>
-              <option value="pi">Pi</option>
-              <option value="devin">Devin</option>
-            </select>
-          </label>
-          <button class="quiet-button" type="button" id="add-pm">Add a PM</button>
-        </div>
-      </div>
       <div class="dialog-actions">
         <button class="quiet-button" type="button" value="cancel">Close</button>
       </div>

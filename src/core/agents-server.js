@@ -20,9 +20,9 @@ import {
 } from '../roster.js'
 
 /**
- * The human's agents screens, served by the new core: the roster editor
- * (`/`, with each agent's tier and tags), the agent library (`/library`) and
- * the harness diagnostics (`/harnesses`), each an inline page, with the
+ * The human's agents screens, served by the new core: the agents (`/`: the
+ * catalog and the saved agents as one list, each saved agent with its tier)
+ * and the harness diagnostics (`/harnesses`), each an inline page, with the
  * `/api/agents` routes they call. The app checks the UI token it was handed
  * and puts it on every request; the agents' own tokens open none of this.
  */
@@ -69,7 +69,7 @@ export function agentsUi(env, { token, harnessLatest } = {}) {
     /** Answers one of these screens' requests, or null when the path is not theirs. */
     async handle(request, url) {
       const path = url.pathname
-      const page = ['/', '/library', '/harnesses'].includes(path)
+      const page = ['/', '/harnesses'].includes(path)
       const named = /^\/api\/agents\/([a-z][a-z0-9-]*)$/.exec(path)
       const api =
         path === '/api/agents' ||
@@ -85,7 +85,6 @@ export function agentsUi(env, { token, harnessLatest } = {}) {
       }
       try {
         if (request.method === 'GET' && path === '/') return html(PAGE(token))
-        if (request.method === 'GET' && path === '/library') return html(PAGE(token, true))
         if (request.method === 'GET' && path === '/harnesses') return html(harnessPage(token))
         if (request.method === 'GET' && path === '/api/agents') {
           const benchmarks = await artificialAnalysis.refresh()
@@ -151,6 +150,7 @@ export function agentsUi(env, { token, harnessLatest } = {}) {
 const BROWSING_CONTROLS = `
   <div class="filters">
     <label class="filter-search">Search agents<input type="search" placeholder="Name, model, harness or task…" autocomplete="off"></label>
+    <label>Show<select name="show" aria-label="Show"><option value="all">All agents</option><option value="saved">Saved only</option></select></label>
     <label>Work tier<select name="tier" aria-label="Work tier"><option value="all">All tiers</option>${Object.entries(
       WORK_TIERS,
     )
@@ -159,25 +159,25 @@ const BROWSING_CONTROLS = `
     <label>Category<select name="category" aria-label="Category"><option value="all">All categories</option><optgroup label="Task capabilities">${Object.entries(
       CATEGORY_LABELS,
     )
-      .filter(([id]) => !['lead', 'pm'].includes(id))
+      .filter(([id]) => id !== 'lead')
       .map(([id, label]) => `<option value="${id}">${label}</option>`)
       .join(
         '',
-      )}</optgroup><optgroup label="Coordinator recommendations"><option value="lead">Lead candidate</option><option value="pm">PM candidate</option></optgroup></select></label>
+      )}</optgroup><optgroup label="Recommendations"><option value="lead">Lead candidate</option></optgroup></select></label>
     <label>Group by<select name="group" aria-label="Group by"><option value="none">None</option><option value="harness">Harness</option><option value="model-reasoning" selected>Model and reasoning</option><option value="tier">Work tier</option></select></label>
     <label>Sort by<select name="sort" aria-label="Sort by"><option value="default">Model and reasoning</option></select></label>
     <button type="button">Clear filters</button>
   </div>
-  <p class="tier-guide">Work tier sets the assignment scope. Capability tags show suitable tasks; lead and PM tags are recommendations.</p>
+  <p class="tier-guide">The work tier is what a task finds an agent by. Categories say what a model suits; Lead candidate is a recommendation.</p>
   <p class="benchmark-source"></p>
   <details class="benchmark-guide"><summary>About benchmark scores</summary><div></div></details>`
 
-export const PAGE = (token, library = false) => `<!DOCTYPE html>
+export const PAGE = (token) => `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ConsensFlow — ${library ? 'Agent library' : 'Your agents'}</title>
+<title>ConsensFlow — Agents</title>
 <style>
   /* Dark-first: this window lives beside a terminal. Brand marine palette;
      Archivo and IBM Plex Mono when installed locally, never fetched — a local
@@ -193,7 +193,7 @@ export const PAGE = (token, library = false) => `<!DOCTYPE html>
        while keeping seafoam for fills and borders. */
     --accent-text: #63C7B2;
     --buoy: #FF6B5A;
-    --pill-coding: #63C7B2; --pill-lead: #ABC9F1; --pill-pm: #DDC6EF; --pill-images: #EAC58B;
+    --pill-coding: #63C7B2; --pill-lead: #ABC9F1; --pill-images: #EAC58B;
     --ui: Archivo, "Helvetica Neue", system-ui, sans-serif;
     --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   }
@@ -201,7 +201,7 @@ export const PAGE = (token, library = false) => `<!DOCTYPE html>
     :root {
       --ink: #E9F1EF; --panel: #FFFFFF; --line: #C9DAD8; --foam: #0C1E23;
       --muted: #52717A; --accent-text: #16766A; --buoy: #C2402F;
-      --pill-coding: #176B5F; --pill-lead: #285A9C; --pill-pm: #734A91; --pill-images: #835D15;
+      --pill-coding: #176B5F; --pill-lead: #285A9C; --pill-images: #835D15;
     }
   }
   * { box-sizing: border-box; }
@@ -299,17 +299,14 @@ export const PAGE = (token, library = false) => `<!DOCTYPE html>
   .offer__what p { margin: 4px 0 0; }
   .category-pills { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; padding: 0; margin: 6px 0; }
   .category-pill { border: 1px solid currentColor; border-radius: 999px; padding: 2px 8px; font-size: 11px; line-height: 1.4; white-space: nowrap; color: var(--pill-coding); background: var(--panel); }
-  .tier-pill { display: inline-block; width: fit-content; border: 1px solid var(--muted); border-radius: 999px; padding: 4px 10px; margin: 6px 0; font-size: 12px; color: var(--foam); }
+  .tier-pill { display: inline-block; width: fit-content; border: 1px solid var(--muted); border-radius: 999px; padding: 4px 10px; margin: 6px 0; font-size: 12px; color: var(--foam); background: var(--panel); }
   .tier-pill[data-tier=critical] { border-color: var(--pill-images); color: var(--pill-images); }
   .tier-note { margin: 2px 0 8px; font-size: 12px; color: var(--muted); }
   .tier-guide { color: var(--muted); font-size: 12px; }
   .category-pill[data-kind=role] { border-style: dashed; }
   .category-pill[data-category=lead] { color: var(--pill-lead); }
-  .category-pill[data-category=pm] { color: var(--pill-pm); }
   .category-pill[data-category=reviewer] { color: var(--foam); }
   .category-pill[data-category=images] { color: var(--pill-images); }
-  .tag-pills { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; padding: 0; margin: 6px 0; }
-  .tag-pill { border: 1px solid var(--muted); border-radius: 999px; padding: 2px 8px; font: 11px/1.4 var(--mono); white-space: nowrap; color: var(--foam); background: var(--panel); }
   .benchmark-source, .benchmark-guide, .benchmark-details, .benchmark-missing, .benchmark-context { font-size: 12px; color: var(--muted); }
   .benchmark-source { margin: -16px 0 4px; }
   .benchmark-guide { margin: 0 0 22px; }
@@ -346,25 +343,12 @@ export const PAGE = (token, library = false) => `<!DOCTYPE html>
 <body>
 <main>
   <p class="mark"><span>consensflow</span> <span>v${VERSION}</span></p>
-  ${
-    library
-      ? `
-  <section id="catalog-section" aria-label="Agent library">
-  <h1>Agent library <span id="catalog-count" class="section-count"></span></h1>
-  <p class="lede lede--tight">Add an agent with its model and reasoning effort already configured.</p>
+  <section id="agents-section" aria-label="Agents">
+  <h1>Agents <span id="agents-count" class="section-count"></span></h1>
+  <p class="lede" id="lede">The agents a project's team is picked from: add one from the catalog, or define your own below.</p>
   <p id="roster-note" class="note" role="status"></p>
   ${BROWSING_CONTROLS}
-  <div id="catalog"></div>
-  </section>
-
-`
-      : `
-  <section id="roster-section" aria-label="Your agents">
-  <h1>Your agents <span id="roster-count" class="section-count"></span></h1>
-  <p class="lede" id="lede">Configure the workers your lead can consult by name.</p>
-  <p id="roster-note" class="note" role="status"></p>
-  ${BROWSING_CONTROLS}
-  <div id="roster"></div>
+  <div id="agents"></div>
   </section>
 
   <p class="eyebrow eyebrow--section">Define your own</p>
@@ -374,16 +358,13 @@ export const PAGE = (token, library = false) => `<!DOCTYPE html>
     <input class="full" name="model" placeholder="model — anything this harness accepts" required>
     <input name="effort" list="effort-options" placeholder="effort (optional)">
     <datalist id="effort-options"></datalist>
-    <input class="full" name="tags" placeholder="tags: what it is good for, comma-separated (optional)">
     <button class="primary">Add agent</button>
     <p id="error" class="alert full"></p>
-  </form>`
-  }
+  </form>
 
 </main>
 <script>
 const TOKEN = ${JSON.stringify(token)};
-const LIBRARY = ${library};
 const headers = { authorization: 'Bearer ' + TOKEN, 'content-type': 'application/json' };
 const el = (tag, className, text) => {
   const node = document.createElement(tag);
@@ -391,13 +372,6 @@ const el = (tag, className, text) => {
   if (text !== undefined) node.textContent = text;
   return node;
 };
-
-/** "coding, rust" as the list the roster keeps; an empty field clears the tags. */
-const tagList = text => {
-  const tags = text.split(',').map(tag => tag.trim()).filter(Boolean);
-  return tags.length === 0 ? null : tags;
-};
-
 
 const HARNESS_LABELS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi', kimi: 'Kimi', devin: 'Devin', image: 'Images' };
 const CATEGORY_LABELS = ${JSON.stringify(CATEGORY_LABELS)};
@@ -461,6 +435,8 @@ function browsingGroups(entries, sectionId) {
     group.rows.sort((a, b) => compareScores(a, b, metric) || compareAgents(a, b));
     group.shared = group.modelGroup ? ['workTier', 'categories', 'goodFor', 'benchmarks'].filter(field =>
       group.rows.every(p => JSON.stringify(p.profile[field]) === JSON.stringify(group.rows[0].profile[field]))) : [];
+    // The tier's note goes with the tier pill: said once on the card when the tier is.
+    if (group.shared.includes('workTier')) group.shared.push('tierNote');
   }
   return [...groups.values()].sort((a, b) =>
     (by === 'tier' ? rank(Object.keys(WORK_TIERS), a.key) - rank(Object.keys(WORK_TIERS), b.key) : by === 'harness' ? rank(Object.keys(HARNESS_LABELS), a.key) - rank(Object.keys(HARNESS_LABELS), b.key) :
@@ -476,7 +452,7 @@ function groupSection(group, fields = group.shared) {
   } else if (group.title) section.append(el('h3', 'eyebrow eyebrow--tool', group.title + ' · ' + group.rows.length));
   return section;
 }
-function appendProfile(host, p, fields = ['workTier', 'tierNote', 'categories', 'goodFor', 'routeLabel', 'benchmarks']) {
+function appendProfile(host, p, fields) {
   if (fields.includes('workTier')) {
     const tier = WORK_TIERS[p.profile.workTier];
     const pill = el('span', 'tier-pill', 'T' + (Object.keys(WORK_TIERS).indexOf(p.profile.workTier) + 1) + ' · ' + tier.label);
@@ -485,17 +461,6 @@ function appendProfile(host, p, fields = ['workTier', 'tierNote', 'categories', 
     host.append(pill);
     if (fields.includes('tierNote') && p.profile.workTier === 'critical') host.append(el('p', 'tier-note', 'Important work only · No coding'));
   }
-  if (fields.includes('tags') && p.tags?.length) {
-    const tags = el('ul', 'tag-pills');
-    tags.setAttribute('aria-label', 'Tags');
-    tags.setAttribute('role', 'list');
-    for (const tag of p.tags) {
-      const pill = el('li', 'tag-pill', tag);
-      pill.dataset.tag = tag;
-      tags.append(pill);
-    }
-    host.append(tags);
-  }
   if (fields.includes('categories') && p.profile.categories.length) {
     const categories = el('ul', 'category-pills');
     categories.setAttribute('aria-label', 'Categories');
@@ -503,8 +468,8 @@ function appendProfile(host, p, fields = ['workTier', 'tierNote', 'categories', 
     for (const category of p.profile.categories) {
       const pill = el('li', 'category-pill', CATEGORY_LABELS[category]);
       pill.dataset.category = category;
-      pill.dataset.kind = ['lead', 'pm'].includes(category) ? 'role' : 'capability';
-      pill.title = ['lead', 'pm'].includes(category) ? 'Coordinator recommendation; does not launch a role.' : CATEGORY_LABELS[category];
+      pill.dataset.kind = category === 'lead' ? 'role' : 'capability';
+      pill.title = category === 'lead' ? 'A recommendation for the lead; does not launch a role.' : CATEGORY_LABELS[category];
       categories.append(pill);
     }
     host.append(categories);
@@ -586,20 +551,56 @@ function renderBenchmarkControls(data) {
   guide.append(definitions);
 }
 
-function renderRoster(data) {
-  const host = document.querySelector('#roster');
+/** A saved agent's card: its name, harness, tier and route, with Edit and Remove. */
+function memberCard(p, group, data, editors) {
+  const card = el('div', 'member');
+  card.dataset.agentName = p.name;
+  const head = el('div', 'member__head');
+  head.append(el('span', 'callsign', p.name));
+  head.append(el('span', 'tag', group.modelGroup ? (HARNESS_LABELS[p.harness] || p.harness) : p.profile.modelLabel + ' · ' + (HARNESS_LABELS[p.harness] || p.harness) + ' · ' + effortLabel(effortValue(p))));
+  head.append(el('span', 'spacer'));
+  const edit = el('button', null, 'Edit');
+  edit.onclick = () => openEditor(card, p);
+  head.append(edit);
+  head.append(removeButton(p, 'Remove'));
+  card.append(head);
+  const moved = (data.drift ?? []).find((d) => d.name === p.name);
+  if (moved) {
+    const note = el('p', 'member__drift');
+    note.append(el('span', 'tag tag--moved', 'catalog moved'));
+    note.append(el('span', null, ' ' + moved.changes
+      .map((c) => c.field + ': ' + (c.from ?? '-') + ' → ' + (c.to ?? '-')).join(', ') + ' '));
+    const update = el('button', null, 'Update');
+    update.onclick = () => post('/api/agents/sync', { name: p.name }, 'Updating ' + p.name + '…');
+    note.append(update);
+    card.append(note);
+  }
+  // A saved agent shows what a task finds it by, its tier, and how it is
+  // billed; the model card above says what the model is for.
+  appendProfile(card, p, ['workTier', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
+  if (editors.has(p.name)) card.append(editors.get(p.name));
+  return card;
+}
+
+/**
+ * One list: every ready-made agent of the catalog, and every agent defined by
+ * hand, grouped by model. A catalog entry not yet saved offers Add; once
+ * saved it shows as the saved agent itself, editable, in the same place.
+ */
+function renderAgents(data) {
+  const host = document.querySelector('#agents');
   const editors = new Map([...host.querySelectorAll('.member[data-agent-name]')]
     .map(card => [card.dataset.agentName, card.querySelector('form')]).filter(([, form]) => form));
   host.innerHTML = '';
-  const groups = browsingGroups(data.agents, '#roster-section');
+  const catalog = Object.entries(data.catalog).flatMap(([harness, entries]) => entries.map(p => ({ ...p, harness })));
+  const matched = new Set(catalog.flatMap(entry => catalogMatches(entry, data.agents).map(a => a.name)));
+  const custom = data.agents.filter(a => !matched.has(a.name)).map(a => ({ ...a, custom: true }));
+  const show = document.querySelector('#agents-section [name=show]').value;
+  const entries = [...catalog, ...custom].filter(e => show === 'all' || e.custom || catalogMatches(e, data.agents).length > 0);
   document.querySelector('#lede').textContent = data.agents.length === 0
-    ? 'Add agents for your lead and PM to consult by name.'
-    : 'Choose the scope and capabilities available to your lead and PM.';
-
-  if (data.agents.length === 0) {
-    host.appendChild(el('p', 'empty', 'No agents yet. Add one from Agent library, or define your own below.'));
-    return;
-  }
+    ? "The agents a project's team is picked from: add one from the catalog, or define your own below."
+    : data.agents.length + " saved. A project's team is picked from them; a saved agent's tier is edited here.";
+  const groups = browsingGroups(entries, '#agents-section');
   if (groups.length === 0) { host.append(el('p', 'empty', 'No agents match these filters.')); return; }
   if ((data.drift ?? []).length > 1) {
     const all = el('div', 'member');
@@ -613,50 +614,25 @@ function renderRoster(data) {
     host.append(all);
   }
   for (const group of groups) {
-    const section = groupSection(group, ['workTier', 'benchmarks']);
+    const section = groupSection(group, ['workTier', 'tierNote', 'categories', 'goodFor', 'benchmarks']);
+    for (const entry of group.rows) {
+      const saved = entry.custom ? [entry] : catalogMatches(entry, data.agents);
+      if (saved.length === 0) section.append(offerRow(entry, group, data));
+      else for (const agent of saved) section.append(memberCard(agent, group, data, editors));
+    }
     host.append(section);
-    for (const p of group.rows) {
-    const card = el('div', 'member');
-    card.dataset.agentName = p.name;
-    const head = el('div', 'member__head');
-    head.append(el('span', 'callsign', p.name));
-    head.append(el('span', 'tag', group.modelGroup ? (HARNESS_LABELS[p.harness] || p.harness) : p.profile.modelLabel + ' · ' + (HARNESS_LABELS[p.harness] || p.harness) + ' · ' + effortLabel(effortValue(p))));
-    head.append(el('span', 'spacer'));
-    const edit = el('button', null, 'Edit');
-    edit.onclick = () => openEditor(card, p);
-    head.append(edit);
-    head.append(removeButton(p, 'Remove'));
-    card.append(head);
-    const moved = (data.drift ?? []).find((d) => d.name === p.name);
-    if (moved) {
-      const note = el('p', 'member__drift');
-      note.append(el('span', 'tag tag--moved', 'catalog moved'));
-      note.append(el('span', null, ' ' + moved.changes
-        .map((c) => c.field + ': ' + (c.from ?? '-') + ' → ' + (c.to ?? '-')).join(', ') + ' '));
-      const update = el('button', null, 'Update');
-      update.onclick = () => post('/api/agents/sync', { name: p.name }, 'Updating ' + p.name + '…');
-      note.append(update);
-      card.append(note);
-    }
-    // A saved agent shows what the daemon picks it by, its tier and its tags,
-    // and how it is billed; the catalog's words about the model stay in the library.
-    appendProfile(card, p, ['workTier', 'tags', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
-    if (editors.has(p.name)) card.append(editors.get(p.name));
-    section.append(card);
-    }
   }
 }
 
-/** Editing an agent is changing its model, effort, tags or tier. */
+/** Editing an agent is changing its model, effort or tier; an image agent has only its tier. */
 function openEditor(card, agent) {
   if (card.querySelector('form')) return;
   const form = el('form', 'form');
   const fields = [
     ['model', agent.model, 'model'],
     ['effort', agent.effort ?? '', 'effort (blank for none)'],
-    ['tags', (agent.tags ?? []).join(', '), 'tags: what it is good for, comma-separated'],
   ];
-  for (const [name, value, placeholder] of fields.filter(([name]) => agent.harness !== 'image' || name === 'tags')) {
+  for (const [name, value, placeholder] of agent.harness === 'image' ? [] : fields) {
     const input = document.createElement('input');
     input.name = name;
     input.value = value;
@@ -682,7 +658,6 @@ function openEditor(card, agent) {
     event.preventDefault();
     const entries = Object.fromEntries(new FormData(form).entries());
     if (entries.workTier === 'auto') entries.workTier = null;
-    if (entries.tags !== undefined) entries.tags = tagList(entries.tags);
     const res = await fetch('/api/agents/' + agent.name, {
       method: 'PATCH',
       headers,
@@ -732,63 +707,48 @@ function catalogMatches(entry, agents) {
 }
 function catalogState(entry, agents) {
   if (pendingAdds.has(entry.preset)) return 'Adding…';
-  if (catalogMatches(entry, agents).length > 0) return 'Already added';
   return agents.some(p => p.name === entry.name) ? 'Name in use' : 'Add';
 }
-function renderCatalog(data) {
-  const host = document.querySelector('#catalog');
-  host.innerHTML = '';
-  const entries = Object.entries(data.catalog).flatMap(([harness, entries]) => entries.map(p => ({ ...p, harness })));
-  const groups = browsingGroups(entries, '#catalog-section');
-  for (const group of groups) {
-    const section = groupSection(group, ['workTier', 'tierNote', 'categories', 'goodFor', 'benchmarks']);
-    for (const entry of group.rows) {
-      const row = el('div', 'offer');
-      row.append(el('span', 'offer__name', entry.name));
-      const what = el('div', 'offer__what');
-      what.append(el('span', 'offer__model', group.modelGroup ? (HARNESS_LABELS[entry.harness] || entry.harness) : entry.profile.modelLabel + ' · ' + (HARNESS_LABELS[entry.harness] || entry.harness) + ' · ' + effortLabel(effortValue(entry))));
-      appendProfile(what, entry, ['workTier', 'tierNote', 'categories', 'goodFor', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
-      row.append(what);
-      const state = catalogState(entry, data.agents);
-      const add = el('button', null, state);
-      add.disabled = state !== 'Add';
-      add.onclick = async () => {
-        if (pendingAdds.has(entry.preset)) return;
-        pendingAdds.add(entry.preset);
-        add.disabled = true;
-        add.textContent = 'Adding…';
-        const status = document.querySelector('#roster-note');
-        status.textContent = '';
-        try {
-          const response = await fetch('/api/agents', {
-            method: 'POST', headers,
-            body: JSON.stringify({ name: entry.name, harness: entry.harness, model: entry.model,
-              ...(entry.effort ? { effort: entry.effort } : {}), description: entry.description, preset: entry.preset }),
-          });
-          const result = await response.json();
-          if (!response.ok) throw new Error(result.error || 'Could not add agent');
-        } catch (error) {
-          status.textContent = error.message || 'Could not add agent';
-        } finally {
-          pendingAdds.delete(entry.preset);
-          try { await load(); } catch {
-            renderLists();
-            if (!status.textContent) status.textContent = 'Could not refresh agents. Reopen Agents to try again.';
-          }
-        }
-      };
-      const actions = el('div', 'offer__actions');
-      actions.append(add);
-      const matches = catalogMatches(entry, data.agents);
-      for (const agent of matches) {
-        actions.append(removeButton(agent, matches.length === 1 && agent.name === entry.name ? 'Remove' : 'Remove ' + agent.name));
+/** A ready-made agent not yet saved: what it is, and Add. */
+function offerRow(entry, group, data) {
+  const row = el('div', 'offer');
+  row.append(el('span', 'offer__name', entry.name));
+  const what = el('div', 'offer__what');
+  what.append(el('span', 'offer__model', group.modelGroup ? (HARNESS_LABELS[entry.harness] || entry.harness) : entry.profile.modelLabel + ' · ' + (HARNESS_LABELS[entry.harness] || entry.harness) + ' · ' + effortLabel(effortValue(entry))));
+  appendProfile(what, entry, ['workTier', 'tierNote', 'categories', 'goodFor', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
+  row.append(what);
+  const state = catalogState(entry, data.agents);
+  const add = el('button', null, state);
+  add.disabled = state !== 'Add';
+  add.onclick = async () => {
+    if (pendingAdds.has(entry.preset)) return;
+    pendingAdds.add(entry.preset);
+    add.disabled = true;
+    add.textContent = 'Adding…';
+    const status = document.querySelector('#roster-note');
+    status.textContent = '';
+    try {
+      const response = await fetch('/api/agents', {
+        method: 'POST', headers,
+        body: JSON.stringify({ name: entry.name, harness: entry.harness, model: entry.model,
+          ...(entry.effort ? { effort: entry.effort } : {}), description: entry.description, preset: entry.preset }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Could not add agent');
+    } catch (error) {
+      status.textContent = error.message || 'Could not add agent';
+    } finally {
+      pendingAdds.delete(entry.preset);
+      try { await load(); } catch {
+        renderLists();
+        if (!status.textContent) status.textContent = 'Could not refresh agents. Reopen Agents to try again.';
       }
-      row.append(actions);
-      section.append(row);
     }
-    host.append(section);
-  }
-  if (groups.length === 0) host.append(el('p', 'empty', 'No ready-made agents match these filters.'));
+  };
+  const actions = el('div', 'offer__actions');
+  actions.append(add);
+  row.append(actions);
+  return row;
 }
 
 function renderForm(data) {
@@ -831,11 +791,10 @@ async function post(path, body, note) {
   load();
 }
 
-function renderLists() { if (LAST !== null) (LIBRARY ? renderCatalog : renderRoster)(LAST); }
-for (const [id, render] of [['#roster-section', renderRoster], ['#catalog-section', renderCatalog]]) {
-  const filters = document.querySelector(id + ' .filters');
-  if (!filters) continue;
-  const refresh = () => { if (LAST !== null) render(LAST); };
+function renderLists() { if (LAST !== null) renderAgents(LAST); }
+{
+  const filters = document.querySelector('#agents-section .filters');
+  const refresh = renderLists;
   filters.querySelector('input').addEventListener('input', refresh);
   for (const select of filters.querySelectorAll('select')) select.addEventListener('change', refresh);
   filters.querySelector('button').onclick = () => {
@@ -844,6 +803,7 @@ for (const [id, render] of [['#roster-section', renderRoster], ['#catalog-sectio
     filters.querySelector('[name=tier]').value = 'all';
     filters.querySelector('[name=group]').value = 'model-reasoning';
     filters.querySelector('[name=sort]').value = 'default';
+    filters.querySelector('[name=show]').value = 'all';
     refresh();
   };
 }
@@ -857,14 +817,13 @@ async function load() {
   LAST = await response.json();
   renderBenchmarkControls(LAST);
   renderLists();
-  if (!LIBRARY) renderForm(LAST);
+  renderForm(LAST);
 }
 
-if (!LIBRARY) document.querySelector('#add').onsubmit = async (event) => {
+document.querySelector('#add').onsubmit = async (event) => {
   event.preventDefault();
   const form = new FormData(event.target);
   const body = Object.fromEntries([...form.entries()].filter(([, v]) => v !== ''));
-  if (body.tags !== undefined) body.tags = tagList(body.tags);
   const res = await fetch('/api/agents', { method: 'POST', headers, body: JSON.stringify(body) });
   const data = await res.json();
   document.querySelector('#error').textContent = res.ok ? '' : data.error;

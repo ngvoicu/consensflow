@@ -301,7 +301,7 @@ it('PM can discover saved capability profiles without refreshing or changing rol
     mkdirSync(dirname(role), { recursive: true })
     writeFileSync(role, 'Keep existing lead context untouched')
     const roster = readFileSync(rosterPath(t.env), 'utf8')
-    const result = await cf(['agent', 'list', '--json'], { ...t.env, CONSENSFLOW_ROLE: 'pm' })
+    const result = await cf(['agent', 'list', '--json'], { ...t.env, CONSENSFLOW_ROLE: 'lead' })
     assert.equal(result.code, 0, result.stderr)
     const agents = JSON.parse(result.stdout).agents
     assert.equal(agents.length, 1)

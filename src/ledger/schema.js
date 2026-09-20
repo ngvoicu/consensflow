@@ -160,6 +160,16 @@ export const MIGRATIONS = [
   ALTER TABLE participant ADD COLUMN member_id INTEGER REFERENCES participant (id) ON DELETE CASCADE;
   CREATE INDEX participant_member_index ON participant (member_id, left_at);
   `,
+  `
+  -- The PM and tags go (candidate-feedback-3): the lead is the only
+  -- coordinator, and a task finds its member by tier alone. A PM's row goes
+  -- with everything it asked for and was told (the cascades). The role
+  -- constraint keeps 'pm' in its list: changing it means rebuilding the
+  -- table, and dropping a table under foreign keys cascades into every other.
+  DELETE FROM participant WHERE role = 'pm';
+  ALTER TABLE participant DROP COLUMN tags;
+  ALTER TABLE task DROP COLUMN tags;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

@@ -17,30 +17,30 @@ import { randomUUID } from 'node:crypto'
  *   task failed. Adapters say when a window can take input at all (`ready`).
  * - A worker's turn that ends after its task's latest message finishes the
  *   task with the answer written after that message. A task waiting on a
- *   question is left alone. Coordinators (lead, PM) finish their own tasks
- *   explicitly, because their turns end while they wait for workers.
+ *   question is left alone. The lead finishes its own tasks explicitly,
+ *   because its turns end while it waits for workers.
  * - One task per member session: a worker, advisor or reviewer window opens
  *   with its task and is closed, its conversation ended, once it holds no
  *   task (assigned, working, waiting or under review), so the next task starts
  *   from nothing; a fresh window whose first message is not the brief (an
  *   answer, a review's findings) gets the brief in front of it. A member's
  *   active task with no window and nothing due is given up (tiered work back
- *   to the board). Coordinators keep their windows and conversations.
+ *   to the board). The lead keeps its window and conversation.
  * - A worker window that closes mid-task fails the task, and the requester is
  *   told. A lead window that closes suspends its project. A member who leaves
  *   the team has its window closed once its step in progress ends, and that
  *   exit fails nothing: its open tasks were cancelled when it left.
  * - A task for a tier of member starts open: each pass gives it to a free
- *   member of that pool and tier that is not out of quota, the one matching
- *   most of its tags, then the one with the fewest tasks so far; when none is
- *   free the requester is told once. Under the project's review policy a
+ *   member of that pool and tier that is not out of quota, the one with the
+ *   fewest tasks so far, then the earliest joined; when none is free the
+ *   requester is told once. Under the project's review policy a
  *   finished task waits for a reviewer whose model differs from the author's
- *   (a coordinator's model is taken to be its harness); none on the team and
+ *   (the lead's model is taken to be its harness); none on the team and
  *   the review is skipped with a note, all busy and it waits. A member whose
  *   harness reports a fresh refusal (one after it was last marked out) is out
  *   until the reset it names (an hour when it names none): its tiered task
  *   goes back to open for another member, a review it held is withdrawn, a
- *   delivery in flight is queued again, a coordinator keeps its own tasks for
+ *   delivery in flight is queued again, the lead keeps its own tasks for
  *   after the reset, and nothing reaches it while out. A refusal still in the
  *   record after the reset is history, not a new one; the member is simply
  *   eligible again. A member low on quota takes nothing new.
@@ -56,7 +56,6 @@ import { randomUUID } from 'node:crypto'
 const INLINE_LIMIT = 4000
 const OPENING = 3000
 const RECEIVED_ROLES = new Set(['user', 'custom', 'tool'])
-const COORDINATORS = new Set(['lead', 'pm'])
 
 /**
  * How a message reads in the recipient's pane. The header doubles as the
@@ -183,14 +182,12 @@ export class Dispatcher {
     return this.#ledger.project(project.id)
   }
 
-  /** The human's Resume, and the restore after a restart: coordinators come back on their conversations. */
+  /** The human's Resume, and the restore after a restart: the lead comes back on its conversation. */
   async resumeProject(projectId) {
     const project = this.#ledger.setProjectState(projectId, 'open')
-    for (const participant of project.participants) {
-      if (!COORDINATORS.has(participant.role) || this.pane(participant.id) !== null) continue
-      if (participant.role === 'pm' && this.#ledger.currentConversation(participant.id) === null)
-        continue
-      await this.#exclusive(participant.id, () => this.#launch(project, participant, null))
+    const lead = project.participants.find((participant) => participant.role === 'lead')
+    if (this.pane(lead.id) === null) {
+      await this.#exclusive(lead.id, () => this.#launch(project, lead, null))
     }
     this.#changed()
     return this.#ledger.project(projectId)
@@ -199,7 +196,7 @@ export class Dispatcher {
   /**
    * The human's Close: the project is suspended and every window of it goes.
    * Each window's exit settles what it was doing, the way any closed window
-   * does; Resume brings the coordinators back on their conversations.
+   * does; Resume brings the lead back on its conversation.
    */
   async closeProject(projectId) {
     const project = this.#ledger.setProjectState(projectId, 'suspended')
@@ -328,7 +325,7 @@ export class Dispatcher {
     }
     if (participant.role === 'lead') {
       if (project.state === 'open') this.#ledger.setProjectState(project.id, 'suspended')
-    } else if (!COORDINATORS.has(participant.role)) {
+    } else {
       const task = this.#ledger.activeTask(participantId)
       if (task !== null) this.#giveUp(project, task, `@${participant.handle}'s window closed`)
     }
@@ -343,7 +340,7 @@ export class Dispatcher {
     if (project.state !== 'open') return
     const next = this.#ledger.nextDelivery(participant.id)
     if (next !== null) return this.#launch(project, participant, next)
-    if (COORDINATORS.has(participant.role)) return
+    if (participant.role === 'lead') return
     // A member's session is its task's: with the window gone (a restart, a
     // crash) and nothing due to it, nobody is doing the work any more.
     const task = this.#ledger.activeTask(participant.id)
@@ -399,7 +396,7 @@ export class Dispatcher {
     }
     if (runtime.delivering !== null) this.#watchArrival(runtime, observed)
     await this.#releaseDraft(runtime, observed)
-    if (!COORDINATORS.has(participant.role)) {
+    if (participant.role !== 'lead') {
       this.#collect(project, participant, observed)
       // The window may have gone during this step (a launch that timed out).
       if (
@@ -439,7 +436,7 @@ export class Dispatcher {
    */
   #launchText(project, participant, message, resume) {
     const text = this.#textFor(project, message)
-    if (resume !== null || COORDINATORS.has(participant.role) || message.taskNumber == null) {
+    if (resume !== null || participant.role === 'lead' || message.taskNumber == null) {
       return text
     }
     const task = this.#ledger.task(project.id, message.taskNumber)
@@ -455,7 +452,7 @@ export class Dispatcher {
    * of the one its task needs, a reviewer's for a review, its own otherwise.
    */
   #roleFor(project, participant, message) {
-    if (message === null || message.taskNumber == null || COORDINATORS.has(participant.role)) {
+    if (message === null || message.taskNumber == null || participant.role === 'lead') {
       return participant.role
     }
     const task = this.#ledger.task(project.id, message.taskNumber)
@@ -721,7 +718,7 @@ export class Dispatcher {
       const candidates = this.#ledger.candidates(project.id, task.number)
       const free = candidates.filter((member) => this.#available(member))
       if (free.length > 0) {
-        this.#ledger.assignTask(project.id, task.number, this.#rank(free, task.tags)[0].id)
+        this.#ledger.assignTask(project.id, task.number, this.#rank(free)[0].id)
         this.#waitingNoted.delete(task.id)
         this.#changed()
       } else if (!this.#waitingNoted.has(task.id)) {
@@ -755,13 +752,13 @@ export class Dispatcher {
       const free = independent.filter((member) => this.#available(member))
       if (free.length === 0) continue
       this.#ledger.createReview(project.id, task.number, {
-        reviewer: this.#rank(free, task.tags)[0].id,
+        reviewer: this.#rank(free)[0].id,
       })
       this.#changed()
     }
   }
 
-  /** The member a session belongs to; a member or coordinator is its own. */
+  /** The member a session belongs to; a member or the lead is its own. */
   #memberOf(project, participant) {
     if (participant.memberId === null) return participant
     return project.participants.find((p) => p.id === participant.memberId) ?? participant
@@ -791,10 +788,9 @@ export class Dispatcher {
     return Date.parse(quota.at) > Date.parse(participant.outSince)
   }
 
-  /** Most matching tags first, then the fewest tasks taken, then the earliest joined. */
-  #rank(members, tags) {
-    const matches = (member) => tags.filter((tag) => member.tags.includes(tag)).length
-    return [...members].sort((a, b) => matches(b) - matches(a) || a.taken - b.taken || a.id - b.id)
+  /** The fewest tasks taken first, then the earliest joined. */
+  #rank(members) {
+    return [...members].sort((a, b) => a.taken - b.taken || a.id - b.id)
   }
 
   #whyNotFree(candidates) {
@@ -814,7 +810,7 @@ export class Dispatcher {
     return parts.join('; ')
   }
 
-  /** What makes two agents the same model: the roster's model identity; a coordinator's is its harness. */
+  /** What makes two agents the same model: the roster's model identity; the lead's is its harness. */
   #modelOf(participant) {
     const row = participant.agent === null ? null : this.#roster(participant.agent)
     return row?.profile?.modelKey ?? row?.model ?? participant.harness
@@ -824,7 +820,7 @@ export class Dispatcher {
    * A member whose harness just refused it: out until the reset it names (an
    * hour when it names none). What it was receiving is queued again, its
    * tiered work goes back to the board, a review it held is withdrawn; its
-   * own tasks (a coordinator's) wait for it.
+   * own tasks (the lead's) wait for it.
    */
   #outOfQuota(project, participant, runtime, owner) {
     const until = runtime.quota.resetsAt ?? new Date(this.#now() + 3_600_000).toISOString()

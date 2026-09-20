@@ -72,7 +72,6 @@ function coreState(blocker = null) {
     agent: role === 'worker' ? handle : null,
     harness: role === 'human' ? null : 'codex',
     tier: role === 'worker' ? 'standard' : null,
-    tags: [],
     outUntil: null,
   })
   const lane = (who, pane) => ({ participant: who, tasks: [], activity: { state: 'idle' }, pane })

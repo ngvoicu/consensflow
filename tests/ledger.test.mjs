@@ -270,7 +270,7 @@ describe('deleting a project', () => {
 })
 
 describe('upgrading a home', () => {
-  it('gives a home written by the first schema the role sets, the unreviewed reason and the question options', async () => {
+  it('gives a home written by the first schema the role sets and sessions, and takes its PM and tags away', async () => {
     await withDir(async (dir) => {
       const file = path.join(dir, 'consensflow.db')
       const old = new DatabaseSync(file)
@@ -289,22 +289,37 @@ describe('upgrading a home', () => {
            (1, 'human', 'human', NULL, NULL, NULL, ?),
            (1, 'lead', 'lead', NULL, 'claude-code', NULL, ?),
            (1, 'zeus', 'worker', 'zeus', 'claude-code', 'standard', ?),
-           (1, 'hera', 'reviewer', 'hera', 'codex', 'standard', ?)`,
+           (1, 'hera', 'reviewer', 'hera', 'codex', 'standard', ?),
+           (1, 'pm', 'pm', NULL, 'codex', NULL, ?)`,
+        )
+        .run(at, at, at, at, at)
+      old.prepare(`UPDATE participant SET tags = '["coding"]' WHERE handle = 'zeus'`).run()
+      old
+        .prepare(
+          `INSERT INTO task (project_id, number, title, body, requester_id, assignee_id, state, tags, created_at, updated_at)
+           VALUES (1, 1, 'Parser', 'Write the parser', 2, 3, 'working', '["rust"]', ?, ?),
+                  (1, 2, 'Estimate', 'Estimate the parser', 5, 3, 'queued', '[]', ?, ?)`,
         )
         .run(at, at, at, at)
       old
         .prepare(
-          `INSERT INTO task (project_id, number, title, body, requester_id, assignee_id, state, tags, created_at, updated_at)
-           VALUES (1, 1, 'Parser', 'Write the parser', 2, 3, 'working', '[]', ?, ?)`,
+          `INSERT INTO message (project_id, recipient_id, sender_id, kind, task_id, body, state, created_at)
+           VALUES (1, 3, 5, 'task', 2, 'Estimate the parser', 'queued', ?)`,
         )
-        .run(at, at)
+        .run(at)
       old.close()
       const ledger = openLedger(file)
       try {
         const roles = Object.fromEntries(
           ledger.project(1).participants.map((p) => [p.handle, p.roles]),
         )
-        assert.deepEqual(roles, { human: [], lead: [], zeus: ['worker'], hera: ['reviewer'] })
+        assert.deepEqual(
+          roles,
+          { human: [], lead: [], zeus: ['worker'], hera: ['reviewer'] },
+          'the PM is gone with the concept',
+        )
+        assert.equal(ledger.task(1, 2), null, 'and so is the task it asked for, with its message')
+        assert.equal(ledger.inbox(3).length, 0)
         assert.deepEqual(
           ledger.members(1, 'reviewer').map((m) => m.handle),
           ['hera'],
@@ -325,6 +340,15 @@ describe('upgrading a home', () => {
       }
       const upgraded = new DatabaseSync(file)
       assert.equal(upgraded.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION)
+      for (const table of ['participant', 'task']) {
+        const columns = upgraded
+          .prepare(`SELECT name FROM pragma_table_info(?)`)
+          .all(table)
+          .map((row) => row.name)
+        assert.ok(!columns.includes('tags'), `${table} keeps no tags`)
+      }
+      assert.equal(upgraded.prepare('SELECT COUNT(*) AS n FROM task').get().n, 1)
+      assert.equal(upgraded.prepare('PRAGMA foreign_key_check').all().length, 0, 'nothing dangles')
       upgraded.close()
     })
   })
@@ -358,7 +382,6 @@ describe('projects and participants', () => {
         harness: 'pi',
         roles: ['worker', 'reviewer'],
         tier: 'standard',
-        tags: [],
       })
       assert.deepEqual(
         [both.role, both.roles],
@@ -459,7 +482,7 @@ describe('projects and participants', () => {
     })
   })
 
-  it('adds members once each, and a PM as the second coordinator', async () => {
+  it('adds members once each', async () => {
     await withLedger((ledger) => {
       const { project } = team(ledger)
       assert.throws(
@@ -486,9 +509,6 @@ describe('projects and participants', () => {
           }),
         { code: 'invalid-harness' },
       )
-      const pm = ledger.addPm(project.id, { harness: 'codex' })
-      assert.deepEqual([pm.handle, pm.role, pm.harness], ['pm', 'pm', 'codex'])
-      assert.throws(() => ledger.addPm(project.id, { harness: 'pi' }), { code: 'member-exists' })
       ledger.addMember(project.id, {
         agent: 'athena',
         harness: 'opencode',
@@ -497,7 +517,7 @@ describe('projects and participants', () => {
       })
       assert.deepEqual(
         ledger.project(project.id).participants.map((p) => p.handle),
-        ['human', 'lead', 'zeus', 'diana', 'pm', 'athena'],
+        ['human', 'lead', 'zeus', 'diana', 'athena'],
       )
     })
   })
@@ -674,8 +694,7 @@ describe('the project team', () => {
   it('only team members leave', async () => {
     await withLedger((ledger) => {
       const { project } = team(ledger)
-      ledger.addPm(project.id, { harness: 'pi' })
-      for (const handle of ['human', 'lead', 'pm']) {
+      for (const handle of ['human', 'lead']) {
         assert.throws(() => ledger.removeMember(project.id, handle), { code: 'not-a-member' })
       }
       assert.throws(() => ledger.removeMember(project.id, 'nobody'), {
@@ -714,10 +733,9 @@ describe('the project team', () => {
     })
   })
 
-  it('tells a running coordinator who joined or left, and whose tasks went with them', async () => {
+  it('tells a running lead who joined or left, and whose tasks went with them', async () => {
     await withLedger((ledger) => {
       const { project, id } = team(ledger)
-      const pm = ledger.addPm(project.id, { harness: 'pi' })
       ledger.addMember(project.id, {
         agent: 'hera',
         harness: 'pi',
@@ -731,10 +749,8 @@ describe('the project team', () => {
         tier: 'standard',
       })
       assert.deepEqual(notes(ledger, id('lead')), [], 'no window yet: its launch reads the team')
-      assert.deepEqual(notes(ledger, pm.id), [])
 
       ledger.startConversation(id('lead'), { harness: 'claude-code' })
-      ledger.startConversation(pm.id, { harness: 'pi' })
       ledger.addMember(project.id, {
         agent: 'apollo',
         harness: 'codex',
@@ -748,14 +764,11 @@ describe('the project team', () => {
         tier: 'standard',
       })
       ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' })
-      ledger.createTask(project.id, { from: 'pm', to: 'zeus', body: 'Estimate' })
+      ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Estimate' })
       ledger.createTask(project.id, { from: 'human', to: 'zeus', body: 'Logo' })
       ledger.removeMember(project.id, 'zeus')
 
       assert.deepEqual(notes(ledger, id('lead')), [
-        [null, '@zeus left the team; it takes no more tasks. Cancelled with it: T-1, T-2, T-3.'],
-      ])
-      assert.deepEqual(notes(ledger, pm.id), [
         [null, '@zeus left the team; it takes no more tasks. Cancelled with it: T-1, T-2, T-3.'],
       ])
       assert.deepEqual(notes(ledger, id('human')), [])
@@ -1328,21 +1341,20 @@ describe('views', () => {
 })
 
 describe('tiered dispatch: open tasks the daemon assigns', () => {
-  /** A lead with two standard workers, a light worker, a PM and a complex advisor. */
+  /** A lead with two standard workers, a light worker, a complex advisor and a reviewer. */
   function tiered(ledger) {
     const project = ledger.createProject({
       directory: '/work/app',
       name: 'app',
       lead: { harness: 'claude-code' },
     })
-    const add = (agent, harness, role, tier, tags) =>
-      ledger.addMember(project.id, { agent, harness, role, tier, tags })
-    add('zeus', 'claude-code', 'worker', 'standard', ['coding', 'rust'])
-    add('diana', 'codex', 'worker', 'standard', ['coding'])
-    add('hera', 'pi', 'worker', 'light', [])
-    ledger.addPm(project.id, { harness: 'pi' })
-    add('athena', 'opencode', 'advisor', 'complex', ['research'])
-    add('nemesis', 'pi', 'reviewer', 'standard', [])
+    const add = (agent, harness, role, tier) =>
+      ledger.addMember(project.id, { agent, harness, role, tier })
+    add('zeus', 'claude-code', 'worker', 'standard')
+    add('diana', 'codex', 'worker', 'standard')
+    add('hera', 'pi', 'worker', 'light')
+    add('athena', 'opencode', 'advisor', 'complex')
+    add('nemesis', 'pi', 'reviewer', 'standard')
     const id = (handle) =>
       ledger.project(project.id).participants.find((p) => p.handle === handle).id
     return { project, id }
@@ -1356,22 +1368,21 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
       ...extra,
     })
 
-  it("records each member's tier and tags, and refuses a member without a tier", async () => {
+  it("records each member's tier, and refuses a member without a tier", async () => {
     await withLedger((ledger) => {
       const { project } = tiered(ledger)
       assert.deepEqual(
         ledger
           .project(project.id)
           .participants.filter((p) => p.role !== 'human')
-          .map((p) => [p.handle, p.tier, p.tags]),
+          .map((p) => [p.handle, p.tier]),
         [
-          ['lead', null, []],
-          ['zeus', 'standard', ['coding', 'rust']],
-          ['diana', 'standard', ['coding']],
-          ['hera', 'light', []],
-          ['pm', null, []],
-          ['athena', 'complex', ['research']],
-          ['nemesis', 'standard', []],
+          ['lead', null],
+          ['zeus', 'standard'],
+          ['diana', 'standard'],
+          ['hera', 'light'],
+          ['athena', 'complex'],
+          ['nemesis', 'standard'],
         ],
       )
       assert.throws(
@@ -1388,28 +1399,15 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
           }),
         { code: 'invalid-tier' },
       )
-      assert.throws(
-        () =>
-          ledger.addMember(project.id, {
-            agent: 'apollo',
-            harness: 'pi',
-            role: 'worker',
-            tier: 'light',
-            tags: 'coding',
-          }),
-        { code: 'invalid-tags' },
-      )
       const next = ledger.createProject({
         directory: '/work/api',
         name: 'api',
         lead: { harness: 'pi' },
-        team: [
-          { agent: 'zeus', harness: 'pi', role: 'reviewer', tier: 'critical', tags: ['review'] },
-        ],
+        team: [{ agent: 'zeus', harness: 'pi', role: 'reviewer', tier: 'critical' }],
       })
       assert.deepEqual(
-        next.participants.at(-1) && [next.participants.at(-1).tier, next.participants.at(-1).tags],
-        ['critical', ['review']],
+        next.participants.at(-1) && [next.participants.at(-1).tier, next.participants.at(-1).roles],
+        ['critical', ['reviewer']],
       )
     })
   })
@@ -1417,10 +1415,10 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
   it("opens a task for a tier instead of a member; it sits in nobody's lane", async () => {
     await withLedger((ledger) => {
       const { project } = tiered(ledger)
-      const { task, message } = openTask(ledger, project, { tags: ['rust'] })
+      const { task, message } = openTask(ledger, project)
       assert.deepEqual(
-        [task.state, task.assignee, task.pool, task.tier, task.tags, task.requester, message],
-        ['open', null, 'worker', 'standard', ['rust'], 'lead', null],
+        [task.state, task.assignee, task.pool, task.tier, task.requester, message],
+        ['open', null, 'worker', 'standard', 'lead', null],
       )
       const board = ledger.board(project.id)
       assert.deepEqual(
@@ -1437,7 +1435,6 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
         from: 'lead',
         pool: 'worker',
         tier: 'standard',
-        tags: ['rust'],
       })
     })
   })
@@ -1451,13 +1448,11 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
       refuses({ pool: 'lead' }, 'invalid-pool')
       refuses({ tier: 'critical', purpose: 'architecture' }, 'no-member-of-tier')
       refuses({ pool: 'worker', tier: 'complex' }, 'no-member-of-tier')
-      refuses({ tags: ['ok', 'not a tag'] }, 'invalid-tags')
       ledger.addMember(project.id, {
         agent: 'calliope',
         harness: 'claude-code',
         role: 'worker',
         tier: 'critical',
-        tags: ['architecture'],
       })
       refuses({ tier: 'critical' }, 'purpose-required')
       refuses({ tier: 'critical', purpose: 'coding' }, 'purpose-required')
@@ -1471,7 +1466,7 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
     })
   })
 
-  it('lets only coordinators and the human create tasks', async () => {
+  it('lets only the lead and the human create tasks', async () => {
     await withLedger((ledger) => {
       const { project } = tiered(ledger)
       assert.throws(() => openTask(ledger, project, { from: 'zeus' }), {
@@ -1481,9 +1476,9 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
         () => ledger.createTask(project.id, { from: 'zeus', to: 'lead', body: 'Do it' }),
         { code: 'not-a-coordinator' },
       )
-      assert.equal(
-        ledger.createTask(project.id, { from: 'pm', to: 'lead', body: 'Plan' }).task.assignee,
-        'lead',
+      assert.throws(
+        () => ledger.createTask(project.id, { from: 'athena', to: 'lead', body: 'Plan' }),
+        { code: 'not-a-coordinator' },
       )
       assert.equal(
         ledger.createTask(project.id, { from: 'lead', to: 'lead', body: 'My own' }).task.assignee,
@@ -1526,17 +1521,15 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
     })
   })
 
-  it('lists the members a task may go to, with their tags and how many tasks each has taken', async () => {
+  it('lists the members a task may go to, with how many tasks each has taken', async () => {
     await withLedger((ledger) => {
       const { project, id } = tiered(ledger)
       openTask(ledger, project)
       assert.deepEqual(
-        ledger
-          .candidates(project.id, 1)
-          .map((c) => [c.handle, c.tier, c.tags, c.taken, c.outUntil]),
+        ledger.candidates(project.id, 1).map((c) => [c.handle, c.tier, c.taken, c.outUntil]),
         [
-          ['zeus', 'standard', ['coding', 'rust'], 0, null],
-          ['diana', 'standard', ['coding'], 0, null],
+          ['zeus', 'standard', 0, null],
+          ['diana', 'standard', 0, null],
         ],
       )
       ledger.assignTask(project.id, 1, id('zeus'))
@@ -1681,7 +1674,6 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
         harness: 'claude-code',
         role: 'worker',
         tier: 'critical',
-        tags: [],
       })
       openTask(ledger, project, {
         tier: 'critical',
@@ -1782,7 +1774,7 @@ describe('tiered dispatch: the review gate', () => {
       lead: { harness: 'claude-code' },
     })
     const add = (agent, harness, role) =>
-      ledger.addMember(project.id, { agent, harness, role, tier: 'standard', tags: [] })
+      ledger.addMember(project.id, { agent, harness, role, tier: 'standard' })
     add('zeus', 'claude-code', 'worker')
     add('diana', 'codex', 'reviewer')
     add('calliope', 'claude-code', 'reviewer')
@@ -1987,7 +1979,32 @@ describe('tiered dispatch: the review gate', () => {
     })
   })
 
-  it("reviews coordinators' own work only under the all policy, and nothing under none", async () => {
+  it('never reviews advice, under any policy', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = reviewed(ledger, 'all')
+      ledger.addMember(project.id, {
+        agent: 'athena',
+        harness: 'codex',
+        role: 'advisor',
+        tier: 'standard',
+      })
+      const advice = ledger.createTask(project.id, {
+        from: 'lead',
+        pool: 'advisor',
+        tier: 'standard',
+        body: 'Which parser?',
+      })
+      deliver(ledger, ledger.assignTask(project.id, advice.task.number, id('athena')).message)
+      const done = ledger.recordResult(project.id, advice.task.number, { body: 'The second.' })
+      assert.deepEqual(
+        [done.task.state, done.message.state, done.message.recipient],
+        ['done', 'queued', 'lead'],
+        'advice goes straight to the lead, which weighs it itself',
+      )
+    })
+  })
+
+  it("reviews the lead's own work only under the all policy, and nothing under none", async () => {
     await withLedger((ledger) => {
       const { project, id } = reviewed(ledger, 'all')
       const own = ledger.createTask(project.id, { from: 'human', to: 'lead', body: 'Ship it' })
@@ -2168,9 +2185,9 @@ describe('tiered dispatch: the review gate', () => {
 
 describe("sessions: a member's named windows", () => {
   /** A team with a tiered task open for a standard worker. */
-  function opened(ledger, body = 'Write the parser', tags = []) {
+  function opened(ledger, body = 'Write the parser') {
     const { project, id } = team(ledger)
-    ledger.createTask(project.id, { from: 'lead', pool: 'worker', tier: 'standard', tags, body })
+    ledger.createTask(project.id, { from: 'lead', pool: 'worker', tier: 'standard', body })
     return { project, id }
   }
   const sessionOf = (ledger, projectId, handle) =>

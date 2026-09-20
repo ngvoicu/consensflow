@@ -29,7 +29,7 @@ reply does nothing.
   changes:`): address the findings and finish again with your result.
 - Do not hand out tasks, launch other agents or type into other windows, and
   never read another agent's session files: the board is your only channel.
-  Questions go to your coordinator or the human, never to another member.
+  Questions go to the lead or the human, never to another member.
 
 This window is for one task: it opened with the task and closes when the task
 leaves your hands. Nothing from an earlier task is here, and nothing from this

@@ -60,7 +60,6 @@ const participant = (id, handle, role, extra = {}) => ({
   agent: MEMBER.includes(role) ? handle : null,
   harness: role === 'human' ? null : 'claude-code',
   tier: MEMBER.includes(role) ? 'standard' : null,
-  tags: [],
   outUntil: null,
   memberId: null,
   member: null,
@@ -76,7 +75,6 @@ const session = (id, member, name, role = 'worker', extra = {}) =>
     session: name,
     harness: member.harness,
     tier: member.tier,
-    tags: member.tags,
     ...extra,
   })
 const task = (number, title, state, requester, assignee, minutesAgo = 3, extra = {}) => ({
@@ -90,7 +88,6 @@ const task = (number, title, state, requester, assignee, minutesAgo = 3, extra =
   assignee,
   pool: null,
   tier: null,
-  tags: [],
   purpose: null,
   kind: 'work',
   reviewOf: null,
@@ -128,11 +125,7 @@ function model() {
           review: 'members',
         },
         open: [
-          task(6, 'Write the docs', 'open', 'lead', null, 1, {
-            pool: 'worker',
-            tier: 'standard',
-            tags: ['docs'],
-          }),
+          task(6, 'Write the docs', 'open', 'lead', null, 1, { pool: 'worker', tier: 'standard' }),
         ],
         lanes: [
           {
@@ -148,7 +141,7 @@ function model() {
             pane: { id: 'p1-lead', generation: 5 },
           },
           {
-            participant: participant(3, 'zeus', 'worker', { tags: ['coding', 'rust'] }),
+            participant: participant(3, 'zeus', 'worker'),
             tasks: [
               task(2, 'Write the parser', 'done', 'lead', 'zeus', 2, {
                 result: 'Parser done, 14 tests.',
@@ -580,9 +573,9 @@ test("shows a task waiting for a member in its requester's backlog, with the tie
   const card = page.locator(
     'tr[data-handle="lead"] td[data-state="open"] button.card[data-task="6"]',
   )
-  await expect(card.locator('.card-route')).toHaveText('for a standard worker · docs')
+  await expect(card.locator('.card-route')).toHaveText('for a standard worker')
   await expect(page.locator('tr[data-handle="zeus"] .row-meta')).toHaveText(
-    'worker · standard · coding, rust · claude-code · claude-sonnet-5',
+    'worker · standard · claude-code · claude-sonnet-5',
   )
 })
 
@@ -594,7 +587,6 @@ test('gives a task to a tier of member, never to a member by name', async ({ pag
   await backlog.getByRole('button', { name: 'New task' }).click()
   const composer = backlog.locator('form.composer')
   await composer.getByLabel('For').selectOption('worker:light')
-  await composer.getByLabel('Tags').fill('docs, review')
   await expect(composer.getByLabel('Purpose')).toBeHidden()
   await composer.getByLabel('Task').fill('Profile the parser on the large fixture.')
   await composer.getByRole('button', { name: 'Put on the board' }).click()
@@ -605,23 +597,30 @@ test('gives a task to a tier of member, never to a member by name', async ({ pag
         project: 1,
         pool: 'worker',
         tier: 'light',
-        tags: ['docs', 'review'],
         body: 'Profile the parser on the large fixture.',
       },
     ])
   await expect(page.locator('#status')).toHaveText('T-9 is on the board for a light worker.')
 })
 
-test('asks for the purpose of critical work, and offers only the tiers the team has', async ({
+test('asks for the purpose of critical work, and offers only the tiers the team has, advice included', async ({
   page,
 }) => {
   const data = model()
-  data.boards[1].lanes.push({
-    participant: participant(8, 'calliope', 'worker', { tier: 'critical' }),
-    tasks: [],
-    activity: { state: 'closed' },
-    pane: null,
-  })
+  data.boards[1].lanes.push(
+    {
+      participant: participant(8, 'calliope', 'worker', { tier: 'critical' }),
+      tasks: [],
+      activity: { state: 'closed' },
+      pane: null,
+    },
+    {
+      participant: participant(9, 'athena', 'advisor', { tier: 'complex' }),
+      tasks: [],
+      activity: { state: 'closed' },
+      pane: null,
+    },
+  )
   await open(page, data)
   const backlog = page.getByRole('region', { name: 'For you' })
   await backlog.getByRole('button', { name: 'New task' }).click()
@@ -631,6 +630,7 @@ test('asks for the purpose of critical work, and offers only the tiers the team 
     'A critical worker (calliope)',
     'A standard worker (zeus)',
     'A light worker (diana)',
+    'Advice from a complex advisor (athena)',
   ])
   await composer.getByLabel('For').selectOption('worker:critical')
   await composer.getByLabel('Purpose').selectOption('architecture')
@@ -643,11 +643,24 @@ test('asks for the purpose of critical work, and offers only the tiers the team 
         project: 1,
         pool: 'worker',
         tier: 'critical',
-        tags: [],
         purpose: 'architecture',
         body: 'Why does the parser leak memory?',
       },
     ])
+  await backlog.getByRole('button', { name: 'New task' }).click()
+  await composer.getByLabel('For').selectOption('advisor:complex')
+  await expect(composer.getByLabel('Purpose')).toBeHidden()
+  await composer.getByLabel('Task').fill('Which parser design should we keep?')
+  await composer.getByRole('button', { name: 'Put on the board' }).click()
+  await expect
+    .poll(async () => (await calls(page, 'task.add')).at(-1))
+    .toEqual({
+      project: 1,
+      pool: 'advisor',
+      tier: 'complex',
+      body: 'Which parser design should we keep?',
+    })
+  await expect(page.locator('#status')).toHaveText('T-9 is on the board for a complex advisor.')
 })
 
 test('gives a coordinator a task by name from its bay, and keeps a half-written one when the board redraws', async ({
@@ -760,9 +773,13 @@ test('shows the team as a table of roles, and adds a saved agent with the roles 
   await expect(table.locator('tbody tr')).toHaveCount(2)
   await expect(table.locator('tbody tr').first()).toContainText('@zeus')
   await expect(table.locator('tbody tr').first()).toContainText('standard')
-  await expect(table.locator('tbody tr').first().locator('.tag-chip')).toHaveText([
-    'coding',
-    'rust',
+  await expect(table.locator('thead th')).toHaveText([
+    'Member',
+    'Worker',
+    'Advisor',
+    'Reviewer',
+    'Tier',
+    '',
   ])
   await expect(dialog.getByRole('checkbox', { name: 'Worker @zeus' })).toBeChecked()
   await expect(dialog.getByRole('checkbox', { name: 'Reviewer @zeus' })).not.toBeChecked()
@@ -879,54 +896,37 @@ test('holds the review choices until a reviewer is on the team', async ({ page }
   expect(await calls(page, 'project.review')).toEqual([])
 })
 
-test('adds a PM on the harness the human picks', async ({ page }) => {
-  await open(page)
-  await expect(page.getByRole('button', { name: 'PM', exact: true })).toBeHidden()
-  await page.getByRole('button', { name: 'Team' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Project team' })
-  await expect(dialog.getByText('No PM yet.')).toBeVisible()
-  await dialog.getByLabel('The PM runs in').selectOption('codex')
-  await dialog.getByRole('button', { name: 'Add a PM' }).click()
-  await expect.poll(() => calls(page, 'pm.add')).toEqual([{ project: 1, harness: 'codex' }])
-})
-
-/** The harbour board with a PM and its advisor, the advisor added first. */
-function withPm() {
+/** The harbour board with an advisor on the team, its window open. */
+function withAdvisor() {
   const data = model()
-  data.boards[1].lanes.push(
-    {
-      participant: participant(5, 'athena', 'advisor', { harness: 'opencode' }),
-      tasks: [task(6, 'Research the market', 'working', 'pm', 'athena', 4)],
-      activity: { state: 'working' },
-      pane: { id: 'p1-athena', generation: 4 },
-    },
-    {
-      participant: participant(6, 'pm', 'pm', { harness: 'codex' }),
-      tasks: [],
-      activity: { state: 'idle' },
-      pane: { id: 'p1-pm', generation: 3 },
-    },
-  )
+  data.boards[1].lanes.push({
+    participant: participant(5, 'athena', 'advisor', { harness: 'opencode' }),
+    tasks: [task(7, 'Research the market', 'working', 'lead', 'athena', 4)],
+    activity: { state: 'working' },
+    pane: { id: 'p1-athena', generation: 4 },
+  })
   return data
 }
 
-test("groups the PM's team after the lead's, on the board and in the dock's strip of windows", async ({
+test("lists every member under the lead, with no team groups, on the board and in the dock's strip of windows", async ({
   page,
 }) => {
-  await open(page, withPm())
-  await expect(page.locator('.board-group')).toHaveText(["Lead's team", "PM's team"])
+  await open(page, withAdvisor())
+  await expect(page.locator('.board-group')).toHaveCount(0)
   expect(
     await page
       .locator('tbody tr[data-handle]')
       .evaluateAll((rows) => rows.map((row) => row.dataset.handle)),
-  ).toEqual(['human', 'lead', 'zeus', 'diana', 'pm', 'athena'])
+  ).toEqual(['human', 'lead', 'zeus', 'diana', 'athena'])
+  await expect(page.locator('tr[data-handle="athena"] .row-name')).toHaveText('@athena')
+  await expect(page.locator('tr[data-handle="athena"] .row-meta')).toContainText('advisor')
 
   // The dock on the right is a strip of every window, the lead first, then
-  // the PM, then the members; a row's Terminal button brings its card into view.
+  // the members; a row's Terminal button brings its card into view.
   const dock = page.getByRole('complementary', { name: 'Terminal dock' })
   const cards = () =>
     dock.locator('.terminal-card').evaluateAll((cards) => cards.map((c) => c.dataset.handle))
-  await expect.poll(cards).toEqual(['lead', 'zeus', 'pm', 'athena'])
+  await expect.poll(cards).toEqual(['lead', 'zeus', 'athena'])
   await expect(dock.locator('.terminal-card[data-focused="true"]')).toHaveAttribute(
     'data-handle',
     'lead',
@@ -936,9 +936,9 @@ test("groups the PM's team after the lead's, on the board and in the dock's stri
     'data-handle',
     'athena',
   )
-  expect(await page.evaluate(() => window.__emulators.length)).toBe(4)
+  expect(await page.evaluate(() => window.__emulators.length)).toBe(3)
   expect(await page.locator('tbody tr[data-handle]').count()).toBe(
-    6,
+    5,
     'the board stays beside the dock',
   )
 })
@@ -953,14 +953,12 @@ test('opens the agents screens in their own window, and refreshes the agents whe
     )
   const settings = page.getByRole('dialog', { name: 'Settings' })
   await page.getByRole('button', { name: 'Settings' }).click()
-  await settings.getByRole('button', { name: 'Your agents' }).click()
+  await settings.getByRole('button', { name: 'Agents' }).click()
   await expect.poll(opened).toEqual([''])
   await expect(settings).toBeHidden()
   await page.getByRole('button', { name: 'Settings' }).click()
-  await settings.getByRole('button', { name: 'Agent library' }).click()
-  await page.getByRole('button', { name: 'Settings' }).click()
   await settings.getByRole('button', { name: 'Harnesses' }).click()
-  await expect.poll(opened).toEqual(['', 'library', 'harnesses'])
+  await expect.poll(opened).toEqual(['', 'harnesses'])
   const listed = await page.evaluate(
     () => window.__calls.filter(([, args]) => args?.operation === 'agents.list').length,
   )

@@ -50,7 +50,7 @@ describe('the saved roster preserves the v1 execution schema', () => {
   })
 })
 
-it('reports current tiers and tags from legacy rows without writing during discovery', () => {
+it('reports current tiers from legacy rows without writing during discovery', () => {
   const t = tempEnv()
   try {
     mkdirSync(dirname(rosterPath(t.env)), { recursive: true })
@@ -511,49 +511,4 @@ it('saves user work-tier overrides, preserves them on edits/sync, and restores a
   } finally {
     t.cleanup()
   }
-})
-
-describe('tags say what an agent is good for', () => {
-  const t = tempEnv()
-  after(() => t.cleanup())
-
-  it('shows what the profile says the agent is good for as tags until the human sets them, and keeps what they set', () => {
-    addAgent(
-      { name: 'calliope', harness: 'claude', model: 'claude-fable-5-1', effort: 'max' },
-      t.env,
-    )
-    let [agent] = listAgents(t.env)
-    assert.deepEqual(agent.tags, agent.profile.tags)
-    assert.deepEqual(agent.tags, ['review', 'architecture', 'hard-problems', 'questions'])
-
-    editAgent('calliope', { tags: ['rust', 'review', 'rust'] }, t.env)
-    ;[agent] = listAgents(t.env)
-    assert.deepEqual(agent.tags, ['rust', 'review'], 'set, deduplicated, in the order given')
-    assert.deepEqual(JSON.parse(readFileSync(rosterPath(t.env), 'utf8')).agents[0].tags, [
-      'rust',
-      'review',
-    ])
-
-    const before = readFileSync(rosterPath(t.env), 'utf8')
-    for (const tags of [
-      'rust',
-      ['Not A Tag'],
-      [''],
-      [42],
-      Array.from({ length: 21 }, (_, n) => `t${n}`),
-    ])
-      assert.throws(() => editAgent('calliope', { tags }, t.env), /tags/i)
-    assert.equal(readFileSync(rosterPath(t.env), 'utf8'), before)
-
-    editAgent('calliope', { tags: null }, t.env)
-    ;[agent] = listAgents(t.env)
-    assert.deepEqual(agent.tags, ['review', 'architecture', 'hard-problems', 'questions'])
-    assert.equal(JSON.parse(readFileSync(rosterPath(t.env), 'utf8')).agents[0].tags, undefined)
-
-    assert.deepEqual(
-      addAgent({ name: 'diana', harness: 'codex', model: 'gpt-5.6-luna', tags: ['docs'] }, t.env)
-        .tags,
-      ['docs'],
-    )
-  })
 })

@@ -77,13 +77,12 @@ const board = new BoardView(boardRoot, {
         `T-${task.number} queued for ${participant.handle === 'lead' ? 'the lead' : `@${participant.handle}`}.`,
       )
     }),
-  onPutTask: ({ pool, tier, tags, purpose }, text) =>
+  onPutTask: ({ pool, tier, purpose }, text) =>
     act(async () => {
       const { task } = await core('task.add', {
         project: state.selected,
         pool,
         tier,
-        tags,
         ...(purpose === undefined ? {} : { purpose }),
         body: text,
       })
@@ -437,12 +436,10 @@ newProjectDialog
   .querySelector('[value="cancel"]')
   .addEventListener('click', () => newProjectDialog.close())
 
-// The project team: who the coordinators may hand work to, and the PM.
+// The project team: who the lead may hand work to.
 const teamDialog = $('#team-dialog')
 const teamForm = teamDialog.querySelector('form')
 const teamList = $('#team-members')
-const pmState = $('#team-pm-state')
-const pmAdd = $('#team-pm-add')
 const teamReview = $('#team-review')
 const teamWarning = $('#team-warning')
 /** The member whose removal waits for the human's yes, kept across redraws. */
@@ -459,13 +456,9 @@ function renderTeam() {
   )
   if (members.length === 0) {
     const cell = element('td', null, 'Nobody yet: add the agents this project may use.')
-    cell.colSpan = 7
+    cell.colSpan = 6
     teamList.firstChild.append(cell)
   }
-  const pm = lanes.find((lane) => lane.participant.role === 'pm')
-  pmState.textContent =
-    pm === undefined ? 'No PM yet.' : `PM · ${pm.participant.harness ?? 'harness unknown'}`
-  pmAdd.hidden = pm !== undefined
   teamReview.value = state.board?.project.review ?? 'none'
   guardReview(
     teamReview,
@@ -491,7 +484,7 @@ function renderTeam() {
   teamForm.querySelector('[type="submit"]').disabled = choices.length === 0
 }
 
-/** One member: its roles as checkboxes, its tier and tags, and a Remove that asks first. */
+/** One member: its roles as checkboxes, its tier, and a Remove that asks first. */
 function memberRow(member) {
   const row = element('tr')
   row.dataset.handle = member.handle
@@ -509,7 +502,7 @@ function memberRow(member) {
   row.append(who)
   if (removing === member.handle) {
     const cell = element('td')
-    cell.colSpan = 6
+    cell.colSpan = 5
     const keep = element('button', 'quiet-button', `Keep ${name}`)
     keep.type = 'button'
     keep.addEventListener('click', choose(null))
@@ -545,11 +538,7 @@ function memberRow(member) {
       }),
     )
   }
-  const tags = element('td', 'tags-cell')
-  const chips = element('span', 'tag-chips')
-  chips.append(...member.tags.map((tag) => element('span', 'tag-chip', tag)))
-  tags.append(chips)
-  row.append(element('td', null, member.tier ?? ''), tags)
+  row.append(element('td', null, member.tier ?? ''))
   const remove = element('button', 'quiet-button', 'Remove')
   remove.type = 'button'
   remove.setAttribute('aria-label', `Remove ${name} from the team`)
@@ -578,12 +567,6 @@ teamReview.addEventListener('change', () =>
         all: 'All finished work gets a second review.',
       }[teamReview.value],
     )
-  }),
-)
-$('#add-pm').addEventListener('click', () =>
-  act(async () => {
-    await core('pm.add', { project: state.selected, harness: teamForm.elements.pmHarness.value })
-    note('The PM is on the team. Its window opens with its first task.')
   }),
 )
 teamForm.addEventListener('submit', (event) => {

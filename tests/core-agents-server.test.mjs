@@ -12,10 +12,10 @@ import { listAgents } from '../src/roster.js'
 import { tempEnv } from './helpers.mjs'
 
 /**
- * The human's agents screens on the new core (TEST-BDC-24): the roster editor
- * with its tags, the agent library and the harness diagnostics, served by
- * the same server the agents' API runs on, behind the UI token the app
- * checks. Carried over from the old daemon's tests.
+ * The human's agents screens on the new core (TEST-BDC-24): the agents (the
+ * catalog and the saved agents as one list) and the harness diagnostics,
+ * served by the same server the agents' API runs on, behind the UI token the
+ * app checks. Carried over from the old daemon's tests.
  */
 function stubCli(t, name) {
   mkdirSync(t.env.PATH, { recursive: true })
@@ -68,7 +68,7 @@ describe('the agents screens on the new core', () => {
 
   it('is loopback only and refuses the screens and their API without the token', async () => {
     assert.match(server.url, /^http:\/\/127\.0\.0\.1:/)
-    for (const route of ['/', '/library', '/harnesses', '/api/agents']) {
+    for (const route of ['/', '/harnesses', '/api/agents']) {
       assert.equal((await fetch(`${server.url}${route}`)).status, 401, route)
     }
     assert.equal((await fetch(`${server.url}/?token=wrong`)).status, 401)
@@ -91,21 +91,26 @@ describe('the agents screens on the new core', () => {
     for (const call of ['confirm(', 'alert(', 'prompt(']) {
       assert.ok(!script.includes(call), `the page must not call ${call}`)
     }
-    for (const marker of ['id="roster"', 'aria-label="Your agents"', 'id="add"', 'name="tags"']) {
+    for (const marker of ['id="agents"', 'aria-label="Agents"', 'id="add"', 'name="show"']) {
       assert.ok(html.includes(marker), `the page is missing ${marker}`)
     }
+    assert.doesNotMatch(
+      html,
+      /name="tags"|Agent library|Your agents|PM candidate/,
+      'no tags, one list',
+    )
     assert.doesNotMatch(
       html,
       /Talking to an agent|class="cmds"|cf sessions|cf results|cf read|cf attach|id="catalog-section"|Check all harnesses|id="terminal"|\/api\/mode/,
     )
   })
 
-  it('serves the agent library and the harness diagnostics as their own pages', async () => {
-    const library = await (await api('/library')).text()
-    assert.match(library, /aria-label="Agent library"/)
-    assert.match(library, /id="catalog"/)
-    assert.doesNotMatch(library, /id="roster-section"|id="add"/)
-    scriptsParse(library)
+  it('serves the harness diagnostics as their own page, and no library page any more', async () => {
+    assert.equal(
+      (await api('/library')).status,
+      401,
+      'no library page: the UI token opens nothing else',
+    )
     const harnesses = await (await api('/harnesses')).text()
     assert.match(harnesses, /<h1>Harnesses<\/h1>/)
     assert.match(harnesses, /Check all harnesses/)
@@ -113,39 +118,35 @@ describe('the agents screens on the new core', () => {
     scriptsParse(harnesses)
   })
 
-  it('adds, edits, tags and removes agents through the API, persisting each', async () => {
+  it('adds, edits and removes agents through the API, persisting each', async () => {
     const added = await api('/api/agents', {
       method: 'POST',
-      body: JSON.stringify({
-        name: 'zeus',
-        harness: 'claude',
-        model: 'claude-opus-5',
-        tags: ['coding', 'rust'],
-      }),
+      body: JSON.stringify({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }),
     })
     assert.equal(added.status, 201)
     assert.deepEqual(
-      [listAgents(t.env)[0].name, listAgents(t.env)[0].tags],
-      ['zeus', ['coding', 'rust']],
+      [listAgents(t.env)[0].name, listAgents(t.env)[0].workTier],
+      ['zeus', undefined],
     )
     const edited = await api('/api/agents/zeus', {
       method: 'PATCH',
-      body: JSON.stringify({ model: 'claude-fable-5-1', tags: ['review'] }),
+      body: JSON.stringify({ model: 'claude-fable-5-1', workTier: 'complex' }),
     })
     assert.equal(edited.status, 200)
     assert.deepEqual(
-      [listAgents(t.env)[0].model, listAgents(t.env)[0].tags],
-      ['claude-fable-5-1', ['review']],
+      [listAgents(t.env)[0].model, listAgents(t.env)[0].workTier],
+      ['claude-fable-5-1', 'complex'],
     )
     const bad = await api('/api/agents/zeus', {
       method: 'PATCH',
-      body: JSON.stringify({ tags: ['Not A Tag'] }),
+      body: JSON.stringify({ workTier: 'huge' }),
     })
     assert.equal(bad.status, 400)
-    assert.match((await bad.json()).error, /tags/)
+    assert.match((await bad.json()).error, /Work tier/)
     const listed = await (await api('/api/agents')).json()
     assert.equal(listed.agents.length, 1)
-    assert.deepEqual(listed.agents[0].tags, ['review'])
+    assert.equal(listed.agents[0].workTier, 'complex')
+    assert.equal('tags' in listed.agents[0], false, 'an agent carries no tags')
     assert.ok(Array.isArray(listed.catalog.claude))
     assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'roles')), false, 'no role files prepared')
 

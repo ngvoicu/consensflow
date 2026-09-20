@@ -12,13 +12,7 @@ async function fixture(t) {
   return { root, env: { HOME: root, CONSENSFLOW_HOME: join(root, 'app') } }
 }
 
-const worker = {
-  name: 'saved-worker',
-  harness: 'codex',
-  model: 'gpt-6-astra',
-  effort: 'xhigh',
-  tags: ['coding', 'review'],
-}
+const worker = { name: 'saved-worker', roles: ['worker'], workTier: 'complex' }
 
 test('a role text is written in a private directory, and global skills are left alone', async (t) => {
   const { root, env } = await fixture(t)
@@ -45,7 +39,7 @@ test('a window without its role text is refused', async (t) => {
 
 test('every role enters every harness with its whole text already loaded', async (t) => {
   for (const kind of ['claude-code', 'codex', 'opencode', 'pi', 'devin']) {
-    for (const role of ['lead', 'pm', 'advisor', 'worker', 'reviewer']) {
+    for (const role of ['lead', 'advisor', 'worker', 'reviewer']) {
       await t.test(`${kind} ${role}`, async (t) => {
         const { env } = await fixture(t)
         const existing = 'User instructions: preserve "quotes", `backticks`, $HOME\nand newlines.'
@@ -107,8 +101,8 @@ test('every role enters every harness with its whole text already loaded', async
           assert.ok(instructions.startsWith(`${existing}\n\n`))
         }
         assert.ok(instructions.includes(content), 'the whole role text is loaded')
-        if (role === 'lead' || role === 'pm') {
-          assert.match(instructions, /\| saved-worker \| [^|]+ \| coding, review \|/)
+        if (role === 'lead') {
+          assert.match(instructions, /\| saved-worker \| worker \| Complex work \|/)
         } else {
           assert.doesNotMatch(instructions, /\| saved-worker \|/)
         }
@@ -124,7 +118,7 @@ test('OpenCode rejects malformed instruction lists before native launch', async 
       const { env } = await fixture(t)
       env.OPENCODE_CONFIG_CONTENT = JSON.stringify({ instructions })
       await assert.rejects(
-        roleConfiguration('opencode', { role: 'pm', env, content: roleInstructions('pm', []) }),
+        roleConfiguration('opencode', { role: 'lead', env, content: roleInstructions('lead', []) }),
         /OpenCode instructions must be an array of paths/,
       )
     })
@@ -158,7 +152,7 @@ lines.on('line', line => {
   assert.equal(configuration.args[0], '-c')
   assert.match(configuration.args[1], /existing user instructions/)
   assert.match(configuration.args[1], /consensflow-lead/)
-  assert.doesNotMatch(configuration.args[1], /consensflow-pm/)
+  assert.doesNotMatch(configuration.args[1], /consensflow-worker/)
 })
 
 test('an unchanged role text is not rewritten, a changed one is, always private', async (t) => {

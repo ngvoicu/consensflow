@@ -148,7 +148,6 @@ describe('the page protocol of the new core', () => {
           agent: 'zeus',
           harness: 'opencode',
           tier: zeus.profile.workTier,
-          tags: zeus.tags,
         },
       ])
       assert.ok(zeus.profile.workTier, 'a saved agent always has a tier')
@@ -204,13 +203,9 @@ describe('the page protocol of the new core', () => {
         project: project.id,
         pool: 'worker',
         tier: zeus.tier,
-        tags: ['docs'],
         body: 'Write the docs',
       })
-      assert.deepEqual(
-        [task.state, task.assignee, task.pool, task.tags],
-        ['open', null, 'worker', ['docs']],
-      )
+      assert.deepEqual([task.state, task.assignee, task.pool], ['open', null, 'worker'])
       await assert.rejects(
         operations['task.add']({ project: project.id, to: 'zeus', body: 'By name' }),
         /name a tier, not a member/,
@@ -259,21 +254,6 @@ describe('the page protocol of the new core', () => {
       const result = await operations['project.delete']({ project: project.id })
       assert.deepEqual(result.project, { id: project.id, name: 'app' })
       assert.deepEqual((await operations['projects.list']({})).projects, [])
-    })
-  })
-
-  it('adds a PM once, on the harness the human picks', async () => {
-    await withPage(async ({ operations }) => {
-      const { project } = await operations['project.open']({
-        directory: '/work/app',
-        harness: 'pi',
-      })
-      const { member } = await operations['pm.add']({ project: project.id, harness: 'codex' })
-      assert.deepEqual([member.handle, member.role, member.harness], ['pm', 'pm', 'codex'])
-      await assert.rejects(
-        operations['pm.add']({ project: project.id, harness: 'pi' }),
-        /already in project/,
-      )
     })
   })
 

@@ -56,10 +56,6 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
 
     'member.remove': change(async ({ project, agent }) => dispatcher.removeMember(project, agent)),
 
-    'pm.add': change(async ({ project, harness }) => ({
-      member: ledger.addPm(project, { harness }),
-    })),
-
     'board.get': async ({ project }) => {
       const board = ledger.board(project)
       return {
@@ -86,14 +82,14 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       return { task: found }
     },
 
-    'task.add': change(async ({ project, to, pool, tier, tags = [], purpose, body, title }) => {
+    'task.add': change(async ({ project, to, pool, tier, purpose, body, title }) => {
       const member = ledger.project(project)?.participants.find((p) => p.handle === to)
       if (member !== undefined && member.agent !== null) {
         throw new Error(`@${to} is a ${member.role}: name a tier, not a member`)
       }
       return ledger.createTask(project, {
         from: 'human',
-        ...(to === undefined ? { pool, tier, tags, purpose } : { to }),
+        ...(to === undefined ? { pool, tier, purpose } : { to }),
         body,
         title,
       })
@@ -131,14 +127,14 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
   }
 }
 
-/** A saved agent as the team records it: its harness, and its tier and tags as the roster has them now. */
+/** A saved agent as the team records it: its harness, and its tier as the roster has it now. */
 function membership(agent, env, agents = listAgents(env)) {
   const row = agentRow(agent, env)
   const saved = agents.find((candidate) => candidate.name === agent)
   if (row === undefined || saved === undefined) {
     throw new Error(`no agent named ${agent} in your agents`)
   }
-  return { agent, harness: row.kind, tier: saved.profile.workTier, tags: saved.tags }
+  return { agent, harness: row.kind, tier: saved.profile.workTier }
 }
 
 /** The last project's team for a new one: the members still saved, as the roster has them now. */

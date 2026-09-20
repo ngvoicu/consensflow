@@ -12,25 +12,6 @@ describe('every tool ships a list of ready-made agents', () => {
     }
   })
 
-  it('tags every preset with what it is good for, in words a task can ask for', () => {
-    const tagged = Object.entries(CATALOG).flatMap(([harness, list]) =>
-      list.map((preset) => [
-        preset.name,
-        agentProfile({
-          kind: harness === 'claude' ? 'claude-code' : harness,
-          model: preset.model,
-          effort: preset.effort,
-        }).tags,
-      ]),
-    )
-    for (const [name, tags] of tagged) assert.ok(tags.length > 0, `${name} has no tags`)
-    const byName = Object.fromEntries(tagged)
-    assert.deepEqual(byName.hyperion, ['coding', 'review', 'planning'])
-    assert.deepEqual(byName.astraeus, ['review', 'architecture', 'hard-problems', 'questions'])
-    assert.deepEqual(byName.diana, ['coding', 'review', 'small-changes'])
-    assert.deepEqual(byName.pygmalion, ['images'])
-  })
-
   it('gives every entry a name, a model and a description', () => {
     for (const entries of Object.values(CATALOG)) {
       for (const entry of entries) {
@@ -412,7 +393,7 @@ it('lead and PM need xhigh or higher; reviewer recommendations begin at medium',
       const categories = agentProfile({ harness, model, effort }).categories
       const critical = /astra|fable/.test(model) && effort === 'max'
       const expected = critical ? ['architecture', 'problem-solving', 'reviewer'] : ['coding']
-      if (!critical && ['xhigh', 'max'].includes(effort)) expected.push('lead', 'pm')
+      if (!critical && ['xhigh', 'max'].includes(effort)) expected.push('lead')
       if (!critical && effort !== 'low') expected.push('reviewer')
       assert.deepEqual(categories, expected, `${model} ${effort}`)
     }

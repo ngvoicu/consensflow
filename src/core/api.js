@@ -7,16 +7,13 @@ import { LedgerError } from '../ledger/index.js'
  *
  * Every window gets its own bearer token, issued when the dispatcher opens it
  * and revoked when it closes, so a token names exactly one participant of one
- * project. The API decides who may do what (coordinators hand out tasks, only
- * the assignee finishes one, only the one asked answers), the ledger keeps the
+ * project. The API decides who may do what (the lead hands out tasks, only the
+ * assignee finishes one, only the one asked answers), the ledger keeps the
  * state rules, and every write wakes the dispatcher.
  */
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024
-const COORDINATORS = new Set(['lead', 'pm', 'human'])
 const MEMBERS = new Set(['worker', 'advisor', 'reviewer'])
-/** Whose pool a coordinator's tiered task draws from. */
-const POOL_OF = { lead: 'worker', pm: 'advisor', human: 'worker' }
 const TASK_ROUTE = /^\/api\/tasks\/(\d+)(?:\/(done|accept|reopen|cancel|review))?$/
 const MESSAGE_ROUTE = /^\/api\/inbox\/(\d+)$/
 const QUESTION_ROUTE = /^\/api\/questions\/(\d+)$/
@@ -106,7 +103,6 @@ export async function startApi({
               role: member.role,
               roles: member.roles,
               tier: member.tier,
-              tags: member.tags,
               harness: member.harness,
               model: row?.model ?? null,
               effort: row?.effort ?? null,
@@ -126,11 +122,11 @@ export async function startApi({
       })
     }
     if (at === 'POST /api/tasks') {
-      if (!COORDINATORS.has(participant.role)) {
+      if (participant.role !== 'lead') {
         throw new Refusal(
           403,
           'not-a-coordinator',
-          'workers do not hand out tasks: ask your lead instead (cf ask)',
+          'members do not hand out tasks: ask your lead instead (cf ask)',
         )
       }
       const body = await readJson(request)
@@ -143,26 +139,26 @@ export async function startApi({
           `@${to} is a ${target.role}: name a tier, not a member (cf task add --tier ${target.tier} "…")`,
         )
       }
-      // The board is the only channel between agents: only the human gives a
-      // coordinator a task by name.
+      // The board is the only channel between agents: only the human gives
+      // the lead a task by name.
       if (target !== undefined && to !== participant.handle) {
         throw new Refusal(
           403,
           'board-only',
-          'agents give no task by name: put it on the board for a tier (cf task add --tier standard "…"); only the human gives the lead or the PM a task',
+          'agents give no task by name: put it on the board for a tier (cf task add --tier standard "…"); only the human gives the lead a task',
         )
       }
       // A follow-up that needs the context of the window that did T-n goes
-      // back to that window (`after`); everything else is fresh work for a tier.
+      // back to that window (`after`); everything else is fresh work for a
+      // tier of worker, or advice from a tier of advisor.
       const created = ledger.createTask(project.id, {
         from: participant.handle,
         ...(body.after !== undefined
           ? { after: Number(body.after) }
           : to === undefined
             ? {
-                pool: body.pool ?? POOL_OF[participant.role],
+                pool: body.advice === true ? 'advisor' : 'worker',
                 tier: body.tier,
-                tags: body.tags ?? [],
                 purpose: body.purpose,
               }
             : { to }),
@@ -195,14 +191,13 @@ export async function startApi({
     if (at === 'POST /api/questions') {
       const body = await readJson(request)
       const active = ledger.activeTask(participant.id, { queued: true })
-      // A coordinator's question goes to the human; a member's to its coordinator.
-      const to =
-        body.to ?? active?.requester ?? (COORDINATORS.has(participant.role) ? 'human' : 'lead')
+      // The lead's question goes to the human; a member's to whoever gave its task.
+      const to = body.to ?? active?.requester ?? (participant.role === 'lead' ? 'human' : 'lead')
       if (MEMBERS.has(memberByHandle(project, to)?.role)) {
         throw new Refusal(
           403,
           'not-addressable',
-          `questions go to your coordinator or the human, not to @${to}`,
+          `questions go to the lead or the human, not to @${to}`,
         )
       }
       const asked = ledger.ask(project.id, {
@@ -274,11 +269,11 @@ export async function startApi({
       changed()
       return ok({ task: summary(reviewed) })
     }
-    if (!COORDINATORS.has(participant.role) && task.requester !== participant.handle) {
+    if (participant.role !== 'lead' && task.requester !== participant.handle) {
       throw new Refusal(
         403,
         'not-a-coordinator',
-        `only a coordinator or @${task.requester} may ${action} T-${number}`,
+        `only the lead or @${task.requester} may ${action} T-${number}`,
       )
     }
     const by = participant.handle
@@ -344,7 +339,6 @@ function summary(task) {
     assignee: task.assignee,
     pool: task.pool,
     tier: task.tier,
-    tags: task.tags,
     updatedAt: task.updatedAt,
   }
 }

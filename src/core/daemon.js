@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { createAdapters } from '../adapters/index.js'
 import { Bridge } from '../bridge.js'
 import { openLedger } from '../ledger/index.js'
-import { agentRow, configRoot, listAgents } from '../roster.js'
+import { agentRow, configRoot } from '../roster.js'
 import { agentsUi } from './agents-server.js'
 import { Credentials, startApi } from './api.js'
 import { Dispatcher } from './dispatcher.js'
@@ -74,8 +74,7 @@ export async function startCore(
     adapters: createAdapters(env, { peer }),
     credentials,
     roster: (agent) => agentRow(agent, env) ?? null,
-    roles: (participant, project) =>
-      roleInstructions(participant.role, teamOf(project, participant, env)),
+    roles: (participant, project) => roleInstructions(participant.role, teamOf(project)),
     paneEnv: (participant, project) => ({
       CONSENSFLOW_URL: api.url,
       CONSENSFLOW_PROJECT: String(project.id),
@@ -109,15 +108,11 @@ export async function startCore(
   return { stop }
 }
 
-/** The agents a coordinator chooses from: the lead's workers and reviewers, the PM's advisors. */
-function teamOf(project, participant, env) {
-  const roles = { lead: ['worker', 'reviewer'], pm: ['advisor'] }[participant.role] ?? []
-  const members = new Set(
-    project.participants
-      .filter((member) => (member.roles ?? []).some((role) => roles.includes(role)))
-      .map((member) => member.agent),
-  )
-  return listAgents(env).filter((agent) => members.has(agent.name))
+/** The team as the lead's text lists it: each member's name, roles and tier. */
+function teamOf(project) {
+  return project.participants
+    .filter((member) => member.agent !== null && member.memberId === null)
+    .map((member) => ({ name: member.handle, roles: member.roles, workTier: member.tier }))
 }
 
 /** Runs `work` on a timer and on demand, never two at once; a kick during a run runs it again after. */

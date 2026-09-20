@@ -49,7 +49,7 @@ Usage: cf <command> [options]
     [--harness <h>] [--model <m>] [--effort <e>] [--description <d>]
   agent list [--json]
   agent edit <name> [--model <m>] [--effort <e>] [--description <d>]
-    [--work-tier critical|complex|standard|light|auto] [--tags a,b]
+    [--work-tier critical|complex|standard|light|auto]
   agent remove <name>
   agent sync [<name>] [--dry-run]             Refresh catalog-owned agent fields
   ui [--json] [--no-open]                     Run the app's daemon; open the agents screens
@@ -135,7 +135,6 @@ function agentVerb(rest) {
       model: { type: 'string' },
       effort: { type: 'string' },
       'work-tier': { type: 'string' },
-      tags: { type: 'string' },
       description: { type: 'string' },
       from: { type: 'string' },
       presets: { type: 'string' },
@@ -184,17 +183,6 @@ function agentVerb(rest) {
           ...(values['work-tier'] === undefined
             ? {}
             : { workTier: values['work-tier'] === 'auto' ? null : values['work-tier'] }),
-          ...(values.tags === undefined
-            ? {}
-            : {
-                tags:
-                  values.tags === ''
-                    ? null
-                    : values.tags
-                        .split(',')
-                        .map((tag) => tag.trim())
-                        .filter(Boolean),
-              }),
         },
         env,
       )
@@ -259,7 +247,7 @@ function doctor() {
     out('legacy:       mode.json is ignored and can be removed')
   }
   out(`agents:       ${listAgents(env).length}`)
-  out('roles:        bundled lead, PM and advisor; prepared when a pane launches')
+  out('roles:        bundled lead, worker, reviewer and advisor; prepared when a window launches')
 
   // The install records the runtime that performed it — from the app, its own
   // bundled Node. If that has moved, the wiring it left behind stops working,

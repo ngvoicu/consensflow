@@ -6,22 +6,24 @@ import { askTheBoard } from '../../hosts/lib/question-door.js'
 export const USAGE = `cf inside a ConsensFlow window: the board's commands.
 
   cf task add --tier <critical|complex|standard|light> "…"
-                                    a task for a member of that tier; ConsensFlow picks
-                                    the member (--tags a,b to prefer one, --purpose for
-                                    critical work)
+                                    work for a worker of that tier; ConsensFlow picks
+                                    the member (--purpose for critical work)
+  cf task add --advice --tier <tier> "…"
+                                    a question for an advisor of that tier: findings and
+                                    recommendations back, no file changed
   cf task add --after T-3 "…"       a follow-up for the window that did T-3, which
                                     keeps its context; only when that context matters
   cf task add --self "…"            a task for yourself, on the board
   cf task list                      the board: what waits for a member, then every lane
   cf task get T-3                   one task and its whole thread
-  cf task done T-3 "…"              finish a task assigned to you (coordinators)
+  cf task done T-3 "…"              finish a task assigned to you (the lead)
   cf task review T-3                ask for an independent review of finished work
   cf task accept|cancel T-3         move a task you asked for
   cf task reopen T-3 "…"            send a finished or failed task back with a follow-up
   cf inbox [read m-12]              what is waiting for you, or one message in full
   cf ask "…" [--human]              a question to whoever gave you your task (or the human)
   cf answer m-12 "…"                answer a question put to you
-  cf team                           the members: roles, tiers and tags
+  cf team                           the members: roles and tiers
   cf whoami                         your project, role and current task
 
 Add --json for machine output.`
@@ -147,10 +149,7 @@ async function command(verb, rest, call, cwd) {
           members.length === 0
             ? 'No agents are on this project team yet; the human adds them in the app.'
             : members
-                .map(
-                  (member) =>
-                    `@${member.handle} · ${member.roles.join('+')} · ${member.tier} · ${member.tags.length === 0 ? 'no tags' : member.tags.join(', ')}`,
-                )
+                .map((member) => `@${member.handle} · ${member.roles.join('+')} · ${member.tier}`)
                 .join('\n'),
       }
     }
@@ -178,8 +177,8 @@ async function taskCommand([action, ...rest], call, cwd) {
   if (action === 'add') {
     const { flags, text, target } = split(
       rest,
-      ['--self'],
-      ['--to', '--title', '--file', '--tier', '--tags', '--purpose', '--after'],
+      ['--self', '--advice'],
+      ['--to', '--title', '--file', '--tier', '--purpose', '--after'],
     )
     const to = handle(flags['--to'] ?? target)
     const tier = flags['--tier']
@@ -199,7 +198,7 @@ async function taskCommand([action, ...rest], call, cwd) {
           ? { to }
           : {
               tier,
-              ...(flags['--tags'] === undefined ? {} : { tags: tags(flags['--tags']) }),
+              ...(flags['--advice'] ? { advice: true } : {}),
               ...(flags['--purpose'] === undefined ? {} : { purpose: flags['--purpose'] }),
             }
     const created = await call('POST', '/api/tasks', {
@@ -264,14 +263,7 @@ async function taskCommand([action, ...rest], call, cwd) {
 }
 
 const ADD_USAGE =
-  'cf task add --tier <critical|complex|standard|light> "what to do" (or --after T-3, or --self)'
-
-/** `--tags coding,rust` as the list the core takes. */
-const tags = (value) =>
-  String(value)
-    .split(',')
-    .map((tag) => tag.trim())
-    .filter(Boolean)
+  'cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor; or --after T-3, or --self)'
 
 function client(env) {
   const url = env.CONSENSFLOW_URL

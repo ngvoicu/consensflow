@@ -522,7 +522,7 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     [true, true],
     'the second ask reuses the window',
   )
-  assert.match(agentsWindow.data.again.url, /\/library\?token=/)
+  assert.match(agentsWindow.data.again.url, /\/harnesses\?token=/)
 
   const pasted = await app.waitFor('large-paste')
   const expectedPaste = Buffer.from('\x1b[200~' + '漢字 résumé 🙂\r'.repeat(30_000) + '\x1b[201~')
@@ -711,11 +711,8 @@ test('built Agents catalog serves complete saved profiles and current browsing c
       assert.equal(saved.profile.workTier, 'standard')
       assert.equal(Object.hasOwn(saved, 'skillsPolicy'), false)
       const html = await (await fetch(server.url, { headers })).text()
-      for (const text of ['aria-label="Your agents"', 'Model and reasoning', 'Already added', 'offer__actions', 'category-pill', 'PM candidate', 'Review', 'Sort by', 'benchmark-pills', 'About benchmark scores', 'model-summary', 'model-group', 'AA reasoning level not specified', 'value="model-reasoning" selected', 'Work tier', 'tier-pill', 'Important work only · No coding']) assert.ok(html.includes(text), text)
-      assert.ok(!html.includes('id="catalog-section"'))
-      const library = await (await fetch(server.url + '/library', { headers })).text()
-      assert.ok(library.includes('aria-label="Agent library"'))
-      assert.ok(!library.includes('id="roster-section"'))
+      for (const text of ['aria-label="Agents"', 'Model and reasoning', 'Name in use', 'offer__actions', 'category-pill', 'Lead candidate', 'Review', 'Sort by', 'benchmark-pills', 'About benchmark scores', 'model-summary', 'model-group', 'AA reasoning level not specified', 'value="model-reasoning" selected', 'Work tier', 'tier-pill', 'Important work only · No coding']) assert.ok(html.includes(text), text)
+      for (const text of ['id="catalog-section"', 'Agent library', 'Your agents', 'PM candidate', 'name="tags"']) assert.ok(!html.includes(text), 'gone: ' + text)
       assert.equal((await fetch(server.url + '/api/agents/maia', { method: 'DELETE', headers })).status, 204)
       const after = await (await fetch(server.url + '/api/agents', { headers })).json()
       assert.equal(after.agents.length, 0)

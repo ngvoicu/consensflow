@@ -4,7 +4,7 @@ import { element, laneOrder } from './board.js'
 
 /**
  * The live windows beside the board: a horizontal strip of one terminal per
- * participant that has a pane, the lead first, then the PM, then the members,
+ * participant that has a pane, the lead first, then the members,
  * scrolling sideways. A window that ended stays in the strip, marked ended
  * and still readable, until its participant opens a new one or the human
  * closes it; the emulator keeps its scrollback, its size and the human's
@@ -154,4 +154,4 @@ export class TerminalsView {
 const laneName = (participant) =>
   participant.member
     ? `@${participant.member} · ${participant.session}`
-    : ({ lead: 'Lead', pm: 'PM' }[participant.handle] ?? `@${participant.handle}`)
+    : ({ lead: 'Lead' }[participant.handle] ?? `@${participant.handle}`)

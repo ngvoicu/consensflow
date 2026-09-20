@@ -126,8 +126,8 @@ const writeRoster = (home) =>
       {
         schemaVersion: 1,
         agents: [
-          ...wanted.map((name) => ({ ...AGENTS[name], tags: [AGENTS[name].id] })),
-          { ...AGENTS[REVIEWER], id: 'bench-reviewer', tags: ['bench-reviewer'] },
+          ...wanted.map((name) => AGENTS[name]),
+          { ...AGENTS[REVIEWER], id: 'bench-reviewer' },
         ],
       },
       null,
@@ -147,6 +147,10 @@ try {
   })
   if (opened.ok !== true) throw new Error(`project.open: ${JSON.stringify(opened)}`)
   const project = opened.project.id
+  // Each task names its worker's tier. Two bench workers of one tier are told
+  // apart by the daemon's own rule, fewest tasks taken then join order: the
+  // steps below run once per worker, in join order, one task at a time, so
+  // each round goes around the tier's workers in that order.
   const tiers = {}
   for (const name of wanted) {
     const added = await app.requestNode('member.add', { project, agent: AGENTS[name].id })
@@ -178,7 +182,7 @@ try {
     await app.requestNode('task.add', {
       project,
       to: 'lead',
-      body: `Run exactly this command in your shell, then reply with one line:\ncf task add --tier ${tiers[name]} --tags ${agent.id} "Reply with exactly: ${marker}"`,
+      body: `Run exactly this command in your shell, then reply with one line:\ncf task add --tier ${tiers[name]} "Reply with exactly: ${marker}"`,
     })
     const task = await until(
       async () => (await lane(agent.id))?.tasks.find((t) => t.requester === 'lead'),
@@ -307,7 +311,7 @@ try {
     await app.requestNode('task.add', {
       project,
       to: 'lead',
-      body: `Run exactly this command in your shell, then reply with one line:\ncf task add --tier ${tiers[name]} --tags ${worker.id} "Use your ${QUESTION_TOOL[name]} to ask me which colour I prefer, with the options red and blue. After I answer, reply with exactly one line: COLOUR=<the answer>"`,
+      body: `Run exactly this command in your shell, then reply with one line:\ncf task add --tier ${tiers[name]} "Use your ${QUESTION_TOOL[name]} to ask me which colour I prefer, with the options red and blue. After I answer, reply with exactly one line: COLOUR=<the answer>"`,
     })
     const question = await until(
       async () =>
@@ -411,7 +415,7 @@ try {
     await app.requestNode('task.add', {
       project,
       to: 'lead',
-      body: `Run exactly this command in your shell, then reply with one line:\ncf task add --tier ${tiers[wanted[0]]} --tags ${worker.id} "Reply with exactly: ${marker}"`,
+      body: `Run exactly this command in your shell, then reply with one line:\ncf task add --tier ${tiers[wanted[0]]} "Reply with exactly: ${marker}"`,
     })
     const reviewed = await until(
       async () =>

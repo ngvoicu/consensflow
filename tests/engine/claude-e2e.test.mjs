@@ -367,11 +367,11 @@ test('authorization scope and name-neutrality stay locked into the lead skill', 
   // window; the payload skills that used to carry their own copy are gone.
   const { roleInstructions } = await import('../../src/core/roles.js')
   const skill = roleInstructions('lead', [
-    { name: 'zeus', harness: 'claude', model: 'claude-opus-5', effort: 'max' },
+    { name: 'zeus', roles: ['worker'], workTier: 'critical' },
   ])
   assert.match(skill, /authorized work/)
   assert.match(skill, /never type into another window or launch agents/)
-  assert.match(skill, /only the human gives the lead or the PM a task/)
+  assert.match(skill, /only the human gives you a task/)
 
   // No host payload ships any more, so no second copy of the gate can drift.
   assert.equal(existsSync(path.join(ROOT, 'hosts', 'claude')), false, 'no claude payload')

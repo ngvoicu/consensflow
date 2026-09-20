@@ -15,14 +15,15 @@ Run each of these in your shell (your Bash or terminal tool). `cf` is on this
 window's PATH and its output says what happened; a command written in your
 reply does nothing.
 
-    cf task add --tier <critical|complex|standard|light> "…"   work for a worker; ConsensFlow picks the member (--tags a,b to prefer)
+    cf task add --tier <critical|complex|standard|light> "…"   work for a worker; ConsensFlow picks the member
+    cf task add --advice --tier <tier> "…"   a question for an advisor: findings and recommendations back, no file changed
     cf task add --after T-3 "…"   a follow-up for the window that did T-3, only when its context matters
     cf task add --self "…"        work you do yourself, on the board (what the human asks you for in this window too)
     cf task done T-3 "…"          finish your own task with its result
     cf task accept T-3 · cf task reopen T-3 "…" · cf task cancel T-3 · cf task review T-3
     cf task get T-3 · cf task list · cf inbox · cf inbox read m-12
     cf ask --human "…" · cf answer m-12 "…"
-    cf team                       the members: roles, tiers, tags (to prefer with, never to pick one)
+    cf team                       the members: roles and tiers (never to pick one)
     cf --help                     all of it
 
 ## What you do
@@ -34,6 +35,10 @@ reply does nothing.
    board for the lowest sufficient tier: `cf task add --tier standard "…"`.
    Independent tasks run in parallel; ConsensFlow opens a fresh window for
    each and takes a task back to the board if its worker runs out of quota.
+   When a decision needs research, a plan checked or a second opinion before
+   you commit to it, ask an advisor: `cf task add --advice --tier complex
+   "…"`. Its findings and recommendations come back as a result; an advisor
+   changes no file, and its advice is never reviewed.
 3. Write every task as if for someone who has never seen the project, because
    that is who gets it: a worker starts from nothing, with no memory of your
    conversation, of the project's history or of its own earlier tasks. Give
@@ -60,13 +65,11 @@ While results are pending, continue your own work or end your turn.
 
 - Give a task to a worker by name, or write a task with one worker in mind:
   you name the tier, ConsensFlow picks the member. `cf team` shows names so
-  you can read the board, and tags so you can prefer; nothing more.
-- Give the PM or any agent a task by name, or send work to another window:
-  the board is the only channel, and only the human gives the lead or the PM a task.
+  you can read the board; nothing more.
+- Give any agent a task by name, or send work to another window: the board is
+  the only channel, and only the human gives you a task.
 - Accept a result you have not checked, or one whose review asked for changes
   you have not weighed.
-- Write specifications: that is the PM's; a worker may propose changes in
-  its result.
 
 ## The one exception: continuing a window
 

@@ -258,7 +258,7 @@ export async function runSelftest({
     // The agents screens: their own window at the daemon's address, reused
     // on the second ask. The daemon's pages themselves are proven elsewhere.
     const agentsWindow = await invoke('open_agents_window', { page: '' })
-    const again = await invoke('open_agents_window', { page: 'library' })
+    const again = await invoke('open_agents_window', { page: 'harnesses' })
     await report('agents-window', { first: agentsWindow, again })
 
     // Exercise a large Unicode paste through WebKit, IPC and the real PTY.
