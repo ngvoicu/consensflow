@@ -37,6 +37,9 @@ Then: "you decide and build … just ship."
   says so: the lead re-adds the need or cancels the chain.
 - **Needs go with tasks on the board only.** `--self`, `--after` and a task
   for a member by name refuse them.
+- **A plan has no circles.** A `--before` target that the new task waits
+  for, directly or through its needs, refuses the add (`circular-needs`):
+  otherwise both would wait forever with nothing to say but "blocked by".
 - **Rejected:** phases (a coarser DAG, expressible with needs); a project
   "one task at a time" switch (a chain of needs); a lock or resource concept
   for tasks that touch the same files (chain them with needs until a real

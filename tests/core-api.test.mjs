@@ -370,6 +370,22 @@ describe('cf inside a core window', () => {
       )
       const bad = await cf(lead, 'task', 'add', '--tier', 'standard', '--needs', 'one', 'Lexer')
       assert.deepEqual([bad.code, bad.err], [2, 'cf: not a task: "one" (write T-3)'])
+      const loop = await cf(
+        lead,
+        'task',
+        'add',
+        '--tier',
+        'standard',
+        '--needs',
+        'T-2',
+        '--before',
+        'T-1',
+        'Loop',
+      )
+      assert.deepEqual(
+        [loop.code, loop.err],
+        [1, 'cf: T-1 is already what T-5 waits for: a plan has no circles'],
+      )
       ledger.assignTask(project.id, 3, participantId(ledger, project, 'zeus'))
       const late = await cf(lead, 'task', 'add', '--tier', 'standard', '--before', 'T-3', 'Late')
       assert.deepEqual(

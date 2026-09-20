@@ -987,6 +987,14 @@ class Ledger {
               409,
             )
           }
+          // A plan has no circles: what the new task waits for, near or far, cannot wait for it.
+          if (this.#upstream(taskId, waits.id)) {
+            throw new LedgerError(
+              'circular-needs',
+              `T-${number} is already what T-${next} waits for: a plan has no circles`,
+              409,
+            )
+          }
           this.#db
             .prepare('INSERT INTO task_need (task_id, needs_id) VALUES (?, ?)')
             .run(waits.id, taskId)
@@ -1016,6 +1024,22 @@ class Ledger {
       })
       return { task: this.#task(taskId), message: this.#message(messageId) }
     })
+  }
+
+  /** Whether `taskId` needs `otherId`, directly or through the tasks it needs. */
+  #upstream(taskId, otherId) {
+    return (
+      this.#db
+        .prepare(
+          `WITH RECURSIVE upstream (id) AS (
+             SELECT needs_id FROM task_need WHERE task_id = ?
+             UNION
+             SELECT n.needs_id FROM task_need n JOIN upstream u ON n.task_id = u.id
+           )
+           SELECT 1 FROM upstream WHERE id = ? LIMIT 1`,
+        )
+        .get(taskId, otherId) !== undefined
+    )
   }
 
   /** The active members an open task may go to, with what the daemon ranks them by. */

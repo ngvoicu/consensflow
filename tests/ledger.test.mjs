@@ -3039,6 +3039,25 @@ describe('a plan on the board: needs', () => {
     })
   })
 
+  it('refuses a circle: a task cannot come before what it waits for, near or far', async () => {
+    await withLedger((ledger) => {
+      const { project } = planned(ledger)
+      assert.throws(() => open(ledger, project, 'Loop', { needs: [1], before: [1] }), {
+        code: 'circular-needs',
+        message: 'T-1 is already what T-2 waits for: a plan has no circles',
+      })
+      open(ledger, project, 'Parser', { needs: [1] })
+      assert.throws(() => open(ledger, project, 'Far loop', { needs: [2], before: [1] }), {
+        code: 'circular-needs',
+        message: 'T-1 is already what T-3 waits for: a plan has no circles',
+      })
+      assert.equal(ledger.task(project.id, 3), null, 'nothing of the refused task is left')
+      assert.deepEqual(ledger.task(project.id, 1).blockedBy, [], 'and T-1 is untouched')
+      const fine = open(ledger, project, 'Between', { needs: [1], before: [2] })
+      assert.deepEqual([fine.blockedBy, ledger.task(project.id, 2).blockedBy], [[1], [1, 3]])
+    })
+  })
+
   it('keeps a task blocked by a need that was cancelled, and says so', async () => {
     await withLedger((ledger) => {
       const { project } = planned(ledger)

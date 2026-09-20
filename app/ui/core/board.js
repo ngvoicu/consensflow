@@ -124,9 +124,11 @@ const tasks = (numbers) => numbers.map((number) => `T-${number}`).join(', ')
 /** Where a task is going or came from, on its card; what it waits for first. */
 function route(task) {
   if (task.assignee === null) {
-    const who =
+    const waitsFor =
       task.pool === 'designer' ? 'for an image designer' : `for a ${task.tier} ${task.pool}`
-    return task.blockedBy.length === 0 ? who : `blocked by ${tasks(task.blockedBy)} · ${who}`
+    return task.blockedBy.length === 0
+      ? waitsFor
+      : `blocked by ${tasks(task.blockedBy)} · ${waitsFor}`
   }
   return `from ${who(task.requester)}`
 }
