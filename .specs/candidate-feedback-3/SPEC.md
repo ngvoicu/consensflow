@@ -156,3 +156,12 @@ Gabriel, on the Candidate built from `87c45f5`, 2026-09-20 afternoon:
 - Gabriel: the "Good for" description was still on some model cards. The
   description is gone from the profile and the screen: a model's card says
   its tier, the roles it suits and its scores, nothing else.
+- Gabriel: "you decide and finish". The team pickers say why an agent list
+  is empty (no saved agent suits the role, or every suitable one holds it
+  already). A live design task ran through the daemon on the Codex login:
+  see the next entry for what it saved.
+- The design task, live (scratchpad probe through the daemon, OpenCode
+  lead, pygmalion on the team as designer, the human asking from the
+  board): the task opened with no tier, went to a fresh designer window at
+  once, Codex drew and saved `images/harbour-logo.png` (765 KB) in 125 s,
+  and the path came back as the result. 6/6.
