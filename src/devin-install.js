@@ -10,6 +10,8 @@ const quote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`
 const execute = promisify(execFile)
 
 export const DEVIN_MINIMUM_VERSION = '3000.10.21'
+/** How long Devin lets the question hook wait for the board's answer. */
+const QUESTION_HOOK_SECONDS = 3600
 export function supportedDevinVersion(value) {
   const match = String(value).match(/\b(\d+)\.(\d+)\.(\d+)\b/)
   if (!match) return false
@@ -77,6 +79,17 @@ export async function prepareDevinIntegration(env, { launchId, node, executable 
       { matcher: '', hooks: [{ type: 'command', command, timeout: 5 }] },
     ]
   }
+  // Devin's question tool, answered from the board: the hook holds the call
+  // while the question waits for its answer (`cf hook devin`).
+  const questions = configuration.hooks.PreToolUse ?? []
+  if (!Array.isArray(questions)) throw new Error('Invalid native Devin hook configuration')
+  configuration.hooks.PreToolUse = [
+    ...questions,
+    {
+      matcher: 'ask_user_question',
+      hooks: [{ type: 'command', command: 'cf hook devin', timeout: QUESTION_HOOK_SECONDS }],
+    },
+  ]
   configuration.auto_update = false
   const file = join(root, 'config.json')
   await writeFile(file, JSON.stringify(configuration), { mode: 0o600, flag: 'wx' })

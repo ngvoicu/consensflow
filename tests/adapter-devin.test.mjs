@@ -84,11 +84,13 @@ describe('the Devin adapter', () => {
       assert.equal(plan.env.CF_DEVIN_EVENTS, path.join(root, 'hooks.jsonl'))
       const config = JSON.parse(await readFile(path.join(root, 'config.json'), 'utf8'))
       assert.deepEqual(Object.keys(config.hooks).sort(), [
+        'PreToolUse',
         'SessionEnd',
         'SessionStart',
         'Stop',
         'UserPromptSubmit',
       ])
+      assert.equal(config.hooks.PreToolUse[0].matcher, 'ask_user_question')
       assert.equal(config.auto_update, false)
     })
   })

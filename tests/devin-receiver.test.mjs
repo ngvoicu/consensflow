@@ -204,6 +204,11 @@ test('private installation preserves native defaults and hooks, and does not edi
     assert.equal(hook.async, undefined)
   }
   assert.equal(copy.hooks.FileChanged, undefined)
+  // Devin's question tool is answered from the board through cf's hook.
+  assert.deepEqual(copy.hooks.PreToolUse.at(-1), {
+    matcher: 'ask_user_question',
+    hooks: [{ type: 'command', command: 'cf hook devin', timeout: 3600 }],
+  })
   assert.equal(copy.auto_update, false)
   assert.equal(await fs.readFile(native, 'utf8'), original)
   assert.ok(

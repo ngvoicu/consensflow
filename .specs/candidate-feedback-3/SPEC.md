@@ -165,3 +165,37 @@ Gabriel, on the Candidate built from `87c45f5`, 2026-09-20 afternoon:
   board): the task opened with no tier, went to a fresh designer window at
   once, Codex drew and saved `images/harbour-logo.png` (765 KB) in 125 s,
   and the path came back as the result. 6/6.
+- Gabriel: "I think Devin has native tool questions". It does:
+  `ask_user_question`, in Claude's shape, behind Claude-format hooks. Probed
+  three ways (research neuron `native-questions-per-harness`): a pre-filled
+  `updatedInput` is accepted but the dialog opens anyway; a refusal whose
+  reason carries the answer is read and the turn continues. `cf hook devin`
+  is that door, installed per launch in Devin's private config with the
+  hour-long timeout; the bench gets a Devin question step.
+
+### Phase C: Everything through the human [planned]
+
+Gabriel, 2026-09-20 evening: "a way where the human must approve all tasks
+and responses (if responses have review enabled from another agent, after
+the review), so any movement of info between lead, workers, advisors and
+vice versa must be a task for the human; a checkbox in the project settings
+can enable/disable this."
+
+Design to confirm before building:
+
+- A project setting, `gate` (off by default; a checkbox in New project and
+  Team, "Everything through me").
+- With the gate on, a task the lead puts on the board (work, advice, design,
+  `--after`) opens in a new state, *proposed*, in the human's bay: Approve
+  opens it for the daemon as today; Decline cancels it with a note to the
+  lead saying why. The lead's own `--self` tasks are its own and pass.
+- With the gate on, a finished result (after its review, when the policy
+  asks for one) is *held for the human* instead of going to the lead: the
+  human reads it on the card and Passes it on (delivered to the lead as
+  today), Sends it back (a reopen with the human's follow-up, to the same
+  window) or Cancels it.
+- Questions and answers stay direct: a member's question still reaches the
+  lead at once, the lead's answer the member, both visible on the card. If
+  Gabriel wants them gated too, that is a second step.
+- The lead's text says a task or a result may wait for the human, so a
+  quiet board is not a stuck board. The bench gets a gated scenario.

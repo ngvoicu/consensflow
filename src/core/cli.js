@@ -64,19 +64,26 @@ async function readStandardInput() {
   return Buffer.concat(chunks).toString('utf8')
 }
 
+/** Each harness's question tool, as its PreToolUse hook names it. */
+const QUESTION_TOOLS = { claude: 'AskUserQuestion', devin: 'ask_user_question' }
+
 /**
- * A harness's question tool, answered from the board. `claude`: Claude Code's
- * PreToolUse hook for AskUserQuestion. The questions go to whoever gave the
- * task, the hook waits for the answer, and returns it as the tool's input, the
- * way Claude documents it. Anything that goes wrong (no ConsensFlow, a timeout,
- * another tool) ends silently: Claude then shows its own dialog in the window.
+ * A harness's question tool, answered from the board: a PreToolUse hook on
+ * Claude Code's AskUserQuestion or Devin's ask_user_question. The questions go
+ * to whoever gave the task and the hook waits for the answer. Claude takes it
+ * back as the tool's input, the way it documents; Devin draws its dialog even
+ * over a pre-filled input (probed 2026-09-20), so its hook refuses the tool
+ * and hands the answer over as the refusal's reason, which Devin reads and
+ * continues with. Anything that goes wrong (no ConsensFlow, a timeout, another
+ * tool) ends silently: the harness then shows its own dialog in the window.
  */
 async function hook(harness, call, env, input) {
-  if (harness !== 'claude') return null
+  const tool = QUESTION_TOOLS[harness]
+  if (tool === undefined) return null
   try {
     const event = JSON.parse(await input())
     const questions = event.tool_input?.questions
-    if (event.tool_name !== 'AskUserQuestion' || !Array.isArray(questions)) return null
+    if (event.tool_name !== tool || !Array.isArray(questions)) return null
     const { answer } = await askTheBoard(
       call,
       questions.map((q) => ({
@@ -88,16 +95,20 @@ async function hook(harness, call, env, input) {
       env.CONSENSFLOW_QUESTION_WAIT_MS ? { waitMs: Number(env.CONSENSFLOW_QUESTION_WAIT_MS) } : {},
     )
     if (answer === null) return null
+    const answers = questions.map((q, at) => [q.question, (answer.choices?.[at] ?? []).join(', ')])
+    if (harness === 'devin') {
+      return {
+        decision: 'block',
+        reason: `ConsensFlow answered from the board: ${answers
+          .map(([question, choice]) => `${question} ${choice}`)
+          .join(' · ')}. Continue with that answer; do not ask again.`,
+      }
+    }
     return {
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         permissionDecision: 'allow',
-        updatedInput: {
-          ...event.tool_input,
-          answers: Object.fromEntries(
-            questions.map((q, at) => [q.question, (answer.choices?.[at] ?? []).join(', ')]),
-          ),
-        },
+        updatedInput: { ...event.tool_input, answers: Object.fromEntries(answers) },
       },
     }
   } catch {

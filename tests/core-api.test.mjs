@@ -497,6 +497,42 @@ describe("cf hook claude: Claude's question tool answered from the board", () =>
     })
   })
 
+  it("answers Devin's question tool by refusing it with the answer as the reason", async () => {
+    // Probed 2026-09-20: Devin draws its dialog even over a pre-filled input,
+    // but reads a refusal's reason and continues with it.
+    await withApi(async ({ ledger, project, token, call, cf }) => {
+      deliver(
+        ledger,
+        ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' }).message,
+      )
+      const event = { ...EVENT, tool_name: 'ask_user_question' }
+      const hook = cf(token('zeus'), 'hook', 'devin', { input: JSON.stringify(event) })
+      let question = null
+      for (let tries = 0; question === null && tries < 50; tries += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        question = ledger.inbox(participantId(ledger, project, 'lead'))[0] ?? null
+      }
+      assert.ok(question, 'the lead has the question')
+      await call(token('lead'), 'POST', '/api/answers', {
+        question: question.id,
+        body: 'blue\nvite, esbuild',
+      })
+      const { code, out } = await hook
+      assert.equal(code, 0)
+      assert.deepEqual(JSON.parse(out), {
+        decision: 'block',
+        reason:
+          'ConsensFlow answered from the board: Which colour? blue · Which tools? vite, esbuild. Continue with that answer; do not ask again.',
+      })
+      const claudeNamed = await cf(token('zeus'), 'hook', 'devin', { input: JSON.stringify(EVENT) })
+      assert.deepEqual(
+        [claudeNamed.code, claudeNamed.out],
+        [0, ''],
+        "Claude's tool name is not Devin's",
+      )
+    })
+  })
+
   it('stays silent for any other tool, and when ConsensFlow cannot be reached', async () => {
     await withApi(async ({ token, cf }) => {
       const other = await cf(token('zeus'), 'hook', 'claude', {

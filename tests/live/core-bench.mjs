@@ -30,11 +30,12 @@ const H = process.env.HOME
 const WORKSPACE = join(H, '.consensflow-candidate', 'bench', 'workspace')
 
 // One cheap model per harness (brain: operations/test-models.md).
-/** What each harness calls its question tool, for the worker's brief; none for Pi and Devin. */
+/** What each harness calls its question tool, for the worker's brief; none for Pi. */
 const QUESTION_TOOL = {
   claude: 'AskUserQuestion tool',
   opencode: 'question tool',
   codex: 'request_user_input tool',
+  devin: 'ask_user_question tool',
 }
 
 const AGENTS = {
