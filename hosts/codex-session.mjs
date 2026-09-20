@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import WebSocket, { WebSocketServer } from 'ws'
 import { configRoot } from '../src/roster.js'
+import { askTheBoard, boardClient } from './lib/question-door.js'
 import { createReceiver } from './lib/receiver.js'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -23,6 +24,8 @@ export async function startBroker({
   upstream,
   freshBypass = false,
   receiver: receiverOptions,
+  board: boardOptions,
+  questionWaitMs,
 }) {
   if (
     !Number.isInteger(port) ||
@@ -50,6 +53,11 @@ export async function startBroker({
   }
   const connections = new Set()
   const pending = new Map()
+  // The question tool's door: the app-server asks the client; this broker is
+  // the client, so it asks the board instead and answers the app-server with
+  // what the board said. When nobody answers in time, or there is no board,
+  // the request goes on to the TUI and its own dialog takes over.
+  const board = boardClient(boardOptions)
   const control = new WebSocket(upstream, {
     maxPayload: MAX_FRAME,
     handshakeTimeout: 3000,
@@ -347,8 +355,40 @@ export async function startBroker({
         observeStatus(message)
         if (message.method === 'turn/started' && message.params?.threadId === selected)
           empty = false
+        if (message.method === 'item/tool/requestUserInput' && message.id !== undefined && board) {
+          void holdQuestion(message, raw)
+          return
+        }
         forward(client, raw)
       })
+      const holdQuestion = async (message, raw) => {
+        const questions = message.params?.questions ?? []
+        try {
+          const asked = await askTheBoard(
+            board,
+            questions.map((q) => ({
+              question: q.question,
+              header: q.header,
+              options: (q.options ?? []).map((o) => ({
+                label: o.label,
+                description: o.description,
+              })),
+              multiple: false,
+            })),
+            questionWaitMs === undefined ? {} : { waitMs: questionWaitMs },
+          )
+          if (asked.answer !== null) {
+            const answers = Object.fromEntries(
+              questions.map((q, at) => [q.id, { answers: asked.answer.choices[at] ?? [] }]),
+            )
+            forward(native, JSON.stringify({ id: message.id, result: { answers } }))
+            return
+          }
+        } catch {
+          // The board could not be reached or refused: the window asks instead.
+        }
+        forward(client, raw)
+      }
     })
   })
   server.listen(port, '127.0.0.1')

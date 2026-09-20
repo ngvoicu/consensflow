@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:net'
 import test from 'node:test'
 
-async function fixture(t, useEnvironment = false) {
+async function fixture(t, useEnvironment = false, boardUrl = null) {
   const { tui } = await import('../hosts/opencode-extension/consensflow-session.mjs')
   const portServer = createServer()
   await new Promise((resolve) => portServer.listen(0, '127.0.0.1', resolve))
@@ -14,6 +14,8 @@ async function fixture(t, useEnvironment = false) {
     token: 'private-token-for-local-tests-only',
   }
   const calls = []
+  const replies = []
+  const handlers = new Map()
   let current = { name: 'session', params: { sessionID: 'ses_first' } }
   let dispose
   let send = async (input) => {
@@ -21,7 +23,12 @@ async function fixture(t, useEnvironment = false) {
     return { data: undefined, response: { status: 204 } }
   }
   const previous = process.env.CF_OPENCODE_SESSION_BRIDGE
+  const board = { url: process.env.CONSENSFLOW_URL, token: process.env.CONSENSFLOW_TOKEN }
   if (useEnvironment) process.env.CF_OPENCODE_SESSION_BRIDGE = JSON.stringify(configuration)
+  if (boardUrl !== null) {
+    process.env.CONSENSFLOW_URL = boardUrl
+    process.env.CONSENSFLOW_TOKEN = 'window-token'
+  }
   try {
     await tui(
       {
@@ -30,7 +37,21 @@ async function fixture(t, useEnvironment = false) {
             return current
           },
         },
-        client: { session: { promptAsync: (input) => send(input) } },
+        client: {
+          session: { promptAsync: (input) => send(input) },
+          question: {
+            reply: async (input) => {
+              replies.push(input)
+              return { data: true }
+            },
+          },
+        },
+        event: {
+          on(type, handler) {
+            handlers.set(type, handler)
+            return () => handlers.delete(type)
+          },
+        },
         lifecycle: {
           onDispose(fn) {
             dispose = fn
@@ -42,6 +63,13 @@ async function fixture(t, useEnvironment = false) {
   } finally {
     if (previous === undefined) delete process.env.CF_OPENCODE_SESSION_BRIDGE
     else process.env.CF_OPENCODE_SESSION_BRIDGE = previous
+    for (const [key, value] of [
+      ['CONSENSFLOW_URL', board.url],
+      ['CONSENSFLOW_TOKEN', board.token],
+    ]) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
   }
   t.after(() => dispose())
   const request = async (path, body, token = configuration.token) => {
@@ -56,6 +84,8 @@ async function fixture(t, useEnvironment = false) {
   return {
     request,
     calls,
+    replies,
+    emit: (type, properties) => handlers.get(type)?.({ type, properties }),
     setCurrent(value) {
       current = value
     },
@@ -149,4 +179,106 @@ test('OpenCode loads the native default export and process-local launch configur
   assert.equal(module.default?.tui, module.tui)
   const f = await fixture(t, true)
   assert.equal((await f.request('/session')).body.launchId, 'test-launch')
+})
+
+/** A stand-in for the board's API: the question posted, the answer when the test gives it. */
+async function fakeBoard(t) {
+  const { createServer: createHttpServer } = await import('node:http')
+  const state = { posted: [], answered: [], answer: null, tokens: [] }
+  const server = createHttpServer(async (request, response) => {
+    state.tokens.push(request.headers.authorization)
+    const chunks = []
+    for await (const chunk of request) chunks.push(chunk)
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : null
+    const json = (status, value) => {
+      response.writeHead(status, { 'content-type': 'application/json' })
+      response.end(JSON.stringify(value))
+    }
+    if (request.method === 'POST' && request.url === '/api/questions') {
+      state.posted.push(body)
+      return json(201, { message: { id: 40 + state.posted.length } })
+    }
+    if (request.method === 'GET' && request.url.startsWith('/api/questions/')) {
+      for (let i = 0; i < 40 && state.answer === null; i++)
+        await new Promise((r) => setTimeout(r, 25))
+      return json(200, { question: {}, answer: state.answer })
+    }
+    if (request.method === 'POST' && request.url === '/api/answers') {
+      state.answered.push(body)
+      return json(201, { message: { id: 99, state: 'read' } })
+    }
+    json(404, { error: 'unknown-route' })
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise((resolve) => server.close(resolve)))
+  return { state, url: `http://127.0.0.1:${server.address().port}` }
+}
+
+const ASKED = {
+  id: 'q-1',
+  sessionID: 'ses_first',
+  questions: [
+    {
+      question: 'Which colour?',
+      header: 'Colour',
+      options: [
+        { label: 'red', description: 'Warm' },
+        { label: 'blue', description: '' },
+      ],
+    },
+  ],
+  tool: { messageID: 'm', callID: 'c' },
+}
+
+test("OpenCode's question tool is answered from the board through the plugin", async (t) => {
+  const board = await fakeBoard(t)
+  const f = await fixture(t, false, board.url)
+  f.emit('question.v2.asked', ASKED)
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  assert.deepEqual(board.state.posted, [
+    {
+      questions: [
+        {
+          question: 'Which colour?',
+          header: 'Colour',
+          options: [
+            { label: 'red', description: 'Warm' },
+            { label: 'blue', description: '' },
+          ],
+          multiple: false,
+        },
+      ],
+    },
+  ])
+  assert.deepEqual([...new Set(board.state.tokens)], ['Bearer window-token'])
+  assert.deepEqual(f.replies, [], 'nothing replied while the board has no answer')
+  board.state.answer = { id: 50, from: 'lead', body: 'Colour: blue', choices: [['blue']] }
+  for (let i = 0; i < 100 && f.replies.length === 0; i++)
+    await new Promise((r) => setTimeout(r, 10))
+  assert.deepEqual(f.replies, [{ requestID: 'q-1', answers: [['blue']] }])
+})
+
+test('OpenCode: a question answered in the window first is recorded on the board, never replied twice', async (t) => {
+  const board = await fakeBoard(t)
+  const f = await fixture(t, false, board.url)
+  f.emit('question.v2.asked', ASKED)
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  assert.equal(board.state.posted.length, 1)
+  f.emit('question.v2.replied', { sessionID: 'ses_first', requestID: 'q-1', answers: [['red']] })
+  for (let i = 0; i < 100 && board.state.answered.length === 0; i++)
+    await new Promise((r) => setTimeout(r, 10))
+  assert.deepEqual(board.state.answered, [{ question: 41, choices: [['red']] }])
+  assert.deepEqual(f.replies, [])
+})
+
+test('OpenCode: a question of another session, or outside a window, is left to the TUI', async (t) => {
+  const board = await fakeBoard(t)
+  const f = await fixture(t, false, board.url)
+  f.emit('question.v2.asked', { ...ASKED, sessionID: 'ses_other' })
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  assert.deepEqual(board.state.posted, [])
+  const outside = await fixture(t)
+  outside.emit('question.v2.asked', ASKED)
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  assert.deepEqual(board.state.posted, [])
 })

@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { askTheBoard } from '../../hosts/lib/question-door.js'
 
 /** `cf` inside a window the new core opened: the agents' commands (`USAGE` lists them). */
 export const USAGE = `cf inside a ConsensFlow window: the board's commands.
@@ -57,10 +58,6 @@ async function readStandardInput() {
   return Buffer.concat(chunks).toString('utf8')
 }
 
-/** How long a door waits for the board before the harness's own dialog takes over. */
-const QUESTION_WAIT_MS = 3_500_000
-const POLL_WAIT_MS = 20_000
-
 /**
  * A harness's question tool, answered from the board. `claude`: Claude Code's
  * PreToolUse hook for AskUserQuestion. The questions go to whoever gave the
@@ -74,20 +71,16 @@ async function hook(harness, call, env, input) {
     const event = JSON.parse(await input())
     const questions = event.tool_input?.questions
     if (event.tool_name !== 'AskUserQuestion' || !Array.isArray(questions)) return null
-    const { message } = await call('POST', '/api/questions', {
-      questions: questions.map((q) => ({
+    const { answer } = await askTheBoard(
+      call,
+      questions.map((q) => ({
         question: q.question,
         header: q.header,
         options: (q.options ?? []).map((o) => ({ label: o.label, description: o.description })),
         multiple: q.multiSelect === true,
       })),
-    })
-    const until = Date.now() + (Number(env.CONSENSFLOW_QUESTION_WAIT_MS) || QUESTION_WAIT_MS)
-    let answer = null
-    while (answer === null && Date.now() < until) {
-      const wait = Math.min(POLL_WAIT_MS, until - Date.now())
-      answer = (await call('GET', `/api/questions/${message.id}?wait=${wait}`)).answer
-    }
+      env.CONSENSFLOW_QUESTION_WAIT_MS ? { waitMs: Number(env.CONSENSFLOW_QUESTION_WAIT_MS) } : {},
+    )
     if (answer === null) return null
     return {
       hookSpecificOutput: {
@@ -273,7 +266,7 @@ const tags = (value) =>
 function client(env) {
   const url = env.CONSENSFLOW_URL
   const token = env.CONSENSFLOW_TOKEN
-  return async (method, path, body) => {
+  return async (method, path, body, { signal } = {}) => {
     if (typeof url !== 'string' || url.length === 0) {
       throw new Error('CONSENSFLOW_URL is not set: run cf from a window ConsensFlow opened')
     }
@@ -281,6 +274,7 @@ function client(env) {
       method,
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(signal === undefined ? {} : { signal }),
     }).catch((cause) => {
       throw new Error(`ConsensFlow is not answering at ${url} (${cause.message})`)
     })

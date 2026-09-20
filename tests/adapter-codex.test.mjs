@@ -91,6 +91,10 @@ describe('the Codex adapter', () => {
         process.execPath,
         SUPERVISOR,
         executable,
+        '--enable',
+        'default_mode_request_user_input',
+        '-c',
+        'suppress_unstable_features_warning=true',
         '--model',
         'gpt-5.6-luna',
         '-c',
@@ -110,6 +114,10 @@ describe('the Codex adapter', () => {
       assert.equal(plan.nativeSession, thread)
       assert.deepEqual(withoutRole(plan.argv).slice(2), [
         executable,
+        '--enable',
+        'default_mode_request_user_input',
+        '-c',
+        'suppress_unstable_features_warning=true',
         'resume',
         thread,
         '--dangerously-bypass-approvals-and-sandbox',

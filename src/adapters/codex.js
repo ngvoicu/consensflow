@@ -14,6 +14,13 @@ import { admission, executableFor, recordState } from './shared.js'
  * names the thread once Codex starts it. A Codex without the queue runs bare
  * and gets its messages pasted, only while no human is typing.
  */
+const QUESTION_TOOL = [
+  '--enable',
+  'default_mode_request_user_input',
+  '-c',
+  'suppress_unstable_features_warning=true',
+]
+
 export function codexAdapter({
   env,
   send = sendCodex,
@@ -48,8 +55,10 @@ export function codexAdapter({
               message,
             )
           : interactiveResume({ kind: 'codex' }, resume, message)
+      // Codex's question tool (request_user_input) is behind a feature still
+      // marked under development; the broker answers it from the board.
       const invocation = withNativeBridge(
-        { command: executable, args: [...roleSetup.args, ...runner.args] },
+        { command: executable, args: [...roleSetup.args, ...QUESTION_TOOL, ...runner.args] },
         configuration,
         env.CONSENSFLOW_NODE ?? process.execPath,
       )

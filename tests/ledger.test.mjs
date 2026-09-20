@@ -1002,6 +1002,19 @@ describe('tasks and the inbox queue', () => {
     })
   })
 
+  it('lets the asker answer its own question with options, when its window answered first', async () => {
+    await withLedger((ledger) => {
+      const { project, question } = asked(ledger)
+      const answer = ledger.answer(question.id, { from: 'zeus', choices: [['red'], ['no']] })
+      assert.deepEqual([answer.sender, answer.recipient, answer.state], ['zeus', 'zeus', 'read'])
+      assert.equal(ledger.task(project.id, 1).state, 'working')
+      const plain = ledger.ask(project.id, { from: 'zeus', to: 'lead', task: 1, body: 'Plain?' })
+      assert.throws(() => ledger.answer(plain.id, { from: 'zeus', body: 'Me' }), {
+        code: 'not-your-question',
+      })
+    })
+  })
+
   it('maps a text answer onto the options, one line per question, and keeps free text', async () => {
     await withLedger((ledger) => {
       const { question } = asked(ledger)

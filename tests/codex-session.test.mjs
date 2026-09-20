@@ -16,15 +16,17 @@ async function fixture(t, options = {}) {
   await once(upstream, 'listening')
   const requests = []
   const pending = []
-  upstream.on('connection', (socket) =>
+  const sockets = []
+  upstream.on('connection', (socket) => {
+    sockets.push(socket)
     socket.on('message', (raw) => {
       const message = JSON.parse(raw)
       requests.push(message)
       if (message.method === 'initialize')
         socket.send(JSON.stringify({ id: message.id, result: {} }))
       else if (message.id !== undefined) pending.push({ socket, message })
-    }),
-  )
+    })
+  })
   const broker = await startBroker({
     ...options,
     port: 0,
@@ -87,7 +89,7 @@ async function fixture(t, options = {}) {
     entry.socket.send(JSON.stringify({ id: entry.message.id, ...(error ? { error } : { result }) }))
     return entry.message
   }
-  return { broker, requests, pending, wait, connect, read, deliver, respond }
+  return { broker, requests, pending, sockets, wait, connect, read, deliver, respond }
 }
 
 it('Codex receiver pulls full bodies into the selected main, holds busy, and fences a concurrent new', async (t) => {
@@ -405,4 +407,107 @@ it('keeps native Codex sockets private and inside ConsensFlow home', async (t) =
     codexSession.createSocketDirectory({ CONSENSFLOW_HOME: deep, TMPDIR: deep }),
     /socket path.*too long/i,
   )
+})
+
+/** A stand-in for the board's API: the questions posted, the answer once the test gives it. */
+async function fakeBoard(t) {
+  const { createServer } = await import('node:http')
+  const state = { posted: [], answer: null }
+  const server = createServer(async (request, response) => {
+    const chunks = []
+    for await (const chunk of request) chunks.push(chunk)
+    const json = (status, value) => {
+      response.writeHead(status, { 'content-type': 'application/json' })
+      response.end(JSON.stringify(value))
+    }
+    if (request.method === 'POST' && request.url === '/api/questions') {
+      state.posted.push(JSON.parse(Buffer.concat(chunks).toString('utf8')))
+      return json(201, { message: { id: 61 } })
+    }
+    if (request.method === 'GET' && request.url.startsWith('/api/questions/61')) {
+      for (let i = 0; i < 40 && state.answer === null; i++)
+        await new Promise((r) => setTimeout(r, 25))
+      return json(200, { question: {}, answer: state.answer })
+    }
+    json(404, {})
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise((resolve) => server.close(resolve)))
+  return { state, url: `http://127.0.0.1:${server.address().port}` }
+}
+
+const REQUEST_USER_INPUT = {
+  id: 'ask-1',
+  method: 'item/tool/requestUserInput',
+  params: {
+    threadId: A,
+    turnId: 'turn-1',
+    itemId: 'item-1',
+    isBlocking: true,
+    questions: [
+      {
+        id: 'colour',
+        header: 'Colour',
+        question: 'Which colour?',
+        options: [
+          { label: 'red', description: 'Warm' },
+          { label: 'blue', description: 'Cool' },
+        ],
+      },
+    ],
+  },
+}
+
+it("Codex's question tool is answered from the board by the broker, and the TUI never sees it", async (t) => {
+  const board = await fakeBoard(t)
+  const f = await fixture(t, { board: { url: board.url, token: 'window-token' } })
+  const tui = await f.connect()
+  const seen = []
+  tui.on('message', (raw) => seen.push(JSON.parse(raw)))
+  f.sockets.at(-1).send(JSON.stringify(REQUEST_USER_INPUT))
+  await f.wait(() => board.state.posted.length === 1)
+  assert.deepEqual(board.state.posted[0].questions, [
+    {
+      question: 'Which colour?',
+      header: 'Colour',
+      options: [
+        { label: 'red', description: 'Warm' },
+        { label: 'blue', description: 'Cool' },
+      ],
+      multiple: false,
+    },
+  ])
+  board.state.answer = { id: 70, from: 'lead', body: 'Colour: blue', choices: [['blue']] }
+  await f.wait(() => f.requests.some((m) => m.id === 'ask-1'))
+  assert.deepEqual(
+    f.requests.find((m) => m.id === 'ask-1'),
+    { id: 'ask-1', result: { answers: { colour: { answers: ['blue'] } } } },
+  )
+  assert.deepEqual(
+    seen.filter((m) => m.method === 'item/tool/requestUserInput'),
+    [],
+    'the window showed no dialog',
+  )
+})
+
+it("Codex's question goes on to the TUI when the board does not answer in time, or there is no board", async (t) => {
+  const board = await fakeBoard(t)
+  const f = await fixture(t, {
+    board: { url: board.url, token: 'window-token' },
+    questionWaitMs: 50,
+  })
+  const tui = await f.connect()
+  const seen = []
+  tui.on('message', (raw) => seen.push(JSON.parse(raw)))
+  f.sockets.at(-1).send(JSON.stringify(REQUEST_USER_INPUT))
+  await f.wait(() => seen.some((m) => m.id === 'ask-1'))
+  assert.equal(seen.find((m) => m.id === 'ask-1').method, 'item/tool/requestUserInput')
+  assert.equal(board.state.posted.length, 1, 'it was asked on the board first')
+
+  const plain = await fixture(t)
+  const plainTui = await plain.connect()
+  const shown = []
+  plainTui.on('message', (raw) => shown.push(JSON.parse(raw)))
+  plain.sockets.at(-1).send(JSON.stringify(REQUEST_USER_INPUT))
+  await plain.wait(() => shown.some((m) => m.id === 'ask-1'))
 })

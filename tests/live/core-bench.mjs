@@ -30,6 +30,13 @@ const H = process.env.HOME
 const WORKSPACE = join(H, '.consensflow-candidate', 'bench', 'workspace')
 
 // One cheap model per harness (brain: operations/test-models.md).
+/** What each harness calls its question tool, for the worker's brief; none for Pi and Devin. */
+const QUESTION_TOOL = {
+  claude: 'AskUserQuestion tool',
+  opencode: 'question tool',
+  codex: 'request_user_input tool',
+}
+
 const AGENTS = {
   claude: { id: 'bench-claude', kind: 'claude-code', model: 'claude-sonnet-5' },
   opencode: {
@@ -216,6 +223,76 @@ try {
       `${name}-window-closed`,
       Boolean(closed),
       closed ? {} : { activity: (await lane(agent.id))?.activity },
+    )
+  }
+
+  // The question door, live: a worker asks through its harness's own question
+  // tool; the door puts the question in the lead's inbox; the lead answers
+  // with `cf answer`; the door hands the answer back and the worker finishes.
+  for (const name of wanted.filter((candidate) => QUESTION_TOOL[candidate])) {
+    const started = Date.now()
+    const worker = AGENTS[name]
+    await app.requestNode('task.add', {
+      project,
+      to: 'lead',
+      body: `Run exactly this command in your shell, then reply with one line:\ncf task add --tier ${tiers[name]} --tags ${worker.id} "Use your ${QUESTION_TOOL[name]} to ask me which colour I prefer, with the options red and blue. After I answer, reply with exactly one line: COLOUR=<the answer>"`,
+    })
+    const question = await until(
+      async () =>
+        (await inbox('lead')).find(
+          (m) => m.kind === 'question' && m.sender === worker.id && m.questions !== null,
+        ),
+      300_000,
+    )
+    record(`${name}-question-asked`, Boolean(question), {
+      seconds: Math.round((Date.now() - started) / 1000),
+      ...(question
+        ? { options: question.questions[0].options.map((o) => o.label) }
+        : {
+            lead: (await lane('lead'))?.activity,
+            worker: (await lane(worker.id))?.activity,
+            output: app.output(`p${project}-${worker.id}`).slice(-1200),
+          }),
+    })
+    if (!question) continue
+    const answer = await until(async () => {
+      const found = (await inbox(worker.id)).find((m) => m.replyTo === question.id)
+      return found?.state === 'read' ? found : null
+    }, 300_000)
+    record(`${name}-question-answered-by-lead`, Boolean(answer), {
+      seconds: Math.round((Date.now() - started) / 1000),
+      ...(answer
+        ? { choices: answer.choices, from: answer.sender }
+        : {
+            lead: (await lane('lead'))?.activity,
+            output: app.output(`p${project}-lead`).slice(-1200),
+          }),
+    })
+    const done = await until(async () => {
+      const current = (await lane(worker.id))?.tasks.find((t) => t.number === question.taskNumber)
+      return current?.state === 'done' ? current : null
+    }, 300_000)
+    const result = done
+      ? (await inbox('lead')).find(
+          (m) => m.kind === 'result' && m.taskNumber === question.taskNumber,
+        )
+      : null
+    const label = answer?.choices?.[0]?.[0]
+    record(
+      `${name}-question-returned-to-worker`,
+      Boolean(
+        result && label && result.body.toLowerCase().includes(`colour=${label.toLowerCase()}`),
+      ),
+      {
+        seconds: Math.round((Date.now() - started) / 1000),
+        ...(result
+          ? { result: result.body.slice(0, 80), label }
+          : {
+              state: (await lane(worker.id))?.tasks.find((t) => t.number === question.taskNumber)
+                ?.state,
+              output: app.output(`p${project}-${worker.id}`).slice(-1200),
+            }),
+      },
     )
   }
 

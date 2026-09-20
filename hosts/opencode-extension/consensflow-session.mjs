@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import { answerFromWindow, askTheBoard, boardClient } from '../lib/question-door.js'
 import { createReceiver } from '../lib/receiver.js'
 
 export const id = 'consensflow-session'
@@ -54,6 +55,50 @@ export async function tui(api, options) {
         },
       })
     : null
+  // The question tool's door: the questions go to the board as this window's
+  // participant, the board's answer comes back through the API as the
+  // question's reply, and a reply given in the window first goes to the board
+  // instead, so the question is answered once either way.
+  const board = boardClient()
+  const held = new Map()
+  const relay = async ({ id, sessionID, questions }) => {
+    if (board === null || sessionID !== currentSession() || held.has(id)) return
+    const control = new AbortController()
+    held.set(id, control)
+    try {
+      const asked = await askTheBoard(
+        board,
+        questions.map((q) => ({
+          question: q.question,
+          header: q.header,
+          options: q.options.map((o) => ({ label: o.label, description: o.description })),
+          multiple: q.multiple === true,
+        })),
+        { signal: control.signal },
+      )
+      if (control.window !== undefined) {
+        await answerFromWindow(board, asked.id, control.window)
+      } else if (asked.answer !== null) {
+        await api.client.question.reply({ requestID: id, answers: asked.answer.choices })
+      }
+    } catch {
+      // The board could not be reached or refused: the window's own dialog stays.
+    } finally {
+      held.delete(id)
+    }
+  }
+  const settle = (requestID, answers) => {
+    const control = held.get(requestID)
+    if (control === undefined) return
+    if (answers !== undefined) control.window = answers
+    control.abort()
+  }
+  api.event?.on('question.v2.asked', (event) => void relay(event.properties))
+  api.event?.on('question.v2.replied', (event) =>
+    settle(event.properties.requestID, event.properties.answers),
+  )
+  api.event?.on('question.v2.rejected', (event) => settle(event.properties.requestID))
+
   const server = createServer(async (request, response) => {
     const reply = (status, value) => {
       response.writeHead(status, {

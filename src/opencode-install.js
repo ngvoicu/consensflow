@@ -3,7 +3,11 @@ import { pathToFileURL } from 'node:url'
 import { harnessPath } from './harnesses.js'
 import { preparePrivateIntegration } from './private-integration.js'
 
-const FILES = ['hosts/opencode-extension/consensflow-session.mjs', 'hosts/lib/receiver.js']
+const FILES = [
+  'hosts/opencode-extension/consensflow-session.mjs',
+  'hosts/lib/receiver.js',
+  'hosts/lib/question-door.js',
+]
 
 export function prepareOpenCodeExtension(env) {
   if (!harnessPath('opencode', env)) return { state: 'not-installed', path: null }

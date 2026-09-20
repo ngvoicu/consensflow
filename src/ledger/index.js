@@ -1101,7 +1101,10 @@ class Ledger {
       if (question === null || question.kind !== 'question') {
         throw new LedgerError('not-a-question', `message ${questionId} is not a question`, 409)
       }
-      if (question.recipient !== from && from !== 'human') {
+      // The one asked, the human, or (a question with options) the asker itself:
+      // its window may have answered first, and the board's copy takes that answer.
+      const fromWindow = question.questions !== null && from === question.sender
+      if (question.recipient !== from && from !== 'human' && !fromWindow) {
         throw new LedgerError(
           'not-your-question',
           `the question was put to ${question.recipient}, not ${from}`,
