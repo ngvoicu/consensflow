@@ -122,3 +122,13 @@ Gabriel, on the Candidate built from `87c45f5`, 2026-09-20 afternoon:
   reviewed should go away" (the review policy is none or workers' work; a
   fifth migration reads a home's `all` as `members`; the lead asks for a
   review of its own work by hand with `cf task review`).
+- Gabriel: "clean code, remove all unused code". The old one-shot runner is
+  gone: `hosts/lib/{runners,codex-auth,harness-transcript,image-run,packets,
+  session-binding,threads,state,transcript-events}.js`, the presets' runner
+  helpers, the completion module's cursor slicing, the utils left to slugify
+  and stripMention, every export nothing shipped read made private; the
+  window builders every adapter uses live in `hosts/lib/windows.js`. Ten test
+  files and five fixtures went with it; the window tests, the Pi path tests
+  and the name-neutrality check stayed (the last one now sweeps hosts, bin,
+  src and skill). The README describes the board, the roles, the tiers and
+  the screens as they are.
