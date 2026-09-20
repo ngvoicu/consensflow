@@ -46,8 +46,12 @@ test("a worker's question with options goes to the lead's inbox and its answer r
     assert.equal(given.ok, true, JSON.stringify(given))
 
     const board = async () => (await app.requestNode('board.get', { project })).board
+    // A member's work runs in a session of its own: its lane is the session's.
     const lane = async (handle) =>
-      (await board()).lanes.find((candidate) => candidate.participant.handle === handle)
+      (await board()).lanes.findLast(
+        (candidate) =>
+          candidate.participant.member === handle || candidate.participant.handle === handle,
+      )
     const inbox = async (participant) =>
       (await app.requestNode('inbox.get', { project, participant })).messages
 
@@ -59,14 +63,13 @@ test("a worker's question with options goes to the lead's inbox and its answer r
       30_000,
     )
     const question = (await inbox('lead')).find((m) => m.kind === 'question')
-    assert.deepEqual(
-      [question.sender, question.taskNumber, question.questions[0].options[1].label],
-      ['worker', 2, 'blue'],
-    )
+    assert.match(question.sender, /^worker-/, "the worker's session asked")
+    assert.deepEqual([question.taskNumber, question.questions[0].options[1].label], [2, 'blue'])
     assert.equal(question.body, 'Colour: Which colour?\n- red\n- blue: REPLY blue')
 
     await app.waitFor(async () => (await lane('worker'))?.tasks[0]?.state === 'done', 30_000)
-    const answer = (await inbox('worker')).find((m) => m.kind === 'answer')
+    const session = (await lane('worker')).participant.handle
+    const answer = (await inbox(session)).find((m) => m.kind === 'answer')
     assert.deepEqual(
       [answer.state, answer.choices, answer.sender, answer.body],
       ['read', [['blue']], 'lead', 'Colour: blue'],
@@ -82,7 +85,7 @@ test("a worker's question with options goes to the lead's inbox and its answer r
     // What the windows showed and what the ledger held, for the failure report.
     const board = (await app.requestNode('board.get', { project: 1 })).board
     cause.message += `\nboard=${JSON.stringify(board.lanes.map((l) => [l.participant.handle, l.tasks.map((t) => [t.number, t.state])]))}`
-    for (const id of ['p1-lead', 'p1-worker']) {
+    for (const id of app.openFrames.map((frame) => frame.id)) {
       cause.message += `\n--- ${id}: ${app.output(id).slice(-1500)}`
     }
     const worker = await app.requestNode('task.get', { project: 1, task: 2 })

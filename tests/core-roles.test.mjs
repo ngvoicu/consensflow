@@ -48,7 +48,8 @@ describe('role instructions for the new core', () => {
         )
         assert.doesNotMatch(text, /claude-sonnet-5|Careful implementer/, 'no model, no description')
         assert.match(text, /^## Your commands$/m, 'the command card comes first')
-        assert.ok(text.indexOf('## Your commands') < text.indexOf('## How work moves'))
+        const next = role === 'lead' ? '## What you do' : '## How work moves'
+        assert.ok(text.indexOf('## Your commands') < text.indexOf(next), `${role}: card first`)
         assert.match(text, /Cross-model review/)
       } else {
         assert.ok(text.includes('cf ask'), `${role} can ask`)
@@ -64,6 +65,17 @@ describe('role instructions for the new core', () => {
 
   it('says so when the team is empty', () => {
     assert.match(roleInstructions('lead', []), /No saved workers are available/)
+    for (const role of ['lead', 'pm']) {
+      const text = roleInstructions(role, [zeus])
+      assert.match(text, /cf task add --after T-3/, `${role}: the one way to continue a window`)
+      assert.match(text, /only when its context matters/, `${role}: and when`)
+    }
+    assert.match(roleInstructions('lead', [zeus]), /## What you do/)
+    assert.match(roleInstructions('lead', [zeus]), /## What you never do/)
+    assert.match(
+      roleInstructions('lead', [zeus]),
+      /## What you never do\n\n- Give a task to a worker by name, or write a task with one worker in mind/,
+    )
     assert.match(roleInstructions('pm', []), /No saved advisors are available/)
   })
 

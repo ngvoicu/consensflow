@@ -260,6 +260,7 @@ export class Dispatcher {
   async pass() {
     for (const project of this.#ledger.projects()) {
       if (project.state !== 'open') continue
+      if (this.#ledger.expireSessions(project.id).length > 0) this.#changed()
       this.#assignOpenTasks(project)
       this.#findReviewers(project)
     }
@@ -271,6 +272,20 @@ export class Dispatcher {
       }
     }
     await Promise.all(steps)
+    await this.#closeLeftWindows()
+  }
+
+  /** A window whose participant has left (a session ended, a member removed) closes. */
+  async #closeLeftWindows() {
+    const live = new Set(
+      this.#ledger.projects().flatMap((project) => project.participants.map((p) => p.id)),
+    )
+    for (const [participantId, runtime] of this.#runtime) {
+      if (runtime.pane === null || runtime.retiring || live.has(participantId)) continue
+      runtime.retiring = true
+      await this.#host.kill(runtime.pane).catch(() => {})
+      this.#changed()
+    }
   }
 
   /** A window ended: `pane.exit` from the pane host. */
@@ -345,24 +360,27 @@ export class Dispatcher {
         ? { state: 'waiting', reason: observed.waiting.reason ?? null }
         : { state: observed.settled ? 'idle' : 'working' },
     )
+    // Quota belongs to the member: a session that runs out takes its member out.
+    const owner = this.#memberOf(project, participant)
     if (observed.quota !== undefined) {
       runtime.quota = observed.quota ?? null
       // Low is soft: the current task continues, nothing new comes until the
       // reset it names (an hour when it names none). It outlives the window,
       // which closes with the task, so a low member is not asked again at once.
       if (runtime.quota?.state === 'low') {
-        runtime.lowUntil = runtime.quota.resetsAt ?? new Date(this.#now() + 3_600_000).toISOString()
-      } else if (runtime.quota !== null) runtime.lowUntil = null
+        this.#runtimeOf(owner.id).lowUntil =
+          runtime.quota.resetsAt ?? new Date(this.#now() + 3_600_000).toISOString()
+      } else if (runtime.quota !== null) this.#runtimeOf(owner.id).lowUntil = null
     }
-    const out = this.#isOut(participant)
-    if (!out && this.#freshRefusal(participant, runtime.quota)) {
-      this.#outOfQuota(project, participant, runtime)
+    const out = this.#isOut(owner)
+    if (!out && this.#freshRefusal(owner, runtime.quota)) {
+      this.#outOfQuota(project, participant, runtime, owner)
       return
     }
     if (out) {
       this.#setActivity(runtime, {
         state: 'out',
-        reason: `out of quota until ${participant.outUntil}`,
+        reason: `out of quota until ${owner.outUntil}`,
       })
       return
     }
@@ -390,10 +408,13 @@ export class Dispatcher {
    * One task per member session: the window and its conversation end with the
    * work, so the next task starts a fresh session with nothing carried over.
    */
-  async #retire(participant, runtime) {
+  /**
+   * A session's window closes with its task; its conversation stays until the
+   * session ends (the ledger ends both together), so a follow-up given with
+   * `--after` comes back on the same conversation.
+   */
+  async #retire(_participant, runtime) {
     runtime.retiring = true
-    const conversation = this.#ledger.currentConversation(participant.id)
-    if (conversation !== null) this.#ledger.endConversation(conversation.id)
     await this.#host.kill(runtime.pane).catch(() => {})
     this.#changed()
   }
@@ -727,6 +748,12 @@ export class Dispatcher {
     }
   }
 
+  /** The member a session belongs to; a member or coordinator is its own. */
+  #memberOf(project, participant) {
+    if (participant.memberId === null) return participant
+    return project.participants.find((p) => p.id === participant.memberId) ?? participant
+  }
+
   /** Free: nothing on its hands, not out of quota, not low on it. */
   #available(member) {
     return !member.busy && !this.#isOut(member) && !this.#isLow(member)
@@ -786,10 +813,10 @@ export class Dispatcher {
    * tiered work goes back to the board, a review it held is withdrawn; its
    * own tasks (a coordinator's) wait for it.
    */
-  #outOfQuota(project, participant, runtime) {
+  #outOfQuota(project, participant, runtime, owner) {
     const until = runtime.quota.resetsAt ?? new Date(this.#now() + 3_600_000).toISOString()
     this.#setActivity(runtime, { state: 'out', reason: `out of quota until ${until}` })
-    this.#ledger.markOut(participant.id, { until, reason: 'out of quota' })
+    this.#ledger.markOut(owner.id, { until, reason: 'out of quota' })
     if (runtime.delivering !== null) {
       const { delivering } = runtime
       runtime.delivering = null

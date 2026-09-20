@@ -88,16 +88,20 @@ const COORDINATORS = ['human', 'lead', 'pm']
 /** Whose team a participant is on: the lead's (with workers and reviewers) or the PM's (with advisors). */
 export const teamOf = (participant) => TEAM_OF_ROLE[participant.role] ?? null
 
-/** The human first, then the lead's team and the PM's, each coordinator ahead of its members. */
+/**
+ * The human first, then the lead's team and the PM's, each coordinator ahead
+ * of its members, and each member's sessions right under it.
+ */
 export function laneOrder(lanes) {
   const rank = ({ participant }) => [
     [null, 'lead', 'pm'].indexOf(teamOf(participant)),
     COORDINATORS.includes(participant.role) ? 0 : 1,
-    participant.id,
+    participant.memberId ?? participant.id,
+    participant.memberId === null ? 0 : participant.id,
   ]
   return [...lanes].sort((a, b) => {
     const [x, y] = [rank(a), rank(b)]
-    return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]
+    return x[0] - y[0] || x[1] - y[1] || x[2] - y[2] || x[3] - y[3]
   })
 }
 
@@ -107,8 +111,21 @@ const clock = (iso) =>
   new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
 const outOfQuota = (participant, now) =>
   participant.outUntil !== null && Date.parse(participant.outUntil) > now
+/** "@zeus · amber-pine" for a session; the member's own name otherwise. */
 const laneName = (participant) =>
-  ({ human: 'You', lead: 'Lead', pm: 'PM' })[participant.handle] ?? `@${participant.handle}`
+  participant.member
+    ? `@${participant.member} · ${participant.session}`
+    : ({ human: 'You', lead: 'Lead', pm: 'PM' }[participant.handle] ?? `@${participant.handle}`)
+
+/** A member's row: how many of its windows are open now. */
+function sessionsNote(lane, board) {
+  const open = board.lanes.filter(
+    (other) => other.participant.member === lane.participant.handle && other.pane !== null,
+  ).length
+  return open === 0
+    ? 'Free: a window opens with its next task'
+    : `${open} window${open === 1 ? '' : 's'} open, one per task`
+}
 
 /** Where a task is going or came from, on its card. */
 function route(task) {
@@ -127,10 +144,15 @@ const reviewLine = (review) =>
     ? `Reviewed by ${who(review.reviewer)}, round ${review.round}: ${review.verdict ?? 'pass (no verdict line)'}`
     : `${who(review.reviewer)} is reviewing, round ${review.round}`
 
-/** A member between tasks: one task per session, so its window is gone until the next. */
+/** A member between tasks: its work runs in sessions, so it has no window of its own. */
 const resting = (participant, activity) =>
   ['worker', 'advisor', 'reviewer'].includes(participant.role) &&
+  participant.member === null &&
   (activity?.state ?? 'closed') === 'closed'
+
+/** A session whose window closed with its task: it waits to be accepted or continued. */
+const parked = (participant, activity) =>
+  participant.member !== null && (activity?.state ?? 'closed') === 'closed'
 
 function lamp(activity) {
   const node = element('span', 'lamp')
@@ -357,7 +379,8 @@ export class BoardView {
     const row = element('tr')
     row.dataset.handle = participant.handle
     row.dataset.role = participant.role
-    row.append(this.#rowHead(lane, agent, now))
+    if (participant.member) row.dataset.session = participant.member
+    row.append(this.#rowHead(lane, board, agent, now))
     // A task waiting for a member sits in its requester's backlog.
     const mine = [
       ...lane.tasks.filter((task) => task.kind !== 'review'),
@@ -380,7 +403,7 @@ export class BoardView {
     return row
   }
 
-  #rowHead(lane, agent, now) {
+  #rowHead(lane, board, agent, now) {
     const { participant, activity, pane } = lane
     const head = element('th', 'row-head')
     head.setAttribute('scope', 'row')
@@ -389,13 +412,22 @@ export class BoardView {
       return head
     }
     const coordinator = participant.role === 'lead' || participant.role === 'pm'
-    const identity = [
-      coordinator ? null : participant.roles.join('+'),
-      participant.tier,
-      participant.tags.join(', ') || null,
-      participant.harness,
-      agent?.model,
-    ]
+    // A session's row says whose window it is; the member's row says what it is.
+    const identity = (
+      participant.member
+        ? [
+            `${participant.role} session of @${participant.member}`,
+            participant.harness,
+            agent?.model,
+          ]
+        : [
+            coordinator ? null : participant.roles.join('+'),
+            participant.tier,
+            participant.tags.join(', ') || null,
+            participant.harness,
+            agent?.model,
+          ]
+    )
       .filter(Boolean)
       .join(' · ')
     const out = outOfQuota(participant, now)
@@ -410,8 +442,10 @@ export class BoardView {
           : reviewing !== undefined
             ? `Reviewing T-${reviewing.reviewOf}`
             : resting(participant, activity)
-              ? 'Free: a window opens with its next task'
-              : (ACTIVITY_LABEL[activity?.state] ?? 'No window'),
+              ? sessionsNote(lane, board)
+              : parked(participant, activity)
+                ? 'Window closed with its task; a follow-up reopens it'
+                : (ACTIVITY_LABEL[activity?.state] ?? 'No window'),
     )
     status.dataset.state = out ? 'out' : (activity?.state ?? 'closed')
     const tools = element('div', 'row-tools')
@@ -490,7 +524,12 @@ export class BoardView {
     for (const tier of TIERS) {
       for (const pool of POOLS) {
         const names = board.lanes
-          .filter((lane) => lane.participant.roles.includes(pool) && lane.participant.tier === tier)
+          .filter(
+            (lane) =>
+              lane.participant.member === null &&
+              lane.participant.roles.includes(pool) &&
+              lane.participant.tier === tier,
+          )
           .map((lane) => lane.participant.handle)
         if (names.length === 0) continue
         const option = element('option', null, `A ${tier} ${pool} (${names.join(', ')})`)

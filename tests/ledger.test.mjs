@@ -6,7 +6,14 @@ import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { OVERDUE_MS, openLedger, SCHEMA_VERSION, verdictOf } from '../src/ledger/index.js'
+import {
+  OVERDUE_MS,
+  openLedger,
+  SCHEMA_VERSION,
+  SESSION_IDLE_MS,
+  SESSION_SLOTS,
+  verdictOf,
+} from '../src/ledger/index.js'
 import { MIGRATIONS } from '../src/ledger/schema.js'
 
 /**
@@ -33,9 +40,23 @@ function clock() {
   }
 }
 
+/** Session names in a fixed order, so a test can say `zeus-amber-pine` and mean the first one. */
+function names() {
+  const list = [
+    'amber-pine',
+    'brisk-birch',
+    'calm-brook',
+    'coral-canyon',
+    'crisp-cedar',
+    'dusky-cliff',
+  ]
+  let at = 0
+  return () => list[at++ % list.length]
+}
+
 async function withLedger(fn) {
   return withDir(async (dir) => {
-    const ledger = openLedger(path.join(dir, 'consensflow.db'), { now: clock() })
+    const ledger = openLedger(path.join(dir, 'consensflow.db'), { now: clock(), names: names() })
     try {
       return await fn(ledger, dir)
     } finally {
@@ -67,6 +88,10 @@ function team(ledger) {
   const id = (handle) => ledger.project(project.id).participants.find((p) => p.handle === handle).id
   return { project, id }
 }
+
+/** The id of a session (or any participant) by handle. */
+const sessionId = (ledger, projectId, handle) =>
+  ledger.project(projectId).participants.find((p) => p.handle === handle).id
 
 /** Delivers a message the way the dispatcher will: begin, then confirm. */
 function deliver(ledger, message) {
@@ -231,6 +256,12 @@ describe('upgrading a home', () => {
            (1, 'hera', 'reviewer', 'hera', 'codex', 'standard', ?)`,
         )
         .run(at, at, at, at)
+      old
+        .prepare(
+          `INSERT INTO task (project_id, number, title, body, requester_id, assignee_id, state, tags, created_at, updated_at)
+           VALUES (1, 1, 'Parser', 'Write the parser', 2, 3, 'working', '[]', ?, ?)`,
+        )
+        .run(at, at)
       old.close()
       const ledger = openLedger(file)
       try {
@@ -245,6 +276,14 @@ describe('upgrading a home', () => {
         )
         const question = ledger.ask(1, { from: 'lead', to: 'human', body: 'Still here?' })
         assert.equal(question.questions, null)
+        // A task the old schema assigned to the member itself stays on its lane.
+        const lane = ledger.board(1).lanes.find((l) => l.participant.handle === 'zeus')
+        assert.deepEqual(
+          lane.tasks.map((t) => [t.number, t.state]),
+          [[1, 'working']],
+          'the member keeps the task it held before sessions existed',
+        )
+        assert.equal(lane.participant.memberId, null)
       } finally {
         ledger.close()
       }
@@ -1442,20 +1481,23 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
       const { project, id } = tiered(ledger)
       ledger.setReview(project.id, 'members')
       openTask(ledger, project)
-      const busy = () => ledger.members(project.id, 'worker').find((m) => m.handle === 'zeus').busy
-      assert.deepEqual([ledger.holdsWork(id('zeus')), busy()], [false, false], 'nothing yet')
+      // The work is on the session's hands; the member counts its sessions at work.
+      const sessions = () =>
+        ledger.members(project.id, 'worker').find((m) => m.handle === 'zeus').sessions
+      assert.deepEqual([ledger.holdsWork(id('zeus')), sessions()], [false, 0], 'nothing yet')
       ledger.assignTask(project.id, 1, id('zeus'))
-      assert.deepEqual([ledger.holdsWork(id('zeus')), busy()], [true, true], 'queued')
+      const session = sessionId(ledger, project.id, 'zeus-amber-pine')
+      assert.deepEqual([ledger.holdsWork(session), sessions()], [true, 1], 'queued')
       const brief = ledger.task(project.id, 1).messages.find((m) => m.kind === 'task')
       ledger.beginDelivery(brief.id)
       ledger.confirmDelivery(brief.id, { item: 'i-1' })
-      assert.deepEqual([ledger.holdsWork(id('zeus')), busy()], [true, true], 'working')
+      assert.deepEqual([ledger.holdsWork(session), sessions()], [true, 1], 'working')
       ledger.recordResult(project.id, 1, { body: 'Parser done' })
       assert.equal(ledger.task(project.id, 1).state, 'review')
-      assert.deepEqual([ledger.holdsWork(id('zeus')), busy()], [true, true], 'under review')
+      assert.deepEqual([ledger.holdsWork(session), sessions()], [true, 1], 'under review')
       ledger.skipReview(project.id, 1, { reason: 'no reviewer' })
       assert.equal(ledger.task(project.id, 1).state, 'done')
-      assert.deepEqual([ledger.holdsWork(id('zeus')), busy()], [false, false], 'done')
+      assert.deepEqual([ledger.holdsWork(session), sessions()], [false, 0], 'done')
     })
   })
 
@@ -1500,11 +1542,11 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
       openTask(ledger, project)
       ledger.assignTask(project.id, 1, id('zeus'))
       assert.deepEqual(
-        ledger.members(project.id, 'worker').map((m) => [m.handle, m.tier, m.busy, m.taken]),
+        ledger.members(project.id, 'worker').map((m) => [m.handle, m.tier, m.sessions, m.taken]),
         [
-          ['zeus', 'standard', true, 1],
-          ['diana', 'standard', false, 0],
-          ['hera', 'light', false, 0],
+          ['zeus', 'standard', 1, 1],
+          ['diana', 'standard', 0, 0],
+          ['hera', 'light', 0, 0],
         ],
       )
       assert.deepEqual(
@@ -1519,12 +1561,12 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
       ledger.setReview(project.id, 'members')
       ledger.recordResult(project.id, 1, { body: 'Done' })
       assert.equal(
-        ledger.members(project.id, 'worker')[0].busy,
-        true,
+        ledger.members(project.id, 'worker')[0].sessions,
+        1,
         'work under review is still on its hands',
       )
       ledger.skipReview(project.id, 1, { reason: 'no reviewer' })
-      assert.equal(ledger.members(project.id, 'worker')[0].busy, false, 'finished work is not busy')
+      assert.equal(ledger.members(project.id, 'worker')[0].sessions, 0, 'finished work is not busy')
     })
   })
 
@@ -1565,16 +1607,26 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
       const { project, id } = tiered(ledger)
       openTask(ledger, project)
       const { task, message } = ledger.assignTask(project.id, 1, id('zeus'))
-      assert.deepEqual([task.state, task.assignee], ['queued', 'zeus'])
+      assert.deepEqual([task.state, task.assignee], ['queued', 'zeus-amber-pine'])
       assert.deepEqual(
         [message.recipient, message.kind, message.state, message.body],
-        ['zeus', 'task', 'queued', 'Write the parser'],
+        ['zeus-amber-pine', 'task', 'queued', 'Write the parser'],
       )
-      assert.equal(ledger.nextDelivery(id('zeus')).id, message.id)
+      assert.equal(
+        ledger.nextDelivery(sessionId(ledger, project.id, 'zeus-amber-pine')).id,
+        message.id,
+      )
       assert.deepEqual(ledger.events(project.id).at(-1), {
         ...ledger.events(project.id).at(-1),
         kind: 'task.assigned',
-        data: { task: 1, from: 'open', to: 'queued', assignee: 'zeus', message: message.id },
+        data: {
+          task: 1,
+          from: 'open',
+          to: 'queued',
+          assignee: 'zeus-amber-pine',
+          member: 'zeus',
+          message: message.id,
+        },
       })
       assert.throws(() => ledger.assignTask(project.id, 1, id('diana')), {
         code: 'invalid-transition',
@@ -1584,11 +1636,13 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
       assert.throws(() => ledger.assignTask(project.id, 2, id('athena')), {
         code: 'not-a-candidate',
       })
-      assert.equal(ledger.assignTask(project.id, 2, id('hera')).task.assignee, 'hera')
+      assert.equal(ledger.assignTask(project.id, 2, id('hera')).task.assignee, 'hera-brisk-birch')
       const board = ledger.board(project.id)
       assert.deepEqual(board.open, [])
       assert.deepEqual(
-        board.lanes.find((lane) => lane.participant.handle === 'hera').tasks.map((t) => t.number),
+        board.lanes
+          .find((lane) => lane.participant.handle === 'hera-brisk-birch')
+          .tasks.map((t) => t.number),
         [2],
       )
     })
@@ -1627,7 +1681,7 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
       assert.equal(ledger.task(project.id, 1).state, 'working')
       const note = ledger.note(project.id, {
         from: 'lead',
-        to: 'zeus',
+        to: 'zeus-amber-pine',
         body: 'Mind the tests',
         task: 1,
       })
@@ -1638,20 +1692,25 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
       assert.deepEqual([task.state, task.assignee], ['open', null])
       assert.equal(ledger.message(note.id).state, 'cancelled')
       assert.equal(ledger.message(first.message.id).state, 'delivered', 'history stays')
-      assert.deepEqual(ledger.events(project.id).at(-2).data, {
+      assert.deepEqual(ledger.events(project.id).findLast((e) => e.kind === 'task.released').data, {
         task: 1,
         from: 'working',
         to: 'open',
-        member: 'zeus',
+        member: 'zeus-amber-pine',
         because: 'ran out of quota after starting',
       })
+      assert.equal(
+        ledger.events(project.id).at(-2).kind,
+        'session.ended',
+        'the window that lost its work ends with it',
+      )
       const told = ledger.inbox(id('lead'))[0]
       assert.deepEqual(
         [told.kind, told.taskNumber, told.body],
         [
           'note',
           1,
-          'T-1 was taken back from @zeus (ran out of quota after starting) and waits for another standard worker.',
+          'T-1 was taken back from @zeus-amber-pine (ran out of quota after starting) and waits for another standard worker.',
         ],
       )
       assert.equal(ledger.activeTask(id('zeus')), null)
@@ -1659,7 +1718,7 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
       const second = ledger.assignTask(project.id, 1, id('diana'))
       assert.equal(
         second.message.body,
-        'Write the parser\n\nReassigned from @zeus, which ran out of quota after starting; check the working tree for partial changes.',
+        'Write the parser\n\nReassigned from @zeus-amber-pine, which ran out of quota after starting; check the working tree for partial changes.',
       )
       deliver(ledger, second.message)
       ledger.recordResult(project.id, 1, { body: 'Done' })
@@ -1764,9 +1823,9 @@ describe('tiered dispatch: the review gate', () => {
           review.task.state,
           review.task.title,
         ],
-        [2, 'review', 1, 'diana', 'lead', 'queued', 'Review T-1'],
+        [2, 'review', 1, 'diana-brisk-birch', 'lead', 'queued', 'Review T-1'],
       )
-      assert.match(review.message.body, /^Review T-1 \(round 1\) by @zeus\./)
+      assert.match(review.message.body, /^Review T-1 \(round 1\) by @zeus-amber-pine\./)
       assert.match(review.message.body, /The task:\nParser\n/)
       assert.match(review.message.body, /The result:\nParser done\n/)
       assert.match(review.message.body, /VERDICT: pass or VERDICT: changes\.$/)
@@ -1776,7 +1835,7 @@ describe('tiered dispatch: the review gate', () => {
       })
 
       deliver(ledger, review.message)
-      assert.equal(ledger.activeTask(id('diana')).number, 2)
+      assert.equal(ledger.activeTask(sessionId(ledger, project.id, 'diana-brisk-birch')).number, 2)
       const verdict = ledger.recordVerdict(project.id, 2, { body: 'Looks right.\n\nVERDICT: pass' })
       assert.deepEqual(
         [verdict.verdict, verdict.task.state, verdict.task.round, verdict.review.state],
@@ -1788,7 +1847,7 @@ describe('tiered dispatch: the review gate', () => {
         {
           number: 2,
           round: 1,
-          reviewer: 'diana',
+          reviewer: 'diana-brisk-birch',
           state: 'done',
           verdict: 'pass',
           findings: 'Looks right.\n\nVERDICT: pass',
@@ -1845,17 +1904,17 @@ describe('tiered dispatch: the review gate', () => {
       })
       assert.deepEqual(
         [back.verdict, back.task.state, back.task.assignee, back.task.round, back.review.state],
-        ['changes', 'queued', 'zeus', 1, 'done'],
+        ['changes', 'queued', 'zeus-amber-pine', 1, 'done'],
       )
       assert.equal(ledger.message(held.id).state, 'cancelled', 'the first result is superseded')
-      const followUp = ledger.nextDelivery(id('zeus'))
+      const followUp = ledger.nextDelivery(sessionId(ledger, project.id, 'zeus-amber-pine'))
       assert.deepEqual(
         [followUp.kind, followUp.sender, followUp.taskNumber, followUp.body],
         [
           'task',
-          'diana',
+          'diana-brisk-birch',
           number,
-          'Review round 1 by @diana asks for changes:\n\nMissing tests.\n\nVERDICT: changes',
+          'Review round 1 by @diana-brisk-birch asks for changes:\n\nMissing tests.\n\nVERDICT: changes',
         ],
       )
       assert.deepEqual(queued(ledger, id('lead')), [], 'the requester sees nothing yet')
@@ -1879,7 +1938,7 @@ describe('tiered dispatch: the review gate', () => {
         [number],
       )
       const second = ledger.createReview(project.id, number, { reviewer: id('calliope') })
-      assert.match(second.message.body, /^Review T-1 \(round 2\) by @zeus\./)
+      assert.match(second.message.body, /^Review T-1 \(round 2\) by @zeus-amber-pine\./)
       deliver(ledger, second.message)
       const decide = ledger.recordVerdict(project.id, second.task.number, {
         body: 'Still wrong.\n\nVERDICT: changes',
@@ -1978,7 +2037,8 @@ describe('tiered dispatch: the review gate', () => {
     await withLedger((ledger) => {
       const { project, id } = reviewed(ledger)
       const zeusCard = () =>
-        ledger.board(project.id).lanes.find((l) => l.participant.handle === 'zeus').tasks[0]
+        ledger.board(project.id).lanes.find((l) => l.participant.handle === 'zeus-amber-pine')
+          .tasks[0]
       const { number } = finished(
         ledger,
         project,
@@ -1999,7 +2059,7 @@ describe('tiered dispatch: the review gate', () => {
         {
           number: review.task.number,
           round: 1,
-          reviewer: 'diana',
+          reviewer: 'diana-brisk-birch',
           state: 'done',
           verdict: 'pass',
           findings: 'Looks right.\n\nVERDICT: pass',
@@ -2075,7 +2135,266 @@ describe('tiered dispatch: the review gate', () => {
       )
       assert.equal(
         ledger.createReview(project.id, next.number, { reviewer: id('calliope') }).task.assignee,
-        'calliope',
+        'calliope-crisp-cedar',
+      )
+    })
+  })
+})
+
+describe("sessions: a member's named windows", () => {
+  /** A team with a tiered task open for a standard worker. */
+  function opened(ledger, body = 'Write the parser', tags = []) {
+    const { project, id } = team(ledger)
+    ledger.createTask(project.id, { from: 'lead', pool: 'worker', tier: 'standard', tags, body })
+    return { project, id }
+  }
+  const sessionOf = (ledger, projectId, handle) =>
+    ledger.project(projectId).participants.find((p) => p.handle === handle)
+
+  it("assigns a task to a new session of the member, named after it, with the member's shape", async () => {
+    await withLedger((ledger) => {
+      const { project, id } = opened(ledger)
+      const { task, message } = ledger.assignTask(project.id, 1, id('zeus'))
+      assert.equal(task.assignee, 'zeus-amber-pine')
+      assert.equal(message.recipient, 'zeus-amber-pine')
+      const session = sessionOf(ledger, project.id, 'zeus-amber-pine')
+      assert.deepEqual(
+        [
+          session.memberId,
+          session.member,
+          session.session,
+          session.role,
+          session.roles,
+          session.tier,
+          session.agent,
+          session.harness,
+        ],
+        [id('zeus'), 'zeus', 'amber-pine', 'worker', ['worker'], 'standard', 'zeus', 'claude-code'],
+      )
+      assert.deepEqual(
+        ledger.members(project.id, 'worker').map((m) => [m.handle, m.sessions, m.busy]),
+        [
+          ['zeus', 1, false],
+          ['diana', 0, false],
+        ],
+        'members stay members; a session is counted, not listed',
+      )
+      assert.equal(ledger.holdsWork(session.id), true)
+      assert.equal(ledger.holdsWork(id('zeus')), false)
+      assert.equal(ledger.task(project.id, 1).session, 'zeus-amber-pine')
+    })
+  })
+
+  it('runs two sessions of one member at once and no more', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = opened(ledger)
+      ledger.createTask(project.id, {
+        from: 'lead',
+        pool: 'worker',
+        tier: 'standard',
+        body: 'Lexer',
+      })
+      ledger.createTask(project.id, {
+        from: 'lead',
+        pool: 'worker',
+        tier: 'standard',
+        body: 'Docs',
+      })
+      assert.equal(ledger.assignTask(project.id, 1, id('zeus')).task.assignee, 'zeus-amber-pine')
+      assert.equal(ledger.assignTask(project.id, 2, id('zeus')).task.assignee, 'zeus-brisk-birch')
+      assert.equal(SESSION_SLOTS, 2)
+      assert.equal(ledger.members(project.id, 'worker').find((m) => m.handle === 'zeus').busy, true)
+      assert.throws(() => ledger.assignTask(project.id, 3, id('zeus')), { code: 'no-free-slot' })
+      assert.throws(
+        () => ledger.assignTask(project.id, 3, sessionOf(ledger, project.id, 'zeus-amber-pine').id),
+        { code: 'not-a-member' },
+        'a task is assigned to a member, never to a session by hand',
+      )
+    })
+  })
+
+  it('continues a session with --after: the follow-up goes to the same window, alive and free', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = opened(ledger)
+      deliver(ledger, ledger.assignTask(project.id, 1, id('zeus')).message)
+      assert.throws(
+        () => ledger.createTask(project.id, { from: 'lead', after: 1, body: 'Also the lexer' }),
+        { code: 'session-busy' },
+      )
+      ledger.recordResult(project.id, 1, { body: 'Parser done' })
+      const { task, message } = ledger.createTask(project.id, {
+        from: 'lead',
+        after: 1,
+        body: 'Now the lexer, in the same style',
+      })
+      assert.deepEqual(
+        [task.number, task.assignee, task.state, task.pool, message.recipient],
+        [2, 'zeus-amber-pine', 'queued', null, 'zeus-amber-pine'],
+      )
+      assert.equal(
+        ledger.nextDelivery(sessionOf(ledger, project.id, 'zeus-amber-pine').id).id,
+        message.id,
+      )
+      deliver(ledger, message)
+      ledger.recordResult(project.id, 2, { body: 'Lexer done' })
+      ledger.acceptTask(project.id, 1, { by: 'lead' })
+      assert.ok(
+        sessionOf(ledger, project.id, 'zeus-amber-pine'),
+        'the session stays while T-2 is unaccepted',
+      )
+      ledger.acceptTask(project.id, 2, { by: 'lead' })
+      assert.equal(
+        sessionOf(ledger, project.id, 'zeus-amber-pine'),
+        undefined,
+        'accepted work ends the session',
+      )
+      assert.throws(
+        () => ledger.createTask(project.id, { from: 'lead', after: 1, body: 'More' }),
+        (error) =>
+          error.code === 'session-ended' && /open the task for its tier/.test(error.message),
+      )
+      assert.throws(
+        () => ledger.createTask(project.id, { from: 'zeus-amber-pine', after: 1, body: 'x' }),
+        { code: 'member-left' },
+        'an ended session is nobody',
+      )
+    })
+  })
+
+  it("folds an ended session's tasks into its member's lane, and keeps its cards", async () => {
+    await withLedger((ledger) => {
+      const { project, id } = opened(ledger)
+      deliver(ledger, ledger.assignTask(project.id, 1, id('zeus')).message)
+      ledger.recordResult(project.id, 1, { body: 'Parser done' })
+      let board = ledger.board(project.id)
+      assert.deepEqual(
+        board.lanes.map((l) => [
+          l.participant.handle,
+          l.participant.member ?? null,
+          l.tasks.map((t) => t.number),
+        ]),
+        [
+          ['human', null, []],
+          ['lead', null, []],
+          ['zeus', null, []],
+          ['diana', null, []],
+          ['zeus-amber-pine', 'zeus', [1]],
+        ],
+      )
+      ledger.acceptTask(project.id, 1, { by: 'lead' })
+      board = ledger.board(project.id)
+      assert.deepEqual(
+        board.lanes.map((l) => [
+          l.participant.handle,
+          l.tasks.map((t) => [t.number, t.state, t.session]),
+        ]),
+        [
+          ['human', []],
+          ['lead', []],
+          ['zeus', [[1, 'accepted', 'zeus-amber-pine']]],
+          ['diana', []],
+        ],
+      )
+      assert.deepEqual(
+        ledger.members(project.id, 'worker').map((m) => [m.handle, m.taken]),
+        [
+          ['zeus', 1],
+          ['diana', 0],
+        ],
+        'a member counts the tasks its sessions took',
+      )
+    })
+  })
+
+  it('reopens a done task on its own session, and cancelling its last work ends the session', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = opened(ledger)
+      deliver(ledger, ledger.assignTask(project.id, 1, id('zeus')).message)
+      ledger.recordResult(project.id, 1, { body: 'Parser done' })
+      const { task } = ledger.reopenTask(project.id, 1, { by: 'lead', body: 'Handle comments too' })
+      assert.deepEqual([task.assignee, task.state], ['zeus-amber-pine', 'queued'])
+      ledger.cancelTask(project.id, 1, { by: 'lead' })
+      assert.equal(sessionOf(ledger, project.id, 'zeus-amber-pine'), undefined)
+      assert.throws(() => ledger.reopenTask(project.id, 1, { by: 'lead', body: 'Again' }), {
+        code: 'invalid-transition',
+      })
+    })
+  })
+
+  it('ends a session left idle after its work, so it does not linger', async () => {
+    await withDir((dir) => {
+      let at = Date.parse('2026-09-20T10:00:00.000Z')
+      const ledger = openLedger(path.join(dir, 'consensflow.db'), {
+        now: () => new Date(at),
+        names: names(),
+      })
+      try {
+        const { project, id } = opened(ledger)
+        deliver(ledger, ledger.assignTask(project.id, 1, id('zeus')).message)
+        ledger.recordResult(project.id, 1, { body: 'Parser done' })
+        at += SESSION_IDLE_MS - 1000
+        assert.deepEqual(ledger.expireSessions(project.id), [])
+        at += 2000
+        assert.deepEqual(ledger.expireSessions(project.id), ['zeus-amber-pine'])
+        assert.equal(sessionOf(ledger, project.id, 'zeus-amber-pine'), undefined)
+        assert.throws(() => ledger.reopenTask(project.id, 1, { by: 'lead', body: 'Again' }), {
+          code: 'session-ended',
+        })
+        assert.equal(ledger.task(project.id, 1).state, 'done', 'the task itself is untouched')
+      } finally {
+        ledger.close()
+      }
+    })
+  })
+
+  it('gives a review its own reviewer session, ended with the verdict', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = opened(ledger)
+      ledger.addMember(project.id, {
+        agent: 'nemesis',
+        harness: 'pi',
+        roles: ['reviewer'],
+        tier: 'standard',
+      })
+      ledger.setReview(project.id, 'members')
+      deliver(ledger, ledger.assignTask(project.id, 1, id('zeus')).message)
+      ledger.recordResult(project.id, 1, { body: 'Parser done' })
+      const review = ledger.createReview(project.id, 1, { reviewer: id('nemesis') })
+      assert.deepEqual(
+        [review.task.assignee, review.task.kind, review.message.recipient],
+        ['nemesis-brisk-birch', 'review', 'nemesis-brisk-birch'],
+      )
+      assert.throws(
+        () =>
+          ledger.createReview(project.id, 1, {
+            reviewer: sessionOf(ledger, project.id, 'nemesis-brisk-birch').id,
+          }),
+        { code: 'not-a-member' },
+      )
+      deliver(ledger, review.message)
+      ledger.recordVerdict(project.id, review.task.number, { body: 'Fine.\n\nVERDICT: pass' })
+      assert.equal(
+        sessionOf(ledger, project.id, 'nemesis-brisk-birch'),
+        undefined,
+        'the verdict ends the reviewer session',
+      )
+      assert.deepEqual(
+        ledger.reviewsOf(project.id, 1).map((r) => [r.reviewer, r.verdict]),
+        [['nemesis-brisk-birch', 'pass']],
+      )
+    })
+  })
+
+  it('removes a member with its live sessions, cancelling their work', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = opened(ledger)
+      deliver(ledger, ledger.assignTask(project.id, 1, id('zeus')).message)
+      ledger.removeMember(project.id, 'zeus')
+      assert.equal(sessionOf(ledger, project.id, 'zeus-amber-pine'), undefined)
+      assert.equal(ledger.task(project.id, 1).state, 'cancelled', 'its work went with it')
+      assert.deepEqual(
+        ledger.members(project.id, 'worker').map((m) => m.handle),
+        ['diana'],
       )
     })
   })

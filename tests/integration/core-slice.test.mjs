@@ -40,13 +40,19 @@ test('a lead hands a task to a worker through the board and the result lands in 
     assert.equal(given.ok, true, JSON.stringify(given))
 
     const board = async () => (await app.requestNode('board.get', { project })).board
+    // A member's work runs in a session of its own: its lane is the session's.
     const lane = async (handle) =>
-      (await board()).lanes.find((candidate) => candidate.participant.handle === handle)
+      (await board()).lanes.findLast(
+        (candidate) =>
+          candidate.participant.member === handle || candidate.participant.handle === handle,
+      )
     await app.waitFor(async () => (await lane('worker'))?.tasks[0]?.state === 'done', 30_000)
     const workerTask = (await lane('worker')).tasks[0]
     assert.deepEqual([workerTask.requester, workerTask.number], ['lead', 2])
 
-    const workerFrame = app.openFrames.find((frame) => frame.id === `p${project}-worker`)
+    const workerFrame = app.openFrames.find(
+      (frame) => frame.id === `p${project}-${workerTask.assignee}`,
+    )
     assert.match(
       workerFrame.argv.at(-1),
       /^\[ConsensFlow m-\d+ · T-2 · task from @lead\]\nReply with exactly: WORKER_OK$/,
@@ -64,7 +70,7 @@ test('a lead hands a task to a worker through the board and the result lands in 
     const leadSession = leadFrame.argv[leadFrame.argv.indexOf('--session-id') + 1]
     assert.match(
       app.transcript(leadSession),
-      new RegExp(`\\[ConsensFlow m-${result.id} · T-2 · result from @worker\\]`),
+      new RegExp(`\\[ConsensFlow m-${result.id} · T-2 · result from @worker-[a-z]+-[a-z]+\\]`),
     )
   } finally {
     await app.close()

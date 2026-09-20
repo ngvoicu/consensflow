@@ -147,4 +147,6 @@ export class TerminalsView {
 }
 
 const laneName = (participant) =>
-  ({ lead: 'Lead', pm: 'PM' })[participant.handle] ?? `@${participant.handle}`
+  participant.member
+    ? `@${participant.member} · ${participant.session}`
+    : ({ lead: 'Lead', pm: 'PM' }[participant.handle] ?? `@${participant.handle}`)

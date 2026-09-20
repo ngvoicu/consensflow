@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
+import { sessionName } from './names.js'
 import { MIGRATIONS, SCHEMA_VERSION } from './schema.js'
 
 export { SCHEMA_VERSION }
@@ -78,6 +79,10 @@ const HELD_TASK_STATES = ['queued', 'working', 'waiting', 'review']
 const MAX_BODY = 1_000_000
 /** How long a coordinator may leave a question before the human sees it too. */
 export const OVERDUE_MS = 10 * 60_000
+/** How many sessions of one member may hold work at once. */
+export const SESSION_SLOTS = 2
+/** How long a session with nothing on its hands lives before it ends on its own. */
+export const SESSION_IDLE_MS = 2 * 60 * 60_000
 const MAX_QUESTIONS = 4
 const MAX_TITLE = 120
 const AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
@@ -98,7 +103,7 @@ const SQLITE_LOCKED = 6
 const SQLITE_CORRUPT = 11
 const SQLITE_NOTADB = 26
 
-export function openLedger(file, { now = () => new Date() } = {}) {
+export function openLedger(file, { now = () => new Date(), names = sessionName } = {}) {
   const db = new DatabaseSync(file, { timeout: 0, enableForeignKeyConstraints: true })
   try {
     db.exec('PRAGMA locking_mode = EXCLUSIVE')
@@ -122,7 +127,7 @@ export function openLedger(file, { now = () => new Date() } = {}) {
     }
     throw cause
   }
-  return new Ledger(db, now)
+  return new Ledger(db, now, names)
 }
 
 function migrate(db) {
@@ -284,11 +289,19 @@ const MESSAGE_SELECT = `
   LEFT JOIN task t ON t.id = m.task_id`
 
 const TASK_SELECT = `
-  SELECT t.*, q.handle AS requester, a.handle AS assignee, o.number AS review_of_number
+  SELECT t.*, q.handle AS requester, a.handle AS assignee, o.number AS review_of_number,
+         am.handle AS assignee_member, a.left_at AS assignee_left_at
   FROM task t
   JOIN participant q ON q.id = t.requester_id
   LEFT JOIN participant a ON a.id = t.assignee_id
+  LEFT JOIN participant am ON am.id = a.member_id
   LEFT JOIN task o ON o.id = t.review_of`
+
+/** A participant with its member's handle, when it is a member's session. */
+const PARTICIPANT_SELECT = `
+  SELECT p.*, m.handle AS member_handle
+  FROM participant p
+  LEFT JOIN participant m ON m.id = p.member_id`
 
 const participantView = (row) => ({
   id: row.id,
@@ -304,6 +317,9 @@ const participantView = (row) => ({
   roles: JSON.parse(row.roles),
   outUntil: row.out_until,
   outSince: row.out_since,
+  memberId: row.member_id ?? null,
+  member: row.member_handle ?? null,
+  session: row.member_handle ? row.handle.slice(row.member_handle.length + 1) : null,
 })
 
 const conversationView = (row) =>
@@ -336,6 +352,7 @@ const taskView = (row) => ({
   round: row.round,
   verdict: row.verdict,
   unreviewed: row.unreviewed ?? null,
+  session: row.assignee_member ? row.assignee : null,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
@@ -451,10 +468,12 @@ const renderChoices = (questions, choices) =>
 class Ledger {
   #db
   #now
+  #names
 
-  constructor(db, now) {
+  constructor(db, now, names) {
     this.#db = db
     this.#now = now
+    this.#names = names
   }
 
   close() {
@@ -511,7 +530,7 @@ class Ledger {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       participants: this.#db
-        .prepare('SELECT * FROM participant WHERE project_id = ? AND left_at IS NULL ORDER BY id')
+        .prepare(`${PARTICIPANT_SELECT} WHERE p.project_id = ? AND p.left_at IS NULL ORDER BY p.id`)
         .all(id)
         .map(participantView),
     }
@@ -675,24 +694,32 @@ class Ledger {
       if (JSON.parse(member.roles).includes('reviewer')) {
         this.#requireAnotherReviewer(projectId, member.id)
       }
+      const sessions = this.#db
+        .prepare(`${PARTICIPANT_SELECT} WHERE p.member_id = ? AND p.left_at IS NULL ORDER BY p.id`)
+        .all(member.id)
+      const windows = [member, ...sessions]
       const open = this.#db
         .prepare(
           `SELECT t.*, q.handle AS requester FROM task t JOIN participant q ON q.id = t.requester_id
-           WHERE t.assignee_id = ? AND t.state IN ('queued', 'working', 'waiting')
+           WHERE t.assignee_id IN (${windows.map(() => '?').join(', ')})
+             AND t.state IN ('queued', 'working', 'waiting')
            ORDER BY t.number`,
         )
-        .all(member.id)
+        .all(...windows.map((row) => row.id))
       for (const task of open) {
         this.#dropQueued(task.id)
         this.#moveTask(task, 'cancelled', { reason: `@${handle} left the team` })
       }
-      this.#db
-        .prepare(
-          `UPDATE message SET state = 'cancelled'
-           WHERE (recipient_id = ? AND state IN ('queued', 'delivering'))
-              OR (sender_id = ? AND kind = 'question' AND state = 'queued')`,
-        )
-        .run(member.id, member.id)
+      for (const row of windows) {
+        this.#db
+          .prepare(
+            `UPDATE message SET state = 'cancelled'
+             WHERE (recipient_id = ? AND state IN ('queued', 'delivering'))
+                OR (sender_id = ? AND kind = 'question' AND state = 'queued')`,
+          )
+          .run(row.id, row.id)
+      }
+      for (const session of sessions) this.#endSession(session, `@${handle} left the team`)
       this.#db.prepare('UPDATE participant SET left_at = ? WHERE id = ?').run(this.#at(), member.id)
       const cancelled = open.map((task) => task.number)
       this.#log(projectId, 'member.left', { handle, cancelled })
@@ -721,8 +748,8 @@ class Ledger {
         `SELECT agent, harness, role, roles FROM participant
          WHERE project_id = (
            SELECT MAX(project_id) FROM participant
-           WHERE role IN ('worker', 'advisor', 'reviewer') AND left_at IS NULL
-         ) AND role IN ('worker', 'advisor', 'reviewer') AND left_at IS NULL
+           WHERE role IN ('worker', 'advisor', 'reviewer') AND left_at IS NULL AND member_id IS NULL
+         ) AND role IN ('worker', 'advisor', 'reviewer') AND left_at IS NULL AND member_id IS NULL
          ORDER BY id`,
       )
       .all()
@@ -817,11 +844,11 @@ class Ledger {
    * member of that pool and tier; `tags` say which member it prefers, and
    * critical work names its `purpose`.
    */
-  createTask(projectId, { from, to, pool, tier, tags = [], purpose, body, title }) {
+  createTask(projectId, { from, to, after, pool, tier, tags = [], purpose, body, title }) {
     requireText(body, 'body', MAX_BODY)
     if (title !== undefined) requireText(title, 'title', MAX_TITLE)
     tags = requireTags(tags)
-    if (to === undefined) {
+    if (to === undefined && after === undefined) {
       requireTier(tier)
       if (!POOLS.includes(pool)) {
         throw new LedgerError('invalid-pool', `a pool is ${POOLS.join(' or ')}, not ${pool}`)
@@ -842,7 +869,14 @@ class Ledger {
           403,
         )
       }
-      const assignee = to === undefined ? null : this.#participantByHandle(projectId, to)
+      // A follow-up on a finished task goes to the session that did it, while
+      // it is still there and free: the one case a coordinator names a window.
+      const assignee =
+        after !== undefined
+          ? this.#continuableSession(projectId, after)
+          : to === undefined
+            ? null
+            : this.#participantByHandle(projectId, to)
       if (assignee === null && this.#members(projectId, pool, tier).length === 0) {
         throw new LedgerError('no-member-of-tier', `no ${tier} ${pool} is on the team`, 409)
       }
@@ -921,15 +955,18 @@ class Ledger {
    * is on their hands now, and until when they are out of quota.
    */
   members(projectId, role) {
+    const held = HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')
     return this.#db
       .prepare(
         `SELECT p.*,
-                (SELECT COUNT(*) FROM task WHERE assignee_id = p.id) AS taken,
-                EXISTS (
-                  SELECT 1 FROM task WHERE assignee_id = p.id AND state IN (${HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')})
-                ) AS busy
+                (SELECT COUNT(*) FROM task t JOIN participant s ON s.id = t.assignee_id
+                  WHERE s.id = p.id OR s.member_id = p.id) AS taken,
+                (SELECT COUNT(*) FROM participant s
+                  WHERE (s.id = p.id OR s.member_id = p.id) AND s.left_at IS NULL
+                    AND EXISTS (SELECT 1 FROM task WHERE assignee_id = s.id AND state IN (${held}))
+                ) AS sessions
          FROM participant p
-         WHERE p.project_id = ? AND p.left_at IS NULL
+         WHERE p.project_id = ? AND p.left_at IS NULL AND p.member_id IS NULL
            AND EXISTS (SELECT 1 FROM json_each(p.roles) r WHERE r.value = ?)
          ORDER BY p.id`,
       )
@@ -941,21 +978,125 @@ class Ledger {
         tags: JSON.parse(row.tags),
         roles: JSON.parse(row.roles),
         taken: row.taken,
-        busy: row.busy === 1,
+        sessions: row.sessions,
+        busy: row.sessions >= SESSION_SLOTS,
         outUntil: row.out_until,
       }))
   }
 
-  /** The daemon's choice for an open task: it is queued for that member from here on. */
+  /** How many of a member's windows hold work: its live sessions, and itself for work assigned before sessions. */
+  #slotsOf(memberId) {
+    const held = HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')
+    return this.#db
+      .prepare(
+        `SELECT COUNT(*) AS slots FROM participant s
+         WHERE (s.id = ? OR s.member_id = ?) AND s.left_at IS NULL
+           AND EXISTS (SELECT 1 FROM task WHERE assignee_id = s.id AND state IN (${held}))`,
+      )
+      .get(memberId, memberId).slots
+  }
+
+  /**
+   * A member's new session: its own participant, named after the member,
+   * with the member's agent, harness, tier and tags and the role its task
+   * needs. It starts from nothing and ends with its work (CORE-19).
+   */
+  #startSession(projectId, member, role) {
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      const handle = `${member.handle}-${this.#names()}`
+      const taken = this.#db
+        .prepare('SELECT 1 FROM participant WHERE project_id = ? AND handle = ?')
+        .get(projectId, handle)
+      if (taken !== undefined) continue
+      const { lastInsertRowid: id } = this.#db
+        .prepare(
+          `INSERT INTO participant (project_id, handle, role, roles, agent, harness, tier, tags, member_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          projectId,
+          handle,
+          role,
+          member.roles,
+          member.agent,
+          member.harness,
+          member.tier,
+          member.tags,
+          member.id,
+          this.#at(),
+        )
+      this.#log(projectId, 'session.started', { handle, member: member.handle, role })
+      return this.#participantRow(id)
+    }
+    throw new LedgerError('no-session-name', `no free session name for @${member.handle}`, 409)
+  }
+
+  /** A session ends: it leaves the project and its conversation closes. */
+  #endSession(session, reason) {
+    const at = this.#at()
+    this.#db.prepare('UPDATE participant SET left_at = ? WHERE id = ?').run(at, session.id)
+    this.#db
+      .prepare('UPDATE conversation SET ended_at = ? WHERE participant_id = ? AND ended_at IS NULL')
+      .run(at, session.id)
+    this.#log(session.project_id, 'session.ended', {
+      handle: session.handle,
+      member: session.member_handle,
+      reason,
+    })
+  }
+
+  /**
+   * A session with nothing left on its hands ends; a member or coordinator
+   * stays. Work done but not yet accepted, or failed and reopenable, still
+   * keeps the session, so a follow-up can go to the same window.
+   */
+  #endSessionIfIdle(participantId, reason) {
+    if (participantId === null) return
+    const row = this.#participantRow(participantId)
+    if (row.member_id === null || row.left_at !== null) return
+    // A review is over with its verdict; work waits for its acceptance.
+    const keeps = this.#db
+      .prepare(
+        `SELECT 1 FROM task WHERE assignee_id = ?
+           AND (state IN (${HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')})
+             OR (kind = 'work' AND state IN ('done', 'failed')))`,
+      )
+      .get(row.id)
+    if (keeps === undefined) this.#endSession(row, reason)
+  }
+
+  /** Sessions idle past SESSION_IDLE_MS end on their own; their handles. */
+  expireSessions(projectId) {
+    const held = HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')
+    const before = new Date(this.#now().getTime() - SESSION_IDLE_MS).toISOString()
+    return this.#write(() => {
+      const idle = this.#db
+        .prepare(
+          `${PARTICIPANT_SELECT}
+           WHERE p.project_id = ? AND p.member_id IS NOT NULL AND p.left_at IS NULL
+             AND NOT EXISTS (SELECT 1 FROM task WHERE assignee_id = p.id AND state IN (${held}))
+             AND COALESCE((SELECT MAX(updated_at) FROM task WHERE assignee_id = p.id), p.created_at) <= ?
+           ORDER BY p.id`,
+        )
+        .all(projectId, before)
+      for (const session of idle) this.#endSession(session, 'idle')
+      return idle.map((session) => session.handle)
+    })
+  }
+
+  /**
+   * The daemon's choice for an open task: a new session of that member,
+   * which the task is queued for from here on.
+   */
   assignTask(projectId, number, participantId) {
     return this.#write(() => {
       const task = this.#taskRow(projectId, number)
       this.#requireTaskState(task, ['open'], 'assign')
-      const member = this.#participantRow(participantId)
+      const member = this.#requireMemberRow(participantId, 'takes a task')
       const candidate =
         member.left_at === null &&
         member.project_id === projectId &&
-        member.role === task.pool &&
+        JSON.parse(member.roles).includes(task.pool) &&
         member.tier === task.tier
       if (!candidate) {
         throw new LedgerError(
@@ -964,11 +1105,19 @@ class Ledger {
           409,
         )
       }
+      if (this.#slotsOf(member.id) >= SESSION_SLOTS) {
+        throw new LedgerError(
+          'no-free-slot',
+          `@${member.handle} already runs ${SESSION_SLOTS} sessions`,
+          409,
+        )
+      }
+      const session = this.#startSession(projectId, member, task.pool)
       this.#db
         .prepare('UPDATE task SET assignee_id = ?, updated_at = ? WHERE id = ?')
-        .run(member.id, this.#at(), task.id)
+        .run(session.id, this.#at(), task.id)
       const messageId = this.#queue(projectId, {
-        to: member.id,
+        to: session.id,
         from: task.requester_id,
         kind: 'task',
         taskId: task.id,
@@ -977,11 +1126,46 @@ class Ledger {
       this.#moveTask(
         task,
         'queued',
-        { assignee: member.handle, message: messageId },
+        { assignee: session.handle, member: member.handle, message: messageId },
         'task.assigned',
       )
       return { task: this.#task(task.id), message: this.#message(messageId) }
     })
+  }
+
+  /** The session that did T-`after`, still there and with nothing on its hands. */
+  #continuableSession(projectId, after) {
+    const previous = this.#taskRow(projectId, after)
+    const session =
+      previous.assignee_id === null ? null : this.#participantRow(previous.assignee_id)
+    if (session === null || session.member_id === null || session.left_at !== null) {
+      throw new LedgerError(
+        'session-ended',
+        `the session that did T-${after} has ended: open the task for its tier instead`,
+        409,
+      )
+    }
+    if (this.holdsWork(session.id)) {
+      throw new LedgerError(
+        'session-busy',
+        `@${session.handle} is still on its work: wait for its result, or open the task for its tier`,
+        409,
+      )
+    }
+    return session
+  }
+
+  /** A member of the team, never one of its sessions. */
+  #requireMemberRow(participantId, does) {
+    const row = this.#participantRow(participantId)
+    if (row.member_id !== null) {
+      throw new LedgerError(
+        'not-a-member',
+        `@${row.handle} is a session of @${row.member_handle}: a member ${does}`,
+        409,
+      )
+    }
+    return row
   }
 
   /** A member that ran out of quota takes no work until then (an ISO time); `outSince` says when it was marked. */
@@ -1042,6 +1226,7 @@ class Ledger {
         member: member.handle,
         because,
       })
+      this.#endSessionIfIdle(member.id, because)
       const requester = this.#participantRow(task.requester_id)
       this.#send(projectId, {
         to: requester.handle,
@@ -1351,10 +1536,10 @@ class Ledger {
     return this.#write(() => {
       const task = this.#taskRow(projectId, number)
       this.#requireTaskState(task, ['review'], 'review')
+      const member = this.#requireMemberRow(reviewer, 'reviews')
       if (!this.reviewsPending(projectId).some((pending) => pending.id === task.id)) {
         throw new LedgerError('invalid-transition', `T-${number} already has its reviewer`, 409)
       }
-      const member = this.#participantRow(reviewer)
       if (
         !JSON.parse(member.roles).includes('reviewer') ||
         member.left_at !== null ||
@@ -1366,6 +1551,7 @@ class Ledger {
           409,
         )
       }
+      const session = this.#startSession(projectId, member, 'reviewer')
       const author = this.#participantRow(task.assignee_id)
       const result = this.#db
         .prepare(
@@ -1395,13 +1581,13 @@ class Ledger {
           `Review T-${number}`,
           body,
           task.requester_id,
-          member.id,
+          session.id,
           task.id,
           at,
           at,
         )
       const messageId = this.#queue(projectId, {
-        to: member.id,
+        to: session.id,
         from: task.requester_id,
         kind: 'task',
         taskId: reviewId,
@@ -1410,7 +1596,8 @@ class Ledger {
       this.#log(projectId, 'review.created', {
         task: number,
         review: next,
-        reviewer: member.handle,
+        reviewer: session.handle,
+        member: member.handle,
         round,
         message: messageId,
       })
@@ -1470,6 +1657,8 @@ class Ledger {
         })
         this.#moveTask({ ...task, round }, 'done', { review: number, verdict })
       }
+      // The verdict is the reviewer's last word: its window ends with it.
+      this.#endSessionIfIdle(review.assignee_id, `T-${number} judged`)
       return {
         verdict,
         task: this.#task(task.id),
@@ -1522,6 +1711,7 @@ class Ledger {
       this.#requireTaskState(review, ['queued', ...ACTIVE_TASK_STATES], 'withdraw')
       this.#dropQueued(review.id)
       this.#moveTask(review, 'cancelled', { reason })
+      this.#endSessionIfIdle(review.assignee_id, reason)
       return this.#task(review.id)
     })
   }
@@ -1567,6 +1757,7 @@ class Ledger {
       const task = this.#taskRow(projectId, number)
       this.#requireTaskState(task, ['done'], 'accept')
       this.#moveTask(task, 'accepted', { by })
+      this.#endSessionIfIdle(task.assignee_id, `T-${number} accepted`)
       return this.#task(task.id)
     })
   }
@@ -1578,7 +1769,15 @@ class Ledger {
       const author = this.#participantByHandle(projectId, by)
       const task = this.#taskRow(projectId, number)
       this.#requireTaskState(task, ['done', 'failed'], 'reopen')
-      requireActive(this.#participantRow(task.assignee_id))
+      const assignee = this.#participantRow(task.assignee_id)
+      if (assignee.member_id !== null && assignee.left_at !== null) {
+        throw new LedgerError(
+          'session-ended',
+          `@${assignee.handle} has ended: open the task for its tier instead`,
+          409,
+        )
+      }
+      requireActive(assignee)
       const messageId = this.#queue(projectId, {
         to: task.assignee_id,
         from: author.id,
@@ -1600,8 +1799,10 @@ class Ledger {
       for (const review of this.#openReviews(task.id)) {
         this.#dropQueued(review.id)
         this.#moveTask(review, 'cancelled', { by, with: task.number })
+        this.#endSessionIfIdle(review.assignee_id, `T-${review.number} cancelled`)
       }
       this.#moveTask(task, 'cancelled', { by })
+      this.#endSessionIfIdle(task.assignee_id, `T-${number} cancelled`)
       return this.#task(task.id)
     })
   }
@@ -1632,16 +1833,25 @@ class Ledger {
         .map((row) => [row.task_id, row.body]),
     )
     // Each task with the first line of its latest result: what its card shows.
-    const tasks = this.#db
+    // A task of a session that has ended sits on its member's lane.
+    const rows = this.#db
       .prepare(`${TASK_SELECT} WHERE t.project_id = ? ORDER BY t.number`)
       .all(projectId)
-      .map((row) => ({ ...taskView(row), result: firstLine(results.get(row.id)) }))
+    const laneOf = new Map(
+      rows.map((row) => [
+        row.id,
+        row.assignee_left_at !== null && row.assignee_member !== null
+          ? row.assignee_member
+          : row.assignee,
+      ]),
+    )
+    const tasks = rows.map((row) => ({ ...taskView(row), result: firstLine(results.get(row.id)) }))
     return {
       project,
       open: tasks.filter((task) => task.state === 'open'),
       lanes: project.participants.map((participant) => ({
         participant,
-        tasks: tasks.filter((task) => task.assignee === participant.handle),
+        tasks: tasks.filter((task) => laneOf.get(task.id) === participant.handle),
       })),
       overdue: this.#overdueQuestions(projectId),
     }
@@ -1753,7 +1963,7 @@ class Ledger {
   }
 
   #participantRow(id) {
-    const row = this.#db.prepare('SELECT * FROM participant WHERE id = ?').get(id)
+    const row = this.#db.prepare(`${PARTICIPANT_SELECT} WHERE p.id = ?`).get(id)
     if (row === undefined) throw new LedgerError('unknown-participant', `no participant ${id}`, 404)
     return row
   }
@@ -1761,7 +1971,7 @@ class Ledger {
   #participantByHandle(projectId, handle) {
     this.#projectRow(projectId)
     const row = this.#db
-      .prepare('SELECT * FROM participant WHERE project_id = ? AND handle = ?')
+      .prepare(`${PARTICIPANT_SELECT} WHERE p.project_id = ? AND p.handle = ?`)
       .get(projectId, handle)
     if (row === undefined) {
       throw new LedgerError(

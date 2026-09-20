@@ -154,7 +154,14 @@ try {
     tiers[name] = added.member.tier
   }
   const board = async () => (await app.requestNode('board.get', { project })).board
-  const lane = async (handle) => (await board()).lanes.find((l) => l.participant.handle === handle)
+  // A member's work runs in a session of its own: its lane is its newest session's.
+  const lane = async (handle) =>
+    (await board()).lanes.findLast(
+      (l) => l.participant.member === handle || l.participant.handle === handle,
+    )
+  /** The window a member's newest session runs in, for the pane host's output. */
+  const paneOf = async (handle) =>
+    `p${project}-${(await lane(handle))?.participant.handle ?? handle}`
   const inbox = async (participant) =>
     (await app.requestNode('inbox.get', { project, participant })).messages
 
@@ -197,7 +204,7 @@ try {
             worker: (await lane(agent.id))?.activity,
             state: (await lane(agent.id))?.tasks.find((t) => t.number === task.number)?.state,
             exits: app.exits.filter((exit) => exit.id === `p${project}-${agent.id}`),
-            output: app.output(`p${project}-${agent.id}`).slice(-1500),
+            output: app.output(await paneOf(agent.id)).slice(-1500),
           }),
     })
     if (!result) continue
@@ -224,6 +231,50 @@ try {
       Boolean(closed),
       closed ? {} : { activity: (await lane(agent.id))?.activity },
     )
+    // Continuation: the lead sends a follow-up to the window that did the
+    // task; it comes back on its own conversation and answers again.
+    {
+      const again = `BENCH_AGAIN_${name.toUpperCase()}`
+      const begun = Date.now()
+      await app.requestNode('task.add', {
+        project,
+        to: 'lead',
+        body: `Run exactly this command in your shell, then reply with one line:\ncf task add --after T-${task.number} "Reply with exactly: ${again}"`,
+      })
+      const follow = await until(
+        async () =>
+          (await board()).lanes
+            .flatMap((l) => l.tasks)
+            .find((t) => t.requester === 'lead' && t.number > task.number && t.pool === null),
+        300_000,
+      )
+      record(`${name}-continued-in-same-window`, follow?.assignee === task.assignee, {
+        seconds: Math.round((Date.now() - begun) / 1000),
+        ...(follow
+          ? { task: follow.number, window: follow.assignee }
+          : { lead: (await lane('lead'))?.activity }),
+      })
+      if (follow) {
+        const finished = await until(async () => {
+          const current = (await board()).lanes
+            .flatMap((l) => l.tasks)
+            .find((t) => t.number === follow.number)
+          return current?.state === 'done' ? current : null
+        }, 300_000)
+        const answered = finished
+          ? (await inbox('lead')).find((m) => m.kind === 'result' && m.taskNumber === follow.number)
+          : null
+        record(`${name}-continued-answered`, Boolean(answered?.body.includes(again)), {
+          seconds: Math.round((Date.now() - begun) / 1000),
+          ...(answered
+            ? { result: answered.body.slice(0, 80) }
+            : {
+                state: (await lane(agent.id))?.tasks.find((t) => t.number === follow.number)?.state,
+                output: app.output(await paneOf(agent.id)).slice(-1200),
+              }),
+        })
+      }
+    }
   }
 
   // The question door, live: a worker asks through its harness's own question
@@ -272,13 +323,13 @@ try {
         : {
             lead: (await lane('lead'))?.activity,
             worker: (await lane(worker.id))?.activity,
-            output: app.output(`p${project}-${worker.id}`).slice(-1200),
+            output: app.output(await paneOf(worker.id)).slice(-1200),
           }),
     })
     if (!question) continue
     const answer = await until(async () => {
       await answerAsHuman()
-      const found = (await inbox(worker.id)).find((m) => m.replyTo === question.id)
+      const found = (await inbox(question.sender)).find((m) => m.replyTo === question.id)
       return found?.state === 'read' ? found : null
     }, 300_000)
     if (humanAnswers.length > 0) {
@@ -322,7 +373,7 @@ try {
           : {
               state: (await lane(worker.id))?.tasks.find((t) => t.number === question.taskNumber)
                 ?.state,
-              output: app.output(`p${project}-${worker.id}`).slice(-1200),
+              output: app.output(await paneOf(worker.id)).slice(-1200),
             }),
       },
     )

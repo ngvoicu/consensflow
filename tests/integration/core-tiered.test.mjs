@@ -48,8 +48,13 @@ async function project(app, { review, members }) {
   )
   const task = async (number) =>
     (await app.requestNode('task.get', { project: id, task: number })).task
+  // A member's work runs in a session of its own: its lane is the session's,
+  // the newest one when it has had several.
   const lane = async (handle) =>
-    (await board()).lanes.find((candidate) => candidate.participant.handle === handle)
+    (await board()).lanes.findLast(
+      (candidate) =>
+        candidate.participant.member === handle || candidate.participant.handle === handle,
+    )
   const inbox = async (participant) =>
     (await app.requestNode('inbox.get', { project: id, participant })).messages
   return { id, tiers, board, task, lane, inbox }
@@ -168,11 +173,12 @@ test('a reviewer asking for changes twice sends the work back once, then the req
     })
     await app.waitFor(async () => (await p.task(2))?.round === 1, 90_000)
     const back = await p.task(2)
-    assert.equal(back.assignee, 'worker', 'the work goes back to its author')
+    assert.match(back.assignee, /^worker-/, 'the work goes back to its author, the same session')
     assert.ok(
       back.messages.some(
         (m) =>
-          m.kind === 'task' && m.body.startsWith('Review round 1 by @checker asks for changes:'),
+          m.kind === 'task' &&
+          /^Review round 1 by @checker-[a-z]+-[a-z]+ asks for changes:/.test(m.body),
       ),
       'the findings reach the worker as a follow-up',
     )
@@ -230,9 +236,13 @@ test('a worker refused by its provider mid-task loses the task to the other work
     })
     await app.waitFor(async () => (await p.task(2))?.state === 'done', 90_000)
     const done = await p.task(2)
-    assert.equal(done.assignee, 'worker2')
-    assert.match(done.body, /Reassigned from @worker, which ran out of quota after starting/)
-    const out = (await p.lane('worker')).participant
+    assert.match(done.assignee, /^worker2-/, 'a session of the other worker')
+    assert.match(
+      done.body,
+      /Reassigned from @worker-[a-z]+-[a-z]+, which ran out of quota after starting/,
+    )
+    // Quota is the member's: the member row says it is out, not a session.
+    const out = (await p.board()).lanes.find((l) => l.participant.handle === 'worker').participant
     assert.ok(
       out.outUntil !== null && Date.parse(out.outUntil) > Date.now(),
       'the first worker is out',
@@ -241,7 +251,9 @@ test('a worker refused by its provider mid-task loses the task to the other work
       (await p.inbox('lead')).some(
         (m) =>
           m.kind === 'note' &&
-          m.body.startsWith('T-2 was taken back from @worker (ran out of quota after starting)'),
+          /^T-2 was taken back from @worker-[a-z]+-[a-z]+ \(ran out of quota after starting\)/.test(
+            m.body,
+          ),
       ),
       'the requester was told',
     )

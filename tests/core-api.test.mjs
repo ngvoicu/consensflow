@@ -281,7 +281,10 @@ describe('cf inside a core window', () => {
       const usage = await cf(lead, 'task', 'add', 'no target')
       assert.deepEqual(
         [usage.code, usage.err],
-        [2, 'cf: cf task add --tier <critical|complex|standard|light> "what to do" (or --self)'],
+        [
+          2,
+          'cf: cf task add --tier <critical|complex|standard|light> "what to do" (or --after T-3, or --self)',
+        ],
       )
       const missing = await cf(lead, 'task', 'done', 'T-9', 'x')
       assert.deepEqual([missing.code, missing.err], [1, 'cf: no task T-9 in this project'])
@@ -340,7 +343,10 @@ describe('tiered tasks through the API and cf', () => {
       const noTier = await cf(lead, 'task', 'add', 'Just do it')
       assert.deepEqual(
         [noTier.code, noTier.err],
-        [2, 'cf: cf task add --tier <critical|complex|standard|light> "what to do" (or --self)'],
+        [
+          2,
+          'cf: cf task add --tier <critical|complex|standard|light> "what to do" (or --after T-3, or --self)',
+        ],
       )
 
       const own = await cf(lead, 'task', 'add', '--self', 'Plan the release')
@@ -507,6 +513,53 @@ describe("cf hook claude: Claude's question tool answered from the board", () =>
         },
       )
       assert.equal(gone, 0)
+    })
+  })
+})
+
+describe('continuing a window with --after', () => {
+  it('sends a follow-up to the session that did the task, and says why when it cannot', async () => {
+    await withApi(async ({ ledger, project, token, cf, call }) => {
+      const lead = token('lead')
+      const opened = await cf(lead, 'task', 'add', '--tier', 'standard', 'Write the parser')
+      assert.equal(opened.code, 0, opened.err)
+      const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
+      const { message } = ledger.assignTask(project.id, 1, zeus.id)
+      const session = ledger.task(project.id, 1).assignee
+      assert.match(session, /^zeus-/)
+      const busy = await cf(lead, 'task', 'add', '--after', 'T-1', 'Also the lexer')
+      assert.deepEqual(
+        [busy.code, busy.err],
+        [
+          1,
+          `cf: @${session} is still on its work: wait for its result, or open the task for its tier`,
+        ],
+      )
+      deliver(ledger, message)
+      ledger.recordResult(project.id, 1, { body: 'Parser done' })
+      const followed = await cf(lead, 'task', 'add', '--after', 'T-1', 'Now the lexer')
+      assert.equal(followed.code, 0, followed.err)
+      assert.equal(
+        followed.out,
+        `T-2 continues in @${session}, the window that did T-1; its result arrives in your inbox.`,
+      )
+      assert.deepEqual(
+        [ledger.task(project.id, 2).assignee, ledger.task(project.id, 2).state],
+        [session, 'queued'],
+      )
+      const team = await call(lead, 'GET', '/api/team')
+      assert.deepEqual(
+        team.body.members.map((m) => m.handle),
+        ['zeus'],
+        'the team lists members, never their sessions',
+      )
+      ledger.cancelTask(project.id, 2, { by: 'lead' })
+      ledger.acceptTask(project.id, 1, { by: 'lead' })
+      const gone = await cf(lead, 'task', 'add', '--after', 'T-1', 'One more')
+      assert.deepEqual(
+        [gone.code, gone.err],
+        [1, 'cf: the session that did T-1 has ended: open the task for its tier instead'],
+      )
     })
   })
 })

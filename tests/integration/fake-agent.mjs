@@ -155,10 +155,10 @@ async function replyTo(text) {
     ? /^REVIEWER: (.+)$/m.exec(text)
     : null
   if (reviewing) return reviewing[1]
-  if (
-    /QUOTA-OUT/.test(text) &&
-    process.env.CF_TEST_QUOTA_OUT === process.env.CONSENSFLOW_PARTICIPANT
-  ) {
+  // The refusing window is a session of the member the test names.
+  const me = process.env.CONSENSFLOW_PARTICIPANT ?? ''
+  const refusing = process.env.CF_TEST_QUOTA_OUT
+  if (/QUOTA-OUT/.test(text) && refusing && (me === refusing || me.startsWith(`${refusing}-`))) {
     return null
   }
   const exact = /Reply with exactly: (\S+)/.exec(text)

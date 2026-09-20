@@ -76,28 +76,31 @@ Gabriel opened the Candidate built from `891adf8` on the morning of
   review; the review reads under the reviewed task's card, and the reviewer's
   row status says "Reviewing T-n".
 
-### Phase B: Named worker sessions [planned, awaiting Gabriel's answer]
+### Phase B: Named worker sessions [active]
 
-- [ ] [TEST-CF2-03] Ledger: a session participant per assignment with a
+- [x] [TEST-CF2-03] Ledger: a session participant per assignment with a
   generated `agent-adjective-noun` handle unique in the project; a member's
   slot count; `--after` continuation assigns to the session that did the
   named task and resumes its conversation; a session ends when its work is
   accepted or cancelled; reopen goes to the same session.
-- [ ] [IMPL-CF2-04] Ledger, dispatcher (launch and resume per session,
+- [x] [IMPL-CF2-04] Ledger, dispatcher (launch and resume per session,
   retire keeps a continuable conversation), API and `cf task add --after`,
   role texts (when to continue, never to pick).
-- [ ] [TEST-CF2-05] Board: a lane per session under its member, folding when
+- [x] [TEST-CF2-05] Board: a lane per session under its member, folding when
   ended; the dock strip per session; the drawer names the session.
-- [ ] [IMPL-CF2-06] Satisfies TEST-CF2-05.
+- [x] [IMPL-CF2-06] Satisfies TEST-CF2-05.
 - [ ] [VERIFY-CF2-07] Integration with the fake harness (two sessions of one
   member in parallel; a continuation on the same native session); the bench
   with a continuation on Claude, Codex and OpenCode; Candidate rebuilt.
 
 ## Resume context
 
-Written 2026-09-20 mid-morning. Phase A is committed. Phase B is a design
-proposal; the answer decides whether it is built as written, changed, or
-dropped. Until then, one task per member session (CORE-19) stands.
+Written 2026-09-20 mid-morning. Phase A is committed. Gabriel confirmed
+Phase B at noon: "default is without name but if the lead wants the same
+worker to continue something it should be able to do so; we need to improve
+the lead's skill to know how to use cf and to give it good instructions about
+what it should do and what it can do." Built the same day; the live
+continuation run and the Candidate rebuild close it.
 
 ## TDD log
 
@@ -106,3 +109,30 @@ dropped. Until then, one task per member session (CORE-19) stands.
   chips and no description) and the harness page suite's category and
   description expectations rewritten for tag pills. GREEN: page 76/76,
   node 814/814, integration 7/7 (`57fdc74`).
+- 2026-09-20, Phase B. A third migration adds `participant.member_id` (the
+  one unnamed constraint: `ADD COLUMN` cannot name one). A session is a
+  participant of its own, `zeus-amber-pine` (`src/ledger/names.js`, names
+  injectable for tests), with its member's agent, harness, tier, tags and the
+  role its task needs; `assignTask` and `createReview` start one; a member
+  holds two (`SESSION_SLOTS`); a session ends when its work is accepted or
+  cancelled, at a review's verdict, when its task is released, or idle for
+  two hours (`SESSION_IDLE_MS`, swept each pass); an ended session's tasks
+  fold into its member's lane. `createTask({ after })` continues the session
+  that did T-n, alive and free, else `session-ended` or `session-busy` with
+  what to do instead; reopen goes to the same session. The dispatcher's
+  retire kills the window only (the conversation stays for `--after`), quota
+  is charged to the member, windows of sessions that ended are closed after
+  the pass. `cf task add --after T-3`, the team route without sessions, the
+  lead's skill rewritten as what you do, what you never do, and the one
+  exception; the PM's gains the exception. The board draws each session as a
+  lane under its member ("@zeus · amber-pine", "worker session of @zeus"), the
+  member's row counts its open windows, the dock names sessions the same way,
+  and the composer offers tiers from members only. The fake harnesses and
+  the bench find a member's newest session; the bench continues each worker's
+  window with `--after` and checks the same window answers. RED: eight ledger
+  tests, two dispatcher tests, one API test, role assertions, one page test.
+  GREEN: ledger 74, dispatcher 43, node 825/831, integration 7/7, page
+  77/77. Found on the way: the dispatcher's sweep for closed sessions must run
+  after the pass's steps, or a removal racing a launch wins the lock first;
+  by-name tasks stay direct to their participant (only tests use them), so
+  sessions come with tiered work, reviews and continuation.

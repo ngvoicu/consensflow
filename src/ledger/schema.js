@@ -153,6 +153,13 @@ export const MIGRATIONS = [
   ALTER TABLE message ADD COLUMN questions TEXT;
   ALTER TABLE message ADD COLUMN choices TEXT;
   `,
+  `
+  -- A session is a member's named window (Phase B of candidate-feedback-2):
+  -- it points at its member. ADD COLUMN cannot name a constraint in SQLite,
+  -- so this foreign key is the one unnamed constraint in the schema.
+  ALTER TABLE participant ADD COLUMN member_id INTEGER REFERENCES participant (id) ON DELETE CASCADE;
+  CREATE INDEX participant_member_index ON participant (member_id, left_at);
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

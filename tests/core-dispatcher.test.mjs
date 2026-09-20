@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { Dispatcher, deliveryText } from '../src/core/dispatcher.js'
-import { openLedger } from '../src/ledger/index.js'
+import { openLedger, SESSION_IDLE_MS } from '../src/ledger/index.js'
 
 /**
  * The dispatcher (TEST-BDC-09): the only actor. It launches panes, delivers
@@ -81,7 +81,11 @@ function fakeAdapter(harness = 'claude-code') {
       }
     },
   }
-  adapter.agent = (handle) => [...agents.values()].filter((a) => a.handle === handle).at(-1)
+  // A member's latest window: its own, or its newest session's (`zeus` finds `zeus-amber-pine`).
+  adapter.agent = (handle) =>
+    [...agents.values()]
+      .filter((a) => a.handle === handle || a.handle.startsWith(`${handle}-`))
+      .at(-1)
   adapter.answer = (handle, text) => {
     const agent = adapter.agent(handle)
     agent.items.push(item('assistant', text))
@@ -105,6 +109,11 @@ const MODELS = {
   astraeus: 'gpt-6-astra',
 }
 
+/** Whether a pane id is a window of `handle`: its own, or one of its sessions'. */
+const windowOf = (id, handle) =>
+  id.endsWith(`-${handle}`) ||
+  (/^p\d+-/.test(id) && id.replace(/^p\d+-/, '').startsWith(`${handle}-`))
+
 /** A pane host that opens nothing real and exits panes when told to. */
 function fakeHost() {
   const exits = []
@@ -124,7 +133,7 @@ function fakeHost() {
       enters.push(listener)
     },
     enter(handle, epoch) {
-      const body = host.opened.filter((b) => b.id.endsWith(`-${handle}`)).at(-1)
+      const body = host.opened.filter((b) => windowOf(b.id, handle)).at(-1)
       for (const listener of enters) listener({ id: body.id, generation: body.generation, epoch })
     },
     async open(body) {
@@ -149,11 +158,11 @@ function fakeHost() {
       exits.push(listener)
     },
     async exit(handle) {
-      const body = host.opened.filter((b) => b.id.endsWith(`-${handle}`)).at(-1)
+      const body = host.opened.filter((b) => windowOf(b.id, handle)).at(-1)
       for (const listener of exits) await listener({ id: body.id, generation: body.generation })
     },
     last(handle) {
-      return host.opened.filter((b) => b.id.endsWith(`-${handle}`)).at(-1)
+      return host.opened.filter((b) => windowOf(b.id, handle)).at(-1)
     },
   }
   return host
@@ -168,7 +177,19 @@ async function setup(fn, options = {}) {
       at += ms
     },
   }
-  const ledger = openLedger(path.join(dir, 'consensflow.db'), { now: clock.now })
+  const list = [
+    'amber-pine',
+    'brisk-birch',
+    'calm-brook',
+    'coral-canyon',
+    'crisp-cedar',
+    'dusky-cliff',
+  ]
+  let named = 0
+  const ledger = openLedger(path.join(dir, 'consensflow.db'), {
+    now: clock.now,
+    names: () => list[named++ % list.length],
+  })
   const adapter = fakeAdapter()
   const host = fakeHost()
   const make = () =>
@@ -667,7 +688,7 @@ describe('the dispatcher', () => {
       await context.dispatcher.resumeProject(project.id)
       assert.equal(context.adapter.prepared.at(-1).resume, native)
       await context.dispatcher.pass()
-      assert.equal(context.ledger.task(project.id, 1).assignee, 'zeus')
+      assert.match(context.ledger.task(project.id, 1).assignee, /^zeus-/, 'a fresh session of zeus')
     })
   })
 
@@ -763,11 +784,11 @@ describe('the dispatcher assigns open tasks', () => {
       const { open, task } = await withTiers(context)
       open({ tags: ['rust'] })
       await context.dispatcher.pass()
-      assert.deepEqual([task(1).state, task(1).assignee], ['queued', 'zeus'])
-      assert.equal(context.host.last('zeus').id, 'p1-zeus')
+      assert.deepEqual([task(1).state, task(1).assignee], ['queued', 'zeus-amber-pine'])
+      assert.equal(context.host.last('zeus').id, 'p1-zeus-amber-pine')
       open({ body: 'Write the docs' })
       await context.dispatcher.pass()
-      assert.equal(task(2).assignee, 'diana', 'zeus is busy')
+      assert.match(task(2).assignee, /^diana-/, 'zeus is busy')
       await context.dispatcher.pass()
       context.adapter.answer('zeus', 'parser done')
       context.adapter.answer('diana', 'docs done')
@@ -776,36 +797,37 @@ describe('the dispatcher assigns open tasks', () => {
 
       open({ tags: ['rust'], body: 'Lexer' })
       await context.dispatcher.pass()
-      assert.equal(task(3).assignee, 'zeus', 'the tag decides between two free members')
+      assert.match(task(3).assignee, /^zeus-/, 'the tag decides between two free members')
       await context.dispatcher.pass()
       context.adapter.answer('zeus', 'lexer done')
       await context.dispatcher.pass()
       open({ body: 'Tests' })
       await context.dispatcher.pass()
-      assert.equal(task(4).assignee, 'diana', 'with no tag, the member with fewer tasks so far')
+      assert.match(task(4).assignee, /^diana-/, 'with no tag, the member with fewer tasks so far')
       open({ tier: 'light', body: 'Rename a file' })
       await context.dispatcher.pass()
-      assert.equal(task(5).assignee, 'hera')
+      assert.match(task(5).assignee, /^hera-/)
     })
   })
 
   it('tells the requester once when nobody of the tier is free, and assigns when one frees up', async () => {
     await setup(async (context) => {
       const { open, task, notes } = await withTiers(context)
-      open()
-      open({ body: 'Docs' })
+      // Two sessions per member: four tasks fill both standard workers.
+      for (const body of ['One', 'Two', 'Three', 'Four']) open({ body })
       await context.dispatcher.pass()
-      open({ body: 'Third' })
+      open({ body: 'Fifth' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      assert.equal(task(3).state, 'open')
+      assert.equal(task(5).state, 'open')
       assert.deepEqual(notes('lead'), [
-        'T-3 waits for a free standard worker: @zeus and @diana are busy.',
+        'T-5 waits for a free standard worker: @zeus and @diana are busy.',
       ])
       context.adapter.answer('zeus', 'done')
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      assert.deepEqual([task(3).state, task(3).assignee], ['queued', 'zeus'])
+      assert.equal(task(5).state, 'queued')
+      assert.match(task(5).assignee, /^zeus-/, 'a new session of the member that freed a slot')
       assert.equal(notes('lead').length, 1)
     })
   })
@@ -832,10 +854,13 @@ describe('the dispatcher runs the review gate', () => {
       const review = task(2)
       assert.deepEqual(
         [review.kind, review.assignee, review.state],
-        ['review', 'astraeus', 'queued'],
+        ['review', 'astraeus-brisk-birch', 'queued'],
         "calliope shares the author's model; astraeus does not",
       )
-      assert.match(context.adapter.prepared.at(-1).message, /Review T-1 \(round 1\) by @zeus\./)
+      assert.match(
+        context.adapter.prepared.at(-1).message,
+        /Review T-1 \(round 1\) by @zeus-amber-pine\./,
+      )
       await context.dispatcher.pass()
       assert.equal(task(2).state, 'working')
       context.adapter.answer('astraeus', 'Looks right.\n\nVERDICT: pass')
@@ -847,7 +872,7 @@ describe('the dispatcher runs the review gate', () => {
       for (let n = 0; n < 4; n += 1) await context.dispatcher.pass()
       assert.match(
         lead(context)[0],
-        /T-1 · result from @zeus\]\nParser done\n\nReviewed by @astraeus, round 1: pass\nLooks right\.\n\nVERDICT: pass$/,
+        /T-1 · result from @zeus-amber-pine\]\nParser done\n\nReviewed by @astraeus-brisk-birch, round 1: pass\nLooks right\.\n\nVERDICT: pass$/,
         'one delivery: the result with its review under it',
       )
       context.adapter.answer('lead', 'noted')
@@ -866,11 +891,14 @@ describe('the dispatcher runs the review gate', () => {
       await context.dispatcher.pass()
       context.adapter.answer('astraeus', 'Missing tests.\n\nVERDICT: changes')
       await context.dispatcher.pass()
-      assert.deepEqual([task(1).state, task(1).assignee, task(1).round], ['queued', 'zeus', 1])
+      assert.deepEqual(
+        [task(1).state, task(1).assignee, task(1).round],
+        ['queued', 'zeus-amber-pine', 1],
+      )
       await context.dispatcher.pass()
       assert.match(
         context.adapter.agent('zeus').items.at(-1).text,
-        /task from @astraeus\]\nReview round 1 by @astraeus asks for changes:\n\nMissing tests\./,
+        /task from @astraeus-brisk-birch\]\nReview round 1 by @astraeus-brisk-birch asks for changes:\n\nMissing tests\./,
       )
       assert.deepEqual(lead(context), [], 'the requester has seen nothing')
       context.adapter.answer('zeus', 'Tests added')
@@ -878,7 +906,7 @@ describe('the dispatcher runs the review gate', () => {
       await context.dispatcher.pass()
       assert.deepEqual(
         [task(1).state, task(3).kind, task(3).assignee],
-        ['review', 'review', 'astraeus'],
+        ['review', 'review', 'astraeus-calm-brook'],
       )
       await context.dispatcher.pass()
       context.adapter.answer('astraeus', 'Still wrong.\n\nVERDICT: changes')
@@ -888,7 +916,7 @@ describe('the dispatcher runs the review gate', () => {
       for (let n = 0; n < 4; n += 1) await context.dispatcher.pass()
       assert.match(
         lead(context).at(-1),
-        /result from @zeus\]\nTests added\n\nReviewed by @astraeus, round 1: changes\nMissing tests\.\n\nVERDICT: changes\n\nReviewed by @astraeus, round 2: changes\nStill wrong\.\n\nVERDICT: changes\n\nThe reviewer asked for changes twice\. Accept it, or send it back with what to change\.$/,
+        /result from @zeus-amber-pine\]\nTests added\n\nReviewed by @astraeus-brisk-birch, round 1: changes\nMissing tests\.\n\nVERDICT: changes\n\nReviewed by @astraeus-calm-brook, round 2: changes\nStill wrong\.\n\nVERDICT: changes\n\nThe reviewer asked for changes twice\. Accept it, or send it back with what to change\.$/,
       )
     })
   })
@@ -917,28 +945,31 @@ describe('the dispatcher runs the review gate', () => {
     await setup(async (context) => {
       const { open, task } = await reviewed(context, 'Parser done', { reviewers: ['astraeus'] })
       await context.dispatcher.pass()
-      assert.equal(task(2).assignee, 'astraeus')
+      assert.match(task(2).assignee, /^astraeus-/)
       open({ tags: ['coding'], body: 'Lexer' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      assert.equal(task(3).assignee, 'diana', 'zeus holds its work until the verdict')
+      assert.match(task(3).assignee, /^diana-/, 'zeus holds its work until the verdict')
       context.adapter.answer('diana', 'Lexer done')
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       assert.equal(task(3).state, 'review')
       assert.equal(
         context.ledger.reviewsPending(1).length,
-        1,
-        'T-3 waits for astraeus, the only reviewer',
+        0,
+        "the only reviewer's second slot takes the second review",
       )
+      assert.match(task(4).assignee, /^astraeus-/)
+      assert.notEqual(task(4).assignee, task(2).assignee, 'in a session of its own')
 
-      await context.host.exit('astraeus')
+      await context.host.exit(task(2).assignee)
       assert.equal(task(2).state, 'cancelled', 'the review went with the window')
       assert.equal(task(1).state, 'review', 'the work still waits')
       await context.dispatcher.pass()
       const again = context.ledger
         .board(1)
-        .lanes.find((l) => l.participant.handle === 'astraeus').tasks
+        .lanes.filter((l) => l.participant.member === 'astraeus')
+        .flatMap((l) => l.tasks)
       assert.deepEqual(
         again.filter((t) => t.state === 'queued').map((t) => t.reviewOf),
         [1],
@@ -962,22 +993,23 @@ describe('the dispatcher watches quota', () => {
       context.adapter.quota('zeus', { state: 'exhausted', resetsAt: soon(context, 2) })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      assert.deepEqual([task(1).state, task(1).assignee], ['queued', 'diana'])
+      assert.deepEqual([task(1).state, task(1).assignee], ['queued', 'diana-brisk-birch'])
       assert.match(
         task(1).body,
-        /Reassigned from @zeus, which ran out of quota after starting; check the working tree/,
+        /Reassigned from @zeus-amber-pine, which ran out of quota after starting; check the working tree/,
       )
       assert.deepEqual(notes('lead'), [
-        'T-1 was taken back from @zeus (ran out of quota after starting) and waits for another standard worker.',
+        'T-1 was taken back from @zeus-amber-pine (ran out of quota after starting) and waits for another standard worker.',
       ])
       assert.equal(
         context.ledger.project(1).participants.find((p) => p.id === id('zeus')).outUntil,
         soon(context, 2),
       )
-      assert.deepEqual(context.dispatcher.activity(id('zeus')), {
-        state: 'out',
-        reason: `out of quota until ${soon(context, 2)}`,
-      })
+      assert.equal(
+        context.ledger.project(1).participants.some((p) => p.handle === 'zeus-amber-pine'),
+        false,
+        'the session that ran out is gone; the member is out until its reset',
+      )
     })
   })
 
@@ -998,17 +1030,17 @@ describe('the dispatcher watches quota', () => {
       context.adapter.agent('zeus').settled = true
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      assert.equal(task(1).assignee, 'diana')
+      assert.match(task(1).assignee, /^diana-/)
       context.adapter.answer('diana', 'done')
       await context.dispatcher.pass()
 
       context.clock.advance(2 * 3_600_000)
       open({ tags: ['rust'], body: 'Lexer' })
       await context.dispatcher.pass()
-      assert.equal(task(2).assignee, 'zeus', 'the old refusal is not a new one')
+      assert.match(task(2).assignee, /^zeus-/, 'the old refusal is not a new one')
       await context.dispatcher.pass()
       assert.equal(task(2).state, 'working', 'and zeus receives again')
-      assert.equal(context.dispatcher.activity(id('zeus')).state, 'working')
+      assert.equal(context.dispatcher.activity(id(task(2).assignee)).state, 'working')
 
       context.adapter.quota('zeus', {
         state: 'exhausted',
@@ -1030,7 +1062,12 @@ describe('the dispatcher watches quota', () => {
       open({ tags: ['rust'] })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      const question = context.ledger.ask(1, { from: 'zeus', to: 'lead', task: 1, body: 'Which?' })
+      const question = context.ledger.ask(1, {
+        from: 'zeus-amber-pine',
+        to: 'lead',
+        task: 1,
+        body: 'Which?',
+      })
       context.adapter.agent('zeus').arrive = false
       context.adapter.answer('zeus', 'asked')
       await context.dispatcher.pass()
@@ -1082,19 +1119,21 @@ describe('the dispatcher watches quota', () => {
       await context.dispatcher.pass()
       open({ tags: ['rust'], body: 'Lexer' })
       await context.dispatcher.pass()
-      assert.equal(task(2).assignee, 'diana', 'zeus is low on quota')
+      assert.match(task(2).assignee, /^diana-/, 'zeus is low on quota')
       open({ body: 'Tests' })
+      open({ body: 'Docs' })
       await context.dispatcher.pass()
-      assert.equal(task(3).state, 'open', 'diana is busy and zeus is low')
+      assert.match(task(3).assignee, /^diana-/, "diana's second slot")
+      assert.equal(task(4).state, 'open', 'diana is full and zeus is low')
       context.clock.advance(2 * 3_600_000)
       await context.dispatcher.pass()
-      assert.equal(task(3).assignee, 'zeus', 'eligible again after the hour, in a fresh window')
+      assert.match(task(4).assignee, /^zeus-/, 'eligible again after the hour, in a fresh window')
       await context.dispatcher.pass()
       context.adapter.quota('zeus', { state: 'exhausted' })
       await context.dispatcher.pass()
       assert.deepEqual(
         [
-          task(3).state,
+          task(4).state,
           context.ledger.project(1).participants.find((p) => p.id === id('zeus')).outUntil,
         ],
         ['open', soon(context, 1)],
@@ -1132,7 +1171,7 @@ describe('a member with several roles', () => {
       const task = (number) => context.ledger.task(project.id, number)
       const launches = (handle) =>
         context.adapter.prepared
-          .filter((request) => request.participant.handle === handle)
+          .filter((request) => request.participant.handle.startsWith(`${handle}-`))
           .map((request) => [request.role, request.instructions])
       const open = (body, tags) =>
         context.ledger.createTask(project.id, {
@@ -1145,13 +1184,13 @@ describe('a member with several roles', () => {
       open('Write the parser', ['rust'])
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      assert.equal(task(1).assignee, 'zeus')
+      assert.equal(task(1).assignee, 'zeus-amber-pine')
       context.adapter.answer('zeus', 'Parser done')
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       assert.deepEqual(
         [task(1).state, task(2).kind, task(2).assignee],
-        ['review', 'review', 'hera'],
+        ['review', 'review', 'hera-brisk-birch'],
       )
       assert.deepEqual(
         launches('hera'),
@@ -1160,18 +1199,17 @@ describe('a member with several roles', () => {
       )
       open('Write the docs', ['docs'])
       await context.dispatcher.pass()
-      assert.equal(
-        task(3).state,
-        'open',
-        'zeus is under review and hera is reviewing: nobody is free',
+      assert.match(
+        task(3).assignee,
+        /^hera-/,
+        'hera reviews in one session and, with a slot free, works in another',
       )
+      assert.notEqual(task(3).assignee, task(2).assignee)
       await context.dispatcher.pass()
-      context.adapter.answer('hera', 'Fine.\n\nVERDICT: pass')
+      context.adapter.answer(task(2).assignee, 'Fine.\n\nVERDICT: pass')
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       assert.equal(task(1).state, 'done')
-      await context.dispatcher.pass()
-      assert.equal(task(3).assignee, 'hera', 'free again, hera takes the work its tag prefers')
       await context.dispatcher.pass()
       assert.deepEqual(
         launches('hera').at(-1),
@@ -1183,7 +1221,7 @@ describe('a member with several roles', () => {
 })
 
 describe('one task per member session', () => {
-  const zeusWindows = (context) => context.host.opened.filter((b) => b.id.endsWith('-zeus'))
+  const zeusWindows = (context) => context.host.opened.filter((b) => windowOf(b.id, 'zeus'))
 
   /** T-1 to zeus (its rust tag wins), delivered and answered. */
   async function finished(context, options = {}) {
@@ -1197,41 +1235,52 @@ describe('one task per member session', () => {
     return fixture
   }
 
-  it("closes a worker's window and ends its conversation with its task, and opens a fresh one for the next", async () => {
+  it("closes a session's window with its task but keeps its conversation, and opens a fresh session for the next task", async () => {
     await setup(async (context) => {
-      const { id, open, task } = await finished(context)
+      const { project, id, open, task } = await finished(context)
       const first = context.host.last('zeus')
+      const session = id('zeus-amber-pine')
       assert.equal(task(1).state, 'done')
       assert.deepEqual(context.host.killed, [{ id: first.id, generation: first.generation }])
-      assert.equal(context.ledger.currentConversation(id('zeus')), null, 'the conversation ended')
-      assert.equal(context.dispatcher.pane(id('zeus')), null, 'the window went with it')
+      assert.ok(
+        context.ledger.currentConversation(session),
+        'the conversation stays until the work is accepted, for a follow-up',
+      )
+      assert.equal(context.dispatcher.pane(session), null, 'the window went with the task')
 
       open({ body: 'Write the lexer', tags: ['rust'] })
       await context.dispatcher.pass()
       const launch = context.adapter.prepared.at(-1)
       assert.deepEqual(
         [launch.participant.handle, launch.resume],
-        ['zeus', null],
-        'a fresh session',
+        ['zeus-brisk-birch', null],
+        'a fresh session of the same member',
       )
       assert.match(launch.message, /Write the lexer/)
       assert.equal(zeusWindows(context).length, 2)
-      assert.notEqual(context.ledger.currentConversation(id('zeus')).nativeSession, first.id)
+
+      context.ledger.acceptTask(project.id, 1, { by: 'lead' })
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.currentConversation(session), null, 'accepted: the session ends')
+      assert.equal(
+        context.ledger.project(project.id).participants.some((p) => p.id === session),
+        false,
+      )
     })
   })
 
-  it('holds a task assigned while the old window is still closing, and opens after it has gone', async () => {
+  it("opens the next task's session while the old window is still closing", async () => {
     await setup(async (context) => {
       context.host.holdExits = true
       const { open, task } = await finished(context)
       open({ body: 'Write the lexer', tags: ['rust'] })
       await context.dispatcher.pass()
-      assert.equal(task(2).assignee, 'zeus')
-      assert.equal(zeusWindows(context).length, 1, 'nothing opens into a closing window')
-      await context.host.exit('zeus')
-      await context.dispatcher.pass()
-      assert.equal(zeusWindows(context).length, 2)
+      assert.equal(task(2).assignee, 'zeus-brisk-birch')
+      assert.equal(zeusWindows(context).length, 2, 'a session of its own waits for no window')
       assert.equal(context.adapter.prepared.at(-1).resume, null)
+      await context.host.exit('zeus-amber-pine')
+      await context.dispatcher.pass()
+      assert.equal(task(2).state, 'working', 'the old exit lands on the old session only')
     })
   })
 
@@ -1243,7 +1292,7 @@ describe('one task per member session', () => {
       await context.dispatcher.pass()
       assert.deepEqual(
         [task(2).kind, task(2).assignee, task(2).state],
-        ['review', 'astraeus', 'working'],
+        ['review', 'astraeus-brisk-birch', 'working'],
       )
       assert.deepEqual(context.host.killed, [], 'an author under review keeps its window')
       const reviewer = context.host.last('astraeus')
@@ -1258,7 +1307,7 @@ describe('one task per member session', () => {
       )
       assert.match(
         context.adapter.agent('zeus').items.at(-1).text,
-        /Review round 1 by @astraeus asks for changes:/,
+        /Review round 1 by @astraeus-brisk-birch asks for changes:/,
       )
     })
   })
@@ -1285,9 +1334,12 @@ describe('one task per member session', () => {
       open({ body: 'Write the lexer', tags: ['coding'] })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      assert.deepEqual([task(1).assignee, task(2).assignee], ['zeus', 'diana'])
+      assert.deepEqual(
+        [task(1).assignee, task(2).assignee],
+        ['zeus-amber-pine', 'diana-brisk-birch'],
+      )
       const question = context.ledger.ask(project.id, {
-        from: 'diana',
+        from: 'diana-brisk-birch',
         to: 'lead',
         task: 2,
         body: 'Which dialect?',
@@ -1295,7 +1347,7 @@ describe('one task per member session', () => {
       context.adapter.answer('diana', 'I asked the lead.')
       await context.dispatcher.pass()
       assert.deepEqual([task(1).state, task(2).state], ['working', 'waiting'])
-      const native = context.ledger.currentConversation(id('diana')).nativeSession
+      const native = context.ledger.currentConversation(id('diana-brisk-birch')).nativeSession
 
       context.ledger.suspendForRestart()
       const after = context.make()
@@ -1310,7 +1362,7 @@ describe('one task per member session', () => {
       const launch = context.adapter.prepared.at(-1)
       assert.deepEqual(
         [launch.participant.handle, launch.resume],
-        ['diana', native],
+        ['diana-brisk-birch', native],
         'its own session, with the brief in it',
       )
       assert.match(launch.message, /^\[ConsensFlow m-\d+ · T-2 · answer from @lead\]\nANSI$/)
@@ -1319,19 +1371,81 @@ describe('one task per member session', () => {
     })
   })
 
-  it('reopens a finished task in a fresh session, with the brief in front of the new instructions', async () => {
+  it('reopens a finished task on its own session, resumed with the follow-up and nothing else', async () => {
     await setup(async (context) => {
-      const { project, task } = await finished(context)
+      const { project, id, task } = await finished(context)
+      const native = context.ledger.currentConversation(id('zeus-amber-pine')).nativeSession
       context.ledger.reopenTask(project.id, 1, { by: 'lead', body: 'Handle empty input too' })
       await context.dispatcher.pass()
       const launch = context.adapter.prepared.at(-1)
-      assert.deepEqual([launch.participant.handle, launch.resume], ['zeus', null])
+      assert.deepEqual(
+        [launch.participant.handle, launch.resume],
+        ['zeus-amber-pine', native],
+        'the same window comes back on its own conversation',
+      )
       assert.match(
         launch.message,
-        /^\[ConsensFlow m-\d+ · T-1 · task from @lead\]\nWrite the parser\n\n\[ConsensFlow m-\d+ · T-1 · task from @lead\]\nHandle empty input too$/,
+        /^\[ConsensFlow m-\d+ · T-1 · task from @lead\]\nHandle empty input too$/,
+        'it remembers the brief: only the follow-up goes in',
       )
       await context.dispatcher.pass()
       assert.equal(task(1).state, 'working')
+    })
+  })
+
+  it("continues a finished task's session with --after: the same window comes back on its conversation", async () => {
+    await setup(async (context) => {
+      const { project, id, task } = await finished(context)
+      const native = context.ledger.currentConversation(id('zeus-amber-pine')).nativeSession
+      context.ledger.createTask(project.id, {
+        from: 'lead',
+        after: 1,
+        body: 'Now the lexer, in the same style',
+      })
+      await context.dispatcher.pass()
+      const launch = context.adapter.prepared.at(-1)
+      assert.deepEqual(
+        [launch.participant.handle, launch.resume],
+        ['zeus-amber-pine', native],
+        'the session that did T-1, on its own conversation',
+      )
+      assert.match(
+        launch.message,
+        /^\[ConsensFlow m-\d+ · T-2 · task from @lead\]\nNow the lexer, in the same style$/,
+        'no brief in front: the window remembers',
+      )
+      await context.dispatcher.pass()
+      assert.equal(task(2).state, 'working')
+      context.adapter.answer('zeus-amber-pine', 'Lexer done')
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(task(2).state, 'done')
+      assert.equal(context.host.killed.length, 2, 'the window closed after each task')
+    })
+  })
+
+  it('ends a session left idle after its work, and closes the window of a session that ended', async () => {
+    await setup(async (context) => {
+      const { project, open, task } = await finished(context)
+      context.clock.advance(SESSION_IDLE_MS + 1000)
+      await context.dispatcher.pass()
+      assert.equal(
+        context.ledger.project(project.id).participants.some((p) => p.handle === 'zeus-amber-pine'),
+        false,
+        'idle past its time: the session ended',
+      )
+      assert.equal(task(1).state, 'done', 'its work stays for the lead to accept')
+
+      open({ tags: ['coding'], body: 'Docs' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const working = task(2)
+      assert.equal(working.state, 'working')
+      const killed = context.host.killed.length
+      context.ledger.cancelTask(project.id, 2, { by: 'lead' })
+      await context.dispatcher.pass()
+      assert.equal(context.host.killed.length, killed + 1, "the ended session's window is closed")
+      assert.equal(context.host.killed.at(-1).id, `p${project.id}-${working.assignee}`)
     })
   })
 })

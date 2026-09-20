@@ -62,8 +62,23 @@ const participant = (id, handle, role, extra = {}) => ({
   tier: MEMBER.includes(role) ? 'standard' : null,
   tags: [],
   outUntil: null,
+  memberId: null,
+  member: null,
+  session: null,
   ...extra,
 })
+
+/** A session of a member: its own participant, named after the member. */
+const session = (id, member, name, role = 'worker', extra = {}) =>
+  participant(id, `${member.handle}-${name}`, role, {
+    memberId: member.id,
+    member: member.handle,
+    session: name,
+    harness: member.harness,
+    tier: member.tier,
+    tags: member.tags,
+    ...extra,
+  })
 const task = (number, title, state, requester, assignee, minutesAgo = 3, extra = {}) => ({
   id: number,
   projectId: 1,
@@ -418,6 +433,66 @@ test('shows an agent-written title as text, never as markup', async ({ page }) =
   await expect(title).toHaveText('<img src=x onerror=window.__pwned=1> hostile title')
   expect(await page.evaluate(() => window.__pwned)).toBeUndefined()
   await expect(page.locator('tr[data-handle="diana"] img')).toHaveCount(0)
+})
+
+test("draws a member's sessions as lanes under it, named, and counts its open windows", async ({
+  page,
+}) => {
+  const data = model()
+  const zeusLane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  const zeus = zeusLane.participant
+  // A member runs no window of its own: its work is in its sessions.
+  Object.assign(zeusLane, { tasks: [], activity: { state: 'closed' }, pane: null })
+  data.boards[1].lanes.push(
+    {
+      participant: session(20, zeus, 'amber-pine'),
+      tasks: [task(21, 'Write the lexer', 'working', 'lead', 'zeus-amber-pine', 3)],
+      activity: { state: 'working' },
+      pane: { id: 'p1-zeus-amber-pine', generation: 9 },
+    },
+    {
+      participant: session(21, zeus, 'brisk-birch'),
+      tasks: [
+        task(22, 'Write the docs', 'done', 'lead', 'zeus-brisk-birch', 1, { result: 'Docs done.' }),
+      ],
+      activity: { state: 'closed' },
+      pane: null,
+    },
+  )
+  await open(page, data)
+  const rows = page.locator('table[aria-label="Tasks"] tbody tr')
+  await expect(rows.evaluateAll((nodes) => nodes.map((n) => n.dataset.handle))).resolves.toEqual([
+    'human',
+    'lead',
+    'zeus',
+    'zeus-amber-pine',
+    'zeus-brisk-birch',
+    'diana',
+  ])
+  const first = page.locator('tr[data-handle="zeus-amber-pine"]')
+  await expect(first).toHaveAttribute('data-session', 'zeus')
+  await expect(first.locator('.row-name')).toHaveText('@zeus · amber-pine')
+  await expect(first.locator('.row-meta')).toContainText('worker session of @zeus')
+  await expect(first.locator('td[data-state="working"] button.card')).toHaveCount(1)
+  const second = page.locator('tr[data-handle="zeus-brisk-birch"]')
+  await expect(second.locator('.row-status')).toHaveText(
+    'Window closed with its task; a follow-up reopens it',
+  )
+  await expect(page.locator('tr[data-handle="zeus"] .row-status')).toHaveText(
+    '1 window open, one per task',
+  )
+  const dock = page.getByRole('complementary', { name: 'Terminal dock' })
+  await expect(
+    dock.locator('.terminal-card[data-handle="zeus-amber-pine"] .terminal-name'),
+  ).toHaveText('@zeus · amber-pine')
+  await page.getByRole('button', { name: 'New task' }).click()
+  const backlog = page.getByRole('region', { name: 'For you' })
+  const composer = backlog.locator('form.composer')
+  await expect(composer.getByLabel('For').locator('option')).toHaveText([
+    'Lead',
+    'A standard worker (zeus)',
+    'A light worker (diana)',
+  ])
 })
 
 test('answers a question with options by picking, one pick per question at least', async ({

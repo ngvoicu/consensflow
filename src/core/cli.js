@@ -9,6 +9,8 @@ export const USAGE = `cf inside a ConsensFlow window: the board's commands.
                                     a task for a member of that tier; ConsensFlow picks
                                     the member (--tags a,b to prefer one, --purpose for
                                     critical work)
+  cf task add --after T-3 "…"       a follow-up for the window that did T-3, which
+                                    keeps its context; only when that context matters
   cf task add --self "…"            a task for yourself, on the board
   cf task list                      the board: what waits for a member, then every lane
   cf task get T-3                   one task and its whole thread
@@ -177,37 +179,44 @@ async function taskCommand([action, ...rest], call, cwd) {
     const { flags, text, target } = split(
       rest,
       ['--self'],
-      ['--to', '--title', '--file', '--tier', '--tags', '--purpose'],
+      ['--to', '--title', '--file', '--tier', '--tags', '--purpose', '--after'],
     )
     const to = handle(flags['--to'] ?? target)
     const tier = flags['--tier']
-    if (to === undefined && tier === undefined && flags['--self'] !== true) throw usage(ADD_USAGE)
+    const after = flags['--after'] === undefined ? undefined : taskNumber(flags['--after'])
+    if (to === undefined && tier === undefined && after === undefined && flags['--self'] !== true) {
+      throw usage(ADD_USAGE)
+    }
     const body =
       flags['--file'] === undefined
         ? requireText(text, ADD_USAGE)
         : await readFile(resolve(cwd, flags['--file']), 'utf8')
     const address = flags['--self']
       ? { self: true }
-      : to !== undefined
-        ? { to }
-        : {
-            tier,
-            ...(flags['--tags'] === undefined ? {} : { tags: tags(flags['--tags']) }),
-            ...(flags['--purpose'] === undefined ? {} : { purpose: flags['--purpose'] }),
-          }
+      : after !== undefined
+        ? { after }
+        : to !== undefined
+          ? { to }
+          : {
+              tier,
+              ...(flags['--tags'] === undefined ? {} : { tags: tags(flags['--tags']) }),
+              ...(flags['--purpose'] === undefined ? {} : { purpose: flags['--purpose'] }),
+            }
     const created = await call('POST', '/api/tasks', {
       ...address,
       body,
       ...(flags['--title'] === undefined ? {} : { title: flags['--title'] }),
     })
-    const { number, pool } = created.task
+    const { number, pool, assignee } = created.task
     return {
       data: created,
       text: flags['--self']
         ? `T-${number} is yours; finish it with: cf task done T-${number} "what you did".`
-        : to !== undefined
-          ? `T-${number} queued for @${to}. The result arrives in your inbox when @${to} finishes.`
-          : `T-${number} is on the board for a ${tier} ${pool}; the first free one gets it, and its result arrives in your inbox.`,
+        : after !== undefined
+          ? `T-${number} continues in @${assignee}, the window that did T-${after}; its result arrives in your inbox.`
+          : to !== undefined
+            ? `T-${number} queued for @${to}. The result arrives in your inbox when @${to} finishes.`
+            : `T-${number} is on the board for a ${tier} ${pool}; the first free one gets it, and its result arrives in your inbox.`,
     }
   }
   if (action === 'list' || action === undefined) {
@@ -254,7 +263,8 @@ async function taskCommand([action, ...rest], call, cwd) {
   )
 }
 
-const ADD_USAGE = 'cf task add --tier <critical|complex|standard|light> "what to do" (or --self)'
+const ADD_USAGE =
+  'cf task add --tier <critical|complex|standard|light> "what to do" (or --after T-3, or --self)'
 
 /** `--tags coding,rust` as the list the core takes. */
 const tags = (value) =>

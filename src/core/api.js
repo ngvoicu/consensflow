@@ -98,7 +98,7 @@ export async function startApi({
     if (at === 'GET /api/team') {
       return ok({
         members: project.participants
-          .filter((member) => member.agent !== null)
+          .filter((member) => member.agent !== null && member.memberId === null)
           .map((member) => {
             const row = roster(member.agent)
             return {
@@ -152,16 +152,20 @@ export async function startApi({
           'agents give no task by name: put it on the board for a tier (cf task add --tier standard "…"); only the human gives the lead or the PM a task',
         )
       }
+      // A follow-up that needs the context of the window that did T-n goes
+      // back to that window (`after`); everything else is fresh work for a tier.
       const created = ledger.createTask(project.id, {
         from: participant.handle,
-        ...(to === undefined
-          ? {
-              pool: body.pool ?? POOL_OF[participant.role],
-              tier: body.tier,
-              tags: body.tags ?? [],
-              purpose: body.purpose,
-            }
-          : { to }),
+        ...(body.after !== undefined
+          ? { after: Number(body.after) }
+          : to === undefined
+            ? {
+                pool: body.pool ?? POOL_OF[participant.role],
+                tier: body.tier,
+                tags: body.tags ?? [],
+                purpose: body.purpose,
+              }
+            : { to }),
         body: body.body,
         title: body.title,
       })

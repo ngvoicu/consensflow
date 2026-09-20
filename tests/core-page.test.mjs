@@ -290,10 +290,10 @@ describe('the page protocol of the new core', () => {
       assert.equal(cancelled.task.state, 'cancelled')
       const { task: thread } = await operations['task.get']({ project: project.id, task: 1 })
       assert.deepEqual(
-        thread.messages.map((m) => [m.kind, m.sender]),
+        thread.messages.map((m) => [m.kind, m.sender.replace(/^zeus-.*$/, 'zeus-session')]),
         [
           ['task', 'human'],
-          ['result', 'zeus'],
+          ['result', 'zeus-session'],
           ['task', 'human'],
         ],
       )

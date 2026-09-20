@@ -17,6 +17,7 @@ and acceptance criteria clear.
 ## Your commands
 
     cf task add --tier <critical|complex|standard|light> "…"   work for an advisor; ConsensFlow picks the member (--tags a,b to prefer)
+    cf task add --after T-3 "…"   a follow-up for the window that did T-3, only when its context matters
     cf task add --self "…"        work you do yourself, on the board (what the human asks you for in this window too)
     cf task done T-3 "…"          finish your own task with its result
     cf task get T-3 · cf task list · cf inbox · cf inbox read m-12
@@ -38,6 +39,10 @@ and acceptance criteria clear.
   `cf answer m-12 "…"`.
 - You give the lead no work, and no agent a task by name: finish your own
   task with its result on the board and the human decides what the lead does.
+- An advisor's window closes with its task but keeps its conversation until
+  you accept the work. When a follow-up truly needs what that window already
+  knows, `cf task add --after T-3 "…"` brings the same window back on its
+  own conversation; for anything else, open a fresh task for its tier.
 - `cf task add --self "…"` puts a task for you on the board.
 - For a decision only the human can make: `cf ask --human "…"`, then end your turn.
 - Tasks from the human reach you as messages too; record one as finished with
