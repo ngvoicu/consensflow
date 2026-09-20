@@ -692,7 +692,7 @@ test('built Agents catalog serves complete saved profiles and current browsing c
     import { Credentials, startApi } from ${JSON.stringify(join(cli, 'src/core/api.js'))}
     import { openLedger } from ${JSON.stringify(join(cli, 'src/ledger/index.js'))}
     import { addAgent, rosterPath } from ${JSON.stringify(join(cli, 'src/roster.js'))}
-    assert.equal(Object.values(CATALOG).flat().length, 99, 'packaged preset count')
+    assert.equal(Object.values(CATALOG).flat().length, 102, 'packaged preset count')
     assert.equal(METRICS.length, 14)
     for (const secretFile of ['artificial-analysis-key', 'artificial-analysis-cache.json']) assert.equal(existsSync(${JSON.stringify(cli)} + '/' + secretFile), false)
     assert.equal(catalogEntry('pygmalion').model, 'codex-image')
@@ -716,7 +716,7 @@ test('built Agents catalog serves complete saved profiles and current browsing c
       assert.equal((await fetch(server.url + '/api/agents/maia', { method: 'DELETE', headers })).status, 204)
       const after = await (await fetch(server.url + '/api/agents', { headers })).json()
       assert.equal(after.agents.length, 0)
-      assert.equal(Object.values(after.catalog).flat().length, 99)
+      assert.equal(Object.values(after.catalog).flat().length, 102)
       console.log('packaged catalog and saved profiles verified')
     } finally {
       await server.close()

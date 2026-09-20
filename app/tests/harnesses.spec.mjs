@@ -121,8 +121,26 @@ test('Agents adds and removes a saved agent without loading harness diagnostics 
     await form.locator('[name="name"]').fill('custom')
     await form.locator('[name="harness"]').selectOption('claude')
     await form.locator('[name="model"]').fill('example-model')
+    // The same choices a catalog agent gets: an effort and a work tier.
+    await expect(form.getByLabel('Work tier').locator('option')).toHaveText([
+      'Automatic (model and reasoning)',
+      'Critical work',
+      'Complex work',
+      'Standard work',
+      'Light work',
+    ])
+    await form.getByLabel('Work tier').selectOption('complex')
     await form.getByRole('button', { name: 'Add agent' }).click()
     await expect(member(page, 'custom')).toBeVisible()
+    // Its own model card carries the tier, said once for the model and reasoning.
+    await expect(
+      page
+        .locator('.model-group')
+        .filter({ has: page.locator('.callsign', { hasText: /^custom$/ }) })
+        .locator('.model-summary .tier-pill'),
+    ).toHaveText('T2 · Complex work')
+    expect(listAgents(t.env).find((a) => a.name === 'custom').workTier).toBe('complex')
+    await expect(form.getByLabel('Work tier')).toHaveValue('auto')
     await expect(page.locator('#lede')).toContainText('1 saved')
     await member(page, 'custom').getByRole('button', { name: 'Remove', exact: true }).click()
     await expect(member(page, 'custom')).toHaveCount(0)
@@ -533,14 +551,17 @@ test('all browsing modes keep descending effort order, saved agents among the ca
             ? [
                 'Max',
                 'Xhigh',
+                'High',
                 'Medium',
                 'Low',
                 'Max',
                 'Xhigh',
+                'High',
                 'Medium',
                 'Low',
                 'Max',
                 'Xhigh',
+                'High',
                 'Medium',
                 'Low',
               ]
@@ -551,6 +572,9 @@ test('all browsing modes keep descending effort order, saved agents among the ca
                 'Xhigh',
                 'Xhigh',
                 'Xhigh',
+                'High',
+                'High',
+                'High',
                 'Medium',
                 'Medium',
                 'Medium',
@@ -780,23 +804,24 @@ test('Show, search, category and grouping work per tab, saved agents and catalog
         'Work tier',
       ])
       await expect(screen.getByRole('heading', { level: 3 })).toHaveCount(0)
-      await expect(screen.locator('#agents-count')).toHaveText('107 of 107 shown')
+      await expect(screen.locator('#agents-count')).toHaveText('110 of 110 shown')
     }
     await fixture.saved(own)
     await expect(own.locator('#agents-count')).toHaveText('8 of 8 shown')
     await search.fill('Astra')
     await expect(own.locator('#agents-count')).toHaveText('5 of 8 shown')
-    await expect(page.locator('#agents-count')).toHaveText('107 of 107 shown')
+    await expect(page.locator('#agents-count')).toHaveText('110 of 110 shown')
     await category.selectOption('lead')
     await expect(own.locator('.callsign')).toHaveText(['lead-one', 'peer-one'])
     await group.selectOption('model-reasoning')
     await expect(own.getByRole('heading', { level: 3 })).toHaveText(['GPT-6 Astra · Xhigh · 2'])
     await page.getByRole('searchbox').fill('Astra')
     await page.getByLabel('Group by').selectOption('model-reasoning')
-    await expect(page.locator('#agents-count')).toHaveText('17 of 107 shown')
+    await expect(page.locator('#agents-count')).toHaveText('20 of 110 shown')
     await expect(page.getByRole('heading', { level: 3 })).toHaveText([
       'GPT-6 Astra · Max · 3',
       'GPT-6 Astra · Xhigh · 5',
+      'GPT-6 Astra · High · 3',
       'GPT-6 Astra · Medium · 3',
       'GPT-6 Astra · Low · 4',
       'GPT-6 Astra · Minimal · 1',
@@ -817,7 +842,7 @@ test('Show, search, category and grouping work per tab, saved agents and catalog
     await expect(own.locator('.callsign')).toHaveText(['lead-one', 'peer-one'])
     await search.fill('OpenRouter')
     await expect(own.locator('#agents')).toContainText('No agents match')
-    await expect(page.locator('#agents-count')).toHaveText('17 of 107 shown')
+    await expect(page.locator('#agents-count')).toHaveText('20 of 110 shown')
     await own.getByRole('button', { name: 'Clear filters' }).click()
     await expect(search).toHaveValue('')
     await expect(category).toHaveValue('all')
@@ -837,15 +862,15 @@ test('Show, search, category and grouping work per tab, saved agents and catalog
     ])
     await page.getByLabel('Group by').selectOption('harness')
     await expect(page.getByRole('heading', { level: 3 })).toHaveText([
-      'Codex · 7',
-      'OpenCode · 4',
-      'Pi · 6',
+      'Codex · 8',
+      'OpenCode · 5',
+      'Pi · 7',
     ])
     await page.getByRole('button', { name: 'Clear filters' }).click()
     await expect(page.getByRole('searchbox')).toHaveValue('')
     await expect(page.getByLabel('Group by')).toHaveValue('model-reasoning')
     await expect(page.getByLabel('Suits', { exact: true })).toHaveValue('all')
-    await expect(page.getByRole('heading', { level: 3 })).toHaveCount(41)
+    await expect(page.getByRole('heading', { level: 3 })).toHaveCount(42)
     await expect(group).toHaveValue('harness')
     await group.selectOption('model-reasoning')
     for (const name of [
@@ -861,7 +886,7 @@ test('Show, search, category and grouping work per tab, saved agents and catalog
     }
     await category.selectOption('advisor')
     await expect(own.locator('.callsign')).toHaveText(['lead-one', 'peer-one'])
-    await expect(page.locator('#agents-count')).toHaveText('107 of 107 shown')
+    await expect(page.locator('#agents-count')).toHaveText('110 of 110 shown')
     await page.getByLabel('Suits', { exact: true }).selectOption('advisor')
     await expect(offer(page, 'astraeus')).toBeVisible()
     await expect(offer(page, 'maia')).toHaveCount(0)
@@ -912,7 +937,7 @@ test('shared model cards default to every model and reasoning across all harness
       if (!expected.has(key)) expected.set(key, [])
       expected.get(key).push(p.name)
     }
-    expect([...expected.values()].filter((names) => names.length > 1)).toHaveLength(30)
+    expect([...expected.values()].filter((names) => names.length > 1)).toHaveLength(31)
     for (const screen of [page, fixture.second]) {
       await expect(screen.getByLabel('Group by')).toHaveValue('model-reasoning')
       const cards = screen.locator('.model-group')
@@ -1210,7 +1235,7 @@ test('a saved catalog entry takes its row’s place, and removal restores Add wi
         .filter({ has: page.getByRole('heading', { name: 'GPT-6 Astra · Medium · 1' }) })
         .locator('.callsign'),
     ).toHaveText('maia')
-    await expect(page.locator('#agents-count')).toHaveText('1 of 99 shown')
+    await expect(page.locator('#agents-count')).toHaveText('1 of 102 shown')
     await member(page, 'maia').getByRole('button', { name: 'Remove', exact: true }).click()
     await refreshAgents(second)
     await expect(member(second, 'maia')).toHaveCount(0)

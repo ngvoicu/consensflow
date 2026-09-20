@@ -188,7 +188,7 @@ describe('every tool ships a list of ready-made agents', () => {
   })
 
   it('reaches GPT 6 Astra on all three engines that answer for it', () => {
-    // codex through the ChatGPT login (astraeus/asteria), pi through its own
+    // codex through the ChatGPT login (astraeus/asteria/celaeno), pi through its own
     // copy of that login, opencode through OpenRouter — three roads, three
     // model strings, so no twin rule couples them. `ultra` stays codex-only:
     // neither of the new roads publishes it.
@@ -202,8 +202,8 @@ describe('every tool ships a list of ready-made agents', () => {
         .sort()
       assert.deepEqual(
         efforts,
-        ['low', 'max', 'medium', 'xhigh'],
-        `${harness}: four Astra tiers, and no ultra`,
+        ['high', 'low', 'max', 'medium', 'xhigh'],
+        `${harness}: five Astra levels, and no ultra`,
       )
     }
   })
@@ -360,7 +360,7 @@ it('ships all compatible low/medium choices with stable identities and Pi OpenRo
       assert.equal(entry.effort, effort)
     }
   }
-  assert.equal(Object.values(CATALOG).flat().length, 99)
+  assert.equal(Object.values(CATALOG).flat().length, 102)
   for (const name of ['orpheus', 'linus', 'erato', 'kronos', 'atlas']) {
     assert.match(catalogEntry(name).model, /^openrouter\/anthropic\//)
     assert.equal(catalogEntry(name).profile.routeLabel, 'OpenRouter · API')
@@ -453,6 +453,9 @@ it('assigns four work tiers by model and effort across routes, without agent-nam
     ['calliope', 'critical'],
     ['phosphoros', 'critical'],
     ['asteria', 'complex'],
+    ['celaeno', 'complex'],
+    ['taygete', 'complex'],
+    ['vidar', 'complex'],
     ['clio', 'complex'],
     ['ilmarinen', 'complex'],
     ['zeus', 'standard'],

@@ -345,6 +345,18 @@ export const AGENT_PRESETS = [
     model: "gpt-6-astra",
     effort: "xhigh",
   },
+  // Astra HIGH (asked for on 2026-09-20): the level between medium and xhigh
+  // on every road that reaches Astra, complex work without the lead recommendation.
+  {
+    preset: "celaeno",
+    id: "celaeno",
+    name: "Celaeno",
+    label: "Codex GPT 6 Astra HIGH",
+    description: "Complex debugging, architecture and detailed review.",
+    kind: "codex",
+    model: "gpt-6-astra",
+    effort: "high",
+  },
 
   // --- GPT 6 Astra on the other engines that reach it ----------------------
   // Probed 2026-09-06, each id on the CLI that will run it, at both levels.
@@ -378,6 +390,16 @@ export const AGENT_PRESETS = [
     thinking: "xhigh",
   },
   {
+    preset: "taygete",
+    id: "taygete",
+    name: "Taygete",
+    label: "Pi GPT 6 Astra HIGH",
+    description: "Complex debugging, architecture and detailed review.",
+    kind: "pi",
+    model: "openai-codex/gpt-6-astra",
+    thinking: "high",
+  },
+  {
     preset: "aurvandil",
     id: "aurvandil",
     name: "Aurvandil",
@@ -396,6 +418,16 @@ export const AGENT_PRESETS = [
     kind: "opencode",
     model: "openrouter/openai/gpt-6-astra",
     effort: "xhigh",
+  },
+  {
+    preset: "vidar",
+    id: "vidar",
+    name: "Vidar",
+    label: "OpenCode GPT 6 Astra HIGH",
+    description: "Complex debugging, architecture and detailed review.",
+    kind: "opencode",
+    model: "openrouter/openai/gpt-6-astra",
+    effort: "high",
   },
 
   // --- GPT 5.6 on the other engines that reach it --------------------------

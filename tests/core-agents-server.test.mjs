@@ -91,7 +91,13 @@ describe('the agents screens on the new core', () => {
     for (const call of ['confirm(', 'alert(', 'prompt(']) {
       assert.ok(!script.includes(call), `the page must not call ${call}`)
     }
-    for (const marker of ['id="agents"', 'aria-label="Agents"', 'id="add"', 'name="show"']) {
+    for (const marker of [
+      'id="agents"',
+      'aria-label="Agents"',
+      'id="add"',
+      'name="show"',
+      'name="workTier"',
+    ]) {
       assert.ok(html.includes(marker), `the page is missing ${marker}`)
     }
     assert.doesNotMatch(

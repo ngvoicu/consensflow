@@ -109,3 +109,9 @@ Gabriel, on the Candidate built from `87c45f5`, 2026-09-20 afternoon:
   above low effort; critical-tier models are Advisor and Reviewer; an image
   agent suits none. The filter reads "Suits: Any role"; Architecture, Hard
   problems, Coding and Images are gone.
+- Gabriel: "add also astra high in consensflow". GPT-6 Astra at High on
+  every road that reaches it: Celaeno (Codex), Taygete (Pi), Vidar
+  (OpenCode); Complex work, Worker and Reviewer. The catalog is 102 entries.
+- Gabriel: "DEFINE YOUR OWN doesn't have all options the others have". The
+  Define-your-own form now offers the work tier (Automatic, or one of the
+  four) beside the effort, the same choices a catalog agent's editor has.

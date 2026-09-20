@@ -354,6 +354,11 @@ export const PAGE = (token) => `<!DOCTYPE html>
     <input class="full" name="model" placeholder="model — anything this harness accepts" required>
     <input name="effort" list="effort-options" placeholder="effort (optional)">
     <datalist id="effort-options"></datalist>
+    <label class="full">Work tier<select name="workTier"><option value="auto">Automatic (model and reasoning)</option>${Object.entries(
+      WORK_TIERS,
+    )
+      .map(([id, tier]) => `<option value="${id}">${tier.label}</option>`)
+      .join('')}</select></label>
     <button class="primary">Add agent</button>
     <p id="error" class="alert full"></p>
   </form>
@@ -819,6 +824,7 @@ document.querySelector('#add').onsubmit = async (event) => {
   event.preventDefault();
   const form = new FormData(event.target);
   const body = Object.fromEntries([...form.entries()].filter(([, v]) => v !== ''));
+  if (body.workTier === 'auto') delete body.workTier;
   const res = await fetch('/api/agents', { method: 'POST', headers, body: JSON.stringify(body) });
   const data = await res.json();
   document.querySelector('#error').textContent = res.ok ? '' : data.error;
