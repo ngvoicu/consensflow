@@ -168,9 +168,15 @@ export async function startApi({
         title: body.title,
       })
       changed()
+      // With human approval required, the brief waits for the human before it
+      // moves; `cf` says so, and the lead knows a quiet board is a waiting one.
       return {
         status: 201,
-        body: { task: summary(created.task), message: created.message?.id ?? null },
+        body: {
+          task: summary(created.task),
+          message: created.message?.id ?? null,
+          gated: ledger.project(project.id).gate,
+        },
       }
     }
     const task = TASK_ROUTE.exec(url.pathname)

@@ -252,6 +252,41 @@ describe('the agents API', () => {
     })
   })
 
+  it('tells the lead when what it sent waits for the human', async () => {
+    await withApi(async ({ ledger, project, token, cf }) => {
+      ledger.setGate(project.id, true)
+      const lead = token('lead')
+      const opened = await cf(lead, 'task', 'add', '--tier', 'standard', 'Write the parser')
+      assert.equal(
+        opened.out,
+        'T-1 is on the board for a standard worker; the first free one gets it, and its result arrives in your inbox. The human approves each message before it moves.',
+      )
+      const own = await cf(lead, 'task', 'add', '--self', 'Plan the release')
+      assert.equal(own.out, 'T-2 is yours; finish it with: cf task done T-2 "what you did".')
+      const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
+      const { message } = ledger.assignTask(project.id, 1, zeus.id)
+      deliver(ledger, ledger.approveMessage(message.id, { by: 'human' }))
+      const question = ledger.ask(project.id, {
+        from: message.recipient,
+        to: 'lead',
+        task: 1,
+        body: 'Which format?',
+      })
+      deliver(ledger, ledger.approveMessage(question.id, { by: 'human' }))
+      const answered = await cf(lead, 'answer', `m-${question.id}`, 'JSON')
+      assert.equal(
+        answered.out,
+        `m-${question.id + 1} answered @${message.recipient}; the human passes it on first.`,
+      )
+      ledger.setGate(project.id, false)
+      const again = await cf(lead, 'task', 'add', '--tier', 'standard', 'Write the lexer')
+      assert.equal(
+        again.out,
+        'T-3 is on the board for a standard worker; the first free one gets it, and its result arrives in your inbox.',
+      )
+    })
+  })
+
   it('shows an agent only the messages it sent or received', async () => {
     await withApi(async ({ ledger, project, token, call }) => {
       const note = ledger.note(project.id, { from: 'lead', to: 'human', body: 'private' })

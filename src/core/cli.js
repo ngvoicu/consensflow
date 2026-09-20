@@ -152,7 +152,13 @@ async function command(verb, rest, call, cwd) {
         question: messageId(id),
         body: requireText(words.join(' '), 'cf answer m-<id> "your answer"'),
       })
-      return { data: message, text: `m-${message.id} answered @${message.recipient}.` }
+      return {
+        data: message,
+        text:
+          message.state === 'gated'
+            ? `m-${message.id} answered @${message.recipient}; the human passes it on first.`
+            : `m-${message.id} answered @${message.recipient}.`,
+      }
     }
     case 'team': {
       const { members } = await call('GET', '/api/team')
@@ -228,15 +234,18 @@ async function taskCommand([action, ...rest], call, cwd) {
       ...(flags['--title'] === undefined ? {} : { title: flags['--title'] }),
     })
     const { number, pool, assignee } = created.task
+    // With human approval required, nothing moves until the human passes it on.
+    const gated =
+      created.gated && !flags['--self'] ? ' The human approves each message before it moves.' : ''
     return {
       data: created,
       text: flags['--self']
         ? `T-${number} is yours; finish it with: cf task done T-${number} "what you did".`
         : after !== undefined
-          ? `T-${number} continues in @${assignee}, the window that did T-${after}; its result arrives in your inbox.`
+          ? `T-${number} continues in @${assignee}, the window that did T-${after}; its result arrives in your inbox.${gated}`
           : to !== undefined
-            ? `T-${number} queued for @${to}. The result arrives in your inbox when @${to} finishes.`
-            : `T-${number} is on the board for ${aPool(pool, tier)}; the first free one gets it, and its result arrives in your inbox.`,
+            ? `T-${number} queued for @${to}. The result arrives in your inbox when @${to} finishes.${gated}`
+            : `T-${number} is on the board for ${aPool(pool, tier)}; the first free one gets it, and its result arrives in your inbox.${gated}`,
     }
   }
   if (action === 'list' || action === undefined) {
