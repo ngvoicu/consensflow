@@ -805,6 +805,57 @@ test("reassigns a task given by tier from its drawer, working or paused, never t
   await expect(named.getByRole('button', { name: /^Reassign/ })).toHaveCount(0)
 })
 
+test("keeps only what is new in a task's thread: questions, answers, follow-ups and an earlier result", async ({
+  page,
+}) => {
+  const data = model()
+  const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  const brief = 'Tell a joke'
+  const body = `${brief}\n\nReassigned from @gefjon-jolly-tundra (ran out of quota after starting); check the working tree for partial changes.`
+  lane.tasks.push(task(14, 'Tell a joke', 'done', 'lead', 'zeus', 0, { body }))
+  const message = (id, kind, sender, recipient, text, state = 'delivered') => ({
+    id,
+    kind,
+    sender,
+    recipient,
+    state,
+    reason: null,
+    body: text,
+  })
+  data.tasks['1:14'] = {
+    ...lane.tasks.find((t) => t.number === 14),
+    messages: [
+      message(40, 'task', 'lead', 'gefjon-jolly-tundra', brief),
+      message(
+        41,
+        'note',
+        null,
+        'lead',
+        'T-14 was taken back from @gefjon-jolly-tundra (ran out of quota after starting) and waits for another light worker.',
+      ),
+      message(42, 'task', 'lead', 'zeus', body),
+      message(43, 'question', 'zeus', 'lead', 'About cats or code?'),
+      message(44, 'answer', 'lead', 'zeus', 'Code.'),
+      message(45, 'result', 'zeus', 'lead', 'Why do programmers mix up Halloween and Christmas?'),
+      message(46, 'task', 'lead', 'zeus', 'Reopened: shorter, please.'),
+      message(47, 'task', 'lead', 'zeus', 'Also no puns.', 'cancelled'),
+      message(48, 'result', 'zeus', 'lead', 'Oct 31 == Dec 25.'),
+    ],
+  }
+  await open(page, data)
+  await page.locator('button.card[data-task="14"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-14' })
+  await expect(drawer.locator('.drawer-result')).toHaveText('Oct 31 == Dec 25.')
+  await expect(drawer.locator('.thread-body')).toHaveText([
+    'About cats or code?',
+    'Code.',
+    'Why do programmers mix up Halloween and Christmas?',
+    'Reopened: shorter, please.',
+  ])
+  await expect(drawer.locator('.drawer-meta')).toContainText('updated just now')
+  await expect(drawer.locator('.drawer-meta')).not.toContainText('just now ago')
+})
+
 test("shows what a task's window wrote, from ConsensFlow's own copy, under the thread", async ({
   page,
 }) => {

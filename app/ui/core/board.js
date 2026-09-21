@@ -75,6 +75,12 @@ function button(text, className, action, label) {
   return node
 }
 
+/** "just now", or "4m ago": how long ago something last changed. */
+const ago = (iso, now) => {
+  const since = age(iso, now)
+  return since === 'just now' ? since : `${since} ago`
+}
+
 /** "just now", "4m", "2h", "3d": how long something has been in its state. */
 export function age(iso, now = Date.now()) {
   const seconds = Math.max(0, Math.round((now - Date.parse(iso)) / 1000))
@@ -635,7 +641,7 @@ export class TaskDrawer {
     const meta = element(
       'p',
       'drawer-meta',
-      `${who(task.requester)} asked ${task.assignee === null ? `for a ${task.tier} ${task.pool}` : who(task.assignee)} · ${STATE_LABEL[task.state]} · updated ${age(task.updatedAt, now)} ago${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
+      `${who(task.requester)} asked ${task.assignee === null ? `for a ${task.tier} ${task.pool}` : who(task.assignee)} · ${STATE_LABEL[task.state]} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
     )
     meta.dataset.state = task.state
     const sections = [head, meta]
@@ -657,10 +663,18 @@ export class TaskDrawer {
       block.append(element('p', 'drawer-result', result.body))
       sections.push(block)
     }
-    // The rest of the thread: follow-ups, questions and answers, notes.
-    const rest = task.messages.filter(
-      (message) => message !== result && !(message.kind === 'task' && message.body === task.body),
-    )
+    // The thread keeps only what the rest of the drawer does not say: the
+    // questions, answers, follow-ups and earlier results. Each window's
+    // first task message is the brief it was given, a note is ConsensFlow
+    // talking to the lead, and a withdrawn message reached nobody.
+    const briefed = new Set()
+    const rest = task.messages.filter((message) => {
+      if (message === result || message.kind === 'note' || message.state === 'cancelled')
+        return false
+      if (message.kind !== 'task' || briefed.has(message.recipient)) return true
+      briefed.add(message.recipient)
+      return false
+    })
     if (rest.length > 0) {
       const block = panel('thread', 'Thread', String(rest.length))
       const thread = element('ol', 'thread')
