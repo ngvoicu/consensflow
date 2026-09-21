@@ -3,7 +3,7 @@
 | ID | Title | Status | Priority | Progress | Updated |
 |---|---|---|---|---|---|
 | tiered-dispatch | Tiered dispatch, review gate and quota — the daemon picks the member | completed | critical | 14/14 | 2026-09-19 |
-| board-daemon-core | Board, daemon and inboxes — the Stage 2 rewrite of the daemon core | active | critical | 21/25 | 2026-09-19 |
+| board-daemon-core | Board, daemon and inboxes — the Stage 2 rewrite of the daemon core | active | critical | 23/25 | 2026-09-19 |
 | candidate-feedback-1 | First hands-on round on the Candidate — kanban, team, agents window, questions | active | critical | 17/18 | 2026-09-20 |
 | candidate-feedback-2 | Second hands-on round on the Candidate — wide dialogs, settings gear, agent cards, named worker sessions | completed | critical | 8/8 | 2026-09-20 |
 | candidate-feedback-3 | Third hands-on round — one Agents screen, no PM, three member roles, tiers instead of tags | completed | critical | 5/5 | 2026-09-20 |

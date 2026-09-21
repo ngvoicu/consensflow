@@ -123,9 +123,10 @@ opens panes or types into them.
 Decided on 2026-09-19 with Gabriel's "when can we open the app": the first
 hands-on build comes before the importer. The Candidate has its own home
 (`~/.consensflow-candidate`), so it starts with an empty board and he creates
-a project; the live app and its JSON state are never read. The importer
-(TEST-BDC-03, IMPL-BDC-04) moves to the end of the phase, for the day the live
-app is replaced.
+a project; the live app and its JSON state are never read. There is no
+importer: Gabriel, 2026-09-21, "we will delete everything when we have to go
+live and start from clean, everything from the old ConsensFlow will go away."
+TEST-BDC-03 and IMPL-BDC-04 are dropped; go-live is a clean home.
 
 - [x] [TEST-BDC-24] The agents screens keep working on the new core: the roster editor (with the new tags field), the agent library and the harness diagnostics are served by the new daemon behind the UI token the app already checks; their routes' tests move with them. `tests/core-agents-server.test.mjs`, `app/tests/core-page.spec.mjs`.
 - [x] [IMPL-BDC-25] `src/core/agents-server.js` (the pages and `/api/agents…` routes out of `src/ui.js`), mounted on the new core's API server; the new daemon's handle carries the UI token; the board page gains the three dialogs; satisfies TEST-BDC-24.
@@ -134,8 +135,8 @@ app is replaced.
 - [x] [VERIFY-BDC-27] `npm run candidate` builds, smoke-tests and installs ConsensFlow Candidate; Gabriel is told it is ready. Installed 2026-09-19 21:07 (`~/Applications/ConsensFlow Candidate.app`, 3.0.0-alpha.62, smoke 2/2, the live app unchanged).
 - [x] [TEST-BDC-28] One task per member session (Gabriel, 2026-09-19 evening: "make all workers one task only"; the lead cannot know a worker, so the session rule is the daemon's). Ledger: a member holds its work from assignment to the verdict and is busy meanwhile; only its task's messages reach it. Dispatcher: a worker, advisor or reviewer window closes and its conversation ends once it holds no task; a send-back lands in the author's still-open session; the reviewer closes after its verdict; coordinators never close; a fresh session whose first message is a reopening gets the brief in front; after a restart a member task with no window is given up and one with an answer due resumes its own session; low quota outlives the window until its reset. Page: a member between tasks reads as free. Integration: two tiered tasks, one worker, two native sessions. Bench: the worker's window closes after its task.
 - [x] [IMPL-BDC-29] `holdsWork`, `HELD_TASK_STATES` in `members()` and `nextDelivery`; `#retire`, `retiring`, `#launchText`, the restart give-up and `lowUntil` in the dispatcher; the role texts (workers, advisors and reviewers start from nothing; the lead and PM put everything in the task); the composer placeholders; satisfies TEST-BDC-28.
-- [ ] [TEST-BDC-03] Import from alpha.62 state (tabs, threads, tasks, inbox results) is complete, idempotent and read-only on the source; replayed against a copy of the live home.
-- [ ] [IMPL-BDC-04] Importer; satisfies TEST-BDC-03.
+- [x] [TEST-BDC-03] *Dropped 2026-09-21:* no import from the old app's state; go-live starts from a clean home.
+- [x] [IMPL-BDC-04] *Dropped with TEST-BDC-03.*
 
 ### Phase G: Transcript copy [planned]
 
@@ -175,8 +176,8 @@ tests the Candidate (empty board; he creates a project); a follow-up commit
 prunes the one-shot runner code the old `cf run` left behind (`runAgent` in
 `hosts/lib/runners.js`, `codex-auth`, `harness-transcript`, `image-run`,
 `packets`, `session-binding`, `threads` and their tests; image agents have no
-adapter in the new core); the importer
-(TEST-BDC-03) waits for the day the live app is replaced. Not built yet:
+adapter in the new core); no importer is built (dropped 2026-09-21: go-live
+starts clean). Not built yet:
 removing a PM (the ledger refuses it as `not-a-member`).
 
 ## TDD log
