@@ -491,7 +491,7 @@ test("gives a session's lane the human's hand on its window: open, close, delete
   ).toBeVisible()
   await expect(
     live.getByRole('button', { name: "Open @zeus · amber-pine's terminal" }),
-  ).toBeVisible()
+  ).toHaveCount(0)
   const closed = page.locator('tr[data-handle="zeus-brisk-birch"]')
   await expect(closed.locator('.row-status')).toHaveText('Terminal closed')
   // Opening a terminal unfolds the dock it shows in.
@@ -1344,8 +1344,8 @@ test("lists every member under the lead, with no team groups, on the board and i
   await expect(page.locator('tr[data-handle="athena"] .row-name')).toHaveText('@athena')
   await expect(page.locator('tr[data-handle="athena"] .row-meta')).toContainText('advisor')
 
-  // The dock on the right is a strip of every window, the lead first, then
-  // the members; a row's Terminal button brings its card into view.
+  // The dock on the right is a strip of every open terminal, the lead first,
+  // then the members; a row with its terminal open offers no Open terminal.
   const dock = page.getByRole('complementary', { name: 'Terminal dock' })
   const cards = () =>
     dock.locator('.terminal-card').evaluateAll((cards) => cards.map((c) => c.dataset.handle))
@@ -1354,11 +1354,7 @@ test("lists every member under the lead, with no team groups, on the board and i
     'data-handle',
     'lead',
   )
-  await page.getByRole('button', { name: "Open @athena's terminal" }).click()
-  await expect(dock.locator('.terminal-card[data-focused="true"]')).toHaveAttribute(
-    'data-handle',
-    'athena',
-  )
+  await expect(page.getByRole('button', { name: "Open @athena's terminal" })).toHaveCount(0)
   expect(await page.evaluate(() => window.__emulators.length)).toBe(3)
   expect(await page.locator('tbody tr[data-handle]').count()).toBe(
     5,
@@ -1570,7 +1566,7 @@ test('starts a project without reviews when nobody ticked is a reviewer', async 
     ])
 })
 
-test('shows every live window in the strip, brings the asked one into view, and feeds them their output', async ({
+test('shows every open terminal in the strip, offers no Open terminal for them, and feeds them their output', async ({
   page,
 }) => {
   await open(page)
@@ -1580,11 +1576,8 @@ test('shows every live window in the strip, brings the asked one into view, and 
     'data-handle',
     'lead',
   )
-  await page.getByRole('button', { name: "Open @zeus's terminal" }).click()
-  await expect(dock.locator('.terminal-card[data-focused="true"]')).toHaveAttribute(
-    'data-handle',
-    'zeus',
-  )
+  await expect(page.getByRole('button', { name: "Open @zeus's terminal" })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: "Open Lead's terminal" })).toHaveCount(0)
   // A member without a window of its own is a heading: nothing to view on its row.
   await expect(page.locator('tr[data-handle="diana"] .row-tools button')).toHaveCount(0)
   await page.evaluate(() =>

@@ -128,12 +128,12 @@ const board = new BoardView(boardRoot, {
       note(`T-${message.taskNumber} goes back to @${message.sender}.`)
     }),
   onOpenTask: (number) => act(() => openTask(number)),
-  // Opening a terminal shows it in the dock, the dock unfolded; a session's
-  // closed terminal comes back on its own conversation first. Closing a
-  // session's terminal ends its process and takes its card away with it.
-  onOpenTerminal: (participant, { live }) =>
+  // Opening a session's closed terminal brings it back on its own
+  // conversation and shows it in the dock, the dock unfolded. Closing it ends
+  // its process and takes its card away with it.
+  onOpenTerminal: (participant) =>
     act(async () => {
-      if (participant.member !== null && !live) {
+      if (participant.member !== null) {
         await core('session.open', { project: state.selected, handle: participant.handle })
       }
       unfold('dock')

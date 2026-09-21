@@ -549,24 +549,26 @@ export class BoardView {
     )
     status.dataset.state = out ? 'out' : (activity?.state ?? 'closed')
     const tools = element('div', 'row-tools')
-    // A member's row heads its sessions and has no terminal of its own. Any
-    // other row opens its terminal: a session's comes back on its own
-    // conversation if it is closed; an open one is brought into view. A
-    // session's terminal also closes from here, and the session is deleted
-    // from here; a closed one's copy is on its last task's card.
+    // A member's row heads its sessions and has no terminal of its own. A
+    // session's closed terminal opens again on its own conversation; an open
+    // one closes; the session is deleted from here too, and a closed one's
+    // copy is on its last task's card.
     const heading =
       participant.agent !== null && participant.member === null && pane === null && !lane.ended
     const session = participant.member !== null
     const latest = lane.tasks.at(-1)
     if (!heading) {
-      const openTerminal = button(
-        'Open terminal',
-        'quiet-button',
-        () => this.#actions.onOpenTerminal(participant, { live: pane !== null }),
-        `Open ${laneName(participant)}'s terminal`,
-      )
-      openTerminal.disabled = pane === null && !lane.ended && !session
-      tools.append(openTerminal)
+      // An open terminal is already in the dock: only a closed one offers Open.
+      if (pane === null) {
+        const openTerminal = button(
+          'Open terminal',
+          'quiet-button',
+          () => this.#actions.onOpenTerminal(participant),
+          `Open ${laneName(participant)}'s terminal`,
+        )
+        openTerminal.disabled = !lane.ended && !session
+        tools.append(openTerminal)
+      }
       if (session && pane !== null) {
         tools.append(
           button(
