@@ -1322,6 +1322,17 @@ test('folds the projects sidebar and the terminal dock away, and remembers it in
   await expect(projects).toBeHidden()
   await expect(sidebar.getByRole('button', { name: 'Show projects' })).toBeVisible()
   const dock = page.getByRole('complementary', { name: 'Terminal dock' })
+  // Folding the projects leaves the dock's header alone: at its right edge, its arrow pointing right.
+  await expect
+    .poll(() =>
+      dock
+        .locator('.dock-head')
+        .evaluate((head) => [
+          getComputedStyle(head).justifyContent,
+          getComputedStyle(head.querySelector('.fold-icon svg')).transform,
+        ]),
+    )
+    .toEqual(['flex-end', 'none'])
   await dock.getByRole('button', { name: 'Hide windows' }).click()
   await expect(stage).toBeHidden()
   await page.reload()

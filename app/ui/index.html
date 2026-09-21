@@ -70,8 +70,8 @@
     .shell[data-projects="hidden"] { grid-template-columns: 34px minmax(0, 1fr); }
     .shell[data-projects="hidden"] .sidebar { padding: 10px 4px; }
     .shell[data-projects="hidden"] .sidebar-title, .shell[data-projects="hidden"] #projects { display: none; }
-    .shell[data-projects="hidden"] .panel-head { justify-content: center; }
-    .shell[data-projects="hidden"] .fold-icon svg { transform: rotate(180deg); }
+    .shell[data-projects="hidden"] .sidebar .panel-head { justify-content: center; }
+    .shell[data-projects="hidden"] .sidebar .fold-icon svg { transform: rotate(180deg); }
     .main[data-dock="hidden"] { grid-template-columns: minmax(0, 1fr) 34px; }
     .main[data-dock="hidden"] .dock-title, .main[data-dock="hidden"] .stage { display: none; }
     .main[data-dock="hidden"] .dock-head { justify-content: center; padding: 10px 4px; }
@@ -204,7 +204,8 @@
       border-left: 1px solid var(--line-soft);
       background: var(--ink);
     }
-    .dock-head { padding: 8px 10px 0; }
+    /* The dock's title sits at its right edge, next to the arrow that folds it that way. */
+    .dock-head { padding: 8px 10px 0; justify-content: flex-end; }
     .dock-title {
       margin: 0;
       font: 700 10px var(--mono);
