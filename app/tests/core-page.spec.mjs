@@ -1462,7 +1462,7 @@ test('shows every live window in the strip, brings the asked one into view, and 
     'data-handle',
     'zeus',
   )
-  await expect(page.getByRole('button', { name: "Open @diana's terminal" })).toBeDisabled()
+  await expect(page.getByRole('button', { name: "What @diana's window wrote" })).toBeVisible()
   await page.evaluate(() =>
     window.__output.onmessage({ id: 'p1-zeus', generation: 7, seq: 1, bytes: [104, 105] }),
   )
@@ -1494,10 +1494,25 @@ test("keeps an ended window's terminal in the strip until the human closes it", 
   await expect(ended.getByText('ended')).toBeVisible()
   await ended.getByRole('button', { name: "Close @zeus's ended window" }).click()
   await expect(dock.locator('.terminal-card[data-handle="zeus"]')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: "Open @zeus's terminal" })).toBeDisabled()
+  await expect(page.getByRole('button', { name: "What @zeus's window wrote" })).toBeVisible()
 })
 
-test('offers no terminal for a participant without a window', async ({ page }) => {
-  await open(page)
-  await expect(page.getByRole('button', { name: "Open @diana's terminal" })).toBeDisabled()
+test("opens the last task's transcript for a window that is gone, and offers no terminal for a member with nothing yet", async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].lanes.push({
+    participant: participant(8, 'hera', 'worker', { harness: 'pi' }),
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  await expect(page.getByRole('button', { name: "Open @hera's terminal" })).toBeDisabled()
+  await expect(page.getByRole('button', { name: "Open @diana's terminal" })).toHaveCount(0)
+  await page.getByRole('button', { name: "What @diana's window wrote" }).click()
+  await expect(page.getByRole('complementary', { name: 'Task T-3' })).toBeVisible()
+  await expect
+    .poll(async () => (await calls(page, 'task.transcript')).some((call) => call.task === 3))
+    .toBe(true)
 })

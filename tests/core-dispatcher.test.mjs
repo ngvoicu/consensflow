@@ -395,6 +395,26 @@ describe('the dispatcher', () => {
     })
   })
 
+  it('presses Escape twice in a row for a harness that asks for it', async () => {
+    await setup(async (context) => {
+      const { project } = await withTeam(context)
+      context.adapter.interrupt = { presses: 2 }
+      context.ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.ledger.pauseTask(project.id, 1, { by: 'lead' })
+      await context.dispatcher.pass()
+      const pane = context.host.last('zeus')
+      assert.deepEqual(
+        context.host.requests.filter(([op]) => op === 'pane.input'),
+        [
+          ['pane.input', { id: pane.id, generation: pane.generation, bytes: [27] }],
+          ['pane.input', { id: pane.id, generation: pane.generation, bytes: [27] }],
+        ],
+      )
+    })
+  })
+
   it('delivers results to an idle lead one at a time and proves each arrived', async () => {
     await setup(async (context) => {
       const { project, id } = await withTeam(context, ['zeus', 'diana'])
@@ -539,12 +559,25 @@ describe('the dispatcher', () => {
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       const pane = context.host.last('zeus')
+      const escapes = () => context.host.requests.filter(([op]) => op === 'pane.input')
       assert.deepEqual(
-        context.host.requests.filter(([op]) => op === 'pane.input'),
+        escapes(),
         [['pane.input', { id: pane.id, generation: pane.generation, bytes: [27] }]],
         'Escape, once',
       )
       assert.deepEqual(context.host.killed, [], 'the window stays')
+      // Still working three seconds later (a harness that ignored the key while it thought): again, up to three times.
+      context.adapter.busy('zeus')
+      context.clock.advance(3_100)
+      await context.dispatcher.pass()
+      assert.equal(escapes().length, 2, 'pressed again while the window still works')
+      context.clock.advance(3_100)
+      await context.dispatcher.pass()
+      context.clock.advance(3_100)
+      await context.dispatcher.pass()
+      context.clock.advance(3_100)
+      await context.dispatcher.pass()
+      assert.equal(escapes().length, 3, 'and then no more')
       context.adapter.answer('zeus', 'Parser done')
       await context.dispatcher.pass()
       assert.equal(

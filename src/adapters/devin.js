@@ -26,6 +26,8 @@ export function devinAdapter({
 }) {
   return {
     harness: 'devin',
+    // Devin's own status line says it: "esc twice to interrupt".
+    interrupt: { presses: 2 },
 
     async prepare({ launchId, role, directory, resume, message, agent, instructions }) {
       const executable = executableFor('devin', env)

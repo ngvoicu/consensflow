@@ -507,15 +507,29 @@ export class BoardView {
     )
     status.dataset.state = out ? 'out' : (activity?.state ?? 'closed')
     const tools = element('div', 'row-tools')
-    tools.append(
-      button(
-        'Terminal',
-        'quiet-button',
-        () => this.#actions.onOpenTerminal(participant),
-        `Open ${laneName(participant)}'s terminal`,
-      ),
-    )
-    if (pane === null && !lane.ended) tools.firstChild.disabled = true
+    // A live (or still readable) window opens in the dock; a window that is
+    // gone leaves its copy on its last task's card: the same button opens that.
+    const latest = lane.tasks.at(-1)
+    if (pane === null && !lane.ended && latest !== undefined) {
+      tools.append(
+        button(
+          'Transcript',
+          'quiet-button',
+          () => this.#actions.onOpenTask(latest.number),
+          `What ${laneName(participant)}'s window wrote`,
+        ),
+      )
+    } else {
+      tools.append(
+        button(
+          'Terminal',
+          'quiet-button',
+          () => this.#actions.onOpenTerminal(participant),
+          `Open ${laneName(participant)}'s terminal`,
+        ),
+      )
+      if (pane === null && !lane.ended) tools.firstChild.disabled = true
+    }
     // Only the lead takes a task by name; members get theirs from the board by tier.
     if (coordinator) {
       tools.append(

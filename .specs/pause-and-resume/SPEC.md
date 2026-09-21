@@ -60,6 +60,15 @@ a pause names the task, never the member.
   `task.resume`. Board: the paused card, Pause and Resume in the drawer.
 - [x] [IMPL-PR-02] Satisfies TEST-PR-01; the lead's text and the README.
 
+- **The key, probed live on 2026-09-21** (`scratchpad/esc-probe/probe.py`,
+  a long list as the prompt, keys sent raw, growth measured after each):
+  one Escape stops Claude Code, Codex, Pi and OpenCode (OpenCode ignores it
+  while thinking); Devin needs two presses. Every harness took a fresh
+  prompt afterwards. The daemon presses per harness (`adapter.interrupt.presses`,
+  two for Devin) and again every three seconds while the window still reads
+  as working, three rounds at most. The Terminal button of a window that is
+  gone became Transcript: it opens the last task's card and its copy.
+
 ## TDD log
 
 - 2026-09-21, one gated commit: ledger 96 (4 new), dispatcher 45 (1 new, 3

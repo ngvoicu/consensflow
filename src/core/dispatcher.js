@@ -53,8 +53,11 @@ import { randomUUID } from 'node:crypto'
  * testable with explicit passes (`tests/core-dispatcher.test.mjs`).
  */
 
-/** The key that interrupts a harness's current turn. */
+/** The key that interrupts a harness's current turn, how often it is pressed again for a window still working, how soon, and the gap of a double press. */
 const ESCAPE = 27
+const INTERRUPT_ROUNDS = 3
+const INTERRUPT_AGAIN_MS = 3_000
+const DOUBLE_PRESS_MS = 150
 const INLINE_LIMIT = 4000
 const OPENING = 3000
 const RECEIVED_ROLES = new Set(['user', 'custom', 'tool'])
@@ -464,14 +467,29 @@ export class Dispatcher {
 
   /**
    * A paused task's window stays open, but the agent stops: the Escape key
-   * interrupts the turn every harness is on, once per pause. Whatever it
-   * still writes is not collected, since the task is not working.
+   * interrupts the turn (twice in a row where the harness asks for it), and
+   * again a few seconds later while the window still reads as working, since
+   * a harness may ignore the key while it thinks. Whatever the agent still
+   * writes is not collected, since the task is not working.
    */
   async #interruptIfPaused(participant, runtime) {
     const paused = this.#ledger.pausedTask(participant.id)
-    if (paused === null || runtime.interrupted === paused.id) return
-    runtime.interrupted = paused.id
-    await this.#host.request('pane.input', { ...runtime.pane, bytes: [ESCAPE] }).catch(() => {})
+    if (paused === null) return
+    const done = runtime.interrupted?.task === paused.id ? runtime.interrupted : null
+    if (
+      done !== null &&
+      (runtime.activity.state !== 'working' ||
+        done.rounds >= INTERRUPT_ROUNDS ||
+        this.#now() - done.at < INTERRUPT_AGAIN_MS)
+    ) {
+      return
+    }
+    runtime.interrupted = { task: paused.id, rounds: (done?.rounds ?? 0) + 1, at: this.#now() }
+    const presses = runtime.adapter.interrupt?.presses ?? 1
+    for (let press = 0; press < presses; press += 1) {
+      if (press > 0) await new Promise((resolve) => setTimeout(resolve, DOUBLE_PRESS_MS))
+      await this.#host.request('pane.input', { ...runtime.pane, bytes: [ESCAPE] }).catch(() => {})
+    }
   }
 
   /**
