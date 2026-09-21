@@ -145,6 +145,7 @@ describe('the Claude Code adapter', () => {
   it('resumes a conversation on the session it already has', async () => {
     await withHome(async ({ env }) => {
       const session = '0f8fad5b-d9cb-469f-a165-70867728950e'
+      await transcript(env, session, [userLine(session, 1, 'Write the parser')])
       const plan = await claudeCodeAdapter({ env, peer: false }).prepare(
         request({ resume: session, message: null }),
       )
@@ -157,6 +158,24 @@ describe('the Claude Code adapter', () => {
         '--permission-mode',
         'bypassPermissions',
       ])
+    })
+  })
+
+  it('starts afresh under the same id a conversation Claude never kept, instead of resuming nothing', async () => {
+    await withHome(async ({ env }) => {
+      // A window opened by hand and lost before anything was said in it:
+      // Claude kept no record, and `--resume` would say "No conversation found".
+      const session = '6a2f41ac-8c1d-4c55-9b4e-2f1e8a3d9c70'
+      const plan = await claudeCodeAdapter({ env, peer: false }).prepare(
+        request({ resume: session, message: 'Review T-1' }),
+      )
+      assert.equal(plan.nativeSession, session)
+      assert.ok(!plan.argv.includes('--resume'))
+      assert.deepEqual(
+        plan.argv.slice(plan.argv.indexOf('--session-id'), plan.argv.indexOf('--session-id') + 2),
+        ['--session-id', session],
+      )
+      assert.equal(plan.argv.at(-1), 'Review T-1', 'the brief goes in as its first message')
     })
   })
 

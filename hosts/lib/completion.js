@@ -88,6 +88,11 @@ export function cachedAnswers() {
 }
 
 /** Where a JSONL harness keeps one session's transcript, or null. */
+/** Whether the harness has kept a record of the conversation at all. */
+export async function hasTranscript(kind, sessionId, env) {
+  return (await locateTranscript(kind, sessionId, env)) !== null
+}
+
 async function locateTranscript(kind, sessionId, env) {
   switch (kind) {
     case 'claude-code':

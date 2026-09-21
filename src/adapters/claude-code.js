@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
-import { cachedAnswers } from '../../hosts/lib/completion.js'
+import { cachedAnswers, hasTranscript } from '../../hosts/lib/completion.js'
 import { interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
 import { send as sendPeer } from '../channels/claude-peer.js'
 import { prepareClaudeSettings } from '../claude-install.js'
@@ -45,11 +45,15 @@ export function claudeCodeAdapter({
         content: instructions,
       })
       const identity = { kind: 'claude-code', model: agent?.model, effort: agent?.effort }
+      // Claude keeps a conversation only once something was said in it: a
+      // window that closed before that (opened by hand, then lost to a
+      // restart) has nothing to resume, and `--resume` would exit at once.
+      // It starts afresh under the same id, so the conversation stays bound.
       const nativeSession = resume ?? randomUUID()
-      const runner =
-        resume === null
-          ? interactiveStart(identity, nativeSession, message)
-          : interactiveResume(identity, resume, message)
+      const resumable = resume !== null && (await hasTranscript('claude-code', resume, env))
+      const runner = resumable
+        ? interactiveResume(identity, resume, message)
+        : interactiveStart(identity, nativeSession, message)
       return {
         argv: [executable, ...settings, ...roleSetup.args, ...runner.args],
         env: { ...roleSetup.env },
