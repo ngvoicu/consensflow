@@ -289,7 +289,6 @@
     .row-status[data-state="waiting"] { color: var(--amber); }
     .row-status[data-state="out"] { color: var(--buoy); }
     .row-tools { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
-    .row-head .composer { margin-top: 8px; }
 
     .lamp {
       width: 10px;
@@ -458,7 +457,7 @@
       font-size: 12px;
     }
     .answer-choices .primary-button { align-self: flex-start; }
-    .answer textarea, .composer textarea, .reopen textarea {
+    .answer textarea, .reopen textarea {
       flex: 1;
       resize: vertical;
       min-height: 38px;
@@ -466,17 +465,6 @@
       border-radius: 6px;
       border: 1px solid var(--line);
       background: var(--ink);
-    }
-    .composer { display: grid; gap: 8px; margin: 10px 0 2px; }
-    .composer-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
-    .composer-fields label { display: grid; gap: 4px; font: 11px var(--mono); color: var(--muted); }
-    .composer-fields select, .composer-fields input {
-      padding: 6px 8px;
-      border-radius: 6px;
-      border: 1px solid var(--line);
-      background: var(--ink);
-      color: var(--foam);
-      font: 12px var(--ui);
     }
     .backlog {
       background: var(--deep);
@@ -486,7 +474,6 @@
     }
     .backlog .bay-name { color: var(--muted); }
     .team-warning { margin: 0; font: 12px var(--mono); color: var(--amber); }
-    .composer-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
     /* One task and its thread. */
     .drawer {

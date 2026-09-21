@@ -52,8 +52,6 @@ const ACTIVITY_LABEL = {
   out: 'Out of quota',
 }
 /** The work tiers, in the order the composer offers them. */
-const TIERS = ['critical', 'complex', 'standard', 'light']
-const PURPOSES = ['critical-review', 'architecture', 'hard-problem', 'important-question']
 const KIND_LABEL = {
   task: 'Task',
   result: 'Result',
@@ -171,9 +169,6 @@ function sessionsNote(lane, board) {
 /** "T-3, T-4": task numbers in a sentence. */
 const tasks = (numbers) => numbers.map((number) => `T-${number}`).join(', ')
 
-/** The fields a redraw must not lose: text areas, and the New task form's choices. */
-const DRAFT_FIELDS = 'textarea, form.composer select, form.composer input'
-
 /** Where a task is going or came from, on its card; what it waits for first. */
 function route(task) {
   if (task.assignee === null) {
@@ -212,7 +207,6 @@ function lamp(activity) {
 export class BoardView {
   #root
   #actions
-  #composingOpen = false
   #drafts = new Map()
 
   constructor(root, actions) {
@@ -248,13 +242,8 @@ export class BoardView {
         'foryou-status',
         waiting.length === 0 ? 'Nothing waiting' : `${waiting.length} waiting`,
       ),
-      button('New task', 'quiet-button', () => {
-        this.#composingOpen = !this.#composingOpen
-        this.#actions.onRedraw()
-      }),
     )
     section.append(head)
-    if (this.#composingOpen) section.append(this.#openComposer(board))
     const strips = element('ol', 'strips')
     strips.setAttribute('aria-label', 'Waiting for you')
     for (const message of waiting) strips.append(this.#messageStrip(message, now))
@@ -265,7 +254,7 @@ export class BoardView {
           'bay-empty',
           board.project?.gate
             ? 'Every task, result, question and answer between your agents waits here for your approval.'
-            : 'Questions from your agents and the results you asked for appear here.',
+            : 'Questions from your agents appear here.',
         ),
       )
     }
@@ -634,121 +623,9 @@ export class BoardView {
     return item
   }
 
-  /**
-   * A new task on the board: for a tier of worker on the team, or an image
-   * from the designer; critical work names its purpose. The lead is talked to
-   * in its terminal, and advice is the lead's alone to ask.
-   */
-  #openComposer(board) {
-    const form = element('form', 'composer')
-    const fields = element('div', 'composer-fields')
-    const address = element('select')
-    address.name = 'address'
-    address.setAttribute('aria-label', 'For')
-    for (const tier of TIERS) {
-      const names = board.lanes
-        .filter(
-          (lane) =>
-            lane.participant.member === null &&
-            lane.participant.roles.includes('worker') &&
-            lane.participant.tier === tier,
-        )
-        .map((lane) => lane.participant.handle)
-      if (names.length === 0) continue
-      const option = element('option', null, `A ${tier} worker (${names.join(', ')})`)
-      option.value = `worker:${tier}`
-      address.append(option)
-    }
-    const designers = board.lanes
-      .filter(
-        (lane) => lane.participant.member === null && lane.participant.roles.includes('designer'),
-      )
-      .map((lane) => lane.participant.handle)
-    if (designers.length > 0) {
-      const option = element('option', null, `An image designer (${designers.join(', ')})`)
-      option.value = 'designer'
-      address.append(option)
-    }
-    if (address.options.length === 0) {
-      return element(
-        'p',
-        'bay-empty',
-        'The team has no worker or image designer yet: add one in Team.',
-      )
-    }
-    const purpose = element('select')
-    purpose.name = 'purpose'
-    purpose.setAttribute('aria-label', 'Purpose')
-    for (const value of PURPOSES) {
-      const option = element('option', null, value)
-      option.value = value
-      purpose.append(option)
-    }
-    const labelled = (text, control) => {
-      const label = element('label', null, text)
-      label.append(control)
-      return label
-    }
-    const purposeLabel = labelled('Purpose', purpose)
-    // What the task waits for first: task numbers, checked by the browser.
-    const needs = element('input')
-    needs.name = 'needs'
-    needs.type = 'text'
-    needs.placeholder = 'T-3, T-4'
-    needs.pattern = String.raw`\s*((T-?)?\d+\s*(,\s*(T-?)?\d+\s*)*)?`
-    needs.title = 'Task numbers, like T-3, T-4'
-    needs.setAttribute('aria-label', 'Only after')
-    const needsLabel = labelled('Only after', needs)
-    const arrange = () => {
-      purposeLabel.hidden = !address.value.endsWith(':critical')
-    }
-    address.addEventListener('change', arrange)
-    arrange()
-    fields.append(labelled('For', address), purposeLabel, needsLabel)
-    const field = element('textarea')
-    field.name = 'task'
-    field.rows = 3
-    field.required = true
-    field.setAttribute('aria-label', 'Task')
-    field.placeholder =
-      'What should be done? The member starts from nothing: include every detail it needs and what to return.'
-    field.dataset.draft = 'open'
-    const submit = element('button', 'primary-button', 'Put on the board')
-    submit.type = 'submit'
-    const actions = element('div', 'composer-actions')
-    actions.append(
-      button('Cancel', 'quiet-button', () => {
-        this.#composingOpen = false
-        this.#actions.onRedraw()
-      }),
-      submit,
-    )
-    form.append(fields, field, actions)
-    form.addEventListener('submit', (event) => {
-      event.preventDefault()
-      const text = field.value.trim()
-      if (!text) return
-      this.#drafts.delete('open')
-      this.#drafts.delete('Only after')
-      this.#composingOpen = false
-      const after = [...needs.value.matchAll(/\d+/g)].map((match) => Number(match[0]))
-      const waits = after.length === 0 ? {} : { needs: after }
-      if (address.value === 'designer') {
-        this.#actions.onPutTask({ pool: 'designer', ...waits }, text)
-        return
-      }
-      const [pool, tier] = address.value.split(':')
-      this.#actions.onPutTask(
-        { pool, tier, ...(tier === 'critical' ? { purpose: purpose.value } : {}), ...waits },
-        text,
-      )
-    })
-    requestAnimationFrame(() => field.focus())
-    return form
-  }
-
+  /** What the human is writing in a text area survives a redraw. */
   #saveDrafts() {
-    for (const field of this.#root.querySelectorAll(DRAFT_FIELDS)) {
+    for (const field of this.#root.querySelectorAll('textarea')) {
       const key = field.dataset.draft ?? field.getAttribute('aria-label')
       if (field.value) this.#drafts.set(key, field.value)
       else this.#drafts.delete(key)
@@ -756,11 +633,9 @@ export class BoardView {
   }
 
   #restoreDrafts() {
-    for (const field of this.#root.querySelectorAll(DRAFT_FIELDS)) {
+    for (const field of this.#root.querySelectorAll('textarea')) {
       const key = field.dataset.draft ?? field.getAttribute('aria-label')
-      if (!this.#drafts.has(key)) continue
-      field.value = this.#drafts.get(key)
-      if (field.tagName === 'SELECT') field.dispatchEvent(new Event('change'))
+      if (this.#drafts.has(key)) field.value = this.#drafts.get(key)
     }
   }
 }

@@ -66,24 +66,6 @@ async function act(work) {
 }
 
 const board = new BoardView(boardRoot, {
-  onPutTask: ({ pool, tier, purpose, needs }, text) =>
-    act(async () => {
-      const { task } = await core('task.add', {
-        project: state.selected,
-        pool,
-        ...(tier === undefined ? {} : { tier }),
-        ...(purpose === undefined ? {} : { purpose }),
-        ...(needs === undefined ? {} : { needs }),
-        body: text,
-      })
-      const waits =
-        task.blockedBy.length === 0
-          ? ''
-          : ` It waits until ${task.blockedBy.map((number) => `T-${number}`).join(', ')} ${task.blockedBy.length === 1 ? 'is' : 'are'} accepted.`
-      note(
-        `T-${task.number} is on the board for ${pool === 'designer' ? 'an image designer' : `a ${tier} ${pool}`}.${waits}`,
-      )
-    }),
   // A question put to the lead (left unanswered, or still waiting for the
   // human's approval) is answered here too; it was never in the human's
   // inbox, so there is nothing to mark read.

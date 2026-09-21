@@ -1234,20 +1234,6 @@ describe('tasks and the inbox queue', () => {
     })
   })
 
-  it('lets the human take a task by reading it and finish it with a result', async () => {
-    await withLedger((ledger) => {
-      const { project } = team(ledger)
-      const { message } = ledger.createTask(project.id, {
-        from: 'lead',
-        to: 'human',
-        body: 'Try the login',
-      })
-      ledger.markRead(message.id)
-      assert.equal(ledger.task(project.id, 1).state, 'working')
-      assert.equal(ledger.recordResult(project.id, 1, { body: 'Works' }).message.recipient, 'lead')
-    })
-  })
-
   it('follows the task state machine for accept, reopen, cancel and fail', async () => {
     await withLedger((ledger) => {
       const { project, id } = team(ledger)

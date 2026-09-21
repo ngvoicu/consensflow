@@ -1643,7 +1643,7 @@ class Ledger {
     })
   }
 
-  /** The human opened a message in the app; reading a task takes it on. */
+  /** The human read a message in the app. */
   markRead(messageId) {
     return this.#write(() => {
       const message = this.#message(messageId)
@@ -1661,8 +1661,6 @@ class Ledger {
         .prepare(`UPDATE message SET state = 'read', delivered_at = ? WHERE id = ?`)
         .run(this.#at(), messageId)
       this.#log(message.projectId, 'message.read', { message: messageId })
-      const task = this.#messageTask(messageId)
-      if (message.kind === 'task' && task?.state === 'queued') this.#moveTask(task, 'working')
       return this.#message(messageId)
     })
   }

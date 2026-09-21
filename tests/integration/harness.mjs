@@ -6,7 +6,6 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
-const CF = join(REPO, 'bin', 'cf.mjs')
 const BRIDGE =
   process.env.CONSENSFLOW_TEST_BRIDGE ??
   join(REPO, 'app', 'src-tauri', 'target', 'release', 'consensflow-bridge')
@@ -278,54 +277,6 @@ export async function startIntegration({
     })
   }
 
-  const http = async (pathname, { method = 'GET', body, token = handle.token } = {}) => {
-    const response = await fetch(`${handle.url}${pathname.replace(/^\//, '')}`, {
-      method,
-      headers: {
-        authorization: `Bearer ${token}`,
-        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    })
-    const text = await response.text()
-    return { status: response.status, body: text.length === 0 ? null : JSON.parse(text) }
-  }
-
-  const runCli = (args, extraEnv = {}, timeoutMs = 10_000) =>
-    new Promise((resolveRun, rejectRun) => {
-      const child = spawn(process.execPath, [CF, ...args], {
-        cwd: workspace,
-        env: { ...env, ...extraEnv },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      })
-      let stdout = ''
-      let stderr = ''
-      let settled = false
-      const timer = setTimeout(() => {
-        if (settled) return
-        child.kill('SIGKILL')
-        rejectRun(new Error(`CLI timed out: cf ${args.join(' ')}`))
-      }, timeoutMs)
-      child.stdout.on('data', (chunk) => {
-        stdout += String(chunk)
-      })
-      child.stderr.on('data', (chunk) => {
-        stderr += String(chunk)
-      })
-      child.on('error', (cause) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        rejectRun(cause)
-      })
-      child.on('close', (code, signal) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        resolveRun({ code, signal, stdout, stderr })
-      })
-    })
-
   const transcript = (sessionId) => {
     const file = join(env.CLAUDE_CONFIG_DIR, 'projects', 'integration', `${sessionId}.jsonl`)
     try {
@@ -419,16 +370,6 @@ export async function startIntegration({
     signalRust(signal) {
       return process.kill(rust.pid, signal)
     },
-    http,
-    async openTab(options = {}) {
-      const opened = await http('/api/tabs', {
-        method: 'POST',
-        body: { dir: workspace, harness: 'claude-code', ...options },
-      })
-      assert.equal(opened.status, 201, JSON.stringify(opened.body))
-      return opened.body
-    },
-    runCli,
     // A timeout names what both processes said on stderr: an automatic resume
     // that failed, for one, logs there and nowhere else.
     waitFor: (predicate, timeoutMs, intervalMs) =>

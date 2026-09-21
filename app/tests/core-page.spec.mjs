@@ -345,17 +345,6 @@ async function open(page, data = model()) {
         answer({ task: { ...data.tasks[`${project}:${task}`], state: 'queued' } }),
       'task.transcript': ({ project, task }) =>
         answer(data.transcripts?.[`${project}:${task}`] ?? { items: [], total: 0 }),
-      'task.add': ({ to, tier, pool, body, needs }) =>
-        answer({
-          task: {
-            number: 9,
-            assignee: to ?? null,
-            tier: tier ?? null,
-            pool: pool ?? null,
-            body,
-            blockedBy: needs ?? [],
-          },
-        }),
       'project.open': ({ directory }) => answer({ project: { id: 3, name: 'new', directory } }),
     }
     const invoke = async (command, args = {}) => {
@@ -621,13 +610,6 @@ test("draws a member's sessions as lanes under it, named, and counts its open wi
   await expect(
     dock.locator('.terminal-card[data-handle="zeus-amber-pine"] .terminal-name'),
   ).toHaveText('@zeus · amber-pine')
-  await page.getByRole('button', { name: 'New task' }).click()
-  const backlog = page.getByRole('region', { name: 'For you' })
-  const composer = backlog.locator('form.composer')
-  await expect(composer.getByLabel('For').locator('option')).toHaveText([
-    'A standard worker (zeus)',
-    'A light worker (diana)',
-  ])
 })
 
 test('answers a question with options by picking, one pick per question at least', async ({
@@ -712,6 +694,9 @@ test("shows a task waiting for a member in its requester's backlog, with the tie
   await open(page)
   const foryou = page.getByRole('region', { name: 'For you' })
   await expect(foryou.locator('.foryou-status')).toHaveText('3 waiting')
+  // The human puts no task on the board: the lead does, told in its terminal.
+  await expect(page.getByRole('button', { name: 'New task' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /^Give .* a task$/ })).toHaveCount(0)
   const card = page.locator(
     'tr[data-handle="lead"] td[data-state="open"] button.card[data-task="6"]',
   )
@@ -747,161 +732,6 @@ test('shows what a task on the board waits for, on its card and in its drawer', 
   await card.click()
   const drawer = page.getByRole('complementary', { name: 'Task T-7' })
   await expect(drawer.locator('.drawer-meta')).toContainText('needs T-2 (done), T-6 (open)')
-})
-
-test('gives a task to a tier of member, never to a member by name', async ({ page }) => {
-  await open(page)
-  // Nobody is given a task by name from the board: the lead is talked to in its terminal.
-  await expect(page.getByRole('button', { name: /^Give .* a task$/ })).toHaveCount(0)
-  const backlog = page.getByRole('region', { name: 'For you' })
-  await backlog.getByRole('button', { name: 'New task' }).click()
-  const composer = backlog.locator('form.composer')
-  await composer.getByLabel('For').selectOption('worker:light')
-  await expect(composer.getByLabel('Purpose')).toBeHidden()
-  await expect(composer.getByLabel('Only after')).toBeVisible()
-  await composer.getByLabel('Task').fill('Profile the parser on the large fixture.')
-  await composer.getByRole('button', { name: 'Put on the board' }).click()
-  await expect
-    .poll(() => calls(page, 'task.add'))
-    .toEqual([
-      {
-        project: 1,
-        pool: 'worker',
-        tier: 'light',
-        body: 'Profile the parser on the large fixture.',
-      },
-    ])
-  await expect(page.locator('#status')).toHaveText('T-9 is on the board for a light worker.')
-})
-
-test('keeps what the human chose in New task when the board redraws under it', async ({ page }) => {
-  await open(page)
-  const backlog = page.getByRole('region', { name: 'For you' })
-  await backlog.getByRole('button', { name: 'New task' }).click()
-  const composer = backlog.locator('form.composer')
-  await composer.getByLabel('For').selectOption('worker:standard')
-  await composer.getByLabel('Only after').fill('T-2')
-  await composer.getByLabel('Task').fill('Wire the parser.')
-  await page.evaluate(() => window.__listeners.get('state-changed')())
-  await expect.poll(() => calls(page, 'board.get').then((list) => list.length)).toBeGreaterThan(1)
-  await expect(composer.getByLabel('For')).toHaveValue('worker:standard')
-  await expect(composer.getByLabel('Only after')).toHaveValue('T-2')
-  await expect(composer.getByLabel('Task')).toHaveValue('Wire the parser.')
-})
-
-test('says what to do instead of offering New task when the team has no worker or designer', async ({
-  page,
-}) => {
-  const data = model()
-  data.boards[1].lanes = data.boards[1].lanes.filter((l) => l.participant.agent === null)
-  await open(page, data)
-  const backlog = page.getByRole('region', { name: 'For you' })
-  await backlog.getByRole('button', { name: 'New task' }).click()
-  await expect(backlog.locator('form.composer')).toHaveCount(0)
-  await expect(
-    backlog.getByText('The team has no worker or image designer yet: add one in Team.'),
-  ).toBeVisible()
-})
-
-test('puts a task on the board that waits for others, and refuses anything but task numbers', async ({
-  page,
-}) => {
-  await open(page)
-  const backlog = page.getByRole('region', { name: 'For you' })
-  await backlog.getByRole('button', { name: 'New task' }).click()
-  const composer = backlog.locator('form.composer')
-  await expect(composer.getByLabel('Only after')).toBeVisible()
-  await composer.getByLabel('For').selectOption('worker:standard')
-  await composer.getByLabel('Task').fill('Wire the parser into the CLI.')
-  await composer.getByLabel('Only after').fill('T-2, 6')
-  await composer.getByRole('button', { name: 'Put on the board' }).click()
-  await expect
-    .poll(() => calls(page, 'task.add'))
-    .toEqual([
-      {
-        project: 1,
-        pool: 'worker',
-        tier: 'standard',
-        needs: [2, 6],
-        body: 'Wire the parser into the CLI.',
-      },
-    ])
-  await expect(page.locator('#status')).toHaveText(
-    'T-9 is on the board for a standard worker. It waits until T-2, T-6 are accepted.',
-  )
-  await backlog.getByRole('button', { name: 'New task' }).click()
-  await composer.getByLabel('For').selectOption('worker:standard')
-  await composer.getByLabel('Task').fill('Second')
-  await composer.getByLabel('Only after').fill('the parser')
-  await composer.getByRole('button', { name: 'Put on the board' }).click()
-  await expect(composer.getByLabel('Only after')).toHaveJSProperty('validity.valid', false)
-  expect(await calls(page, 'task.add')).toHaveLength(1)
-})
-
-test('asks for the purpose of critical work, and offers only the tiers of worker the team has', async ({
-  page,
-}) => {
-  const data = model()
-  data.boards[1].lanes.push(
-    {
-      participant: participant(8, 'calliope', 'worker', { tier: 'critical' }),
-      tasks: [],
-      activity: { state: 'closed' },
-      pane: null,
-    },
-    {
-      participant: participant(9, 'athena', 'advisor', { tier: 'complex' }),
-      tasks: [],
-      activity: { state: 'closed' },
-      pane: null,
-    },
-    {
-      participant: participant(10, 'pygmalion', 'designer', { harness: 'image', tier: 'light' }),
-      tasks: [],
-      activity: { state: 'closed' },
-      pane: null,
-    },
-  )
-  await open(page, data)
-  const backlog = page.getByRole('region', { name: 'For you' })
-  await backlog.getByRole('button', { name: 'New task' }).click()
-  const composer = backlog.locator('form.composer')
-  // Advice is the lead's alone to ask, and the lead is talked to in its terminal:
-  // neither athena, an advisor, nor the lead is an address here.
-  await expect(composer.getByLabel('For').locator('option')).toHaveText([
-    'A critical worker (calliope)',
-    'A standard worker (zeus)',
-    'A light worker (diana)',
-    'An image designer (pygmalion)',
-  ])
-  await composer.getByLabel('For').selectOption('worker:critical')
-  await composer.getByLabel('Purpose').selectOption('architecture')
-  await composer.getByLabel('Task').fill('Why does the parser leak memory?')
-  await composer.getByRole('button', { name: 'Put on the board' }).click()
-  await expect
-    .poll(() => calls(page, 'task.add'))
-    .toEqual([
-      {
-        project: 1,
-        pool: 'worker',
-        tier: 'critical',
-        purpose: 'architecture',
-        body: 'Why does the parser leak memory?',
-      },
-    ])
-  await backlog.getByRole('button', { name: 'New task' }).click()
-  await composer.getByLabel('For').selectOption('designer')
-  await expect(composer.getByLabel('Purpose')).toBeHidden()
-  await composer.getByLabel('Task').fill('A logo: a compass rose; save it as images/logo.png')
-  await composer.getByRole('button', { name: 'Put on the board' }).click()
-  await expect
-    .poll(async () => (await calls(page, 'task.add')).at(-1))
-    .toEqual({
-      project: 1,
-      pool: 'designer',
-      body: 'A logo: a compass rose; save it as images/logo.png',
-    })
-  await expect(page.locator('#status')).toHaveText('T-9 is on the board for an image designer.')
 })
 
 test("shows a member out of quota, and a task's reviews under it, never as cards of their own", async ({

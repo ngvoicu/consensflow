@@ -95,20 +95,6 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       return { task: found }
     },
 
-    // The human puts work on the board for a tier (or the designer); the lead
-    // is talked to in its own terminal, never through a task.
-    'task.add': change(async ({ project, pool, tier, purpose, needs, body, title }) =>
-      ledger.createTask(project, {
-        from: 'human',
-        pool,
-        tier,
-        purpose,
-        ...(needs === undefined ? {} : { needs }),
-        body,
-        title,
-      }),
-    ),
-
     'task.transcript': async ({ project, task, limit }) =>
       ledger.transcript(project, task, limit === undefined ? {} : { limit }),
 
