@@ -142,7 +142,7 @@ const board = new BoardView(boardRoot, {
   onCloseTerminal: (participant) =>
     act(async () => {
       await core('session.close', { project: state.selected, handle: participant.handle })
-      terminals.forget(participant.handle)
+      terminals.forget(state.selected, participant.handle)
     }),
   onEndSession: (participant) =>
     act(async () => {
@@ -266,11 +266,11 @@ function render() {
   const lanes = state.board?.lanes ?? []
   if (!lanes.some((lane) => lane.participant.handle === state.focus)) state.focus = 'lead'
   if (suspended) {
-    terminals.clear()
+    terminals.clear(state.selected)
     drawer.hide()
   }
   // A row's Terminal button stays live while an ended window is still readable.
-  for (const lane of lanes) lane.ended = terminals.has(lane.participant.handle)
+  for (const lane of lanes) lane.ended = terminals.has(state.selected, lane.participant.handle)
   if (state.board === null) {
     boardRoot.replaceChildren(
       element(
@@ -283,7 +283,7 @@ function render() {
     board.render({ board: state.board, inbox: state.inbox, agents: state.agents })
     if (suspended) boardRoot.prepend(suspendedBanner(project))
   }
-  terminals.render(lanes, { focused: state.focus })
+  terminals.render(lanes, { focused: state.focus, project: state.selected })
 }
 
 /** What a closed project shows in place of its actions: why it is still, and the one way on. */

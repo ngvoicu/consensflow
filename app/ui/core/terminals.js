@@ -46,33 +46,44 @@ export class TerminalsView {
     return this.#link.input(pane, data)
   }
 
-  /** Whether a participant has a window in the strip, live or ended. */
-  has(handle) {
-    return [...this.#cards.values()].some((entry) => entry.handle === handle)
+  /** Whether a participant of a project has a terminal in the strip, live or ended. */
+  has(project, handle) {
+    return [...this.#cards.values()].some(
+      (entry) => entry.project === project && entry.handle === handle,
+    )
   }
 
   /**
-   * Keep a window for every lane that has one, in lane order; keep an ended
-   * window until its participant opens a new one; bring `focused` into view.
+   * Keep a terminal for every lane of the project shown that has one, in lane
+   * order; keep an ended one until its participant opens a new one; bring
+   * `focused` into view. Another project's terminals stay alive, off screen,
+   * with their scrollback: switching projects loses nothing.
    */
-  render(lanes, { focused }) {
+  render(lanes, { focused, project }) {
     const ordered = laneOrder(lanes)
     for (const [order, lane] of ordered.entries()) {
       if (lane.pane === null || this.#dismissed.has(paneKey(lane.pane))) continue
       for (const [key, entry] of this.#cards) {
-        if (entry.handle === lane.participant.handle && key !== paneKey(lane.pane)) this.#drop(key)
+        if (
+          entry.project === project &&
+          entry.handle === lane.participant.handle &&
+          key !== paneKey(lane.pane)
+        ) {
+          this.#drop(key)
+        }
       }
-      this.#card(lane.pane, lane, order)
+      this.#card(lane.pane, lane, order, project)
     }
-    for (const entry of this.#cards.values()) {
+    const mine = [...this.#cards.values()].filter((entry) => entry.project === project)
+    for (const entry of mine) {
       const lane = ordered.find((lane) => lane.participant.handle === entry.handle)
       const live = lane !== undefined && lane.pane !== null && paneKey(lane.pane) === entry.key
       entry.card.dataset.ended = String(!live)
       entry.ended.hidden = live
     }
-    const cards = [...this.#cards.values()].sort((a, b) => a.order - b.order)
+    const cards = mine.sort((a, b) => a.order - b.order)
     if (cards.length === 0) {
-      this.#stage.replaceChildren(element('p', 'stage-empty', 'No window is open yet.'))
+      this.#stage.replaceChildren(element('p', 'stage-empty', 'No terminal is open yet.'))
       return
     }
     this.#stage.replaceChildren(...cards.map((entry) => entry.card))
@@ -88,30 +99,30 @@ export class TerminalsView {
     )
   }
 
-  /** Every card goes: a closed project has no windows to read. */
-  clear() {
-    for (const key of [...this.#cards.keys()]) this.#drop(key)
+  /** A closed project's cards go: it has no terminals to read. */
+  clear(project) {
+    for (const [key, entry] of [...this.#cards]) {
+      if (entry.project === project) this.#drop(key)
+    }
   }
 
   /**
-   * The human closed a participant's window: its card goes now, even while
+   * The human closed a participant's terminal: its card goes now, even while
    * the window is still on its way out, and does not come back for it. A new
-   * window of the same participant is a new pane and shows as usual.
+   * terminal of the same participant is a new pane and shows as usual.
    */
-  forget(handle) {
+  forget(project, handle) {
     for (const [key, entry] of this.#cards) {
-      if (entry.handle !== handle) continue
+      if (entry.project !== project || entry.handle !== handle) continue
       this.#dismissed.add(key)
       this.#drop(key)
     }
     this.#onChange()
   }
 
-  /** The human closes an ended window's card; a live one stays. */
-  close(handle) {
-    for (const [key, entry] of this.#cards) {
-      if (entry.handle === handle && entry.card.dataset.ended === 'true') this.#drop(key)
-    }
+  /** The human closes an ended terminal's card; a live one stays. */
+  #closeEnded(key) {
+    if (this.#cards.get(key)?.card.dataset.ended === 'true') this.#drop(key)
     this.#onChange()
   }
 
@@ -123,7 +134,12 @@ export class TerminalsView {
     this.#link.retire(key)
   }
 
-  #card(pane, lane, order = Number.MAX_SAFE_INTEGER) {
+  /**
+   * A pane's card and emulator. Output may arrive before the board has drawn
+   * the pane (or for a project not shown): its card waits, with no project,
+   * until a render places it.
+   */
+  #card(pane, lane, order = Number.MAX_SAFE_INTEGER, project = null) {
     const key = paneKey(pane)
     let entry = this.#cards.get(key)
     if (entry === undefined) {
@@ -133,7 +149,17 @@ export class TerminalsView {
       const ended = element('span', 'terminal-ended', 'ended')
       ended.hidden = true
       card.append(head, host)
-      entry = { key, pane, card, head, host, ended, handle: null, order: Number.MAX_SAFE_INTEGER }
+      entry = {
+        key,
+        pane,
+        card,
+        head,
+        host,
+        ended,
+        handle: null,
+        project: null,
+        order: Number.MAX_SAFE_INTEGER,
+      }
       this.#cards.set(key, entry)
       this.#registry.ensure(pane, host)
     }
@@ -144,8 +170,8 @@ export class TerminalsView {
       lamp.setAttribute('aria-hidden', 'true')
       const close = element('button', 'quiet-button terminal-close', 'Close')
       close.type = 'button'
-      close.setAttribute('aria-label', `Close ${name}'s ended window`)
-      close.addEventListener('click', () => this.close(lane.participant.handle))
+      close.setAttribute('aria-label', `Close ${name}'s ended terminal`)
+      close.addEventListener('click', () => this.#closeEnded(key))
       entry.head.replaceChildren(
         lamp,
         element('span', 'terminal-name', name),
@@ -156,6 +182,7 @@ export class TerminalsView {
       entry.card.setAttribute('aria-label', `${name}'s terminal`)
       entry.card.dataset.handle = lane.participant.handle
       entry.handle = lane.participant.handle
+      entry.project = project
       entry.order = order
     }
     return entry.card

@@ -91,6 +91,46 @@ export function age(iso, now = Date.now()) {
 const COORDINATORS = ['human', 'lead']
 
 /** The human and the lead first, then each member with its sessions right under it. */
+/** The role a member's task is for: a review is a reviewer's, the rest its pool's. */
+const roleOf = (task, roles) => (task.kind === 'review' ? 'reviewer' : (task.pool ?? roles[0]))
+
+/**
+ * The board's rows: a member with several roles heads one row per role, each
+ * followed by that role's sessions and holding that role's cards, so a worker
+ * and a reviewer read as two things; everything else in lane order.
+ */
+export function boardRows(lanes) {
+  const ordered = laneOrder(lanes)
+  const members = new Set(
+    ordered
+      .filter((lane) => lane.participant.agent !== null && lane.participant.member === null)
+      .map((lane) => lane.participant.handle),
+  )
+  const rows = []
+  for (const lane of ordered) {
+    const { participant } = lane
+    // A session is placed under its member's row for its role.
+    if (participant.member !== null && members.has(participant.member)) continue
+    if (!members.has(participant.handle)) {
+      rows.push(lane)
+      continue
+    }
+    const sessions = ordered.filter((other) => other.participant.member === participant.handle)
+    const roles = participant.roles.length > 0 ? participant.roles : [participant.role]
+    for (const role of roles) {
+      rows.push({
+        ...lane,
+        participant: { ...participant, role, roles: [role] },
+        tasks: lane.tasks.filter((task) => roleOf(task, roles) === role),
+      })
+      rows.push(...sessions.filter((session) => session.participant.role === role))
+    }
+    // A session of a role the member no longer holds still shows, last.
+    rows.push(...sessions.filter((session) => !roles.includes(session.participant.role)))
+  }
+  return rows
+}
+
 export function laneOrder(lanes) {
   const rank = ({ participant }) => [
     COORDINATORS.includes(participant.role) ? 0 : 1,
@@ -115,10 +155,13 @@ const laneName = (participant) =>
     ? `@${participant.member} · ${participant.session}`
     : ({ human: 'You', lead: 'Lead' }[participant.handle] ?? `@${participant.handle}`)
 
-/** A member's row: how many of its sessions' terminals are open now. */
+/** A member's row: how many of its sessions' terminals (of the row's role) are open now. */
 function sessionsNote(lane, board) {
   const open = board.lanes.filter(
-    (other) => other.participant.member === lane.participant.handle && other.pane !== null,
+    (other) =>
+      other.participant.member === lane.participant.handle &&
+      other.participant.role === lane.participant.role &&
+      other.pane !== null,
   ).length
   return open === 0
     ? 'Free: a terminal opens with its next task'
@@ -425,7 +468,7 @@ export class BoardView {
         reviews.set(task.reviewOf, list)
       }
     }
-    for (const lane of laneOrder(board.lanes)) {
+    for (const lane of boardRows(board.lanes)) {
       body.append(this.#row(lane, board, models.get(lane.participant.agent), reviews, now))
     }
     table.append(head, body)

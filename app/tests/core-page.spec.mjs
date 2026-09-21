@@ -520,6 +520,59 @@ test("gives a session's lane the human's hand on its window: open, close, delete
   await expect(page.getByRole('button', { name: "Delete @zeus's session" })).toHaveCount(0)
 })
 
+test('gives a member with two roles a row per role, each with its own sessions and cards', async ({
+  page,
+}) => {
+  const data = model()
+  const zeusLane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  const zeus = zeusLane.participant
+  zeus.roles = ['worker', 'reviewer']
+  Object.assign(zeusLane, {
+    tasks: [
+      task(31, 'Old parser', 'accepted', 'lead', 'zeus', 40, { pool: 'worker', tier: 'standard' }),
+    ],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  data.boards[1].lanes.push(
+    {
+      participant: session(40, zeus, 'amber-pine', 'worker'),
+      tasks: [task(41, 'Write the lexer', 'working', 'lead', 'zeus-amber-pine', 3)],
+      activity: { state: 'working' },
+      pane: { id: 'p1-zeus-amber-pine', generation: 9 },
+    },
+    {
+      participant: session(42, zeus, 'brisk-birch', 'reviewer'),
+      tasks: [
+        task(43, 'Review T-2', 'working', 'lead', 'zeus-brisk-birch', 2, {
+          kind: 'review',
+          reviewOf: 2,
+        }),
+      ],
+      activity: { state: 'working' },
+      pane: { id: 'p1-zeus-brisk-birch', generation: 4 },
+    },
+  )
+  await open(page, data)
+  const rows = await page
+    .locator('tbody tr[data-handle^="zeus"]')
+    .evaluateAll((rows) => rows.map((row) => [row.dataset.handle, row.dataset.role]))
+  expect(rows).toEqual([
+    ['zeus', 'worker'],
+    ['zeus-amber-pine', 'worker'],
+    ['zeus', 'reviewer'],
+    ['zeus-brisk-birch', 'reviewer'],
+  ])
+  const worker = page.locator('tr[data-handle="zeus"][data-role="worker"]')
+  const reviewer = page.locator('tr[data-handle="zeus"][data-role="reviewer"]')
+  await expect(worker.locator('.row-meta')).toHaveText(/^worker · standard/)
+  await expect(reviewer.locator('.row-meta')).toHaveText(/^reviewer · standard/)
+  await expect(worker.locator('.row-status')).toHaveText('1 terminal open, one per task')
+  await expect(reviewer.locator('.row-status')).toHaveText('1 terminal open, one per task')
+  await expect(worker.locator('button.card[data-task="31"]')).toHaveCount(1)
+  await expect(reviewer.locator('button.card')).toHaveCount(0)
+})
+
 test("draws a member's sessions as lanes under it, named, and counts its open windows", async ({
   page,
 }) => {
@@ -1548,6 +1601,41 @@ test('shows every live window in the strip, brings the asked one into view, and 
   expect(subscriptions).toBe(1)
 })
 
+test("keeps each project's terminals, scrollback and all, when the human switches projects", async ({
+  page,
+}) => {
+  const data = model()
+  data.projects[1].state = 'open'
+  data.boards[2].project.state = 'open'
+  data.boards[2].lanes.push({
+    participant: { ...participant(10, 'lead', 'lead'), projectId: 2 },
+    tasks: [],
+    activity: { state: 'idle' },
+    pane: { id: 'p2-lead', generation: 1 },
+  })
+  await open(page, data)
+  const dock = page.getByRole('complementary', { name: 'Terminal dock' })
+  await expect(dock.locator('.terminal-card')).toHaveCount(2)
+  const emulators = () => page.evaluate(() => window.__emulators.length)
+  const before = await emulators()
+  await page.evaluate(() =>
+    window.__output.onmessage({ id: 'p1-lead', generation: 5, seq: 1, bytes: [104, 105] }),
+  )
+  await page.locator('.project-select', { hasText: 'foundry' }).click()
+  await expect(dock.locator('.terminal-card')).toHaveCount(1)
+  await expect(dock.locator('.terminal-card[data-handle="lead"]')).toHaveAttribute(
+    'data-ended',
+    'false',
+  )
+  await page.locator('.project-select', { hasText: 'harbour' }).click()
+  await expect(dock.locator('.terminal-card')).toHaveCount(2)
+  await expect(dock.locator('.terminal-card[data-ended="true"]')).toHaveCount(0)
+  expect(await emulators()).toBe(before + 1, "only foundry's lead got a new terminal")
+  expect(
+    await page.evaluate(() => window.__emulators.some((emulator) => emulator.written.length > 0)),
+  ).toBe(true)
+})
+
 test("keeps an ended window's terminal in the strip until the human closes it", async ({
   page,
 }) => {
@@ -1563,7 +1651,7 @@ test("keeps an ended window's terminal in the strip until the human closes it", 
   const ended = dock.locator('.terminal-card[data-handle="zeus"]')
   await expect(ended).toHaveAttribute('data-ended', 'true')
   await expect(ended.getByText('ended')).toBeVisible()
-  await ended.getByRole('button', { name: "Close @zeus's ended window" }).click()
+  await ended.getByRole('button', { name: "Close @zeus's ended terminal" }).click()
   await expect(dock.locator('.terminal-card[data-handle="zeus"]')).toHaveCount(0)
   await expect(page.locator('tr[data-handle="zeus"] .row-tools button')).toHaveCount(0)
 })
