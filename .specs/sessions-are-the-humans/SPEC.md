@@ -32,6 +32,13 @@ should open the original session."
   while it holds work (queued, working, waiting or in review).
 - **The lane's status is short.** "Window closed" for a session without a
   window; the old sentence is gone.
+- **One word on screen: terminal** (Gabriel, 2026-09-21: "then we can have
+  open terminal, close terminal and remove the window stuff"). A session's
+  row offers *Open terminal* (reopens a closed one on its conversation, or
+  brings an open one into view, unfolding the dock), *Close terminal* and
+  *Delete session*, plus *Transcript* while it is closed. The lead's row has
+  Open terminal; a member's row is a heading with no buttons. The dock is
+  titled Terminals.
 - **The transcript copy stays** (asked: "do we still need to keep a copy?"):
   reopening shows the harness's own history, but that history is the
   harness's to prune, it is gone once the session is deleted, and the card

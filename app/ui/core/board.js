@@ -115,14 +115,14 @@ const laneName = (participant) =>
     ? `@${participant.member} · ${participant.session}`
     : ({ human: 'You', lead: 'Lead' }[participant.handle] ?? `@${participant.handle}`)
 
-/** A member's row: how many of its windows are open now. */
+/** A member's row: how many of its sessions' terminals are open now. */
 function sessionsNote(lane, board) {
   const open = board.lanes.filter(
     (other) => other.participant.member === lane.participant.handle && other.pane !== null,
   ).length
   return open === 0
-    ? 'Free: a window opens with its next task'
-    : `${open} window${open === 1 ? '' : 's'} open, one per task`
+    ? 'Free: a terminal opens with its next task'
+    : `${open} terminal${open === 1 ? '' : 's'} open, one per task`
 }
 
 /** "T-3, T-4": task numbers in a sentence. */
@@ -501,56 +501,52 @@ export class BoardView {
             : resting(participant, activity)
               ? sessionsNote(lane, board)
               : participant.member !== null && (activity?.state ?? 'closed') === 'closed'
-                ? 'Window closed'
+                ? 'Terminal closed'
                 : (ACTIVITY_LABEL[activity?.state] ?? 'No window'),
     )
     status.dataset.state = out ? 'out' : (activity?.state ?? 'closed')
     const tools = element('div', 'row-tools')
-    // A member's row heads its sessions and never has a window of its own. A
-    // live (or still readable) window opens in the dock; a window that is gone
-    // leaves its copy on its last task's card: the same place opens that.
+    // A member's row heads its sessions and has no terminal of its own. Any
+    // other row opens its terminal: a session's comes back on its own
+    // conversation if it is closed; an open one is brought into view. A
+    // session's terminal also closes from here, and the session is deleted
+    // from here; a closed one's copy is on its last task's card.
     const heading =
       participant.agent !== null && participant.member === null && pane === null && !lane.ended
+    const session = participant.member !== null
     const latest = lane.tasks.at(-1)
-    if (heading) {
-      // Nothing to view here: each session below has its own.
-    } else if (pane === null && !lane.ended && latest !== undefined) {
-      tools.append(
-        button(
-          'Transcript',
-          'quiet-button',
-          () => this.#actions.onOpenTask(latest.number),
-          `What ${laneName(participant)}'s window wrote`,
-        ),
+    if (!heading) {
+      const openTerminal = button(
+        'Open terminal',
+        'quiet-button',
+        () => this.#actions.onOpenTerminal(participant, { live: pane !== null }),
+        `Open ${laneName(participant)}'s terminal`,
       )
-    } else {
-      tools.append(
-        button(
-          'Terminal',
-          'quiet-button',
-          () => this.#actions.onOpenTerminal(participant),
-          `Open ${laneName(participant)}'s terminal`,
-        ),
-      )
-      if (pane === null && !lane.ended) tools.firstChild.disabled = true
+      openTerminal.disabled = pane === null && !lane.ended && !session
+      tools.append(openTerminal)
+      if (session && pane !== null) {
+        tools.append(
+          button(
+            'Close terminal',
+            'quiet-button',
+            () => this.#actions.onCloseTerminal(participant),
+            `Close ${laneName(participant)}'s terminal`,
+          ),
+        )
+      }
+      if (session && pane === null && latest !== undefined) {
+        tools.append(
+          button(
+            'Transcript',
+            'quiet-button',
+            () => this.#actions.onOpenTask(latest.number),
+            `What ${laneName(participant)}'s terminal wrote`,
+          ),
+        )
+      }
     }
-    // A session's window is the human's: open it again on its conversation,
-    // close it, or end the session for good.
-    if (participant.member !== null) {
+    if (session) {
       tools.append(
-        pane === null
-          ? button(
-              'Open window',
-              'quiet-button',
-              () => this.#actions.onOpenWindow(participant),
-              `Open ${laneName(participant)}'s window`,
-            )
-          : button(
-              'Close window',
-              'quiet-button',
-              () => this.#actions.onCloseWindow(participant),
-              `Close ${laneName(participant)}'s window`,
-            ),
         button(
           'Delete session',
           'danger-button',

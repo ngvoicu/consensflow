@@ -31,9 +31,9 @@ credentials, takes no API key, and writes only inside its own home.
   so the lead writes every task for someone who has never seen the project.
   When a follow-up truly needs what a window already knows, the lead continues
   that window with `cf task add --after T-3 "…"`. A session keeps its
-  conversation until you delete it: from its lane you can open its window
-  again on that conversation, close it, or delete the session for good.
-  There is no limit on sessions and none of them expires.
+  conversation until you delete it: from its lane you open its terminal
+  (again on that conversation, if it was closed), close it, or delete the
+  session for good. There is no limit on sessions and none of them expires.
 - **The board is the only channel.** No agent gives another a task by name,
   types into another window, or reads another agent's session files.
   Questions go up: a member asks the lead, the lead asks you. You answer on the

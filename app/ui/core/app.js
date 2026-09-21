@@ -128,15 +128,18 @@ const board = new BoardView(boardRoot, {
       note(`T-${message.taskNumber} goes back to @${message.sender}.`)
     }),
   onOpenTask: (number) => act(() => openTask(number)),
-  // Opening a session's window shows it in the dock at once, the dock unfolded;
-  // closing it takes its card away with it.
-  onOpenWindow: (participant) =>
+  // Opening a terminal shows it in the dock, the dock unfolded; a session's
+  // closed terminal comes back on its own conversation first. Closing a
+  // session's terminal ends its process and takes its card away with it.
+  onOpenTerminal: (participant, { live }) =>
     act(async () => {
-      await core('session.open', { project: state.selected, handle: participant.handle })
+      if (participant.member !== null && !live) {
+        await core('session.open', { project: state.selected, handle: participant.handle })
+      }
       unfold('dock')
       state.focus = participant.handle
     }),
-  onCloseWindow: (participant) =>
+  onCloseTerminal: (participant) =>
     act(async () => {
       await core('session.close', { project: state.selected, handle: participant.handle })
       terminals.forget(participant.handle)
@@ -146,10 +149,6 @@ const board = new BoardView(boardRoot, {
       await core('session.end', { project: state.selected, handle: participant.handle })
       note(`@${participant.handle} is gone; its tasks stay on @${participant.member}'s lane.`)
     }),
-  onOpenTerminal: (participant) => {
-    state.focus = participant.handle
-    render()
-  },
   onRedraw: () => render(),
 })
 
@@ -342,9 +341,8 @@ function renderProjects() {
     const select = element('button', 'project-select')
     select.type = 'button'
     select.setAttribute('aria-current', String(project.id === state.selected))
-    // Open is the normal state and says nothing; a closed project wears it.
+    // A closed project says so by its buttons (Delete, Resume), not by a pill.
     select.append(element('span', 'project-name', project.name))
-    if (project.state !== 'open') select.append(element('span', 'project-state', 'Closed'))
     select.addEventListener('click', () => {
       state.selected = project.id
       state.focus = 'lead'
@@ -761,7 +759,7 @@ const shell = $('.shell')
 const main = $('.main')
 const FOLDS = [
   ['projects', shell, 'data-projects', $('#toggle-projects'), 'projects'],
-  ['dock', main, 'data-dock', $('#toggle-dock'), 'windows'],
+  ['dock', main, 'data-dock', $('#toggle-dock'), 'terminals'],
 ]
 const foldKey = (name) => `cf.layout.${name}`
 function readFold(name) {

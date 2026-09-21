@@ -487,24 +487,24 @@ test("gives a session's lane the human's hand on its window: open, close, delete
   await open(page, data)
   const live = page.locator('tr[data-handle="zeus-amber-pine"]')
   await expect(
-    live.getByRole('button', { name: "Close @zeus · amber-pine's window" }),
+    live.getByRole('button', { name: "Close @zeus · amber-pine's terminal" }),
   ).toBeVisible()
-  await expect(live.getByRole('button', { name: "Open @zeus · amber-pine's window" })).toHaveCount(
-    0,
-  )
+  await expect(
+    live.getByRole('button', { name: "Open @zeus · amber-pine's terminal" }),
+  ).toBeVisible()
   const closed = page.locator('tr[data-handle="zeus-brisk-birch"]')
-  await expect(closed.locator('.row-status')).toHaveText('Window closed')
-  // Opening a window unfolds the dock it shows in.
-  await page.getByRole('button', { name: 'Hide windows' }).click()
+  await expect(closed.locator('.row-status')).toHaveText('Terminal closed')
+  // Opening a terminal unfolds the dock it shows in.
+  await page.getByRole('button', { name: 'Hide terminals' }).click()
   await expect(page.getByRole('region', { name: 'Terminals' })).toBeHidden()
-  await closed.getByRole('button', { name: "Open @zeus · brisk-birch's window" }).click()
+  await closed.getByRole('button', { name: "Open @zeus · brisk-birch's terminal" }).click()
   await expect
     .poll(() => calls(page, 'session.open'))
     .toEqual([{ project: 1, handle: 'zeus-brisk-birch' }])
   await expect(page.getByRole('region', { name: 'Terminals' })).toBeVisible()
   const dock = page.getByRole('complementary', { name: 'Terminal dock' })
   await expect(dock.locator('.terminal-card[data-handle="zeus-amber-pine"]')).toHaveCount(1)
-  await live.getByRole('button', { name: "Close @zeus · amber-pine's window" }).click()
+  await live.getByRole('button', { name: "Close @zeus · amber-pine's terminal" }).click()
   await expect
     .poll(() => calls(page, 'session.close'))
     .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
@@ -560,9 +560,9 @@ test("draws a member's sessions as lanes under it, named, and counts its open wi
   await expect(first.locator('.row-meta')).toContainText('worker session of @zeus')
   await expect(first.locator('td[data-state="working"] button.card')).toHaveCount(1)
   const second = page.locator('tr[data-handle="zeus-brisk-birch"]')
-  await expect(second.locator('.row-status')).toHaveText('Window closed')
+  await expect(second.locator('.row-status')).toHaveText('Terminal closed')
   await expect(page.locator('tr[data-handle="zeus"] .row-status')).toHaveText(
-    '1 window open, one per task',
+    '1 terminal open, one per task',
   )
   const dock = page.getByRole('complementary', { name: 'Terminal dock' })
   await expect(
@@ -1351,7 +1351,7 @@ test('shows a member between tasks as free, its window gone until the next task'
   diana.participant.outUntil = null
   await open(page, data)
   const row = page.locator('tr[data-handle="diana"]')
-  await expect(row.locator('.row-status')).toHaveText('Free: a window opens with its next task')
+  await expect(row.locator('.row-status')).toHaveText('Free: a terminal opens with its next task')
   await expect(row.getByTestId('lamp')).toHaveAttribute('data-state', 'closed')
 })
 
@@ -1434,13 +1434,13 @@ test('folds the projects sidebar and the terminal dock away, and remembers it in
         ]),
     )
     .toEqual(['flex-end', 'none'])
-  await dock.getByRole('button', { name: 'Hide windows' }).click()
+  await dock.getByRole('button', { name: 'Hide terminals' }).click()
   await expect(stage).toBeHidden()
   await page.reload()
   await expect(page.getByTestId('projects')).toBeHidden()
   await expect(page.getByRole('region', { name: 'Terminals' })).toBeHidden()
   await page.getByRole('button', { name: 'Show projects' }).click()
-  await page.getByRole('button', { name: 'Show windows' }).click()
+  await page.getByRole('button', { name: 'Show terminals' }).click()
   await expect(page.getByTestId('projects')).toBeVisible()
   await expect(page.getByRole('region', { name: 'Terminals' })).toBeVisible()
 })
@@ -1581,7 +1581,7 @@ test("opens a closed session's transcript from its lane, and gives a member's he
   })
   await open(page, data)
   await expect(page.locator('tr[data-handle="diana"] .row-tools button')).toHaveCount(0)
-  await page.getByRole('button', { name: "What @diana · amber-pine's window wrote" }).click()
+  await page.getByRole('button', { name: "What @diana · amber-pine's terminal wrote" }).click()
   await expect(page.getByRole('complementary', { name: 'Task T-3' })).toBeVisible()
   await expect
     .poll(async () => (await calls(page, 'task.transcript')).some((call) => call.task === 3))
