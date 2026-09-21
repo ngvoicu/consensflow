@@ -148,6 +148,7 @@
       background: rgba(255, 255, 255, .02);
       overflow: hidden;
     }
+    .project:hover { background: var(--panel); }
     .project[data-current="true"] {
       border-color: var(--seafoam-dim);
       background: var(--panel-raised);
@@ -164,7 +165,6 @@
       background: transparent;
       cursor: pointer;
     }
-    .project-select:hover { background: var(--panel); }
     .project-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .project-state {
       width: fit-content;
@@ -176,14 +176,12 @@
       text-transform: uppercase;
       color: var(--muted);
     }
-    .project[data-state="open"] .project-state { color: var(--seafoam); }
     .project-tools {
       display: flex;
       justify-content: flex-end;
       gap: 6px;
       padding: 6px 8px;
       border-top: 1px solid var(--line-soft);
-      background: rgba(0, 0, 0, .12);
     }
     .project-tools .quiet-button { padding: 3px 9px; font-size: 12px; }
     .projects-empty, .team-empty { color: var(--muted); padding: 6px 9px; }

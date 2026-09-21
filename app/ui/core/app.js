@@ -324,10 +324,9 @@ function renderProjects() {
     const select = element('button', 'project-select')
     select.type = 'button'
     select.setAttribute('aria-current', String(project.id === state.selected))
-    select.append(
-      element('span', 'project-name', project.name),
-      element('span', 'project-state', project.state === 'open' ? 'Open' : 'Suspended'),
-    )
+    // Open is the normal state and says nothing; a closed project wears it.
+    select.append(element('span', 'project-name', project.name))
+    if (project.state !== 'open') select.append(element('span', 'project-state', 'Closed'))
     select.addEventListener('click', () => {
       state.selected = project.id
       state.focus = 'lead'
