@@ -446,18 +446,8 @@
     .strip[data-overdue="true"] .strip-route { color: var(--amber); }
     .strip[data-gated="true"] .strip-route { color: var(--seafoam); }
     .strip[data-gated="true"] { border-left: 3px solid var(--seafoam-dim); }
-    .decline { display: flex; gap: 8px; align-items: center; flex: 1; }
-    .decline input {
-      flex: 1;
-      padding: 5px 8px;
-      border-radius: 5px;
-      border: 1px solid var(--line);
-      background: var(--ink);
-      color: var(--foam);
-      font-size: 12px;
-    }
     .answer-choices .primary-button { align-self: flex-start; }
-    .answer textarea, .reopen textarea {
+    .answer textarea {
       flex: 1;
       resize: vertical;
       min-height: 38px;
@@ -515,27 +505,46 @@
     .team-warning { margin: 0 0 12px; font-size: 12px; color: var(--amber); }
     .team-hint { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--muted); }
     .member-confirm { color: var(--buoy); font-size: 12px; margin-right: 8px; }
-    .drawer-section { margin: 0 0 14px; }
-    .drawer-section h3 {
-      margin: 0 0 6px;
-      font: 700 10px/1 var(--mono);
+    /* Each part of a task is a panel of its own, headed by what it is. */
+    .drawer-section {
+      margin: 0 0 12px;
+      padding: 12px 14px;
+      border: 1px solid var(--line-soft);
+      border-left: 3px solid var(--slate);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, .02);
+    }
+    .drawer-section-head {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      margin: 0 0 8px;
+      font: 700 10px/1.2 var(--mono);
       letter-spacing: .16em;
       text-transform: uppercase;
       color: var(--muted);
     }
+    .drawer-count { margin-left: auto; font-weight: 400; letter-spacing: .04em; text-transform: none; }
     .drawer-brief, .drawer-result, .drawer-review-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .drawer-result-section {
-      padding: 10px 12px;
-      border: 1px solid var(--seafoam-dim);
-      border-left: 3px solid var(--seafoam);
-      border-radius: 6px;
+    .drawer-section[data-section="result"] {
+      border-color: var(--seafoam-dim);
+      border-left-color: var(--seafoam);
       background: rgba(99, 199, 178, .06);
     }
-    .drawer-result-section h3 { color: var(--seafoam); }
-    .drawer-review { padding: 8px 12px; border-left: 3px solid var(--amber); }
-    .drawer-review-head { color: var(--amber); }
+    .drawer-section[data-section="result"] .drawer-section-head { color: var(--seafoam); }
+    .drawer-section[data-section="reviews"] { border-left-color: var(--amber); }
+    .drawer-section[data-section="reviews"] .drawer-section-head { color: var(--amber); }
+    .drawer-review + .drawer-review { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+    .drawer-review-head { margin: 0 0 4px; font-size: 12px; color: var(--amber); }
+    .drawer-section[data-section="transcript"] { background: var(--ink); border-left-color: var(--line); }
+    details.drawer-section > summary { cursor: pointer; list-style: none; }
+    details.drawer-section > summary::-webkit-details-marker { display: none; }
+    details.drawer-section > summary::before { content: '▾'; letter-spacing: 0; }
+    details.drawer-section:not([open]) > summary { margin-bottom: 0; }
+    details.drawer-section:not([open]) > summary::before { content: '▸'; }
+    details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoam); outline-offset: 4px; border-radius: 2px; }
     .thread { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
-    .thread-item { border-left: 3px solid var(--slate); padding: 2px 0 2px 12px; }
+    .thread-item { border-left: 2px solid var(--slate); padding: 2px 0 2px 10px; }
     .thread-item[data-kind="result"] { border-color: var(--seafoam); }
     .thread-item[data-kind="question"] { border-color: var(--amber); }
     .thread-head {
@@ -560,8 +569,7 @@
       overflow: auto;
     }
     .transcript-more { margin: 0 0 8px; font-size: 12px; color: var(--muted); }
-    .drawer-actions { display: grid; gap: 10px; margin-top: 18px; }
-    .reopen { display: flex; gap: 8px; align-items: flex-start; }
+    .drawer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
 
     /* The live windows. */
     .stage {

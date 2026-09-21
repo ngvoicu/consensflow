@@ -66,16 +66,14 @@ async function act(work) {
 }
 
 const board = new BoardView(boardRoot, {
-  // A question put to the lead (left unanswered, or still waiting for the
-  // human's approval) is answered here too; it was never in the human's
-  // inbox, so there is nothing to mark read.
+  // A question put to the human is answered here and marked read.
   onAnswer: (message, text, choices) =>
     act(async () => {
       await core('message.answer', {
         question: message.id,
         ...(choices === undefined ? { body: text } : { choices }),
       })
-      if (message.recipient === 'human') await core('message.read', { message: message.id })
+      await core('message.read', { message: message.id })
       note(`Answer sent to @${message.sender}.`)
     }),
   onRead: (message) => act(() => core('message.read', { message: message.id })),
@@ -85,18 +83,10 @@ const board = new BoardView(boardRoot, {
       await core('message.approve', { message: message.id })
       note(`m-${message.id} goes on to @${message.recipient}.`)
     }),
-  onDecline: (message, reason) =>
+  onDecline: (message) =>
     act(async () => {
-      await core('message.decline', {
-        message: message.id,
-        ...(reason ? { reason } : {}),
-      })
+      await core('message.decline', { message: message.id })
       note(`m-${message.id} declined; @${message.sender} is told.`)
-    }),
-  onSendBack: (message, text) =>
-    act(async () => {
-      await core('task.reopen', { project: state.selected, task: message.taskNumber, body: text })
-      note(`T-${message.taskNumber} goes back to @${message.sender}.`)
     }),
   onOpenTask: (number) => act(() => openTask(number)),
   // Opening a session's closed terminal brings it back on its own
@@ -128,8 +118,6 @@ const drawer = new TaskDrawer($('#task-drawer'), {
     state.openTask = null
     drawer.hide()
   },
-  onReopen: (task, text) =>
-    act(() => core('task.reopen', { project: state.selected, task: task.number, body: text })),
   onCancel: (task) =>
     act(() => core('task.cancel', { project: state.selected, task: task.number })),
   onPause: (task) =>
@@ -137,12 +125,11 @@ const drawer = new TaskDrawer($('#task-drawer'), {
       await core('task.pause', { project: state.selected, task: task.number })
       note(`T-${task.number} is paused; its work waits.`)
     }),
-  onResume: (task, text) =>
+  onResume: (task) =>
     act(async () => {
       const { task: resumed } = await core('task.resume', {
         project: state.selected,
         task: task.number,
-        body: text,
       })
       note(
         resumed.state === 'open'

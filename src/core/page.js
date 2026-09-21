@@ -7,6 +7,9 @@ import { agentRow, listAgents } from '../roster.js'
  * names (`core_request` in `app/src-tauri/src/commands.rs`), and every change
  * wakes the dispatcher so it happens in the panes at once.
  */
+/** What a paused task's window is told when the human resumes it. */
+export const RESUME_WORDS = 'Go on where you stopped.'
+
 export function pageOperations({ ledger, dispatcher, env, kick }) {
   const change = (work) => async (body) => {
     const value = await work(body)
@@ -110,10 +113,6 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       project: ledger.setGate(project, gate),
     })),
 
-    'task.reopen': change(async ({ project, task, body }) =>
-      ledger.reopenTask(project, task, { by: 'human', body }),
-    ),
-
     'task.cancel': change(async ({ project, task }) => ({
       task: ledger.cancelTask(project, task, { by: 'human' }),
     })),
@@ -122,8 +121,9 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       task: ledger.pauseTask(project, task, { by: 'human' }),
     })),
 
-    'task.resume': change(async ({ project, task, body }) =>
-      ledger.resumeTask(project, task, { by: 'human', body }),
+    // The human resumes without writing to the agent: the words are always these.
+    'task.resume': change(async ({ project, task }) =>
+      ledger.resumeTask(project, task, { by: 'human', body: RESUME_WORDS }),
     ),
 
     'message.read': change(async ({ message }) => ({ message: ledger.markRead(message) })),
@@ -132,11 +132,8 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       message: ledger.approveMessage(message, { by: 'human' }),
     })),
 
-    'message.decline': change(async ({ message, reason }) => ({
-      message: ledger.declineMessage(message, {
-        by: 'human',
-        ...(reason === undefined ? {} : { reason }),
-      }),
+    'message.decline': change(async ({ message }) => ({
+      message: ledger.declineMessage(message, { by: 'human' }),
     })),
 
     'message.answer': change(async ({ question, body, choices }) => ({

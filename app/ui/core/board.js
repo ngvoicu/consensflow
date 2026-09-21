@@ -354,7 +354,9 @@ export class BoardView {
     }
     if (gated) {
       item.append(this.#gateActions(message))
-    } else if (message.kind === 'question') {
+    } else if (message.kind === 'question' && !message.overdue) {
+      // A question put to the human is answered here; one the lead has left
+      // unanswered is a notice: tell the lead in its terminal.
       item.append(message.questions ? this.#choiceForm(message) : this.#answerForm(message))
     } else {
       const actions = element('div', 'strip-actions')
@@ -363,24 +365,27 @@ export class BoardView {
           button('Open task', 'quiet-button', () => this.#actions.onOpenTask(message.taskNumber)),
         )
       }
-      actions.append(
-        button(
-          'Mark read',
-          'quiet-button',
-          () => this.#actions.onRead(message),
-          `Mark m-${message.id} read`,
-        ),
-      )
+      // An unanswered question of the lead's was never in the human's inbox.
+      if (!message.overdue) {
+        actions.append(
+          button(
+            'Mark read',
+            'quiet-button',
+            () => this.#actions.onRead(message),
+            `Mark m-${message.id} read`,
+          ),
+        )
+      }
       item.append(actions)
     }
     return item
   }
 
   /**
-   * What the human may do with a message that waits for approval: pass it on
-   * as it is, or the one other thing its kind allows. A task or an answer is
-   * declined with a word to its sender; a result goes back to its window with
-   * a follow-up; a question is answered here instead of by the one asked.
+   * What the human may do with a message that waits for approval: pass it on,
+   * or decline a task or an answer (its sender is told). The human writes to
+   * no agent from here: a result or a question goes on to the lead, who
+   * decides and answers in its terminal.
    */
   #gateActions(message) {
     const actions = element('div', 'strip-actions')
@@ -392,37 +397,15 @@ export class BoardView {
         `Approve m-${message.id} for ${who(message.recipient)}`,
       ),
     )
-    if (message.kind === 'result') {
-      const form = element('form', 'reopen')
-      const field = element('textarea')
-      field.rows = 2
-      field.required = true
-      field.setAttribute('aria-label', `Follow-up for T-${message.taskNumber}`)
-      field.placeholder = `What should ${who(message.sender)} change?`
-      const submit = element('button', 'quiet-button', 'Send back')
-      submit.type = 'submit'
-      form.append(field, submit)
-      form.addEventListener('submit', (event) => {
-        event.preventDefault()
-        if (field.value.trim()) this.#actions.onSendBack(message, field.value.trim())
-      })
-      actions.append(form)
-    } else if (message.kind === 'question') {
-      actions.append(message.questions ? this.#choiceForm(message) : this.#answerForm(message))
-    } else {
-      const form = element('form', 'decline')
-      const field = element('input')
-      field.type = 'text'
-      field.setAttribute('aria-label', `Why m-${message.id} is declined`)
-      field.placeholder = 'Why (optional)'
-      const submit = element('button', 'quiet-button', 'Decline')
-      submit.type = 'submit'
-      form.append(field, submit)
-      form.addEventListener('submit', (event) => {
-        event.preventDefault()
-        this.#actions.onDecline(message, field.value.trim())
-      })
-      actions.append(form)
+    if (message.kind === 'task' || message.kind === 'answer') {
+      actions.append(
+        button(
+          'Decline',
+          'quiet-button',
+          () => this.#actions.onDecline(message),
+          `Decline m-${message.id}`,
+        ),
+      )
     }
     if (message.taskNumber) {
       actions.append(
@@ -456,6 +439,11 @@ export class BoardView {
         reviews.set(task.reviewOf, list)
       }
     }
+    // A review's round is its place among the reviews of its task.
+    for (const list of reviews.values()) {
+      list.sort((a, b) => a.number - b.number)
+      for (const [index, review] of list.entries()) review.round = index + 1
+    }
     for (const lane of boardRows(board.lanes)) {
       body.append(this.#row(lane, board, models.get(lane.participant.agent), reviews, now))
     }
@@ -470,13 +458,12 @@ export class BoardView {
     row.dataset.role = participant.role
     if (participant.member) row.dataset.session = participant.member
     row.append(this.#rowHead(lane, board, agent, now))
-    // A task waiting for a member sits in its requester's backlog.
+    // A task waiting for a member sits in its requester's backlog. A review is
+    // a card on its reviewer's row, and hangs under the task it reviews too.
     const mine = [
-      ...lane.tasks.filter((task) => task.kind !== 'review'),
+      ...lane.tasks,
       ...board.open.filter((task) => task.requester === participant.handle),
     ].sort((a, b) => b.number - a.number)
-    // A review is never a card of its own: it hangs under the task it reviews,
-    // and the reviewer's row only says so in its status.
     for (const [state] of COLUMNS) {
       const cell = element('td')
       cell.dataset.state = state
@@ -685,21 +672,35 @@ export class TaskDrawer {
     )
     meta.dataset.state = task.state
     const sections = [head, meta]
-    const brief = element('section', 'drawer-section')
-    brief.append(element('h3', null, 'Brief'), element('p', 'drawer-brief', task.body))
+    const panel = (name, label, count) => {
+      const section = element(name === 'transcript' ? 'details' : 'section', 'drawer-section')
+      section.dataset.section = name
+      const heading = element(name === 'transcript' ? 'summary' : 'h3', 'drawer-section-head')
+      heading.append(element('span', null, label))
+      if (count !== undefined) heading.append(element('span', 'drawer-count', count))
+      section.append(heading)
+      return section
+    }
+    const brief = panel('brief', 'Brief')
+    brief.append(element('p', 'drawer-brief', task.body))
     sections.push(brief)
     const result = task.messages.findLast((message) => message.kind === 'result')
     if (result !== undefined) {
-      const block = element('section', 'drawer-section drawer-result-section')
-      block.append(element('h3', null, 'Result'), element('p', 'drawer-result', result.body))
+      const block = panel('result', 'Result')
+      block.append(element('p', 'drawer-result', result.body))
       sections.push(block)
     }
-    for (const review of task.reviews ?? []) {
-      const block = element('section', 'drawer-section drawer-review')
-      block.dataset.review = String(review.number)
-      block.append(element('h3', 'drawer-review-head', reviewLine(review)))
-      if (review.findings !== null) {
-        block.append(element('p', 'drawer-review-body', review.findings))
+    const reviews = task.reviews ?? []
+    if (reviews.length > 0) {
+      const block = panel('reviews', 'Reviews', String(reviews.length))
+      for (const review of reviews) {
+        const entry = element('div', 'drawer-review')
+        entry.dataset.review = String(review.number)
+        entry.append(element('p', 'drawer-review-head', reviewLine(review)))
+        if (review.findings !== null) {
+          entry.append(element('p', 'drawer-review-body', review.findings))
+        }
+        block.append(entry)
       }
       sections.push(block)
     }
@@ -708,6 +709,7 @@ export class TaskDrawer {
       (message) => message !== result && !(message.kind === 'task' && message.body === task.body),
     )
     if (rest.length > 0) {
+      const block = panel('thread', 'Thread', String(rest.length))
       const thread = element('ol', 'thread')
       thread.setAttribute('aria-label', `T-${task.number}'s thread`)
       for (const message of rest) {
@@ -723,14 +725,18 @@ export class TaskDrawer {
         )
         thread.append(item)
       }
-      sections.push(thread)
+      block.append(thread)
+      sections.push(block)
     }
-    const actions = element('div', 'drawer-actions')
     if (transcript.items.length > 0) {
-      const section = element('section', 'drawer-section')
-      section.append(element('h3', null, 'What the agent did'))
+      const block = panel(
+        'transcript',
+        'What the agent did',
+        `${transcript.total} item${transcript.total === 1 ? '' : 's'}`,
+      )
+      block.open = true
       if (transcript.total > transcript.items.length) {
-        section.append(
+        block.append(
           element(
             'p',
             'transcript-more',
@@ -753,54 +759,27 @@ export class TaskDrawer {
         )
         list.append(entry)
       }
-      section.append(list)
-      sections.push(section)
+      block.append(list)
+      sections.push(block)
     }
-    // Accepting is the lead's call, made in its terminal; the human sends back.
+    // What the human may do: nothing that writes to the agent (that is done
+    // in its terminal), and no accepting (that is the lead's).
+    const actions = element('div', 'drawer-actions')
     if (task.state === 'done' && task.kind === 'work') {
       actions.append(button('Ask for a review', 'quiet-button', () => this.#actions.onReview(task)))
-    }
-    if (task.state === 'done' || task.state === 'failed') {
-      const form = element('form', 'reopen')
-      const field = element('textarea')
-      field.rows = 3
-      field.required = true
-      field.setAttribute('aria-label', `Follow-up for T-${task.number}`)
-      field.placeholder = `What should ${who(task.assignee)} change?`
-      const submit = element('button', 'quiet-button', 'Send back')
-      submit.type = 'submit'
-      form.append(field, submit)
-      form.addEventListener('submit', (event) => {
-        event.preventDefault()
-        if (field.value.trim()) this.#actions.onReopen(task, field.value.trim())
-      })
-      actions.append(form)
     }
     if (PAUSABLE.includes(task.state) && task.kind === 'work' && task.assignee !== 'lead') {
       actions.append(button('Pause', 'quiet-button', () => this.#actions.onPause(task)))
     }
     if (task.state === 'paused') {
-      const form = element('form', 'reopen')
-      const field = element('textarea')
-      field.rows = 3
-      field.required = true
-      field.setAttribute('aria-label', `Resume T-${task.number} with`)
-      field.placeholder = 'What should happen now? It goes into the same window.'
-      const submit = element('button', 'primary-button', 'Resume')
-      submit.type = 'submit'
-      form.append(field, submit)
-      form.addEventListener('submit', (event) => {
-        event.preventDefault()
-        if (field.value.trim()) this.#actions.onResume(task, field.value.trim())
-      })
-      actions.append(form)
+      actions.append(button('Resume', 'primary-button', () => this.#actions.onResume(task)))
     }
     if (ACTIVE.includes(task.state)) {
       actions.append(button('Cancel task', 'danger-button', () => this.#actions.onCancel(task)))
     }
     this.#root.setAttribute('aria-label', `Task T-${task.number}`)
     this.#root.dataset.state = task.state
-    this.#root.replaceChildren(...sections, actions)
+    this.#root.replaceChildren(...sections, ...(actions.childElementCount > 0 ? [actions] : []))
     this.#root.hidden = false
   }
 

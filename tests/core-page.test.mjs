@@ -288,13 +288,10 @@ describe('the page protocol of the new core', () => {
       const before = kicks()
       const approved = await operations['message.approve']({ message: first.id })
       assert.equal(approved.message.state, 'queued')
-      const declined = await operations['message.decline']({
-        message: second.id,
-        reason: 'One at a time',
-      })
+      const declined = await operations['message.decline']({ message: second.id })
       assert.deepEqual(
         [declined.message.state, declined.message.reason],
-        ['cancelled', 'declined by @human: One at a time'],
+        ['cancelled', 'declined by @human'],
       )
       assert.equal(ledger.task(project.id, 2).state, 'cancelled')
       assert.equal(kicks(), before + 2, 'each decision wakes the dispatcher')
@@ -372,7 +369,7 @@ describe('the page protocol of the new core', () => {
     })
   })
 
-  it('lets the human reopen and cancel tasks, and leaves handing out and accepting to the lead', async () => {
+  it('lets the human cancel tasks, and leaves handing out, sending back and accepting to the lead', async () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
@@ -393,23 +390,14 @@ describe('the page protocol of the new core', () => {
       const message = ledger.task(project.id, 1).messages[0]
       ledger.beginDelivery(message.id)
       ledger.confirmDelivery(message.id, {})
-      ledger.recordResult(project.id, 1, { body: 'done' })
-      const reopened = await operations['task.reopen']({
-        project: project.id,
-        task: 1,
-        body: 'Add tests',
-      })
-      assert.equal(reopened.task.state, 'queued')
+      // The human writes to no agent from the board: sending back is the lead's, in its terminal.
+      assert.equal(operations['task.reopen'], undefined)
       const cancelled = await operations['task.cancel']({ project: project.id, task: 1 })
       assert.equal(cancelled.task.state, 'cancelled')
       const { task: thread } = await operations['task.get']({ project: project.id, task: 1 })
       assert.deepEqual(
         thread.messages.map((m) => [m.kind, m.sender.replace(/^zeus-.*$/, 'zeus-session')]),
-        [
-          ['task', 'lead'],
-          ['result', 'zeus-session'],
-          ['task', 'human'],
-        ],
+        [['task', 'lead']],
       )
       await assert.rejects(operations['task.get']({ project: project.id, task: 9 }), /no task T-9/)
       ledger.createTask(project.id, {
@@ -427,7 +415,7 @@ describe('the page protocol of the new core', () => {
     })
   })
 
-  it('lets the human pause a task and resume it with words', async () => {
+  it('lets the human pause a task and resume it without writing to the agent', async () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
@@ -450,11 +438,11 @@ describe('the page protocol of the new core', () => {
       const { task, message: words } = await operations['task.resume']({
         project: project.id,
         task: 1,
-        body: 'Go on',
       })
       assert.deepEqual(
         [task.state, words.body, words.sender],
-        ['queued', 'Resumed: Go on', 'human'],
+        ['queued', 'Resumed: Go on where you stopped.', 'human'],
+        'the human writes nothing: the same words every time',
       )
     })
   })

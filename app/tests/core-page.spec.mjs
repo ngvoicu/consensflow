@@ -644,7 +644,7 @@ test('answers a question with options by picking, one pick per question at least
   await expect.poll(() => calls(page, 'message.read')).toEqual([{ message: 14 }])
 })
 
-test("shows a coordinator's unanswered question in For you and answers it without a read", async ({
+test('shows a question the lead left unanswered in For you as a notice, with nothing to write', async ({
   page,
 }) => {
   const data = model()
@@ -667,12 +667,11 @@ test("shows a coordinator's unanswered question in For you and answers it withou
   await expect(strip.locator('.strip-route')).toHaveText(
     'Question from @zeus to @lead · T-2 · unanswered',
   )
-  await strip.getByLabel('Answer to m-15').fill('The recursive one.')
-  await strip.getByRole('button', { name: 'Send answer' }).click()
-  await expect
-    .poll(() => calls(page, 'message.answer'))
-    .toEqual([{ question: 15, body: 'The recursive one.' }])
-  expect(await calls(page, 'message.read')).toEqual([])
+  // The human tells the lead in its terminal; nothing here writes to an agent.
+  await expect(strip.getByRole('textbox')).toHaveCount(0)
+  await expect(strip.getByRole('button', { name: 'Mark m-15 read' })).toHaveCount(0)
+  await strip.getByRole('button', { name: 'Open task' }).click()
+  await expect(page.getByRole('complementary', { name: 'Task T-2' })).toBeVisible()
 })
 
 test("answers a question in the human's bay and routes it back", async ({ page }) => {
@@ -734,7 +733,7 @@ test('shows what a task on the board waits for, on its card and in its drawer', 
   await expect(drawer.locator('.drawer-meta')).toContainText('needs T-2 (done), T-6 (open)')
 })
 
-test("shows a member out of quota, and a task's reviews under it, never as cards of their own", async ({
+test("shows a member out of quota, and a task's reviews under it and as cards on the reviewer's row", async ({
   page,
 }) => {
   const data = model()
@@ -755,6 +754,11 @@ test("shows a member out of quota, and a task's reviews under it, never as cards
         round: 1,
         verdict: 'pass',
       }),
+      task(7, 'Review T-8', 'done', 'lead', 'hera', 3, {
+        kind: 'review',
+        reviewOf: 8,
+        verdict: 'changes',
+      }),
     ],
     activity: { state: 'working' },
     pane: { id: 'p1-hera', generation: 2 },
@@ -767,15 +771,18 @@ test("shows a member out of quota, and a task's reviews under it, never as cards
     'tr[data-handle="zeus"] td[data-state="review"] li.card-item:has(button[data-task="8"])',
   )
   await expect(lexer.locator('.card-state')).toHaveText('In review · round 2')
-  await expect(lexer.locator('.reviews li')).toHaveText(['@hera is reviewing, round 2'])
+  await expect(lexer.locator('.reviews li')).toHaveText([
+    'Reviewed by @hera, round 1: changes',
+    '@hera is reviewing, round 2',
+  ])
   const parser = page.locator(
     'tr[data-handle="zeus"] td[data-state="done"] li.card-item:has(button[data-task="2"])',
   )
   await expect(parser.locator('.reviews li')).toHaveText(['Reviewed by @hera, round 1: pass'])
-  // The review lives on the worker's lane; the reviewer's row only says what it is doing.
+  // The reviewer's row shows its reviews as cards, and says what it is doing.
   const hera = page.locator('tr[data-handle="hera"]')
-  await expect(hera.locator('button.card')).toHaveCount(0)
-  await expect(hera.locator('td li')).toHaveCount(0)
+  await expect(hera.locator('td[data-state="working"] button.card[data-task="9"]')).toHaveCount(1)
+  await expect(hera.locator('td[data-state="done"] button.card')).toHaveCount(2)
   await expect(hera.locator('.row-status')).toHaveText('Reviewing T-8')
 })
 
@@ -805,10 +812,17 @@ test("opens a card's drawer with the result apart from the brief and the reviews
   // Accepting is the lead's call, in its terminal: the drawer offers a review and a send-back.
   await expect(drawer.getByRole('button', { name: 'Accept' })).toHaveCount(0)
   await expect(drawer.getByRole('button', { name: 'Ask for a review' })).toBeVisible()
-  await expect(drawer.getByRole('button', { name: 'Send back' })).toBeVisible()
+  // Nothing here writes to the agent: that is done in its terminal.
+  await expect(drawer.getByRole('textbox')).toHaveCount(0)
+  // Each part is a panel of its own, headed by what it is.
+  await expect(drawer.locator('.drawer-section-head')).toHaveText([
+    'Brief',
+    'Result',
+    /^Reviews\s*1$/,
+  ])
 })
 
-test('pauses a task from its drawer, shows it paused in the queue, and resumes it with words', async ({
+test('pauses a task from its drawer, shows it paused in the queue, and resumes it', async ({
   page,
 }) => {
   const data = model()
@@ -830,11 +844,9 @@ test('pauses a task from its drawer, shows it paused in the queue, and resumes i
   await paused.click()
   const drawer = page.getByRole('complementary', { name: 'Task T-11' })
   await expect(drawer.getByRole('button', { name: 'Pause' })).toHaveCount(0)
-  await drawer.getByLabel('Resume T-11 with').fill('Go on with the lexer.')
+  await expect(drawer.getByRole('textbox')).toHaveCount(0)
   await drawer.getByRole('button', { name: 'Resume' }).click()
-  await expect
-    .poll(() => calls(page, 'task.resume'))
-    .toEqual([{ project: 1, task: 11, body: 'Go on with the lexer.' }])
+  await expect.poll(() => calls(page, 'task.resume')).toEqual([{ project: 1, task: 11 }])
 })
 
 test("shows what a task's window wrote, from ConsensFlow's own copy, under the thread", async ({
@@ -871,17 +883,6 @@ test("shows what a task's window wrote, from ConsensFlow's own copy, under the t
   ])
   await expect(items.nth(2).locator('.transcript-body')).toHaveText('Parser done, 14 tests.')
   await expect(items.nth(2)).toHaveAttribute('data-role', 'assistant')
-})
-
-test('sends a failed task back with a follow-up', async ({ page }) => {
-  await open(page)
-  await page.locator('tr[data-handle="diana"] button.card').click()
-  const drawer = page.getByRole('complementary', { name: 'Task T-3' })
-  await drawer.getByLabel('Follow-up for T-3').fill('Try again with the smaller model.')
-  await drawer.getByRole('button', { name: 'Send back' }).click()
-  await expect
-    .poll(() => calls(page, 'task.reopen'))
-    .toEqual([{ project: 1, task: 3, body: 'Try again with the smaller model.' }])
 })
 
 test('shows the team as one row per member and role, and adds a saved agent in a role its model suits', async ({
@@ -1045,7 +1046,7 @@ test('shows and sets human approval from the team dialog', async ({ page }) => {
   )
 })
 
-test('lists what waits for approval in For you, and approves, declines, sends back or answers it', async ({
+test('lists what waits for approval in For you, and approves or declines it, writing to no agent', async ({
   page,
 }) => {
   const data = model()
@@ -1086,29 +1087,22 @@ test('lists what waits for approval in For you, and approves, declines, sends ba
   await expect(answer.locator('.strip-route')).toHaveText(
     'Answer from @lead to @zeus-amber-pine · T-4 · needs your approval',
   )
-  await answer.getByLabel('Why m-33 is declined').fill('Say the iterative one')
-  await answer.getByRole('button', { name: 'Decline' }).click()
-  await expect
-    .poll(() => calls(page, 'message.decline'))
-    .toEqual([{ message: 33, reason: 'Say the iterative one' }])
+  await answer.getByRole('button', { name: 'Decline m-33' }).click()
+  await expect.poll(() => calls(page, 'message.decline')).toEqual([{ message: 33 }])
 
   const result = bay.locator('.strip-message[data-message="31"]')
   await expect(result.locator('.strip-route')).toHaveText(
     'Result from @zeus-amber-pine to @lead · T-2 · needs your approval',
   )
-  await result.getByLabel('Follow-up for T-2').fill('Add the lexer tests too.')
-  await result.getByRole('button', { name: 'Send back' }).click()
-  await expect
-    .poll(() => calls(page, 'task.reopen'))
-    .toEqual([{ project: 1, task: 2, body: 'Add the lexer tests too.' }])
-
+  // A result and a question go on to the lead, who decides and answers in its terminal.
+  await expect(result.getByRole('textbox')).toHaveCount(0)
+  await expect(result.getByRole('button', { name: /^Decline/ })).toHaveCount(0)
   const question = bay.locator('.strip-message[data-message="32"]')
-  await question.getByLabel('Answer to m-32').fill('The recursive one.')
-  await question.getByRole('button', { name: 'Send answer' }).click()
+  await expect(question.getByRole('textbox')).toHaveCount(0)
+  await question.getByRole('button', { name: 'Approve m-32 for @lead' }).click()
   await expect
-    .poll(() => calls(page, 'message.answer'))
-    .toEqual([{ question: 32, body: 'The recursive one.' }])
-  expect(await calls(page, 'message.read')).toEqual([], 'a gated question was never in the inbox')
+    .poll(() => calls(page, 'message.approve'))
+    .toEqual([{ message: 30 }, { message: 32 }])
 })
 
 test('sets the review policy from the team dialog once a reviewer is on the team', async ({

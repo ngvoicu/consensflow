@@ -1559,7 +1559,6 @@ const CORE_OPERATIONS: &[&str] = &[
     "session.end",
     "task.get",
     "task.transcript",
-    "task.reopen",
     "task.cancel",
     "task.pause",
     "task.resume",
@@ -2815,9 +2814,9 @@ mod tests {
             ),
             (
                 "core_request",
-                json!({"operation":"task.reopen","body":{"project":1,"task":1,"body":"Ship v2"}}),
-                "task.reopen",
-                json!({"project":1,"task":1,"body":"Ship v2"}),
+                json!({"operation":"task.cancel","body":{"project":1,"task":1}}),
+                "task.cancel",
+                json!({"project":1,"task":1}),
             ),
         ];
 
