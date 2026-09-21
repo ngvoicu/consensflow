@@ -758,6 +758,10 @@ describe('continuing a window with --after', () => {
       )
       ledger.cancelTask(project.id, 2, { by: 'lead' })
       ledger.acceptTask(project.id, 1, { by: 'lead' })
+      const still = await cf(lead, 'task', 'add', '--after', 'T-1', 'One more')
+      assert.equal(still.code, 0, 'accepted work keeps the session')
+      ledger.cancelTask(project.id, 3, { by: 'lead' })
+      ledger.endSession(project.id, session, { by: 'human' })
       const gone = await cf(lead, 'task', 'add', '--after', 'T-1', 'One more')
       assert.deepEqual(
         [gone.code, gone.err],

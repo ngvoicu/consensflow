@@ -78,13 +78,10 @@ const REVIEW_STATES = ['open', 'queued', 'working', 'waiting']
 const ACTIVE_TASK_STATES = ['working', 'waiting']
 /** A task on a member's hands: from assignment until its review is over. */
 const HELD_TASK_STATES = ['queued', 'working', 'waiting', 'review']
+const HOLDS_WORK = `SELECT 1 FROM task WHERE assignee_id = ? AND state IN (${HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')})`
 const MAX_BODY = 1_000_000
 /** How long a coordinator may leave a question before the human sees it too. */
 export const OVERDUE_MS = 10 * 60_000
-/** How many sessions of one member may hold work at once. */
-export const SESSION_SLOTS = 2
-/** How long a session with nothing on its hands lives before it ends on its own. */
-export const SESSION_IDLE_MS = 2 * 60 * 60_000
 /** The most of one transcript item that is copied: a tool's output can run to megabytes. */
 export const TRANSCRIPT_ITEM_MAX = 64_000
 /** How many items of a transcript the board reads at once, from the end. */
@@ -1169,21 +1166,8 @@ class Ledger {
         roles: JSON.parse(row.roles),
         taken: row.taken,
         sessions: row.sessions,
-        busy: row.sessions >= SESSION_SLOTS,
         outUntil: row.out_until,
       }))
-  }
-
-  /** How many of a member's windows hold work: its live sessions, and itself for work assigned before sessions. */
-  #slotsOf(memberId) {
-    const held = HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')
-    return this.#db
-      .prepare(
-        `SELECT COUNT(*) AS slots FROM participant s
-         WHERE (s.id = ? OR s.member_id = ?) AND s.left_at IS NULL
-           AND EXISTS (SELECT 1 FROM task WHERE assignee_id = s.id AND state IN (${held}))`,
-      )
-      .get(memberId, memberId).slots
   }
 
   /**
@@ -1235,42 +1219,27 @@ class Ledger {
   }
 
   /**
-   * A session with nothing left on its hands ends; a member or coordinator
-   * stays. Work done but not yet accepted, or failed and reopenable, still
-   * keeps the session, so a follow-up can go to the same window.
+   * A session is the human's to end: its lane folds into its member's, its
+   * conversation closes, and nothing of it can be resumed. One still holding
+   * work (queued, working, waiting or in review) is refused; paused work goes
+   * back on the board when resumed.
    */
-  #endSessionIfIdle(participantId, reason) {
-    if (participantId === null) return
-    const row = this.#participantRow(participantId)
-    if (row.member_id === null || row.left_at !== null) return
-    // A review is over with its verdict; work waits for its acceptance, and
-    // paused work for its resumption.
-    const keeps = this.#db
-      .prepare(
-        `SELECT 1 FROM task WHERE assignee_id = ?
-           AND (state IN (${HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')})
-             OR (kind = 'work' AND state IN ('done', 'failed', 'paused')))`,
-      )
-      .get(row.id)
-    if (keeps === undefined) this.#endSession(row, reason)
-  }
-
-  /** Sessions idle past SESSION_IDLE_MS end on their own; their handles. */
-  expireSessions(projectId) {
-    const held = HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')
-    const before = new Date(this.#now().getTime() - SESSION_IDLE_MS).toISOString()
+  endSession(projectId, handle, { by }) {
     return this.#write(() => {
-      const idle = this.#db
-        .prepare(
-          `${PARTICIPANT_SELECT}
-           WHERE p.project_id = ? AND p.member_id IS NOT NULL AND p.left_at IS NULL
-             AND NOT EXISTS (SELECT 1 FROM task WHERE assignee_id = p.id AND state IN (${held}))
-             AND COALESCE((SELECT MAX(updated_at) FROM task WHERE assignee_id = p.id), p.created_at) <= ?
-           ORDER BY p.id`,
+      this.#participantByHandle(projectId, by)
+      const session = this.#participantByHandle(projectId, handle)
+      if (session.member_id === null) {
+        throw new LedgerError('not-a-session', `@${handle} is not a session`, 409)
+      }
+      if (this.#db.prepare(HOLDS_WORK).get(session.id) !== undefined) {
+        throw new LedgerError(
+          'session-busy',
+          `@${handle} still holds work: accept, cancel or pause it first`,
+          409,
         )
-        .all(projectId, before)
-      for (const session of idle) this.#endSession(session, 'idle')
-      return idle.map((session) => session.handle)
+      }
+      this.#endSession(session, `ended by @${by}`)
+      return this.project(projectId)
     })
   }
 
@@ -1292,13 +1261,6 @@ class Ledger {
         throw new LedgerError(
           'not-a-candidate',
           `@${member.handle} is not ${aPool(task.pool, task.tier)} on this team`,
-          409,
-        )
-      }
-      if (this.#slotsOf(member.id) >= SESSION_SLOTS) {
-        throw new LedgerError(
-          'no-free-slot',
-          `@${member.handle} already runs ${SESSION_SLOTS} sessions`,
           409,
         )
       }
@@ -1416,7 +1378,6 @@ class Ledger {
         member: member.handle,
         because,
       })
-      this.#endSessionIfIdle(member.id, because)
       const requester = this.#participantRow(task.requester_id)
       this.#send(projectId, {
         to: requester.handle,
@@ -1943,7 +1904,6 @@ class Ledger {
         this.#moveTask({ ...task, round }, 'done', { review: number, verdict })
       }
       // The verdict is the reviewer's last word: its window ends with it.
-      this.#endSessionIfIdle(review.assignee_id, `T-${number} judged`)
       return {
         verdict,
         task: this.#task(task.id),
@@ -1996,7 +1956,6 @@ class Ledger {
       this.#requireTaskState(review, ['queued', ...ACTIVE_TASK_STATES], 'withdraw')
       this.#dropQueued(review.id)
       this.#moveTask(review, 'cancelled', { reason })
-      this.#endSessionIfIdle(review.assignee_id, reason)
       return this.#task(review.id)
     })
   }
@@ -2043,7 +2002,6 @@ class Ledger {
       this.#requireTaskState(task, ['done'], 'accept')
       this.#withdrawGated(task.id, `accepted by @${by}`)
       this.#moveTask(task, 'accepted', { by })
-      this.#endSessionIfIdle(task.assignee_id, `T-${number} accepted`)
       return this.#task(task.id)
     })
   }
@@ -2189,10 +2147,8 @@ class Ledger {
       for (const review of this.#openReviews(task.id)) {
         this.#dropQueued(review.id)
         this.#moveTask(review, 'cancelled', { by, with: task.number })
-        this.#endSessionIfIdle(review.assignee_id, `T-${review.number} cancelled`)
       }
       this.#moveTask(task, 'cancelled', { by })
-      this.#endSessionIfIdle(task.assignee_id, `T-${number} cancelled`)
       return this.#task(task.id)
     })
   }

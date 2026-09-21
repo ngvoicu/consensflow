@@ -55,6 +55,18 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       member: ledger.setRoles(project, agent, roles),
     })),
 
+    'session.open': change(async ({ project, handle }) => ({
+      project: await dispatcher.openWindow(project, handle),
+    })),
+
+    'session.close': change(async ({ project, handle }) => ({
+      project: await dispatcher.closeWindow(project, handle),
+    })),
+
+    'session.end': change(async ({ project, handle }) => ({
+      project: await dispatcher.endSession(project, handle),
+    })),
+
     'member.remove': change(async ({ project, agent }) => dispatcher.removeMember(project, agent)),
 
     'board.get': async ({ project }) => {

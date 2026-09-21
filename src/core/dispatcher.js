@@ -225,6 +225,51 @@ export class Dispatcher {
     return this.#ledger.project(projectId)
   }
 
+  // --- the human's hand on a session's window ------------------------------------------
+
+  /**
+   * The human opens a session's window with nothing to deliver: it comes back
+   * on its own conversation, with its history, and stays open until the
+   * human closes it, whatever work comes and goes meanwhile.
+   */
+  async openWindow(projectId, handle) {
+    const { project, participant } = this.#sessionOf(projectId, handle)
+    const runtime = this.#runtimeOf(participant.id)
+    runtime.pinned = true
+    if (runtime.pane === null) {
+      await this.#exclusive(participant.id, () => this.#launch(project, participant, null))
+    }
+    this.#changed()
+    return this.#ledger.project(projectId)
+  }
+
+  /** The human closes a session's window; work in it pauses, as any lost window's does. */
+  async closeWindow(projectId, handle) {
+    const { participant } = this.#sessionOf(projectId, handle)
+    const runtime = this.#runtimeOf(participant.id)
+    runtime.pinned = false
+    if (runtime.pane !== null) await this.#retire(participant, runtime)
+    return this.#ledger.project(projectId)
+  }
+
+  /** The human ends a session for good: the ledger folds it, and its window goes. */
+  async endSession(projectId, handle) {
+    const { participant } = this.#sessionOf(projectId, handle)
+    const project = this.#ledger.endSession(projectId, handle, { by: 'human' })
+    const runtime = this.#runtimeOf(participant.id)
+    runtime.pinned = false
+    if (runtime.pane !== null) await this.#retire(participant, runtime)
+    this.#changed()
+    return project
+  }
+
+  #sessionOf(projectId, handle) {
+    const project = this.#ledger.project(projectId)
+    const participant = project?.participants.find((p) => p.handle === handle && p.member !== null)
+    if (participant === undefined) throw new Error(`no session @${handle} in project ${projectId}`)
+    return { project, participant }
+  }
+
   /** A closed project goes for good; the ledger refuses an open one. Its windows are already gone. */
   async deleteProject(projectId) {
     const project = this.#ledger.project(projectId)
@@ -281,7 +326,6 @@ export class Dispatcher {
   async pass() {
     for (const project of this.#ledger.projects()) {
       if (project.state !== 'open') continue
-      if (this.#ledger.expireSessions(project.id).length > 0) this.#changed()
       this.#assignOpenTasks(project)
       this.#findReviewers(project)
     }
@@ -434,6 +478,7 @@ export class Dispatcher {
       if (
         runtime.pane !== null &&
         runtime.delivering === null &&
+        !runtime.pinned &&
         !this.#ledger.holdsWork(participant.id)
       ) {
         await this.#retire(participant, runtime)
@@ -849,7 +894,7 @@ export class Dispatcher {
 
   /** Free: nothing on its hands, not out of quota, not low on it. */
   #available(member) {
-    return !member.busy && !this.#isOut(member) && !this.#isLow(member)
+    return !this.#isOut(member) && !this.#isLow(member)
   }
 
   #isLow(member) {
@@ -877,16 +922,11 @@ export class Dispatcher {
   }
 
   #whyNotFree(candidates) {
-    const names = (list) => list.map((member) => `@${member.handle}`)
     const out = candidates.filter(
       (m) => m.outUntil !== null && Date.parse(m.outUntil) > this.#now(),
     )
     const low = candidates.filter((m) => !out.includes(m) && this.#isLow(m))
-    const busy = candidates.filter((m) => !out.includes(m) && !low.includes(m) && m.busy)
     const parts = []
-    if (busy.length > 0) {
-      parts.push(`${names(busy).join(' and ')} ${busy.length === 1 ? 'is' : 'are'} busy`)
-    }
     for (const member of out)
       parts.push(`@${member.handle} is out of quota until ${member.outUntil}`)
     for (const member of low) parts.push(`@${member.handle} is low on quota`)
@@ -1001,6 +1041,7 @@ export class Dispatcher {
         humanItems: null,
         copied: null,
         interrupted: null,
+        pinned: false,
         activity: { state: 'closed' },
       }
       this.#runtime.set(participantId, runtime)

@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { Dispatcher, deliveryText } from '../src/core/dispatcher.js'
-import { openLedger, SESSION_IDLE_MS } from '../src/ledger/index.js'
+import { openLedger } from '../src/ledger/index.js'
 
 /**
  * The dispatcher (TEST-BDC-09): the only actor. It launches panes, delivers
@@ -1031,22 +1031,29 @@ describe('the dispatcher assigns open tasks', () => {
   it('tells the requester once when nobody of the tier is free, and assigns when one frees up', async () => {
     await setup(async (context) => {
       const { open, task, notes } = await withTiers(context)
-      // Two sessions per member: four tasks fill both standard workers.
-      for (const body of ['One', 'Two', 'Three', 'Four']) open({ body })
+      // Nothing caps a member's sessions: only quota keeps one from new work.
+      open({ body: 'One' })
+      open({ body: 'Two' })
       await context.dispatcher.pass()
-      open({ body: 'Fifth' })
       await context.dispatcher.pass()
+      context.adapter.quota('zeus', { state: 'low', usedPercent: 97 })
+      context.adapter.quota('diana', { state: 'low', usedPercent: 96 })
       await context.dispatcher.pass()
-      assert.equal(task(5).state, 'open')
-      assert.deepEqual(notes('lead'), [
-        'T-5 waits for a free standard worker: @zeus and @diana are busy.',
-      ])
       context.adapter.answer('zeus', 'done')
+      context.adapter.answer('diana', 'done')
+      await context.dispatcher.pass()
+      open({ body: 'Third' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      assert.equal(task(5).state, 'queued')
-      assert.match(task(5).assignee, /^zeus-/, 'a new session of the member that freed a slot')
-      assert.equal(notes('lead').length, 1)
+      assert.equal(task(3).state, 'open')
+      assert.deepEqual(notes('lead'), [
+        'T-3 waits for a free standard worker: @zeus is low on quota; @diana is low on quota.',
+      ])
+      await context.dispatcher.pass()
+      assert.equal(notes('lead').length, 1, 'told once')
+      context.clock.advance(2 * 3_600_000)
+      await context.dispatcher.pass()
+      assert.match(task(3).assignee, /^zeus-/, 'the earliest joined, once the hour has passed')
     })
   })
 })
@@ -1225,8 +1232,8 @@ describe('the dispatcher watches quota', () => {
       )
       assert.equal(
         context.ledger.project(1).participants.some((p) => p.handle === 'zeus-amber-pine'),
-        false,
-        'the session that ran out is gone; the member is out until its reset',
+        true,
+        'the session that ran out stays for the human; the member is out until its reset',
       )
     })
   })
@@ -1339,11 +1346,14 @@ describe('the dispatcher watches quota', () => {
       await context.dispatcher.pass()
       assert.match(task(2).assignee, /^diana-/, 'zeus is low on quota')
       open({ body: 'Tests' })
-      open({ body: 'Docs' })
       await context.dispatcher.pass()
-      assert.match(task(3).assignee, /^diana-/, "diana's second slot")
-      assert.equal(task(4).state, 'open', 'diana is full and zeus is low')
+      assert.match(
+        task(3).assignee,
+        /^diana-/,
+        'diana again: nothing caps her sessions, zeus is low',
+      )
       context.clock.advance(2 * 3_600_000)
+      open({ body: 'Docs' })
       await context.dispatcher.pass()
       assert.match(task(4).assignee, /^zeus-/, 'eligible again after the hour, in a fresh window')
       await context.dispatcher.pass()
@@ -1483,7 +1493,13 @@ describe('one task per member session', () => {
 
       context.ledger.acceptTask(project.id, 1, { by: 'lead' })
       await context.dispatcher.pass()
-      assert.equal(context.ledger.currentConversation(session), null, 'accepted: the session ends')
+      assert.notEqual(
+        context.ledger.currentConversation(session),
+        null,
+        'accepted: the session keeps its conversation for the human',
+      )
+      await context.dispatcher.endSession(project.id, 'zeus-amber-pine')
+      assert.equal(context.ledger.currentConversation(session), null)
       assert.equal(
         context.ledger.project(project.id).participants.some((p) => p.id === session),
         false,
@@ -1660,28 +1676,55 @@ describe('one task per member session', () => {
     })
   })
 
-  it('ends a session left idle after its work, and closes the window of a session that ended', async () => {
+  it("keeps a session after its work until the human ends it, and opens, closes and ends its window at the human's hand", async () => {
     await setup(async (context) => {
       const { project, open, task } = await finished(context)
-      context.clock.advance(SESSION_IDLE_MS + 1000)
       await context.dispatcher.pass()
-      assert.equal(
+      assert.ok(
         context.ledger.project(project.id).participants.some((p) => p.handle === 'zeus-amber-pine'),
-        false,
-        'idle past its time: the session ended',
+        'nothing expires',
       )
       assert.equal(task(1).state, 'done', 'its work stays for the lead to accept')
+      const native = context.ledger.currentConversation(
+        context.ledger.project(project.id).participants.find((p) => p.handle === 'zeus-amber-pine')
+          .id,
+      ).nativeSession
 
+      // The human opens the window again: on its conversation, with nothing to deliver, and it stays.
+      await context.dispatcher.openWindow(project.id, 'zeus-amber-pine')
+      const reopened = context.adapter.prepared.at(-1)
+      assert.deepEqual(
+        [reopened.participant.handle, reopened.resume, reopened.message],
+        ['zeus-amber-pine', native, null],
+      )
+      const killed = context.host.killed.length
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(context.host.killed.length, killed, 'a window the human opened is not retired')
+      await context.dispatcher.closeWindow(project.id, 'zeus-amber-pine')
+      assert.equal(context.host.killed.length, killed + 1, "closed at the human's hand")
+
+      // Ending the session closes its window and folds it away.
       open({ body: 'Docs' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       const working = task(2)
       assert.equal(working.state, 'working')
-      const killed = context.host.killed.length
+      await assert.rejects(context.dispatcher.endSession(project.id, working.assignee), {
+        code: 'session-busy',
+      })
       context.ledger.cancelTask(project.id, 2, { by: 'lead' })
       await context.dispatcher.pass()
-      assert.equal(context.host.killed.length, killed + 1, "the ended session's window is closed")
-      assert.equal(context.host.killed.at(-1).id, `p${project.id}-${working.assignee}`)
+      assert.equal(
+        context.host.killed.at(-1).id,
+        `p${project.id}-${working.assignee}`,
+        'the window closes with its work, the session stays',
+      )
+      await context.dispatcher.endSession(project.id, working.assignee)
+      assert.equal(
+        context.ledger.project(project.id).participants.some((p) => p.handle === working.assignee),
+        false,
+      )
     })
   })
 })

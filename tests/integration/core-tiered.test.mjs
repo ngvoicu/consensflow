@@ -199,7 +199,10 @@ test('a reviewer asking for changes twice sends the work back once, then the req
       !(await p.inbox('lead')).some((m) => m.kind === 'note' && /changes twice/.test(m.body)),
       'no note about the rounds',
     )
-    const reviews = (await p.lane('checker')).tasks
+    // Each round ran in a session of its own, and both sessions stay for the human.
+    const reviews = (await p.board()).lanes
+      .filter((lane) => lane.participant.member === 'checker')
+      .flatMap((lane) => lane.tasks)
     assert.deepEqual(
       reviews.map((t) => [t.kind, t.state, t.verdict]),
       [

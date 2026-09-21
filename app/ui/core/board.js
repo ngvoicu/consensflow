@@ -155,10 +155,6 @@ const resting = (participant, activity) =>
   participant.member === null &&
   (activity?.state ?? 'closed') === 'closed'
 
-/** A session whose window closed with its task: it waits to be accepted or continued. */
-const parked = (participant, activity) =>
-  participant.member !== null && (activity?.state ?? 'closed') === 'closed'
-
 function lamp(activity) {
   const node = element('span', 'lamp')
   node.dataset.testid = 'lamp'
@@ -501,8 +497,8 @@ export class BoardView {
             ? `Reviewing T-${reviewing.reviewOf}`
             : resting(participant, activity)
               ? sessionsNote(lane, board)
-              : parked(participant, activity)
-                ? 'Window closed with its task; a follow-up reopens it'
+              : participant.member !== null && (activity?.state ?? 'closed') === 'closed'
+                ? 'Window closed'
                 : (ACTIVITY_LABEL[activity?.state] ?? 'No window'),
     )
     status.dataset.state = out ? 'out' : (activity?.state ?? 'closed')
@@ -529,6 +525,31 @@ export class BoardView {
         ),
       )
       if (pane === null && !lane.ended) tools.firstChild.disabled = true
+    }
+    // A session's window is the human's: open it again on its conversation,
+    // close it, or end the session for good.
+    if (participant.member !== null) {
+      tools.append(
+        pane === null
+          ? button(
+              'Open window',
+              'quiet-button',
+              () => this.#actions.onOpenWindow(participant),
+              `Open ${laneName(participant)}'s window`,
+            )
+          : button(
+              'Close window',
+              'quiet-button',
+              () => this.#actions.onCloseWindow(participant),
+              `Close ${laneName(participant)}'s window`,
+            ),
+        button(
+          'Delete session',
+          'danger-button',
+          () => this.#actions.onEndSession(participant),
+          `Delete ${laneName(participant)}'s session`,
+        ),
+      )
     }
     // Only the lead takes a task by name; members get theirs from the board by tier.
     if (coordinator) {

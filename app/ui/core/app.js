@@ -128,6 +128,18 @@ const board = new BoardView(boardRoot, {
       note(`T-${message.taskNumber} goes back to @${message.sender}.`)
     }),
   onOpenTask: (number) => act(() => openTask(number)),
+  onOpenWindow: (participant) =>
+    act(async () => {
+      await core('session.open', { project: state.selected, handle: participant.handle })
+      state.focus = participant.handle
+    }),
+  onCloseWindow: (participant) =>
+    act(() => core('session.close', { project: state.selected, handle: participant.handle })),
+  onEndSession: (participant) =>
+    act(async () => {
+      await core('session.end', { project: state.selected, handle: participant.handle })
+      note(`@${participant.handle} is gone; its tasks stay on @${participant.member}'s lane.`)
+    }),
   onOpenTerminal: (participant) => {
     state.focus = participant.handle
     render()

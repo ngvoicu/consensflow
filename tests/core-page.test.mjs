@@ -46,6 +46,19 @@ async function withPage(fn) {
       removed.push([project, handle])
       return ledger.removeMember(project, handle)
     },
+    windows: [],
+    async openWindow(project, handle) {
+      dispatcher.windows.push(['open', handle])
+      return ledger.project(project)
+    },
+    async closeWindow(project, handle) {
+      dispatcher.windows.push(['close', handle])
+      return ledger.project(project)
+    },
+    async endSession(project, handle) {
+      dispatcher.windows.push(['end', handle])
+      return ledger.endSession(project, handle, { by: 'human' })
+    },
     async resumeProject(id) {
       return ledger.setProjectState(id, 'open')
     },
@@ -61,7 +74,7 @@ async function withPage(fn) {
   }
   const operations = pageOperations({ ledger, dispatcher, env, kick: () => kicks++ })
   try {
-    await fn({ ledger, operations, opened, removed, closed, env, kicks: () => kicks })
+    await fn({ ledger, operations, opened, removed, closed, env, kicks: () => kicks, dispatcher })
   } finally {
     ledger.close()
     await rm(home, { recursive: true, force: true })
@@ -288,6 +301,47 @@ describe('the page protocol of the new core', () => {
       assert.equal(ledger.task(project.id, 2).state, 'cancelled')
       assert.equal(kicks(), before + 2, 'each decision wakes the dispatcher')
       assert.deepEqual((await operations['board.get']({ project: project.id })).board.gated, [])
+    })
+  })
+
+  it("opens, closes and ends a session's window at the human's hand", async () => {
+    await withPage(async ({ ledger, operations, dispatcher }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        harness: 'pi',
+        review: 'none',
+      })
+      await operations['member.add']({ project: project.id, agent: 'zeus' })
+      const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
+      await operations['task.add']({
+        project: project.id,
+        pool: 'worker',
+        tier: zeus.tier,
+        body: 'Lexer',
+      })
+      const { message } = ledger.assignTask(project.id, 1, zeus.id)
+      const session = message.recipient
+      await operations['session.open']({ project: project.id, handle: session })
+      await operations['session.close']({ project: project.id, handle: session })
+      await assert.rejects(
+        operations['session.end']({ project: project.id, handle: session }),
+        /still holds work/,
+      )
+      ledger.cancelTask(project.id, 1, { by: 'human' })
+      const { project: after } = await operations['session.end']({
+        project: project.id,
+        handle: session,
+      })
+      assert.equal(
+        after.participants.some((p) => p.handle === session),
+        false,
+      )
+      assert.deepEqual(dispatcher.windows, [
+        ['open', session],
+        ['close', session],
+        ['end', session],
+        ['end', session],
+      ])
     })
   })
 

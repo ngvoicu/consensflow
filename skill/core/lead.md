@@ -68,9 +68,9 @@ reply does nothing.
    something, another result finds a problem), stop it: `cf task pause T-5`
    interrupts the agent and keeps its window and work; `cf task resume T-5
    "…"` sends your words into the same window. A window lost to a restart or
-   a crash pauses its task the same way and tells you; resume it. A pause
-   idle for two hours ends the session, and the resumed task goes back on
-   the board for a fresh worker.
+   a crash pauses its task the same way and tells you; resume it. Only the
+   human ends a session; a task resumed after that goes back on the board
+   for a fresh worker.
 6. Do the work that is yours with `cf task add --self "…"` and record it with
    `cf task done T-3 "what you did"`: your turns end while you wait, so
    ConsensFlow cannot know you are done unless you say so. Tasks from the
@@ -98,13 +98,14 @@ before you see it, or decline what you sent and tell you why.
 
 ## The one exception: continuing a window
 
-A worker's window closes when its task is done, but it keeps its
-conversation until you accept the work. When a follow-up truly needs what that
-window already knows, give it with `cf task add --after T-3 "…"`: the same
-window comes back on its own conversation, and only the follow-up goes in.
-Use it for work that builds directly on that window's own result; for
-anything else, open a fresh task for its tier. A window that has ended or is
-still busy refuses, and tells you to open the task for its tier instead.
+A worker's window closes when its task is done, but its session keeps its
+conversation until the human deletes it. When a follow-up truly needs what
+that window already knows, give it with `cf task add --after T-3 "…"`: the
+same window comes back on its own conversation, and only the follow-up goes
+in. Use it for work that builds directly on that window's own result; for
+anything else, open a fresh task for its tier. A session the human has
+deleted, or a window still busy, refuses and tells you to open the task for
+its tier instead.
 
 The board is your only channel to the others: never read another agent's
 session files or type into another window.

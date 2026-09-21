@@ -463,6 +463,55 @@ test('shows an agent-written title as text, never as markup', async ({ page }) =
   await expect(page.locator('tr[data-handle="diana"] img')).toHaveCount(0)
 })
 
+test("gives a session's lane the human's hand on its window: open, close, delete", async ({
+  page,
+}) => {
+  const data = model()
+  const zeusLane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  const zeus = zeusLane.participant
+  Object.assign(zeusLane, { tasks: [], activity: { state: 'closed' }, pane: null })
+  data.boards[1].lanes.push(
+    {
+      participant: session(20, zeus, 'amber-pine'),
+      tasks: [task(21, 'Write the lexer', 'working', 'lead', 'zeus-amber-pine', 3)],
+      activity: { state: 'working' },
+      pane: { id: 'p1-zeus-amber-pine', generation: 9 },
+    },
+    {
+      participant: session(22, zeus, 'brisk-birch'),
+      tasks: [task(23, 'Write the docs', 'done', 'lead', 'zeus-brisk-birch', 30)],
+      activity: { state: 'closed' },
+      pane: null,
+    },
+  )
+  await open(page, data)
+  const live = page.locator('tr[data-handle="zeus-amber-pine"]')
+  await expect(
+    live.getByRole('button', { name: "Close @zeus · amber-pine's window" }),
+  ).toBeVisible()
+  await expect(live.getByRole('button', { name: "Open @zeus · amber-pine's window" })).toHaveCount(
+    0,
+  )
+  const closed = page.locator('tr[data-handle="zeus-brisk-birch"]')
+  await expect(closed.locator('.row-status')).toHaveText('Window closed')
+  await closed.getByRole('button', { name: "Open @zeus · brisk-birch's window" }).click()
+  await expect
+    .poll(() => calls(page, 'session.open'))
+    .toEqual([{ project: 1, handle: 'zeus-brisk-birch' }])
+  await live.getByRole('button', { name: "Close @zeus · amber-pine's window" }).click()
+  await expect
+    .poll(() => calls(page, 'session.close'))
+    .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
+  await closed.getByRole('button', { name: "Delete @zeus · brisk-birch's session" }).click()
+  await expect
+    .poll(() => calls(page, 'session.end'))
+    .toEqual([{ project: 1, handle: 'zeus-brisk-birch' }])
+  await expect(page.locator('#status')).toHaveText(
+    "@zeus-brisk-birch is gone; its tasks stay on @zeus's lane.",
+  )
+  await expect(page.getByRole('button', { name: "Delete @zeus's session" })).toHaveCount(0)
+})
+
 test("draws a member's sessions as lanes under it, named, and counts its open windows", async ({
   page,
 }) => {
@@ -503,9 +552,7 @@ test("draws a member's sessions as lanes under it, named, and counts its open wi
   await expect(first.locator('.row-meta')).toContainText('worker session of @zeus')
   await expect(first.locator('td[data-state="working"] button.card')).toHaveCount(1)
   const second = page.locator('tr[data-handle="zeus-brisk-birch"]')
-  await expect(second.locator('.row-status')).toHaveText(
-    'Window closed with its task; a follow-up reopens it',
-  )
+  await expect(second.locator('.row-status')).toHaveText('Window closed')
   await expect(page.locator('tr[data-handle="zeus"] .row-status')).toHaveText(
     '1 window open, one per task',
   )
