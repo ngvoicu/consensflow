@@ -398,6 +398,38 @@ describe('the page protocol of the new core', () => {
     })
   })
 
+  it('lets the human pause a task and resume it with words', async () => {
+    await withPage(async ({ ledger, operations }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        harness: 'pi',
+        review: 'none',
+      })
+      await operations['member.add']({ project: project.id, agent: 'zeus' })
+      const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
+      await operations['task.add']({
+        project: project.id,
+        pool: 'worker',
+        tier: zeus.tier,
+        body: 'Lexer',
+      })
+      const { message } = ledger.assignTask(project.id, 1, zeus.id)
+      ledger.beginDelivery(message.id)
+      ledger.confirmDelivery(message.id, {})
+      const paused = await operations['task.pause']({ project: project.id, task: 1 })
+      assert.equal(paused.task.state, 'paused')
+      const { task, message: words } = await operations['task.resume']({
+        project: project.id,
+        task: 1,
+        body: 'Go on',
+      })
+      assert.deepEqual(
+        [task.state, words.body, words.sender],
+        ['queued', 'Resumed: Go on', 'human'],
+      )
+    })
+  })
+
   it("reads a task's transcript copy, the last items first when asked for fewer", async () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({

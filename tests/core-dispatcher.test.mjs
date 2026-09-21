@@ -500,18 +500,70 @@ describe('the dispatcher', () => {
     })
   })
 
-  it('fails the task and tells the requester when the worker window closes mid-task', async () => {
+  it('pauses the task and tells the requester when the worker window closes mid-task, and resumes it on its conversation', async () => {
+    await setup(async (context) => {
+      const { project, id } = await withTeam(context)
+      context.ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const native = context.ledger.currentConversation(id('zeus')).nativeSession
+      await context.host.exit('zeus')
+      const task = context.ledger.task(project.id, 1)
+      assert.deepEqual([task.state, task.assignee], ['paused', 'zeus'])
+      const note = task.messages.find((m) => m.kind === 'note')
+      assert.equal(note.recipient, 'lead')
+      assert.match(
+        note.body,
+        /^T-1 is paused: @zeus's window closed\. Resume it with: cf task resume T-1 "…"/,
+      )
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.task(project.id, 1).state, 'paused', 'nothing happens on its own')
+      context.ledger.resumeTask(project.id, 1, { by: 'lead', body: 'Carry on' })
+      await context.dispatcher.pass()
+      const launch = context.adapter.prepared.at(-1)
+      assert.deepEqual([launch.participant.handle, launch.resume], ['zeus', native])
+      assert.match(launch.message, /T-1 · task from @lead\]\nResumed: Carry on$/)
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.task(project.id, 1).state, 'working')
+    })
+  })
+
+  it("pauses a working task in its open window: the agent is interrupted once, its output not collected, and the lead's words resume it there", async () => {
     await setup(async (context) => {
       const { project } = await withTeam(context)
       context.ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      await context.host.exit('zeus')
-      const task = context.ledger.task(project.id, 1)
-      assert.equal(task.state, 'failed')
-      const note = task.messages.find((m) => m.kind === 'note')
-      assert.equal(note.recipient, 'lead')
-      assert.match(note.body, /T-1 failed: @zeus's window closed/)
+      const launches = context.adapter.prepared.length
+      context.ledger.pauseTask(project.id, 1, { by: 'lead' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const pane = context.host.last('zeus')
+      assert.deepEqual(
+        context.host.requests.filter(([op]) => op === 'pane.input'),
+        [['pane.input', { id: pane.id, generation: pane.generation, bytes: [27] }]],
+        'Escape, once',
+      )
+      assert.deepEqual(context.host.killed, [], 'the window stays')
+      context.adapter.answer('zeus', 'Parser done')
+      await context.dispatcher.pass()
+      assert.equal(
+        context.ledger.task(project.id, 1).state,
+        'paused',
+        'said after the pause: not a result',
+      )
+      context.ledger.resumeTask(project.id, 1, { by: 'lead', body: 'Add the tests too' })
+      await context.dispatcher.pass()
+      assert.equal(context.adapter.prepared.length, launches, 'no new window')
+      assert.match(
+        context.adapter.agent('zeus').items.at(-1).text,
+        /T-1 · task from @lead\]\nResumed: Add the tests too$/,
+      )
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.task(project.id, 1).state, 'working')
+      context.adapter.answer('zeus', 'Parser and tests done')
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.task(project.id, 1).state, 'done')
     })
   })
 
@@ -750,7 +802,7 @@ describe('the dispatcher', () => {
     })
   })
 
-  it('closes a project: its windows go, tiered work returns to the backlog, and Resume brings it back', async () => {
+  it('closes a project: its windows go, work in them pauses, and Resume brings the lead back', async () => {
     await setup(async (context) => {
       const { project, id } = await withTeam(context)
       context.ledger.createTask(project.id, {
@@ -776,16 +828,23 @@ describe('the dispatcher', () => {
       const task = context.ledger.task(project.id, 1)
       assert.deepEqual(
         [task.state, task.assignee],
-        ['open', null],
-        'the work waits for a member again',
+        ['paused', 'zeus-amber-pine'],
+        'the work waits, with its session, for the lead to resume it',
       )
       await context.dispatcher.pass()
       assert.equal(context.host.opened.length, 2, 'nothing reopens while suspended')
 
       await context.dispatcher.resumeProject(project.id)
       assert.equal(context.adapter.prepared.at(-1).resume, native)
+      const nativeZeus = context.ledger.currentConversation(id('zeus-amber-pine')).nativeSession
+      context.ledger.resumeTask(project.id, 1, { by: 'lead', body: 'Go on' })
       await context.dispatcher.pass()
-      assert.match(context.ledger.task(project.id, 1).assignee, /^zeus-/, 'a fresh session of zeus')
+      const back = context.adapter.prepared.at(-1)
+      assert.deepEqual(
+        [back.participant.handle, back.resume],
+        ['zeus-amber-pine', nativeZeus],
+        'the same session of zeus, on its own conversation',
+      )
     })
   })
 
@@ -1457,7 +1516,7 @@ describe('one task per member session', () => {
     })
   })
 
-  it('after a restart, gives up a member task with no window, and resumes one whose answer is due', async () => {
+  it('after a restart, pauses a member task with no window for the lead to resume, and resumes one whose answer is due', async () => {
     await setup(async (context) => {
       const { project, id, open, task } = await withTiers(context)
       open()
@@ -1479,6 +1538,7 @@ describe('one task per member session', () => {
       assert.deepEqual([task(1).state, task(2).state], ['working', 'waiting'])
       const native = context.ledger.currentConversation(id('diana-brisk-birch')).nativeSession
 
+      const nativeZeus = context.ledger.currentConversation(id('zeus-amber-pine')).nativeSession
       context.ledger.suspendForRestart()
       const after = context.make()
       await after.resumeAfterRestart()
@@ -1486,8 +1546,12 @@ describe('one task per member session', () => {
       await after.pass()
       assert.deepEqual(
         [task(1).state, task(1).assignee],
-        ['open', null],
-        'nobody was working on it any more',
+        ['paused', 'zeus-amber-pine'],
+        'its window is gone; its session and conversation wait for the lead',
+      )
+      assert.match(
+        task(1).messages.find((m) => m.kind === 'note').body,
+        /^T-1 is paused: @zeus-amber-pine's window is gone\. Resume it with: cf task resume T-1/,
       )
       const launch = context.adapter.prepared.at(-1)
       assert.deepEqual(
@@ -1498,6 +1562,15 @@ describe('one task per member session', () => {
       assert.match(launch.message, /^\[ConsensFlow m-\d+ · T-2 · answer from @lead\]\nANSI$/)
       await after.pass()
       assert.equal(task(2).state, 'working')
+      context.ledger.resumeTask(project.id, 1, { by: 'lead', body: 'Go on' })
+      await after.pass()
+      const back = context.adapter.prepared.at(-1)
+      assert.deepEqual(
+        [back.participant.handle, back.resume],
+        ['zeus-amber-pine', nativeZeus],
+        'the same conversation, with its memory',
+      )
+      assert.match(back.message, /T-1 · task from @lead\]\nResumed: Go on$/)
     })
   })
 

@@ -24,6 +24,8 @@ export const USAGE = `cf inside a ConsensFlow window: the board's commands.
   cf task review T-3                ask for an independent review of finished work
   cf task accept|cancel T-3         move a task you asked for
   cf task reopen T-3 "…"            send a finished or failed task back with a follow-up
+  cf task pause T-3                 stop a worker's task: its window closes, its work waits
+  cf task resume T-3 "…"            go on with it: the same window, with your words
   cf inbox [read m-12]              what is waiting for you, or one message in full
   cf ask "…" [--human]              a question to whoever gave you your task (or the human)
   cf answer m-12 "…"                answer a question put to you
@@ -291,11 +293,11 @@ async function taskCommand([action, ...rest], call, cwd) {
       text: `T-${number} goes to an independent reviewer; the verdict arrives in your inbox.`,
     }
   }
-  if (['done', 'accept', 'cancel', 'reopen'].includes(action)) {
+  if (['done', 'accept', 'cancel', 'reopen', 'pause', 'resume'].includes(action)) {
     const text = rest.slice(1).join(' ')
-    if ((action === 'done' || action === 'reopen') && text.trim().length === 0) {
+    if (['done', 'reopen', 'resume'].includes(action) && text.trim().length === 0) {
       throw usage(
-        `cf task ${action} T-${number} "${action === 'done' ? 'your result' : 'the follow-up'}"`,
+        `cf task ${action} T-${number} "${action === 'done' ? 'your result' : action === 'resume' ? 'what to do now' : 'the follow-up'}"`,
       )
     }
     const { task } = await call(
@@ -303,7 +305,15 @@ async function taskCommand([action, ...rest], call, cwd) {
       `/api/tasks/${number}/${action}`,
       text ? { body: text } : {},
     )
-    return { data: task, text: taskLine(task) }
+    const said =
+      action === 'pause'
+        ? `T-${number} is paused: its window stops and its work waits. Resume it with: cf task resume T-${number} "what to do now"`
+        : action === 'resume'
+          ? task.state === 'open'
+            ? `T-${number} is back on the board for ${aPool(task.pool, task.tier)}: the window that had it has ended.`
+            : `T-${number} resumes in @${task.assignee} with your words.`
+          : taskLine(task)
+    return { data: task, text: said }
   }
   throw usage(
     `unknown task command ${JSON.stringify(action)}: use add, list, get, done, review, accept, reopen or cancel`,

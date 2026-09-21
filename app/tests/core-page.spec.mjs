@@ -341,6 +341,8 @@ async function open(page, data = model()) {
       },
       'inbox.get': ({ project }) => answer({ messages: data.inbox[project] ?? [] }),
       'task.get': ({ project, task }) => answer({ task: data.tasks[`${project}:${task}`] }),
+      'task.resume': ({ project, task }) =>
+        answer({ task: { ...data.tasks[`${project}:${task}`], state: 'queued' } }),
       'task.transcript': ({ project, task }) =>
         answer(data.transcripts?.[`${project}:${task}`] ?? { items: [], total: 0 }),
       'task.add': ({ to, tier, pool, body, needs }) =>
@@ -853,6 +855,35 @@ test("opens a card's drawer with the result apart from the brief and the reviews
   ])
   await drawer.getByRole('button', { name: 'Accept' }).click()
   await expect.poll(() => calls(page, 'task.accept')).toEqual([{ project: 1, task: 2 }])
+})
+
+test('pauses a task from its drawer, shows it paused in the queue, and resumes it with words', async ({
+  page,
+}) => {
+  const data = model()
+  const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  lane.tasks.push(task(11, 'Add the lexer', 'paused', 'lead', 'zeus', 4))
+  data.tasks['1:4'] = { ...lane.tasks.find((t) => t.number === 4), messages: [], reviews: [] }
+  data.tasks['1:11'] = { ...lane.tasks.find((t) => t.number === 11), messages: [], reviews: [] }
+  await open(page, data)
+  const paused = page.locator(
+    'tr[data-handle="zeus"] td[data-state="queued"] button.card[data-task="11"]',
+  )
+  await expect(paused).toHaveAttribute('data-state', 'paused')
+  await expect(paused.locator('.card-state')).toHaveText('Paused')
+  await page.locator('button.card[data-task="4"]').click()
+  const queued = page.getByRole('complementary', { name: 'Task T-4' })
+  await queued.getByRole('button', { name: 'Pause' }).click()
+  await expect.poll(() => calls(page, 'task.pause')).toEqual([{ project: 1, task: 4 }])
+  await expect(page.locator('#status')).toHaveText('T-4 is paused; its work waits.')
+  await paused.click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-11' })
+  await expect(drawer.getByRole('button', { name: 'Pause' })).toHaveCount(0)
+  await drawer.getByLabel('Resume T-11 with').fill('Go on with the lexer.')
+  await drawer.getByRole('button', { name: 'Resume' }).click()
+  await expect
+    .poll(() => calls(page, 'task.resume'))
+    .toEqual([{ project: 1, task: 11, body: 'Go on with the lexer.' }])
 })
 
 test("shows what a task's window wrote, from ConsensFlow's own copy, under the thread", async ({

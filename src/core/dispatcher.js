@@ -53,6 +53,8 @@ import { randomUUID } from 'node:crypto'
  * testable with explicit passes (`tests/core-dispatcher.test.mjs`).
  */
 
+/** The key that interrupts a harness's current turn. */
+const ESCAPE = 27
 const INLINE_LIMIT = 4000
 const OPENING = 3000
 const RECEIVED_ROLES = new Set(['user', 'custom', 'tool'])
@@ -333,9 +335,28 @@ export class Dispatcher {
       if (project.state === 'open') this.#ledger.setProjectState(project.id, 'suspended')
     } else {
       const task = this.#ledger.activeTask(participantId)
-      if (task !== null) this.#giveUp(project, task, `@${participant.handle}'s window closed`)
+      if (task !== null) this.#stall(project, task, `@${participant.handle}'s window closed`)
     }
     this.#changed()
+  }
+
+  /**
+   * A task whose window went away mid-work (a restart, a crash, a window the
+   * human closed) is paused, not given up: its session and conversation stay,
+   * and the lead resumes it into the same window with its memory. A review
+   * is withdrawn instead: another reviewer starts from the result.
+   */
+  #stall(project, task, because) {
+    if (task.kind === 'review') {
+      this.#ledger.withdrawReview(project.id, task.number, { reason: because })
+      return
+    }
+    this.#ledger.pauseTask(project.id, task.number, { because })
+    this.#ledger.note(project.id, {
+      to: task.requester,
+      task: task.number,
+      body: `T-${task.number} is paused: ${because}. Resume it with: cf task resume T-${task.number} "…"; its window comes back on its own conversation.`,
+    })
   }
 
   // --- one participant's step ----------------------------------------------------
@@ -351,7 +372,7 @@ export class Dispatcher {
     // crash) and nothing due to it, nobody is doing the work any more.
     const task = this.#ledger.activeTask(participant.id)
     if (task !== null) {
-      this.#giveUp(project, task, `@${participant.handle}'s window is gone`)
+      this.#stall(project, task, `@${participant.handle}'s window is gone`)
       this.#changed()
     }
   }
@@ -404,6 +425,7 @@ export class Dispatcher {
     if (runtime.delivering !== null) this.#watchArrival(runtime, observed)
     await this.#releaseDraft(runtime, observed)
     if (participant.role !== 'lead') {
+      await this.#interruptIfPaused(participant, runtime)
       this.#collect(project, participant, observed)
       // The window may have gone during this step (a launch that timed out).
       if (
@@ -441,6 +463,18 @@ export class Dispatcher {
   }
 
   /**
+   * A paused task's window stays open, but the agent stops: the Escape key
+   * interrupts the turn every harness is on, once per pause. Whatever it
+   * still writes is not collected, since the task is not working.
+   */
+  async #interruptIfPaused(participant, runtime) {
+    const paused = this.#ledger.pausedTask(participant.id)
+    if (paused === null || runtime.interrupted === paused.id) return
+    runtime.interrupted = paused.id
+    await this.#host.request('pane.input', { ...runtime.pane, bytes: [ESCAPE] }).catch(() => {})
+  }
+
+  /**
    * One task per member session: the window and its conversation end with the
    * work, so the next task starts a fresh session with nothing carried over.
    */
@@ -467,7 +501,7 @@ export class Dispatcher {
     }
     const task = this.#ledger.task(project.id, message.taskNumber)
     const brief = task?.messages.find(
-      (m) => m.kind === 'task' && m.recipient === participant.handle,
+      (m) => m.kind === 'task' && m.recipient === participant.handle && m.state !== 'cancelled',
     )
     if (brief === undefined || brief.id === message.id) return text
     return `${deliveryText(brief)}\n\n${text}`
@@ -959,6 +993,7 @@ export class Dispatcher {
         enters: [],
         humanItems: null,
         copied: null,
+        interrupted: null,
         activity: { state: 'closed' },
       }
       this.#runtime.set(participantId, runtime)

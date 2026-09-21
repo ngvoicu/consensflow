@@ -10,7 +10,9 @@
  * the callbacks; the controller calls the core and redraws.
  */
 
-const ACTIVE = ['working', 'waiting', 'queued', 'review', 'open']
+const ACTIVE = ['working', 'waiting', 'queued', 'paused', 'review', 'open']
+/** What the lead (or the human) may stop: work on the board or in a window, never a review. */
+const PAUSABLE = ['open', 'queued', 'working', 'waiting']
 /** The columns, in reading order; failed and cancelled share the last one. */
 const COLUMNS = [
   ['open', 'Backlog'],
@@ -23,12 +25,17 @@ const COLUMNS = [
   ['ended', 'Ended'],
 ]
 const columnOf = (task) =>
-  task.state === 'failed' || task.state === 'cancelled' ? 'ended' : task.state
+  task.state === 'failed' || task.state === 'cancelled'
+    ? 'ended'
+    : task.state === 'paused'
+      ? 'queued'
+      : task.state
 const STATE_LABEL = {
   open: 'Open',
   queued: 'Queued',
   working: 'Working',
   waiting: 'Waiting',
+  paused: 'Paused',
   review: 'In review',
   done: 'Done',
   accepted: 'Accepted',
@@ -860,6 +867,25 @@ export class TaskDrawer {
       form.addEventListener('submit', (event) => {
         event.preventDefault()
         if (field.value.trim()) this.#actions.onReopen(task, field.value.trim())
+      })
+      actions.append(form)
+    }
+    if (PAUSABLE.includes(task.state) && task.kind === 'work' && task.assignee !== 'lead') {
+      actions.append(button('Pause', 'quiet-button', () => this.#actions.onPause(task)))
+    }
+    if (task.state === 'paused') {
+      const form = element('form', 'reopen')
+      const field = element('textarea')
+      field.rows = 3
+      field.required = true
+      field.setAttribute('aria-label', `Resume T-${task.number} with`)
+      field.placeholder = 'What should happen now? It goes into the same window.'
+      const submit = element('button', 'primary-button', 'Resume')
+      submit.type = 'submit'
+      form.append(field, submit)
+      form.addEventListener('submit', (event) => {
+        event.preventDefault()
+        if (field.value.trim()) this.#actions.onResume(task, field.value.trim())
       })
       actions.append(form)
     }

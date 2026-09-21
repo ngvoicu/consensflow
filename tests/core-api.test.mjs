@@ -395,6 +395,35 @@ describe('cf inside a core window', () => {
     })
   })
 
+  it('lets the lead pause and resume a task, in plain words, and nobody else', async () => {
+    await withApi(async ({ ledger, project, token, cf, call }) => {
+      const lead = token('lead')
+      assert.equal((await cf(lead, 'task', 'add', '--tier', 'standard', 'Parser')).code, 0)
+      const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
+      const { message } = ledger.assignTask(project.id, 1, zeus.id)
+      deliver(ledger, message)
+      const session = message.recipient
+      assert.equal((await call(token(session), 'POST', '/api/tasks/1/pause')).status, 403)
+      const paused = await cf(lead, 'task', 'pause', 'T-1')
+      assert.deepEqual(
+        [paused.code, paused.out],
+        [
+          0,
+          'T-1 is paused: its window stops and its work waits. Resume it with: cf task resume T-1 "what to do now"',
+        ],
+      )
+      assert.equal(ledger.task(project.id, 1).state, 'paused')
+      const silent = await cf(lead, 'task', 'resume', 'T-1')
+      assert.deepEqual([silent.code, silent.err], [2, 'cf: cf task resume T-1 "what to do now"'])
+      const resumed = await cf(lead, 'task', 'resume', 'T-1', 'Go', 'on')
+      assert.deepEqual(
+        [resumed.code, resumed.out],
+        [0, `T-1 resumes in @${session} with your words.`],
+      )
+      assert.equal(ledger.task(project.id, 1).state, 'queued')
+    })
+  })
+
   it('shows the project team as roles and tiers, nothing to pick a member by', async () => {
     await withApi(async ({ token, cf, ledger, project }) => {
       assert.equal((await cf(token('lead'), 'team')).out, '@zeus · worker · standard')

@@ -1118,12 +1118,16 @@ class Ledger {
   }
 
   /** The active members an open task may go to, with what the daemon ranks them by. */
-  /** Whether a member has a task on its hands: one task per member session ends when this is false. */
+  /**
+   * Whether a member has a task on its hands: one task per member session
+   * ends when this is false. Paused work counts: its window stays for the
+   * resumption.
+   */
   holdsWork(participantId) {
     return (
       this.#db
         .prepare(
-          `SELECT 1 FROM task WHERE assignee_id = ? AND state IN (${HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')})`,
+          `SELECT 1 FROM task WHERE assignee_id = ? AND state IN (${[...HELD_TASK_STATES, 'paused'].map((state) => `'${state}'`).join(', ')})`,
         )
         .get(participantId) !== undefined
     )
@@ -1239,12 +1243,13 @@ class Ledger {
     if (participantId === null) return
     const row = this.#participantRow(participantId)
     if (row.member_id === null || row.left_at !== null) return
-    // A review is over with its verdict; work waits for its acceptance.
+    // A review is over with its verdict; work waits for its acceptance, and
+    // paused work for its resumption.
     const keeps = this.#db
       .prepare(
         `SELECT 1 FROM task WHERE assignee_id = ?
            AND (state IN (${HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')})
-             OR (kind = 'work' AND state IN ('done', 'failed')))`,
+             OR (kind = 'work' AND state IN ('done', 'failed', 'paused')))`,
       )
       .get(row.id)
     if (keeps === undefined) this.#endSession(row, reason)
@@ -2043,6 +2048,105 @@ class Ledger {
     })
   }
 
+  /**
+   * The lead (or the human) stops a worker's task without ending it: its
+   * window closes on the daemon's next look, whatever was on its way to it is
+   * withdrawn, and the task keeps its member, its conversation and its place
+   * until it is resumed or cancelled. The lead's own work is not paused.
+   */
+  pauseTask(projectId, number, { by, because } = {}) {
+    if (because !== undefined) requireText(because, 'because', 1000)
+    return this.#write(() => {
+      if (by !== undefined) this.#participantByHandle(projectId, by)
+      const task = this.#taskRow(projectId, number)
+      this.#requireTaskState(task, ['open', 'queued', ...ACTIVE_TASK_STATES], 'pause')
+      if (task.kind === 'review') {
+        throw new LedgerError('not-work', `T-${number} is a review: it ends with a verdict`, 409)
+      }
+      if (task.assignee_id !== null && this.#participantRow(task.assignee_id).role === 'lead') {
+        throw new LedgerError('own-work', `T-${number} is the lead's own: finish or cancel it`, 409)
+      }
+      this.#dropQueued(task.id)
+      this.#moveTask(task, 'paused', {
+        by: by ?? null,
+        ...(because === undefined ? {} : { because }),
+      })
+      return this.#task(task.id)
+    })
+  }
+
+  /** The paused task a participant still holds, or null. */
+  pausedTask(participantId) {
+    const row = this.#db
+      .prepare(
+        `SELECT project_id, number FROM task WHERE assignee_id = ? AND state = 'paused'
+         ORDER BY id LIMIT 1`,
+      )
+      .get(participantId)
+    return row === undefined ? null : this.task(row.project_id, row.number)
+  }
+
+  /**
+   * A paused task goes on with the words that resume it: into the same
+   * window when its session is still there (a brief never delivered goes in
+   * first), or back on the board for its tier when the session has ended.
+   */
+  resumeTask(projectId, number, { by, body }) {
+    requireText(body, 'body', MAX_BODY)
+    return this.#write(() => {
+      const author = this.#participantByHandle(projectId, by)
+      const task = this.#taskRow(projectId, number)
+      this.#requireTaskState(task, ['paused'], 'resume')
+      const assignee = task.assignee_id === null ? null : this.#participantRow(task.assignee_id)
+      if (assignee === null) {
+        this.#db
+          .prepare('UPDATE task SET body = ?, updated_at = ? WHERE id = ?')
+          .run(`${task.body}\n\nResumed: ${body}`, this.#at(), task.id)
+        this.#moveTask(task, 'open', { by })
+        return { task: this.#task(task.id), message: null }
+      }
+      if (assignee.left_at !== null) {
+        if (task.pool === null) {
+          throw new LedgerError(
+            'session-ended',
+            `the window that had T-${number} has ended: cancel it and open the work for its tier`,
+            409,
+          )
+        }
+        this.#db
+          .prepare(
+            `UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?
+             WHERE id = ?`,
+          )
+          .run(
+            `${task.body}\n\nResumed after a pause, in a fresh window (the one that had it ended; check the working tree for partial changes): ${body}`,
+            this.#at(),
+            task.id,
+          )
+        this.#log(projectId, 'task.state', { task: number, from: 'paused', to: 'open', by })
+        return { task: this.#task(task.id), message: null }
+      }
+      const delivered = this.#db
+        .prepare(
+          `SELECT 1 FROM message WHERE task_id = ? AND kind = 'task' AND recipient_id = ?
+             AND state IN ('delivered', 'read')`,
+        )
+        .get(task.id, assignee.id)
+      const messageId = this.#queue(projectId, {
+        to: assignee.id,
+        from: author.id,
+        kind: 'task',
+        taskId: task.id,
+        body:
+          delivered === undefined
+            ? `${deliveryBody(task)}\n\nResumed: ${body}`
+            : `Resumed: ${body}`,
+      })
+      this.#moveTask(task, 'queued', { by, message: messageId })
+      return { task: this.#task(task.id), message: this.#message(messageId) }
+    })
+  }
+
   /** A follow-up on a finished or failed task: it goes back to its assignee's queue. */
   reopenTask(projectId, number, { by, body }) {
     requireText(body, 'body', MAX_BODY)
@@ -2076,7 +2180,11 @@ class Ledger {
     return this.#write(() => {
       this.#participantByHandle(projectId, by)
       const task = this.#taskRow(projectId, number)
-      this.#requireTaskState(task, ['open', 'queued', ...ACTIVE_TASK_STATES, 'review'], 'cancel')
+      this.#requireTaskState(
+        task,
+        ['open', 'queued', ...ACTIVE_TASK_STATES, 'paused', 'review'],
+        'cancel',
+      )
       this.#dropQueued(task.id)
       for (const review of this.#openReviews(task.id)) {
         this.#dropQueued(review.id)

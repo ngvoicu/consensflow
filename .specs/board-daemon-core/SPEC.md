@@ -403,7 +403,8 @@ removing a PM (the ledger refuses it as `not-a-member`).
   a fresh session's first message that is not the brief (a reopening) gets
   the brief in front, while an answer due after a restart resumes the
   member's own session; a member's working task with no window and nothing
-  due is given up; low quota is kept in the daemon until its reset, since the
+  due is given up (*since 2026-09-21 it is paused for the lead to resume,
+  spec `pause-and-resume`*); low quota is kept in the daemon until its reset, since the
   window that reported it is gone. Found on the way: the fake pane host never
   exited a killed window, so every test chaining two tasks through one
   member hung; it exits at once now, and one test holds the exit to prove

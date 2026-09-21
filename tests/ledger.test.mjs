@@ -3181,3 +3181,174 @@ describe('the transcript copy', () => {
     })
   })
 })
+
+describe('pause and resume', () => {
+  /** A worker's tiered task delivered into its session window. */
+  function running(ledger) {
+    const { project, id } = team(ledger)
+    ledger.createTask(project.id, {
+      from: 'lead',
+      pool: 'worker',
+      tier: 'standard',
+      body: 'Parser',
+    })
+    const { message } = ledger.assignTask(project.id, 1, id('zeus'))
+    deliver(ledger, message)
+    return { project, id, session: message.recipient, sessionId: message.recipientId }
+  }
+
+  it('pauses work on the board or in a window, drops what was on its way, and keeps the session', async () => {
+    await withLedger((ledger) => {
+      const { project, id, session, sessionId } = running(ledger)
+      const question = ledger.ask(project.id, {
+        from: session,
+        to: 'lead',
+        task: 1,
+        body: 'Which?',
+      })
+      const paused = ledger.pauseTask(project.id, 1, { by: 'lead' })
+      assert.deepEqual([paused.state, paused.assignee], ['paused', session])
+      assert.equal(ledger.message(question.id).state, 'cancelled', 'nothing of it goes on')
+      assert.equal(ledger.holdsWork(sessionId), true, 'the window stays for the resumption')
+      assert.equal(ledger.pausedTask(sessionId).number, 1)
+      assert.equal(ledger.activeTask(sessionId), null)
+      assert.equal(ledger.nextDelivery(sessionId), null)
+      assert.deepEqual(ledger.events(project.id).at(-1).data, {
+        task: 1,
+        from: 'waiting',
+        to: 'paused',
+        by: 'lead',
+      })
+      ledger.createTask(project.id, {
+        from: 'lead',
+        pool: 'worker',
+        tier: 'standard',
+        body: 'Lexer',
+      })
+      assert.equal(
+        ledger.pauseTask(project.id, 2).state,
+        'paused',
+        'from the board, by ConsensFlow',
+      )
+      assert.deepEqual(ledger.events(project.id).at(-1).data, {
+        task: 2,
+        from: 'open',
+        to: 'paused',
+        by: null,
+      })
+      assert.deepEqual(ledger.board(project.id).open, [], 'a paused task is not given out')
+      assert.throws(() => ledger.pauseTask(project.id, 2, { by: 'lead' }), {
+        code: 'invalid-transition',
+      })
+      assert.equal(id('lead') > 0, true)
+    })
+  })
+
+  it("refuses to pause a review, the lead's own work, or finished work", async () => {
+    await withLedger((ledger) => {
+      const { project, id } = team(ledger)
+      const own = ledger.createTask(project.id, { from: 'lead', to: 'lead', body: 'Plan' })
+      assert.throws(() => ledger.pauseTask(project.id, own.task.number, { by: 'lead' }), {
+        code: 'own-work',
+      })
+      ledger.createTask(project.id, {
+        from: 'lead',
+        pool: 'worker',
+        tier: 'standard',
+        body: 'Parser',
+      })
+      deliver(ledger, ledger.assignTask(project.id, 2, id('zeus')).message)
+      ledger.recordResult(project.id, 2, { body: 'Done' })
+      assert.throws(() => ledger.pauseTask(project.id, 2, { by: 'lead' }), {
+        code: 'invalid-transition',
+      })
+      ledger.setReview(project.id, 'none')
+      assert.throws(() => ledger.pauseTask(project.id, 9, { by: 'lead' }), { code: 'unknown-task' })
+    })
+  })
+
+  it('resumes into the same window with the words, with the brief first when it never arrived', async () => {
+    await withLedger((ledger) => {
+      const { project, session } = running(ledger)
+      ledger.pauseTask(project.id, 1, { by: 'lead' })
+      const { task, message } = ledger.resumeTask(project.id, 1, { by: 'lead', body: 'Go on' })
+      assert.deepEqual(
+        [task.state, task.assignee, message.recipient, message.kind, message.state],
+        ['queued', session, session, 'task', 'queued'],
+      )
+      assert.equal(message.body, 'Resumed: Go on')
+      assert.throws(() => ledger.resumeTask(project.id, 1, { by: 'lead', body: 'Again' }), {
+        code: 'invalid-transition',
+      })
+      assert.throws(() => ledger.resumeTask(project.id, 1, { by: 'lead', body: '' }), {
+        code: 'invalid-text',
+      })
+      // Paused before its brief was delivered: the brief goes in with the words.
+      ledger.createTask(project.id, {
+        from: 'lead',
+        pool: 'worker',
+        tier: 'standard',
+        body: 'Lexer',
+      })
+      const { message: brief } = ledger.assignTask(
+        project.id,
+        2,
+        ledger.project(project.id).participants.find((p) => p.handle === 'diana').id,
+      )
+      ledger.pauseTask(project.id, 2, { by: 'human' })
+      assert.equal(ledger.message(brief.id).state, 'cancelled')
+      const again = ledger.resumeTask(project.id, 2, { by: 'human', body: 'Start now' })
+      assert.equal(again.message.body, 'Lexer\n\nResumed: Start now')
+      assert.equal(again.task.state, 'queued')
+    })
+  })
+
+  it('resumes a task paused on the board back onto the board, and one whose session ended too', async () => {
+    await withDir(async (dir) => {
+      let at = Date.parse('2026-09-21T09:00:00.000Z')
+      const ledger = openLedger(path.join(dir, 'consensflow.db'), {
+        now: () => {
+          at += 1000
+          return new Date(at)
+        },
+        names: names(),
+      })
+      try {
+        const { project, id } = team(ledger)
+        ledger.createTask(project.id, {
+          from: 'lead',
+          pool: 'worker',
+          tier: 'standard',
+          body: 'Parser',
+        })
+        ledger.pauseTask(project.id, 1, { by: 'lead' })
+        const opened = ledger.resumeTask(project.id, 1, { by: 'lead', body: 'When you can' })
+        assert.deepEqual(
+          [opened.task.state, opened.task.assignee, opened.message],
+          ['open', null, null],
+        )
+        assert.equal(opened.task.body, 'Parser\n\nResumed: When you can')
+
+        deliver(ledger, ledger.assignTask(project.id, 1, id('zeus')).message)
+        ledger.pauseTask(project.id, 1, { by: 'lead' })
+        at += SESSION_IDLE_MS
+        assert.deepEqual(ledger.expireSessions(project.id), ['zeus-amber-pine'], 'idle too long')
+        const fresh = ledger.resumeTask(project.id, 1, { by: 'lead', body: 'Try again' })
+        assert.deepEqual([fresh.task.state, fresh.task.assignee], ['open', null])
+        assert.match(fresh.task.body, /Resumed after a pause, in a fresh window .*: Try again$/)
+        assert.equal(ledger.board(project.id).open.length, 1, 'the daemon gives it out again')
+
+        const named = ledger.createTask(project.id, { from: 'human', to: 'diana', body: 'By name' })
+        deliver(ledger, named.message)
+        ledger.pauseTask(project.id, 2, { by: 'human' })
+        ledger.removeMember(project.id, 'diana')
+        assert.throws(() => ledger.resumeTask(project.id, 2, { by: 'human', body: 'Go' }), {
+          code: 'session-ended',
+        })
+        assert.equal(ledger.cancelTask(project.id, 2, { by: 'human' }).state, 'cancelled')
+      } finally {
+        ledger.close()
+      }
+    })
+  })
+})

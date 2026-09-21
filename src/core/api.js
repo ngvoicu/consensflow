@@ -14,7 +14,7 @@ import { LedgerError } from '../ledger/index.js'
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024
 const MEMBERS = new Set(['worker', 'advisor', 'reviewer'])
-const TASK_ROUTE = /^\/api\/tasks\/(\d+)(?:\/(done|accept|reopen|cancel|review))?$/
+const TASK_ROUTE = /^\/api\/tasks\/(\d+)(?:\/(done|accept|reopen|cancel|pause|resume|review))?$/
 const MESSAGE_ROUTE = /^\/api\/inbox\/(\d+)$/
 const QUESTION_ROUTE = /^\/api\/questions\/(\d+)$/
 /** The longest one poll for an answer may hold; a door polls again. */
@@ -297,7 +297,11 @@ export async function startApi({
         ? ledger.acceptTask(project.id, number, { by })
         : action === 'cancel'
           ? ledger.cancelTask(project.id, number, { by })
-          : ledger.reopenTask(project.id, number, { by, body: body.body }).task
+          : action === 'pause'
+            ? ledger.pauseTask(project.id, number, { by })
+            : action === 'resume'
+              ? ledger.resumeTask(project.id, number, { by, body: body.body }).task
+              : ledger.reopenTask(project.id, number, { by, body: body.body }).task
     changed()
     return ok({ task: summary(moved) })
   }

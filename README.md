@@ -40,6 +40,11 @@ credentials, takes no API key, and writes only inside its own home.
   reviewer must run a different model than the author; a request for changes
   goes back to the author once, and after a second round the lead decides with
   both reviews in hand.
+- **Pause and resume.** The lead (or you) stops a worker's task by its
+  number: `cf task pause T-5` interrupts the agent and keeps its window,
+  conversation and work; `cf task resume T-5 "…"` sends the words into the
+  same window. A window lost to a restart or a crash pauses its task the
+  same way and tells the lead, so nothing is redone from scratch.
 - **A plan on the board.** A task may need others first: `cf task add
   --needs T-3,T-4 "…"` waits, blocked, until each is accepted, and the daemon
   gives out only unblocked tasks, so a plan of many tasks runs in its own

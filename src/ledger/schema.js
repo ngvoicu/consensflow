@@ -365,6 +365,56 @@ export const MIGRATIONS = [
   ) STRICT;
   CREATE INDEX transcript_order_index ON transcript (conversation_id, seq);
   `,
+  // A task may be paused (its window closed, its work kept): the state check
+  // learns the word, and a paused task may sit on the board without a member.
+  rebuilding(`
+        CREATE TABLE task_next (
+          id INTEGER PRIMARY KEY,
+          project_id INTEGER NOT NULL,
+          number INTEGER NOT NULL,
+          title TEXT NOT NULL,
+          body TEXT NOT NULL,
+          requester_id INTEGER NOT NULL,
+          assignee_id INTEGER,
+          state TEXT NOT NULL,
+          pool TEXT,
+          tier TEXT,
+          purpose TEXT,
+          kind TEXT NOT NULL DEFAULT 'work',
+          review_of INTEGER,
+          round INTEGER NOT NULL DEFAULT 0,
+          verdict TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          unreviewed TEXT,
+          CONSTRAINT task_project_fk FOREIGN KEY (project_id)
+            REFERENCES project (id) ON DELETE CASCADE,
+          CONSTRAINT task_requester_fk FOREIGN KEY (requester_id)
+            REFERENCES participant (id) ON DELETE CASCADE,
+          CONSTRAINT task_assignee_fk FOREIGN KEY (assignee_id)
+            REFERENCES participant (id) ON DELETE CASCADE,
+          CONSTRAINT task_number_unique UNIQUE (project_id, number),
+          CONSTRAINT task_review_of_fk FOREIGN KEY (review_of)
+            REFERENCES task (id) ON DELETE CASCADE,
+          CONSTRAINT task_state_check CHECK (
+            state IN ('open', 'queued', 'working', 'waiting', 'paused', 'review', 'done', 'accepted', 'failed', 'cancelled')
+          ),
+          CONSTRAINT task_assignee_check
+            CHECK (assignee_id IS NOT NULL OR state IN ('open', 'paused', 'cancelled', 'failed')),
+          CONSTRAINT task_pool_check CHECK (pool IS NULL OR pool IN ('worker', 'advisor', 'designer')),
+          CONSTRAINT task_tier_check
+            CHECK (tier IS NULL OR tier IN ('critical', 'complex', 'standard', 'light')),
+          CONSTRAINT task_kind_check CHECK (kind IN ('work', 'review')),
+          CONSTRAINT task_verdict_check CHECK (verdict IS NULL OR verdict IN ('pass', 'changes'))
+        ) STRICT;
+        INSERT INTO task_next
+          SELECT id, project_id, number, title, body, requester_id, assignee_id, state, pool, tier,
+                 purpose, kind, review_of, round, verdict, created_at, updated_at, unreviewed
+          FROM task;
+        DROP TABLE task;
+        ALTER TABLE task_next RENAME TO task;
+        CREATE INDEX task_assignee_index ON task (assignee_id, state);
+  `),
 ]
 
 /**

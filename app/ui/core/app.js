@@ -146,6 +146,24 @@ const drawer = new TaskDrawer($('#task-drawer'), {
     act(() => core('task.reopen', { project: state.selected, task: task.number, body: text })),
   onCancel: (task) =>
     act(() => core('task.cancel', { project: state.selected, task: task.number })),
+  onPause: (task) =>
+    act(async () => {
+      await core('task.pause', { project: state.selected, task: task.number })
+      note(`T-${task.number} is paused; its work waits.`)
+    }),
+  onResume: (task, text) =>
+    act(async () => {
+      const { task: resumed } = await core('task.resume', {
+        project: state.selected,
+        task: task.number,
+        body: text,
+      })
+      note(
+        resumed.state === 'open'
+          ? `T-${task.number} is back on the board: the window that had it has ended.`
+          : `T-${task.number} resumes in @${resumed.assignee}.`,
+      )
+    }),
   onReview: (task) =>
     act(async () => {
       await core('task.review', { project: state.selected, task: task.number })

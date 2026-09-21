@@ -124,6 +124,14 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       task: ledger.cancelTask(project, task, { by: 'human' }),
     })),
 
+    'task.pause': change(async ({ project, task }) => ({
+      task: ledger.pauseTask(project, task, { by: 'human' }),
+    })),
+
+    'task.resume': change(async ({ project, task, body }) =>
+      ledger.resumeTask(project, task, { by: 'human', body }),
+    ),
+
     'message.read': change(async ({ message }) => ({ message: ledger.markRead(message) })),
 
     'message.approve': change(async ({ message }) => ({

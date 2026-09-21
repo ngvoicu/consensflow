@@ -376,6 +376,9 @@
     .card[data-state="working"] { --state: var(--seafoam); --state-ink: var(--ink); }
     .card[data-state="waiting"] { --state: var(--amber); --state-ink: var(--ink); }
     .card[data-state="review"] { --state: var(--amber); --state-ink: var(--ink); }
+    .card[data-state="paused"] { --state: var(--slate); opacity: .7; }
+    .card[data-state="paused"] .card-state { display: block; grid-area: route; }
+    .card[data-state="paused"] .card-route { display: none; }
     .card[data-state="done"] { --state: var(--foam); --state-ink: var(--ink); }
     .card[data-state="failed"] { --state: var(--buoy); --state-ink: var(--ink); }
     .card[data-state="accepted"] { --state: var(--seafoam-dim); }

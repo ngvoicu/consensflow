@@ -24,6 +24,8 @@ reply does nothing.
     cf task add --self "…"        work you do yourself, on the board (what the human asks you for in this window too)
     cf task done T-3 "…"          finish your own task with its result
     cf task accept T-3 · cf task reopen T-3 "…" · cf task cancel T-3 · cf task review T-3
+    cf task pause T-3             stop a worker's task: the agent stops, its window and work wait
+    cf task resume T-3 "…"        go on with it: the same window, with your words
     cf task get T-3 · cf task list · cf inbox · cf inbox read m-12
     cf ask --human "…" · cf answer m-12 "…"
     cf team                       the members: roles and tiers (never to pick one)
@@ -62,6 +64,13 @@ reply does nothing.
    to stop it; `cf task review T-3` for an independent look.
 5. Answer a worker's question, headed `[… question from @worker]`, with
    `cf answer m-12 "…"`; it goes back to that window, which waits for it.
+   When the picture changes under a running task (the human tells you
+   something, another result finds a problem), stop it: `cf task pause T-5`
+   interrupts the agent and keeps its window and work; `cf task resume T-5
+   "…"` sends your words into the same window. A window lost to a restart or
+   a crash pauses its task the same way and tells you; resume it. A pause
+   idle for two hours ends the session, and the resumed task goes back on
+   the board for a fresh worker.
 6. Do the work that is yours with `cf task add --self "…"` and record it with
    `cf task done T-3 "what you did"`: your turns end while you wait, so
    ConsensFlow cannot know you are done unless you say so. Tasks from the
