@@ -125,6 +125,13 @@ const drawer = new TaskDrawer($('#task-drawer'), {
       await core('task.pause', { project: state.selected, task: task.number })
       note(`T-${task.number} is paused; its work waits.`)
     }),
+  onReassign: (task) =>
+    act(async () => {
+      await core('task.reassign', { project: state.selected, task: task.number })
+      note(
+        `T-${task.number} is back on the board for another ${task.pool === 'designer' ? 'image designer' : `${task.tier} ${task.pool}`}.`,
+      )
+    }),
   onResume: (task) =>
     act(async () => {
       const { task: resumed } = await core('task.resume', {

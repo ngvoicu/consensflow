@@ -1035,9 +1035,9 @@ class Ledger {
 
   candidates(projectId, number) {
     const task = this.#taskRow(projectId, number)
-    return this.members(projectId, task.pool).filter(
-      (member) => task.tier === null || member.tier === task.tier,
-    )
+    return this.members(projectId, task.pool)
+      .filter((member) => task.tier === null || member.tier === task.tier)
+      .map((member) => ({ ...member, hadIt: member.id === task.taken_from_id }))
   }
 
   /**
@@ -1240,15 +1240,18 @@ class Ledger {
   }
 
   /**
-   * The daemon takes a task back from its member (it ran out of quota): the
-   * task opens again with a warning for the next member, whatever was still
-   * on its way to the member is cancelled, and the requester is told.
+   * A task given by tier goes back to the board for another member of that
+   * tier: taken from a member that ran out of quota (the daemon), or
+   * reassigned by the human, working or paused. The task opens again with a
+   * warning for the next member, whatever was still on its way to the old
+   * one (a brief held for the human too) is withdrawn, and the requester is
+   * told.
    */
   releaseTask(projectId, number, { because }) {
     requireText(because, 'because', 1000)
     return this.#write(() => {
       const task = this.#taskRow(projectId, number)
-      this.#requireTaskState(task, ['queued', ...ACTIVE_TASK_STATES], 'release')
+      this.#requireTaskState(task, ['queued', ...ACTIVE_TASK_STATES, 'paused'], 'release')
       if (task.pool === null) {
         throw new LedgerError(
           'invalid-transition',
@@ -1256,29 +1259,37 @@ class Ledger {
           409,
         )
       }
-      const member = this.#participantRow(task.assignee_id)
+      // A task paused before anyone took it has nobody to take it from.
+      const member = task.assignee_id === null ? null : this.#participantRow(task.assignee_id)
+      if (member !== null) {
+        this.#db
+          .prepare(
+            `UPDATE message SET state = 'cancelled'
+             WHERE task_id = ? AND recipient_id = ? AND state IN ('queued', 'delivering', 'gated')`,
+          )
+          .run(task.id, member.id)
+      }
+      // One statement: the row is never without an assignee in a working
+      // state. It remembers the member it was taken from (a session's member).
       this.#db
         .prepare(
-          `UPDATE message SET state = 'cancelled'
-           WHERE task_id = ? AND recipient_id = ? AND state IN ('queued', 'delivering')`,
-        )
-        .run(task.id, member.id)
-      // One statement: the row is never without an assignee in a working state.
-      this.#db
-        .prepare(
-          `UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?
+          `UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?,
+             taken_from_id = COALESCE(?, taken_from_id)
            WHERE id = ?`,
         )
         .run(
-          `${task.body}\n\nReassigned from @${member.handle}, which ${because}; check the working tree for partial changes.`,
+          member === null
+            ? task.body
+            : `${task.body}\n\nReassigned from @${member.handle} (${because}); check the working tree for partial changes.`,
           this.#at(),
+          member === null ? null : (member.member_id ?? member.id),
           task.id,
         )
       this.#log(projectId, 'task.released', {
         task: number,
         from: task.state,
         to: 'open',
-        member: member.handle,
+        member: member?.handle ?? null,
         because,
       })
       const requester = this.#participantRow(task.requester_id)
@@ -1286,7 +1297,10 @@ class Ledger {
         to: requester.handle,
         task: number,
         kind: 'note',
-        body: `T-${number} was taken back from @${member.handle} (${because}) and waits for another ${poolName(task.pool, task.tier)}.`,
+        body:
+          member === null
+            ? `T-${number} is back on the board (${because}) and waits for ${aPool(task.pool, task.tier)}.`
+            : `T-${number} was taken back from @${member.handle} (${because}) and waits for another ${poolName(task.pool, task.tier)}.`,
       })
       return { task: this.#task(task.id) }
     })

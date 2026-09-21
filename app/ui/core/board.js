@@ -13,6 +13,8 @@
 const ACTIVE = ['working', 'waiting', 'queued', 'paused', 'open']
 /** What the lead (or the human) may stop: a task on the board or in a window. */
 const PAUSABLE = ['open', 'queued', 'working', 'waiting']
+/** What the human may give back to the board for another member of its tier. */
+const REASSIGNABLE = ['queued', 'working', 'waiting', 'paused']
 /** The columns, in reading order; failed and cancelled share the last one. */
 const COLUMNS = [
   ['open', 'Backlog'],
@@ -721,6 +723,18 @@ export class TaskDrawer {
     }
     if (task.state === 'paused') {
       actions.append(button('Resume', 'primary-button', () => this.#actions.onResume(task)))
+    }
+    // Taken from its member and back on the board for its tier; the lead's
+    // own work and work given by name have no tier to go back to.
+    if (REASSIGNABLE.includes(task.state) && task.pool !== null && task.assignee !== null) {
+      actions.append(
+        button(
+          'Reassign',
+          'quiet-button',
+          () => this.#actions.onReassign(task),
+          `Reassign T-${task.number} to another member of its tier`,
+        ),
+      )
     }
     if (ACTIVE.includes(task.state)) {
       actions.append(button('Cancel task', 'danger-button', () => this.#actions.onCancel(task)))

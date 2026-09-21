@@ -1024,6 +1024,22 @@ describe('the dispatcher assigns open tasks', () => {
     })
   })
 
+  it('closes the old window of a task the human reassigned and gives the task to another member', async () => {
+    await setup(async (context) => {
+      const { open, task } = await withTiers(context)
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(task(1).state, 'working')
+      const old = context.host.last('zeus')
+      context.ledger.releaseTask(1, 1, { because: 'by @human' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.deepEqual(context.host.killed, [{ id: old.id, generation: old.generation }])
+      assert.match(task(1).assignee, /^diana-/, 'zeus has the most tasks taken now')
+    })
+  })
+
   it('tells the requester once when nobody of the tier is free, and assigns when one frees up', async () => {
     await setup(async (context) => {
       const { open, task, notes } = await withTiers(context)
@@ -1109,7 +1125,7 @@ describe('the dispatcher watches quota', () => {
       assert.deepEqual([task(1).state, task(1).assignee], ['queued', 'diana-brisk-birch'])
       assert.match(
         task(1).body,
-        /Reassigned from @zeus-amber-pine, which ran out of quota after starting; check the working tree/,
+        /Reassigned from @zeus-amber-pine \(ran out of quota after starting\); check the working tree/,
       )
       assert.deepEqual(notes('lead'), [
         'T-1 was taken back from @zeus-amber-pine (ran out of quota after starting) and waits for another standard worker.',

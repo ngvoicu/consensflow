@@ -775,6 +775,36 @@ test('pauses a task from its drawer, shows it paused in the queue, and resumes i
   await expect.poll(() => calls(page, 'task.resume')).toEqual([{ project: 1, task: 11 }])
 })
 
+test("reassigns a task given by tier from its drawer, working or paused, never the lead's own", async ({
+  page,
+}) => {
+  const data = model()
+  const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  const tiered = { pool: 'worker', tier: 'light' }
+  lane.tasks.push(
+    task(12, 'Tell a joke', 'working', 'lead', 'zeus', 3, tiered),
+    task(13, 'Add the lexer', 'paused', 'lead', 'zeus', 4, tiered),
+  )
+  data.tasks['1:12'] = { ...lane.tasks.find((t) => t.number === 12), messages: [] }
+  data.tasks['1:13'] = { ...lane.tasks.find((t) => t.number === 13), messages: [] }
+  data.tasks['1:4'] = { ...lane.tasks.find((t) => t.number === 4), messages: [] }
+  await open(page, data)
+  await page.locator('button.card[data-task="12"]').click()
+  const working = page.getByRole('complementary', { name: 'Task T-12' })
+  await working.getByRole('button', { name: 'Reassign T-12 to another member of its tier' }).click()
+  await expect.poll(() => calls(page, 'task.reassign')).toEqual([{ project: 1, task: 12 }])
+  await expect(page.locator('#status')).toHaveText(
+    'T-12 is back on the board for another light worker.',
+  )
+  await page.locator('button.card[data-task="13"]').click()
+  const paused = page.getByRole('complementary', { name: 'Task T-13' })
+  await expect(paused.getByRole('button', { name: /^Reassign/ })).toHaveCount(1)
+  // Work given by name (the lead's own) has no tier to go back to.
+  await page.locator('button.card[data-task="4"]').click()
+  const named = page.getByRole('complementary', { name: 'Task T-4' })
+  await expect(named.getByRole('button', { name: /^Reassign/ })).toHaveCount(0)
+})
+
 test("shows what a task's window wrote, from ConsensFlow's own copy, under the thread", async ({
   page,
 }) => {

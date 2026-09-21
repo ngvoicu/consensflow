@@ -83,7 +83,8 @@ projects.
 - **The board.** One lane per participant: you, the lead, each member and its
   live sessions under it. A task moves from the backlog through queued and
   working to done; you open any card to read its brief, its result, its thread
-  and what its window wrote. The lead's window is docked beside the board; a strip holds every
+  and what its window wrote, and to pause it, reassign it (back to the board
+  for another member of its tier) or cancel it. The lead's window is docked beside the board; a strip holds every
   live window.
 - **New project.** A folder, the lead's harness, the team (the last project's
   ticked already) and whether human approval is required.

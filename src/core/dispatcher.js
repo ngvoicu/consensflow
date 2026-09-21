@@ -32,14 +32,17 @@ import { randomUUID } from 'node:crypto'
  *   exit fails nothing: its open tasks were cancelled when it left.
  * - A task for a tier of member starts open: each pass gives it to a free
  *   member of that pool and tier that is not out of quota, the one with the
- *   fewest tasks so far, then the earliest joined; when none is free the
- *   requester is told once. A review is such a task, for a reviewer. A member whose
+ *   fewest tasks so far, then the earliest joined; a task taken back from a
+ *   member goes to another one first. When none is free the requester is
+ *   told once. A review is such a task, for a reviewer. A member whose
  *   harness reports a fresh refusal (one after it was last marked out) is out
  *   until the reset it names (an hour when it names none): its tiered task
- *   goes back to open for another member, a delivery in flight is queued again, the lead keeps its own tasks for
- *   after the reset, and nothing reaches it while out. A refusal still in the
- *   record after the reset is history, not a new one; the member is simply
- *   eligible again. A member low on quota takes nothing new.
+ *   goes back to open for another member and its window closes, a delivery
+ *   in flight is queued again, the lead keeps its own tasks for after the
+ *   reset, and nothing reaches it while out. A refusal still in the record
+ *   after the reset is history, not a new one; the member is simply
+ *   eligible again. A member low on quota takes nothing new. The human may
+ *   also give a working or paused task back to the board (Reassign).
  * - A human typing in a window latches it against pastes. Their Enter releases
  *   the latch once the harness shows a new message of theirs; the pane host
  *   keeps it if they typed again after that Enter.
@@ -834,9 +837,16 @@ export class Dispatcher {
     return Date.parse(quota.at) > Date.parse(participant.outSince)
   }
 
-  /** The fewest tasks taken first, then the earliest joined. */
+  /**
+   * A member the task was taken back from last, then the fewest tasks taken,
+   * then the earliest joined: a reassigned task goes to another member when
+   * one is free, and back to the same one only when it is the only one.
+   */
   #rank(members) {
-    return [...members].sort((a, b) => a.taken - b.taken || a.id - b.id)
+    return [...members].sort(
+      (a, b) =>
+        Number(a.hadIt === true) - Number(b.hadIt === true) || a.taken - b.taken || a.id - b.id,
+    )
   }
 
   #whyNotFree(candidates) {

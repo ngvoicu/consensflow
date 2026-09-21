@@ -164,7 +164,7 @@ test('a worker refused by its provider mid-task loses the task to the other work
     assert.match(done.assignee, /^worker2-/, 'a session of the other worker')
     assert.match(
       done.body,
-      /Reassigned from @worker-[a-z]+-[a-z]+, which ran out of quota after starting/,
+      /Reassigned from @worker-[a-z]+-[a-z]+ \(ran out of quota after starting\)/,
     )
     // Quota is the member's: the member row says it is out, not a session.
     const out = (await p.board()).lanes.find((l) => l.participant.handle === 'worker').participant

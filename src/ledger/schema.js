@@ -173,6 +173,12 @@ export const MIGRATIONS = [
   ) STRICT;
   CREATE INDEX event_project_index ON event (project_id, id);
   `,
+  // The member a task was last taken back from (out of quota, or reassigned
+  // by the human), so the daemon gives it to another member of its tier.
+  `
+  ALTER TABLE task ADD COLUMN taken_from_id INTEGER
+    CONSTRAINT task_taken_from_fk REFERENCES participant (id) ON DELETE SET NULL;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

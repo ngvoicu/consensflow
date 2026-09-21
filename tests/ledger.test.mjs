@@ -280,6 +280,11 @@ describe('the schema', () => {
       assert.throws(() => raw.prepare('UPDATE project SET gate = 2').run(), /CHECK/)
       assert.throws(() => raw.prepare("UPDATE task SET pool = 'judge'").run(), /CHECK/)
       assert.throws(() => raw.prepare("UPDATE task SET state = 'review'").run(), /CHECK/)
+      assert.throws(
+        () => raw.prepare('UPDATE task SET taken_from_id = 99').run(),
+        /FOREIGN KEY/,
+        'a task is taken back only from a participant that exists',
+      )
       assert.throws(() => raw.prepare('INSERT INTO task_need VALUES (1, 1)').run(), /CHECK/)
       assert.throws(() => raw.prepare('INSERT INTO task_need VALUES (1, 99)').run(), /FOREIGN KEY/)
       const insert = raw.prepare(
@@ -1677,7 +1682,7 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
       const second = ledger.assignTask(project.id, 1, id('diana'))
       assert.equal(
         second.message.body,
-        'Write the parser\n\nReassigned from @zeus-amber-pine, which ran out of quota after starting; check the working tree for partial changes.',
+        'Write the parser\n\nReassigned from @zeus-amber-pine (ran out of quota after starting); check the working tree for partial changes.',
       )
       deliver(ledger, second.message)
       ledger.recordResult(project.id, 1, { body: 'Done' })
@@ -1688,6 +1693,47 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
       assert.throws(() => ledger.releaseTask(project.id, direct.task.number, { because: 'x' }), {
         code: 'invalid-transition',
       })
+    })
+  })
+
+  it('gives a paused task back to the board too, and withdraws a brief still held for the human', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = tiered(ledger)
+      openTask(ledger, project)
+      deliver(ledger, ledger.assignTask(project.id, 1, id('zeus')).message)
+      ledger.pauseTask(project.id, 1, { by: 'lead' })
+      const paused = ledger.releaseTask(project.id, 1, { because: 'by @human' }).task
+      assert.deepEqual([paused.state, paused.assignee], ['open', null])
+      assert.deepEqual(
+        ledger.candidates(project.id, 1).map((c) => [c.handle, c.hadIt]),
+        [
+          ['zeus', true],
+          ['diana', false],
+        ],
+        'the member it was taken from is marked, for the daemon to pass over',
+      )
+      assert.match(
+        paused.body,
+        /Reassigned from @zeus-amber-pine \(by @human\); check the working tree/,
+      )
+      assert.equal(
+        ledger.inbox(id('lead'))[0].body,
+        'T-1 was taken back from @zeus-amber-pine (by @human) and waits for another standard worker.',
+      )
+
+      // With human approval required, a brief waits gated; it goes with the task.
+      ledger.setGate(project.id, true)
+      openTask(ledger, project, { body: 'Write the lexer' })
+      const { message } = ledger.assignTask(project.id, 2, id('diana'))
+      assert.equal(ledger.message(message.id).state, 'gated')
+      ledger.releaseTask(project.id, 2, { because: 'by @human' })
+      assert.equal(ledger.message(message.id).state, 'cancelled', 'never reaches the old window')
+
+      // A task paused before anyone took it has nobody to take it from.
+      openTask(ledger, project, { body: 'Write the docs' })
+      ledger.pauseTask(project.id, 3, { by: 'lead' })
+      const unassigned = ledger.releaseTask(project.id, 3, { because: 'by @human' }).task
+      assert.deepEqual([unassigned.state, unassigned.body], ['open', 'Write the docs'])
     })
   })
 

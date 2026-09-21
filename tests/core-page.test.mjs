@@ -208,6 +208,29 @@ describe('the page protocol of the new core', () => {
     })
   })
 
+  it('reassigns a task given by tier back to the board, and nothing given by name', async () => {
+    await withPage(async ({ ledger, operations, kicks }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        harness: 'pi',
+      })
+      await operations['member.add']({ project: project.id, agent: 'zeus' })
+      const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
+      ledger.createTask(project.id, { from: 'lead', pool: 'worker', tier: zeus.tier, body: 'Joke' })
+      ledger.assignTask(project.id, 1, zeus.id)
+      const before = kicks()
+      const { task } = await operations['task.reassign']({ project: project.id, task: 1 })
+      assert.deepEqual([task.state, task.assignee], ['open', null])
+      assert.match(task.body, /Reassigned from @zeus-[a-z]+-[a-z]+ \(by @human\)/)
+      assert.ok(kicks() > before, 'the daemon looks at once')
+      const own = ledger.createTask(project.id, { from: 'lead', to: 'lead', body: 'Plan' })
+      await assert.rejects(
+        operations['task.reassign']({ project: project.id, task: own.task.number }),
+        /given by name, not by tier/,
+      )
+    })
+  })
+
   it('offers the human no review and no new task: the lead adds both, a review as a task', async () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({
