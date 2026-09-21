@@ -24,7 +24,7 @@ export const USAGE = `cf inside a ConsensFlow window: the board's commands.
   cf task review T-3                ask for an independent review of finished work
   cf task accept|cancel T-3         move a task you asked for
   cf task reopen T-3 "…"            send a finished or failed task back with a follow-up
-  cf task pause T-3                 stop a worker's task: its window closes, its work waits
+  cf task pause T-3                 stop a worker's task: the agent stops, its window and work wait
   cf task resume T-3 "…"            go on with it: the same window, with your words
   cf inbox [read m-12]              what is waiting for you, or one message in full
   cf ask "…" [--human]              a question to whoever gave you your task (or the human)

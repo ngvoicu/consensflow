@@ -494,14 +494,22 @@ test("gives a session's lane the human's hand on its window: open, close, delete
   )
   const closed = page.locator('tr[data-handle="zeus-brisk-birch"]')
   await expect(closed.locator('.row-status')).toHaveText('Window closed')
+  // Opening a window unfolds the dock it shows in.
+  await page.getByRole('button', { name: 'Hide windows' }).click()
+  await expect(page.getByRole('region', { name: 'Terminals' })).toBeHidden()
   await closed.getByRole('button', { name: "Open @zeus · brisk-birch's window" }).click()
   await expect
     .poll(() => calls(page, 'session.open'))
     .toEqual([{ project: 1, handle: 'zeus-brisk-birch' }])
+  await expect(page.getByRole('region', { name: 'Terminals' })).toBeVisible()
+  const dock = page.getByRole('complementary', { name: 'Terminal dock' })
+  await expect(dock.locator('.terminal-card[data-handle="zeus-amber-pine"]')).toHaveCount(1)
   await live.getByRole('button', { name: "Close @zeus · amber-pine's window" }).click()
   await expect
     .poll(() => calls(page, 'session.close'))
     .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
+  // Its card goes at once, even while the board still lists the window on its way out.
+  await expect(dock.locator('.terminal-card[data-handle="zeus-amber-pine"]')).toHaveCount(0)
   await closed.getByRole('button', { name: "Delete @zeus · brisk-birch's session" }).click()
   await expect
     .poll(() => calls(page, 'session.end'))
@@ -712,6 +720,21 @@ test('gives a task to a tier of member, never to a member by name', async ({ pag
       },
     ])
   await expect(page.locator('#status')).toHaveText('T-9 is on the board for a light worker.')
+})
+
+test('keeps what the human chose in New task when the board redraws under it', async ({ page }) => {
+  await open(page)
+  const backlog = page.getByRole('region', { name: 'For you' })
+  await backlog.getByRole('button', { name: 'New task' }).click()
+  const composer = backlog.locator('form.composer')
+  await composer.getByLabel('For').selectOption('worker:standard')
+  await composer.getByLabel('Only after').fill('T-2')
+  await composer.getByLabel('Task').fill('Wire the parser.')
+  await page.evaluate(() => window.__listeners.get('state-changed')())
+  await expect.poll(() => calls(page, 'board.get').then((list) => list.length)).toBeGreaterThan(1)
+  await expect(composer.getByLabel('For')).toHaveValue('worker:standard')
+  await expect(composer.getByLabel('Only after')).toHaveValue('T-2')
+  await expect(composer.getByLabel('Task')).toHaveValue('Wire the parser.')
 })
 
 test('puts a task on the board that waits for others, and refuses anything but task numbers', async ({
@@ -1509,7 +1532,8 @@ test('shows every live window in the strip, brings the asked one into view, and 
     'data-handle',
     'zeus',
   )
-  await expect(page.getByRole('button', { name: "What @diana's window wrote" })).toBeVisible()
+  // A member without a window of its own is a heading: nothing to view on its row.
+  await expect(page.locator('tr[data-handle="diana"] .row-tools button')).toHaveCount(0)
   await page.evaluate(() =>
     window.__output.onmessage({ id: 'p1-zeus', generation: 7, seq: 1, bytes: [104, 105] }),
   )
@@ -1541,23 +1565,23 @@ test("keeps an ended window's terminal in the strip until the human closes it", 
   await expect(ended.getByText('ended')).toBeVisible()
   await ended.getByRole('button', { name: "Close @zeus's ended window" }).click()
   await expect(dock.locator('.terminal-card[data-handle="zeus"]')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: "What @zeus's window wrote" })).toBeVisible()
+  await expect(page.locator('tr[data-handle="zeus"] .row-tools button')).toHaveCount(0)
 })
 
-test("opens the last task's transcript for a window that is gone, and offers no terminal for a member with nothing yet", async ({
+test("opens a closed session's transcript from its lane, and gives a member's heading row no buttons", async ({
   page,
 }) => {
   const data = model()
+  const diana = data.boards[1].lanes.find((l) => l.participant.handle === 'diana').participant
   data.boards[1].lanes.push({
-    participant: participant(8, 'hera', 'worker', { harness: 'pi' }),
-    tasks: [],
+    participant: session(24, diana, 'amber-pine'),
+    tasks: [task(3, 'hostile', 'failed', 'lead', 'diana-amber-pine', 5)],
     activity: { state: 'closed' },
     pane: null,
   })
   await open(page, data)
-  await expect(page.getByRole('button', { name: "Open @hera's terminal" })).toBeDisabled()
-  await expect(page.getByRole('button', { name: "Open @diana's terminal" })).toHaveCount(0)
-  await page.getByRole('button', { name: "What @diana's window wrote" }).click()
+  await expect(page.locator('tr[data-handle="diana"] .row-tools button')).toHaveCount(0)
+  await page.getByRole('button', { name: "What @diana · amber-pine's window wrote" }).click()
   await expect(page.getByRole('complementary', { name: 'Task T-3' })).toBeVisible()
   await expect
     .poll(async () => (await calls(page, 'task.transcript')).some((call) => call.task === 3))

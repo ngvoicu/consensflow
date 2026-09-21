@@ -128,6 +128,9 @@ function sessionsNote(lane, board) {
 /** "T-3, T-4": task numbers in a sentence. */
 const tasks = (numbers) => numbers.map((number) => `T-${number}`).join(', ')
 
+/** The fields a redraw must not lose: text areas, and the New task form's choices. */
+const DRAFT_FIELDS = 'textarea, form.composer select, form.composer input'
+
 /** Where a task is going or came from, on its card; what it waits for first. */
 function route(task) {
   if (task.assignee === null) {
@@ -503,10 +506,15 @@ export class BoardView {
     )
     status.dataset.state = out ? 'out' : (activity?.state ?? 'closed')
     const tools = element('div', 'row-tools')
-    // A live (or still readable) window opens in the dock; a window that is
-    // gone leaves its copy on its last task's card: the same button opens that.
+    // A member's row heads its sessions and never has a window of its own. A
+    // live (or still readable) window opens in the dock; a window that is gone
+    // leaves its copy on its last task's card: the same place opens that.
+    const heading =
+      participant.agent !== null && participant.member === null && pane === null && !lane.ended
     const latest = lane.tasks.at(-1)
-    if (pane === null && !lane.ended && latest !== undefined) {
+    if (heading) {
+      // Nothing to view here: each session below has its own.
+    } else if (pane === null && !lane.ended && latest !== undefined) {
       tools.append(
         button(
           'Transcript',
@@ -694,6 +702,7 @@ export class BoardView {
       const text = field.value.trim()
       if (!text) return
       this.#drafts.delete('open')
+      this.#drafts.delete('Only after')
       this.#composingOpen = false
       if (!tiered()) {
         this.#actions.onGiveTask({ handle: address.value }, text)
@@ -749,8 +758,13 @@ export class BoardView {
     this.#actions.onRedraw()
   }
 
+  /**
+   * What the human is writing survives a redraw: every text area, and the
+   * New task form's choices (who it is for, the purpose, what it waits for).
+   * A choice is restored before the fields it shows or hides.
+   */
   #saveDrafts() {
-    for (const field of this.#root.querySelectorAll('textarea')) {
+    for (const field of this.#root.querySelectorAll(DRAFT_FIELDS)) {
       const key = field.dataset.draft ?? field.getAttribute('aria-label')
       if (field.value) this.#drafts.set(key, field.value)
       else this.#drafts.delete(key)
@@ -758,9 +772,11 @@ export class BoardView {
   }
 
   #restoreDrafts() {
-    for (const field of this.#root.querySelectorAll('textarea')) {
+    for (const field of this.#root.querySelectorAll(DRAFT_FIELDS)) {
       const key = field.dataset.draft ?? field.getAttribute('aria-label')
-      if (this.#drafts.has(key)) field.value = this.#drafts.get(key)
+      if (!this.#drafts.has(key)) continue
+      field.value = this.#drafts.get(key)
+      if (field.tagName === 'SELECT') field.dispatchEvent(new Event('change'))
     }
   }
 }

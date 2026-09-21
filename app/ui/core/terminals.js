@@ -15,6 +15,8 @@ export class TerminalsView {
   #registry
   #link
   #cards = new Map()
+  /** Windows the human closed: their cards go at once and never come back. */
+  #dismissed = new Set()
   #onChange
 
   constructor(stage, { invoke, report, createEmulator, onChange = () => {} }) {
@@ -56,7 +58,7 @@ export class TerminalsView {
   render(lanes, { focused }) {
     const ordered = laneOrder(lanes)
     for (const [order, lane] of ordered.entries()) {
-      if (lane.pane === null) continue
+      if (lane.pane === null || this.#dismissed.has(paneKey(lane.pane))) continue
       for (const [key, entry] of this.#cards) {
         if (entry.handle === lane.participant.handle && key !== paneKey(lane.pane)) this.#drop(key)
       }
@@ -89,6 +91,20 @@ export class TerminalsView {
   /** Every card goes: a closed project has no windows to read. */
   clear() {
     for (const key of [...this.#cards.keys()]) this.#drop(key)
+  }
+
+  /**
+   * The human closed a participant's window: its card goes now, even while
+   * the window is still on its way out, and does not come back for it. A new
+   * window of the same participant is a new pane and shows as usual.
+   */
+  forget(handle) {
+    for (const [key, entry] of this.#cards) {
+      if (entry.handle !== handle) continue
+      this.#dismissed.add(key)
+      this.#drop(key)
+    }
+    this.#onChange()
   }
 
   /** The human closes an ended window's card; a live one stays. */

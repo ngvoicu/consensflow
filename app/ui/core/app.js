@@ -128,13 +128,19 @@ const board = new BoardView(boardRoot, {
       note(`T-${message.taskNumber} goes back to @${message.sender}.`)
     }),
   onOpenTask: (number) => act(() => openTask(number)),
+  // Opening a session's window shows it in the dock at once, the dock unfolded;
+  // closing it takes its card away with it.
   onOpenWindow: (participant) =>
     act(async () => {
       await core('session.open', { project: state.selected, handle: participant.handle })
+      unfold('dock')
       state.focus = participant.handle
     }),
   onCloseWindow: (participant) =>
-    act(() => core('session.close', { project: state.selected, handle: participant.handle })),
+    act(async () => {
+      await core('session.close', { project: state.selected, handle: participant.handle })
+      terminals.forget(participant.handle)
+    }),
   onEndSession: (participant) =>
     act(async () => {
       await core('session.end', { project: state.selected, handle: participant.handle })
@@ -786,6 +792,16 @@ for (const [name, , , button] of FOLDS) {
   })
 }
 applyFolds()
+
+/** A panel the page needs to show comes back unfolded. */
+function unfold(name) {
+  try {
+    localStorage.setItem(foldKey(name), 'shown')
+  } catch {
+    // No storage: shown for this page.
+  }
+  applyFolds()
+}
 
 const settingsDialog = $('#settings-dialog')
 $('#settings-button').addEventListener('click', () => settingsDialog.showModal())

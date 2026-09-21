@@ -321,3 +321,63 @@ test('with human approval required, the brief and the result each wait for the h
     await app.close()
   }
 })
+
+test("the human opens a finished session's window on its own conversation, and closing it ends the process", async () => {
+  const app = await startIntegration({
+    editor: CORE_EDITOR,
+    fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
+  })
+  try {
+    team(app)
+    const p = await project(app, { review: 'none', members: [['worker', 'worker']] })
+    const alive = (pid) => {
+      try {
+        process.kill(pid, 0)
+        return true
+      } catch {
+        return false
+      }
+    }
+    await app.requestNode('task.add', {
+      project: p.id,
+      to: 'lead',
+      body: `DISPATCH --tier ${p.tiers.worker} Reply with exactly: ONE`,
+    })
+    await app.waitFor(async () => (await p.task(2))?.state === 'done', 60_000)
+    const handle = (await p.task(2)).assignee
+    const session = async () =>
+      (await p.board()).lanes.find((lane) => lane.participant.handle === handle)
+    await app.waitFor(async () => (await session())?.pane === null, 30_000)
+    // The fake agent records its pid and native session: the lead's comes first.
+    const lead = app.processes()[0].sessionId
+    const first = app.processes().find((entry) => entry.sessionId !== lead)
+    await app.waitFor(async () => !alive(first.pid), 30_000)
+
+    const opened = await app.requestNode('session.open', { project: p.id, handle })
+    assert.equal(opened.ok, true, JSON.stringify(opened))
+    await app.waitFor(async () => (await session())?.pane !== null, 30_000)
+    // A fresh process on the same conversation.
+    await app.waitFor(
+      async () =>
+        app
+          .processes()
+          .some((entry) => entry.sessionId === first.sessionId && entry.pid !== first.pid),
+      30_000,
+    )
+    const again = app
+      .processes()
+      .filter((entry) => entry.sessionId === first.sessionId)
+      .at(-1)
+    await new Promise((resolve) => setTimeout(resolve, 2_000))
+    assert.notEqual((await session()).pane, null, 'it stays open with nothing to do')
+    assert.equal(alive(again.pid), true)
+
+    const closed = await app.requestNode('session.close', { project: p.id, handle })
+    assert.equal(closed.ok, true, JSON.stringify(closed))
+    await app.waitFor(async () => (await session())?.pane === null, 30_000)
+    await app.waitFor(async () => !alive(again.pid), 30_000)
+    assert.ok(await session(), 'the session stays for the human')
+  } finally {
+    await app.close()
+  }
+})
