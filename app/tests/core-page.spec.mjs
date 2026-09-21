@@ -89,10 +89,6 @@ const task = (number, title, state, requester, assignee, minutesAgo = 3, extra =
   pool: null,
   tier: null,
   purpose: null,
-  kind: 'work',
-  reviewOf: null,
-  round: 0,
-  verdict: null,
   needs: [],
   blockedBy: [],
   createdAt: at(minutesAgo + 1),
@@ -142,7 +138,6 @@ function model() {
           name: 'harbour',
           directory: '/work/harbour',
           state: 'open',
-          review: 'members',
         },
         open: [
           task(6, 'Write the docs', 'open', 'lead', null, 1, { pool: 'worker', tier: 'standard' }),
@@ -199,7 +194,6 @@ function model() {
           name: 'foundry',
           directory: '/work/foundry',
           state: 'suspended',
-          review: 'none',
         },
         open: [],
         lanes: [
@@ -270,16 +264,6 @@ function model() {
     tasks: {
       '1:2': {
         ...task(2, 'Write the parser', 'done', 'lead', 'zeus', 2),
-        reviews: [
-          {
-            number: 10,
-            round: 1,
-            reviewer: 'hera',
-            state: 'done',
-            verdict: 'pass',
-            findings: 'Looks right.\n\nVERDICT: pass',
-          },
-        ],
         messages: [
           {
             id: 20,
@@ -321,16 +305,6 @@ async function open(page, data = model()) {
       'team.last': () => answer({ team: data.lastTeam ?? [] }),
       'member.roles': ({ project, agent, roles }) => {
         const lane = data.boards[project].lanes.find((l) => l.participant.handle === agent)
-        const board = data.boards[project]
-        const reviewers = board.lanes.filter(
-          (l) => l.participant.roles.includes('reviewer') && l !== lane,
-        )
-        if (
-          board.project.review !== 'none' &&
-          !roles.includes('reviewer') &&
-          reviewers.length === 0
-        )
-          return { ok: false, error: `@${agent} is the last reviewer: the review policy needs one` }
         lane.participant.roles = roles
         return answer({ member: lane.participant })
       },
@@ -422,7 +396,6 @@ test('draws the kanban: a row per participant, a column per state, and cards tha
     'Queued',
     'Working',
     'Waiting',
-    'In review',
     'Done',
     'Accepted',
     'Ended',
@@ -534,8 +507,8 @@ test('gives a member with two roles a row per role, each with its own sessions a
       participant: session(42, zeus, 'brisk-birch', 'reviewer'),
       tasks: [
         task(43, 'Review T-2', 'working', 'lead', 'zeus-brisk-birch', 2, {
-          kind: 'review',
-          reviewOf: 2,
+          pool: 'reviewer',
+          tier: 'standard',
         }),
       ],
       activity: { state: 'working' },
@@ -720,7 +693,7 @@ test('shows what a task on the board waits for, on its card and in its drawer', 
       blockedBy: [2, 6],
     }),
   )
-  data.tasks['1:7'] = { ...data.boards[1].open[1], messages: [], reviews: [] }
+  data.tasks['1:7'] = { ...data.boards[1].open[1], messages: [] }
   await open(page, data)
   const card = page.locator(
     'tr[data-handle="lead"] td[data-state="open"] button.card[data-task="7"]',
@@ -733,32 +706,15 @@ test('shows what a task on the board waits for, on its card and in its drawer', 
   await expect(drawer.locator('.drawer-meta')).toContainText('needs T-2 (done), T-6 (open)')
 })
 
-test("shows a member out of quota, and a task's reviews under it and as cards on the reviewer's row", async ({
+test("shows a member out of quota, and a reviewer's review tasks as cards on its row like any task", async ({
   page,
 }) => {
   const data = model()
-  data.boards[1].lanes[2].tasks.push(
-    task(8, 'Add the lexer', 'review', 'lead', 'zeus', 1, { round: 1 }),
-  )
   data.boards[1].lanes.push({
     participant: participant(7, 'hera', 'reviewer', { harness: 'pi' }),
     tasks: [
-      task(9, 'Review T-8', 'working', 'lead', 'hera', 1, {
-        kind: 'review',
-        reviewOf: 8,
-        round: 2,
-      }),
-      task(10, 'Review T-2', 'done', 'lead', 'hera', 2, {
-        kind: 'review',
-        reviewOf: 2,
-        round: 1,
-        verdict: 'pass',
-      }),
-      task(7, 'Review T-8', 'done', 'lead', 'hera', 3, {
-        kind: 'review',
-        reviewOf: 8,
-        verdict: 'changes',
-      }),
+      task(9, 'Review T-8', 'working', 'lead', 'hera', 1, { pool: 'reviewer', tier: 'standard' }),
+      task(10, 'Review T-2', 'done', 'lead', 'hera', 2, { pool: 'reviewer', tier: 'standard' }),
     ],
     activity: { state: 'working' },
     pane: { id: 'p1-hera', generation: 2 },
@@ -767,34 +723,14 @@ test("shows a member out of quota, and a task's reviews under it and as cards on
   const diana = page.locator('tr[data-handle="diana"]')
   await expect(diana.getByTestId('lamp')).toHaveAttribute('data-state', 'out')
   await expect(diana.locator('.row-status')).toHaveText(/^Out of quota until \d\d:\d\d$/)
-  const lexer = page.locator(
-    'tr[data-handle="zeus"] td[data-state="review"] li.card-item:has(button[data-task="8"])',
-  )
-  await expect(lexer.locator('.card-state')).toHaveText('In review · round 2')
-  await expect(lexer.locator('.reviews li')).toHaveText([
-    'Reviewed by @hera, round 1: changes',
-    '@hera is reviewing, round 2',
-  ])
-  const parser = page.locator(
-    'tr[data-handle="zeus"] td[data-state="done"] li.card-item:has(button[data-task="2"])',
-  )
-  await expect(parser.locator('.reviews li')).toHaveText(['Reviewed by @hera, round 1: pass'])
-  // The reviewer's row shows its reviews as cards, and says what it is doing.
   const hera = page.locator('tr[data-handle="hera"]')
   await expect(hera.locator('td[data-state="working"] button.card[data-task="9"]')).toHaveCount(1)
-  await expect(hera.locator('td[data-state="done"] button.card')).toHaveCount(2)
-  await expect(hera.locator('.row-status')).toHaveText('Reviewing T-8')
+  await expect(hera.locator('td[data-state="done"] button.card[data-task="10"]')).toHaveCount(1)
+  // A review hangs under no other card: it is a task of its own.
+  await expect(page.locator('.reviews')).toHaveCount(0)
 })
 
-test('asks for a review of finished work from the drawer', async ({ page }) => {
-  await open(page)
-  await page.locator('button.card[data-task="2"]').click()
-  const drawer = page.getByRole('complementary', { name: 'Task T-2' })
-  await drawer.getByRole('button', { name: 'Ask for a review' }).click()
-  await expect.poll(() => calls(page, 'task.review')).toEqual([{ project: 1, task: 2 }])
-})
-
-test("opens a card's drawer with the result apart from the brief and the reviews under it, and leaves accepting to the lead", async ({
+test("opens a card's drawer with the result apart from the brief, and leaves accepting and reviews to the lead", async ({
   page,
 }) => {
   await open(page)
@@ -803,23 +739,13 @@ test("opens a card's drawer with the result apart from the brief and the reviews
   await expect(drawer.locator('.drawer-brief')).toHaveText('Write the parser')
   await expect(drawer.getByRole('heading', { name: 'Result' })).toBeVisible()
   await expect(drawer.locator('.drawer-result')).toHaveText('Parser done, 14 tests.')
-  await expect(drawer.locator('.drawer-review .drawer-review-head')).toHaveText([
-    'Reviewed by @hera, round 1: pass',
-  ])
-  await expect(drawer.locator('.drawer-review .drawer-review-body')).toHaveText([
-    'Looks right.\n\nVERDICT: pass',
-  ])
-  // Accepting is the lead's call, in its terminal: the drawer offers a review and a send-back.
+  // Accepting and asking for a review are the lead's, from its terminal.
   await expect(drawer.getByRole('button', { name: 'Accept' })).toHaveCount(0)
-  await expect(drawer.getByRole('button', { name: 'Ask for a review' })).toBeVisible()
+  await expect(drawer.getByRole('button', { name: /review/i })).toHaveCount(0)
   // Nothing here writes to the agent: that is done in its terminal.
   await expect(drawer.getByRole('textbox')).toHaveCount(0)
   // Each part is a panel of its own, headed by what it is.
-  await expect(drawer.locator('.drawer-section-head')).toHaveText([
-    'Brief',
-    'Result',
-    /^Reviews\s*1$/,
-  ])
+  await expect(drawer.locator('.drawer-section-head')).toHaveText(['Brief', 'Result'])
 })
 
 test('pauses a task from its drawer, shows it paused in the queue, and resumes it', async ({
@@ -828,8 +754,8 @@ test('pauses a task from its drawer, shows it paused in the queue, and resumes i
   const data = model()
   const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
   lane.tasks.push(task(11, 'Add the lexer', 'paused', 'lead', 'zeus', 4))
-  data.tasks['1:4'] = { ...lane.tasks.find((t) => t.number === 4), messages: [], reviews: [] }
-  data.tasks['1:11'] = { ...lane.tasks.find((t) => t.number === 11), messages: [], reviews: [] }
+  data.tasks['1:4'] = { ...lane.tasks.find((t) => t.number === 4), messages: [] }
+  data.tasks['1:11'] = { ...lane.tasks.find((t) => t.number === 11), messages: [] }
   await open(page, data)
   const paused = page.locator(
     'tr[data-handle="zeus"] td[data-state="queued"] button.card[data-task="11"]',
@@ -999,21 +925,6 @@ test('keeps a pending removal and the chosen agent when the core redraws the tea
   await expect(dialog.getByLabel('Agent')).toHaveValue('hera')
 })
 
-test('keeps the row when the core refuses to drop the last reviewer', async ({ page }) => {
-  const data = model()
-  const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'diana')
-  lane.participant.roles = ['worker', 'reviewer']
-  await open(page, data)
-  await page.getByRole('button', { name: 'Team' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Project team' })
-  await dialog.getByRole('button', { name: 'Remove Reviewer @diana' }).click()
-  await expect(page.getByRole('status')).toContainText(
-    '@diana is the last reviewer: the review policy needs one',
-  )
-  await expect(dialog.getByRole('button', { name: 'Remove Reviewer @diana' })).toBeVisible()
-  await expect(dialog.getByLabel('Second review of')).toHaveValue('members')
-})
-
 test('starts a project with human approval required, and posts the checkbox with the team', async ({
   page,
 }) => {
@@ -1026,17 +937,18 @@ test('starts a project with human approval required, and posts the checkbox with
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
     .poll(() => calls(page, 'project.open'))
-    .toEqual([
-      { directory: '/work/fresh', harness: 'claude-code', review: 'none', gate: true, team: [] },
-    ])
+    .toEqual([{ directory: '/work/fresh', harness: 'claude-code', gate: true, team: [] }])
 })
 
-test('shows and sets human approval from the team dialog', async ({ page }) => {
+test('shows and sets human approval from the team dialog, which has no review policy', async ({
+  page,
+}) => {
   const data = model()
   data.boards[1].project.gate = true
   await open(page, data)
   await page.getByRole('button', { name: 'Team' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project team' })
+  await expect(dialog.getByLabel('Second review of')).toHaveCount(0)
   const gate = dialog.getByLabel('Human approval required', { exact: false })
   await expect(gate).toBeChecked()
   await gate.uncheck()
@@ -1103,42 +1015,6 @@ test('lists what waits for approval in For you, and approves or declines it, wri
   await expect
     .poll(() => calls(page, 'message.approve'))
     .toEqual([{ message: 30 }, { message: 32 }])
-})
-
-test('sets the review policy from the team dialog once a reviewer is on the team', async ({
-  page,
-}) => {
-  const data = model()
-  const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
-  lane.participant.roles = ['worker', 'reviewer']
-  await open(page, data)
-  await page.getByRole('button', { name: 'Team' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Project team' })
-  await expect(dialog.getByLabel('Second review of')).toHaveValue('members')
-  await expect(dialog.locator('.team-warning')).toBeHidden()
-  await expect(dialog.getByLabel('Second review of').locator('option')).toHaveText([
-    'Nothing: results go straight to whoever asked',
-    "Workers' work: what a worker finishes",
-  ])
-  await dialog.getByLabel('Second review of').selectOption('none')
-  await expect.poll(() => calls(page, 'project.review')).toEqual([{ project: 1, review: 'none' }])
-})
-
-test('holds the review choices until a reviewer is on the team', async ({ page }) => {
-  const data = model()
-  data.boards[1].project.review = 'none'
-  await open(page, data)
-  await page.getByRole('button', { name: 'Team' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Project team' })
-  await expect(dialog.getByLabel('Second review of')).toHaveValue('none')
-  await expect(dialog.locator('.team-warning')).toHaveText(
-    'Reviews need a reviewer on the team: add one of the agents as Reviewer.',
-  )
-  await expect(
-    dialog.getByLabel('Second review of').locator('option[value="members"]'),
-  ).toHaveJSProperty('disabled', true)
-  await expect(dialog.getByLabel('Second review of').locator('option')).toHaveCount(2)
-  expect(await calls(page, 'project.review')).toEqual([])
 })
 
 /** The harbour board with an advisor on the team, its window open. */
@@ -1335,7 +1211,7 @@ test('starts a project in a chosen folder with the chosen lead, the team ticked 
     /zeus.*Reviewer/,
     /diana.*codex · gpt-5.6-luna · low.*Worker/,
   ])
-  await expect(dialog.getByLabel('Second review of')).toHaveValue('members')
+  await expect(dialog.getByLabel('Second review of')).toHaveCount(0)
   await dialog.getByLabel('The lead runs in').selectOption('opencode')
   await dialog.locator('[name="pickRole"]').selectOption('advisor')
   await expect(dialog.locator('[name="pickAgent"]').locator('option')).toHaveText([
@@ -1344,7 +1220,6 @@ test('starts a project in a chosen folder with the chosen lead, the team ticked 
   await dialog.getByRole('button', { name: 'Add', exact: true }).click()
   await dialog.getByRole('button', { name: 'Remove Worker diana' }).click()
   await expect(table.locator('tbody tr')).toHaveCount(3)
-  await dialog.getByLabel('Second review of').selectOption('none')
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
     .poll(() => calls(page, 'project.open'))
@@ -1352,39 +1227,12 @@ test('starts a project in a chosen folder with the chosen lead, the team ticked 
       {
         directory: '/work/fresh',
         harness: 'opencode',
-        review: 'none',
         gate: false,
         team: [
           { agent: 'zeus', roles: ['worker', 'reviewer'] },
           { agent: 'athena', roles: ['advisor'] },
         ],
       },
-    ])
-})
-
-test('starts a project without reviews when nobody ticked is a reviewer', async ({ page }) => {
-  await open(page)
-  await page.getByRole('button', { name: 'New project' }).click()
-  const dialog = page.getByRole('dialog', { name: 'New project' })
-  await expect(dialog.getByLabel('Second review of')).toHaveValue('none')
-  await expect(dialog.locator('.team-warning')).toHaveText(
-    'Reviews need a reviewer on the team: add one of the agents as Reviewer.',
-  )
-  await expect(
-    dialog.getByLabel('Second review of').locator('option[value="members"]'),
-  ).toHaveJSProperty('disabled', true)
-  await dialog.locator('[name="pickRole"]').selectOption('reviewer')
-  await dialog.locator('[name="pickAgent"]').selectOption('athena')
-  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
-  await expect(dialog.locator('.team-warning')).toBeHidden()
-  await dialog.getByLabel('Second review of').selectOption('members')
-  await dialog.getByRole('button', { name: 'Remove Reviewer athena' }).click()
-  await expect(dialog.getByLabel('Second review of')).toHaveValue('none')
-  await dialog.getByRole('button', { name: 'Start project' }).click()
-  await expect
-    .poll(() => calls(page, 'project.open'))
-    .toEqual([
-      { directory: '/work/fresh', harness: 'claude-code', review: 'none', gate: false, team: [] },
     ])
 })
 

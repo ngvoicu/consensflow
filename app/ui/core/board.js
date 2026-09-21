@@ -1,17 +1,17 @@
 /**
  * The board: a kanban of the project's tasks. One row per participant, one
  * column per state, every task a card that stays where it ended, with its
- * result on it. A task's reviews sit under its card, never as cards of their
- * own. Above the grid, what waits for the human: questions to answer, results
- * and notes to read, and the composer that puts a new task on the board.
+ * result on it. A review is a task like any other, on its reviewer's row.
+ * Above the grid, what waits for the human: questions to answer, results and
+ * notes to read.
  *
  * Everything here is drawn from the core's state with `textContent`, never
  * markup, so an agent-written title cannot become HTML. Actions go out through
  * the callbacks; the controller calls the core and redraws.
  */
 
-const ACTIVE = ['working', 'waiting', 'queued', 'paused', 'review', 'open']
-/** What the lead (or the human) may stop: work on the board or in a window, never a review. */
+const ACTIVE = ['working', 'waiting', 'queued', 'paused', 'open']
+/** What the lead (or the human) may stop: a task on the board or in a window. */
 const PAUSABLE = ['open', 'queued', 'working', 'waiting']
 /** The columns, in reading order; failed and cancelled share the last one. */
 const COLUMNS = [
@@ -19,7 +19,6 @@ const COLUMNS = [
   ['queued', 'Queued'],
   ['working', 'Working'],
   ['waiting', 'Waiting'],
-  ['review', 'In review'],
   ['done', 'Done'],
   ['accepted', 'Accepted'],
   ['ended', 'Ended'],
@@ -36,7 +35,6 @@ const STATE_LABEL = {
   working: 'Working',
   waiting: 'Waiting',
   paused: 'Paused',
-  review: 'In review',
   done: 'Done',
   accepted: 'Accepted',
   failed: 'Failed',
@@ -89,8 +87,8 @@ export function age(iso, now = Date.now()) {
 const COORDINATORS = ['human', 'lead']
 
 /** The human and the lead first, then each member with its sessions right under it. */
-/** The role a member's task is for: a review is a reviewer's, the rest its pool's. */
-const roleOf = (task, roles) => (task.kind === 'review' ? 'reviewer' : (task.pool ?? roles[0]))
+/** The role a member's task is for: its pool's. */
+const roleOf = (task, roles) => task.pool ?? roles[0]
 
 /**
  * The board's rows: a member with several roles heads one row per role, each
@@ -180,15 +178,6 @@ function route(task) {
   }
   return `from ${who(task.requester)}`
 }
-
-const stateLabel = (task) =>
-  task.state === 'review' ? `In review · round ${task.round + 1}` : STATE_LABEL[task.state]
-
-/** One line per review, as it reads under the task it reviews. */
-const reviewLine = (review) =>
-  review.state === 'done'
-    ? `Reviewed by ${who(review.reviewer)}, round ${review.round}: ${review.verdict ?? 'pass (no verdict line)'}`
-    : `${who(review.reviewer)} is reviewing, round ${review.round}`
 
 /** A member between tasks: its work runs in sessions, so it has no window of its own. */
 const resting = (participant, activity) =>
@@ -429,37 +418,21 @@ export class BoardView {
     }
     head.append(headRow)
     const body = element('tbody')
-    // Reviews hang under the task they review, wherever the reviewer sits.
-    const reviews = new Map()
-    for (const lane of board.lanes) {
-      for (const task of lane.tasks) {
-        if (task.kind !== 'review') continue
-        const list = reviews.get(task.reviewOf) ?? []
-        list.push({ ...task, reviewer: lane.participant.handle })
-        reviews.set(task.reviewOf, list)
-      }
-    }
-    // A review's round is its place among the reviews of its task.
-    for (const list of reviews.values()) {
-      list.sort((a, b) => a.number - b.number)
-      for (const [index, review] of list.entries()) review.round = index + 1
-    }
     for (const lane of boardRows(board.lanes)) {
-      body.append(this.#row(lane, board, models.get(lane.participant.agent), reviews, now))
+      body.append(this.#row(lane, board, models.get(lane.participant.agent), now))
     }
     table.append(head, body)
     return table
   }
 
-  #row(lane, board, agent, reviews, now) {
+  #row(lane, board, agent, now) {
     const { participant, activity, pane } = lane
     const row = element('tr')
     row.dataset.handle = participant.handle
     row.dataset.role = participant.role
     if (participant.member) row.dataset.session = participant.member
     row.append(this.#rowHead(lane, board, agent, now))
-    // A task waiting for a member sits in its requester's backlog. A review is
-    // a card on its reviewer's row, and hangs under the task it reviews too.
+    // A task waiting for a member sits in its requester's backlog.
     const mine = [
       ...lane.tasks,
       ...board.open.filter((task) => task.requester === participant.handle),
@@ -470,7 +443,7 @@ export class BoardView {
       const list = element('ol', 'cards')
       for (const task of mine) {
         if (columnOf(task) !== state) continue
-        list.append(this.#card(task, reviews.get(task.number) ?? [], now))
+        list.append(this.#card(task, now))
       }
       if (list.childElementCount > 0) cell.append(list)
       row.append(cell)
@@ -506,7 +479,6 @@ export class BoardView {
       .filter(Boolean)
       .join(' · ')
     const out = outOfQuota(participant, now)
-    const reviewing = lane.tasks.find((task) => task.kind === 'review' && task.state !== 'done')
     const status = element(
       'span',
       'row-status',
@@ -514,13 +486,11 @@ export class BoardView {
         ? `Out of quota until ${clock(participant.outUntil)}`
         : activity?.state === 'waiting' && activity.reason
           ? `Waiting: ${activity.reason}`
-          : reviewing !== undefined
-            ? `Reviewing T-${reviewing.reviewOf}`
-            : resting(participant, activity)
-              ? sessionsNote(lane, board)
-              : participant.member !== null && (activity?.state ?? 'closed') === 'closed'
-                ? 'Terminal closed'
-                : (ACTIVITY_LABEL[activity?.state] ?? 'No window'),
+          : resting(participant, activity)
+            ? sessionsNote(lane, board)
+            : participant.member !== null && (activity?.state ?? 'closed') === 'closed'
+              ? 'Terminal closed'
+              : (ACTIVITY_LABEL[activity?.state] ?? 'No window'),
     )
     status.dataset.state = out ? 'out' : (activity?.state ?? 'closed')
     const tools = element('div', 'row-tools')
@@ -584,7 +554,7 @@ export class BoardView {
     return head
   }
 
-  #card(task, reviews, now) {
+  #card(task, now) {
     const item = element('li', 'card-item')
     const card = button('', 'card', () => this.#actions.onOpenTask(task.number))
     card.dataset.task = String(task.number)
@@ -597,16 +567,11 @@ export class BoardView {
       element('span', 'card-number', `T-${task.number}`),
       element('span', 'card-title', task.title),
       element('span', 'card-route', route(task)),
-      element('span', 'card-state', stateLabel(task)),
+      element('span', 'card-state', STATE_LABEL[task.state]),
       element('span', 'card-age', age(task.updatedAt, now)),
     )
     if (task.result) card.append(element('span', 'card-result', task.result))
     item.append(card)
-    if (reviews.length > 0) {
-      const list = element('ul', 'reviews')
-      for (const review of reviews) list.append(element('li', null, reviewLine(review)))
-      item.append(list)
-    }
     return item
   }
 
@@ -636,8 +601,8 @@ const TRANSCRIPT_ROLE = {
 }
 
 /**
- * One task: its brief, its result apart from it, its reviews with their
- * findings, the rest of its thread, what its window wrote (ConsensFlow's own
+ * One task: its brief, its result apart from it, the rest of its thread,
+ * what its window wrote (ConsensFlow's own
  * copy of the conversation, kept after the window is gone), and what the
  * human may do next.
  */
@@ -668,7 +633,7 @@ export class TaskDrawer {
     const meta = element(
       'p',
       'drawer-meta',
-      `${who(task.requester)} asked ${task.assignee === null ? `for a ${task.tier} ${task.pool}` : who(task.assignee)} · ${stateLabel(task)} · updated ${age(task.updatedAt, now)} ago${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
+      `${who(task.requester)} asked ${task.assignee === null ? `for a ${task.tier} ${task.pool}` : who(task.assignee)} · ${STATE_LABEL[task.state]} · updated ${age(task.updatedAt, now)} ago${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
     )
     meta.dataset.state = task.state
     const sections = [head, meta]
@@ -688,20 +653,6 @@ export class TaskDrawer {
     if (result !== undefined) {
       const block = panel('result', 'Result')
       block.append(element('p', 'drawer-result', result.body))
-      sections.push(block)
-    }
-    const reviews = task.reviews ?? []
-    if (reviews.length > 0) {
-      const block = panel('reviews', 'Reviews', String(reviews.length))
-      for (const review of reviews) {
-        const entry = element('div', 'drawer-review')
-        entry.dataset.review = String(review.number)
-        entry.append(element('p', 'drawer-review-head', reviewLine(review)))
-        if (review.findings !== null) {
-          entry.append(element('p', 'drawer-review-body', review.findings))
-        }
-        block.append(entry)
-      }
       sections.push(block)
     }
     // The rest of the thread: follow-ups, questions and answers, notes.
@@ -765,10 +716,7 @@ export class TaskDrawer {
     // What the human may do: nothing that writes to the agent (that is done
     // in its terminal), and no accepting (that is the lead's).
     const actions = element('div', 'drawer-actions')
-    if (task.state === 'done' && task.kind === 'work') {
-      actions.append(button('Ask for a review', 'quiet-button', () => this.#actions.onReview(task)))
-    }
-    if (PAUSABLE.includes(task.state) && task.kind === 'work' && task.assignee !== 'lead') {
+    if (PAUSABLE.includes(task.state) && task.assignee !== 'lead') {
       actions.append(button('Pause', 'quiet-button', () => this.#actions.onPause(task)))
     }
     if (task.state === 'paused') {

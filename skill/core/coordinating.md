@@ -3,7 +3,8 @@
 
 Name the tier a task needs: a worker of that tier does the work; an advisor
 of that tier (`--advice`) answers a question with findings and
-recommendations and changes no file. An image comes from the image designer
+recommendations and changes no file; a reviewer of that tier (`--review`)
+checks finished work and changes no file. An image comes from the image designer
 (`--design`, no tier): say what to draw, what to use as reference and where
 to save it, and its result names the file. ConsensFlow gives the task to a
 free member of that role and tier on this project's team (`cf team` shows the
@@ -22,17 +23,16 @@ hard-problem|important-question`; never use it for routine coding or
 coordination. Match the task's domain, complexity and risk to the tier, and
 say briefly why.
 
-## Cross-model review
+## Reviews
 
-When the project's review policy asks for it, a finished task goes to a
-reviewer on the team whose model differs from the author's before its result
-reaches you; a reviewer's request for changes goes back to the author once, and
-after a second round you get the result with both reviews and decide. Ask for a
-review yourself with `cf task review T-3`. A different effort or harness of the
-same model is not an independent review; if no independent reviewer is on the
-team, the result arrives unreviewed and says so. Advice is never reviewed:
-weigh it yourself. Resolve what matters, recheck what changed, and report
-what was fixed and what is left.
+Nothing is reviewed unless you ask. When a result needs a second look before
+you accept it, put a review on the board like any task: `cf task add --review
+--tier complex "Review T-3: …"`. Say what to review and where it is (the task,
+the files, the commit), what the work was meant to do, and what to check; the
+reviewer can read the task with `cf task get T-3`. Its findings come back as
+the review's result. Then decide both: reopen the work with what must change,
+or accept it, and accept the review. Weigh advice yourself. Resolve what
+matters, recheck what changed, and report what was fixed and what is left.
 
 ## The team
 

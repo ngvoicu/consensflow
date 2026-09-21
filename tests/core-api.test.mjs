@@ -440,7 +440,7 @@ describe('cf inside a core window', () => {
         [usage.code, usage.err],
         [
           2,
-          'cf: cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor; or --design, --after T-3, or --self; --needs T-3,T-4 and --before T-9,T-10 order the board)',
+          'cf: cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor or --review for a reviewer; or --design, --after T-3, or --self; --needs T-3,T-4 and --before T-9,T-10 order the board)',
         ],
       )
       const missing = await cf(lead, 'task', 'done', 'T-9', 'x')
@@ -490,7 +490,7 @@ describe('tiered tasks through the API and cf', () => {
         [noTier.code, noTier.err],
         [
           2,
-          'cf: cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor; or --design, --after T-3, or --self; --needs T-3,T-4 and --before T-9,T-10 order the board)',
+          'cf: cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor or --review for a reviewer; or --design, --after T-3, or --self; --needs T-3,T-4 and --before T-9,T-10 order the board)',
         ],
       )
 
@@ -564,32 +564,36 @@ describe('tiered tasks through the API and cf', () => {
     })
   })
 
-  it('lets a coordinator ask for a review by hand, and members ask questions only upward', async () => {
+  it('lets the lead put a review on the board for a reviewer of a tier, and members ask questions only upward', async () => {
     await withApi(async ({ ledger, project, token, cf }) => {
-      ledger.setReview(project.id, 'none')
+      const lead = token('lead')
+      const noReviewer = await cf(
+        lead,
+        'task',
+        'add',
+        '--review',
+        '--tier',
+        'standard',
+        'Review T-1',
+      )
+      assert.deepEqual(
+        [noReviewer.code, noReviewer.err],
+        [1, 'cf: no standard reviewer is on the team'],
+      )
       ledger.addMember(project.id, {
         agent: 'diana',
         harness: 'codex',
         role: 'reviewer',
         tier: 'standard',
       })
-      const { message } = ledger.createTask(project.id, {
-        from: 'lead',
-        to: 'zeus',
-        body: 'Parser',
-      })
-      deliver(ledger, message)
-      ledger.recordResult(project.id, 1, { body: 'Done' })
-      const asked = await cf(token('lead'), 'task', 'review', 'T-1')
-      assert.deepEqual(asked, {
-        code: 0,
-        out: 'T-1 goes to an independent reviewer; the verdict arrives in your inbox.',
-        err: '',
-      })
-      assert.equal(ledger.task(project.id, 1).state, 'review')
-      const refused = await cf(token('zeus'), 'task', 'review', 'T-1')
-      assert.equal(refused.code, 1)
-      assert.match(refused.err, /only coordinators ask for reviews/)
+      const review = await cf(lead, 'task', 'add', '--review', '--tier', 'standard', 'Review T-1')
+      assert.match(review.out, /^T-1 is on the board for a standard reviewer;/)
+      assert.deepEqual(
+        [ledger.task(project.id, 1).pool, ledger.task(project.id, 1).tier],
+        ['reviewer', 'standard'],
+      )
+      const gone = await cf(lead, 'task', 'review', 'T-1')
+      assert.equal(gone.code, 2, 'no command asks for a review: it is a task')
 
       const sideways = await cf(token('zeus'), 'ask', '--to', '@diana', 'Which parser?')
       assert.deepEqual(

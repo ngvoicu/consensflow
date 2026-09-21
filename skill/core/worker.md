@@ -25,8 +25,8 @@ reply does nothing.
 - If you cannot go on without an answer, ask with `cf ask "…"` and end your
   turn; the answer arrives as a new message and you continue from there.
 - A follow-up on the same task arrives the same way; continue from where you are.
-  A review may come back as one (`Review round 1 by @reviewer asks for
-  changes:`): address the findings and finish again with your result.
+  It may carry a reviewer's findings: address them and finish again with your
+  result.
 - Do not hand out tasks, launch other agents or type into other windows, and
   never read another agent's session files: the board is your only channel.
   Questions go to the lead or the human, never to another member.

@@ -10,10 +10,10 @@ import { fileURLToPath } from 'node:url'
  * TUI does: a bracketed paste followed by Enter is one message.
  *
  * Every message is one turn. `Reply with exactly: X` answers X. A line
- * `DISPATCH --tier standard <task>` (or `DISPATCH @lead <task>`) runs `cf task
- * add` with those words and the task (`\n` in it becomes a line break), with
- * this window's own token, the way a lead hands out work. In a review brief,
- * the task's own `REVIEWER: …` line is the fake reviewer's answer. A task
+ * `DISPATCH --tier standard <task>` (or `DISPATCH --review --tier standard
+ * <task>`, or `DISPATCH @lead <task>`) runs `cf task add` with those words and
+ * the task (`\n` in it becomes a line break), with this window's own token,
+ * the way a lead hands out work. A task
  * saying `QUOTA-OUT` is refused with a 429, Claude's way, by the window whose
  * participant `CF_TEST_QUOTA_OUT` names. A line `ASK <questions JSON>` asks
  * through Claude's question tool: the PreToolUse hook of the settings file
@@ -145,16 +145,13 @@ async function replyTo(text) {
   const asked = /^\[ConsensFlow m-(\d+)[^\]]*question from @/m.exec(text)
   const reply = /REPLY (.+)$/m.exec(text)
   if (asked && reply) return `replied: ${await runCf(['answer', `m-${asked[1]}`, reply[1]])}`
-  const dispatch = /^DISPATCH ((?:(?:--\S+ \S+|@\S+) )+)(.+)$/m.exec(text)
+  const dispatch =
+    /^DISPATCH ((?:(?:--(?:advice|review|design|self)|--\S+ \S+|@\S+) )+)(.+)$/m.exec(text)
   if (dispatch) {
     const words = dispatch[1].trim().split(' ')
     const task = dispatch[2].replaceAll('\\n', '\n')
     return `dispatched: ${await runCf(['task', 'add', ...words, task])}`
   }
-  const reviewing = /^Review T-\d+ \(round \d+\)/m.test(text)
-    ? /^REVIEWER: (.+)$/m.exec(text)
-    : null
-  if (reviewing) return reviewing[1]
   // The refusing window is a session of the member the test names.
   const me = process.env.CONSENSFLOW_PARTICIPANT ?? ''
   const refusing = process.env.CF_TEST_QUOTA_OUT

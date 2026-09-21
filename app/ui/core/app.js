@@ -137,11 +137,6 @@ const drawer = new TaskDrawer($('#task-drawer'), {
           : `T-${task.number} resumes in @${resumed.assignee}.`,
       )
     }),
-  onReview: (task) =>
-    act(async () => {
-      await core('task.review', { project: state.selected, task: task.number })
-      note(`T-${task.number} goes to an independent reviewer.`)
-    }),
 })
 
 // The packaged smoke watches acks and arrivals here, on the real paths.
@@ -401,26 +396,11 @@ function teamRow(who, role, remove) {
   return row
 }
 
-/**
- * The review choices need a reviewer: without one only "none" can be picked,
- * and the warning says what to tick.
- */
-function guardReview(select, warning, team) {
-  const reviewers = team.some(({ roles }) => roles.includes('reviewer'))
-  for (const option of select.options) option.disabled = option.value !== 'none' && !reviewers
-  if (!reviewers) select.value = 'none'
-  warning.textContent = reviewers
-    ? ''
-    : 'Reviews need a reviewer on the team: add one of the agents as Reviewer.'
-  warning.hidden = reviewers
-}
-
 // New project: the native folder picker first, then the lead's harness, the
-// team (the last project's ticked already) and the review policy.
+// team (the last project's ticked already) and the approval setting.
 const newProjectDialog = $('#new-project-dialog')
 const newProjectForm = newProjectDialog.querySelector('form')
 const newProjectTeam = $('#new-project-team')
-const newProjectWarning = $('#new-project-warning')
 $('#new-project').addEventListener('click', async () => {
   if (typeof tauri.dialog?.open !== 'function') {
     report('The folder picker is not available in this window.')
@@ -453,10 +433,6 @@ function renderNewProjectTeam(lastTeam) {
       : [],
   )
   drawNewProjectTeam()
-  newProjectForm.elements.review.value = picked.some(({ role }) => role === 'reviewer')
-    ? 'members'
-    : 'none'
-  guardNewProjectReview()
 }
 
 function drawNewProjectTeam() {
@@ -474,7 +450,6 @@ function drawNewProjectTeam() {
     remove.addEventListener('click', () => {
       picked.splice(at, 1)
       drawNewProjectTeam()
-      guardNewProjectReview()
     })
     const row = teamRow(who, role, remove)
     row.dataset.agent = agent
@@ -508,7 +483,6 @@ $('#new-project-add').addEventListener('click', () => {
   if (!agent) return
   picked.push({ agent, role })
   drawNewProjectTeam()
-  guardNewProjectReview()
 })
 
 /** The picked rows as the core takes a team: each agent once, with its roles. */
@@ -521,19 +495,15 @@ function pickedTeam() {
   return [...team.values()]
 }
 
-const guardNewProjectReview = () =>
-  guardReview(newProjectForm.elements.review, newProjectWarning, pickedTeam())
-
 newProjectForm.addEventListener('submit', (event) => {
   event.preventDefault()
   const directory = newProjectForm.elements.directory.value
   const harness = newProjectForm.elements.harness.value
-  const review = newProjectForm.elements.review.value
   const gate = newProjectForm.elements.gate.checked
   const team = pickedTeam()
   newProjectDialog.close()
   void act(async () => {
-    const { project } = await core('project.open', { directory, harness, review, gate, team })
+    const { project } = await core('project.open', { directory, harness, gate, team })
     state.selected = project.id
     state.focus = 'lead'
   })
@@ -546,9 +516,7 @@ newProjectDialog
 const teamDialog = $('#team-dialog')
 const teamForm = teamDialog.querySelector('form')
 const teamList = $('#team-members')
-const teamReview = $('#team-review')
 const teamGate = $('#team-gate')
-const teamWarning = $('#team-warning')
 /** The member whose removal waits for the human's yes, kept across redraws. */
 let removing = null
 
@@ -565,13 +533,7 @@ function renderTeam() {
     cell.colSpan = 4
     teamList.firstChild.append(cell)
   }
-  teamReview.value = state.board?.project.review ?? 'none'
   teamGate.checked = state.board?.project.gate ?? false
-  guardReview(
-    teamReview,
-    teamWarning,
-    members.map((member) => ({ roles: member.roles })),
-  )
   rolePicker(
     teamForm.elements.role,
     teamForm.elements.agent,
@@ -658,17 +620,6 @@ teamButton.addEventListener('click', () =>
     removing = null
     renderTeam()
     teamDialog.showModal()
-  }),
-)
-teamReview.addEventListener('change', () =>
-  act(async () => {
-    await core('project.review', { project: state.selected, review: teamReview.value })
-    note(
-      {
-        none: 'Finished work goes straight to whoever asked.',
-        members: "Workers' finished work gets a second review.",
-      }[teamReview.value],
-    )
   }),
 )
 teamGate.addEventListener('change', () =>

@@ -11,6 +11,9 @@ export const USAGE = `cf inside a ConsensFlow window: the board's commands.
   cf task add --advice --tier <tier> "…"
                                     a question for an advisor of that tier: findings and
                                     recommendations back, no file changed
+  cf task add --review --tier <tier> "…"
+                                    a review for a reviewer of that tier: say what to
+                                    review; findings back, no file changed
   cf task add --design "…"          an image from the image designer: what to draw, what
                                     to use as reference, where to save it
   cf task add --after T-3 "…"       a follow-up for the window that did T-3, which
@@ -21,7 +24,6 @@ export const USAGE = `cf inside a ConsensFlow window: the board's commands.
   cf task list                      the board: what waits for a member, then every lane
   cf task get T-3                   one task and its whole thread
   cf task done T-3 "…"              finish a task assigned to you (the lead)
-  cf task review T-3                ask for an independent review of finished work
   cf task accept|cancel T-3         move a task you asked for
   cf task reopen T-3 "…"            send a finished or failed task back with a follow-up
   cf task pause T-3                 stop a worker's task: the agent stops, its window and work wait
@@ -200,7 +202,7 @@ async function taskCommand([action, ...rest], call, cwd) {
   if (action === 'add') {
     const { flags, text, target } = split(
       rest,
-      ['--self', '--advice', '--design'],
+      ['--self', '--advice', '--review', '--design'],
       ['--to', '--title', '--file', '--tier', '--purpose', '--after', '--needs', '--before'],
     )
     const to = handle(flags['--to'] ?? target)
@@ -238,6 +240,7 @@ async function taskCommand([action, ...rest], call, cwd) {
             : {
                 tier,
                 ...(flags['--advice'] ? { advice: true } : {}),
+                ...(flags['--review'] ? { review: true } : {}),
                 ...(flags['--purpose'] === undefined ? {} : { purpose: flags['--purpose'] }),
               }
     const created = await call('POST', '/api/tasks', {
@@ -286,13 +289,6 @@ async function taskCommand([action, ...rest], call, cwd) {
     const thread = task.messages.map((m) => `${messageLine(m)}\n${m.body}`).join('\n\n')
     return { data: task, text: `${taskLine(task)}\n\n${thread}` }
   }
-  if (action === 'review') {
-    const { task } = await call('POST', `/api/tasks/${number}/review`, {})
-    return {
-      data: task,
-      text: `T-${number} goes to an independent reviewer; the verdict arrives in your inbox.`,
-    }
-  }
   if (['done', 'accept', 'cancel', 'reopen', 'pause', 'resume'].includes(action)) {
     const text = rest.slice(1).join(' ')
     if (['done', 'reopen', 'resume'].includes(action) && text.trim().length === 0) {
@@ -316,12 +312,12 @@ async function taskCommand([action, ...rest], call, cwd) {
     return { data: task, text: said }
   }
   throw usage(
-    `unknown task command ${JSON.stringify(action)}: use add, list, get, done, review, accept, reopen or cancel`,
+    `unknown task command ${JSON.stringify(action)}: use add, list, get, done, accept, reopen, cancel, pause or resume`,
   )
 }
 
 const ADD_USAGE =
-  'cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor; or --design, --after T-3, or --self; --needs T-3,T-4 and --before T-9,T-10 order the board)'
+  'cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor or --review for a reviewer; or --design, --after T-3, or --self; --needs T-3,T-4 and --before T-9,T-10 order the board)'
 
 /** "a standard worker", "an image designer": who an open task waits for. */
 const aPool = (pool, tier) => (pool === 'designer' ? 'an image designer' : `a ${tier} ${pool}`)

@@ -17,9 +17,11 @@ credentials, takes no API key, and writes only inside its own home.
   else on the board.
 - **Members** are the agents you put on the project's team, each with one or
   more roles. A *worker* does bounded work. An *advisor* answers the lead's
-  question with findings and changes no file; only the lead asks for advice,
-  and advice is never reviewed. A *reviewer* reviews a worker's finished work
-  when the project's review policy asks, or when the lead asks by hand.
+  question with findings and changes no file; only the lead asks for advice.
+  A *reviewer* checks finished work and changes no file. Nothing is reviewed
+  on its own: a review is a task the lead puts on the board for a reviewer's
+  tier (`cf task add --review --tier complex "Review T-3: …"`), and its
+  findings come back as that task's result.
 - **Tiers, not names.** The lead names the tier of member a task needs
   (critical, complex, standard, light), never the member. The daemon gives the
   task to a free member of that role and tier with the fewest tasks so far,
@@ -79,14 +81,14 @@ projects.
 ## Inside the app
 
 - **The board.** One lane per participant: you, the lead, each member and its
-  live sessions under it. A task moves from the backlog through queued,
-  working and in review to done; you open any card to read its thread and its
-  reviews. The lead's window is docked beside the board; a strip holds every
+  live sessions under it. A task moves from the backlog through queued and
+  working to done; you open any card to read its brief, its result, its thread
+  and what its window wrote. The lead's window is docked beside the board; a strip holds every
   live window.
 - **New project.** A folder, the lead's harness, the team (the last project's
-  ticked already), the review policy and whether human approval is required.
+  ticked already) and whether human approval is required.
 - **Team.** Which saved agents this project may use, each with its roles and
-  tier, plus the review policy and the approval setting. The daemon assigns
+  tier, plus the approval setting. The daemon assigns
   work only within the team.
 - **Agents** (Settings). The catalog and the agents you saved, as one list by
   model. Each model's card says its work tier, the roles it suits (Lead

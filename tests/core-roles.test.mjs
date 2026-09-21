@@ -33,7 +33,7 @@ describe('role instructions for the new core', () => {
           'cf task add --advice --tier',
           'cf task add --design',
           'cf task add --self',
-          'cf task review',
+          'cf task add --review --tier',
           'cf answer',
           'cf task done',
           'cf ask --human',
@@ -50,8 +50,8 @@ describe('role instructions for the new core', () => {
         assert.doesNotMatch(text, /tags|PM\b/, 'no tags, no PM')
         assert.match(text, /^## Your commands$/m, 'the command card comes first')
         assert.ok(text.indexOf('## Your commands') < text.indexOf('## What you do'), 'card first')
-        assert.match(text, /Cross-model review/)
-        assert.match(text, /Advice is never reviewed/)
+        assert.match(text, /## Reviews\n\nNothing is reviewed unless you ask\./)
+        assert.doesNotMatch(text, /VERDICT|review policy|cf task review/)
       } else {
         assert.ok(text.includes('cf ask'), `${role} can ask`)
         assert.match(text, /^## Your commands$/m, 'the command card comes first')
@@ -60,7 +60,8 @@ describe('role instructions for the new core', () => {
         assert.match(text, /never read another agent's\s+session files/i)
         assert.doesNotMatch(text, /cf task add/)
         assert.doesNotMatch(text, /PM\b|coordinator/, `${role} answers to the lead`)
-        if (role === 'reviewer') assert.match(text, /VERDICT: pass/)
+        if (role === 'reviewer') assert.match(text, /delivers them to the lead, who decides/)
+        assert.doesNotMatch(text, /VERDICT|Review round/, 'a review is a task: no verdict line')
         if (role === 'advisor') assert.match(text, /You advise this project's lead/)
         if (role === 'designer') assert.match(text, /image generation tool/)
       }

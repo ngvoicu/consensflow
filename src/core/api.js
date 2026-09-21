@@ -14,7 +14,7 @@ import { LedgerError } from '../ledger/index.js'
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024
 const MEMBERS = new Set(['worker', 'advisor', 'reviewer'])
-const TASK_ROUTE = /^\/api\/tasks\/(\d+)(?:\/(done|accept|reopen|cancel|pause|resume|review))?$/
+const TASK_ROUTE = /^\/api\/tasks\/(\d+)(?:\/(done|accept|reopen|cancel|pause|resume))?$/
 const MESSAGE_ROUTE = /^\/api\/inbox\/(\d+)$/
 const QUESTION_ROUTE = /^\/api\/questions\/(\d+)$/
 /** The longest one poll for an answer may hold; a door polls again. */
@@ -150,19 +150,22 @@ export async function startApi({
       }
       // A follow-up that needs the context of the window that did T-n goes
       // back to that window (`after`); everything else is fresh work for a
-      // tier of worker, advice from a tier of advisor, or an image from the
-      // designer.
+      // tier of worker, advice from a tier of advisor, a review from a tier of
+      // reviewer, or an image from the designer.
+      const pool =
+        body.design === true
+          ? 'designer'
+          : body.advice === true
+            ? 'advisor'
+            : body.review === true
+              ? 'reviewer'
+              : 'worker'
       const created = ledger.createTask(project.id, {
         from: participant.handle,
         ...(body.after !== undefined
           ? { after: Number(body.after) }
           : to === undefined
-            ? {
-                pool:
-                  body.design === true ? 'designer' : body.advice === true ? 'advisor' : 'worker',
-                tier: body.tier,
-                purpose: body.purpose,
-              }
+            ? { pool, tier: body.tier, purpose: body.purpose }
             : { to }),
         body: body.body,
         title: body.title,
@@ -278,11 +281,6 @@ export async function startApi({
       const done = ledger.recordResult(project.id, number, { body: body.body })
       changed()
       return ok({ task: summary(done.task) })
-    }
-    if (action === 'review') {
-      const reviewed = ledger.requestReview(project.id, number, { by: participant.handle })
-      changed()
-      return ok({ task: summary(reviewed) })
     }
     if (participant.role !== 'lead' && task.requester !== participant.handle) {
       throw new Refusal(

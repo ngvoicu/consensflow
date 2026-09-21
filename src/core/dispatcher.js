@@ -19,28 +19,24 @@ import { randomUUID } from 'node:crypto'
  *   task with the answer written after that message. A task waiting on a
  *   question is left alone. The lead finishes its own tasks explicitly,
  *   because its turns end while it waits for workers.
- * - One task per member session: a worker, advisor or reviewer window opens
- *   with its task and is closed, its conversation ended, once it holds no
- *   task (assigned, working, waiting or under review), so the next task starts
- *   from nothing; a fresh window whose first message is not the brief (an
- *   answer, a review's findings) gets the brief in front of it. A member's
- *   active task with no window and nothing due is given up (tiered work back
- *   to the board). The lead keeps its window and conversation.
- * - A worker window that closes mid-task fails the task, and the requester is
- *   told. A lead window that closes suspends its project. A member who leaves
+ * - One task per member session: a worker, advisor, reviewer or designer
+ *   window opens with its task and closes once it holds no task (assigned,
+ *   working or waiting); the session and its conversation stay until the
+ *   human deletes it. A fresh window whose first message is not the brief (an
+ *   answer, a follow-up) gets the brief in front of it. The lead keeps its
+ *   window and conversation.
+ * - A member window lost mid-task (a restart, a crash, a closed window)
+ *   pauses the task, and the requester is told how to resume it. A lead
+ *   window that closes suspends its project. A member who leaves
  *   the team has its window closed once its step in progress ends, and that
  *   exit fails nothing: its open tasks were cancelled when it left.
  * - A task for a tier of member starts open: each pass gives it to a free
  *   member of that pool and tier that is not out of quota, the one with the
  *   fewest tasks so far, then the earliest joined; when none is free the
- *   requester is told once. Under the project's review policy a
- *   finished task waits for a reviewer whose model differs from the author's
- *   (the lead's model is taken to be its harness); none on the team and
- *   the review is skipped with a note, all busy and it waits. A member whose
+ *   requester is told once. A review is such a task, for a reviewer. A member whose
  *   harness reports a fresh refusal (one after it was last marked out) is out
  *   until the reset it names (an hour when it names none): its tiered task
- *   goes back to open for another member, a review it held is withdrawn, a
- *   delivery in flight is queued again, the lead keeps its own tasks for
+ *   goes back to open for another member, a delivery in flight is queued again, the lead keeps its own tasks for
  *   after the reset, and nothing reaches it while out. A refusal still in the
  *   record after the reset is history, not a new one; the member is simply
  *   eligible again. A member low on quota takes nothing new.
@@ -62,12 +58,8 @@ const INLINE_LIMIT = 4000
 const OPENING = 3000
 const RECEIVED_ROLES = new Set(['user', 'custom', 'tool'])
 
-/**
- * How a message reads in the recipient's pane. The header doubles as the
- * arrival marker. A result carries its reviews under it, in plain words: one
- * delivery per finished task, the findings readable in full on the board.
- */
-export function deliveryText(message, { reviews = [], unreviewed = null } = {}) {
+/** How a message reads in the recipient's pane. The header doubles as the arrival marker. */
+export function deliveryText(message) {
   const from = message.sender === null ? 'ConsensFlow' : `@${message.sender}`
   const task =
     message.taskNumber === null || message.taskNumber === undefined
@@ -86,29 +78,9 @@ export function deliveryText(message, { reviews = [], unreviewed = null } = {}) 
         ? `\n\nAnswer with: cf answer m-${message.id} "…" (a label or your own words${message.questions.length > 1 ? '; one line per question' : ''})`
         : `\n\nAnswer with: cf answer m-${message.id} "…"`
       : message.kind === 'result' && message.taskNumber != null
-        ? `\n\nDecide with: cf task accept T-${message.taskNumber} · cf task reopen T-${message.taskNumber} "…" · cf task review T-${message.taskNumber}`
+        ? `\n\nDecide with: cf task accept T-${message.taskNumber} · cf task reopen T-${message.taskNumber} "…"`
         : ''
-  return `[ConsensFlow m-${message.id}${task} · ${message.kind} from ${from}]\n${body}${reviewText(reviews, unreviewed)}${footer}`
-}
-
-function reviewText(reviews, unreviewed) {
-  const done = reviews.filter((review) => review.state === 'done')
-  const parts = done.map((review) => {
-    const findings =
-      review.findings === null
-        ? ''
-        : review.findings.length <= OPENING
-          ? `\n${review.findings}`
-          : `\n${review.findings.slice(0, OPENING)}\n… (read all of it with: cf task get T-${review.number})`
-    return `Reviewed by @${review.reviewer}, round ${review.round}: ${review.verdict ?? 'pass (no verdict line)'}${findings}`
-  })
-  if (done.length >= 2 && done.at(-1).verdict === 'changes') {
-    parts.push(
-      'The reviewer asked for changes twice. Accept it, or send it back with what to change.',
-    )
-  }
-  if (unreviewed !== null) parts.push(`Unreviewed: ${unreviewed}.`)
-  return parts.length === 0 ? '' : `\n\n${parts.join('\n\n')}`
+  return `[ConsensFlow m-${message.id}${task} · ${message.kind} from ${from}]\n${body}${footer}`
 }
 
 const markerOf = (messageId) => `[ConsensFlow m-${messageId} ·`
@@ -179,13 +151,12 @@ export class Dispatcher {
   }
 
   /** A new project: the ledger records it with its team, and its lead window opens. */
-  async openProject({ directory, name, harness, team = [], review, gate }) {
+  async openProject({ directory, name, harness, team = [], gate }) {
     const project = this.#ledger.createProject({
       directory,
       name,
       lead: { harness },
       team,
-      ...(review === undefined ? {} : { review }),
       ...(gate === undefined ? {} : { gate }),
     })
     const lead = project.participants.find((participant) => participant.handle === 'lead')
@@ -327,7 +298,6 @@ export class Dispatcher {
     for (const project of this.#ledger.projects()) {
       if (project.state !== 'open') continue
       this.#assignOpenTasks(project)
-      this.#findReviewers(project)
     }
     const steps = []
     for (const project of this.#ledger.projects()) {
@@ -390,14 +360,9 @@ export class Dispatcher {
   /**
    * A task whose window went away mid-work (a restart, a crash, a window the
    * human closed) is paused, not given up: its session and conversation stay,
-   * and the lead resumes it into the same window with its memory. A review
-   * is withdrawn instead: another reviewer starts from the result.
+   * and the lead resumes it into the same window with its memory.
    */
   #stall(project, task, because) {
-    if (task.kind === 'review') {
-      this.#ledger.withdrawReview(project.id, task.number, { reason: because })
-      return
-    }
     this.#ledger.pauseTask(project.id, task.number, { because })
     this.#ledger.note(project.id, {
       to: task.requester,
@@ -487,7 +452,7 @@ export class Dispatcher {
     }
     if (runtime.delivering === null && observed.settled && !observed.waiting) {
       const next = this.#ledger.nextDelivery(participant.id)
-      if (next !== null) await this.#deliver(project, runtime, next)
+      if (next !== null) await this.#deliver(runtime, next)
     }
   }
 
@@ -554,11 +519,11 @@ export class Dispatcher {
 
   /**
    * A member's fresh session starts from nothing: when its first message is
-   * not the task's own brief (a reopening, a review's findings), the brief
+   * not the task's own brief (a reopening, an answer), the brief
    * goes in first. A resumed conversation has it already.
    */
   #launchText(project, participant, message, resume) {
-    const text = this.#textFor(project, message)
+    const text = deliveryText(message)
     if (resume !== null || participant.role === 'lead' || message.taskNumber == null) {
       return text
     }
@@ -568,29 +533,6 @@ export class Dispatcher {
     )
     if (brief === undefined || brief.id === message.id) return text
     return `${deliveryText(brief)}\n\n${text}`
-  }
-
-  /**
-   * The role a window plays: a member with several roles opens with the text
-   * of the one its task needs, a reviewer's for a review, its own otherwise.
-   */
-  #roleFor(project, participant, message) {
-    if (message === null || message.taskNumber == null || participant.role === 'lead') {
-      return participant.role
-    }
-    const task = this.#ledger.task(project.id, message.taskNumber)
-    return task?.kind === 'review' ? 'reviewer' : participant.role
-  }
-
-  /** A work task's result reads with its reviews under it; anything else reads as it is. */
-  #textFor(project, message) {
-    if (message.kind !== 'result' || message.taskNumber == null) return deliveryText(message)
-    const task = this.#ledger.task(project.id, message.taskNumber)
-    if (task === null || task.kind !== 'work') return deliveryText(message)
-    return deliveryText(message, {
-      reviews: this.#ledger.reviewsOf(project.id, task.number),
-      unreviewed: task.unreviewed,
-    })
   }
 
   #watchArrival(runtime, observed) {
@@ -676,12 +618,11 @@ export class Dispatcher {
       .at(-1)
     if (answer === undefined) return
     const body = answer.text.trim() || '(the agent ended its turn without a written answer)'
-    if (task.kind === 'review') this.#ledger.recordVerdict(project.id, task.number, { body })
-    else this.#ledger.recordResult(project.id, task.number, { body })
+    this.#ledger.recordResult(project.id, task.number, { body })
     this.#changed()
   }
 
-  async #deliver(project, runtime, message) {
+  async #deliver(runtime, message) {
     if (runtime.adapter.ready !== undefined) {
       const ready = await runtime.adapter.ready({
         launch: runtime.launch,
@@ -697,7 +638,7 @@ export class Dispatcher {
         launch: runtime.launch,
         pane: runtime.pane,
         host: this.#host,
-        text: this.#textFor(project, message),
+        text: deliveryText(message),
       })
     } catch (cause) {
       // Uncertain is for a harness that may have taken it; an adapter that
@@ -747,7 +688,9 @@ export class Dispatcher {
 
     let plan
     try {
-      const role = this.#roleFor(project, participant, message)
+      // A session plays the role of the task it was started for; a member or
+      // the lead its own.
+      const { role } = participant
       plan = await adapter.prepare({
         launchId,
         participant,
@@ -757,7 +700,7 @@ export class Dispatcher {
         resume,
         message: message === null ? null : this.#launchText(project, participant, message, resume),
         agent: participant.agent === null ? null : this.#roster(participant.agent),
-        instructions: this.#roles({ ...participant, role }, project),
+        instructions: this.#roles(participant, project),
       })
     } catch (cause) {
       if (delivering !== null)
@@ -833,7 +776,7 @@ export class Dispatcher {
     this.#changed()
   }
 
-  // --- assignment and review ------------------------------------------------------------
+  // --- assignment ---------------------------------------------------------------------
 
   /**
    * Each open task goes to the best free member of its tier; the requester
@@ -858,31 +801,6 @@ export class Dispatcher {
         })
         this.#changed()
       }
-    }
-  }
-
-  /** Each task in review gets a free reviewer on another model, or goes on unreviewed. */
-  #findReviewers(project) {
-    for (const task of this.#ledger.reviewsPending(project.id)) {
-      const author = project.participants.find((p) => p.handle === task.assignee)
-      const authorModel = this.#modelOf(author)
-      const independent = this.#ledger.members(project.id, 'reviewer').filter((reviewer) => {
-        const participant = project.participants.find((p) => p.id === reviewer.id)
-        return this.#modelOf(participant) !== authorModel
-      })
-      if (independent.length === 0) {
-        this.#ledger.skipReview(project.id, task.number, {
-          reason: 'no independent reviewer on the team',
-        })
-        this.#changed()
-        continue
-      }
-      const free = independent.filter((member) => this.#available(member))
-      if (free.length === 0) continue
-      this.#ledger.createReview(project.id, task.number, {
-        reviewer: this.#rank(free)[0].id,
-      })
-      this.#changed()
     }
   }
 
@@ -933,17 +851,10 @@ export class Dispatcher {
     return parts.join('; ')
   }
 
-  /** What makes two agents the same model: the roster's model identity; the lead's is its harness. */
-  #modelOf(participant) {
-    const row = participant.agent === null ? null : this.#roster(participant.agent)
-    return row?.profile?.modelKey ?? row?.model ?? participant.harness
-  }
-
   /**
    * A member whose harness just refused it: out until the reset it names (an
    * hour when it names none). What it was receiving is queued again, its
-   * tiered work goes back to the board, a review it held is withdrawn; its
-   * own tasks (the lead's) wait for it.
+   * tiered work goes back to the board; its own tasks (the lead's) wait for it.
    */
   #outOfQuota(project, participant, runtime, owner) {
     const until = runtime.quota.resetsAt ?? new Date(this.#now() + 3_600_000).toISOString()
@@ -959,9 +870,7 @@ export class Dispatcher {
       .lanes.find((l) => l.participant.id === participant.id)
     for (const task of lane.tasks) {
       if (!['queued', 'working', 'waiting'].includes(task.state)) continue
-      if (task.kind === 'review') {
-        this.#ledger.withdrawReview(project.id, task.number, { reason: 'ran out of quota' })
-      } else if (task.pool !== null) {
+      if (task.pool !== null) {
         this.#ledger.releaseTask(project.id, task.number, {
           because: 'ran out of quota after starting',
         })

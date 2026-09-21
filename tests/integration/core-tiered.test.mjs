@@ -6,10 +6,11 @@ import { fileURLToPath } from 'node:url'
 import { startIntegration } from './harness.mjs'
 
 /**
- * Tiered dispatch, the review gate and quota, end to end through the real
- * pane host (VERIFY-TD-13): fake Claude agents in real PTYs, the daemon
- * picking the member, a reviewer on another model judging the work, and a
- * worker whose provider refuses it mid-task losing the task to another.
+ * Tiered dispatch, reviews and quota, end to end through the real pane host
+ * (VERIFY-TD-13): fake Claude agents in real PTYs, the daemon picking the
+ * member, a review the lead puts on the board going to a reviewer like any
+ * task, and a worker whose provider refuses it mid-task losing the task to
+ * another.
  */
 
 const CORE_EDITOR = fileURLToPath(new URL('./core-editor.mjs', import.meta.url))
@@ -30,12 +31,11 @@ function team(app) {
   )
 }
 
-/** A project opened as the New project dialog opens one: the team and the policy together. */
-async function project(app, { review, gate, members }) {
+/** A project opened as the New project dialog opens one: the team and the approval setting together. */
+async function project(app, { gate, members }) {
   const opened = await app.requestNode('project.open', {
     directory: app.workspace,
     harness: 'claude-code',
-    review,
     ...(gate === undefined ? {} : { gate }),
     team: members.map(([agent, role]) => ({ agent, roles: [role] })),
   })
@@ -61,7 +61,7 @@ async function project(app, { review, gate, members }) {
   return { id, tiers, board, task, lane, inbox }
 }
 
-test('a reviewer on another model passes the work, and the requester gets the result with the review', async () => {
+test('a review is a task the lead puts on the board: a reviewer of its tier takes it and its findings come back as the result', async () => {
   const app = await startIntegration({
     editor: CORE_EDITOR,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
@@ -69,41 +69,36 @@ test('a reviewer on another model passes the work, and the requester gets the re
   try {
     team(app)
     const p = await project(app, {
-      review: 'members',
       members: [
         ['worker', 'worker'],
         ['checker', 'reviewer'],
       ],
     })
-    await app.tell(
-      p.id,
-      `DISPATCH --tier ${p.tiers.worker} Reply with exactly: WORKER_OK\\nREVIEWER: VERDICT: pass`,
-    )
-
-    await app.waitFor(async () => (await p.task(1))?.state === 'review', 60_000)
-    await app.waitFor(async () => (await p.lane('checker'))?.tasks.length === 1, 60_000)
-    const review = (await p.lane('checker')).tasks[0]
-    assert.deepEqual([review.kind, review.reviewOf, review.title], ['review', 1, 'Review T-1'])
-    await app.waitFor(async () => (await p.task(1))?.state === 'done', 60_000)
-    const reviewed = await p.task(1)
-    assert.equal(reviewed.round, 1)
-    assert.equal((await p.task(review.number)).verdict, 'pass')
+    await app.tell(p.id, `DISPATCH --tier ${p.tiers.worker} Reply with exactly: WORKER_OK`)
     await app.waitFor(async () => {
       const messages = await p.inbox('lead')
       return messages.some(
         (m) => m.kind === 'result' && m.taskNumber === 1 && m.state === 'delivered',
       )
     }, 60_000)
-    const results = (await p.inbox('lead')).filter(
-      (m) => m.kind === 'result' && m.state === 'delivered',
-    )
+    assert.equal((await p.task(1)).state, 'done', 'nothing is reviewed on its own')
     assert.deepEqual(
-      results.map((m) => [m.taskNumber, m.body]),
-      [[1, 'WORKER_OK']],
-      'one delivery: the result; the findings stay on the review task',
+      (await p.board()).lanes.flatMap((lane) => lane.tasks).map((t) => t.number),
+      [1],
+      'no review task appears by itself',
     )
-    const findings = (await p.task(review.number)).messages.find((m) => m.kind === 'result')
-    assert.deepEqual([findings.state, findings.body], ['read', 'VERDICT: pass'])
+
+    await app.tell(
+      p.id,
+      `DISPATCH --review --tier ${p.tiers.checker} Review T-1. Reply with exactly: FINDINGS_OK`,
+    )
+    await app.waitFor(async () => (await p.task(2))?.state === 'done', 90_000)
+    const review = await p.task(2)
+    assert.deepEqual([review.pool, review.tier], ['reviewer', p.tiers.checker])
+    assert.match(review.assignee, /^checker-/)
+    const findings = review.messages.find((m) => m.kind === 'result')
+    assert.deepEqual([findings.recipient, findings.body], ['lead', 'FINDINGS_OK'])
+    assert.equal((await p.task(1)).state, 'done', 'the lead decides the work')
   } finally {
     await app.close()
   }
@@ -116,7 +111,7 @@ test('each task runs in its own worker session: the window closes with the task,
   })
   try {
     team(app)
-    const p = await project(app, { review: 'none', members: [['worker', 'worker']] })
+    const p = await project(app, { members: [['worker', 'worker']] })
     const alive = (pid) => {
       try {
         process.kill(pid, 0)
@@ -147,71 +142,6 @@ test('each task runs in its own worker session: the window closes with the task,
   }
 })
 
-test('a reviewer asking for changes twice sends the work back once, then the requester decides', async () => {
-  const app = await startIntegration({
-    editor: CORE_EDITOR,
-    fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
-  })
-  try {
-    team(app)
-    const p = await project(app, {
-      review: 'members',
-      members: [
-        ['worker', 'worker'],
-        ['checker', 'reviewer'],
-      ],
-    })
-    await app.tell(
-      p.id,
-      `DISPATCH --tier ${p.tiers.worker} Reply with exactly: WORKER_OK\\nREVIEWER: VERDICT: changes`,
-    )
-    await app.waitFor(async () => (await p.task(1))?.round === 1, 90_000)
-    const back = await p.task(1)
-    assert.match(back.assignee, /^worker-/, 'the work goes back to its author, the same session')
-    assert.ok(
-      back.messages.some(
-        (m) =>
-          m.kind === 'task' &&
-          /^Review round 1 by @checker-[a-z]+-[a-z]+ asks for changes:/.test(m.body),
-      ),
-      'the findings reach the worker as a follow-up',
-    )
-    await app.waitFor(
-      async () => (await p.task(1))?.round === 2 && (await p.task(1))?.state === 'done',
-      120_000,
-    )
-    // One delivery to the lead: the result, with both verdicts written under
-    // it as it goes; no note. The findings stay on the review tasks.
-    await app.waitFor(async () => {
-      const messages = await p.inbox('lead')
-      return messages.some(
-        (m) => m.kind === 'result' && m.taskNumber === 1 && m.state === 'delivered',
-      )
-    }, 60_000)
-    assert.ok(
-      !(await p.inbox('lead')).some((m) => m.kind === 'note' && /changes twice/.test(m.body)),
-      'no note about the rounds',
-    )
-    // Each round ran in a session of its own, and both sessions stay for the human.
-    const reviews = (await p.board()).lanes
-      .filter((lane) => lane.participant.member === 'checker')
-      .flatMap((lane) => lane.tasks)
-    assert.deepEqual(
-      reviews.map((t) => [t.kind, t.state, t.verdict]),
-      [
-        ['review', 'done', 'changes'],
-        ['review', 'done', 'changes'],
-      ],
-    )
-    for (const review of reviews) {
-      const findings = (await p.task(review.number)).messages.find((m) => m.kind === 'result')
-      assert.deepEqual([findings.state, findings.body], ['read', 'VERDICT: changes'])
-    }
-  } finally {
-    await app.close()
-  }
-})
-
 test('a worker refused by its provider mid-task loses the task to the other worker of its tier', async () => {
   const app = await startIntegration({
     editor: CORE_EDITOR,
@@ -220,7 +150,6 @@ test('a worker refused by its provider mid-task loses the task to the other work
   try {
     team(app)
     const p = await project(app, {
-      review: 'none',
       members: [
         ['worker', 'worker'],
         ['worker2', 'worker'],
@@ -271,7 +200,7 @@ test('with human approval required, the brief and the result each wait for the h
   })
   try {
     team(app)
-    const p = await project(app, { review: 'none', gate: true, members: [['worker', 'worker']] })
+    const p = await project(app, { gate: true, members: [['worker', 'worker']] })
     assert.equal((await p.board()).project.gate, true)
     await app.tell(p.id, `DISPATCH --tier ${p.tiers.worker} Reply with exactly: WORKER_OK`)
 
@@ -316,7 +245,7 @@ test("the human opens a finished session's window on its own conversation, and c
   })
   try {
     team(app)
-    const p = await project(app, { review: 'none', members: [['worker', 'worker']] })
+    const p = await project(app, { members: [['worker', 'worker']] })
     const alive = (pid) => {
       try {
         process.kill(pid, 0)

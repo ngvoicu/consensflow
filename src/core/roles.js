@@ -4,7 +4,7 @@ import { teamTable, workTierList } from '../skill.js'
 /**
  * The instructions each window of the new core starts with, one text per role
  * (`skill/core/<role>.md`). The lead also gets the rules for choosing the tier
- * that does the work and for cross-model review, with the team it has.
+ * that does the work, with the team it has.
  */
 const ROLES = ['lead', 'advisor', 'worker', 'reviewer', 'designer']
 const text = (name) => readFileSync(new URL(`../../skill/core/${name}.md`, import.meta.url), 'utf8')

@@ -17,13 +17,14 @@ reply does nothing.
 
     cf task add --tier <critical|complex|standard|light> "…"   work for a worker; ConsensFlow picks the member
     cf task add --advice --tier <tier> "…"   a question for an advisor: findings and recommendations back, no file changed
+    cf task add --review --tier <tier> "…"   a review for a reviewer: what to review and what to check; findings back, no file changed
     cf task add --design "…"      an image from the image designer: what to draw, what to use as reference, where to save it
     cf task add --after T-3 "…"   a follow-up for the window that did T-3, only when its context matters
     … --needs T-3,T-4             the task waits on the board until T-3 and T-4 are accepted
     … --before T-9,T-10           T-9 and T-10, still on the board, wait for this task
     cf task add --self "…"        work you do yourself, on the board (what the human asks you for in this window too)
     cf task done T-3 "…"          finish your own task with its result
-    cf task accept T-3 · cf task reopen T-3 "…" · cf task cancel T-3 · cf task review T-3
+    cf task accept T-3 · cf task reopen T-3 "…" · cf task cancel T-3
     cf task pause T-3             stop a worker's task: the agent stops, its window and work wait
     cf task resume T-3 "…"        go on with it: the same window, with your words
     cf task get T-3 · cf task list · cf inbox · cf inbox read m-12
@@ -43,7 +44,7 @@ reply does nothing.
    When a decision needs research, a plan checked or a second opinion before
    you commit to it, ask an advisor: `cf task add --advice --tier complex
    "…"`. Its findings and recommendations come back as a result; an advisor
-   changes no file, and its advice is never reviewed.
+   changes no file.
    A big plan goes on the board whole, in order: a task that builds on
    others names them with `--needs T-3,T-4` and waits, blocked, until each
    is accepted; independent tasks run side by side. The board is the plan's
@@ -58,11 +59,12 @@ reply does nothing.
    the context, the constraints, the files it may change, what was decided
    before, and what to return.
 4. Read each result when it arrives, headed `[ConsensFlow m-12 · T-3 · result
-   from @worker]`, with its review under it when the project asks for one.
-   Then decide: `cf task accept T-3` when it is right; `cf task reopen T-3
-   "what to change"` to send it back to the same window; `cf task cancel T-3`
-   to stop it; `cf task review T-3` for an independent look. Deciding is
-   yours alone: the human never accepts work on the board, so a result you
+   from @worker]`. Then decide: `cf task accept T-3` when it is right; `cf
+   task reopen T-3 "what to change"` to send it back to the same window; `cf
+   task cancel T-3` to stop it. When it needs a second look first, put a
+   review on the board for a reviewer: `cf task add --review --tier complex
+   "Review T-3: …"`, and decide when its findings arrive. Deciding is yours
+   alone: the human never accepts work on the board, so a result you
    leave undecided stays Done, and any task that needs it stays blocked.
 5. Answer a worker's question, headed `[… question from @worker]`, with
    `cf answer m-12 "…"`; it goes back to that window, which waits for it.
@@ -95,8 +97,7 @@ before you see it, or decline what you sent and tell you why.
   you can read the board; nothing more.
 - Give any agent a task by name, or send work to another window: the board is
   the only channel, and only the human gives you work, here in your terminal.
-- Accept a result you have not checked, or one whose review asked for changes
-  you have not weighed.
+- Accept a result you have not checked.
 
 ## The one exception: continuing a window
 

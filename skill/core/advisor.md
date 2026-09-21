@@ -28,8 +28,8 @@ Your answer is the final message of your turn: ConsensFlow collects it when you
 finish and delivers it to the lead. Make it complete: findings, evidence,
 uncertainties and recommendations. If you cannot go on without an answer, ask
 with `cf ask "…"` and end your turn; the answer arrives as a new message and you
-continue from there. A review may come back as a follow-up asking for changes:
-address the findings and answer again. Do not hand out tasks or launch other
+continue from there. A follow-up arrives the same way: continue from where you
+are and answer again. Do not hand out tasks or launch other
 agents, and never read another agent's session files: the board is your only
 channel; questions go to the lead or the human, never to another member.
 

@@ -156,16 +156,14 @@ let app = await startIntegration({ editor: EDITOR, fakeEnv: ENV })
 const root = app.root
 try {
   writeRoster(app.env.CONSENSFLOW_HOME)
-  // The baseline measures delivery alone; the review gate is its own scenario below.
+  // The baseline measures delivery alone; a review is its own scenario below.
   const opened = await app.requestNode('project.open', {
     directory: WORKSPACE,
     harness: LEAD_KIND,
-    review: 'none',
   })
   if (opened.ok !== true) throw new Error(`project.open: ${JSON.stringify(opened)}`)
   const project = opened.project.id
-  // Each task names its worker's tier, and each bench worker has its own;
-  // the review scenario still follows the task to whichever worker got it.
+  // Each task names its worker's tier, and each bench worker has its own.
   const tiers = {}
   for (const name of wanted) {
     const added = await app.requestNode('member.add', { project, agent: AGENTS[name].id })
@@ -402,11 +400,10 @@ try {
     )
   }
 
-  // The review gate, live: a reviewer on another model judges one worker's
-  // result before the lead sees it. The daemon picks the worker (the one
-  // with the fewest tasks so far, so not necessarily the first) and the
-  // reviewer; if every worker shares the reviewer's model the work goes on
-  // unreviewed, and the check says so.
+  // A review, live: the lead puts it on the board for the reviewer's tier
+  // like any task, the reviewer takes it in a session of its own, and its
+  // findings come back to the lead as the result. Nothing is reviewed unless
+  // the lead asks.
   {
     const started = Date.now()
     const marker = 'BENCH_REVIEW_OK'
@@ -415,81 +412,47 @@ try {
       0,
       ...(await board()).lanes.flatMap((l) => l.tasks.map((t) => t.number)),
     )
-    // The reviewer first: a policy with nobody to review is refused.
     const reviewer = await app.requestNode('member.add', {
       project,
       agent: 'bench-reviewer',
       roles: ['reviewer'],
     })
-    const policy = await app.requestNode('project.review', { project, review: 'members' })
-    record('review-setup', policy.ok === true && reviewer.ok === true, {
+    record('review-setup', reviewer.ok === true, {
       reviewer: REVIEWER,
-      ...(reviewer.ok ? {} : { error: reviewer.error }),
-      ...(policy.ok ? {} : { error: policy.error }),
+      ...(reviewer.ok ? { tier: reviewer.member.tier } : { error: reviewer.error }),
     })
+    const tier = reviewer.member?.tier
+    const flag =
+      tier === 'critical' ? '--tier critical --purpose critical-review' : `--tier ${tier}`
     await app.tell(
       project,
-      `Run exactly this command in your shell, then reply with one line:\ncf task add ${tierFlag(tiers[wanted[0]])} "Reply with exactly: ${marker}"`,
+      `Run exactly this command in your shell, then reply with one line:\ncf task add --review ${flag} "Review README.md: does it name the project? Reply with exactly: ${marker}"`,
       { idleMs: 300_000 },
     )
-    const reviewed = await until(
+    const review = await until(
       async () =>
         (await board()).lanes
-          .filter((l) => l.participant.agent !== null && !l.participant.roles.includes('reviewer'))
           .flatMap((l) => l.tasks)
-          .find(
-            (t) => t.number > before && t.kind === 'work' && ['review', 'done'].includes(t.state),
-          ),
+          .find((t) => t.number > before && t.pool === 'reviewer' && t.state === 'done'),
       300_000,
     )
-    record('review-work-finished', Boolean(reviewed), {
+    record('review-finished', Boolean(review), {
       seconds: Math.round((Date.now() - started) / 1000),
-      state: reviewed?.state,
-      worker: reviewed?.assignee,
+      reviewer: review?.assignee ?? (await lane('bench-reviewer'))?.activity,
     })
-    const review = reviewed
+    const delivered = review
       ? await until(
           async () =>
-            (await lane('bench-reviewer'))?.tasks.find((t) => t.reviewOf === reviewed.number),
-          120_000,
+            (await inbox('lead')).find(
+              (m) =>
+                m.kind === 'result' && m.taskNumber === review.number && m.state === 'delivered',
+            ),
+          300_000,
         )
       : null
-    record('review-created', Boolean(review), {
+    record('review-received-by-lead', Boolean(delivered?.body.includes(marker)), {
       seconds: Math.round((Date.now() - started) / 1000),
-      ...(review
-        ? { review: review.number }
-        : { notes: (await inbox('lead')).filter((m) => m.kind === 'note').map((m) => m.body) }),
-    })
-    const verdict = review
-      ? await until(async () => {
-          const current = (await lane('bench-reviewer'))?.tasks.find(
-            (t) => t.number === review.number,
-          )
-          return current?.state === 'done' ? current : null
-        }, 300_000)
-      : null
-    record('review-verdict', Boolean(verdict?.verdict), {
-      seconds: Math.round((Date.now() - started) / 1000),
-      verdict: verdict?.verdict ?? null,
-      ...(verdict ? {} : { reviewer: (await lane('bench-reviewer'))?.activity }),
-    })
-    // One delivery: the result reaches the lead with the verdict under it;
-    // the reviewer's findings stay on the review task, for the board.
-    const delivered = verdict
-      ? await until(async () => {
-          const result = (await inbox('lead')).find(
-            (m) =>
-              m.kind === 'result' && m.taskNumber === reviewed.number && m.state === 'delivered',
-          )
-          const findings = (
-            await app.requestNode('task.get', { project, task: review.number })
-          ).task?.messages.find((m) => m.kind === 'result')
-          return result && findings ? { result, findings } : null
-        }, 300_000)
-      : null
-    record('review-received-by-lead', Boolean(delivered), {
-      seconds: Math.round((Date.now() - started) / 1000),
-      ...(delivered ? { findings: delivered.findings.body.slice(0, 120) } : {}),
+      ...(delivered ? { findings: delivered.body.slice(0, 120) } : {}),
     })
   }
 

@@ -124,7 +124,6 @@ test('one member runs two tasks at once, each in a session and window of its own
     const opened = await app.requestNode('project.open', {
       directory: app.workspace,
       harness: 'claude-code',
-      review: 'none',
     })
     assert.equal(opened.ok, true, JSON.stringify(opened))
     const project = opened.project.id

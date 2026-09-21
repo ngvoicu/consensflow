@@ -100,7 +100,7 @@ function fakeAdapter(harness = 'claude-code') {
   return adapter
 }
 
-/** The saved model of each fake agent: what makes a reviewer independent of an author. */
+/** The saved model of each fake agent, as the roster gives it at launch. */
 const MODELS = {
   zeus: 'claude-opus-5',
   diana: 'gpt-5.6-luna',
@@ -218,13 +218,12 @@ async function setup(fn, options = {}) {
   }
 }
 
-/** A project with its lead window up, its workers (Zeus, unless told) in the team from the start, and no review gate. */
+/** A project with its lead window up, its workers (Zeus, unless told) in the team from the start. */
 async function withTeam(context, workers = ['zeus']) {
   const project = await context.dispatcher.openProject({
     directory: '/work/app',
     name: 'app',
     harness: 'claude-code',
-    review: 'none',
     team: workers.map((agent) => ({
       agent,
       harness: 'claude-code',
@@ -934,7 +933,7 @@ describe('the delivered text', () => {
     )
     assert.equal(
       deliveryText({ ...base, kind: 'result', body: 'Parser done' }),
-      '[ConsensFlow m-12 · T-3 · result from @zeus]\nParser done\n\nDecide with: cf task accept T-3 · cf task reopen T-3 "…" · cf task review T-3',
+      '[ConsensFlow m-12 · T-3 · result from @zeus]\nParser done\n\nDecide with: cf task accept T-3 · cf task reopen T-3 "…"',
       'a result says what to do with it: it is not a request',
     )
   })
@@ -955,21 +954,18 @@ describe('the delivered text', () => {
   })
 })
 
-/** A tiered team: standard workers (zeus and diana, unless told), a light worker, and reviewers on two models. */
-async function withTiers(
-  context,
-  { review = 'none', workers = ['zeus', 'diana'], reviewers = ['calliope', 'astraeus'] } = {},
-) {
+/** A tiered team: standard workers (zeus and diana, unless told), a light worker, and two standard reviewers. */
+async function withTiers(context, { workers = ['zeus', 'diana'] } = {}) {
   const member = (agent, role, tier) => ({ agent, harness: 'claude-code', role, tier })
   const project = await context.dispatcher.openProject({
     directory: '/work/app',
     name: 'app',
     harness: 'claude-code',
-    review,
     team: [
       ...workers.map((agent) => member(agent, 'worker', 'standard')),
       member('hera', 'worker', 'light'),
-      ...reviewers.map((agent) => member(agent, 'reviewer', 'standard')),
+      member('calliope', 'reviewer', 'standard'),
+      member('astraeus', 'reviewer', 'standard'),
     ],
   })
   const id = (handle) =>
@@ -1058,147 +1054,38 @@ describe('the dispatcher assigns open tasks', () => {
   })
 })
 
-describe('the dispatcher runs the review gate', () => {
-  /** A worker's task through to its result, under review. */
-  async function reviewed(context, body = 'Parser done', options = {}) {
-    const fixture = await withTiers(context, { review: 'members', ...options })
-    fixture.open()
-    await context.dispatcher.pass()
-    await context.dispatcher.pass()
-    context.adapter.answer('zeus', body)
-    await context.dispatcher.pass()
-    return fixture
-  }
-  const lead = (context) => context.adapter.agent('lead').items.map((item) => item.text)
-
-  it("puts a member's result in review with an independent reviewer, then releases it on pass", async () => {
+describe('the dispatcher runs a review like any task', () => {
+  it('gives a review to a reviewer of its tier in a session of its own, and brings its findings back as the result', async () => {
     await setup(async (context) => {
-      const { task } = await reviewed(context)
-      assert.equal(task(1).state, 'review')
-      await context.dispatcher.pass()
-      const review = task(2)
-      assert.deepEqual(
-        [review.kind, review.assignee, review.state],
-        ['review', 'astraeus-brisk-birch', 'queued'],
-        "calliope shares the author's model; astraeus does not",
-      )
-      assert.match(
-        context.adapter.prepared.at(-1).message,
-        /Review T-1 \(round 1\) by @zeus-amber-pine\./,
-      )
-      await context.dispatcher.pass()
-      assert.equal(task(2).state, 'working')
-      context.adapter.answer('astraeus', 'Looks right.\n\nVERDICT: pass')
-      await context.dispatcher.pass()
-      assert.deepEqual(
-        [task(1).state, task(1).round, task(2).state, task(2).verdict],
-        ['done', 1, 'done', 'pass'],
-      )
-      for (let n = 0; n < 4; n += 1) await context.dispatcher.pass()
-      assert.match(
-        lead(context)[0],
-        /T-1 · result from @zeus-amber-pine\]\nParser done\n\nReviewed by @astraeus-brisk-birch, round 1: pass\nLooks right\.\n\nVERDICT: pass\n\nDecide with: cf task accept T-1 · cf task reopen T-1 "…" · cf task review T-1$/,
-        'one delivery: the result with its review under it',
-      )
-      context.adapter.answer('lead', 'noted')
-      for (let n = 0; n < 3; n += 1) await context.dispatcher.pass()
-      assert.ok(
-        !lead(context).some((text) => text.includes('result from @astraeus')),
-        'no second message for the review',
-      )
-    })
-  })
-
-  it('sends the work back once on changes, then lets the requester decide', async () => {
-    await setup(async (context) => {
-      const { task, notes } = await reviewed(context)
-      await context.dispatcher.pass()
-      await context.dispatcher.pass()
-      context.adapter.answer('astraeus', 'Missing tests.\n\nVERDICT: changes')
-      await context.dispatcher.pass()
-      assert.deepEqual(
-        [task(1).state, task(1).assignee, task(1).round],
-        ['queued', 'zeus-amber-pine', 1],
-      )
-      await context.dispatcher.pass()
-      assert.match(
-        context.adapter.agent('zeus').items.at(-1).text,
-        /task from @astraeus-brisk-birch\]\nReview round 1 by @astraeus-brisk-birch asks for changes:\n\nMissing tests\./,
-      )
-      assert.deepEqual(lead(context), [], 'the requester has seen nothing')
-      context.adapter.answer('zeus', 'Tests added')
-      await context.dispatcher.pass()
-      await context.dispatcher.pass()
-      assert.deepEqual(
-        [task(1).state, task(3).kind, task(3).assignee],
-        ['review', 'review', 'astraeus-calm-brook'],
-      )
-      await context.dispatcher.pass()
-      context.adapter.answer('astraeus', 'Still wrong.\n\nVERDICT: changes')
-      await context.dispatcher.pass()
-      assert.deepEqual([task(1).state, task(1).round], ['done', 2])
-      assert.deepEqual(notes('lead'), [], 'no note: the result says it')
-      for (let n = 0; n < 4; n += 1) await context.dispatcher.pass()
-      assert.match(
-        lead(context).at(-1),
-        /result from @zeus-amber-pine\]\nTests added\n\nReviewed by @astraeus-brisk-birch, round 1: changes\nMissing tests\.\n\nVERDICT: changes\n\nReviewed by @astraeus-calm-brook, round 2: changes\nStill wrong\.\n\nVERDICT: changes\n\nThe reviewer asked for changes twice\. Accept it, or send it back with what to change\.\n\nDecide with: /,
-      )
-    })
-  })
-
-  it('skips the review when no independent reviewer is on the team, and says so', async () => {
-    await setup(async (context) => {
-      const fixture = await withTiers(context, { review: 'members', reviewers: ['calliope'] })
-      fixture.open()
+      const { open, task } = await withTiers(context)
+      open()
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       context.adapter.answer('zeus', 'Parser done')
       await context.dispatcher.pass()
+      assert.equal(task(1).state, 'done', 'nothing is reviewed on its own')
+      open({ pool: 'reviewer', body: 'Review T-1: the parser in src/parse.js' })
       await context.dispatcher.pass()
-      assert.equal(fixture.task(1).state, 'done')
-      assert.deepEqual(fixture.notes('lead'), [], 'no note: the result says it')
-      for (let n = 0; n < 3; n += 1) await context.dispatcher.pass()
-      assert.match(
-        context.adapter.agent('lead').items.at(-1).text,
-        /Parser done\n\nUnreviewed: no independent reviewer on the team\.\n\nDecide with: /,
-      )
-      assert.equal(context.host.last('calliope'), undefined, 'no review window opened')
-    })
-  })
-
-  it('waits for a busy reviewer rather than skipping, and replaces one whose window closes', async () => {
-    await setup(async (context) => {
-      const { open, task } = await reviewed(context, 'Parser done', { reviewers: ['astraeus'] })
-      await context.dispatcher.pass()
-      assert.match(task(2).assignee, /^astraeus-/)
-      open({ body: 'Lexer' })
-      await context.dispatcher.pass()
-      await context.dispatcher.pass()
-      assert.match(task(3).assignee, /^diana-/, 'zeus holds its work until the verdict')
-      context.adapter.answer('diana', 'Lexer done')
-      await context.dispatcher.pass()
-      await context.dispatcher.pass()
-      assert.equal(task(3).state, 'review')
-      assert.equal(
-        context.ledger.reviewsPending(1).length,
-        0,
-        "the only reviewer's second slot takes the second review",
-      )
-      assert.match(task(4).assignee, /^astraeus-/)
-      assert.notEqual(task(4).assignee, task(2).assignee, 'in a session of its own')
-
-      await context.host.exit(task(2).assignee)
-      assert.equal(task(2).state, 'cancelled', 'the review went with the window')
-      assert.equal(task(1).state, 'review', 'the work still waits')
-      await context.dispatcher.pass()
-      const again = context.ledger
-        .board(1)
-        .lanes.filter((l) => l.participant.member === 'astraeus')
-        .flatMap((l) => l.tasks)
       assert.deepEqual(
-        again.filter((t) => t.state === 'queued').map((t) => t.reviewOf),
-        [1],
-        'a new review of T-1 for a fresh astraeus window',
+        [task(2).pool, task(2).assignee, task(2).state],
+        ['reviewer', 'calliope-brisk-birch', 'queued'],
+        'the earliest joined reviewer of the tier',
+      )
+      const launch = context.adapter.prepared.at(-1)
+      assert.deepEqual(
+        [launch.role, launch.instructions],
+        ['reviewer', 'instructions for reviewer'],
+      )
+      assert.match(launch.message, /Review T-1: the parser in src\/parse\.js/)
+      await context.dispatcher.pass()
+      assert.equal(task(2).state, 'working')
+      context.adapter.answer('calliope', 'No test for empty input.')
+      await context.dispatcher.pass()
+      assert.deepEqual([task(1).state, task(2).state], ['done', 'done'], 'the lead decides both')
+      const result = task(2).messages.at(-1)
+      assert.deepEqual(
+        [result.kind, result.recipient, result.body],
+        ['result', 'lead', 'No test for empty input.'],
       )
     })
   })
@@ -1372,13 +1259,12 @@ describe('the dispatcher watches quota', () => {
 })
 
 describe('a member with several roles', () => {
-  it('opens with the text of the role its task needs, and reviews nothing while its own work is reviewed', async () => {
+  it('opens with the text of the role its task needs, in a session per task', async () => {
     await setup(async (context) => {
       const project = await context.dispatcher.openProject({
         directory: '/work/app',
         name: 'app',
         harness: 'claude-code',
-        review: 'members',
         team: [
           { agent: 'zeus', harness: 'claude-code', role: 'worker', tier: 'standard' },
           {
@@ -1402,11 +1288,10 @@ describe('a member with several roles', () => {
       assert.equal(task(1).assignee, 'zeus-amber-pine')
       context.adapter.answer('zeus', 'Parser done')
       await context.dispatcher.pass()
+      assert.equal(task(1).state, 'done')
+      open('Review T-1: the parser', 'complex', 'reviewer')
       await context.dispatcher.pass()
-      assert.deepEqual(
-        [task(1).state, task(2).kind, task(2).assignee],
-        ['review', 'review', 'hera-brisk-birch'],
-      )
+      assert.equal(task(2).assignee, 'hera-brisk-birch')
       assert.deepEqual(
         launches('hera'),
         [['reviewer', 'instructions for reviewer']],
@@ -1414,17 +1299,13 @@ describe('a member with several roles', () => {
       )
       open('Write the docs', 'complex')
       await context.dispatcher.pass()
-      assert.match(
-        task(3).assignee,
-        /^hera-/,
-        'hera reviews in one session and, with a slot free, works in another',
-      )
+      assert.match(task(3).assignee, /^hera-/, 'hera reviews in one session and works in another')
       assert.notEqual(task(3).assignee, task(2).assignee)
       await context.dispatcher.pass()
-      context.adapter.answer(task(2).assignee, 'Fine.\n\nVERDICT: pass')
+      context.adapter.answer(task(2).assignee, 'Fine.')
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      assert.equal(task(1).state, 'done')
+      assert.equal(task(2).state, 'done')
       await context.dispatcher.pass()
       assert.deepEqual(
         launches('hera').at(-1),
@@ -1446,7 +1327,7 @@ describe('a member with several roles', () => {
       context.adapter.answer(task(4).assignee, 'The second.')
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      assert.equal(task(4).state, 'done', 'advice is never reviewed')
+      assert.equal(task(4).state, 'done')
       assert.equal(context.ledger.task(project.id, 4).messages.at(-1).recipient, 'lead')
     })
   })
@@ -1456,8 +1337,8 @@ describe('one task per member session', () => {
   const zeusWindows = (context) => context.host.opened.filter((b) => windowOf(b.id, 'zeus'))
 
   /** T-1 to zeus, the only standard worker here, delivered and answered. */
-  async function finished(context, options = {}) {
-    const fixture = await withTiers(context, { workers: ['zeus'], ...options })
+  async function finished(context) {
+    const fixture = await withTiers(context, { workers: ['zeus'] })
     fixture.open()
     await context.dispatcher.pass()
     await context.dispatcher.pass()
@@ -1519,34 +1400,6 @@ describe('one task per member session', () => {
       await context.host.exit('zeus-amber-pine')
       await context.dispatcher.pass()
       assert.equal(task(2).state, 'working', 'the old exit lands on the old session only')
-    })
-  })
-
-  it('keeps the author open through its review, lands the send-back there, and closes the reviewer after its verdict', async () => {
-    await setup(async (context) => {
-      const { task } = await finished(context, { review: 'members' })
-      assert.equal(task(1).state, 'review')
-      await context.dispatcher.pass()
-      await context.dispatcher.pass()
-      assert.deepEqual(
-        [task(2).kind, task(2).assignee, task(2).state],
-        ['review', 'astraeus-brisk-birch', 'working'],
-      )
-      assert.deepEqual(context.host.killed, [], 'an author under review keeps its window')
-      const reviewer = context.host.last('astraeus')
-      context.adapter.answer('astraeus', 'Name the error.\n\nVERDICT: changes')
-      await context.dispatcher.pass()
-      await context.dispatcher.pass()
-      assert.deepEqual(context.host.killed, [{ id: reviewer.id, generation: reviewer.generation }])
-      assert.equal(
-        zeusWindows(context).length,
-        1,
-        'the send-back lands in the session that did the work',
-      )
-      assert.match(
-        context.adapter.agent('zeus').items.at(-1).text,
-        /Review round 1 by @astraeus-brisk-birch asks for changes:/,
-      )
     })
   })
 

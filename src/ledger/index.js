@@ -39,18 +39,13 @@ export { SCHEMA_VERSION }
  *
  *   open ──assigned──▶ queued ──delivered──▶ working ──question──▶ waiting ──answer delivered──▶ working
  *   queued, working, waiting ──released──▶ open
- *   working, waiting ──result──▶ done, or ──result, review due──▶ review
- *   review ──pass, no reviewer, two rounds──▶ done, ──changes──▶ queued (back to its author)
- *   done ──review asked──▶ review, ──accept──▶ accepted
+ *   open, queued, working, waiting ──pause──▶ paused ──resume──▶ open, queued
+ *   working, waiting ──result──▶ done ──accept──▶ accepted
  *   done, failed ──reopen──▶ queued
- *   open, queued, working, waiting, review ──cancel──▶ cancelled, ──fail──▶ failed
+ *   open, queued, working, waiting, paused ──cancel──▶ cancelled, ──fail──▶ failed
  *
- * - The review gate: under the project's policy (none, members, all) a finished
- *   task waits in review with its result held; the daemon gives a reviewer a
- *   review task, and the verdict on its last line decides: pass releases the
- *   result and the review to the requester; changes sends the work back to its
- *   author with the findings, once; a second changes releases everything to the
- *   requester with a note to decide. A review task is never itself reviewed.
+ * - A review is a task like any other: the lead puts it on the board for a
+ *   reviewer of a tier, and the reviewer's findings come back as its result.
  *
  * This module never reads `process.env` and never logs: the file and the
  * clock are arguments, and every refusal is a `LedgerError` with a stable code.
@@ -62,22 +57,17 @@ const MEMBER_ROLES = ['worker', 'advisor', 'reviewer', 'designer']
 const COORDINATOR_HANDLES = ['human', 'lead']
 const COORDINATOR_ROLES = ['human', 'lead']
 export const TIERS = ['critical', 'complex', 'standard', 'light']
-/** Who takes a tiered task: a worker, an advisor (advice), or an image designer (no tier). */
-const POOLS = ['worker', 'advisor', 'designer']
+/** Who takes a task on the board: a worker, an advisor (advice), a reviewer, or an image designer (no tier). */
+const POOLS = ['worker', 'advisor', 'reviewer', 'designer']
 export const PURPOSES = ['critical-review', 'architecture', 'hard-problem', 'important-question']
 /** "standard worker", "image designer": who an open task waits for; `aPool` adds the article. */
 const poolName = (pool, tier) => (pool === 'designer' ? 'image designer' : `${tier} ${pool}`)
 const aPool = (pool, tier) => `${pool === 'designer' ? 'an' : 'a'} ${poolName(pool, tier)}`
 const CRITICAL_RULE =
   'No coding or implementation edits. Do not write or revise specifications. Return analysis, evidence and recommendations to your coordinator.'
-const REVIEW_POLICIES = ['none', 'members']
-const REVIEW_ROUNDS = 2
-/** The reviewer's last word, with whatever emphasis its harness wrapped it in: `**VERDICT: pass**`, `Verdict: **changes**`. */
-const VERDICT = /^[\s*_`#>-]*VERDICT[\s*_`]*[:\-–—][\s*_`]*(pass|changes)\b/i
-const REVIEW_STATES = ['open', 'queued', 'working', 'waiting']
 const ACTIVE_TASK_STATES = ['working', 'waiting']
-/** A task on a member's hands: from assignment until its review is over. */
-const HELD_TASK_STATES = ['queued', 'working', 'waiting', 'review']
+/** A task on a member's hands: from assignment until its result. */
+const HELD_TASK_STATES = ['queued', 'working', 'waiting']
 const HOLDS_WORK = `SELECT 1 FROM task WHERE assignee_id = ? AND state IN (${HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')})`
 const MAX_BODY = 1_000_000
 /** How long a coordinator may leave a question before the human sees it too. */
@@ -144,14 +134,9 @@ function migrate(db) {
     )
   }
   for (let from = version; from < SCHEMA_VERSION; from += 1) {
-    const migration = MIGRATIONS[from]
-    if (typeof migration === 'function') {
-      migration(db, from + 1)
-      continue
-    }
     db.exec('BEGIN IMMEDIATE')
     try {
-      db.exec(migration)
+      db.exec(MIGRATIONS[from])
       db.exec(`PRAGMA user_version = ${from + 1}`)
       db.exec('COMMIT')
     } catch (cause) {
@@ -200,23 +185,6 @@ const requireGate = (gate) => {
   }
 }
 
-const noReviewer = () =>
-  new LedgerError(
-    'no-reviewer',
-    'a review policy needs a reviewer on the team: add one first, or keep the policy at none',
-    409,
-  )
-
-function requireReview(policy) {
-  if (!REVIEW_POLICIES.includes(policy)) {
-    throw new LedgerError(
-      'invalid-review',
-      `a review policy is ${REVIEW_POLICIES.join(', ')}, not ${JSON.stringify(policy)}`,
-    )
-  }
-  return policy
-}
-
 function requireTier(tier) {
   if (!TIERS.includes(tier)) {
     throw new LedgerError(
@@ -227,7 +195,7 @@ function requireTier(tier) {
   return tier
 }
 
-/** A member's roles, one or more of worker, advisor and reviewer; the first one leads. */
+/** A member's roles, one or more of worker, advisor, reviewer and designer; the first one leads. */
 function requireRoles(roles) {
   if (
     !Array.isArray(roles) ||
@@ -251,17 +219,6 @@ function requireMember({ agent, harness, role, roles, tier }) {
   requireHarness(harness)
   requireTier(tier)
   return set
-}
-
-/** The verdict on a review's last line that says something, or null. */
-export function verdictOf(body) {
-  const line = body
-    .split('\n')
-    .map((text) => text.trim())
-    .filter(Boolean)
-    .at(-1)
-  const match = line === undefined ? null : VERDICT.exec(line)
-  return match === null ? null : match[1].toLowerCase()
 }
 
 /** How a task reads when it is handed over: critical work leads with its purpose. */
@@ -297,7 +254,7 @@ const MESSAGE_SELECT = `
   LEFT JOIN task t ON t.id = m.task_id`
 
 const TASK_SELECT = `
-  SELECT t.*, q.handle AS requester, a.handle AS assignee, o.number AS review_of_number,
+  SELECT t.*, q.handle AS requester, a.handle AS assignee,
          am.handle AS assignee_member, a.left_at AS assignee_left_at,
          (SELECT json_group_array(json_object('number', d.number, 'state', d.state))
             FROM (SELECT d.number, d.state FROM task_need n JOIN task d ON d.id = n.needs_id
@@ -305,8 +262,7 @@ const TASK_SELECT = `
   FROM task t
   JOIN participant q ON q.id = t.requester_id
   LEFT JOIN participant a ON a.id = t.assignee_id
-  LEFT JOIN participant am ON am.id = a.member_id
-  LEFT JOIN task o ON o.id = t.review_of`
+  LEFT JOIN participant am ON am.id = a.member_id`
 
 /** A participant with its member's handle, when it is a member's session. */
 const PARTICIPANT_SELECT = `
@@ -365,11 +321,6 @@ const taskView = (row) => ({
   pool: row.pool,
   tier: row.tier,
   purpose: row.purpose,
-  kind: row.kind,
-  reviewOf: row.review_of_number ?? null,
-  round: row.round,
-  verdict: row.verdict,
-  unreviewed: row.unreviewed ?? null,
   session: row.assignee_member ? row.assignee : null,
   ...needsView(row.needs),
   createdAt: row.created_at,
@@ -507,26 +458,20 @@ class Ledger {
   // --- projects and participants ---------------------------------------------
 
   /** A project with its lead and, when given, its team (the last project's, usually). */
-  createProject({ directory, name, lead, team = [], review, gate = false }) {
+  createProject({ directory, name, lead, team = [], gate = false }) {
     requireText(directory, 'directory', 4096)
     requireText(name, 'name', 100)
     requireHarness(lead?.harness)
     requireGate(gate)
     const members = team.map((member) => ({ ...member, roles: requireMember(member) }))
-    const reviewer = members.some((member) => member.roles.includes('reviewer'))
-    // A review policy needs someone to review: without a reviewer on the
-    // team nothing is reviewed, and asking for it is refused.
-    review ??= reviewer ? 'members' : 'none'
-    requireReview(review)
-    if (review !== 'none' && !reviewer) throw noReviewer()
     return this.#write(() => {
       const at = this.#at()
       const { lastInsertRowid: id } = this.#db
         .prepare(
-          `INSERT INTO project (directory, name, state, review, gate, created_at, updated_at)
-           VALUES (?, ?, 'open', ?, ?, ?, ?)`,
+          `INSERT INTO project (directory, name, state, gate, created_at, updated_at)
+           VALUES (?, ?, 'open', ?, ?, ?)`,
         )
-        .run(directory, name, review, gate ? 1 : 0, at, at)
+        .run(directory, name, gate ? 1 : 0, at, at)
       this.#addParticipant(id, { handle: 'human', role: 'human', agent: null, harness: null })
       this.#addParticipant(id, { handle: 'lead', role: 'lead', agent: null, harness: lead.harness })
       for (const { agent, harness, roles, tier } of members) {
@@ -545,7 +490,6 @@ class Ledger {
       directory: row.directory,
       name: row.name,
       state: row.state,
-      review: row.review,
       gate: row.gate === 1,
       resumeOnStart: row.resume_on_start === 1,
       createdAt: row.created_at,
@@ -592,20 +536,6 @@ class Ledger {
       }
       this.#db.prepare('DELETE FROM project WHERE id = ?').run(id)
       return { id: row.id, name: row.name }
-    })
-  }
-
-  /** Which finished work gets a second review from now on: none, members' or all. */
-  setReview(id, policy) {
-    requireReview(policy)
-    return this.#write(() => {
-      if (policy !== 'none' && !this.#reviewerOnTeam(id)) throw noReviewer()
-      const from = this.#projectRow(id).review
-      this.#db
-        .prepare('UPDATE project SET review = ?, updated_at = ? WHERE id = ?')
-        .run(policy, this.#at(), id)
-      if (from !== policy) this.#log(id, 'project.review', { from, to: policy })
-      return this.project(id)
     })
   }
 
@@ -677,7 +607,7 @@ class Ledger {
     })
   }
 
-  /** A member's roles change in place; the last reviewer stays while the policy needs one. */
+  /** A member's roles change in place. */
   setRoles(projectId, handle, roles) {
     roles = requireRoles(roles)
     return this.#write(() => {
@@ -690,36 +620,12 @@ class Ledger {
           409,
         )
       }
-      if (!roles.includes('reviewer')) this.#requireAnotherReviewer(projectId, member.id)
       this.#db
         .prepare('UPDATE participant SET role = ?, roles = ? WHERE id = ?')
         .run(roles[0], JSON.stringify(roles), member.id)
       this.#log(projectId, 'member.roles', { handle, roles })
       return participantView(this.#participantRow(member.id))
     })
-  }
-
-  /** Whether an active member can review. */
-  #reviewerOnTeam(projectId, except = null) {
-    return (
-      this.#db
-        .prepare(
-          `SELECT 1 FROM participant p, json_each(p.roles) r
-           WHERE p.project_id = ? AND p.left_at IS NULL AND r.value = 'reviewer' AND p.id != ?`,
-        )
-        .get(projectId, except ?? -1) !== undefined
-    )
-  }
-
-  /** Under a review policy, the last reviewer cannot go. */
-  #requireAnotherReviewer(projectId, memberId) {
-    if (this.#projectRow(projectId).review === 'none') return
-    if (this.#reviewerOnTeam(projectId, memberId)) return
-    throw new LedgerError(
-      'last-reviewer',
-      'the review policy needs a reviewer on the team: add another one, or set the policy to none first',
-      409,
-    )
   }
 
   /**
@@ -737,9 +643,6 @@ class Ledger {
           `${handle} is the project's ${member.role}, not a member of its team`,
           409,
         )
-      }
-      if (JSON.parse(member.roles).includes('reviewer')) {
-        this.#requireAnotherReviewer(projectId, member.id)
       }
       const sessions = this.#db
         .prepare(`${PARTICIPANT_SELECT} WHERE p.member_id = ? AND p.left_at IS NULL ORDER BY p.id`)
@@ -1221,7 +1124,7 @@ class Ledger {
   /**
    * A session is the human's to end: its lane folds into its member's, its
    * conversation closes, and nothing of it can be resumed. One still holding
-   * work (queued, working, waiting or in review) is refused; paused work goes
+   * work (queued, working or waiting) is refused; paused work goes
    * back on the board when resumed.
    */
   endSession(projectId, handle, { by }) {
@@ -1679,48 +1582,26 @@ class Ledger {
   }
 
   /**
-   * The human declines a gated message, and whoever sent it is told why. A
-   * declined task is cancelled (a declined review goes on unreviewed); a
-   * declined answer leaves its question open for another. A result is passed
-   * on or sent back, a question passed on or answered: never declined.
+   * The human declines a gated message, and whoever sent it is told. A
+   * declined task is cancelled; a declined answer leaves its question open
+   * for another. A result or a question is passed on, never declined.
    */
-  declineMessage(messageId, { by, reason }) {
-    if (reason !== undefined) requireText(reason, 'reason', 1000)
+  declineMessage(messageId, { by }) {
     return this.#write(() => {
       const message = this.#requireMessage(messageId, 'gated')
       this.#participantByHandle(message.projectId, by)
       if (message.kind !== 'task' && message.kind !== 'answer') {
-        throw new LedgerError(
-          'not-declinable',
-          `a ${message.kind} is passed on${message.kind === 'result' ? ' or sent back' : message.kind === 'question' ? ' or answered' : ''}, not declined`,
-          409,
-        )
+        throw new LedgerError('not-declinable', `a ${message.kind} is passed on, not declined`, 409)
       }
-      const why = reason === undefined ? '' : `: ${reason}`
-      this.#withdraw(messageId, `declined by @${by}${why}`)
-      this.#log(message.projectId, 'message.declined', {
-        message: messageId,
-        by,
-        reason: reason ?? null,
-      })
+      this.#withdraw(messageId, `declined by @${by}`)
+      this.#log(message.projectId, 'message.declined', { message: messageId, by })
       const task = this.#messageTask(messageId)
       let told = message.sender
-      let word = `@${by} declined your answer to m-${message.replyTo}${why}. Answer it again: cf answer m-${message.replyTo} "…"`
+      let word = `@${by} declined your answer to m-${message.replyTo}. Answer it again: cf answer m-${message.replyTo} "…"`
       if (message.kind === 'task') {
         told = this.#participantRow(task.requester_id).handle
-        if (task.kind === 'review') {
-          const reviewed = this.#db
-            .prepare('SELECT number FROM task WHERE id = ?')
-            .get(task.review_of)
-          this.withdrawReview(message.projectId, task.number, { reason: `declined by @${by}` })
-          this.skipReview(message.projectId, reviewed.number, {
-            reason: `@${by} declined the review${why}`,
-          })
-          word = `@${by} declined the review of T-${reviewed.number}${why}. The result goes on unreviewed.`
-        } else {
-          this.cancelTask(message.projectId, task.number, { by })
-          word = `@${by} declined T-${task.number} (${task.title})${why}. It is cancelled.`
-        }
+        this.cancelTask(message.projectId, task.number, { by })
+        word = `@${by} declined T-${task.number} (${task.title}). It is cancelled.`
       }
       if (told !== by) {
         this.#send(message.projectId, {
@@ -1735,261 +1616,21 @@ class Ledger {
     })
   }
 
-  /**
-   * The assignee's answer finishes the task and is queued for whoever asked
-   * for it, unless the project's policy puts the work in review first: then
-   * the result is held until the verdict. A review task ends with
-   * `recordVerdict`, not here.
-   */
+  /** The assignee's answer finishes the task and is queued for whoever asked for it. */
   recordResult(projectId, number, { body }) {
     requireText(body, 'body', MAX_BODY)
     return this.#write(() => {
       const task = this.#taskRow(projectId, number)
       this.#requireTaskState(task, ACTIVE_TASK_STATES, 'record a result for')
-      if (task.kind === 'review') {
-        throw new LedgerError('not-work', `T-${number} is a review: it ends with a verdict`, 409)
-      }
-      const review = this.#reviewDue(projectId, task)
       const messageId = this.#queue(projectId, {
         to: task.requester_id,
         from: task.assignee_id,
         kind: 'result',
         taskId: task.id,
         body,
-        state: review ? 'held' : 'queued',
       })
-      this.#moveTask(task, review ? 'review' : 'done', { result: messageId })
+      this.#moveTask(task, 'done', { result: messageId })
       return { task: this.#task(task.id), message: this.#message(messageId) }
-    })
-  }
-
-  /** The tasks in review that no reviewer is on yet: the daemon finds each one a reviewer. */
-  reviewsPending(projectId) {
-    return this.#db
-      .prepare(
-        `${TASK_SELECT} WHERE t.project_id = ? AND t.state = 'review' AND NOT EXISTS (
-           SELECT 1 FROM task r WHERE r.review_of = t.id AND r.state IN (${REVIEW_STATES.map(() => '?').join(', ')})
-         ) ORDER BY t.number`,
-      )
-      .all(projectId, ...REVIEW_STATES)
-      .map(taskView)
-  }
-
-  /** The daemon's reviewer for a task in review: a review task, queued for that reviewer. */
-  createReview(projectId, number, { reviewer }) {
-    return this.#write(() => {
-      const task = this.#taskRow(projectId, number)
-      this.#requireTaskState(task, ['review'], 'review')
-      const member = this.#requireMemberRow(reviewer, 'reviews')
-      if (!this.reviewsPending(projectId).some((pending) => pending.id === task.id)) {
-        throw new LedgerError('invalid-transition', `T-${number} already has its reviewer`, 409)
-      }
-      if (
-        !JSON.parse(member.roles).includes('reviewer') ||
-        member.left_at !== null ||
-        member.project_id !== projectId
-      ) {
-        throw new LedgerError(
-          'not-a-reviewer',
-          `@${member.handle} is not a reviewer on this team`,
-          409,
-        )
-      }
-      const session = this.#startSession(projectId, member, 'reviewer')
-      const author = this.#participantRow(task.assignee_id)
-      const result = this.#db
-        .prepare(
-          `SELECT body FROM message WHERE task_id = ? AND kind = 'result' ORDER BY id DESC LIMIT 1`,
-        )
-        .get(task.id)
-      const round = task.round + 1
-      const body = [
-        `Review T-${number} (round ${round}) by @${author.handle}.`,
-        `The task:\n${task.body}`,
-        `The result:\n${result?.body ?? '(no written result)'}`,
-        'Report errors, omissions and actionable findings with evidence; suggested fixes belong in your findings. Change no file. End with one line: VERDICT: pass or VERDICT: changes.',
-      ].join('\n\n')
-      const { next } = this.#db
-        .prepare('SELECT COALESCE(MAX(number), 0) + 1 AS next FROM task WHERE project_id = ?')
-        .get(projectId)
-      const at = this.#at()
-      const { lastInsertRowid: reviewId } = this.#db
-        .prepare(
-          `INSERT INTO task (project_id, number, title, body, requester_id, assignee_id, state,
-                             kind, review_of, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, 'queued', 'review', ?, ?, ?)`,
-        )
-        .run(
-          projectId,
-          next,
-          `Review T-${number}`,
-          body,
-          task.requester_id,
-          session.id,
-          task.id,
-          at,
-          at,
-        )
-      const messageId = this.#queue(projectId, {
-        to: session.id,
-        from: task.requester_id,
-        kind: 'task',
-        taskId: reviewId,
-        body,
-      })
-      this.#log(projectId, 'review.created', {
-        task: number,
-        review: next,
-        reviewer: session.handle,
-        member: member.handle,
-        round,
-        message: messageId,
-      })
-      return { task: this.#task(reviewId), message: this.#message(messageId) }
-    })
-  }
-
-  /**
-   * The reviewer's answer ends its review task; the verdict on its last line
-   * decides what happens to the work it reviewed.
-   */
-  recordVerdict(projectId, number, { body }) {
-    requireText(body, 'body', MAX_BODY)
-    return this.#write(() => {
-      const review = this.#taskRow(projectId, number)
-      this.#requireTaskState(review, ACTIVE_TASK_STATES, 'record a verdict for')
-      if (review.kind !== 'review') {
-        throw new LedgerError('not-a-review', `T-${number} is not a review`, 409)
-      }
-      const task = this.#taskById(review.review_of)
-      const reviewer = this.#participantRow(review.assignee_id)
-      const verdict = verdictOf(body)
-      const round = task.round + 1
-      this.#db
-        .prepare('UPDATE task SET round = ?, updated_at = ? WHERE id = ?')
-        .run(round, this.#at(), task.id)
-      this.#db.prepare('UPDATE task SET verdict = ? WHERE id = ?').run(verdict, review.id)
-      this.#log(projectId, 'review.verdict', { task: task.number, review: number, verdict, round })
-      if (verdict === 'changes' && round < REVIEW_ROUNDS) {
-        // Back to its author with the findings; the held result is superseded.
-        this.#db
-          .prepare(`UPDATE message SET state = 'cancelled' WHERE task_id = ? AND state = 'held'`)
-          .run(task.id)
-        const messageId = this.#queue(projectId, {
-          to: task.assignee_id,
-          from: reviewer.id,
-          kind: 'task',
-          taskId: task.id,
-          body: `Review round ${round} by @${reviewer.handle} asks for changes:\n\n${body}`,
-        })
-        this.#moveTask(review, 'done', {
-          result: this.#findings(projectId, review, reviewer, body),
-        })
-        this.#moveTask({ ...task, round }, 'queued', { review: number, message: messageId })
-      } else {
-        // One delivery: the result goes on its way and the dispatcher writes
-        // the verdicts under it. The findings stay on the review task, where
-        // the board shows them under the work; nobody gets a second message.
-        this.#releaseHeld(task.id)
-        this.#moveTask(review, 'done', {
-          result: this.#findings(
-            projectId,
-            review,
-            reviewer,
-            verdict === null ? `No VERDICT line; read as pass.\n\n${body}` : body,
-          ),
-        })
-        this.#moveTask({ ...task, round }, 'done', { review: number, verdict })
-      }
-      // The verdict is the reviewer's last word: its window ends with it.
-      return {
-        verdict,
-        task: this.#task(task.id),
-        review: this.#task(review.id),
-      }
-    })
-  }
-
-  /** The reviewer's findings, kept on the review task for the board: read there, never delivered on their own. */
-  #findings(projectId, review, reviewer, body) {
-    return this.#queue(projectId, {
-      to: review.requester_id,
-      from: reviewer.id,
-      kind: 'result',
-      taskId: review.id,
-      body,
-      state: 'read',
-    })
-  }
-
-  /** A task's reviews in order, each with its state, verdict and the findings the reviewer wrote. */
-  reviewsOf(projectId, number) {
-    const task = this.#taskRow(projectId, number)
-    return this.#db
-      .prepare(
-        `SELECT t.number, t.state, t.verdict, p.handle AS reviewer,
-                (SELECT body FROM message WHERE task_id = t.id AND kind = 'result' ORDER BY id DESC LIMIT 1) AS findings
-         FROM task t JOIN participant p ON p.id = t.assignee_id
-         WHERE t.review_of = ? ORDER BY t.number`,
-      )
-      .all(task.id)
-      .map((row, index) => ({
-        number: row.number,
-        round: index + 1,
-        reviewer: row.reviewer,
-        state: row.state,
-        verdict: row.verdict,
-        findings: row.findings ?? null,
-      }))
-  }
-
-  /** A review its reviewer cannot finish (its window closed, its quota ran out): the work waits for another. */
-  withdrawReview(projectId, number, { reason }) {
-    requireText(reason, 'reason', 1000)
-    return this.#write(() => {
-      const review = this.#taskRow(projectId, number)
-      if (review.kind !== 'review') {
-        throw new LedgerError('not-a-review', `T-${number} is not a review`, 409)
-      }
-      this.#requireTaskState(review, ['queued', ...ACTIVE_TASK_STATES], 'withdraw')
-      this.#dropQueued(review.id)
-      this.#moveTask(review, 'cancelled', { reason })
-      return this.#task(review.id)
-    })
-  }
-
-  /** A coordinator asks for a review of finished work by hand. */
-  requestReview(projectId, number, { by }) {
-    return this.#write(() => {
-      const asker = this.#participantByHandle(projectId, by)
-      if (!COORDINATOR_ROLES.includes(asker.role)) {
-        throw new LedgerError(
-          'not-a-coordinator',
-          `@${by} is a ${asker.role}: only coordinators ask for reviews`,
-          403,
-        )
-      }
-      const task = this.#taskRow(projectId, number)
-      this.#requireTaskState(task, ['done'], 'ask a review of')
-      this.#moveTask(task, 'review', { by })
-      return this.#task(task.id)
-    })
-  }
-
-  /** No reviewer can take this one: the work is done as it is, and the requester is told. */
-  skipReview(projectId, number, { reason }) {
-    requireText(reason, 'reason', 1000)
-    return this.#write(() => {
-      const task = this.#taskRow(projectId, number)
-      this.#requireTaskState(task, ['review'], 'skip the review of')
-      if (!this.reviewsPending(projectId).some((pending) => pending.id === task.id)) {
-        throw new LedgerError('invalid-transition', `T-${number} is being reviewed`, 409)
-      }
-      this.#releaseHeld(task.id)
-      // The result says it as it goes (the dispatcher writes the reason under it).
-      this.#db.prepare('UPDATE task SET unreviewed = ? WHERE id = ?').run(reason, task.id)
-      this.#moveTask(task, 'done', { unreviewed: reason })
-      return this.#task(task.id)
     })
   }
 
@@ -2016,9 +1657,6 @@ class Ledger {
       if (by !== undefined) this.#participantByHandle(projectId, by)
       const task = this.#taskRow(projectId, number)
       this.#requireTaskState(task, ['open', 'queued', ...ACTIVE_TASK_STATES], 'pause')
-      if (task.kind === 'review') {
-        throw new LedgerError('not-work', `T-${number} is a review: it ends with a verdict`, 409)
-      }
       if (task.assignee_id !== null && this.#participantRow(task.assignee_id).role === 'lead') {
         throw new LedgerError('own-work', `T-${number} is the lead's own: finish or cancel it`, 409)
       }
@@ -2136,16 +1774,8 @@ class Ledger {
     return this.#write(() => {
       this.#participantByHandle(projectId, by)
       const task = this.#taskRow(projectId, number)
-      this.#requireTaskState(
-        task,
-        ['open', 'queued', ...ACTIVE_TASK_STATES, 'paused', 'review'],
-        'cancel',
-      )
+      this.#requireTaskState(task, ['open', 'queued', ...ACTIVE_TASK_STATES, 'paused'], 'cancel')
       this.#dropQueued(task.id)
-      for (const review of this.#openReviews(task.id)) {
-        this.#dropQueued(review.id)
-        this.#moveTask(review, 'cancelled', { by, with: task.number })
-      }
       this.#moveTask(task, 'cancelled', { by })
       return this.#task(task.id)
     })
@@ -2237,7 +1867,6 @@ class Ledger {
         .prepare(`${MESSAGE_SELECT} WHERE m.task_id = ? ORDER BY m.id`)
         .all(row.id)
         .map(messageView),
-      reviews: row.kind === 'work' ? this.reviewsOf(projectId, number) : [],
     }
   }
 
@@ -2399,7 +2028,6 @@ class Ledger {
       taskId = null,
       replyTo = null,
       body,
-      state = 'queued',
       collected = false,
       questions = null,
       choices = null,
@@ -2407,8 +2035,8 @@ class Ledger {
   ) {
     // A message on its way (queued, or collected: read at once by the door
     // that asked) waits for the human instead when the project gates it.
-    const gated = (state === 'queued' || collected) && this.#gateHolds(projectId, from, to)
-    const landing = gated ? 'gated' : collected ? 'read' : state
+    const gated = this.#gateHolds(projectId, from, to)
+    const landing = gated ? 'gated' : collected ? 'read' : 'queued'
     const { lastInsertRowid: id } = this.#db
       .prepare(
         `INSERT INTO message (project_id, recipient_id, sender_id, kind, task_id, reply_to, body,
@@ -2429,21 +2057,6 @@ class Ledger {
         this.#at(),
       )
     return id
-  }
-
-  /** A held result goes on its way once its review is over. */
-  #releaseHeld(taskId) {
-    const held = this.#db
-      .prepare(
-        `SELECT id, project_id, sender_id, recipient_id FROM message WHERE task_id = ? AND state = 'held'`,
-      )
-      .all(taskId)
-    for (const row of held) {
-      const gated = this.#gateHolds(row.project_id, row.sender_id, row.recipient_id)
-      this.#db
-        .prepare('UPDATE message SET state = ? WHERE id = ?')
-        .run(gated ? 'gated' : 'queued', row.id)
-    }
   }
 
   /**
@@ -2469,24 +2082,6 @@ class Ledger {
         `UPDATE message SET state = 'cancelled', reason = ? WHERE task_id = ? AND state = 'gated'`,
       )
       .run(reason, taskId)
-  }
-
-  /**
-   * Whether a finished task waits for a review under the project's policy:
-   * a worker's work under `members`, nothing under `none`. Advice and the
-   * lead's own tasks are never reviewed by policy; the lead asks by hand.
-   */
-  #reviewDue(projectId, task) {
-    if (this.#projectRow(projectId).review === 'none') return false
-    return this.#participantRow(task.assignee_id).role === 'worker'
-  }
-
-  #openReviews(taskId) {
-    return this.#db
-      .prepare(
-        `SELECT * FROM task WHERE review_of = ? AND state IN (${REVIEW_STATES.map(() => '?').join(', ')})`,
-      )
-      .all(taskId, ...REVIEW_STATES)
   }
 
   #send(projectId, { from, to, body, task, kind, questions = null }) {
@@ -2572,7 +2167,7 @@ class Ledger {
   #dropQueued(taskId) {
     this.#db
       .prepare(
-        `UPDATE message SET state = 'cancelled' WHERE task_id = ? AND state IN ('queued', 'held', 'gated')`,
+        `UPDATE message SET state = 'cancelled' WHERE task_id = ? AND state IN ('queued', 'gated')`,
       )
       .run(taskId)
   }

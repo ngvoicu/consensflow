@@ -20,12 +20,11 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
     'projects.list': async () => ({ projects: ledger.projects() }),
 
     // The team given, as the roster has those agents now; else the last team.
-    'project.open': change(async ({ directory, name, harness, review, gate, team }) => ({
+    'project.open': change(async ({ directory, name, harness, gate, team }) => ({
       project: await dispatcher.openProject({
         directory,
         name: name ?? basename(directory),
         harness,
-        review,
         gate,
         team:
           team === undefined
@@ -100,14 +99,6 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
 
     'task.transcript': async ({ project, task, limit }) =>
       ledger.transcript(project, task, limit === undefined ? {} : { limit }),
-
-    'task.review': change(async ({ project, task }) => ({
-      task: ledger.requestReview(project, task, { by: 'human' }),
-    })),
-
-    'project.review': change(async ({ project, review }) => ({
-      project: ledger.setReview(project, review),
-    })),
 
     'project.gate': change(async ({ project, gate }) => ({
       project: ledger.setGate(project, gate),
