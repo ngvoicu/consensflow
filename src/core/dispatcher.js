@@ -912,17 +912,6 @@ export class Dispatcher {
     this.#changed()
   }
 
-  /** Work a member cannot go on with: a review is withdrawn for another reviewer, tiered work goes back open, the rest fails. */
-  #giveUp(project, task, because) {
-    if (task.kind === 'review') {
-      this.#ledger.withdrawReview(project.id, task.number, { reason: because })
-    } else if (task.pool !== null) {
-      this.#ledger.releaseTask(project.id, task.number, { because })
-    } else {
-      this.#failTask(project, task, because)
-    }
-  }
-
   // --- failures ----------------------------------------------------------------------
 
   /** A delivery that did not arrive: try again while attempts remain, or give up. */
