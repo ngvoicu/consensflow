@@ -3,7 +3,8 @@
  * terms: `{state, usedPercent?, resetsAt?}`, or null when the record says
  * nothing. Codex reports its usage ahead of time; Claude Code, OpenCode, Pi
  * and Devin only say so once a request is refused (a 429), so for them the
- * daemon learns at the first refusal.
+ * daemon learns at the first refusal. OpenCode says it only in its window's
+ * live status, never in its store, since it waits to retry the request.
  */
 
 const LOW_PERCENT = 95
@@ -42,6 +43,28 @@ export function codexQuota(limits) {
     usedPercent,
     resetsAt:
       typeof fullest?.resets_at === 'number' ? new Date(fullest.resets_at * 1000).toISOString() : null,
+  }
+}
+
+/** OpenCode's words for a limit it waits out, in a retry's message or reason. */
+const OPENCODE_LIMIT = /limit|usage|quota|too many requests/i
+/** A retry sooner than this is backoff, not the limit's reset. */
+const BACKOFF_MS = 60_000
+
+/**
+ * OpenCode waiting to retry a refused request (`{type: 'retry', message,
+ * action, next}`, probed on OpenCode 1.18.31): a usage or rate limit there is
+ * a spent quota, reset when OpenCode will retry, unless that is only backoff.
+ * Any other retry (an overloaded provider) is not a quota.
+ */
+export function opencodeRetryQuota(status, nowMs) {
+  if (status?.type !== 'retry') return null
+  if (!OPENCODE_LIMIT.test(`${status.message ?? ''} ${status.action?.reason ?? ''}`)) return null
+  const next = Number(status.next)
+  return {
+    state: 'exhausted',
+    at: null,
+    resetsAt: Number.isFinite(next) && next - nowMs >= BACKOFF_MS ? new Date(next).toISOString() : null,
   }
 }
 

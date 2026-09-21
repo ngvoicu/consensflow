@@ -17,6 +17,7 @@ async function fixture(t, useEnvironment = false, boardUrl = null) {
   const replies = []
   const handlers = new Map()
   let current = { name: 'session', params: { sessionID: 'ses_first' } }
+  const statuses = new Map()
   let dispose
   let send = async (input) => {
     calls.push(input)
@@ -37,6 +38,7 @@ async function fixture(t, useEnvironment = false, boardUrl = null) {
             return current
           },
         },
+        state: { session: { status: (sessionID) => statuses.get(sessionID) } },
         client: {
           session: { promptAsync: (input) => send(input) },
           question: {
@@ -89,6 +91,9 @@ async function fixture(t, useEnvironment = false, boardUrl = null) {
     setCurrent(value) {
       current = value
     },
+    setStatus(sessionID, status) {
+      statuses.set(sessionID, status)
+    },
     setSend(value) {
       send = value
     },
@@ -100,6 +105,7 @@ test('OpenCode reports the displayed session after new and resume, including the
   assert.deepEqual((await f.request('/session')).body, {
     launchId: 'test-launch',
     sessionId: 'ses_first',
+    status: null,
   })
   f.setCurrent({ name: 'home' })
   assert.equal((await f.request('/session')).body.sessionId, null)
@@ -108,6 +114,29 @@ test('OpenCode reports the displayed session after new and resume, including the
   f.setCurrent({ name: 'session', params: { sessionID: 'ses_first' } })
   assert.equal((await f.request('/session')).body.sessionId, 'ses_first')
   assert.deepEqual(f.calls, [])
+})
+
+test('OpenCode reports what the displayed session is doing, a retry of a refused request included', async (t) => {
+  const f = await fixture(t)
+  f.setStatus('ses_first', { type: 'busy' })
+  assert.deepEqual((await f.request('/session')).body.status, { type: 'busy' })
+  // OpenCode 1.18.31, probed on 2026-09-21: a spent free tier waits here, never in its store.
+  const retry = {
+    type: 'retry',
+    attempt: 1,
+    message: 'Free usage exceeded, subscribe to Go',
+    action: { reason: 'free_tier_limit', provider: 'opencode', title: 'Free limit reached' },
+    next: 1790035200967,
+  }
+  f.setStatus('ses_first', retry)
+  assert.deepEqual((await f.request('/session')).body.status, retry)
+  f.setStatus('ses_second', { type: 'busy' })
+  f.setCurrent({ name: 'home' })
+  assert.deepEqual((await f.request('/session')).body, {
+    launchId: 'test-launch',
+    sessionId: null,
+    status: null,
+  })
 })
 
 test('OpenCode refuses retired sessions at native admission and preserves the composer', async (t) => {

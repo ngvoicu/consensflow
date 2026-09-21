@@ -201,7 +201,8 @@ describe('the OpenCode adapter', () => {
       let shown
       const adapter = openCodeAdapter({
         env,
-        currentSession: async () => shown,
+        sessionState: async () =>
+          shown === undefined ? undefined : { sessionId: shown, status: null },
         answers: async () => ({ items: [], inFlight: false, settlement: { state: 'unknown' } }),
       })
       const launch = { nativeSession: 'ses_abc123', channel: { kind: 'opencode-server' } }
@@ -221,7 +222,7 @@ describe('the OpenCode adapter', () => {
       const adapter = openCodeAdapter({
         env,
         answers: async () => record,
-        currentSession: async () => 'ses_abc123',
+        sessionState: async () => ({ sessionId: 'ses_abc123', status: { type: 'busy' } }),
       })
       const launch = { nativeSession: 'ses_abc123' }
       assert.equal((await adapter.observe({ launch })).settled, true)
@@ -241,6 +242,52 @@ describe('the OpenCode adapter', () => {
       assert.deepEqual(
         [observed.settled, observed.quota],
         [true, { state: 'exhausted', resetsAt: null }],
+      )
+    })
+  })
+
+  it("reads OpenCode waiting out a usage or rate limit as the member's quota spent", async () => {
+    await withHome(async ({ env }) => {
+      const now = Date.now()
+      let shown = { sessionId: 'ses_abc123', status: { type: 'busy' } }
+      const adapter = openCodeAdapter({
+        env,
+        sessionState: async () => shown,
+        answers: async () => ({
+          items: [{ id: 'u', role: 'user' }],
+          inFlight: true,
+          settlement: { state: 'in-flight' },
+        }),
+      })
+      const launch = { nativeSession: 'ses_abc123' }
+      const retry = (message, next, action) => ({
+        sessionId: 'ses_abc123',
+        status: { type: 'retry', attempt: 1, message, next, ...(action ? { action } : {}) },
+      })
+      assert.equal((await adapter.observe({ launch })).quota, null, 'busy is not a refusal')
+      // OpenCode 1.18.31 on a spent free tier: it waits until the reset it names.
+      const midnight = now + 5 * 3_600_000
+      shown = retry('Free usage exceeded, subscribe to Go', midnight, {
+        reason: 'free_tier_limit',
+      })
+      const spent = await adapter.observe({ launch })
+      assert.deepEqual(
+        [spent.settled, spent.quota],
+        [false, { state: 'exhausted', at: null, resetsAt: new Date(midnight).toISOString() }],
+      )
+      shown = retry('Rate limit exceeded. Please try again later.', now + 4_000)
+      assert.deepEqual(
+        (await adapter.observe({ launch })).quota,
+        { state: 'exhausted', at: null, resetsAt: null },
+        'a retry seconds away is backoff, not a reset: the daemon picks the hour',
+      )
+      shown = retry('Provider is overloaded', now + 4_000)
+      assert.equal((await adapter.observe({ launch })).quota, null, 'an overload is no quota')
+      shown = { ...retry('Rate limit exceeded', midnight), sessionId: 'ses_other' }
+      assert.equal(
+        (await adapter.observe({ launch })).quota,
+        null,
+        "another conversation's status says nothing about this one",
       )
     })
   })

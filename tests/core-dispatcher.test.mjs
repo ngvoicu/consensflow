@@ -1102,6 +1102,7 @@ describe('the dispatcher watches quota', () => {
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       assert.equal(task(1).state, 'working')
+      const refused = context.host.last('zeus')
       context.adapter.quota('zeus', { state: 'exhausted', resetsAt: soon(context, 2) })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
@@ -1121,6 +1122,13 @@ describe('the dispatcher watches quota', () => {
         context.ledger.project(1).participants.some((p) => p.handle === 'zeus-amber-pine'),
         true,
         'the session that ran out stays for the human; the member is out until its reset',
+      )
+      // A harness that waits out its limit (OpenCode) would take the task up
+      // again at the reset, beside the member that has it now.
+      assert.deepEqual(
+        context.host.killed,
+        [{ id: refused.id, generation: refused.generation }],
+        "the refused session's window closes with its work",
       )
     })
   })

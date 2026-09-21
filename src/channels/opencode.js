@@ -103,8 +103,14 @@ async function claimEpoch(target) {
   throw new Error('opencode-server delivery needs pane.claim_epoch')
 }
 
-/** Only the launch-owned TUI can attest which native conversation is displayed. */
-export async function currentSession(config) {
+/**
+ * Only the launch-owned TUI can attest which native conversation is
+ * displayed: that conversation (null when none is) and what OpenCode says it
+ * is doing, `{type: 'idle' | 'busy'}` or `{type: 'retry', message, next, …}`
+ * while it waits to retry a refused request. Undefined when the plugin does
+ * not answer for this launch.
+ */
+export async function sessionState(config) {
   const bridge = config?.sessionBridge
   if (!bridge?.endpoint || !bridge.token || !config.launchId) return undefined
   try {
@@ -114,8 +120,9 @@ export async function currentSession(config) {
     })
     const current = await response.json()
     if (!response.ok || current.launchId !== config.launchId) return undefined
-    if (current.sessionId === null) return null
-    return /^ses_[A-Za-z0-9]+$/.test(current.sessionId ?? '') ? current.sessionId : undefined
+    if (current.sessionId === null) return { sessionId: null, status: null }
+    if (!/^ses_[A-Za-z0-9]+$/.test(current.sessionId ?? '')) return undefined
+    return { sessionId: current.sessionId, status: current.status ?? null }
   } catch {
     return undefined
   }

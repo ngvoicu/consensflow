@@ -424,7 +424,7 @@ export class Dispatcher {
     }
     const out = this.#isOut(owner)
     if (!out && this.#freshRefusal(owner, runtime.quota)) {
-      this.#outOfQuota(project, participant, runtime, owner)
+      await this.#outOfQuota(project, participant, runtime, owner)
       return
     }
     if (out) {
@@ -855,8 +855,11 @@ export class Dispatcher {
    * A member whose harness just refused it: out until the reset it names (an
    * hour when it names none). What it was receiving is queued again, its
    * tiered work goes back to the board; its own tasks (the lead's) wait for it.
+   * The session's window then closes, as any window whose work left it: a
+   * harness that waits out its limit (OpenCode) would otherwise take the task
+   * up again at the reset, beside whoever has it now.
    */
-  #outOfQuota(project, participant, runtime, owner) {
+  async #outOfQuota(project, participant, runtime, owner) {
     const until = runtime.quota.resetsAt ?? new Date(this.#now() + 3_600_000).toISOString()
     this.#setActivity(runtime, { state: 'out', reason: `out of quota until ${until}` })
     this.#ledger.markOut(owner.id, { until, reason: 'out of quota' })
@@ -875,6 +878,9 @@ export class Dispatcher {
           because: 'ran out of quota after starting',
         })
       }
+    }
+    if (participant.role !== 'lead' && !runtime.pinned && !this.#ledger.holdsWork(participant.id)) {
+      await this.#retire(participant, runtime)
     }
     this.#changed()
   }

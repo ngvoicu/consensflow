@@ -1,10 +1,11 @@
 import { cachedAnswers } from '../../hosts/lib/completion.js'
+import { opencodeRetryQuota } from '../../hosts/lib/quota.js'
 import { childEnv, interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
 import {
   createSession as createOpenCodeSession,
   seedSession as seedOpenCodeSession,
   send as sendOpenCode,
-  currentSession as shownSession,
+  sessionState as shownState,
 } from '../channels/opencode.js'
 import { launchConfiguration } from '../channels.js'
 import { prepareOpenCodeExtension } from '../opencode-install.js'
@@ -22,17 +23,20 @@ import { admission, executableFor, recordState } from './shared.js'
  * An empty conversation says nothing about the window: until the plugin
  * reports that the TUI shows this conversation, OpenCode is still loading (or
  * the human is looking at another one) and nothing is sent.
+ *
+ * A refused request never reaches OpenCode's store: it waits to retry it,
+ * until the limit resets, and says so only in the window's live status,
+ * which the plugin reports with the conversation it shows.
  */
 export function openCodeAdapter({
   env,
   createSession = createOpenCodeSession,
   seedSession = seedOpenCodeSession,
   send = sendOpenCode,
-  currentSession = shownSession,
+  sessionState = shownState,
   answers = cachedAnswers(),
 }) {
-  const showing = async (launch) =>
-    (await currentSession(launch.channel).catch(() => undefined)) === launch.nativeSession
+  const shown = (launch) => sessionState(launch.channel).catch(() => undefined)
 
   return {
     harness: 'opencode',
@@ -99,7 +103,7 @@ export function openCodeAdapter({
     },
 
     async ready({ launch }) {
-      return showing(launch)
+      return (await shown(launch))?.sessionId === launch.nativeSession
     },
 
     async deliver({ launch, pane, host, text }) {
@@ -125,12 +129,19 @@ export function openCodeAdapter({
     },
 
     async observe({ launch }) {
-      const [record, shown] = await Promise.all([
+      const [record, window] = await Promise.all([
         answers('opencode', launch.nativeSession, env),
-        showing(launch),
+        shown(launch),
       ])
+      const showing = window?.sessionId === launch.nativeSession
       const state = recordState(record)
-      return { ...state, settled: state.settled && shown, waiting: null }
+      const retry = showing ? opencodeRetryQuota(window.status, Date.now()) : null
+      return {
+        ...state,
+        quota: retry ?? state.quota,
+        settled: state.settled && showing,
+        waiting: null,
+      }
     },
 
     transcript({ launch }) {

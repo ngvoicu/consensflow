@@ -115,8 +115,14 @@ export async function tui(api, options) {
       request.resume()
       return reply(401, refused('unauthorized'))
     }
-    if (request.method === 'GET' && request.url === '/session')
-      return reply(200, { launchId, sessionId: currentSession() })
+    if (request.method === 'GET' && request.url === '/session') {
+      // What OpenCode says the shown conversation is doing: idle, busy, or
+      // waiting to retry a refused request. A spent quota shows only here:
+      // OpenCode writes nothing to its store while it waits for the reset.
+      const sessionId = currentSession()
+      const status = sessionId === null ? null : (api.state?.session?.status(sessionId) ?? null)
+      return reply(200, { launchId, sessionId, status })
+    }
     if (request.method !== 'POST' || request.url !== '/deliver') {
       request.resume()
       return reply(404, refused('unknown-operation'))
