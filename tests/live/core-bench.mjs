@@ -194,11 +194,11 @@ try {
     const agent = AGENTS[name]
     const marker = `BENCH_OK_${name.toUpperCase()}`
     const started = Date.now()
-    await app.requestNode('task.add', {
+    await app.tell(
       project,
-      to: 'lead',
-      body: `Run exactly this command in your shell, then reply with one line:\ncf task add ${tierFlag(tiers[name])} "Reply with exactly: ${marker}"\nWhen its result arrives, do not accept it yet: reply with one line and wait for my next message.`,
-    })
+      `Run exactly this command in your shell, then reply with one line:\ncf task add ${tierFlag(tiers[name])} "Reply with exactly: ${marker}"\nWhen its result arrives, do not accept it yet: reply with one line and wait for my next message.`,
+      { idleMs: 300_000 },
+    )
     const task = await until(
       async () => (await lane(agent.id))?.tasks.find((t) => t.requester === 'lead'),
       300_000,
@@ -255,11 +255,11 @@ try {
     {
       const again = `BENCH_AGAIN_${name.toUpperCase()}`
       const begun = Date.now()
-      await app.requestNode('task.add', {
+      await app.tell(
         project,
-        to: 'lead',
-        body: `Run exactly this command in your shell, then reply with one line:\ncf task add --after T-${task.number} "Reply with exactly: ${again}"`,
-      })
+        `Run exactly this command in your shell, then reply with one line:\ncf task add --after T-${task.number} "Reply with exactly: ${again}"`,
+        { idleMs: 300_000 },
+      )
       const follow = await until(
         async () =>
           (await board()).lanes
@@ -323,11 +323,11 @@ try {
         })
       }
     }
-    await app.requestNode('task.add', {
+    await app.tell(
       project,
-      to: 'lead',
-      body: `Run exactly this command in your shell, then reply with one line:\ncf task add ${tierFlag(tiers[name])} "Use your ${QUESTION_TOOL[name]} to ask me which colour I prefer, with the options red and blue. After I answer, reply with exactly one line: COLOUR=<the answer>"`,
-    })
+      `Run exactly this command in your shell, then reply with one line:\ncf task add ${tierFlag(tiers[name])} "Use your ${QUESTION_TOOL[name]} to ask me which colour I prefer, with the options red and blue. After I answer, reply with exactly one line: COLOUR=<the answer>"`,
+      { idleMs: 300_000 },
+    )
     const question = await until(
       async () =>
         (await inbox('lead')).find(
@@ -427,11 +427,11 @@ try {
       ...(reviewer.ok ? {} : { error: reviewer.error }),
       ...(policy.ok ? {} : { error: policy.error }),
     })
-    await app.requestNode('task.add', {
+    await app.tell(
       project,
-      to: 'lead',
-      body: `Run exactly this command in your shell, then reply with one line:\ncf task add ${tierFlag(tiers[wanted[0]])} "Reply with exactly: ${marker}"`,
-    })
+      `Run exactly this command in your shell, then reply with one line:\ncf task add ${tierFlag(tiers[wanted[0]])} "Reply with exactly: ${marker}"`,
+      { idleMs: 300_000 },
+    )
     const reviewed = await until(
       async () =>
         (await board()).lanes

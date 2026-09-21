@@ -58,7 +58,7 @@ async function until(what, check, { timeoutMs = STEP_MS, note = null } = {}) {
   const deadline = Date.now() + timeoutMs
   let polls = 0
   for (;;) {
-    const found = check()
+    const found = await check()
     if (found !== null && found !== undefined && found !== false) return found
     if (Date.now() > deadline) throw new Error(`${what} did not happen within ${timeoutMs} ms`)
     polls += 1
@@ -210,14 +210,27 @@ export async function runSelftest({
     )
     await report('echo', { typed, hex })
 
-    // A task from the board: the human's composer, the core, the dispatcher,
-    // the pane host's paste, the child. The child's hex of the header line is
-    // the proof that the board reaches a window; the core's own confirmation,
-    // read back from the record the fake harness keeps, is the proof that it
-    // knows it did.
-    const given = await core('task.add', { project: opened.project.id, to: 'lead', body: 'SMOKE' })
-    if (given?.ok !== true) throw new Error(`task.add refused: ${JSON.stringify(given)}`)
-    const header = `[ConsensFlow m-${given.message?.id ?? given.task.number} ·`
+    // A task through the board: the lead's own `cf`, the core, the
+    // dispatcher, the pane host's paste, the child. The human talks to the lead
+    // in its terminal and never gives it a task from the board, so the lead's
+    // window puts its own on the board (`cf task add --self`). The child's hex
+    // of the delivered header line is the proof that the board reaches a
+    // window; the core's own confirmation, read back from the record the fake
+    // harness keeps, is the proof that it knows it did.
+    await sendInput(pane, 'SELF\r')
+    const given = await until('the lead put its own task on the board', async () => {
+      const { board } = await core('board.get', { project: opened.project.id })
+      return (
+        board?.lanes
+          .find((lane) => lane.participant.handle === 'lead')
+          ?.tasks.find((task) => task.requester === 'lead') ?? null
+      )
+    })
+    const { task: thread } = await core('task.get', {
+      project: opened.project.id,
+      task: given.number,
+    })
+    const header = `[ConsensFlow m-${thread.messages.find((message) => message.kind === 'task').id} ·`
     const delivered = await until(
       'the task reached the lead window',
       () => {
@@ -249,11 +262,11 @@ export async function runSelftest({
       await sleep(200)
       const { task } = await core('task.get', {
         project: opened.project.id,
-        task: given.task.number,
+        task: given.number,
       })
       state = task.messages.find((message) => message.kind === 'task')?.state ?? null
     }
-    await report('board', { task: given.task.number, hex: delivered, delivered: true })
+    await report('board', { task: given.number, hex: delivered, delivered: true })
 
     // The agents screens: their own window at the daemon's address, reused
     // on the second ask. The daemon's pages themselves are proven elsewhere.

@@ -61,7 +61,9 @@ reply does nothing.
    from @worker]`, with its review under it when the project asks for one.
    Then decide: `cf task accept T-3` when it is right; `cf task reopen T-3
    "what to change"` to send it back to the same window; `cf task cancel T-3`
-   to stop it; `cf task review T-3` for an independent look.
+   to stop it; `cf task review T-3` for an independent look. Deciding is
+   yours alone: the human never accepts work on the board, so a result you
+   leave undecided stays Done, and any task that needs it stays blocked.
 5. Answer a worker's question, headed `[… question from @worker]`, with
    `cf answer m-12 "…"`; it goes back to that window, which waits for it.
    When the picture changes under a running task (the human tells you
@@ -92,7 +94,7 @@ before you see it, or decline what you sent and tell you why.
   you name the tier, ConsensFlow picks the member. `cf team` shows names so
   you can read the board; nothing more.
 - Give any agent a task by name, or send work to another window: the board is
-  the only channel, and only the human gives you a task.
+  the only channel, and only the human gives you work, here in your terminal.
 - Accept a result you have not checked, or one whose review asked for changes
   you have not weighed.
 

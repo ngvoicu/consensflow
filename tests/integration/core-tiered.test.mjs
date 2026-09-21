@@ -75,25 +75,23 @@ test('a reviewer on another model passes the work, and the requester gets the re
         ['checker', 'reviewer'],
       ],
     })
-    const given = await app.requestNode('task.add', {
-      project: p.id,
-      to: 'lead',
-      body: `DISPATCH --tier ${p.tiers.worker} Reply with exactly: WORKER_OK\\nREVIEWER: VERDICT: pass`,
-    })
-    assert.equal(given.ok, true, JSON.stringify(given))
+    await app.tell(
+      p.id,
+      `DISPATCH --tier ${p.tiers.worker} Reply with exactly: WORKER_OK\\nREVIEWER: VERDICT: pass`,
+    )
 
-    await app.waitFor(async () => (await p.task(2))?.state === 'review', 60_000)
+    await app.waitFor(async () => (await p.task(1))?.state === 'review', 60_000)
     await app.waitFor(async () => (await p.lane('checker'))?.tasks.length === 1, 60_000)
     const review = (await p.lane('checker')).tasks[0]
-    assert.deepEqual([review.kind, review.reviewOf, review.title], ['review', 2, 'Review T-2'])
-    await app.waitFor(async () => (await p.task(2))?.state === 'done', 60_000)
-    const reviewed = await p.task(2)
+    assert.deepEqual([review.kind, review.reviewOf, review.title], ['review', 1, 'Review T-1'])
+    await app.waitFor(async () => (await p.task(1))?.state === 'done', 60_000)
+    const reviewed = await p.task(1)
     assert.equal(reviewed.round, 1)
     assert.equal((await p.task(review.number)).verdict, 'pass')
     await app.waitFor(async () => {
       const messages = await p.inbox('lead')
       return messages.some(
-        (m) => m.kind === 'result' && m.taskNumber === 2 && m.state === 'delivered',
+        (m) => m.kind === 'result' && m.taskNumber === 1 && m.state === 'delivered',
       )
     }, 60_000)
     const results = (await p.inbox('lead')).filter(
@@ -101,7 +99,7 @@ test('a reviewer on another model passes the work, and the requester gets the re
     )
     assert.deepEqual(
       results.map((m) => [m.taskNumber, m.body]),
-      [[2, 'WORKER_OK']],
+      [[1, 'WORKER_OK']],
       'one delivery: the result; the findings stay on the review task',
     )
     const findings = (await p.task(review.number)).messages.find((m) => m.kind === 'result')
@@ -132,11 +130,7 @@ test('each task runs in its own worker session: the window closes with the task,
       ['ONE', 2],
       ['TWO', 3],
     ]) {
-      await app.requestNode('task.add', {
-        project: p.id,
-        to: 'lead',
-        body: `DISPATCH --tier ${p.tiers.worker} Reply with exactly: ${word}`,
-      })
+      await app.tell(p.id, `DISPATCH --tier ${p.tiers.worker} Reply with exactly: ${word}`)
       await app.waitFor(
         async () =>
           (await p.lane('worker'))?.tasks.some((t) => t.state === 'done' && t.title.includes(word)),
@@ -167,13 +161,12 @@ test('a reviewer asking for changes twice sends the work back once, then the req
         ['checker', 'reviewer'],
       ],
     })
-    await app.requestNode('task.add', {
-      project: p.id,
-      to: 'lead',
-      body: `DISPATCH --tier ${p.tiers.worker} Reply with exactly: WORKER_OK\\nREVIEWER: VERDICT: changes`,
-    })
-    await app.waitFor(async () => (await p.task(2))?.round === 1, 90_000)
-    const back = await p.task(2)
+    await app.tell(
+      p.id,
+      `DISPATCH --tier ${p.tiers.worker} Reply with exactly: WORKER_OK\\nREVIEWER: VERDICT: changes`,
+    )
+    await app.waitFor(async () => (await p.task(1))?.round === 1, 90_000)
+    const back = await p.task(1)
     assert.match(back.assignee, /^worker-/, 'the work goes back to its author, the same session')
     assert.ok(
       back.messages.some(
@@ -184,7 +177,7 @@ test('a reviewer asking for changes twice sends the work back once, then the req
       'the findings reach the worker as a follow-up',
     )
     await app.waitFor(
-      async () => (await p.task(2))?.round === 2 && (await p.task(2))?.state === 'done',
+      async () => (await p.task(1))?.round === 2 && (await p.task(1))?.state === 'done',
       120_000,
     )
     // One delivery to the lead: the result, with both verdicts written under
@@ -192,7 +185,7 @@ test('a reviewer asking for changes twice sends the work back once, then the req
     await app.waitFor(async () => {
       const messages = await p.inbox('lead')
       return messages.some(
-        (m) => m.kind === 'result' && m.taskNumber === 2 && m.state === 'delivered',
+        (m) => m.kind === 'result' && m.taskNumber === 1 && m.state === 'delivered',
       )
     }, 60_000)
     assert.ok(
@@ -233,13 +226,12 @@ test('a worker refused by its provider mid-task loses the task to the other work
         ['worker2', 'worker'],
       ],
     })
-    await app.requestNode('task.add', {
-      project: p.id,
-      to: 'lead',
-      body: `DISPATCH --tier ${p.tiers.worker} QUOTA-OUT Reply with exactly: WORKER_OK`,
-    })
-    await app.waitFor(async () => (await p.task(2))?.state === 'done', 90_000)
-    const done = await p.task(2)
+    await app.tell(
+      p.id,
+      `DISPATCH --tier ${p.tiers.worker} QUOTA-OUT Reply with exactly: WORKER_OK`,
+    )
+    await app.waitFor(async () => (await p.task(1))?.state === 'done', 90_000)
+    const done = await p.task(1)
     assert.match(done.assignee, /^worker2-/, 'a session of the other worker')
     assert.match(
       done.body,
@@ -255,14 +247,14 @@ test('a worker refused by its provider mid-task loses the task to the other work
       (await p.inbox('lead')).some(
         (m) =>
           m.kind === 'note' &&
-          /^T-2 was taken back from @worker-[a-z]+-[a-z]+ \(ran out of quota after starting\)/.test(
+          /^T-1 was taken back from @worker-[a-z]+-[a-z]+ \(ran out of quota after starting\)/.test(
             m.body,
           ),
       ),
       'the requester was told',
     )
     const second = (await p.lane('worker2')).tasks[0]
-    assert.equal(second.number, 2)
+    assert.equal(second.number, 1)
     await app.waitFor(async () => {
       const results = (await p.inbox('lead')).filter((m) => m.kind === 'result')
       return results.some((m) => m.body === 'WORKER_OK' && m.state === 'delivered')
@@ -281,18 +273,13 @@ test('with human approval required, the brief and the result each wait for the h
     team(app)
     const p = await project(app, { review: 'none', gate: true, members: [['worker', 'worker']] })
     assert.equal((await p.board()).project.gate, true)
-    const given = await app.requestNode('task.add', {
-      project: p.id,
-      to: 'lead',
-      body: `DISPATCH --tier ${p.tiers.worker} Reply with exactly: WORKER_OK`,
-    })
-    assert.equal(given.ok, true, JSON.stringify(given))
+    await app.tell(p.id, `DISPATCH --tier ${p.tiers.worker} Reply with exactly: WORKER_OK`)
 
     // The lead's brief is assigned, then held: no worker window opens for it.
     await app.waitFor(async () => (await p.board()).gated.length === 1, 60_000)
     const [brief] = (await p.board()).gated
-    assert.deepEqual([brief.kind, brief.sender, brief.taskNumber], ['task', 'lead', 2])
-    assert.equal((await p.task(2)).state, 'queued')
+    assert.deepEqual([brief.kind, brief.sender, brief.taskNumber], ['task', 'lead', 1])
+    assert.equal((await p.task(1)).state, 'queued')
     await new Promise((resolve) => setTimeout(resolve, 1500))
     assert.equal(
       app.openFrames.some((frame) => frame.id === `p${p.id}-${brief.recipient}`),
@@ -301,7 +288,7 @@ test('with human approval required, the brief and the result each wait for the h
     )
     const approved = await app.requestNode('message.approve', { message: brief.id })
     assert.equal(approved.ok, true, JSON.stringify(approved))
-    await app.waitFor(async () => (await p.task(2))?.state === 'done', 60_000)
+    await app.waitFor(async () => (await p.task(1))?.state === 'done', 60_000)
 
     // The result waits the same way; the lead's window gets nothing until it is passed on.
     await app.waitFor(async () => (await p.board()).gated.length === 1, 60_000)
@@ -338,13 +325,9 @@ test("the human opens a finished session's window on its own conversation, and c
         return false
       }
     }
-    await app.requestNode('task.add', {
-      project: p.id,
-      to: 'lead',
-      body: `DISPATCH --tier ${p.tiers.worker} Reply with exactly: ONE`,
-    })
-    await app.waitFor(async () => (await p.task(2))?.state === 'done', 60_000)
-    const handle = (await p.task(2)).assignee
+    await app.tell(p.id, `DISPATCH --tier ${p.tiers.worker} Reply with exactly: ONE`)
+    await app.waitFor(async () => (await p.task(1))?.state === 'done', 60_000)
+    const handle = (await p.task(1)).assignee
     const session = async () =>
       (await p.board()).lanes.find((lane) => lane.participant.handle === handle)
     await app.waitFor(async () => (await session())?.pane === null, 30_000)

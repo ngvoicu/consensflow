@@ -66,17 +66,6 @@ async function act(work) {
 }
 
 const board = new BoardView(boardRoot, {
-  onGiveTask: (participant, text) =>
-    act(async () => {
-      const { task } = await core('task.add', {
-        project: state.selected,
-        to: participant.handle,
-        body: text,
-      })
-      note(
-        `T-${task.number} queued for ${participant.handle === 'lead' ? 'the lead' : `@${participant.handle}`}.`,
-      )
-    }),
   onPutTask: ({ pool, tier, purpose, needs }, text) =>
     act(async () => {
       const { task } = await core('task.add', {
@@ -157,8 +146,6 @@ const drawer = new TaskDrawer($('#task-drawer'), {
     state.openTask = null
     drawer.hide()
   },
-  onAccept: (task) =>
-    act(() => core('task.accept', { project: state.selected, task: task.number })),
   onReopen: (task, text) =>
     act(() => core('task.reopen', { project: state.selected, task: task.number, body: text })),
   onCancel: (task) =>

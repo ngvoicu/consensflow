@@ -34,6 +34,10 @@ credentials, takes no API key, and writes only inside its own home.
   conversation until you delete it: from its lane you open its terminal
   (again on that conversation, if it was closed), close it, or delete the
   session for good. There is no limit on sessions and none of them expires.
+- **You talk to the lead in its terminal.** Your work reaches the project
+  through the lead: you type to it, and it plans, puts tasks on the board and
+  decides on every result. The board has no Accept for you; you read, send
+  back, pause, and approve what waits for you.
 - **The board is the only channel.** No agent gives another a task by name,
   types into another window, or reads another agent's session files.
   Questions go up: a member asks the lead, the lead asks you. You answer on the
@@ -107,7 +111,7 @@ only subject:
 
 Every role's window opens with its role text: what it does, what it never
 does, and these commands. Agents run with full permissions in their windows;
-the protection is the review and your acceptance of the work, not a fence
+the protection is the review, the lead's acceptance and your approval, not a fence
 around the run.
 
 ## Developing

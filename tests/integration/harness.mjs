@@ -382,6 +382,24 @@ export async function startIntegration({
     request,
     requestNode,
     requestRust: request,
+    /**
+     * The human types into the lead's terminal, the one way work reaches the
+     * lead: a bracketed paste of `text`, then Enter, once the lead is idle.
+     */
+    async tell(project, text, { idleMs = 60_000 } = {}) {
+      const lead = async () =>
+        (await requestNode('board.get', { project })).board.lanes.find(
+          (lane) => lane.participant.handle === 'lead',
+        )
+      await waitFor(async () => (await lead())?.activity?.state === 'idle', idleMs)
+      const { pane } = await lead()
+      const typed = await request('pane.input', {
+        id: pane.id,
+        generation: pane.generation,
+        bytes: [...Buffer.from(`\u001b[200~${text}\u001b[201~\r`)],
+      })
+      assert.equal(typed.ok, true, JSON.stringify(typed))
+    },
     killRust(signal = 'SIGKILL') {
       return rust.kill(signal)
     },

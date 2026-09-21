@@ -196,6 +196,11 @@ while IFS= read -r line; do
     stty raw -echo
     "$CFSMOKE_PASTE_NODE" "$CFSMOKE_PASTE_READER"
     stty "$saved"
+  elif [ "$line" = "SELF" ]; then
+    # The lead puts its own task on the board from its terminal, the way a
+    # real lead does; the core then delivers it back into this window.
+    cf task add --self "SMOKE"
+    turn "SELF"
   elif [ "$line" = "FLOOD" ]; then
     n=1
     while [ $n -le ${FLOOD_LINES} ]; do
@@ -500,13 +505,13 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     'the child echoed something other than what was typed',
   )
 
-  // The board reaches the window: a task the human gave the lead arrived as
-  // a paste the child hexed, header first.
+  // The board reaches the window: the task the lead put on the board from its
+  // own terminal came back as a paste the child hexed, header first.
   const board = await app.waitFor('board')
   assert.equal(board.data.task, 1)
   assert.match(
     Buffer.from(board.data.hex, 'hex').toString('utf8'),
-    /^\[ConsensFlow m-\d+ · T-1 · task from @human\]/,
+    /^\[ConsensFlow m-\d+ · T-1 · task from @lead\]/,
   )
   assert.equal(board.data.delivered, true, 'the core never confirmed the delivery from the record')
 

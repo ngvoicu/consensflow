@@ -139,13 +139,13 @@ export async function startApi({
           `@${to} is a ${target.role}: name a tier, not a member (cf task add --tier ${target.tier} "…")`,
         )
       }
-      // The board is the only channel between agents: only the human gives
-      // the lead a task by name.
+      // The board is the only channel between agents; the human gives the
+      // lead its work by talking to it in its terminal.
       if (target !== undefined && to !== participant.handle) {
         throw new Refusal(
           403,
           'board-only',
-          'agents give no task by name: put it on the board for a tier (cf task add --tier standard "…"); only the human gives the lead a task',
+          'agents give no task by name: put it on the board for a tier (cf task add --tier standard "…"); only the human gives the lead work, in its terminal',
         )
       }
       // A follow-up that needs the context of the window that did T-n goes

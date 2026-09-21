@@ -32,12 +32,7 @@ test('a lead hands a task to a worker through the board and the result lands in 
     const leadFrame = app.openFrames.find((frame) => frame.id === `p${project}-lead`)
     assert.ok(leadFrame, 'the lead window opened')
 
-    const given = await app.requestNode('task.add', {
-      project,
-      to: 'lead',
-      body: `DISPATCH --tier ${added.member.tier} Reply with exactly: WORKER_OK`,
-    })
-    assert.equal(given.ok, true, JSON.stringify(given))
+    await app.tell(project, `DISPATCH --tier ${added.member.tier} Reply with exactly: WORKER_OK`)
 
     const board = async () => (await app.requestNode('board.get', { project })).board
     // A member's work runs in a session of its own: its lane is the session's.
@@ -48,14 +43,14 @@ test('a lead hands a task to a worker through the board and the result lands in 
       )
     await app.waitFor(async () => (await lane('worker'))?.tasks[0]?.state === 'done', 30_000)
     const workerTask = (await lane('worker')).tasks[0]
-    assert.deepEqual([workerTask.requester, workerTask.number], ['lead', 2])
+    assert.deepEqual([workerTask.requester, workerTask.number], ['lead', 1])
 
     const workerFrame = app.openFrames.find(
       (frame) => frame.id === `p${project}-${workerTask.assignee}`,
     )
     assert.match(
       workerFrame.argv.at(-1),
-      /^\[ConsensFlow m-\d+ · T-2 · task from @lead\]\nReply with exactly: WORKER_OK$/,
+      /^\[ConsensFlow m-\d+ · T-1 · task from @lead\]\nReply with exactly: WORKER_OK$/,
     )
     assert.ok(workerFrame.argv.includes('bypassPermissions'))
 
@@ -70,7 +65,7 @@ test('a lead hands a task to a worker through the board and the result lands in 
     const leadSession = leadFrame.argv[leadFrame.argv.indexOf('--session-id') + 1]
     assert.match(
       app.transcript(leadSession),
-      new RegExp(`\\[ConsensFlow m-${result.id} · T-2 · result from @worker-[a-z]+-[a-z]+\\]`),
+      new RegExp(`\\[ConsensFlow m-${result.id} · T-1 · result from @worker-[a-z]+-[a-z]+\\]`),
     )
   } finally {
     await app.close()
@@ -136,12 +131,7 @@ test('one member runs two tasks at once, each in a session and window of its own
     const added = await app.requestNode('member.add', { project, agent: 'worker' })
     assert.equal(added.ok, true, JSON.stringify(added))
     for (const word of ['ONE', 'TWO']) {
-      const given = await app.requestNode('task.add', {
-        project,
-        to: 'lead',
-        body: `DISPATCH --tier ${added.member.tier} Reply with exactly: ${word}`,
-      })
-      assert.equal(given.ok, true, JSON.stringify(given))
+      await app.tell(project, `DISPATCH --tier ${added.member.tier} Reply with exactly: ${word}`)
     }
     const board = async () => (await app.requestNode('board.get', { project })).board
     const dispatched = async () =>

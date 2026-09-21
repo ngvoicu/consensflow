@@ -227,9 +227,10 @@ describe('the page protocol of the new core', () => {
         body: 'Write the docs',
       })
       assert.deepEqual([task.state, task.assignee, task.pool], ['open', null, 'worker'])
+      // Work goes on the board for a tier: the page names no participant.
       await assert.rejects(
-        operations['task.add']({ project: project.id, to: 'zeus', body: 'By name' }),
-        /name a tier, not a member/,
+        operations['task.add']({ project: project.id, to: 'lead', body: 'By name' }),
+        /a pool is worker, advisor, designer/,
       )
       ledger.assignTask(project.id, 1, zeus.id)
       const message = ledger.task(project.id, 1).messages[0]
@@ -374,7 +375,7 @@ describe('the page protocol of the new core', () => {
     })
   })
 
-  it('lets the human hand out, accept, reopen and cancel tasks', async () => {
+  it('lets the human hand out, reopen and cancel tasks, and leaves accepting to the lead', async () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
@@ -425,10 +426,7 @@ describe('the page protocol of the new core', () => {
       ledger.beginDelivery(second.id)
       ledger.confirmDelivery(second.id, {})
       ledger.recordResult(project.id, 2, { body: 'ok' })
-      assert.equal(
-        (await operations['task.accept']({ project: project.id, task: 2 })).task.state,
-        'accepted',
-      )
+      assert.equal(operations['task.accept'], undefined, "accepting is the lead's, in its terminal")
     })
   })
 

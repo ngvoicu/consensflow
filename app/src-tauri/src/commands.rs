@@ -1560,7 +1560,6 @@ const CORE_OPERATIONS: &[&str] = &[
     "task.get",
     "task.transcript",
     "task.add",
-    "task.accept",
     "task.reopen",
     "task.cancel",
     "task.pause",

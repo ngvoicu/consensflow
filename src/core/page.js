@@ -95,19 +95,19 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       return { task: found }
     },
 
-    'task.add': change(async ({ project, to, pool, tier, purpose, needs, body, title }) => {
-      const member = ledger.project(project)?.participants.find((p) => p.handle === to)
-      if (member !== undefined && member.agent !== null) {
-        throw new Error(`@${to} is a ${member.role}: name a tier, not a member`)
-      }
-      return ledger.createTask(project, {
+    // The human puts work on the board for a tier (or the designer); the lead
+    // is talked to in its own terminal, never through a task.
+    'task.add': change(async ({ project, pool, tier, purpose, needs, body, title }) =>
+      ledger.createTask(project, {
         from: 'human',
-        ...(to === undefined ? { pool, tier, purpose } : { to }),
+        pool,
+        tier,
+        purpose,
         ...(needs === undefined ? {} : { needs }),
         body,
         title,
-      })
-    }),
+      }),
+    ),
 
     'task.transcript': async ({ project, task, limit }) =>
       ledger.transcript(project, task, limit === undefined ? {} : { limit }),
@@ -122,10 +122,6 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
 
     'project.gate': change(async ({ project, gate }) => ({
       project: ledger.setGate(project, gate),
-    })),
-
-    'task.accept': change(async ({ project, task }) => ({
-      task: ledger.acceptTask(project, task, { by: 'human' }),
     })),
 
     'task.reopen': change(async ({ project, task, body }) =>

@@ -38,12 +38,7 @@ test("a worker's question with options goes to the lead's inbox and its answer r
         multiSelect: false,
       },
     ]
-    const given = await app.requestNode('task.add', {
-      project,
-      to: 'lead',
-      body: `DISPATCH --tier ${added.member.tier} ASK ${JSON.stringify(questions)}`,
-    })
-    assert.equal(given.ok, true, JSON.stringify(given))
+    await app.tell(project, `DISPATCH --tier ${added.member.tier} ASK ${JSON.stringify(questions)}`)
 
     const board = async () => (await app.requestNode('board.get', { project })).board
     // A member's work runs in a session of its own: its lane is the session's.
@@ -64,7 +59,7 @@ test("a worker's question with options goes to the lead's inbox and its answer r
     )
     const question = (await inbox('lead')).find((m) => m.kind === 'question')
     assert.match(question.sender, /^worker-/, "the worker's session asked")
-    assert.deepEqual([question.taskNumber, question.questions[0].options[1].label], [2, 'blue'])
+    assert.deepEqual([question.taskNumber, question.questions[0].options[1].label], [1, 'blue'])
     assert.equal(question.body, 'Colour: Which colour?\n- red\n- blue: REPLY blue')
 
     await app.waitFor(async () => (await lane('worker'))?.tasks[0]?.state === 'done', 30_000)
@@ -75,7 +70,7 @@ test("a worker's question with options goes to the lead's inbox and its answer r
       ['read', [['blue']], 'lead', 'Colour: blue'],
       'the answer is collected by the hook, never delivered as text',
     )
-    const { task } = await app.requestNode('task.get', { project, task: 2 })
+    const { task } = await app.requestNode('task.get', { project, task: 1 })
     assert.equal(task.messages.find((m) => m.kind === 'result').body, 'answered: blue')
     await app.waitFor(
       async () => (await inbox('lead')).some((m) => m.kind === 'result' && m.state === 'delivered'),
@@ -88,8 +83,8 @@ test("a worker's question with options goes to the lead's inbox and its answer r
     for (const id of app.openFrames.map((frame) => frame.id)) {
       cause.message += `\n--- ${id}: ${app.output(id).slice(-1500)}`
     }
-    const worker = await app.requestNode('task.get', { project: 1, task: 2 })
-    cause.message += `\ntask 2=${JSON.stringify(worker.task?.messages?.map((m) => [m.kind, m.state, m.body.slice(0, 400)]))}`
+    const worker = await app.requestNode('task.get', { project: 1, task: 1 })
+    cause.message += `\ntask 1=${JSON.stringify(worker.task?.messages?.map((m) => [m.kind, m.state, m.body.slice(0, 400)]))}`
     cause.message += `\nexits=${JSON.stringify(app.exits)}`
     throw cause
   } finally {

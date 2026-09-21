@@ -212,7 +212,6 @@ function lamp(activity) {
 export class BoardView {
   #root
   #actions
-  #composing = null
   #composingOpen = false
   #drafts = new Map()
 
@@ -600,24 +599,12 @@ export class BoardView {
         ),
       )
     }
-    // Only the lead takes a task by name; members get theirs from the board by tier.
-    if (coordinator) {
-      tools.append(
-        button(
-          'Give a task',
-          'quiet-button',
-          () => this.#compose(participant.handle),
-          `Give ${laneName(participant)} a task`,
-        ),
-      )
-    }
     const title = element('div', 'row-title')
     title.append(
       lamp(out ? { state: 'out' } : activity),
       element('span', 'row-name', laneName(participant)),
     )
     head.append(title, element('span', 'row-meta', identity), status, tools)
-    if (this.#composing === participant.handle) head.append(this.#composer(participant))
     return head
   }
 
@@ -648,9 +635,9 @@ export class BoardView {
   }
 
   /**
-   * A new task: for the lead by name, for a tier of worker on the team, or an
-   * image from the designer; critical work names its purpose. Advice is the
-   * lead's alone to ask.
+   * A new task on the board: for a tier of worker on the team, or an image
+   * from the designer; critical work names its purpose. The lead is talked to
+   * in its terminal, and advice is the lead's alone to ask.
    */
   #openComposer(board) {
     const form = element('form', 'composer')
@@ -658,12 +645,6 @@ export class BoardView {
     const address = element('select')
     address.name = 'address'
     address.setAttribute('aria-label', 'For')
-    for (const lane of board.lanes) {
-      if (lane.participant.role !== 'lead') continue
-      const option = element('option', null, laneName(lane.participant))
-      option.value = lane.participant.handle
-      address.append(option)
-    }
     for (const tier of TIERS) {
       const names = board.lanes
         .filter(
@@ -688,6 +669,13 @@ export class BoardView {
       option.value = 'designer'
       address.append(option)
     }
+    if (address.options.length === 0) {
+      return element(
+        'p',
+        'bay-empty',
+        'The team has no worker or image designer yet: add one in Team.',
+      )
+    }
     const purpose = element('select')
     purpose.name = 'purpose'
     purpose.setAttribute('aria-label', 'Purpose')
@@ -711,10 +699,8 @@ export class BoardView {
     needs.title = 'Task numbers, like T-3, T-4'
     needs.setAttribute('aria-label', 'Only after')
     const needsLabel = labelled('Only after', needs)
-    const tiered = () => address.value.includes(':') || address.value === 'designer'
     const arrange = () => {
       purposeLabel.hidden = !address.value.endsWith(':critical')
-      needsLabel.hidden = !tiered()
     }
     address.addEventListener('change', arrange)
     arrange()
@@ -745,10 +731,6 @@ export class BoardView {
       this.#drafts.delete('open')
       this.#drafts.delete('Only after')
       this.#composingOpen = false
-      if (!tiered()) {
-        this.#actions.onGiveTask({ handle: address.value }, text)
-        return
-      }
       const after = [...needs.value.matchAll(/\d+/g)].map((match) => Number(match[0]))
       const waits = after.length === 0 ? {} : { needs: after }
       if (address.value === 'designer') {
@@ -765,45 +747,6 @@ export class BoardView {
     return form
   }
 
-  #composer(participant) {
-    const form = element('form', 'composer')
-    const field = element('textarea')
-    field.name = 'task'
-    field.rows = 3
-    field.required = true
-    field.setAttribute('aria-label', `Task for ${laneName(participant)}`)
-    field.placeholder = `What should ${laneName(participant)} do? Include every detail it needs and what to return.`
-    field.dataset.draft = participant.handle
-    const submit = element('button', 'primary-button', 'Queue task')
-    submit.type = 'submit'
-    const actions = element('div', 'composer-actions')
-    actions.append(
-      button('Cancel', 'quiet-button', () => this.#compose(null)),
-      submit,
-    )
-    form.append(field, actions)
-    form.addEventListener('submit', (event) => {
-      event.preventDefault()
-      const text = field.value.trim()
-      if (!text) return
-      this.#drafts.delete(participant.handle)
-      this.#composing = null
-      this.#actions.onGiveTask(participant, text)
-    })
-    requestAnimationFrame(() => field.focus())
-    return form
-  }
-
-  #compose(handle) {
-    this.#composing = this.#composing === handle ? null : handle
-    this.#actions.onRedraw()
-  }
-
-  /**
-   * What the human is writing survives a redraw: every text area, and the
-   * New task form's choices (who it is for, the purpose, what it waits for).
-   * A choice is restored before the fields it shows or hides.
-   */
   #saveDrafts() {
     for (const field of this.#root.querySelectorAll(DRAFT_FIELDS)) {
       const key = field.dataset.draft ?? field.getAttribute('aria-label')
@@ -938,13 +881,9 @@ export class TaskDrawer {
       section.append(list)
       sections.push(section)
     }
-    if (task.state === 'done') {
-      actions.append(button('Accept', 'primary-button', () => this.#actions.onAccept(task)))
-      if (task.kind === 'work') {
-        actions.append(
-          button('Ask for a review', 'quiet-button', () => this.#actions.onReview(task)),
-        )
-      }
+    // Accepting is the lead's call, made in its terminal; the human sends back.
+    if (task.state === 'done' && task.kind === 'work') {
+      actions.append(button('Ask for a review', 'quiet-button', () => this.#actions.onReview(task)))
     }
     if (task.state === 'done' || task.state === 'failed') {
       const form = element('form', 'reopen')
