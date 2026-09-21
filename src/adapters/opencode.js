@@ -24,9 +24,11 @@ import { admission, executableFor, recordState } from './shared.js'
  * reports that the TUI shows this conversation, OpenCode is still loading (or
  * the human is looking at another one) and nothing is sent.
  *
- * A refused request never reaches OpenCode's store: it waits to retry it,
- * until the limit resets, and says so only in the window's live status,
- * which the plugin reports with the conversation it shows.
+ * The window's live status, which the plugin reports with the conversation
+ * it shows, has the last word where the store cannot: a refused request
+ * never reaches the store (OpenCode waits to retry it until the limit
+ * resets), and an answer a lost window never finished stays unfinished there
+ * for good once the conversation is reopened, though OpenCode is idle.
  */
 export function openCodeAdapter({
   env,
@@ -136,10 +138,11 @@ export function openCodeAdapter({
       const showing = window?.sessionId === launch.nativeSession
       const state = recordState(record)
       const retry = showing ? opencodeRetryQuota(window.status, Date.now()) : null
+      const idle = showing && window.status?.type === 'idle'
       return {
         ...state,
         quota: retry ?? state.quota,
-        settled: state.settled && showing,
+        settled: showing && (state.settled || idle),
         waiting: null,
       }
     },

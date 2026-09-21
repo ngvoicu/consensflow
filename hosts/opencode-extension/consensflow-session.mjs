@@ -119,8 +119,10 @@ export async function tui(api, options) {
       // What OpenCode says the shown conversation is doing: idle, busy, or
       // waiting to retry a refused request. A spent quota shows only here:
       // OpenCode writes nothing to its store while it waits for the reset.
+      // No status is idle, as for delivery: it has not worked since the window opened.
       const sessionId = currentSession()
-      const status = sessionId === null ? null : (api.state?.session?.status(sessionId) ?? null)
+      const status =
+        sessionId === null ? null : (api.state?.session?.status(sessionId) ?? { type: 'idle' })
       return reply(200, { launchId, sessionId, status })
     }
     if (request.method !== 'POST' || request.url !== '/deliver') {

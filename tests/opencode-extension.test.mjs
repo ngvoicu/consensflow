@@ -105,7 +105,7 @@ test('OpenCode reports the displayed session after new and resume, including the
   assert.deepEqual((await f.request('/session')).body, {
     launchId: 'test-launch',
     sessionId: 'ses_first',
-    status: null,
+    status: { type: 'idle' },
   })
   f.setCurrent({ name: 'home' })
   assert.equal((await f.request('/session')).body.sessionId, null)
@@ -118,6 +118,8 @@ test('OpenCode reports the displayed session after new and resume, including the
 
 test('OpenCode reports what the displayed session is doing, a retry of a refused request included', async (t) => {
   const f = await fixture(t)
+  // A conversation OpenCode has no status for has not worked since the window opened: idle.
+  assert.deepEqual((await f.request('/session')).body.status, { type: 'idle' })
   f.setStatus('ses_first', { type: 'busy' })
   assert.deepEqual((await f.request('/session')).body.status, { type: 'busy' })
   // OpenCode 1.18.31, probed on 2026-09-21: a spent free tier waits here, never in its store.

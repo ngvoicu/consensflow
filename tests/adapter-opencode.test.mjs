@@ -291,4 +291,34 @@ describe('the OpenCode adapter', () => {
       )
     })
   })
+
+  it('reads a turn OpenCode never finished as over once OpenCode says the window is idle', async () => {
+    await withHome(async ({ env }) => {
+      // A window lost mid-answer and reopened on its conversation: the store
+      // keeps the unfinished answer for good, and OpenCode does not retry it.
+      let status = { type: 'busy' }
+      const adapter = openCodeAdapter({
+        env,
+        sessionState: async () => ({ sessionId: 'ses_abc123', status }),
+        answers: async () => ({
+          items: [
+            { id: 'u', role: 'user', complete: true },
+            { id: 'a', role: 'assistant', text: '', complete: false },
+          ],
+          inFlight: true,
+          settlement: { state: 'in-flight' },
+        }),
+      })
+      const launch = { nativeSession: 'ses_abc123' }
+      assert.equal((await adapter.observe({ launch })).settled, false, 'busy: still working')
+      status = null
+      assert.equal(
+        (await adapter.observe({ launch })).settled,
+        false,
+        'no word from the window: the store decides',
+      )
+      status = { type: 'idle' }
+      assert.equal((await adapter.observe({ launch })).settled, true, 'idle: the turn is over')
+    })
+  })
 })
