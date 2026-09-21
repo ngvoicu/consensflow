@@ -398,6 +398,38 @@ describe('the page protocol of the new core', () => {
     })
   })
 
+  it("reads a task's transcript copy, the last items first when asked for fewer", async () => {
+    await withPage(async ({ ledger, operations }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        harness: 'pi',
+        review: 'none',
+      })
+      await operations['member.add']({ project: project.id, agent: 'zeus' })
+      const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
+      await operations['task.add']({
+        project: project.id,
+        pool: 'worker',
+        tier: zeus.tier,
+        body: 'Lexer',
+      })
+      const { message } = ledger.assignTask(project.id, 1, zeus.id)
+      const conversation = ledger.startConversation(message.recipientId, { harness: 'claude-code' })
+      ledger.copyTranscript(conversation.id, [
+        { id: 'u1', role: 'user', text: 'Lexer', complete: true },
+        { id: 'a1', role: 'assistant', text: 'Lexer done', complete: true },
+      ])
+      const all = await operations['task.transcript']({ project: project.id, task: 1 })
+      assert.deepEqual([all.total, all.items.map((i) => i.text)], [2, ['Lexer', 'Lexer done']])
+      const last = await operations['task.transcript']({ project: project.id, task: 1, limit: 1 })
+      assert.deepEqual([last.total, last.items.map((i) => i.id)], [2, ['a1']])
+      await assert.rejects(
+        operations['task.transcript']({ project: project.id, task: 9 }),
+        /no task T-9/,
+      )
+    })
+  })
+
   it("shows the human's inbox and routes an answer back to whoever asked", async () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({

@@ -167,9 +167,12 @@ const terminals = new TerminalsView(stage, {
 })
 
 async function openTask(number) {
-  const { task } = await core('task.get', { project: state.selected, task: number })
+  const [{ task }, transcript] = await Promise.all([
+    core('task.get', { project: state.selected, task: number }),
+    core('task.transcript', { project: state.selected, task: number }),
+  ])
   state.openTask = number
-  drawer.show(task)
+  drawer.show(task, { transcript })
 }
 
 let refreshing = null

@@ -97,6 +97,9 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       })
     }),
 
+    'task.transcript': async ({ project, task, limit }) =>
+      ledger.transcript(project, task, limit === undefined ? {} : { limit }),
+
     'task.review': change(async ({ project, task }) => ({
       task: ledger.requestReview(project, task, { by: 'human' }),
     })),

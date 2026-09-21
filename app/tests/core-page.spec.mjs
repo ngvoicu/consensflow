@@ -341,6 +341,8 @@ async function open(page, data = model()) {
       },
       'inbox.get': ({ project }) => answer({ messages: data.inbox[project] ?? [] }),
       'task.get': ({ project, task }) => answer({ task: data.tasks[`${project}:${task}`] }),
+      'task.transcript': ({ project, task }) =>
+        answer(data.transcripts?.[`${project}:${task}`] ?? { items: [], total: 0 }),
       'task.add': ({ to, tier, pool, body, needs }) =>
         answer({
           task: {
@@ -851,6 +853,42 @@ test("opens a card's drawer with the result apart from the brief and the reviews
   ])
   await drawer.getByRole('button', { name: 'Accept' }).click()
   await expect.poll(() => calls(page, 'task.accept')).toEqual([{ project: 1, task: 2 }])
+})
+
+test("shows what a task's window wrote, from ConsensFlow's own copy, under the thread", async ({
+  page,
+}) => {
+  const data = model()
+  data.transcripts = {
+    '1:2': {
+      total: 5,
+      items: [
+        {
+          id: 'u1',
+          role: 'user',
+          text: '[ConsensFlow m-20 · T-2 · task from @lead]\nWrite the parser',
+          complete: true,
+          at: null,
+        },
+        { id: 't1', role: 'tool', text: 'ok\n14 passed', complete: true, at: null },
+        { id: 'a1', role: 'assistant', text: 'Parser done, 14 tests.', complete: false, at: null },
+      ],
+    },
+  }
+  await open(page, data)
+  await page.locator('button.card[data-task="2"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-2' })
+  await expect(drawer.locator('.transcript-more')).toHaveText('The last 3 of 5 items.')
+  const items = drawer
+    .getByRole('list', { name: "What T-2's window wrote" })
+    .locator('.transcript-item')
+  await expect(items.locator('.transcript-head')).toHaveText([
+    'Sent to the window',
+    'Tool output',
+    'The agent · still writing',
+  ])
+  await expect(items.nth(2).locator('.transcript-body')).toHaveText('Parser done, 14 tests.')
+  await expect(items.nth(2)).toHaveAttribute('data-role', 'assistant')
 })
 
 test('sends a failed task back with a follow-up', async ({ page }) => {

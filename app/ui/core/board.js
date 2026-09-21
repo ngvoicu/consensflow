@@ -723,9 +723,19 @@ export class BoardView {
   }
 }
 
+/** How a transcript item's role reads on the card. */
+const TRANSCRIPT_ROLE = {
+  user: 'Sent to the window',
+  assistant: 'The agent',
+  tool: 'Tool output',
+  custom: 'Note',
+}
+
 /**
  * One task: its brief, its result apart from it, its reviews with their
- * findings, the rest of its thread, and what the human may do next.
+ * findings, the rest of its thread, what its window wrote (ConsensFlow's own
+ * copy of the conversation, kept after the window is gone), and what the
+ * human may do next.
  */
 export class TaskDrawer {
   #root
@@ -740,7 +750,7 @@ export class TaskDrawer {
     return !this.#root.hidden
   }
 
-  show(task, now = Date.now()) {
+  show(task, { transcript = { items: [], total: 0 }, now = Date.now() } = {}) {
     const head = element('header', 'drawer-head')
     const title = element('h2', 'drawer-title')
     title.append(
@@ -799,6 +809,36 @@ export class TaskDrawer {
       sections.push(thread)
     }
     const actions = element('div', 'drawer-actions')
+    if (transcript.items.length > 0) {
+      const section = element('section', 'drawer-section')
+      section.append(element('h3', null, 'What the agent did'))
+      if (transcript.total > transcript.items.length) {
+        section.append(
+          element(
+            'p',
+            'transcript-more',
+            `The last ${transcript.items.length} of ${transcript.total} items.`,
+          ),
+        )
+      }
+      const list = element('ol', 'transcript')
+      list.setAttribute('aria-label', `What T-${task.number}'s window wrote`)
+      for (const item of transcript.items) {
+        const entry = element('li', 'transcript-item')
+        entry.dataset.role = item.role
+        entry.append(
+          element(
+            'div',
+            'transcript-head',
+            `${TRANSCRIPT_ROLE[item.role] ?? item.role}${item.complete ? '' : ' · still writing'}`,
+          ),
+          element('pre', 'transcript-body', item.text),
+        )
+        list.append(entry)
+      }
+      section.append(list)
+      sections.push(section)
+    }
     if (task.state === 'done') {
       actions.append(button('Accept', 'primary-button', () => this.#actions.onAccept(task)))
       if (task.kind === 'work') {

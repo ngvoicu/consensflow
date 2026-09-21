@@ -343,6 +343,28 @@ export const MIGRATIONS = [
   ) STRICT;
   CREATE INDEX task_need_needs_index ON task_need (needs_id);
   `,
+  `
+  -- ConsensFlow's own copy of each window's conversation (Phase G), kept in
+  -- the home with everything else: what the agent was told, wrote and got
+  -- back from its tools, one row per item, updated while an item is still
+  -- being written. It lives and dies with its conversation's project.
+  CREATE TABLE transcript (
+    conversation_id INTEGER NOT NULL,
+    item_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    text TEXT NOT NULL,
+    complete INTEGER NOT NULL DEFAULT 1,
+    at TEXT,
+    copied_at TEXT NOT NULL,
+    CONSTRAINT transcript_pk PRIMARY KEY (conversation_id, item_id),
+    CONSTRAINT transcript_conversation_fk FOREIGN KEY (conversation_id)
+      REFERENCES conversation (id) ON DELETE CASCADE,
+    CONSTRAINT transcript_role_check CHECK (role IN ('user', 'assistant', 'tool', 'custom')),
+    CONSTRAINT transcript_complete_check CHECK (complete IN (0, 1))
+  ) STRICT;
+  CREATE INDEX transcript_order_index ON transcript (conversation_id, seq);
+  `,
 ]
 
 /**

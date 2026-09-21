@@ -138,10 +138,14 @@ TEST-BDC-03 and IMPL-BDC-04 are dropped; go-live is a clean home.
 - [x] [TEST-BDC-03] *Dropped 2026-09-21:* no import from the old app's state; go-live starts from a clean home.
 - [x] [IMPL-BDC-04] *Dropped with TEST-BDC-03.*
 
-### Phase G: Transcript copy [planned]
+### Phase G: Transcript copy [done]
 
-- [ ] [TEST-BDC-15] Incremental copy per harness, retention, answers collected from the copy.
-- [ ] [IMPL-BDC-16] `src/mirror/`.
+Gabriel, 2026-09-21: "when the task is in done I can't open the terminal to
+see what the agent wrote?" and, on the fix, "we don't copy anything into the
+project's home but in .consensflow-candidate / .consensflow (the home)."
+
+- [x] [TEST-BDC-15] The daemon keeps its own copy of every window's conversation in the ledger (the home's `consensflow.db`, a `transcript` table that lives and dies with its conversation's project): each look at a window copies the new items and the one still being written, an item is cut at 64 000 characters, a record that shrank is copied over. `ledger.transcript(project, task)` reads the assignee's conversations in order, the last 300 items by default; a continued window shows the same copy; a task on the board shows nothing. The page reads it with `task.transcript`; the drawer shows "What the agent did" under the thread with each item's role, text and whether it is still being written. Retention: with the project. Answers are still collected from the live record, as before.
+- [x] [IMPL-BDC-16] `copyTranscript` and `transcript` in the ledger (migration 8), `#copyTranscript` in the dispatcher, `task.transcript` in the page and the Rust allow-list, the drawer section; satisfies TEST-BDC-15. Done 2026-09-21.
 
 ### Phase H: Windows [planned]
 

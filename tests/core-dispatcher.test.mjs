@@ -365,6 +365,36 @@ describe('the dispatcher', () => {
     })
   })
 
+  it("keeps its own copy of each window's conversation, item by item, as it grows", async () => {
+    await setup(async (context) => {
+      const { project } = await withTeam(context)
+      context.ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Write the parser' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const before = context.ledger.transcript(project.id, 1)
+      assert.deepEqual(
+        before.items.map((i) => [i.role, i.text.split('\n')[0]]),
+        [['user', '[ConsensFlow m-1 · T-1 · task from @lead]']],
+        'the brief, as the window got it',
+      )
+      const zeus = context.adapter.agent('zeus')
+      zeus.items.push(item('assistant', 'Half', { complete: false, settled: false }))
+      zeus.settled = false
+      await context.dispatcher.pass()
+      const half = context.ledger.transcript(project.id, 1).items.at(-1)
+      assert.deepEqual([half.role, half.text, half.complete], ['assistant', 'Half', false])
+      zeus.items.at(-1).text = 'Half done, then all done'
+      zeus.items.at(-1).complete = true
+      zeus.items.at(-1).settled = true
+      zeus.settled = true
+      await context.dispatcher.pass()
+      const { items, total } = context.ledger.transcript(project.id, 1)
+      assert.equal(total, 2)
+      assert.deepEqual([items[1].text, items[1].complete], ['Half done, then all done', true])
+      assert.equal(context.ledger.task(project.id, 1).state, 'done', 'and the result was collected')
+    })
+  })
+
   it('delivers results to an idle lead one at a time and proves each arrived', async () => {
     await setup(async (context) => {
       const { project, id } = await withTeam(context, ['zeus', 'diana'])

@@ -85,6 +85,11 @@ export const OVERDUE_MS = 10 * 60_000
 export const SESSION_SLOTS = 2
 /** How long a session with nothing on its hands lives before it ends on its own. */
 export const SESSION_IDLE_MS = 2 * 60 * 60_000
+/** The most of one transcript item that is copied: a tool's output can run to megabytes. */
+export const TRANSCRIPT_ITEM_MAX = 64_000
+/** How many items of a transcript the board reads at once, from the end. */
+export const TRANSCRIPT_PAGE = 300
+const TRANSCRIPT_ROLES = ['user', 'assistant', 'tool', 'custom']
 const MAX_QUESTIONS = 4
 const MAX_TITLE = 120
 const AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
@@ -850,6 +855,76 @@ class Ledger {
       })
       return this.#conversation(conversationId)
     })
+  }
+
+  /**
+   * The copy of a window's conversation, one row per item as the harness's
+   * own record has them: what is new is added, and an item still being
+   * written is brought up to date. `from` is the position of the first item
+   * given, so a caller may pass only the tail.
+   */
+  copyTranscript(conversationId, items, { from = 0 } = {}) {
+    if (!Array.isArray(items)) throw new LedgerError('invalid-items', 'items is a list')
+    return this.#write(() => {
+      if (this.#conversation(conversationId) === null) {
+        throw new LedgerError('unknown-conversation', `no conversation ${conversationId}`, 404)
+      }
+      const upsert = this.#db.prepare(
+        `INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (conversation_id, item_id) DO UPDATE
+           SET seq = excluded.seq, text = excluded.text, complete = excluded.complete,
+               at = excluded.at, copied_at = excluded.copied_at
+           WHERE transcript.text != excluded.text OR transcript.complete != excluded.complete`,
+      )
+      const at = this.#at()
+      let written = 0
+      for (const [index, item] of items.entries()) {
+        if (typeof item?.id !== 'string' || item.id.length === 0) continue
+        const text = typeof item.text === 'string' ? item.text : ''
+        const { changes } = upsert.run(
+          conversationId,
+          item.id,
+          from + index,
+          TRANSCRIPT_ROLES.includes(item.role) ? item.role : 'custom',
+          text.length > TRANSCRIPT_ITEM_MAX
+            ? `${text.slice(0, TRANSCRIPT_ITEM_MAX)}\n… (${text.length} characters; cut here)`
+            : text,
+          item.complete === false ? 0 : 1,
+          typeof item.at === 'string' && !Number.isNaN(Date.parse(item.at)) ? item.at : null,
+          at,
+        )
+        written += changes
+      }
+      return written
+    })
+  }
+
+  /**
+   * What the window that has a task wrote, for the board: the copied items
+   * of its assignee's conversations in order, the last `limit` of them.
+   */
+  transcript(projectId, number, { limit = TRANSCRIPT_PAGE } = {}) {
+    const task = this.#taskRow(projectId, number)
+    if (task.assignee_id === null) return { items: [], total: 0 }
+    const rows = this.#db
+      .prepare(
+        `SELECT t.conversation_id, t.item_id, t.role, t.text, t.complete, t.at
+         FROM transcript t JOIN conversation c ON c.id = t.conversation_id
+         WHERE c.participant_id = ? ORDER BY t.conversation_id, t.seq`,
+      )
+      .all(task.assignee_id)
+    return {
+      total: rows.length,
+      items: rows.slice(Math.max(0, rows.length - limit)).map((row) => ({
+        id: row.item_id,
+        conversation: row.conversation_id,
+        role: row.role,
+        text: row.text,
+        complete: row.complete === 1,
+        at: row.at,
+      })),
+    }
   }
 
   endConversation(conversationId) {

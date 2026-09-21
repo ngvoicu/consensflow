@@ -12,6 +12,7 @@ import {
   SCHEMA_VERSION,
   SESSION_IDLE_MS,
   SESSION_SLOTS,
+  TRANSCRIPT_ITEM_MAX,
   verdictOf,
 } from '../src/ledger/index.js'
 import { MIGRATIONS } from '../src/ledger/schema.js'
@@ -3067,6 +3068,116 @@ describe('a plan on the board: needs', () => {
       assert.deepEqual([parser.needs, parser.blockedBy], [[{ number: 1, state: 'cancelled' }], [1]])
       ledger.cancelTask(project.id, 2, { by: 'lead' })
       assert.equal(ledger.task(project.id, 2).state, 'cancelled', 'the lead decides')
+    })
+  })
+})
+
+describe('the transcript copy', () => {
+  const item = (id, role, text, extra = {}) => ({ id, role, text, complete: true, ...extra })
+  /** A worker's task assigned to a session with a conversation of its own. */
+  function windowed(ledger) {
+    const { project, id } = team(ledger)
+    ledger.createTask(project.id, {
+      from: 'lead',
+      pool: 'worker',
+      tier: 'standard',
+      body: 'Parser',
+    })
+    const { message } = ledger.assignTask(project.id, 1, id('zeus'))
+    const conversation = ledger.startConversation(message.recipientId, { harness: 'claude-code' })
+    return { project, id, session: message.recipientId, conversation }
+  }
+
+  it('copies what is new, brings an item still being written up to date, and reads it by task', async () => {
+    await withLedger((ledger) => {
+      const { project, conversation } = windowed(ledger)
+      assert.deepEqual(ledger.transcript(project.id, 1), { items: [], total: 0 })
+      const first = [
+        item('u1', 'user', '[ConsensFlow m-1 · T-1 · task from @lead]\nParser'),
+        item('a1', 'assistant', 'On it', { complete: false, at: '2026-09-21T08:00:00.000Z' }),
+      ]
+      assert.equal(ledger.copyTranscript(conversation.id, first), 2)
+      assert.equal(
+        ledger.copyTranscript(conversation.id, first),
+        0,
+        'nothing changed: nothing written',
+      )
+      const then = [
+        item('a1', 'assistant', 'On it. Parser done', { at: '2026-09-21T08:00:00.000Z' }),
+        item('t1', 'tool', 'ok\n', { at: 7 }),
+      ]
+      assert.equal(ledger.copyTranscript(conversation.id, then, { from: 1 }), 2)
+      const { items, total } = ledger.transcript(project.id, 1)
+      assert.equal(total, 3)
+      assert.deepEqual(
+        items.map((i) => [i.id, i.role, i.text, i.complete, i.at]),
+        [
+          ['u1', 'user', '[ConsensFlow m-1 · T-1 · task from @lead]\nParser', true, null],
+          ['a1', 'assistant', 'On it. Parser done', true, '2026-09-21T08:00:00.000Z'],
+          ['t1', 'tool', 'ok\n', true, null],
+        ],
+      )
+      const page = ledger.transcript(project.id, 1, { limit: 2 })
+      assert.deepEqual(
+        [page.total, page.items.map((i) => i.id)],
+        [3, ['a1', 't1']],
+        'the last ones',
+      )
+    })
+  })
+
+  it('cuts an item longer than it keeps, files an unknown role as custom, and skips what has no id', async () => {
+    await withLedger((ledger) => {
+      const { project, conversation } = windowed(ledger)
+      const long = 'x'.repeat(TRANSCRIPT_ITEM_MAX + 5)
+      ledger.copyTranscript(conversation.id, [
+        item('big', 'tool', long),
+        item('odd', 'system', 'hm'),
+        { role: 'user', text: 'no id' },
+        item('none', 'assistant', undefined),
+      ])
+      const { items } = ledger.transcript(project.id, 1)
+      assert.deepEqual(
+        items.map((i) => [i.id, i.role, i.text.length]),
+        [
+          ['big', 'tool', TRANSCRIPT_ITEM_MAX + `\n… (${long.length} characters; cut here)`.length],
+          ['odd', 'custom', 2],
+          ['none', 'assistant', 0],
+        ],
+      )
+      assert.match(items[0].text, /… \(64005 characters; cut here\)$/)
+      assert.throws(() => ledger.copyTranscript(999, [item('a', 'user', 'x')]), {
+        code: 'unknown-conversation',
+      })
+      assert.throws(() => ledger.copyTranscript(conversation.id, 'items'), {
+        code: 'invalid-items',
+      })
+    })
+  })
+
+  it("follows a task's window across a continued conversation, and shows nothing for a task on the board", async () => {
+    await withLedger((ledger) => {
+      const { project, id, session, conversation } = windowed(ledger)
+      ledger.copyTranscript(conversation.id, [item('a1', 'assistant', 'Parser done')])
+      deliver(ledger, ledger.task(project.id, 1).messages[0])
+      ledger.recordResult(project.id, 1, { body: 'Parser done' })
+      const again = ledger.createTask(project.id, { from: 'lead', after: 1, body: 'Now the lexer' })
+      assert.equal(again.task.assignee, ledger.task(project.id, 1).assignee)
+      ledger.copyTranscript(conversation.id, [item('a2', 'assistant', 'Lexer done')], { from: 1 })
+      assert.deepEqual(
+        ledger.transcript(project.id, 2).items.map((i) => i.text),
+        ['Parser done', 'Lexer done'],
+        'the follow-up shows the same window',
+      )
+      ledger.createTask(project.id, {
+        from: 'lead',
+        pool: 'worker',
+        tier: 'standard',
+        body: 'Tests',
+      })
+      assert.deepEqual(ledger.transcript(project.id, 3), { items: [], total: 0 })
+      assert.throws(() => ledger.transcript(project.id, 9), { code: 'unknown-task' })
+      assert.equal(session > 0 && id('lead') > 0, true)
     })
   })
 })

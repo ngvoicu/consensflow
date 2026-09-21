@@ -376,6 +376,7 @@ export class Dispatcher {
         ? { state: 'waiting', reason: observed.waiting.reason ?? null }
         : { state: observed.settled ? 'idle' : 'working' },
     )
+    this.#copyTranscript(participant, runtime, observed)
     // Quota belongs to the member: a session that runs out takes its member out.
     const owner = this.#memberOf(project, participant)
     if (observed.quota !== undefined) {
@@ -418,6 +419,25 @@ export class Dispatcher {
       const next = this.#ledger.nextDelivery(participant.id)
       if (next !== null) await this.#deliver(project, runtime, next)
     }
+  }
+
+  /**
+   * ConsensFlow's own copy of the window's conversation, kept in the home:
+   * what the agent was told, wrote and got back from its tools, readable on
+   * the card once the window is gone. Each look copies what is new and the
+   * item still being written; a record that shrank (a resumed window rewrote
+   * it) is copied over from the start.
+   */
+  #copyTranscript(participant, runtime, observed) {
+    const conversation = this.#ledger.currentConversation(participant.id)
+    if (conversation === null) return
+    const items = observed.items
+    const copied = runtime.copied?.conversation === conversation.id ? runtime.copied.count : 0
+    const from = items.length < copied ? 0 : Math.max(0, copied - 1)
+    if (items.length > from) {
+      this.#ledger.copyTranscript(conversation.id, items.slice(from), { from })
+    }
+    runtime.copied = { conversation: conversation.id, count: items.length }
   }
 
   /**
@@ -938,6 +958,7 @@ export class Dispatcher {
         retiring: false,
         enters: [],
         humanItems: null,
+        copied: null,
         activity: { state: 'closed' },
       }
       this.#runtime.set(participantId, runtime)

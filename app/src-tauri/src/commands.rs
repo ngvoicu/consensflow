@@ -1555,6 +1555,7 @@ const CORE_OPERATIONS: &[&str] = &[
     "member.remove",
     "member.roles",
     "task.get",
+    "task.transcript",
     "task.add",
     "task.accept",
     "task.reopen",
