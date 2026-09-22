@@ -93,8 +93,6 @@ export function age(iso, now = Date.now()) {
 }
 
 const COORDINATORS = ['human', 'lead']
-/** How much of a message's first line the bay's own line can be trusted to show. */
-const TITLE_MAX = 72
 
 /** The human and the lead first, then each member with its sessions right under it. */
 /** The role a member's task is for: its pool's. */
@@ -337,7 +335,9 @@ export class BoardView {
     const line = element('div', 'strip-line')
     line.append(
       element('span', 'strip-number', `m-${message.id}`),
-      element('span', 'strip-title', message.body.split('\n')[0]),
+      // The whole message, wrapped, read where it is answered. One with
+      // options says nothing here: its choices under it are the questions.
+      element('span', 'strip-title', message.questions ? '' : message.body),
       element(
         'span',
         'strip-route',
@@ -348,13 +348,6 @@ export class BoardView {
     if (message.overdue) item.dataset.overdue = 'true'
     if (gated) item.dataset.gated = 'true'
     item.append(line)
-    // The line above shows what fits on one line. Anything longer, or with
-    // more lines, is written out under it: what waits for the human is read
-    // where it is answered, never cut off.
-    const cut = message.body.includes('\n') || message.body.length > TITLE_MAX
-    if (cut && !message.questions) {
-      item.append(element('p', 'strip-body', message.body))
-    }
     if (gated) {
       item.append(this.#gateActions(message))
     } else if (message.kind === 'question' && !message.overdue) {

@@ -595,7 +595,8 @@ test('writes out a long one-line question in For you, where the human answers it
   question.body = long
   await open(page, data)
   const strip = page.locator(`.strip-message[data-message="${question.id}"]`)
-  await expect(strip.locator('.strip-body')).toHaveText(long)
+  await expect(strip.locator('.strip-title')).toHaveText(long)
+  await expect(strip.locator('.strip-body')).toHaveCount(0)
   await expect(strip.getByLabel(`Answer to m-${question.id}`)).toBeVisible()
 })
 
@@ -605,6 +606,9 @@ test('answers a question with options by picking, one pick per question at least
   await open(page)
   const question = page.locator('.strip-message[data-message="14"]')
   await expect(question.locator('.strip-body')).toHaveCount(0)
+  await expect(question.locator('.strip-title')).toHaveText('', {
+    useInnerText: false,
+  })
   const form = question.getByRole('form', { name: 'Answer to m-14' })
   await expect(form.getByRole('group', { name: 'Colour: Which colour?' })).toContainText('Warm')
   await form.getByRole('radio', { name: 'blue' }).check()
@@ -1099,7 +1103,7 @@ test('lists what waits for approval in For you, and approves or declines it, wri
   await expect(brief.locator('.strip-route')).toHaveText(
     'Task from @lead to @zeus-amber-pine · T-4 · needs your approval',
   )
-  await expect(brief.locator('.strip-body')).toHaveText('Add the tests\nCover the parser.')
+  await expect(brief.locator('.strip-title')).toHaveText('Add the tests\nCover the parser.')
   await brief.getByRole('button', { name: 'Approve m-30 for @zeus-amber-pine' }).click()
   await expect.poll(() => calls(page, 'message.approve')).toEqual([{ message: 30 }])
   await expect(page.locator('#status')).toHaveText('m-30 goes on to @zeus-amber-pine.')
