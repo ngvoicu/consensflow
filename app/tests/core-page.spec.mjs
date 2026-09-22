@@ -585,6 +585,20 @@ test("draws a member's sessions as lanes under it, named, and counts its open wi
   ).toHaveText('@zeus · amber-pine')
 })
 
+test('writes out a long one-line question in For you, where the human answers it', async ({
+  page,
+}) => {
+  const data = model()
+  const long =
+    'I tried to put a joke task on the board for a light-tier worker, but the team has no members yet, so the task was refused. Could you add one light worker in the app? Any tier would do for a joke.'
+  const question = data.inbox[1].find((message) => message.id === 12)
+  question.body = long
+  await open(page, data)
+  const strip = page.locator(`.strip-message[data-message="${question.id}"]`)
+  await expect(strip.locator('.strip-body')).toHaveText(long)
+  await expect(strip.getByLabel(`Answer to m-${question.id}`)).toBeVisible()
+})
+
 test('answers a question with options by picking, one pick per question at least', async ({
   page,
 }) => {
