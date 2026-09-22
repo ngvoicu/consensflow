@@ -426,7 +426,7 @@ try {
       tier === 'critical' ? '--tier critical --purpose critical-review' : `--tier ${tier}`
     await app.tell(
       project,
-      `Run exactly this command in your shell, then reply with one line:\ncf task add --review ${flag} "Review README.md: does it name the project? Reply with exactly: ${marker}"`,
+      `Run exactly this command in your shell, then reply with one line:\ncf task add --review ${flag} "Review this one-line result of T-1 for spelling: BENCH_OK_PI. No files are involved. Reply with exactly: ${marker}"`,
       { idleMs: 300_000 },
     )
     const review = await until(

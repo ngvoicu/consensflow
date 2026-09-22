@@ -250,9 +250,9 @@ describe('the Claude Code adapter', () => {
     })
   })
 
-  it('pastes a message into the window, and waits while a human is typing there', async () => {
+  it('pastes a message into the window by default, and waits while a human is typing there', async () => {
     await withHome(async ({ env }) => {
-      const adapter = claudeCodeAdapter({ env, peer: false })
+      const adapter = claudeCodeAdapter({ env })
       const requests = []
       let draftLatched = false
       const host = {

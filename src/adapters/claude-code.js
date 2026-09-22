@@ -16,18 +16,16 @@ import { executableFor } from './shared.js'
  * accepted, and a Stop hook on every turn so every finished turn is recorded.
  *
  * - The session id is ours: minted for a fresh window, resumed for a known one.
- * - A message reaches a live window through Claude's own peer inbox on macOS
- *   (the Rust host checks the peer belongs to this pane); elsewhere, or when
- *   Claude has not registered the inbox, it is pasted, and only while no human
- *   is typing in the window.
+ * - A message is pasted into a live window as if the human typed it, once no
+ *   human is typing there. Claude's own peer inbox (`peer: true`, macOS only,
+ *   the Rust host checks the peer belongs to this pane) delivers while the
+ *   human types, but Claude wraps each such message as a teammate's request
+ *   from another Claude session, a hundred tokens of caution per delivery
+ *   that misnames the human's own answers; since 2026-09-22 it is off.
  * - Claude's own `sessions/<pid>.json` says busy, idle or waiting (and why);
  *   the transcript holds the conversation and says whether the turn settled.
  */
-export function claudeCodeAdapter({
-  env,
-  peer = process.platform === 'darwin',
-  answers = cachedAnswers(),
-}) {
+export function claudeCodeAdapter({ env, peer = false, answers = cachedAnswers() }) {
   const configDir = path.resolve(
     env.CLAUDE_CONFIG_DIR ?? path.join(env.HOME ?? homedir(), '.claude'),
   )

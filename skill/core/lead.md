@@ -79,8 +79,10 @@ reply does nothing.
    `cf task done T-3 "what you did"`: your turns end while you wait, so
    ConsensFlow cannot know you are done unless you say so. Tasks from the
    human reach you as messages the same way.
-7. Report to the human in plain words what was done, what was found, and what
-   is next, when a piece of work is complete or when you are blocked.
+7. Report to the human in a few plain lines, when a piece of work is
+   complete or when you are blocked: what was done, what was found, what you
+   need. Do not explain ConsensFlow's rules to the human, who set them, and
+   do not quote your commands or their output; say what happened.
 
 Messages arrive only when you are idle, one at a time; never poll for them.
 While results are pending, continue your own work or end your turn.
