@@ -397,8 +397,7 @@ test('draws the kanban: a row per participant, a column per state, and cards tha
     'Working',
     'Waiting',
     'Done',
-    'Accepted',
-    'Ended',
+    'Finished',
   ])
   const rows = table.locator('tbody tr')
   await expect(rows).toHaveCount(4)
@@ -410,9 +409,11 @@ test('draws the kanban: a row per participant, a column per state, and cards tha
   const done = zeus.locator('td[data-state="done"] button.card[data-task="2"]')
   await expect(done.locator('.card-title')).toHaveText('Write the parser')
   await expect(done.locator('.card-result')).toHaveText('Parser done, 14 tests.')
-  await expect(zeus.locator('td[data-state="accepted"] .card-title')).toHaveText(['Old spike'])
+  const spike = zeus.locator('td[data-state="finished"] button.card[data-task="5"]')
+  await expect(spike.locator('.card-title')).toHaveText('Old spike')
+  await expect(spike.locator('.card-state')).toHaveText('Accepted')
   await expect(
-    page.locator('tr[data-handle="diana"] td[data-state="ended"] .card-title'),
+    page.locator('tr[data-handle="diana"] td[data-state="finished"] .card-title'),
   ).toHaveText('<img src=x onerror=window.__pwned=1> hostile title')
   expect(await page.evaluate(() => window.__pwned)).toBeUndefined()
 })

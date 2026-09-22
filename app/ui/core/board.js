@@ -15,19 +15,18 @@ const ACTIVE = ['working', 'waiting', 'queued', 'paused', 'open']
 const PAUSABLE = ['open', 'queued', 'working', 'waiting']
 /** What the human may give back to the board for another member of its tier. */
 const REASSIGNABLE = ['queued', 'working', 'waiting', 'paused']
-/** The columns, in reading order; failed and cancelled share the last one. */
+/** The columns, in reading order; whatever is over, accepted or not, shares the last one. */
 const COLUMNS = [
   ['open', 'Backlog'],
   ['queued', 'Queued'],
   ['working', 'Working'],
   ['waiting', 'Waiting'],
   ['done', 'Done'],
-  ['accepted', 'Accepted'],
-  ['ended', 'Ended'],
+  ['finished', 'Finished'],
 ]
 const columnOf = (task) =>
-  task.state === 'failed' || task.state === 'cancelled'
-    ? 'ended'
+  ['accepted', 'failed', 'cancelled'].includes(task.state)
+    ? 'finished'
     : task.state === 'paused'
       ? 'queued'
       : task.state
