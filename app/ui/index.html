@@ -251,7 +251,6 @@
       border-collapse: separate;
       border-spacing: 0;
       width: 100%;
-      min-width: 1180px;
       table-layout: fixed;
     }
     .kanban thead th {
@@ -267,7 +266,7 @@
       color: var(--muted);
       border-bottom: 1px solid var(--line-soft);
     }
-    .kanban .kanban-team { width: 220px; }
+    .kanban .kanban-team { width: 19%; }
     .kanban th[data-state="finished"] { color: var(--muted); }
     .kanban tbody td, .kanban tbody th {
       vertical-align: top;
@@ -347,7 +346,16 @@
       font: 700 11px var(--mono);
       letter-spacing: .03em;
     }
-    .card-title { grid-area: title; padding-top: 6px; font-size: 13px; overflow-wrap: anywhere; }
+    .card-title {
+      grid-area: title;
+      padding-top: 6px;
+      font-size: 13px;
+      overflow-wrap: anywhere;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 3;
+      overflow: hidden;
+    }
     .card-route { grid-area: route; font: 11px var(--mono); color: var(--muted); }
     .card-state, .card-age { display: none; }
     .card-result {
@@ -415,13 +423,14 @@
       align-items: flex-start;
       padding-top: 10px;
     }
-    .strip-route, .strip-age { font: 11px var(--mono); color: var(--muted); white-space: nowrap; }
+    .strip-route, .strip-age { font: 11px var(--mono); color: var(--muted); }
+    .strip-age { white-space: nowrap; }
     .strip-age { justify-content: flex-end; }
 
     .strip-message { display: block; cursor: default; }
     .strip-line {
       display: grid;
-      grid-template-columns: 66px minmax(0, 1fr) minmax(0, auto) 70px;
+      grid-template-columns: 66px minmax(0, 1fr) fit-content(30%) 70px;
       min-height: 38px;
     }
     .strip-message[data-kind="question"] { --state: var(--amber); --state-ink: var(--ink); }
