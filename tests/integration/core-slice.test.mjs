@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { startIntegration } from './harness.mjs'
@@ -61,6 +63,15 @@ test('a lead hands a task to a worker through the board and the result lands in 
     const { messages } = await app.requestNode('inbox.get', { project, participant: 'lead' })
     const result = messages.find((m) => m.kind === 'result')
     assert.equal(result.body, 'WORKER_OK')
+    // Every move also went to the home's event file as it happened, for
+    // whoever watches the daemon from outside.
+    const events = (await readFile(join(app.env.CONSENSFLOW_HOME, 'events.jsonl'), 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+    assert.ok(events.some((e) => e.kind === 'task.opened' && e.data.task === 1))
+    assert.ok(events.some((e) => e.kind === 'task.state' && e.data.to === 'done'))
+    assert.ok(events.some((e) => e.kind === 'window.activity' && e.participant === 'lead'))
     // The lead's native session is the `--session-id` its window was launched with.
     const leadSession = leadFrame.argv[leadFrame.argv.indexOf('--session-id') + 1]
     assert.match(
