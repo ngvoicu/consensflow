@@ -429,6 +429,19 @@ export class BoardView {
     for (const lane of boardRows(board.lanes)) {
       body.append(this.#row(lane, board, models.get(lane.participant.agent), now))
     }
+    // A project with nobody on its team looks like any other board, and every
+    // task the lead hands out is refused: say it where the members would be.
+    if (!board.lanes.some((lane) => lane.participant.agent !== null)) {
+      const row = element('tr', 'board-empty')
+      const cell = element(
+        'td',
+        null,
+        'No members yet: add the agents this project may use under Team.',
+      )
+      cell.colSpan = COLUMNS.length + 1
+      row.append(cell)
+      body.append(row)
+    }
     table.append(head, body)
     return table
   }

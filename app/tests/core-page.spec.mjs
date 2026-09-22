@@ -805,6 +805,20 @@ test("reassigns a task given by tier from its drawer, working or paused, never t
   await expect(named.getByRole('button', { name: /^Reassign/ })).toHaveCount(0)
 })
 
+test('says so on the board when the project has no members yet', async ({ page }) => {
+  const data = model()
+  const board = data.boards[1]
+  board.lanes = board.lanes.filter((lane) => lane.participant.agent === null)
+  board.open = []
+  await open(page, data)
+  const table = page.getByRole('table', { name: 'Tasks' })
+  await expect(table.locator('tr.board-empty')).toHaveText(
+    'No members yet: add the agents this project may use under Team.',
+  )
+  await open(page)
+  await expect(table.locator('tr.board-empty')).toHaveCount(0)
+})
+
 test("keeps only what is new in a task's thread: questions, answers, follow-ups and an earlier result", async ({
   page,
 }) => {

@@ -913,7 +913,11 @@ class Ledger {
             ? null
             : this.#participantByHandle(projectId, to)
       if (assignee === null && this.#members(projectId, pool, tier).length === 0) {
-        throw new LedgerError('no-member-of-tier', `no ${poolName(pool, tier)} is on the team`, 409)
+        throw new LedgerError(
+          'no-member-of-tier',
+          `no ${poolName(pool, tier)} is on the team: ask the human for one with cf ask --human "…"`,
+          409,
+        )
       }
       const { next } = this.#db
         .prepare('SELECT COALESCE(MAX(number), 0) + 1 AS next FROM task WHERE project_id = ?')

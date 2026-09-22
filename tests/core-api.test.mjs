@@ -484,7 +484,7 @@ describe('tiered tasks through the API and cf', () => {
         'Why is it slow?',
       )
       assert.equal(critical.code, 1)
-      assert.match(critical.err, /no critical worker is on the team/)
+      assert.match(critical.err, /no critical worker is on the team: ask the human for one/)
       const noTier = await cf(lead, 'task', 'add', 'Just do it')
       assert.deepEqual(
         [noTier.code, noTier.err],
@@ -509,7 +509,10 @@ describe('tiered tasks through the API and cf', () => {
         tier: 'standard',
       })
       const noAdvisor = await cf(lead, 'task', 'add', '--advice', '--tier', 'light', 'Which one?')
-      assert.deepEqual([noAdvisor.code, noAdvisor.err], [1, 'cf: no light advisor is on the team'])
+      assert.deepEqual(
+        [noAdvisor.code, noAdvisor.err],
+        [1, 'cf: no light advisor is on the team: ask the human for one with cf ask --human "…"'],
+      )
       const advice = await cf(
         lead,
         'task',
@@ -578,7 +581,10 @@ describe('tiered tasks through the API and cf', () => {
       )
       assert.deepEqual(
         [noReviewer.code, noReviewer.err],
-        [1, 'cf: no standard reviewer is on the team'],
+        [
+          1,
+          'cf: no standard reviewer is on the team: ask the human for one with cf ask --human "…"',
+        ],
       )
       ledger.addMember(project.id, {
         agent: 'diana',
