@@ -12,6 +12,7 @@ import { Dispatcher } from './dispatcher.js'
 import { pageOperations } from './page.js'
 import { PaneHost } from './pane-host.js'
 import { roleInstructions } from './roles.js'
+import { eventTrace } from './trace.js'
 
 /**
  * The new core's daemon: the one process that owns ConsensFlow's state.
@@ -40,7 +41,10 @@ export async function startCore(
 ) {
   const home = configRoot(env)
   mkdirSync(home, { recursive: true })
-  const ledger = openLedger(join(home, 'consensflow.db'))
+  // Every event and every change of a window goes to <home>/events.jsonl as
+  // it happens, for whoever watches the daemon from outside.
+  const trace = eventTrace(home)
+  const ledger = openLedger(join(home, 'consensflow.db'), { trace })
   ledger.suspendForRestart()
 
   const credentials = new Credentials()
@@ -75,6 +79,7 @@ export async function startCore(
     credentials,
     roster: (agent) => agentRow(agent, env) ?? null,
     roles: (participant, project) => roleInstructions(participant.role, teamOf(project)),
+    trace,
     paneEnv: (participant, project) => ({
       CONSENSFLOW_URL: api.url,
       CONSENSFLOW_PROJECT: String(project.id),

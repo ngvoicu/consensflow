@@ -142,6 +142,37 @@ describe('opening the ledger', () => {
     })
   })
 
+  it('tells a trace every event as it is logged, with the time the ledger gave it', async () => {
+    await withDir(async (dir) => {
+      const entries = []
+      const ledger = openLedger(path.join(dir, 'consensflow.db'), {
+        now: clock(),
+        trace: (entry) => entries.push(entry),
+      })
+      try {
+        const project = ledger.createProject({
+          directory: '/work/app',
+          name: 'app',
+          lead: { harness: 'pi' },
+        })
+        const logged = ledger.events(project.id)
+        assert.deepEqual(entries[0], {
+          at: logged[0].at,
+          project: project.id,
+          kind: 'project.created',
+          data: { name: 'app', directory: '/work/app' },
+        })
+        assert.deepEqual(
+          entries.map((entry) => [entry.at, entry.kind]),
+          logged.map((event) => [event.at, event.kind]),
+          'the trace is the event log, as it happens',
+        )
+      } finally {
+        ledger.close()
+      }
+    })
+  })
+
   it('refuses a second open while the first holds the file, in this process and in another', async () => {
     await withDir(async (dir) => {
       const file = path.join(dir, 'consensflow.db')

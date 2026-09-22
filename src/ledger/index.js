@@ -97,7 +97,10 @@ const SQLITE_LOCKED = 6
 const SQLITE_CORRUPT = 11
 const SQLITE_NOTADB = 26
 
-export function openLedger(file, { now = () => new Date(), names = sessionName } = {}) {
+export function openLedger(
+  file,
+  { now = () => new Date(), names = sessionName, trace = () => {} } = {},
+) {
   const db = new DatabaseSync(file, { timeout: 0, enableForeignKeyConstraints: true })
   try {
     db.exec('PRAGMA locking_mode = EXCLUSIVE')
@@ -121,7 +124,7 @@ export function openLedger(file, { now = () => new Date(), names = sessionName }
     }
     throw cause
   }
-  return new Ledger(db, now, names)
+  return new Ledger(db, now, names, trace)
 }
 
 function migrate(db) {
@@ -439,11 +442,14 @@ class Ledger {
   #db
   #now
   #names
+  /** Told every event as it is logged: `{at, project, kind, data}`. */
+  #trace
 
-  constructor(db, now, names) {
+  constructor(db, now, names, trace) {
     this.#db = db
     this.#now = now
     this.#names = names
+    this.#trace = trace
   }
 
   close() {
@@ -1954,9 +1960,11 @@ class Ledger {
   }
 
   #log(projectId, kind, data) {
+    const at = this.#at()
     this.#db
       .prepare('INSERT INTO event (project_id, at, kind, data) VALUES (?, ?, ?, ?)')
-      .run(projectId, this.#at(), kind, JSON.stringify(data))
+      .run(projectId, at, kind, JSON.stringify(data))
+    this.#trace({ at, project: projectId, kind, data })
   }
 
   #projectRow(id) {

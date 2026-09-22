@@ -105,6 +105,8 @@ export class Dispatcher {
   #arrivalTimeoutMs
   #launchTimeoutMs
   #maxAttempts
+  /** Told each change of a window's activity, for the event file in the home. */
+  #trace
   #runtime = new Map()
   #listeners = new Set()
   #waitingNoted = new Set()
@@ -122,6 +124,7 @@ export class Dispatcher {
     arrivalTimeoutMs = 60_000,
     launchTimeoutMs = 180_000,
     maxAttempts = 3,
+    trace = () => {},
   }) {
     this.#ledger = ledger
     this.#host = host
@@ -132,6 +135,7 @@ export class Dispatcher {
     this.#roster = roster
     this.#roles = roles
     this.#arrivalTimeoutMs = arrivalTimeoutMs
+    this.#trace = trace
     this.#launchTimeoutMs = launchTimeoutMs
     this.#maxAttempts = maxAttempts
     host.onExit((pane) => this.paneExited(pane))
@@ -953,6 +957,7 @@ export class Dispatcher {
     let runtime = this.#runtime.get(participantId)
     if (runtime === undefined) {
       runtime = {
+        id: participantId,
         adapter: null,
         pane: null,
         launch: null,
@@ -978,6 +983,15 @@ export class Dispatcher {
     if (runtime.activity.state === activity.state && runtime.activity.reason === activity.reason)
       return
     runtime.activity = activity
+    const project = this.#projectOf(runtime.id)
+    this.#trace({
+      at: new Date(this.#now()).toISOString(),
+      kind: 'window.activity',
+      project: project?.id ?? null,
+      participant: project?.participants.find((p) => p.id === runtime.id)?.handle ?? null,
+      state: activity.state,
+      reason: activity.reason ?? null,
+    })
     this.#changed()
   }
 

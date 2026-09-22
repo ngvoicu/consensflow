@@ -1605,3 +1605,32 @@ describe('one task per member session', () => {
     })
   })
 })
+
+describe('the dispatcher traces what its windows do', () => {
+  it("tells a trace each change of a window's activity, by participant", async () => {
+    const entries = []
+    await setup(
+      async (context) => {
+        const { open, task } = await withTiers(context)
+        open()
+        await context.dispatcher.pass()
+        await context.dispatcher.pass()
+        assert.equal(task(1).state, 'working')
+        const activity = entries.filter((entry) => entry.kind === 'window.activity')
+        assert.deepEqual(activity.map((entry) => [entry.participant, entry.state]).slice(0, 2), [
+          ['lead', 'idle'],
+          ['zeus-amber-pine', 'working'],
+        ])
+        assert.deepEqual(Object.keys(activity[0]).sort(), [
+          'at',
+          'kind',
+          'participant',
+          'project',
+          'reason',
+          'state',
+        ])
+      },
+      { trace: (entry) => entries.push(entry) },
+    )
+  })
+})
