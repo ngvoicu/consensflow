@@ -74,30 +74,126 @@ test('offline and invalid version output are explicit failures, not latest or in
   }
 })
 
-test('update source follows the detected Homebrew distribution instead of npm latest', async () => {
+test('each install method names itself and the command that updates it the same way', async () => {
   const { releaseSource } = await import('../src/harness-admin.js')
   const t = tempEnv()
   try {
-    assert.equal(
-      releaseSource('codex', '/opt/homebrew/Caskroom/codex/0.1/bin/codex', t.env).url,
-      'https://formulae.brew.sh/api/cask/codex.json',
+    const codex = releaseSource('codex', '/opt/homebrew/Caskroom/codex/0.1/bin/codex', t.env)
+    assert.deepEqual(
+      [codex.url, codex.distribution, codex.update],
+      [
+        'https://formulae.brew.sh/api/cask/codex.json',
+        'Homebrew',
+        ['/opt/homebrew/bin/brew', 'upgrade', '--cask', 'codex'],
+      ],
     )
-    assert.equal(
-      releaseSource('opencode', '/opt/homebrew/Cellar/opencode/1/bin/opencode', t.env).url,
-      'https://formulae.brew.sh/api/formula/opencode.json',
+    const formula = releaseSource('opencode', '/opt/homebrew/Cellar/opencode/1/bin/opencode', t.env)
+    assert.deepEqual(
+      [formula.url, formula.update],
+      [
+        'https://formulae.brew.sh/api/formula/opencode.json',
+        ['/opt/homebrew/bin/brew', 'upgrade', 'opencode'],
+      ],
     )
     assert.equal(
       releaseSource('claude', '/opt/homebrew/Caskroom/claude-code@latest/2/bin/claude', t.env).url,
       'https://formulae.brew.sh/api/cask/claude-code@latest.json',
     )
-    assert.equal(
-      releaseSource(
-        'pi',
-        '/usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js',
-        t.env,
-      ).distribution,
-      'npm',
+    const claude = releaseSource('claude', '/Users/me/.local/share/claude/versions/2.1.280', t.env)
+    assert.deepEqual(
+      [claude.distribution, claude.update],
+      [
+        "Claude's installer, latest channel",
+        ['/Users/me/.local/share/claude/versions/2.1.280', 'update'],
+      ],
     )
+    const pi = releaseSource(
+      'pi',
+      '/usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js',
+      t.env,
+    )
+    assert.deepEqual(
+      [pi.distribution, pi.update],
+      ['npm', ['/usr/bin/npm', 'install', '-g', '@earendil-works/pi-coding-agent@latest']],
+    )
+    const opencode = releaseSource('opencode', '/Users/me/.opencode/bin/opencode', t.env)
+    assert.deepEqual(
+      [opencode.distribution, opencode.update],
+      ["OpenCode's installer", ['/Users/me/.opencode/bin/opencode', 'upgrade']],
+    )
+    const devin = releaseSource(
+      'devin',
+      '/Users/me/.local/share/devin/cli/_versions/current/bin/devin',
+      t.env,
+    )
+    assert.deepEqual(
+      [devin.distribution, devin.update],
+      [
+        "Devin's installer",
+        ['/Users/me/.local/share/devin/cli/_versions/current/bin/devin', 'update'],
+      ],
+    )
+    const unknown = releaseSource('codex', '/somewhere/else/codex', t.env)
+    assert.deepEqual(
+      [unknown.distribution, unknown.update, unknown.url],
+      [null, null, 'https://registry.npmjs.org/@openai/codex/latest'],
+    )
+  } finally {
+    t.cleanup()
+  }
+})
+
+test('updates a harness with its own tool, checks it again, and says what happened', async () => {
+  const t = tempEnv()
+  try {
+    // Codex as its own installer puts it: the version it prints lives in a file the updater rewrites.
+    const bin = join(t.env.HOME, '.codex', 'bin')
+    mkdirSync(bin, { recursive: true })
+    mkdirSync(t.env.PATH, { recursive: true })
+    const versionFile = join(t.env.HOME, 'codex-version')
+    writeFileSync(versionFile, '1.0.0\n')
+    writeFileSync(join(bin, 'codex'), `#!/bin/sh\n/bin/cat "${versionFile}"\n`, { mode: 0o755 })
+    const runs = []
+    let fail = false
+    const admin = new HarnessAdmin(t.env, {
+      latest: async () => '1.0.1',
+      run: async (file, args, options) => {
+        runs.push([file, args, options.cwd])
+        if (fail) {
+          const error = new Error('Command failed: codex update')
+          error.stderr = 'no network\n'
+          throw error
+        }
+        writeFileSync(versionFile, '1.0.1\n')
+        return { stdout: 'Updated to 1.0.1\n', stderr: '' }
+      },
+    })
+    const [checked] = await admin.check('codex')
+    assert.deepEqual(
+      [checked.distribution, checked.update.state, checked.update.command],
+      ["Codex's installer", 'available', `${join(bin, 'codex')} update`],
+    )
+    const done = await admin.update('codex')
+    assert.deepEqual(runs, [[join(bin, 'codex'), ['update'], t.env.HOME]])
+    assert.deepEqual(
+      [done.state, done.before, done.after, done.command, done.output, done.harness.version.value],
+      ['updated', '1.0.0', '1.0.1', `${join(bin, 'codex')} update`, 'Updated to 1.0.1', '1.0.1'],
+    )
+    assert.equal(done.harness.update.state, 'current', 'checked again after the update')
+
+    fail = true
+    const failed = await admin.update('codex')
+    assert.deepEqual(
+      [failed.state, failed.reason, failed.output, failed.after],
+      ['failed', 'Command failed: codex update', 'no network', '1.0.1'],
+    )
+
+    // A CLI found somewhere ConsensFlow does not recognize is the human's to update.
+    writeFileSync(join(t.env.PATH, 'pi'), '#!/bin/sh\necho 0.1.0\n', { mode: 0o755 })
+    const unsupported = await admin.update('pi')
+    assert.equal(unsupported.state, 'unsupported')
+    assert.match(unsupported.reason, /update it the way you installed it/)
+    await assert.rejects(admin.update('devin'), /Devin is not installed/)
   } finally {
     t.cleanup()
   }
@@ -153,7 +249,8 @@ test('Devin diagnostics report the minimum native version and idle collection li
     const [row] = await admin.check('devin')
     assert.equal(row.setup.state, 'update-required')
     assert.match(row.setup.reason, /3000.10.21/)
-    assert.match(row.receiveNote, /next prompt/)
+    assert.equal(Object.hasOwn(row, 'receiveNote'), false)
+    assert.deepEqual([row.distribution, row.update.command], [null, null])
   } finally {
     t.cleanup()
   }

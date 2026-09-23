@@ -56,10 +56,13 @@ function readBody(request) {
 }
 
 /** The screens and their API, mounted by `startApi` under the UI token. */
-export function agentsUi(env, { token, harnessLatest } = {}) {
+export function agentsUi(env, { token, harnessLatest, harnessRun } = {}) {
   if (typeof token !== 'string' || token.length === 0)
     throw new Error('the agents screens need a UI token')
-  const harnessAdmin = new HarnessAdmin(env, { latest: harnessLatest })
+  const harnessAdmin = new HarnessAdmin(env, {
+    latest: harnessLatest,
+    ...(harnessRun === undefined ? {} : { run: harnessRun }),
+  })
   const artificialAnalysis = new ArtificialAnalysis(configRoot(env))
   const html = (page) => ({ status: 200, html: page })
   const json = (status, body) => ({ status, body })
@@ -75,6 +78,7 @@ export function agentsUi(env, { token, harnessLatest } = {}) {
         path === '/api/agents' ||
         path === '/api/agents/sync' ||
         path === '/api/harnesses/check' ||
+        path === '/api/harnesses/update' ||
         named !== null
       if (!page && !api) return null
       const header = request.headers.authorization ?? ''
@@ -118,6 +122,12 @@ export function agentsUi(env, { token, harnessLatest } = {}) {
         }
         if (request.method === 'POST' && path === '/api/agents') {
           return json(201, { agent: addAgent(body, env) })
+        }
+        if (request.method === 'POST' && path === '/api/harnesses/update') {
+          if (!['claude', 'codex', 'opencode', 'pi', 'kimi', 'devin'].includes(body.id)) {
+            return json(400, { error: 'Unknown harness' })
+          }
+          return json(200, { result: await harnessAdmin.update(body.id) })
         }
         if (request.method === 'POST' && path === '/api/harnesses/check') {
           if (

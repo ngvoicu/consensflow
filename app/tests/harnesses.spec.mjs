@@ -71,8 +71,8 @@ for (const [harness, label] of [
       const pi = page
         .locator('.host')
         .filter({ has: page.locator('strong', { hasText: new RegExp(`^${harness}$`) }) })
-      await expect(pi).toContainText('Version: 1.2.3')
-      await expect(pi).toContainText('New release: 1.2.4')
+      await expect(pi).toContainText('Version 1.2.3, 1.2.4 is out')
+      await expect(pi).toContainText('Update it the way you installed it.')
       await expect(pi).toContainText(`${label} setup failed`)
       await expect(pi.getByText(`${label} setup failed`)).toHaveCSS('color', 'rgb(244, 119, 105)')
       await expect(page.locator('body')).not.toContainText(
@@ -201,6 +201,71 @@ test('Harnesses reports a failed initial check and allows retry', async ({ page 
     await page.getByRole('button', { name: 'Check all harnesses' }).click()
     await expect(page.locator('.host')).toHaveCount(6)
     await expect(page.getByRole('status')).toBeEmpty()
+  } finally {
+    await server.close()
+    t.cleanup()
+  }
+})
+
+test('Harnesses says how each one was installed and updates it from a button', async ({ page }) => {
+  const t = tempEnv()
+  const server = await agentsServer(t.env)
+  const row = (version, update) => ({
+    id: 'codex',
+    path: '/opt/homebrew/Caskroom/codex/0.1/bin/codex',
+    installed: true,
+    lead: true,
+    checkedAt: Date.now(),
+    version: { state: 'checked', value: version },
+    distribution: 'Homebrew',
+    update,
+  })
+  const others = ['claude', 'opencode', 'pi', 'kimi', 'devin'].map((id) => ({
+    id,
+    path: null,
+    installed: false,
+    lead: id !== 'kimi',
+    checkedAt: Date.now(),
+    version: { state: 'not-installed' },
+    update: { state: 'not-checked' },
+  }))
+  const available = {
+    state: 'available',
+    value: '0.2.0',
+    command: '/opt/homebrew/bin/brew upgrade --cask codex',
+  }
+  await page.route('**/api/harnesses/check', (route) =>
+    route.fulfill({ json: { harnesses: [row('0.1.0', available), ...others] } }),
+  )
+  let asked = null
+  await page.route('**/api/harnesses/update', async (route) => {
+    asked = route.request().postDataJSON()
+    await route.fulfill({
+      json: {
+        result: {
+          id: 'codex',
+          state: 'updated',
+          before: '0.1.0',
+          after: '0.2.0',
+          command: available.command,
+          output: '',
+          harness: row('0.2.0', { state: 'current', value: '0.2.0', command: available.command }),
+        },
+      },
+    })
+  })
+  try {
+    await page.goto(`${server.url}/harnesses?token=${server.token}`)
+    const codex = page.locator('.host').first()
+    await expect(codex).toContainText('Version 0.1.0, 0.2.0 is out')
+    await expect(codex).toContainText('Installed with Homebrew')
+    await expect(codex).not.toContainText('Release from')
+    await codex.getByRole('button', { name: 'Update to 0.2.0' }).click()
+    await expect(codex).toContainText('Updated 0.1.0 → 0.2.0')
+    await expect(codex).toContainText('Version 0.2.0, up to date')
+    await expect(codex.getByRole('button', { name: /^Update to/ })).toHaveCount(0)
+    expect(asked).toEqual({ id: 'codex' })
+    await expect(page.locator('.host').nth(5)).not.toContainText('next prompt')
   } finally {
     await server.close()
     t.cleanup()

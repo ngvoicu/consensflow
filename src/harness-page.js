@@ -47,6 +47,24 @@ const el = (tag, className, text) => {
   return node;
 };
 let HARNESS_ROWS = [];
+const UPDATES = new Map();
+async function updateHarness(id, button) {
+  const note = document.querySelector('#check-note');
+  note.textContent = 'Updating ' + id + '… this can take a minute.';
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/harnesses/update', { method: 'POST', headers, body: JSON.stringify({ id }) });
+    if (!response.ok) throw new Error('The update could not be started');
+    const { result } = await response.json();
+    UPDATES.set(id, result);
+    HARNESS_ROWS = HARNESS_ROWS.map(row => row.id === id ? result.harness : row);
+    renderHarnesses();
+    note.textContent = '';
+  } catch (error) {
+    note.textContent = error.message + ' — try again.';
+    button.disabled = false;
+  }
+}
 async function checkHarnesses(id = null, button = null) {
   const note = document.querySelector('#check-note');
   note.textContent = 'Checking…';
@@ -68,11 +86,39 @@ function renderHarness(row) {
   line.append(el('strong', null, row.id + (row.lead ? '' : ' (worker only)')));
   line.append(el('div', null, row.installed ? 'Installed: ' + row.path : 'Not installed'));
   if (row.installed) {
-    line.append(el('div', null, 'Version: ' + (row.version.value || row.version.reason || row.version.state)));
     const update = row.update;
-    const text = update.state === 'available' ? 'New release: ' + update.value : update.state === 'current' ? 'Up to date' : update.reason || 'Update availability not verified';
-    line.append(el('div', null, text));
-    if (update.note) line.append(el('small', null, update.note));
+    const version = row.version.value ? 'Version ' + row.version.value : row.version.reason || 'Version unknown';
+    const latest = update.state === 'current' ? ', up to date'
+      : update.state === 'available' ? ', ' + update.value + ' is out'
+      : update.state === 'unknown' ? '; the latest release is ' + update.value
+      : update.state === 'error' ? '; could not check for updates: ' + update.reason
+      : '';
+    line.append(el('div', null, version + latest));
+    line.append(el('div', null, row.distribution ? 'Installed with ' + row.distribution : 'Installed in a way ConsensFlow does not recognize'));
+    const last = UPDATES.get(row.id);
+    if (last) {
+      const said = last.state === 'updated' ? 'Updated ' + last.before + ' → ' + last.after
+        : last.state === 'unchanged' ? 'Ran ' + last.command + '; the version did not change'
+        : last.state === 'failed' ? 'Update failed: ' + last.reason
+        : last.reason;
+      const outcome = el('div', null, said);
+      if (last.state === 'failed') outcome.style.color = '#f47769';
+      line.append(outcome);
+      if (last.output && last.state !== 'updated') {
+        const output = el('pre', null, last.output);
+        output.style.cssText = 'font-size:12px;white-space:pre-wrap;color:var(--muted);margin:6px 0 0;';
+        line.append(output);
+      }
+    }
+    if (update.state === 'available') {
+      if (update.command) {
+        const go = el('button', null, 'Update to ' + update.value);
+        go.onclick = () => updateHarness(row.id, go);
+        line.append(go);
+      } else {
+        line.append(el('small', null, 'Update it the way you installed it.'));
+      }
+    }
     if (row.extension?.state === 'error' || row.extension?.state === 'not-installed') {
       const label = row.id === 'pi' ? 'Pi' : 'OpenCode';
       const status = el('div', null, label + ' setup failed: ' + (row.extension.reason || 'Setup is missing.'));
@@ -84,7 +130,6 @@ function renderHarness(row) {
     }
   }
   if (row.setup?.reason) line.append(el('div', null, row.setup.reason));
-  if (row.receiveNote) line.append(el('small', null, row.receiveNote));
   const check = el('button', null, 'Check again');
   check.onclick = () => checkHarnesses(row.id, check); line.append(check);
   line.append(el('small', null, 'Checked: ' + new Date(row.checkedAt).toLocaleString()));
