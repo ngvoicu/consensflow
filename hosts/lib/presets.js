@@ -501,30 +501,30 @@ export const AGENT_PRESETS = [
     preset: "zeus",
     id: "zeus",
     name: "Zeus",
-    label: "Claude Code Opus 5 MAX",
+    label: "Claude Code Opus 5.5 MAX",
     description: "Feature work, code review and technical planning.",
     kind: "claude-code",
-    model: "claude-opus-5",
+    model: "claude-opus-5-5",
     effort: "max",
   },
   {
     preset: "apollo",
     id: "apollo",
     name: "Apollo",
-    label: "Claude Code Opus 5 XHIGH",
+    label: "Claude Code Opus 5.5 XHIGH",
     description: "Feature work, code review and technical planning.",
     kind: "claude-code",
-    model: "claude-opus-5",
+    model: "claude-opus-5-5",
     effort: "xhigh",
   },
   {
     preset: "artemis",
     id: "artemis",
     name: "Artemis",
-    label: "Claude Code Opus 5 MEDIUM",
+    label: "Claude Code Opus 5.5 MEDIUM",
     description: "Feature work, code review and technical planning.",
     kind: "claude-code",
-    model: "claude-opus-5",
+    model: "claude-opus-5-5",
     effort: "medium",
   },
 
@@ -598,42 +598,41 @@ export const AGENT_PRESETS = [
     preset: "kronos",
     id: "kronos",
     name: "Kronos",
-    label: "Pi Opus 5 XHIGH (OpenRouter API)",
+    label: "Pi Opus 5.5 XHIGH (OpenRouter API)",
     description: "Feature work, code review and technical planning.",
     kind: "pi",
-    model: "openrouter/anthropic/claude-opus-5",
+    model: "openrouter/anthropic/claude-opus-5.5",
     thinking: "xhigh",
   },
   {
     preset: "atlas",
     id: "atlas",
     name: "Atlas",
-    label: "Pi Opus 5 MEDIUM (OpenRouter API)",
+    label: "Pi Opus 5.5 MEDIUM (OpenRouter API)",
     description: "Feature work, code review and technical planning.",
     kind: "pi",
-    model: "openrouter/anthropic/claude-opus-5",
+    model: "openrouter/anthropic/claude-opus-5.5",
     thinking: "medium",
   },
-  // Opus 5 on OpenCode (via OpenRouter). Unlike the 4.8 generation there is no dotted id:
-  // it is plainly anthropic/claude-opus-5. Kept at the xhigh/medium tiers the 4.8 pair used.
+  // Opus 5.5 on OpenCode (via OpenRouter), whose id spells the version with a dot, as Fable's.
   {
     preset: "baldr",
     id: "baldr",
     name: "Baldr",
-    label: "OpenCode Opus 5 XHIGH",
+    label: "OpenCode Opus 5.5 XHIGH",
     description: "Feature work, code review and technical planning.",
     kind: "opencode",
-    model: "openrouter/anthropic/claude-opus-5",
+    model: "openrouter/anthropic/claude-opus-5.5",
     effort: "xhigh",
   },
   {
     preset: "vali",
     id: "vali",
     name: "Vali",
-    label: "OpenCode Opus 5 MEDIUM",
+    label: "OpenCode Opus 5.5 MEDIUM",
     description: "Feature work, code review and technical planning.",
     kind: "opencode",
-    model: "openrouter/anthropic/claude-opus-5",
+    model: "openrouter/anthropic/claude-opus-5.5",
     effort: "medium",
   },
   // GPT 5.5 on OpenCode (via OpenRouter).
@@ -1255,7 +1254,7 @@ const MODEL_LABELS = {
   'gpt-5.6-luna': 'GPT-5.6 Luna',
   'claude-fable-5.1': 'Claude Fable 5.1',
   'claude-fable-5': 'Claude Fable 5',
-  'claude-opus-5': 'Claude Opus 5',
+  'claude-opus-5.5': 'Claude Opus 5.5',
   'claude-sonnet-5': 'Claude Sonnet 5',
   'gemini-3.8-flash': 'Gemini 3.8 Flash',
   'deepseek-v4-flash-0731': 'DeepSeek V4 Flash (0731)',
@@ -1299,7 +1298,7 @@ export function agentProfile(agent) {
   else if (known && (['low', 'medium', 'high', 'xhigh', 'max'].includes(effort) || (harness === 'codex' && effort === 'ultra'))) {
     if (['gpt-6-astra', 'claude-fable-5.1'].includes(profile.modelKey))
       tier = ['max', 'ultra'].includes(effort) ? 'critical' : ['high', 'xhigh'].includes(effort) ? 'complex' : effort === 'medium' ? 'standard' : 'light';
-    else if (profile.modelKey === 'claude-opus-5')
+    else if (profile.modelKey === 'claude-opus-5.5')
       tier = effort === 'max' ? 'critical' : effort === 'xhigh' ? 'complex' : effort === 'low' ? 'light' : 'standard';
     else if (profile.modelKey === 'gpt-5.6-sol' && !['low', 'medium'].includes(effort)) tier = 'standard';
   }
@@ -1328,7 +1327,8 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
     ? model
         .split('/')
         .at(-1)
-        .replace(/^claude-fable-5-1$/, 'claude-fable-5.1')
+        // Anthropic's own ids spell the version with a dash; the key with the dot, as OpenRouter does.
+        .replace(/^claude-(fable|opus)-(\d)-(\d)$/, 'claude-$1-$2.$3')
         // Contributor/free are reviewed pricing and data-use routes for Muse 1.3.
         .replace(/^muse-spark-1\.3-contributor(?:-free)?$/, 'muse-spark-1.3')
     : (model ?? "default")

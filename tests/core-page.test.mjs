@@ -127,7 +127,7 @@ describe('the page protocol of the new core', () => {
         mine.map((a) => [a.name, a.harness, a.model]),
         [
           ['diana', 'codex', 'gpt-5.6-luna'],
-          ['zeus', 'claude', 'claude-opus-5'],
+          ['zeus', 'claude', 'claude-opus-5-5'],
         ],
         'in the catalog’s order',
       )

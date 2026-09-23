@@ -235,7 +235,7 @@ describe('every tool ships a list of ready-made agents', () => {
   it('finds an entry by name, whatever tool it belongs to', () => {
     const entry = catalogEntry('zeus')
     assert.equal(entry.harness, 'claude')
-    assert.equal(entry.model, 'claude-opus-5')
+    assert.equal(entry.model, 'claude-opus-5-5')
     assert.equal(catalogEntry('nobody'), undefined)
   })
 

@@ -477,7 +477,7 @@ test('model capability order takes precedence over agent names and reasoning eff
 }) => {
   const ordered = [
     ['claude-fable-5.1', 'low'],
-    ['claude-opus-5', 'max'],
+    ['claude-opus-5.5', 'max'],
     ['claude-sonnet-5', 'high'],
     ['claude-haiku-5', 'max'],
     ['gpt-6-astra', 'low'],
