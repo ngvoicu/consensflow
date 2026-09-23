@@ -476,6 +476,10 @@ test("gives a session's lane the human's hand on its window: open, close, delete
   const dock = page.getByRole('complementary', { name: 'Terminal dock' })
   const card = dock.locator('.terminal-card[data-handle="zeus-amber-pine"]')
   await expect(card).toHaveCount(1)
+  // The lead's window stays with the project: its card offers no Close.
+  await expect(
+    dock.locator('.terminal-card[data-handle="lead"]').getByRole('button', { name: /^Close/ }),
+  ).toHaveCount(0)
   // The card's own header closes the window too, the same way as its row.
   await card.getByRole('button', { name: "Close @zeus · amber-pine's terminal" }).click()
   await expect

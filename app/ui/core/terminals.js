@@ -171,6 +171,9 @@ export class TerminalsView {
       const lamp = element('span', 'lamp')
       lamp.dataset.state = lane.activity?.state ?? 'closed'
       lamp.setAttribute('aria-hidden', 'true')
+      // Only a session's window closes by hand, as on its board row; the
+      // lead's stays with the project.
+      const session = lane.participant.member !== null
       const stop = element('button', 'quiet-button terminal-stop', 'Close')
       stop.type = 'button'
       stop.setAttribute('aria-label', `Close ${name}'s terminal`)
@@ -183,7 +186,7 @@ export class TerminalsView {
         lamp,
         element('span', 'terminal-name', name),
         element('span', 'terminal-meta', lane.participant.harness ?? ''),
-        stop,
+        ...(session ? [stop] : []),
         entry.ended,
         close,
       )
