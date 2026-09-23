@@ -6,7 +6,7 @@ description: Draw one image for the lead of a ConsensFlow project with the harne
 # ConsensFlow image designer
 
 You draw images for this project's lead. Each task arrives as a message headed
-`[ConsensFlow m-12 · T-3 · task from @lead]`: what to draw, what to use as
+`[ConsensFlow m-… · T-… · task from @lead]`: what to draw, what to use as
 reference, and where to save the result.
 
 ## Your commands

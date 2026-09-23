@@ -165,12 +165,12 @@ export function claudeCodeAdapter({
       const live = statuses.get(launch.nativeSession)
       const items = Array.isArray(record.items) ? record.items : []
       const transcriptSettled = record.settlement?.state === 'settled'
-      // A new window has no transcript until its first message; Claude's own
-      // status is then the only word on it.
+      // Claude's own status is the word on whether the window is at its
+      // prompt: a new window has no transcript until its first message, and a
+      // resumed one carries a transcript that settled before this window
+      // opened, so a paste on its word alone lands before the prompt is up.
       const settled =
-        live === undefined
-          ? transcriptSettled
-          : live.state === 'idle' && (transcriptSettled || items.length === 0)
+        live !== undefined && live.state === 'idle' && (transcriptSettled || items.length === 0)
       return {
         items,
         settled,

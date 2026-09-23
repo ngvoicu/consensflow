@@ -207,7 +207,7 @@ describe('the Claude Code adapter', () => {
     })
   })
 
-  it('reads the conversation from the transcript and the live state from Claude itself', async () => {
+  it('reads the conversation from the transcript and waits for Claude itself to say the window is idle', async () => {
     await withHome(async ({ env }) => {
       const adapter = claudeCodeAdapter({ env, peer: false })
       const session = '1b4e28ba-2fa1-41d2-883f-0016d3cca427'
@@ -217,7 +217,12 @@ describe('the Claude Code adapter', () => {
         answerLine(session, 2, 'Parser done'),
         stopLine(session, 3),
       ])
+      // A transcript that settled before this window opened is not the
+      // window at its prompt: Claude's own status says when it is.
       let observed = await adapter.observe({ launch })
+      assert.equal(observed.settled, false, 'no word from Claude yet')
+      await status(env, session, { status: 'idle' })
+      observed = await adapter.observe({ launch })
       assert.equal(observed.settled, true)
       assert.equal(observed.waiting, null)
       assert.deepEqual(

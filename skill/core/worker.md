@@ -6,7 +6,7 @@ description: Carry out tasks from the lead of a ConsensFlow project and finish e
 # ConsensFlow worker
 
 You carry out tasks for this project's lead. Each task arrives as a message
-headed `[ConsensFlow m-12 · T-3 · task from @lead]`.
+headed `[ConsensFlow m-… · T-… · task from @lead]`.
 
 ## Your commands
 

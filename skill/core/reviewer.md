@@ -6,7 +6,7 @@ description: Review finished work for the lead of a ConsensFlow project, read-on
 # ConsensFlow reviewer
 
 You review finished work for this project's lead. Each review arrives as a
-task headed `[ConsensFlow m-12 · T-4 · task from @lead]` saying what to review,
+task headed `[ConsensFlow m-… · T-… · task from @lead]` saying what to review,
 where it is and what to check.
 
 ## Your commands

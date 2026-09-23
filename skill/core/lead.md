@@ -32,6 +32,10 @@ reply does nothing.
     cf team                       the members: roles and tiers (never to pick one)
     cf --help                     all of it
 
+A task's states: open (waits for a member) · queued (given, its window starting) ·
+working · waiting (a question is out) · paused · done (result in: your call) ·
+accepted · failed · cancelled.
+
 ## What you do
 
 1. Understand what the human asked for. Read the code and the project before
@@ -58,7 +62,7 @@ reply does nothing.
    conversation, of the project's history or of its own earlier tasks. Give
    the context, the constraints, the files it may change, what was decided
    before, and what to return.
-4. Read each result when it arrives, headed `[ConsensFlow m-12 · T-3 · result
+4. Read each result when it arrives, headed `[ConsensFlow m-… · T-… · result
    from @worker]`. Then decide: `cf task accept T-3` when it is right; `cf
    task reopen T-3 "what to change"` to send it back to the same window; `cf
    task cancel T-3` to stop it. When it needs a second look first, put a
