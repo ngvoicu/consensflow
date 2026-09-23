@@ -86,15 +86,18 @@ export function claudeCodeAdapter({
 
     /**
      * Pasting waits for the human to finish typing; the peer inbox never
-     * touches their draft. The pane latches on any keystroke and only a clear
+     * touches their draft. The pane latches on typed text and only a clear
      * lets go, so a latch nobody types behind any more (a stray key, or a
      * submission the record never showed) would hold every message for good:
-     * after the grace it is let go and the paste goes ahead.
+     * after the grace it is let go and the paste goes ahead. True when the
+     * window is ready; otherwise the reason, for the trace.
      */
     async ready({ pane, host }) {
       if (peer) return true
       const snapshot = await host.request('pane.snapshot', pane)
-      if (snapshot?.ok !== true || snapshot.pasteInFlight) return false
+      if (snapshot?.ok !== true)
+        return `the window cannot be read: ${snapshot?.error ?? 'no answer'}`
+      if (snapshot.pasteInFlight) return 'a paste is on its way to the window'
       const key = `${pane.id}#${pane.generation}`
       if (snapshot.draftLatched !== true) {
         drafts.delete(key)
@@ -103,15 +106,17 @@ export function claudeCodeAdapter({
       const seen = drafts.get(key)
       if (seen === undefined || seen.epoch !== snapshot.inputEpoch) {
         drafts.set(key, { epoch: snapshot.inputEpoch, since: now() })
-        return false
+        return `someone is typing in the window (input epoch ${snapshot.inputEpoch})`
       }
-      if (now() - seen.since < DRAFT_GRACE_MS) return false
+      if (now() - seen.since < DRAFT_GRACE_MS)
+        return `someone typed in the window ${Math.round((now() - seen.since) / 1000)}s ago (input epoch ${snapshot.inputEpoch})`
       const cleared = await host.request('draft.clear', {
         ...pane,
         epoch: snapshot.inputEpoch,
         submission: `stale-${snapshot.inputEpoch}`,
       })
-      if (cleared?.ok !== true || cleared.outcome !== 'cleared') return false
+      if (cleared?.ok !== true || cleared.outcome !== 'cleared')
+        return `the window kept its draft: ${cleared?.outcome ?? cleared?.error ?? 'no answer'}`
       drafts.delete(key)
       return true
     },

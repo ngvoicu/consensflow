@@ -1,5 +1,5 @@
 import { EmulatorRegistry, paneKey } from '../term.js'
-import { TerminalLink } from '../terminal-link.js'
+import { isDraft, TerminalLink } from '../terminal-link.js'
 import { element, laneOrder } from './board.js'
 
 /**
@@ -20,6 +20,8 @@ export class TerminalsView {
   #onChange
   /** The human closing a live window from its card: the same as from its board row. */
   #onClose
+  /** The card last brought into view: a redraw scrolls only when it changes. */
+  #shownKey = null
 
   constructor(stage, { invoke, report, createEmulator, onChange = () => {}, onClose = () => {} }) {
     this.#stage = stage
@@ -27,7 +29,7 @@ export class TerminalsView {
     this.#onClose = onClose
     this.#registry = new EmulatorRegistry({
       ...(createEmulator ? { createEmulator } : {}),
-      onData: (pane, data) => void this.#link.input(pane, data),
+      onData: (pane, data) => void this.#link.input(pane, data, { draft: isDraft(data) }),
       onReply: (pane, data) => void this.#link.reply(pane, data),
       onResize: (pane, cols, rows) => this.#link.resize(pane, cols, rows),
     })
@@ -96,6 +98,10 @@ export class TerminalsView {
       const [id, generation] = [entry.pane.id, entry.pane.generation]
       this.#registry.fit(id, generation)
     }
+    // A redraw follows the board every few seconds: scrolling and focusing
+    // on each one would drag the human back from a card they scrolled to.
+    if (shown.key === this.#shownKey) return
+    this.#shownKey = shown.key
     shown.card.scrollIntoView({ inline: 'nearest', block: 'nearest' })
     requestAnimationFrame(() =>
       this.#registry.get(shown.pane.id, shown.pane.generation)?.terminal?.focus(),

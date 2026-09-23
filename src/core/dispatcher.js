@@ -640,7 +640,7 @@ export class Dispatcher {
         pane: runtime.pane,
         host: this.#host,
       })
-      if (!ready) {
+      if (ready !== true) {
         // Said once per message, so a wait is in the trace, not a mystery.
         if (runtime.held !== message.id) {
           runtime.held = message.id
@@ -651,8 +651,7 @@ export class Dispatcher {
             project: project?.id ?? null,
             participant: project?.participants.find((p) => p.id === runtime.id)?.handle ?? null,
             message: message.id,
-            reason:
-              'the window is not ready for a paste: someone is typing there, or a paste is on its way',
+            reason: `the window is not ready for a paste: ${typeof ready === 'string' ? ready : 'someone is typing there, or a paste is on its way'}`,
           })
         }
         return

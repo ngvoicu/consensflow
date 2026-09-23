@@ -368,7 +368,10 @@ async function open(page, data = model()) {
             host,
             written: [],
             write: async (bytes) => emulator.written.push(...bytes),
-            onData: () => ({ dispose() {} }),
+            onData: (callback) => {
+              emulator.type = callback
+              return { dispose() {} }
+            },
             resize() {},
             fit() {},
             dispose() {},
@@ -962,6 +965,56 @@ test('a member whose agent is gone says so on the board and in the team, with Re
     'no agent named diana any more: define one under Agents, or remove it',
   )
   await expect(member.getByRole('button', { name: 'Remove Worker @diana' })).toBeVisible()
+})
+
+test('the dock stays where the human scrolled it across redraws', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 900 })
+  const data = model()
+  data.boards[1].lanes.push({
+    participant: session(20, participant(3, 'zeus', 'worker'), 'amber-pine'),
+    tasks: [],
+    activity: { state: 'working' },
+    pane: { id: 'p1-zeus-amber-pine', generation: 1 },
+  })
+  await open(page, data)
+  const stage = page.getByRole('region', { name: 'Terminals' })
+  await expect(stage.locator('.terminal-card')).toHaveCount(3)
+  await stage.evaluate((node) => {
+    node.scrollLeft = node.scrollWidth
+  })
+  const scrolled = await stage.evaluate((node) => node.scrollLeft)
+  expect(scrolled).toBeGreaterThan(0)
+  await page.evaluate(() => window.__listeners.get('state-changed')())
+  await page.waitForTimeout(100)
+  expect(await stage.evaluate((node) => node.scrollLeft)).toBe(scrolled)
+})
+
+test('typed text is a draft the pane guards; arrows, mouse and Escape are not', async ({
+  page,
+}) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    const emulator = window.__emulators[0]
+    for (const data of ['h', '\r', '\x1b[A', '\x1b[<64;10;20M', '\x1b', '\x1b[200~pasted\x1b[201~'])
+      emulator.type(data)
+  })
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.__calls
+          .filter(([command]) => command === 'pane_input_enqueue')
+          .map(([, args]) => [String.fromCharCode(...args.bytes).slice(0, 3), args.draft ?? true]),
+      ),
+    )
+    .toEqual([
+      ['h', true],
+      ['\r', true],
+      ['\x1b[A', false],
+      ['\x1b[<', false],
+      ['\x1b', false],
+      ['\x1b[2', true],
+    ])
 })
 
 test('shows the team as one row per member and role, and adds any saved agent in any role', async ({

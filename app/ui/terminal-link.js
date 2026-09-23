@@ -9,6 +9,14 @@ const INPUT_CHUNK_BYTES = 32 * 1024
  * ticket and waited for, so a large paste keeps later typing behind it), and
  * the emulator's size into the pane. Pane ownership stays in Rust.
  */
+/**
+ * Whether typed bytes are a draft the pane guards from a paste: text, Enter,
+ * Backspace, or a paste. An escape sequence types nothing (arrows, function
+ * keys, mouse and wheel reports, focus, Escape itself), and must not hold a
+ * window's deliveries.
+ */
+export const isDraft = (data) => !data.startsWith('\x1b') || data.startsWith('\x1b[200~')
+
 export class TerminalLink {
   #invoke
   #registry
@@ -47,8 +55,8 @@ export class TerminalLink {
   }
 
   /** What the human types into a pane. */
-  input(pane, data) {
-    return this.#stream('pane_input_enqueue', pane, data)
+  input(pane, data, { draft = true } = {}) {
+    return this.#stream('pane_input_enqueue', pane, data, draft)
   }
 
   /** What the emulator answers the program on its own (cursor reports and the like). */
@@ -92,7 +100,7 @@ export class TerminalLink {
     }
   }
 
-  async #stream(command, pane, data) {
+  async #stream(command, pane, data, draft = true) {
     const key = paneKey(pane)
     const bytes = new TextEncoder().encode(data)
     const previous = this.#inputs.get(key)
@@ -100,7 +108,7 @@ export class TerminalLink {
       for (let offset = 0; offset < bytes.length; offset += INPUT_CHUNK_BYTES) {
         if (this.#retired.has(key)) return
         const chunk = bytes.subarray(offset, offset + INPUT_CHUNK_BYTES)
-        if (!(await this.#chunk(command, pane, chunk))) return
+        if (!(await this.#chunk(command, pane, chunk, draft))) return
       }
     }
     // A keystroke goes at once; a large paste streams and keeps later input behind it.
@@ -114,7 +122,7 @@ export class TerminalLink {
     }
   }
 
-  async #chunk(command, pane, bytes) {
+  async #chunk(command, pane, bytes, draft = true) {
     const key = paneKey(pane)
     const sequence = (this.#sequences.get(key) ?? 0) + 1
     this.#sequences.set(key, sequence)
@@ -123,6 +131,7 @@ export class TerminalLink {
       generation: pane.generation,
       sequence,
       bytes: Array.from(bytes),
+      ...(draft ? {} : { draft: false }),
     })
     if (admitted?.ok !== true || typeof admitted.ticket !== 'string') return false
     const settled = await this.#invoke('pane_input_wait', { ticket: admitted.ticket })

@@ -282,14 +282,18 @@ describe('the Claude Code adapter', () => {
         { id: 's1-zeus', generation: 7, epoch: 4, body: 'hello' },
       ])
       draftLatched = true
-      assert.equal(await adapter.ready({ launch, pane, host }), false)
+      assert.match(await adapter.ready({ launch, pane, host }), /someone is typing in the window/)
       // A latch nobody types behind any more lets go after the grace; a
       // keystroke meanwhile starts it over.
       clock += DRAFT_GRACE_MS - 1
-      assert.equal(await adapter.ready({ launch, pane, host }), false)
+      assert.match(await adapter.ready({ launch, pane, host }), /typed in the window \d+s ago/)
       inputEpoch = 9
       clock += 10
-      assert.equal(await adapter.ready({ launch, pane, host }), false, 'typed again: a fresh grace')
+      assert.match(
+        await adapter.ready({ launch, pane, host }),
+        /someone is typing in the window/,
+        'typed again: a fresh grace',
+      )
       clock += DRAFT_GRACE_MS
       assert.equal(await adapter.ready({ launch, pane, host }), true)
       assert.deepEqual(requests.at(-1), [

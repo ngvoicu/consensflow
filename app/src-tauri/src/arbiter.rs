@@ -280,11 +280,33 @@ impl InputArbiter {
         self.write_human_via(table, pane, bytes)
     }
 
+    /// Keys that type nothing (arrows, function keys, mouse and wheel reports,
+    /// Escape): they reach the pane in order with the typing, but leave no
+    /// draft behind, so they never hold a paste.
+    pub fn write_control(
+        &self,
+        table: &PaneTable,
+        pane: &PaneKey,
+        bytes: &[u8],
+    ) -> Result<u64, ArbiterError> {
+        self.write_human_latching(table, pane, bytes, false)
+    }
+
     fn write_human_via<W: PaneInputWriter + ?Sized>(
         &self,
         writer: &W,
         pane: &PaneKey,
         bytes: &[u8],
+    ) -> Result<u64, ArbiterError> {
+        self.write_human_latching(writer, pane, bytes, true)
+    }
+
+    fn write_human_latching<W: PaneInputWriter + ?Sized>(
+        &self,
+        writer: &W,
+        pane: &PaneKey,
+        bytes: &[u8],
+        latch: bool,
     ) -> Result<u64, ArbiterError> {
         let state = self.pane_state(pane)?;
         let mut state = lock_state(&state)?;
@@ -303,7 +325,9 @@ impl InputArbiter {
             .ok_or(ArbiterError::EpochOverflow)?;
         let enter_epochs = state.human_enter_epochs(bytes, first_epoch);
         state.input_epoch = next_epoch;
-        state.draft_epoch = Some(next_epoch);
+        if latch {
+            state.draft_epoch = Some(next_epoch);
+        }
 
         if state.paste_in_flight {
             state.queued_human.push_back(QueuedHumanInput {
@@ -1306,6 +1330,32 @@ mod tests {
                 last_submission_id: None,
             }
         );
+    }
+
+    #[test]
+    fn control_keys_reach_the_pane_in_order_without_latching_a_draft() {
+        let key = PaneKey::new("recorded", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let (events, _receiver) = mpsc::channel();
+        let arbiter = Arc::new(InputArbiter::new(100, events));
+        arbiter.register(&key).expect("register pane");
+
+        // An arrow key, a wheel report and Escape: written, counted, no draft.
+        let epoch = arbiter
+            .write_human_latching(writer.as_ref(), &key, b"\x1b[A", false)
+            .expect("arrow key");
+        assert_eq!(epoch, 3);
+        assert!(!arbiter.snapshot(&key).expect("snapshot").draft_latched);
+        // A typed letter after them is a draft as before.
+        let typed = arbiter
+            .write_human_via(writer.as_ref(), &key, b"h")
+            .expect("typed letter");
+        assert_eq!(typed, 4);
+        assert!(arbiter.snapshot(&key).expect("snapshot").draft_latched);
+        let records = writer.records();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].bytes, b"\x1b[A");
+        assert_eq!(records[1].bytes, b"h");
     }
 
     #[test]

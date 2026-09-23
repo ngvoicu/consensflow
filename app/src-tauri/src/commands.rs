@@ -94,7 +94,7 @@ struct OutputHub {
 }
 
 enum InputWork {
-    Human(Vec<u8>),
+    Human { bytes: Vec<u8>, draft: bool },
     Reply(Vec<u8>),
     Paste { epoch: u64, body: Vec<u8> },
     ClaimEpoch { epoch: u64, native_editor: bool },
@@ -103,7 +103,7 @@ enum InputWork {
 impl InputWork {
     fn byte_count(&self) -> usize {
         match self {
-            Self::Human(bytes) | Self::Reply(bytes) => bytes.len(),
+            Self::Human { bytes, .. } | Self::Reply(bytes) => bytes.len(),
             Self::Paste { body, .. } => body.len().saturating_add(13),
             Self::ClaimEpoch { .. } => 0,
         }
@@ -283,7 +283,7 @@ impl InputQueue {
 
         page.last_sequences.insert(key.clone(), sequence);
         match &work {
-            InputWork::Human(bytes) | InputWork::Reply(bytes) => validate_input(bytes)?,
+            InputWork::Human { bytes, .. } | InputWork::Reply(bytes) => validate_input(bytes)?,
             InputWork::Paste { body, .. } => validate_input(body)?,
             InputWork::ClaimEpoch { .. } => {}
         }
@@ -316,7 +316,7 @@ impl InputQueue {
         key: PaneKey,
         bytes: Vec<u8>,
     ) -> Result<oneshot::Receiver<InputResponse>, String> {
-        self.submit(key, InputWork::Human(bytes))
+        self.submit(key, InputWork::Human { bytes, draft: true })
     }
 
     fn reply(
@@ -449,8 +449,12 @@ fn input_worker(
 ) {
     for job in jobs {
         let result = match job.work {
-            InputWork::Human(bytes) => arbiter
+            InputWork::Human { bytes, draft: true } => arbiter
                 .write_human(&panes, &key, &bytes)
+                .map(|epoch| InputSuccess::Human { epoch })
+                .map_err(|error| error.to_string()),
+            InputWork::Human { bytes, draft: false } => arbiter
+                .write_control(&panes, &key, &bytes)
                 .map(|epoch| InputSuccess::Human { epoch })
                 .map_err(|error| error.to_string()),
             InputWork::Reply(bytes) => arbiter
@@ -1412,7 +1416,7 @@ fn enqueue_page_input<R: Runtime>(
     id: String,
     generation: u64,
     sequence: u64,
-    bytes: Vec<u8>,
+    work: InputWork,
     human: bool,
 ) -> Value {
     let key = match pane_key(&id, generation) {
@@ -1422,11 +1426,6 @@ fn enqueue_page_input<R: Runtime>(
     let inputs = {
         let state = app.state::<AppRuntime>();
         Arc::clone(&state.inputs)
-    };
-    let work = if human {
-        InputWork::Human(bytes)
-    } else {
-        InputWork::Reply(bytes)
     };
     match inputs.enqueue_page(key, sequence, work, human) {
         Ok(ticket) => json!({"ok":true,"ticket":ticket}),
@@ -1441,8 +1440,13 @@ pub fn pane_input_enqueue<R: Runtime>(
     generation: u64,
     sequence: u64,
     bytes: Vec<u8>,
+    draft: Option<bool>,
 ) -> Value {
-    enqueue_page_input(app, id, generation, sequence, bytes, true)
+    let work = InputWork::Human {
+        bytes,
+        draft: draft.unwrap_or(true),
+    };
+    enqueue_page_input(app, id, generation, sequence, work, true)
 }
 
 #[tauri::command]
@@ -1453,7 +1457,7 @@ pub fn pane_reply_enqueue<R: Runtime>(
     sequence: u64,
     bytes: Vec<u8>,
 ) -> Value {
-    enqueue_page_input(app, id, generation, sequence, bytes, false)
+    enqueue_page_input(app, id, generation, sequence, InputWork::Reply(bytes), false)
 }
 
 #[tauri::command]
@@ -2194,6 +2198,7 @@ mod tests {
                     blocked_key.generation,
                     index + 1,
                     vec![b'x'; MAX_INPUT_BYTES],
+                    None,
                 )
             })
             .collect::<Vec<_>>();
@@ -2207,6 +2212,7 @@ mod tests {
             responsive_key.generation,
             1,
             b"R".to_vec(),
+            None,
         );
         assert_eq!(responsive_admission["ok"], true);
         let responsive_ticket = responsive_admission["ticket"]
