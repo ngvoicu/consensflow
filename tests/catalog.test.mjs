@@ -365,7 +365,7 @@ it('Muse Contributor variants share model identity while retaining route terms a
   assert.equal(catalogEntry('gefjon').profile.routeLabel, 'OpenCode Zen · Contributor · Free')
 })
 
-it('Devin preserves the native configured model without inventing effort or benchmark identity', () => {
+it('Devin preserves the native configured model without inventing an effort or a model identity', () => {
   const entry = catalogEntry('devin')
   assert.equal(entry?.harness, 'devin')
   assert.equal(entry.model, 'default')

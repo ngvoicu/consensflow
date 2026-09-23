@@ -2,12 +2,11 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ArtificialAnalysis, METRICS, withBenchmarks } from '../../hosts/lib/benchmarks.js'
 import { WORK_TIERS } from '../../hosts/lib/presets.js'
-import { agentProfile, EFFORTS } from '../catalog.js'
+import { EFFORTS } from '../catalog.js'
 import { HarnessAdmin } from '../harness-admin.js'
 import { harnessPage } from '../harness-page.js'
-import { addAgent, configRoot, editAgent, HARNESSES, listAgents, removeAgent } from '../roster.js'
+import { addAgent, editAgent, HARNESSES, listAgents, removeAgent } from '../roster.js'
 
 /**
  * The human's agents screens, served by the new core: the agents (`/`: the
@@ -27,11 +26,6 @@ function tokenMatches(presented, token) {
 const VERSION = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json'), 'utf8'),
 ).version
-
-/** The agent with its profile and benchmark scores, as the screens show it. */
-function withProfile(agent, benchmarks) {
-  return { ...agent, profile: withBenchmarks(agent, agentProfile(agent), benchmarks) }
-}
 
 function readBody(request) {
   return new Promise((resolve, reject) => {
@@ -56,7 +50,6 @@ export function agentsUi(
     latest: harnessLatest,
     ...(harnessRun === undefined ? {} : { run: harnessRun }),
   })
-  const artificialAnalysis = new ArtificialAnalysis(configRoot(env))
   const html = (page) => ({ status: 200, html: page })
   const json = (status, body) => ({ status, body })
 
@@ -83,19 +76,7 @@ export function agentsUi(
         if (request.method === 'GET' && path === '/') return html(PAGE(token))
         if (request.method === 'GET' && path === '/harnesses') return html(harnessPage(token))
         if (request.method === 'GET' && path === '/api/agents') {
-          const benchmarks = await artificialAnalysis.refresh()
-          return json(200, {
-            agents: listAgents(env).map((agent) => withProfile(agent, benchmarks)),
-            harnesss: HARNESSES,
-            efforts: EFFORTS,
-            benchmarks: {
-              status: benchmarks.status,
-              tier: benchmarks.tier,
-              fetchedAt: benchmarks.fetchedAt,
-              indexVersion: benchmarks.indexVersion,
-              metrics: METRICS,
-            },
-          })
+          return json(200, { agents: listAgents(env), harnesss: HARNESSES, efforts: EFFORTS })
         }
         const body = request.method === 'GET' ? {} : JSON.parse((await readBody(request)) || '{}')
         if (request.method === 'POST' && path === '/api/agents') {
@@ -150,12 +131,9 @@ const BROWSING_CONTROLS = `
       .map(([id, tier]) => `<option value="${id}">${tier.label}</option>`)
       .join('')}</select></label>
     <label>Group by<select name="group" aria-label="Group by"><option value="none">None</option><option value="harness">Harness</option><option value="model-reasoning" selected>Model and reasoning</option><option value="tier">Work tier</option></select></label>
-    <label>Sort by<select name="sort" aria-label="Sort by"><option value="default">Model and reasoning</option></select></label>
     <button type="button">Clear filters</button>
   </div>
-  <p class="tier-guide">The work tier is what a task finds an agent by.</p>
-  <p class="benchmark-source"></p>
-  <details class="benchmark-guide"><summary>About benchmark scores</summary><div></div></details>`
+  <p class="tier-guide">The work tier is what a task finds an agent by.</p>`
 
 const PAGE = (token) => `<!DOCTYPE html>
 <html lang="en">
@@ -277,17 +255,6 @@ const PAGE = (token) => `<!DOCTYPE html>
   .tier-pill[data-tier=critical] { border-color: var(--pill-advisor); color: var(--pill-advisor); }
   .tier-note { margin: 2px 0 8px; font-size: 12px; color: var(--muted); }
   .tier-guide { color: var(--muted); font-size: 12px; }
-  .benchmark-source, .benchmark-guide, .benchmark-details, .benchmark-missing, .benchmark-context { font-size: 12px; color: var(--muted); }
-  .benchmark-source { margin: -16px 0 4px; }
-  .benchmark-guide { margin: 0 0 22px; }
-  .benchmark-pills { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; padding: 0; margin: 8px 0; }
-  .benchmark-pill { color: var(--foam); background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; font: 11px/1.4 var(--mono); max-width: 100%; }
-  .benchmark-pill[data-selected=true] { border-color: var(--accent-text); }
-  .benchmark-details summary, .benchmark-guide summary { cursor: pointer; width: fit-content; color: var(--accent-text); }
-  .benchmark-details p, .benchmark-guide p { margin: 8px 0; overflow-wrap: anywhere; }
-  .benchmark-details a, .benchmark-source a { color: var(--accent-text); }
-  .benchmark-guide dt, .benchmark-details dt { margin-top: 8px; color: var(--foam); font-weight: 600; }
-  .benchmark-guide dd, .benchmark-details dd { margin: 2px 0 10px; }
   .model-group { border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin: 16px 0; }
   .model-summary { padding-bottom: 14px; overflow-wrap: anywhere; }
   .model-summary h3 { color: var(--foam); font-size: 18px; font-weight: 600; margin: 0 0 10px; }
@@ -368,21 +335,12 @@ const compareModels = (a, b) => modelRank(a.modelKey) - modelRank(b.modelKey) ||
 const compareEffort = (a, b) => rank(EFFORT_ORDER, a) - rank(EFFORT_ORDER, b) || compareText(a, b);
 const compareAgents = (a, b) => compareModels(a.profile, b.profile) ||
   compareEffort(effortValue(a), effortValue(b)) || compareText(a.name, b.name);
-function compareScores(a, b, metric) {
-  if (!metric) return 0;
-  const av = a.profile.benchmarks?.scores[metric.id], bv = b.profile.benchmarks?.scores[metric.id];
-  const ah = Number.isFinite(av), bh = Number.isFinite(bv);
-  if (ah !== bh) return ah ? -1 : 1;
-  return ah ? (metric.direction === 'asc' ? av - bv : bv - av) : 0;
-}
-const selectedMetric = () => LAST?.benchmarks?.metrics.find(m => m.id === document.querySelector('[name=sort]').value);
 
 function browsingGroups(entries, sectionId) {
   const section = document.querySelector(sectionId);
   const needle = section.querySelector('input[type=search]').value.trim().toLowerCase();
   const tier = section.querySelector('[name=tier]').value;
   const by = section.querySelector('[name=group]').value;
-  const metric = selectedMetric();
   const filtered = entries.filter(p => (tier === 'all' || p.profile.workTier === tier) &&
     [p.name, p.model, p.description, p.detail, p.harness, HARNESS_LABELS[p.harness], effortLabel(effortValue(p)),
       WORK_TIERS[p.profile.workTier].label, p.profile.modelLabel, p.profile.routeLabel, p.profile.routeNote]
@@ -397,15 +355,15 @@ function browsingGroups(entries, sectionId) {
     groups.get(key).rows.push(p);
   }
   for (const group of groups.values()) {
-    group.rows.sort((a, b) => compareScores(a, b, metric) || compareAgents(a, b));
-    group.shared = group.modelGroup ? ['workTier', 'benchmarks'].filter(field =>
+    group.rows.sort(compareAgents);
+    group.shared = group.modelGroup ? ['workTier'].filter(field =>
       group.rows.every(p => JSON.stringify(p.profile[field]) === JSON.stringify(group.rows[0].profile[field]))) : [];
     // The tier's note goes with the tier pill: said once on the card when the tier is.
     if (group.shared.includes('workTier')) group.shared.push('tierNote');
   }
   return [...groups.values()].sort((a, b) =>
     (by === 'tier' ? rank(Object.keys(WORK_TIERS), a.key) - rank(Object.keys(WORK_TIERS), b.key) : by === 'harness' ? rank(Object.keys(HARNESS_LABELS), a.key) - rank(Object.keys(HARNESS_LABELS), b.key) :
-      by === 'model-reasoning' ? compareScores(a.rows[0], b.rows[0], metric) || compareModels(a, b) || compareEffort(a.effort, b.effort) : 0) || compareText(a.title, b.title) || compareText(a.key, b.key));
+      by === 'model-reasoning' ? compareModels(a, b) || compareEffort(a.effort, b.effort) : 0) || compareText(a.title, b.title) || compareText(a.key, b.key));
 }
 function groupSection(group, fields = group.shared) {
   const section = el('section', group.modelGroup ? 'agent-group model-group' : 'agent-group');
@@ -430,76 +388,6 @@ function appendProfile(host, p, fields) {
     host.append(el('p', 'agent-route', p.profile.routeLabel));
     if (p.profile.routeNote) host.append(el('p', 'agent-route-note', p.profile.routeNote));
   }
-  if (fields.includes('benchmarks')) appendBenchmarks(host, p);
-}
-
-const metricValue = (metric, value) => value.toFixed(1) + (metric.unit === '%' ? '%' : metric.unit === 'Elo' ? ' Elo' : '');
-function benchmarkPills(metrics, scores) {
-  const list = el('ul', 'benchmark-pills');
-  list.setAttribute('aria-label', 'Artificial Analysis scores');
-  for (const metric of metrics) {
-    const pill = el('li', 'benchmark-pill', metric.label + ' ' + metricValue(metric, scores[metric.id]));
-    pill.dataset.metric = metric.id;
-    pill.dataset.selected = String(selectedMetric()?.id === metric.id);
-    list.append(pill);
-  }
-  return list;
-}
-function appendBenchmarks(host, p) {
-  const snapshot = p.profile.benchmarks;
-  if (!snapshot) {
-    if (LAST?.benchmarks?.fetchedAt) host.append(el('p', 'benchmark-missing', 'No AA score for this model and reasoning setting.'));
-    return;
-  }
-  const metrics = LAST.benchmarks.metrics.filter(m => Number.isFinite(snapshot.scores[m.id]));
-  const primary = m => ['intelligence', 'coding', 'agentic', selectedMetric()?.id].includes(m.id);
-  if (snapshot.reasoningMatch === 'unspecified') host.append(el('p', 'benchmark-context', 'AA reasoning level not specified'));
-  host.append(benchmarkPills(metrics.filter(primary), snapshot.scores));
-  const details = el('details', 'benchmark-details');
-  details.append(el('summary', null, 'Benchmark details · ' + metrics.length + ' scores'));
-  details.append(el('p', null, 'Tested: ' + snapshot.testedModel));
-  details.append(el('p', null, 'AA index v' + snapshot.indexVersion + ' · Retrieved ' + new Date(snapshot.fetchedAt).toLocaleDateString()));
-  details.append(el('p', null, 'AA tests its own configuration. Results can differ with this agent’s harness and provider.'));
-  const link = el('a', null, 'AA model result');
-  link.href = snapshot.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
-  details.append(link);
-  details.append(benchmarkPills(metrics.filter(m => !primary(m)), snapshot.scores));
-  const definitions = el('dl');
-  for (const metric of metrics) {
-    definitions.append(el('dt', null, metric.label + ': ' + metricValue(metric, snapshot.scores[metric.id])));
-    definitions.append(el('dd', null, metric.description));
-  }
-  details.append(definitions);
-  host.append(details);
-}
-function renderBenchmarkControls(data) {
-  const info = data.benchmarks;
-  const rows = data.agents;
-  const select = document.querySelector('[name=sort]');
-  const selected = select.value;
-  select.replaceChildren(new Option('Model and reasoning', 'default'));
-  for (const metric of info.metrics) {
-    if (rows.some(row => Number.isFinite(row.profile.benchmarks?.scores[metric.id])))
-      select.add(new Option(metric.label + ' · ' + (metric.direction === 'asc' ? 'lowest first' : 'highest first'), metric.id));
-  }
-  if ([...select.options].some(option => option.value === selected)) select.value = selected;
-  const source = document.querySelector('.benchmark-source');
-  source.replaceChildren();
-  const link = el('a', null, 'Artificial Analysis');
-  link.href = 'https://artificialanalysis.ai/'; link.target = '_blank'; link.rel = 'noopener noreferrer';
-  source.append(link);
-  source.append(document.createTextNode(info.fetchedAt ? ' · Index v' + info.indexVersion + ' · Updated ' + new Date(info.fetchedAt).toLocaleDateString() : ' · Scores unavailable'));
-  if (info.status === 'stale') source.append(document.createTextNode(' · Refresh unavailable; showing saved scores'));
-  const guide = document.querySelector('.benchmark-guide > div');
-  guide.replaceChildren();
-  guide.append(el('p', null, info.tier === 'free' ? 'Free access includes Intelligence, Coding and Agentic indexes. Individual benchmark scores, including hallucinations, require higher AA access.' : info.status === 'unconfigured' ? 'AA scores are not configured on this installation.' : info.status === 'unavailable' ? 'Could not retrieve AA scores. Agent browsing remains available; scores will retry later.' : 'Available scores are shown for each tested model and reasoning setting. Missing scores are not zero.'));
-  guide.append(el('p', null, 'Sort by orders scored entries first, then entries without a score. Group by stays independent. Default ordering keeps the model families and descending reasoning effort. Scores refresh daily.'));
-  const definitions = el('dl');
-  for (const metric of info.metrics) {
-    definitions.append(el('dt', null, metric.label + ' · ' + metric.unit + ' · ' + (metric.direction === 'asc' ? 'lower is better' : 'higher is better')));
-    definitions.append(el('dd', null, metric.description));
-  }
-  guide.append(definitions);
 }
 
 /**
@@ -524,7 +412,7 @@ function agentCard(p, group, editors) {
   card.append(head);
   // The row shows what a task finds it by, its tier, and how it is billed;
   // the model card above says the rest once for the model.
-  appendProfile(card, p, ['workTier', 'tierNote', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
+  appendProfile(card, p, ['workTier', 'tierNote', 'routeLabel'].filter(field => !group.shared.includes(field)));
   if (editors.has(p.name)) card.append(editors.get(p.name));
   return card;
 }
@@ -546,7 +434,7 @@ function renderAgents(data) {
   const groups = browsingGroups(entries, '#agents-section');
   if (groups.length === 0) { host.append(el('p', 'empty', 'No agents match these filters.')); return; }
   for (const group of groups) {
-    const section = groupSection(group, ['workTier', 'tierNote', 'benchmarks']);
+    const section = groupSection(group, ['workTier', 'tierNote']);
     for (const agent of group.rows) section.append(agentCard(agent, group, editors));
     host.append(section);
   }
@@ -665,7 +553,6 @@ function renderLists() { if (LAST !== null) renderAgents(LAST); }
     filters.querySelector('input').value = '';
     filters.querySelector('[name=tier]').value = 'all';
     filters.querySelector('[name=group]').value = 'model-reasoning';
-    filters.querySelector('[name=sort]').value = 'default';
     filters.querySelector('[name=show]').value = 'all';
     refresh();
   };
@@ -678,7 +565,6 @@ async function load() {
   const response = await fetch('/api/agents', { headers });
   if (!response.ok) throw new Error('Could not refresh agents. Reopen this screen to try again.');
   LAST = await response.json();
-  renderBenchmarkControls(LAST);
   renderLists();
   renderForm(LAST);
 }

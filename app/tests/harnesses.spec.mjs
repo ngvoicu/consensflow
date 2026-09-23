@@ -182,7 +182,6 @@ test('Agents keeps catalog agents as the catalog has them, and Show: mine lists 
         effort: 'low',
       },
     ],
-    undefined,
     null,
   )
   const { second } = fixture
@@ -310,15 +309,8 @@ test('Harnesses says how each one was installed and updates it from a button', a
  * open beside the board while another window changes the saved agents. The
  * `saved` helper narrows a tab to the saved agents alone (Show: Saved only).
  */
-async function catalogPage(page, agents = [], benchmarks, group = 'none') {
+async function catalogPage(page, agents = [], group = 'none') {
   const t = tempEnv()
-  if (benchmarks) {
-    mkdirSync(t.env.CONSENSFLOW_HOME, { recursive: true })
-    writeFileSync(
-      join(t.env.CONSENSFLOW_HOME, 'artificial-analysis-cache.json'),
-      JSON.stringify(benchmarks),
-    )
-  }
   for (const agent of agents) addAgent(agent, t.env)
   const server = await agentsServer(t.env)
   const second = await page.context().newPage()
@@ -347,44 +339,6 @@ async function catalogPage(page, agents = [], benchmarks, group = 'none') {
   }
 }
 
-function benchmarkCache(tier = 'pro') {
-  return {
-    schemaVersion: 1,
-    status: 'ready',
-    fetchedAt: new Date().toISOString(),
-    tier,
-    indexVersion: 4.3,
-    models: {
-      'gpt-6-astra': {
-        name: 'GPT-6 Astra (max)',
-        scores: {
-          intelligence: 51.11,
-          coding: 0,
-          agentic: 40,
-          ...(tier === 'pro' ? { hallucinations: 80, accuracy: 62, terminal: 60 } : {}),
-        },
-      },
-      'gpt-6-astra-low': {
-        name: 'GPT-6 Astra (low)',
-        scores: {
-          intelligence: 40,
-          coding: 66,
-          ...(tier === 'pro' ? { hallucinations: 0, accuracy: 45, terminal: 50 } : {}),
-        },
-      },
-      'claude-fable-5-1': {
-        name: 'Claude Fable 5.1 (Adaptive Reasoning, Max Effort, Default Fallback)',
-        scores: {
-          intelligence: 51.12,
-          coding: 77,
-          agentic: 55,
-          ...(tier === 'pro' ? { hallucinations: 25, accuracy: 68, terminal: 55 } : {}),
-        },
-      },
-    },
-  }
-}
-
 async function refreshAgents(page) {
   await Promise.all([
     page.waitForResponse(
@@ -404,7 +358,6 @@ test('Kimi K3 effort follows the catalog until edited, and edits are validated',
       { name: 'low-kimi', harness: 'kimi', model: 'moonshot-ai/kimi-k3', effort: 'low' },
       { name: 'high-kimi', harness: 'kimi', model: 'moonshot-ai/kimi-k3', effort: 'high' },
     ],
-    undefined,
     null,
   )
   const { second } = fixture
@@ -443,132 +396,6 @@ test('Kimi K3 effort follows the catalog until edited, and edits are validated',
     await fixture.close()
   }
 })
-
-test('AA score pills show exact settings, zero, attribution, explanations and unavailable metrics in both tabs', async ({
-  page,
-}) => {
-  const fixture = await catalogPage(
-    page,
-    [
-      { name: 'alpha', harness: 'codex', model: 'gpt-6-astra', effort: 'max' },
-      { name: 'missing', harness: 'codex', model: 'gpt-6-astra', effort: 'ultra' },
-    ],
-    benchmarkCache('free'),
-  )
-  try {
-    for (const screen of [page, fixture.second]) {
-      await expect(
-        screen.getByRole('link', { name: 'Artificial Analysis', exact: true }).first(),
-      ).toBeVisible()
-      const row = screen === page ? member(page, 'astraeus') : member(screen, 'alpha')
-      await expect(row.locator('.benchmark-pills').first()).toContainText('Intelligence 51.1')
-      await expect(row.locator('.benchmark-pills').first()).toContainText('Coding 0.0')
-      await row.locator('.benchmark-details summary').click()
-      await expect(row).toContainText('GPT-6 Astra (max)')
-      await expect(row).toContainText('v4.3')
-      await expect(row.getByRole('link', { name: 'AA model result' })).toHaveAttribute(
-        'href',
-        'https://artificialanalysis.ai/models/gpt-6-astra',
-      )
-      await screen.locator('.benchmark-guide summary').click()
-      await expect(screen.locator('.benchmark-guide')).toContainText('Free access')
-      await expect(screen.locator('.benchmark-guide')).toContainText('Correct answers are excluded')
-      await expect(screen.getByLabel('Sort by', { exact: true }).locator('option')).toHaveText([
-        'Model and reasoning',
-        'Intelligence · highest first',
-        'Coding · highest first',
-        'Agentic · highest first',
-      ])
-    }
-    await expect(member(fixture.second, 'missing')).toContainText(
-      'No AA score for this model and reasoning setting',
-    )
-    await expect(member(fixture.second, 'missing').locator('.benchmark-pill')).toHaveCount(0)
-  } finally {
-    await fixture.close()
-  }
-})
-
-test('AA sorting uses unrounded values, lower hallucinations first, missing last and independent grouping/filter state', async ({
-  page,
-}) => {
-  const fixture = await catalogPage(
-    page,
-    [
-      { name: 'astra', harness: 'codex', model: 'gpt-6-astra', effort: 'max' },
-      { name: 'low', harness: 'codex', model: 'gpt-6-astra', effort: 'low' },
-      { name: 'fable', harness: 'claude', model: 'claude-fable-5-1', effort: 'max' },
-      { name: 'missing', harness: 'codex', model: 'gpt-6-astra', effort: 'ultra' },
-    ],
-    benchmarkCache(),
-  )
-  const own = fixture.second
-  try {
-    await fixture.saved(own)
-    await own.getByLabel('Sort by', { exact: true }).selectOption('hallucinations')
-    await expect(own.locator('.callsign')).toHaveText(['low', 'fable', 'astra', 'missing'])
-    await expect(page.getByLabel('Sort by', { exact: true })).toHaveValue('default')
-    await expect(member(own, 'low').locator('.benchmark-pills').first()).toContainText(
-      'Hallucinations 0.0%',
-    )
-    await own.getByLabel('Group by', { exact: true }).selectOption('model-reasoning')
-    await expect(own.locator('#agents h3')).toHaveText([
-      'GPT-6 Astra · Low · 1',
-      'Claude Fable 5.1 · Max · 1',
-      'GPT-6 Astra · Max · 1',
-      'GPT-6 Astra · Ultra · 1',
-    ])
-    await own.getByLabel('Sort by', { exact: true }).selectOption('intelligence')
-    await expect(own.locator('.callsign')).toHaveText(['fable', 'astra', 'low', 'missing'])
-    await own.getByLabel('Group by', { exact: true }).selectOption('harness')
-    await expect(own.locator('#agents h3')).toHaveText(['Claude Code · 1', 'Codex · 3'])
-    await expect(own.locator('.callsign')).toHaveText(['fable', 'astra', 'low', 'missing'])
-    await page.getByLabel('Sort by', { exact: true }).selectOption('coding')
-    await expect(page.locator('.callsign').first()).toHaveText('calliope')
-    await own.getByRole('searchbox').fill('astra')
-    await refreshAgents(own)
-    await expect(own.getByRole('searchbox')).toHaveValue('astra')
-    await expect(own.getByLabel('Sort by', { exact: true })).toHaveValue('intelligence')
-    await expect(own.getByLabel('Show', { exact: true })).toHaveValue('mine')
-    await own.getByRole('button', { name: 'Clear filters' }).click()
-    await expect(own.getByLabel('Sort by', { exact: true })).toHaveValue('default')
-    await expect(own.getByLabel('Show', { exact: true })).toHaveValue('all')
-    await expect(page.getByLabel('Sort by', { exact: true })).toHaveValue('coding')
-  } finally {
-    await fixture.close()
-  }
-})
-
-for (const colorScheme of ['light', 'dark']) {
-  test(`AA benchmark pills and details wrap at 390px in ${colorScheme}`, async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 })
-    await page.emulateMedia({ colorScheme })
-    const fixture = await catalogPage(
-      page,
-      [{ name: 'alpha', harness: 'codex', model: 'gpt-6-astra', effort: 'max' }],
-      benchmarkCache(),
-    )
-    try {
-      for (const screen of [page, fixture.second]) {
-        await screen.getByLabel('Sort by', { exact: true }).selectOption('hallucinations')
-        await screen.locator('.benchmark-details summary').first().click()
-        await screen.locator('.benchmark-guide summary').click()
-        expect(
-          await screen.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
-        ).toBe(true)
-        const pills = screen.locator('.benchmark-pill:visible')
-        expect(await pills.count()).toBeGreaterThan(0)
-        for (const pill of await pills.all()) {
-          const bounds = await pill.boundingBox()
-          expect(bounds.x).toBeGreaterThanOrEqual(0)
-          expect(bounds.x + bounds.width).toBeLessThanOrEqual(390)
-        }
-      }
-    } finally {
-      await fixture.close()
-    }
-  })
-}
 
 test('all browsing modes keep descending effort order, saved agents among the catalog entries of their model', async ({
   page,
@@ -940,7 +767,7 @@ test('shared model cards default to every model and reasoning across all harness
   const entries = Object.entries(CATALOG).flatMap(([harness, rows]) =>
     rows.map((p) => ({ ...p, harness })),
   )
-  const fixture = await catalogPage(page, [], benchmarkCache(), null)
+  const fixture = await catalogPage(page, [], null)
   try {
     const expected = new Map()
     for (const p of entries) {
@@ -959,19 +786,14 @@ test('shared model cards default to every model and reasoning across all harness
       const summaries = await cards.evaluateAll((nodes) =>
         nodes.map((node) => ({
           names: [...node.querySelectorAll('.callsign')].map((n) => n.textContent).sort(),
-          repeated: node.querySelectorAll('.member .benchmark-details').length,
           routes: node.querySelectorAll('.member .agent-route').length,
         })),
       )
       expect(summaries.map((s) => s.names.join(',')).sort()).toEqual(
         [...expected.values()].map((names) => names.sort().join(',')).sort(),
       )
-      // The model card says once what the model is for; every agent under
-      // it is a row with its route, and nothing repeated.
-      for (const card of summaries) {
-        expect(card.repeated).toBe(0)
-        expect(card.routes).toBe(card.names.length)
-      }
+      // Every agent under a model card is a row with its route.
+      for (const card of summaries) expect(card.routes).toBe(card.names.length)
       const luna = cards.filter({
         has: screen.getByRole('heading', { name: 'GPT-5.6 Luna · Xhigh · 5', exact: true }),
       })
@@ -989,13 +811,6 @@ test('shared model cards default to every model and reasoning across all harness
         'Codex subscription',
         'OpenCode Go',
       ])
-      const astra = cards.filter({
-        has: screen.getByRole('heading', { name: 'GPT-6 Astra · Max · 3', exact: true }),
-      })
-      await expect(astra.locator('.benchmark-details')).toHaveCount(1)
-      await expect(
-        astra.locator('.model-summary .benchmark-pill[data-metric=intelligence]'),
-      ).toHaveText('Intelligence 51.1')
       await screen.getByRole('searchbox').fill('DeepSeek V4 Pro')
       await expect(screen.locator('.model-summary h3')).toHaveText([
         'DeepSeek V4 Pro (0813) · High · 2',
@@ -1007,37 +822,14 @@ test('shared model cards default to every model and reasoning across all harness
   }
 })
 
-test('model-level AA scores are labeled and sortable while Muse provider choices share exact scores', async ({
+test('the Muse Spark card lists each provider choice with its route and its training note', async ({
   page,
 }) => {
-  const cache = benchmarkCache('free')
-  cache.models['qwen3-8-max'] = {
-    name: 'Qwen3.8 Max',
-    scores: { intelligence: 60, coding: 72, agentic: 50 },
-  }
-  cache.models['muse-spark-1-3-xhigh'] = {
-    name: 'Muse Spark 1.3 (xhigh)',
-    scores: { intelligence: 45.2, coding: 76.5, agentic: 51.8 },
-  }
-  const fixture = await catalogPage(page, [], cache, null)
+  const fixture = await catalogPage(page, [], null)
   try {
     for (const screen of [page, fixture.second]) {
-      await screen.getByLabel('Sort by').selectOption('intelligence')
-      await expect(screen.locator('.model-summary h3').first()).toContainText('Qwen 3.8 Max')
-      await expect(screen.locator('.model-group').first().locator('.benchmark-context')).toHaveText(
-        'AA reasoning level not specified',
-      )
-      await expect(
-        screen
-          .locator('.model-group')
-          .first()
-          .locator('.benchmark-pill[data-metric=intelligence]')
-          .first(),
-      ).toHaveText('Intelligence 60.0')
       await screen.getByRole('searchbox').fill('Muse Spark')
       await expect(screen.locator('.model-summary h3')).toHaveText('Muse Spark 1.3 · Xhigh · 5')
-      await expect(screen.locator('.benchmark-details')).toHaveCount(1)
-      await expect(screen.locator('.benchmark-context')).toHaveCount(0)
       await expect(screen.locator('.agent-route')).toHaveText([
         'OpenRouter · API',
         'OpenCode Zen · Contributor · Free',
@@ -1061,7 +853,7 @@ test('model-level AA scores are labeled and sortable while Muse provider choices
 })
 
 test('shared model cards return after reload and Clear filters in both tabs', async ({ page }) => {
-  const fixture = await catalogPage(page, [], undefined, null)
+  const fixture = await catalogPage(page, [], null)
   try {
     for (const screen of [page, fixture.second]) {
       const card = screen.locator('.model-group').filter({
@@ -1087,31 +879,19 @@ test('shared model cards return after reload and Clear filters in both tabs', as
   }
 })
 
-test('a model card keeps its shared scores while an agent of your own joins and leaves it', async ({
+test('a model card keeps its shared tier while an agent of your own joins and leaves it', async ({
   page,
 }) => {
-  const cache = benchmarkCache()
-  cache.models['claude-fable-5-1-xhigh'] = {
-    name: 'Claude Fable 5.1 (Adaptive Reasoning, Xhigh Effort, Default Fallback)',
-    scores: { intelligence: 53.2, coding: 80.7, agentic: 57.1 },
-  }
-  const fixture = await catalogPage(page, [], cache)
+  const fixture = await catalogPage(page)
   const { second } = fixture
   try {
     await page.getByRole('searchbox').fill('Fable')
     await page.getByLabel('Group by').selectOption('model-reasoning')
-    await page.getByLabel('Sort by').selectOption('coding')
     const card = page
       .locator('.model-group')
       .filter({ has: page.getByRole('heading', { name: /^Claude Fable 5.1 · Xhigh ·/ }) })
     await expect(card.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 3')
     await expect(card.locator('.model-summary .tier-pill')).toHaveCount(1)
-    await expect(card.locator('.benchmark-details')).toHaveCount(1)
-    await expect(card.locator('.model-summary .benchmark-pill')).toHaveText([
-      'Intelligence 53.2',
-      'Coding 80.7',
-      'Agentic 57.1',
-    ])
     // Three harnesses run this model at this effort; each row says which.
     await expect(card.locator('.member__head > .tag:not(.tag--own)')).toHaveText([
       'Claude Code',
@@ -1129,10 +909,9 @@ test('a model card keeps its shared scores while an agent of your own joins and 
     await expect(member(second, 'my-fable')).toBeVisible()
     await refreshAgents(page)
     await expect(card.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 4')
-    await expect(card.locator('.benchmark-details')).toHaveCount(1)
-    await expect(card.locator('.member .benchmark-details')).toHaveCount(0)
+    await expect(card.locator('.model-summary .tier-pill')).toHaveCount(1)
+    await expect(card.locator('.member .tier-pill')).toHaveCount(0)
     await expect(page.getByRole('searchbox')).toHaveValue('Fable')
-    await expect(page.getByLabel('Sort by')).toHaveValue('coding')
     await member(page, 'my-fable').getByRole('button', { name: 'Remove', exact: true }).click()
     await expect(card.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 3')
     expect(listAgents(fixture.t.env).some((p) => p.name === 'my-fable')).toBe(false)
@@ -1267,11 +1046,9 @@ for (const colorScheme of ['light', 'dark']) {
     test(`the agents layout remains usable at ${width}px in ${colorScheme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme })
-      const fixture = await catalogPage(
-        page,
-        [{ name: 'maia-2', harness: 'codex', model: 'gpt-6-astra', effort: 'medium' }],
-        benchmarkCache(),
-      )
+      const fixture = await catalogPage(page, [
+        { name: 'maia-2', harness: 'codex', model: 'gpt-6-astra', effort: 'medium' },
+      ])
       try {
         for (const screen of [page, fixture.second]) {
           const section = screen.getByRole('region', { name: 'Agents', exact: true })
@@ -1298,9 +1075,7 @@ for (const colorScheme of ['light', 'dark']) {
           expect(contrast).toBeGreaterThanOrEqual(4.5)
           await section.getByLabel('Group by').selectOption('model-reasoning')
           await expect(section.locator('.model-summary').first()).toBeVisible()
-          for (const node of await section
-            .locator('.model-summary, .member__head button, .benchmark-pill')
-            .all()) {
+          for (const node of await section.locator('.model-summary, .member__head button').all()) {
             const bounds = await node.boundingBox()
             expect(bounds.x).toBeGreaterThanOrEqual(0)
             expect(bounds.x + bounds.width).toBeLessThanOrEqual(width)

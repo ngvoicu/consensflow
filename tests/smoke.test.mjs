@@ -689,17 +689,14 @@ test('built Agents catalog serves complete saved profiles and current browsing c
     box,
     `
     import assert from 'node:assert/strict'
-    import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+    import { mkdirSync, readFileSync } from 'node:fs'
     import { join } from 'node:path'
-    import { METRICS } from ${JSON.stringify(join(cli, 'hosts/lib/benchmarks.js'))}
     import { CATALOG, catalogEntry } from ${JSON.stringify(join(cli, 'src/catalog.js'))}
     import { agentsUi } from ${JSON.stringify(join(cli, 'src/core/agents-server.js'))}
     import { Credentials, startApi } from ${JSON.stringify(join(cli, 'src/core/api.js'))}
     import { openLedger } from ${JSON.stringify(join(cli, 'src/ledger/index.js'))}
     import { addAgent, listAgents, rosterPath } from ${JSON.stringify(join(cli, 'src/roster.js'))}
     assert.equal(Object.values(CATALOG).flat().length, 102, 'packaged preset count')
-    assert.equal(METRICS.length, 14)
-    for (const secretFile of ['artificial-analysis-key', 'artificial-analysis-cache.json']) assert.equal(existsSync(${JSON.stringify(cli)} + '/' + secretFile), false)
     assert.equal(catalogEntry('pygmalion').model, 'codex-image')
     // Every catalog agent is in the roster, as the catalog has it; the file keeps only your own.
     assert.equal(listAgents(process.env).length, 102)
@@ -718,8 +715,8 @@ test('built Agents catalog serves complete saved profiles and current browsing c
       assert.deepEqual([mine.effort, mine.custom, mine.profile.workTier], ['low', true, 'light'])
       assert.equal(data.agents.length, 103)
       const html = await (await fetch(server.url, { headers })).text()
-      for (const text of ['aria-label="Agents"', 'Model and reasoning', 'My own agents', 'Sort by', 'benchmark-pills', 'About benchmark scores', 'model-summary', 'model-group', 'AA reasoning level not specified', 'value="model-reasoning" selected', 'Work tier', 'tier-pill', 'Important work only · No coding']) assert.ok(html.includes(text), text)
-      for (const text of ['id="catalog-section"', 'Agent library', 'Your agents', 'PM candidate', 'name="tags"', 'category-pill', 'Lead candidate', 'name="category"', 'Name in use', 'offer__actions', 'Saved only']) assert.ok(!html.includes(text), 'gone: ' + text)
+      for (const text of ['aria-label="Agents"', 'Model and reasoning', 'My own agents', 'model-summary', 'model-group', 'value="model-reasoning" selected', 'Work tier', 'tier-pill', 'Important work only · No coding']) assert.ok(html.includes(text), text)
+      for (const text of ['id="catalog-section"', 'Agent library', 'Your agents', 'PM candidate', 'name="tags"', 'category-pill', 'Lead candidate', 'name="category"', 'Name in use', 'offer__actions', 'Saved only', 'Sort by', 'benchmark', 'Artificial Analysis', 'AA ']) assert.ok(!html.includes(text), 'gone: ' + text)
       assert.equal((await fetch(server.url + '/api/agents/maia', { method: 'DELETE', headers })).status, 400)
       assert.equal((await fetch(server.url + '/api/agents/my-maia', { method: 'DELETE', headers })).status, 204)
       const after = await (await fetch(server.url + '/api/agents', { headers })).json()
