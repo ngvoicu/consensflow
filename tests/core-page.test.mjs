@@ -131,7 +131,7 @@ describe('the page protocol of the new core', () => {
         ],
         'in the catalog’s order',
       )
-      assert.ok(agents.length > 100)
+      assert.ok(agents.length > 90, 'the whole catalog is on offer')
       const { project } = await operations['project.open']({
         directory: '/work/app',
         harness: 'pi',

@@ -19,11 +19,11 @@ import { slugify, stripMention } from "./utils.js";
 // Three models take no effort parameter at all (MiniMax M3, Laguna S 2.1 free, and Codex Images):
 // their presets name no level, because a level nothing honours is worse than a blank one.
 //
-// The one disagreement that touches this catalog is DeepSeek V4 (all variants): pi says
-// {high, xhigh}, models.dev says {low, high, max}. Probing could not settle it — pi returns
-// reasoning tokens at both of its levels, and opencode reports zero reasoning on this model at
-// every variant, including the `high` both catalogs confirm. So zephyros/hades/freya/odin sit at
-// `high`, the only level both sources agree exists. Raise it when one of them is proven right.
+// DeepSeek (V4.1 Flash and V4 Pro 0813, through OpenRouter on pi and opencode) sits at `max`:
+// OpenRouter's own model records (GET /api/v1/models, `reasoning.supported_efforts`, read on
+// 2026-09-23) list {max, high, low} for both, with `high` the default, and both harnesses take
+// `max`. Until then the rows held `high`, the one level two catalogs agreed on; the Go rows for
+// DeepSeek were dropped the same day, so the four rows are the whole DeepSeek offer.
 //
 // The GPT 5.6 trio through OpenCode (sunna/jord/bil) is deliberately NOT at its ceiling: it holds
 // the xhigh tier that the same three models occupy on codex and pi, so the trio means the same
@@ -662,21 +662,21 @@ export const AGENT_PRESETS = [
     preset: "freya",
     id: "freya",
     name: "Freya",
-    label: "OpenCode DeepSeek V4 Flash HIGH (fast)",
+    label: "OpenCode DeepSeek V4.1 Flash MAX (fast)",
     description: "Routine coding and second opinions.",
     kind: "opencode",
-    model: "openrouter/deepseek/deepseek-v4-flash-0731",
-    effort: "high",
+    model: "openrouter/deepseek/deepseek-v4.1-flash",
+    effort: "max",
   },
   {
     preset: "zephyros",
     id: "zephyros",
     name: "Zephyros",
-    label: "Pi DeepSeek V4 Flash HIGH (fast)",
+    label: "Pi DeepSeek V4.1 Flash MAX (fast)",
     description: "Routine coding and second opinions.",
     kind: "pi",
-    model: "openrouter/deepseek/deepseek-v4-flash-0731",
-    thinking: "high",
+    model: "openrouter/deepseek/deepseek-v4.1-flash",
+    thinking: "max",
   },
   {
     preset: "sif",
@@ -694,11 +694,11 @@ export const AGENT_PRESETS = [
     preset: "hades",
     id: "hades",
     name: "Hades",
-    label: "Pi DeepSeek V4 Pro",
+    label: "Pi DeepSeek V4 Pro MAX",
     description: "Complex code changes and analysis.",
     kind: "pi",
     model: "openrouter/deepseek/deepseek-v4-pro-0813",
-    thinking: "high",
+    thinking: "max",
   },
   {
     preset: "ares",
@@ -832,11 +832,11 @@ export const AGENT_PRESETS = [
     preset: "odin",
     id: "odin",
     name: "Odin",
-    label: "OpenCode DeepSeek V4 Pro HIGH",
+    label: "OpenCode DeepSeek V4 Pro MAX",
     description: "Complex code changes and analysis.",
     kind: "opencode",
     model: "openrouter/deepseek/deepseek-v4-pro-0813",
-    effort: "high",
+    effort: "max",
   },
   {
     preset: "thor",
@@ -959,13 +959,6 @@ export const AGENT_PRESETS = [
   //     it a reasoning TOGGLE with no effort values. A level nothing honours is
   //     worse than a blank one.
   //
-  // DeepSeek runs the other way, and it is worth recording because the
-  // OpenRouter rows sit LOWER: zephyros/hades/freya/odin hold `high` because pi
-  // and models.dev disagreed about that road. On Go the two agree — {low, high,
-  // max} for Flash, {high, max} for Pro — so these rows take `max`, and both
-  // were probed there on both harnesses. Same model, different road, different
-  // evidence, different ceiling.
-  //
   // PRIVACY, because it differs row by row. Go's own model table says "Not
   // used" for training on every model here except Muse Spark: the `-contributor`
   // tier costs $0.10/$0.20 per MTok against $1.25/$4.25 for the standard model
@@ -974,26 +967,6 @@ export const AGENT_PRESETS = [
   // for abuse monitoring; the rest keep none. Urania and Odrerir say so in their
   // own descriptions — a row that spends your privacy should not read like one
   // that does not.
-  {
-    preset: "boreas",
-    id: "boreas",
-    name: "Boreas",
-    label: "Pi DeepSeek V4 Flash MAX (OpenCode Go)",
-    description: "Routine coding and second opinions.",
-    kind: "pi",
-    model: "opencode-go/deepseek-v4-flash",
-    thinking: "max",
-  },
-  {
-    preset: "nereus",
-    id: "nereus",
-    name: "Nereus",
-    label: "Pi DeepSeek V4 Pro MAX (OpenCode Go)",
-    description: "Complex code changes and analysis.",
-    kind: "pi",
-    model: "opencode-go/deepseek-v4-pro",
-    thinking: "max",
-  },
   {
     preset: "eris",
     id: "eris",
@@ -1074,26 +1047,6 @@ export const AGENT_PRESETS = [
     kind: "pi",
     model: "opencode-go/gpt-5.6-luna",
     thinking: "xhigh",
-  },
-  {
-    preset: "dvalin",
-    id: "dvalin",
-    name: "Dvalin",
-    label: "OpenCode Go DeepSeek V4 Flash MAX",
-    description: "Routine coding and second opinions.",
-    kind: "opencode",
-    model: "opencode-go/deepseek-v4-flash",
-    effort: "max",
-  },
-  {
-    preset: "durin",
-    id: "durin",
-    name: "Durin",
-    label: "OpenCode Go DeepSeek V4 Pro MAX",
-    description: "Complex code changes and analysis.",
-    kind: "opencode",
-    model: "opencode-go/deepseek-v4-pro",
-    effort: "max",
   },
   {
     preset: "loki",
@@ -1257,10 +1210,8 @@ const MODEL_LABELS = {
   'claude-opus-5.5': 'Claude Opus 5.5',
   'claude-sonnet-5': 'Claude Sonnet 5',
   'gemini-3.8-flash': 'Gemini 3.8 Flash',
-  'deepseek-v4-flash-0731': 'DeepSeek V4 Flash (0731)',
+  'deepseek-v4.1-flash': 'DeepSeek V4.1 Flash',
   'deepseek-v4-pro-0813': 'DeepSeek V4 Pro (0813)',
-  'deepseek-v4-flash': 'DeepSeek V4 Flash',
-  'deepseek-v4-pro': 'DeepSeek V4 Pro',
   'grok-4.6': 'Grok 4.6',
   'qwen3.8-max': 'Qwen 3.8 Max',
   'qwen3.8-27b': 'Qwen 3.8 27B',

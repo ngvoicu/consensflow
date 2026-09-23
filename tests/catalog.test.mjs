@@ -142,8 +142,6 @@ describe('every tool ships a list of ready-made agents', () => {
     // then holds them to the same level. That pairing is the whole reason a
     // name means one thing here.
     for (const model of [
-      'opencode-go/deepseek-v4-flash',
-      'opencode-go/deepseek-v4-pro',
       'opencode-go/grok-4.6',
       'opencode-go/qwen3.8-max',
       'opencode-go/minimax-m3',
@@ -247,8 +245,8 @@ describe('every tool ships a list of ready-made agents', () => {
 
   it('names no ultra preset — ultra stays a level the CLI takes, not a row the catalog ships', () => {
     // Sol stepped down from ultra to max by the user's decision (2026-09-06):
-    // a deliberate seat below the proven ceiling, like the DeepSeek rows. The
-    // effort-ceilings audit must not "fix" it back.
+    // a deliberate seat below the proven ceiling. The effort-ceilings audit
+    // must not "fix" it back.
     const ultras = Object.values(CATALOG)
       .flat()
       .filter((entry) => entry.effort === 'ultra')
@@ -295,7 +293,7 @@ describe('catalog presentation follows actual model and effort', () => {
     assert.equal(catalogEntry('logi').profile?.modelKey, catalogEntry('gefjon').profile?.modelKey)
     assert.notEqual(
       catalogEntry('freya').profile?.modelKey,
-      catalogEntry('dvalin').profile?.modelKey,
+      catalogEntry('hades').profile?.modelKey,
     )
   })
 })
@@ -324,7 +322,7 @@ it('ships all compatible low/medium choices with stable identities and Pi OpenRo
       assert.equal(entry.effort, effort)
     }
   }
-  assert.equal(Object.values(CATALOG).flat().length, 102)
+  assert.equal(Object.values(CATALOG).flat().length, 98)
   for (const name of ['orpheus', 'linus', 'erato', 'kronos', 'atlas']) {
     assert.match(catalogEntry(name).model, /^openrouter\/anthropic\//)
     assert.equal(catalogEntry(name).profile.routeLabel, 'OpenRouter · API')
