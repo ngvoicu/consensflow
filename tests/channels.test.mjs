@@ -127,6 +127,7 @@ const YOLO = {
   permissions: { defaultMode: 'bypassPermissions' },
   skipDangerousModePermissionPrompt: true,
   crossSessionInbound: 'accept',
+  tui: 'default',
 }
 
 /** The settings file a Claude launch was given, read back from its flag. */
