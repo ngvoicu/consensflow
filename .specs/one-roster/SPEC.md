@@ -84,5 +84,6 @@ team menu to show them all, but add also criticality in the list."
 - 2026-09-23, Phase B: the Agents screen's tests adapted or rewritten (30 with Harnesses); the board page's 50 still pass.
 - 2026-09-23, Phase C: the pick lists grouped by harness with the tier on each line; board page 38/38 in its own file.
 - 2026-09-23, later: the pick lists regrouped by work tier, T1 first, and the Team dialog's rows say what each member runs; the fixture gained a T1 agent last in the roster to prove the order; board page 38/38.
+- 2026-09-23, later still: the rows of both dialogs read by role, then by tier, then by name (`99ea554`); a critical reviewer ahead of the workers and a critical worker last among the picks prove it; board page 38/38.
 - 2026-09-23, Phase D: README, the packaged smoke test and the brain; the Candidate rebuilt on it.
 - 2026-09-23, later: catalog agents read-only (no Edit, no overrides, no Reset); roster, cli, server, smoke, page and Agents-screen tests rewritten for it; Harnesses+Agents 30/30, board page 38/38.
