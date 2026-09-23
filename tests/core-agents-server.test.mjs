@@ -159,7 +159,8 @@ describe('the agents screens on the new core', () => {
     const mine = listed.agents.find((p) => p.name === 'mine')
     assert.deepEqual([mine.workTier, mine.custom], ['complex', true])
     assert.equal('tags' in mine, false, 'an agent carries no tags')
-    assert.ok(Array.isArray(listed.catalog.claude))
+    assert.ok(Array.isArray(listed.harnesss), 'the harnesses the form offers')
+    assert.equal(Object.hasOwn(listed, 'catalog'), false, 'the agents are the catalog')
     assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'roles')), false, 'no role files prepared')
 
     const invalid = await api('/api/agents', {
@@ -192,13 +193,19 @@ describe('the agents screens on the new core', () => {
     assert.equal((await edited.json()).agent.effort, 'low')
     const raw = () => JSON.parse(readFileSync(rosterPath(t.env), 'utf8'))
     assert.deepEqual(
-      [listAgents(t.env).find((p) => p.name === 'gefjon').edited, raw().agents.length],
+      [
+        listAgents(t.env).find((p) => p.name === 'gefjon').edited,
+        raw().agents.filter((row) => row.id === 'gefjon').length,
+      ],
       [true, 1],
     )
     const reset = await api('/api/agents/gefjon/reset', { method: 'POST', body: '{}' })
     assert.equal(reset.status, 200)
     assert.equal((await reset.json()).agent.effort, 'xhigh')
-    assert.equal(raw().agents.length, 0)
+    assert.equal(
+      raw().agents.some((row) => row.id === 'gefjon'),
+      false,
+    )
     const added = await api('/api/agents', {
       method: 'POST',
       body: JSON.stringify({ name: 'gefjon', harness: 'codex', model: 'm' }),

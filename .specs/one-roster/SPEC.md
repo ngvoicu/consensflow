@@ -56,12 +56,12 @@ team menu to show them all, but add also criticality in the list."
   The daemon normalizes at start. `cf agent reset`; no `cf agent sync`.
 - [x] [IMPL-OR-02] Satisfies TEST-OR-01.
 
-### Phase B: the Agents screen [pending]
+### Phase B: the Agents screen [done]
 
-- [ ] [TEST-OR-03] One row shape; no Add for catalog entries; Reset and
+- [x] [TEST-OR-03] One row shape; no Add for catalog entries; Reset and
   Remove where they apply; Show all / mine; the model cards still share
   what their rows share.
-- [ ] [IMPL-OR-04] Satisfies TEST-OR-03.
+- [x] [IMPL-OR-04] Satisfies TEST-OR-03.
 
 ### Phase C: the team dialogs [pending]
 
@@ -76,3 +76,4 @@ team menu to show them all, but add also criticality in the list."
 ## TDD log
 
 - 2026-09-23, Phase A: roster, cf, page and server tests rewritten; Node 666 passed in the gate.
+- 2026-09-23, Phase B: the Agents screen's tests adapted or rewritten (30 with Harnesses); the board page's 50 still pass.

@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ArtificialAnalysis, METRICS, withBenchmarks } from '../../hosts/lib/benchmarks.js'
 import { WORK_TIERS } from '../../hosts/lib/presets.js'
-import { agentProfile, CATALOG, EFFORTS } from '../catalog.js'
+import { agentProfile, EFFORTS } from '../catalog.js'
 import { HarnessAdmin } from '../harness-admin.js'
 import { harnessPage } from '../harness-page.js'
 import {
@@ -96,12 +96,6 @@ export function agentsUi(
           return json(200, {
             agents: listAgents(env).map((agent) => withProfile(agent, benchmarks)),
             harnesss: HARNESSES,
-            catalog: Object.fromEntries(
-              Object.entries(CATALOG).map(([harness, entries]) => [
-                harness,
-                entries.map((entry) => withProfile({ ...entry, harness }, benchmarks)),
-              ]),
-            ),
             efforts: EFFORTS,
             benchmarks: {
               status: benchmarks.status,
@@ -164,7 +158,7 @@ export function agentsUi(
 const BROWSING_CONTROLS = `
   <div class="filters">
     <label class="filter-search">Search agents<input type="search" placeholder="Name, model, harness or task…" autocomplete="off"></label>
-    <label>Show<select name="show" aria-label="Show"><option value="all">All agents</option><option value="saved">Saved only</option></select></label>
+    <label>Show<select name="show" aria-label="Show"><option value="all">All agents</option><option value="mine">Mine: edited and custom</option></select></label>
     <label>Work tier<select name="tier" aria-label="Work tier"><option value="all">All tiers</option>${Object.entries(
       WORK_TIERS,
     )
@@ -242,6 +236,7 @@ const PAGE = (token) => `<!DOCTYPE html>
   .member__head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .callsign { font-size: 17px; font-weight: 600; color: var(--accent-text); letter-spacing: -.01em; }
   .tag { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .tag--edited { color: var(--accent-text); }
   .member__head .spacer { flex: 1; }
   /* A long command scrolls rather than wrapping (it stays one readable line);
      the fade is the only hint that there is more to the right. */
@@ -264,11 +259,6 @@ const PAGE = (token) => `<!DOCTYPE html>
   button.primary:hover { filter: brightness(1.08); color: #06171C; }
   :focus-visible { outline: 2px solid var(--seafoam); outline-offset: 2px; }
 
-  .offer { display: flex; align-items: baseline; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
-  .offer:first-of-type { border-top: none; }
-  .offer__name { font-family: var(--mono); font-size: 13px; color: var(--foam); min-width: 96px; }
-  .offer__what { color: var(--muted); font-size: 13px; flex: 1; }
-  .offer__model { font-family: var(--mono); font-size: 11px; color: var(--muted); opacity: .8; }
   .lede--tight { margin: 0 0 8px; }
   .filters input[type=search] {
     width: 100%; box-sizing: border-box; padding: 8px 10px;
@@ -287,7 +277,7 @@ const PAGE = (token) => `<!DOCTYPE html>
   .alert { color: var(--buoy); font-size: 13px; margin: 0; }
   .note { font-size: 13px; color: var(--muted); min-height: 20px; margin: 10px 0 0; }
   .empty { color: var(--muted); font-size: 13.5px; border: 1px dashed var(--line); border-radius: 4px; padding: 18px; }
-  @media (max-width: 620px) { form { grid-template-columns: 1fr; } .offer { flex-wrap: wrap; } }
+  @media (max-width: 620px) { form { grid-template-columns: 1fr; } }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
   h1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; }
@@ -298,9 +288,6 @@ const PAGE = (token) => `<!DOCTYPE html>
   .filters .filter-search { flex: 1 1 100%; }
   .filters input, .filters select { width: 100%; min-width: 0; }
   .filters button { padding: 7px 10px; }
-  .offer { align-items: start; }
-  .offer__what { min-width: 0; overflow-wrap: anywhere; }
-  .offer__what p { margin: 4px 0 0; }
   .tier-pill { display: inline-block; width: fit-content; border: 1px solid var(--muted); border-radius: 999px; padding: 4px 10px; margin: 6px 0; font-size: 12px; color: var(--foam); background: var(--panel); }
   .tier-pill[data-tier=critical] { border-color: var(--pill-advisor); color: var(--pill-advisor); }
   .tier-note { margin: 2px 0 8px; font-size: 12px; color: var(--muted); }
@@ -319,21 +306,15 @@ const PAGE = (token) => `<!DOCTYPE html>
   .model-group { border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin: 16px 0; }
   .model-summary { padding-bottom: 14px; overflow-wrap: anywhere; }
   .model-summary h3 { color: var(--foam); font-size: 18px; font-weight: 600; margin: 0 0 10px; }
-  .model-group .offer, .model-group .member { padding: 12px 0; border-top: 1px solid var(--line); }
-  .model-group .offer:last-child, .model-group .member:last-child { padding-bottom: 0; border-bottom: none; }
+  .model-group .member { padding: 12px 0; border-top: 1px solid var(--line); }
+  .model-group .member:last-child { padding-bottom: 0; border-bottom: none; }
   .agent-route, .agent-route-note { color: var(--muted); font-size: 11px; }
   .member .agent-route, .member .agent-route-note { margin: 0; }
-  .offer__model { color: var(--foam); opacity: 1; display: block; overflow-wrap: anywhere; }
-  .offer__actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; max-width: 220px; }
-  .offer__actions button { overflow-wrap: anywhere; max-width: 100%; }
   .tag { overflow-wrap: anywhere; }
   button:disabled { opacity: .6; cursor: default; }
   @media (max-width: 620px) {
     .filters label { flex: 1 1 45%; min-width: 0; }
-    .offer__name { min-width: 80px; }
-    .offer__what { flex: 1 1 180px; }
-    .offer__actions { margin-left: auto; max-width: 100%; }
-  }
+        }
 </style>
 </head>
 <body>
@@ -341,7 +322,7 @@ const PAGE = (token) => `<!DOCTYPE html>
   <p class="mark"><span>consensflow</span> <span>v${VERSION}</span></p>
   <section id="agents-section" aria-label="Agents">
   <h1>Agents <span id="agents-count" class="section-count"></span></h1>
-  <p class="lede" id="lede">The agents a project's team is picked from: add one from the catalog, or define your own below.</p>
+  <p class="lede" id="lede">The agents a project's team is picked from: the catalog's, with your edits, and your own.</p>
   <p id="roster-note" class="note" role="status"></p>
   ${BROWSING_CONTROLS}
   <div id="agents"></div>
@@ -508,7 +489,7 @@ function appendBenchmarks(host, p) {
 }
 function renderBenchmarkControls(data) {
   const info = data.benchmarks;
-  const rows = [...data.agents, ...Object.values(data.catalog).flat()];
+  const rows = data.agents;
   const select = document.querySelector('[name=sort]');
   const selected = select.value;
   select.replaceChildren(new Option('Model and reasoning', 'default'));
@@ -536,53 +517,55 @@ function renderBenchmarkControls(data) {
   guide.append(definitions);
 }
 
-/** A saved agent's card: its name, harness, tier and route, with Edit and Remove. */
-function memberCard(p, group, data, editors) {
+/**
+ * An agent's row, the same for every agent: its name, what it runs, its tier
+ * and route, and Edit; Reset when it is a catalog agent the human edited,
+ * Remove when it is the human's own.
+ */
+function agentCard(p, group, editors) {
   const card = el('div', 'member');
   card.dataset.agentName = p.name;
+  if (p.edited) card.dataset.edited = 'true';
+  if (p.custom) card.dataset.custom = 'true';
   const head = el('div', 'member__head');
   head.append(el('span', 'callsign', p.name));
   head.append(el('span', 'tag', group.modelGroup ? (HARNESS_LABELS[p.harness] || p.harness) : p.profile.modelLabel + ' · ' + (HARNESS_LABELS[p.harness] || p.harness) + ' · ' + effortLabel(effortValue(p))));
+  if (p.edited) head.append(el('span', 'tag tag--edited', 'edited'));
+  if (p.custom) head.append(el('span', 'tag tag--edited', 'your own'));
   head.append(el('span', 'spacer'));
   const edit = el('button', null, 'Edit');
   edit.onclick = () => openEditor(card, p);
   head.append(edit);
-  head.append(removeButton(p, 'Remove'));
+  if (p.edited) head.append(resetButton(p));
+  if (p.custom) head.append(removeButton(p, 'Remove'));
   card.append(head);
-  // A saved agent shows what a task finds it by, its tier, and how it is
-  // billed; the model card above says what the model is for.
-  appendProfile(card, p, ['workTier', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
+  // The row shows what a task finds it by, its tier, and how it is billed;
+  // the model card above says the rest once for the model.
+  appendProfile(card, p, ['workTier', 'tierNote', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
   if (editors.has(p.name)) card.append(editors.get(p.name));
   return card;
 }
 
 /**
- * One list: every ready-made agent of the catalog, and every agent defined by
- * hand, grouped by model. A catalog entry not yet saved offers Add; once
- * saved it shows as the saved agent itself, editable, in the same place.
+ * One list: every catalog agent, with the human's edits on it, and every
+ * agent defined by hand, grouped as the controls say. Show narrows it to
+ * what is the human's: the edited and the custom.
  */
 function renderAgents(data) {
   const host = document.querySelector('#agents');
   const editors = new Map([...host.querySelectorAll('.member[data-agent-name]')]
     .map(card => [card.dataset.agentName, card.querySelector('form')]).filter(([, form]) => form));
   host.innerHTML = '';
-  const catalog = Object.entries(data.catalog).flatMap(([harness, entries]) => entries.map(p => ({ ...p, harness })));
-  const matched = new Set(catalog.flatMap(entry => catalogMatches(entry, data.agents).map(a => a.name)));
-  const custom = data.agents.filter(a => !matched.has(a.name)).map(a => ({ ...a, custom: true }));
   const show = document.querySelector('#agents-section [name=show]').value;
-  const entries = [...catalog, ...custom].filter(e => show === 'all' || e.custom || catalogMatches(e, data.agents).length > 0);
-  document.querySelector('#lede').textContent = data.agents.length === 0
-    ? "The agents a project's team is picked from: add one from the catalog, or define your own below."
-    : data.agents.length + " saved. A project's team is picked from them; a saved agent's tier is edited here.";
+  const entries = data.agents.filter(p => show === 'all' || p.custom || p.edited);
+  const mine = data.agents.filter(p => p.custom || p.edited).length;
+  document.querySelector('#lede').textContent = data.agents.length + ' agents, the catalog’s and your own; a project’s team is picked from them.' +
+    (mine === 0 ? '' : ' ' + mine + ' ' + (mine === 1 ? 'is' : 'are') + ' yours: edited or defined here.');
   const groups = browsingGroups(entries, '#agents-section');
   if (groups.length === 0) { host.append(el('p', 'empty', 'No agents match these filters.')); return; }
   for (const group of groups) {
     const section = groupSection(group, ['workTier', 'tierNote', 'benchmarks']);
-    for (const entry of group.rows) {
-      const saved = entry.custom ? [entry] : catalogMatches(entry, data.agents);
-      if (saved.length === 0) section.append(offerRow(entry, group, data));
-      else for (const agent of saved) section.append(memberCard(agent, group, data, editors));
-    }
+    for (const agent of group.rows) section.append(agentCard(agent, group, editors));
     host.append(section);
   }
 }
@@ -593,7 +576,7 @@ function openEditor(card, agent) {
   const form = el('form', 'form');
   const fields = [
     ['model', agent.model, 'model'],
-    ['effort', agent.effort ?? '', 'effort (blank for none)'],
+    ['effort', agent.effort ?? '', agent.custom ? 'effort (blank for none)' : 'effort (blank: the catalog’s)'],
   ];
   for (const [name, value, placeholder] of agent.harness === 'image' ? [] : fields) {
     const input = document.createElement('input');
@@ -663,55 +646,32 @@ function removeButton(agent, label) {
   return button;
 }
 
-const pendingAdds = new Set();
-function catalogMatches(entry, agents) {
-  return agents.filter(p => p.preset === entry.preset || (!p.preset && p.name === entry.name &&
-    p.harness === entry.harness && p.model === entry.model && (p.effort || '') === (entry.effort || '')));
-}
-function catalogState(entry, agents) {
-  if (pendingAdds.has(entry.preset)) return 'Adding…';
-  return agents.some(p => p.name === entry.name) ? 'Name in use' : 'Add';
-}
-/** A ready-made agent not yet saved: what it is, and Add. */
-function offerRow(entry, group, data) {
-  const row = el('div', 'offer');
-  row.append(el('span', 'offer__name', entry.name));
-  const what = el('div', 'offer__what');
-  what.append(el('span', 'offer__model', group.modelGroup ? (HARNESS_LABELS[entry.harness] || entry.harness) : entry.profile.modelLabel + ' · ' + (HARNESS_LABELS[entry.harness] || entry.harness) + ' · ' + effortLabel(effortValue(entry))));
-  appendProfile(what, entry, ['workTier', 'tierNote', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
-  row.append(what);
-  const state = catalogState(entry, data.agents);
-  const add = el('button', null, state);
-  add.disabled = state !== 'Add';
-  add.onclick = async () => {
-    if (pendingAdds.has(entry.preset)) return;
-    pendingAdds.add(entry.preset);
-    add.disabled = true;
-    add.textContent = 'Adding…';
+const pendingResets = new Set();
+/** A catalog agent back as the catalog has it: its edits go. */
+function resetButton(agent) {
+  const button = el('button', null, pendingResets.has(agent.name) ? 'Resetting…' : 'Reset');
+  button.disabled = pendingResets.has(agent.name);
+  button.onclick = async () => {
+    if (pendingResets.has(agent.name)) return;
+    pendingResets.add(agent.name);
+    button.disabled = true;
+    button.textContent = 'Resetting…';
     const status = document.querySelector('#roster-note');
     status.textContent = '';
     try {
-      const response = await fetch('/api/agents', {
-        method: 'POST', headers,
-        body: JSON.stringify({ name: entry.name, harness: entry.harness, model: entry.model,
-          ...(entry.effort ? { effort: entry.effort } : {}), description: entry.description, preset: entry.preset }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Could not add agent');
+      const response = await fetch('/api/agents/' + encodeURIComponent(agent.name) + '/reset', { method: 'POST', headers, body: '{}' });
+      if (!response.ok) throw new Error((await response.json()).error || 'Could not reset agent');
     } catch (error) {
-      status.textContent = error.message || 'Could not add agent';
+      status.textContent = error.message || 'Could not reset agent';
     } finally {
-      pendingAdds.delete(entry.preset);
+      pendingResets.delete(agent.name);
       try { await load(); } catch {
         renderLists();
-        if (!status.textContent) status.textContent = 'Could not refresh agents. Reopen Agents to try again.';
+        if (!status.textContent) status.textContent = 'Could not refresh agents. Reopen this screen to try again.';
       }
     }
   };
-  const actions = el('div', 'offer__actions');
-  actions.append(add);
-  row.append(actions);
-  return row;
+  return button;
 }
 
 function renderForm(data) {
@@ -739,19 +699,6 @@ function showEfforts(efforts, harness) {
   const list = document.querySelector('#effort-options');
   list.innerHTML = '';
   for (const e of efforts[harness] ?? []) list.appendChild(new Option(e, e));
-}
-
-async function post(path, body, note) {
-  const status = document.querySelector('#roster-note');
-  status.textContent = note;
-  const res = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
-  const data = await res.json();
-  if (!res.ok) { status.textContent = data.error; return; }
-  status.textContent = data.applied.length === 0
-    ? 'already up to date'
-    : data.applied.map((a) => a.name + ': ' + a.changes
-        .map((c) => c.field + ' → ' + (c.to ?? '-')).join(', ')).join(' · ');
-  load();
 }
 
 function renderLists() { if (LAST !== null) renderAgents(LAST); }
