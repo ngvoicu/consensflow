@@ -7,7 +7,7 @@ import { tempEnv } from './helpers.mjs'
 
 test('behavioral evaluation copies its roster into a private app root and preserves native profiles', () => {
   const t = tempEnv()
-  addAgent({ name: 'zeus', harness: 'codex', model: 'example' }, t.env)
+  addAgent({ name: 'mine', harness: 'codex', model: 'example' }, t.env)
   const before = readFileSync(rosterPath(t.env), 'utf8')
   const stage = makeStage({}, t.env)
   try {

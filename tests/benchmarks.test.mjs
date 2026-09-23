@@ -302,9 +302,10 @@ test('API, saved display profiles and edits use the same cache without credentia
       headers: { authorization: 'Bearer ui-token' },
     })
     const data = await result.json()
-    assert.equal(data.agents[0].profile.benchmarks.scores.intelligence, 51)
+    const mine = data.agents.find((p) => p.name === agent.name)
+    assert.equal(mine.profile.benchmarks.scores.intelligence, 51)
     const disk = JSON.parse(readFileSync(join(t.env.CONSENSFLOW_HOME, 'agents.json'), 'utf8'))
-    assert.deepEqual(data.agents[0].profile, disk.agents[0].profile)
+    assert.equal(Object.hasOwn(disk.agents[0], 'profile'), false, 'the file keeps no display data')
     assert.ok(data.benchmarks.metrics.some((m) => m.id === 'hallucinations'))
     assert.ok(!JSON.stringify(data).includes(KEY))
     for (const path of ['', '/library']) {
@@ -312,7 +313,7 @@ test('API, saved display profiles and edits use the same cache without credentia
       assert.ok(!html.includes(KEY))
     }
     editAgent(agent.name, { effort: 'ultra' }, t.env)
-    assert.equal(listAgents(t.env)[0].profile.benchmarks, undefined)
+    assert.equal(listAgents(t.env).find((p) => p.name === agent.name).profile.benchmarks, undefined)
   } finally {
     await server?.close()
     ledger?.close()

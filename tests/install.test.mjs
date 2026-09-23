@@ -86,7 +86,7 @@ it('app preparation owns its launcher and integrations, not role documents or gl
       mkdirSync(dirname(file), { recursive: true })
       writeFileSync(file, 'global canary')
     }
-    addAgent({ name: 'zeus', harness: 'claude', model: 'example' }, t.env)
+    addAgent({ name: 'mine', harness: 'claude', model: 'example' }, t.env)
     for (let i = 0; i < 2; i++) installation.prepareApp(t.env)
     assert.ok(existsSync(join(t.env.CONSENSFLOW_BIN_DIR, 'cf')))
     assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'roles')), false)

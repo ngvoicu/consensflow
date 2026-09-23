@@ -739,7 +739,6 @@ test('a saved agent shows its tier and route in its entry’s place; no card nam
     { name: 'draw', harness: 'image', model: 'codex-image' },
   ])
   try {
-    const pills = (row, name) => row.getByRole('list', { name }).getByRole('listitem')
     // A saved catalog entry takes the row: no Add, and no second description of the model.
     await expect(offer(page, 'maia')).toHaveCount(0)
     await expect(offer(page, 'electra')).toHaveCount(0)

@@ -120,13 +120,17 @@ describe('the page protocol of the new core', () => {
   it('lists the saved agents for the team picker and adds one with its own harness', async () => {
     await withPage(async ({ operations }) => {
       const { agents } = await operations['agents.list']({})
+      // Every catalog agent is on offer; the two rows in the file override theirs.
+      const mine = agents.filter((a) => ['zeus', 'diana'].includes(a.name))
       assert.deepEqual(
-        agents.map((a) => [a.name, a.harness, a.model]),
+        mine.map((a) => [a.name, a.harness, a.model]),
         [
-          ['zeus', 'claude', 'claude-sonnet-5'],
           ['diana', 'codex', 'gpt-5.6-luna'],
+          ['zeus', 'claude', 'claude-sonnet-5'],
         ],
+        'in the catalog’s order, with the file’s overrides on them',
       )
+      assert.ok(agents.length > 100)
       const { project } = await operations['project.open']({
         directory: '/work/app',
         harness: 'pi',
@@ -160,19 +164,18 @@ describe('the page protocol of the new core', () => {
         })}\n`,
       )
       const next = await operations['project.open']({ directory: '/work/api', harness: 'pi' })
-      const [zeus] = (await operations['agents.list']({})).agents
+      const { agents } = await operations['agents.list']({})
+      const zeus = agents.find((a) => a.name === 'zeus')
+      const diana = agents.find((a) => a.name === 'diana')
+      // zeus is the human's own opencode agent now; diana is the catalog's, as it has her.
       assert.deepEqual(opened[1].team, [
-        {
-          roles: ['worker'],
-          agent: 'zeus',
-          harness: 'opencode',
-          tier: zeus.profile.workTier,
-        },
+        { roles: ['worker'], agent: 'zeus', harness: 'opencode', tier: zeus.profile.workTier },
+        { roles: ['reviewer'], agent: 'diana', harness: 'codex', tier: diana.profile.workTier },
       ])
-      assert.ok(zeus.profile.workTier, 'a saved agent always has a tier')
+      assert.ok(zeus.profile.workTier, 'an agent always has a tier')
       assert.deepEqual(
         next.project.participants.map((p) => p.handle),
-        ['human', 'lead', 'zeus'],
+        ['human', 'lead', 'zeus', 'diana'],
       )
     })
   })

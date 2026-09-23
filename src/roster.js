@@ -9,19 +9,23 @@ import {
 } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { readBenchmarkCache, withBenchmarks } from '../hosts/lib/benchmarks.js'
 import {
+  AGENT_PRESETS,
   agentProfile,
-  syncAgentWithPreset,
   validateKimiEffort,
   validateWorkTier,
 } from '../hosts/lib/presets.js'
 
 /**
- * agents.json stores the saved execution configuration and display profile.
- * Reads map native kind/thinking fields to the app's harness/effort view;
- * writes preserve fields outside the edited configuration, including older
- * and future schema fields.
+ * The roster: every catalog agent, with the human's overrides on it, and the
+ * agents defined by hand. `agents.json` keeps only what is the human's: a
+ * custom agent in full, and for a catalog agent the fields changed on it
+ * (model, effort, tier, description), keyed by the catalog entry. Reads
+ * merge the catalog with the file, so a release that moves an entry reaches
+ * every field the human did not touch. Rows an older build saved from the
+ * catalog in full read as overrides of what differs, and `normalizeRoster`
+ * folds them at daemon start. Reads map native kind/thinking fields to the
+ * app's harness/effort view.
  *
  * Every function takes the environment explicitly — nothing reads
  * process.env — so tests run against throwaway homes.
@@ -161,32 +165,91 @@ function loadDocument(env) {
   return { ...rest, schemaVersion: parsed.schemaVersion ?? 1, agents: rows }
 }
 
-function saveDocument(document, env, benchmarks = readBenchmarkCache(rosterHome(env))) {
-  for (const row of document.agents) {
-    delete row.skillsPolicy
-    delete row.skillPaths
-    delete row.skills
-    delete row.skillPath
-    row.profile = withBenchmarks(row, agentProfile(row), benchmarks)
-  }
+/** Display data older builds wrote into the file; recomputed on read now, never stored again. */
+const STALE_FIELDS = ['skillsPolicy', 'skillPaths', 'skills', 'skillPath', 'profile']
+
+function saveDocument(document, env) {
+  for (const row of document.agents) for (const field of STALE_FIELDS) delete row[field]
   const path = rosterPath(env)
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`)
 }
 
+const CATALOG_BY_PRESET = new Map(AGENT_PRESETS.map((preset) => [preset.preset, preset]))
+const CATALOG_BY_ID = new Map(AGENT_PRESETS.map((preset) => [preset.id, preset]))
 /** The pi runner reads `thinking`; every other runner reads `effort`. */
-function effortOf(row) {
-  return row.kind === 'pi' ? (row.thinking ?? row.effort) : (row.effort ?? undefined)
+const effortKey = (kind) => (kind === 'pi' ? 'thinking' : 'effort')
+/** What the human may change on a catalog agent; its harness is the catalog's. */
+const overridable = (kind) => ['model', effortKey(kind), 'description', 'workTier']
+const set = (value) => value !== undefined && value !== null && value !== ''
+
+/** A catalog entry as the row the launcher runs when nothing on it is overridden. */
+function catalogRow(preset) {
+  const effort = preset.effort ?? preset.thinking
+  return {
+    id: preset.id,
+    name: preset.name,
+    kind: preset.kind,
+    model: preset.model,
+    ...(effort ? { [effortKey(preset.kind)]: effort } : {}),
+    // The one-line label is what a roster row calls itself; the preset's
+    // own description is the catalog card's paragraph.
+    description: preset.label ?? preset.description,
+    preset: preset.preset,
+  }
 }
+
+/** The fields of a stored row that differ from its catalog entry: the human's overrides. */
+function overridesOf(row, preset) {
+  const base = catalogRow(preset)
+  const own = {}
+  for (const field of overridable(preset.kind)) {
+    if (set(row[field]) && row[field] !== base[field]) own[field] = row[field]
+  }
+  return own
+}
+
+/**
+ * The catalog entry a stored row overrides, if it is one: by the provenance
+ * it carries, else by a matching name and harness (a copy an older build
+ * saved, or a row released from its entry today). A custom row that took a
+ * catalog name on another harness is its own agent.
+ */
+function entryOf(row) {
+  const byPreset = row.preset === undefined ? undefined : CATALOG_BY_PRESET.get(row.preset)
+  if (byPreset !== undefined && byPreset.id === row.id) return byPreset
+  const byId = CATALOG_BY_ID.get(row.id)
+  return byId !== undefined && byId.kind === row.kind ? byId : undefined
+}
+
+/**
+ * The roster as the app sees it, in the file's shape: every catalog agent
+ * with the human's overrides on it (marked `edited`), then the agents
+ * defined by hand (marked `custom`). A custom row with a catalog name hides
+ * that entry.
+ */
+function rows(document) {
+  const overrides = new Map()
+  const custom = []
+  for (const row of document.agents) {
+    const entry = entryOf(row)
+    if (entry === undefined) custom.push(row)
+    else overrides.set(entry.preset, row)
+  }
+  const hidden = new Set(custom.map((row) => row.id))
+  const catalog = AGENT_PRESETS.filter((preset) => !hidden.has(preset.id)).map((preset) => {
+    const stored = overrides.get(preset.preset)
+    const own = stored === undefined ? {} : overridesOf(stored, preset)
+    const row = { ...catalogRow(preset), ...own }
+    return Object.keys(own).length > 0 ? { ...row, edited: true } : row
+  })
+  return [...catalog, ...custom.map((row) => ({ ...row, custom: true }))]
+}
+
+const effortOf = (row) => row[effortKey(row.kind)] ?? undefined
 
 function toView(row) {
   const harness = KIND_TO_HARNESS[row.kind]
-  // The profile is computed afresh; only the benchmark scores the file caches
-  // come along, never a field an older ConsensFlow stored (role pills, tags).
-  const profile = {
-    ...agentProfile(row),
-    ...(row.profile?.benchmarks === undefined ? {} : { benchmarks: row.profile.benchmarks }),
-  }
   return {
     name: row.id,
     harness: harness ?? row.kind,
@@ -195,39 +258,57 @@ function toView(row) {
     ...(effortOf(row) ? { effort: effortOf(row) } : {}),
     ...(row.description ? { description: row.description } : {}),
     ...(row.preset ? { preset: row.preset } : {}),
-    profile,
+    ...(row.custom ? { custom: true } : {}),
+    ...(row.edited ? { edited: true } : {}),
+    profile: agentProfile(row),
     ...(harness === undefined ? { unsupported: true } : {}),
   }
 }
 
 /**
- * The row as it sits in the file, not the manager's view of it.
- *
- * The runner and the packet builder are the payload's, and they speak the
- * stored shape (`kind`, `thinking`) — handing them `listAgents()` output
- * would quietly drop the fields they run on.
+ * The row the launcher runs, in the stored shape (`kind`, `thinking`): the
+ * catalog entry with the human's overrides, or the custom row. The runner
+ * and the packet builder speak that shape, so `listAgents()` output would
+ * drop the fields they run on.
  */
 export function agentRow(name, env) {
   const wanted = String(name ?? '').replace(/^@/, '')
-  return loadDocument(env).agents.find((row) => row.id === wanted)
-}
-
-/** Refresh display metadata only; never change the saved model or custom fields. */
-export function refreshAgentProfiles(env, benchmarks = readBenchmarkCache(rosterHome(env))) {
-  const document = loadDocument(env)
-  if (
-    document.agents.some(
-      (row) =>
-        JSON.stringify(row.profile) !==
-        JSON.stringify(withBenchmarks(row, agentProfile(row), benchmarks)),
-    )
-  ) {
-    saveDocument(document, env, benchmarks)
-  }
+  return rows(loadDocument(env)).find((row) => row.id === wanted)
 }
 
 export function listAgents(env) {
-  return loadDocument(env).agents.map(toView)
+  return rows(loadDocument(env)).map(toView)
+}
+
+/**
+ * Folds what older builds wrote into the shape the file keeps now: a full
+ * copy of a catalog entry becomes the overrides that differ from it (or
+ * nothing), and stored display data goes. Says whether the file changed.
+ */
+export function normalizeRoster(env) {
+  const before = JSON.stringify(loadDocument(env))
+  const document = loadDocument(env)
+  document.agents = document.agents.flatMap((row) => {
+    for (const field of STALE_FIELDS) delete row[field]
+    const entry = entryOf(row)
+    if (entry === undefined) return [row]
+    const own = overridesOf(row, entry)
+    if (Object.keys(own).length === 0) return []
+    return [
+      {
+        id: entry.id,
+        name: entry.name,
+        kind: entry.kind,
+        preset: entry.preset,
+        ...(row.createdAt ? { createdAt: row.createdAt } : {}),
+        ...(row.updatedAt ? { updatedAt: row.updatedAt } : {}),
+        ...own,
+      },
+    ]
+  })
+  if (JSON.stringify(document) === before) return false
+  saveDocument(document, env)
+  return true
 }
 
 function validateAdd(input) {
@@ -235,6 +316,9 @@ function validateAdd(input) {
     throw new Error(
       `agent names are lowercase [a-z0-9-] starting with a letter; got ${JSON.stringify(input.name)}`,
     )
+  }
+  if (CATALOG_BY_ID.has(input.name)) {
+    throw new Error(`${input.name} is in the catalog already: edit it, or pick another name`)
   }
   if (!HARNESSES.includes(input.harness)) {
     throw new Error(
@@ -246,6 +330,7 @@ function validateAdd(input) {
   }
 }
 
+/** An agent defined by hand: the catalog's agents are there already. */
 export function addAgent(input, env) {
   validateAdd(input)
   validateKimiEffort(input)
@@ -265,45 +350,16 @@ export function addAgent(input, env) {
     updatedAt: now,
     model: input.model,
     ...(input.workTier == null ? {} : { workTier: input.workTier }),
-    ...(input.effort
-      ? input.harness === 'pi'
-        ? { thinking: input.effort }
-        : { effort: input.effort }
-      : {}),
+    ...(input.effort ? { [effortKey(HARNESS_TO_KIND[input.harness])]: input.effort } : {}),
     ...(input.description ? { description: input.description } : {}),
-    // Which catalog entry this came from, when it came from one. The payload
-    // has always read this field; the manager never wrote it, which is why a
-    // agent added in the app could never be told its model had moved.
-    ...(input.preset ? { preset: input.preset } : {}),
   }
   document.agents.push(row)
   saveDocument(document, env)
-  return toView(row)
+  return toView({ ...row, custom: true })
 }
 
-function findRow(document, name) {
-  const row = document.agents.find((p) => p.id === name)
-  if (row === undefined) throw new Error(`no agent named ${name}`)
-  return row
-}
-
-export function editAgent(name, patch, env) {
-  validateWorkTier(patch.workTier)
-  const document = loadDocument(env)
-  const row = findRow(document, name)
-  const supported = KIND_TO_HARNESS[row.kind] !== undefined
-
-  // Two different refusals that used to be one: a kind this build cannot run
-  // at all, and `image`, which it runs but which has no effort to set —
-  // the image route takes a prompt, not a thinking level.
-  if (patch.effort !== undefined && (!supported || row.kind === 'image')) {
-    throw new Error(
-      supported
-        ? `${name} is an image agent: it has no effort level — only its model and description can be edited`
-        : `${name} is a ${row.kind} agent, which this build does not run; only its model and description can be edited here`,
-    )
-  }
-
+/** The patch on a row of the file's shape: the effort under the key its kind reads. */
+function applyPatch(row, patch) {
   if (patch.model !== undefined) {
     if (typeof patch.model !== 'string' || patch.model.length === 0) {
       throw new Error('an agent needs a model (any identifier its harness accepts)')
@@ -316,52 +372,99 @@ export function editAgent(name, patch, env) {
     else row.workTier = patch.workTier
   }
   if (patch.effort !== undefined) {
-    const key = row.kind === 'pi' ? 'thinking' : 'effort'
+    const key = effortKey(row.kind)
     if (patch.effort === '' || patch.effort === null) delete row[key]
     else row[key] = patch.effort
     // Never leave a stale value in the key this kind does not read.
     delete row[key === 'thinking' ? 'effort' : 'thinking']
   }
-  // A model or effort of the human's own choosing is theirs to keep: the
-  // agent no longer follows its catalog entry.
-  if ((patch.model !== undefined || patch.effort !== undefined) && row.preset !== undefined) {
-    delete row.preset
-  }
   validateKimiEffort(row)
-  row.updatedAt = new Date().toISOString()
-
-  saveDocument(document, env)
-  return toView(row)
 }
 
-export function removeAgent(name, env) {
-  const document = loadDocument(env)
-  findRow(document, name)
-  document.agents = document.agents.filter((p) => p.id !== name)
-  saveDocument(document, env)
+function refuseEffortEdit(name, kind) {
+  const supported = KIND_TO_HARNESS[kind] !== undefined
+  // Two different refusals that used to be one: a kind this build cannot run
+  // at all, and `image`, which it runs but which has no effort to set —
+  // the image route takes a prompt, not a thinking level.
+  throw new Error(
+    supported
+      ? `${name} is an image agent: it has no effort level — only its model and description can be edited`
+      : `${name} is a ${kind} agent, which this build does not run; only its model and description can be edited here`,
+  )
 }
 
 /**
- * Re-resolves preset-backed agents against the catalog: what the app ships
- * is what the roster has. Every field the preset owns moves — kind, model,
- * effort/thinking, and since 2026-08-27 the description, because a label
- * naming the wrong model is what the skill table shows a lead. A row with no
- * `preset` (defined by hand, or edited since) is never touched. The daemon
- * runs this at start and the Agents screen on every read.
+ * Edits a catalog agent by storing only what now differs from its entry,
+ * and a custom agent in place. A blank effort on a catalog agent means the
+ * catalog's own.
  */
-export function syncAgents(env, options = {}) {
-  const { name, dryRun = false } = options
+export function editAgent(name, patch, env) {
+  validateWorkTier(patch.workTier)
   const document = loadDocument(env)
-  const applied = []
+  const stored = document.agents.find((row) => row.id === name)
+  const entry = CATALOG_BY_ID.get(name)
+  if (entry !== undefined && (stored === undefined || entryOf(stored) === entry)) {
+    if (patch.effort !== undefined && entry.kind === 'image') refuseEffortEdit(name, entry.kind)
+    const current = {
+      ...catalogRow(entry),
+      ...(stored === undefined ? {} : overridesOf(stored, entry)),
+    }
+    applyPatch(current, patch)
+    const own = overridesOf(current, entry)
+    const now = new Date().toISOString()
+    document.agents = document.agents.filter((row) => row !== stored)
+    if (Object.keys(own).length > 0) {
+      document.agents.push({
+        id: entry.id,
+        name: entry.name,
+        kind: entry.kind,
+        preset: entry.preset,
+        createdAt: stored?.createdAt ?? now,
+        updatedAt: now,
+        ...own,
+      })
+    }
+    saveDocument(document, env)
+    return listAgents(env).find((agent) => agent.name === name)
+  }
+  if (stored === undefined) throw new Error(`no agent named ${name}`)
+  if (
+    patch.effort !== undefined &&
+    (KIND_TO_HARNESS[stored.kind] === undefined || stored.kind === 'image')
+  ) {
+    refuseEffortEdit(name, stored.kind)
+  }
+  applyPatch(stored, patch)
+  stored.updatedAt = new Date().toISOString()
+  saveDocument(document, env)
+  return toView({ ...stored, custom: true })
+}
 
-  document.agents = document.agents.map((row) => {
-    if (name !== undefined && row.id !== name) return row
-    const { agent, changes } = syncAgentWithPreset(row)
-    if (changes.length === 0) return row
-    applied.push({ name: row.id, changes })
-    return dryRun ? row : { ...agent, updatedAt: new Date().toISOString() }
-  })
+/** A catalog agent back as the catalog has it: its overrides go. */
+export function resetAgent(name, env) {
+  const document = loadDocument(env)
+  const entry = CATALOG_BY_ID.get(name)
+  const stored = document.agents.find((row) => row.id === name)
+  if (entry === undefined || (stored !== undefined && entryOf(stored) !== entry)) {
+    if (stored === undefined) throw new Error(`no agent named ${name}`)
+    throw new Error(`${name} is your own agent: there is no catalog entry to reset it to`)
+  }
+  if (stored !== undefined) {
+    document.agents = document.agents.filter((row) => row !== stored)
+    saveDocument(document, env)
+  }
+  return listAgents(env).find((agent) => agent.name === name)
+}
 
-  if (!dryRun && applied.length > 0) saveDocument(document, env)
-  return applied
+/** Removes an agent defined by hand; a catalog agent is reset, never removed. */
+export function removeAgent(name, env) {
+  const document = loadDocument(env)
+  const stored = document.agents.find((row) => row.id === name)
+  const entry = CATALOG_BY_ID.get(name)
+  if (entry !== undefined && (stored === undefined || entryOf(stored) === entry)) {
+    throw new Error(`${name} is in the catalog: reset it instead of removing it`)
+  }
+  if (stored === undefined) throw new Error(`no agent named ${name}`)
+  document.agents = document.agents.filter((row) => row !== stored)
+  saveDocument(document, env)
 }

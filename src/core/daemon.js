@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { createAdapters } from '../adapters/index.js'
 import { Bridge } from '../bridge.js'
 import { openLedger } from '../ledger/index.js'
-import { agentRow, configRoot, listAgents, syncAgents } from '../roster.js'
+import { agentRow, configRoot, listAgents, normalizeRoster } from '../roster.js'
 import { agentsUi } from './agents-server.js'
 import { Credentials, startApi } from './api.js'
 import { Dispatcher } from './dispatcher.js'
@@ -46,16 +46,17 @@ export async function startCore(
   const trace = eventTrace(home)
   const ledger = openLedger(join(home, 'consensflow.db'), { trace })
   ledger.suspendForRestart()
-  // What the app ships is what the roster and the teams have: a catalog
-  // entry that moved reaches its saved agents, and every member's tier is
-  // read again from its agent, at start and after any change to the agents.
+  // What the app ships is what the roster and the teams have: the roster is
+  // the catalog plus the human's own agents and overrides, and every
+  // member's tier is read again from its agent, at start and after any
+  // change to the agents.
   const followCatalog = () => {
-    syncAgents(env)
     const agents = listAgents(env)
     return ledger.refreshMemberTiers(
       (name) => agents.find((agent) => agent.name === name)?.profile.workTier ?? null,
     )
   }
+  normalizeRoster(env)
   followCatalog()
 
   const credentials = new Credentials()

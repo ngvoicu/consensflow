@@ -16,7 +16,7 @@ import {
   listAgents,
   migrateStateRoot,
   removeAgent,
-  syncAgents,
+  resetAgent,
 } from '../src/roster.js'
 import { terminalRuntime } from '../src/terminal.js'
 
@@ -51,7 +51,7 @@ Usage: cf <command> [options]
   agent edit <name> [--model <m>] [--effort <e>] [--description <d>]
     [--work-tier critical|complex|standard|light|auto]
   agent remove <name>
-  agent sync [<name>] [--dry-run]             Refresh catalog-owned agent fields
+  agent reset <name>                          A catalog agent back as the catalog has it
   ui [--json] [--no-open]                     Run the app's daemon; open the agents screens
   doctor                                    Inspect runtime, roster and bundled roles
 
@@ -74,23 +74,21 @@ function fail(message) {
  * nobody knows still needs a harness and a model.
  */
 function resolveAdd(name, values) {
-  const entry = catalogEntry(name)
-  if (entry === undefined && (values.harness === undefined || values.model === undefined)) {
+  // Every catalog agent is in the roster already; an add defines one by hand.
+  if (catalogEntry(name) !== undefined) {
+    throw new Error(`${name} is in the catalog already: edit it with \`cf agent edit\``)
+  }
+  if (values.harness === undefined || values.model === undefined) {
     throw new Error(
-      `${name} is not in the catalog, so it needs --harness and --model (see \`cf catalog\`)`,
+      `${name} needs --harness and --model (see \`cf catalog\` for the ready-made ones)`,
     )
   }
-  // Provenance only when the catalog actually decided the agent: an
-  // explicit --model or --effort makes this the user's own definition, and a
-  // later sync must not drag it back to the preset.
-  const pinned = values.model !== undefined || values.effort !== undefined
   return {
     name,
-    harness: values.harness ?? entry?.harness,
-    model: values.model ?? entry?.model,
-    effort: values.effort ?? entry?.effort,
-    description: values.description ?? entry?.description,
-    ...(entry !== undefined && !pinned ? { preset: entry.preset } : {}),
+    harness: values.harness,
+    model: values.model,
+    effort: values.effort,
+    description: values.description,
   }
 }
 
@@ -122,7 +120,9 @@ function catalogVerb(rest) {
     }
     out('')
   }
-  out('add one with `cf agent add <name>` — no other flags needed')
+  out(
+    'every one of them is in your agents already; define your own with `cf agent add <name> --harness … --model …`',
+  )
 }
 
 function agentVerb(rest) {
@@ -194,34 +194,15 @@ function agentVerb(rest) {
       out(`removed ${name}`)
       return
     }
-    case 'sync': {
-      // Catalog-backed agents keep whatever model they were created
-      // with; this is how a moved preset reaches them — the description
-      // included, so the skill table never names a model the agent dropped.
-      // Anything you defined yourself (an explicit --model or --effort at add
-      // time records no preset) is left alone.
-      const applied = syncAgents(env, { name, dryRun: values['dry-run'] })
-      if (applied.length === 0) {
-        const backed = listAgents(env).filter((p) => p.preset !== undefined).length
-        out(
-          backed === 0
-            ? 'nothing to sync: no agent came from the catalog'
-            : `up to date: all ${backed} catalog-backed agents match the catalog`,
-        )
-        return
-      }
-      for (const { name: who, changes } of applied) {
-        for (const change of changes) {
-          out(
-            `${who.padEnd(14)}${change.field.padEnd(14)}${change.from ?? '-'} → ${change.to ?? '-'}`,
-          )
-        }
-      }
-      if (values['dry-run']) out('(dry run: nothing was written)')
+    case 'reset': {
+      const reset = resetAgent(name, env)
+      out(
+        `${reset.name}  ${reset.harness}  ${reset.model}  ${reset.effort ?? '-'}  (as the catalog has it)`,
+      )
       return
     }
     default:
-      fail('usage: cf agent add|list|edit|remove')
+      fail('usage: cf agent add|list|edit|reset|remove')
   }
 }
 

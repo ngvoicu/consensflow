@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path, { join } from 'node:path'
@@ -8,7 +8,7 @@ import { Script } from 'node:vm'
 import { agentsUi } from '../src/core/agents-server.js'
 import { Credentials, startApi } from '../src/core/api.js'
 import { openLedger } from '../src/ledger/index.js'
-import { listAgents } from '../src/roster.js'
+import { listAgents, rosterPath } from '../src/roster.js'
 import { tempEnv } from './helpers.mjs'
 
 /**
@@ -127,32 +127,38 @@ describe('the agents screens on the new core', () => {
   it('adds, edits and removes agents through the API, persisting each', async () => {
     const added = await api('/api/agents', {
       method: 'POST',
-      body: JSON.stringify({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }),
+      body: JSON.stringify({ name: 'mine', harness: 'claude', model: 'claude-opus-5' }),
     })
     assert.equal(added.status, 201)
     assert.deepEqual(
-      [listAgents(t.env)[0].name, listAgents(t.env)[0].workTier],
-      ['zeus', undefined],
+      [
+        listAgents(t.env).find((p) => p.name === 'mine').name,
+        listAgents(t.env).find((p) => p.name === 'mine').workTier,
+      ],
+      ['mine', undefined],
     )
-    const edited = await api('/api/agents/zeus', {
+    const edited = await api('/api/agents/mine', {
       method: 'PATCH',
       body: JSON.stringify({ model: 'claude-fable-5-1', workTier: 'complex' }),
     })
     assert.equal(edited.status, 200)
     assert.deepEqual(
-      [listAgents(t.env)[0].model, listAgents(t.env)[0].workTier],
+      [
+        listAgents(t.env).find((p) => p.name === 'mine').model,
+        listAgents(t.env).find((p) => p.name === 'mine').workTier,
+      ],
       ['claude-fable-5-1', 'complex'],
     )
-    const bad = await api('/api/agents/zeus', {
+    const bad = await api('/api/agents/mine', {
       method: 'PATCH',
       body: JSON.stringify({ workTier: 'huge' }),
     })
     assert.equal(bad.status, 400)
     assert.match((await bad.json()).error, /Work tier/)
     const listed = await (await api('/api/agents')).json()
-    assert.equal(listed.agents.length, 1)
-    assert.equal(listed.agents[0].workTier, 'complex')
-    assert.equal('tags' in listed.agents[0], false, 'an agent carries no tags')
+    const mine = listed.agents.find((p) => p.name === 'mine')
+    assert.deepEqual([mine.workTier, mine.custom], ['complex', true])
+    assert.equal('tags' in mine, false, 'an agent carries no tags')
     assert.ok(Array.isArray(listed.catalog.claude))
     assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'roles')), false, 'no role files prepared')
 
@@ -163,32 +169,43 @@ describe('the agents screens on the new core', () => {
     assert.equal(invalid.status, 400)
     assert.match((await invalid.json()).error, /names/)
 
-    const removed = await api('/api/agents/zeus', { method: 'DELETE' })
+    const removed = await api('/api/agents/mine', { method: 'DELETE' })
     assert.equal(removed.status, 204)
-    assert.deepEqual(listAgents(t.env), [])
+    assert.equal(
+      listAgents(t.env).some((p) => p.name === 'mine'),
+      false,
+    )
   })
 
-  it('lists a saved agent as the catalog has it now, and offers no update route', async () => {
-    await api('/api/agents', {
-      method: 'POST',
-      body: JSON.stringify({
-        name: 'diana',
-        harness: 'codex',
-        model: 'gpt-5.5',
-        effort: 'xhigh',
-        preset: 'diana',
-      }),
-    })
+  it('lists every catalog agent, edits one into an override, resets it, and refuses to add its name', async () => {
     const listed = await (await api('/api/agents')).json()
-    assert.equal(
-      listed.agents.find((p) => p.name === 'diana').model,
-      'gpt-5.6-luna',
-      'the catalog moved, so the saved agent moved with it on read',
+    assert.ok(
+      listed.agents.find((p) => p.name === 'gefjon'),
+      'the catalog is the roster',
     )
     assert.equal(Object.hasOwn(listed, 'drift'), false)
-    assert.equal(listAgents(t.env).find((p) => p.name === 'diana').model, 'gpt-5.6-luna')
+    const edited = await api('/api/agents/gefjon', {
+      method: 'PATCH',
+      body: JSON.stringify({ effort: 'low' }),
+    })
+    assert.equal(edited.status, 200)
+    assert.equal((await edited.json()).agent.effort, 'low')
+    const raw = () => JSON.parse(readFileSync(rosterPath(t.env), 'utf8'))
+    assert.deepEqual(
+      [listAgents(t.env).find((p) => p.name === 'gefjon').edited, raw().agents.length],
+      [true, 1],
+    )
+    const reset = await api('/api/agents/gefjon/reset', { method: 'POST', body: '{}' })
+    assert.equal(reset.status, 200)
+    assert.equal((await reset.json()).agent.effort, 'xhigh')
+    assert.equal(raw().agents.length, 0)
+    const added = await api('/api/agents', {
+      method: 'POST',
+      body: JSON.stringify({ name: 'gefjon', harness: 'codex', model: 'm' }),
+    })
+    assert.equal(added.status, 400)
+    assert.match((await added.json()).error, /in the catalog already/)
     assert.equal((await api('/api/agents/sync', { method: 'POST', body: '{}' })).status, 404)
-    await api('/api/agents/diana', { method: 'DELETE' })
   })
 
   it('exposes nothing that runs commands, and no retired route', async () => {

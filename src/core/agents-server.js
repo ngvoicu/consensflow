@@ -13,9 +13,8 @@ import {
   editAgent,
   HARNESSES,
   listAgents,
-  refreshAgentProfiles,
   removeAgent,
-  syncAgents,
+  resetAgent,
 } from '../roster.js'
 
 /**
@@ -80,6 +79,7 @@ export function agentsUi(
         path === '/api/agents' ||
         path === '/api/harnesses/check' ||
         path === '/api/harnesses/update' ||
+        /^\/api\/agents\/[^/]+\/reset$/.test(path) ||
         named !== null
       if (!page && !api) return null
       const header = request.headers.authorization ?? ''
@@ -93,10 +93,6 @@ export function agentsUi(
         if (request.method === 'GET' && path === '/harnesses') return html(harnessPage(token))
         if (request.method === 'GET' && path === '/api/agents') {
           const benchmarks = await artificialAnalysis.refresh()
-          // What the app ships is what the roster has: a catalog entry that
-          // moved reaches its saved agents here, before they are listed.
-          if (syncAgents(env).length > 0) onRosterChange()
-          refreshAgentProfiles(env, benchmarks)
           return json(200, {
             agents: listAgents(env).map((agent) => withProfile(agent, benchmarks)),
             harnesss: HARNESSES,
@@ -140,6 +136,12 @@ export function agentsUi(
               refresh: body.refresh === true,
             }),
           })
+        }
+        const reset = path.match(/^\/api\/agents\/([^/]+)\/reset$/)
+        if (reset !== null && request.method === 'POST') {
+          const agent = resetAgent(decodeURIComponent(reset[1]), env)
+          onRosterChange()
+          return json(200, { agent })
         }
         if (named !== null && request.method === 'PATCH') {
           const agent = editAgent(named[1], body, env)
