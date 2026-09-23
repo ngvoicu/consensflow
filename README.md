@@ -91,14 +91,14 @@ projects.
 - **Team.** Which saved agents this project may use, each with its roles and
   tier, plus the approval setting. The daemon assigns
   work only within the team.
-- **Agents** (Settings). The catalog and the agents you saved, as one list by
-  model. Each model's card says its work tier and its benchmark scores once;
-  a saved
-  catalog entry takes its row's place with its harness, tier, route and an
-  editor for model, effort and tier. A saved agent follows its catalog entry:
-  when a release moves the entry to a newer model, the agent and every team
-  it is on move with it, until you edit its model or effort, which makes it
-  your own. Define your own with any model string its harness accepts.
+- **Agents** (Settings). One roster: every catalog agent and every agent
+  you define, as one list by model. Each model's card says its work tier and
+  its benchmark scores once; each agent's row says its harness, effort, tier
+  and route, with Edit, plus Reset once you edited it and Remove when it is
+  yours. A catalog agent follows its entry: when a release moves the entry
+  to a newer model, the agent and every team it is on move with it, except
+  the fields you edited. Define your own with any model string its harness
+  accepts; a catalog name cannot be defined twice.
 - **Harnesses** (Settings). Which harness CLIs are installed, their versions
   and whether ConsensFlow's integration with each is in place.
 

@@ -1,7 +1,7 @@
 ---
 id: one-roster
 title: One roster — every catalog agent is an agent, edits are overrides, teams pick from all of them
-status: active
+status: completed
 created: 2026-09-23
 updated: 2026-09-23
 priority: high
@@ -69,12 +69,13 @@ team menu to show them all, but add also criticality in the list."
   harness, with the tier on each line.
 - [x] [IMPL-OR-06] Satisfies TEST-OR-05.
 
-### Phase D: the rest [pending]
+### Phase D: the rest [done]
 
-- [ ] [IMPL-OR-07] README, the smoke test, the brain.
+- [x] [IMPL-OR-07] README, the smoke test, the brain.
 
 ## TDD log
 
 - 2026-09-23, Phase A: roster, cf, page and server tests rewritten; Node 666 passed in the gate.
 - 2026-09-23, Phase B: the Agents screen's tests adapted or rewritten (30 with Harnesses); the board page's 50 still pass.
 - 2026-09-23, Phase C: the pick lists grouped by harness with the tier on each line; board page 38/38 in its own file.
+- 2026-09-23, Phase D: README, the packaged smoke test and the brain; the Candidate rebuilt on it.
