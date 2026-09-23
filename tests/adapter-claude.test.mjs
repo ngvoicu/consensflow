@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { claudeCodeAdapter } from '../src/adapters/claude-code.js'
+import { claudeCodeAdapter, DRAFT_GRACE_MS } from '../src/adapters/claude-code.js'
 
 /**
  * The Claude Code adapter (TEST-BDC-05, IMPL-BDC-06): how a Claude window is
@@ -252,14 +252,17 @@ describe('the Claude Code adapter', () => {
 
   it('pastes a message into the window by default, and waits while a human is typing there', async () => {
     await withHome(async ({ env }) => {
-      const adapter = claudeCodeAdapter({ env })
+      let clock = 1_000_000
+      const adapter = claudeCodeAdapter({ env, now: () => clock })
       const requests = []
       let draftLatched = false
+      let inputEpoch = 4
       const host = {
         async request(op, body) {
           requests.push([op, body])
-          if (op === 'pane.snapshot') return { ok: true, inputEpoch: 4, draftLatched }
+          if (op === 'pane.snapshot') return { ok: true, inputEpoch, draftLatched }
           if (op === 'pane.write_paste') return { ok: true }
+          if (op === 'draft.clear') return { ok: true, outcome: 'cleared' }
           return { ok: false, error: 'unexpected' }
         },
       }
@@ -275,6 +278,19 @@ describe('the Claude Code adapter', () => {
       ])
       draftLatched = true
       assert.equal(await adapter.ready({ launch, pane, host }), false)
+      // A latch nobody types behind any more lets go after the grace; a
+      // keystroke meanwhile starts it over.
+      clock += DRAFT_GRACE_MS - 1
+      assert.equal(await adapter.ready({ launch, pane, host }), false)
+      inputEpoch = 9
+      clock += 10
+      assert.equal(await adapter.ready({ launch, pane, host }), false, 'typed again: a fresh grace')
+      clock += DRAFT_GRACE_MS
+      assert.equal(await adapter.ready({ launch, pane, host }), true)
+      assert.deepEqual(requests.at(-1), [
+        'draft.clear',
+        { id: 's1-zeus', generation: 7, epoch: 9, submission: 'stale-9' },
+      ])
     })
   })
 

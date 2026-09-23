@@ -1635,6 +1635,39 @@ describe('the dispatcher traces what its windows do', () => {
   })
 })
 
+describe('a window that is not ready for a paste', () => {
+  it('says so once in the trace, and delivers when the window is ready', async () => {
+    const entries = []
+    let ready = false
+    await setup(
+      async (context) => {
+        const { id, open, task } = await withTiers(context)
+        context.adapter.ready = async () => ready
+        open()
+        await context.dispatcher.pass()
+        await context.dispatcher.pass()
+        assert.equal(task(1).state, 'working')
+        context.adapter.answer('zeus', 'Parser done.')
+        await context.dispatcher.pass()
+        await context.dispatcher.pass()
+        assert.equal(task(1).state, 'done')
+        const result = () => context.ledger.inbox(id('lead')).find((m) => m.kind === 'result')
+        assert.equal(result().state, 'queued', 'the lead is typing: the result waits')
+        const held = entries.filter(
+          (entry) => entry.kind === 'delivery.held' && entry.message === result().id,
+        )
+        assert.equal(held.length, 1, 'said once, not every pass')
+        assert.deepEqual([held[0].participant, held[0].project], ['lead', 1])
+        assert.match(held[0].reason, /not ready for a paste/)
+        ready = true
+        await context.dispatcher.pass()
+        assert.notEqual(result().state, 'queued', 'delivered once the window is ready')
+      },
+      { trace: (entry) => entries.push(entry) },
+    )
+  })
+})
+
 describe('a member whose saved agent is gone', () => {
   it('gives a member whose agent is gone no work: the task waits and the lead hears why', async () => {
     await setup(

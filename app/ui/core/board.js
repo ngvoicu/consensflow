@@ -718,7 +718,6 @@ export class TaskDrawer {
         'What the agent did',
         `${transcript.total} item${transcript.total === 1 ? '' : 's'}`,
       )
-      block.open = true
       if (transcript.total > transcript.items.length) {
         block.append(
           element(

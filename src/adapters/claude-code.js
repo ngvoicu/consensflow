@@ -25,7 +25,17 @@ import { executableFor } from './shared.js'
  * - Claude's own `sessions/<pid>.json` says busy, idle or waiting (and why);
  *   the transcript holds the conversation and says whether the turn settled.
  */
-export function claudeCodeAdapter({ env, peer = false, answers = cachedAnswers() }) {
+/** How long a human draft holds pastes after the last keystroke behind it. */
+export const DRAFT_GRACE_MS = 120_000
+
+export function claudeCodeAdapter({
+  env,
+  peer = false,
+  answers = cachedAnswers(),
+  now = Date.now,
+}) {
+  // The latched drafts seen per window: the input epoch and since when.
+  const drafts = new Map()
   const configDir = path.resolve(
     env.CLAUDE_CONFIG_DIR ?? path.join(env.HOME ?? homedir(), '.claude'),
   )
@@ -74,11 +84,36 @@ export function claudeCodeAdapter({ env, peer = false, answers = cachedAnswers()
       return {}
     },
 
-    /** Pasting waits for the human to finish typing; the peer inbox never touches their draft. */
+    /**
+     * Pasting waits for the human to finish typing; the peer inbox never
+     * touches their draft. The pane latches on any keystroke and only a clear
+     * lets go, so a latch nobody types behind any more (a stray key, or a
+     * submission the record never showed) would hold every message for good:
+     * after the grace it is let go and the paste goes ahead.
+     */
     async ready({ pane, host }) {
       if (peer) return true
       const snapshot = await host.request('pane.snapshot', pane)
-      return snapshot?.ok === true && snapshot.draftLatched !== true && !snapshot.pasteInFlight
+      if (snapshot?.ok !== true || snapshot.pasteInFlight) return false
+      const key = `${pane.id}#${pane.generation}`
+      if (snapshot.draftLatched !== true) {
+        drafts.delete(key)
+        return true
+      }
+      const seen = drafts.get(key)
+      if (seen === undefined || seen.epoch !== snapshot.inputEpoch) {
+        drafts.set(key, { epoch: snapshot.inputEpoch, since: now() })
+        return false
+      }
+      if (now() - seen.since < DRAFT_GRACE_MS) return false
+      const cleared = await host.request('draft.clear', {
+        ...pane,
+        epoch: snapshot.inputEpoch,
+        submission: `stale-${snapshot.inputEpoch}`,
+      })
+      if (cleared?.ok !== true || cleared.outcome !== 'cleared') return false
+      drafts.delete(key)
+      return true
     },
 
     async deliver({ launch, pane, host, text }) {

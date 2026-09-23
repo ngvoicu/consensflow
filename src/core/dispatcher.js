@@ -640,8 +640,25 @@ export class Dispatcher {
         pane: runtime.pane,
         host: this.#host,
       })
-      if (!ready) return
+      if (!ready) {
+        // Said once per message, so a wait is in the trace, not a mystery.
+        if (runtime.held !== message.id) {
+          runtime.held = message.id
+          const project = this.#projectOf(runtime.id)
+          this.#trace({
+            at: new Date(this.#now()).toISOString(),
+            kind: 'delivery.held',
+            project: project?.id ?? null,
+            participant: project?.participants.find((p) => p.id === runtime.id)?.handle ?? null,
+            message: message.id,
+            reason:
+              'the window is not ready for a paste: someone is typing there, or a paste is on its way',
+          })
+        }
+        return
+      }
     }
+    runtime.held = null
     this.#ledger.beginDelivery(message.id)
     let outcome
     try {
@@ -1006,6 +1023,7 @@ export class Dispatcher {
         launch: null,
         token: null,
         delivering: null,
+        held: null,
         quota: null,
         lowUntil: null,
         running: null,

@@ -920,6 +920,10 @@ test("shows what a task's window wrote, from ConsensFlow's own copy, under the t
   await open(page, data)
   await page.locator('button.card[data-task="2"]').click()
   const drawer = page.getByRole('complementary', { name: 'Task T-2' })
+  // Folded until asked: the brief and the result come first.
+  const fold = drawer.locator('details[data-section="transcript"]')
+  await expect(fold).not.toHaveAttribute('open', '')
+  await fold.locator('summary').click()
   await expect(drawer.locator('.transcript-more')).toHaveText('The last 3 of 5 items.')
   const items = drawer
     .getByRole('list', { name: "What T-2's window wrote" })
