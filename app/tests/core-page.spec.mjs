@@ -108,27 +108,23 @@ function model() {
         resumeOnStart: false,
       },
     ],
-    // Each saved agent carries the roles its model suits, as the Agents screen's pills say.
     agents: [
       {
         name: 'zeus',
         harness: 'claude',
         model: 'claude-sonnet-5',
         effort: 'high',
-        profile: { categories: ['worker', 'reviewer'] },
       },
       {
         name: 'diana',
         harness: 'codex',
         model: 'gpt-5.6-luna',
         effort: 'low',
-        profile: { categories: ['worker', 'reviewer'] },
       },
       {
         name: 'athena',
         harness: 'opencode',
         model: 'muse-spark',
-        profile: { categories: ['advisor', 'worker', 'reviewer'] },
       },
     ],
     boards: {
@@ -925,7 +921,7 @@ test("shows what a task's window wrote, from ConsensFlow's own copy, under the t
   await expect(items.nth(2)).toHaveAttribute('data-role', 'assistant')
 })
 
-test('shows the team as one row per member and role, and adds a saved agent in a role its model suits', async ({
+test('shows the team as one row per member and role, and adds any saved agent in any role', async ({
   page,
 }) => {
   await open(page)
@@ -947,11 +943,14 @@ test('shows the team as one row per member and role, and adds a saved agent in a
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
     'athena · opencode · muse-spark',
   ])
-  // An advisor: only the agents whose model suits advising.
+  // An advisor: every saved agent, since any agent may take any role.
   await dialog.getByLabel('Role').selectOption('advisor')
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
+    'zeus · claude · claude-sonnet-5 · high',
+    'diana · codex · gpt-5.6-luna · low',
     'athena · opencode · muse-spark',
   ])
+  await dialog.getByLabel('Agent').selectOption('athena')
   await dialog.getByRole('button', { name: 'Add to team' }).click()
   await expect
     .poll(() => calls(page, 'member.add'))
@@ -969,14 +968,10 @@ test('shows the team as one row per member and role, and adds a saved agent in a
   await expect
     .poll(() => calls(page, 'member.roles'))
     .toEqual([{ project: 1, agent: 'zeus', roles: ['worker', 'reviewer'] }])
-  // Nobody's model suits the image designer here, and the dialog says so.
+  // The image designer too: nothing on the card decides who may draw.
   await dialog.getByLabel('Role').selectOption('designer')
-  await expect(dialog.getByLabel('Agent').locator('option')).toHaveCount(0)
-  await expect(dialog.getByRole('button', { name: 'Add to team' })).toBeDisabled()
-  await expect(dialog.locator('#team-hint')).toHaveText(
-    'No saved agent suits Image designer yet: add one under Settings, Agents.',
-  )
-  await dialog.getByLabel('Role').selectOption('advisor')
+  await expect(dialog.getByLabel('Agent').locator('option')).toHaveCount(3)
+  await expect(dialog.getByRole('button', { name: 'Add to team' })).toBeEnabled()
   await expect(dialog.locator('#team-hint')).toBeHidden()
 })
 
@@ -1021,7 +1016,6 @@ test('keeps a pending removal and the chosen agent when the core redraws the tea
     name: 'hera',
     harness: 'pi',
     model: 'muse-spark',
-    profile: { categories: ['worker', 'reviewer'] },
   })
   await open(page, data)
   await page.getByRole('button', { name: 'Team' }).click()
@@ -1329,8 +1323,11 @@ test('starts a project in a chosen folder with the chosen lead, the team ticked 
   await dialog.getByLabel('The lead runs in').selectOption('opencode')
   await dialog.locator('[name="pickRole"]').selectOption('advisor')
   await expect(dialog.locator('[name="pickAgent"]').locator('option')).toHaveText([
+    'zeus · claude · claude-sonnet-5 · high',
+    'diana · codex · gpt-5.6-luna · low',
     'athena · opencode · muse-spark',
   ])
+  await dialog.locator('[name="pickAgent"]').selectOption('athena')
   await dialog.getByRole('button', { name: 'Add', exact: true }).click()
   await dialog.getByRole('button', { name: 'Remove Worker diana' }).click()
   await expect(table.locator('tbody tr')).toHaveCount(3)

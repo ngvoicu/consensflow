@@ -92,8 +92,8 @@ projects.
   tier, plus the approval setting. The daemon assigns
   work only within the team.
 - **Agents** (Settings). The catalog and the agents you saved, as one list by
-  model. Each model's card says its work tier, the roles it suits (Lead
-  candidate, Advisor, Worker, Reviewer) and its benchmark scores once; a saved
+  model. Each model's card says its work tier and its benchmark scores once;
+  a saved
   catalog entry takes its row's place with its harness, tier, route and an
   editor for model, effort and tier. Define your own with any model string its
   harness accepts.

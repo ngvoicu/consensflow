@@ -306,7 +306,8 @@ it('the lead can discover saved capability profiles without refreshing or changi
     const agents = JSON.parse(result.stdout).agents
     assert.equal(agents.length, 1)
     assert.equal(agents[0].name, 'hyperion')
-    assert.ok(agents[0].profile.categories.includes('worker'))
+    assert.equal(Object.hasOwn(agents[0].profile, 'categories'), false, 'no role pills')
+    assert.ok(agents[0].profile.workTier)
     assert.equal(readFileSync(rosterPath(t.env), 'utf8'), roster)
     assert.equal(readFileSync(role, 'utf8'), 'Keep existing lead context untouched')
   } finally {

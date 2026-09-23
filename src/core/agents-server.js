@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ArtificialAnalysis, METRICS, withBenchmarks } from '../../hosts/lib/benchmarks.js'
-import { CATEGORY_LABELS, WORK_TIERS } from '../../hosts/lib/presets.js'
+import { WORK_TIERS } from '../../hosts/lib/presets.js'
 import { agentProfile, CATALOG, EFFORTS } from '../catalog.js'
 import { HarnessAdmin } from '../harness-admin.js'
 import { harnessPage } from '../harness-page.js'
@@ -166,16 +166,11 @@ const BROWSING_CONTROLS = `
     )
       .map(([id, tier]) => `<option value="${id}">${tier.label}</option>`)
       .join('')}</select></label>
-    <label>Suits<select name="category" aria-label="Suits"><option value="all">Any role</option>${Object.entries(
-      CATEGORY_LABELS,
-    )
-      .map(([id, label]) => `<option value="${id}">${label}</option>`)
-      .join('')}</select></label>
     <label>Group by<select name="group" aria-label="Group by"><option value="none">None</option><option value="harness">Harness</option><option value="model-reasoning" selected>Model and reasoning</option><option value="tier">Work tier</option></select></label>
     <label>Sort by<select name="sort" aria-label="Sort by"><option value="default">Model and reasoning</option></select></label>
     <button type="button">Clear filters</button>
   </div>
-  <p class="tier-guide">The work tier is what a task finds an agent by. The role pills say which roles a model suits; a pill launches nothing.</p>
+  <p class="tier-guide">The work tier is what a task finds an agent by.</p>
   <p class="benchmark-source"></p>
   <details class="benchmark-guide"><summary>About benchmark scores</summary><div></div></details>`
 
@@ -304,16 +299,10 @@ const PAGE = (token) => `<!DOCTYPE html>
   .offer { align-items: start; }
   .offer__what { min-width: 0; overflow-wrap: anywhere; }
   .offer__what p { margin: 4px 0 0; }
-  .category-pills { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; padding: 0; margin: 6px 0; }
-  .category-pill { border: 1px solid currentColor; border-radius: 999px; padding: 2px 8px; font-size: 11px; line-height: 1.4; white-space: nowrap; color: var(--pill-worker); background: var(--panel); }
   .tier-pill { display: inline-block; width: fit-content; border: 1px solid var(--muted); border-radius: 999px; padding: 4px 10px; margin: 6px 0; font-size: 12px; color: var(--foam); background: var(--panel); }
   .tier-pill[data-tier=critical] { border-color: var(--pill-advisor); color: var(--pill-advisor); }
   .tier-note { margin: 2px 0 8px; font-size: 12px; color: var(--muted); }
   .tier-guide { color: var(--muted); font-size: 12px; }
-  .category-pill[data-category=lead] { color: var(--pill-lead); }
-  .category-pill[data-category=advisor] { color: var(--pill-advisor); }
-  .category-pill[data-category=reviewer] { color: var(--foam); }
-  .category-pill[data-category=designer] { color: var(--pill-lead); }
   .benchmark-source, .benchmark-guide, .benchmark-details, .benchmark-missing, .benchmark-context { font-size: 12px; color: var(--muted); }
   .benchmark-source { margin: -16px 0 4px; }
   .benchmark-guide { margin: 0 0 22px; }
@@ -384,7 +373,6 @@ const el = (tag, className, text) => {
 };
 
 const HARNESS_LABELS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi', kimi: 'Kimi', devin: 'Devin', image: 'Images' };
-const CATEGORY_LABELS = ${JSON.stringify(CATEGORY_LABELS)};
 const WORK_TIERS = ${JSON.stringify(WORK_TIERS)};
 const EFFORT_ORDER = ['ultra', 'max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'off', 'default', 'kimi-setting', 'not-applicable'];
 const effortValue = p => p.harness === 'image' ? 'not-applicable' : (p.effort || (p.harness === 'kimi' ? 'kimi-setting' : 'default'));
@@ -424,13 +412,12 @@ const selectedMetric = () => LAST?.benchmarks?.metrics.find(m => m.id === docume
 function browsingGroups(entries, sectionId) {
   const section = document.querySelector(sectionId);
   const needle = section.querySelector('input[type=search]').value.trim().toLowerCase();
-  const category = section.querySelector('[name=category]').value;
   const tier = section.querySelector('[name=tier]').value;
   const by = section.querySelector('[name=group]').value;
   const metric = selectedMetric();
-  const filtered = entries.filter(p => (tier === 'all' || p.profile.workTier === tier) && (category === 'all' || p.profile.categories.includes(category)) &&
+  const filtered = entries.filter(p => (tier === 'all' || p.profile.workTier === tier) &&
     [p.name, p.model, p.description, p.detail, p.harness, HARNESS_LABELS[p.harness], effortLabel(effortValue(p)),
-      WORK_TIERS[p.profile.workTier].label, p.profile.modelLabel, p.profile.routeLabel, p.profile.routeNote, ...p.profile.categories.map(c => CATEGORY_LABELS[c])]
+      WORK_TIERS[p.profile.workTier].label, p.profile.modelLabel, p.profile.routeLabel, p.profile.routeNote]
       .filter(Boolean).join(' ').toLowerCase().includes(needle));
   section.querySelector('.section-count').textContent = filtered.length + ' of ' + entries.length + ' shown';
   const groups = new Map();
@@ -443,7 +430,7 @@ function browsingGroups(entries, sectionId) {
   }
   for (const group of groups.values()) {
     group.rows.sort((a, b) => compareScores(a, b, metric) || compareAgents(a, b));
-    group.shared = group.modelGroup ? ['workTier', 'categories', 'benchmarks'].filter(field =>
+    group.shared = group.modelGroup ? ['workTier', 'benchmarks'].filter(field =>
       group.rows.every(p => JSON.stringify(p.profile[field]) === JSON.stringify(group.rows[0].profile[field]))) : [];
     // The tier's note goes with the tier pill: said once on the card when the tier is.
     if (group.shared.includes('workTier')) group.shared.push('tierNote');
@@ -470,18 +457,6 @@ function appendProfile(host, p, fields) {
     pill.title = tier.description;
     host.append(pill);
     if (fields.includes('tierNote') && p.profile.workTier === 'critical') host.append(el('p', 'tier-note', 'Important work only · No coding'));
-  }
-  if (fields.includes('categories') && p.profile.categories.length) {
-    const categories = el('ul', 'category-pills');
-    categories.setAttribute('aria-label', 'Roles');
-    categories.setAttribute('role', 'list');
-    for (const category of p.profile.categories) {
-      const pill = el('li', 'category-pill', CATEGORY_LABELS[category]);
-      pill.dataset.category = category;
-      pill.title = 'Suits the ' + CATEGORY_LABELS[category].toLowerCase() + ' role; launches nothing.';
-      categories.append(pill);
-    }
-    host.append(categories);
   }
   if (fields.includes('routeLabel')) {
     host.append(el('p', 'agent-route', p.profile.routeLabel));
@@ -622,7 +597,7 @@ function renderAgents(data) {
     host.append(all);
   }
   for (const group of groups) {
-    const section = groupSection(group, ['workTier', 'tierNote', 'categories', 'benchmarks']);
+    const section = groupSection(group, ['workTier', 'tierNote', 'benchmarks']);
     for (const entry of group.rows) {
       const saved = entry.custom ? [entry] : catalogMatches(entry, data.agents);
       if (saved.length === 0) section.append(offerRow(entry, group, data));
@@ -723,7 +698,7 @@ function offerRow(entry, group, data) {
   row.append(el('span', 'offer__name', entry.name));
   const what = el('div', 'offer__what');
   what.append(el('span', 'offer__model', group.modelGroup ? (HARNESS_LABELS[entry.harness] || entry.harness) : entry.profile.modelLabel + ' · ' + (HARNESS_LABELS[entry.harness] || entry.harness) + ' · ' + effortLabel(effortValue(entry))));
-  appendProfile(what, entry, ['workTier', 'tierNote', 'categories', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
+  appendProfile(what, entry, ['workTier', 'tierNote', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
   row.append(what);
   const state = catalogState(entry, data.agents);
   const add = el('button', null, state);
@@ -807,7 +782,6 @@ function renderLists() { if (LAST !== null) renderAgents(LAST); }
   for (const select of filters.querySelectorAll('select')) select.addEventListener('change', refresh);
   filters.querySelector('button').onclick = () => {
     filters.querySelector('input').value = '';
-    filters.querySelector('[name=category]').value = 'all';
     filters.querySelector('[name=tier]').value = 'all';
     filters.querySelector('[name=group]').value = 'model-reasoning';
     filters.querySelector('[name=sort]').value = 'default';

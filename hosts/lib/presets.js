@@ -1283,10 +1283,6 @@ export const WORK_TIERS = {
 };
 
 /** The roles a model suits, in the order the pills show them; a pill launches nothing. */
-export const CATEGORY_LABELS = {
-  lead: 'Lead candidate', advisor: 'Advisor', worker: 'Worker', reviewer: 'Reviewer', designer: 'Image designer',
-};
-
 export function validateWorkTier(value) {
   if (value != null && (typeof value !== 'string' || !Object.hasOwn(WORK_TIERS, value)))
     throw new Error('Work tier must be critical, complex, standard or light');
@@ -1307,9 +1303,6 @@ export function agentProfile(agent) {
   }
   validateWorkTier(agent.workTier);
   profile.workTier = agent.workTier ?? tier;
-  if (profile.workTier === 'critical') {
-    profile.categories = ['advisor'];
-  }
   return profile;
 }
 
@@ -1320,14 +1313,12 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
     modelKey: model && model !== 'default' ? model : 'devin-configured',
     modelLabel: model && model !== 'default' ? model : 'Devin configured model',
     routeLabel: 'Devin account',
-    categories: ['worker', 'reviewer'],
   }
   if (harness === 'image')
     return {
       modelKey: 'codex-image',
       modelLabel: 'Codex Images',
       routeLabel: 'Codex login',
-      categories: ['designer'],
     }
   const known = AGENT_PRESETS.some((p) => (p.kind === "claude-code" ? "claude" : p.kind) === harness && p.model === model)
   // Strip provider paths only AFTER an exact curated model/harness match.
@@ -1339,8 +1330,6 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
         // Contributor/free are reviewed pricing and data-use routes for Muse 1.3.
         .replace(/^muse-spark-1\.3-contributor(?:-free)?$/, 'muse-spark-1.3')
     : (model ?? "default")
-  const worker = ['claude', 'codex', 'pi', 'opencode', 'kimi'].includes(harness)
-  let lead = false
   const contributor = known && key === 'muse-spark-1.3' && model.includes('-contributor')
   const routeLabel = model?.startsWith('openrouter/')
     ? 'OpenRouter · API'
@@ -1355,25 +1344,11 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
             : ({ claude: 'Claude Code account', codex: 'Codex login', kimi: 'Kimi Code account' }[
                 harness
               ] ?? harness)
-  if (known) {
-    const supportedEffort =
-      (harness === 'kimi' ? KIMI_EFFORTS : ['low', 'medium', 'high', 'xhigh', 'max']).includes(effort) ||
-      (harness === 'codex' && effort === 'ultra')
-    if (supportedEffort) {
-      const roleModel = ['gpt-6-astra', 'claude-fable-5.1', 'gpt-5.6-sol', 'claude-opus-5'].includes(key)
-      lead = roleModel && ['xhigh', 'max', 'ultra'].includes(effort)
-    }
-  }
-  // A model fit to lead is fit to advise; every worker model reviews too (the
-  // two roles keep their own pills, on the same models for now); critical work
-  // is advice alone.
-  const categories = [...(lead ? ['lead', 'advisor'] : []), ...(worker ? ['worker', 'reviewer'] : [])]
   return {
     modelKey: key,
     modelLabel: (known && MODEL_LABELS[key]) || model || "Default",
     routeLabel: routeLabel + (contributor ? (model.endsWith('-free') ? ' · Contributor · Free' : ' · Contributor') : ''),
     ...(contributor ? { routeNote: 'Prompts and replies may train Meta models.' } : {}),
-    categories,
   }
 }
 

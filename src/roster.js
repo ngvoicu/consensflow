@@ -182,7 +182,12 @@ function effortOf(row) {
 
 function toView(row) {
   const harness = KIND_TO_HARNESS[row.kind]
-  const profile = { ...row.profile, ...agentProfile(row) }
+  // The profile is computed afresh; only the benchmark scores the file caches
+  // come along, never a field an older ConsensFlow stored (role pills, tags).
+  const profile = {
+    ...agentProfile(row),
+    ...(row.profile?.benchmarks === undefined ? {} : { benchmarks: row.profile.benchmarks }),
+  }
   return {
     name: row.id,
     harness: harness ?? row.kind,

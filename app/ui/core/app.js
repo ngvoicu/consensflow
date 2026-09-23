@@ -344,8 +344,6 @@ const ROLE_LABEL = {
   reviewer: 'Reviewer',
   designer: 'Image designer',
 }
-/** Whether a saved agent's model suits a role, as the Agents screen's pills say. */
-const suits = (agent, role) => (agent.profile?.categories ?? []).includes(role)
 /** "zeus · claude · claude-sonnet-5 · high": what an agent runs, effort included when it has one. */
 const agentLabel = (agent) =>
   [agent.name, agent.harness, agent.model ?? 'model unknown', agent.effort]
@@ -354,8 +352,8 @@ const agentLabel = (agent) =>
 
 /**
  * The two selects that add a member: a role first, then the saved agents
- * whose model suits it and do not hold it yet. The chosen agent survives a
- * redraw when it is still on offer.
+ * that do not hold it yet; any agent may take any role. The chosen agent
+ * survives a redraw when it is still on offer.
  */
 function rolePicker(roleSelect, agentSelect, hint, holding, onRefill = () => {}) {
   if (roleSelect.options.length === 0) {
@@ -369,7 +367,7 @@ function rolePicker(roleSelect, agentSelect, hint, holding, onRefill = () => {})
   const refill = () => {
     const role = roleSelect.value
     const chosen = agentSelect.value
-    const choices = state.agents.filter((agent) => suits(agent, role) && !holding(agent.name, role))
+    const choices = state.agents.filter((agent) => !holding(agent.name, role))
     agentSelect.replaceChildren(
       ...choices.map((agent) => {
         const option = element('option', null, agentLabel(agent))
@@ -382,9 +380,9 @@ function rolePicker(roleSelect, agentSelect, hint, holding, onRefill = () => {})
     // An empty list says why, so the answer is in the dialog, not in a guess.
     hint.textContent =
       choices.length === 0
-        ? state.agents.some((agent) => suits(agent, role))
-          ? `Every saved agent that suits ${ROLE_LABEL[role]} is on the team in that role already.`
-          : `No saved agent suits ${ROLE_LABEL[role]} yet: add one under Settings, Agents.`
+        ? state.agents.length === 0
+          ? 'No saved agents yet: add one under Settings, Agents.'
+          : `Every saved agent is on the team as ${ROLE_LABEL[role]} already.`
         : ''
     hint.hidden = choices.length > 0
     onRefill()
