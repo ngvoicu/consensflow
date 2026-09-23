@@ -142,7 +142,7 @@ describe('every tool ships a list of ready-made agents', () => {
     // then holds them to the same level. That pairing is the whole reason a
     // name means one thing here.
     for (const model of [
-      'opencode-go/grok-4.6',
+      'opencode-go/grok-4.7',
       'opencode-go/qwen3.8-max',
       'opencode-go/minimax-m3',
       'opencode-go/glm-5.3',
@@ -164,7 +164,7 @@ describe('every tool ships a list of ready-made agents', () => {
     // the fallback. A Go row that quietly replaced one would be a route change
     // wearing a name the roster already trusts.
     const models = Object.values(CATALOG).flatMap((entries) => entries.map((e) => e.model))
-    assert.ok(models.includes('openrouter/x-ai/grok-4.6'))
+    assert.ok(models.includes('openrouter/x-ai/grok-4.7'))
     assert.ok(models.includes('openrouter/moonshotai/kimi-k3'))
   })
 
@@ -322,7 +322,7 @@ it('ships all compatible low/medium choices with stable identities and Pi OpenRo
       assert.equal(entry.effort, effort)
     }
   }
-  assert.equal(Object.values(CATALOG).flat().length, 98)
+  assert.equal(Object.values(CATALOG).flat().length, 106)
   for (const name of ['orpheus', 'linus', 'erato', 'kronos', 'atlas']) {
     assert.match(catalogEntry(name).model, /^openrouter\/anthropic\//)
     assert.equal(catalogEntry(name).profile.routeLabel, 'OpenRouter · API')

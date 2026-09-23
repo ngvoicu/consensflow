@@ -305,6 +305,16 @@ export const AGENT_PRESETS = [
     effort: "xhigh",
   },
   {
+    preset: "theia",
+    id: "theia",
+    name: "Theia",
+    label: "Codex GPT 5.6 Sol HIGH",
+    description: "Feature work, code review and technical planning.",
+    kind: "codex",
+    model: "gpt-5.6-sol",
+    effort: "high",
+  },
+  {
     preset: "gaia",
     id: "gaia",
     name: "Gaia",
@@ -315,6 +325,16 @@ export const AGENT_PRESETS = [
     effort: "xhigh",
   },
   {
+    preset: "tellus",
+    id: "tellus",
+    name: "Tellus",
+    label: "Codex GPT 5.6 Terra MAX",
+    description: "Everyday implementation and tests.",
+    kind: "codex",
+    model: "gpt-5.6-terra",
+    effort: "max",
+  },
+  {
     preset: "diana",
     id: "diana",
     name: "Diana",
@@ -323,6 +343,16 @@ export const AGENT_PRESETS = [
     kind: "codex",
     model: "gpt-5.6-luna",
     effort: "xhigh",
+  },
+  {
+    preset: "cynthia",
+    id: "cynthia",
+    name: "Cynthia",
+    label: "Codex GPT 5.6 Luna MAX",
+    description: "Small fixes and focused coding tasks.",
+    kind: "codex",
+    model: "gpt-5.6-luna",
+    effort: "max",
   },
 
   {
@@ -446,6 +476,16 @@ export const AGENT_PRESETS = [
     thinking: "xhigh",
   },
   {
+    preset: "aurora",
+    id: "aurora",
+    name: "Aurora",
+    label: "Pi GPT 5.6 Sol HIGH",
+    description: "Feature work, code review and technical planning.",
+    kind: "pi",
+    model: "openai-codex/gpt-5.6-sol",
+    thinking: "high",
+  },
+  {
     preset: "rhea",
     id: "rhea",
     name: "Rhea",
@@ -474,6 +514,16 @@ export const AGENT_PRESETS = [
     kind: "opencode",
     model: "openrouter/openai/gpt-5.6-sol",
     effort: "xhigh",
+  },
+  {
+    preset: "skinfaxi",
+    id: "skinfaxi",
+    name: "Skinfaxi",
+    label: "OpenCode GPT 5.6 Sol HIGH",
+    description: "Feature work, code review and technical planning.",
+    kind: "opencode",
+    model: "openrouter/openai/gpt-5.6-sol",
+    effort: "high",
   },
   {
     preset: "jord",
@@ -516,6 +566,16 @@ export const AGENT_PRESETS = [
     kind: "claude-code",
     model: "claude-opus-5-5",
     effort: "xhigh",
+  },
+  {
+    preset: "poseidon",
+    id: "poseidon",
+    name: "Poseidon",
+    label: "Claude Code Opus 5.5 HIGH",
+    description: "Feature work, code review and technical planning.",
+    kind: "claude-code",
+    model: "claude-opus-5-5",
+    effort: "high",
   },
   {
     preset: "artemis",
@@ -605,6 +665,16 @@ export const AGENT_PRESETS = [
     thinking: "xhigh",
   },
   {
+    preset: "iapetus",
+    id: "iapetus",
+    name: "Iapetus",
+    label: "Pi Opus 5.5 HIGH (OpenRouter API)",
+    description: "Feature work, code review and technical planning.",
+    kind: "pi",
+    model: "openrouter/anthropic/claude-opus-5.5",
+    thinking: "high",
+  },
+  {
     preset: "atlas",
     id: "atlas",
     name: "Atlas",
@@ -624,6 +694,16 @@ export const AGENT_PRESETS = [
     kind: "opencode",
     model: "openrouter/anthropic/claude-opus-5.5",
     effort: "xhigh",
+  },
+  {
+    preset: "hodr",
+    id: "hodr",
+    name: "Hodr",
+    label: "OpenCode Opus 5.5 HIGH",
+    description: "Feature work, code review and technical planning.",
+    kind: "opencode",
+    model: "openrouter/anthropic/claude-opus-5.5",
+    effort: "high",
   },
   {
     preset: "vali",
@@ -704,10 +784,10 @@ export const AGENT_PRESETS = [
     preset: "ares",
     id: "ares",
     name: "Ares",
-    label: "Pi Grok 4.6 XHIGH",
+    label: "Pi Grok 4.7 XHIGH",
     description: "Complex code changes and analysis.",
     kind: "pi",
-    model: "openrouter/x-ai/grok-4.6",
+    model: "openrouter/x-ai/grok-4.7",
     thinking: "xhigh",
   },
   {
@@ -842,10 +922,10 @@ export const AGENT_PRESETS = [
     preset: "thor",
     id: "thor",
     name: "Thor",
-    label: "OpenCode Grok 4.6 XHIGH",
+    label: "OpenCode Grok 4.7 XHIGH",
     description: "Complex code changes and analysis.",
     kind: "opencode",
-    model: "openrouter/x-ai/grok-4.6",
+    model: "openrouter/x-ai/grok-4.7",
     effort: "xhigh",
   },
   {
@@ -963,7 +1043,7 @@ export const AGENT_PRESETS = [
   // used" for training on every model here except Muse Spark: the `-contributor`
   // tier costs $0.10/$0.20 per MTok against $1.25/$4.25 for the standard model
   // precisely because you grant permission to use your prompts and completions
-  // to train future Meta models. Grok 4.6 and GPT 5.6 Luna keep 30 days of logs
+  // to train future Meta models. Grok 4.7 and GPT 5.6 Luna keep 30 days of logs
   // for abuse monitoring; the rest keep none. Urania and Odrerir say so in their
   // own descriptions — a row that spends your privacy should not read like one
   // that does not.
@@ -971,10 +1051,10 @@ export const AGENT_PRESETS = [
     preset: "eris",
     id: "eris",
     name: "Eris",
-    label: "Pi Grok 4.6 XHIGH (OpenCode Go)",
+    label: "Pi Grok 4.7 XHIGH (OpenCode Go)",
     description: "Complex code changes and analysis.",
     kind: "pi",
-    model: "opencode-go/grok-4.6",
+    model: "opencode-go/grok-4.7",
     thinking: "xhigh",
   },
   {
@@ -1052,10 +1132,10 @@ export const AGENT_PRESETS = [
     preset: "loki",
     id: "loki",
     name: "Loki",
-    label: "OpenCode Go Grok 4.6 XHIGH",
+    label: "OpenCode Go Grok 4.7 XHIGH",
     description: "Complex code changes and analysis.",
     kind: "opencode",
-    model: "opencode-go/grok-4.6",
+    model: "opencode-go/grok-4.7",
     effort: "xhigh",
   },
   {
@@ -1212,7 +1292,7 @@ const MODEL_LABELS = {
   'gemini-3.8-flash': 'Gemini 3.8 Flash',
   'deepseek-v4.1-flash': 'DeepSeek V4.1 Flash',
   'deepseek-v4-pro-0813': 'DeepSeek V4 Pro (0813)',
-  'grok-4.6': 'Grok 4.6',
+  'grok-4.7': 'Grok 4.7',
   'qwen3.8-max': 'Qwen 3.8 Max',
   'qwen3.8-27b': 'Qwen 3.8 27B',
   'minimax-m3': 'MiniMax M3',
