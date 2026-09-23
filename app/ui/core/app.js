@@ -578,8 +578,9 @@ let removing = null
 /** Draws the team from the board, in place, so it stays current while open. */
 function renderTeam() {
   const lanes = state.board?.lanes ?? []
+  // The members only: a member's sessions are lanes too, named after it.
   const members = lanes
-    .filter((lane) => lane.participant.agent !== null)
+    .filter((lane) => lane.participant.agent !== null && lane.participant.member === null)
     .map((lane) => lane.participant)
   const rows = members
     .flatMap((member) =>

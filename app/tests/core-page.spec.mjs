@@ -944,6 +944,13 @@ test('shows the team as one row per member and role, and adds any saved agent in
     activity: { state: 'idle' },
     pane: { id: 'p1-hera', generation: 1 },
   })
+  // A session of zeus has a lane of its own; the team lists members, not their sessions.
+  data.boards[1].lanes.push({
+    participant: session(8, participant(3, 'zeus', 'worker'), 'pale-comet'),
+    tasks: [],
+    activity: { state: 'working' },
+    pane: { id: 'p1-zeus-pale-comet', generation: 1 },
+  })
   await open(page, data)
   await page.getByRole('button', { name: 'Team' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project team' })
