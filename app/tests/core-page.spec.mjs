@@ -971,6 +971,22 @@ test('a member whose agent is gone says so on the board and in the team, with Re
   await expect(member.getByRole('button', { name: 'Remove Worker @diana' })).toBeVisible()
 })
 
+test('a terminal keeps a visible scrollbar for its scrollback', async ({ page }) => {
+  await open(page)
+  const rules = await page.evaluate(() =>
+    [...document.styleSheets]
+      .flatMap((sheet) => [...sheet.cssRules])
+      .map((rule) => rule.selectorText ?? '')
+      .filter((selector) => selector.includes('.xterm-viewport::-webkit-scrollbar')),
+  )
+  expect(rules).toEqual([
+    '.xterm-viewport::-webkit-scrollbar',
+    '.xterm-viewport::-webkit-scrollbar-track',
+    '.xterm-viewport::-webkit-scrollbar-thumb',
+    '.xterm-viewport::-webkit-scrollbar-thumb:hover',
+  ])
+})
+
 test('a redraw leaves the keyboard where the human put it in the dock', async ({ page }) => {
   const data = model()
   data.boards[1].lanes.push({
