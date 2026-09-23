@@ -936,13 +936,24 @@ test("shows what a task's window wrote, from ConsensFlow's own copy, under the t
 test('shows the team as one row per member and role, and adds any saved agent in any role', async ({
   page,
 }) => {
-  await open(page)
+  const data = model()
+  // A critical reviewer ahead of the workers among the lanes: the table reads by role, then by tier.
+  data.boards[1].lanes.splice(2, 0, {
+    participant: participant(7, 'hera', 'reviewer', { harness: 'codex', tier: 'critical' }),
+    tasks: [],
+    activity: { state: 'idle' },
+    pane: { id: 'p1-hera', generation: 1 },
+  })
+  await open(page, data)
   await page.getByRole('button', { name: 'Team' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project team' })
   const table = dialog.getByRole('table', { name: 'On the team' })
   await expect(table.locator('thead th')).toHaveText(['Member', 'Role', ''])
-  await expect(table.locator('tbody tr')).toHaveCount(2)
-  await expect(table.locator('tbody tr').first()).toContainText('@zeus')
+  await expect(table.locator('tbody tr')).toHaveText([
+    /@zeus.*Worker/,
+    /@diana.*Worker/,
+    /@hera.*gpt-6-astra · codex · max · critical.*Reviewer/,
+  ])
   // Each member says what it runs: model, harness, effort and its tier.
   await expect(table.locator('tbody tr').first().locator('.member-meta')).toHaveText(
     'claude-sonnet-5 · claude · high · standard',
@@ -981,9 +992,8 @@ test('shows the team as one row per member and role, and adds any saved agent in
     .toEqual([{ project: 1, agent: 'athena', roles: ['advisor'] }])
   // A second role for a member already on the team adds to its roles.
   await dialog.getByLabel('Role').selectOption('reviewer')
-  // Each choice says what it runs, the model's effort level included.
+  // Each choice says what it runs, the model's effort level included; hera reviews already.
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
-    'hera · gpt-6-astra · codex · max',
     'zeus · claude-sonnet-5 · claude · high',
     'diana · gpt-5.6-luna · codex · low',
     'athena · muse-spark · opencode',
@@ -1333,17 +1343,19 @@ test('starts a project in a chosen folder with the chosen lead, the team ticked 
   data.lastTeam = [
     { agent: 'zeus', roles: ['worker', 'reviewer'] },
     { agent: 'diana', roles: ['worker'] },
+    { agent: 'hera', roles: ['worker'] },
   ]
   await open(page, data)
   await page.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
   await expect(dialog.getByLabel('Project folder')).toHaveValue('/work/fresh')
   const table = dialog.getByRole('table', { name: 'Agents for the team' })
-  // The last team, one row per agent and role.
+  // The last team, one row per agent and role, by role and then by tier.
   await expect(table.locator('tbody tr')).toHaveText([
+    /hera.*gpt-6-astra · codex · max · critical.*Worker/,
     /zeus.*claude-sonnet-5 · claude · high · standard.*Worker/,
-    /zeus.*Reviewer/,
     /diana.*gpt-5.6-luna · codex · low · light.*Worker/,
+    /zeus.*Reviewer/,
   ])
   await expect(dialog.getByLabel('Second review of')).toHaveCount(0)
   await dialog.getByLabel('The lead runs in').selectOption('opencode')
@@ -1357,7 +1369,7 @@ test('starts a project in a chosen folder with the chosen lead, the team ticked 
   await dialog.locator('[name="pickAgent"]').selectOption('athena')
   await dialog.getByRole('button', { name: 'Add', exact: true }).click()
   await dialog.getByRole('button', { name: 'Remove Worker diana' }).click()
-  await expect(table.locator('tbody tr')).toHaveCount(3)
+  await expect(table.locator('tbody tr')).toHaveCount(4)
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
     .poll(() => calls(page, 'project.open'))
@@ -1368,6 +1380,7 @@ test('starts a project in a chosen folder with the chosen lead, the team ticked 
         gate: false,
         team: [
           { agent: 'zeus', roles: ['worker', 'reviewer'] },
+          { agent: 'hera', roles: ['worker'] },
           { agent: 'athena', roles: ['advisor'] },
         ],
       },

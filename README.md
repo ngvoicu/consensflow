@@ -89,8 +89,9 @@ projects.
 - **New project.** A folder, the lead's harness, the team (the last project's
   ticked already) and whether human approval is required.
 - **Team.** Which agents this project may use, each with its roles and what
-  it runs (model, harness, effort, tier), plus the approval setting. The pick
-  list offers every agent by work tier, the most critical first. The daemon
+  it runs (model, harness, effort, tier), plus the approval setting. The
+  rows read by role, then by work tier with the most critical first; the
+  pick list offers every agent by work tier the same way. The daemon
   assigns work only within the team.
 - **Agents** (Settings). One roster: every catalog agent and every agent
   you define, as one list by model. Each model's card says its work tier and

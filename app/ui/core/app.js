@@ -353,6 +353,13 @@ const TIER_LABEL = {
 }
 /** The harnesses in the order agents of one tier are listed. */
 const HARNESS_ORDER = ['claude', 'codex', 'opencode', 'pi', 'kimi', 'devin', 'image']
+const TIERS = Object.keys(TIER_LABEL)
+const rank = (list, value) => (list.includes(value) ? list.indexOf(value) : list.length)
+/** A team reads by role, in the order the picker offers them, then by tier, the most critical first, then by name. */
+const byRoleAndTier = (a, b) =>
+  rank(ROLES, a.role) - rank(ROLES, b.role) ||
+  rank(TIERS, a.tier) - rank(TIERS, b.tier) ||
+  a.name.localeCompare(b.name)
 /**
  * "claude-sonnet-5 · claude · high · standard": what an agent runs and the
  * tier a task finds it by, effort included when it has one.
@@ -380,8 +387,6 @@ function rolePicker(roleSelect, agentSelect, hint, holding, onRefill = () => {})
     const choices = state.agents.filter((agent) => !holding(agent.name, role))
     // Every agent, the catalog's and the human's own, by the work it is for:
     // the most critical tier first, then harness by harness, by name.
-    const tiers = Object.keys(TIER_LABEL)
-    const rank = (list, value) => (list.includes(value) ? list.indexOf(value) : list.length)
     const groups = new Map()
     for (const agent of choices) {
       const tier = agent.profile?.workTier
@@ -390,12 +395,12 @@ function rolePicker(roleSelect, agentSelect, hint, holding, onRefill = () => {})
     }
     agentSelect.replaceChildren(
       ...[...groups.entries()]
-        .sort(([a], [b]) => rank(tiers, a) - rank(tiers, b))
+        .sort(([a], [b]) => rank(TIERS, a) - rank(TIERS, b))
         .map(([tier, agents]) => {
           const group = element('optgroup')
           group.label =
             tier in TIER_LABEL
-              ? `T${tiers.indexOf(tier) + 1} · ${TIER_LABEL[tier]}`
+              ? `T${TIERS.indexOf(tier) + 1} · ${TIER_LABEL[tier]}`
               : 'Tier unknown'
           agents.sort(
             (a, b) =>
@@ -476,25 +481,35 @@ function renderNewProjectTeam(lastTeam) {
 }
 
 function drawNewProjectTeam() {
-  const rows = picked.map(({ agent, role }, at) => {
-    const saved = state.agents.find((candidate) => candidate.name === agent)
-    const who = element('td')
-    who.append(
-      element('span', 'member-name', agent),
-      element('br'),
-      element('span', 'member-meta', runsLabel(saved)),
-    )
-    const remove = element('button', 'quiet-button', 'Remove')
-    remove.type = 'button'
-    remove.setAttribute('aria-label', `Remove ${ROLE_LABEL[role]} ${agent}`)
-    remove.addEventListener('click', () => {
-      picked.splice(at, 1)
-      drawNewProjectTeam()
+  const rows = picked
+    .map((pick) => ({
+      ...pick,
+      name: pick.agent,
+      tier: state.agents.find((candidate) => candidate.name === pick.agent)?.profile?.workTier,
+    }))
+    .sort(byRoleAndTier)
+    .map(({ agent, role }) => {
+      const saved = state.agents.find((candidate) => candidate.name === agent)
+      const who = element('td')
+      who.append(
+        element('span', 'member-name', agent),
+        element('br'),
+        element('span', 'member-meta', runsLabel(saved)),
+      )
+      const remove = element('button', 'quiet-button', 'Remove')
+      remove.type = 'button'
+      remove.setAttribute('aria-label', `Remove ${ROLE_LABEL[role]} ${agent}`)
+      remove.addEventListener('click', () => {
+        picked.splice(
+          picked.findIndex((pick) => pick.agent === agent && pick.role === role),
+          1,
+        )
+        drawNewProjectTeam()
+      })
+      const row = teamRow(who, role, remove)
+      row.dataset.agent = agent
+      return row
     })
-    const row = teamRow(who, role, remove)
-    row.dataset.agent = agent
-    return row
-  })
   if (rows.length === 0) {
     const row = element('tr', 'team-empty')
     const cell = element(
@@ -566,7 +581,12 @@ function renderTeam() {
   const members = lanes
     .filter((lane) => lane.participant.agent !== null)
     .map((lane) => lane.participant)
-  const rows = members.flatMap((member) => memberRows(member))
+  const rows = members
+    .flatMap((member) =>
+      memberRows(member).map((entry) => ({ ...entry, tier: member.tier, name: member.handle })),
+    )
+    .sort(byRoleAndTier)
+    .map((entry) => entry.row)
   teamList.replaceChildren(...(rows.length ? rows : [element('tr', 'team-empty')]))
   if (rows.length === 0) {
     const cell = element('td', null, 'Nobody yet: add the agents this project may use.')
@@ -587,8 +607,9 @@ function renderTeam() {
 }
 
 /**
- * A member's rows, one per role: Remove drops that role, or, for its last
- * role, asks first and takes the member off the team.
+ * A member's rows, one per role, each with the role it stands for: Remove
+ * drops that role, or, for its last role, asks first and takes the member
+ * off the team.
  */
 function memberRows(member) {
   const name = `@${member.handle}`
@@ -634,7 +655,7 @@ function memberRows(member) {
       yes,
     )
     row.append(cell)
-    return [row]
+    return [{ role: member.roles[0], row }]
   }
   return member.roles.map((role) => {
     const remove = element('button', 'quiet-button', 'Remove')
@@ -656,7 +677,7 @@ function memberRows(member) {
     })
     const row = teamRow(who(), role, remove)
     row.dataset.handle = member.handle
-    return row
+    return { role, row }
   })
 }
 
