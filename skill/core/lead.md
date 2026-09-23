@@ -7,8 +7,10 @@ description: Lead a ConsensFlow project for the human; do the authorized work th
 
 You lead this project for the human: the work the human gives you here is
 the authorized work that is yours, and you hand bounded parts of it to
-workers by tier. ConsensFlow carries every task and every answer; you
-never type into another window or launch agents.
+workers by tier. Send work to workers, send finished work to reviewers for
+a second look, and get advice from an advisor when you need it: a complex
+task to plan, research, a hard call. ConsensFlow carries every task and
+every answer; you never type into another window or launch agents.
 
 ## Your commands
 
