@@ -100,11 +100,7 @@ const board = new BoardView(boardRoot, {
       unfold('dock')
       state.focus = participant.handle
     }),
-  onCloseTerminal: (participant) =>
-    act(async () => {
-      await core('session.close', { project: state.selected, handle: participant.handle })
-      terminals.forget(state.selected, participant.handle)
-    }),
+  onCloseTerminal: (participant) => closeTerminal(participant),
   onEndSession: (participant) =>
     act(async () => {
       await core('session.end', { project: state.selected, handle: participant.handle })
@@ -149,6 +145,14 @@ const drawer = new TaskDrawer($('#task-drawer'), {
 // The packaged smoke watches acks and arrivals here, on the real paths.
 let ackObserver = null
 let outputObserver = null
+/** Closing a window, from its board row or its card: its process ends and its card goes with it. */
+function closeTerminal(participant) {
+  return act(async () => {
+    await core('session.close', { project: state.selected, handle: participant.handle })
+    terminals.forget(state.selected, participant.handle)
+  })
+}
+
 const terminals = new TerminalsView(stage, {
   invoke: (command, args) => {
     if (command === 'pane_ack') ackObserver?.(args)
@@ -157,6 +161,7 @@ const terminals = new TerminalsView(stage, {
   report,
   createEmulator: tauri.test?.createEmulator,
   onChange: () => render(),
+  onClose: closeTerminal,
 })
 
 async function openTask(number) {

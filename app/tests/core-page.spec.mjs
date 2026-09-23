@@ -474,8 +474,10 @@ test("gives a session's lane the human's hand on its window: open, close, delete
     .toEqual([{ project: 1, handle: 'zeus-brisk-birch' }])
   await expect(page.getByRole('region', { name: 'Terminals' })).toBeVisible()
   const dock = page.getByRole('complementary', { name: 'Terminal dock' })
-  await expect(dock.locator('.terminal-card[data-handle="zeus-amber-pine"]')).toHaveCount(1)
-  await live.getByRole('button', { name: "Close @zeus · amber-pine's terminal" }).click()
+  const card = dock.locator('.terminal-card[data-handle="zeus-amber-pine"]')
+  await expect(card).toHaveCount(1)
+  // The card's own header closes the window too, the same way as its row.
+  await card.getByRole('button', { name: "Close @zeus · amber-pine's terminal" }).click()
   await expect
     .poll(() => calls(page, 'session.close'))
     .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])

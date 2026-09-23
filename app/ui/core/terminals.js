@@ -18,10 +18,13 @@ export class TerminalsView {
   /** Windows the human closed: their cards go at once and never come back. */
   #dismissed = new Set()
   #onChange
+  /** The human closing a live window from its card: the same as from its board row. */
+  #onClose
 
-  constructor(stage, { invoke, report, createEmulator, onChange = () => {} }) {
+  constructor(stage, { invoke, report, createEmulator, onChange = () => {}, onClose = () => {} }) {
     this.#stage = stage
     this.#onChange = onChange
+    this.#onClose = onClose
     this.#registry = new EmulatorRegistry({
       ...(createEmulator ? { createEmulator } : {}),
       onData: (pane, data) => void this.#link.input(pane, data),
@@ -168,6 +171,10 @@ export class TerminalsView {
       const lamp = element('span', 'lamp')
       lamp.dataset.state = lane.activity?.state ?? 'closed'
       lamp.setAttribute('aria-hidden', 'true')
+      const stop = element('button', 'quiet-button terminal-stop', 'Close')
+      stop.type = 'button'
+      stop.setAttribute('aria-label', `Close ${name}'s terminal`)
+      stop.addEventListener('click', () => this.#onClose(lane.participant))
       const close = element('button', 'quiet-button terminal-close', 'Close')
       close.type = 'button'
       close.setAttribute('aria-label', `Close ${name}'s ended terminal`)
@@ -176,6 +183,7 @@ export class TerminalsView {
         lamp,
         element('span', 'terminal-name', name),
         element('span', 'terminal-meta', lane.participant.harness ?? ''),
+        stop,
         entry.ended,
         close,
       )
