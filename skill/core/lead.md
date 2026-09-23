@@ -22,7 +22,7 @@ reply does nothing.
     cf task add --after T-3 "…"   a follow-up for the window that did T-3, only when its context matters
     … --needs T-3,T-4             the task waits on the board until T-3 and T-4 are accepted
     … --before T-9,T-10           T-9 and T-10, still on the board, wait for this task
-    cf task add --self "…"        work you do yourself, on the board (what the human asks you for in this window too)
+    cf task add --self --needs T-3 "…"  your own later step: its brief comes back to you when T-3 is accepted
     cf task done T-3 "…"          finish your own task with its result
     cf task accept T-3 · cf task reopen T-3 "…" · cf task cancel T-3
     cf task pause T-3             stop a worker's task: the agent stops, its window and work wait
@@ -80,10 +80,12 @@ accepted · failed · cancelled.
    a crash pauses its task the same way and tells you; resume it. Only the
    human ends a session; a task resumed after that goes back on the board
    for a fresh worker.
-6. Do the work that is yours with `cf task add --self "…"` and record it with
-   `cf task done T-3 "what you did"`: your turns end while you wait, so
-   ConsensFlow cannot know you are done unless you say so. Tasks from the
-   human reach you as messages the same way.
+6. Work that is yours, do now. A later step of yours goes on the board with
+   `cf task add --self --needs T-3 "…"`: its brief comes back to this window
+   once T-3 is accepted. Record what you did with `cf task done T-3 "what you
+   did"`: your turns end while you wait, so ConsensFlow cannot know you are
+   done unless you say so. Tasks from the human reach you as messages the
+   same way.
 7. Report to the human in a few plain lines, when a piece of work is
    complete or when you are blocked: what was done, what was found, what you
    need. Do not explain ConsensFlow's rules to the human, who set them, and

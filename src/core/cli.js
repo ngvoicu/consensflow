@@ -18,7 +18,7 @@ export const USAGE = `cf inside a ConsensFlow window: the board's commands.
                                     to use as reference, where to save it
   cf task add --after T-3 "…"       a follow-up for the window that did T-3, which
                                     keeps its context; only when that context matters
-  cf task add --self "…"            a task for yourself, on the board
+  cf task add --self --needs T-3 "…" your own later step: its brief comes back to you when T-3 is accepted
   … --needs T-3,T-4                 the task waits on the board until T-3 and T-4 are accepted
   … --before T-9,T-10               T-9 and T-10 (still on the board) wait for this task
   cf task list                      the board: what waits for a member, then every lane
@@ -224,6 +224,13 @@ async function taskCommand([action, ...rest], call, cwd) {
     const after = flags['--after'] === undefined ? undefined : taskNumber(flags['--after'])
     const needs = taskNumbers(flags['--needs'])
     const before = taskNumbers(flags['--before'])
+    // Your own work needs no board while you are at it; on the board it is a
+    // wake-up: the brief comes back to this window when what it waits for is accepted.
+    if (flags['--self'] === true && needs === undefined && before === undefined) {
+      throw usage(
+        'you are already at it: do it now, or give it --needs T-3 to be woken when T-3 is accepted',
+      )
+    }
     if (
       to === undefined &&
       tier === undefined &&

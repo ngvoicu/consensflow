@@ -199,7 +199,7 @@ while IFS= read -r line; do
   elif [ "$line" = "SELF" ]; then
     # The lead puts its own task on the board from its terminal, the way a
     # real lead does; the core then delivers it back into this window.
-    cf task add --self "SMOKE"
+    cf task add --to lead "SMOKE"
     turn "SELF"
   elif [ "$line" = "FLOOD" ]; then
     n=1

@@ -289,8 +289,11 @@ describe('the agents API', () => {
         opened.out,
         'T-1 is on the board for a standard worker; the first free one gets it, and its result arrives in your inbox. The human approves each message before it moves.',
       )
-      const own = await cf(lead, 'task', 'add', '--self', 'Plan the release')
-      assert.equal(own.out, 'T-2 is yours; finish it with: cf task done T-2 "what you did".')
+      const own = await cf(lead, 'task', 'add', '--self', '--needs', 'T-1', 'Plan the release')
+      assert.equal(
+        own.out,
+        'T-2 is yours; finish it with: cf task done T-2 "what you did". It waits until T-1 is accepted.',
+      )
       const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
       const { message } = ledger.assignTask(project.id, 1, zeus.id)
       deliver(ledger, ledger.approveMessage(message.id, { by: 'human' }))
@@ -520,12 +523,20 @@ describe('tiered tasks through the API and cf', () => {
         ],
       )
 
-      const own = await cf(lead, 'task', 'add', '--self', 'Plan the release')
+      const own = await cf(lead, 'task', 'add', '--self', '--needs', 'T-1', 'Plan the release')
       assert.deepEqual(own, {
         code: 0,
-        out: 'T-2 is yours; finish it with: cf task done T-2 "what you did".',
+        out: 'T-2 is yours; finish it with: cf task done T-2 "what you did". It waits until T-1 is accepted.',
         err: '',
       })
+      const now = await cf(lead, 'task', 'add', '--self', 'Plan the release')
+      assert.deepEqual(
+        [now.code, now.err],
+        [
+          2,
+          'cf: you are already at it: do it now, or give it --needs T-3 to be woken when T-3 is accepted',
+        ],
+      )
       assert.equal(ledger.task(project.id, 2).assignee, 'lead')
 
       ledger.addMember(project.id, {
@@ -587,7 +598,7 @@ describe('tiered tasks through the API and cf', () => {
           'T-3 [open] for a standard advisor ← @lead: Compare the two parsers',
           'T-4 [open] for an image designer ← @lead: A logo: a compass rose; save it as images/logo.png',
           '@lead (lead)',
-          'T-2 [queued] @lead ← @lead: Plan the release',
+          'T-2 [open] @lead ← @lead: Plan the release',
         ].join('\n'),
       )
     })

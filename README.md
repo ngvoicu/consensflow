@@ -117,7 +117,7 @@ only subject:
     cf task add --tier <critical|complex|standard|light> "…"   work for a worker
     cf task add --advice --tier <tier> "…"                     a question for an advisor (the lead)
     cf task add --after T-3 "…"                                continue the window that did T-3
-    cf task add --self "…"                                     work the lead does itself
+    cf task add --self --needs T-3 "…"                         the lead's own later step, woken when T-3 is accepted
     cf task list | get T-3 | done T-3 "…" | review T-3 | accept | reopen | cancel
     cf inbox [read m-12] · cf ask "…" [--human] · cf answer m-12 "…" · cf team · cf whoami
     cf note "…" [--human]                                     something to know; nothing waits on it

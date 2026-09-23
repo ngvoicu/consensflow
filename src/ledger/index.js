@@ -850,13 +850,26 @@ class Ledger {
   transcript(projectId, number, { limit = TRANSCRIPT_PAGE } = {}) {
     const task = this.#taskRow(projectId, number)
     if (task.assignee_id === null) return { items: [], total: 0 }
-    const rows = this.#db
+    const copied = this.#db
       .prepare(
         `SELECT t.conversation_id, t.item_id, t.role, t.text, t.complete, t.at
          FROM transcript t JOIN conversation c ON c.id = t.conversation_id
          WHERE c.participant_id = ? ORDER BY t.conversation_id, t.seq`,
       )
       .all(task.assignee_id)
+    // A window's copy may hold more than this task (the lead's own, after
+    // its other work): the task's part starts where its brief arrived.
+    const brief = this.#db
+      .prepare(
+        `SELECT id FROM message WHERE task_id = ? AND kind = 'task' AND recipient_id = ?
+         ORDER BY id DESC LIMIT 1`,
+      )
+      .get(task.id, task.assignee_id)
+    const start =
+      brief === undefined
+        ? -1
+        : copied.findIndex((row) => row.text.includes(`[ConsensFlow m-${brief.id} ·`))
+    const rows = start > 0 ? copied.slice(start) : copied
     return {
       total: rows.length,
       items: rows.slice(Math.max(0, rows.length - limit)).map((row) => ({
@@ -1883,7 +1896,8 @@ class Ledger {
     const tasks = rows.map((row) => ({ ...taskView(row), result: firstLine(results.get(row.id)) }))
     return {
       project,
-      open: tasks.filter((task) => task.state === 'open'),
+      // On the board for a member; one given by name waits in its own lane.
+      open: tasks.filter((task) => task.state === 'open' && task.assignee === null),
       lanes: project.participants.map((participant) => ({
         participant,
         tasks: tasks.filter((task) => laneOf.get(task.id) === participant.handle),

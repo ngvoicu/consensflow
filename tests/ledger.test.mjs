@@ -2592,6 +2592,30 @@ describe('the transcript copy', () => {
     return { project, id, session: message.recipientId, conversation }
   }
 
+  it("a task's part of a window's copy starts at its brief: the lead's own, after its other work", async () => {
+    await withLedger((ledger) => {
+      const { project, id } = team(ledger)
+      const own = ledger.createTask(project.id, { from: 'lead', to: 'lead', body: 'Write it up' })
+      const conversation = ledger.startConversation(id('lead'), { harness: 'claude-code' })
+      ledger.copyTranscript(conversation.id, [
+        item('u0', 'user', 'Earlier, from the human'),
+        item('a0', 'assistant', 'Looking into it'),
+        item(
+          'u1',
+          'user',
+          `[ConsensFlow m-${own.message.id} · T-1 · task from @lead]\nWrite it up`,
+        ),
+        item('a1', 'assistant', 'Writing'),
+      ])
+      const { items, total } = ledger.transcript(project.id, 1)
+      assert.equal(total, 2)
+      assert.deepEqual(
+        items.map((i) => i.id),
+        ['u1', 'a1'],
+      )
+    })
+  })
+
   it('copies what is new, brings an item still being written up to date, and reads it by task', async () => {
     await withLedger((ledger) => {
       const { project, conversation } = windowed(ledger)
