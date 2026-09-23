@@ -13,7 +13,6 @@ import {
   migrateStateRoot,
   normalizeRoster,
   removeAgent,
-  resetAgent,
   rosterPath,
 } from '../src/roster.js'
 import { tempEnv } from './helpers.mjs'
@@ -64,7 +63,8 @@ describe('the roster is the catalog plus what is the human’s own', () => {
     assert.equal(agents.zeus.harness, 'claude')
     assert.equal(agents.zeus.effort, 'max')
     assert.equal(agents.endymion.harness, 'pi')
-    assert.equal(agents.endymion.effort, 'xhigh')
+    // The fixture's copy says xhigh; a catalog agent reads as the catalog has it.
+    assert.equal(agents.endymion.effort, 'max')
     assert.equal(agents.mani.harness, 'opencode')
   })
 
@@ -102,103 +102,27 @@ it('reports current tiers from legacy rows without writing during discovery', ()
   }
 })
 
-describe('a catalog agent carries the human’s overrides, and only those are stored', () => {
+describe('a catalog agent stays as the catalog has it', () => {
   const t = tempEnv()
   after(() => t.cleanup())
 
-  it('an edit stores what differs from the catalog, and the listing shows it edited', () => {
-    editAgent('gefjon', { effort: 'low', description: 'the cheap one' }, t.env)
-    const [stored] = raw(t.env).agents
-    assert.deepEqual(
-      Object.keys(stored).sort(),
-      ['createdAt', 'description', 'effort', 'id', 'kind', 'name', 'preset', 'updatedAt'],
-      'only the changed fields, with the row’s identity',
-    )
-    assert.deepEqual(
-      [stored.effort, stored.description, stored.model],
-      ['low', 'the cheap one', undefined],
-    )
-    const gefjon = byName(t.env).gefjon
-    assert.deepEqual(
-      [gefjon.effort, gefjon.description, gefjon.model, gefjon.edited, gefjon.custom],
-      ['low', 'the cheap one', 'opencode/muse-spark-1.3-contributor-free', true, undefined],
-    )
-    assert.equal(agentRow('gefjon', t.env).effort, 'low', 'the launcher runs the override')
-    assert.equal(listAgents(t.env).length, AGENT_PRESETS.length, 'still one agent per entry')
-  })
-
-  it('a pi agent edit lands in `thinking`, the key the pi runner reads', () => {
-    editAgent('endymion', { effort: 'high' }, t.env)
-    const endymion = raw(t.env).agents.find((p) => p.id === 'endymion')
-    assert.equal(endymion.thinking, 'high')
-    assert.equal(endymion.effort, undefined)
-    assert.equal(byName(t.env).endymion.effort, 'high')
-  })
-
-  it('an edit back to the catalog’s value drops the override, and the row when nothing is left', () => {
-    editAgent('gefjon', { effort: 'xhigh' }, t.env)
-    assert.deepEqual(raw(t.env).agents.find((p) => p.id === 'gefjon').effort, undefined)
-    editAgent(
-      'gefjon',
-      { description: 'OpenCode Zen Muse Spark 1.3 Contributor FREE XHIGH' },
-      t.env,
-    )
-    assert.equal(
-      raw(t.env).agents.some((p) => p.id === 'gefjon'),
-      false,
-    )
-    assert.equal(byName(t.env).gefjon.edited, undefined)
-  })
-
-  it('a blank effort means the catalog’s own; a tier override stays until cleared', () => {
-    editAgent('gefjon', { effort: 'low', workTier: 'complex' }, t.env)
-    editAgent('gefjon', { effort: '' }, t.env)
-    const gefjon = byName(t.env).gefjon
-    assert.deepEqual(
-      [gefjon.effort, gefjon.workTier, gefjon.profile.workTier],
-      ['xhigh', 'complex', 'complex'],
-    )
-    editAgent('gefjon', { workTier: null }, t.env)
-    assert.equal(byName(t.env).gefjon.workTier, undefined)
-    assert.equal(
-      raw(t.env).agents.some((p) => p.id === 'gefjon'),
-      false,
-    )
-  })
-
-  it('reset returns a catalog agent to the catalog; remove is refused for it', () => {
-    editAgent('endymion', { model: 'openrouter/somebody/else' }, t.env)
-    assert.equal(byName(t.env).endymion.edited, true)
-    const reset = resetAgent('endymion', t.env)
-    assert.deepEqual([reset.edited, reset.model !== 'openrouter/somebody/else'], [undefined, true])
-    assert.equal(
-      raw(t.env).agents.some((p) => p.id === 'endymion'),
-      false,
-    )
-    resetAgent('endymion', t.env)
-    assert.throws(() => removeAgent('endymion', t.env), /in the catalog: reset it/)
-  })
-
-  it('validates the effort the harness accepts, and refuses one on an image agent', () => {
-    for (const effort of ['medium', 'ultra', 'on', 0, false]) {
-      assert.throws(() => editAgent('ilmarinen', { effort }, t.env), /low.*high.*max/)
-    }
-    editAgent('ilmarinen', { effort: 'low' }, t.env)
-    assert.equal(byName(t.env).ilmarinen.effort, 'low')
-    editAgent('ilmarinen', { effort: '' }, t.env)
-    assert.equal(byName(t.env).ilmarinen.effort, 'max', 'blank: the catalog’s own')
-    assert.throws(() => editAgent('pygmalion', { effort: 'high' }, t.env), /no effort level/)
-    editAgent('pygmalion', { description: 'still editable' }, t.env)
-    assert.equal(byName(t.env).pygmalion.edited, true)
-  })
-
-  it('a catalog name cannot be added, and an unknown name is named on edit, reset and remove', () => {
+  it('is neither edited nor removed, and its name cannot be defined again', () => {
+    assert.throws(() => editAgent('gefjon', { effort: 'low' }, t.env), /catalog agent and stays/)
+    assert.throws(() => editAgent('gefjon', { description: 'x' }, t.env), /catalog agent and stays/)
+    assert.throws(() => removeAgent('gefjon', t.env), /not yours to remove/)
     assert.throws(
       () => addAgent({ name: 'gefjon', harness: 'codex', model: 'm' }, t.env),
-      /in the catalog already/,
+      /catalog agent: pick another name/,
     )
+    assert.equal(existsSync(rosterPath(t.env)), false, 'nothing was written')
+    assert.deepEqual(
+      [byName(t.env).gefjon.effort, byName(t.env).gefjon.custom],
+      ['xhigh', undefined],
+    )
+  })
+
+  it('names an unknown agent on edit and remove', () => {
     assert.throws(() => editAgent('nobody', { model: 'm' }, t.env), /nobody/)
-    assert.throws(() => resetAgent('nobody', t.env), /nobody/)
     assert.throws(() => removeAgent('nobody', t.env), /nobody/)
   })
 })
@@ -230,14 +154,25 @@ describe('agents defined by hand are stored in full, v1-shaped', () => {
     assert.throws(() => addAgent({ name: 'ok', harness: 'not-a-cli', model: 'm' }, t.env))
     assert.throws(() => addAgent({ name: 'ok', harness: 'claude', model: '' }, t.env))
     assert.throws(() => addAgent({ name: 'mine', harness: 'codex', model: 'm' }, t.env))
+    // A pi agent edit lands in `thinking`, the key the pi runner reads.
+    addAgent({ name: 'my-pi', harness: 'pi', model: 'openrouter/moonshotai/kimi-k3' }, t.env)
+    editAgent('my-pi', { effort: 'high' }, t.env)
+    const pi = raw(t.env).agents.find((p) => p.id === 'my-pi')
+    assert.deepEqual(
+      [pi.thinking, pi.effort, byName(t.env)['my-pi'].effort],
+      ['high', undefined, 'high'],
+    )
+    // An image agent has no effort to edit, plainly.
+    addAgent({ name: 'my-image', harness: 'image', model: 'codex-image' }, t.env)
+    assert.throws(() => editAgent('my-image', { effort: 'high' }, t.env), /no effort level/)
+    editAgent('my-image', { description: 'still editable' }, t.env)
   })
 
-  it('edits and removes a custom agent in place, and refuses to reset it', () => {
+  it('edits and removes a custom agent in place', () => {
     addAgent({ name: 'freya-2', harness: 'codex', model: 'gpt-5.6-terra', effort: 'xhigh' }, t.env)
     editAgent('freya-2', { model: 'gpt-6-astra', effort: 'low' }, t.env)
     const stored = raw(t.env).agents.find((p) => p.id === 'freya-2')
     assert.deepEqual([stored.model, stored.effort, stored.kind], ['gpt-6-astra', 'low', 'codex'])
-    assert.throws(() => resetAgent('freya-2', t.env), /your own agent/)
     removeAgent('freya-2', t.env)
     assert.equal(
       raw(t.env).agents.some((p) => p.id === 'freya-2'),
@@ -288,7 +223,7 @@ describe('what older builds wrote is read the same, and folded at start', () => 
   const t = tempEnv()
   after(() => t.cleanup())
 
-  it('a full copy of a catalog entry reads as overrides of what differs, without writing', () => {
+  it('a copy of a catalog entry, edited or not, reads as the catalog has it, without writing', () => {
     mkdirSync(dirname(rosterPath(t.env)), { recursive: true })
     const original = JSON.stringify({
       schemaVersion: 1,
@@ -299,7 +234,6 @@ describe('what older builds wrote is read the same, and folded at start', () => 
           kind: 'opencode',
           model: 'opencode/muse-spark-1.3-contributor-free',
           effort: 'xhigh',
-          description: 'OpenCode Zen Muse Spark 1.3 Contributor FREE XHIGH',
           preset: 'gefjon',
           profile: { workTier: 'light' },
         },
@@ -310,26 +244,33 @@ describe('what older builds wrote is read the same, and folded at start', () => 
           model: 'claude-opus-5',
           effort: 'low',
           preset: 'apollo',
+        },
+        {
+          id: 'mine',
+          name: 'Mine',
+          kind: 'codex',
+          model: 'gpt-6-astra',
+          effort: 'low',
           skillsPolicy: 'default',
         },
       ],
     })
     writeFileSync(rosterPath(t.env), original)
     const agents = byName(t.env)
-    assert.equal(agents.gefjon.edited, undefined, 'equal to the catalog: nothing overridden')
-    assert.deepEqual([agents.apollo.effort, agents.apollo.edited], ['low', true])
+    assert.deepEqual(
+      [agents.gefjon.custom, agents.apollo.effort, agents.mine.custom],
+      [undefined, 'xhigh', true],
+    )
     assert.equal(readFileSync(rosterPath(t.env), 'utf8'), original, 'a read writes nothing')
   })
 
-  it('normalizing keeps only the overrides, drops stored display data, and is idempotent', () => {
+  it('normalizing keeps only the human’s own agents, drops stored display data, and is idempotent', () => {
     assert.equal(normalizeRoster(t.env), true)
-    const file = raw(t.env)
     assert.deepEqual(
-      file.agents.map((row) => [row.id, Object.keys(row).sort()]),
-      [['apollo', ['effort', 'id', 'kind', 'name', 'preset']]],
+      raw(t.env).agents.map((row) => [row.id, Object.keys(row).sort()]),
+      [['mine', ['effort', 'id', 'kind', 'model', 'name']]],
     )
     assert.equal(normalizeRoster(t.env), false)
-    assert.deepEqual([byName(t.env).apollo.effort, byName(t.env).gefjon.edited], ['low', undefined])
   })
 
   it('normalizing a home with no roster writes nothing', () => {

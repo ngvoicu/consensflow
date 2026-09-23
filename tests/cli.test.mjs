@@ -117,8 +117,6 @@ describe('role files belong to pane launch, not CLI administration', () => {
     const manifest = join(t.env.CONSENSFLOW_HOME, 'skills-manifest.json')
     writeFileSync(manifest, '{"files":{}}')
     for (const args of [
-      ['agent', 'edit', 'zeus', '--effort', 'high'],
-      ['agent', 'reset', 'zeus'],
       ['agent', 'add', 'mine', '--harness', 'claude', '--model', 'example'],
       ['agent', 'edit', 'mine', '--effort', 'high'],
       ['agent', 'list', '--json'],
@@ -211,25 +209,17 @@ describe('the catalog turns a name into a working agent', () => {
     assert.equal(hyperion.effort, 'max')
     const out = await cf(['agent', 'add', 'hyperion'], t.env)
     assert.equal(out.code, 1)
-    assert.match(out.stderr, /in the catalog already/)
+    assert.match(out.stderr, /catalog agent/)
   })
 
-  it('an edited catalog agent keeps its edit, and reset returns it to the catalog', async () => {
-    assert.equal((await cf(['agent', 'edit', 'hyperion', '--effort', 'low'], t.env)).code, 0)
-    const edited = JSON.parse((await cf(['agent', 'list', '--json'], t.env)).stdout).agents.find(
-      (p) => p.name === 'hyperion',
-    )
-    assert.deepEqual([edited.effort, edited.edited], ['low', true])
-    const reset = await cf(['agent', 'reset', 'hyperion'], t.env)
-    assert.equal(reset.code, 0, reset.stderr)
-    assert.match(reset.stdout, /as the catalog has it/)
-    const back = JSON.parse((await cf(['agent', 'list', '--json'], t.env)).stdout).agents.find(
-      (p) => p.name === 'hyperion',
-    )
-    assert.deepEqual(
-      [back.effort, back.description, back.edited],
-      ['max', 'Codex GPT 5.6 Sol MAX', undefined],
-    )
+  it('a catalog agent is not edited or removed from here either', async () => {
+    const edited = await cf(['agent', 'edit', 'hyperion', '--effort', 'low'], t.env)
+    assert.equal(edited.code, 1)
+    assert.match(edited.stderr, /catalog agent and stays/)
+    const removed = await cf(['agent', 'remove', 'hyperion'], t.env)
+    assert.equal(removed.code, 1)
+    assert.match(removed.stderr, /not yours to remove/)
+    assert.equal((await cf(['agent', 'reset', 'hyperion'], t.env)).code, 1)
   })
 
   it('still requires harness and model for a name it does not know', async () => {
@@ -238,12 +228,26 @@ describe('the catalog turns a name into a working agent', () => {
     assert.match(out.stdout + out.stderr, /cf catalog|--harness/)
   })
 
-  it('an edit overrides one field of a catalog agent and keeps the rest', async () => {
-    await cf(['agent', 'edit', 'diana', '--effort', 'low'], t.env)
+  it('an edit changes one field of an agent of your own and keeps the rest', async () => {
+    await cf(
+      [
+        'agent',
+        'add',
+        'my-luna',
+        '--harness',
+        'codex',
+        '--model',
+        'gpt-5.6-luna',
+        '--effort',
+        'xhigh',
+      ],
+      t.env,
+    )
+    await cf(['agent', 'edit', 'my-luna', '--effort', 'low'], t.env)
     const listed = JSON.parse((await cf(['agent', 'list', '--json'], t.env)).stdout)
-    const diana = listed.agents.find((p) => p.name === 'diana')
-    assert.equal(diana.model, 'gpt-5.6-luna')
-    assert.equal(diana.effort, 'low')
+    const luna = listed.agents.find((p) => p.name === 'my-luna')
+    assert.equal(luna.model, 'gpt-5.6-luna')
+    assert.equal(luna.effort, 'low')
   })
 })
 
@@ -302,7 +306,7 @@ it('the lead can discover saved capability profiles without refreshing or changi
     assert.equal(added.code, 0, added.stderr)
     const refused = await cf(['agent', 'add', 'hyperion'], t.env)
     assert.equal(refused.code, 1)
-    assert.match(refused.stderr, /in the catalog already/)
+    assert.match(refused.stderr, /catalog agent/)
     const role = join(t.env.CONSENSFLOW_HOME, 'roles/lead/.claude/skills/consensflow-lead/SKILL.md')
     mkdirSync(dirname(role), { recursive: true })
     writeFileSync(role, 'Keep existing lead context untouched')

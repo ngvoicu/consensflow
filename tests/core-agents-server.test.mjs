@@ -178,41 +178,39 @@ describe('the agents screens on the new core', () => {
     )
   })
 
-  it('lists every catalog agent, edits one into an override, resets it, and refuses to add its name', async () => {
+  it('lists every catalog agent and refuses to edit, remove or redefine one', async () => {
     const listed = await (await api('/api/agents')).json()
     assert.ok(
       listed.agents.find((p) => p.name === 'gefjon'),
       'the catalog is the roster',
     )
-    assert.equal(Object.hasOwn(listed, 'drift'), false)
+    assert.equal(Object.hasOwn(listed, 'catalog'), false)
     const edited = await api('/api/agents/gefjon', {
       method: 'PATCH',
       body: JSON.stringify({ effort: 'low' }),
     })
-    assert.equal(edited.status, 200)
-    assert.equal((await edited.json()).agent.effort, 'low')
-    const raw = () => JSON.parse(readFileSync(rosterPath(t.env), 'utf8'))
-    assert.deepEqual(
-      [
-        listAgents(t.env).find((p) => p.name === 'gefjon').edited,
-        raw().agents.filter((row) => row.id === 'gefjon').length,
-      ],
-      [true, 1],
-    )
-    const reset = await api('/api/agents/gefjon/reset', { method: 'POST', body: '{}' })
-    assert.equal(reset.status, 200)
-    assert.equal((await reset.json()).agent.effort, 'xhigh')
+    assert.equal(edited.status, 400)
+    assert.match((await edited.json()).error, /catalog agent and stays/)
+    assert.equal((await api('/api/agents/gefjon', { method: 'DELETE' })).status, 400)
     assert.equal(
-      raw().agents.some((row) => row.id === 'gefjon'),
-      false,
+      (await api('/api/agents/gefjon/reset', { method: 'POST', body: '{}' })).status,
+      401,
+      'no such route: nothing behind the token either',
     )
     const added = await api('/api/agents', {
       method: 'POST',
       body: JSON.stringify({ name: 'gefjon', harness: 'codex', model: 'm' }),
     })
     assert.equal(added.status, 400)
-    assert.match((await added.json()).error, /in the catalog already/)
-    assert.equal((await api('/api/agents/sync', { method: 'POST', body: '{}' })).status, 404)
+    assert.match((await added.json()).error, /catalog agent: pick another name/)
+    const stored = existsSync(rosterPath(t.env))
+      ? JSON.parse(readFileSync(rosterPath(t.env), 'utf8')).agents
+      : []
+    assert.equal(
+      stored.some((row) => row.id === 'gefjon'),
+      false,
+      'nothing about it was written',
+    )
   })
 
   it('exposes nothing that runs commands, and no retired route', async () => {

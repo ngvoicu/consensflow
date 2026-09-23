@@ -17,15 +17,13 @@ import {
 } from '../hosts/lib/presets.js'
 
 /**
- * The roster: every catalog agent, with the human's overrides on it, and the
- * agents defined by hand. `agents.json` keeps only what is the human's: a
- * custom agent in full, and for a catalog agent the fields changed on it
- * (model, effort, tier, description), keyed by the catalog entry. Reads
- * merge the catalog with the file, so a release that moves an entry reaches
- * every field the human did not touch. Rows an older build saved from the
- * catalog in full read as overrides of what differs, and `normalizeRoster`
- * folds them at daemon start. Reads map native kind/thinking fields to the
- * app's harness/effort view.
+ * The roster: every catalog agent, exactly as the catalog has it, and the
+ * agents defined by hand. `agents.json` keeps only the latter, in full. A
+ * catalog agent is never edited or removed: a different setting is a custom
+ * agent under a name of its own. Rows an older build saved from the catalog
+ * are the catalog's again on read, and `normalizeRoster` drops them at
+ * daemon start. Reads map native kind/thinking fields to the app's
+ * harness/effort view.
  *
  * Every function takes the environment explicitly — nothing reads
  * process.env — so tests run against throwaway homes.
@@ -179,10 +177,6 @@ const CATALOG_BY_PRESET = new Map(AGENT_PRESETS.map((preset) => [preset.preset, 
 const CATALOG_BY_ID = new Map(AGENT_PRESETS.map((preset) => [preset.id, preset]))
 /** The pi runner reads `thinking`; every other runner reads `effort`. */
 const effortKey = (kind) => (kind === 'pi' ? 'thinking' : 'effort')
-/** What the human may change on a catalog agent; its harness is the catalog's. */
-const overridable = (kind) => ['model', effortKey(kind), 'description', 'workTier']
-const set = (value) => value !== undefined && value !== null && value !== ''
-
 /** A catalog entry as the row the launcher runs when nothing on it is overridden. */
 function catalogRow(preset) {
   const effort = preset.effort ?? preset.thinking
@@ -199,21 +193,11 @@ function catalogRow(preset) {
   }
 }
 
-/** The fields of a stored row that differ from its catalog entry: the human's overrides. */
-function overridesOf(row, preset) {
-  const base = catalogRow(preset)
-  const own = {}
-  for (const field of overridable(preset.kind)) {
-    if (set(row[field]) && row[field] !== base[field]) own[field] = row[field]
-  }
-  return own
-}
-
 /**
- * The catalog entry a stored row overrides, if it is one: by the provenance
- * it carries, else by a matching name and harness (a copy an older build
- * saved, or a row released from its entry today). A custom row that took a
- * catalog name on another harness is its own agent.
+ * The catalog entry a stored row is a copy of, if it is one: by the
+ * provenance it carries, else by a matching name and harness (a copy an
+ * older build saved). A custom row that took a catalog name on another
+ * harness is its own agent, and hides the entry.
  */
 function entryOf(row) {
   const byPreset = row.preset === undefined ? undefined : CATALOG_BY_PRESET.get(row.preset)
@@ -224,26 +208,17 @@ function entryOf(row) {
 
 /**
  * The roster as the app sees it, in the file's shape: every catalog agent
- * with the human's overrides on it (marked `edited`), then the agents
- * defined by hand (marked `custom`). A custom row with a catalog name hides
- * that entry.
+ * as the catalog has it, then the agents defined by hand (marked `custom`).
+ * A stored copy of a catalog entry is ignored; a custom row with a catalog
+ * name hides that entry.
  */
 function rows(document) {
-  const overrides = new Map()
-  const custom = []
-  for (const row of document.agents) {
-    const entry = entryOf(row)
-    if (entry === undefined) custom.push(row)
-    else overrides.set(entry.preset, row)
-  }
+  const custom = document.agents.filter((row) => entryOf(row) === undefined)
   const hidden = new Set(custom.map((row) => row.id))
-  const catalog = AGENT_PRESETS.filter((preset) => !hidden.has(preset.id)).map((preset) => {
-    const stored = overrides.get(preset.preset)
-    const own = stored === undefined ? {} : overridesOf(stored, preset)
-    const row = { ...catalogRow(preset), ...own }
-    return Object.keys(own).length > 0 ? { ...row, edited: true } : row
-  })
-  return [...catalog, ...custom.map((row) => ({ ...row, custom: true }))]
+  return [
+    ...AGENT_PRESETS.filter((preset) => !hidden.has(preset.id)).map(catalogRow),
+    ...custom.map((row) => ({ ...row, custom: true })),
+  ]
 }
 
 const effortOf = (row) => row[effortKey(row.kind)] ?? undefined
@@ -259,7 +234,6 @@ function toView(row) {
     ...(row.description ? { description: row.description } : {}),
     ...(row.preset ? { preset: row.preset } : {}),
     ...(row.custom ? { custom: true } : {}),
-    ...(row.edited ? { edited: true } : {}),
     profile: agentProfile(row),
     ...(harness === undefined ? { unsupported: true } : {}),
   }
@@ -267,9 +241,8 @@ function toView(row) {
 
 /**
  * The row the launcher runs, in the stored shape (`kind`, `thinking`): the
- * catalog entry with the human's overrides, or the custom row. The runner
- * and the packet builder speak that shape, so `listAgents()` output would
- * drop the fields they run on.
+ * catalog entry, or the custom row. The runner and the packet builder speak
+ * that shape, so `listAgents()` output would drop the fields they run on.
  */
 export function agentRow(name, env) {
   const wanted = String(name ?? '').replace(/^@/, '')
@@ -281,30 +254,16 @@ export function listAgents(env) {
 }
 
 /**
- * Folds what older builds wrote into the shape the file keeps now: a full
- * copy of a catalog entry becomes the overrides that differ from it (or
- * nothing), and stored display data goes. Says whether the file changed.
+ * Folds what older builds wrote into the shape the file keeps now: a copy
+ * of a catalog entry goes (the catalog has it), and so does stored display
+ * data. Says whether the file changed.
  */
 export function normalizeRoster(env) {
   const before = JSON.stringify(loadDocument(env))
   const document = loadDocument(env)
-  document.agents = document.agents.flatMap((row) => {
+  document.agents = document.agents.filter((row) => {
     for (const field of STALE_FIELDS) delete row[field]
-    const entry = entryOf(row)
-    if (entry === undefined) return [row]
-    const own = overridesOf(row, entry)
-    if (Object.keys(own).length === 0) return []
-    return [
-      {
-        id: entry.id,
-        name: entry.name,
-        kind: entry.kind,
-        preset: entry.preset,
-        ...(row.createdAt ? { createdAt: row.createdAt } : {}),
-        ...(row.updatedAt ? { updatedAt: row.updatedAt } : {}),
-        ...own,
-      },
-    ]
+    return entryOf(row) === undefined
   })
   if (JSON.stringify(document) === before) return false
   saveDocument(document, env)
@@ -318,7 +277,7 @@ function validateAdd(input) {
     )
   }
   if (CATALOG_BY_ID.has(input.name)) {
-    throw new Error(`${input.name} is in the catalog already: edit it, or pick another name`)
+    throw new Error(`${input.name} is a catalog agent: pick another name for your own`)
   }
   if (!HARNESSES.includes(input.harness)) {
     throw new Error(
@@ -393,39 +352,16 @@ function refuseEffortEdit(name, kind) {
   )
 }
 
-/**
- * Edits a catalog agent by storing only what now differs from its entry,
- * and a custom agent in place. A blank effort on a catalog agent means the
- * catalog's own.
- */
+/** Edits an agent defined by hand, in place. A catalog agent is the catalog's. */
 export function editAgent(name, patch, env) {
   validateWorkTier(patch.workTier)
   const document = loadDocument(env)
   const stored = document.agents.find((row) => row.id === name)
   const entry = CATALOG_BY_ID.get(name)
   if (entry !== undefined && (stored === undefined || entryOf(stored) === entry)) {
-    if (patch.effort !== undefined && entry.kind === 'image') refuseEffortEdit(name, entry.kind)
-    const current = {
-      ...catalogRow(entry),
-      ...(stored === undefined ? {} : overridesOf(stored, entry)),
-    }
-    applyPatch(current, patch)
-    const own = overridesOf(current, entry)
-    const now = new Date().toISOString()
-    document.agents = document.agents.filter((row) => row !== stored)
-    if (Object.keys(own).length > 0) {
-      document.agents.push({
-        id: entry.id,
-        name: entry.name,
-        kind: entry.kind,
-        preset: entry.preset,
-        createdAt: stored?.createdAt ?? now,
-        updatedAt: now,
-        ...own,
-      })
-    }
-    saveDocument(document, env)
-    return listAgents(env).find((agent) => agent.name === name)
+    throw new Error(
+      `${name} is a catalog agent and stays as the catalog has it: define your own with the settings you want`,
+    )
   }
   if (stored === undefined) throw new Error(`no agent named ${name}`)
   if (
@@ -440,29 +376,13 @@ export function editAgent(name, patch, env) {
   return toView({ ...stored, custom: true })
 }
 
-/** A catalog agent back as the catalog has it: its overrides go. */
-export function resetAgent(name, env) {
-  const document = loadDocument(env)
-  const entry = CATALOG_BY_ID.get(name)
-  const stored = document.agents.find((row) => row.id === name)
-  if (entry === undefined || (stored !== undefined && entryOf(stored) !== entry)) {
-    if (stored === undefined) throw new Error(`no agent named ${name}`)
-    throw new Error(`${name} is your own agent: there is no catalog entry to reset it to`)
-  }
-  if (stored !== undefined) {
-    document.agents = document.agents.filter((row) => row !== stored)
-    saveDocument(document, env)
-  }
-  return listAgents(env).find((agent) => agent.name === name)
-}
-
-/** Removes an agent defined by hand; a catalog agent is reset, never removed. */
+/** Removes an agent defined by hand; a catalog agent is the catalog's. */
 export function removeAgent(name, env) {
   const document = loadDocument(env)
   const stored = document.agents.find((row) => row.id === name)
   const entry = CATALOG_BY_ID.get(name)
   if (entry !== undefined && (stored === undefined || entryOf(stored) === entry)) {
-    throw new Error(`${name} is in the catalog: reset it instead of removing it`)
+    throw new Error(`${name} is a catalog agent: it is not yours to remove`)
   }
   if (stored === undefined) throw new Error(`no agent named ${name}`)
   document.agents = document.agents.filter((row) => row !== stored)

@@ -7,15 +7,7 @@ import { WORK_TIERS } from '../../hosts/lib/presets.js'
 import { agentProfile, EFFORTS } from '../catalog.js'
 import { HarnessAdmin } from '../harness-admin.js'
 import { harnessPage } from '../harness-page.js'
-import {
-  addAgent,
-  configRoot,
-  editAgent,
-  HARNESSES,
-  listAgents,
-  removeAgent,
-  resetAgent,
-} from '../roster.js'
+import { addAgent, configRoot, editAgent, HARNESSES, listAgents, removeAgent } from '../roster.js'
 
 /**
  * The human's agents screens, served by the new core: the agents (`/`: the
@@ -79,7 +71,6 @@ export function agentsUi(
         path === '/api/agents' ||
         path === '/api/harnesses/check' ||
         path === '/api/harnesses/update' ||
-        /^\/api\/agents\/[^/]+\/reset$/.test(path) ||
         named !== null
       if (!page && !api) return null
       const header = request.headers.authorization ?? ''
@@ -131,12 +122,6 @@ export function agentsUi(
             }),
           })
         }
-        const reset = path.match(/^\/api\/agents\/([^/]+)\/reset$/)
-        if (reset !== null && request.method === 'POST') {
-          const agent = resetAgent(decodeURIComponent(reset[1]), env)
-          onRosterChange()
-          return json(200, { agent })
-        }
         if (named !== null && request.method === 'PATCH') {
           const agent = editAgent(named[1], body, env)
           onRosterChange()
@@ -158,7 +143,7 @@ export function agentsUi(
 const BROWSING_CONTROLS = `
   <div class="filters">
     <label class="filter-search">Search agents<input type="search" placeholder="Name, model, harness or task…" autocomplete="off"></label>
-    <label>Show<select name="show" aria-label="Show"><option value="all">All agents</option><option value="mine">Mine: edited and custom</option></select></label>
+    <label>Show<select name="show" aria-label="Show"><option value="all">All agents</option><option value="mine">My own agents</option></select></label>
     <label>Work tier<select name="tier" aria-label="Work tier"><option value="all">All tiers</option>${Object.entries(
       WORK_TIERS,
     )
@@ -236,7 +221,7 @@ const PAGE = (token) => `<!DOCTYPE html>
   .member__head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .callsign { font-size: 17px; font-weight: 600; color: var(--accent-text); letter-spacing: -.01em; }
   .tag { font-family: var(--mono); font-size: 11px; color: var(--muted); }
-  .tag--edited { color: var(--accent-text); }
+  .tag--own { color: var(--accent-text); }
   .member__head .spacer { flex: 1; }
   /* A long command scrolls rather than wrapping (it stays one readable line);
      the fade is the only hint that there is more to the right. */
@@ -519,25 +504,23 @@ function renderBenchmarkControls(data) {
 
 /**
  * An agent's row, the same for every agent: its name, what it runs, its tier
- * and route, and Edit; Reset when it is a catalog agent the human edited,
- * Remove when it is the human's own.
+ * and route; Edit and Remove when it is the human's own, since a catalog
+ * agent stays as the catalog has it.
  */
 function agentCard(p, group, editors) {
   const card = el('div', 'member');
   card.dataset.agentName = p.name;
-  if (p.edited) card.dataset.edited = 'true';
   if (p.custom) card.dataset.custom = 'true';
   const head = el('div', 'member__head');
   head.append(el('span', 'callsign', p.name));
   head.append(el('span', 'tag', group.modelGroup ? (HARNESS_LABELS[p.harness] || p.harness) : p.profile.modelLabel + ' · ' + (HARNESS_LABELS[p.harness] || p.harness) + ' · ' + effortLabel(effortValue(p))));
-  if (p.edited) head.append(el('span', 'tag tag--edited', 'edited'));
-  if (p.custom) head.append(el('span', 'tag tag--edited', 'your own'));
+  if (p.custom) head.append(el('span', 'tag tag--own', 'your own'));
   head.append(el('span', 'spacer'));
-  const edit = el('button', null, 'Edit');
-  edit.onclick = () => openEditor(card, p);
-  head.append(edit);
-  if (p.edited) head.append(resetButton(p));
-  if (p.custom) head.append(removeButton(p, 'Remove'));
+  if (p.custom) {
+    const edit = el('button', null, 'Edit');
+    edit.onclick = () => openEditor(card, p);
+    head.append(edit, removeButton(p, 'Remove'));
+  }
   card.append(head);
   // The row shows what a task finds it by, its tier, and how it is billed;
   // the model card above says the rest once for the model.
@@ -547,9 +530,8 @@ function agentCard(p, group, editors) {
 }
 
 /**
- * One list: every catalog agent, with the human's edits on it, and every
- * agent defined by hand, grouped as the controls say. Show narrows it to
- * what is the human's: the edited and the custom.
+ * One list: every catalog agent and every agent defined by hand, grouped as
+ * the controls say. Show narrows it to the human's own.
  */
 function renderAgents(data) {
   const host = document.querySelector('#agents');
@@ -557,10 +539,10 @@ function renderAgents(data) {
     .map(card => [card.dataset.agentName, card.querySelector('form')]).filter(([, form]) => form));
   host.innerHTML = '';
   const show = document.querySelector('#agents-section [name=show]').value;
-  const entries = data.agents.filter(p => show === 'all' || p.custom || p.edited);
-  const mine = data.agents.filter(p => p.custom || p.edited).length;
+  const entries = data.agents.filter(p => show === 'all' || p.custom);
+  const mine = data.agents.filter(p => p.custom).length;
   document.querySelector('#lede').textContent = data.agents.length + ' agents, the catalog’s and your own; a project’s team is picked from them.' +
-    (mine === 0 ? '' : ' ' + mine + ' ' + (mine === 1 ? 'is' : 'are') + ' yours: edited or defined here.');
+    (mine === 0 ? '' : ' ' + mine + ' ' + (mine === 1 ? 'is' : 'are') + ' yours, defined here.');
   const groups = browsingGroups(entries, '#agents-section');
   if (groups.length === 0) { host.append(el('p', 'empty', 'No agents match these filters.')); return; }
   for (const group of groups) {
@@ -576,7 +558,7 @@ function openEditor(card, agent) {
   const form = el('form', 'form');
   const fields = [
     ['model', agent.model, 'model'],
-    ['effort', agent.effort ?? '', agent.custom ? 'effort (blank for none)' : 'effort (blank: the catalog’s)'],
+    ['effort', agent.effort ?? '', 'effort (blank for none)'],
   ];
   for (const [name, value, placeholder] of agent.harness === 'image' ? [] : fields) {
     const input = document.createElement('input');
@@ -637,34 +619,6 @@ function removeButton(agent, label) {
       status.textContent = error.message || 'Could not remove agent';
     } finally {
       pendingRemovals.delete(agent.name);
-      try { await load(); } catch {
-        renderLists();
-        if (!status.textContent) status.textContent = 'Could not refresh agents. Reopen this screen to try again.';
-      }
-    }
-  };
-  return button;
-}
-
-const pendingResets = new Set();
-/** A catalog agent back as the catalog has it: its edits go. */
-function resetButton(agent) {
-  const button = el('button', null, pendingResets.has(agent.name) ? 'Resetting…' : 'Reset');
-  button.disabled = pendingResets.has(agent.name);
-  button.onclick = async () => {
-    if (pendingResets.has(agent.name)) return;
-    pendingResets.add(agent.name);
-    button.disabled = true;
-    button.textContent = 'Resetting…';
-    const status = document.querySelector('#roster-note');
-    status.textContent = '';
-    try {
-      const response = await fetch('/api/agents/' + encodeURIComponent(agent.name) + '/reset', { method: 'POST', headers, body: '{}' });
-      if (!response.ok) throw new Error((await response.json()).error || 'Could not reset agent');
-    } catch (error) {
-      status.textContent = error.message || 'Could not reset agent';
-    } finally {
-      pendingResets.delete(agent.name);
       try { await load(); } catch {
         renderLists();
         if (!status.textContent) status.textContent = 'Could not refresh agents. Reopen this screen to try again.';

@@ -16,7 +16,6 @@ import {
   listAgents,
   migrateStateRoot,
   removeAgent,
-  resetAgent,
 } from '../src/roster.js'
 import { terminalRuntime } from '../src/terminal.js'
 
@@ -51,7 +50,6 @@ Usage: cf <command> [options]
   agent edit <name> [--model <m>] [--effort <e>] [--description <d>]
     [--work-tier critical|complex|standard|light|auto]
   agent remove <name>
-  agent reset <name>                          A catalog agent back as the catalog has it
   ui [--json] [--no-open]                     Run the app's daemon; open the agents screens
   doctor                                    Inspect runtime, roster and bundled roles
 
@@ -76,7 +74,9 @@ function fail(message) {
 function resolveAdd(name, values) {
   // Every catalog agent is in the roster already; an add defines one by hand.
   if (catalogEntry(name) !== undefined) {
-    throw new Error(`${name} is in the catalog already: edit it with \`cf agent edit\``)
+    throw new Error(
+      `${name} is a catalog agent, in your agents already: pick another name for your own`,
+    )
   }
   if (values.harness === undefined || values.model === undefined) {
     throw new Error(
@@ -194,15 +194,8 @@ function agentVerb(rest) {
       out(`removed ${name}`)
       return
     }
-    case 'reset': {
-      const reset = resetAgent(name, env)
-      out(
-        `${reset.name}  ${reset.harness}  ${reset.model}  ${reset.effort ?? '-'}  (as the catalog has it)`,
-      )
-      return
-    }
     default:
-      fail('usage: cf agent add|list|edit|reset|remove')
+      fail('usage: cf agent add|list|edit|remove')
   }
 }
 

@@ -94,11 +94,11 @@ projects.
 - **Agents** (Settings). One roster: every catalog agent and every agent
   you define, as one list by model. Each model's card says its work tier and
   its benchmark scores once; each agent's row says its harness, effort, tier
-  and route, with Edit, plus Reset once you edited it and Remove when it is
-  yours. A catalog agent follows its entry: when a release moves the entry
-  to a newer model, the agent and every team it is on move with it, except
-  the fields you edited. Define your own with any model string its harness
-  accepts; a catalog name cannot be defined twice.
+  and route. A catalog agent is exactly what the catalog ships: when a
+  release moves its entry to a newer model, the agent and every team it is
+  on move with it, and it cannot be edited or removed. Your own agents carry
+  Edit and Remove; define one with any model string its harness accepts and
+  the settings you want, under a name the catalog does not have.
 - **Harnesses** (Settings). Which harness CLIs are installed, their versions
   and whether ConsensFlow's integration with each is in place.
 

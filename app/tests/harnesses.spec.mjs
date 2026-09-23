@@ -5,7 +5,7 @@ import { CATALOG } from '../../src/catalog.js'
 import { agentsUi } from '../../src/core/agents-server.js'
 import { Credentials, startApi } from '../../src/core/api.js'
 import { openLedger } from '../../src/ledger/index.js'
-import { addAgent, editAgent, listAgents } from '../../src/roster.js'
+import { addAgent, listAgents } from '../../src/roster.js'
 import { tempEnv } from '../../tests/helpers.mjs'
 
 /**
@@ -118,8 +118,7 @@ test('Agents lists every catalog agent as one row with nothing to add, and takes
     await expect(page.locator('#agents .offer')).toHaveCount(0)
     await expect(page.locator('#agents').getByRole('button', { name: /^Add/ })).toHaveCount(0)
     const gefjon = member(page, 'gefjon')
-    await expect(gefjon.getByRole('button', { name: 'Edit', exact: true })).toBeVisible()
-    await expect(gefjon.getByRole('button', { name: /Remove|Reset/ })).toHaveCount(0)
+    await expect(gefjon.getByRole('button')).toHaveCount(0)
     const form = page.locator('#add')
     await form.locator('[name="name"]').fill('custom')
     await form.locator('[name="harness"]').selectOption('claude')
@@ -137,7 +136,8 @@ test('Agents lists every catalog agent as one row with nothing to add, and takes
     const custom = member(page, 'custom')
     await expect(custom).toBeVisible()
     await expect(custom).toHaveAttribute('data-custom', 'true')
-    await expect(custom.locator('.tag--edited')).toHaveText('your own')
+    await expect(custom.locator('.tag--own')).toHaveText('your own')
+    await expect(custom.getByRole('button', { name: 'Edit', exact: true })).toBeVisible()
     // Its own model card carries the tier, said once for the model and reasoning.
     await expect(
       page
@@ -154,7 +154,7 @@ test('Agents lists every catalog agent as one row with nothing to add, and takes
     await form.locator('[name="harness"]').selectOption('claude')
     await form.locator('[name="model"]').fill('example-model')
     await form.getByRole('button', { name: 'Add agent' }).click()
-    await expect(page.locator('#error')).toContainText('in the catalog already')
+    await expect(page.locator('#error')).toContainText('catalog agent')
     await custom.getByRole('button', { name: 'Remove', exact: true }).click()
     await expect(member(page, 'custom')).toHaveCount(0)
     await expect(page.locator('#lede')).not.toContainText('yours')
@@ -169,42 +169,50 @@ test('Agents lists every catalog agent as one row with nothing to add, and takes
   }
 })
 
-test('Agents edits a catalog agent into your own settings, shows it so, and resets it', async ({
+test('Agents keeps catalog agents as the catalog has them, and Show: mine lists only your own', async ({
   page,
 }) => {
-  const fixture = await catalogPage(page, [], undefined, null)
+  const fixture = await catalogPage(
+    page,
+    [
+      {
+        name: 'mine',
+        harness: 'opencode',
+        model: 'opencode/muse-spark-1.3-contributor-free',
+        effort: 'low',
+      },
+    ],
+    undefined,
+    null,
+  )
   const { second } = fixture
   try {
     const gefjon = member(page, 'gefjon')
-    await gefjon.getByRole('button', { name: 'Edit', exact: true }).click()
-    await expect(gefjon.locator('[name=effort]')).toHaveAttribute(
+    await expect(gefjon.getByRole('button')).toHaveCount(0)
+    await expect(gefjon.locator('.tag--own')).toHaveCount(0)
+    const mine = member(page, 'mine')
+    await expect(mine.getByRole('button', { name: 'Edit', exact: true })).toBeVisible()
+    await expect(mine.getByRole('button', { name: 'Remove', exact: true })).toBeVisible()
+    await mine.getByRole('button', { name: 'Edit', exact: true }).click()
+    await expect(mine.locator('[name=effort]')).toHaveAttribute(
       'placeholder',
-      'effort (blank: the catalog’s)',
+      'effort (blank for none)',
     )
-    await gefjon.locator('[name=effort]').fill('low')
-    await gefjon.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(gefjon).toHaveAttribute('data-edited', 'true')
-    await expect(gefjon.locator('.tag--edited')).toHaveText('edited')
-    await expect(gefjon.getByRole('button', { name: 'Reset', exact: true })).toBeVisible()
-    await expect(gefjon.getByRole('button', { name: 'Remove', exact: true })).toHaveCount(0)
-    // It sits in the card of the model and reasoning it runs now.
+    await mine.locator('[name=effort]').fill('xhigh')
+    await mine.getByRole('button', { name: 'Save', exact: true }).click()
+    // It sits in the card of the model and reasoning it runs now, beside the catalog's gefjon.
     await expect(
       page
         .locator('.model-group')
-        .filter({ has: page.locator('.callsign', { hasText: /^gefjon$/ }) })
+        .filter({ has: page.locator('.callsign', { hasText: /^mine$/ }) })
         .locator('h3'),
-    ).toHaveText('Muse Spark 1.3 · Low · 1')
-    const stored = listAgents(fixture.t.env).find((p) => p.name === 'gefjon')
-    expect([stored.effort, stored.edited]).toEqual(['low', true])
+    ).toHaveText('Muse Spark 1.3 · Xhigh · 6')
+    expect(listAgents(fixture.t.env).find((p) => p.name === 'mine').effort).toBe('xhigh')
     await expect(page.locator('#lede')).toContainText('1 is yours')
-    // Show: mine is only what is yours, in every tab.
     await fixture.saved(second)
-    await refreshAgents(second)
-    await expect(second.locator('.callsign')).toHaveText(['gefjon'])
-    await gefjon.getByRole('button', { name: 'Reset', exact: true }).click()
-    await expect(gefjon.getByRole('button', { name: 'Reset', exact: true })).toHaveCount(0)
-    await expect(gefjon).not.toHaveAttribute('data-edited', 'true')
-    expect(listAgents(fixture.t.env).find((p) => p.name === 'gefjon').effort).toBe('xhigh')
+    await expect(second.locator('.callsign')).toHaveText(['mine'])
+    await mine.getByRole('button', { name: 'Remove', exact: true }).click()
+    await expect(member(page, 'mine')).toHaveCount(0)
     await refreshAgents(second)
     await expect(second.locator('#agents')).toContainText('No agents match these filters.')
   } finally {
@@ -414,21 +422,21 @@ test('Kimi K3 effort follows the catalog until edited, and edits are validated',
       'Kimi K3 · Low · 1',
     ])
     expect(listAgents(fixture.t.env).find((a) => a.name === 'ilmarinen').effort).toBe('max')
-    await member(page, 'ilmarinen').getByRole('button', { name: 'Edit', exact: true }).click()
-    await member(page, 'ilmarinen').locator('input[name=effort]').fill('high')
-    await member(page, 'ilmarinen').getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(member(page, 'ilmarinen').locator('form')).toHaveCount(0)
-    expect(listAgents(fixture.t.env).find((a) => a.name === 'ilmarinen').effort).toBe('high')
-    await member(page, 'ilmarinen').getByRole('button', { name: 'Edit', exact: true }).click()
-    await member(page, 'ilmarinen').locator('input[name=effort]').fill('medium')
-    await member(page, 'ilmarinen').getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(page.getByRole('status')).toContainText('low, high or max')
-    expect(listAgents(fixture.t.env).find((a) => a.name === 'ilmarinen').effort).toBe('high')
-    // A blank effort is the catalog's own again.
-    await member(page, 'ilmarinen').locator('input[name=effort]').fill('')
-    await member(page, 'ilmarinen').getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(member(page, 'ilmarinen').getByRole('button', { name: 'Reset' })).toHaveCount(0)
-    expect(listAgents(fixture.t.env).find((a) => a.name === 'ilmarinen').effort).toBe('max')
+    await expect(member(page, 'ilmarinen').getByRole('button')).toHaveCount(0)
+    const mine = member(second, 'low-kimi')
+    await mine.getByRole('button', { name: 'Edit', exact: true }).click()
+    await mine.locator('input[name=effort]').fill('high')
+    await mine.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(mine.locator('form')).toHaveCount(0)
+    expect(listAgents(fixture.t.env).find((a) => a.name === 'low-kimi').effort).toBe('high')
+    await mine.getByRole('button', { name: 'Edit', exact: true }).click()
+    await mine.locator('input[name=effort]').fill('medium')
+    await mine.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(second.getByRole('status')).toContainText('low, high or max')
+    expect(listAgents(fixture.t.env).find((a) => a.name === 'low-kimi').effort).toBe('high')
+    await mine.locator('input[name=effort]').fill('')
+    await mine.getByRole('button', { name: 'Save', exact: true }).click()
+    expect(listAgents(fixture.t.env).find((a) => a.name === 'low-kimi').effort).toBeUndefined()
     await second.locator('#add [name=harness]').selectOption('kimi')
     await expect(second.locator('#effort-options option')).toHaveText(['low', 'high', 'max'])
   } finally {
@@ -691,9 +699,7 @@ test('model capability order takes precedence over agent names and reasoning eff
       for (const section of await sections.all()) {
         const labels = await section
           .locator(
-            group === 'model-reasoning'
-              ? '.agent-group h3'
-              : '.member__head > .tag:not(.tag--edited)',
+            group === 'model-reasoning' ? '.agent-group h3' : '.member__head > .tag:not(.tag--own)',
           )
           .allTextContents()
         expect([...new Set(labels.map((label) => label.split(' · ')[0]))]).toEqual([
@@ -709,11 +715,11 @@ test('model capability order takes precedence over agent names and reasoning eff
   }
 })
 
-test('every row shows its tier and route; an edit to a catalog agent moves its tier', async ({
+test('every row shows its tier and route; an edit to your own agent moves its tier', async ({
   page,
 }) => {
   const fixture = await catalogPage(page, [
-    { name: 'custom', harness: 'codex', model: 'my-model', effort: 'high' },
+    { name: 'custom', harness: 'codex', model: 'gpt-6-astra', effort: 'medium' },
     { name: 'draw', harness: 'image', model: 'codex-image' },
   ])
   try {
@@ -725,11 +731,13 @@ test('every row shows its tier and route; an edit to a catalog agent moves its t
     await expect(member(page, 'draw').locator('.tier-pill')).toHaveText('T4 · Light work')
     await expect(member(page, 'skirnir').locator('.agent-route')).toHaveText('OpenRouter · API')
     // The tier follows the agent's own model and reasoning, edits included.
-    await maia.getByRole('button', { name: 'Edit', exact: true }).click()
-    await maia.locator('[name=effort]').fill('low')
-    await maia.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(maia.locator('.tier-pill')).toHaveText('T4 · Light work')
-    await expect(maia).toHaveAttribute('data-edited', 'true')
+    const custom = member(page, 'custom')
+    await expect(custom.locator('.tier-pill')).toHaveText('T3 · Standard work')
+    await custom.getByRole('button', { name: 'Edit', exact: true }).click()
+    await custom.locator('[name=effort]').fill('low')
+    await custom.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(custom.locator('.tier-pill')).toHaveText('T4 · Light work')
+    await expect(maia.getByRole('button')).toHaveCount(0)
   } finally {
     await fixture.close()
   }
@@ -741,10 +749,8 @@ test('a second tab refreshes saved changes while preserving its filters and open
   const fixture = await catalogPage(page, [
     { name: 'last-max', harness: 'codex', model: 'gpt-6-astra', effort: 'max' },
     { name: 'first-xhigh', harness: 'codex', model: 'gpt-6-astra', effort: 'xhigh' },
+    { name: 'own-minimal', harness: 'codex', model: 'gpt-6-astra', effort: 'minimal' },
   ])
-  editAgent('electra', { effort: 'minimal' }, fixture.t.env)
-  await refreshAgents(page)
-  await refreshAgents(fixture.second)
   const { second } = fixture
   try {
     await expect(page.locator('#add')).toHaveCount(1)
@@ -758,7 +764,7 @@ test('a second tab refreshes saved changes while preserving its filters and open
       'GPT-6 Astra · Xhigh · 1',
       'GPT-6 Astra · Minimal · 1',
     ])
-    const edited = member(second, 'electra')
+    const edited = member(second, 'own-minimal')
     await edited.getByRole('button', { name: 'Edit', exact: true }).click()
     await edited.locator('[name=effort]').fill('medium')
     await second.locator('#add [name=name]').fill('another-draft')
@@ -1081,7 +1087,7 @@ test('shared model cards return after reload and Clear filters in both tabs', as
   }
 })
 
-test('a model card keeps its shared scores while one of its agents is edited and reset', async ({
+test('a model card keeps its shared scores while an agent of your own joins and leaves it', async ({
   page,
 }) => {
   const cache = benchmarkCache()
@@ -1107,36 +1113,29 @@ test('a model card keeps its shared scores while one of its agents is edited and
       'Agentic 57.1',
     ])
     // Three harnesses run this model at this effort; each row says which.
-    await expect(card.locator('.member__head > .tag:not(.tag--edited)')).toHaveText([
+    await expect(card.locator('.member__head > .tag:not(.tag--own)')).toHaveText([
       'Claude Code',
       'Pi',
       'OpenCode',
     ])
+    await expect(card.getByRole('button')).toHaveCount(0)
     await page.screenshot({ path: '/tmp/cf-model-card-fable.png' })
-    await second.getByRole('searchbox').fill('Fable')
-    await second.getByLabel('Group by').selectOption('model-reasoning')
-    const orpheus = member(second, 'orpheus')
-    await orpheus.getByRole('button', { name: 'Edit', exact: true }).click()
-    await expect(orpheus.locator('[name=description]')).toHaveCount(0)
-    await orpheus.locator('[name=effort]').fill('low')
-    await orpheus.getByRole('button', { name: 'Save', exact: true }).click()
-    // The edited agent moves to the card of what it runs now; the others stay.
-    await expect(
-      second
-        .locator('.model-group')
-        .filter({ has: second.locator('.callsign', { hasText: /^orpheus$/ }) })
-        .locator('h3'),
-    ).toHaveText('Claude Fable 5.1 · Low · 4')
-    const stored = listAgents(fixture.t.env).find((p) => p.name === 'orpheus')
-    expect([stored.effort, stored.edited]).toEqual(['low', true])
+    const form = second.locator('#add')
+    await form.locator('[name=name]').fill('my-fable')
+    await form.locator('[name=harness]').selectOption('claude')
+    await form.locator('[name=model]').fill('claude-fable-5-1')
+    await form.locator('[name=effort]').fill('xhigh')
+    await form.getByRole('button', { name: 'Add agent' }).click()
+    await expect(member(second, 'my-fable')).toBeVisible()
     await refreshAgents(page)
-    await expect(card.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 2')
+    await expect(card.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 4')
     await expect(card.locator('.benchmark-details')).toHaveCount(1)
-    await member(page, 'orpheus').getByRole('button', { name: 'Reset', exact: true }).click()
-    await expect(card.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 3')
+    await expect(card.locator('.member .benchmark-details')).toHaveCount(0)
     await expect(page.getByRole('searchbox')).toHaveValue('Fable')
     await expect(page.getByLabel('Sort by')).toHaveValue('coding')
-    expect(listAgents(fixture.t.env).find((p) => p.name === 'orpheus').edited).toBeUndefined()
+    await member(page, 'my-fable').getByRole('button', { name: 'Remove', exact: true }).click()
+    await expect(card.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 3')
+    expect(listAgents(fixture.t.env).some((p) => p.name === 'my-fable')).toBe(false)
   } finally {
     await fixture.close()
   }
@@ -1268,7 +1267,11 @@ for (const colorScheme of ['light', 'dark']) {
     test(`the agents layout remains usable at ${width}px in ${colorScheme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme })
-      const fixture = await catalogPage(page, [], benchmarkCache())
+      const fixture = await catalogPage(
+        page,
+        [{ name: 'maia-2', harness: 'codex', model: 'gpt-6-astra', effort: 'medium' }],
+        benchmarkCache(),
+      )
       try {
         for (const screen of [page, fixture.second]) {
           const section = screen.getByRole('region', { name: 'Agents', exact: true })
@@ -1303,7 +1306,7 @@ for (const colorScheme of ['light', 'dark']) {
             expect(bounds.x + bounds.width).toBeLessThanOrEqual(width)
           }
         }
-        await expect(member(page, 'maia')).toBeVisible()
+        await expect(member(page, 'maia-2')).toBeVisible()
         expect(
           await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
         ).toBe(true)
@@ -1345,7 +1348,7 @@ for (const colorScheme of ['light', 'dark']) {
             expect(checks.withinViewport).toBe(true)
           }
         }
-        const head = member(page, 'maia').locator('.member__head')
+        const head = member(page, 'maia-2').locator('.member__head')
         await expect(head.getByRole('button', { name: 'Edit', exact: true })).toBeEnabled()
         const bounds = await head.boundingBox()
         expect(bounds.x).toBeGreaterThanOrEqual(0)

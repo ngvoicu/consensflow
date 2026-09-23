@@ -120,15 +120,16 @@ describe('the page protocol of the new core', () => {
   it('lists the saved agents for the team picker and adds one with its own harness', async () => {
     await withPage(async ({ operations }) => {
       const { agents } = await operations['agents.list']({})
-      // Every catalog agent is on offer; the two rows in the file override theirs.
+      // Every catalog agent is on offer, as the catalog has it: the file's
+      // copies of zeus and diana change nothing.
       const mine = agents.filter((a) => ['zeus', 'diana'].includes(a.name))
       assert.deepEqual(
         mine.map((a) => [a.name, a.harness, a.model]),
         [
           ['diana', 'codex', 'gpt-5.6-luna'],
-          ['zeus', 'claude', 'claude-sonnet-5'],
+          ['zeus', 'claude', 'claude-opus-5'],
         ],
-        'in the catalog’s order, with the file’s overrides on them',
+        'in the catalog’s order',
       )
       assert.ok(agents.length > 100)
       const { project } = await operations['project.open']({
