@@ -1299,7 +1299,9 @@ export function agentProfile(agent) {
   else if (known && (['low', 'medium', 'high', 'xhigh', 'max'].includes(effort) || (harness === 'codex' && effort === 'ultra'))) {
     if (['gpt-6-astra', 'claude-fable-5.1'].includes(profile.modelKey))
       tier = ['max', 'ultra'].includes(effort) ? 'critical' : ['high', 'xhigh'].includes(effort) ? 'complex' : effort === 'medium' ? 'standard' : 'light';
-    else if (['gpt-5.6-sol', 'claude-opus-5'].includes(profile.modelKey) && effort !== 'low') tier = 'standard';
+    else if (profile.modelKey === 'claude-opus-5')
+      tier = effort === 'max' ? 'critical' : effort === 'xhigh' ? 'complex' : effort === 'low' ? 'light' : 'standard';
+    else if (profile.modelKey === 'gpt-5.6-sol' && !['low', 'medium'].includes(effort)) tier = 'standard';
   }
   validateWorkTier(agent.workTier);
   profile.workTier = agent.workTier ?? tier;
