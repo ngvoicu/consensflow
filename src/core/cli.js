@@ -30,6 +30,7 @@ export const USAGE = `cf inside a ConsensFlow window: the board's commands.
   cf task resume T-3 "…"            go on with it: the same window, with your words
   cf inbox [read m-12]              what is waiting for you, or one message in full
   cf ask "…" [--human]              a question to whoever gave you your task (or the human)
+  cf note "…" [--human]             something they should know; nothing waits on it
   cf answer m-12 "…"                answer a question put to you
   cf team                           the members: roles and tiers
   cf whoami                         your project, role and current task
@@ -139,6 +140,19 @@ async function command(verb, rest, call, cwd) {
         text: messages.length === 0 ? 'Your inbox is empty.' : messages.map(messageLine).join('\n'),
       }
     }
+    case 'note': {
+      const { flags, text } = split(rest, ['--human'], ['--to', '--task'])
+      const to = flags['--human'] ? 'human' : handle(flags['--to'])
+      const { message } = await call('POST', '/api/notes', {
+        body: requireText(text, 'cf note "what to know"'),
+        ...(to === undefined ? {} : { to }),
+        ...(flags['--task'] === undefined ? {} : { task: taskNumber(flags['--task']) }),
+      })
+      return {
+        data: message,
+        text: `m-${message.id} noted to @${message.recipient}; nothing waits on it.`,
+      }
+    }
     case 'ask': {
       const { flags, text } = split(rest, ['--human'], ['--to', '--task'])
       const to = flags['--human'] ? 'human' : handle(flags['--to'])
@@ -211,12 +225,6 @@ async function taskCommand([action, ...rest], call, cwd) {
     const needs = taskNumbers(flags['--needs'])
     const before = taskNumbers(flags['--before'])
     if (
-      (needs !== undefined || before !== undefined) &&
-      (to !== undefined || after !== undefined || flags['--self'] === true)
-    ) {
-      throw usage('--needs and --before go with a task for a tier (or --design)')
-    }
-    if (
       to === undefined &&
       tier === undefined &&
       after === undefined &&
@@ -263,11 +271,11 @@ async function taskCommand([action, ...rest], call, cwd) {
     return {
       data: created,
       text: flags['--self']
-        ? `T-${number} is yours; finish it with: cf task done T-${number} "what you did".`
+        ? `T-${number} is yours; finish it with: cf task done T-${number} "what you did".${waits}`
         : after !== undefined
-          ? `T-${number} continues in @${assignee}, the window that did T-${after}; its result arrives in your inbox.${gated}`
+          ? `T-${number} continues in @${assignee}, the window that did T-${after}; its result arrives in your inbox.${gated}${waits}`
           : to !== undefined
-            ? `T-${number} queued for @${to}. The result arrives in your inbox when @${to} finishes.${gated}`
+            ? `T-${number} queued for @${to}. The result arrives in your inbox when @${to} finishes.${gated}${waits}`
             : `T-${number} is on the board for ${aPool(pool, tier)}; the first free one gets it, and its result arrives in your inbox.${waits}${holds}${gated}`,
     }
   }

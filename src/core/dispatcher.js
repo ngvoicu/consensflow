@@ -819,7 +819,7 @@ export class Dispatcher {
    */
   #assignOpenTasks(project) {
     for (const task of this.#ledger.board(project.id).open) {
-      if (task.blockedBy.length > 0) continue
+      if (task.blockedBy.length > 0 || task.assignee !== null) continue
       const candidates = this.#ledger.candidates(project.id, task.number)
       const free = candidates.filter((member) => this.#available(member))
       if (free.length > 0) {

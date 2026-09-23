@@ -701,7 +701,7 @@ test("shows a task waiting for a member in its requester's backlog, with the tie
 }) => {
   await open(page)
   const foryou = page.getByRole('region', { name: 'For you' })
-  await expect(foryou.locator('.foryou-status')).toHaveText('3 waiting')
+  await expect(foryou.locator('.foryou-status')).toHaveText('2 waiting · 1 note')
   // The human puts no task on the board: the lead does, told in its terminal.
   await expect(page.getByRole('button', { name: 'New task' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: /^Give .* a task$/ })).toHaveCount(0)
@@ -989,6 +989,34 @@ test('the dock stays where the human scrolled it across redraws', async ({ page 
   expect(await stage.evaluate((node) => node.scrollLeft)).toBe(scrolled)
 })
 
+test('a note from an agent reads in its own list, marked read when seen', async ({ page }) => {
+  const data = model()
+  data.inbox[1].push({
+    id: 16,
+    kind: 'note',
+    state: 'queued',
+    sender: 'lead',
+    recipient: 'human',
+    taskNumber: 1,
+    body: 'The parser is in; I am moving to the lexer.',
+    questions: null,
+    createdAt: at(1),
+  })
+  await open(page, data)
+  const bay = page.getByRole('region', { name: 'For you' })
+  await expect(bay.locator('.foryou-status')).toHaveText('2 waiting · 2 notes')
+  await expect(
+    bay.getByRole('list', { name: 'Waiting for you' }).locator('li[data-message="16"]'),
+  ).toHaveCount(0)
+  const notes = bay.getByRole('list', { name: 'Notes for you' })
+  await expect(bay.locator('.foryou-sub')).toHaveText('Notes from your agents')
+  const note = notes.locator('li[data-message="16"]')
+  await expect(note).toContainText('The parser is in; I am moving to the lexer.')
+  await expect(note).toContainText('Note from @lead')
+  await note.getByRole('button', { name: 'Mark m-16 read' }).click()
+  await expect.poll(() => calls(page, 'message.read')).toEqual([{ message: 16 }])
+})
+
 test('typed text is a draft the pane guards; arrows, mouse and Escape are not', async ({
   page,
 }) => {
@@ -1219,7 +1247,7 @@ test('lists what waits for approval in For you, and approves or declines it, wri
   ]
   await open(page, data)
   const bay = page.getByRole('region', { name: 'For you' })
-  await expect(bay.locator('.foryou-status')).toHaveText('7 waiting')
+  await expect(bay.locator('.foryou-status')).toHaveText('6 waiting · 1 note')
   const brief = bay.locator('.strip-message[data-message="30"]')
   await expect(brief).toHaveAttribute('data-gated', 'true')
   await expect(brief.locator('.strip-route')).toHaveText(

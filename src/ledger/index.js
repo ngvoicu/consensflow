@@ -910,12 +910,6 @@ class Ledger {
     if (title !== undefined) requireText(title, 'title', MAX_TITLE)
     const needed = requireNumbers(needs, 'needs')
     const blocking = requireNumbers(before, 'before')
-    if ((needed.length > 0 || blocking.length > 0) && (to !== undefined || after !== undefined)) {
-      throw new LedgerError(
-        'needs-on-the-board',
-        'needs go with a task on the board (for a tier, or the designer)',
-      )
-    }
     if (to === undefined && after === undefined) {
       if (!POOLS.includes(pool)) {
         throw new LedgerError('invalid-pool', `a pool is ${POOLS.join(', ')}, not ${pool}`)
@@ -962,6 +956,11 @@ class Ledger {
           409,
         )
       }
+      // A task given by name waits on the board too while what it needs is
+      // not yet accepted; it goes to its window then.
+      const blocked =
+        assignee !== null &&
+        needed.some((number) => this.#taskRow(projectId, number).state !== 'accepted')
       const { next } = this.#db
         .prepare('SELECT COALESCE(MAX(number), 0) + 1 AS next FROM task WHERE project_id = ?')
         .get(projectId)
@@ -979,53 +978,52 @@ class Ledger {
           body,
           requester.id,
           assignee?.id ?? null,
-          assignee === null ? 'open' : 'queued',
+          assignee === null || blocked ? 'open' : 'queued',
           assignee === null ? pool : null,
           assignee === null ? tier : null,
           purpose ?? null,
           at,
           at,
         )
-      if (assignee === null) {
-        for (const number of needed) {
-          const need = this.#taskRow(projectId, number)
-          if (need.state === 'cancelled') {
-            throw new LedgerError(
-              'need-cancelled',
-              `T-${number} is cancelled: nothing waits for it`,
-              409,
-            )
-          }
-          this.#db
-            .prepare('INSERT INTO task_need (task_id, needs_id) VALUES (?, ?)')
-            .run(taskId, need.id)
+      for (const number of needed) {
+        const need = this.#taskRow(projectId, number)
+        if (need.state === 'cancelled') {
+          throw new LedgerError(
+            'need-cancelled',
+            `T-${number} is cancelled: nothing waits for it`,
+            409,
+          )
         }
-        for (const number of blocking) {
-          const waits = this.#taskRow(projectId, number)
-          if (waits.state !== 'open') {
-            throw new LedgerError(
-              'not-on-the-board',
-              `T-${number} is ${waits.state}: only a task still on the board can wait for a new one`,
-              409,
-            )
-          }
-          // A plan has no circles: what the new task waits for, near or far, cannot wait for it.
-          if (this.#upstream(taskId, waits.id)) {
-            throw new LedgerError(
-              'circular-needs',
-              `T-${number} is already what T-${next} waits for: a plan has no circles`,
-              409,
-            )
-          }
-          this.#db
-            .prepare('INSERT INTO task_need (task_id, needs_id) VALUES (?, ?)')
-            .run(waits.id, taskId)
+        this.#db
+          .prepare('INSERT INTO task_need (task_id, needs_id) VALUES (?, ?)')
+          .run(taskId, need.id)
+      }
+      for (const number of blocking) {
+        const waits = this.#taskRow(projectId, number)
+        if (waits.state !== 'open') {
+          throw new LedgerError(
+            'not-on-the-board',
+            `T-${number} is ${waits.state}: only a task still on the board can wait for a new one`,
+            409,
+          )
         }
+        // A plan has no circles: what the new task waits for, near or far, cannot wait for it.
+        if (this.#upstream(taskId, waits.id)) {
+          throw new LedgerError(
+            'circular-needs',
+            `T-${number} is already what T-${next} waits for: a plan has no circles`,
+            409,
+          )
+        }
+        this.#db
+          .prepare('INSERT INTO task_need (task_id, needs_id) VALUES (?, ?)')
+          .run(waits.id, taskId)
+      }
+      if (assignee === null || blocked) {
         this.#log(projectId, 'task.opened', {
           task: next,
           from: requester.handle,
-          pool,
-          tier,
+          ...(assignee === null ? { pool, tier } : { to: assignee.handle }),
           ...(needed.length === 0 ? {} : { needs: needed }),
           ...(blocking.length === 0 ? {} : { before: blocking }),
         })
@@ -1703,6 +1701,7 @@ class Ledger {
       this.#requireTaskState(task, ['done'], 'accept')
       this.#withdrawGated(task.id, `accepted by @${by}`)
       this.#moveTask(task, 'accepted', { by })
+      this.#releaseWaiting(projectId, task.id)
       return this.#task(task.id)
     })
   }
@@ -2217,6 +2216,36 @@ class Ledger {
         `cannot ${action} T-${task.number}: it is ${task.state}`,
         409,
       )
+    }
+  }
+
+  /**
+   * The tasks given by name that waited on the board for the one just
+   * accepted: each with nothing left to wait for goes to its window now.
+   */
+  #releaseWaiting(projectId, acceptedId) {
+    const waiting = this.#db
+      .prepare(
+        `SELECT t.* FROM task t JOIN task_need n ON n.task_id = t.id
+         WHERE n.needs_id = ? AND t.state = 'open' AND t.assignee_id IS NOT NULL ORDER BY t.id`,
+      )
+      .all(acceptedId)
+    for (const task of waiting) {
+      const still = this.#db
+        .prepare(
+          `SELECT 1 FROM task_need n JOIN task d ON d.id = n.needs_id
+           WHERE n.task_id = ? AND d.state != 'accepted'`,
+        )
+        .get(task.id)
+      if (still !== undefined) continue
+      const messageId = this.#queue(projectId, {
+        to: task.assignee_id,
+        from: task.requester_id,
+        kind: 'task',
+        taskId: task.id,
+        body: deliveryBody(task),
+      })
+      this.#moveTask(task, 'queued', { message: messageId })
     }
   }
 

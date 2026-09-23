@@ -183,7 +183,9 @@ function route(task) {
       ? waitsFor
       : `blocked by ${tasks(task.blockedBy)} · ${waitsFor}`
   }
-  return `from ${who(task.requester)}`
+  return task.blockedBy.length === 0
+    ? `from ${who(task.requester)}`
+    : `blocked by ${tasks(task.blockedBy)} · from ${who(task.requester)}`
 }
 
 /** A member between tasks: its work runs in sessions, so it has no window of its own. */
@@ -222,11 +224,14 @@ export class BoardView {
   #forYou(inbox, board, now) {
     // The human's own inbox, what waits for the human's approval, then the
     // questions a coordinator has left unanswered too long.
+    const inboxed = inbox.filter((message) => message.state === 'queued')
     const waiting = [
-      ...inbox.filter((message) => message.state === 'queued'),
+      ...inboxed.filter((message) => message.kind !== 'note'),
       ...(board.gated ?? []),
       ...(board.overdue ?? []).map((message) => ({ ...message, overdue: true })),
     ]
+    // A note needs no answer: it reads and is marked read, in its own list.
+    const notes = inboxed.filter((message) => message.kind === 'note')
     const section = element('section', 'foryou')
     section.setAttribute('role', 'region')
     section.setAttribute('aria-label', 'For you')
@@ -236,7 +241,14 @@ export class BoardView {
       element(
         'span',
         'foryou-status',
-        waiting.length === 0 ? 'Nothing waiting' : `${waiting.length} waiting`,
+        waiting.length === 0 && notes.length === 0
+          ? 'Nothing waiting'
+          : [
+              waiting.length === 0 ? null : `${waiting.length} waiting`,
+              notes.length === 0 ? null : `${notes.length} note${notes.length === 1 ? '' : 's'}`,
+            ]
+              .filter(Boolean)
+              .join(' · '),
       ),
     )
     section.append(head)
@@ -255,6 +267,12 @@ export class BoardView {
       )
     }
     section.append(strips)
+    if (notes.length > 0) {
+      const list = element('ol', 'strips')
+      list.setAttribute('aria-label', 'Notes for you')
+      for (const message of notes) list.append(this.#messageStrip(message, now))
+      section.append(element('h3', 'foryou-sub', 'Notes from your agents'), list)
+    }
     return section
   }
 

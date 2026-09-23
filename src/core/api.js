@@ -225,6 +225,27 @@ export async function startApi({
       changed()
       return { status: 201, body: { message: messageSummary(asked) } }
     }
+    if (at === 'POST /api/notes') {
+      const body = await readJson(request)
+      const active = ledger.activeTask(participant.id, { queued: true })
+      // The lead's note goes to the human; a member's to whoever gave its task.
+      const to = body.to ?? active?.requester ?? (participant.role === 'lead' ? 'human' : 'lead')
+      if (MEMBERS.has(memberByHandle(project, to)?.role)) {
+        throw new Refusal(
+          403,
+          'not-addressable',
+          `notes go to the lead or the human, not to @${to}`,
+        )
+      }
+      const noted = ledger.note(project.id, {
+        from: participant.handle,
+        to,
+        task: body.task ?? active?.number,
+        body: body.body,
+      })
+      changed()
+      return { status: 201, body: { message: messageSummary(noted) } }
+    }
     // A door waiting for the answer to the question it put on the board.
     const question = QUESTION_ROUTE.exec(url.pathname)
     if (question !== null && request.method === 'GET') {

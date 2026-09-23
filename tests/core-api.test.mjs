@@ -135,6 +135,34 @@ describe('the agents API', () => {
     })
   })
 
+  it('sends a note to whoever gave the task, or to the human from the lead; never to a member', async () => {
+    await withApi(async ({ ledger, project, token, call }) => {
+      deliver(
+        ledger,
+        ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' }).message,
+      )
+      const zeus = token('zeus')
+      const noted = await call(zeus, 'POST', '/api/notes', { body: 'The schema moved.' })
+      assert.equal(noted.status, 201)
+      assert.deepEqual(
+        [noted.body.message.kind, noted.body.message.recipient, noted.body.message.task],
+        ['note', 'lead', 1],
+      )
+      assert.equal(ledger.task(project.id, 1).state, 'working', 'a note stops nothing')
+      const lead = token('lead')
+      const told = await call(lead, 'POST', '/api/notes', { body: 'Done for today.' })
+      assert.deepEqual([told.status, told.body.message.recipient], [201, 'human'])
+      assert.equal(
+        ledger
+          .inbox(ledger.project(project.id).participants.find((p) => p.handle === 'human').id)
+          .some((m) => m.id === told.body.message.id),
+        true,
+      )
+      const wrong = await call(lead, 'POST', '/api/notes', { body: 'psst', to: 'zeus' })
+      assert.equal(wrong.status, 403)
+    })
+  })
+
   it('sends a question to whoever gave the task, and lets only the one asked answer it', async () => {
     await withApi(async ({ ledger, project, token, call }) => {
       deliver(
@@ -363,11 +391,9 @@ describe('cf inside a core window', () => {
         both.out,
         'T-4 is on the board for a standard worker; the first free one gets it, and its result arrives in your inbox. It waits until T-1 is accepted. T-2 waits for it.',
       )
-      const wrong = await cf(lead, 'task', 'add', '--self', '--needs', 'T-1', 'Plan')
-      assert.deepEqual(
-        [wrong.code, wrong.err],
-        [2, 'cf: --needs and --before go with a task for a tier (or --design)'],
-      )
+      const own = await cf(lead, 'task', 'add', '--self', '--needs', 'T-1', 'Plan')
+      assert.equal(own.code, 0)
+      assert.match(own.out, /^T-5 is yours; finish it with: cf task done T-5 "what you did"\./)
       const bad = await cf(lead, 'task', 'add', '--tier', 'standard', '--needs', 'one', 'Lexer')
       assert.deepEqual([bad.code, bad.err], [2, 'cf: not a task: "one" (write T-3)'])
       const loop = await cf(
@@ -384,7 +410,7 @@ describe('cf inside a core window', () => {
       )
       assert.deepEqual(
         [loop.code, loop.err],
-        [1, 'cf: T-1 is already what T-5 waits for: a plan has no circles'],
+        [1, 'cf: T-1 is already what T-6 waits for: a plan has no circles'],
       )
       ledger.assignTask(project.id, 3, participantId(ledger, project, 'zeus'))
       const late = await cf(lead, 'task', 'add', '--tier', 'standard', '--before', 'T-3', 'Late')

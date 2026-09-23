@@ -2434,6 +2434,40 @@ describe('a plan on the board: needs', () => {
     ledger.recordResult(project.id, number, { body: 'Done' })
   }
 
+  it('a task given by name waits on the board for what it needs, then goes to its window', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = planned(ledger)
+      const own = ledger.createTask(project.id, {
+        from: 'lead',
+        to: 'lead',
+        body: 'Write it up',
+        needs: [1],
+      })
+      assert.equal(own.message, null, 'nothing goes to the window yet')
+      assert.deepEqual(
+        [own.task.state, own.task.assignee, own.task.blockedBy],
+        ['open', 'lead', [1]],
+      )
+      assert.deepEqual(
+        ledger.events(project.id).find((e) => e.kind === 'task.opened' && e.data.task === 2).data,
+        { task: 2, from: 'lead', to: 'lead', needs: [1] },
+      )
+      finish(ledger, project, id, 1)
+      assert.equal(ledger.task(project.id, 2).state, 'open', 'done is not accepted')
+      ledger.acceptTask(project.id, 1, { by: 'lead' })
+      const freed = ledger.task(project.id, 2)
+      assert.deepEqual([freed.state, freed.blockedBy], ['queued', []])
+      const queued = ledger
+        .inbox(id('lead'))
+        .find((message) => message.kind === 'task' && message.taskNumber === 2)
+      assert.deepEqual([queued.state, queued.recipient], ['queued', 'lead'])
+      assert.deepEqual(
+        ledger.events(project.id).find((e) => e.kind === 'task.state' && e.data.task === 2).data,
+        { task: 2, from: 'open', to: 'queued', message: queued.id },
+      )
+    })
+  })
+
   it('waits for the tasks it needs until each is accepted, and says which block it', async () => {
     await withLedger((ledger) => {
       const { project, id } = planned(ledger)
@@ -2488,7 +2522,7 @@ describe('a plan on the board: needs', () => {
     })
   })
 
-  it('refuses a need that does not exist or is cancelled, and needs on a task that is not on the board', async () => {
+  it('refuses a need that does not exist or is cancelled, for a task given by name too', async () => {
     await withLedger((ledger) => {
       const { project } = planned(ledger)
       assert.throws(() => open(ledger, project, 'Parser', { needs: [9] }), { code: 'unknown-task' })
@@ -2503,7 +2537,7 @@ describe('a plan on the board: needs', () => {
         assert.throws(
           () =>
             ledger.createTask(project.id, { from: 'lead', ...address, body: 'Plan', needs: [1] }),
-          { code: 'needs-on-the-board' },
+          { code: 'need-cancelled' },
         )
       }
       assert.equal(ledger.board(project.id).open.length, 0)
