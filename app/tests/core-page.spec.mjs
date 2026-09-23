@@ -108,23 +108,27 @@ function model() {
         resumeOnStart: false,
       },
     ],
+    // Every agent, as the roster lists it: the catalog's and the human's own, each with its tier.
     agents: [
       {
         name: 'zeus',
         harness: 'claude',
         model: 'claude-sonnet-5',
         effort: 'high',
+        profile: { workTier: 'standard' },
       },
       {
         name: 'diana',
         harness: 'codex',
         model: 'gpt-5.6-luna',
         effort: 'low',
+        profile: { workTier: 'light' },
       },
       {
         name: 'athena',
         harness: 'opencode',
         model: 'muse-spark',
+        profile: { workTier: 'light' },
       },
     ],
     boards: {
@@ -939,17 +943,24 @@ test('shows the team as one row per member and role, and adds any saved agent in
     'Reviewer',
     'Image designer',
   ])
-  // A worker: every saved agent that does not hold the role yet.
+  // A worker: every agent that does not hold the role yet, grouped by harness, its tier on the line.
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
-    'athena · opencode · muse-spark',
+    'athena · muse-spark · opencode · light',
   ])
-  // An advisor: every saved agent, since any agent may take any role.
+  await expect(dialog.getByLabel('Agent').locator('optgroup')).toHaveCount(1)
+  // An advisor: every agent, since any agent may take any role.
   await dialog.getByLabel('Role').selectOption('advisor')
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
-    'zeus · claude · claude-sonnet-5 · high',
-    'diana · codex · gpt-5.6-luna · low',
-    'athena · opencode · muse-spark',
+    'zeus · claude-sonnet-5 · claude · high · standard',
+    'diana · gpt-5.6-luna · codex · low · light',
+    'athena · muse-spark · opencode · light',
   ])
+  expect(
+    await dialog
+      .getByLabel('Agent')
+      .locator('optgroup')
+      .evaluateAll((g) => g.map((n) => n.label)),
+  ).toEqual(['Claude Code', 'Codex', 'OpenCode'])
   await dialog.getByLabel('Agent').selectOption('athena')
   await dialog.getByRole('button', { name: 'Add to team' }).click()
   await expect
@@ -959,9 +970,9 @@ test('shows the team as one row per member and role, and adds any saved agent in
   await dialog.getByLabel('Role').selectOption('reviewer')
   // Each choice says what it runs, the model's effort level included.
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
-    'zeus · claude · claude-sonnet-5 · high',
-    'diana · codex · gpt-5.6-luna · low',
-    'athena · opencode · muse-spark',
+    'zeus · claude-sonnet-5 · claude · high · standard',
+    'diana · gpt-5.6-luna · codex · low · light',
+    'athena · muse-spark · opencode · light',
   ])
   await dialog.getByLabel('Agent').selectOption('zeus')
   await dialog.getByRole('button', { name: 'Add to team' }).click()
@@ -1016,6 +1027,7 @@ test('keeps a pending removal and the chosen agent when the core redraws the tea
     name: 'hera',
     harness: 'pi',
     model: 'muse-spark',
+    profile: { workTier: 'light' },
   })
   await open(page, data)
   await page.getByRole('button', { name: 'Team' }).click()
@@ -1315,17 +1327,17 @@ test('starts a project in a chosen folder with the chosen lead, the team ticked 
   const table = dialog.getByRole('table', { name: 'Agents for the team' })
   // The last team, one row per agent and role.
   await expect(table.locator('tbody tr')).toHaveText([
-    /zeus.*claude · claude-sonnet-5 · high.*Worker/,
+    /zeus.*claude-sonnet-5 · claude · high · standard.*Worker/,
     /zeus.*Reviewer/,
-    /diana.*codex · gpt-5.6-luna · low.*Worker/,
+    /diana.*gpt-5.6-luna · codex · low · light.*Worker/,
   ])
   await expect(dialog.getByLabel('Second review of')).toHaveCount(0)
   await dialog.getByLabel('The lead runs in').selectOption('opencode')
   await dialog.locator('[name="pickRole"]').selectOption('advisor')
   await expect(dialog.locator('[name="pickAgent"]').locator('option')).toHaveText([
-    'zeus · claude · claude-sonnet-5 · high',
-    'diana · codex · gpt-5.6-luna · low',
-    'athena · opencode · muse-spark',
+    'zeus · claude-sonnet-5 · claude · high · standard',
+    'diana · gpt-5.6-luna · codex · low · light',
+    'athena · muse-spark · opencode · light',
   ])
   await dialog.locator('[name="pickAgent"]').selectOption('athena')
   await dialog.getByRole('button', { name: 'Add', exact: true }).click()

@@ -344,9 +344,22 @@ const ROLE_LABEL = {
   reviewer: 'Reviewer',
   designer: 'Image designer',
 }
-/** "zeus · claude · claude-sonnet-5 · high": what an agent runs, effort included when it has one. */
+/** The harnesses in the order the pick list groups them, each with its name for humans. */
+const HARNESS_LABEL = {
+  claude: 'Claude Code',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+  pi: 'Pi',
+  kimi: 'Kimi',
+  devin: 'Devin',
+  image: 'Images',
+}
+/**
+ * "zeus · claude-sonnet-5 · claude · high · standard": what an agent runs and
+ * the tier a task finds it by, effort included when it has one.
+ */
 const agentLabel = (agent) =>
-  [agent.name, agent.harness, agent.model ?? 'model unknown', agent.effort]
+  [agent.name, agent.model ?? 'model unknown', agent.harness, agent.effort, agent.profile?.workTier]
     .filter(Boolean)
     .join(' · ')
 
@@ -368,12 +381,29 @@ function rolePicker(roleSelect, agentSelect, hint, holding, onRefill = () => {})
     const role = roleSelect.value
     const chosen = agentSelect.value
     const choices = state.agents.filter((agent) => !holding(agent.name, role))
+    // Every agent, the catalog's and the human's own, grouped by harness.
+    const groups = new Map()
+    for (const agent of choices) {
+      if (!groups.has(agent.harness)) groups.set(agent.harness, [])
+      groups.get(agent.harness).push(agent)
+    }
+    const order = (harness) => {
+      const at = Object.keys(HARNESS_LABEL).indexOf(harness)
+      return at === -1 ? Object.keys(HARNESS_LABEL).length : at
+    }
     agentSelect.replaceChildren(
-      ...choices.map((agent) => {
-        const option = element('option', null, agentLabel(agent))
-        option.value = agent.name
-        return option
-      }),
+      ...[...groups.entries()]
+        .sort(([a], [b]) => order(a) - order(b))
+        .map(([harness, agents]) => {
+          const group = element('optgroup')
+          group.label = HARNESS_LABEL[harness] ?? harness
+          for (const agent of agents) {
+            const option = element('option', null, agentLabel(agent))
+            option.value = agent.name
+            group.append(option)
+          }
+          return group
+        }),
     )
     if (choices.some((agent) => agent.name === chosen)) agentSelect.value = chosen
     agentSelect.disabled = choices.length === 0

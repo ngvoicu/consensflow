@@ -63,11 +63,11 @@ team menu to show them all, but add also criticality in the list."
   what their rows share.
 - [x] [IMPL-OR-04] Satisfies TEST-OR-03.
 
-### Phase C: the team dialogs [pending]
+### Phase C: the team dialogs [done]
 
-- [ ] [TEST-OR-05] Team and New project list every agent, grouped by
+- [x] [TEST-OR-05] Team and New project list every agent, grouped by
   harness, with the tier on each line.
-- [ ] [IMPL-OR-06] Satisfies TEST-OR-05.
+- [x] [IMPL-OR-06] Satisfies TEST-OR-05.
 
 ### Phase D: the rest [pending]
 
@@ -77,3 +77,4 @@ team menu to show them all, but add also criticality in the list."
 
 - 2026-09-23, Phase A: roster, cf, page and server tests rewritten; Node 666 passed in the gate.
 - 2026-09-23, Phase B: the Agents screen's tests adapted or rewritten (30 with Harnesses); the board page's 50 still pass.
+- 2026-09-23, Phase C: the pick lists grouped by harness with the tier on each line; board page 38/38 in its own file.
