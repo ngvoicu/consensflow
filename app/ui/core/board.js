@@ -501,17 +501,23 @@ export class BoardView {
     const status = element(
       'span',
       'row-status',
-      out
-        ? `Out of quota until ${clock(participant.outUntil)}`
-        : activity?.state === 'waiting' && activity.reason
-          ? `Waiting: ${activity.reason}`
-          : resting(participant, activity)
-            ? sessionsNote(lane, board)
-            : participant.member !== null && (activity?.state ?? 'closed') === 'closed'
-              ? 'Terminal closed'
-              : (ACTIVITY_LABEL[activity?.state] ?? 'No window'),
+      lane.agentMissing
+        ? `No agent named ${participant.agent} any more: define one under Agents, or remove @${participant.handle} from the team`
+        : out
+          ? `Out of quota until ${clock(participant.outUntil)}`
+          : activity?.state === 'waiting' && activity.reason
+            ? `Waiting: ${activity.reason}`
+            : resting(participant, activity)
+              ? sessionsNote(lane, board)
+              : participant.member !== null && (activity?.state ?? 'closed') === 'closed'
+                ? 'Terminal closed'
+                : (ACTIVITY_LABEL[activity?.state] ?? 'No window'),
     )
-    status.dataset.state = out ? 'out' : (activity?.state ?? 'closed')
+    status.dataset.state = lane.agentMissing
+      ? 'missing'
+      : out
+        ? 'out'
+        : (activity?.state ?? 'closed')
     const tools = element('div', 'row-tools')
     // A member's row heads its sessions and has no terminal of its own. A
     // session's closed terminal opens again on its own conversation; an open

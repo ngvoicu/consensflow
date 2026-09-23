@@ -387,6 +387,10 @@ export class Dispatcher {
     const next = this.#ledger.nextDelivery(participant.id)
     if (next !== null) return this.#launch(project, participant, next)
     if (participant.role === 'lead') return
+    // A member whose agent is gone must not wait for a window that will not
+    // open: its held work goes back to the board now.
+    if (participant.agent !== null && this.#roster(participant.agent) === null)
+      return this.#withoutAgent(project, participant, null)
     // A member's session is its task's: with the window gone (a restart, a
     // crash) and nothing due to it, nobody is doing the work any more.
     const task = this.#ledger.activeTask(participant.id)
@@ -702,9 +706,8 @@ export class Dispatcher {
       // has deleted from their agents must not fall back to a harness default.
       const agent = participant.agent === null ? null : this.#roster(participant.agent)
       if (participant.agent !== null && agent === null) {
-        throw new Error(
-          `${participant.agent} is no longer among your saved agents: add it back under Agents, or remove @${participant.handle} from the team`,
-        )
+        await this.#withoutAgent(project, participant, delivering)
+        return
       }
       plan = await adapter.prepare({
         launchId,
@@ -827,7 +830,7 @@ export class Dispatcher {
 
   /** Free: nothing on its hands, not out of quota, not low on it. */
   #available(member) {
-    return !this.#isOut(member) && !this.#isLow(member)
+    return this.#roster(member.agent) !== null && !this.#isOut(member) && !this.#isLow(member)
   }
 
   #isLow(member) {
@@ -862,15 +865,47 @@ export class Dispatcher {
   }
 
   #whyNotFree(candidates) {
+    const gone = candidates.filter((m) => this.#roster(m.agent) === null)
     const out = candidates.filter(
-      (m) => m.outUntil !== null && Date.parse(m.outUntil) > this.#now(),
+      (m) => !gone.includes(m) && m.outUntil !== null && Date.parse(m.outUntil) > this.#now(),
     )
-    const low = candidates.filter((m) => !out.includes(m) && this.#isLow(m))
+    const low = candidates.filter((m) => !gone.includes(m) && !out.includes(m) && this.#isLow(m))
     const parts = []
+    for (const member of gone)
+      parts.push(
+        `@${member.handle} has no agent any more (${member.agent} is not among your agents: define it, or remove the member)`,
+      )
     for (const member of out)
       parts.push(`@${member.handle} is out of quota until ${member.outUntil}`)
     for (const member of low) parts.push(`@${member.handle} is low on quota`)
     return parts.join('; ')
+  }
+
+  /**
+   * A member whose agent is gone from the human's agents (a release dropped
+   * the catalog entry, or the human removed one of their own) runs on no
+   * default: its tiered work goes back to the board for another member, with
+   * whatever was on its way to it withdrawn, and a request given to it by
+   * name fails so the requester hears why. The board says why it sits.
+   */
+  async #withoutAgent(project, participant, delivering) {
+    const because = `${participant.agent} is no longer among your agents`
+    const lane = this.#ledger
+      .board(project.id)
+      .lanes.find((l) => l.participant.id === participant.id)
+    let released = 0
+    for (const task of lane?.tasks ?? []) {
+      if (!['queued', 'working', 'waiting'].includes(task.state) || task.pool === null) continue
+      this.#ledger.releaseTask(project.id, task.number, { because })
+      released += 1
+    }
+    if (delivering !== null)
+      this.#settleFailure(
+        delivering,
+        `${because}: add it back under Agents, or remove @${participant.handle} from the team`,
+        { retry: false },
+      )
+    else if (released > 0) this.#changed()
   }
 
   /**

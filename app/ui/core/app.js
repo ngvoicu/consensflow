@@ -624,7 +624,9 @@ function memberRows(member) {
       element(
         'span',
         'member-meta',
-        saved ? runsLabel(saved, member.tier) : `${member.harness ?? ''} · ${member.tier ?? ''}`,
+        saved
+          ? runsLabel(saved, member.tier)
+          : `no agent named ${member.agent} any more: define one under Agents, or remove it`,
       ),
     )
     return cell

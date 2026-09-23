@@ -92,7 +92,10 @@ projects.
   it runs (model, harness, effort, tier), plus the approval setting. The
   rows read by role, then by work tier with the most critical first; the
   pick list offers every agent by work tier the same way. The daemon
-  assigns work only within the team.
+  assigns work only within the team. A member whose agent is gone (a
+  release dropped the catalog entry, or you removed one of your own) runs
+  on no default: its row says so, it gets no work, and what it held goes
+  back to the board; define the agent again or remove the member.
 - **Agents** (Settings). One roster: every catalog agent and every agent
   you define, as one list by model. Each model's card says its work tier
   once; each agent's row says its harness, effort, tier and route. A

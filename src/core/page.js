@@ -78,6 +78,12 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
           ...board,
           lanes: board.lanes.map((lane) => ({
             ...lane,
+            // A member whose agent is gone (a release dropped the entry, or
+            // the human removed their own) sits, and the board says why.
+            agentMissing:
+              lane.participant.agent !== null &&
+              lane.participant.member === null &&
+              agentRow(lane.participant.agent, env) === undefined,
             activity: dispatcher.activity(lane.participant.id),
             pane: dispatcher.pane(lane.participant.id),
           })),

@@ -1112,6 +1112,7 @@ class Ledger {
       .map((row) => ({
         id: row.id,
         handle: row.handle,
+        agent: row.agent,
         tier: row.tier,
         roles: JSON.parse(row.roles),
         taken: row.taken,

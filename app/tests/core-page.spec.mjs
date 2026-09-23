@@ -933,6 +933,27 @@ test("shows what a task's window wrote, from ConsensFlow's own copy, under the t
   await expect(items.nth(2)).toHaveAttribute('data-role', 'assistant')
 })
 
+test('a member whose agent is gone says so on the board and in the team, with Remove at hand', async ({
+  page,
+}) => {
+  const data = model()
+  data.agents = data.agents.filter((agent) => agent.name !== 'diana')
+  data.boards[1].lanes.find((lane) => lane.participant.handle === 'diana').agentMissing = true
+  await open(page, data)
+  const row = page.locator('tr[data-handle="diana"]')
+  await expect(row.locator('.row-status')).toHaveText(
+    'No agent named diana any more: define one under Agents, or remove @diana from the team',
+  )
+  await expect(row.locator('.row-status')).toHaveAttribute('data-state', 'missing')
+  await page.getByRole('button', { name: 'Team' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project team' })
+  const member = dialog.locator('tr[data-handle="diana"]')
+  await expect(member.locator('.member-meta')).toHaveText(
+    'no agent named diana any more: define one under Agents, or remove it',
+  )
+  await expect(member.getByRole('button', { name: 'Remove Worker @diana' })).toBeVisible()
+})
+
 test('shows the team as one row per member and role, and adds any saved agent in any role', async ({
   page,
 }) => {

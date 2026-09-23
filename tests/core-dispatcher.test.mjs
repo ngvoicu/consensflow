@@ -1636,21 +1636,58 @@ describe('the dispatcher traces what its windows do', () => {
 })
 
 describe('a member whose saved agent is gone', () => {
-  it('does not launch on a harness default: the task fails and the lead hears why', async () => {
+  it('gives a member whose agent is gone no work: the task waits and the lead hears why', async () => {
     await setup(
       async (context) => {
-        const { open, task, notes } = await withTiers(context)
+        const { open, task, notes } = await withTiers(context, { workers: ['zeus'] })
         open()
         await context.dispatcher.pass()
         await context.dispatcher.pass()
-        assert.equal(task(1).state, 'failed')
+        assert.deepEqual([task(1).state, task(1).assignee], ['open', null])
         assert.match(
           notes('lead').at(-1),
-          /zeus is no longer among your saved agents: add it back under Agents, or remove @zeus-amber-pine from the team/,
+          /T-1 waits for a free standard worker: @zeus has no agent any more \(zeus is not among your agents: define it, or remove the member\)/,
         )
         assert.equal(context.host.opened.length, 1, 'only the lead window opened')
       },
       { roster: (name) => (name === 'zeus' ? null : { id: name, model: 'm', profile: {} }) },
+    )
+  })
+
+  it('after a release drops the agent of a working member, a restart sends its task back to the board', async () => {
+    let gone = false
+    await setup(
+      async (context) => {
+        const { open, task, notes } = await withTiers(context, { workers: ['zeus'] })
+        open()
+        await context.dispatcher.pass()
+        await context.dispatcher.pass()
+        assert.deepEqual([task(1).state, task(1).assignee], ['working', 'zeus-amber-pine'])
+        // The human installs a release without zeus's entry and the daemon starts again.
+        gone = true
+        context.ledger.suspendForRestart()
+        const after = context.make()
+        await after.resumeAfterRestart()
+        await after.pass()
+        assert.deepEqual([task(1).state, task(1).assignee], ['open', null])
+        assert.match(
+          task(1).body,
+          /Reassigned from @zeus-amber-pine \(zeus is no longer among your agents\)/,
+        )
+        await after.pass()
+        assert.match(
+          notes('lead').at(-1),
+          /waits for a free standard worker: @zeus has no agent any more/,
+        )
+        assert.equal(
+          context.host.opened.length,
+          3,
+          'the lead before and after the restart, zeus before it, nothing for zeus after',
+        )
+      },
+      {
+        roster: (name) => (name === 'zeus' && gone ? null : { id: name, model: 'm', profile: {} }),
+      },
     )
   })
 })

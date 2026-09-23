@@ -5,6 +5,7 @@ import path from 'node:path'
 import { describe, it } from 'node:test'
 import { pageOperations } from '../src/core/page.js'
 import { openLedger } from '../src/ledger/index.js'
+import { addAgent, removeAgent } from '../src/roster.js'
 
 /**
  * What the board page may ask of the new core (TEST-BDC-13's data side): each
@@ -177,6 +178,24 @@ describe('the page protocol of the new core', () => {
       assert.deepEqual(
         next.project.participants.map((p) => p.handle),
         ['human', 'lead', 'zeus', 'diana'],
+      )
+    })
+  })
+
+  it('marks a member whose agent is gone on the board, and nobody else', async () => {
+    await withPage(async ({ operations, env }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        harness: 'pi',
+      })
+      addAgent({ name: 'mine', harness: 'codex', model: 'gpt-6-astra', effort: 'low' }, env)
+      await operations['member.add']({ project: project.id, agent: 'mine' })
+      await operations['member.add']({ project: project.id, agent: 'artemis' })
+      removeAgent('mine', env)
+      const { board } = await operations['board.get']({ project: project.id })
+      assert.deepEqual(
+        board.lanes.filter((lane) => lane.agentMissing).map((lane) => lane.participant.handle),
+        ['mine'],
       )
     })
   })
