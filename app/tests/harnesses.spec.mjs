@@ -1407,7 +1407,7 @@ test('work tiers filter and group the list, and a saved override keeps its hones
     await card.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(card.locator('.tier-pill')).toContainText('Critical work')
     expect(listAgents(t.env).find((a) => a.name === 'specialist').workTier).toBeUndefined()
-    // Catalog defaults are independent of saved overrides.
+    // A catalog agent's tier is the catalog's, whatever your own agents say.
     await page.getByLabel('Work tier', { exact: true }).selectOption('critical')
     await expect(page.locator('.callsign', { hasText: /^astraeus$/ })).toBeVisible()
     await page.screenshot({ path: '/tmp/cf-tiers-agents.png', fullPage: true })

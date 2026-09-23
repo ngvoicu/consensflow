@@ -47,7 +47,7 @@ export async function startCore(
   const ledger = openLedger(join(home, 'consensflow.db'), { trace })
   ledger.suspendForRestart()
   // What the app ships is what the roster and the teams have: the roster is
-  // the catalog plus the human's own agents and overrides, and every
+  // the catalog plus the human's own agents, and every
   // member's tier is read again from its agent, at start and after any
   // change to the agents.
   const followCatalog = () => {
