@@ -344,24 +344,21 @@ const ROLE_LABEL = {
   reviewer: 'Reviewer',
   designer: 'Image designer',
 }
-/** The harnesses in the order the pick list groups them, each with its name for humans. */
-const HARNESS_LABEL = {
-  claude: 'Claude Code',
-  codex: 'Codex',
-  opencode: 'OpenCode',
-  pi: 'Pi',
-  kimi: 'Kimi',
-  devin: 'Devin',
-  image: 'Images',
+/** The work tiers in the order the pick list groups them, most critical first, as the Agents screen names them. */
+const TIER_LABEL = {
+  critical: 'Critical work',
+  complex: 'Complex work',
+  standard: 'Standard work',
+  light: 'Light work',
 }
+/** The harnesses in the order agents of one tier are listed. */
+const HARNESS_ORDER = ['claude', 'codex', 'opencode', 'pi', 'kimi', 'devin', 'image']
 /**
- * "zeus · claude-sonnet-5 · claude · high · standard": what an agent runs and
- * the tier a task finds it by, effort included when it has one.
+ * "claude-sonnet-5 · claude · high · standard": what an agent runs and the
+ * tier a task finds it by, effort included when it has one.
  */
-const agentLabel = (agent) =>
-  [agent.name, agent.model ?? 'model unknown', agent.harness, agent.effort, agent.profile?.workTier]
-    .filter(Boolean)
-    .join(' · ')
+const runsLabel = (agent, tier = agent.profile?.workTier) =>
+  [agent.model ?? 'model unknown', agent.harness, agent.effort, tier].filter(Boolean).join(' · ')
 
 /**
  * The two selects that add a member: a role first, then the saved agents
@@ -381,24 +378,32 @@ function rolePicker(roleSelect, agentSelect, hint, holding, onRefill = () => {})
     const role = roleSelect.value
     const chosen = agentSelect.value
     const choices = state.agents.filter((agent) => !holding(agent.name, role))
-    // Every agent, the catalog's and the human's own, grouped by harness.
+    // Every agent, the catalog's and the human's own, by the work it is for:
+    // the most critical tier first, then harness by harness, by name.
+    const tiers = Object.keys(TIER_LABEL)
+    const rank = (list, value) => (list.includes(value) ? list.indexOf(value) : list.length)
     const groups = new Map()
     for (const agent of choices) {
-      if (!groups.has(agent.harness)) groups.set(agent.harness, [])
-      groups.get(agent.harness).push(agent)
-    }
-    const order = (harness) => {
-      const at = Object.keys(HARNESS_LABEL).indexOf(harness)
-      return at === -1 ? Object.keys(HARNESS_LABEL).length : at
+      const tier = agent.profile?.workTier
+      if (!groups.has(tier)) groups.set(tier, [])
+      groups.get(tier).push(agent)
     }
     agentSelect.replaceChildren(
       ...[...groups.entries()]
-        .sort(([a], [b]) => order(a) - order(b))
-        .map(([harness, agents]) => {
+        .sort(([a], [b]) => rank(tiers, a) - rank(tiers, b))
+        .map(([tier, agents]) => {
           const group = element('optgroup')
-          group.label = HARNESS_LABEL[harness] ?? harness
+          group.label =
+            tier in TIER_LABEL
+              ? `T${tiers.indexOf(tier) + 1} · ${TIER_LABEL[tier]}`
+              : 'Tier unknown'
+          agents.sort(
+            (a, b) =>
+              rank(HARNESS_ORDER, a.harness) - rank(HARNESS_ORDER, b.harness) ||
+              a.name.localeCompare(b.name),
+          )
           for (const agent of agents) {
-            const option = element('option', null, agentLabel(agent))
+            const option = element('option', null, `${agent.name} · ${runsLabel(agent, null)}`)
             option.value = agent.name
             group.append(option)
           }
@@ -477,7 +482,7 @@ function drawNewProjectTeam() {
     who.append(
       element('span', 'member-name', agent),
       element('br'),
-      element('span', 'member-meta', agentLabel(saved).slice(agent.length + 3)),
+      element('span', 'member-meta', runsLabel(saved)),
     )
     const remove = element('button', 'quiet-button', 'Remove')
     remove.type = 'button'
@@ -587,12 +592,18 @@ function renderTeam() {
  */
 function memberRows(member) {
   const name = `@${member.handle}`
+  // What the member runs, from its agent; the tier is the team's own, which follows the agent.
+  const saved = state.agents.find((agent) => agent.name === member.agent)
   const who = () => {
     const cell = element('td')
     cell.append(
       element('span', 'member-name', name),
       element('br'),
-      element('span', 'member-meta', `${member.harness ?? ''} · ${member.tier ?? ''}`),
+      element(
+        'span',
+        'member-meta',
+        saved ? runsLabel(saved, member.tier) : `${member.harness ?? ''} · ${member.tier ?? ''}`,
+      ),
     )
     return cell
   }

@@ -130,6 +130,14 @@ function model() {
         model: 'muse-spark',
         profile: { workTier: 'light' },
       },
+      // Last in the roster, first on offer: the pick lists go by tier.
+      {
+        name: 'hera',
+        harness: 'codex',
+        model: 'gpt-6-astra',
+        effort: 'max',
+        profile: { workTier: 'critical' },
+      },
     ],
     boards: {
       1: {
@@ -935,7 +943,10 @@ test('shows the team as one row per member and role, and adds any saved agent in
   await expect(table.locator('thead th')).toHaveText(['Member', 'Role', ''])
   await expect(table.locator('tbody tr')).toHaveCount(2)
   await expect(table.locator('tbody tr').first()).toContainText('@zeus')
-  await expect(table.locator('tbody tr').first()).toContainText('standard')
+  // Each member says what it runs: model, harness, effort and its tier.
+  await expect(table.locator('tbody tr').first().locator('.member-meta')).toHaveText(
+    'claude-sonnet-5 · claude · high · standard',
+  )
   await expect(table.locator('tbody tr').first().locator('td').nth(1)).toHaveText('Worker')
   await expect(dialog.getByLabel('Role').locator('option')).toHaveText([
     'Worker',
@@ -943,24 +954,26 @@ test('shows the team as one row per member and role, and adds any saved agent in
     'Reviewer',
     'Image designer',
   ])
-  // A worker: every agent that does not hold the role yet, grouped by harness, its tier on the line.
+  // A worker: every agent that does not hold the role yet, grouped by work tier, the most critical first.
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
-    'athena · muse-spark · opencode · light',
+    'hera · gpt-6-astra · codex · max',
+    'athena · muse-spark · opencode',
   ])
-  await expect(dialog.getByLabel('Agent').locator('optgroup')).toHaveCount(1)
+  await expect(dialog.getByLabel('Agent').locator('optgroup')).toHaveCount(2)
   // An advisor: every agent, since any agent may take any role.
   await dialog.getByLabel('Role').selectOption('advisor')
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
-    'zeus · claude-sonnet-5 · claude · high · standard',
-    'diana · gpt-5.6-luna · codex · low · light',
-    'athena · muse-spark · opencode · light',
+    'hera · gpt-6-astra · codex · max',
+    'zeus · claude-sonnet-5 · claude · high',
+    'diana · gpt-5.6-luna · codex · low',
+    'athena · muse-spark · opencode',
   ])
   expect(
     await dialog
       .getByLabel('Agent')
       .locator('optgroup')
       .evaluateAll((g) => g.map((n) => n.label)),
-  ).toEqual(['Claude Code', 'Codex', 'OpenCode'])
+  ).toEqual(['T1 · Critical work', 'T3 · Standard work', 'T4 · Light work'])
   await dialog.getByLabel('Agent').selectOption('athena')
   await dialog.getByRole('button', { name: 'Add to team' }).click()
   await expect
@@ -970,9 +983,10 @@ test('shows the team as one row per member and role, and adds any saved agent in
   await dialog.getByLabel('Role').selectOption('reviewer')
   // Each choice says what it runs, the model's effort level included.
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
-    'zeus · claude-sonnet-5 · claude · high · standard',
-    'diana · gpt-5.6-luna · codex · low · light',
-    'athena · muse-spark · opencode · light',
+    'hera · gpt-6-astra · codex · max',
+    'zeus · claude-sonnet-5 · claude · high',
+    'diana · gpt-5.6-luna · codex · low',
+    'athena · muse-spark · opencode',
   ])
   await dialog.getByLabel('Agent').selectOption('zeus')
   await dialog.getByRole('button', { name: 'Add to team' }).click()
@@ -981,7 +995,7 @@ test('shows the team as one row per member and role, and adds any saved agent in
     .toEqual([{ project: 1, agent: 'zeus', roles: ['worker', 'reviewer'] }])
   // The image designer too: nothing on the card decides who may draw.
   await dialog.getByLabel('Role').selectOption('designer')
-  await expect(dialog.getByLabel('Agent').locator('option')).toHaveCount(3)
+  await expect(dialog.getByLabel('Agent').locator('option')).toHaveCount(4)
   await expect(dialog.getByRole('button', { name: 'Add to team' })).toBeEnabled()
   await expect(dialog.locator('#team-hint')).toBeHidden()
 })
@@ -1335,9 +1349,10 @@ test('starts a project in a chosen folder with the chosen lead, the team ticked 
   await dialog.getByLabel('The lead runs in').selectOption('opencode')
   await dialog.locator('[name="pickRole"]').selectOption('advisor')
   await expect(dialog.locator('[name="pickAgent"]').locator('option')).toHaveText([
-    'zeus · claude-sonnet-5 · claude · high · standard',
-    'diana · gpt-5.6-luna · codex · low · light',
-    'athena · muse-spark · opencode · light',
+    'hera · gpt-6-astra · codex · max',
+    'zeus · claude-sonnet-5 · claude · high',
+    'diana · gpt-5.6-luna · codex · low',
+    'athena · muse-spark · opencode',
   ])
   await dialog.locator('[name="pickAgent"]').selectOption('athena')
   await dialog.getByRole('button', { name: 'Add', exact: true }).click()

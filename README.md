@@ -88,9 +88,10 @@ projects.
   live window.
 - **New project.** A folder, the lead's harness, the team (the last project's
   ticked already) and whether human approval is required.
-- **Team.** Which saved agents this project may use, each with its roles and
-  tier, plus the approval setting. The daemon assigns
-  work only within the team.
+- **Team.** Which agents this project may use, each with its roles and what
+  it runs (model, harness, effort, tier), plus the approval setting. The pick
+  list offers every agent by work tier, the most critical first. The daemon
+  assigns work only within the team.
 - **Agents** (Settings). One roster: every catalog agent and every agent
   you define, as one list by model. Each model's card says its work tier and
   its benchmark scores once; each agent's row says its harness, effort, tier
