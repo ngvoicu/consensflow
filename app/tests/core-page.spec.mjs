@@ -364,6 +364,10 @@ async function open(page, data = model()) {
       dialog: { open: async () => '/work/fresh' },
       test: {
         createEmulator: (host) => {
+          // The keyboard lives in a field inside the host, as xterm's does.
+          host.append(
+            Object.assign(document.createElement('textarea'), { className: 'stub-input' }),
+          )
           const emulator = {
             host,
             written: [],
@@ -965,6 +969,24 @@ test('a member whose agent is gone says so on the board and in the team, with Re
     'no agent named diana any more: define one under Agents, or remove it',
   )
   await expect(member.getByRole('button', { name: 'Remove Worker @diana' })).toBeVisible()
+})
+
+test('a redraw leaves the keyboard where the human put it in the dock', async ({ page }) => {
+  const data = model()
+  data.boards[1].lanes.push({
+    participant: session(20, participant(3, 'zeus', 'worker'), 'amber-pine'),
+    tasks: [],
+    activity: { state: 'working' },
+    pane: { id: 'p1-zeus-amber-pine', generation: 1 },
+  })
+  await open(page, data)
+  const dock = page.getByRole('complementary', { name: 'Terminal dock' })
+  const keyboard = dock.locator('.terminal-card[data-handle="zeus-amber-pine"] .stub-input')
+  await keyboard.focus()
+  await expect(keyboard).toBeFocused()
+  await page.evaluate(() => window.__listeners.get('state-changed')())
+  await page.waitForTimeout(150)
+  await expect(keyboard).toBeFocused()
 })
 
 test('the dock stays where the human scrolled it across redraws', async ({ page }) => {

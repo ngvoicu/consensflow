@@ -56,7 +56,9 @@ export class TerminalLink {
 
   /** What the human types into a pane. */
   input(pane, data, { draft = true } = {}) {
-    return this.#stream('pane_input_enqueue', pane, data, draft)
+    return this.#stream('pane_input_enqueue', pane, data, draft).catch((cause) =>
+      this.#report(cause),
+    )
   }
 
   /** What the emulator answers the program on its own (cursor reports and the like). */
@@ -133,8 +135,20 @@ export class TerminalLink {
       bytes: Array.from(bytes),
       ...(draft ? {} : { draft: false }),
     })
-    if (admitted?.ok !== true || typeof admitted.ticket !== 'string') return false
+    // A refused keystroke shows, instead of vanishing.
+    if (admitted?.ok !== true || typeof admitted.ticket !== 'string') {
+      this.#report(
+        new Error(`typing refused: ${admitted?.error ?? 'no answer from the pane host'}`),
+      )
+      return false
+    }
     const settled = await this.#invoke('pane_input_wait', { ticket: admitted.ticket })
-    return settled?.ok === true
+    if (settled?.ok !== true) {
+      this.#report(
+        new Error(`typing was not taken: ${settled?.error ?? 'no answer from the pane host'}`),
+      )
+      return false
+    }
+    return true
   }
 }

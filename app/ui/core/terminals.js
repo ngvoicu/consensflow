@@ -91,7 +91,15 @@ export class TerminalsView {
       this.#stage.replaceChildren(element('p', 'stage-empty', 'No terminal is open yet.'))
       return
     }
-    this.#stage.replaceChildren(...cards.map((entry) => entry.card))
+    // Re-inserting a card blurs whatever has the keyboard inside it: the
+    // stage is touched only when its cards or their order change.
+    const wanted = cards.map((entry) => entry.card)
+    if (
+      wanted.length !== this.#stage.children.length ||
+      wanted.some((card, at) => this.#stage.children[at] !== card)
+    ) {
+      this.#stage.replaceChildren(...wanted)
+    }
     const shown = cards.find((entry) => entry.handle === focused) ?? cards[0]
     for (const entry of cards) entry.card.dataset.focused = String(entry === shown)
     for (const entry of cards) {
