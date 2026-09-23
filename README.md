@@ -55,8 +55,10 @@ credentials, takes no API key, and writes only inside its own home.
   same window. A window lost to a restart or a crash pauses its task the
   same way and tells the lead, so nothing is redone from scratch.
 - **A plan on the board.** A task may need others first: `cf task add
-  --needs T-3,T-4 "…"` waits, blocked, until each is accepted, and the daemon
-  gives out only unblocked tasks, so a plan of many tasks runs in its own
+  --needs T-3,T-4 "…"` waits, blocked, until each is accepted (one the lead
+  gives itself or a window by name waits the same way and goes to its window
+  then), and the daemon gives out only unblocked tasks, so a plan of many
+  tasks runs in its own
   order with parallel work where the plan allows it. When a result uncovers
   work that must come first, `--before T-9,T-10` puts a new task ahead of
   tasks still on the board. The board is the plan's memory.
@@ -118,6 +120,7 @@ only subject:
     cf task add --self "…"                                     work the lead does itself
     cf task list | get T-3 | done T-3 "…" | review T-3 | accept | reopen | cancel
     cf inbox [read m-12] · cf ask "…" [--human] · cf answer m-12 "…" · cf team · cf whoami
+    cf note "…" [--human]                                     something to know; nothing waits on it
 
 Every role's window opens with its role text: what it does, what it never
 does, and these commands. Agents run with full permissions in their windows;
