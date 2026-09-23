@@ -95,8 +95,10 @@ projects.
   model. Each model's card says its work tier and its benchmark scores once;
   a saved
   catalog entry takes its row's place with its harness, tier, route and an
-  editor for model, effort and tier. Define your own with any model string its
-  harness accepts.
+  editor for model, effort and tier. A saved agent follows its catalog entry:
+  when a release moves the entry to a newer model, the agent and every team
+  it is on move with it, until you edit its model or effort, which makes it
+  your own. Define your own with any model string its harness accepts.
 - **Harnesses** (Settings). Which harness CLIs are installed, their versions
   and whether ConsensFlow's integration with each is in place.
 

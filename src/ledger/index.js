@@ -613,6 +613,43 @@ class Ledger {
     })
   }
 
+  /**
+   * Members follow the roster: each active member's tier (and its sessions')
+   * becomes what its saved agent has now, since the app's catalog may have
+   * moved the model. Says which members changed; an agent the roster no
+   * longer has leaves its member as it is.
+   */
+  refreshMemberTiers(tierOf) {
+    return this.#write(() => {
+      const members = this.#db
+        .prepare(
+          `SELECT id, project_id, handle, agent, tier FROM participant
+           WHERE agent IS NOT NULL AND member_id IS NULL AND left_at IS NULL ORDER BY id`,
+        )
+        .all()
+      const changed = []
+      for (const member of members) {
+        const tier = tierOf(member.agent) ?? null
+        if (tier === null || tier === member.tier) continue
+        this.#db
+          .prepare('UPDATE participant SET tier = ? WHERE id = ? OR member_id = ?')
+          .run(tier, member.id, member.id)
+        this.#log(member.project_id, 'member.tier', {
+          handle: member.handle,
+          from: member.tier,
+          to: tier,
+        })
+        changed.push({
+          project: member.project_id,
+          handle: member.handle,
+          from: member.tier,
+          to: tier,
+        })
+      }
+      return changed
+    })
+  }
+
   /** A member's roles change in place. */
   setRoles(projectId, handle, roles) {
     roles = requireRoles(roles)

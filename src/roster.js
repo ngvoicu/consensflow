@@ -12,7 +12,6 @@ import { dirname, join } from 'node:path'
 import { readBenchmarkCache, withBenchmarks } from '../hosts/lib/benchmarks.js'
 import {
   agentProfile,
-  presetDrift,
   syncAgentWithPreset,
   validateKimiEffort,
   validateWorkTier,
@@ -323,6 +322,11 @@ export function editAgent(name, patch, env) {
     // Never leave a stale value in the key this kind does not read.
     delete row[key === 'thinking' ? 'effort' : 'thinking']
   }
+  // A model or effort of the human's own choosing is theirs to keep: the
+  // agent no longer follows its catalog entry.
+  if ((patch.model !== undefined || patch.effort !== undefined) && row.preset !== undefined) {
+    delete row.preset
+  }
   validateKimiEffort(row)
   row.updatedAt = new Date().toISOString()
 
@@ -338,27 +342,12 @@ export function removeAgent(name, env) {
 }
 
 /**
- * What the catalog would change on each agent that came from it.
- *
- * A preset moves — a family gets a new release, an effort level is renamed —
- * and an agent created from it keeps whatever it was created with. The
- * comparison is the payload's own `presetDrift`, not a second implementation,
- * so the app and the running harness always agree about what has moved. Rows
- * with no provenance, and rows whose preset the catalog has since dropped,
- * report nothing: they are pinned, and pinned is a valid state.
- */
-export function agentDrift(env) {
-  return loadDocument(env).agents.flatMap((row) => {
-    const changes = presetDrift(row)
-    return changes.length === 0 ? [] : [{ name: row.id, preset: row.preset, changes }]
-  })
-}
-
-/**
- * Re-resolves preset-backed agents against the catalog. Every field the preset
- * owns moves — kind, model, effort/thinking, and since
- * 2026-08-27 the description, because a label naming the wrong model is what
- * the skill table shows a lead. A row with no `preset` is never touched.
+ * Re-resolves preset-backed agents against the catalog: what the app ships
+ * is what the roster has. Every field the preset owns moves — kind, model,
+ * effort/thinking, and since 2026-08-27 the description, because a label
+ * naming the wrong model is what the skill table shows a lead. A row with no
+ * `preset` (defined by hand, or edited since) is never touched. The daemon
+ * runs this at start and the Agents screen on every read.
  */
 export function syncAgents(env, options = {}) {
   const { name, dryRun = false } = options

@@ -698,6 +698,14 @@ export class Dispatcher {
       // A session plays the role of the task it was started for; a member or
       // the lead its own.
       const { role } = participant
+      // A member runs on its saved agent's model, read now; one the human
+      // has deleted from their agents must not fall back to a harness default.
+      const agent = participant.agent === null ? null : this.#roster(participant.agent)
+      if (participant.agent !== null && agent === null) {
+        throw new Error(
+          `${participant.agent} is no longer among your saved agents: add it back under Agents, or remove @${participant.handle} from the team`,
+        )
+      }
       plan = await adapter.prepare({
         launchId,
         participant,
@@ -706,7 +714,7 @@ export class Dispatcher {
         directory: project.directory,
         resume,
         message: message === null ? null : this.#launchText(project, participant, message, resume),
-        agent: participant.agent === null ? null : this.#roster(participant.agent),
+        agent,
         instructions: this.#roles(participant, project),
       })
     } catch (cause) {

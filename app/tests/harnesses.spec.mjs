@@ -158,7 +158,7 @@ test('Agents adds and removes a saved agent without loading harness diagnostics 
   }
 })
 
-test('Agents retains catalog update feedback after removing the installation panel', async ({
+test('Agents shows a saved agent as the catalog has it now, with nothing to press', async ({
   page,
 }) => {
   const t = tempEnv()
@@ -169,11 +169,9 @@ test('Agents retains catalog update feedback after removing the installation pan
   const server = await agentsServer(t.env)
   try {
     await page.goto(`${server.url}/?token=${server.token}`)
-    await page.locator('#agents').getByRole('button', { name: 'Update', exact: true }).click()
-    await expect(page.getByRole('status')).toContainText('diana: model → gpt-5.6-luna')
-    await expect(
-      page.locator('#agents').getByRole('button', { name: 'Update', exact: true }),
-    ).toHaveCount(0)
+    await expect(member(page, 'diana')).toBeVisible()
+    await expect(page.locator('#agents').getByRole('button', { name: /^Update/ })).toHaveCount(0)
+    expect(listAgents(t.env).find((p) => p.name === 'diana').model).toBe('gpt-5.6-luna')
     await page.locator('#agents').getByRole('button', { name: 'Edit', exact: true }).click()
     const model = page.locator('#agents input[name="model"]')
     await expect(model).toHaveValue('gpt-5.6-luna')
@@ -362,7 +360,7 @@ async function refreshAgents(page) {
   ])
 }
 
-test('Kimi K3 effort survives grouping, add, edit and explicit catalog updates', async ({
+test('Kimi K3 effort follows the catalog until edited, and edits are validated', async ({
   page,
 }) => {
   const fixture = await catalogPage(
@@ -391,15 +389,9 @@ test('Kimi K3 effort survives grouping, add, edit and explicit catalog updates',
       'Kimi K3 · High · 1',
       'Kimi K3 · Low · 1',
     ])
-    await expect(
-      member(second, 'saved-kimi').getByRole('button', { name: 'Update', exact: true }),
-    ).toBeVisible()
-    expect(listAgents(fixture.t.env).find((a) => a.name === 'saved-kimi').effort).toBeUndefined()
-    await member(second, 'saved-kimi').getByRole('button', { name: 'Update', exact: true }).click()
-    await expect(
-      member(second, 'saved-kimi').getByRole('button', { name: 'Update', exact: true }),
-    ).toHaveCount(0)
+    // Saved without an effort, it took the catalog's the moment the screen read it.
     expect(listAgents(fixture.t.env).find((a) => a.name === 'saved-kimi').effort).toBe('max')
+    await expect(second.locator('#agents').getByRole('button', { name: /^Update/ })).toHaveCount(0)
     await member(second, 'saved-kimi').getByRole('button', { name: 'Edit', exact: true }).click()
     await member(second, 'saved-kimi').locator('input[name=effort]').fill('high')
     await member(second, 'saved-kimi').getByRole('button', { name: 'Save', exact: true }).click()
@@ -1192,10 +1184,13 @@ test('shared model cards keep Fable choices independent through add, remove, fil
     const edited = member(second, 'orpheus')
     await edited.locator('[name=effort]').fill('low')
     await edited.getByRole('button', { name: 'Save', exact: true }).click()
-    // An edited catalog agent keeps its entry's place and says how it differs from the catalog.
-    await expect(saved.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 2')
-    await expect(edited.locator('.member__drift')).toContainText('low → xhigh')
-    expect(listAgents(fixture.t.env).find((p) => p.name === 'orpheus').effort).toBe('low')
+    // An edited catalog agent is the human's own now: it leaves its entry's group for its own.
+    await expect(saved.locator('h3')).toHaveText([
+      'Claude Fable 5.1 · Xhigh · 1',
+      'Claude Fable 5.1 · Low · 1',
+    ])
+    const orpheus = listAgents(fixture.t.env).find((p) => p.name === 'orpheus')
+    expect([orpheus.effort, orpheus.preset]).toEqual(['low', undefined])
     await expect(member(second, 'clio').locator('[name=effort]')).toHaveValue('medium')
     await refreshAgents(page)
     await member(page, 'orpheus').getByRole('button', { name: 'Remove', exact: true }).click()

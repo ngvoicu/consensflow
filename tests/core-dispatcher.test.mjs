@@ -1634,3 +1634,23 @@ describe('the dispatcher traces what its windows do', () => {
     )
   })
 })
+
+describe('a member whose saved agent is gone', () => {
+  it('does not launch on a harness default: the task fails and the lead hears why', async () => {
+    await setup(
+      async (context) => {
+        const { open, task, notes } = await withTiers(context)
+        open()
+        await context.dispatcher.pass()
+        await context.dispatcher.pass()
+        assert.equal(task(1).state, 'failed')
+        assert.match(
+          notes('lead').at(-1),
+          /zeus is no longer among your saved agents: add it back under Agents, or remove @zeus-amber-pine from the team/,
+        )
+        assert.equal(context.host.opened.length, 1, 'only the lead window opened')
+      },
+      { roster: (name) => (name === 'zeus' ? null : { id: name, model: 'm', profile: {} }) },
+    )
+  })
+})

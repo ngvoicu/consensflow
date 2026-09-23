@@ -4,7 +4,6 @@ import { dirname, join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import {
   addAgent,
-  agentDrift,
   configRoot,
   editAgent,
   legacyConfigRoot,
@@ -92,7 +91,11 @@ describe('writes are v1-faithful: cc and pi keep working on the same file', () =
     assert.equal(zeus.kind, 'claude-code')
     // Obsolete skill settings are removed; unrelated legacy data survives.
     assert.equal(Object.hasOwn(zeus, 'skillsPolicy'), false)
-    assert.equal(zeus.preset, 'zeus')
+    assert.equal(
+      zeus.preset,
+      undefined,
+      'an edited model or effort is the human’s own: the catalog no longer moves it',
+    )
     assert.equal(zeus.name, 'Zeus')
     assert.equal(raw.schemaVersion, 1)
   })
@@ -176,7 +179,11 @@ it('Kimi effort changes are explicit, validated and persisted without altering i
       t.env,
     )
     assert.equal(listAgents(t.env)[0].effort, undefined)
-    assert.ok(agentDrift(t.env)[0].changes.some((c) => c.field === 'effort' && c.to === 'max'))
+    assert.ok(
+      syncAgents(t.env, { dryRun: true })[0].changes.some(
+        (c) => c.field === 'effort' && c.to === 'max',
+      ),
+    )
     syncAgents(t.env, { name: 'ilmarinen' })
     assert.equal(listAgents(t.env)[0].effort, 'max')
     editAgent('ilmarinen', { effort: 'low' }, t.env)
@@ -201,7 +208,7 @@ it('Kimi effort changes are explicit, validated and persisted without altering i
   }
 })
 
-describe('a catalog agent can be told its model moved', () => {
+describe('a catalog agent follows its entry until the human edits it', () => {
   const t = tempEnv()
   after(() => t.cleanup())
 
@@ -227,14 +234,16 @@ describe('a catalog agent can be told its model moved', () => {
     assert.equal(byName.mine.preset, undefined, 'a hand-made agent is nobody else’s to move')
   })
 
-  it('reports what the catalog would change, and nothing for pinned rows', () => {
+  it('a dry run reports what the catalog would change, and nothing for pinned rows', () => {
     pin('diana', 'gpt-5.5', t.env)
     pin('mine', 'gpt-5.4', t.env)
-
-    const drift = agentDrift(t.env)
-    assert.equal(drift.length, 1, 'only the catalog-backed row drifts')
-    assert.equal(drift[0].name, 'diana')
-    assert.deepEqual(drift[0].changes, [
+    const applied = syncAgents(t.env, { dryRun: true })
+    assert.deepEqual(
+      applied.map((a) => a.name),
+      ['diana'],
+      'only the catalog-backed row moves',
+    )
+    assert.deepEqual(applied[0].changes, [
       { field: 'model', from: 'gpt-5.5', to: 'gpt-5.6-luna' },
       { field: 'description', from: 'my own words', to: 'Codex GPT 5.6 Luna XHIGH' },
     ])
@@ -262,12 +271,20 @@ describe('a catalog agent can be told its model moved', () => {
       'the label follows the catalog too: a name for a model it no longer runs is what the skill table would print',
     )
     assert.equal(byName.mine.model, 'gpt-5.4', 'a pinned agent stays pinned')
-    assert.equal(agentDrift(t.env).length, 0, 'nothing left to do')
+    assert.equal(syncAgents(t.env, { dryRun: true }).length, 0, 'nothing left to do')
+  })
+
+  it('an edit to the model or effort releases the agent from the catalog; a description edit does not', () => {
+    editAgent('diana', { description: 'for parsers' }, t.env)
+    assert.equal(listAgents(t.env).find((p) => p.name === 'diana').preset, 'diana')
+    editAgent('diana', { effort: 'low' }, t.env)
+    const diana = listAgents(t.env).find((p) => p.name === 'diana')
+    assert.deepEqual([diana.preset, diana.effort], [undefined, 'low'])
+    assert.deepEqual(syncAgents(t.env, { dryRun: true }), [], 'the catalog no longer moves it')
   })
 
   it('a name the catalog has dropped stays where it is', () => {
     addAgent({ name: 'ghost', harness: 'codex', model: 'gpt-5.4', preset: 'no-such-preset' }, t.env)
-    assert.equal(agentDrift(t.env).length, 0)
     assert.equal(syncAgents(t.env, {}).length, 0)
     assert.equal(listAgents(t.env).find((p) => p.name === 'ghost').model, 'gpt-5.4')
   })
@@ -324,7 +341,7 @@ it('Pi Claude provider updates are explicit and leave custom rows pinned', () =>
     assert.equal(listAgents(t.env)[0].model, 'anthropic/claude-fable-5')
     assert.equal(readFileSync(rosterPath(t.env), 'utf8'), before)
     assert.ok(
-      agentDrift(t.env)
+      syncAgents(t.env, { dryRun: true })
         .find((a) => a.name === 'erato')
         .changes.some((c) => c.to === 'openrouter/anthropic/claude-fable-5.1'),
     )
@@ -418,7 +435,8 @@ it('saves user work-tier overrides, preserves them on edits/sync, and restores a
     editAgent('calliope', { workTier: null }, t.env)
     row = listAgents(t.env)[0]
     assert.equal(row.workTier, undefined)
-    assert.equal(row.profile.workTier, 'critical')
+    // The automatic tier for the effort it has now: the xhigh edit released it from the catalog.
+    assert.equal(row.profile.workTier, 'complex')
   } finally {
     t.cleanup()
   }

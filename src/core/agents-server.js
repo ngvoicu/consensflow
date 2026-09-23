@@ -9,7 +9,6 @@ import { HarnessAdmin } from '../harness-admin.js'
 import { harnessPage } from '../harness-page.js'
 import {
   addAgent,
-  agentDrift,
   configRoot,
   editAgent,
   HARNESSES,
@@ -56,7 +55,10 @@ function readBody(request) {
 }
 
 /** The screens and their API, mounted by `startApi` under the UI token. */
-export function agentsUi(env, { token, harnessLatest, harnessRun } = {}) {
+export function agentsUi(
+  env,
+  { token, harnessLatest, harnessRun, onRosterChange = () => {} } = {},
+) {
   if (typeof token !== 'string' || token.length === 0)
     throw new Error('the agents screens need a UI token')
   const harnessAdmin = new HarnessAdmin(env, {
@@ -76,7 +78,6 @@ export function agentsUi(env, { token, harnessLatest, harnessRun } = {}) {
       const named = /^\/api\/agents\/([a-z][a-z0-9-]*)$/.exec(path)
       const api =
         path === '/api/agents' ||
-        path === '/api/agents/sync' ||
         path === '/api/harnesses/check' ||
         path === '/api/harnesses/update' ||
         named !== null
@@ -92,10 +93,12 @@ export function agentsUi(env, { token, harnessLatest, harnessRun } = {}) {
         if (request.method === 'GET' && path === '/harnesses') return html(harnessPage(token))
         if (request.method === 'GET' && path === '/api/agents') {
           const benchmarks = await artificialAnalysis.refresh()
+          // What the app ships is what the roster has: a catalog entry that
+          // moved reaches its saved agents here, before they are listed.
+          if (syncAgents(env).length > 0) onRosterChange()
           refreshAgentProfiles(env, benchmarks)
           return json(200, {
             agents: listAgents(env).map((agent) => withProfile(agent, benchmarks)),
-            drift: agentDrift(env),
             harnesss: HARNESSES,
             catalog: Object.fromEntries(
               Object.entries(CATALOG).map(([harness, entries]) => [
@@ -114,14 +117,10 @@ export function agentsUi(env, { token, harnessLatest, harnessRun } = {}) {
           })
         }
         const body = request.method === 'GET' ? {} : JSON.parse((await readBody(request)) || '{}')
-        if (request.method === 'POST' && path === '/api/agents/sync') {
-          const applied = syncAgents(env, {
-            ...(typeof body.name === 'string' ? { name: body.name } : {}),
-          })
-          return json(200, { applied, agents: listAgents(env).map(withProfile) })
-        }
         if (request.method === 'POST' && path === '/api/agents') {
-          return json(201, { agent: addAgent(body, env) })
+          const agent = addAgent(body, env)
+          onRosterChange()
+          return json(201, { agent })
         }
         if (request.method === 'POST' && path === '/api/harnesses/update') {
           if (!['claude', 'codex', 'opencode', 'pi', 'kimi', 'devin'].includes(body.id)) {
@@ -143,10 +142,13 @@ export function agentsUi(env, { token, harnessLatest, harnessRun } = {}) {
           })
         }
         if (named !== null && request.method === 'PATCH') {
-          return json(200, { agent: editAgent(named[1], body, env) })
+          const agent = editAgent(named[1], body, env)
+          onRosterChange()
+          return json(200, { agent })
         }
         if (named !== null && request.method === 'DELETE') {
           removeAgent(named[1], env)
+          onRosterChange()
           return { status: 204 }
         }
         return json(404, { error: 'not found' })
@@ -265,8 +267,6 @@ const PAGE = (token) => `<!DOCTYPE html>
   .offer__name { font-family: var(--mono); font-size: 13px; color: var(--foam); min-width: 96px; }
   .offer__what { color: var(--muted); font-size: 13px; flex: 1; }
   .offer__model { font-family: var(--mono); font-size: 11px; color: var(--muted); opacity: .8; }
-  .member__drift { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 6px 0 0; font-size: 13px; color: var(--muted); }
-  .tag--moved { background: var(--buoy); color: var(--ink); }
   .lede--tight { margin: 0 0 8px; }
   .filters input[type=search] {
     width: 100%; box-sizing: border-box; padding: 8px 10px;
@@ -547,17 +547,6 @@ function memberCard(p, group, data, editors) {
   head.append(edit);
   head.append(removeButton(p, 'Remove'));
   card.append(head);
-  const moved = (data.drift ?? []).find((d) => d.name === p.name);
-  if (moved) {
-    const note = el('p', 'member__drift');
-    note.append(el('span', 'tag tag--moved', 'catalog moved'));
-    note.append(el('span', null, ' ' + moved.changes
-      .map((c) => c.field + ': ' + (c.from ?? '-') + ' → ' + (c.to ?? '-')).join(', ') + ' '));
-    const update = el('button', null, 'Update');
-    update.onclick = () => post('/api/agents/sync', { name: p.name }, 'Updating ' + p.name + '…');
-    note.append(update);
-    card.append(note);
-  }
   // A saved agent shows what a task finds it by, its tier, and how it is
   // billed; the model card above says what the model is for.
   appendProfile(card, p, ['workTier', 'routeLabel', 'benchmarks'].filter(field => !group.shared.includes(field)));
@@ -585,17 +574,6 @@ function renderAgents(data) {
     : data.agents.length + " saved. A project's team is picked from them; a saved agent's tier is edited here.";
   const groups = browsingGroups(entries, '#agents-section');
   if (groups.length === 0) { host.append(el('p', 'empty', 'No agents match these filters.')); return; }
-  if ((data.drift ?? []).length > 1) {
-    const all = el('div', 'member');
-    const line = el('p', 'member__drift');
-    line.append(el('span', 'tag tag--moved', data.drift.length + ' agents moved'));
-    line.append(el('span', null, ' the catalog has newer models for them '));
-    const update = el('button', null, 'Update all');
-    update.onclick = () => post('/api/agents/sync', {}, 'Updating…');
-    line.append(update);
-    all.append(line);
-    host.append(all);
-  }
   for (const group of groups) {
     const section = groupSection(group, ['workTier', 'tierNote', 'benchmarks']);
     for (const entry of group.rows) {

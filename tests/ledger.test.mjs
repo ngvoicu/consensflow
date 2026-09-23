@@ -386,6 +386,35 @@ describe('projects and participants', () => {
     })
   })
 
+  it("refreshes each member's tier from its saved agent, sessions included, and leaves an unknown agent alone", async () => {
+    await withLedger((ledger) => {
+      const { project, id } = team(ledger)
+      ledger.createTask(project.id, { from: 'lead', pool: 'worker', tier: 'standard', body: 'P' })
+      ledger.assignTask(project.id, 1, id('zeus'))
+      const changed = ledger.refreshMemberTiers((agent) => ({ zeus: 'complex' })[agent] ?? null)
+      assert.deepEqual(changed, [
+        { project: project.id, handle: 'zeus', from: 'standard', to: 'complex' },
+      ])
+      const tiers = Object.fromEntries(
+        ledger.project(project.id).participants.map((p) => [p.handle, p.tier]),
+      )
+      assert.deepEqual(
+        [tiers.zeus, tiers['zeus-amber-pine'], tiers.diana],
+        ['complex', 'complex', 'standard'],
+        "the session follows its member; diana's agent is unknown to the roster here",
+      )
+      assert.deepEqual(ledger.events(project.id).findLast((e) => e.kind === 'member.tier').data, {
+        handle: 'zeus',
+        from: 'standard',
+        to: 'complex',
+      })
+      assert.deepEqual(
+        ledger.refreshMemberTiers(() => 'complex'),
+        [{ project: project.id, handle: 'diana', from: 'standard', to: 'complex' }],
+      )
+    })
+  })
+
   it('tells no coordinator about a member joining, only a requester about work cancelled by one leaving', async () => {
     await withLedger((ledger) => {
       const { project, id } = team(ledger)

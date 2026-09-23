@@ -168,7 +168,7 @@ describe('the agents screens on the new core', () => {
     assert.deepEqual(listAgents(t.env), [])
   })
 
-  it('offers the catalog update as a named operation', async () => {
+  it('lists a saved agent as the catalog has it now, and offers no update route', async () => {
     await api('/api/agents', {
       method: 'POST',
       body: JSON.stringify({
@@ -179,17 +179,15 @@ describe('the agents screens on the new core', () => {
         preset: 'diana',
       }),
     })
-    const before = await (await api('/api/agents')).json()
-    assert.ok(
-      before.drift.find((d) => d.name === 'diana'),
-      'the page is told the catalog moved',
+    const listed = await (await api('/api/agents')).json()
+    assert.equal(
+      listed.agents.find((p) => p.name === 'diana').model,
+      'gpt-5.6-luna',
+      'the catalog moved, so the saved agent moved with it on read',
     )
-    const synced = await api('/api/agents/sync', {
-      method: 'POST',
-      body: JSON.stringify({ name: 'diana' }),
-    })
-    assert.equal(synced.status, 200)
-    assert.equal((await synced.json()).agents.find((p) => p.name === 'diana').model, 'gpt-5.6-luna')
+    assert.equal(Object.hasOwn(listed, 'drift'), false)
+    assert.equal(listAgents(t.env).find((p) => p.name === 'diana').model, 'gpt-5.6-luna')
+    assert.equal((await api('/api/agents/sync', { method: 'POST', body: '{}' })).status, 404)
     await api('/api/agents/diana', { method: 'DELETE' })
   })
 
