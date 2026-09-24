@@ -389,7 +389,7 @@ function rolePicker(roleSelect, agentSelect, hint, holding, onRefill = () => {})
   const refill = () => {
     const role = roleSelect.value
     const chosen = agentSelect.value
-    const choices = state.agents.filter((agent) => !holding(agent.name, role))
+    const choices = state.agents.filter((agent) => !agent.hidden && !holding(agent.name, role))
     // Every agent, the catalog's and the human's own, by the work it is for:
     // the most critical tier first, then harness by harness, by name.
     const groups = new Map()

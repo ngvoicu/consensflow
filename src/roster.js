@@ -249,8 +249,39 @@ export function agentRow(name, env) {
   return rows(loadDocument(env)).find((row) => row.id === wanted)
 }
 
+/** What the human chose about the roster, kept in the file beside their own agents. */
+const PREFERENCE_KEYS = ['ownHarnessOnly']
+const preferencesOf = (document) => ({
+  ownHarnessOnly: document.preferences?.ownHarnessOnly === true,
+})
+export function preferences(env) {
+  return preferencesOf(loadDocument(env))
+}
+export function setPreferences(patch, env) {
+  const document = loadDocument(env)
+  const next = preferencesOf(document)
+  for (const [key, value] of Object.entries(patch ?? {})) {
+    if (!PREFERENCE_KEYS.includes(key)) throw new Error(`no preference named ${key}`)
+    if (typeof value !== 'boolean') throw new Error(`${key} is on or off`)
+    next[key] = value
+  }
+  saveDocument({ ...document, preferences: next }, env)
+  return next
+}
+/**
+ * Claude and OpenAI models reached through Pi or OpenCode are hidden when the
+ * human keeps them to their own harnesses; a member already on one still runs.
+ */
+const RELAYED = new Set(['pi', 'opencode'])
+const hides = (prefs, view) =>
+  prefs.ownHarnessOnly && RELAYED.has(view.harness) && /^(claude|gpt)-/.test(view.profile.modelKey)
 export function listAgents(env) {
-  return rows(loadDocument(env)).map(toView)
+  const document = loadDocument(env)
+  const prefs = preferencesOf(document)
+  return rows(document).map((row) => {
+    const view = toView(row)
+    return hides(prefs, view) ? { ...view, hidden: true } : view
+  })
 }
 
 /**

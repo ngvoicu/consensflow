@@ -169,6 +169,38 @@ test('Agents lists every catalog agent as one row with nothing to add, and takes
   }
 })
 
+test('a checkbox keeps Claude and OpenAI models to their own harnesses, for every tab and the next launch', async ({
+  page,
+}) => {
+  const fixture = await catalogPage(page, [], null)
+  const { second } = fixture
+  try {
+    const box = (screen) =>
+      screen.getByLabel(/Claude and OpenAI models only on their own harnesses/)
+    await expect(box(page)).not.toBeChecked()
+    await expect(member(page, 'kronos')).toBeVisible()
+    await box(page).check()
+    await expect(member(page, 'kronos')).toHaveCount(0)
+    await expect(member(page, 'apollo')).toBeVisible()
+    await expect(member(page, 'ares')).toBeVisible()
+    await expect(page.locator('#lede')).toContainText(
+      'hidden on Pi and OpenCode: Claude and OpenAI models run on their own harnesses.',
+    )
+    expect(listAgents(fixture.t.env).find((p) => p.name === 'kronos').hidden).toBe(true)
+    // The other tab, and the next launch, read the same preference.
+    await refreshAgents(second)
+    await expect(box(second)).toBeChecked()
+    await expect(member(second, 'kronos')).toHaveCount(0)
+    await box(second).uncheck()
+    await expect(member(second, 'kronos')).toBeVisible()
+    await refreshAgents(page)
+    await expect(box(page)).not.toBeChecked()
+    await expect(member(page, 'kronos')).toBeVisible()
+  } finally {
+    await fixture.close()
+  }
+})
+
 test('Agents keeps catalog agents as the catalog has them, and Show: mine lists only your own', async ({
   page,
 }) => {

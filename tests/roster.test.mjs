@@ -12,8 +12,10 @@ import {
   listAgents,
   migrateStateRoot,
   normalizeRoster,
+  preferences,
   removeAgent,
   rosterPath,
+  setPreferences,
 } from '../src/roster.js'
 import { tempEnv } from './helpers.mjs'
 
@@ -329,4 +331,32 @@ it('legacy import never copies a link that could redirect a future write outside
   } finally {
     t.cleanup()
   }
+})
+
+describe('the roster keeps what the human chose about it', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+
+  it('hides Claude and OpenAI models on Pi and OpenCode when they are kept to their own harnesses', () => {
+    {
+      assert.deepEqual(preferences(t.env), { ownHarnessOnly: false })
+      assert.ok(!listAgents(t.env).some((p) => p.hidden), 'nothing hidden by default')
+      assert.deepEqual(setPreferences({ ownHarnessOnly: true }, t.env), { ownHarnessOnly: true })
+      const hidden = (name) => listAgents(t.env).find((p) => p.name === name).hidden === true
+      assert.deepEqual(
+        ['kronos', 'baldr', 'phoebe', 'bil', 'aurora', 'apollo', 'diana', 'ares', 'gefjon'].map(
+          hidden,
+        ),
+        [true, true, true, true, true, false, false, false, false],
+        'Opus, Luna and Sol through Pi or OpenCode; never on Claude Code or Codex, never Grok or Muse',
+      )
+      assert.deepEqual(raw(t.env).preferences, { ownHarnessOnly: true }, 'kept in the file')
+      normalizeRoster(t.env)
+      assert.deepEqual(preferences(t.env), { ownHarnessOnly: true }, 'a fold at start keeps it')
+      assert.throws(() => setPreferences({ ownHarnessOnly: 'yes' }, t.env), /is on or off/)
+      assert.throws(() => setPreferences({ colour: true }, t.env), /no preference named colour/)
+      setPreferences({ ownHarnessOnly: false }, t.env)
+      assert.ok(!listAgents(t.env).some((p) => p.hidden))
+    }
+  })
 })

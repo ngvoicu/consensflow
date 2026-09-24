@@ -124,6 +124,34 @@ describe('the agents screens on the new core', () => {
     scriptsParse(harnesses)
   })
 
+  it('keeps Claude and OpenAI models to their own harnesses when asked, and says so in the payload', async () => {
+    const chosen = await api('/api/preferences', {
+      method: 'POST',
+      body: JSON.stringify({ ownHarnessOnly: true }),
+    })
+    assert.equal(chosen.status, 200)
+    assert.deepEqual(await chosen.json(), { preferences: { ownHarnessOnly: true } })
+    const listed = await (await api('/api/agents')).json()
+    assert.deepEqual(listed.preferences, { ownHarnessOnly: true })
+    assert.deepEqual(
+      ['kronos', 'apollo'].map(
+        (name) => listed.agents.find((p) => p.name === name).hidden === true,
+      ),
+      [true, false],
+    )
+    const html = await (await api('/')).text()
+    assert.ok(html.includes('name="ownHarnessOnly"'))
+    const bad = await api('/api/preferences', {
+      method: 'POST',
+      body: JSON.stringify({ ownHarnessOnly: 'yes' }),
+    })
+    assert.equal(bad.status, 400)
+    await api('/api/preferences', {
+      method: 'POST',
+      body: JSON.stringify({ ownHarnessOnly: false }),
+    })
+  })
+
   it('adds, edits and removes agents through the API, persisting each', async () => {
     const added = await api('/api/agents', {
       method: 'POST',

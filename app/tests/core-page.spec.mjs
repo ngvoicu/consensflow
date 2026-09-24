@@ -138,6 +138,15 @@ function model() {
         effort: 'max',
         profile: { workTier: 'critical' },
       },
+      // Hidden by the human's preference: never on offer, though a member on it still runs.
+      {
+        name: 'kronos',
+        harness: 'pi',
+        model: 'openrouter/anthropic/claude-opus-5.5',
+        effort: 'xhigh',
+        profile: { workTier: 'complex' },
+        hidden: true,
+      },
     ],
     boards: {
       1: {

@@ -6,7 +6,15 @@ import { WORK_TIERS } from '../../hosts/lib/presets.js'
 import { EFFORTS } from '../catalog.js'
 import { HarnessAdmin } from '../harness-admin.js'
 import { harnessPage } from '../harness-page.js'
-import { addAgent, editAgent, HARNESSES, listAgents, removeAgent } from '../roster.js'
+import {
+  addAgent,
+  editAgent,
+  HARNESSES,
+  listAgents,
+  preferences,
+  removeAgent,
+  setPreferences,
+} from '../roster.js'
 
 /**
  * The human's agents screens, served by the new core: the agents (`/`: the
@@ -62,6 +70,7 @@ export function agentsUi(
       const named = /^\/api\/agents\/([a-z][a-z0-9-]*)$/.exec(path)
       const api =
         path === '/api/agents' ||
+        path === '/api/preferences' ||
         path === '/api/harnesses/check' ||
         path === '/api/harnesses/update' ||
         named !== null
@@ -76,13 +85,23 @@ export function agentsUi(
         if (request.method === 'GET' && path === '/') return html(PAGE(token))
         if (request.method === 'GET' && path === '/harnesses') return html(harnessPage(token))
         if (request.method === 'GET' && path === '/api/agents') {
-          return json(200, { agents: listAgents(env), harnesss: HARNESSES, efforts: EFFORTS })
+          return json(200, {
+            agents: listAgents(env),
+            harnesss: HARNESSES,
+            efforts: EFFORTS,
+            preferences: preferences(env),
+          })
         }
         const body = request.method === 'GET' ? {} : JSON.parse((await readBody(request)) || '{}')
         if (request.method === 'POST' && path === '/api/agents') {
           const agent = addAgent(body, env)
           onRosterChange()
           return json(201, { agent })
+        }
+        if (request.method === 'POST' && path === '/api/preferences') {
+          const chosen = setPreferences(body, env)
+          onRosterChange()
+          return json(200, { preferences: chosen })
         }
         if (request.method === 'POST' && path === '/api/harnesses/update') {
           if (!['claude', 'codex', 'opencode', 'pi', 'kimi', 'devin'].includes(body.id)) {
@@ -133,7 +152,8 @@ const BROWSING_CONTROLS = `
     <label>Group by<select name="group" aria-label="Group by"><option value="none">None</option><option value="harness">Harness</option><option value="model-reasoning" selected>Model and reasoning</option><option value="tier">Work tier</option></select></label>
     <button type="button">Clear filters</button>
   </div>
-  <p class="tier-guide">The work tier is what a task finds an agent by.</p>`
+  <p class="tier-guide">The work tier is what a task finds an agent by.</p>
+  <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi and OpenCode</label>`
 
 const PAGE = (token) => `<!DOCTYPE html>
 <html lang="en">
@@ -255,6 +275,7 @@ const PAGE = (token) => `<!DOCTYPE html>
   .tier-pill[data-tier=critical] { border-color: var(--pill-advisor); color: var(--pill-advisor); }
   .tier-note { margin: 2px 0 8px; font-size: 12px; color: var(--muted); }
   .tier-guide { color: var(--muted); font-size: 12px; }
+  .own-harness { display: flex; align-items: center; gap: 8px; margin: 8px 0 20px; font-size: 13px; color: var(--muted); }
   .model-group { border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin: 16px 0; }
   .model-summary { padding-bottom: 14px; overflow-wrap: anywhere; }
   .model-summary h3 { color: var(--foam); font-size: 18px; font-weight: 600; margin: 0 0 10px; }
@@ -320,7 +341,7 @@ const MODEL_ORDER = [
   /^claude-fable(?:-|$)/, /^claude-opus(?:-|$)/, /^claude-sonnet(?:-|$)/, /^claude-haiku(?:-|$)/, /^claude-/,
   /^gpt-[0-9.]+-astra(?:-|$)/, /^gpt-[0-9.]+-sol(?:-|$)/, /^gpt-[0-9.]+-terra(?:-|$)/, /^gpt-[0-9.]+-luna(?:-|$)/, /^gpt-/,
   /^gemini-[0-9.]+-pro(?:-|$)/, /^gemini-[0-9.]+-flash(?:-|$)/, /^gemini-/,
-  /^deepseek-v4(?:\.\d+)?-pro(?:-|$)/, /^deepseek-v4(?:\.\d+)?-flash(?:-|$)/, /^deepseek-/,
+  /^deepseek-v4(?:\\.\\d+)?-pro(?:-|$)/, /^deepseek-v4(?:\\.\\d+)?-flash(?:-|$)/, /^deepseek-/,
   /^glm-[0-9.]+$/, /^glm-[0-9.]+-flash(?:-|$)/, /^glm-/,
   /^grok-/, /^kimi-/, /^laguna-/, /^minimax-/, /^muse-/, /^nemotron-/,
   /^qwen[0-9.]+-max(?:-|$)/, /^qwen[0-9.]+-27b(?:-|$)/, /^qwen[0-9]/,
@@ -427,10 +448,13 @@ function renderAgents(data) {
     .map(card => [card.dataset.agentName, card.querySelector('form')]).filter(([, form]) => form));
   host.innerHTML = '';
   const show = document.querySelector('#agents-section [name=show]').value;
-  const entries = data.agents.filter(p => show === 'all' || p.custom);
-  const mine = data.agents.filter(p => p.custom).length;
-  document.querySelector('#lede').textContent = data.agents.length + ' agents, the catalog’s and your own; a project’s team is picked from them.' +
-    (mine === 0 ? '' : ' ' + mine + ' ' + (mine === 1 ? 'is' : 'are') + ' yours, defined here.');
+  const offered = data.agents.filter(p => !p.hidden);
+  const hidden = data.agents.length - offered.length;
+  const entries = offered.filter(p => show === 'all' || p.custom);
+  const mine = offered.filter(p => p.custom).length;
+  document.querySelector('#lede').textContent = offered.length + ' agents, the catalog’s and your own; a project’s team is picked from them.' +
+    (mine === 0 ? '' : ' ' + mine + ' ' + (mine === 1 ? 'is' : 'are') + ' yours, defined here.') +
+    (hidden === 0 ? '' : ' ' + hidden + ' hidden on Pi and OpenCode: Claude and OpenAI models run on their own harnesses.');
   const groups = browsingGroups(entries, '#agents-section');
   if (groups.length === 0) { host.append(el('p', 'empty', 'No agents match these filters.')); return; }
   for (const group of groups) {
@@ -556,6 +580,17 @@ function renderLists() { if (LAST !== null) renderAgents(LAST); }
     filters.querySelector('[name=show]').value = 'all';
     refresh();
   };
+  // A preference, kept with the roster: the whole app follows it.
+  document.querySelector('[name=ownHarnessOnly]').addEventListener('change', async event => {
+    const wanted = event.target.checked;
+    const res = await fetch('/api/preferences', { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ ownHarnessOnly: wanted }) });
+    if (!res.ok) {
+      event.target.checked = !wanted;
+      document.querySelector('#roster-note').textContent = (await res.json().catch(() => ({}))).error ?? 'The preference was not saved.';
+      return;
+    }
+    refreshAgents();
+  });
 }
 
 // The last roster payload, so filtering the catalog re-renders without a fetch.
@@ -565,6 +600,7 @@ async function load() {
   const response = await fetch('/api/agents', { headers });
   if (!response.ok) throw new Error('Could not refresh agents. Reopen this screen to try again.');
   LAST = await response.json();
+  document.querySelector('[name=ownHarnessOnly]').checked = LAST.preferences?.ownHarnessOnly === true;
   renderLists();
   renderForm(LAST);
 }
