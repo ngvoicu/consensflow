@@ -431,15 +431,18 @@ export class Dispatcher {
       this.#setActivity(runtime, { state: 'unknown', reason: cause.message })
       return
     }
-    this.#setActivity(
-      runtime,
-      observed.waiting
-        ? { state: 'waiting', reason: observed.waiting.reason ?? null }
-        : { state: observed.settled ? 'idle' : 'working' },
-    )
-    this.#copyTranscript(participant, runtime, observed)
     // Quota belongs to the member: a session that runs out takes its member out.
     const owner = this.#memberOf(project, participant)
+    // An out member's window says so, and nothing else, until the reset.
+    if (!this.#isOut(owner)) {
+      this.#setActivity(
+        runtime,
+        observed.waiting
+          ? { state: 'waiting', reason: observed.waiting.reason ?? null }
+          : { state: observed.settled ? 'idle' : 'working' },
+      )
+    }
+    this.#copyTranscript(participant, runtime, observed)
     if (observed.quota !== undefined) {
       runtime.quota = observed.quota ?? null
       // Low is soft: the current task continues, nothing new comes until the

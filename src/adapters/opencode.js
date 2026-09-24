@@ -139,10 +139,12 @@ export function openCodeAdapter({
       const state = recordState(record)
       const retry = showing ? opencodeRetryQuota(window.status, Date.now()) : null
       const idle = showing && window.status?.type === 'idle'
+      // A session waiting to retry a request is at work, whatever its record says.
+      const retrying = showing && window.status?.type === 'retry'
       return {
         ...state,
         quota: retry ?? state.quota,
-        settled: showing && (state.settled || idle),
+        settled: showing && !retrying && (state.settled || idle),
         waiting: null,
       }
     },

@@ -48,23 +48,31 @@ export function codexQuota(limits) {
 
 /** OpenCode's words for a limit it waits out, in a retry's message or reason. */
 const OPENCODE_LIMIT = /limit|usage|quota|too many requests/i
+/** OpenCode's own name for a spent free tier, in a retry's action. */
+const OPENCODE_SPENT = /free_tier_limit|quota|usage/i
 /** A retry sooner than this is backoff, not the limit's reset. */
 const BACKOFF_MS = 60_000
 
 /**
  * OpenCode waiting to retry a refused request (`{type: 'retry', message,
- * action, next}`, probed on OpenCode 1.18.31): a usage or rate limit there is
- * a spent quota, reset when OpenCode will retry, unless that is only backoff.
- * Any other retry (an overloaded provider) is not a quota.
+ * action, next}`, probed on OpenCode 1.18.31): a spent quota when its action
+ * names one (`free_tier_limit`), or when the words say a limit and the retry
+ * is due only at a reset a minute or more away. A retry due in seconds is
+ * backoff on a rate limit or an overloaded provider: the window is working,
+ * and taking its task away would waste what it did. Anything else is not a
+ * quota.
  */
 export function opencodeRetryQuota(status, nowMs) {
   if (status?.type !== 'retry') return null
-  if (!OPENCODE_LIMIT.test(`${status.message ?? ''} ${status.action?.reason ?? ''}`)) return null
   const next = Number(status.next)
+  const soon = Number.isFinite(next) && next - nowMs < BACKOFF_MS
+  const spent = OPENCODE_SPENT.test(status.action?.reason ?? '')
+  const words = OPENCODE_LIMIT.test(`${status.message ?? ''} ${status.action?.reason ?? ''}`)
+  if (!spent && (!words || soon)) return null
   return {
     state: 'exhausted',
     at: null,
-    resetsAt: Number.isFinite(next) && next - nowMs >= BACKOFF_MS ? new Date(next).toISOString() : null,
+    resetsAt: Number.isFinite(next) && !soon ? new Date(next).toISOString() : null,
   }
 }
 

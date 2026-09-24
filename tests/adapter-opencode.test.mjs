@@ -275,11 +275,17 @@ describe('the OpenCode adapter', () => {
         [spent.settled, spent.quota],
         [false, { state: 'exhausted', at: null, resetsAt: new Date(midnight).toISOString() }],
       )
+      // A rate limit OpenCode retries in seconds is backoff: the window is at
+      // work, and its task stays with it. Only a reset a minute or more away
+      // is a spent quota.
       shown = retry('Rate limit exceeded. Please try again later.', now + 4_000)
+      const backoff = await adapter.observe({ launch })
+      assert.deepEqual([backoff.quota, backoff.settled], [null, false], 'backoff, not a quota')
+      shown = retry('Rate limit exceeded. Please try again later.', now + 20 * 60_000)
       assert.deepEqual(
         (await adapter.observe({ launch })).quota,
-        { state: 'exhausted', at: null, resetsAt: null },
-        'a retry seconds away is backoff, not a reset: the daemon picks the hour',
+        { state: 'exhausted', at: null, resetsAt: new Date(now + 20 * 60_000).toISOString() },
+        'a retry twenty minutes away is a limit waited out',
       )
       shown = retry('Provider is overloaded', now + 4_000)
       assert.equal((await adapter.observe({ launch })).quota, null, 'an overload is no quota')
