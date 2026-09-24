@@ -274,7 +274,21 @@ describe('deleting a project', () => {
       const leadId = id('lead')
       assert.throws(() => ledger.deleteProject(project.id), { code: 'project-open' })
       ledger.setProjectState(project.id, 'suspended')
-      assert.deepEqual(ledger.deleteProject(project.id), { id: project.id, name: 'app' })
+      const gone = ledger.deleteProject(project.id)
+      assert.deepEqual(
+        [
+          gone.id,
+          gone.name,
+          gone.directory,
+          gone.members,
+          gone.sessions,
+          gone.tasks,
+          gone.messages,
+        ],
+        [project.id, 'app', '/work/app', 2, 0, 1, 2],
+        'what went, for the trace',
+      )
+      assert.match(gone.createdAt, /^\d{4}-/)
       assert.deepEqual(
         ledger.projects().map((p) => p.name),
         ['other'],

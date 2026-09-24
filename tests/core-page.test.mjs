@@ -411,7 +411,7 @@ describe('the page protocol of the new core', () => {
       })
       await operations['project.close']({ project: project.id })
       const result = await operations['project.delete']({ project: project.id })
-      assert.deepEqual(result.project, { id: project.id, name: 'app' })
+      assert.deepEqual([result.project.id, result.project.name], [project.id, 'app'])
       assert.deepEqual((await operations['projects.list']({})).projects, [])
     })
   })

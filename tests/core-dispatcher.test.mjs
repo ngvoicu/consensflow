@@ -880,19 +880,32 @@ describe('the dispatcher', () => {
     })
   })
 
-  it('deletes a closed project for good, and refuses an open one', async () => {
-    await setup(async (context) => {
-      const { project } = await withTeam(context)
-      await assert.rejects(context.dispatcher.deleteProject(project.id), { code: 'project-open' })
-      await context.dispatcher.closeProject(project.id)
-      assert.deepEqual(await context.dispatcher.deleteProject(project.id), {
-        id: project.id,
-        name: 'app',
-      })
-      assert.deepEqual(context.ledger.projects(), [])
-      await context.dispatcher.pass()
-      assert.equal(context.host.opened.length, 1, 'nothing reopens')
-    })
+  it('deletes a closed project for good, refuses an open one, and leaves one line in the trace', async () => {
+    const entries = []
+    const forgotten = []
+    await setup(
+      async (context) => {
+        const { project } = await withTeam(context)
+        await assert.rejects(context.dispatcher.deleteProject(project.id), {
+          code: 'project-open',
+        })
+        await context.dispatcher.closeProject(project.id)
+        const gone = await context.dispatcher.deleteProject(project.id)
+        assert.deepEqual([gone.id, gone.name, gone.directory], [project.id, 'app', '/work/app'])
+        assert.deepEqual(context.ledger.projects(), [])
+        const record = entries.filter((entry) => entry.kind === 'project.deleted')
+        assert.equal(record.length, 1)
+        assert.deepEqual([record[0].project, record[0].data.name], [null, 'app'])
+        assert.ok(forgotten.includes(project.id), "the project's own lines are dropped")
+        await context.dispatcher.pass()
+        assert.equal(context.host.opened.length, 1, 'nothing reopens')
+      },
+      {
+        trace: Object.assign((entry) => entries.push(entry), {
+          forget: (project) => forgotten.push(project),
+        }),
+      },
+    )
   })
 
   it('brings back the projects that were open before a restart, on their own conversations', async () => {

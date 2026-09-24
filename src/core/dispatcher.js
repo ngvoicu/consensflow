@@ -101,6 +101,7 @@ export class Dispatcher {
   #credentials
   #paneEnv
   #roster
+  #launchFiles
   #roles
   #arrivalTimeoutMs
   #launchTimeoutMs
@@ -125,6 +126,7 @@ export class Dispatcher {
     launchTimeoutMs = 180_000,
     maxAttempts = 3,
     trace = () => {},
+    launchFiles = { forget: () => {} },
   }) {
     this.#ledger = ledger
     this.#host = host
@@ -136,6 +138,7 @@ export class Dispatcher {
     this.#roles = roles
     this.#arrivalTimeoutMs = arrivalTimeoutMs
     this.#trace = trace
+    this.#launchFiles = launchFiles
     this.#launchTimeoutMs = launchTimeoutMs
     this.#maxAttempts = maxAttempts
     host.onExit((pane) => this.paneExited(pane))
@@ -255,8 +258,19 @@ export class Dispatcher {
     for (const participant of project?.participants ?? []) {
       const runtime = this.#runtime.get(participant.id)
       if (runtime?.token) this.#credentials.revoke(runtime.token)
+      this.#launchFiles.forget(runtime?.launchId)
       this.#runtime.delete(participant.id)
     }
+    // A deleted project leaves no trace but the line that says it was:
+    // its own lines go, and the record of it names no project id, so a
+    // later project with the same id never takes it along.
+    this.#trace.forget?.(projectId)
+    this.#trace({
+      at: new Date(this.#now()).toISOString(),
+      kind: 'project.deleted',
+      project: null,
+      data: deleted,
+    })
     this.#changed()
     return deleted
   }
@@ -339,9 +353,12 @@ export class Dispatcher {
     const [participantId, runtime] = entry
     this.#credentials.revoke(runtime.token)
     const delivering = runtime.delivering
+    // The window's files in the home go with it.
+    this.#launchFiles.forget(runtime.launchId)
     Object.assign(runtime, {
       pane: null,
       launch: null,
+      launchId: null,
       token: null,
       delivering: null,
       retiring: false,
@@ -778,6 +795,7 @@ export class Dispatcher {
       adapter,
       pane,
       launch: plan.launch,
+      launchId,
       token,
       delivering,
       enters: [],

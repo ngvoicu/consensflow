@@ -9,6 +9,7 @@ import { agentRow, configRoot, listAgents, normalizeRoster } from '../roster.js'
 import { agentsUi } from './agents-server.js'
 import { Credentials, startApi } from './api.js'
 import { Dispatcher } from './dispatcher.js'
+import { forgetLaunch, sweepLaunches } from './launch-files.js'
 import { pageOperations } from './page.js'
 import { PaneHost } from './pane-host.js'
 import { roleInstructions } from './roles.js'
@@ -44,6 +45,8 @@ export async function startCore(
   // Every event and every change of a window goes to <home>/events.jsonl as
   // it happens, for whoever watches the daemon from outside.
   const trace = eventTrace(home)
+  // No window survives a restart: what every launch left in the home goes.
+  sweepLaunches(home)
   const ledger = openLedger(join(home, 'consensflow.db'), { trace })
   ledger.suspendForRestart()
   // What the app ships is what the roster and the teams have: the roster is
@@ -98,6 +101,7 @@ export async function startCore(
     roster: (agent) => agentRow(agent, env) ?? null,
     roles: (participant, project) => roleInstructions(participant.role, teamOf(project)),
     trace,
+    launchFiles: { forget: (launch) => forgetLaunch(home, launch) },
     paneEnv: (participant, project) => ({
       CONSENSFLOW_URL: api.url,
       CONSENSFLOW_PROJECT: String(project.id),

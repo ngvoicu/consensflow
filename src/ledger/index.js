@@ -540,8 +540,25 @@ class Ledger {
       if (row.state !== 'suspended') {
         throw new LedgerError('project-open', `${row.name} is open: close it first`, 409)
       }
+      const count = (sql) => this.#db.prepare(sql).get(id).n
+      // What goes, for the one line the trace keeps.
+      const gone = {
+        id: row.id,
+        name: row.name,
+        directory: row.directory,
+        createdAt: row.created_at,
+        members: count(
+          `SELECT COUNT(*) AS n FROM participant
+           WHERE project_id = ? AND agent IS NOT NULL AND member_id IS NULL AND left_at IS NULL`,
+        ),
+        sessions: count(
+          'SELECT COUNT(*) AS n FROM participant WHERE project_id = ? AND member_id IS NOT NULL',
+        ),
+        tasks: count('SELECT COUNT(*) AS n FROM task WHERE project_id = ?'),
+        messages: count('SELECT COUNT(*) AS n FROM message WHERE project_id = ?'),
+      }
       this.#db.prepare('DELETE FROM project WHERE id = ?').run(id)
-      return { id: row.id, name: row.name }
+      return gone
     })
   }
 

@@ -29,6 +29,24 @@ describe('the event trace', () => {
       })
       // A trace that cannot write never troubles the daemon.
       eventTrace(path.join(dir, 'missing', 'deeper'))({ kind: 'x' })
+      // A deleted project's lines go; the record of the deletion, which names
+      // no project, and everyone else's stay.
+      trace({ kind: 'task.opened', project: 2, data: { task: 1 } })
+      trace({ kind: 'project.deleted', project: null, data: { id: 1, name: 'app' } })
+      trace.forget(1)
+      const after = (await readFile(path.join(dir, 'events.jsonl'), 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line))
+      assert.deepEqual(
+        after.map((entry) => [entry.kind, entry.project]),
+        [
+          ['window.activity', undefined],
+          ['task.opened', 2],
+          ['project.deleted', null],
+        ],
+      )
+      eventTrace(path.join(dir, 'missing')).forget(1)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

@@ -1449,7 +1449,7 @@ test('deletes a closed project for good once the human confirms, never an open o
   await expect(page.getByRole('button', { name: 'Delete harbour' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Delete foundry' }).click()
   const dialog = page.getByRole('dialog', { name: 'Delete foundry?' })
-  await expect(dialog).toContainText('every message go for good')
+  await expect(dialog).toContainText('kept for its windows go for good')
   await dialog.getByRole('button', { name: 'Keep' }).click()
   await expect(dialog).toBeHidden()
   expect(await calls(page, 'project.delete')).toEqual([])
