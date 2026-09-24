@@ -105,7 +105,10 @@ projects.
   release moves its entry to a newer model, the agent and every team it is
   on move with it, and it cannot be edited or removed. Your own agents carry
   Edit and Remove; define one with any model string its harness accepts and
-  the settings you want, under a name the catalog does not have.
+  the settings you want, under a name the catalog does not have. A checkbox
+  keeps Claude and OpenAI models to their own harnesses: they are hidden on
+  Pi and OpenCode, here and in the team dialogs; a member already on one
+  still runs.
 - **Harnesses** (Settings). Which harness CLIs are installed, their versions
   and whether ConsensFlow's integration with each is in place.
 
