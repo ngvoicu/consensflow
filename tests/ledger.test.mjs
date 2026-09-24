@@ -6,7 +6,13 @@ import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { OVERDUE_MS, openLedger, SCHEMA_VERSION, TRANSCRIPT_ITEM_MAX } from '../src/ledger/index.js'
+import {
+  OVERDUE_MS,
+  openLedger,
+  RESUME_WORDS,
+  SCHEMA_VERSION,
+  TRANSCRIPT_ITEM_MAX,
+} from '../src/ledger/index.js'
 
 /**
  * The ledger (TEST-BDC-01): one SQLite file in the home that holds every
@@ -180,7 +186,7 @@ describe('opening the ledger', () => {
       try {
         assert.throws(() => openLedger(file), { code: 'ledger-locked' })
         const other = await child(
-          `import { openLedger } from ${JSON.stringify(LEDGER)}
+          `import { openLedger, RESUME_WORDS } from ${JSON.stringify(LEDGER)}
            try { openLedger(${JSON.stringify(file)}); console.log('opened') }
            catch (error) { console.log(error.code) }`,
         )
@@ -2889,6 +2895,54 @@ describe('pause and resume', () => {
       } finally {
         ledger.close()
       }
+    })
+  })
+})
+
+describe('a task held with its window while its member is out of quota', () => {
+  it('is paused until its time, goes on by itself then, and forgets the hold on any move', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = team(ledger)
+      ledger.createTask(project.id, {
+        from: 'lead',
+        pool: 'worker',
+        tier: 'standard',
+        body: 'Lexer',
+      })
+      const { message } = ledger.assignTask(project.id, 1, id('zeus'))
+      ledger.beginDelivery(message.id)
+      ledger.confirmDelivery(message.id, { item: 'x' })
+      assert.throws(() => ledger.holdTask(project.id, 1, { until: 'soon', because: 'quota' }), {
+        code: 'invalid-until',
+      })
+      const until = '2026-09-24T14:58:35.479Z'
+      const held = ledger.holdTask(project.id, 1, { until, because: 'out of quota' })
+      assert.deepEqual(
+        [held.state, held.heldUntil, held.assignee],
+        ['paused', until, message.recipient],
+      )
+      assert.deepEqual(
+        ledger.events(project.id).find((e) => e.kind === 'task.state' && e.data.to === 'paused')
+          .data,
+        { task: 1, from: 'working', to: 'paused', by: null, because: 'out of quota', until },
+      )
+      assert.deepEqual(ledger.heldTasksDue('2026-09-24T14:58:35.478Z'), [], 'not yet')
+      assert.deepEqual(ledger.heldTasksDue(until), [
+        { projectId: project.id, number: 1, assigneeId: id(message.recipient) },
+      ])
+      // The daemon resumes in its own name: the same window, the same words as the human's Resume.
+      const resumed = ledger.resumeTask(project.id, 1, { body: RESUME_WORDS })
+      assert.deepEqual(
+        [
+          resumed.task.state,
+          resumed.task.heldUntil,
+          resumed.message.recipient,
+          resumed.message.sender,
+        ],
+        ['queued', null, message.recipient, null],
+      )
+      assert.match(resumed.message.body, /^Resumed: Go on where you stopped\.$/)
+      assert.deepEqual(ledger.heldTasksDue(until), [])
     })
   })
 })

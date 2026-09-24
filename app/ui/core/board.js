@@ -183,6 +183,9 @@ function route(task) {
       ? waitsFor
       : `blocked by ${tasks(task.blockedBy)} · ${waitsFor}`
   }
+  if (task.state === 'paused' && task.heldUntil) {
+    return `out of quota until ${clock(task.heldUntil)} · from ${who(task.requester)}`
+  }
   return task.blockedBy.length === 0
     ? `from ${who(task.requester)}`
     : `blocked by ${tasks(task.blockedBy)} · from ${who(task.requester)}`

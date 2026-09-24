@@ -1,4 +1,5 @@
 import { basename } from 'node:path'
+import { RESUME_WORDS } from '../ledger/index.js'
 import { agentRow, listAgents } from '../roster.js'
 
 /**
@@ -8,7 +9,7 @@ import { agentRow, listAgents } from '../roster.js'
  * wakes the dispatcher so it happens in the panes at once.
  */
 /** What a paused task's window is told when the human resumes it. */
-export const RESUME_WORDS = 'Go on where you stopped.'
+export { RESUME_WORDS } from '../ledger/index.js'
 
 export function pageOperations({ ledger, dispatcher, env, kick }) {
   const change = (work) => async (body) => {

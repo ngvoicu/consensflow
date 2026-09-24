@@ -1295,6 +1295,60 @@ describe('the dispatcher watches quota', () => {
   })
 })
 
+describe('a member out of quota mid-task', () => {
+  it('holds the task with its window when the reset is near, and goes on by itself when it passes', async () => {
+    await setup(async (context) => {
+      const { open, task, notes, id } = await withTiers(context)
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.deepEqual([task(1).state, task(1).assignee], ['working', 'zeus-amber-pine'])
+      const native = context.ledger.currentConversation(id('zeus-amber-pine')).nativeSession
+      const resetsAt = new Date(context.clock.now().getTime() + 20 * 60_000).toISOString()
+      context.adapter.quota('zeus', { state: 'exhausted', resetsAt })
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        [task(1).state, task(1).assignee, task(1).heldUntil],
+        ['paused', 'zeus-amber-pine', resetsAt],
+        'held with its window: diana is free, but the reset is twenty minutes away',
+      )
+      assert.match(
+        notes('lead').at(-1),
+        /^T-1 waits with @zeus-amber-pine: out of quota until .*; it goes on by itself then\.$/,
+      )
+      assert.deepEqual(context.host.killed, [], 'the window waits, as any paused task’s')
+      // The agent, stopped, says where it was; that is not a result while the task is held.
+      context.adapter.answer('zeus', 'Stopped at the lexer.')
+      await context.dispatcher.pass()
+      assert.equal(task(1).state, 'paused', 'nothing moves before the reset')
+      context.clock.advance(21 * 60_000)
+      // The window no longer shows the refusal once the reset has passed.
+      context.adapter.quota('zeus', null)
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.deepEqual([task(1).state, task(1).assignee], ['working', 'zeus-amber-pine'])
+      // The same window, on the same conversation, with the words of a Resume.
+      const resumed = context.ledger.inbox(id('zeus-amber-pine'))[0]
+      assert.deepEqual([resumed.state, resumed.kind], ['delivered', 'task'])
+      assert.match(resumed.body, /^Resumed: Go on where you stopped\.$/)
+      assert.equal(context.ledger.currentConversation(id('zeus-amber-pine')).nativeSession, native)
+    })
+  })
+
+  it('holds the task when nobody else of its tier is free, whatever the reset', async () => {
+    await setup(async (context) => {
+      const { open, task } = await withTiers(context, { workers: ['zeus'] })
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const resetsAt = new Date(context.clock.now().getTime() + 3 * 3_600_000).toISOString()
+      context.adapter.quota('zeus', { state: 'exhausted', resetsAt })
+      await context.dispatcher.pass()
+      assert.deepEqual([task(1).state, task(1).heldUntil], ['paused', resetsAt])
+    })
+  })
+})
+
 describe('a member with several roles', () => {
   it('opens with the text of the role its task needs, in a session per task', async () => {
     await setup(async (context) => {

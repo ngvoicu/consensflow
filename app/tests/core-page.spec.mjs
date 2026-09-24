@@ -1,3 +1,13 @@
+test('a task held while its member is out of quota says when it goes on', async ({ page }) => {
+  const data = model()
+  const lane = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
+  lane.tasks.push(task(9, 'Write the docs', 'paused', 'lead', 'zeus', 4, { heldUntil: at(-25) }))
+  await open(page, data)
+  await expect(page.locator('button.card[data-task="9"] .card-route')).toHaveText(
+    /^out of quota until \d\d:\d\d · from /,
+  )
+})
+
 import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { dirname, extname, resolve, sep } from 'node:path'

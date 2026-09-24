@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { RESUME_WORDS } from '../ledger/index.js'
 
 /**
  * The dispatcher: the only actor in the daemon. Agents never open panes or
@@ -92,6 +93,9 @@ const markerOf = (messageId) => `[ConsensFlow m-${messageId} ·`
 const humanMessages = (observed) =>
   observed.items.filter((item) => item.role === 'user' && !item.text.includes('[ConsensFlow m-'))
     .length
+
+/** A reset this near holds a task with its window rather than sending it back to the board. */
+const HOLD_MS = 30 * 60_000
 
 export class Dispatcher {
   #ledger
@@ -316,6 +320,7 @@ export class Dispatcher {
 
   /** One pass over every participant; each moves on its own, so a slow launch holds up no one else. */
   async pass() {
+    this.#resumeHeld()
     for (const project of this.#ledger.projects()) {
       if (project.state !== 'open') continue
       this.#assignOpenTasks(project)
@@ -463,6 +468,8 @@ export class Dispatcher {
         state: 'out',
         reason: `out of quota until ${owner.outUntil}`,
       })
+      // A held task's agent stops, as any paused task's; the window waits for the reset.
+      if (participant.role !== 'lead') await this.#interruptIfPaused(participant, runtime)
       return
     }
     if (runtime.delivering !== null) this.#watchArrival(runtime, observed)
@@ -885,6 +892,8 @@ export class Dispatcher {
    */
   #freshRefusal(participant, quota) {
     if (quota?.state !== 'exhausted') return false
+    // A refusal whose reset has passed is old news, whatever record still shows it.
+    if (quota.resetsAt && Date.parse(quota.resetsAt) <= this.#now()) return false
     if (participant.outSince === null || !quota.at) return true
     return Date.parse(quota.at) > Date.parse(participant.outSince)
   }
@@ -967,7 +976,21 @@ export class Dispatcher {
       .lanes.find((l) => l.participant.id === participant.id)
     for (const task of lane.tasks) {
       if (!['queued', 'working', 'waiting'].includes(task.state)) continue
-      if (task.pool !== null) {
+      if (task.pool === null) continue
+      // Near the reset, or with nobody else to take it, the task keeps its
+      // window and goes on by itself; otherwise it goes back to the board.
+      const soon = Date.parse(until) - this.#now() <= HOLD_MS
+      const teammate = this.#ledger
+        .candidates(project.id, task.number)
+        .some((member) => member.id !== owner.id && this.#available(member))
+      if (soon || !teammate) {
+        this.#ledger.holdTask(project.id, task.number, { until, because: 'out of quota' })
+        this.#ledger.note(project.id, {
+          to: task.requester,
+          task: task.number,
+          body: `T-${task.number} waits with @${participant.handle}: out of quota until ${until}; it goes on by itself then.`,
+        })
+      } else {
         this.#ledger.releaseTask(project.id, task.number, {
           because: 'ran out of quota after starting',
         })
@@ -977,6 +1000,19 @@ export class Dispatcher {
       await this.#retire(participant, runtime)
     }
     this.#changed()
+  }
+
+  /** A held task whose time has come goes on in its own window, unless its member is still out. */
+  #resumeHeld() {
+    for (const held of this.#ledger.heldTasksDue(new Date(this.#now()).toISOString())) {
+      const project = this.#ledger.project(held.projectId)
+      if (project === null || project.state !== 'open') continue
+      const assignee = project.participants.find((p) => p.id === held.assigneeId)
+      const owner = assignee === undefined ? null : this.#memberOf(project, assignee)
+      if (owner !== null && this.#isOut(owner)) continue
+      this.#ledger.resumeTask(held.projectId, held.number, { body: RESUME_WORDS })
+      this.#changed()
+    }
   }
 
   // --- failures ----------------------------------------------------------------------

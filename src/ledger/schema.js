@@ -179,6 +179,11 @@ export const MIGRATIONS = [
   ALTER TABLE task ADD COLUMN taken_from_id INTEGER
     CONSTRAINT task_taken_from_fk REFERENCES participant (id) ON DELETE SET NULL;
   `,
+  // A task held with its window while its member is out of quota: when it
+  // goes on by itself. Cleared by any move.
+  `
+  ALTER TABLE task ADD COLUMN held_until TEXT;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

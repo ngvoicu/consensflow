@@ -68,6 +68,8 @@ const CRITICAL_RULE =
 const ACTIVE_TASK_STATES = ['working', 'waiting']
 /** A task on a member's hands: from assignment until its result. */
 const HELD_TASK_STATES = ['queued', 'working', 'waiting']
+/** What a paused task's window is told when it goes on: the human's Resume and the daemon's alike. */
+export const RESUME_WORDS = 'Go on where you stopped.'
 const HOLDS_WORK = `SELECT 1 FROM task WHERE assignee_id = ? AND state IN (${HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')})`
 const MAX_BODY = 1_000_000
 /** How long a coordinator may leave a question before the human sees it too. */
@@ -326,6 +328,7 @@ const taskView = (row) => ({
   purpose: row.purpose,
   session: row.assignee_member ? row.assignee : null,
   ...needsView(row.needs),
+  heldUntil: row.held_until ?? null,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
@@ -1760,6 +1763,41 @@ class Ledger {
     })
   }
 
+  /**
+   * The daemon holds a task with its window while its member is out of
+   * quota: paused, with the time it goes on by itself. The window closes as
+   * any paused task's does and comes back on its conversation at the reset.
+   */
+  holdTask(projectId, number, { until, because }) {
+    requireText(because, 'because', 1000)
+    if (typeof until !== 'string' || !Number.isFinite(Date.parse(until))) {
+      throw new LedgerError('invalid-until', 'a hold names when it ends', 400)
+    }
+    return this.#write(() => {
+      const task = this.#taskRow(projectId, number)
+      this.#requireTaskState(task, ['queued', ...ACTIVE_TASK_STATES], 'hold')
+      this.#dropQueued(task.id)
+      this.#moveTask(task, 'paused', { by: null, because, until })
+      this.#db.prepare('UPDATE task SET held_until = ? WHERE id = ?').run(until, task.id)
+      return this.#task(task.id)
+    })
+  }
+
+  /** The held tasks whose time has come, oldest first. */
+  heldTasksDue(nowIso) {
+    return this.#db
+      .prepare(
+        `SELECT project_id, number, assignee_id FROM task
+         WHERE state = 'paused' AND held_until IS NOT NULL AND held_until <= ? ORDER BY id`,
+      )
+      .all(nowIso)
+      .map((row) => ({
+        projectId: row.project_id,
+        number: row.number,
+        assigneeId: row.assignee_id,
+      }))
+  }
+
   /** The paused task a participant still holds, or null. */
   pausedTask(participantId) {
     const row = this.#db
@@ -1779,7 +1817,8 @@ class Ledger {
   resumeTask(projectId, number, { by, body }) {
     requireText(body, 'body', MAX_BODY)
     return this.#write(() => {
-      const author = this.#participantByHandle(projectId, by)
+      // The daemon resumes a held task in its own name: no author.
+      const author = by === undefined ? null : this.#participantByHandle(projectId, by)
       const task = this.#taskRow(projectId, number)
       this.#requireTaskState(task, ['paused'], 'resume')
       const assignee = task.assignee_id === null ? null : this.#participantRow(task.assignee_id)
@@ -1787,7 +1826,7 @@ class Ledger {
         this.#db
           .prepare('UPDATE task SET body = ?, updated_at = ? WHERE id = ?')
           .run(`${task.body}\n\nResumed: ${body}`, this.#at(), task.id)
-        this.#moveTask(task, 'open', { by })
+        this.#moveTask(task, 'open', { by: by ?? null })
         return { task: this.#task(task.id), message: null }
       }
       if (assignee.left_at !== null) {
@@ -1808,7 +1847,12 @@ class Ledger {
             this.#at(),
             task.id,
           )
-        this.#log(projectId, 'task.state', { task: number, from: 'paused', to: 'open', by })
+        this.#log(projectId, 'task.state', {
+          task: number,
+          from: 'paused',
+          to: 'open',
+          by: by ?? null,
+        })
         return { task: this.#task(task.id), message: null }
       }
       const delivered = this.#db
@@ -1819,7 +1863,7 @@ class Ledger {
         .get(task.id, assignee.id)
       const messageId = this.#queue(projectId, {
         to: assignee.id,
-        from: author.id,
+        from: author?.id ?? null,
         kind: 'task',
         taskId: task.id,
         body:
@@ -1827,7 +1871,7 @@ class Ledger {
             ? `${deliveryBody(task)}\n\nResumed: ${body}`
             : `Resumed: ${body}`,
       })
-      this.#moveTask(task, 'queued', { by, message: messageId })
+      this.#moveTask(task, 'queued', { by: by ?? null, message: messageId })
       return { task: this.#task(task.id), message: this.#message(messageId) }
     })
   }
@@ -2282,7 +2326,7 @@ class Ledger {
 
   #moveTask(task, to, detail = {}, kind = 'task.state') {
     this.#db
-      .prepare('UPDATE task SET state = ?, updated_at = ? WHERE id = ?')
+      .prepare('UPDATE task SET state = ?, updated_at = ?, held_until = NULL WHERE id = ?')
       .run(to, this.#at(), task.id)
     this.#log(task.project_id, kind, { task: task.number, from: task.state, to, ...detail })
   }
