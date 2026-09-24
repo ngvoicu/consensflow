@@ -111,9 +111,9 @@ test('Agents lists every catalog agent as one row with nothing to add, and takes
   page.on('request', (request) => requests.push(new URL(request.url()).pathname))
   try {
     await page.goto(`${server.url}/?token=${server.token}`)
-    await expect(page.locator('#agents-count')).toHaveText('106 of 106 shown')
+    await expect(page.locator('#agents-count')).toHaveText('90 of 90 shown')
     await expect(page.locator('#lede')).toHaveText(
-      '106 agents, the catalog’s and your own; a project’s team is picked from them.',
+      '90 agents, the catalog’s and your own; a project’s team is picked from them.',
     )
     await expect(page.locator('#agents .offer')).toHaveCount(0)
     await expect(page.locator('#agents').getByRole('button', { name: /^Add/ })).toHaveCount(0)
@@ -148,7 +148,7 @@ test('Agents lists every catalog agent as one row with nothing to add, and takes
     expect(listAgents(t.env).find((a) => a.name === 'custom').workTier).toBe('complex')
     await expect(form.getByLabel('Work tier')).toHaveValue('auto')
     await expect(page.locator('#lede')).toContainText('1 is yours')
-    await expect(page.locator('#agents-count')).toHaveText('107 of 107 shown')
+    await expect(page.locator('#agents-count')).toHaveText('91 of 91 shown')
     // A catalog name is not yours to define again.
     await form.locator('[name="name"]').fill('gefjon')
     await form.locator('[name="harness"]').selectOption('claude')
@@ -205,7 +205,7 @@ test('Agents keeps catalog agents as the catalog has them, and Show: mine lists 
         .locator('.model-group')
         .filter({ has: page.locator('.callsign', { hasText: /^mine$/ }) })
         .locator('h3'),
-    ).toHaveText('Muse Spark 1.3 · Xhigh · 6')
+    ).toHaveText('Muse Spark 1.3 · Xhigh · 4')
     expect(listAgents(fixture.t.env).find((p) => p.name === 'mine').effort).toBe('xhigh')
     await expect(page.locator('#lede')).toContainText('1 is yours')
     await fixture.saved(second)
@@ -365,7 +365,7 @@ test('Kimi K3 effort follows the catalog until edited, and edits are validated',
     await page.getByRole('searchbox').fill('Kimi')
     // The catalog's Kimi agent sits with the other K3 max entries.
     await expect(member(page, 'ilmarinen').locator('..').getByRole('heading')).toHaveText(
-      'Kimi K3 · Max · 5',
+      'Kimi K3 · Max · 3',
     )
     await expect(page.locator('#agents')).not.toContainText(/K2\.7|seppo|ahti/)
     await fixture.saved(second)
@@ -649,13 +649,13 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
         'Work tier',
       ])
       await expect(screen.getByRole('heading', { level: 3 })).toHaveCount(0)
-      await expect(screen.locator('#agents-count')).toHaveText('114 of 114 shown')
+      await expect(screen.locator('#agents-count')).toHaveText('98 of 98 shown')
     }
     await fixture.saved(own)
     await expect(own.locator('#agents-count')).toHaveText('8 of 8 shown')
     await search.fill('Astra')
     await expect(own.locator('#agents-count')).toHaveText('5 of 8 shown')
-    await expect(page.locator('#agents-count')).toHaveText('114 of 114 shown')
+    await expect(page.locator('#agents-count')).toHaveText('98 of 98 shown')
     await expect(own.locator('.callsign')).toHaveCount(5)
     await group.selectOption('model-reasoning')
     await expect(own.getByRole('heading', { level: 3 })).toHaveCount(4)
@@ -664,7 +664,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     ).toBeVisible()
     await page.getByRole('searchbox').fill('Astra')
     await page.getByLabel('Group by').selectOption('model-reasoning')
-    await expect(page.locator('#agents-count')).toHaveText('20 of 114 shown')
+    await expect(page.locator('#agents-count')).toHaveText('20 of 98 shown')
     await expect(page.getByRole('heading', { level: 3 })).toHaveText([
       'GPT-6 Astra · Max · 3',
       'GPT-6 Astra · Xhigh · 5',
@@ -692,7 +692,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     await expect(own.locator('.callsign')).toHaveCount(5)
     await search.fill('OpenRouter')
     await expect(own.locator('#agents')).toContainText('No agents match')
-    await expect(page.locator('#agents-count')).toHaveText('20 of 114 shown')
+    await expect(page.locator('#agents-count')).toHaveText('20 of 98 shown')
     await own.getByRole('button', { name: 'Clear filters' }).click()
     await expect(search).toHaveValue('')
     await expect(group).toHaveValue('model-reasoning')
@@ -732,7 +732,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     ]) {
       await expect(own.getByRole('heading', { name, exact: true })).toBeVisible()
     }
-    await expect(page.locator('#agents-count')).toHaveText('114 of 114 shown')
+    await expect(page.locator('#agents-count')).toHaveText('98 of 98 shown')
     await expect(member(page, 'astraeus')).toBeVisible()
     // No description of a model anywhere: its tier and scores say it all.
     await expect(page.locator('#agents')).not.toContainText('Good for')
@@ -778,7 +778,7 @@ test('shared model cards default to every model and reasoning across all harness
       if (!expected.has(key)) expected.set(key, [])
       expected.get(key).push(p.name)
     }
-    expect([...expected.values()].filter((names) => names.length > 1)).toHaveLength(31)
+    expect([...expected.values()].filter((names) => names.length > 1)).toHaveLength(30)
     for (const screen of [page, fixture.second]) {
       await expect(screen.getByLabel('Group by')).toHaveValue('model-reasoning')
       const cards = screen.locator('.model-group')
@@ -795,21 +795,13 @@ test('shared model cards default to every model and reasoning across all harness
       // Every agent under a model card is a row with its route.
       for (const card of summaries) expect(card.routes).toBe(card.names.length)
       const luna = cards.filter({
-        has: screen.getByRole('heading', { name: 'GPT-5.6 Luna · Xhigh · 5', exact: true }),
+        has: screen.getByRole('heading', { name: 'GPT-5.6 Luna · Xhigh · 3', exact: true }),
       })
-      await expect(luna.locator('.callsign')).toHaveText([
-        'bil',
-        'diana',
-        'hjuki',
-        'phoebe',
-        'selene',
-      ])
+      await expect(luna.locator('.callsign')).toHaveText(['bil', 'diana', 'phoebe'])
       await expect(luna.locator('.agent-route')).toHaveText([
         'OpenRouter · API',
         'Codex login',
-        'OpenCode Go',
         'Codex subscription',
-        'OpenCode Go',
       ])
       await screen.getByRole('searchbox').fill('DeepSeek V4 Pro')
       await expect(screen.locator('.model-summary h3')).toHaveText([
@@ -828,17 +820,15 @@ test('the Muse Spark card lists each provider choice with its route and its trai
   try {
     for (const screen of [page, fixture.second]) {
       await screen.getByRole('searchbox').fill('Muse Spark')
-      await expect(screen.locator('.model-summary h3')).toHaveText('Muse Spark 1.3 · Xhigh · 5')
+      await expect(screen.locator('.model-summary h3')).toHaveText('Muse Spark 1.3 · Xhigh · 3')
       await expect(screen.locator('.agent-route')).toHaveText([
         'OpenRouter · API',
         'OpenCode Zen · Contributor · Free',
         'OpenRouter · API',
-        'OpenCode Go · Contributor',
-        'OpenCode Go · Contributor',
       ])
-      await expect(screen.locator('.agent-route-note')).toHaveText(
-        Array(3).fill('Prompts and replies may train Meta models.'),
-      )
+      await expect(screen.locator('.agent-route-note')).toHaveText([
+        'Prompts and replies may train Meta models.',
+      ])
     }
     expect(listAgents(fixture.t.env).find((p) => p.name === 'gefjon').model).toBe(
       'opencode/muse-spark-1.3-contributor-free',

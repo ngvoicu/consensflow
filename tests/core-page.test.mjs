@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
+import { CATALOG } from '../src/catalog.js'
 import { pageOperations } from '../src/core/page.js'
 import { openLedger } from '../src/ledger/index.js'
 import { addAgent, removeAgent } from '../src/roster.js'
@@ -132,7 +133,11 @@ describe('the page protocol of the new core', () => {
         ],
         'in the catalog’s order',
       )
-      assert.ok(agents.length > 90, 'the whole catalog is on offer')
+      assert.equal(
+        agents.length,
+        Object.values(CATALOG).flat().length,
+        'the whole catalog is on offer',
+      )
       const { project } = await operations['project.open']({
         directory: '/work/app',
         harness: 'pi',
