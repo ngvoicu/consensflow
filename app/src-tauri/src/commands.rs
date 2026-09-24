@@ -4,6 +4,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use futures_channel::oneshot;
 use portable_pty::PtySize;
@@ -20,6 +21,8 @@ use crate::pty::{
 };
 
 const MAX_FRAME_BYTES: usize = 1024 * 1024;
+/// How long the daemon gets to stop on its own before it is killed.
+const EDITOR_STOP_GRACE: Duration = Duration::from_secs(2);
 /// The page-side name of Node's `state.changed`. No dot: Tauri rejects it.
 const PAGE_STATE_EVENT: &str = "state-changed";
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
@@ -647,8 +650,7 @@ impl AppRuntime {
             .unwrap_or_else(|error| error.into_inner())
             .take()
         {
-            let _ = editor.kill();
-            let _ = editor.wait();
+            stop_editor(&mut editor);
         }
         true
     }
@@ -697,6 +699,27 @@ impl Drop for AppRuntime {
     fn drop(&mut self) {
         self.shutdown();
     }
+}
+
+/// Asks the daemon to stop and gives it a moment: it writes down why it
+/// stopped and closes its ledger. Only what has not gone by then is killed, so
+/// a start with no stop after it in the daemon's log means it was killed from
+/// outside, never by the app.
+fn stop_editor(editor: &mut Child) {
+    #[cfg(unix)]
+    {
+        // SAFETY: a plain signal to a child this process spawned and still holds.
+        unsafe { libc::kill(editor.id() as i32, libc::SIGTERM) };
+        let deadline = Instant::now() + EDITOR_STOP_GRACE;
+        while Instant::now() < deadline {
+            if matches!(editor.try_wait(), Ok(Some(_))) {
+                return;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+    let _ = editor.kill();
+    let _ = editor.wait();
 }
 
 #[derive(Deserialize)]
@@ -2546,6 +2569,66 @@ mod tests {
             !process_exists(editor_pid),
             "the editor child outlived shutdown"
         );
+    }
+
+    /// The daemon is asked before it is killed: one that stops on the signal
+    /// gets to write its last lines, and one that ignores it is killed once
+    /// the grace is over.
+    #[cfg(unix)]
+    #[test]
+    fn gui_shutdown_asks_the_editor_first_and_kills_only_what_stays() {
+        let mark = std::env::temp_dir().join(format!("consensflow-stop-{}", std::process::id()));
+        let _ = std::fs::remove_file(&mark);
+        let runtime_for = |script: String| {
+            use std::io::{BufRead, BufReader};
+            let mut editor = Command::new("/bin/sh")
+                .arg("-c")
+                .arg(script)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .expect("spawn the stand-in editor");
+            let pid = editor.id() as i32;
+            let mut ready = String::new();
+            BufReader::new(editor.stdout.take().expect("editor stdout"))
+                .read_line(&mut ready)
+                .expect("the stand-in says it is ready");
+            assert_eq!(ready, "ready\n");
+            let (event_sender, _event_receiver) = mpsc::channel();
+            let arbiter = Arc::new(InputArbiter::new(0, event_sender));
+            let panes = Arc::new(PaneTable::new());
+            let runtime = AppRuntime {
+                panes: Arc::clone(&panes),
+                bridge: None,
+                editor: Mutex::new(Some(editor)),
+                roster: None,
+                startup_error: None,
+                output: Arc::new(OutputHub::new()),
+                inputs: Arc::new(InputQueue::new(panes, arbiter)),
+                shutting_down: AtomicBool::new(false),
+            };
+            (runtime, pid)
+        };
+
+        let (polite, polite_pid) = runtime_for(format!(
+            "trap 'echo asked > {}; exit 0' TERM; echo ready; while :; do sleep 0.05; done",
+            mark.display()
+        ));
+        let started = Instant::now();
+        polite.shutdown();
+        assert!(started.elapsed() < EDITOR_STOP_GRACE, "it went on its own");
+        assert_eq!(
+            std::fs::read_to_string(&mark).expect("the editor wrote its last line"),
+            "asked\n"
+        );
+        assert!(!process_exists(polite_pid));
+        let _ = std::fs::remove_file(&mark);
+
+        let (deaf, deaf_pid) = runtime_for("trap '' TERM; echo ready; exec sleep 60".to_string());
+        let started = Instant::now();
+        deaf.shutdown();
+        assert!(started.elapsed() >= EDITOR_STOP_GRACE, "it had its grace");
+        assert!(!process_exists(deaf_pid), "and was killed after it");
     }
 
     /// Why the editor is killed FIRST, stated as a test rather than a comment.

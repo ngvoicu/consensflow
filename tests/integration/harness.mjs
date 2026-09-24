@@ -367,6 +367,9 @@ export async function startIntegration({
     rustPid() {
       return rust.pid
     },
+    uiPid() {
+      return ui.pid
+    },
     signalRust(signal) {
       return process.kill(rust.pid, signal)
     },

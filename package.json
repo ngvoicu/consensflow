@@ -26,6 +26,7 @@
     "eval": "node evals/run.mjs",
     "test:integration": "node --test --test-concurrency=1 tests/integration/*.test.mjs",
     "smoke": "CONSENSFLOW_SMOKE=1 node --test tests/smoke.test.mjs",
+    "load": "CONSENSFLOW_LOAD=1 node --test tests/load/*.test.mjs",
     "candidate": "node app/scripts/candidate.mjs",
     "bench:core": "node tests/live/core-bench.mjs",
     "check:all": "npm run check && cargo test --offline --manifest-path app/src-tauri/Cargo.toml && cargo clippy --offline --manifest-path app/src-tauri/Cargo.toml --all-targets -- -D warnings && npm --prefix app run test:ui && npm run test:integration && npm run smoke"

@@ -140,8 +140,15 @@ around the run.
     npm run test:integration   the daemon against the real pane host with fake agents
     npm --prefix app run test:ui   the board and the Agents screen in a browser
     npm run smoke          the packaged app
+    npm run load           the daemon under load: several projects, waves of tasks, the page polling
     npm run bench:core     the live bench on real harnesses (opt-in, cheap models)
     npm run candidate      build, smoke-test and install ConsensFlow Candidate
+
+The daemon keeps its own log at `~/.consensflow/daemon.log` (one `.1` kept
+past 5 MB): when it started, why it stopped, a pass that failed or ran long,
+an error nobody caught, and every ten minutes that it is alive and how big it
+is. The app asks it to stop before quitting, so a start with no stop after it
+means something outside the app killed it.
 
 Requirements, decisions and status live in the `consensflow-sme` brain; the
 repo's `.specs/` folder tracks each piece of work.
