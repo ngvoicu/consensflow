@@ -23,6 +23,7 @@ export const USAGE = `cf inside a ConsensFlow window: the board's commands.
   … --before T-9,T-10               T-9 and T-10 (still on the board) wait for this task
   cf task list                      the board: what waits for a member, then every lane
   cf task get T-3                   one task and its whole thread
+  cf task get T-3 --transcript      what its window did so far (the last 10 items; --last 30 for more)
   cf task done T-3 "…"              finish a task assigned to you (the lead)
   cf task accept|cancel T-3         move a task you asked for
   cf task reopen T-3 "…"            send a finished or failed task back with a follow-up
@@ -300,7 +301,25 @@ async function taskCommand([action, ...rest], call, cwd) {
   }
   const number = taskNumber(rest[0])
   if (action === 'get') {
+    const { flags } = split(rest.slice(1), ['--transcript'], ['--last'])
     const { task } = await call('GET', `/api/tasks/${number}`)
+    if (flags['--transcript'] === true) {
+      const last = flags['--last'] === undefined ? 10 : Number(flags['--last'])
+      if (!Number.isInteger(last) || last < 1) throw usage('--last takes a number of items')
+      const copy = await call('GET', `/api/tasks/${number}/transcript?last=${last}`)
+      const items = copy.items.map(
+        (item) =>
+          `[${TRANSCRIPT_ROLE[item.role] ?? item.role}${item.complete ? '' : ' · still writing'}]\n${clip(item.text, 600)}`,
+      )
+      return {
+        data: { task, ...copy },
+        text: `${taskLine(task)}\n\n${
+          copy.total === 0
+            ? 'Its window has written nothing yet.'
+            : `What its window did, the last ${copy.items.length} of ${copy.total} items:\n\n${items.join('\n\n')}`
+        }`,
+      }
+    }
     const thread = task.messages.map((m) => `${messageLine(m)}\n${m.body}`).join('\n\n')
     return { data: task, text: `${taskLine(task)}\n\n${thread}` }
   }
@@ -361,6 +380,15 @@ function client(env) {
 }
 
 /** Positional words, one leading `@target`, and the named flags. */
+/** How a transcript item's role reads in a window. */
+const TRANSCRIPT_ROLE = {
+  user: 'Sent to the window',
+  assistant: 'The agent',
+  tool: 'Tool output',
+  custom: 'Note',
+}
+const clip = (text, at) => (text.length > at ? `${text.slice(0, at)}…` : text)
+
 function split(words, booleans, valued) {
   const flags = {}
   const text = []

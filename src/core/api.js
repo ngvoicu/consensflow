@@ -14,7 +14,7 @@ import { LedgerError } from '../ledger/index.js'
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024
 const MEMBERS = new Set(['worker', 'advisor', 'reviewer'])
-const TASK_ROUTE = /^\/api\/tasks\/(\d+)(?:\/(done|accept|reopen|cancel|pause|resume))?$/
+const TASK_ROUTE = /^\/api\/tasks\/(\d+)(?:\/(done|accept|reopen|cancel|pause|resume|transcript))?$/
 const MESSAGE_ROUTE = /^\/api\/inbox\/(\d+)$/
 const QUESTION_ROUTE = /^\/api\/questions\/(\d+)$/
 /** The longest one poll for an answer may hold; a door polls again. */
@@ -185,7 +185,7 @@ export async function startApi({
       }
     }
     const task = TASK_ROUTE.exec(url.pathname)
-    if (task !== null) return taskRoute(request, caller, Number(task[1]), task[2])
+    if (task !== null) return taskRoute(request, caller, Number(task[1]), task[2], url)
     if (at === 'GET /api/inbox') {
       return ok({ messages: ledger.inbox(participant.id).map(messageSummary) })
     }
@@ -284,12 +284,25 @@ export async function startApi({
     throw new Refusal(404, 'unknown-route', `no such command: ${at}`)
   }
 
-  async function taskRoute(request, { project, participant }, number, action) {
+  async function taskRoute(request, { project, participant }, number, action, url) {
     const task = ledger.task(project.id, number)
     if (task === null) throw new Refusal(404, 'unknown-task', `no task T-${number} in this project`)
     if (action === undefined && request.method === 'GET') {
       // The thread as far as the human has let it go: a gated message waits unseen.
       return ok({ task: { ...task, messages: task.messages.filter((m) => m.state !== 'gated') } })
+    }
+    // What the task's window did so far, from ConsensFlow's own copy: the
+    // last items, for whoever gave the task.
+    if (action === 'transcript' && request.method === 'GET') {
+      if (participant.role !== 'lead' && task.requester !== participant.handle) {
+        throw new Refusal(
+          403,
+          'not-a-coordinator',
+          `only the lead or @${task.requester} may read what T-${number}'s window did`,
+        )
+      }
+      const last = Math.min(50, Math.max(1, Number(url.searchParams.get('last')) || 10))
+      return ok(ledger.transcript(project.id, number, { limit: last }))
     }
     if (request.method !== 'POST' || action === undefined) {
       throw new Refusal(404, 'unknown-route', 'no such task command')

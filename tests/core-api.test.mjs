@@ -135,6 +135,58 @@ describe('the agents API', () => {
     })
   })
 
+  it("shows the lead what a task's window did so far, the last items when asked for fewer", async () => {
+    await withApi(async ({ ledger, project, token, cf }) => {
+      const { message } = ledger.createTask(project.id, {
+        from: 'lead',
+        to: 'zeus',
+        body: 'Parser',
+      })
+      deliver(ledger, message)
+      const lead = token('lead')
+      const empty = await cf(lead, 'task', 'get', 'T-1', '--transcript')
+      assert.match(
+        empty.out,
+        /^T-1 \[working\] @zeus ← @lead: Parser\n\nIts window has written nothing yet\.$/,
+      )
+      const conversation = ledger.startConversation(message.recipientId, { harness: 'claude-code' })
+      ledger.copyTranscript(conversation.id, [
+        {
+          id: 'u1',
+          role: 'user',
+          text: `[ConsensFlow m-${message.id} · T-1 · task from @lead]\nParser`,
+          complete: true,
+          at: null,
+        },
+        {
+          id: 'a1',
+          role: 'assistant',
+          text: 'Reading the grammar first.',
+          complete: true,
+          at: null,
+        },
+        { id: 't1', role: 'tool', text: 'ok\n14 passed', complete: true, at: null },
+        { id: 'a2', role: 'assistant', text: 'Parser done', complete: false, at: null },
+      ])
+      const last = await cf(lead, 'task', 'get', 'T-1', '--transcript', '--last', '2')
+      assert.equal(
+        last.out,
+        'T-1 [working] @zeus ← @lead: Parser\n\nWhat its window did, the last 2 of 4 items:\n\n[Tool output]\nok\n14 passed\n\n[The agent · still writing]\nParser done',
+      )
+      const asJson = JSON.parse(
+        (await cf(lead, 'task', 'get', 'T-1', '--transcript', '--json')).out,
+      )
+      assert.deepEqual([asJson.total, asJson.items.map((i) => i.id)], [4, ['u1', 'a1', 't1', 'a2']])
+      const bad = await cf(lead, 'task', 'get', 'T-1', '--transcript', '--last', 'many')
+      assert.deepEqual([bad.code, bad.err], [2, 'cf: --last takes a number of items'])
+      const member = await cf(token('zeus'), 'task', 'get', 'T-1', '--transcript')
+      assert.deepEqual(
+        [member.code, member.err],
+        [1, "cf: only the lead or @lead may read what T-1's window did"],
+      )
+    })
+  })
+
   it('sends a note to whoever gave the task, or to the human from the lead; never to a member', async () => {
     await withApi(async ({ ledger, project, token, call }) => {
       deliver(

@@ -31,6 +31,7 @@ reply does nothing.
     cf task pause T-3             stop a worker's task: the agent stops, its window and work wait
     cf task resume T-3 "…"        go on with it: the same window, with your words
     cf task get T-3 · cf task list · cf inbox · cf inbox read m-12
+    cf task get T-3 --transcript  what its window did so far (the last 10 items; --last 30 for more)
     cf ask --human "…" · cf answer m-12 "…"
     cf note --human "…"           tell the human something; nothing waits on it
     cf team                       the members: roles and tiers (never to pick one)
