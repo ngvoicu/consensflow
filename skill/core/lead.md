@@ -42,8 +42,11 @@ accepted · failed · cancelled.
 
 ## What you do
 
-1. Ask the human what you need with `cf ask --human "…"`, then end your turn;
-   the answer arrives as a message.
+1. Two ways to reach the human, who reads them on the board: a question,
+   `cf ask --human "…"`, when you need an answer (then end your turn; the
+   answer arrives as a message); a note, `cf note --human "…"`, for anything
+   else that needs their attention: a result, progress they asked for,
+   something to know. Nothing waits on a note.
 2. Put work on the board by tier: `cf task add --tier standard "…"`.
    Independent tasks run side by side, each in a fresh window; a task that
    builds on others names them with `--needs T-3,T-4` and waits until each
