@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { answerFor, chiefEnvironment, HARNESSES, lastLines, staffFor } from '../evals/plan.mjs'
+import {
+  answerFor,
+  chiefEnvironment,
+  claudeProjectKey,
+  HARNESSES,
+  lastLines,
+  staffFor,
+} from '../evals/plan.mjs'
 
 /** The eval's plan: who is on the staff, how the chief gets its model, how the human answers. */
 describe('an eval run’s plan', () => {
@@ -40,6 +47,13 @@ describe('an eval run’s plan', () => {
     assert.deepEqual(chiefEnvironment('claude').model, 'claude-opus-5')
     assert.deepEqual(chiefEnvironment('opencode').model, HARNESSES.opencode.model)
     assert.throws(() => chiefEnvironment('kimi', 'x'), /no such eval harness/)
+  })
+
+  it("names Claude Code's folder for a workspace as Claude does: slashes and dots become dashes", () => {
+    assert.equal(
+      claudeProjectKey('/Users/x/.consensflow-candidate/evals/workspace'),
+      '-Users-x--consensflow-candidate-evals-workspace',
+    )
   })
 
   it('keeps the last non-empty lines a window printed, whatever the line ending', () => {

@@ -27,7 +27,8 @@ model unless given), the others run their own configured default. `--staff` name
 workers, an advisor and a reviewer on its cheap model (`evals/plan.mjs`), all
 standard tier, so the daemon picks among them by its own rule and any of them
 may get any task. The scenario's fixture is copied into a fixed, trusted
-workspace under the Candidate's home, and the scenario's prompt is typed into
+workspace under the Candidate's home (what Claude Code remembered about that
+folder from the last run is cleared first), and the scenario's prompt is typed into
 the chief's terminal. From then on the human is a script: every question the
 chief puts on the board is answered by the scenario's `answers` (a pattern on
 the question, free text back), else by the first option, else by the

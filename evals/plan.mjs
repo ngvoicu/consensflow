@@ -69,6 +69,16 @@ export function chiefEnvironment(chief, model = undefined) {
 }
 
 /**
+ * Where Claude Code keeps what it saves about a folder (`~/.claude/projects/
+ * <key>`): the folder's path with every slash and dot made a dash. Its
+ * `memory/` there is read by every later session in that folder, so a run's
+ * chief would learn from the last run's; the runner clears it first.
+ */
+export function claudeProjectKey(directory) {
+  return directory.replace(/[/.]/g, '-')
+}
+
+/**
  * The last `count` non-empty lines a window printed, control sequences already
  * stripped: near enough its screen, for a report to show why a chief said
  * nothing (a login page, a quota wall, a model that does not exist).

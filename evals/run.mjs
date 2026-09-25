@@ -17,7 +17,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 import { startIntegration } from '../tests/integration/harness.mjs'
 import { measure, verdict } from './measure.mjs'
-import { answerFor, chiefEnvironment, HARNESSES, lastLines, staffFor } from './plan.mjs'
+import {
+  answerFor,
+  chiefEnvironment,
+  claudeProjectKey,
+  HARNESSES,
+  lastLines,
+  staffFor,
+} from './plan.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const EDITOR = join(HERE, '..', 'tests', 'live', 'core-live-editor.mjs')
@@ -101,6 +108,11 @@ async function run(index) {
   const started = Date.now()
   rmSync(WORKSPACE, { recursive: true, force: true })
   mkdirSync(WORKSPACE, { recursive: true })
+  // A fresh run: nothing Claude remembered about this folder from the last one.
+  rmSync(join(H, '.claude', 'projects', claudeProjectKey(WORKSPACE), 'memory'), {
+    recursive: true,
+    force: true,
+  })
   cpSync(join(HERE, 'fixtures', scenario.fixture), WORKSPACE, { recursive: true })
   if (chief === 'claude' || staffHarnesses.includes('claude')) {
     process.stdout.write(
