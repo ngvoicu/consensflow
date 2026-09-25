@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import WebSocket, { WebSocketServer } from 'ws'
+import { runnable } from '../src/harnesses.js'
 import { configRoot } from '../src/roster.js'
 import { askTheBoard, boardClient } from './lib/question-door.js'
 import { createReceiver } from './lib/receiver.js'
@@ -465,11 +466,16 @@ async function supervise(executable, args) {
   const socket = join(directory, 'native.sock')
   const env = { ...process.env }
   delete env.OPENAI_API_KEY
-  const backend = spawn(
+  const backendRun = runnable(
     executable,
     [...split.backend, 'app-server', '--listen', `unix://${socket}`],
-    { env, stdio: ['ignore', 'ignore', 'pipe'] },
+    env,
   )
+  const backend = spawn(backendRun.file, backendRun.args, {
+    ...backendRun.options,
+    env,
+    stdio: ['ignore', 'ignore', 'pipe'],
+  })
   let startupError = ''
   backend.stderr.on('data', (chunk) => {
     startupError = (startupError + chunk).slice(-4000)
@@ -498,7 +504,7 @@ async function supervise(executable, args) {
       upstream: `ws+unix://${socket}`,
       freshBypass: args.includes('--dangerously-bypass-approvals-and-sandbox'),
     })
-    tui = spawn(
+    const tuiRun = runnable(
       executable,
       [
         '--remote',
@@ -507,8 +513,13 @@ async function supervise(executable, args) {
         'CF_CODEX_TUI_TOKEN',
         ...split.tui,
       ],
-      { env: { ...env, CF_CODEX_TUI_TOKEN: configuration.token }, stdio: 'inherit' },
+      env,
     )
+    tui = spawn(tuiRun.file, tuiRun.args, {
+      ...tuiRun.options,
+      env: { ...env, CF_CODEX_TUI_TOKEN: configuration.token },
+      stdio: 'inherit',
+    })
     backend.once('exit', () => tui?.kill('SIGTERM'))
     const [code] = await once(tui, 'exit')
     return code ?? 0

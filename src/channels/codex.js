@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { isAbsolute } from 'node:path'
+import { runnable } from '../harnesses.js'
 import { claimEpoch } from './pty.js'
 
 export const DEFAULT_DEADLINE_MS = 3_000
@@ -136,7 +137,9 @@ function runQueue(config, launch, session, text, deadline) {
     }
 
     try {
-      child = spawn(config.executable, args, {
+      const run = runnable(config.executable, args)
+      child = spawn(run.file, run.args, {
+        ...run.options,
         cwd: config.cwd,
         env: childEnvironment(launch, config),
         shell: false,

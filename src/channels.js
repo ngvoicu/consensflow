@@ -12,6 +12,7 @@ import { DEFAULT_DEADLINE_MS, send as sendOpenCode } from './channels/opencode.j
 import { send as sendPi } from './channels/pi.js'
 import { prepareClaudeSettings } from './claude-install.js'
 import { prepareDevinIntegration } from './devin-install.js'
+import { runnable } from './harnesses.js'
 import { configRoot } from './roster.js'
 
 const PROBES = Object.freeze({
@@ -68,7 +69,9 @@ async function hasNativeQueue(kind, executable) {
   if (typeof executable !== 'string' || !isAbsolute(executable)) return false
   if (kind === 'claude-code') return process.platform === 'darwin'
   try {
-    const { stdout } = await runHelp(executable, ['queue', '--help'], {
+    const run = runnable(executable, ['queue', '--help'])
+    const { stdout } = await runHelp(run.file, run.args, {
+      ...run.options,
       timeout: 10_000,
       maxBuffer: 128 * 1024,
       encoding: 'utf8',

@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -15,13 +14,15 @@ import { after, describe, it } from 'node:test'
 import { detectHarnesses, harnessPath } from '../src/harnesses.js'
 import * as installation from '../src/install.js'
 import { addAgent } from '../src/roster.js'
-import { tempEnv } from './helpers.mjs'
+import { fakeExecutable, tempEnv } from './helpers.mjs'
+
+/** A launcher is `cf` on POSIX and `cf.cmd` on Windows. */
+const CMD = process.platform === 'win32' ? '.cmd' : ''
 
 function stubCli(env, name) {
   mkdirSync(env.PATH, { recursive: true })
   const path = join(env.PATH, name)
-  writeFileSync(path, '#!/bin/sh\nexit 0\n')
-  chmodSync(path, 0o755)
+  fakeExecutable(path)
 }
 
 describe('harness executable discovery', () => {
@@ -57,8 +58,7 @@ describe('BO12: the path a pane is launched with is absolute, whatever PATH says
     try {
       mkdirSync(join(root, 'bin'), { recursive: true })
       const shim = join(root, 'bin', 'claude')
-      writeFileSync(shim, '#!/bin/sh\nexit 0\n')
-      chmodSync(shim, 0o755)
+      fakeExecutable(shim)
       process.chdir(root)
 
       const found = harnessPath('claude', { PATH: 'bin', HOME: root })
@@ -88,7 +88,7 @@ it('app preparation owns its launcher and integrations, not role documents or gl
     }
     addAgent({ name: 'mine', harness: 'claude', model: 'example' }, t.env)
     for (let i = 0; i < 2; i++) installation.prepareApp(t.env)
-    assert.ok(existsSync(join(t.env.CONSENSFLOW_BIN_DIR, 'cf')))
+    assert.ok(existsSync(join(t.env.CONSENSFLOW_BIN_DIR, `cf${CMD}`)))
     assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'roles')), false)
     assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'skills-manifest.json')), false)
     for (const file of globals) assert.equal(readFileSync(file, 'utf8'), 'global canary')

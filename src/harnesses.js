@@ -148,6 +148,35 @@ function locate(harness, env) {
  * not the login shell's — the same reason detection looks past PATH at all.
  * So the launcher asks for the path, not the name.
  */
+/** cmd.exe's own special characters; each is escaped with a caret. */
+const CMD_META = /([()\][%!^"`<>&|;, *?])/g
+
+/**
+ * How to run `executable` with `args` on this machine, for spawn or execFile:
+ * `{ file, args, options }`.
+ *
+ * A `.cmd` or `.bat` on Windows (an npm-installed CLI is one) is a script for
+ * cmd.exe, not a program, and Node refuses to spawn it directly. It goes
+ * through cmd.exe instead, with every argument quoted and escaped the way
+ * cmd.exe reads its line, then read again by the script (the shape npm itself
+ * uses through cross-spawn). Anything else runs as it is.
+ */
+export function runnable(executable, args = [], env = process.env) {
+  if (!/\.(cmd|bat)$/i.test(executable)) return { file: executable, args, options: {} }
+  const quote = (arg) =>
+    `"${String(arg)
+      .replace(/(\\*)"/g, '$1$1\\"')
+      .replace(/(\\+)$/, '$1$1')}"`
+      .replace(CMD_META, '^$1')
+      .replace(CMD_META, '^$1')
+  const line = [executable.replace(CMD_META, '^$1'), ...args.map(quote)].join(' ')
+  return {
+    file: env.ComSpec ?? env.COMSPEC ?? 'cmd.exe',
+    args: ['/d', '/s', '/c', `"${line}"`],
+    options: { windowsVerbatimArguments: true },
+  }
+}
+
 export function harnessPath(id, env) {
   const harness = HARNESSES.find((candidate) => candidate.id === id)
   return harness === undefined ? null : locate(harness, env)

@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
 import { promisify } from 'node:util'
+import { runnable } from './harnesses.js'
 import { preparePrivateIntegration } from './private-integration.js'
 import { configRoot } from './roster.js'
 
@@ -55,7 +56,9 @@ export async function prepareDevinIntegration(env, { launchId, node, executable 
   if (typeof node !== 'string' || !isAbsolute(node))
     throw new Error('Devin requires an absolute runtime')
   if (executable) {
-    const { stdout } = await execute(executable, ['--version'], {
+    const run = runnable(executable, ['--version'], env)
+    const { stdout } = await execute(run.file, run.args, {
+      ...run.options,
       env,
       timeout: 3000,
       maxBuffer: 8192,

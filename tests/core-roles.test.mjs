@@ -119,7 +119,10 @@ describe('role instructions for the new core', () => {
       })
       const file = configured.args[configured.args.indexOf('--append-system-prompt-file') + 1]
       assert.equal(await readFile(file, 'utf8'), 'WORKER TEXT')
-      assert.match(file, /roles\/worker\/\.claude\/skills\/consensflow-worker\/SKILL\.md$/)
+      assert.match(
+        file.replaceAll('\\', '/'),
+        /roles\/worker\/\.claude\/skills\/consensflow-worker\/SKILL\.md$/,
+      )
     } finally {
       await rm(home, { recursive: true, force: true })
     }

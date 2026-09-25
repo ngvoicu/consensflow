@@ -378,7 +378,7 @@ it('launches the bundled supervisor for owned panes without changing legacy Code
   }
   const wrapped = withNativeBridge(invocation, configured, process.execPath)
   assert.equal(wrapped.command, process.execPath)
-  assert.match(wrapped.args[0], /hosts\/codex-session\.mjs$/)
+  assert.match(wrapped.args[0].replaceAll('\\', '/'), /hosts\/codex-session\.mjs$/)
   assert.deepEqual(wrapped.args.slice(1), ['/native/codex', 'resume', A])
   assert.deepEqual(wrapped.env, invocation.env)
   assert.deepEqual(wrapped.dropEnv, invocation.dropEnv)

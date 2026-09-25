@@ -3,7 +3,7 @@ import { readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { DEVIN_MINIMUM_VERSION, supportedDevinVersion } from './devin-install.js'
-import { harnessPath, knownHarnesses } from './harnesses.js'
+import { harnessPath, knownHarnesses, runnable } from './harnesses.js'
 import { prepareOpenCodeExtension } from './opencode-install.js'
 import { preparePiExtension } from './pi-install.js'
 
@@ -50,6 +50,8 @@ export function releaseSource(id, executable, env) {
   try {
     path = realpathSync(executable)
   } catch {}
+  // The layouts below are spelled with `/`; Windows answers with `\`.
+  path = path?.replaceAll('\\', '/')
   const brew = path?.match(/^(.*)\/(Caskroom|Cellar)\/([^/]+)\//)
   const expected = id === 'claude' ? ['claude-code', 'claude-code@latest'] : [id]
   if (brew && expected.includes(brew[3])) {
@@ -172,7 +174,9 @@ export class HarnessAdmin {
     let output = ''
     let failure = null
     try {
-      const result = await this.#run(source.update[0], source.update.slice(1), {
+      const run = runnable(source.update[0], source.update.slice(1), this.#env)
+      const result = await this.#run(run.file, run.args, {
+        ...run.options,
         env: this.#env,
         cwd: this.#env.HOME,
         timeout: 600_000,
@@ -233,7 +237,9 @@ export class HarnessAdmin {
     }
     if (!path) return row
     try {
-      const { stdout } = await execute(path, ['--version'], {
+      const run = runnable(path, ['--version'], this.#env)
+      const { stdout } = await execute(run.file, run.args, {
+        ...run.options,
         env: this.#env,
         cwd: this.#env.HOME,
         timeout: 3000,

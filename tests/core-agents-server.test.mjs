@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path, { join } from 'node:path'
@@ -9,7 +9,7 @@ import { agentsUi } from '../src/core/agents-server.js'
 import { Credentials, startApi } from '../src/core/api.js'
 import { openLedger } from '../src/ledger/index.js'
 import { listAgents, rosterPath } from '../src/roster.js'
-import { tempEnv } from './helpers.mjs'
+import { fakeExecutable, tempEnv } from './helpers.mjs'
 
 /**
  * The human's agents screens on the new core (TEST-BDC-24): the agents (the
@@ -20,8 +20,7 @@ import { tempEnv } from './helpers.mjs'
 function stubCli(t, name) {
   mkdirSync(t.env.PATH, { recursive: true })
   const file = join(t.env.PATH, name)
-  writeFileSync(file, '#!/bin/sh\nexit 0\n')
-  chmodSync(file, 0o755)
+  fakeExecutable(file)
 }
 
 describe('the agents screens on the new core', () => {

@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { promisify } from 'node:util'
 import { rosterPath } from '../src/roster.js'
-import { tempEnv } from './helpers.mjs'
+import { fakeExecutable, tempEnv } from './helpers.mjs'
+
+/** A launcher is `cf` on POSIX and `cf.cmd` on Windows. */
+const CMD = process.platform === 'win32' ? '.cmd' : ''
 
 const run = promisify(execFile)
 const CF = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
@@ -25,8 +28,7 @@ async function cf(args, env) {
 function stubCli(t, name) {
   mkdirSync(t.env.PATH, { recursive: true })
   const path = join(t.env.PATH, name)
-  writeFileSync(path, '#!/bin/sh\nexit 0\n')
-  chmodSync(path, 0o755)
+  fakeExecutable(path)
 }
 
 describe('cf manages the roster', () => {
@@ -130,7 +132,7 @@ describe('role files belong to pane launch, not CLI administration', () => {
       assert.equal(readFileSync(role, 'utf8'), 'role canary', args.join(' '))
       assert.equal(readFileSync(manifest, 'utf8'), '{"files":{}}')
     }
-    assert.ok(existsSync(join(t.env.CONSENSFLOW_BIN_DIR, 'cf')))
+    assert.ok(existsSync(join(t.env.CONSENSFLOW_BIN_DIR, `cf${CMD}`)))
   })
 
   it('skills administration is absent, including forced uninstall', async () => {
@@ -278,7 +280,7 @@ describe('retired off/reset CLI commands preserve the installation and saved dat
         mkdirSync(history, { recursive: true })
         const files = [
           rosterPath(t.env),
-          join(t.env.CONSENSFLOW_BIN_DIR, 'cf'),
+          join(t.env.CONSENSFLOW_BIN_DIR, `cf${CMD}`),
           join(history, 'answer.txt'),
         ]
         writeFileSync(files[2], 'saved result')

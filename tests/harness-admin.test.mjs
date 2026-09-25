@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
 import { agentsUi } from '../src/core/agents-server.js'
 import { Credentials, startApi } from '../src/core/api.js'
 import { HarnessAdmin } from '../src/harness-admin.js'
 import { openLedger } from '../src/ledger/index.js'
-import { tempEnv } from './helpers.mjs'
+import { fakeExecutable, tempEnv } from './helpers.mjs'
 
 test('administration lists missing harnesses without probing or installing them', async () => {
   const t = tempEnv()
@@ -30,8 +30,7 @@ test('version and update checks cache results and refresh on request', async () 
   try {
     mkdirSync(t.env.HOME, { recursive: true })
     mkdirSync(t.env.PATH, { recursive: true })
-    writeFileSync(join(t.env.PATH, 'codex'), '#!/bin/sh\nprintf "codex-cli 99.1.0\\n"\n')
-    chmodSync(join(t.env.PATH, 'codex'), 0o755)
+    fakeExecutable(join(t.env.PATH, 'codex'), { output: 'codex-cli 99.1.0' })
     let calls = 0
     const admin = new HarnessAdmin(t.env, {
       latest: async () => {
@@ -57,8 +56,7 @@ test('offline and invalid version output are explicit failures, not latest or in
   try {
     mkdirSync(t.env.HOME, { recursive: true })
     mkdirSync(t.env.PATH, { recursive: true })
-    writeFileSync(join(t.env.PATH, 'claude'), '#!/bin/sh\necho unusual\n')
-    chmodSync(join(t.env.PATH, 'claude'), 0o755)
+    fakeExecutable(join(t.env.PATH, 'claude'), { output: 'unusual' })
     const admin = new HarnessAdmin(t.env, {
       latest: async () => {
         throw new Error('offline')
@@ -152,7 +150,7 @@ test('updates a harness with its own tool, checks it again, and says what happen
     mkdirSync(t.env.PATH, { recursive: true })
     const versionFile = join(t.env.HOME, 'codex-version')
     writeFileSync(versionFile, '1.0.0\n')
-    writeFileSync(join(bin, 'codex'), `#!/bin/sh\n/bin/cat "${versionFile}"\n`, { mode: 0o755 })
+    fakeExecutable(join(bin, 'codex'), { outputFile: versionFile })
     const runs = []
     let fail = false
     const admin = new HarnessAdmin(t.env, {
@@ -189,7 +187,7 @@ test('updates a harness with its own tool, checks it again, and says what happen
     )
 
     // A CLI found somewhere ConsensFlow does not recognize is the human's to update.
-    writeFileSync(join(t.env.PATH, 'pi'), '#!/bin/sh\necho 0.1.0\n', { mode: 0o755 })
+    fakeExecutable(join(t.env.PATH, 'pi'), { output: '0.1.0' })
     const unsupported = await admin.update('pi')
     assert.equal(unsupported.state, 'unsupported')
     assert.match(unsupported.reason, /update it the way you installed it/)
@@ -204,8 +202,7 @@ test('harness checks do not require session storage or expose receipt diagnostic
   mkdirSync(t.env.HOME, { recursive: true })
   mkdirSync(t.env.PATH, { recursive: true })
   mkdirSync(t.env.CONSENSFLOW_HOME, { recursive: true })
-  writeFileSync(join(t.env.PATH, 'codex'), '#!/bin/sh\necho 1.2.3\n')
-  chmodSync(join(t.env.PATH, 'codex'), 0o755)
+  fakeExecutable(join(t.env.PATH, 'codex'), { output: '1.2.3' })
   const ledger = openLedger(join(t.env.CONSENSFLOW_HOME, 'consensflow.db'))
   const token = 'ui-token'
   const server = await startApi({
@@ -239,7 +236,7 @@ test('Devin diagnostics report the minimum native version and idle collection li
   try {
     mkdirSync(t.env.HOME, { recursive: true })
     mkdirSync(t.env.PATH, { recursive: true })
-    writeFileSync(join(t.env.PATH, 'devin'), '#!/bin/sh\necho 3000.6.14\n', { mode: 0o700 })
+    fakeExecutable(join(t.env.PATH, 'devin'), { output: '3000.6.14' })
     const admin = new HarnessAdmin(t.env, {
       latest: async (_id, source) => {
         assert.equal(source.url, 'https://static.devin.ai/cli/current/manifest.json')

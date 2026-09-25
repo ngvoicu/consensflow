@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
-import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { devinAdapter } from '../src/adapters/devin.js'
+import { fakeExecutable } from './helpers.mjs'
 
 /**
  * The Devin adapter (TEST-BDC-05, IMPL-BDC-07): Devin runs on a config of our
@@ -22,9 +23,7 @@ async function withHome(fn) {
     CONSENSFLOW_NODE: process.execPath,
   }
   await mkdir(env.PATH, { recursive: true })
-  const executable = path.join(env.PATH, 'devin')
-  await writeFile(executable, '#!/bin/sh\necho "devin 3000.10.22"\n')
-  await chmod(executable, 0o755)
+  const executable = fakeExecutable(path.join(env.PATH, 'devin'), { output: 'devin 3000.10.22' })
   try {
     await fn({ env, executable })
   } finally {

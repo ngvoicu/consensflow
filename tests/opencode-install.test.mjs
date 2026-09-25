@@ -1,19 +1,18 @@
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { pathToFileURL } from 'node:url'
 import { launchConfiguration } from '../src/channels.js'
 import { HarnessAdmin } from '../src/harness-admin.js'
 import { prepareApp } from '../src/install.js'
-import { tempEnv } from './helpers.mjs'
+import { fakeExecutable, tempEnv } from './helpers.mjs'
 
 function detected(t) {
   const f = tempEnv()
   t.after(() => f.cleanup())
   mkdirSync(f.env.PATH, { recursive: true })
-  writeFileSync(join(f.env.PATH, 'opencode'), '#!/bin/sh\necho 1.18.30\n')
-  chmodSync(join(f.env.PATH, 'opencode'), 0o755)
+  fakeExecutable(join(f.env.PATH, 'opencode'), { output: '1.18.30' })
   return f
 }
 

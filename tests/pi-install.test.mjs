@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
 import { pathToFileURL } from 'node:url'
 import { preparePiExtension } from '../src/pi-install.js'
-import { tempEnv } from './helpers.mjs'
+import { fakeExecutable, tempEnv } from './helpers.mjs'
 
 test('Pi absent never creates an extension', () => {
   const t = tempEnv()
@@ -21,8 +21,7 @@ test('detected Pi gets an immutable private extension with working imports and n
   try {
     const bin = join(t.root, 'bin')
     mkdirSync(bin)
-    writeFileSync(join(bin, 'pi'), '#!/bin/sh\nexit 0\n')
-    chmodSync(join(bin, 'pi'), 0o755)
+    fakeExecutable(join(bin, 'pi'))
     t.env.PATH = bin
     const global = join(t.env.HOME, '.pi', 'agent')
     mkdirSync(global, { recursive: true })
@@ -52,8 +51,7 @@ test('Pi preparation failure is reported, not a crash or false OK', () => {
   try {
     const bin = join(t.root, 'bin')
     mkdirSync(bin)
-    writeFileSync(join(bin, 'pi'), '#!/bin/sh\nexit 0\n')
-    chmodSync(join(bin, 'pi'), 0o755)
+    fakeExecutable(join(bin, 'pi'))
     t.env.PATH = bin
     mkdirSync(t.env.CONSENSFLOW_HOME, { recursive: true })
     writeFileSync(join(t.env.CONSENSFLOW_HOME, 'extensions'), 'cannot create directory here')
@@ -69,8 +67,7 @@ test('opening the app prepares Pi only when its executable is detected', async (
   try {
     assert.equal(prepareApp(t.env).piExtension.state, 'not-installed')
     mkdirSync(t.env.PATH, { recursive: true })
-    writeFileSync(join(t.env.PATH, 'pi'), '#!/bin/sh\nexit 0\n')
-    chmodSync(join(t.env.PATH, 'pi'), 0o755)
+    fakeExecutable(join(t.env.PATH, 'pi'))
     assert.equal(prepareApp(t.env).piExtension.state, 'installed-unverified')
   } finally {
     t.cleanup()

@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { realpath } from 'node:fs/promises'
+import { runnable } from '../harnesses.js'
 
 /**
  * The P5 prompt_async endpoint admits a request but may stay silent forever.
@@ -497,7 +498,9 @@ export async function createSession({
 
   let child
   try {
-    child = spawn(executable, ['serve', ...configuration.args], {
+    const run = runnable(executable, ['serve', ...configuration.args], baseEnv)
+    child = spawn(run.file, run.args, {
+      ...run.options,
       cwd: canonical,
       env: { ...baseEnv, ...(configuration.env ?? {}), OPENCODE_SERVER_USERNAME: 'opencode' },
       stdio: ['ignore', 'ignore', 'pipe'],

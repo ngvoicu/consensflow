@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { runnable } from './harnesses.js'
 import { configRoot } from './roster.js'
 
 /**
@@ -73,7 +74,13 @@ export async function roleConfiguration(
 /** Ask the native resolver to preserve profile/project layering; never read versions. */
 function codexInstructions(executable, cwd, env) {
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, ['app-server'], { cwd, env, stdio: ['pipe', 'pipe', 'ignore'] })
+    const run = runnable(executable, ['app-server'], env)
+    const child = spawn(run.file, run.args, {
+      ...run.options,
+      cwd,
+      env,
+      stdio: ['pipe', 'pipe', 'ignore'],
+    })
     let buffer = ''
     let settled = false
     const finish = (error, value) => {

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { openCodeAdapter } from '../src/adapters/opencode.js'
+import { fakeExecutable } from './helpers.mjs'
 
 /**
  * The OpenCode adapter (TEST-BDC-05, IMPL-BDC-07): the conversation is created
@@ -20,9 +21,7 @@ async function withHome(fn) {
     PATH: path.join(root, 'bin'),
   }
   await mkdir(env.PATH, { recursive: true })
-  const executable = path.join(env.PATH, 'opencode')
-  await writeFile(executable, '#!/bin/sh\nexit 0\n')
-  await chmod(executable, 0o755)
+  const executable = fakeExecutable(path.join(env.PATH, 'opencode'))
   try {
     await fn({ env, executable })
   } finally {
@@ -80,7 +79,7 @@ describe('the OpenCode adapter', () => {
       assert.equal(plan.env.OPENCODE_SERVER_USERNAME, 'opencode')
       assert.equal(plan.env.OPENCODE_SERVER_PASSWORD, plan.launch.channel.password)
       assert.match(
-        plan.env.OPENCODE_TUI_CONFIG,
+        plan.env.OPENCODE_TUI_CONFIG.replaceAll('\\', '/'),
         /extensions\/opencode\/[0-9a-f]+\/hosts\/opencode-extension\/tui\.json$/,
       )
       assert.equal(JSON.parse(plan.env.CF_OPENCODE_SESSION_BRIDGE).launchId, 'launch-1')

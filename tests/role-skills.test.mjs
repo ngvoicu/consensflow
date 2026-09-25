@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { roleInstructions } from '../src/core/roles.js'
 import { roleConfiguration } from '../src/role-skills.js'
+import { fakeNodeExecutable } from './helpers.mjs'
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'cf-role-skills-'))
@@ -127,9 +128,8 @@ test('OpenCode rejects malformed instruction lists before native launch', async 
 
 test('Codex appends the role to its own effective instructions, read through configuration only', async (t) => {
   const { root, env } = await fixture(t)
-  const executable = join(root, 'codex')
-  await writeFile(
-    executable,
+  const executable = fakeNodeExecutable(
+    join(root, 'codex'),
     `#!${process.execPath}\n
 import { createInterface } from 'node:readline';
 const lines = createInterface({input: process.stdin});
@@ -141,7 +141,6 @@ lines.on('line', line => {
 });
 `,
   )
-  await chmod(executable, 0o755)
   const configuration = await roleConfiguration('codex', {
     role: 'lead',
     env,

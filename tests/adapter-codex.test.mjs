@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { codexAdapter } from '../src/adapters/codex.js'
+import { fakeNodeExecutable } from './helpers.mjs'
 
 /**
  * The Codex adapter (TEST-BDC-05, IMPL-BDC-07): Codex runs under ConsensFlow's
@@ -25,11 +26,10 @@ async function withHome(fn, { queue = true } = {}) {
     CONSENSFLOW_NODE: process.execPath,
   }
   await mkdir(env.PATH, { recursive: true })
-  const executable = path.join(env.PATH, 'codex')
   // A Codex that answers the two things a launch asks of it: whether it has
   // the native queue, and its effective instructions over the app-server.
-  await writeFile(
-    executable,
+  const executable = fakeNodeExecutable(
+    path.join(env.PATH, 'codex'),
     `#!${process.execPath}
 import { createInterface } from 'node:readline'
 if (process.argv[2] === 'queue') {
@@ -45,7 +45,6 @@ if (process.argv[2] === 'queue') {
 }
 `,
   )
-  await chmod(executable, 0o755)
   try {
     await fn({ env, executable })
   } finally {

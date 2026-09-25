@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,6 +8,7 @@ import { describe, it } from 'node:test'
 import { Bridge } from '../src/bridge.js'
 import { send as sendOpenCode } from '../src/channels/opencode.js'
 import { enabledChannels, launchConfiguration, send } from '../src/channels.js'
+import { fakeExecutable } from './helpers.mjs'
 
 function bridgePair() {
   const nodeToRust = new PassThrough()
@@ -88,11 +89,8 @@ it('OpenCode worker messages claim native authority and preserve raw text (TEST-
 
 it('Codex launch enables only an installed native queue capability (TEST-PANE-109)', async () => {
   const root = await mkdtemp(join(tmpdir(), 'cf-native-capability-'))
-  const executable = join(root, 'codex')
-  const { chmod } = await import('node:fs/promises')
   try {
-    await writeFile(executable, '#!/bin/sh\nprintf "%s\\n" "--thread --message"\n')
-    await chmod(executable, 0o755)
+    const executable = fakeExecutable(join(root, 'codex'), { output: '--thread --message' })
     const configured = await launchConfiguration('codex', {
       launchId: 'launch-codex',
       workspace: root,
@@ -103,7 +101,7 @@ it('Codex launch enables only an installed native queue capability (TEST-PANE-10
     assert.equal(configured.channel.executable, executable)
     assert.equal(configured.channel.cwd, root)
     assert.deepEqual(configured.args, [])
-    await writeFile(executable, '#!/bin/sh\nexit 0\n')
+    fakeExecutable(executable)
     assert.equal(
       (await launchConfiguration('codex', { launchId: 'old-codex', workspace: root, executable }))
         .channel,
@@ -140,14 +138,7 @@ async function claudeSettings(configuration, home) {
 
 describe('retired Claude development channel (TEST-PANE-121)', () => {
   async function claudeExecutable(root) {
-    const executable = join(root, 'claude')
-    const { chmod } = await import('node:fs/promises')
-    await writeFile(
-      executable,
-      `#!/bin/sh\nprintf called > '${join(root, 'probe-called')}'\nexit 1\n`,
-    )
-    await chmod(executable, 0o755)
-    return executable
+    return fakeExecutable(join(root, 'claude'), { touch: join(root, 'probe-called'), exit: 1 })
   }
 
   it('opens Claude without development channels regardless of version', async () => {

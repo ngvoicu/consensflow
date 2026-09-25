@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { piAdapter } from '../src/adapters/pi.js'
+import { fakeExecutable } from './helpers.mjs'
 
 /**
  * The Pi adapter (TEST-BDC-05, IMPL-BDC-07): Pi runs with ConsensFlow's
@@ -19,9 +20,7 @@ async function withHome(fn) {
     PATH: path.join(root, 'bin'),
   }
   await mkdir(env.PATH, { recursive: true })
-  const executable = path.join(env.PATH, 'pi')
-  await writeFile(executable, '#!/bin/sh\nexit 0\n')
-  await chmod(executable, 0o755)
+  const executable = fakeExecutable(path.join(env.PATH, 'pi'))
   try {
     await fn({ env, executable })
   } finally {
@@ -56,7 +55,7 @@ describe('the Pi adapter', () => {
       assert.match(plan.nativeSession, /^cf-1-zeus-[0-9a-f]{8}$/)
       const extension = plan.argv[2]
       assert.match(
-        extension,
+        extension.replaceAll('\\', '/'),
         /extensions\/pi\/[0-9a-f]+\/hosts\/pi-extension\/consensflow-delivery\.mjs$/,
       )
       const skill = path.join(
