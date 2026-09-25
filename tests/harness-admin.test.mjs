@@ -112,10 +112,12 @@ test('each install method names itself and the command that updates it the same 
         ['/Users/me/.local/share/claude/versions/2.1.280', 'update'],
       ],
     )
-    const pi = releaseSource(
-      'pi',
-      '/usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js',
-      t.env,
+    const pi = posix(
+      releaseSource(
+        'pi',
+        '/usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js',
+        t.env,
+      ),
     )
     assert.deepEqual(
       [pi.distribution, pi.update],
@@ -190,7 +192,7 @@ test('updates a harness with its own tool, checks it again, and says what happen
     }
     assert.deepEqual(
       [done.state, done.before, done.after, done.command, done.output, done.harness.version.value],
-      ['updated', '1.0.0', '1.0.1', `${join(bin, 'codex')} update`, 'Updated to 1.0.1', '1.0.1'],
+      ['updated', '1.0.0', '1.0.1', `${codexPath} update`, 'Updated to 1.0.1', '1.0.1'],
     )
     assert.equal(done.harness.update.state, 'current', 'checked again after the update')
 

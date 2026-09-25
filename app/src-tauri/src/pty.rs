@@ -967,6 +967,7 @@ fn signal_for_termination(pane: &mut Pane) -> Result<bool, PaneError> {
     #[cfg(target_os = "macos")]
     pane.process_tree.terminate()?;
 
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut child_exited = has_exited(pane)?;
 
     #[cfg(unix)]
@@ -1388,6 +1389,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn kill_closes_the_reader_and_reaps_the_process_group() {
         let _pty_guard = serial_pty_test();

@@ -800,6 +800,7 @@ struct PeerSendRequest {
     socket: PathBuf,
     peer_pid: i32,
     #[serde(default)]
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     allow_descendant: bool,
     body: String,
     timeout_ms: u64,
@@ -1701,7 +1702,9 @@ fn agents_url(roster: &RosterHandle, page: &str) -> Result<tauri::Url, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::io::Read;
+    #[cfg(unix)]
     use std::time::Duration;
 
     #[test]

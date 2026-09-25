@@ -257,6 +257,7 @@ fn inherited_session_variables<'a>(names: impl IntoIterator<Item = &'a str>) -> 
 /// with one previous file kept once it passes `limit` bytes. A Finder-launched
 /// app's stderr is /dev/null, so panics and daemon errors used to leave no
 /// trace at all.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn prepare_error_log(home: &std::path::Path, limit: u64) -> std::io::Result<std::path::PathBuf> {
     let directory = home.join("app");
     std::fs::create_dir_all(&directory)?;

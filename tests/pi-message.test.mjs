@@ -338,6 +338,10 @@ describe('consensflow Pi worker followup', () => {
       await writeFile(join(s.inbox, `${id}.json`), record)
       await s.extension.consume()
       assert.deepEqual(s.pi.sent, ['acknowledged followup'])
+      // A consume that found the first pass still running queues a rerun; the
+      // copy goes when that rerun comes, not before.
+      while ((await exists(join(s.inbox, `${id}.json`))) && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 5))
       assert.equal(await exists(join(s.inbox, `${id}.json`)), false, s.logs.join('; '))
     } finally {
       await s.close()

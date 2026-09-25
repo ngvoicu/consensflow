@@ -87,6 +87,7 @@ struct Lifecycle {
 
 struct TransportShutdown {
     requested: AtomicBool,
+    #[cfg_attr(not(unix), allow(dead_code))]
     wait_lock: Mutex<()>,
     ready: Condvar,
 }
@@ -967,10 +968,12 @@ impl TransportShutdown {
         self.ready.notify_all();
     }
 
+    #[cfg_attr(not(unix), allow(dead_code))]
     fn is_requested(&self) -> bool {
         self.requested.load(Ordering::Acquire)
     }
 
+    #[cfg_attr(not(unix), allow(dead_code))]
     fn wait_for_retry(&self) {
         let guard = self
             .wait_lock
