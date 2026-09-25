@@ -1,0 +1,232 @@
+{
+  "scenario": "six-decisions",
+  "model": "claude-sonnet-5",
+  "staffModel": "claude-haiku-4-5-20251001",
+  "run": 1,
+  "seconds": 1355,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Termină draftul content/legislatie-ro.md (site despre burnout la locul de muncă, RO+EN; paginile site-ului sunt sub sit…",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-worker-tidy-summit"
+      },
+      {
+        "number": 2,
+        "title": "Tradu în engleză fișierul content/legislatie-ro.md (varianta finală, după acceptarea task-ului T-1 care i-a completat s…",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-worker-rusty-canyon"
+      },
+      {
+        "number": 3,
+        "title": "Creează paginile noi de legislație și adaugă linkul „Legislație”/„Legislation” în meniul de jos (footer) al site-ului, …",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-worker-olive-tundra"
+      },
+      {
+        "number": 4,
+        "title": "Marchează docs/document-de-referinta-hr.md ca depășit, acum că pagina publică de legislație există (site/legislatie.htm…",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-worker-coral-pebble"
+      }
+    ],
+    "parallel": 1,
+    "advice": 0,
+    "reviews": 0,
+    "questionsToHuman": [
+      {
+        "id": 2,
+        "options": false,
+        "body": "Am pus pe planșă T-1 (termină content/legislatie-ro.md, cu fapte verificate din Codul Muncii, Legea 319/2006, HG 355/2007, OUG 158/2005 și stadiul din sept. 2026 al inițiativei UE), T-2 (traducerea în"
+      }
+    ],
+    "notesToHuman": [
+      {
+        "id": 17,
+        "body": "Gata toate cele 4 task-uri (T-1..T-4), toate acceptate după verificare linie cu linie (nu doar din rezumate):\n\n- **T-1**: content/legislatie-ro.md complet — a trecut prin 3 runde de corecturi până a f"
+      }
+    ],
+    "chiefId": 2,
+    "chiefTurns": 44,
+    "chiefEdits": 3,
+    "chiefLastWords": "## Rezumat\n\nToate cele 4 task-uri sunt gata și acceptate, verificate de mine linie cu linie (nu doar din rezumatele lucrătorilor — la T-1 asta a prins de fapt o citare de lege greșită pe care rezumatul n-o menționa):\n\n- **content/legislatie-ro.md** — terminat, cu trimiteri verificate la Codul Muncii, Legea 319/2006, HG 355/2007, OUG 158/2005 și stadiul din septembrie 2026 al inițiativei europene.\n- **content/legislatie-en.md** — tradus, verificat.\n- **site/legislatie.html** + **site/en/legislation.html** — paginile noi există, cu buton „Legislație”/„Legislation” adăugat în footer pe index, evaluare și en/index.\n- **docs/document-de-referinta-hr.md** — marcat „Depășit”, cu trimitere la pagina nouă.\n\n**Nimic nu e publicat** — totul rămâne fișiere locale, exact cum ai cerut.\n\nRămân trei marcaje `[de verificat]`/`[to verify]` în text (articolul exact din Legea 319/2006 pentru dreptul de retragere din pericol; stadiul propunerilor din Parlamentul României despre burnout — sursele mele s-au contrazis; conținutul viitoarei directive UE — încă necunoscut, votul e abia în octombrie). Ți-am scris tot pe planșă (m-17) și aștept să-mi spui dacă vrei să le verificăm mai departe sau rămân ca notă internă până publici."
+  },
+  "checks": [
+    {
+      "name": "the owner is asked on the board, at least three questions",
+      "ok": false
+    },
+    {
+      "name": "at least one question offers options",
+      "ok": false
+    },
+    {
+      "name": "a finding reaches the owner as a note",
+      "ok": true
+    },
+    {
+      "name": "at least two tasks go on the board",
+      "ok": true
+    },
+    {
+      "name": "two tasks run side by side at some point",
+      "ok": false
+    },
+    {
+      "name": "finished work goes to a review",
+      "ok": false
+    },
+    {
+      "name": "the chief's own edits stay under ten",
+      "ok": true
+    }
+  ],
+  "log": [
+    {
+      "at": 64,
+      "line": "chief ready; typing the prompt"
+    },
+    {
+      "at": 69,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 570,
+      "line": "chief working; tasks T-1:queued"
+    },
+    {
+      "at": 575,
+      "line": "chief working; tasks T-1:working"
+    },
+    {
+      "at": 585,
+      "line": "chief working; tasks T-1:working T-2:open"
+    },
+    {
+      "at": 600,
+      "line": "chief working; tasks T-1:working T-2:open T-3:open"
+    },
+    {
+      "at": 620,
+      "line": "answered m-2 (Am pus pe planșă T-1 (termină content/legislatie-ro.md, cu fapte verif) with: da, cum recomanzi"
+    },
+    {
+      "at": 630,
+      "line": "chief working; tasks T-1:done T-2:open T-3:open"
+    },
+    {
+      "at": 655,
+      "line": "chief working; tasks T-1:done T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 740,
+      "line": "chief working; tasks T-1:working T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 745,
+      "line": "chief idle; tasks T-1:working T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 820,
+      "line": "chief working; tasks T-1:done T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 880,
+      "line": "chief working; tasks T-1:working T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 885,
+      "line": "chief idle; tasks T-1:working T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 895,
+      "line": "chief working; tasks T-1:done T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 900,
+      "line": "chief working; tasks T-1:accepted T-2:queued T-3:open T-4:open"
+    },
+    {
+      "at": 905,
+      "line": "chief idle; tasks T-1:accepted T-2:working T-3:open T-4:open"
+    },
+    {
+      "at": 940,
+      "line": "chief idle; tasks T-1:accepted T-2:done T-3:open T-4:open"
+    },
+    {
+      "at": 945,
+      "line": "chief working; tasks T-1:accepted T-2:done T-3:open T-4:open"
+    },
+    {
+      "at": 995,
+      "line": "chief working; tasks T-1:accepted T-2:working T-3:open T-4:open"
+    },
+    {
+      "at": 1000,
+      "line": "chief idle; tasks T-1:accepted T-2:working T-3:open T-4:open"
+    },
+    {
+      "at": 1005,
+      "line": "chief idle; tasks T-1:accepted T-2:done T-3:open T-4:open"
+    },
+    {
+      "at": 1010,
+      "line": "chief working; tasks T-1:accepted T-2:done T-3:open T-4:open"
+    },
+    {
+      "at": 1015,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:working T-4:open"
+    },
+    {
+      "at": 1020,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:working T-4:open"
+    },
+    {
+      "at": 1095,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:done T-4:open"
+    },
+    {
+      "at": 1100,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:done T-4:open"
+    },
+    {
+      "at": 1125,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:working"
+    },
+    {
+      "at": 1130,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:accepted T-4:working"
+    },
+    {
+      "at": 1145,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:done"
+    },
+    {
+      "at": 1155,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted"
+    },
+    {
+      "at": 1235,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted"
+    },
+    {
+      "at": 1355,
+      "line": "quiet: the run is over"
+    }
+  ]
+}

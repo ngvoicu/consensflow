@@ -65,9 +65,20 @@ the whole transcripts or you can invent cases/prompts" → "da".
 - [x] [TEST-CE-01] `measure(ledgerFile, project)` reads a ledger and reports the counts above; a unit test builds a ledger with the real API (tasks, questions, notes, a transcript copy with edit results) and checks every number; the scenario's `verdict(metrics)` names each expectation that held or failed.
 - [x] [IMPL-CE-02] `evals/run.mjs` (the live run, the scripted human, the report), `evals/measure.mjs`, `evals/scenarios/six-decisions.mjs`, its fixture, README; the old evals removed. Satisfies TEST-CE-01.
 
+### Phase C: every harness in every role [ ]
+
+Gabriel, after the first run: "test all the combinations of harnesses, cc,
+codex, pi and opencode with cheap models, in every role from chief to
+workers, advisors and reviewers; simpler and more complex cases too; keep
+the tests, do not delete or replace them if they are good; free text as an
+answer to questions; and devin."
+
+- [ ] [TEST-CE-04] `staffFor(harnesses)` gives each harness two workers, an advisor and a reviewer on its cheap model, all standard tier; `chiefEnvironment(chief, model)` sets the model through the environment for Claude Code and OpenCode and says "default" for the rest; `answerFor(scenario, question)` takes the scenario's first matching pattern (free text), else the first option, else the fallback. Unit tests, no spend.
+- [ ] [IMPL-CE-05] `--chief` and `--staff` on the runner, `evals/plan.mjs`, reports named by scenario, chief and staff and kept in git, `npm run eval:summary`; the `simple-fix` and `complex-launch` scenarios on the shared `site` fixture; `answers` on every scenario. Satisfies TEST-CE-04.
+
 ### Phase B: the first measurement [ ]
 
-- [ ] [VERIFY-CE-03] One run with a Sonnet chief to prove the pipe, then runs with the chief on Opus, before and after any change to the chief's text; the numbers in the TDD log.
+- [ ] [VERIFY-CE-03] One run with a Sonnet chief to prove the pipe (done 2026-09-25), one with a chief and a staff on other harnesses, then runs with the chief on Opus, before and after any change to the chief's text; the numbers in the TDD log.
 
 ## TDD log
 

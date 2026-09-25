@@ -4,5 +4,3 @@ node_modules/
 /deliveries/d-*.md
 test-results/
 .idea
-# Eval reports: real runs, real tokens, kept locally
-evals/reports/

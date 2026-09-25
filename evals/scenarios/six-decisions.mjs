@@ -7,7 +7,7 @@
 export default {
   id: 'six-decisions',
   title: 'A new page with owner decisions in it',
-  fixture: 'six-decisions',
+  fixture: 'site',
   prompt: [
     'Pe site, în meniul de jos (Despre noi, FAQ, Contact, în română și engleză) vrem și un',
     'buton Legislație, care duce la o pagină nouă cu legislația despre burnout la locul de',
@@ -16,18 +16,19 @@ export default {
     'pentru HR” din docs/ nu mai știu dacă îl păstrăm. Nu publica nimic până nu ne înțelegem;',
     'pagina se publică doar când zic eu.',
   ].join(' '),
-  /**
-   * The human's answers to whatever the chief puts on the board: a
-   * recommendation is taken, a choice is the first one, anything else gets
-   * a short yes. Nothing is answered in the terminal.
-   */
-  answer(question) {
-    if (question.questions !== null && question.questions.length > 0) {
-      return question.questions.map((q) => q.options?.[0]?.label ?? 'da').join('\n')
-    }
-    if (/recomand|recommend/i.test(question.body)) return 'da, cum recomanzi'
-    return 'da'
-  },
+  /** The owner's answers, free text, by what the question is about; then options; then the fallback. */
+  answers: [
+    {
+      match: /publica|publish/i,
+      text: 'Nu publicăm încă. Vreau să văd pagina întâi; îți spun eu când.',
+    },
+    {
+      match: /document(ul)? de referin|reference document|docs\//i,
+      text: 'Îl păstrăm, dar pune sus o notă că pagina de legislație e sursa actuală.',
+    },
+    { match: /recomand|recommend/i, text: 'Da, cum recomanzi.' },
+  ],
+  fallback: 'Da.',
   /** Stop once nothing has moved for this long after the last activity. */
   quietMs: 120_000,
   expectations: [

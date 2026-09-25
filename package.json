@@ -24,6 +24,7 @@
     "format": "biome format --write .",
     "check": "npm run lint && npm test",
     "eval": "node evals/run.mjs",
+    "eval:summary": "node evals/summarize.mjs",
     "test:integration": "node --test --test-concurrency=1 tests/integration/*.test.mjs",
     "smoke": "CONSENSFLOW_SMOKE=1 node --test tests/smoke.test.mjs",
     "load": "CONSENSFLOW_LOAD=1 node --test tests/load/*.test.mjs",
