@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { dirname, isAbsolute, join } from 'node:path'
 import { promisify } from 'node:util'
 import { runnable } from './harnesses.js'
@@ -23,7 +24,11 @@ export function supportedDevinVersion(value) {
 }
 
 async function nativeConfiguration(env) {
-  const file = join(env.XDG_CONFIG_HOME ?? join(env.HOME, '.config'), 'devin', 'config.json')
+  const file = join(
+    env.XDG_CONFIG_HOME ?? join(env.HOME ?? homedir(), '.config'),
+    'devin',
+    'config.json',
+  )
   let source
   try {
     source = await readFile(file, 'utf8')

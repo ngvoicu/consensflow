@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { readFileSync, realpathSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { DEVIN_MINIMUM_VERSION, supportedDevinVersion } from './devin-install.js'
@@ -68,7 +69,7 @@ export function releaseSource(id, executable, env) {
     try {
       const settings = JSON.parse(
         readFileSync(
-          join(env.CLAUDE_CONFIG_DIR ?? join(env.HOME, '.claude'), 'settings.json'),
+          join(env.CLAUDE_CONFIG_DIR ?? join(env.HOME ?? homedir(), '.claude'), 'settings.json'),
           'utf8',
         ),
       )

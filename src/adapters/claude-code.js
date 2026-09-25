@@ -199,7 +199,7 @@ export function claudeCodeAdapter({
  */
 async function claudeStatuses(env) {
   const directory = path.join(
-    env.CLAUDE_CONFIG_DIR ?? path.join(env.HOME ?? '', '.claude'),
+    env.CLAUDE_CONFIG_DIR ?? path.join(env.HOME ?? homedir(), '.claude'),
     'sessions',
   )
   const statuses = new Map()
