@@ -2,7 +2,8 @@
 <!-- Common Controls 6 for the test binaries on Windows: the dialog code they
      link imports TaskDialogIndirect, which only that version of comctl32
      exports. The app itself gets its manifest from Tauri; cargo gives a test
-     binary none, so it loaded the old comctl32 and never started. -->
+     binary none, so it loaded the old comctl32 and never started. The runner
+     in scripts/with-manifest.mjs puts this file beside each test binary. -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <dependency>
     <dependentAssembly>
