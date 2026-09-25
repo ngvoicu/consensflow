@@ -627,6 +627,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn raw_recorder(table: &PaneTable, byte_count: usize) -> (PaneKey, Box<dyn Read + Send>) {
         let script = format!("stty raw -echo; printf ready; od -An -tx1 -N {byte_count}");
         let OpenedPane { key, mut reader } = table
@@ -641,6 +642,7 @@ mod tests {
         (key, reader)
     }
 
+    #[cfg(unix)]
     fn raw_recorder_at(table: &PaneTable, key: PaneKey, byte_count: usize) -> Box<dyn Read + Send> {
         let script = format!("stty raw -echo; printf ready; od -An -tx1 -N {byte_count}");
         let mut reader = table
@@ -656,6 +658,7 @@ mod tests {
         reader
     }
 
+    #[cfg(unix)]
     fn await_ready(reader: &mut Box<dyn Read + Send>) {
         let mut ready = [0_u8; 5];
         reader.read_exact(&mut ready).expect("raw recorder ready");
@@ -838,6 +841,8 @@ mod tests {
         assert!(records[1].at.duration_since(records[0].at) >= Duration::from_millis(25));
     }
 
+    #[cfg(unix)]
+
     #[test]
     fn human_bytes_latch_the_draft_bump_epoch_and_emit_enter() {
         let _pty_guard = serial_pty_test();
@@ -1002,6 +1007,8 @@ mod tests {
         let _ = table.kill(&responsive_key);
     }
 
+    #[cfg(unix)]
+
     #[test]
     fn native_editor_claim_preserves_latch_and_rejects_newer_input() {
         let _pty_guard = serial_pty_test();
@@ -1039,6 +1046,8 @@ mod tests {
         assert!(arbiter.snapshot(&key).expect("snapshot").draft_latched);
         table.kill(&key).expect("kill pane");
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn epoch_claims_and_pastes_share_stale_and_draft_guards() {
@@ -1079,6 +1088,8 @@ mod tests {
             Err(ArbiterError::Stale)
         ));
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn delayed_clear_for_submission_a_preserves_newer_draft_b() {
@@ -1151,6 +1162,8 @@ mod tests {
         assert!(!arbiter.snapshot(&key).expect("cleared state").draft_latched);
         assert_eq!(read_hex(reader), "6472616674410d42210d");
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn clear_rejects_unissued_and_future_submission_epochs() {

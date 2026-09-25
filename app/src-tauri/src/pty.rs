@@ -1109,10 +1109,12 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn shell(script: &str) -> Vec<String> {
         vec!["/bin/sh".to_string(), "-c".to_string(), script.to_string()]
     }
 
+    #[cfg(unix)]
     fn open_shell(table: &PaneTable, script: &str) -> OpenedPane {
         table
             .open(
@@ -1193,6 +1195,8 @@ mod tests {
             "the blocker names itself so the dialog can ask for a restart"
         );
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn update_installation_blocks_all_pane_launches_and_failure_restores_admission() {
@@ -1280,6 +1284,8 @@ mod tests {
         result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(1)
     }
 
+    #[cfg(unix)]
+
     #[test]
     fn open_reads_hello_then_eof() {
         let _pty_guard = serial_pty_test();
@@ -1297,6 +1303,8 @@ mod tests {
             }]
         );
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn pane_table_keys_same_id_by_generation() {
@@ -1341,6 +1349,8 @@ mod tests {
         assert_eq!(read_to_end(second_reader), b"");
     }
 
+    #[cfg(unix)]
+
     #[test]
     fn streamed_open_at_preserves_the_store_reserved_identity() {
         let _pty_guard = serial_pty_test();
@@ -1367,6 +1377,8 @@ mod tests {
         }
         assert_eq!(bytes, b"reserved");
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn resize_reaches_the_child_terminal() {
@@ -1587,6 +1599,8 @@ mod tests {
         assert!(!process_exists(child_pid), "background child survived Drop");
     }
 
+    #[cfg(unix)]
+
     #[test]
     fn environment_map_reaches_the_child() {
         let _pty_guard = serial_pty_test();
@@ -1604,6 +1618,8 @@ mod tests {
 
         assert_eq!(read_to_end(reader), b"from-env-map");
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn child_environment_is_inherited_then_overlaid() {
@@ -1645,6 +1661,8 @@ mod tests {
             .expect("open child with the supplied sentinel");
         assert_eq!(read_to_end(reader), b"role-value");
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn raw_mode_recorder_receives_exact_bytes() {
@@ -1753,6 +1771,8 @@ mod tests {
         let _ = table.kill(&responsive_key);
     }
 
+    #[cfg(unix)]
+
     #[test]
     fn pane_table_write_paste_writes_brackets_then_delayed_enter() {
         let _pty_guard = serial_pty_test();
@@ -1827,6 +1847,8 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+
     #[test]
     fn reader_activity_resets_idle_then_silence_increases_it() {
         let _pty_guard = serial_pty_test();
@@ -1860,6 +1882,8 @@ mod tests {
         assert!(idle_after_silence >= idle_after_output + 80);
         table.kill(&streamed.key).expect("kill delayed-output pane");
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn unacked_yes_output_is_bounded_then_resumes_after_ack() {
@@ -1896,6 +1920,8 @@ mod tests {
         table.kill(&key).expect("kill streamed pane");
         assert_output_closes(output);
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn ack_rejects_future_sequences_and_cumulative_progress_stays_bounded() {
@@ -1973,6 +1999,8 @@ mod tests {
         table.kill(&key).expect("kill chunked output pane");
         assert_output_closes(output);
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn input_remains_responsive_while_output_waits_for_ack() {

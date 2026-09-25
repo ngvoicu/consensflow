@@ -1824,11 +1824,13 @@ mod tests {
         .unwrap();
         assert!(validate_open_request(&relative).is_err());
 
+        // A program that is absolute here: `/bin/sh` is not, on Windows.
+        let program = if cfg!(windows) { "C:\\Windows\\System32\\cmd.exe" } else { "/bin/sh" };
         let absolute: OpenRequest = parse_body(json!({
             "id":"p-1",
             "generation":1,
             "cwd":"/tmp",
-            "argv":["/bin/sh"],
+            "argv":[program],
             "dropEnv":["OPENAI_API_KEY"],
             "size":{"rows":24,"cols":80},
         }))
