@@ -936,12 +936,8 @@ class Ledger {
    * A task on the board may `needs` other tasks: it waits until each is
    * accepted. With `before`, tasks still on the board wait for this one.
    */
-  createTask(
-    projectId,
-    { from, to, after, pool, tier, purpose, body, title, needs = [], before = [] },
-  ) {
+  createTask(projectId, { from, to, after, pool, tier, purpose, body, needs = [], before = [] }) {
     requireText(body, 'body', MAX_BODY)
-    if (title !== undefined) requireText(title, 'title', MAX_TITLE)
     const needed = requireNumbers(needs, 'needs')
     const blocking = requireNumbers(before, 'before')
     if (to === undefined && after === undefined) {
@@ -1008,7 +1004,7 @@ class Ledger {
         .run(
           projectId,
           next,
-          title ?? titleOf(body),
+          titleOf(body),
           body,
           requester.id,
           assignee?.id ?? null,

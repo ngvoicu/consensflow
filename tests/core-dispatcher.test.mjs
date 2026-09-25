@@ -591,6 +591,43 @@ describe('the dispatcher', () => {
     })
   })
 
+  it("brings a tell to a task whose window is gone on that window's own conversation, still paused", async () => {
+    await setup(async (context) => {
+      const { project, id } = await withTeam(context)
+      context.ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const native = context.ledger.currentConversation(id('zeus')).nativeSession
+      await context.host.exit('zeus')
+      assert.equal(context.ledger.task(project.id, 1).state, 'paused')
+      const told = context.ledger.ask(project.id, {
+        from: 'lead',
+        to: 'zeus',
+        task: 1,
+        body: 'Which grammar did you start from?',
+        urgent: true,
+      })
+      await context.dispatcher.pass()
+      const launch = context.adapter.prepared.at(-1)
+      assert.deepEqual(
+        [launch.participant.handle, launch.resume],
+        ['zeus', native],
+        'the same conversation',
+      )
+      assert.match(
+        launch.message,
+        /^\[ConsensFlow m-\d+ · T-1 · question from @lead\]\nWhich grammar did you start from\?\n\nT-1 is paused for this\./,
+      )
+      await context.dispatcher.pass()
+      assert.equal(
+        context.ledger.task(project.id, 1).state,
+        'paused',
+        'the task waits for the lead',
+      )
+      assert.notEqual(context.ledger.message(told.id).state, 'queued')
+    })
+  })
+
   it("pauses a working task in its open window: the agent is interrupted once, its output not collected, and the lead's words resume it there", async () => {
     await setup(async (context) => {
       const { project } = await withTeam(context)
