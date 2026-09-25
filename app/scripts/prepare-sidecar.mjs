@@ -31,7 +31,9 @@ const TRIPLES = {
   'darwin-x64': 'x86_64-apple-darwin',
   'linux-x64': 'x86_64-unknown-linux-gnu',
   'linux-arm64': 'aarch64-unknown-linux-gnu',
+  'win32-x64': 'x86_64-pc-windows-msvc',
 }
+const WINDOWS = process.platform === 'win32'
 
 function platformKey() {
   return `${process.platform}-${process.arch}`
@@ -45,22 +47,28 @@ function targetTriple() {
   return triple
 }
 
+/**
+ * The official Node build for this platform, from nodejs.org's archive: a
+ * tarball with `bin/node` inside, or on Windows a zip with `node.exe` at its
+ * root. Both `curl` and `tar` ship with Windows 10 and later, and its `tar`
+ * reads zips.
+ */
 function fetchNode() {
-  const key = platformKey().replace('-', '-')
+  const key = WINDOWS ? 'win-x64' : platformKey()
   const name = `node-${NODE_VERSION}-${key}`
-  const archive = join(CACHE, `${name}.tar.gz`)
+  const archive = join(CACHE, WINDOWS ? `${name}.zip` : `${name}.tar.gz`)
   const extracted = join(CACHE, name)
 
   mkdirSync(CACHE, { recursive: true })
   if (!existsSync(archive)) {
-    const url = `https://nodejs.org/dist/${NODE_VERSION}/${name}.tar.gz`
+    const url = `https://nodejs.org/dist/${NODE_VERSION}/${name}.${WINDOWS ? 'zip' : 'tar.gz'}`
     process.stdout.write(`fetching ${url}\n`)
     execFileSync('curl', ['-fsSL', '-o', archive, url], { stdio: ['ignore', 'inherit', 'inherit'] })
   }
   if (!existsSync(extracted)) {
-    execFileSync('tar', ['-xzf', archive, '-C', CACHE], { stdio: 'inherit' })
+    execFileSync('tar', ['-xf', archive, '-C', CACHE], { stdio: 'inherit' })
   }
-  return join(extracted, 'bin', 'node')
+  return WINDOWS ? join(extracted, 'node.exe') : join(extracted, 'bin', 'node')
 }
 
 function copyCli() {
@@ -84,9 +92,10 @@ function copyCli() {
 const triple = targetTriple()
 const node = fetchNode()
 mkdirSync(BINARIES, { recursive: true })
-const sidecar = join(BINARIES, `node-${triple}`)
+// Tauri names a sidecar by its target triple, and on Windows expects `.exe`.
+const sidecar = join(BINARIES, `node-${triple}${WINDOWS ? '.exe' : ''}`)
 cpSync(node, sidecar)
-execFileSync('chmod', ['+x', sidecar])
+if (!WINDOWS) execFileSync('chmod', ['+x', sidecar])
 const version = copyCli()
 
 process.stdout.write(`sidecar: ${sidecar}\n`)

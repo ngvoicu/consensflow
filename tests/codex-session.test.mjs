@@ -385,7 +385,9 @@ it('launches the bundled supervisor for owned panes without changing legacy Code
   assert.deepEqual(withNativeBridge(invocation, { channel: null }, process.execPath), invocation)
 })
 
-it('keeps native Codex sockets private and inside ConsensFlow home', async (t) => {
+it('keeps native Codex sockets private and inside ConsensFlow home', {
+  skip: process.platform === 'win32' && 'Unix sockets only',
+}, async (t) => {
   const root = await mkdtemp('/tmp/cf-socket-home-')
   t.after(() => rm(root, { recursive: true, force: true }))
   const home = join(root, '.consensflow')

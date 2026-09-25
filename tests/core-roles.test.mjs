@@ -96,7 +96,7 @@ describe('role instructions for the new core', () => {
     assert.match(skill, /only the human gives you work, here in your terminal/)
     assert.match(skill, /the human never accepts work on the board/)
     // One role text per role, read by the core: no host payload carries a second copy.
-    const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
+    const root = path.resolve(import.meta.dirname, '..')
     assert.equal(existsSync(path.join(root, 'hosts', 'claude')), false, 'no claude payload')
     assert.equal(existsSync(path.join(root, 'hosts', 'pi')), false, 'no pi payload')
     // The personal name must not appear in anything that ships.

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
+import { pathToFileURL } from 'node:url'
 import { launchConfiguration } from '../src/channels.js'
 import { HarnessAdmin } from '../src/harness-admin.js'
 import { prepareApp } from '../src/install.js'
@@ -25,7 +26,7 @@ test('OpenCode preparation is private, immutable, importable and installed with 
   const extension = prepareOpenCodeExtension(f.env)
   assert.equal(extension.state, 'installed-unverified')
   assert.ok(extension.path.startsWith(f.env.CONSENSFLOW_HOME))
-  assert.equal(typeof (await import(extension.path)).tui, 'function')
+  assert.equal(typeof (await import(pathToFileURL(extension.path).href)).tui, 'function')
   assert.deepEqual(prepareOpenCodeExtension(f.env), extension)
   assert.equal(prepareApp(f.env).opencodeExtension.path, extension.path)
   assert.equal(readFileSync(global, 'utf8'), '{"plugin":["user-plugin"]}')

@@ -5,7 +5,6 @@ import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { describe, it } from 'node:test'
-import { fileURLToPath } from 'node:url'
 import {
   OVERDUE_MS,
   openLedger,
@@ -19,7 +18,7 @@ import {
  * project, participant, task and inbox message. Each test gets a throwaway
  * directory and a clock that moves one second per reading.
  */
-const LEDGER = fileURLToPath(new URL('../src/ledger/index.js', import.meta.url))
+const LEDGER = new URL('../src/ledger/index.js', import.meta.url).href
 
 async function withDir(fn) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-ledger-'))

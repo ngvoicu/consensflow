@@ -134,7 +134,9 @@ function baseArgs(fx, overrides = {}) {
   return Object.entries(values).flatMap(([key, value]) => [`--${key}`, value])
 }
 
-describe('TEST-PANE-150 prepare-update metadata', () => {
+describe('TEST-PANE-150 prepare-update metadata', {
+  skip: process.platform === 'win32' && 'the macOS release pipeline; Windows packaging is its own',
+}, () => {
   it('builds correct deterministic Tauri metadata on the happy path', () => {
     const fx = fixture()
     try {

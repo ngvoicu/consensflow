@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
+import { pathToFileURL } from 'node:url'
 import { preparePiExtension } from '../src/pi-install.js'
 import { tempEnv } from './helpers.mjs'
 
@@ -29,7 +30,7 @@ test('detected Pi gets an immutable private extension with working imports and n
     const first = preparePiExtension(t.env)
     assert.equal(first.state, 'installed-unverified')
     assert.ok(first.path.startsWith(t.env.CONSENSFLOW_HOME))
-    await import(first.path)
+    await import(pathToFileURL(first.path).href)
     assert.deepEqual(preparePiExtension(t.env), first)
     assert.equal(
       readFileSync(join(global, 'settings.json'), 'utf8'),

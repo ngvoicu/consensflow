@@ -37,7 +37,12 @@ describe('the daemon and its log', () => {
     ['its input ending', (child) => child.stdin.end(), 'stdin ended'],
     ['SIGTERM', (child) => child.kill('SIGTERM'), 'SIGTERM'],
   ]) {
-    it(`starts its log with its pid and ends it with why it stopped: ${how}`, async () => {
+    it(`starts its log with its pid and ends it with why it stopped: ${how}`, {
+      skip:
+        reason === 'SIGTERM' &&
+        process.platform === 'win32' &&
+        'Node on Windows never delivers SIGTERM',
+    }, async () => {
       const home = await mkdtemp(path.join(os.tmpdir(), 'cf-daemon-'))
       try {
         const child = spawn(process.execPath, [EDITOR], {

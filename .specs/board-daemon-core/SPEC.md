@@ -147,10 +147,23 @@ project's home but in .consensflow-candidate / .consensflow (the home)."
 - [x] [TEST-BDC-15] The daemon keeps its own copy of every window's conversation in the ledger (the home's `consensflow.db`, a `transcript` table that lives and dies with its conversation's project): each look at a window copies the new items and the one still being written, an item is cut at 64 000 characters, a record that shrank is copied over. `ledger.transcript(project, task)` reads the assignee's conversations in order, the last 300 items by default; a continued window shows the same copy; a task on the board shows nothing. The page reads it with `task.transcript`; the drawer shows "What the agent did" under the thread with each item's role, text and whether it is still being written. Retention: with the project. Answers are still collected from the live record, as before.
 - [x] [IMPL-BDC-16] `copyTranscript` and `transcript` in the ledger (migration 8), `#copyTranscript` in the dispatcher, `task.transcript` in the page and the Rust allow-list, the drawer section; satisfies TEST-BDC-15. Done 2026-09-21.
 
-### Phase H: Windows [planned]
+### Phase H: Windows [in progress since 2026-09-25]
 
-- [ ] [TEST-BDC-17] Windows runner for Node and Rust suites; process-tree termination and single-instance guarantees on Windows.
-- [ ] [IMPL-BDC-18] Job Objects in the PTY host, Windows updater path, path and shim handling.
+The code stays on this branch behind platform guards and the macOS gate;
+Gabriel's Windows 11 x64 machine is a build-and-test target reached over
+SSH (the source tree copied as a tarball, never a checkout), with only the
+native Claude Code installed there by his choice. First run of the Node
+suite there: 671 tests, 591 pass, 77 fail; `cargo check` compiled every
+crate and stopped only at the missing Node sidecar.
+
+- [x] [IMPL-BDC-18a] One stop on every platform: the app ends the daemon's input and kills only what stays (`8052a58`); `stdin_is_pipe` on Windows.
+- [x] [IMPL-BDC-18b] Build inputs: the Node sidecar fetched as `node.exe` from Node's zip, `tauri.windows.conf.json` (NSIS, WebView2 bootstrapper), `bin/cf.cmd`; tests that hand absolute paths to `import()` or build the repo root from a URL fixed; macOS-only suites (release packaging, Claude's Unix-socket inbox, a Unix-socket test, SIGTERM) skip on Windows and say why.
+- [ ] [TEST-BDC-17a] The Node suite green on Windows: fake harnesses written as `.cmd` on Windows through one helper, path assertions that accept `\`, and the production gaps they expose: running a `.cmd` shim from Node (cmd.exe with proper quoting, or the `.exe` beside it), the `cf` launcher, `/`-only path checks in the harness updater.
+- [ ] [IMPL-BDC-18c] The Rust host compiles and its unit suite passes on Windows: `cfg` splits for the macOS-only modules, the error-log redirect, `bundled_cli` finding `node.exe`, the placeholder Windows tests in `arbiter.rs` made real.
+- [ ] [IMPL-BDC-18d] One Job Object per pane, kill-on-close, so closing a window ends the harness and everything it spawned; the process-tree module's Windows arm.
+- [ ] [TEST-BDC-17b] The integration suite on Windows: the headless bridge on ConPTY, a `claude.cmd` fake, launches and deliveries by paste.
+- [ ] [IMPL-BDC-18e] `tauri build` on Windows: the NSIS installer, install, open, the daemon starts and its log shows a clean stop on quit; then the updater: a `windows-x86_64` entry in the feed and an update by running the downloaded installer.
+- [ ] [TEST-BDC-17c] CI from zero: a workflow with a macOS job (the gate) and a Windows job (Node suite, `cargo test --lib`, clippy).
 
 ### Phase I: Acceptance [planned]
 
