@@ -1816,6 +1816,13 @@ mod tests {
 
     #[test]
     fn open_request_requires_absolute_launch_inputs() {
+        // A directory and a program that are absolute here: `/tmp` and
+        // `/bin/sh` are not, on Windows.
+        let (directory, program) = if cfg!(windows) {
+            ("C:\\Windows", "C:\\Windows\\System32\\cmd.exe")
+        } else {
+            ("/tmp", "/bin/sh")
+        };
         let relative: OpenRequest = parse_body(json!({
             "cwd":"relative",
             "argv":["sh"],
@@ -1824,13 +1831,6 @@ mod tests {
         .unwrap();
         assert!(validate_open_request(&relative).is_err());
 
-        // A directory and a program that are absolute here: `/tmp` and
-        // `/bin/sh` are not, on Windows.
-        let (directory, program) = if cfg!(windows) {
-            ("C:\\Windows", "C:\\Windows\\System32\\cmd.exe")
-        } else {
-            ("/tmp", "/bin/sh")
-        };
         let absolute: OpenRequest = parse_body(json!({
             "id":"p-1",
             "generation":1,
@@ -1845,16 +1845,16 @@ mod tests {
         let half_reserved: OpenRequest = parse_body(json!({
             "id":"p-1",
             "launchId":"launch-1",
-            "cwd":"/tmp",
-            "argv":["/bin/sh"],
+            "cwd":directory,
+            "argv":[program],
             "size":{"rows":24,"cols":80},
         }))
         .unwrap();
         assert!(validate_open_request(&half_reserved).is_err());
 
         let invalid_drop_env: OpenRequest = parse_body(json!({
-            "cwd":"/tmp",
-            "argv":["/bin/sh"],
+            "cwd":directory,
+            "argv":[program],
             "dropEnv":["BAD=NAME"],
         }))
         .unwrap();
@@ -1863,8 +1863,8 @@ mod tests {
             .contains("environment variable name"));
 
         assert!(parse_body::<OpenRequest>(json!({
-            "cwd":"/tmp",
-            "argv":["/bin/sh"],
+            "cwd":directory,
+            "argv":[program],
             "dropEnv":[],
             "silentlyIgnoredSecurityField":true,
         }))

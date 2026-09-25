@@ -1094,6 +1094,7 @@ mod tests {
     use std::sync::Arc;
     #[cfg(unix)]
     use std::thread;
+    #[cfg(unix)]
     use std::time::{Duration, Instant};
 
     use portable_pty::PtySize;
