@@ -30,6 +30,7 @@ reply does nothing.
     cf task accept T-3 · cf task reopen T-3 "…" · cf task cancel T-3
     cf task pause T-3             stop a worker's task: the agent stops, its window and work wait
     cf task resume T-3 "…"        go on with it: the same window, with your words
+    cf tell T-3 "…"               stop T-3 and put this to its window: its answer arrives as a message; then resume it
     cf task get T-3 · cf task list · cf inbox · cf inbox read m-12
     cf task get T-3 --transcript  what its window did so far (the last 10 items; --last 30 for more)
     cf ask --human "…" · cf answer m-12 "…"

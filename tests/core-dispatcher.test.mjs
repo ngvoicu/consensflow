@@ -394,6 +394,50 @@ describe('the dispatcher', () => {
     })
   })
 
+  it("delivers the lead's tell into the paused window once the agent is interrupted, and collects no result from it", async () => {
+    await setup(async (context) => {
+      const { project } = await withTeam(context)
+      context.ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.adapter.busy('zeus')
+      context.ledger.pauseTask(project.id, 1, { by: 'lead' })
+      const told = context.ledger.ask(project.id, {
+        from: 'lead',
+        to: 'zeus',
+        task: 1,
+        body: 'Stop: use grammar v2',
+        urgent: true,
+      })
+      await context.dispatcher.pass()
+      const pane = context.host.last('zeus')
+      assert.deepEqual(
+        context.host.requests.filter(([op]) => op === 'pane.input'),
+        [['pane.input', { id: pane.id, generation: pane.generation, bytes: [27] }]],
+        'the agent is interrupted first',
+      )
+      const zeus = context.adapter.agent('zeus')
+      assert.ok(
+        !zeus.items.some((i) => i.text.includes(`m-${told.id}`)),
+        'nothing pasted while it works',
+      )
+      context.adapter.answer('zeus', 'Half a parser')
+      await context.dispatcher.pass()
+      assert.match(
+        zeus.items.at(-1).text,
+        /^\[ConsensFlow m-\d+ · T-1 · question from @lead\]\nStop: use grammar v2\n\nT-1 is paused for this\. Answer with: cf answer m-\d+ "…"; the lead resumes the task\.$/,
+        'the tell goes in once the window is idle',
+      )
+      assert.equal(
+        context.ledger.task(project.id, 1).state,
+        'paused',
+        'its half-done output was not a result',
+      )
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.message(told.id).state, 'delivered')
+    })
+  })
+
   it('presses Escape twice in a row for a harness that asks for it', async () => {
     await setup(async (context) => {
       const { project } = await withTeam(context)

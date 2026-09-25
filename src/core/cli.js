@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
 import { askTheBoard } from '../../hosts/lib/question-door.js'
 
 /** `cf` inside a window the new core opened: the agents' commands (`USAGE` lists them). */
@@ -29,6 +27,8 @@ export const USAGE = `cf inside a ConsensFlow window: the board's commands.
   cf task reopen T-3 "…"            send a finished or failed task back with a follow-up
   cf task pause T-3                 stop a worker's task: the agent stops, its window and work wait
   cf task resume T-3 "…"            go on with it: the same window, with your words
+  cf tell T-3 "…"                   stop T-3 and put this to its window: its answer arrives as
+                                    a message; then cf task resume T-3 "…"
   cf inbox [read m-12]              what is waiting for you, or one message in full
   cf ask "…" [--human]              a question to whoever gave you your task (or the human)
   cf note "…" [--human]             something they should know; nothing waits on it
@@ -40,11 +40,7 @@ Add --json for machine output.`
 
 const HELP = new Set(['help', '--help', '-h'])
 
-export async function runCoreCli(
-  args,
-  env,
-  { out, err, cwd = process.cwd(), input = readStandardInput },
-) {
+export async function runCoreCli(args, env, { out, err, input = readStandardInput }) {
   const json = args.includes('--json')
   const words = args.filter((arg) => arg !== '--json')
   const call = client(env)
@@ -57,7 +53,7 @@ export async function runCoreCli(
       if (output !== null) out(JSON.stringify(output))
       return 0
     }
-    const result = await command(verb, rest, call, cwd)
+    const result = await command(verb, rest, call)
     out(json ? JSON.stringify(result.data, null, 2) : result.text)
     return 0
   } catch (cause) {
@@ -124,11 +120,11 @@ async function hook(harness, call, env, input) {
   }
 }
 
-async function command(verb, rest, call, cwd) {
+async function command(verb, rest, call) {
   if (verb === undefined || HELP.has(verb)) return { data: { usage: USAGE }, text: USAGE }
   switch (verb) {
     case 'task':
-      return taskCommand(rest, call, cwd)
+      return taskCommand(rest, call)
     case 'inbox': {
       if (rest[0] === 'read') {
         const id = messageId(rest[1])
@@ -142,12 +138,10 @@ async function command(verb, rest, call, cwd) {
       }
     }
     case 'note': {
-      const { flags, text } = split(rest, ['--human'], ['--to', '--task'])
-      const to = flags['--human'] ? 'human' : handle(flags['--to'])
+      const { flags, text } = split(rest, ['--human'], [])
       const { message } = await call('POST', '/api/notes', {
         body: requireText(text, 'cf note "what to know"'),
-        ...(to === undefined ? {} : { to }),
-        ...(flags['--task'] === undefined ? {} : { task: taskNumber(flags['--task']) }),
+        ...(flags['--human'] ? { to: 'human' } : {}),
       })
       return {
         data: message,
@@ -155,16 +149,25 @@ async function command(verb, rest, call, cwd) {
       }
     }
     case 'ask': {
-      const { flags, text } = split(rest, ['--human'], ['--to', '--task'])
-      const to = flags['--human'] ? 'human' : handle(flags['--to'])
+      const { flags, text } = split(rest, ['--human'], [])
       const { message } = await call('POST', '/api/questions', {
         body: requireText(text, 'cf ask "your question"'),
-        ...(to === undefined ? {} : { to }),
-        ...(flags['--task'] === undefined ? {} : { task: taskNumber(flags['--task']) }),
+        ...(flags['--human'] ? { to: 'human' } : {}),
       })
       return {
         data: message,
         text: `m-${message.id} asked @${message.recipient}. The answer arrives as a message; end your turn now.`,
+      }
+    }
+    case 'tell': {
+      const [id, ...words] = rest
+      const number = taskNumber(id)
+      const { message } = await call('POST', `/api/tasks/${number}/tell`, {
+        body: requireText(words.join(' '), 'cf tell T-<n> "what to put to its window now"'),
+      })
+      return {
+        data: message,
+        text: `T-${number} is paused and m-${message.id} put to @${message.recipient}; its answer arrives as a message. Then: cf task resume T-${number} "…"`,
       }
     }
     case 'answer': {
@@ -204,23 +207,22 @@ async function command(verb, rest, call, cwd) {
     }
     default:
       throw usage(
-        `unknown command ${JSON.stringify(verb ?? '')}: use task, inbox, ask, answer, team or whoami`,
+        `unknown command ${JSON.stringify(verb ?? '')}: use task, inbox, ask, note, tell, answer, team or whoami`,
       )
   }
 }
 
-async function taskCommand([action, ...rest], call, cwd) {
+async function taskCommand([action, ...rest], call) {
   if (HELP.has(action)) {
     const lines = USAGE.split('\n').filter((line) => /^\s+cf task |^ {36}/.test(line))
     return { data: { usage: lines.join('\n') }, text: lines.join('\n') }
   }
   if (action === 'add') {
-    const { flags, text, target } = split(
+    const { flags, text } = split(
       rest,
       ['--self', '--advice', '--review', '--design'],
-      ['--to', '--title', '--file', '--tier', '--purpose', '--after', '--needs', '--before'],
+      ['--tier', '--purpose', '--after', '--needs', '--before'],
     )
-    const to = handle(flags['--to'] ?? target)
     const tier = flags['--tier']
     const after = flags['--after'] === undefined ? undefined : taskNumber(flags['--after'])
     const needs = taskNumbers(flags['--needs'])
@@ -233,7 +235,6 @@ async function taskCommand([action, ...rest], call, cwd) {
       )
     }
     if (
-      to === undefined &&
       tier === undefined &&
       after === undefined &&
       flags['--self'] !== true &&
@@ -241,30 +242,24 @@ async function taskCommand([action, ...rest], call, cwd) {
     ) {
       throw usage(ADD_USAGE)
     }
-    const body =
-      flags['--file'] === undefined
-        ? requireText(text, ADD_USAGE)
-        : await readFile(resolve(cwd, flags['--file']), 'utf8')
+    const body = requireText(text, ADD_USAGE)
     const address = flags['--self']
       ? { self: true }
       : after !== undefined
         ? { after }
-        : to !== undefined
-          ? { to }
-          : flags['--design']
-            ? { design: true }
-            : {
-                tier,
-                ...(flags['--advice'] ? { advice: true } : {}),
-                ...(flags['--review'] ? { review: true } : {}),
-                ...(flags['--purpose'] === undefined ? {} : { purpose: flags['--purpose'] }),
-              }
+        : flags['--design']
+          ? { design: true }
+          : {
+              tier,
+              ...(flags['--advice'] ? { advice: true } : {}),
+              ...(flags['--review'] ? { review: true } : {}),
+              ...(flags['--purpose'] === undefined ? {} : { purpose: flags['--purpose'] }),
+            }
     const created = await call('POST', '/api/tasks', {
       ...address,
       ...(needs === undefined ? {} : { needs }),
       ...(before === undefined ? {} : { before }),
       body,
-      ...(flags['--title'] === undefined ? {} : { title: flags['--title'] }),
     })
     const { number, pool, assignee } = created.task
     // With human approval required, nothing moves until the human passes it on.
@@ -282,9 +277,7 @@ async function taskCommand([action, ...rest], call, cwd) {
         ? `T-${number} is yours; finish it with: cf task done T-${number} "what you did".${waits}`
         : after !== undefined
           ? `T-${number} continues in @${assignee}, the window that did T-${after}; its result arrives in your inbox.${gated}${waits}`
-          : to !== undefined
-            ? `T-${number} queued for @${to}. The result arrives in your inbox when @${to} finishes.${gated}${waits}`
-            : `T-${number} is on the board for ${aPool(pool, tier)}; the first free one gets it, and its result arrives in your inbox.${waits}${holds}${gated}`,
+          : `T-${number} is on the board for ${aPool(pool, tier)}; the first free one gets it, and its result arrives in your inbox.${waits}${holds}${gated}`,
     }
   }
   if (action === 'list' || action === undefined) {
@@ -379,7 +372,7 @@ function client(env) {
   }
 }
 
-/** Positional words, one leading `@target`, and the named flags. */
+/** The text, and the named flags picked out of it. */
 /** How a transcript item's role reads in a window. */
 const TRANSCRIPT_ROLE = {
   user: 'Sent to the window',
@@ -392,22 +385,15 @@ const clip = (text, at) => (text.length > at ? `${text.slice(0, at)}…` : text)
 function split(words, booleans, valued) {
   const flags = {}
   const text = []
-  let target
   for (let at = 0; at < words.length; at += 1) {
     const word = words[at]
     if (booleans.includes(word)) flags[word] = true
     else if (valued.includes(word)) {
       flags[word] = words[at + 1]
       at += 1
-    } else if (target === undefined && text.length === 0 && word.startsWith('@')) target = word
-    else text.push(word)
+    } else text.push(word)
   }
-  return { flags, text: text.join(' '), target }
-}
-
-function handle(value) {
-  if (value === undefined) return undefined
-  return value.startsWith('@') ? value.slice(1) : value
+  return { flags, text: text.join(' ') }
 }
 
 function taskNumber(value) {

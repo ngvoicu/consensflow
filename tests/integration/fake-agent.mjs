@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
  *
  * Every message is one turn. `Reply with exactly: X` answers X. A line
  * `DISPATCH --tier standard <task>` (or `DISPATCH --review --tier standard
- * <task>`, or `DISPATCH @lead <task>`) runs `cf task add` with those words and
+ * <task>`) runs `cf task add` with those words and
  * the task (`\n` in it becomes a line break), with this window's own token,
  * the way a lead hands out work. A task
  * saying `QUOTA-OUT` is refused with a 429, Claude's way, by the window whose
@@ -145,8 +145,9 @@ async function replyTo(text) {
   const asked = /^\[ConsensFlow m-(\d+)[^\]]*question from @/m.exec(text)
   const reply = /REPLY (.+)$/m.exec(text)
   if (asked && reply) return `replied: ${await runCf(['answer', `m-${asked[1]}`, reply[1]])}`
-  const dispatch =
-    /^DISPATCH ((?:(?:--(?:advice|review|design|self)|--\S+ \S+|@\S+) )+)(.+)$/m.exec(text)
+  const dispatch = /^DISPATCH ((?:(?:--(?:advice|review|design|self)|--\S+ \S+) )+)(.+)$/m.exec(
+    text,
+  )
   if (dispatch) {
     const words = dispatch[1].trim().split(' ')
     const task = dispatch[2].replaceAll('\\n', '\n')

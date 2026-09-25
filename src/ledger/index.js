@@ -350,6 +350,7 @@ const messageView = (row) => ({
   receipt: row.receipt === null ? null : JSON.parse(row.receipt),
   questions: row.questions === null ? null : JSON.parse(row.questions),
   choices: row.choices === null ? null : JSON.parse(row.choices),
+  urgent: row.urgent === 1,
   createdAt: row.created_at,
   deliveredAt: row.delivered_at,
 })
@@ -1392,9 +1393,11 @@ class Ledger {
   /**
    * A question for a coordinator or the human; the asker's task waits for the
    * answer. With `questions`, the question carries options as a harness's own
-   * question tool asked them, and its text is rendered from them.
+   * question tool asked them, and its text is rendered from them. An `urgent`
+   * question is the lead's `cf tell` to a task's window: the task is paused
+   * for it, and the question says so.
    */
-  ask(projectId, { from, to, body, task, questions }) {
+  ask(projectId, { from, to, body, task, questions, urgent = false }) {
     if (from === undefined) {
       throw new LedgerError('unknown-participant', 'a question names who asks it', 400)
     }
@@ -1407,6 +1410,7 @@ class Ledger {
         task,
         kind: 'question',
         questions: options,
+        urgent,
       })
       if (task !== undefined) {
         const row = this.#taskRow(projectId, task)
@@ -1544,7 +1548,7 @@ class Ledger {
            AND (kind != 'task' OR ? = 0 OR NOT EXISTS (
              SELECT 1 FROM task WHERE assignee_id = ? AND state IN ('working', 'waiting')
            ))
-           AND (? = 0 OR kind = 'task' OR task_id IN (
+           AND (? = 0 OR kind = 'task' OR urgent = 1 OR task_id IN (
              SELECT id FROM task WHERE assignee_id = ? AND state IN (${HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')})
            ))
          ORDER BY id LIMIT 1`,
@@ -2169,6 +2173,7 @@ class Ledger {
       collected = false,
       questions = null,
       choices = null,
+      urgent = false,
     },
   ) {
     // A message on its way (queued, or collected: read at once by the door
@@ -2178,8 +2183,8 @@ class Ledger {
     const { lastInsertRowid: id } = this.#db
       .prepare(
         `INSERT INTO message (project_id, recipient_id, sender_id, kind, task_id, reply_to, body,
-                              state, questions, choices, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                              state, questions, choices, urgent, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         projectId,
@@ -2192,6 +2197,7 @@ class Ledger {
         landing,
         questions === null ? null : JSON.stringify(questions),
         choices === null ? null : JSON.stringify(choices),
+        urgent ? 1 : 0,
         this.#at(),
       )
     return id
@@ -2222,7 +2228,7 @@ class Ledger {
       .run(reason, taskId)
   }
 
-  #send(projectId, { from, to, body, task, kind, questions = null }) {
+  #send(projectId, { from, to, body, task, kind, questions = null, urgent = false }) {
     requireText(body, 'body', MAX_BODY)
     return this.#write(() => {
       const sender = from === undefined ? null : this.#participantByHandle(projectId, from)
@@ -2235,6 +2241,7 @@ class Ledger {
         taskId,
         body,
         questions,
+        urgent,
       })
       this.#log(projectId, 'message.sent', {
         message: id,

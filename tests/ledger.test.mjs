@@ -810,6 +810,33 @@ describe('tasks and the inbox queue', () => {
     })
   })
 
+  it("marks the lead's tell urgent, and a paused window still takes it", async () => {
+    await withLedger((ledger) => {
+      const { project } = team(ledger)
+      const { task, message } = ledger.createTask(project.id, {
+        from: 'lead',
+        to: 'zeus',
+        body: 'Parser',
+      })
+      ledger.beginDelivery(message.id)
+      ledger.confirmDelivery(message.id, { evidence: 'native' })
+      const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
+      ledger.pauseTask(project.id, task.number, { by: 'lead' })
+      const plain = ledger.ask(project.id, { from: 'lead', to: 'zeus', task: 1, body: 'Later' })
+      assert.equal(plain.urgent, false)
+      assert.equal(ledger.nextDelivery(zeus.id), null, 'a paused task takes no ordinary message')
+      const told = ledger.ask(project.id, {
+        from: 'lead',
+        to: 'zeus',
+        task: 1,
+        body: 'Use the new grammar',
+        urgent: true,
+      })
+      assert.deepEqual([told.kind, told.urgent, told.taskNumber], ['question', true, 1])
+      assert.equal(ledger.nextDelivery(zeus.id)?.id, told.id, 'the tell goes to the paused window')
+    })
+  })
+
   it('refuses a task for someone outside the project and writes nothing', async () => {
     await withLedger((ledger) => {
       const { project } = team(ledger)

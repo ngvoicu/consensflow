@@ -99,12 +99,11 @@ describe('the agents API', () => {
         [1, 'open', null, null],
       )
       assert.equal(changes(), 1, 'the dispatcher is woken')
-      const named = await call(token('lead'), 'POST', '/api/tasks', { to: 'zeus', body: 'Lexer' })
-      assert.deepEqual([named.status, named.body.error], [403, 'name-a-tier'])
-      const refused = await call(token('zeus'), 'POST', '/api/tasks', { to: 'lead', body: 'Do it' })
+      const refused = await call(token('zeus'), 'POST', '/api/tasks', {
+        tier: 'standard',
+        body: 'Do it',
+      })
       assert.deepEqual([refused.status, refused.body.error], [403, 'not-a-coordinator'])
-      const stranger = await call(token('lead'), 'POST', '/api/tasks', { to: 'ghost', body: 'Boo' })
-      assert.deepEqual([stranger.status, stranger.body.error], [404, 'unknown-participant'])
     })
   })
 
@@ -210,8 +209,44 @@ describe('the agents API', () => {
           .some((m) => m.id === told.body.message.id),
         true,
       )
-      const wrong = await call(lead, 'POST', '/api/notes', { body: 'psst', to: 'zeus' })
-      assert.equal(wrong.status, 403)
+    })
+  })
+
+  it("tells a task's window something urgent: the task is paused for it and the question queued", async () => {
+    await withApi(async ({ ledger, project, token, cf, call }) => {
+      const { message } = ledger.createTask(project.id, {
+        from: 'lead',
+        to: 'zeus',
+        body: 'Parser',
+      })
+      deliver(ledger, message)
+      const lead = token('lead')
+      const told = await cf(lead, 'tell', 'T-1', 'Stop: the grammar changed, use v2')
+      assert.equal(told.code, 0, told.err)
+      assert.match(
+        told.out,
+        /^T-1 is paused and m-\d+ put to @zeus; its answer arrives as a message\. Then: cf task resume T-1 "…"$/,
+      )
+      assert.equal(ledger.task(project.id, 1).state, 'paused')
+      const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
+      const queued = ledger.inbox(zeus.id).find((m) => m.kind === 'question')
+      assert.deepEqual(
+        [queued.sender, queued.urgent, queued.taskNumber, queued.body],
+        ['lead', true, 1, 'Stop: the grammar changed, use v2'],
+      )
+      // Again while paused: no second pause, one more question.
+      assert.equal((await cf(lead, 'tell', 'T-1', 'And keep the tests')).code, 0)
+      assert.equal(ledger.task(project.id, 1).state, 'paused')
+      // Only the lead (or whoever gave the task) tells; a task with no window cannot be told.
+      const sideways = await cf(token('zeus'), 'tell', 'T-1', 'Hey')
+      assert.deepEqual(
+        [sideways.code, sideways.err],
+        [1, 'cf: only the lead or @lead may tell T-1'],
+      )
+      await call(lead, 'POST', '/api/tasks', { tier: 'standard', body: 'Docs' })
+      const open = await cf(lead, 'tell', 'T-2', 'Hurry')
+      assert.deepEqual([open.code, open.err], [1, 'cf: T-2 has no window to tell: it is open'])
+      assert.deepEqual((await cf(lead, 'tell', 'T-1')).code, 2, 'the words are required')
     })
   })
 
@@ -546,11 +581,11 @@ describe('tiered tasks through the API and cf', () => {
       const task = ledger.task(project.id, 1)
       assert.deepEqual([task.state, task.pool, task.tier], ['open', 'worker', 'standard'])
 
+      // No task is given by name: `@zeus` is just words with no tier, and the usage says so.
       const named = await cf(lead, 'task', 'add', '@zeus', 'Write the lexer')
-      assert.deepEqual(
-        [named.code, named.err],
-        [1, 'cf: @zeus is a worker: name a tier, not a member (cf task add --tier standard "…")'],
-      )
+      assert.equal(named.code, 2)
+      assert.match(named.err, /^cf: cf task add --tier <critical\|complex\|standard\|light>/)
+      assert.equal(ledger.task(project.id, 2), null, 'and nothing was created')
       const noPurpose = await cf(lead, 'task', 'add', '--tier', 'critical', 'Why is it slow?')
       assert.equal(noPurpose.code, 1)
       assert.match(noPurpose.err, /critical work names its purpose/)
@@ -636,7 +671,7 @@ describe('tiered tasks through the API and cf', () => {
         [fromAdvisor.code, fromAdvisor.err],
         [1, 'cf: members do not hand out tasks: ask your lead instead (cf ask)'],
       )
-      const toLead = await cf(token('zeus'), 'task', 'add', '@lead', 'Ship it')
+      const toLead = await cf(token('zeus'), 'task', 'add', '--tier', 'standard', 'Ship it')
       assert.deepEqual(
         [toLead.code, toLead.err],
         [1, 'cf: members do not hand out tasks: ask your lead instead (cf ask)'],
@@ -690,13 +725,6 @@ describe('tiered tasks through the API and cf', () => {
       const gone = await cf(lead, 'task', 'review', 'T-1')
       assert.equal(gone.code, 2, 'no command asks for a review: it is a task')
 
-      const sideways = await cf(token('zeus'), 'ask', '--to', '@diana', 'Which parser?')
-      assert.deepEqual(
-        [sideways.code, sideways.err],
-        [1, 'cf: questions go to the lead or the human, not to @diana'],
-      )
-      const upward = await cf(token('zeus'), 'ask', '--to', '@lead', 'Which parser?')
-      assert.equal(upward.code, 0)
       const human = await cf(token('zeus'), 'ask', '--human', 'Which parser?')
       assert.equal(human.code, 0)
     })

@@ -52,16 +52,20 @@ credentials, takes no API key, and writes only inside its own home.
 - **Pause and resume.** The lead (or you) stops a worker's task by its
   number: `cf task pause T-5` interrupts the agent and keeps its window,
   conversation and work; `cf task resume T-5 "…"` sends the words into the
-  same window. A window lost to a restart or a crash pauses its task the
-  same way and tells the lead, so nothing is redone from scratch. A member
+  same window. Something urgent for a window mid-task goes with `cf tell
+  T-5 "…"`: the task is paused for it, the agent reads it once interrupted,
+  answers as it would any question, and the lead resumes the task with its
+  words. A window lost to a restart or a
+  crash pauses its task the same way and tells the lead, so nothing is
+  redone from scratch. A member
   that runs out of quota mid-task keeps the task with its window when the
   reset is within half an hour or nobody else of its tier is free, and goes
   on by itself at the reset; otherwise the task goes back to the board for
   another member.
 - **A plan on the board.** A task may need others first: `cf task add
   --needs T-3,T-4 "…"` waits, blocked, until each is accepted (one the lead
-  gives itself or a window by name waits the same way and goes to its window
-  then), and the daemon gives out only unblocked tasks, so a plan of many
+  gives itself waits the same way and comes back to it then), and the
+  daemon gives out only unblocked tasks, so a plan of many
   tasks runs in its own
   order with parallel work where the plan allows it. When a result uncovers
   work that must come first, `--before T-9,T-10` puts a new task ahead of
@@ -126,6 +130,7 @@ only subject:
     cf task add --after T-3 "…"                                continue the window that did T-3
     cf task add --self --needs T-3 "…"                         the lead's own later step, woken when T-3 is accepted
     cf task list | get T-3 [--transcript] | done T-3 "…" | accept | reopen | cancel | pause | resume
+    cf tell T-3 "…"                                            stop T-3 and put this to its window; its answer comes back; then resume it
     cf inbox [read m-12] · cf ask "…" [--human] · cf answer m-12 "…" · cf team · cf whoami
     cf note "…" [--human]                                     something to know; nothing waits on it
 

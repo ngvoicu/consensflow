@@ -184,6 +184,11 @@ export const MIGRATIONS = [
   `
   ALTER TABLE task ADD COLUMN held_until TEXT;
   `,
+  // A question put to a task's window with the task paused for it (the
+  // lead's `cf tell`); the delivered text says so.
+  `
+  ALTER TABLE message ADD COLUMN urgent INTEGER NOT NULL DEFAULT 0;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

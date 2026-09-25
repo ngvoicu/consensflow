@@ -80,7 +80,9 @@ export function deliveryText(message) {
     message.kind === 'question'
       ? message.questions
         ? `\n\nAnswer with: cf answer m-${message.id} "…" (a label or your own words${message.questions.length > 1 ? '; one line per question' : ''})`
-        : `\n\nAnswer with: cf answer m-${message.id} "…"`
+        : message.urgent && message.taskNumber != null
+          ? `\n\nT-${message.taskNumber} is paused for this. Answer with: cf answer m-${message.id} "…"; the lead resumes the task.`
+          : `\n\nAnswer with: cf answer m-${message.id} "…"`
       : message.kind === 'result' && message.taskNumber != null
         ? `\n\nDecide with: cf task accept T-${message.taskNumber} · cf task reopen T-${message.taskNumber} "…"`
         : ''

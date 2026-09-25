@@ -13,9 +13,11 @@ import { LedgerError } from '../ledger/index.js'
  */
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024
-const MEMBERS = new Set(['worker', 'advisor', 'reviewer'])
-const TASK_ROUTE = /^\/api\/tasks\/(\d+)(?:\/(done|accept|reopen|cancel|pause|resume|transcript))?$/
+const TASK_ROUTE =
+  /^\/api\/tasks\/(\d+)(?:\/(done|accept|reopen|cancel|pause|resume|tell|transcript))?$/
 const MESSAGE_ROUTE = /^\/api\/inbox\/(\d+)$/
+/** A task in one of these states has a window a `tell` reaches (a queued one has none yet). */
+const WINDOWED = new Set(['working', 'waiting', 'paused'])
 const QUESTION_ROUTE = /^\/api\/questions\/(\d+)$/
 /** The longest one poll for an answer may hold; a door polls again. */
 const MAX_WAIT_MS = 25_000
@@ -130,28 +132,12 @@ export async function startApi({
         )
       }
       const body = await readJson(request)
-      const to = body.self === true ? participant.handle : body.to
-      const target = to === undefined ? undefined : memberByHandle(project, to)
-      if (target !== undefined && MEMBERS.has(target.role)) {
-        throw new Refusal(
-          403,
-          'name-a-tier',
-          `@${to} is a ${target.role}: name a tier, not a member (cf task add --tier ${target.tier} "…")`,
-        )
-      }
-      // The board is the only channel between agents; the human gives the
-      // lead its work by talking to it in its terminal.
-      if (target !== undefined && to !== participant.handle) {
-        throw new Refusal(
-          403,
-          'board-only',
-          'agents give no task by name: put it on the board for a tier (cf task add --tier standard "…"); only the human gives the lead work, in its terminal',
-        )
-      }
-      // A follow-up that needs the context of the window that did T-n goes
-      // back to that window (`after`); everything else is fresh work for a
-      // tier of worker, advice from a tier of advisor, a review from a tier of
-      // reviewer, or an image from the designer.
+      // The board is the only channel between agents: no task is given by
+      // name. A follow-up that needs the context of the window that did T-n
+      // goes back to that window (`after`); the lead's own later step is its
+      // own (`self`); everything else is fresh work for a tier of worker,
+      // advice from a tier of advisor, a review from a tier of reviewer, or
+      // an image from the designer.
       const pool =
         body.design === true
           ? 'designer'
@@ -164,11 +150,10 @@ export async function startApi({
         from: participant.handle,
         ...(body.after !== undefined
           ? { after: Number(body.after) }
-          : to === undefined
-            ? { pool, tier: body.tier, purpose: body.purpose }
-            : { to }),
+          : body.self === true
+            ? { to: participant.handle }
+            : { pool, tier: body.tier, purpose: body.purpose }),
         body: body.body,
-        title: body.title,
         ...(body.needs === undefined ? {} : { needs: body.needs }),
         ...(body.before === undefined ? {} : { before: body.before }),
       })
@@ -207,18 +192,11 @@ export async function startApi({
       const body = await readJson(request)
       const active = ledger.activeTask(participant.id, { queued: true })
       // The lead's question goes to the human; a member's to whoever gave its task.
-      const to = body.to ?? active?.requester ?? (participant.role === 'lead' ? 'human' : 'lead')
-      if (MEMBERS.has(memberByHandle(project, to)?.role)) {
-        throw new Refusal(
-          403,
-          'not-addressable',
-          `questions go to the lead or the human, not to @${to}`,
-        )
-      }
+      const to = active?.requester ?? (participant.role === 'lead' ? 'human' : 'lead')
       const asked = ledger.ask(project.id, {
         from: participant.handle,
         to,
-        task: body.task ?? active?.number,
+        task: active?.number,
         body: body.body,
         ...(body.questions === undefined ? {} : { questions: body.questions }),
       })
@@ -229,18 +207,11 @@ export async function startApi({
       const body = await readJson(request)
       const active = ledger.activeTask(participant.id, { queued: true })
       // The lead's note goes to the human; a member's to whoever gave its task.
-      const to = body.to ?? active?.requester ?? (participant.role === 'lead' ? 'human' : 'lead')
-      if (MEMBERS.has(memberByHandle(project, to)?.role)) {
-        throw new Refusal(
-          403,
-          'not-addressable',
-          `notes go to the lead or the human, not to @${to}`,
-        )
-      }
+      const to = active?.requester ?? (participant.role === 'lead' ? 'human' : 'lead')
       const noted = ledger.note(project.id, {
         from: participant.handle,
         to,
-        task: body.task ?? active?.number,
+        task: active?.number,
         body: body.body,
       })
       changed()
@@ -323,6 +294,28 @@ export async function startApi({
         `only the lead or @${task.requester} may ${action} T-${number}`,
       )
     }
+    if (action === 'tell') {
+      // Stop the task and put this to its window: the agent is interrupted as
+      // for any pause, reads the question once idle, and its answer comes
+      // back as a message; the lead resumes the task with its words.
+      if (task.assignee === null || !WINDOWED.has(task.state)) {
+        throw new Refusal(
+          409,
+          'no-window',
+          `T-${number} has no window to tell: it is ${task.state}`,
+        )
+      }
+      if (task.state !== 'paused') ledger.pauseTask(project.id, number, { by: participant.handle })
+      const told = ledger.ask(project.id, {
+        from: participant.handle,
+        to: task.assignee,
+        task: number,
+        body: body.body,
+        urgent: true,
+      })
+      changed()
+      return ok({ message: messageSummary(told), task: summary(ledger.task(project.id, number)) })
+    }
     const by = participant.handle
     const moved =
       action === 'accept'
@@ -336,10 +329,6 @@ export async function startApi({
               : ledger.reopenTask(project.id, number, { by, body: body.body }).task
     changed()
     return ok({ task: summary(moved) })
-  }
-
-  function memberByHandle(project, handle) {
-    return ledger.project(project.id)?.participants.find((p) => p.handle === handle)
   }
 
   function callerOf(request) {
