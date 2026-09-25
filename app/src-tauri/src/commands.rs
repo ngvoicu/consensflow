@@ -903,7 +903,10 @@ fn bundled_cli(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
         .path()
         .resource_dir()
         .map_err(|error| format!("the app could not find its own resources: {error}"))?;
-    let resource_node = resources.join("binaries/node");
+    // Tauri strips the target triple from a sidecar's name and, on Windows,
+    // keeps the `.exe`: `node` on macOS, `node.exe` beside the app there.
+    let sidecar = if cfg!(windows) { "node.exe" } else { "node" };
+    let resource_node = resources.join("binaries").join(sidecar);
     let node = if resource_node.exists() {
         resource_node
     } else {
@@ -911,7 +914,7 @@ fn bundled_cli(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
             .map_err(|error| format!("the app could not find itself: {error}"))?
             .parent()
             .ok_or_else(|| "the app executable has no directory".to_string())?
-            .join("node")
+            .join(sidecar)
     };
     let cli = resources.join("cli/bin/cf.mjs");
     if !node.is_absolute() || !node.exists() {
