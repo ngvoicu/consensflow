@@ -607,6 +607,7 @@ pub fn sanitize(body: &[u8]) -> Result<Vec<u8>, SanitizeError> {
 mod tests {
     #[cfg(unix)]
     use std::collections::HashMap;
+    #[cfg(unix)]
     use std::io::{Read, Result as IoResult};
     #[cfg(unix)]
     use std::path::Path;
@@ -615,6 +616,7 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant};
 
+    #[cfg(unix)]
     use portable_pty::PtySize;
 
     #[cfg(unix)]
