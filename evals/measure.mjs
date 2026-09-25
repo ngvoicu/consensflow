@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { join, relative } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { openLedger } from '../src/ledger/index.js'
 
@@ -5,10 +8,12 @@ import { openLedger } from '../src/ledger/index.js'
  * What a chief did, read from the ledger of a finished eval run: the tasks it
  * put on the board and how many ran side by side, what it asked and told the
  * human, the advice and reviews it asked for, the edits it made with its own
- * hands (the transcript copy's Edit and Write results), and its last words.
+ * hands (the transcript copy's Edit and Write results, a Claude Code count;
+ * null for another chief), its last words, and which files of the fixture
+ * the run changed or added (`workspace` against `fixture`, any harness).
  * The daemon must have closed the ledger first: the ledger holds its file.
  */
-export function measure(file) {
+export function measure(file, { fixture = null, workspace = null } = {}) {
   const ledger = openLedger(file)
   let metrics
   try {
@@ -61,15 +66,35 @@ export function measure(file) {
         .filter((m) => m.kind === 'note')
         .map((m) => ({ id: m.id, body: m.body.slice(0, 200) })),
       chiefId: chief.id,
+      chiefHarness: chief.harness,
     }
   } finally {
     ledger.close()
   }
-  return { ...metrics, ...chiefWindow(file, metrics.chiefId) }
+  return {
+    ...metrics,
+    ...chiefWindow(file, metrics.chiefId, metrics.chiefHarness),
+    filesChanged: fixture === null || workspace === null ? [] : changed(fixture, workspace),
+  }
+}
+
+/** Files of the fixture that differ in the workspace, and files the run added, relative. */
+export function changed(fixture, workspace) {
+  const digest = (path) => createHash('sha256').update(readFileSync(path)).digest('hex')
+  const list = (root, dir = root) =>
+    readdirSync(dir).flatMap((name) => {
+      const path = join(dir, name)
+      if (name === '.git' || name === 'node_modules') return []
+      return statSync(path).isDirectory() ? list(root, path) : [relative(root, path)]
+    })
+  const before = new Map(list(fixture).map((path) => [path, digest(join(fixture, path))]))
+  return list(workspace)
+    .filter((path) => before.get(path) !== digest(join(workspace, path)))
+    .sort()
 }
 
 /** The chief's own turns and edits, from the daemon's copy of its conversation. */
-function chiefWindow(file, chiefId) {
+function chiefWindow(file, chiefId, harness) {
   const db = new DatabaseSync(file, { readOnly: true })
   try {
     const items = db
@@ -83,8 +108,11 @@ function chiefWindow(file, chiefId) {
     const assistant = items.filter((i) => i.role === 'assistant')
     return {
       chiefTurns: assistant.length,
-      chiefEdits: tools.filter((i) => /has been updated|File created successfully/.test(i.text))
-        .length,
+      // Claude's Edit and Write results say so in words; other harnesses' do not.
+      chiefEdits:
+        harness === 'claude-code'
+          ? tools.filter((i) => /has been updated|File created successfully/.test(i.text)).length
+          : null,
       chiefLastWords: assistant.at(-1)?.text.slice(0, 1500) ?? '',
     }
   } finally {

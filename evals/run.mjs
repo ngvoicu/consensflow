@@ -29,7 +29,7 @@ const { values } = parseArgs({
     scenario: { type: 'string', default: 'six-decisions' },
     chief: { type: 'string', default: 'claude' },
     staff: { type: 'string' },
-    model: { type: 'string', default: 'claude-opus-5' },
+    model: { type: 'string' },
     'claude-staff-model': { type: 'string', default: HARNESSES.claude.model },
     repeat: { type: 'string', default: '1' },
     'timeout-min': { type: 'string', default: '40' },
@@ -160,7 +160,10 @@ async function run(index) {
   } finally {
     await app.close({ preserveRoot: true })
   }
-  const metrics = measure(file)
+  const metrics = measure(file, {
+    fixture: join(HERE, 'fixtures', scenario.fixture),
+    workspace: WORKSPACE,
+  })
   const checks = verdict(scenario, metrics)
   const report = {
     scenario: scenario.id,
@@ -186,7 +189,7 @@ async function run(index) {
   for (const check of checks)
     process.stdout.write(`  ${check.ok ? 'PASS' : 'FAIL'} ${check.name}\n`)
   process.stdout.write(
-    `  tasks ${metrics.tasks.length} (parallel ${metrics.parallel}, advice ${metrics.advice}, reviews ${metrics.reviews}) · questions ${metrics.questionsToHuman.length} · notes ${metrics.notesToHuman.length} · chief edits ${metrics.chiefEdits} in ${metrics.chiefTurns} turns\n  report: ${out}\n`,
+    `  tasks ${metrics.tasks.length} (parallel ${metrics.parallel}, advice ${metrics.advice}, reviews ${metrics.reviews}) · questions ${metrics.questionsToHuman.length} · notes ${metrics.notesToHuman.length} · chief edits ${metrics.chiefEdits ?? '?'} in ${metrics.chiefTurns} turns · files changed ${metrics.filesChanged.length}\n  report: ${out}\n`,
   )
   return checks.every((check) => check.ok)
 }

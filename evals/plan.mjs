@@ -50,14 +50,20 @@ export function staffFor(harnesses, models = {}) {
 
 /**
  * The chief has no model of its own in the roster: it runs its harness's
- * default. Claude Code and OpenCode take one from the environment; Codex, Pi
- * and Devin run the model their own configuration names, so `model` is
- * ignored there and the report says so.
+ * default. Claude Code and OpenCode take one from the environment (Opus, and
+ * OpenCode's cheap model, unless `model` says otherwise); Codex, Pi and Devin
+ * run the model their own configuration names, so `model` is ignored there
+ * and the report says so.
  */
-export function chiefEnvironment(chief, model) {
-  if (chief === 'claude') return { env: { ANTHROPIC_MODEL: model }, model }
-  if (chief === 'opencode')
-    return { env: { OPENCODE_CONFIG_CONTENT: JSON.stringify({ model }) }, model }
+export function chiefEnvironment(chief, model = undefined) {
+  if (chief === 'claude') {
+    const chosen = model ?? 'claude-opus-5'
+    return { env: { ANTHROPIC_MODEL: chosen }, model: chosen }
+  }
+  if (chief === 'opencode') {
+    const chosen = model ?? HARNESSES.opencode.model
+    return { env: { OPENCODE_CONFIG_CONTENT: JSON.stringify({ model: chosen }) }, model: chosen }
+  }
   if (!(chief in HARNESSES)) throw new Error(`no such eval harness: ${chief}`)
   return { env: {}, model: `${chief}'s default` }
 }

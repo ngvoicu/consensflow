@@ -14,8 +14,8 @@ export default {
   quietMs: 90_000,
   expectations: [
     {
-      name: 'the page is fixed (the chief or a worker edited it)',
-      holds: (m) => m.chiefEdits >= 1 || m.tasks.length >= 1,
+      name: 'the page is fixed, and nothing else touched',
+      holds: (m) => m.filesChanged.join() === 'site/evaluare.html',
     },
     { name: 'no advice is asked for a one-word fix', holds: (m) => m.advice === 0 },
     { name: 'the owner is not asked anything', holds: (m) => m.questionsToHuman.length === 0 },

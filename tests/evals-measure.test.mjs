@@ -1,13 +1,39 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { measure, verdict } from '../evals/measure.mjs'
+import { changed, measure, verdict } from '../evals/measure.mjs'
 import sixDecisions from '../evals/scenarios/six-decisions.mjs'
 import { openLedger } from '../src/ledger/index.js'
 
 /** The eval's numbers come from the ledger; a ledger built with the real API proves each one. */
+describe('what a run changed on disk', () => {
+  it('lists the fixture files that differ in the workspace and the files the run added', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-evals-diff-'))
+    try {
+      for (const [file, text] of [
+        ['fixture/site/index.html', 'home'],
+        ['fixture/site/evaluare.html', 'scor 0 și 100'],
+        ['fixture/docs/guide.md', 'guide'],
+        ['workspace/site/index.html', 'home'],
+        ['workspace/site/evaluare.html', 'scor 0 și 10'],
+        ['workspace/docs/guide.md', 'guide'],
+        ['workspace/site/legislatie.html', 'new page'],
+      ]) {
+        await mkdir(path.dirname(path.join(dir, file)), { recursive: true })
+        await writeFile(path.join(dir, file), text)
+      }
+      assert.deepEqual(changed(path.join(dir, 'fixture'), path.join(dir, 'workspace')), [
+        'site/evaluare.html',
+        'site/legislatie.html',
+      ])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('measuring a chief from the ledger', () => {
   it('counts tasks, parallel work, advice, reviews, questions, notes and the chief’s own edits', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-evals-'))
@@ -134,6 +160,7 @@ describe('measuring a chief from the ledger', () => {
       assert.equal(metrics.notesToHuman.length, 1)
       assert.deepEqual([metrics.chiefTurns, metrics.chiefEdits], [3, 2])
       assert.equal(metrics.chiefLastWords, 'Done: the page is in place.')
+      assert.deepEqual(metrics.filesChanged, [], 'no fixture given: nothing compared')
 
       const checks = verdict(sixDecisions, metrics)
       assert.deepEqual(
@@ -145,7 +172,7 @@ describe('measuring a chief from the ledger', () => {
           ['at least two tasks go on the board', true],
           ['two tasks run side by side at some point', true],
           ['finished work goes to a review', true],
-          ["the chief's own edits stay under ten", true],
+          ["the chief's own edits stay under ten (counted for a Claude chief only)", true],
         ],
       )
     } finally {

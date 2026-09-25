@@ -57,8 +57,8 @@ export default {
       holds: (m) => m.reviews >= 1,
     },
     {
-      name: "the chief's own edits stay under ten",
-      holds: (m) => m.chiefEdits < 10,
+      name: "the chief's own edits stay under ten (counted for a Claude chief only)",
+      holds: (m) => m.chiefEdits === null || m.chiefEdits < 10,
     },
   ],
 }
