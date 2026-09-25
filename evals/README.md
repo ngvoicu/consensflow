@@ -1,70 +1,44 @@
-# Evals — does the skill change what a chief *does*?
+# Evals — what a chief *does* with its role text
 
-`npm test` checks what the skill **says**. Nothing checked what a chief **does**
-with it, so behavioural failures were each answered with more prose, and no
-change was ever measured.
+`npm test` checks what the role text says. These runs check what a real chief
+does with it on a toy project: whether it puts work that can run side by side
+on the board, asks advice for a hard call, sends finished work to review, and
+puts the owner's decisions and its findings on the board (`cf ask --human`,
+`cf note --human`) instead of a report in its terminal.
 
 ```sh
-npm run eval                                  # every scenario, once
-npm run eval -- --scenario look-before-you-send --repeat 5
-npm run eval -- --chief codex
+npm run eval -- --scenario six-decisions              # once, chief on Opus
+npm run eval -- --scenario six-decisions --repeat 3
+npm run eval -- --scenario six-decisions --model claude-sonnet-5
 ```
 
-**This spends real tokens and is not part of any automated gate.** Do not run
-it in CI or as part of `check:all`: it needs a real chief CLI, a configured roster, and your approval for the spend.
+**This spends real tokens and is not part of any gate.** It needs the real
+Claude Code logged in on this machine, and your word for the spend.
 
-## How it works
+## How a run works
 
-The chief is a real CLI reading the bundled `consensflow-chief` document through
-the app’s role-loading code. Each evaluation has a private app root and a copy
-of the roster; it does not depend on a globally installed ConsensFlow skill. What
-*is* replaced is `cf`: a stub that answers plausibly and records every
-invocation, first on `PATH`. The chief runs in a throwaway directory.
+Everything is real but the human. The daemon, the pane host and Claude Code
+are the ones the app uses (the live bench's shape). The chief runs on
+`--model` (default `claude-opus-5`); the staff (two workers, an advisor and
+a reviewer) runs on a cheap model, so tasks really run and results really come
+back. The scenario's fixture is copied into a fixed, trusted workspace under
+the Candidate's home, and the scenario's prompt is typed into the chief's
+terminal. From then on the human is a script: every question the chief puts
+on the board is answered by the scenario's policy, and nothing else is said.
+The run ends once nothing has moved for the scenario's quiet time.
 
-So its choices become a log, and a log can be asserted. Nothing reaches a real
-agent or a real conversation. There is no pane tooling to stub: ConsensFlow
-has one shape, the app owns the panes, and the skill never names a pane
-command or a harness CLI.
+Then the ledger is read: tasks by pool and tier and how many ran side by
+side, questions and notes to the human, advice and reviews, the chief's own
+edits (the transcript copy's Edit and Write results), its last words. The
+scenario's expectations are checked against those numbers; the report goes
+to `evals/reports/` (ignored by git) and a verdict to stdout.
 
-The stub `cf` mints conversation names on `run --new`, continues on a bare
-run or `--session`, answers `say`, `results` and `read` from a per-scenario
-transcript, pastes a `deliver` fixture into the chief's transcript, and prints
-a long `read` fixture in numbered parts. A turn may also carry a `delivery`
-field, which the runner prefixes into what the chief receives — the envelope
-or pointer arriving in chief context, the way the app pastes it into the pane.
-Every invocation is logged, so a chief that invents a command the skill never
-taught is caught by the log.
+## Scenarios
 
-Each scenario is one chief session across several turns, because every failure
-worth checking happened on turn two or later.
+`evals/scenarios/<id>.mjs` exports the prompt, the answer policy, the quiet
+time and the expectations; `evals/fixtures/<id>/` is the toy project.
 
-## Reading the result
-
-A rate per check, not a verdict. Leads are not deterministic: a check that
-passes 4/5 is a **failing** check, because the user meets it on the run it
-misses. The runner exits non-zero if any check missed even once.
-
-## The scenarios are the standalone contract
-
-| Scenario | What it guards |
-|---|---|
-| `consult-opens-a-pane` | the consult is `cf run --new`, via `cf` only — no pane tool, no harness CLI |
-| `look-before-you-send` | a follow-up rides on the answer already delivered in context — `cf say`, never a restart, no `results`/`read` round-trip |
-| `an-independent-task-gets-its-own-conversation` | unrelated work starts fresh with `--new`, nothing sent into the old conversation |
-| `a-dependent-task-stays-in-its-conversation` | work that leans on the conversation is a `cf say` on the delivered context where it belongs — no retrieval, no second conversation |
-| `a-delivered-answer-is-read-whole` | the envelope arrives in the turn, as pasted into the pane — the chief reports its top verdict with no `catchup`, no `read` |
-| `a-delivered-file-is-read` | the pointer arrives in the turn — the chief runs every `cf read` part and its report holds the beginning, the middle AND the end |
-| `manual-is-the-humans` | the chief can read for its authorized task and leaves a human-set `manual` policy alone |
-| `a-chief-sends-and-returns` | after `cf run --new` or `cf say` the chief reports what is running and where — no `--wait`, no polling |
-| `after-dispatch-continues-independent-work` | after dispatch the chief reports what is running and does the authorized independent work in the same turn — no `--wait`, no polling, no retrieval |
-| `a-delivered-result-is-used-without-asking` | an automatically delivered full result is used at once — verdict in the report, no retrieval, no read/authorize ask-back |
-| `zero-runs-is-not-failure` | a `0 runs` count starts no replacement, polls nothing, and is never declared a failed dispatch or a fallback |
-
-## History
-
-The cmux-era scenarios (pane recipes, `mint`, `tree`, tail-pipe guards) were
-retired with the switch-over: they measured a shape that no longer exists.
-What they taught is kept — the honest-stage rules: a scenario whose prompt
-names a file ships that file, a scenario whose follow-up refers to what the
-agent said ships that transcript, and a miss prints every command the chief
-ran. A check that passes because nothing was sent is no check at all.
+- `six-decisions`: from the btb transcript of 2026-09-25. A bilingual site, a
+  new page to write and translate, choices only the owner can make, and a
+  planted discrepancy (the guides say "a scale from 1 to 5"; the site shows a
+  colour and a score).

@@ -5,6 +5,7 @@
       "src/**",
       "bin/**",
       "tests/**",
+      "evals/**",
       "app/ui/*.js",
       "app/ui/core/**",
       "app/tests/**",

@@ -1,161 +1,189 @@
 #!/usr/bin/env node
-import { parseArgs } from 'node:util'
-import { listAgents } from '../src/roster.js'
-import { AGENT, leadSession, makeStage, runChief, threadFrom } from './harness.mjs'
-import { SCENARIOS } from './scenarios.mjs'
-
 /**
- * Does the skill actually change what a chief does?
+ * One eval run: a real chief on a toy project, with a real staff on a cheap
+ * model and a scripted human, measured from the ledger at the end. See
+ * evals/README.md. Spends real tokens; never part of a gate.
  *
- * `npm test` checks what the skill SAYS. Nothing checked what a chief DOES
- * with it, so three behavioural failures in one day were each answered with
- * more prose and none of the fixes was ever measured. This spends real tokens
- * on a real chief to turn "is it better?" into a number.
- *
- * Leads are not deterministic, so a single pass proves little: `--repeat`
- * reports a rate per check, which is the unit a prose change can be judged in.
+ *   npm run eval -- --scenario six-decisions [--model claude-opus-5] [--repeat 1]
+ *                   [--staff-model claude-haiku-4-5-20251001] [--timeout-min 40]
  */
+import { execFileSync } from 'node:child_process'
+import { cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { parseArgs } from 'node:util'
+import { startIntegration } from '../tests/integration/harness.mjs'
+import { measure, verdict } from './measure.mjs'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+const EDITOR = join(HERE, '..', 'tests', 'live', 'core-live-editor.mjs')
+const TRUST = join(HERE, '..', 'tests', 'live', 'trust-claude-folder.py')
+const H = process.env.HOME
+// One fixed workspace, trusted once per run: Claude asks about an unknown folder.
+const WORKSPACE = join(H, '.consensflow-candidate', 'evals', 'workspace')
+const REPORTS = join(HERE, 'reports')
+
 const { values } = parseArgs({
   options: {
-    chief: { type: 'string', default: 'claude' },
+    scenario: { type: 'string', default: 'six-decisions' },
+    model: { type: 'string', default: 'claude-opus-5' },
+    'staff-model': { type: 'string', default: 'claude-haiku-4-5-20251001' },
     repeat: { type: 'string', default: '1' },
-    scenario: { type: 'string' },
-    // 180s was the default until 2026-09-02, and it reported a SIGKILL as a
-    // scenario failure: three runs "failed" checks they hold comfortably when
-    // given time, and one of them read as a prose regression until it was
-    // measured against HEAD and came back identical. A measurement tool that
-    // manufactures failures is worse than a slow one.
-    timeout: { type: 'string', default: '420' },
+    'timeout-min': { type: 'string', default: '40' },
   },
 })
+const scenario = (
+  await import(pathToFileURL(join(HERE, 'scenarios', `${values.scenario}.mjs`)).href)
+).default
+const repeat = Number(values.repeat)
+const timeoutMs = Number(values['timeout-min']) * 60_000
 
-const repeat = Number.parseInt(values.repeat, 10)
-const timeoutMs = Number.parseInt(values.timeout, 10) * 1000
-const chosen = values.scenario ? SCENARIOS.filter((s) => s.id === values.scenario) : SCENARIOS
-if (chosen.length === 0) {
-  console.error(
-    `no scenario ${JSON.stringify(values.scenario)}; have: ${SCENARIOS.map((s) => s.id).join(', ')}`,
+/** The bench's clean environment: the real logins, never this shell's session identity. */
+const ENV = {
+  HOME: H,
+  USER: process.env.USER,
+  LOGNAME: process.env.USER,
+  LANG: 'en_US.UTF-8',
+  TERM: 'xterm-256color',
+  PATH: [
+    join(H, '.local', 'bin'),
+    '/opt/homebrew/bin',
+    '/usr/bin',
+    '/bin',
+    '/usr/sbin',
+    '/sbin',
+  ].join(':'),
+  // Unset on purpose (null removes the harness's sandbox default): with it set,
+  // Claude finds no completed onboarding and opens on the first-run dialog.
+  CLAUDE_CONFIG_DIR: null,
+  // The chief has no model of its own in the roster: the harness's default is this.
+  ANTHROPIC_MODEL: values.model,
+}
+// Two workers, so work that can run side by side has somewhere to run.
+const STAFF = [
+  { id: 'eval-worker', kind: 'claude-code', model: values['staff-model'], workTier: 'standard' },
+  { id: 'eval-worker-2', kind: 'claude-code', model: values['staff-model'], workTier: 'standard' },
+  { id: 'eval-advisor', kind: 'claude-code', model: values['staff-model'], workTier: 'standard' },
+  { id: 'eval-reviewer', kind: 'claude-code', model: values['staff-model'], workTier: 'standard' },
+]
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const stamp = () => new Date().toISOString().replace(/[:.]/g, '-')
+
+async function run(index) {
+  const started = Date.now()
+  rmSync(WORKSPACE, { recursive: true, force: true })
+  mkdirSync(WORKSPACE, { recursive: true })
+  cpSync(join(HERE, 'fixtures', scenario.fixture), WORKSPACE, { recursive: true })
+  process.stdout.write(
+    `trust: ${execFileSync('python3', [TRUST, WORKSPACE], { encoding: 'utf8', env: { ...process.env, HOME: H } }).trim()}\n`,
   )
-  process.exit(2)
-}
-
-// The same roster is copied into each private evaluation app root.
-if (!listAgents(process.env).some(agent => agent.name === AGENT)) {
-  console.error(`The roster does not list ${AGENT}; set CF_EVAL_AGENT to a roster name (cf agent list)`)
-  process.exit(2)
-}
-
-console.log(`chief: ${values.chief} · ${chosen.length} scenarios × ${repeat} · agent @${AGENT}`)
-console.log('this spends real tokens on a real chief, and touches nothing real')
-console.log('')
-
-const tally = new Map()
-const note = (scenario, check, ok) => {
-  const key = `${scenario} ${check}`
-  const row = tally.get(key) ?? { scenario, check, passed: 0, of: 0 }
-  row.passed += ok ? 1 : 0
-  row.of += 1
-  tally.set(key, row)
-}
-// Chief of Staff executions that never completed, per pass label. Counted as misses
-// in the summary below so a dead chief can never read as green.
-const brokenLabels = []
-
-for (const scenario of chosen) {
-  for (let pass = 0; pass < repeat; pass += 1) {
-    const label = repeat > 1 ? `${scenario.id} (${pass + 1}/${repeat})` : scenario.id
-    const stage = makeStage(scenario.stage)
-    const nextTurn = leadSession(values.chief)
-    let thread = null
-    let broke = null
-    const failures = []
-    const evidence = []
-    // Every turn's commands, kept so a miss on turn 3 can show turns 1 and
-    // 2 as well: a chief that sends into a pane it never opened THIS turn
-    // opened it (or two) on a turn with no checks, and that is where the
-    // explanation was (2026-09-06).
-    const turnLogs = []
-    try {
-      for (const turn of scenario.turns) {
-        const before = stage.read().length
-        // A delivery arrives IN the chief's context, not behind a command:
-        // prefix the envelope into the turn so the chief reads it as arrived
-        // text, exactly as the app pastes it into the pane.
-        const prompt = turn.delivery ? `${turn.delivery}\n\n${turn.say}` : turn.say
-        const invocation = nextTurn(prompt, thread)
-        const result = await runChief(invocation, stage, timeoutMs)
-        if (invocation.capturesThread) thread = threadFrom(result.stdout) ?? thread
-        if (result.code !== 0) {
-          broke = `the chief exited ${result.code}: ${(result.stderr || result.stdout).slice(0, 300)}`
-          break
-        }
-        const log = stage.read().slice(before)
-        turnLogs.push({ say: turn.say, log })
-        let missedHere = false
-        for (const [check, holds] of turn.expect) {
-          // What the chief DID, and what it then told the user: some failures are
-          // only visible in the report — a chief that read the tail of a long
-          // answer ran exactly the right command and still reported the wrong thing.
-          const ok = holds(log, result.reply ?? result.stdout)
-          note(scenario.id, check, ok)
-          if (!ok) {
-            failures.push(check)
-            missedHere = true
-          }
-        }
-        // The stage is thrown away below, so a missed check is the last chance
-        // to see WHAT the chief ran — a rate says a fix did not work, only the
-        // commands say why (2026-09-05: two checks missed on a turn that ran
-        // no `cmux send` at all, and nothing said whether it had asked the
-        // user instead or sent something the check did not count).
-        if (missedHere && evidence.length === 0) {
-          for (const { say, log: ran } of turnLogs) {
-            const mark = say === turn.say ? ' (missed)' : ''
-            evidence.push(`    turn ${JSON.stringify(say.slice(0, 60))} ran${mark}:`)
-            for (const line of ran) evidence.push(`      $ ${line}`)
-            if (ran.length === 0) evidence.push('      (nothing)')
-          }
-        } else if (missedHere) {
-          evidence.push(`    turn ${JSON.stringify(turn.say.slice(0, 60))} ran (missed):`)
-          for (const line of log) evidence.push(`      $ ${line}`)
-          if (log.length === 0) evidence.push('      (nothing)')
-        }
-        if (missedHere) evidence.push(`    chief reply: ${result.reply ?? result.stdout}`)
-      }
-    } finally {
-      stage.cleanup()
-    }
-    if (broke) {
-      console.log(`  ${label}: could not run — ${broke}`)
-      // A chief that never ran is not a pass: failed executions count as
-      // misses, or a dead chief reads as green.
-      brokenLabels.push(label)
-      continue
-    }
-    console.log(
-      failures.length === 0
-        ? `  ${label}: all checks held`
-        : `  ${label}: ${failures.join('; ')}`,
+  const app = await startIntegration({ editor: EDITOR, fakeEnv: ENV })
+  const log = []
+  const note = (line) => {
+    log.push({ at: Math.round((Date.now() - started) / 1000), line })
+    process.stdout.write(`  [${Math.round((Date.now() - started) / 1000)}s] ${line}\n`)
+  }
+  let file = null
+  try {
+    writeFileSync(
+      join(app.env.CONSENSFLOW_HOME, 'agents.json'),
+      `${JSON.stringify({ schemaVersion: 1, agents: STAFF }, null, 2)}\n`,
     )
-    for (const line of evidence) console.log(line)
+    file = join(app.env.CONSENSFLOW_HOME, 'consensflow.db')
+    const opened = await app.requestNode('project.open', {
+      directory: WORKSPACE,
+      harness: 'claude-code',
+      staff: [
+        { agent: 'eval-worker', roles: ['worker'] },
+        { agent: 'eval-worker-2', roles: ['worker'] },
+        { agent: 'eval-advisor', roles: ['advisor'] },
+        { agent: 'eval-reviewer', roles: ['reviewer'] },
+      ],
+    })
+    if (opened.ok !== true) throw new Error(`project.open: ${JSON.stringify(opened)}`)
+    const project = opened.project.id
+    const board = async () => (await app.requestNode('board.get', { project })).board
+    const chiefLane = async () =>
+      (await board()).lanes.find((l) => l.participant.handle === 'chief')
+    const questions = async () =>
+      (await app.requestNode('inbox.get', { project, participant: 'human' })).messages.filter(
+        (m) => m.kind === 'question' && m.sender === 'chief' && m.state !== 'answered',
+      )
+    await app.waitFor(async () => (await chiefLane())?.activity?.state === 'idle', 180_000)
+    note('chief ready; typing the prompt')
+    await app.tell(project, scenario.prompt, { idleMs: 180_000 })
+
+    const answered = new Set()
+    let lastChange = Date.now()
+    let signature = ''
+    for (;;) {
+      await sleep(5_000)
+      for (const question of await questions()) {
+        if (answered.has(question.id)) continue
+        answered.add(question.id)
+        const body = scenario.answer(question)
+        await app.requestNode('message.answer', { question: question.id, body })
+        note(
+          `answered m-${question.id} (${question.body.split('\n')[0].slice(0, 70)}) with: ${body.split('\n')[0]}`,
+        )
+      }
+      const current = await board()
+      const chief = current.lanes.find((l) => l.participant.handle === 'chief')
+      const tasks = current.lanes.flatMap((l) => l.tasks).concat(current.open)
+      const now = JSON.stringify([
+        chief?.activity?.state,
+        tasks.map((t) => [t.number, t.state]),
+        current.lanes.map((l) => [l.participant.handle, l.activity?.state]),
+      ])
+      if (now !== signature) {
+        signature = now
+        lastChange = Date.now()
+        note(
+          `chief ${chief?.activity?.state}; tasks ${tasks.map((t) => `T-${t.number}:${t.state}`).join(' ') || 'none'}`,
+        )
+      }
+      const busy =
+        chief?.activity?.state !== 'idle' ||
+        tasks.some((t) => ['queued', 'working', 'waiting'].includes(t.state))
+      if (!busy && Date.now() - lastChange > scenario.quietMs) {
+        note('quiet: the run is over')
+        break
+      }
+      if (Date.now() - started > timeoutMs) {
+        note('time is up')
+        break
+      }
+    }
+  } finally {
+    await app.close({ preserveRoot: true })
   }
+  const metrics = measure(file)
+  const checks = verdict(scenario, metrics)
+  const report = {
+    scenario: scenario.id,
+    model: values.model,
+    staffModel: values['staff-model'],
+    run: index,
+    seconds: Math.round((Date.now() - started) / 1000),
+    metrics,
+    checks,
+    log,
+  }
+  mkdirSync(REPORTS, { recursive: true })
+  const out = join(REPORTS, `${stamp()}-${scenario.id}-${values.model}-${index}.json`)
+  writeFileSync(out, `${JSON.stringify(report, null, 2)}\n`)
+  process.stdout.write(
+    `\n${scenario.id} · chief ${values.model} · run ${index} · ${report.seconds}s\n`,
+  )
+  for (const check of checks)
+    process.stdout.write(`  ${check.ok ? 'PASS' : 'FAIL'} ${check.name}\n`)
+  process.stdout.write(
+    `  tasks ${metrics.tasks.length} (parallel ${metrics.parallel}, advice ${metrics.advice}, reviews ${metrics.reviews}) · questions ${metrics.questionsToHuman.length} · notes ${metrics.notesToHuman.length} · chief edits ${metrics.chiefEdits} in ${metrics.chiefTurns} turns\n  report: ${out}\n`,
+  )
+  return checks.every((check) => check.ok)
 }
 
-console.log('')
-let missed = 0
-for (const scenario of chosen) {
-  const rows = [...tally.values()].filter((r) => r.scenario === scenario.id)
-  if (rows.length === 0) continue
-  console.log(scenario.id)
-  for (const row of rows) {
-    const rate = row.passed / row.of
-    missed += row.of - row.passed
-    const mark = rate === 1 ? '  ok  ' : rate === 0 ? ' FAIL ' : ' flaky'
-    console.log(`  ${mark} ${String(row.passed).padStart(2)}/${row.of}  ${row.check}`)
-  }
-}
-// A flaky check is a failing check: the user meets it on the run it misses.
-// So is a chief that never ran at all.
-missed += brokenLabels.length
-for (const label of brokenLabels) console.log(`  FAIL  0/1  ${label} could not run`)
-process.exitCode = missed === 0 ? 0 : 1
+let allOk = true
+for (let index = 1; index <= repeat; index += 1) allOk = (await run(index)) && allOk
+process.exit(allOk ? 0 : 1)
