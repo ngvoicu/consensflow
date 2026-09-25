@@ -593,7 +593,7 @@ test('completion/claude-code: queued work prevents a settled window through dequ
 test('completion/claude-code: a removed cross-session message clears its queue entry when the envelope attributes differ', async () => {
   // Claude Code 2.1.275 logs a mid-turn cross-session message with a
   // hop-chain attribute on enqueue and without it on remove. Matching the
-  // removal by exact text left the lead "queued" forever, which held every
+  // removal by exact text left the chief "queued" forever, which held every
   // result from 2026-09-18 11:00 on.
   const session = '1b09fb15-feb1-4595-9f47-5eb9ff768191'
   const envelope = (attributes) =>
@@ -618,7 +618,7 @@ test('completion/claude-code: a removed cross-session message clears its queue e
 })
 
 test('completion/cached: an unchanged transcript returns the previous result; a grown one is read again', async () => {
-  // The watcher re-reads every bound session each second; the live lead's
+  // The watcher re-reads every bound session each second; the live chief's
   // transcript is 135 MB. Nothing about an unchanged file can have changed.
   const session = '1b09fb15-feb1-4595-9f47-5eb9ff768191'
   const { env, file, root } = await stageJsonl(

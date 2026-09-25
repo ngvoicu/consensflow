@@ -6,7 +6,7 @@ import { startIntegration } from './harness.mjs'
 /**
  * A native question, end to end through the real pane host (TEST-CF1-15): a
  * fake Claude worker asks through its question tool, the hook in its settings
- * file puts the question on the board, the lead answers it with `cf answer`
+ * file puts the question on the board, the chief answers it with `cf answer`
  * as its inbox told it to, and the hook hands the answer back into the tool
  * call, so the worker goes on and finishes its task. Nothing is pasted into
  * the worker's window for that.
@@ -15,7 +15,7 @@ import { startIntegration } from './harness.mjs'
 const CORE_EDITOR = fileURLToPath(new URL('./core-editor.mjs', import.meta.url))
 const FAKE_AGENT = fileURLToPath(new URL('./fake-agent.mjs', import.meta.url))
 
-test("a worker's question with options goes to the lead's inbox and its answer returns through the hook", async () => {
+test("a worker's question with options goes to the chief's inbox and its answer returns through the hook", async () => {
   const app = await startIntegration({
     editor: CORE_EDITOR,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
@@ -49,14 +49,14 @@ test("a worker's question with options goes to the lead's inbox and its answer r
     const inbox = async (participant) =>
       (await app.requestNode('inbox.get', { project, participant })).messages
 
-    // The task waits only until the lead answers, which the fake lead does at
+    // The task waits only until the chief answers, which the fake chief does at
     // once, so the proof is the thread the ledger kept, not a glimpse of the state.
     await app.waitFor(
       async () =>
-        (await inbox('lead')).some((m) => m.kind === 'question' && m.state === 'delivered'),
+        (await inbox('chief')).some((m) => m.kind === 'question' && m.state === 'delivered'),
       30_000,
     )
-    const question = (await inbox('lead')).find((m) => m.kind === 'question')
+    const question = (await inbox('chief')).find((m) => m.kind === 'question')
     assert.match(question.sender, /^worker-/, "the worker's session asked")
     assert.deepEqual([question.taskNumber, question.questions[0].options[1].label], [1, 'blue'])
     assert.equal(question.body, 'Colour: Which colour?\n- red\n- blue: REPLY blue')
@@ -66,13 +66,14 @@ test("a worker's question with options goes to the lead's inbox and its answer r
     const answer = (await inbox(session)).find((m) => m.kind === 'answer')
     assert.deepEqual(
       [answer.state, answer.choices, answer.sender, answer.body],
-      ['read', [['blue']], 'lead', 'Colour: blue'],
+      ['read', [['blue']], 'chief', 'Colour: blue'],
       'the answer is collected by the hook, never delivered as text',
     )
     const { task } = await app.requestNode('task.get', { project, task: 1 })
     assert.equal(task.messages.find((m) => m.kind === 'result').body, 'answered: blue')
     await app.waitFor(
-      async () => (await inbox('lead')).some((m) => m.kind === 'result' && m.state === 'delivered'),
+      async () =>
+        (await inbox('chief')).some((m) => m.kind === 'result' && m.state === 'delivered'),
       30_000,
     )
   } catch (cause) {

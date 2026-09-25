@@ -5,7 +5,7 @@ import { TerminalsView } from './terminals.js'
 /**
  * The page: the projects on the left, the chosen project's board in the
  * middle, and the live windows on the right in a strip that scrolls sideways,
- * the lead first, so the human reads the board and talks to any of them. Everything it shows comes from the new core through
+ * the chief first, so the human reads the board and talks to any of them. Everything it shows comes from the new core through
  * the app's `core_request`, and it redraws when the core says something
  * changed. It keeps nothing of its own but what is on screen.
  */
@@ -20,7 +20,7 @@ const projectList = $('#projects')
 const projectTitle = $('#project-title')
 const projectDirectory = $('#project-directory')
 const inboxButton = $('#inbox-button')
-const teamButton = $('#team-button')
+const teamButton = $('#staff-button')
 const boardRoot = $('#board')
 const stage = $('#stage')
 const status = $('#status')
@@ -31,7 +31,7 @@ const state = {
   board: null,
   inbox: [],
   agents: [],
-  focus: 'lead',
+  focus: 'chief',
   openTask: null,
 }
 
@@ -200,7 +200,7 @@ async function refresh() {
       }
       if (state.openTask !== null && drawer.open) await openTask(state.openTask)
       render()
-      if (teamDialog.open) renderTeam()
+      if (teamDialog.open) renderStaff()
     } catch (cause) {
       report(cause)
     } finally {
@@ -227,7 +227,7 @@ function render() {
   main.dataset.suspended = String(suspended)
   teamButton.disabled = project === null || suspended
   const lanes = state.board?.lanes ?? []
-  if (!lanes.some((lane) => lane.participant.handle === state.focus)) state.focus = 'lead'
+  if (!lanes.some((lane) => lane.participant.handle === state.focus)) state.focus = 'chief'
   if (suspended) {
     terminals.clear(state.selected)
     drawer.hide()
@@ -266,7 +266,7 @@ function suspendedBanner(project) {
   resume.addEventListener('click', () =>
     act(async () => {
       await core('project.resume', { project: project.id })
-      state.focus = 'lead'
+      state.focus = 'chief'
     }),
   )
   banner.append(resume)
@@ -308,7 +308,7 @@ function renderProjects() {
     select.append(element('span', 'project-name', project.name))
     select.addEventListener('click', () => {
       state.selected = project.id
-      state.focus = 'lead'
+      state.focus = 'chief'
       state.openTask = null
       drawer.hide()
       void refresh()
@@ -360,7 +360,7 @@ const TIER_LABEL = {
 const HARNESS_ORDER = ['claude', 'codex', 'opencode', 'pi', 'kimi', 'devin', 'image']
 const TIERS = Object.keys(TIER_LABEL)
 const rank = (list, value) => (list.includes(value) ? list.indexOf(value) : list.length)
-/** A team reads by role, in the order the picker offers them, then by tier, the most critical first, then by name. */
+/** A staff reads by role, in the order the picker offers them, then by tier, the most critical first, then by name. */
 const byRoleAndTier = (a, b) =>
   rank(ROLES, a.role) - rank(ROLES, b.role) ||
   rank(TIERS, a.tier) - rank(TIERS, b.tier) ||
@@ -427,7 +427,7 @@ function rolePicker(roleSelect, agentSelect, hint, holding, onRefill = () => {})
       choices.length === 0
         ? state.agents.length === 0
           ? 'No saved agents yet: add one under Settings, Agents.'
-          : `Every saved agent is on the team as ${ROLE_LABEL[role]} already.`
+          : `Every saved agent is on the staff as ${ROLE_LABEL[role]} already.`
         : ''
     hint.hidden = choices.length > 0
     onRefill()
@@ -435,7 +435,7 @@ function rolePicker(roleSelect, agentSelect, hint, holding, onRefill = () => {})
   refill()
 }
 
-/** One row of a team table: the agent, one of its roles, and a Remove for that role. */
+/** One row of a staff table: the agent, one of its roles, and a Remove for that role. */
 function teamRow(who, role, remove) {
   const row = element('tr')
   row.dataset.role = role
@@ -446,11 +446,11 @@ function teamRow(who, role, remove) {
   return row
 }
 
-// New project: the native folder picker first, then the lead's harness, the
-// team (the last project's ticked already) and the approval setting.
+// New project: the native folder picker first, then the chief's harness, the
+// staff (the last project's ticked already) and the approval setting.
 const newProjectDialog = $('#new-project-dialog')
 const newProjectForm = newProjectDialog.querySelector('form')
-const newProjectTeam = $('#new-project-team')
+const newProjectStaff = $('#new-project-staff')
 $('#new-project').addEventListener('click', async () => {
   if (typeof tauri.dialog?.open !== 'function') {
     report('The folder picker is not available in this window.')
@@ -463,9 +463,9 @@ $('#new-project').addEventListener('click', async () => {
       multiple: false,
     })
     if (typeof directory !== 'string' || directory.length === 0) return
-    const [{ agents }, { team }] = await Promise.all([core('agents.list'), core('team.last')])
+    const [{ agents }, { staff }] = await Promise.all([core('agents.list'), core('staff.last')])
     state.agents = agents
-    renderNewProjectTeam(team)
+    renderNewProjectStaff(staff)
     newProjectForm.elements.directory.value = directory
     newProjectDialog.showModal()
   } catch (cause) {
@@ -473,19 +473,19 @@ $('#new-project').addEventListener('click', async () => {
   }
 })
 
-/** The agents and roles picked for the new project, the last team's to start with. */
+/** The agents and roles picked for the new project, the last staff's to start with. */
 let picked = []
 
-function renderNewProjectTeam(lastTeam) {
-  picked = lastTeam.flatMap(({ agent, roles }) =>
+function renderNewProjectStaff(lastStaff) {
+  picked = lastStaff.flatMap(({ agent, roles }) =>
     state.agents.some((saved) => saved.name === agent)
       ? roles.map((role) => ({ agent, role }))
       : [],
   )
-  drawNewProjectTeam()
+  drawNewProjectStaff()
 }
 
-function drawNewProjectTeam() {
+function drawNewProjectStaff() {
   const rows = picked
     .map((pick) => ({
       ...pick,
@@ -509,14 +509,14 @@ function drawNewProjectTeam() {
           picked.findIndex((pick) => pick.agent === agent && pick.role === role),
           1,
         )
-        drawNewProjectTeam()
+        drawNewProjectStaff()
       })
       const row = teamRow(who, role, remove)
       row.dataset.agent = agent
       return row
     })
   if (rows.length === 0) {
-    const row = element('tr', 'team-empty')
+    const row = element('tr', 'staff-empty')
     const cell = element(
       'td',
       null,
@@ -528,7 +528,7 @@ function drawNewProjectTeam() {
     row.append(cell)
     rows.push(row)
   }
-  newProjectTeam.replaceChildren(...rows)
+  newProjectStaff.replaceChildren(...rows)
   rolePicker(
     newProjectForm.elements.pickRole,
     newProjectForm.elements.pickAgent,
@@ -542,17 +542,17 @@ $('#new-project-add').addEventListener('click', () => {
   const agent = newProjectForm.elements.pickAgent.value
   if (!agent) return
   picked.push({ agent, role })
-  drawNewProjectTeam()
+  drawNewProjectStaff()
 })
 
-/** The picked rows as the core takes a team: each agent once, with its roles. */
-function pickedTeam() {
-  const team = new Map()
+/** The picked rows as the core takes a staff: each agent once, with its roles. */
+function pickedStaff() {
+  const staff = new Map()
   for (const { agent, role } of picked) {
-    if (!team.has(agent)) team.set(agent, { agent, roles: [] })
-    team.get(agent).roles.push(role)
+    if (!staff.has(agent)) staff.set(agent, { agent, roles: [] })
+    staff.get(agent).roles.push(role)
   }
-  return [...team.values()]
+  return [...staff.values()]
 }
 
 newProjectForm.addEventListener('submit', (event) => {
@@ -560,28 +560,28 @@ newProjectForm.addEventListener('submit', (event) => {
   const directory = newProjectForm.elements.directory.value
   const harness = newProjectForm.elements.harness.value
   const gate = newProjectForm.elements.gate.checked
-  const team = pickedTeam()
+  const staff = pickedStaff()
   newProjectDialog.close()
   void act(async () => {
-    const { project } = await core('project.open', { directory, harness, gate, team })
+    const { project } = await core('project.open', { directory, harness, gate, staff })
     state.selected = project.id
-    state.focus = 'lead'
+    state.focus = 'chief'
   })
 })
 newProjectDialog
   .querySelector('[value="cancel"]')
   .addEventListener('click', () => newProjectDialog.close())
 
-// The project team: who the lead may hand work to.
-const teamDialog = $('#team-dialog')
+// The project staff: who the chief may hand work to.
+const teamDialog = $('#staff-dialog')
 const teamForm = teamDialog.querySelector('form')
-const teamList = $('#team-members')
-const teamGate = $('#team-gate')
+const teamList = $('#staff-members')
+const teamGate = $('#staff-gate')
 /** The member whose removal waits for the human's yes, kept across redraws. */
 let removing = null
 
-/** Draws the team from the board, in place, so it stays current while open. */
-function renderTeam() {
+/** Draws the staff from the board, in place, so it stays current while open. */
+function renderStaff() {
   const lanes = state.board?.lanes ?? []
   // The members only: a member's sessions are lanes too, named after it.
   const members = lanes
@@ -593,7 +593,7 @@ function renderTeam() {
     )
     .sort(byRoleAndTier)
     .map((entry) => entry.row)
-  teamList.replaceChildren(...(rows.length ? rows : [element('tr', 'team-empty')]))
+  teamList.replaceChildren(...(rows.length ? rows : [element('tr', 'staff-empty')]))
   if (rows.length === 0) {
     const cell = element('td', null, 'Nobody yet: add the agents this project may use.')
     cell.colSpan = 4
@@ -603,7 +603,7 @@ function renderTeam() {
   rolePicker(
     teamForm.elements.role,
     teamForm.elements.agent,
-    $('#team-hint'),
+    $('#staff-hint'),
     (agent, role) =>
       members.some((member) => member.agent === agent && member.roles.includes(role)),
     () => {
@@ -615,11 +615,11 @@ function renderTeam() {
 /**
  * A member's rows, one per role, each with the role it stands for: Remove
  * drops that role, or, for its last role, asks first and takes the member
- * off the team.
+ * off the staff.
  */
 function memberRows(member) {
   const name = `@${member.handle}`
-  // What the member runs, from its agent; the tier is the team's own, which follows the agent.
+  // What the member runs, from its agent; the tier is the staff's own, which follows the agent.
   const saved = state.agents.find((agent) => agent.name === member.agent)
   const who = () => {
     const cell = element('td')
@@ -646,7 +646,7 @@ function memberRows(member) {
     keep.type = 'button'
     keep.addEventListener('click', () => {
       removing = null
-      renderTeam()
+      renderStaff()
     })
     const yes = element('button', 'danger-button', `Remove ${name}`)
     yes.type = 'button'
@@ -654,7 +654,7 @@ function memberRows(member) {
       act(async () => {
         await core('member.remove', { project: state.selected, agent: member.handle })
         removing = null
-        note(`${name} left the team.`)
+        note(`${name} left the staff.`)
       }),
     )
     cell.append(
@@ -672,7 +672,7 @@ function memberRows(member) {
     remove.addEventListener('click', () => {
       if (member.roles.length === 1) {
         removing = member.handle
-        renderTeam()
+        renderStaff()
         return
       }
       void act(async () => {
@@ -693,7 +693,7 @@ teamButton.addEventListener('click', () =>
   act(async () => {
     state.agents = (await core('agents.list')).agents
     removing = null
-    renderTeam()
+    renderStaff()
     teamDialog.showModal()
   }),
 )
@@ -716,7 +716,7 @@ teamForm.addEventListener('submit', (event) => {
   void act(async () => {
     if (member === undefined) {
       await core('member.add', { project: state.selected, agent, roles: [role] })
-      note(`@${agent} joined the team as ${ROLE_LABEL[role]}.`)
+      note(`@${agent} joined the staff as ${ROLE_LABEL[role]}.`)
       return
     }
     await core('member.roles', {
@@ -800,7 +800,7 @@ for (const entry of settingsDialog.querySelectorAll('[data-agents-page]')) {
 window.addEventListener('focus', () => {
   void act(async () => {
     state.agents = (await core('agents.list')).agents
-    if (teamDialog.open) renderTeam()
+    if (teamDialog.open) renderStaff()
   })
 })
 

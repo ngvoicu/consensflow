@@ -54,7 +54,7 @@ Usage: cf <command> [options]
   doctor                                    Inspect runtime, roster and bundled roles
 
 Inside a window ConsensFlow opened, cf is the board: task add --tier <t> "…",
-task list|get|done|review|accept|reopen|cancel, inbox, ask, answer, team, whoami.
+task list|get|done|review|accept|reopen|cancel, inbox, ask, answer, staff, whoami.
 `
 
 function out(text) {
@@ -221,7 +221,7 @@ function doctor() {
     out('legacy:       mode.json is ignored and can be removed')
   }
   out(`agents:       ${listAgents(env).length}`)
-  out('roles:        bundled lead, worker, reviewer and advisor; prepared when a window launches')
+  out('roles:        bundled chief, worker, reviewer and advisor; prepared when a window launches')
 
   // The install records the runtime that performed it — from the app, its own
   // bundled Node. If that has moved, the wiring it left behind stops working,

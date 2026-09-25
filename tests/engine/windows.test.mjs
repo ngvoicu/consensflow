@@ -120,9 +120,9 @@ test('window: every harness opens and resumes in full-permission mode', () => {
 test('window: a resume names the recorded native session on every kind', () => {
   // A resume reopens the identity the store recorded — never a fresh one,
   // never the last session in the folder.
-  assert.deepEqual(interactiveResume(AGENTS.pi, 't-1-lead-x').args.slice(0, 2), [
+  assert.deepEqual(interactiveResume(AGENTS.pi, 't-1-chief-x').args.slice(0, 2), [
     '--session-id',
-    't-1-lead-x',
+    't-1-chief-x',
   ])
   const oc = interactiveResume(AGENTS.opencode, 'ses_recorded')
   assert.deepEqual(

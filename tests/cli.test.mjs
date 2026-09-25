@@ -110,10 +110,10 @@ describe('role files belong to pane launch, not CLI administration', () => {
     const role = join(
       t.env.CONSENSFLOW_HOME,
       'roles',
-      'lead',
+      'chief',
       '.claude',
       'skills',
-      'consensflow-lead',
+      'consensflow-chief',
       'SKILL.md',
     )
     mkdirSync(dirname(role), { recursive: true })
@@ -300,7 +300,7 @@ describe('retired off/reset CLI commands preserve the installation and saved dat
     })
   }
 })
-it('the lead can discover saved capability profiles without refreshing or changing role files', async () => {
+it('the chief can discover saved capability profiles without refreshing or changing role files', async () => {
   const t = tempEnv()
   try {
     const added = await cf(
@@ -311,11 +311,14 @@ it('the lead can discover saved capability profiles without refreshing or changi
     const refused = await cf(['agent', 'add', 'hyperion'], t.env)
     assert.equal(refused.code, 1)
     assert.match(refused.stderr, /catalog agent/)
-    const role = join(t.env.CONSENSFLOW_HOME, 'roles/lead/.claude/skills/consensflow-lead/SKILL.md')
+    const role = join(
+      t.env.CONSENSFLOW_HOME,
+      'roles/chief/.claude/skills/consensflow-chief/SKILL.md',
+    )
     mkdirSync(dirname(role), { recursive: true })
-    writeFileSync(role, 'Keep existing lead context untouched')
+    writeFileSync(role, 'Keep existing chief context untouched')
     const roster = readFileSync(rosterPath(t.env), 'utf8')
-    const result = await cf(['agent', 'list', '--json'], { ...t.env, CONSENSFLOW_ROLE: 'lead' })
+    const result = await cf(['agent', 'list', '--json'], { ...t.env, CONSENSFLOW_ROLE: 'chief' })
     assert.equal(result.code, 0, result.stderr)
     const agents = JSON.parse(result.stdout).agents
     const hyperion = agents.find((agent) => agent.name === 'hyperion')
@@ -324,7 +327,7 @@ it('the lead can discover saved capability profiles without refreshing or changi
     assert.equal(Object.hasOwn(hyperion.profile, 'categories'), false, 'no role pills')
     assert.ok(hyperion.profile.workTier)
     assert.equal(readFileSync(rosterPath(t.env), 'utf8'), roster)
-    assert.equal(readFileSync(role, 'utf8'), 'Keep existing lead context untouched')
+    assert.equal(readFileSync(role, 'utf8'), 'Keep existing chief context untouched')
   } finally {
     t.cleanup()
   }

@@ -19,7 +19,7 @@ test('administration lists missing harnesses without probing or installing them'
     const rows = await admin.check()
     assert.equal(rows.length, 6)
     assert.ok(rows.every((r) => r.installed === false && r.version.state === 'not-installed'))
-    assert.equal(rows.find((r) => r.id === 'kimi').lead, false)
+    assert.equal(rows.find((r) => r.id === 'kimi').chief, false)
   } finally {
     t.cleanup()
   }

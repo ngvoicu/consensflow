@@ -3,20 +3,20 @@
  * The live bench for the new core (VERIFY-BDC-08): its daemon, the real Rust
  * pane host and the REAL harness TUIs on cheap models, driven by code.
  *
- * The human gives the lead one task per worker: run `cf task add` for its tier;
+ * The human gives the chief one task per worker: run `cf task add` for its tier;
  * the daemon picks the worker (the free one of that tier with the fewest tasks
  * so far, the earliest joined first), which the steps below lean on. The
- * lead (OpenCode on the free Muse Spark model by default; `--lead claude` for a
- * Claude Code lead on Sonnet) must run it itself; the core opens the worker's
+ * chief (OpenCode on the free Muse Spark model by default; `--chief claude` for a
+ * Claude Code chief on Sonnet) must run it itself; the core opens the worker's
  * window with the task, the worker must answer in full-permission mode, the
  * core must record the answer as the task's result and deliver it into the
- * lead's window, and the worker must read idle. Then the app restarts and the
- * project must come back on its lead's own conversation.
+ * chief's window, and the worker must read idle. Then the app restarts and the
+ * project must come back on its chief's own conversation.
  *
  * State lives in a throwaway home; the harnesses use the real logins. Opt-in,
  * never part of `npm test`:
  *
- *   npm run bench:core [-- [--lead claude|opencode] opencode pi devin claude codex]
+ *   npm run bench:core [-- [--chief claude|opencode] opencode pi devin claude codex]
  */
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -66,8 +66,8 @@ const AGENTS = {
 const tierFlag = (tier) =>
   tier === 'critical' ? '--tier critical --purpose hard-problem' : `--tier ${tier}`
 const args = process.argv.slice(2)
-const leadAt = args.indexOf('--lead')
-const LEAD = leadAt === -1 ? 'opencode' : args[leadAt + 1]
+const leadAt = args.indexOf('--chief')
+const CHIEF = leadAt === -1 ? 'opencode' : args[leadAt + 1]
 const named =
   leadAt === -1 ? args : args.filter((_arg, index) => index !== leadAt && index !== leadAt + 1)
 const reviewerAt = named.indexOf('--reviewer')
@@ -78,8 +78,8 @@ const workers =
     : named.filter((_arg, index) => index !== reviewerAt && index !== reviewerAt + 1)
 const wanted = workers.length ? workers : ['opencode', 'pi', 'devin']
 if (!AGENTS[REVIEWER]) throw new Error(`unsupported bench reviewer: ${REVIEWER}`)
-const LEAD_KIND = { claude: 'claude-code', opencode: 'opencode' }[LEAD]
-if (!LEAD_KIND) throw new Error(`unsupported bench lead: ${LEAD}`)
+const LEAD_KIND = { claude: 'claude-code', opencode: 'opencode' }[CHIEF]
+if (!LEAD_KIND) throw new Error(`unsupported bench chief: ${CHIEF}`)
 
 // A clean environment: never this shell's Claude session identity.
 const ENV = {
@@ -125,7 +125,7 @@ async function until(predicate, timeoutMs, stepMs = 1000) {
 }
 
 mkdirSync(WORKSPACE, { recursive: true })
-// The bench measures delivery, not judgment: a lead left to guess its job
+// The bench measures delivery, not judgment: a chief left to guess its job
 // explores for minutes after every result, and each delivery waits for that.
 const BRIEF =
   'This folder is an automated ConsensFlow bench. Do exactly what each message asks and ' +
@@ -182,11 +182,11 @@ try {
   const inbox = async (participant) =>
     (await app.requestNode('inbox.get', { project, participant })).messages
 
-  const lead = await until(async () => {
-    const leadLane = await lane('lead')
+  const chief = await until(async () => {
+    const leadLane = await lane('chief')
     return leadLane?.activity?.state === 'idle' ? leadLane : null
   }, 180_000)
-  record('lead-ready', Boolean(lead), { lead: LEAD, activity: (await lane('lead'))?.activity })
+  record('chief-ready', Boolean(chief), { chief: CHIEF, activity: (await lane('chief'))?.activity })
 
   for (const name of wanted) {
     const agent = AGENTS[name]
@@ -198,12 +198,12 @@ try {
       { idleMs: 300_000 },
     )
     const task = await until(
-      async () => (await lane(agent.id))?.tasks.find((t) => t.requester === 'lead'),
+      async () => (await lane(agent.id))?.tasks.find((t) => t.requester === 'chief'),
       300_000,
     )
-    record(`${name}-dispatched-by-lead`, Boolean(task), {
+    record(`${name}-dispatched-by-chief`, Boolean(task), {
       seconds: Math.round((Date.now() - started) / 1000),
-      ...(task ? { task: task.number } : { leadActivity: (await lane('lead'))?.activity }),
+      ...(task ? { task: task.number } : { leadActivity: (await lane('chief'))?.activity }),
     })
     if (!task) continue
     const done = await until(async () => {
@@ -211,7 +211,7 @@ try {
       return current?.state === 'done' ? current : null
     }, 300_000)
     const result = done
-      ? (await inbox('lead')).find((m) => m.kind === 'result' && m.taskNumber === task.number)
+      ? (await inbox('chief')).find((m) => m.kind === 'result' && m.taskNumber === task.number)
       : null
     record(`${name}-answered`, Boolean(done && result?.body.includes(marker)), {
       seconds: Math.round((Date.now() - started) / 1000),
@@ -226,16 +226,16 @@ try {
     })
     if (!result) continue
     const delivered = await until(
-      async () => (await inbox('lead')).find((m) => m.id === result.id && m.state === 'delivered'),
+      async () => (await inbox('chief')).find((m) => m.id === result.id && m.state === 'delivered'),
       300_000,
     )
-    record(`${name}-received-by-lead`, Boolean(delivered), {
+    record(`${name}-received-by-chief`, Boolean(delivered), {
       seconds: Math.round((Date.now() - started) / 1000),
       ...(delivered
         ? {}
         : {
-            state: (await inbox('lead')).find((m) => m.id === result.id),
-            lead: (await lane('lead'))?.activity,
+            state: (await inbox('chief')).find((m) => m.id === result.id),
+            chief: (await lane('chief'))?.activity,
           }),
     })
     // One task per session: the worker's window closes once its task is done.
@@ -248,7 +248,7 @@ try {
       Boolean(closed),
       closed ? {} : { activity: (await lane(agent.id))?.activity },
     )
-    // Continuation: the lead sends a follow-up to the window that did the
+    // Continuation: the chief sends a follow-up to the window that did the
     // task; it comes back on its own conversation and answers again.
     {
       const again = `BENCH_AGAIN_${name.toUpperCase()}`
@@ -262,14 +262,14 @@ try {
         async () =>
           (await board()).lanes
             .flatMap((l) => l.tasks)
-            .find((t) => t.requester === 'lead' && t.number > task.number && t.pool === null),
+            .find((t) => t.requester === 'chief' && t.number > task.number && t.pool === null),
         300_000,
       )
       record(`${name}-continued-in-same-window`, follow?.assignee === task.assignee, {
         seconds: Math.round((Date.now() - begun) / 1000),
         ...(follow
           ? { task: follow.number, window: follow.assignee }
-          : { lead: (await lane('lead'))?.activity }),
+          : { chief: (await lane('chief'))?.activity }),
       })
       if (follow) {
         const finished = await until(async () => {
@@ -279,7 +279,9 @@ try {
           return current?.state === 'done' ? current : null
         }, 300_000)
         const answered = finished
-          ? (await inbox('lead')).find((m) => m.kind === 'result' && m.taskNumber === follow.number)
+          ? (await inbox('chief')).find(
+              (m) => m.kind === 'result' && m.taskNumber === follow.number,
+            )
           : null
         record(`${name}-continued-answered`, Boolean(answered?.body.includes(again)), {
           seconds: Math.round((Date.now() - begun) / 1000),
@@ -295,12 +297,12 @@ try {
   }
 
   // The question door, live: a worker asks through its harness's own question
-  // tool; the door puts the question in the lead's inbox; the lead answers
+  // tool; the door puts the question in the chief's inbox; the chief answers
   // with `cf answer`; the door hands the answer back and the worker finishes.
   for (const name of wanted.filter((candidate) => QUESTION_TOOL[candidate])) {
     const started = Date.now()
     const worker = AGENTS[name]
-    // A lead may put the worker's question to the human, whose preference it
+    // A chief may put the worker's question to the human, whose preference it
     // is; the bench answers as the human would, on the board, and says so.
     const humanAnswers = []
     const answerAsHuman = async () => {
@@ -328,7 +330,7 @@ try {
     )
     const question = await until(
       async () =>
-        (await inbox('lead')).find(
+        (await inbox('chief')).find(
           (m) =>
             m.kind === 'question' &&
             m.sender !== null &&
@@ -342,7 +344,7 @@ try {
       ...(question
         ? { options: question.questions[0].options.map((o) => o.label) }
         : {
-            lead: (await lane('lead'))?.activity,
+            chief: (await lane('chief'))?.activity,
             worker: (await lane(worker.id))?.activity,
             output: app.output(await paneOf(worker.id)).slice(-1200),
           }),
@@ -362,13 +364,13 @@ try {
         },
       )
     }
-    record(`${name}-question-answered-by-lead`, Boolean(answer), {
+    record(`${name}-question-answered-by-chief`, Boolean(answer), {
       seconds: Math.round((Date.now() - started) / 1000),
       ...(answer
         ? { choices: answer.choices, from: answer.sender }
         : {
-            lead: (await lane('lead'))?.activity,
-            output: app.output(`p${project}-lead`).slice(-1200),
+            chief: (await lane('chief'))?.activity,
+            output: app.output(`p${project}-chief`).slice(-1200),
           }),
     })
     const done = await until(async () => {
@@ -377,7 +379,7 @@ try {
       return current?.state === 'done' ? current : null
     }, 300_000)
     const result = done
-      ? (await inbox('lead')).find(
+      ? (await inbox('chief')).find(
           (m) => m.kind === 'result' && m.taskNumber === question.taskNumber,
         )
       : null
@@ -400,14 +402,14 @@ try {
     )
   }
 
-  // A review, live: the lead puts it on the board for the reviewer's tier
+  // A review, live: the chief puts it on the board for the reviewer's tier
   // like any task, the reviewer takes it in a session of its own, and its
-  // findings come back to the lead as the result. Nothing is reviewed unless
-  // the lead asks.
+  // findings come back to the chief as the result. Nothing is reviewed unless
+  // the chief asks.
   {
     const started = Date.now()
     const marker = 'BENCH_REVIEW_OK'
-    // Only the task the lead creates from here on counts, not the baseline's.
+    // Only the task the chief creates from here on counts, not the baseline's.
     const before = Math.max(
       0,
       ...(await board()).lanes.flatMap((l) => l.tasks.map((t) => t.number)),
@@ -443,22 +445,22 @@ try {
     const delivered = review
       ? await until(
           async () =>
-            (await inbox('lead')).find(
+            (await inbox('chief')).find(
               (m) =>
                 m.kind === 'result' && m.taskNumber === review.number && m.state === 'delivered',
             ),
           300_000,
         )
       : null
-    record('review-received-by-lead', Boolean(delivered?.body.includes(marker)), {
+    record('review-received-by-chief', Boolean(delivered?.body.includes(marker)), {
       seconds: Math.round((Date.now() - started) / 1000),
       ...(delivered ? { findings: delivered.body.slice(0, 120) } : {}),
     })
   }
 
   // Restart: a new daemon and pane host over the same home, in the app's quit
-  // order. The project must come back on its lead's own conversation.
-  const leadFrame = app.openFrames.find((frame) => frame.id === `p${project}-lead`)
+  // order. The project must come back on its chief's own conversation.
+  const leadFrame = app.openFrames.find((frame) => frame.id === `p${project}-chief`)
   app.killEditor()
   await until(() => app.uiExited(), 10_000, 100)
   await app.close({ preserveRoot: true })
@@ -468,7 +470,7 @@ try {
     return projects.find((s) => s.id === project)?.state === 'open'
   }, 120_000)
   const reopened = await until(
-    () => app.openFrames.find((frame) => frame.id === `p${project}-lead`),
+    () => app.openFrames.find((frame) => frame.id === `p${project}-chief`),
     60_000,
   )
   record('restart-restores-project', Boolean(back && reopened), {

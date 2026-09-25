@@ -176,7 +176,7 @@ const PAGE = (token) => `<!DOCTYPE html>
        while keeping seafoam for fills and borders. */
     --accent-text: #63C7B2;
     --buoy: #FF6B5A;
-    --pill-worker: #63C7B2; --pill-lead: #ABC9F1; --pill-advisor: #EAC58B;
+    --pill-worker: #63C7B2; --pill-chief: #ABC9F1; --pill-advisor: #EAC58B;
     --ui: Archivo, "Helvetica Neue", system-ui, sans-serif;
     --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   }
@@ -184,7 +184,7 @@ const PAGE = (token) => `<!DOCTYPE html>
     :root {
       --ink: #E9F1EF; --panel: #FFFFFF; --line: #C9DAD8; --foam: #0C1E23;
       --muted: #52717A; --accent-text: #16766A; --buoy: #C2402F;
-      --pill-worker: #176B5F; --pill-lead: #285A9C; --pill-advisor: #835D15;
+      --pill-worker: #176B5F; --pill-chief: #285A9C; --pill-advisor: #835D15;
     }
   }
   * { box-sizing: border-box; }
@@ -295,7 +295,7 @@ const PAGE = (token) => `<!DOCTYPE html>
   <p class="mark"><span>consensflow</span> <span>v${VERSION}</span></p>
   <section id="agents-section" aria-label="Agents">
   <h1>Agents <span id="agents-count" class="section-count"></span></h1>
-  <p class="lede" id="lede">The agents a project's team is picked from: the catalog's, with your edits, and your own.</p>
+  <p class="lede" id="lede">The agents a project's staff is picked from: the catalog's, with your edits, and your own.</p>
   <p id="roster-note" class="note" role="status"></p>
   ${BROWSING_CONTROLS}
   <div id="agents"></div>
@@ -452,7 +452,7 @@ function renderAgents(data) {
   const hidden = data.agents.length - offered.length;
   const entries = offered.filter(p => show === 'all' || p.custom);
   const mine = offered.filter(p => p.custom).length;
-  document.querySelector('#lede').textContent = offered.length + ' agents, the catalog’s and your own; a project’s team is picked from them.' +
+  document.querySelector('#lede').textContent = offered.length + ' agents, the catalog’s and your own; a project’s staff is picked from them.' +
     (mine === 0 ? '' : ' ' + mine + ' ' + (mine === 1 ? 'is' : 'are') + ' yours, defined here.') +
     (hidden === 0 ? '' : ' ' + hidden + ' hidden on Pi and OpenCode: Claude and OpenAI models run on their own harnesses.');
   const groups = browsingGroups(entries, '#agents-section');

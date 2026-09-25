@@ -11,7 +11,7 @@
  */
 
 const ACTIVE = ['working', 'waiting', 'queued', 'paused', 'open']
-/** What the lead (or the human) may stop: a task on the board or in a window. */
+/** What the chief (or the human) may stop: a task on the board or in a window. */
 const PAUSABLE = ['open', 'queued', 'working', 'waiting']
 /** What the human may give back to the board for another member of its tier. */
 const REASSIGNABLE = ['queued', 'working', 'waiting', 'paused']
@@ -91,9 +91,9 @@ export function age(iso, now = Date.now()) {
   return `${Math.round(hours / 24)}d`
 }
 
-const COORDINATORS = ['human', 'lead']
+const COORDINATORS = ['human', 'chief']
 
-/** The human and the lead first, then each member with its sessions right under it. */
+/** The human and the chief first, then each member with its sessions right under it. */
 /** The role a member's task is for: its pool's. */
 const roleOf = (task, roles) => task.pool ?? roles[0]
 
@@ -156,7 +156,7 @@ const outOfQuota = (participant, now) =>
 const laneName = (participant) =>
   participant.member
     ? `@${participant.member} · ${participant.session}`
-    : ({ human: 'You', lead: 'Lead' }[participant.handle] ?? `@${participant.handle}`)
+    : ({ human: 'You', chief: 'Chief of Staff' }[participant.handle] ?? `@${participant.handle}`)
 
 /** A member's row: how many of its sessions' terminals (of the row's role) are open now. */
 function sessionsNote(lane, board) {
@@ -371,8 +371,8 @@ export class BoardView {
     if (gated) {
       item.append(this.#gateActions(message))
     } else if (message.kind === 'question' && !message.overdue) {
-      // A question put to the human is answered here; one the lead has left
-      // unanswered is a notice: tell the lead in its terminal.
+      // A question put to the human is answered here; one the chief has left
+      // unanswered is a notice: tell the chief in its terminal.
       item.append(message.questions ? this.#choiceForm(message) : this.#answerForm(message))
     } else {
       const actions = element('div', 'strip-actions')
@@ -381,7 +381,7 @@ export class BoardView {
           button('Open task', 'quiet-button', () => this.#actions.onOpenTask(message.taskNumber)),
         )
       }
-      // An unanswered question of the lead's was never in the human's inbox.
+      // An unanswered question of the chief's was never in the human's inbox.
       if (!message.overdue) {
         actions.append(
           button(
@@ -400,7 +400,7 @@ export class BoardView {
   /**
    * What the human may do with a message that waits for approval: pass it on,
    * or decline a task or an answer (its sender is told). The human writes to
-   * no agent from here: a result or a question goes on to the lead, who
+   * no agent from here: a result or a question goes on to the chief, who
    * decides and answers in its terminal.
    */
   #gateActions(message) {
@@ -437,7 +437,7 @@ export class BoardView {
     table.setAttribute('aria-label', 'Tasks')
     const head = element('thead')
     const headRow = element('tr')
-    headRow.append(element('th', 'kanban-team', 'Team'))
+    headRow.append(element('th', 'kanban-staff', 'Staff'))
     for (const [state, label] of COLUMNS) {
       const cell = element('th', null, label)
       cell.dataset.state = state
@@ -448,14 +448,14 @@ export class BoardView {
     for (const lane of boardRows(board.lanes)) {
       body.append(this.#row(lane, board, models.get(lane.participant.agent), now))
     }
-    // A project with nobody on its team looks like any other board, and every
-    // task the lead hands out is refused: say it where the members would be.
+    // A project with nobody on its staff looks like any other board, and every
+    // task the chief hands out is refused: say it where the members would be.
     if (!board.lanes.some((lane) => lane.participant.agent !== null)) {
       const row = element('tr', 'board-empty')
       const cell = element(
         'td',
         null,
-        'No members yet: add the agents this project may use under Team.',
+        'No members yet: add the agents this project may use under Staff.',
       )
       cell.colSpan = COLUMNS.length + 1
       row.append(cell)
@@ -500,7 +500,7 @@ export class BoardView {
       head.append(element('span', 'row-name', 'You'))
       return head
     }
-    const coordinator = participant.role === 'lead'
+    const coordinator = participant.role === 'chief'
     // A session's row says whose window it is; the member's row says what it is.
     const identity = (
       participant.member
@@ -523,7 +523,7 @@ export class BoardView {
       'span',
       'row-status',
       lane.agentMissing
-        ? `No agent named ${participant.agent} any more: define one under Agents, or remove @${participant.handle} from the team`
+        ? `No agent named ${participant.agent} any more: define one under Agents, or remove @${participant.handle} from the staff`
         : out
           ? `Out of quota until ${clock(participant.outUntil)}`
           : activity?.state === 'waiting' && activity.reason
@@ -704,7 +704,7 @@ export class TaskDrawer {
     // The thread keeps only what the rest of the drawer does not say: the
     // questions, answers, follow-ups and earlier results. Each window's
     // first task message is the brief it was given, a note is ConsensFlow
-    // talking to the lead, and a withdrawn message reached nobody.
+    // talking to the chief, and a withdrawn message reached nobody.
     const briefed = new Set()
     const rest = task.messages.filter((message) => {
       if (message === result || message.kind === 'note' || message.state === 'cancelled')
@@ -767,15 +767,15 @@ export class TaskDrawer {
       sections.push(block)
     }
     // What the human may do: nothing that writes to the agent (that is done
-    // in its terminal), and no accepting (that is the lead's).
+    // in its terminal), and no accepting (that is the chief's).
     const actions = element('div', 'drawer-actions')
-    if (PAUSABLE.includes(task.state) && task.assignee !== 'lead') {
+    if (PAUSABLE.includes(task.state) && task.assignee !== 'chief') {
       actions.append(button('Pause', 'quiet-button', () => this.#actions.onPause(task)))
     }
     if (task.state === 'paused') {
       actions.append(button('Resume', 'primary-button', () => this.#actions.onResume(task)))
     }
-    // Taken from its member and back on the board for its tier; the lead's
+    // Taken from its member and back on the board for its tier; the chief's
     // own work and work given by name have no tier to go back to.
     if (REASSIGNABLE.includes(task.state) && task.pool !== null && task.assignee !== null) {
       actions.append(

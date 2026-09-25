@@ -6,9 +6,9 @@ of that tier (`--review`) checks finished work and changes no file. An image
 comes from the image designer (`--design`, no tier): say what to draw, what to
 use as reference and where to save it, and its result names the file.
 ConsensFlow gives the task to a free member of that role and tier on this
-project's team; you never pick the member. A task for a tier with no member
-of that role on the team is refused: only the human adds members, so ask for
-one (`cf ask --human "…"`) and end your turn. When the team below already
+project's staff; you never pick the member. A task for a tier with no member
+of that role on the staff is refused: only the human adds members, so ask for
+one (`cf ask --human "…"`) and end your turn. When the staff below already
 shows no member of that tier, do not run the command to see the refusal: ask.
 
 The tiers:
@@ -26,9 +26,9 @@ task with `cf task get T-3`. Its findings come back as the review's result.
 Then decide both: reopen the work with what must change, or accept it, and
 accept the review.
 
-## The team
+## The staff
 
-Roles and tiers, nothing else, as of your launch; run `cf team` only when it
+Roles and tiers, nothing else, as of your launch; run `cf staff` only when it
 may have changed since.
 
-{{team}}
+{{staff}}

@@ -37,7 +37,7 @@ const request = (overrides = {}) => ({
   instructions: '# ConsensFlow worker\n\nRole text for the test.',
   directory: '/work/app',
   resume: null,
-  message: '[ConsensFlow m-1 · T-1 · task from @lead]\nWrite the parser',
+  message: '[ConsensFlow m-1 · T-1 · task from @chief]\nWrite the parser',
   agent: { id: 'zeus', kind: 'claude-code', model: 'claude-sonnet-5', effort: 'high' },
   ...overrides,
 })
@@ -119,7 +119,7 @@ describe('the Claude Code adapter', () => {
         'high',
         '--permission-mode',
         'bypassPermissions',
-        '[ConsensFlow m-1 · T-1 · task from @lead]\nWrite the parser',
+        '[ConsensFlow m-1 · T-1 · task from @chief]\nWrite the parser',
       ])
       assert.deepEqual(plan.env, {}, 'cf stays usable inside the window')
       assert.deepEqual(plan.dropEnv, ['ANTHROPIC_API_KEY'])
@@ -178,21 +178,21 @@ describe('the Claude Code adapter', () => {
     })
   })
 
-  it('gives a lead its role instructions and no model of its own', async () => {
+  it('gives a chief its role instructions and no model of its own', async () => {
     await withHome(async ({ env }) => {
       const plan = await claudeCodeAdapter({ env, peer: false }).prepare(
         request({
-          participant: { ...worker, handle: 'lead', role: 'lead', agent: null },
-          role: 'lead',
+          participant: { ...worker, handle: 'chief', role: 'chief', agent: null },
+          role: 'chief',
           message: null,
           agent: null,
-          instructions: 'LEAD INSTRUCTIONS',
+          instructions: 'CHIEF INSTRUCTIONS',
         }),
       )
       const at = plan.argv.indexOf('--append-system-prompt-file')
       assert.ok(at > 0)
-      assert.match(plan.argv[at + 1].replaceAll('\\', '/'), /roles\/lead\/.*SKILL\.md$/)
-      assert.equal(await readFile(plan.argv[at + 1], 'utf8'), 'LEAD INSTRUCTIONS')
+      assert.match(plan.argv[at + 1].replaceAll('\\', '/'), /roles\/chief\/.*SKILL\.md$/)
+      assert.equal(await readFile(plan.argv[at + 1], 'utf8'), 'CHIEF INSTRUCTIONS')
       assert.equal(plan.argv.includes('--model'), false)
     })
   })
@@ -212,7 +212,7 @@ describe('the Claude Code adapter', () => {
       const session = '1b4e28ba-2fa1-41d2-883f-0016d3cca427'
       const launch = { nativeSession: session }
       await transcript(env, session, [
-        userLine(session, 1, '[ConsensFlow m-1 · T-1 · task from @lead]\nWrite the parser'),
+        userLine(session, 1, '[ConsensFlow m-1 · T-1 · task from @chief]\nWrite the parser'),
         answerLine(session, 2, 'Parser done'),
         stopLine(session, 3),
       ])
@@ -227,7 +227,7 @@ describe('the Claude Code adapter', () => {
       assert.deepEqual(
         observed.items.map((item) => [item.role, item.text, item.complete]),
         [
-          ['user', '[ConsensFlow m-1 · T-1 · task from @lead]\nWrite the parser', true],
+          ['user', '[ConsensFlow m-1 · T-1 · task from @chief]\nWrite the parser', true],
           ['assistant', 'Parser done', true],
         ],
       )
@@ -307,7 +307,7 @@ describe('the Claude Code adapter', () => {
       const adapter = claudeCodeAdapter({ env, peer: false })
       const session = '2c1a6b64-0d2c-4f4e-9a7b-6f1c5f2e8d90'
       await transcript(env, session, [
-        userLine(session, 1, '[ConsensFlow m-1 · T-1 · task from @lead]\nWrite the parser'),
+        userLine(session, 1, '[ConsensFlow m-1 · T-1 · task from @chief]\nWrite the parser'),
         record(session, 2, {
           type: 'assistant',
           isApiErrorMessage: true,

@@ -267,7 +267,7 @@ async function sendText(target, text) {
       { deadlineMs: timeoutMs + 100 },
     )
     // A write only starts receipt tracking. The watcher accepts the result
-    // from the complete envelope in the native lead history, never from flush.
+    // from the complete envelope in the native chief history, never from flush.
     return result
   } catch {
     // Once handed to the bridge, even a timeout may follow a complete write.

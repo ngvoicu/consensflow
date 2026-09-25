@@ -11,7 +11,7 @@ describe('the event trace', () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-trace-'))
     try {
       const trace = eventTrace(dir)
-      trace({ kind: 'window.activity', participant: 'lead', state: 'idle' })
+      trace({ kind: 'window.activity', participant: 'chief', state: 'idle' })
       trace({ at: '2026-09-22T10:00:00.000Z', kind: 'task.opened', project: 1, data: { task: 1 } })
       const lines = (await readFile(path.join(dir, 'events.jsonl'), 'utf8')).trim().split('\n')
       const [first, second] = lines.map((line) => JSON.parse(line))
@@ -19,7 +19,7 @@ describe('the event trace', () => {
       assert.match(first.at, /^\d{4}-\d\d-\d\dT/)
       assert.deepEqual(
         [first.kind, first.participant, first.state],
-        ['window.activity', 'lead', 'idle'],
+        ['window.activity', 'chief', 'idle'],
       )
       assert.deepEqual(second, {
         at: '2026-09-22T10:00:00.000Z',

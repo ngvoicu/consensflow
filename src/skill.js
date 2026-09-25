@@ -1,12 +1,12 @@
 import { WORK_TIERS } from '../hosts/lib/presets.js'
 
-/** The project team as the lead reads it: one row per member with its roles and tier. */
+/** The project staff as the chief reads it: one row per member with its roles and tier. */
 export function teamTable(members) {
   const cell = (value) =>
     String(value ?? '')
       .replace(/\|/g, '\\|')
       .replace(/[\r\n]+/g, ' ')
-  // Name, roles and tier, nothing else: the lead names a tier and never picks
+  // Name, roles and tier, nothing else: the chief names a tier and never picks
   // a member, so it needs no model, route or description here.
   const rows = members.map(
     (member) =>
@@ -16,7 +16,7 @@ export function teamTable(members) {
   )
   return rows.length
     ? ['| Member | Roles | Work tier |', '|---|---|---|', ...rows].join('\n')
-    : 'Nobody is on the team yet: the human adds members in the app. Ask the human for the members your work needs (cf ask --human "…"); do the work that is yours, and do not create agents as a side effect.'
+    : 'Nobody is on the staff yet: the human adds members in the app. Ask the human for the members your work needs (cf ask --human "…"); do the work that is yours, and do not create agents as a side effect.'
 }
 
 /** The saved work tiers, one line each. */

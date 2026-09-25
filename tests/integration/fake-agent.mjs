@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url'
  * `DISPATCH --tier standard <task>` (or `DISPATCH --review --tier standard
  * <task>`) runs `cf task add` with those words and
  * the task (`\n` in it becomes a line break), with this window's own token,
- * the way a lead hands out work. A task
+ * the way a chief hands out work. A task
  * saying `QUOTA-OUT` is refused with a 429, Claude's way, by the window whose
  * participant `CF_TEST_QUOTA_OUT` names. A line `ASK <questions JSON>` asks
  * through Claude's question tool: the PreToolUse hook of the settings file

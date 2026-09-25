@@ -50,7 +50,7 @@ export async function answers(kind, sessionId, env, options = {}) {
 
 /**
  * `answers` for a caller that re-reads the same sessions every second (the
- * delivery watcher; the live lead's transcript reached 135 MB). Each JSONL
+ * delivery watcher; the live chief's transcript reached 135 MB). Each JSONL
  * transcript is located once, and a file whose size and modification time
  * have not changed returns the previous result instead of being searched for
  * and parsed again. Calls with options, and harnesses read through a

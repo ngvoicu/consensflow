@@ -89,7 +89,7 @@ it('reports current tiers from legacy rows without writing during discovery', ()
           model: 'claude-fable-5-1',
           effort: 'max',
           skillsPolicy: 'default',
-          profile: { categories: ['coding', 'lead', 'pm'] },
+          profile: { categories: ['coding', 'chief', 'pm'] },
         },
       ],
     })

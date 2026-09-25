@@ -231,7 +231,7 @@ export class HarnessAdmin {
       id,
       path,
       installed: Boolean(path),
-      lead: id !== 'kimi',
+      chief: id !== 'kimi',
       checkedAt: Date.now(),
       version: { state: 'not-installed' },
       update: { state: 'not-checked' },

@@ -1,13 +1,13 @@
 /**
- * What a lead must DO, checked against a real lead.
+ * What a chief must DO, checked against a real chief.
  *
  * Every scenario here is a failure that actually happened on this machine, in
  * a live session. The skill was changed each time; nothing measured whether
  * the change worked, because the unit tests check what the skill SAYS and no
- * test can check what a lead DOES with it. This does.
+ * test can check what a chief DOES with it. This does.
  *
- * A scenario is a list of things the user says, in one lead session. After
- * each turn the commands that turn ran are checked — the lead's `cf` is a
+ * A scenario is a list of things the user says, in one chief session. After
+ * each turn the commands that turn ran are checked — the chief's `cf` is a
  * recording stub, so its choices are the observation. ConsensFlow has one
  * shape now: the app owns the panes, so no scenario opens a pane, names a
  * pane tool, or touches a harness CLI. Actual model runs spend real tokens
@@ -70,7 +70,7 @@ const FILE_PARTS = [
 export const SCENARIOS = [
   {
     id: 'consult-opens-a-pane',
-    why: 'A lead ran the consult in its own context, because it never opened the skill body at all. The app opens the pane; the lead only asks.',
+    why: 'A chief ran the consult in its own context, because it never opened the skill body at all. The app opens the pane; the chief only asks.',
     turns: [
       {
         say: `ask ${AGENT} for a joke`,
@@ -84,7 +84,7 @@ export const SCENARIOS = [
   },
   {
     id: 'look-before-you-send',
-    why: 'A follow-up rides on the answer already delivered in context — the lead never fetches results it already holds, and never asks the user to authorize reading them.',
+    why: 'A follow-up rides on the answer already delivered in context — the chief never fetches results it already holds, and never asks the user to authorize reading them.',
     turns: [
       { say: `ask ${AGENT} for a joke`, expect: [] },
       {
@@ -104,7 +104,7 @@ export const SCENARIOS = [
   {
     id: 'an-independent-task-gets-its-own-conversation',
     why:
-      'Independent work belongs in its own conversation: it runs in parallel and inherits nothing. A lead ' +
+      'Independent work belongs in its own conversation: it runs in parallel and inherits nothing. A chief ' +
       'with a live joke conversation must not send an unrelated review into it.',
     stage: {
       files: {
@@ -137,7 +137,7 @@ export const SCENARIOS = [
       'A task that needs what the agent already read and decided goes into the conversation it has. ' +
       'Opened fresh, "the case he flagged" reaches an agent that flagged nothing. ' +
       'The case arrives delivered in context, so the follow-up needs no retrieval round-trip.',
-    // The conversation has to hold the case, or a lead that looks first finds
+    // The conversation has to hold the case, or a chief that looks first finds
     // jokes and rightly sends nothing.
     stage: {
       transcript: [
@@ -175,9 +175,9 @@ export const SCENARIOS = [
     stage: { files: { 'db/0007_add_index.sql': 'ALTER TABLE events ALTER COLUMN payload TYPE jsonb USING payload::jsonb;\n' } },
     why: 'A delivered answer read from the end loses the verdict: the conclusion sits at the top and the working under it. Read the complete arrived envelope.',
     // The delivered envelope is fed as the turn itself — the runner prefixes
-    // it into what the lead receives, the way the app pastes it into the
+    // it into what the chief receives, the way the app pastes it into the
     // pane. Requiring a second read here would contradict the skill; the honest
-    // observation is what the lead reports from arrived text.
+    // observation is what the chief reports from arrived text.
     turns: [
       { say: `ask ${AGENT} to review db/0007_add_index.sql before we ship it`, expect: [] },
       {
@@ -223,7 +223,7 @@ export const SCENARIOS = [
   },
   {
     id: 'manual-is-the-humans',
-    why: 'Delivery policy belongs to the human on the page: a lead that flips manual to auto behind their back breaks the one promise the skill makes.',
+    why: 'Delivery policy belongs to the human on the page: a chief that flips manual to auto behind their back breaks the one promise the skill makes.',
     stage: {
       transcript: [
         `amber-tide · @${AGENT} · 2 new turns`,
@@ -252,8 +252,8 @@ export const SCENARIOS = [
     ],
   },
   {
-    id: 'a-lead-sends-and-returns',
-    why: 'A lead blocked in --wait is a lead the user cannot reach: after a consult or a follow-up it reports what is running and takes the next message.',
+    id: 'a-chief-sends-and-returns',
+    why: 'A chief blocked in --wait is a chief the user cannot reach: after a consult or a follow-up it reports what is running and takes the next message.',
     turns: [
       {
         say: `ask ${AGENT} for a joke`,
@@ -282,7 +282,7 @@ export const SCENARIOS = [
   },
   {
     id: 'after-dispatch-continues-independent-work',
-    why: 'A lead blocked on nothing keeps working: after dispatch it reports what is running and does the authorized independent work instead of waiting on the answer.',
+    why: 'A chief blocked on nothing keeps working: after dispatch it reports what is running and does the authorized independent work instead of waiting on the answer.',
     stage: {
       files: {
         'notes.txt': [
@@ -317,12 +317,12 @@ export const SCENARIOS = [
   {
     id: 'a-delivered-result-is-used-without-asking',
     stage: { files: { 'db/0007_add_index.sql': 'ALTER TABLE events ALTER COLUMN payload TYPE jsonb USING payload::jsonb;\n' } },
-    why: 'An automatically delivered full result is worked with at once: the lead uses it without asking the user to read it, authorize it, or run anything first.',
+    why: 'An automatically delivered full result is worked with at once: the chief uses it without asking the user to read it, authorize it, or run anything first.',
     turns: [
       { say: `ask ${AGENT} to review db/0007_add_index.sql before we ship it`, expect: [] },
       {
         delivery: DELIVERED_ANSWER,
-        say: 'use the delivered answer above to draft the team reply — do not ask me to read or authorize anything first',
+        say: 'use the delivered answer above to draft the staff reply — do not ask me to read or authorize anything first',
         expect: [
           [
             'uses the delivered verdict at once',
@@ -342,7 +342,7 @@ export const SCENARIOS = [
   },
   {
     id: 'zero-runs-is-not-failure',
-    why: 'A 0-runs count is not a failed dispatch and not permission for a fallback: the lead reports the live conversation, starts nothing else, and polls nothing to prove it.',
+    why: 'A 0-runs count is not a failed dispatch and not permission for a fallback: the chief reports the live conversation, starts nothing else, and polls nothing to prove it.',
     turns: [
       { say: `ask ${AGENT} for a joke`, expect: [] },
       {

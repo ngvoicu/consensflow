@@ -17,7 +17,7 @@ const MAX_FRAME = 64 * 1024 * 1024
 const refused = (error) => ({ ok: false, admitted: false, bytesWritten: 0, error })
 const uncertain = () => ({ ok: false, admitted: null, error: 'uncertain' })
 
-/** The broker owns the main lead identity and the last check before native admission. */
+/** The broker owns the main chief identity and the last check before native admission. */
 export async function startBroker({
   port,
   token,

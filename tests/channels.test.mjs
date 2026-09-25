@@ -204,17 +204,17 @@ describe('retired Claude development channel (TEST-PANE-121)', () => {
         hooks: { PreToolUse: [QUESTION], Stop: [TURN_END] },
       })
       const receiver = { type: 'command', command: 'receiver', asyncRewake: true }
-      const lead = await claudeSettings(
+      const chief = await claudeSettings(
         await launchConfiguration('claude-code', {
-          launchId: 'turn-end-lead',
+          launchId: 'turn-end-chief',
           workspace: home,
           env,
           hooks: { SessionStart: [{ hooks: [receiver] }], Stop: [{ hooks: [receiver] }] },
         }),
         home,
       )
-      assert.deepEqual(lead.hooks.SessionStart, [{ hooks: [receiver] }])
-      assert.deepEqual(lead.hooks.Stop, [{ hooks: [receiver] }, TURN_END])
+      assert.deepEqual(chief.hooks.SessionStart, [{ hooks: [receiver] }])
+      assert.deepEqual(chief.hooks.Stop, [{ hooks: [receiver] }, TURN_END])
       await assert.rejects(
         launchConfiguration('claude-code', { launchId: 'no-home', workspace: home }),
         /ConsensFlow environment/,
@@ -225,7 +225,7 @@ describe('retired Claude development channel (TEST-PANE-121)', () => {
     }
   })
 
-  it('offers no claude-channel to the lead harness', () => {
+  it('offers no claude-channel to the chief harness', () => {
     assert.deepEqual(enabledChannels('claude-code'), ['claude-peer'])
   })
 
@@ -238,7 +238,7 @@ describe('retired Claude development channel (TEST-PANE-121)', () => {
     const claims = []
     const stale = {
       session: '11111111-2222-4333-8444-555555555555',
-      pane: 'lead-pane',
+      pane: 'chief-pane',
       generation: 4,
       epoch: 19,
       enabledChannels: enabledChannels('claude-code'),

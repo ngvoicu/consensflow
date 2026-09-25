@@ -1648,7 +1648,7 @@ const CORE_OPERATIONS: &[&str] = &[
     "message.approve",
     "message.decline",
     "agents.list",
-    "team.last",
+    "staff.last",
 ];
 
 #[tauri::command]
@@ -1789,7 +1789,7 @@ mod tests {
             copy.lock().unwrap().push(message.id);
             true
         }));
-        for id in ["p-pm", "p-lead", "p-pm"] {
+        for id in ["p-pm", "p-chief", "p-pm"] {
             hub.publish(PaneOutputMessage {
                 id: id.into(),
                 generation: 1,
@@ -1797,7 +1797,7 @@ mod tests {
                 bytes: vec![65],
             });
         }
-        assert_eq!(*seen.lock().unwrap(), vec!["p-pm", "p-lead", "p-pm"]);
+        assert_eq!(*seen.lock().unwrap(), vec!["p-pm", "p-chief", "p-pm"]);
     }
 
     #[test]

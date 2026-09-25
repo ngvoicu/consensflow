@@ -376,7 +376,7 @@ export const AGENT_PRESETS = [
     effort: "xhigh",
   },
   // Astra HIGH (asked for on 2026-09-20): the level between medium and xhigh
-  // on every road that reaches Astra, complex work without the lead recommendation.
+  // on every road that reaches Astra, complex work without the chief recommendation.
   {
     preset: "celaeno",
     id: "celaeno",
@@ -546,7 +546,7 @@ export const AGENT_PRESETS = [
     effort: "xhigh",
   },
 
-  // --- House team: strong default agents per engine --------------------
+  // --- House staff: strong default agents per engine --------------------
   {
     preset: "zeus",
     id: "zeus",
@@ -1209,7 +1209,7 @@ function getPreset(ref) {
 // them with the catalog's current values is lossless.
 // `description` joined the list on 2026-08-27, the maintainer's call, after a live update: nyx moved
 // the retired stealth/ox-alpha to z-ai/glm-5.3-flash and the roster — and with it the skill table
-// every lead reads — went on saying "Pi Ox Alpha MAX" beside the new model. It was called cosmetic
+// every chief reads — went on saying "Pi Ox Alpha MAX" beside the new model. It was called cosmetic
 // while it was only a roster field; it is not, now that the generated skill prints it as the line
 // that says WHO an agent is. A label naming a model the agent no longer runs is a wrong answer to
 // the only question the table exists to answer.

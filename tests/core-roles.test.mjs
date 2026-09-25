@@ -9,14 +9,14 @@ import { roleConfiguration } from '../src/role-skills.js'
 
 /**
  * The instructions each window of the new core starts with (TEST-BDC-11): the
- * board's commands for every role, and for coordinators the team they choose
+ * board's commands for every role, and for coordinators the staff they choose
  * from, the work tiers and the review rule. Nothing from the old transport.
  */
-const OLD_COMMANDS = /\bcf (run|say|attach|read|results|projects|lead (send|read))\b/
+const OLD_COMMANDS = /\bcf (run|say|attach|read|results|projects|chief (send|read))\b/
 const zeus = { name: 'zeus', roles: ['worker', 'reviewer'], workTier: 'standard' }
 
 describe('role instructions for the new core', () => {
-  for (const role of ['lead', 'advisor', 'worker', 'reviewer', 'designer']) {
+  for (const role of ['chief', 'advisor', 'worker', 'reviewer', 'designer']) {
     it(`teach the ${role} only the board's commands`, () => {
       const text = roleInstructions(role, [zeus])
       assert.match(text, new RegExp(`^---\\nname: consensflow-${role}\\n`))
@@ -27,7 +27,7 @@ describe('role instructions for the new core', () => {
         /## Your commands\n\nRun each of these in your shell \(your Bash or terminal tool\)/,
         `${role} knows the commands are shell commands`,
       )
-      if (role === 'lead') {
+      if (role === 'chief') {
         for (const command of [
           'cf task add --tier',
           'cf task add --advice --tier',
@@ -37,7 +37,7 @@ describe('role instructions for the new core', () => {
           'cf answer',
           'cf task done',
           'cf ask --human',
-          'cf team',
+          'cf staff',
         ])
           assert.ok(text.includes(command), `${role} learns ${command}`)
         assert.doesNotMatch(text, /cf task add @/, 'no agent gives another a task by name')
@@ -45,13 +45,13 @@ describe('role instructions for the new core', () => {
         assert.match(
           text,
           /\| Member \| Roles \| Work tier \|\n\|---\|---\|---\|\n\| zeus \| worker, reviewer \| Standard work \|/,
-          'the team table: name, roles, tier',
+          'the staff table: name, roles, tier',
         )
         assert.doesNotMatch(text, /tags|PM\b/, 'no tags, no PM')
         assert.match(text, /^## Your commands$/m, 'the command card comes first')
         assert.ok(text.indexOf('## Your commands') < text.indexOf('## What you do'), 'card first')
         assert.match(text, /## Reviews\n\nNothing is reviewed unless you ask\./)
-        assert.match(text, /run `cf team` only when it\s+may have changed since/)
+        assert.match(text, /run `cf staff` only when it\s+may have changed since/)
         assert.match(text, /do not run the command to see the refusal: ask/)
         assert.doesNotMatch(text, /VERDICT|review policy|cf task review/)
       } else {
@@ -61,24 +61,24 @@ describe('role instructions for the new core', () => {
         assert.match(text, /never to another member/)
         assert.match(text, /never read another agent's\s+session files/i)
         assert.doesNotMatch(text, /cf task add/)
-        assert.doesNotMatch(text, /PM\b|coordinator/, `${role} answers to the lead`)
-        if (role === 'reviewer') assert.match(text, /delivers them to the lead, who decides/)
+        assert.doesNotMatch(text, /PM\b|coordinator/, `${role} answers to the chief`)
+        if (role === 'reviewer') assert.match(text, /delivers them to the chief, who decides/)
         assert.doesNotMatch(text, /VERDICT|Review round/, 'a review is a task: no verdict line')
-        if (role === 'advisor') assert.match(text, /You advise this project's lead/)
+        if (role === 'advisor') assert.match(text, /You advise this project's chief/)
         if (role === 'designer') assert.match(text, /image generation tool/)
       }
     })
   }
 
-  it('says so when the team is empty', () => {
-    assert.match(roleInstructions('lead', []), /Nobody is on the team yet/)
-    const text = roleInstructions('lead', [zeus])
+  it('says so when the staff is empty', () => {
+    assert.match(roleInstructions('chief', []), /Nobody is on the staff yet/)
+    const text = roleInstructions('chief', [zeus])
     assert.match(text, /cf task add --after T-3/, 'the one way to continue a window')
     assert.match(text, /only when its context matters/, 'and when')
-    assert.match(roleInstructions('lead', [zeus]), /## What you do/)
-    assert.match(roleInstructions('lead', [zeus]), /## What you never do/)
+    assert.match(roleInstructions('chief', [zeus]), /## What you do/)
+    assert.match(roleInstructions('chief', [zeus]), /## What you never do/)
     assert.match(
-      roleInstructions('lead', [zeus]),
+      roleInstructions('chief', [zeus]),
       /## What you never do\n\n- Give a task to a worker by name, or write a task with one worker in mind/,
     )
   })
@@ -87,8 +87,8 @@ describe('role instructions for the new core', () => {
     assert.throws(() => roleInstructions('king', []), /no role instructions for king/)
   })
 
-  it('keeps the authorization boundary in the lead text, ships no harness payload and no personal name', async () => {
-    const skill = roleInstructions('lead', [
+  it('keeps the authorization boundary in the chief text, ships no harness payload and no personal name', async () => {
+    const skill = roleInstructions('chief', [
       { name: 'zeus', roles: ['worker'], workTier: 'critical' },
     ])
     assert.match(skill, /authorized work/)

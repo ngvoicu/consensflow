@@ -22,7 +22,7 @@ export const USAGE = `cf inside a ConsensFlow window: the board's commands.
   cf task list                      the board: what waits for a member, then every lane
   cf task get T-3                   one task and its whole thread
   cf task get T-3 --transcript      what its window did so far (the last 10 items; --last 30 for more)
-  cf task done T-3 "…"              finish a task assigned to you (the lead)
+  cf task done T-3 "…"              finish a task assigned to you (the chief)
   cf task accept|cancel T-3         move a task you asked for
   cf task reopen T-3 "…"            send a finished or failed task back with a follow-up
   cf task pause T-3                 stop a worker's task: the agent stops, its window and work wait
@@ -33,7 +33,7 @@ export const USAGE = `cf inside a ConsensFlow window: the board's commands.
   cf ask "…" [--human]              a question to whoever gave you your task (or the human)
   cf note "…" [--human]             something they should know; nothing waits on it
   cf answer m-12 "…"                answer a question put to you
-  cf team                           the members: roles and tiers
+  cf staff                           the members: roles and tiers
   cf whoami                         your project, role and current task
 
 Add --json for machine output.`
@@ -184,13 +184,13 @@ async function command(verb, rest, call) {
             : `m-${message.id} answered @${message.recipient}.`,
       }
     }
-    case 'team': {
-      const { members } = await call('GET', '/api/team')
+    case 'staff': {
+      const { members } = await call('GET', '/api/staff')
       return {
         data: members,
         text:
           members.length === 0
-            ? 'No agents are on this project team yet; the human adds them in the app.'
+            ? 'No agents are on this project staff yet; the human adds them in the app.'
             : members
                 .map((member) => `@${member.handle} · ${member.roles.join('+')} · ${member.tier}`)
                 .join('\n'),
@@ -207,7 +207,7 @@ async function command(verb, rest, call) {
     }
     default:
       throw usage(
-        `unknown command ${JSON.stringify(verb ?? '')}: use task, inbox, ask, note, tell, answer, team or whoami`,
+        `unknown command ${JSON.stringify(verb ?? '')}: use task, inbox, ask, note, tell, answer, staff or whoami`,
       )
   }
 }

@@ -18,18 +18,18 @@ import { RESUME_WORDS } from '../ledger/index.js'
  *   task failed. Adapters say when a window can take input at all (`ready`).
  * - A worker's turn that ends after its task's latest message finishes the
  *   task with the answer written after that message. A task waiting on a
- *   question is left alone. The lead finishes its own tasks explicitly,
+ *   question is left alone. The chief finishes its own tasks explicitly,
  *   because its turns end while it waits for workers.
  * - One task per member session: a worker, advisor, reviewer or designer
  *   window opens with its task and closes once it holds no task (assigned,
  *   working or waiting); the session and its conversation stay until the
  *   human deletes it. A fresh window whose first message is not the brief (an
- *   answer, a follow-up) gets the brief in front of it. The lead keeps its
+ *   answer, a follow-up) gets the brief in front of it. The chief keeps its
  *   window and conversation.
  * - A member window lost mid-task (a restart, a crash, a closed window)
- *   pauses the task, and the requester is told how to resume it. A lead
+ *   pauses the task, and the requester is told how to resume it. A chief
  *   window that closes suspends its project. A member who leaves
- *   the team has its window closed once its step in progress ends, and that
+ *   the staff has its window closed once its step in progress ends, and that
  *   exit fails nothing: its open tasks were cancelled when it left.
  * - A task for a tier of member starts open: each pass gives it to a free
  *   member of that pool and tier that is not out of quota, the one with the
@@ -39,7 +39,7 @@ import { RESUME_WORDS } from '../ledger/index.js'
  *   harness reports a fresh refusal (one after it was last marked out) is out
  *   until the reset it names (an hour when it names none): its tiered task
  *   goes back to open for another member and its window closes, a delivery
- *   in flight is queued again, the lead keeps its own tasks for after the
+ *   in flight is queued again, the chief keeps its own tasks for after the
  *   reset, and nothing reaches it while out. A refusal still in the record
  *   after the reset is history, not a new one; the member is simply
  *   eligible again. A member low on quota takes nothing new. The human may
@@ -81,7 +81,7 @@ export function deliveryText(message) {
       ? message.questions
         ? `\n\nAnswer with: cf answer m-${message.id} "…" (a label or your own words${message.questions.length > 1 ? '; one line per question' : ''})`
         : message.urgent && message.taskNumber != null
-          ? `\n\nT-${message.taskNumber} is paused for this. Answer with: cf answer m-${message.id} "…"; the lead resumes the task.`
+          ? `\n\nT-${message.taskNumber} is paused for this. Answer with: cf answer m-${message.id} "…"; the chief resumes the task.`
           : `\n\nAnswer with: cf answer m-${message.id} "…"`
       : message.kind === 'result' && message.taskNumber != null
         ? `\n\nDecide with: cf task accept T-${message.taskNumber} · cf task reopen T-${message.taskNumber} "…"`
@@ -166,26 +166,26 @@ export class Dispatcher {
     return this.#runtime.get(participantId)?.pane ?? null
   }
 
-  /** A new project: the ledger records it with its team, and its lead window opens. */
-  async openProject({ directory, name, harness, team = [], gate }) {
+  /** A new project: the ledger records it with its staff, and its chief window opens. */
+  async openProject({ directory, name, harness, staff = [], gate }) {
     const project = this.#ledger.createProject({
       directory,
       name,
-      lead: { harness },
-      team,
+      chief: { harness },
+      staff,
       ...(gate === undefined ? {} : { gate }),
     })
-    const lead = project.participants.find((participant) => participant.handle === 'lead')
-    await this.#exclusive(lead.id, () => this.#launch(project, lead, null))
+    const chief = project.participants.find((participant) => participant.handle === 'chief')
+    await this.#exclusive(chief.id, () => this.#launch(project, chief, null))
     return this.#ledger.project(project.id)
   }
 
-  /** The human's Resume, and the restore after a restart: the lead comes back on its conversation. */
+  /** The human's Resume, and the restore after a restart: the chief comes back on its conversation. */
   async resumeProject(projectId) {
     const project = this.#ledger.setProjectState(projectId, 'open')
-    const lead = project.participants.find((participant) => participant.role === 'lead')
-    if (this.pane(lead.id) === null) {
-      await this.#exclusive(lead.id, () => this.#launch(project, lead, null))
+    const chief = project.participants.find((participant) => participant.role === 'chief')
+    if (this.pane(chief.id) === null) {
+      await this.#exclusive(chief.id, () => this.#launch(project, chief, null))
     }
     this.#changed()
     return this.#ledger.project(projectId)
@@ -194,7 +194,7 @@ export class Dispatcher {
   /**
    * The human's Close: the project is suspended and every window of it goes.
    * Each window's exit settles what it was doing, the way any closed window
-   * does; Resume brings the lead back on its conversation.
+   * does; Resume brings the chief back on its conversation.
    */
   async closeProject(projectId) {
     const project = this.#ledger.setProjectState(projectId, 'suspended')
@@ -298,14 +298,14 @@ export class Dispatcher {
   }
 
   /**
-   * The human takes a member off the team. It waits for the member's step in
+   * The human takes a member off the staff. It waits for the member's step in
    * progress, so a window that is still opening is closed too, not left behind.
    */
   async removeMember(projectId, handle) {
     const member = this.#ledger
       .project(projectId)
       ?.participants.find((participant) => participant.handle === handle)
-    // Not in the team: the ledger refuses it and says why.
+    // Not in the staff: the ledger refuses it and says why.
     if (member === undefined) return this.#ledger.removeMember(projectId, handle)
     return this.#exclusive(
       member.id,
@@ -379,7 +379,7 @@ export class Dispatcher {
         retry: !delivering.launch,
       })
     }
-    if (participant.role === 'lead') {
+    if (participant.role === 'chief') {
       if (project.state === 'open') this.#ledger.setProjectState(project.id, 'suspended')
     } else {
       const task = this.#ledger.activeTask(participantId)
@@ -391,7 +391,7 @@ export class Dispatcher {
   /**
    * A task whose window went away mid-work (a restart, a crash, a window the
    * human closed) is paused, not given up: its session and conversation stay,
-   * and the lead resumes it into the same window with its memory.
+   * and the chief resumes it into the same window with its memory.
    */
   #stall(project, task, because) {
     this.#ledger.pauseTask(project.id, task.number, { because })
@@ -410,7 +410,7 @@ export class Dispatcher {
     if (project.state !== 'open') return
     const next = this.#ledger.nextDelivery(participant.id)
     if (next !== null) return this.#launch(project, participant, next)
-    if (participant.role === 'lead') return
+    if (participant.role === 'chief') return
     // A member whose agent is gone must not wait for a window that will not
     // open: its held work goes back to the board now.
     if (participant.agent !== null && this.#roster(participant.agent) === null)
@@ -471,12 +471,12 @@ export class Dispatcher {
         reason: `out of quota until ${owner.outUntil}`,
       })
       // A held task's agent stops, as any paused task's; the window waits for the reset.
-      if (participant.role !== 'lead') await this.#interruptIfPaused(participant, runtime)
+      if (participant.role !== 'chief') await this.#interruptIfPaused(participant, runtime)
       return
     }
     if (runtime.delivering !== null) this.#watchArrival(runtime, observed)
     await this.#releaseDraft(runtime, observed)
-    if (participant.role !== 'lead') {
+    if (participant.role !== 'chief') {
       await this.#interruptIfPaused(participant, runtime)
       this.#collect(project, participant, observed)
       // The window may have gone during this step (a launch that timed out).
@@ -564,7 +564,7 @@ export class Dispatcher {
    */
   #launchText(project, participant, message, resume) {
     const text = deliveryText(message)
-    if (resume !== null || participant.role === 'lead' || message.taskNumber == null) {
+    if (resume !== null || participant.role === 'chief' || message.taskNumber == null) {
       return text
     }
     const task = this.#ledger.task(project.id, message.taskNumber)
@@ -745,7 +745,7 @@ export class Dispatcher {
     let plan
     try {
       // A session plays the role of the task it was started for; a member or
-      // the lead its own.
+      // the chief its own.
       const { role } = participant
       // A member runs on its saved agent's model, read now; one the human
       // has deleted from their agents must not fall back to a harness default.
@@ -868,7 +868,7 @@ export class Dispatcher {
     }
   }
 
-  /** The member a session belongs to; a member or the lead is its own. */
+  /** The member a session belongs to; a member or the chief is its own. */
   #memberOf(project, participant) {
     if (participant.memberId === null) return participant
     return project.participants.find((p) => p.id === participant.memberId) ?? participant
@@ -950,7 +950,7 @@ export class Dispatcher {
     if (delivering !== null)
       this.#settleFailure(
         delivering,
-        `${because}: add it back under Agents, or remove @${participant.handle} from the team`,
+        `${because}: add it back under Agents, or remove @${participant.handle} from the staff`,
         { retry: false },
       )
     else if (released > 0) this.#changed()
@@ -959,7 +959,7 @@ export class Dispatcher {
   /**
    * A member whose harness just refused it: out until the reset it names (an
    * hour when it names none). What it was receiving is queued again, its
-   * tiered work goes back to the board; its own tasks (the lead's) wait for it.
+   * tiered work goes back to the board; its own tasks (the chief's) wait for it.
    * The session's window then closes, as any window whose work left it: a
    * harness that waits out its limit (OpenCode) would otherwise take the task
    * up again at the reset, beside whoever has it now.
@@ -998,7 +998,11 @@ export class Dispatcher {
         })
       }
     }
-    if (participant.role !== 'lead' && !runtime.pinned && !this.#ledger.holdsWork(participant.id)) {
+    if (
+      participant.role !== 'chief' &&
+      !runtime.pinned &&
+      !this.#ledger.holdsWork(participant.id)
+    ) {
       await this.#retire(participant, runtime)
     }
     this.#changed()

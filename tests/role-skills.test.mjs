@@ -20,12 +20,12 @@ test('a role text is written in a private directory, and global skills are left 
   const global = join(root, '.claude', 'skills', 'consensflow')
   await mkdir(global, { recursive: true })
   await writeFile(join(global, 'SKILL.md'), 'global canary')
-  const content = roleInstructions('lead', [worker])
-  const configuration = await roleConfiguration('claude-code', { role: 'lead', env, content })
+  const content = roleInstructions('chief', [worker])
+  const configuration = await roleConfiguration('claude-code', { role: 'chief', env, content })
   assert.equal(configuration.args[0], '--add-dir')
   assert.ok(configuration.args[1].startsWith(env.CONSENSFLOW_HOME))
   const text = await readFile(
-    join(configuration.args[1], '.claude/skills/consensflow-lead/SKILL.md'),
+    join(configuration.args[1], '.claude/skills/consensflow-chief/SKILL.md'),
     'utf8',
   )
   assert.equal(text, content)
@@ -40,7 +40,7 @@ test('a window without its role text is refused', async (t) => {
 
 test('every role enters every harness with its whole text already loaded', async (t) => {
   for (const kind of ['claude-code', 'codex', 'opencode', 'pi', 'devin']) {
-    for (const role of ['lead', 'advisor', 'worker', 'reviewer', 'designer']) {
+    for (const role of ['chief', 'advisor', 'worker', 'reviewer', 'designer']) {
       await t.test(`${kind} ${role}`, async (t) => {
         const { env } = await fixture(t)
         const existing = 'User instructions: preserve "quotes", `backticks`, $HOME\nand newlines.'
@@ -102,7 +102,7 @@ test('every role enters every harness with its whole text already loaded', async
           assert.ok(instructions.startsWith(`${existing}\n\n`))
         }
         assert.ok(instructions.includes(content), 'the whole role text is loaded')
-        if (role === 'lead') {
+        if (role === 'chief') {
           assert.match(instructions, /\| saved-worker \| worker \| Complex work \|/)
         } else {
           assert.doesNotMatch(instructions, /\| saved-worker \|/)
@@ -119,7 +119,11 @@ test('OpenCode rejects malformed instruction lists before native launch', async 
       const { env } = await fixture(t)
       env.OPENCODE_CONFIG_CONTENT = JSON.stringify({ instructions })
       await assert.rejects(
-        roleConfiguration('opencode', { role: 'lead', env, content: roleInstructions('lead', []) }),
+        roleConfiguration('opencode', {
+          role: 'chief',
+          env,
+          content: roleInstructions('chief', []),
+        }),
         /OpenCode instructions must be an array of paths/,
       )
     })
@@ -142,15 +146,15 @@ lines.on('line', line => {
 `,
   )
   const configuration = await roleConfiguration('codex', {
-    role: 'lead',
+    role: 'chief',
     env,
     executable,
     cwd: root,
-    content: roleInstructions('lead', []),
+    content: roleInstructions('chief', []),
   })
   assert.equal(configuration.args[0], '-c')
   assert.match(configuration.args[1], /existing user instructions/)
-  assert.match(configuration.args[1], /consensflow-lead/)
+  assert.match(configuration.args[1], /consensflow-chief/)
   assert.doesNotMatch(configuration.args[1], /consensflow-worker/)
 })
 

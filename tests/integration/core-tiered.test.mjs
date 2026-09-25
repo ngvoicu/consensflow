@@ -8,7 +8,7 @@ import { startIntegration } from './harness.mjs'
 /**
  * Tiered dispatch, reviews and quota, end to end through the real pane host
  * (VERIFY-TD-13): fake Claude agents in real PTYs, the daemon picking the
- * member, a review the lead puts on the board going to a reviewer like any
+ * member, a review the chief puts on the board going to a reviewer like any
  * task, and a worker whose provider refuses it mid-task losing the task to
  * another.
  */
@@ -17,7 +17,7 @@ const CORE_EDITOR = fileURLToPath(new URL('./core-editor.mjs', import.meta.url))
 const FAKE_AGENT = fileURLToPath(new URL('./fake-agent.mjs', import.meta.url))
 
 /** Three fake agents on the fake `claude`: two workers on one model, a reviewer on another. */
-function team(app) {
+function staff(app) {
   writeFileSync(
     join(app.env.CONSENSFLOW_HOME, 'agents.json'),
     `${JSON.stringify({
@@ -31,13 +31,13 @@ function team(app) {
   )
 }
 
-/** A project opened as the New project dialog opens one: the team and the approval setting together. */
+/** A project opened as the New project dialog opens one: the staff and the approval setting together. */
 async function project(app, { gate, members }) {
   const opened = await app.requestNode('project.open', {
     directory: app.workspace,
     harness: 'claude-code',
     ...(gate === undefined ? {} : { gate }),
-    team: members.map(([agent, role]) => ({ agent, roles: [role] })),
+    staff: members.map(([agent, role]) => ({ agent, roles: [role] })),
   })
   assert.equal(opened.ok, true, JSON.stringify(opened))
   const id = opened.project.id
@@ -61,13 +61,13 @@ async function project(app, { gate, members }) {
   return { id, tiers, board, task, lane, inbox }
 }
 
-test('a review is a task the lead puts on the board: a reviewer of its tier takes it and its findings come back as the result', async () => {
+test('a review is a task the chief puts on the board: a reviewer of its tier takes it and its findings come back as the result', async () => {
   const app = await startIntegration({
     editor: CORE_EDITOR,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
-    team(app)
+    staff(app)
     const p = await project(app, {
       members: [
         ['worker', 'worker'],
@@ -76,7 +76,7 @@ test('a review is a task the lead puts on the board: a reviewer of its tier take
     })
     await app.tell(p.id, `DISPATCH --tier ${p.tiers.worker} Reply with exactly: WORKER_OK`)
     await app.waitFor(async () => {
-      const messages = await p.inbox('lead')
+      const messages = await p.inbox('chief')
       return messages.some(
         (m) => m.kind === 'result' && m.taskNumber === 1 && m.state === 'delivered',
       )
@@ -97,8 +97,8 @@ test('a review is a task the lead puts on the board: a reviewer of its tier take
     assert.deepEqual([review.pool, review.tier], ['reviewer', p.tiers.checker])
     assert.match(review.assignee, /^checker-/)
     const findings = review.messages.find((m) => m.kind === 'result')
-    assert.deepEqual([findings.recipient, findings.body], ['lead', 'FINDINGS_OK'])
-    assert.equal((await p.task(1)).state, 'done', 'the lead decides the work')
+    assert.deepEqual([findings.recipient, findings.body], ['chief', 'FINDINGS_OK'])
+    assert.equal((await p.task(1)).state, 'done', 'the chief decides the work')
   } finally {
     await app.close()
   }
@@ -110,7 +110,7 @@ test('each task runs in its own worker session: the window closes with the task,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
-    team(app)
+    staff(app)
     const p = await project(app, { members: [['worker', 'worker']] })
     const alive = (pid) => {
       try {
@@ -133,7 +133,7 @@ test('each task runs in its own worker session: the window closes with the task,
       )
       await app.waitFor(async () => (await p.lane('worker'))?.pane === null, 30_000)
       assert.equal((await p.lane('worker')).activity.state, 'closed')
-      assert.equal(sessions().size, expected, 'one native session per task, plus the lead')
+      assert.equal(sessions().size, expected, 'one native session per task, plus the chief')
     }
     const workerPids = app.processes().filter((entry) => entry.pid !== app.processes()[0].pid)
     await app.waitFor(async () => workerPids.every((entry) => !alive(entry.pid)), 30_000)
@@ -148,7 +148,7 @@ test('a worker refused by its provider mid-task loses the task to the other work
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT, CF_TEST_QUOTA_OUT: 'worker' },
   })
   try {
-    team(app)
+    staff(app)
     const p = await project(app, {
       members: [
         ['worker', 'worker'],
@@ -173,7 +173,7 @@ test('a worker refused by its provider mid-task loses the task to the other work
       'the first worker is out',
     )
     assert.ok(
-      (await p.inbox('lead')).some(
+      (await p.inbox('chief')).some(
         (m) =>
           m.kind === 'note' &&
           /^T-1 was taken back from @worker-[a-z]+-[a-z]+ \(ran out of quota after starting\)/.test(
@@ -185,7 +185,7 @@ test('a worker refused by its provider mid-task loses the task to the other work
     const second = (await p.lane('worker2')).tasks[0]
     assert.equal(second.number, 1)
     await app.waitFor(async () => {
-      const results = (await p.inbox('lead')).filter((m) => m.kind === 'result')
+      const results = (await p.inbox('chief')).filter((m) => m.kind === 'result')
       return results.some((m) => m.body === 'WORKER_OK' && m.state === 'delivered')
     }, 60_000)
   } finally {
@@ -199,15 +199,15 @@ test('with human approval required, the brief and the result each wait for the h
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
-    team(app)
+    staff(app)
     const p = await project(app, { gate: true, members: [['worker', 'worker']] })
     assert.equal((await p.board()).project.gate, true)
     await app.tell(p.id, `DISPATCH --tier ${p.tiers.worker} Reply with exactly: WORKER_OK`)
 
-    // The lead's brief is assigned, then held: no worker window opens for it.
+    // The chief's brief is assigned, then held: no worker window opens for it.
     await app.waitFor(async () => (await p.board()).gated.length === 1, 60_000)
     const [brief] = (await p.board()).gated
-    assert.deepEqual([brief.kind, brief.sender, brief.taskNumber], ['task', 'lead', 1])
+    assert.deepEqual([brief.kind, brief.sender, brief.taskNumber], ['task', 'chief', 1])
     assert.equal((await p.task(1)).state, 'queued')
     await new Promise((resolve) => setTimeout(resolve, 1500))
     assert.equal(
@@ -219,18 +219,18 @@ test('with human approval required, the brief and the result each wait for the h
     assert.equal(approved.ok, true, JSON.stringify(approved))
     await app.waitFor(async () => (await p.task(1))?.state === 'done', 60_000)
 
-    // The result waits the same way; the lead's window gets nothing until it is passed on.
+    // The result waits the same way; the chief's window gets nothing until it is passed on.
     await app.waitFor(async () => (await p.board()).gated.length === 1, 60_000)
     const [result] = (await p.board()).gated
-    assert.deepEqual([result.kind, result.recipient, result.body], ['result', 'lead', 'WORKER_OK'])
+    assert.deepEqual([result.kind, result.recipient, result.body], ['result', 'chief', 'WORKER_OK'])
     assert.deepEqual(
-      (await p.inbox('lead')).filter((m) => m.kind === 'result'),
+      (await p.inbox('chief')).filter((m) => m.kind === 'result'),
       [],
-      "not in the lead's inbox yet",
+      "not in the chief's inbox yet",
     )
     await app.requestNode('message.approve', { message: result.id })
     await app.waitFor(async () => {
-      const messages = await p.inbox('lead')
+      const messages = await p.inbox('chief')
       return messages.some((m) => m.id === result.id && m.state === 'delivered')
     }, 60_000)
   } finally {
@@ -244,7 +244,7 @@ test("the human opens a finished session's window on its own conversation, and c
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
-    team(app)
+    staff(app)
     const p = await project(app, { members: [['worker', 'worker']] })
     const alive = (pid) => {
       try {
@@ -260,9 +260,9 @@ test("the human opens a finished session's window on its own conversation, and c
     const session = async () =>
       (await p.board()).lanes.find((lane) => lane.participant.handle === handle)
     await app.waitFor(async () => (await session())?.pane === null, 30_000)
-    // The fake agent records its pid and native session: the lead's comes first.
-    const lead = app.processes()[0].sessionId
-    const first = app.processes().find((entry) => entry.sessionId !== lead)
+    // The fake agent records its pid and native session: the chief's comes first.
+    const chief = app.processes()[0].sessionId
+    const first = app.processes().find((entry) => entry.sessionId !== chief)
     await app.waitFor(async () => !alive(first.pid), 30_000)
 
     const opened = await app.requestNode('session.open', { project: p.id, handle })

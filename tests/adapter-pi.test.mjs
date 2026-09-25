@@ -43,7 +43,7 @@ const request = (overrides = {}) => ({
   instructions: '# ConsensFlow worker\n\nRole text for the test.',
   directory: '/work/app',
   resume: null,
-  message: '[ConsensFlow m-1 · T-1 · task from @lead]\nWrite the parser',
+  message: '[ConsensFlow m-1 · T-1 · task from @chief]\nWrite the parser',
   agent: { model: 'opencode-go/muse-spark-1.3-contributor', thinking: 'high' },
   ...overrides,
 })
@@ -82,7 +82,7 @@ describe('the Pi adapter', () => {
         '--thinking',
         'high',
         '--approve',
-        '[ConsensFlow m-1 · T-1 · task from @lead]\nWrite the parser',
+        '[ConsensFlow m-1 · T-1 · task from @chief]\nWrite the parser',
       ])
       const root = path.join(env.CONSENSFLOW_HOME, 'integrations', 'pi', 'launch-1')
       assert.equal(plan.env.CF_DELIVERY_INBOX, path.join(root, 'inbox'))

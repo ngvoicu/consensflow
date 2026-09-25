@@ -334,16 +334,16 @@ export async function startIntegration({
     requestNode,
     requestRust: request,
     /**
-     * The human types into the lead's terminal, the one way work reaches the
-     * lead: a bracketed paste of `text`, then Enter, once the lead is idle.
+     * The human types into the chief's terminal, the one way work reaches the
+     * chief: a bracketed paste of `text`, then Enter, once the chief is idle.
      */
     async tell(project, text, { idleMs = 60_000 } = {}) {
-      const lead = async () =>
+      const chief = async () =>
         (await requestNode('board.get', { project })).board.lanes.find(
-          (lane) => lane.participant.handle === 'lead',
+          (lane) => lane.participant.handle === 'chief',
         )
-      await waitFor(async () => (await lead())?.activity?.state === 'idle', idleMs)
-      const { pane } = await lead()
+      await waitFor(async () => (await chief())?.activity?.state === 'idle', idleMs)
+      const { pane } = await chief()
       const typed = await request('pane.input', {
         id: pane.id,
         generation: pane.generation,

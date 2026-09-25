@@ -9,7 +9,7 @@ const ACK_GRACE_MS = ACK_POLL_MS * 3
 function launchConfig(target) {
   const launch = target?.launch
   if (launch === null || typeof launch !== 'object') {
-    throw new Error('pi-extension delivery needs the lead launch configuration')
+    throw new Error('pi-extension delivery needs the chief launch configuration')
   }
   return launch
 }

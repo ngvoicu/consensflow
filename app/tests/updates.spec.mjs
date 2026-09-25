@@ -84,7 +84,7 @@ function coreState(blocker = null) {
         open: [],
         lanes: [
           lane(participant(1, 'human', 'human'), null),
-          lane(participant(2, 'lead', 'lead'), { id: 'hidden-lead', generation: 1 }),
+          lane(participant(2, 'chief', 'chief'), { id: 'hidden-chief', generation: 1 }),
           ...(blocker === null
             ? []
             : [lane(participant(3, 'background-worker', 'worker'), { ...blocker })]),

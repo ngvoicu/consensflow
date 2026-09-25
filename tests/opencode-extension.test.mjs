@@ -283,7 +283,7 @@ test("OpenCode's question tool is answered from the board through the plugin", a
   ])
   assert.deepEqual([...new Set(board.state.tokens)], ['Bearer window-token'])
   assert.deepEqual(f.replies, [], 'nothing replied while the board has no answer')
-  board.state.answer = { id: 50, from: 'lead', body: 'Colour: blue', choices: [['blue']] }
+  board.state.answer = { id: 50, from: 'chief', body: 'Colour: blue', choices: [['blue']] }
   for (let i = 0; i < 100 && f.replies.length === 0; i++)
     await new Promise((r) => setTimeout(r, 10))
   assert.deepEqual(f.replies, [{ requestID: 'q-1', answers: [['blue']] }])

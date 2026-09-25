@@ -76,7 +76,7 @@ const request = (overrides = {}) => ({
   // A real directory: the role text is read back through Codex's app-server, started there.
   directory: os.tmpdir(),
   resume: null,
-  message: '[ConsensFlow m-1 · T-1 · task from @lead]\nWrite the parser',
+  message: '[ConsensFlow m-1 · T-1 · task from @chief]\nWrite the parser',
   agent: { model: 'gpt-5.6-luna', effort: 'low' },
   ...overrides,
 })
@@ -99,7 +99,7 @@ describe('the Codex adapter', () => {
         '-c',
         'model_reasoning_effort="low"',
         '--dangerously-bypass-approvals-and-sandbox',
-        '[ConsensFlow m-1 · T-1 · task from @lead]\nWrite the parser',
+        '[ConsensFlow m-1 · T-1 · task from @chief]\nWrite the parser',
       ])
       assert.equal(JSON.parse(plan.env.CF_CODEX_SESSION_BRIDGE).launchId, 'launch-1')
       assert.deepEqual(plan.dropEnv, ['OPENAI_API_KEY'])

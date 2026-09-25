@@ -8,7 +8,7 @@
  *
  * It drives the REAL page: the same `project.open` a human's New project
  * runs, the same emulator registry that draws the docked window, the same
- * input path a keystroke takes, and the board's own way of giving the lead a
+ * input path a keystroke takes, and the board's own way of giving the chief a
  * task. Nothing here reimplements a production path — a smoke that drove its
  * own copy of the page would prove only that the copy works.
  *
@@ -118,7 +118,7 @@ export async function runSelftest({
       ],
     })
 
-    // A project on the smoke's folder, its lead on the fake `claude`.
+    // A project on the smoke's folder, its chief on the fake `claude`.
     const opened = await core('project.open', {
       directory: config.dir,
       harness: 'claude-code',
@@ -128,14 +128,14 @@ export async function runSelftest({
     if (opened?.ok !== true) throw new Error(`project.open refused: ${JSON.stringify(opened)}`)
     await refresh()
 
-    // The lead's window is the one docked beside the board; its emulator is
+    // The chief's window is the one docked beside the board; its emulator is
     // in the page's own registry, keyed `id:generation`.
-    const [emulator, pane] = await until('the lead window appeared', () => {
+    const [emulator, pane] = await until('the chief window appeared', () => {
       for (const [key, entry] of registry.emulators) {
         const cut = key.lastIndexOf(':')
         const id = key.slice(0, cut)
         const generation = Number(key.slice(cut + 1))
-        if (id.endsWith('-lead') && Number.isInteger(generation)) {
+        if (id.endsWith('-chief') && Number.isInteger(generation)) {
           return [entry.emulator, { id, generation }]
         }
       }
@@ -210,20 +210,20 @@ export async function runSelftest({
     )
     await report('echo', { typed, hex })
 
-    // A task through the board: the lead's own `cf`, the core, the
-    // dispatcher, the pane host's paste, the child. The human talks to the lead
-    // in its terminal and never gives it a task from the board, so the lead's
+    // A task through the board: the chief's own `cf`, the core, the
+    // dispatcher, the pane host's paste, the child. The human talks to the chief
+    // in its terminal and never gives it a task from the board, so the chief's
     // window puts its own on the board (`cf task add --self`). The child's hex
     // of the delivered header line is the proof that the board reaches a
     // window; the core's own confirmation, read back from the record the fake
     // harness keeps, is the proof that it knows it did.
     await sendInput(pane, 'SELF\r')
-    const given = await until('the lead put its own task on the board', async () => {
+    const given = await until('the chief put its own task on the board', async () => {
       const { board } = await core('board.get', { project: opened.project.id })
       return (
         board?.lanes
-          .find((lane) => lane.participant.handle === 'lead')
-          ?.tasks.find((task) => task.requester === 'lead') ?? null
+          .find((lane) => lane.participant.handle === 'chief')
+          ?.tasks.find((task) => task.requester === 'chief') ?? null
       )
     })
     const { task: thread } = await core('task.get', {
@@ -232,7 +232,7 @@ export async function runSelftest({
     })
     const header = `[ConsensFlow m-${thread.messages.find((message) => message.kind === 'task').id} ·`
     const delivered = await until(
-      'the task reached the lead window',
+      'the task reached the chief window',
       () => {
         for (const row of screen(emulator)) {
           const match = HEX.exec(row)

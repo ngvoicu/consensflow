@@ -173,7 +173,7 @@ turn() {
 }
 state idle
 printf 'CFSMOKE-READY %s\n' "$CFSMOKE_TAG"
-# Says whether the pane inherited a usable PATH. A lead whose PATH holds only
+# Says whether the pane inherited a usable PATH. A chief whose PATH holds only
 # ConsensFlow's own directories cannot run git, ripgrep or any of what a real
 # harness shells out to, and every test that stubs the environment would still
 # pass. One system command settles it.
@@ -196,11 +196,6 @@ while IFS= read -r line; do
     stty raw -echo
     "$CFSMOKE_PASTE_NODE" "$CFSMOKE_PASTE_READER"
     stty "$saved"
-  elif [ "$line" = "SELF" ]; then
-    # The lead puts its own task on the board from its terminal, the way a
-    # real lead does; the core then delivers it back into this window.
-    cf task add --to lead "SMOKE"
-    turn "SELF"
   elif [ "$line" = "FLOOD" ]; then
     n=1
     while [ $n -le ${FLOOD_LINES} ]; do
@@ -212,7 +207,7 @@ while IFS= read -r line; do
     # A paste arrives bracketed; the record and the hex are of the text.
     line=${'$'}{line#"$esc[200~"}
     line=${'$'}{line%"$esc[201~"}
-    # Shell builtins only, on purpose. A lead pane's PATH once carried just
+    # Shell builtins only, on purpose. A chief pane's PATH once carried just
     # ConsensFlow's own bin directories — this fixture is what found that,
     # by failing on a missing \`od\` — and it is fixed now. Keeping the hex in
     # the shell means this test measures the app, not the machine's coreutils.
@@ -480,7 +475,7 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     )
   }
 
-  // 2. A project, its lead window docked beside the board, and the fake
+  // 2. A project, its chief window docked beside the board, and the fake
   //    harness's own first line drawn by the real xterm — through
   //    `project.open`, the production operation.
   const opened = await app.waitFor('project')
@@ -493,7 +488,7 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   assert.equal(
     rendered.data.tools,
     'ok',
-    'the lead pane inherited a PATH with no system commands on it',
+    'the chief pane inherited a PATH with no system commands on it',
   )
 
   // 3. Input typed through the page's own path reached the child: it came
@@ -505,13 +500,13 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     'the child echoed something other than what was typed',
   )
 
-  // The board reaches the window: the task the lead put on the board from its
+  // The board reaches the window: the task the chief put on the board from its
   // own terminal came back as a paste the child hexed, header first.
   const board = await app.waitFor('board')
   assert.equal(board.data.task, 1)
   assert.match(
     Buffer.from(board.data.hex, 'hex').toString('utf8'),
-    /^\[ConsensFlow m-\d+ · T-1 · task from @lead\]/,
+    /^\[ConsensFlow m-\d+ · T-1 · task from @chief\]/,
   )
   assert.equal(board.data.delivered, true, 'the core never confirmed the delivery from the record')
 
@@ -716,7 +711,7 @@ test('built Agents catalog serves complete saved profiles and current browsing c
       assert.equal(data.agents.length, 91)
       const html = await (await fetch(server.url, { headers })).text()
       for (const text of ['aria-label="Agents"', 'Model and reasoning', 'My own agents', 'model-summary', 'model-group', 'value="model-reasoning" selected', 'Work tier', 'tier-pill', 'Important work only · No coding']) assert.ok(html.includes(text), text)
-      for (const text of ['id="catalog-section"', 'Agent library', 'Your agents', 'PM candidate', 'name="tags"', 'category-pill', 'Lead candidate', 'name="category"', 'Name in use', 'offer__actions', 'Saved only', 'Sort by', 'benchmark', 'Artificial Analysis', 'AA ']) assert.ok(!html.includes(text), 'gone: ' + text)
+      for (const text of ['id="catalog-section"', 'Agent library', 'Your agents', 'PM candidate', 'name="tags"', 'category-pill', 'Chief of Staff candidate', 'name="category"', 'Name in use', 'offer__actions', 'Saved only', 'Sort by', 'benchmark', 'Artificial Analysis', 'AA ']) assert.ok(!html.includes(text), 'gone: ' + text)
       assert.equal((await fetch(server.url + '/api/agents/maia', { method: 'DELETE', headers })).status, 400)
       assert.equal((await fetch(server.url + '/api/agents/my-maia', { method: 'DELETE', headers })).status, 204)
       const after = await (await fetch(server.url + '/api/agents', { headers })).json()

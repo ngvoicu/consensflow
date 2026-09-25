@@ -437,7 +437,7 @@ it('a Pi session switch at admission reports a retryable zero-byte refusal', asy
       'pi-extension',
       {
         session: 'native-pi-session',
-        pane: 'lead-pane',
+        pane: 'chief-pane',
         generation: 1,
         epoch: 0,
         claimEpoch: async () => {

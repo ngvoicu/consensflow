@@ -21,7 +21,7 @@ function nativeEditorState(ctx, session) {
     if (typeof text !== 'string') return { ready: false, reason: 'native editor unavailable' }
     if (text !== '') return { ready: false, reason: 'draft open' }
     if (ctx.isIdle?.() !== true || ctx.hasPendingMessages?.() !== false)
-      return { ready: false, reason: 'lead busy' }
+      return { ready: false, reason: 'chief busy' }
     return { ready: true }
   } catch {
     return { ready: false, reason: 'native editor unavailable' }

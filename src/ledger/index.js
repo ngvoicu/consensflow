@@ -29,11 +29,11 @@ export { SCHEMA_VERSION }
  *   pool and tier) and only then is it queued. A member that runs out of quota
  *   loses its task back to open, with a warning for the next member and a note
  *   to the requester. Only coordinators and the human create tasks.
- * - A member who leaves the team keeps its history but gets nothing new: its
+ * - A member who leaves the staff keeps its history but gets nothing new: its
  *   open tasks are cancelled, its undelivered messages and its unread
  *   questions too, and it is refused as a recipient (`member-left`) until it
  *   rejoins. The coordinators whose windows already run are told when the
- *   team changes; a window that has not started reads the team at launch.
+ *   staff changes; a window that has not started reads the staff at launch.
  * - Task states move only along the state machine below; anything else is
  *   refused with `invalid-transition`.
  *
@@ -44,7 +44,7 @@ export { SCHEMA_VERSION }
  *   done, failed ──reopen──▶ queued
  *   open, queued, working, waiting, paused ──cancel──▶ cancelled, ──fail──▶ failed
  *
- * - A review is a task like any other: the lead puts it on the board for a
+ * - A review is a task like any other: the chief puts it on the board for a
  *   reviewer of a tier, and the reviewer's findings come back as its result.
  *
  * This module never reads `process.env` and never logs: the file and the
@@ -53,9 +53,9 @@ export { SCHEMA_VERSION }
 
 export const HARNESSES = ['claude-code', 'codex', 'opencode', 'pi', 'devin', 'kimi', 'image']
 const MEMBER_ROLES = ['worker', 'advisor', 'reviewer', 'designer']
-/** Who hands out work and hears when the team changes: the human and the lead. */
-const COORDINATOR_HANDLES = ['human', 'lead']
-const COORDINATOR_ROLES = ['human', 'lead']
+/** Who hands out work and hears when the staff changes: the human and the chief. */
+const COORDINATOR_HANDLES = ['human', 'chief']
+const COORDINATOR_ROLES = ['human', 'chief']
 export const TIERS = ['critical', 'complex', 'standard', 'light']
 /** Who takes a task on the board: a worker, an advisor (advice), a reviewer, or an image designer (no tier). */
 const POOLS = ['worker', 'advisor', 'reviewer', 'designer']
@@ -138,16 +138,33 @@ function migrate(db) {
       409,
     )
   }
-  for (let from = version; from < SCHEMA_VERSION; from += 1) {
-    db.exec('BEGIN IMMEDIATE')
-    try {
-      db.exec(MIGRATIONS[from])
-      db.exec(`PRAGMA user_version = ${from + 1}`)
-      db.exec('COMMIT')
-    } catch (cause) {
-      db.exec('ROLLBACK')
-      throw cause
+  if (version === SCHEMA_VERSION) return
+  // A migration may rebuild a table others refer to; with foreign keys on,
+  // dropping it would cascade through them. Off for the migrations, then
+  // every reference checked, then on again.
+  db.exec('PRAGMA foreign_keys = OFF')
+  try {
+    for (let from = version; from < SCHEMA_VERSION; from += 1) {
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        db.exec(MIGRATIONS[from])
+        db.exec(`PRAGMA user_version = ${from + 1}`)
+        db.exec('COMMIT')
+      } catch (cause) {
+        db.exec('ROLLBACK')
+        throw cause
+      }
     }
+    const broken = db.prepare('PRAGMA foreign_key_check').all()
+    if (broken.length > 0) {
+      throw new LedgerError(
+        'ledger-broken',
+        `the ledger's references do not hold after migration: ${JSON.stringify(broken[0])}`,
+        500,
+      )
+    }
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON')
   }
 }
 
@@ -171,7 +188,7 @@ function requireHarness(harness) {
 /** A participant that is still in the project; a member who left is refused. */
 function requireActive(row) {
   if (row.left_at !== null) {
-    throw new LedgerError('member-left', `@${row.handle} left the team`, 409)
+    throw new LedgerError('member-left', `@${row.handle} left the staff`, 409)
   }
   return row
 }
@@ -467,13 +484,13 @@ class Ledger {
 
   // --- projects and participants ---------------------------------------------
 
-  /** A project with its lead and, when given, its team (the last project's, usually). */
-  createProject({ directory, name, lead, team = [], gate = false }) {
+  /** A project with its chief and, when given, its staff (the last project's, usually). */
+  createProject({ directory, name, chief, staff = [], gate = false }) {
     requireText(directory, 'directory', 4096)
     requireText(name, 'name', 100)
-    requireHarness(lead?.harness)
+    requireHarness(chief?.harness)
     requireGate(gate)
-    const members = team.map((member) => ({ ...member, roles: requireMember(member) }))
+    const members = staff.map((member) => ({ ...member, roles: requireMember(member) }))
     return this.#write(() => {
       const at = this.#at()
       const { lastInsertRowid: id } = this.#db
@@ -483,7 +500,12 @@ class Ledger {
         )
         .run(directory, name, gate ? 1 : 0, at, at)
       this.#addParticipant(id, { handle: 'human', role: 'human', agent: null, harness: null })
-      this.#addParticipant(id, { handle: 'lead', role: 'lead', agent: null, harness: lead.harness })
+      this.#addParticipant(id, {
+        handle: 'chief',
+        role: 'chief',
+        agent: null,
+        harness: chief.harness,
+      })
       for (const { agent, harness, roles, tier } of members) {
         this.#addParticipant(id, { handle: agent, roles, agent, harness, tier })
       }
@@ -611,7 +633,7 @@ class Ledger {
     })
   }
 
-  /** A member joins the team, or rejoins it in the roles, harness and tier given now. */
+  /** A member joins the staff, or rejoins it in the roles, harness and tier given now. */
   addMember(projectId, { agent, harness, role, roles, tier }) {
     roles = requireMember({ agent, harness, role, roles, tier })
     return this.#write(() => {
@@ -680,7 +702,7 @@ class Ledger {
       if (!MEMBER_ROLES.includes(member.role)) {
         throw new LedgerError(
           'not-a-member',
-          `${handle} is the project's ${member.role}, not a member of its team`,
+          `${handle} is the project's ${member.role}, not a member of its staff`,
           409,
         )
       }
@@ -693,18 +715,18 @@ class Ledger {
   }
 
   /**
-   * A member leaves the team. Its open tasks are cancelled, with the messages
+   * A member leaves the staff. Its open tasks are cancelled, with the messages
    * still on their way to it and its unread questions; its coordinator and
    * whoever asked for those tasks are told, if their windows run.
    */
   removeMember(projectId, handle) {
     return this.#write(() => {
       const member = this.#participantByHandle(projectId, handle)
-      this.#requireMemberRow(member.id, 'leaves the team')
+      this.#requireMemberRow(member.id, 'leaves the staff')
       if (!MEMBER_ROLES.includes(member.role)) {
         throw new LedgerError(
           'not-a-member',
-          `${handle} is the project's ${member.role}, not a member of its team`,
+          `${handle} is the project's ${member.role}, not a member of its staff`,
           409,
         )
       }
@@ -722,7 +744,7 @@ class Ledger {
         .all(...windows.map((row) => row.id))
       for (const task of open) {
         this.#dropQueued(task.id)
-        this.#moveTask(task, 'cancelled', { reason: `@${handle} left the team` })
+        this.#moveTask(task, 'cancelled', { reason: `@${handle} left the staff` })
       }
       for (const row of windows) {
         this.#db
@@ -733,13 +755,13 @@ class Ledger {
           )
           .run(row.id, row.id)
       }
-      for (const session of sessions) this.#endSession(session, `@${handle} left the team`)
+      for (const session of sessions) this.#endSession(session, `@${handle} left the staff`)
       this.#db.prepare('UPDATE participant SET left_at = ? WHERE id = ?').run(this.#at(), member.id)
       const cancelled = open.map((task) => task.number)
       this.#log(projectId, 'member.left', { handle, cancelled })
       // Only work that went with it is worth a word, and only to whoever asked for it.
       if (cancelled.length > 0) {
-        const body = `@${handle} left the team; it takes no more tasks. Cancelled with it: ${cancelled.map((number) => `T-${number}`).join(', ')}.`
+        const body = `@${handle} left the staff; it takes no more tasks. Cancelled with it: ${cancelled.map((number) => `T-${number}`).join(', ')}.`
         for (const requester of new Set(open.map((task) => task.requester))) {
           if (requester !== 'human') this.#tellIfRunning(projectId, requester, body)
         }
@@ -748,8 +770,8 @@ class Ledger {
     })
   }
 
-  /** The members of the newest project that has any: the team a new project starts from. */
-  lastTeam() {
+  /** The members of the newest project that has any: the staff a new project starts from. */
+  lastStaff() {
     return this.#db
       .prepare(
         `SELECT agent, harness, role, roles FROM participant
@@ -878,7 +900,7 @@ class Ledger {
          WHERE c.participant_id = ? ORDER BY t.conversation_id, t.seq`,
       )
       .all(task.assignee_id)
-    // A window's copy may hold more than this task (the lead's own, after
+    // A window's copy may hold more than this task (the chief's own, after
     // its other work): the task's part starts where its brief arrived.
     const brief = this.#db
       .prepare(
@@ -928,8 +950,8 @@ class Ledger {
   // --- tasks and messages ------------------------------------------------------
 
   /**
-   * A task, from the lead or the human. Given `to`, it is queued for that
-   * participant at once (the lead, the human, or the requester itself). Given
+   * A task, from the chief or the human. Given `to`, it is queued for that
+   * participant at once (the chief, the human, or the requester itself). Given
    * a `pool` and `tier` instead, it opens for the daemon to assign to a member
    * of that pool and tier (work for a worker, advice from an advisor; an image
    * from a designer, which has no tier), and critical work names its `purpose`.
@@ -962,14 +984,14 @@ class Ledger {
           403,
         )
       }
-      // Advice is the lead's alone to ask: the human gives the lead work, not its advisors.
+      // Advice is the chief's alone to ask: the human gives the chief work, not its advisors.
       if (
         pool === 'advisor' &&
         to === undefined &&
         after === undefined &&
-        requester.role !== 'lead'
+        requester.role !== 'chief'
       ) {
-        throw new LedgerError('advice-for-the-lead', 'only the lead asks an advisor', 403)
+        throw new LedgerError('advice-for-the-chief', 'only the chief asks an advisor', 403)
       }
       // A follow-up on a finished task goes to the session that did it, while
       // it is still there and free: the one case a coordinator names a window.
@@ -982,7 +1004,7 @@ class Ledger {
       if (assignee === null && this.#members(projectId, pool, tier).length === 0) {
         throw new LedgerError(
           'no-member-of-tier',
-          `no ${poolName(pool, tier)} is on the team: ask the human for one with cf ask --human "…"`,
+          `no ${poolName(pool, tier)} is on the staff: ask the human for one with cf ask --human "…"`,
           409,
         )
       }
@@ -1239,7 +1261,7 @@ class Ledger {
       if (!candidate) {
         throw new LedgerError(
           'not-a-candidate',
-          `@${member.handle} is not ${aPool(task.pool, task.tier)} on this team`,
+          `@${member.handle} is not ${aPool(task.pool, task.tier)} on this staff`,
           409,
         )
       }
@@ -1286,7 +1308,7 @@ class Ledger {
     return session
   }
 
-  /** A member of the team, never one of its sessions. */
+  /** A member of the staff, never one of its sessions. */
   #requireMemberRow(participantId, does) {
     const row = this.#participantRow(participantId)
     if (row.member_id !== null) {
@@ -1390,7 +1412,7 @@ class Ledger {
    * A question for a coordinator or the human; the asker's task waits for the
    * answer. With `questions`, the question carries options as a harness's own
    * question tool asked them, and its text is rendered from them. An `urgent`
-   * question is the lead's `cf tell` to a task's window: the task is paused
+   * question is the chief's `cf tell` to a task's window: the task is paused
    * for it, and the question says so.
    */
   ask(projectId, { from, to, body, task, questions, urgent = false }) {
@@ -1740,10 +1762,10 @@ class Ledger {
   }
 
   /**
-   * The lead (or the human) stops a worker's task without ending it: its
+   * The chief (or the human) stops a worker's task without ending it: its
    * window closes on the daemon's next look, whatever was on its way to it is
    * withdrawn, and the task keeps its member, its conversation and its place
-   * until it is resumed or cancelled. The lead's own work is not paused.
+   * until it is resumed or cancelled. The chief's own work is not paused.
    */
   pauseTask(projectId, number, { by, because } = {}) {
     if (because !== undefined) requireText(because, 'because', 1000)
@@ -1751,8 +1773,12 @@ class Ledger {
       if (by !== undefined) this.#participantByHandle(projectId, by)
       const task = this.#taskRow(projectId, number)
       this.#requireTaskState(task, ['open', 'queued', ...ACTIVE_TASK_STATES], 'pause')
-      if (task.assignee_id !== null && this.#participantRow(task.assignee_id).role === 'lead') {
-        throw new LedgerError('own-work', `T-${number} is the lead's own: finish or cancel it`, 409)
+      if (task.assignee_id !== null && this.#participantRow(task.assignee_id).role === 'chief') {
+        throw new LedgerError(
+          'own-work',
+          `T-${number} is the chief's own: finish or cancel it`,
+          409,
+        )
       }
       this.#dropQueued(task.id)
       this.#moveTask(task, 'paused', {
@@ -1982,7 +2008,7 @@ class Ledger {
     return this.#db
       .prepare(
         `${MESSAGE_SELECT}
-         WHERE m.project_id = ? AND m.kind = 'question' AND r.role = 'lead'
+         WHERE m.project_id = ? AND m.kind = 'question' AND r.role = 'chief'
            AND m.state != 'gated' AND m.created_at <= ?
            AND NOT EXISTS (SELECT 1 FROM message a WHERE a.reply_to = m.id AND a.kind = 'answer')
          ORDER BY m.id`,
@@ -2121,14 +2147,14 @@ class Ledger {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(projectId, handle, role, JSON.stringify(roles), agent, harness, tier, this.#at())
-    if (role !== 'human' && role !== 'lead') {
+    if (role !== 'human' && role !== 'chief') {
       this.#log(projectId, 'member.added', { handle, role, roles, harness })
     }
     return participantView(this.#participantRow(id))
   }
 
   /** The active members of one pool and tier, in join order. */
-  /** The team's members of one role and tier (any tier when null), whatever role they were saved with first. */
+  /** The staff's members of one role and tier (any tier when null), whatever role they were saved with first. */
   #members(projectId, pool, tier) {
     return this.#db
       .prepare(

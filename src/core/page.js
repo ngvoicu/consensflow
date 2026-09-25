@@ -20,17 +20,17 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
   return {
     'projects.list': async () => ({ projects: ledger.projects() }),
 
-    // The team given, as the roster has those agents now; else the last team.
-    'project.open': change(async ({ directory, name, harness, gate, team }) => ({
+    // The staff given, as the roster has those agents now; else the last staff.
+    'project.open': change(async ({ directory, name, harness, gate, staff }) => ({
       project: await dispatcher.openProject({
         directory,
         name: name ?? basename(directory),
         harness,
         gate,
-        team:
-          team === undefined
-            ? lastTeamNow(ledger, env)
-            : team.map(({ agent, roles }) => ({ roles, ...membership(agent, env) })),
+        staff:
+          staff === undefined
+            ? lastStaffNow(ledger, env)
+            : staff.map(({ agent, roles }) => ({ roles, ...membership(agent, env) })),
       }),
     })),
 
@@ -48,7 +48,7 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
 
     'agents.list': async () => ({ agents: listAgents(env) }),
 
-    'team.last': async () => ({ team: lastTeamNow(ledger, env) }),
+    'staff.last': async () => ({ staff: lastStaffNow(ledger, env) }),
 
     'member.add': change(async ({ project, agent, roles = ['worker'] }) => ({
       member: ledger.addMember(project, { roles, ...membership(agent, env) }),
@@ -150,7 +150,7 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
   }
 }
 
-/** A saved agent as the team records it: its harness, and its tier as the roster has it now. */
+/** A saved agent as the staff records it: its harness, and its tier as the roster has it now. */
 function membership(agent, env, agents = listAgents(env)) {
   const row = agentRow(agent, env)
   const saved = agents.find((candidate) => candidate.name === agent)
@@ -160,11 +160,11 @@ function membership(agent, env, agents = listAgents(env)) {
   return { agent, harness: row.kind, tier: saved.profile.workTier }
 }
 
-/** The last project's team for a new one: the members still saved, as the roster has them now. */
-function lastTeamNow(ledger, env) {
+/** The last project's staff for a new one: the members still saved, as the roster has them now. */
+function lastStaffNow(ledger, env) {
   const agents = listAgents(env)
   return ledger
-    .lastTeam()
+    .lastStaff()
     .filter(({ agent }) => agents.some((candidate) => candidate.name === agent))
     .map(({ agent, roles }) => ({ roles, ...membership(agent, env, agents) }))
 }

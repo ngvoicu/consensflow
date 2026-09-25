@@ -167,7 +167,7 @@ export async function startCore(
   return { stop }
 }
 
-/** The team as the lead's text lists it: each member's name, roles and tier. */
+/** The staff as the chief's text lists it: each member's name, roles and tier. */
 function teamOf(project) {
   return project.participants
     .filter((member) => member.agent !== null && member.memberId === null)

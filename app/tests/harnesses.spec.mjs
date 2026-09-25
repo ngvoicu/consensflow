@@ -113,7 +113,7 @@ test('Agents lists every catalog agent as one row with nothing to add, and takes
     await page.goto(`${server.url}/?token=${server.token}`)
     await expect(page.locator('#agents-count')).toHaveText('90 of 90 shown')
     await expect(page.locator('#lede')).toHaveText(
-      '90 agents, the catalog’s and your own; a project’s team is picked from them.',
+      '90 agents, the catalog’s and your own; a project’s staff is picked from them.',
     )
     await expect(page.locator('#agents .offer')).toHaveCount(0)
     await expect(page.locator('#agents').getByRole('button', { name: /^Add/ })).toHaveCount(0)
@@ -278,7 +278,7 @@ test('Harnesses says how each one was installed and updates it from a button', a
     id: 'codex',
     path: '/opt/homebrew/Caskroom/codex/0.1/bin/codex',
     installed: true,
-    lead: true,
+    chief: true,
     checkedAt: Date.now(),
     version: { state: 'checked', value: version },
     distribution: 'Homebrew',
@@ -288,7 +288,7 @@ test('Harnesses says how each one was installed and updates it from a button', a
     id,
     path: null,
     installed: false,
-    lead: id !== 'kimi',
+    chief: id !== 'kimi',
     checkedAt: Date.now(),
     version: { state: 'not-installed' },
     update: { state: 'not-checked' },
@@ -656,7 +656,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
   page,
 }) => {
   const fixture = await catalogPage(page, [
-    { name: 'lead-one', harness: 'codex', model: 'gpt-6-astra', effort: 'xhigh' },
+    { name: 'chief-one', harness: 'codex', model: 'gpt-6-astra', effort: 'xhigh' },
     { name: 'peer-one', harness: 'pi', model: 'openai-codex/gpt-6-astra', effort: 'xhigh' },
     { name: 'quick-one', harness: 'pi', model: 'openai-codex/gpt-6-astra', effort: 'low' },
     { name: 'custom', harness: 'claude', model: '<custom-model>', effort: 'unusual' },
@@ -716,9 +716,9 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     // An agent defined by hand sits with the catalog's agents of its model and reasoning.
     await expect(cardOf('GPT-6 Astra · Xhigh · 5').locator('.callsign')).toHaveText([
       'asteria',
+      'chief-one',
       'delling',
       'hesperos',
-      'lead-one',
       'peer-one',
     ])
     await expect(own.locator('.callsign')).toHaveCount(5)
@@ -772,8 +772,8 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     await search.fill('<custom-model>')
     await expect(own.locator('#agents')).toContainText('<custom-model>')
     await expect(own.locator('custom-model')).toHaveCount(0)
-    await search.fill('lead-one')
-    const row = member(own, 'lead-one')
+    await search.fill('chief-one')
+    const row = member(own, 'chief-one')
     await row.getByRole('button', { name: 'Edit', exact: true }).click()
     await row.locator('[name=model]').fill('custom-after-edit')
     await row.getByRole('button', { name: 'Save', exact: true }).click()
@@ -781,7 +781,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
       own.getByRole('heading', { name: 'custom-after-edit · Xhigh · 1', exact: true }),
     ).toBeVisible()
     await expect(group).toHaveValue('model-reasoning')
-    await expect(search).toHaveValue('lead-one')
+    await expect(search).toHaveValue('chief-one')
     await expect(member(page, 'astraeus')).toBeVisible()
     await search.fill('no-such-saved-agent')
     await expect(own.locator('#agents')).toContainText('No agents match')
@@ -1108,7 +1108,7 @@ for (const colorScheme of ['light', 'dark']) {
         ).toBe(true)
         await expect(
           page.getByRole('button', {
-            name: /Launch lead|Turn off|Reset everything|Update instructions/,
+            name: /Launch chief|Turn off|Reset everything|Update instructions/,
           }),
         ).toHaveCount(0)
         await page.screenshot({ path: `/tmp/cf-model-card-${colorScheme}-${width}.png` })

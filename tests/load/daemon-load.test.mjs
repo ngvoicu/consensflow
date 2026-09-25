@@ -8,7 +8,7 @@ import { startIntegration } from '../integration/harness.mjs'
 
 /**
  * The daemon under load, opt-in (`npm run load`): several projects at once,
- * each lead handing out waves of tasks to fake workers in real PTYs through
+ * each chief handing out waves of tasks to fake workers in real PTYs through
  * the real pane host, while the page polls every board, task and transcript
  * the whole time. At the end the daemon is still there, every task is done
  * and its result delivered, its log holds no error and no slow pass, and the
@@ -58,7 +58,7 @@ test('the daemon stays up, delivers every task and logs nothing wrong while seve
       const opened = await app.requestNode('project.open', {
         directory,
         harness: 'claude-code',
-        team: workers.map((agent) => ({ agent, roles: ['worker'] })),
+        staff: workers.map((agent) => ({ agent, roles: ['worker'] })),
       })
       assert.equal(opened.ok, true, JSON.stringify(opened))
       const board = (await app.requestNode('board.get', { project: opened.project.id })).board
@@ -68,7 +68,7 @@ test('the daemon stays up, delivers every task and logs nothing wrong while seve
     }
     const board = async (id) => (await app.requestNode('board.get', { project: id })).board
     const delivered = async (id) =>
-      (await app.requestNode('inbox.get', { project: id, participant: 'lead' })).messages.filter(
+      (await app.requestNode('inbox.get', { project: id, participant: 'chief' })).messages.filter(
         (m) => m.kind === 'result' && m.state === 'delivered',
       ).length
 

@@ -239,7 +239,7 @@ test(
     assert.equal(
       await currentSession(f.target.launch, { id: 'p-1', generation: 1 }, bridge),
       session,
-      'background children alone do not change the lead',
+      'background children alone do not change the chief',
     )
     await writeFile(
       join(f.root, 'projects', 'test', `${next}.jsonl`),

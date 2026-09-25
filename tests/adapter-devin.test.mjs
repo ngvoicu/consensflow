@@ -46,7 +46,7 @@ const request = (overrides = {}) => ({
   instructions: '# ConsensFlow worker\n\nRole text for the test.',
   directory: '/work/app',
   resume: null,
-  message: '[ConsensFlow m-1 · T-1 · task from @lead]\nWrite the parser',
+  message: '[ConsensFlow m-1 · T-1 · task from @chief]\nWrite the parser',
   agent: { model: 'swe-1-6-slow' },
   ...overrides,
 })

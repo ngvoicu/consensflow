@@ -17,7 +17,7 @@ export const DEFAULT_DEADLINE_MS = 3_000
 function launchConfig(target) {
   const launch = target?.launch
   if (launch === null || typeof launch !== 'object') {
-    throw new Error('opencode-server delivery needs the lead launch configuration')
+    throw new Error('opencode-server delivery needs the chief launch configuration')
   }
   return launch
 }

@@ -38,8 +38,8 @@ async function withPage(fn) {
       return ledger.createProject({
         directory: request.directory,
         name: request.name,
-        lead: { harness: request.harness },
-        team: request.team,
+        chief: { harness: request.harness },
+        staff: request.staff,
         ...(request.gate === undefined ? {} : { gate: request.gate }),
       })
     },
@@ -107,7 +107,7 @@ describe('the page protocol of the new core', () => {
           name: 'app',
           harness: 'pi',
           gate: undefined,
-          team: [],
+          staff: [],
         },
       ])
       assert.equal(kicks(), 1)
@@ -119,7 +119,7 @@ describe('the page protocol of the new core', () => {
     })
   })
 
-  it('lists the saved agents for the team picker and adds one with its own harness', async () => {
+  it('lists the saved agents for the staff picker and adds one with its own harness', async () => {
     await withPage(async ({ operations }) => {
       const { agents } = await operations['agents.list']({})
       // Every catalog agent is on offer, as the catalog has it: the file's
@@ -155,7 +155,7 @@ describe('the page protocol of the new core', () => {
     })
   })
 
-  it('starts a new project with the last team, as the saved agents are now', async () => {
+  it('starts a new project with the last staff, as the saved agents are now', async () => {
     await withPage(async ({ operations, opened, env }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
@@ -175,14 +175,14 @@ describe('the page protocol of the new core', () => {
       const zeus = agents.find((a) => a.name === 'zeus')
       const diana = agents.find((a) => a.name === 'diana')
       // zeus is the human's own opencode agent now; diana is the catalog's, as it has her.
-      assert.deepEqual(opened[1].team, [
+      assert.deepEqual(opened[1].staff, [
         { roles: ['worker'], agent: 'zeus', harness: 'opencode', tier: zeus.profile.workTier },
         { roles: ['reviewer'], agent: 'diana', harness: 'codex', tier: diana.profile.workTier },
       ])
       assert.ok(zeus.profile.workTier, 'an agent always has a tier')
       assert.deepEqual(
         next.project.participants.map((p) => p.handle),
-        ['human', 'lead', 'zeus', 'diana'],
+        ['human', 'chief', 'zeus', 'diana'],
       )
     })
   })
@@ -205,7 +205,7 @@ describe('the page protocol of the new core', () => {
     })
   })
 
-  it('takes a member off the team through the dispatcher, which closes its window', async () => {
+  it('takes a member off the staff through the dispatcher, which closes its window', async () => {
     await withPage(async ({ ledger, operations, removed, kicks }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
@@ -214,7 +214,7 @@ describe('the page protocol of the new core', () => {
       await operations['member.add']({ project: project.id, agent: 'artemis' })
       const artemis = ledger.project(project.id).participants.find((p) => p.handle === 'artemis')
       ledger.createTask(project.id, {
-        from: 'lead',
+        from: 'chief',
         pool: 'worker',
         tier: artemis.tier,
         body: 'Parser',
@@ -231,7 +231,7 @@ describe('the page protocol of the new core', () => {
       const { board } = await operations['board.get']({ project: project.id })
       assert.deepEqual(
         board.lanes.map((lane) => lane.participant.handle),
-        ['human', 'lead'],
+        ['human', 'chief'],
       )
     })
   })
@@ -245,7 +245,7 @@ describe('the page protocol of the new core', () => {
       await operations['member.add']({ project: project.id, agent: 'artemis' })
       const artemis = ledger.project(project.id).participants.find((p) => p.handle === 'artemis')
       ledger.createTask(project.id, {
-        from: 'lead',
+        from: 'chief',
         pool: 'worker',
         tier: artemis.tier,
         body: 'Joke',
@@ -256,7 +256,7 @@ describe('the page protocol of the new core', () => {
       assert.deepEqual([task.state, task.assignee], ['open', null])
       assert.match(task.body, /Reassigned from @artemis-[a-z]+-[a-z]+ \(by @human\)/)
       assert.ok(kicks() > before, 'the daemon looks at once')
-      const own = ledger.createTask(project.id, { from: 'lead', to: 'lead', body: 'Plan' })
+      const own = ledger.createTask(project.id, { from: 'chief', to: 'chief', body: 'Plan' })
       await assert.rejects(
         operations['task.reassign']({ project: project.id, task: own.task.number }),
         /given by name, not by tier/,
@@ -264,7 +264,7 @@ describe('the page protocol of the new core', () => {
     })
   })
 
-  it('offers the human no review and no new task: the lead adds both, a review as a task', async () => {
+  it('offers the human no review and no new task: the chief adds both, a review as a task', async () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
@@ -273,7 +273,7 @@ describe('the page protocol of the new core', () => {
       await operations['member.add']({ project: project.id, agent: 'diana', roles: ['reviewer'] })
       const diana = ledger.project(project.id).participants.find((p) => p.handle === 'diana')
       const { task } = ledger.createTask(project.id, {
-        from: 'lead',
+        from: 'chief',
         pool: 'reviewer',
         tier: diana.tier,
         body: 'Review the docs',
@@ -312,13 +312,13 @@ describe('the page protocol of the new core', () => {
       await operations['member.add']({ project: project.id, agent: 'artemis' })
       const artemis = ledger.project(project.id).participants.find((p) => p.handle === 'artemis')
       ledger.createTask(project.id, {
-        from: 'lead',
+        from: 'chief',
         pool: 'worker',
         tier: artemis.tier,
         body: 'One',
       })
       ledger.createTask(project.id, {
-        from: 'lead',
+        from: 'chief',
         pool: 'worker',
         tier: artemis.tier,
         body: 'Two',
@@ -329,8 +329,8 @@ describe('the page protocol of the new core', () => {
       assert.deepEqual(
         board.gated.map((m) => [m.id, m.kind, m.sender, m.taskNumber]),
         [
-          [first.id, 'task', 'lead', 1],
-          [second.id, 'task', 'lead', 2],
+          [first.id, 'task', 'chief', 1],
+          [second.id, 'task', 'chief', 2],
         ],
       )
       const before = kicks()
@@ -356,7 +356,7 @@ describe('the page protocol of the new core', () => {
       await operations['member.add']({ project: project.id, agent: 'artemis' })
       const artemis = ledger.project(project.id).participants.find((p) => p.handle === 'artemis')
       ledger.createTask(project.id, {
-        from: 'lead',
+        from: 'chief',
         pool: 'worker',
         tier: artemis.tier,
         body: 'Lexer',
@@ -416,7 +416,7 @@ describe('the page protocol of the new core', () => {
     })
   })
 
-  it('lets the human cancel tasks, and leaves handing out, sending back and accepting to the lead', async () => {
+  it('lets the human cancel tasks, and leaves handing out, sending back and accepting to the chief', async () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
@@ -425,28 +425,28 @@ describe('the page protocol of the new core', () => {
       await operations['member.add']({ project: project.id, agent: 'artemis' })
       const artemis = ledger.project(project.id).participants.find((p) => p.handle === 'artemis')
       const { task } = ledger.createTask(project.id, {
-        from: 'lead',
+        from: 'chief',
         pool: 'worker',
         tier: artemis.tier,
         body: 'Write the parser',
       })
-      assert.deepEqual([task.number, task.requester, task.assignee], [1, 'lead', null])
+      assert.deepEqual([task.number, task.requester, task.assignee], [1, 'chief', null])
       ledger.assignTask(project.id, 1, artemis.id)
       const message = ledger.task(project.id, 1).messages[0]
       ledger.beginDelivery(message.id)
       ledger.confirmDelivery(message.id, {})
-      // The human writes to no agent from the board: sending back is the lead's, in its terminal.
+      // The human writes to no agent from the board: sending back is the chief's, in its terminal.
       assert.equal(operations['task.reopen'], undefined)
       const cancelled = await operations['task.cancel']({ project: project.id, task: 1 })
       assert.equal(cancelled.task.state, 'cancelled')
       const { task: thread } = await operations['task.get']({ project: project.id, task: 1 })
       assert.deepEqual(
         thread.messages.map((m) => [m.kind, m.sender.replace(/^artemis-.*$/, 'artemis-session')]),
-        [['task', 'lead']],
+        [['task', 'chief']],
       )
       await assert.rejects(operations['task.get']({ project: project.id, task: 9 }), /no task T-9/)
       ledger.createTask(project.id, {
-        from: 'lead',
+        from: 'chief',
         pool: 'worker',
         tier: artemis.tier,
         body: 'Second',
@@ -456,7 +456,11 @@ describe('the page protocol of the new core', () => {
       ledger.beginDelivery(second.id)
       ledger.confirmDelivery(second.id, {})
       ledger.recordResult(project.id, 2, { body: 'ok' })
-      assert.equal(operations['task.accept'], undefined, "accepting is the lead's, in its terminal")
+      assert.equal(
+        operations['task.accept'],
+        undefined,
+        "accepting is the chief's, in its terminal",
+      )
     })
   })
 
@@ -469,7 +473,7 @@ describe('the page protocol of the new core', () => {
       await operations['member.add']({ project: project.id, agent: 'artemis' })
       const artemis = ledger.project(project.id).participants.find((p) => p.handle === 'artemis')
       ledger.createTask(project.id, {
-        from: 'lead',
+        from: 'chief',
         pool: 'worker',
         tier: artemis.tier,
         body: 'Lexer',
@@ -500,7 +504,7 @@ describe('the page protocol of the new core', () => {
       await operations['member.add']({ project: project.id, agent: 'artemis' })
       const artemis = ledger.project(project.id).participants.find((p) => p.handle === 'artemis')
       ledger.createTask(project.id, {
-        from: 'lead',
+        from: 'chief',
         pool: 'worker',
         tier: artemis.tier,
         body: 'Lexer',
@@ -528,7 +532,7 @@ describe('the page protocol of the new core', () => {
         directory: '/work/app',
         harness: 'pi',
       })
-      const question = ledger.ask(project.id, { from: 'lead', to: 'human', body: 'Deploy now?' })
+      const question = ledger.ask(project.id, { from: 'chief', to: 'human', body: 'Deploy now?' })
       const { messages } = await operations['inbox.get']({ project: project.id })
       assert.deepEqual(
         messages.map((m) => [m.id, m.kind, m.state]),
@@ -539,7 +543,7 @@ describe('the page protocol of the new core', () => {
         'read',
       )
       const { message } = await operations['message.answer']({ question: question.id, body: 'Yes' })
-      assert.deepEqual([message.kind, message.recipient], ['answer', 'lead'])
+      assert.deepEqual([message.kind, message.recipient], ['answer', 'chief'])
     })
   })
 
@@ -554,7 +558,7 @@ describe('the page protocol of the new core', () => {
         board.lanes.map((lane) => [lane.participant.handle, lane.activity.state, lane.pane]),
         [
           ['human', 'idle', null],
-          ['lead', 'idle', null],
+          ['chief', 'idle', null],
         ],
       )
     })

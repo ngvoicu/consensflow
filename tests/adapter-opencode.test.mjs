@@ -44,7 +44,7 @@ const request = (overrides = {}) => ({
   instructions: '# ConsensFlow worker\n\nRole text for the test.',
   directory: os.tmpdir(),
   resume: null,
-  message: '[ConsensFlow m-1 · T-1 · task from @lead]\nWrite the parser',
+  message: '[ConsensFlow m-1 · T-1 · task from @chief]\nWrite the parser',
   agent: { model: 'opencode/muse-spark-1.3-contributor-free', effort: 'high' },
   ...overrides,
 })
@@ -124,7 +124,7 @@ describe('the OpenCode adapter', () => {
           channel: 'opencode-server',
           sessionId: 'ses_abc123',
           cwd: os.tmpdir(),
-          text: '[ConsensFlow m-1 · T-1 · task from @lead]\nWrite the parser',
+          text: '[ConsensFlow m-1 · T-1 · task from @chief]\nWrite the parser',
           model: 'opencode/muse-spark-1.3-contributor-free',
           variant: 'high',
         },

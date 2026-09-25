@@ -327,7 +327,7 @@ it('restores a rejected switch, rejects invalid ingress, and reports a possible 
 })
 
 it('keeps native TUI arguments while explicitly forwarding backend model, effort and full role configuration', () => {
-  const role = 'developer_instructions="existing instructions\\ncomplete lead role"'
+  const role = 'developer_instructions="existing instructions\\ncomplete chief role"'
   const args = [
     '-c',
     role,
@@ -479,7 +479,7 @@ it("Codex's question tool is answered from the board by the broker, and the TUI 
       multiple: false,
     },
   ])
-  board.state.answer = { id: 70, from: 'lead', body: 'Colour: blue', choices: [['blue']] }
+  board.state.answer = { id: 70, from: 'chief', body: 'Colour: blue', choices: [['blue']] }
   await f.wait(() => f.requests.some((m) => m.id === 'ask-1'))
   assert.deepEqual(
     f.requests.find((m) => m.id === 'ask-1'),

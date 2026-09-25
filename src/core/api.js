@@ -7,7 +7,7 @@ import { LedgerError } from '../ledger/index.js'
  *
  * Every window gets its own bearer token, issued when the dispatcher opens it
  * and revoked when it closes, so a token names exactly one participant of one
- * project. The API decides who may do what (the lead hands out tasks, only the
+ * project. The API decides who may do what (the chief hands out tasks, only the
  * assignee finishes one, only the one asked answers), the ledger keeps the
  * state rules, and every write wakes the dispatcher.
  */
@@ -94,7 +94,7 @@ export async function startApi({
         task: task === null ? null : summary(task),
       })
     }
-    if (at === 'GET /api/team') {
+    if (at === 'GET /api/staff') {
       return ok({
         members: project.participants
           .filter((member) => member.agent !== null && member.memberId === null)
@@ -124,17 +124,17 @@ export async function startApi({
       })
     }
     if (at === 'POST /api/tasks') {
-      if (participant.role !== 'lead') {
+      if (participant.role !== 'chief') {
         throw new Refusal(
           403,
           'not-a-coordinator',
-          'members do not hand out tasks: ask your lead instead (cf ask)',
+          'members do not hand out tasks: ask your chief instead (cf ask)',
         )
       }
       const body = await readJson(request)
       // The board is the only channel between agents: no task is given by
       // name. A follow-up that needs the context of the window that did T-n
-      // goes back to that window (`after`); the lead's own later step is its
+      // goes back to that window (`after`); the chief's own later step is its
       // own (`self`); everything else is fresh work for a tier of worker,
       // advice from a tier of advisor, a review from a tier of reviewer, or
       // an image from the designer.
@@ -159,7 +159,7 @@ export async function startApi({
       })
       changed()
       // With human approval required, the brief waits for the human before it
-      // moves; `cf` says so, and the lead knows a quiet board is a waiting one.
+      // moves; `cf` says so, and the chief knows a quiet board is a waiting one.
       return {
         status: 201,
         body: {
@@ -191,8 +191,8 @@ export async function startApi({
     if (at === 'POST /api/questions') {
       const body = await readJson(request)
       const active = ledger.activeTask(participant.id, { queued: true })
-      // The lead's question goes to the human; a member's to whoever gave its task.
-      const to = active?.requester ?? (participant.role === 'lead' ? 'human' : 'lead')
+      // The chief's question goes to the human; a member's to whoever gave its task.
+      const to = active?.requester ?? (participant.role === 'chief' ? 'human' : 'chief')
       const asked = ledger.ask(project.id, {
         from: participant.handle,
         to,
@@ -206,8 +206,8 @@ export async function startApi({
     if (at === 'POST /api/notes') {
       const body = await readJson(request)
       const active = ledger.activeTask(participant.id, { queued: true })
-      // The lead's note goes to the human; a member's to whoever gave its task.
-      const to = active?.requester ?? (participant.role === 'lead' ? 'human' : 'lead')
+      // The chief's note goes to the human; a member's to whoever gave its task.
+      const to = active?.requester ?? (participant.role === 'chief' ? 'human' : 'chief')
       const noted = ledger.note(project.id, {
         from: participant.handle,
         to,
@@ -265,11 +265,11 @@ export async function startApi({
     // What the task's window did so far, from ConsensFlow's own copy: the
     // last items, for whoever gave the task.
     if (action === 'transcript' && request.method === 'GET') {
-      if (participant.role !== 'lead' && task.requester !== participant.handle) {
+      if (participant.role !== 'chief' && task.requester !== participant.handle) {
         throw new Refusal(
           403,
           'not-a-coordinator',
-          `only the lead or @${task.requester} may read what T-${number}'s window did`,
+          `only the chief or @${task.requester} may read what T-${number}'s window did`,
         )
       }
       const last = Math.min(50, Math.max(1, Number(url.searchParams.get('last')) || 10))
@@ -287,17 +287,17 @@ export async function startApi({
       changed()
       return ok({ task: summary(done.task) })
     }
-    if (participant.role !== 'lead' && task.requester !== participant.handle) {
+    if (participant.role !== 'chief' && task.requester !== participant.handle) {
       throw new Refusal(
         403,
         'not-a-coordinator',
-        `only the lead or @${task.requester} may ${action} T-${number}`,
+        `only the chief or @${task.requester} may ${action} T-${number}`,
       )
     }
     if (action === 'tell') {
       // Stop the task and put this to its window: the agent is interrupted as
       // for any pause, reads the question once idle, and its answer comes
-      // back as a message; the lead resumes the task with its words.
+      // back as a message; the chief resumes the task with its words.
       if (task.assignee === null || !WINDOWED.has(task.state)) {
         throw new Refusal(
           409,

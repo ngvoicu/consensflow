@@ -83,7 +83,7 @@ async function checkHarnesses(id = null, button = null) {
 
 function renderHarness(row) {
   const line = el('div', 'host');
-  line.append(el('strong', null, row.id + (row.lead ? '' : ' (worker only)')));
+  line.append(el('strong', null, row.id + (row.chief ? '' : ' (worker only)')));
   line.append(el('div', null, row.installed ? 'Installed: ' + row.path : 'Not installed'));
   if (row.installed) {
     const update = row.update;

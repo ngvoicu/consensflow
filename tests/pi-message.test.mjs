@@ -91,7 +91,7 @@ async function setup(
   await pi.handlers.get('session_start')({}, ctx)
   const targetFor = (overrides = {}) => ({
     session: 'native-pi-session',
-    pane: 'lead-pane',
+    pane: 'chief-pane',
     generation: 1,
     epoch: 0,
     claimEpoch: async () => ({ ok: true }),

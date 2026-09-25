@@ -174,7 +174,7 @@
       border-top: 1px solid var(--line-soft);
     }
     .project-tools .quiet-button { padding: 3px 9px; font-size: 12px; }
-    .projects-empty, .team-empty { color: var(--muted); padding: 6px 9px; }
+    .projects-empty, .staff-empty { color: var(--muted); padding: 6px 9px; }
 
     /* The board on the left, one window docked on the right, a third of the width. */
     .main {
@@ -267,7 +267,7 @@
       color: var(--muted);
       border-bottom: 1px solid var(--line-soft);
     }
-    .kanban .kanban-team { width: 19%; }
+    .kanban .kanban-staff { width: 19%; }
     .kanban th[data-state="finished"] { color: var(--muted); }
     .kanban tbody td, .kanban tbody th {
       vertical-align: top;
@@ -493,18 +493,18 @@
     .drawer[data-state="accepted"] { --state: var(--seafoam-dim); }
     .drawer-meta { margin: 8px 0 14px; font: 11px var(--mono); color: var(--muted); }
     .dialog-help { margin: 0 0 12px; font-size: 12px; color: var(--muted); }
-    .team { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 13px; }
-    .team th { text-align: left; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); padding: 4px 8px 6px; }
-    .team td { padding: 10px 10px; border-top: 1px solid var(--line-soft); vertical-align: middle; font-size: 14px; }
-    .team .member-name { font-family: var(--mono); }
-    .team .member-meta { color: var(--muted); font: 11px var(--mono); }
-    .team-add, .team-pick { border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
-    .team-add legend, .team-pick legend { padding: 0 6px; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
-    .team-add { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
-    .team-add label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
-    .team-pick .team-add { border: 0; padding: 4px 0 0; margin-bottom: 0; }
+    .staff { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 13px; }
+    .staff th { text-align: left; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); padding: 4px 8px 6px; }
+    .staff td { padding: 10px 10px; border-top: 1px solid var(--line-soft); vertical-align: middle; font-size: 14px; }
+    .staff .member-name { font-family: var(--mono); }
+    .staff .member-meta { color: var(--muted); font: 11px var(--mono); }
+    .staff-add, .staff-pick { border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
+    .staff-add legend, .staff-pick legend { padding: 0 6px; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+    .staff-add { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+    .staff-add label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+    .staff-pick .staff-add { border: 0; padding: 4px 0 0; margin-bottom: 0; }
     .board-empty td { padding: 14px 12px; font: 12px var(--mono); color: var(--muted); }
-    .team-hint { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--muted); }
+    .staff-hint { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--muted); }
     .member-confirm { color: var(--buoy); font-size: 12px; margin-right: 8px; }
     /* Each part of a task is a panel of its own, headed by what it is. */
     .drawer-section {
@@ -645,7 +645,7 @@
       overflow: auto;
     }
     dialog::backdrop { background: rgba(4, 12, 15, .6); }
-    /* The dialogs: New project, and the project team. */
+    /* The dialogs: New project, and the project staff. */
     .dialog-form { display: grid; gap: 16px; padding: 22px 26px 24px; }
     .dialog-form h2 { margin: 0; font-size: 20px; }
     .dialog-form label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
@@ -698,7 +698,7 @@
       </div>
       <span class="spacer"></span>
       <button class="quiet-button" id="inbox-button" type="button">Inbox</button>
-      <button class="quiet-button" id="team-button" type="button">Team</button>
+      <button class="quiet-button" id="staff-button" type="button">Staff</button>
       <button class="primary-button" id="new-project" type="button">New project</button>
       <button class="icon-button" id="settings-button" type="button" aria-label="Settings" title="Settings">
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
@@ -733,7 +733,7 @@
   <dialog id="delete-dialog" class="settings" aria-labelledby="delete-title">
     <form class="dialog-form" method="dialog">
       <h2 id="delete-title">Delete this project?</h2>
-      <p class="dialog-help" id="delete-help">Its board, team, sessions, every message and every file ConsensFlow kept for its windows go for good; the trace keeps one line saying it was deleted. This cannot be undone.</p>
+      <p class="dialog-help" id="delete-help">Its board, staff, sessions, every message and every file ConsensFlow kept for its windows go for good; the trace keeps one line saying it was deleted. This cannot be undone.</p>
       <div class="dialog-actions">
         <button class="quiet-button" type="submit" value="keep">Keep</button>
         <button class="danger-button" type="button" id="delete-confirm">Delete for good</button>
@@ -757,7 +757,7 @@
     <form class="dialog-form">
       <h2 id="new-project-title">New project</h2>
       <label>Project folder<input name="directory" readonly></label>
-      <label>The lead runs in
+      <label>The chief runs in
         <select name="harness">
           <option value="claude-code">Claude Code</option>
           <option value="codex">Codex</option>
@@ -766,23 +766,23 @@
           <option value="devin">Devin</option>
         </select>
       </label>
-      <fieldset class="team-pick">
-        <legend>The team</legend>
-        <p class="dialog-help">Pick a role, then an agent. The last project's team is here already.</p>
-        <table class="team" aria-label="Agents for the team">
+      <fieldset class="staff-pick">
+        <legend>The staff</legend>
+        <p class="dialog-help">Pick a role, then an agent. The last project's staff is here already.</p>
+        <table class="staff" aria-label="Agents for the staff">
           <thead>
             <tr><th>Agent</th><th>Role</th><th></th></tr>
           </thead>
-          <tbody id="new-project-team"></tbody>
+          <tbody id="new-project-staff"></tbody>
         </table>
-        <div class="team-add">
+        <div class="staff-add">
           <label>Role<select name="pickRole"></select></label>
           <label>Agent<select name="pickAgent"></select></label>
           <button class="quiet-button" type="button" id="new-project-add">Add</button>
         </div>
-        <p class="team-hint" id="new-project-hint" hidden></p>
+        <p class="staff-hint" id="new-project-hint" hidden></p>
       </fieldset>
-      <label class="check"><input type="checkbox" name="gate">Human approval required: every message between the lead and its team waits until you pass it on</label>
+      <label class="check"><input type="checkbox" name="gate">Human approval required: every message between the chief and its staff waits until you pass it on</label>
       <div class="dialog-actions">
         <button class="quiet-button" type="button" value="cancel">Cancel</button>
         <button class="primary-button" type="submit">Start project</button>
@@ -790,24 +790,24 @@
     </form>
   </dialog>
 
-  <dialog id="team-dialog" aria-labelledby="team-title">
+  <dialog id="staff-dialog" aria-labelledby="staff-title">
     <form class="dialog-form">
-      <h2 id="team-title">Project team</h2>
-      <p class="dialog-help">The lead names the tier a task needs and ConsensFlow picks a free member of that tier: a worker does the work, an advisor advises the lead, a reviewer reviews finished work when the lead asks, an image designer draws. A member may hold more than one role: one row here per role.</p>
-      <table class="team" aria-label="On the team">
+      <h2 id="staff-title">Project staff</h2>
+      <p class="dialog-help">The chief names the tier a task needs and ConsensFlow picks a free member of that tier: a worker does the work, an advisor advises the chief, a reviewer reviews finished work when the chief asks, an image designer draws. A member may hold more than one role: one row here per role.</p>
+      <table class="staff" aria-label="On the staff">
         <thead>
           <tr><th>Member</th><th>Role</th><th></th></tr>
         </thead>
-        <tbody id="team-members"></tbody>
+        <tbody id="staff-members"></tbody>
       </table>
-      <fieldset class="team-add">
+      <fieldset class="staff-add">
         <legend>Add a member</legend>
         <label>Role<select name="role"></select></label>
         <label>Agent<select name="agent"></select></label>
-        <button class="primary-button" type="submit">Add to team</button>
-        <p class="team-hint" id="team-hint" hidden></p>
+        <button class="primary-button" type="submit">Add to staff</button>
+        <p class="staff-hint" id="staff-hint" hidden></p>
       </fieldset>
-      <label class="check"><input type="checkbox" id="team-gate" name="gate">Human approval required: every message between the lead and its team waits until you pass it on</label>
+      <label class="check"><input type="checkbox" id="staff-gate" name="gate">Human approval required: every message between the chief and its staff waits until you pass it on</label>
       <div class="dialog-actions">
         <button class="quiet-button" type="button" value="cancel">Close</button>
       </div>

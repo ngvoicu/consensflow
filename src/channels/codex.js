@@ -29,7 +29,7 @@ function paneTarget(target) {
 function launchConfig(target) {
   const launch = target?.launch
   if (launch === null || typeof launch !== 'object' || Array.isArray(launch)) {
-    throw new Error('codex-queue delivery needs the lead launch configuration')
+    throw new Error('codex-queue delivery needs the chief launch configuration')
   }
 
   const config =
@@ -186,7 +186,7 @@ function runQueue(config, launch, session, text, deadline) {
   })
 }
 
-/** Native TUI replies identify the main lead, independently of transcript recency. */
+/** Native TUI replies identify the main chief, independently of transcript recency. */
 export async function currentSession(config) {
   return (await currentSessionState(config))?.sessionId
 }

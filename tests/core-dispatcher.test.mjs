@@ -218,13 +218,13 @@ async function setup(fn, options = {}) {
   }
 }
 
-/** A project with its lead window up, its workers (Zeus, unless told) in the team from the start. */
-async function withTeam(context, workers = ['zeus']) {
+/** A project with its chief window up, its workers (Zeus, unless told) in the staff from the start. */
+async function withStaff(context, workers = ['zeus']) {
   const project = await context.dispatcher.openProject({
     directory: '/work/app',
     name: 'app',
     harness: 'claude-code',
-    team: workers.map((agent) => ({
+    staff: workers.map((agent) => ({
       agent,
       harness: 'claude-code',
       role: 'worker',
@@ -237,32 +237,32 @@ async function withTeam(context, workers = ['zeus']) {
 }
 
 describe('the dispatcher', () => {
-  it('opens a project with its lead window and binds the lead conversation', async () => {
+  it('opens a project with its chief window and binds the chief conversation', async () => {
     await setup(async (context) => {
-      const { project, id } = await withTeam(context)
-      const lead = context.host.last('lead')
-      assert.equal(lead.id, `p${project.id}-lead`)
-      assert.deepEqual(lead.argv, ['/bin/fake-agent', 'lead'])
-      assert.equal(lead.cwd, '/work/app')
-      assert.equal(lead.env.FAKE_AGENT, 'lead')
-      assert.equal(lead.env.CONSENSFLOW_PARTICIPANT, 'lead')
-      assert.equal(lead.env.CONSENSFLOW_TOKEN, 'token-lead')
-      assert.equal(context.adapter.prepared[0].message, null, 'a lead opens without a task')
-      assert.equal(context.adapter.prepared[0].role, 'lead')
-      assert.equal(context.adapter.prepared[0].instructions, 'instructions for lead')
-      const conversation = context.ledger.currentConversation(id('lead'))
-      assert.equal(conversation.nativeSession, `native-${lead.launch}`)
-      assert.equal(context.dispatcher.activity(id('lead')).state, 'starting')
+      const { project, id } = await withStaff(context)
+      const chief = context.host.last('chief')
+      assert.equal(chief.id, `p${project.id}-chief`)
+      assert.deepEqual(chief.argv, ['/bin/fake-agent', 'chief'])
+      assert.equal(chief.cwd, '/work/app')
+      assert.equal(chief.env.FAKE_AGENT, 'chief')
+      assert.equal(chief.env.CONSENSFLOW_PARTICIPANT, 'chief')
+      assert.equal(chief.env.CONSENSFLOW_TOKEN, 'token-chief')
+      assert.equal(context.adapter.prepared[0].message, null, 'a chief opens without a task')
+      assert.equal(context.adapter.prepared[0].role, 'chief')
+      assert.equal(context.adapter.prepared[0].instructions, 'instructions for chief')
+      const conversation = context.ledger.currentConversation(id('chief'))
+      assert.equal(conversation.nativeSession, `native-${chief.launch}`)
+      assert.equal(context.dispatcher.activity(id('chief')).state, 'starting')
       await context.dispatcher.pass()
-      assert.equal(context.dispatcher.activity(id('lead')).state, 'idle')
+      assert.equal(context.dispatcher.activity(id('chief')).state, 'idle')
     })
   })
 
   it('launches a worker with its task as the first message and records its answer as the result', async () => {
     await setup(async (context) => {
-      const { project, id } = await withTeam(context)
+      const { project, id } = await withStaff(context)
       const { message } = context.ledger.createTask(project.id, {
-        from: 'lead',
+        from: 'chief',
         to: 'zeus',
         body: 'Write the parser',
       })
@@ -272,7 +272,7 @@ describe('the dispatcher', () => {
       assert.equal(first.message, deliveryText(context.ledger.task(project.id, 1).messages[0]))
       assert.match(
         first.message,
-        new RegExp(`^\\[ConsensFlow m-${message.id} · T-1 · task from @lead\\]\\n`),
+        new RegExp(`^\\[ConsensFlow m-${message.id} · T-1 · task from @chief\\]\\n`),
       )
       assert.equal(context.ledger.task(project.id, 1).state, 'queued', 'not yet seen by the agent')
 
@@ -285,16 +285,16 @@ describe('the dispatcher', () => {
       const task = context.ledger.task(project.id, 1)
       assert.equal(task.state, 'done')
       const result = task.messages.find((m) => m.kind === 'result')
-      assert.deepEqual([result.body, result.recipient], ['Parser done', 'lead'])
+      assert.deepEqual([result.body, result.recipient], ['Parser done', 'chief'])
     })
   })
 
   it('opens no window for a brief the human has not approved, and delivers a result only once approved', async () => {
     await setup(async (context) => {
-      const { project, id } = await withTeam(context)
+      const { project, id } = await withStaff(context)
       context.ledger.setGate(project.id, true)
       context.ledger.createTask(project.id, {
-        from: 'lead',
+        from: 'chief',
         pool: 'worker',
         tier: 'standard',
         body: 'Write the parser',
@@ -318,13 +318,13 @@ describe('the dispatcher', () => {
       const result = context.ledger.task(project.id, 1).messages.find((m) => m.kind === 'result')
       assert.equal(result.state, 'gated')
       await context.dispatcher.pass()
-      assert.equal(context.adapter.agent('lead').items.length, 0, 'the lead waits for the human')
+      assert.equal(context.adapter.agent('chief').items.length, 0, 'the chief waits for the human')
       context.ledger.approveMessage(result.id, { by: 'human' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      assert.equal(context.ledger.inbox(id('lead'))[0].state, 'delivered')
+      assert.equal(context.ledger.inbox(id('chief'))[0].state, 'delivered')
       assert.match(
-        context.adapter.agent('lead').items.at(-1).text,
+        context.adapter.agent('chief').items.at(-1).text,
         /result from @zeus-amber-pine\]\nParser done/,
       )
     })
@@ -332,10 +332,10 @@ describe('the dispatcher', () => {
 
   it('gives out a task only once every task it needs is accepted, and says nothing while it waits', async () => {
     await setup(async (context) => {
-      const { project, id } = await withTeam(context, ['zeus', 'diana'])
+      const { project, id } = await withStaff(context, ['zeus', 'diana'])
       const add = (body, extra = {}) =>
         context.ledger.createTask(project.id, {
-          from: 'lead',
+          from: 'chief',
           pool: 'worker',
           tier: 'standard',
           body,
@@ -348,7 +348,7 @@ describe('the dispatcher', () => {
       const states = () => [1, 2].map((number) => context.ledger.task(project.id, number).state)
       assert.deepEqual(states(), ['working', 'open'], 'the parser waits for the lexer')
       assert.equal(
-        context.ledger.inbox(id('lead')).some((m) => m.kind === 'note'),
+        context.ledger.inbox(id('chief')).some((m) => m.kind === 'note'),
         false,
         'no "waits for a free worker" note: it waits for its need',
       )
@@ -356,24 +356,24 @@ describe('the dispatcher', () => {
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       assert.deepEqual(states(), ['done', 'open'], 'done is not accepted')
-      context.ledger.acceptTask(project.id, 1, { by: 'lead' })
+      context.ledger.acceptTask(project.id, 1, { by: 'chief' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       assert.deepEqual(states(), ['accepted', 'working'])
-      assert.match(context.adapter.prepared.at(-1).message, /T-2 · task from @lead\]\nParser$/)
+      assert.match(context.adapter.prepared.at(-1).message, /T-2 · task from @chief\]\nParser$/)
     })
   })
 
   it("keeps its own copy of each window's conversation, item by item, as it grows", async () => {
     await setup(async (context) => {
-      const { project } = await withTeam(context)
-      context.ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Write the parser' })
+      const { project } = await withStaff(context)
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Write the parser' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       const before = context.ledger.transcript(project.id, 1)
       assert.deepEqual(
         before.items.map((i) => [i.role, i.text.split('\n')[0]]),
-        [['user', '[ConsensFlow m-1 · T-1 · task from @lead]']],
+        [['user', '[ConsensFlow m-1 · T-1 · task from @chief]']],
         'the brief, as the window got it',
       )
       const zeus = context.adapter.agent('zeus')
@@ -394,16 +394,16 @@ describe('the dispatcher', () => {
     })
   })
 
-  it("delivers the lead's tell into the paused window once the agent is interrupted, and collects no result from it", async () => {
+  it("delivers the chief's tell into the paused window once the agent is interrupted, and collects no result from it", async () => {
     await setup(async (context) => {
-      const { project } = await withTeam(context)
-      context.ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' })
+      const { project } = await withStaff(context)
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       context.adapter.busy('zeus')
-      context.ledger.pauseTask(project.id, 1, { by: 'lead' })
+      context.ledger.pauseTask(project.id, 1, { by: 'chief' })
       const told = context.ledger.ask(project.id, {
-        from: 'lead',
+        from: 'chief',
         to: 'zeus',
         task: 1,
         body: 'Stop: use grammar v2',
@@ -425,7 +425,7 @@ describe('the dispatcher', () => {
       await context.dispatcher.pass()
       assert.match(
         zeus.items.at(-1).text,
-        /^\[ConsensFlow m-\d+ · T-1 · question from @lead\]\nStop: use grammar v2\n\nT-1 is paused for this\. Answer with: cf answer m-\d+ "…"; the lead resumes the task\.$/,
+        /^\[ConsensFlow m-\d+ · T-1 · question from @chief\]\nStop: use grammar v2\n\nT-1 is paused for this\. Answer with: cf answer m-\d+ "…"; the chief resumes the task\.$/,
         'the tell goes in once the window is idle',
       )
       assert.equal(
@@ -440,12 +440,12 @@ describe('the dispatcher', () => {
 
   it('presses Escape twice in a row for a harness that asks for it', async () => {
     await setup(async (context) => {
-      const { project } = await withTeam(context)
+      const { project } = await withStaff(context)
       context.adapter.interrupt = { presses: 2 }
-      context.ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' })
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      context.ledger.pauseTask(project.id, 1, { by: 'lead' })
+      context.ledger.pauseTask(project.id, 1, { by: 'chief' })
       await context.dispatcher.pass()
       const pane = context.host.last('zeus')
       assert.deepEqual(
@@ -458,40 +458,40 @@ describe('the dispatcher', () => {
     })
   })
 
-  it('delivers results to an idle lead one at a time and proves each arrived', async () => {
+  it('delivers results to an idle chief one at a time and proves each arrived', async () => {
     await setup(async (context) => {
-      const { project, id } = await withTeam(context, ['zeus', 'diana'])
-      context.ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'One' })
-      context.ledger.createTask(project.id, { from: 'lead', to: 'diana', body: 'Two' })
+      const { project, id } = await withStaff(context, ['zeus', 'diana'])
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'One' })
+      context.ledger.createTask(project.id, { from: 'chief', to: 'diana', body: 'Two' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      context.adapter.busy('lead')
+      context.adapter.busy('chief')
       context.adapter.answer('zeus', 'one done')
       context.adapter.answer('diana', 'two done')
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      const lead = () => context.adapter.agent('lead')
-      assert.equal(lead().items.length, 0, 'a busy lead is not interrupted')
+      const chief = () => context.adapter.agent('chief')
+      assert.equal(chief().items.length, 0, 'a busy chief is not interrupted')
 
-      lead().settled = true
+      chief().settled = true
       await context.dispatcher.pass()
-      assert.equal(lead().items.length, 1)
+      assert.equal(chief().items.length, 1)
       assert.match(
-        lead().items[0].text,
+        chief().items[0].text,
         /result from @zeus\]\none done\n\nDecide with: cf task accept T-1/,
       )
       await context.dispatcher.pass()
-      const [first, second] = context.ledger.inbox(id('lead')).reverse()
+      const [first, second] = context.ledger.inbox(id('chief')).reverse()
       assert.equal(first.state, 'delivered')
-      assert.equal(first.receipt.item, lead().items[0].id)
-      assert.equal(second.state, 'queued', 'the next waits until the lead is idle again')
+      assert.equal(first.receipt.item, chief().items[0].id)
+      assert.equal(second.state, 'queued', 'the next waits until the chief is idle again')
 
-      context.adapter.answer('lead', 'noted')
+      context.adapter.answer('chief', 'noted')
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      assert.equal(context.ledger.inbox(id('lead'))[0].state, 'delivered')
+      assert.equal(context.ledger.inbox(id('chief'))[0].state, 'delivered')
       assert.match(
-        lead().items.at(-1).text,
+        chief().items.at(-1).text,
         /result from @diana\]\ntwo done\n\nDecide with: cf task accept T-2/,
       )
     })
@@ -499,11 +499,11 @@ describe('the dispatcher', () => {
 
   it('retries a delivery the harness refused, then gives up', async () => {
     await setup(async (context) => {
-      const { project, id } = await withTeam(context)
-      context.adapter.agent('lead').admit = false
-      const note = context.ledger.note(project.id, { from: 'zeus', to: 'lead', body: 'hello' })
+      const { project, id } = await withStaff(context)
+      context.adapter.agent('chief').admit = false
+      const note = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'hello' })
       for (let n = 0; n < 5; n += 1) await context.dispatcher.pass()
-      const failed = context.ledger.inbox(id('lead')).find((m) => m.id === note.id)
+      const failed = context.ledger.inbox(id('chief')).find((m) => m.id === note.id)
       assert.deepEqual([failed.state, failed.attempts], ['failed', 3])
       assert.equal(failed.reason, 'refused by the test')
     })
@@ -511,11 +511,11 @@ describe('the dispatcher', () => {
 
   it('retries a delivery whose arrival never shows in the harness record', async () => {
     await setup(async (context) => {
-      const { project, id } = await withTeam(context)
-      context.adapter.agent('lead').arrive = false
-      const note = context.ledger.note(project.id, { from: 'zeus', to: 'lead', body: 'hello' })
+      const { project, id } = await withStaff(context)
+      context.adapter.agent('chief').arrive = false
+      const note = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'hello' })
       await context.dispatcher.pass()
-      const delivering = () => context.ledger.inbox(id('lead')).find((m) => m.id === note.id)
+      const delivering = () => context.ledger.inbox(id('chief')).find((m) => m.id === note.id)
       assert.equal(delivering().state, 'delivering')
       context.clock.advance(29_000)
       await context.dispatcher.pass()
@@ -529,35 +529,35 @@ describe('the dispatcher', () => {
 
   it('tries an uncertain handover again once its arrival window passes with no sign of it', async () => {
     await setup(async (context) => {
-      const { project, id } = await withTeam(context)
+      const { project, id } = await withStaff(context)
       const deliver = context.adapter.deliver
       context.adapter.deliver = async (request) => {
-        if (context.adapter.agent('lead').items.length === 0 && !context.retried) {
+        if (context.adapter.agent('chief').items.length === 0 && !context.retried) {
           context.retried = true
           return { admitted: null, reason: 'the plugin did not answer' }
         }
         return deliver(request)
       }
-      const note = context.ledger.note(project.id, { from: 'zeus', to: 'lead', body: 'hello' })
+      const note = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'hello' })
       await context.dispatcher.pass()
       context.clock.advance(31_000)
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      const message = context.ledger.inbox(id('lead')).find((m) => m.id === note.id)
+      const message = context.ledger.inbox(id('chief')).find((m) => m.id === note.id)
       assert.deepEqual([message.state, message.attempts], ['delivered', 2])
-      assert.equal(context.adapter.agent('lead').items.length, 1, 'delivered once')
+      assert.equal(context.adapter.agent('chief').items.length, 1, 'delivered once')
     })
   })
 
   it('records an adapter that throws as a failed attempt with its error, not as uncertain', async () => {
     await setup(async (context) => {
-      const { project, id } = await withTeam(context)
+      const { project, id } = await withStaff(context)
       context.adapter.deliver = async () => {
         throw new Error('the channel needs pane, generation and observed epoch')
       }
-      const note = context.ledger.note(project.id, { from: 'zeus', to: 'lead', body: 'hello' })
+      const note = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'hello' })
       await context.dispatcher.pass()
-      const message = context.ledger.inbox(id('lead')).find((m) => m.id === note.id)
+      const message = context.ledger.inbox(id('chief')).find((m) => m.id === note.id)
       assert.deepEqual([message.state, message.attempts], ['queued', 1])
       assert.match(message.reason, /the channel needs pane, generation and observed epoch/)
     })
@@ -565,8 +565,8 @@ describe('the dispatcher', () => {
 
   it('pauses the task and tells the requester when the worker window closes mid-task, and resumes it on its conversation', async () => {
     await setup(async (context) => {
-      const { project, id } = await withTeam(context)
-      context.ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' })
+      const { project, id } = await withStaff(context)
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       const native = context.ledger.currentConversation(id('zeus')).nativeSession
@@ -574,18 +574,18 @@ describe('the dispatcher', () => {
       const task = context.ledger.task(project.id, 1)
       assert.deepEqual([task.state, task.assignee], ['paused', 'zeus'])
       const note = task.messages.find((m) => m.kind === 'note')
-      assert.equal(note.recipient, 'lead')
+      assert.equal(note.recipient, 'chief')
       assert.match(
         note.body,
         /^T-1 is paused: @zeus's window closed\. Resume it with: cf task resume T-1 "…"/,
       )
       await context.dispatcher.pass()
       assert.equal(context.ledger.task(project.id, 1).state, 'paused', 'nothing happens on its own')
-      context.ledger.resumeTask(project.id, 1, { by: 'lead', body: 'Carry on' })
+      context.ledger.resumeTask(project.id, 1, { by: 'chief', body: 'Carry on' })
       await context.dispatcher.pass()
       const launch = context.adapter.prepared.at(-1)
       assert.deepEqual([launch.participant.handle, launch.resume], ['zeus', native])
-      assert.match(launch.message, /T-1 · task from @lead\]\nResumed: Carry on$/)
+      assert.match(launch.message, /T-1 · task from @chief\]\nResumed: Carry on$/)
       await context.dispatcher.pass()
       assert.equal(context.ledger.task(project.id, 1).state, 'working')
     })
@@ -593,15 +593,15 @@ describe('the dispatcher', () => {
 
   it("brings a tell to a task whose window is gone on that window's own conversation, still paused", async () => {
     await setup(async (context) => {
-      const { project, id } = await withTeam(context)
-      context.ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' })
+      const { project, id } = await withStaff(context)
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       const native = context.ledger.currentConversation(id('zeus')).nativeSession
       await context.host.exit('zeus')
       assert.equal(context.ledger.task(project.id, 1).state, 'paused')
       const told = context.ledger.ask(project.id, {
-        from: 'lead',
+        from: 'chief',
         to: 'zeus',
         task: 1,
         body: 'Which grammar did you start from?',
@@ -616,26 +616,26 @@ describe('the dispatcher', () => {
       )
       assert.match(
         launch.message,
-        /^\[ConsensFlow m-\d+ · T-1 · question from @lead\]\nWhich grammar did you start from\?\n\nT-1 is paused for this\./,
+        /^\[ConsensFlow m-\d+ · T-1 · question from @chief\]\nWhich grammar did you start from\?\n\nT-1 is paused for this\./,
       )
       await context.dispatcher.pass()
       assert.equal(
         context.ledger.task(project.id, 1).state,
         'paused',
-        'the task waits for the lead',
+        'the task waits for the chief',
       )
       assert.notEqual(context.ledger.message(told.id).state, 'queued')
     })
   })
 
-  it("pauses a working task in its open window: the agent is interrupted once, its output not collected, and the lead's words resume it there", async () => {
+  it("pauses a working task in its open window: the agent is interrupted once, its output not collected, and the chief's words resume it there", async () => {
     await setup(async (context) => {
-      const { project } = await withTeam(context)
-      context.ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' })
+      const { project } = await withStaff(context)
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       const launches = context.adapter.prepared.length
-      context.ledger.pauseTask(project.id, 1, { by: 'lead' })
+      context.ledger.pauseTask(project.id, 1, { by: 'chief' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       const pane = context.host.last('zeus')
@@ -665,12 +665,12 @@ describe('the dispatcher', () => {
         'paused',
         'said after the pause: not a result',
       )
-      context.ledger.resumeTask(project.id, 1, { by: 'lead', body: 'Add the tests too' })
+      context.ledger.resumeTask(project.id, 1, { by: 'chief', body: 'Add the tests too' })
       await context.dispatcher.pass()
       assert.equal(context.adapter.prepared.length, launches, 'no new window')
       assert.match(
         context.adapter.agent('zeus').items.at(-1).text,
-        /T-1 · task from @lead\]\nResumed: Add the tests too$/,
+        /T-1 · task from @chief\]\nResumed: Add the tests too$/,
       )
       await context.dispatcher.pass()
       assert.equal(context.ledger.task(project.id, 1).state, 'working')
@@ -682,8 +682,8 @@ describe('the dispatcher', () => {
 
   it('fails the task when the worker window cannot open', async () => {
     await setup(async (context) => {
-      const { project } = await withTeam(context)
-      context.ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' })
+      const { project } = await withStaff(context)
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
       context.host.refuse = true
       await context.dispatcher.pass()
       assert.equal(context.ledger.task(project.id, 1).state, 'failed')
@@ -693,15 +693,15 @@ describe('the dispatcher', () => {
 
   it('waits on a message a harness queued itself, and re-sends only a paste the record never showed', async () => {
     await setup(async (context) => {
-      const { project } = await withTeam(context)
+      const { project } = await withStaff(context)
       await context.dispatcher.pass()
-      context.adapter.answer('lead', 'ready')
-      // The lead's own queue took it (a peer inbox, a broker): it will show
+      context.adapter.answer('chief', 'ready')
+      // The chief's own queue took it (a peer inbox, a broker): it will show
       // when the harness gets to it, maybe minutes later; sending it again
       // would only make a duplicate the harness may even drop.
-      context.adapter.agent('lead').queued = true
-      context.adapter.agent('lead').arrive = false
-      const note = context.ledger.note(project.id, { from: 'zeus', to: 'lead', body: 'Queued' })
+      context.adapter.agent('chief').queued = true
+      context.adapter.agent('chief').arrive = false
+      const note = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'Queued' })
       await context.dispatcher.pass()
       assert.equal(context.ledger.message(note.id).state, 'delivering')
       context.clock.advance(150_000)
@@ -712,15 +712,15 @@ describe('the dispatcher', () => {
         'still in flight, not sent again',
       )
       context.adapter
-        .agent('lead')
+        .agent('chief')
         .items.push(item('user', `[ConsensFlow m-${note.id} · note from @zeus]\nQueued`))
       await context.dispatcher.pass()
       assert.equal(context.ledger.message(note.id).state, 'delivered')
 
       // A paste has no such receipt: the record is the only proof, and 60 s
       // without it means the paste was lost.
-      context.adapter.agent('lead').queued = false
-      const pasted = context.ledger.note(project.id, { from: 'zeus', to: 'lead', body: 'Pasted' })
+      context.adapter.agent('chief').queued = false
+      const pasted = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'Pasted' })
       await context.dispatcher.pass()
       context.clock.advance(61_000)
       await context.dispatcher.pass()
@@ -734,14 +734,14 @@ describe('the dispatcher', () => {
 
   it('fails a launch whose first message never arrives', async () => {
     await setup(async (context) => {
-      const { project } = await withTeam(context)
+      const { project } = await withStaff(context)
       const original = context.adapter.prepare
       context.adapter.prepare = async (request) => {
         const plan = await original(request)
         context.adapter.agent(request.participant.handle).items = []
         return plan
       }
-      context.ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' })
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
       await context.dispatcher.pass()
       context.clock.advance(121_000)
       await context.dispatcher.pass()
@@ -752,11 +752,11 @@ describe('the dispatcher', () => {
 
   it('fails the first message at once when the harness cannot take it after the window opens', async () => {
     await setup(async (context) => {
-      const { project } = await withTeam(context)
+      const { project } = await withStaff(context)
       context.adapter.started = async () => {
         throw new Error('the server never answered')
       }
-      context.ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' })
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
       await context.dispatcher.pass()
       const task = context.ledger.task(project.id, 1)
       assert.equal(task.state, 'failed')
@@ -767,17 +767,17 @@ describe('the dispatcher', () => {
 
   it('leaves a task waiting on a question alone, and resumes it with the answer', async () => {
     await setup(async (context) => {
-      const { project } = await withTeam(context)
-      context.ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' })
+      const { project } = await withStaff(context)
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       const question = context.ledger.ask(project.id, {
         from: 'zeus',
-        to: 'lead',
+        to: 'chief',
         task: 1,
         body: 'Which format?',
       })
-      context.adapter.answer('zeus', 'I asked the lead.')
+      context.adapter.answer('zeus', 'I asked the chief.')
       await context.dispatcher.pass()
       assert.equal(
         context.ledger.task(project.id, 1).state,
@@ -786,8 +786,8 @@ describe('the dispatcher', () => {
       )
 
       await context.dispatcher.pass()
-      context.adapter.answer('lead', 'JSON, I will reply')
-      context.ledger.answer(question.id, { from: 'lead', body: 'JSON' })
+      context.adapter.answer('chief', 'JSON, I will reply')
+      context.ledger.answer(question.id, { from: 'chief', body: 'JSON' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       assert.equal(context.ledger.task(project.id, 1).state, 'working')
@@ -801,20 +801,20 @@ describe('the dispatcher', () => {
 
   it('releases the typing latch once the harness shows the message the human submitted', async () => {
     await setup(async (context) => {
-      await withTeam(context)
+      await withStaff(context)
       await context.dispatcher.pass()
       const clears = () => context.host.requests.filter(([op]) => op === 'draft.clear')
-      context.host.enter('lead', 5)
+      context.host.enter('chief', 5)
       await context.dispatcher.pass()
       assert.deepEqual(clears(), [], 'an Enter alone proves nothing')
 
-      context.adapter.agent('lead').items.push(item('user', 'the human asks something'))
+      context.adapter.agent('chief').items.push(item('user', 'the human asks something'))
       await context.dispatcher.pass()
-      const lead = context.host.last('lead')
+      const chief = context.host.last('chief')
       assert.deepEqual(clears(), [
         [
           'draft.clear',
-          { id: lead.id, generation: lead.generation, epoch: 5, submission: 'human-1' },
+          { id: chief.id, generation: chief.generation, epoch: 5, submission: 'human-1' },
         ],
       ])
       await context.dispatcher.pass()
@@ -824,10 +824,10 @@ describe('the dispatcher', () => {
 
   it('does not count its own deliveries as the human submitting', async () => {
     await setup(async (context) => {
-      const { project } = await withTeam(context)
+      const { project } = await withStaff(context)
       await context.dispatcher.pass()
-      context.host.enter('lead', 9)
-      context.ledger.note(project.id, { from: 'zeus', to: 'lead', body: 'from zeus' })
+      context.host.enter('chief', 9)
+      context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'from zeus' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       assert.deepEqual(
@@ -838,39 +838,39 @@ describe('the dispatcher', () => {
     })
   })
 
-  it('suspends the project when its lead window closes', async () => {
+  it('suspends the project when its chief window closes', async () => {
     await setup(async (context) => {
-      const { project } = await withTeam(context)
-      await context.host.exit('lead')
+      const { project } = await withStaff(context)
+      await context.host.exit('chief')
       assert.equal(context.ledger.project(project.id).state, 'suspended')
       assert.equal(context.ledger.project(project.id).resumeOnStart, false)
     })
   })
 
-  it('opens a project with the team it is given, and only the lead window', async () => {
+  it('opens a project with the staff it is given, and only the chief window', async () => {
     await setup(async (context) => {
       const project = await context.dispatcher.openProject({
         directory: '/work/app',
         name: 'app',
         harness: 'claude-code',
-        team: [{ agent: 'zeus', harness: 'claude-code', role: 'worker', tier: 'standard' }],
+        staff: [{ agent: 'zeus', harness: 'claude-code', role: 'worker', tier: 'standard' }],
       })
       assert.deepEqual(
         project.participants.map((p) => p.handle),
-        ['human', 'lead', 'zeus'],
+        ['human', 'chief', 'zeus'],
       )
       assert.deepEqual(
         context.host.opened.map((pane) => pane.id),
-        [`p${project.id}-lead`],
+        [`p${project.id}-chief`],
       )
     })
   })
 
   it('closes the window of a member who leaves, and its exit fails nothing', async () => {
     await setup(async (context) => {
-      const { project, id } = await withTeam(context)
+      const { project, id } = await withStaff(context)
       const zeus = id('zeus')
-      context.ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' })
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
 
@@ -895,8 +895,8 @@ describe('the dispatcher', () => {
 
   it('waits for a window still opening before closing it for a member who leaves', async () => {
     await setup(async (context) => {
-      const { project } = await withTeam(context)
-      context.ledger.createTask(project.id, { from: 'lead', to: 'zeus', body: 'Parser' })
+      const { project } = await withStaff(context)
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
       let open
       context.host.hold = new Promise((resolve) => {
         open = resolve
@@ -915,34 +915,34 @@ describe('the dispatcher', () => {
     })
   })
 
-  it('closes a project: its windows go, work in them pauses, and Resume brings the lead back', async () => {
+  it('closes a project: its windows go, work in them pauses, and Resume brings the chief back', async () => {
     await setup(async (context) => {
-      const { project, id } = await withTeam(context)
+      const { project, id } = await withStaff(context)
       context.ledger.createTask(project.id, {
-        from: 'lead',
+        from: 'chief',
         pool: 'worker',
         tier: 'standard',
         body: 'Parser',
       })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      const lead = context.host.last('lead')
+      const chief = context.host.last('chief')
       const zeus = context.host.last('zeus')
-      const native = context.ledger.currentConversation(id('lead')).nativeSession
+      const native = context.ledger.currentConversation(id('chief')).nativeSession
       const closed = await context.dispatcher.closeProject(project.id)
       assert.equal(closed.state, 'suspended')
       assert.deepEqual(context.host.killed, [
-        { id: lead.id, generation: lead.generation },
+        { id: chief.id, generation: chief.generation },
         { id: zeus.id, generation: zeus.generation },
       ])
-      await context.host.exit('lead')
+      await context.host.exit('chief')
       await context.host.exit('zeus')
-      assert.equal(context.dispatcher.pane(id('lead')), null)
+      assert.equal(context.dispatcher.pane(id('chief')), null)
       const task = context.ledger.task(project.id, 1)
       assert.deepEqual(
         [task.state, task.assignee],
         ['paused', 'zeus-amber-pine'],
-        'the work waits, with its session, for the lead to resume it',
+        'the work waits, with its session, for the chief to resume it',
       )
       await context.dispatcher.pass()
       assert.equal(context.host.opened.length, 2, 'nothing reopens while suspended')
@@ -950,7 +950,7 @@ describe('the dispatcher', () => {
       await context.dispatcher.resumeProject(project.id)
       assert.equal(context.adapter.prepared.at(-1).resume, native)
       const nativeZeus = context.ledger.currentConversation(id('zeus-amber-pine')).nativeSession
-      context.ledger.resumeTask(project.id, 1, { by: 'lead', body: 'Go on' })
+      context.ledger.resumeTask(project.id, 1, { by: 'chief', body: 'Go on' })
       await context.dispatcher.pass()
       const back = context.adapter.prepared.at(-1)
       assert.deepEqual(
@@ -966,7 +966,7 @@ describe('the dispatcher', () => {
     const forgotten = []
     await setup(
       async (context) => {
-        const { project } = await withTeam(context)
+        const { project } = await withStaff(context)
         await assert.rejects(context.dispatcher.deleteProject(project.id), {
           code: 'project-open',
         })
@@ -991,16 +991,16 @@ describe('the dispatcher', () => {
 
   it('brings back the projects that were open before a restart, on their own conversations', async () => {
     await setup(async (context) => {
-      const { project, id } = await withTeam(context)
-      const native = context.ledger.currentConversation(id('lead')).nativeSession
+      const { project, id } = await withStaff(context)
+      const native = context.ledger.currentConversation(id('chief')).nativeSession
       context.ledger.suspendForRestart()
       const after = context.make()
       await after.resumeAfterRestart()
       const resumed = context.adapter.prepared.at(-1)
-      assert.deepEqual([resumed.participant.handle, resumed.resume], ['lead', native])
+      assert.deepEqual([resumed.participant.handle, resumed.resume], ['chief', native])
       assert.equal(context.ledger.project(project.id).state, 'open')
       assert.equal(context.ledger.project(project.id).resumeOnStart, false)
-      assert.equal(context.ledger.currentConversation(id('lead')).nativeSession, native)
+      assert.equal(context.ledger.currentConversation(id('chief')).nativeSession, native)
     })
   })
 })
@@ -1048,14 +1048,14 @@ describe('the delivered text', () => {
   })
 })
 
-/** A tiered team: standard workers (zeus and diana, unless told), a light worker, and two standard reviewers. */
+/** A tiered staff: standard workers (zeus and diana, unless told), a light worker, and two standard reviewers. */
 async function withTiers(context, { workers = ['zeus', 'diana'] } = {}) {
   const member = (agent, role, tier) => ({ agent, harness: 'claude-code', role, tier })
   const project = await context.dispatcher.openProject({
     directory: '/work/app',
     name: 'app',
     harness: 'claude-code',
-    team: [
+    staff: [
       ...workers.map((agent) => member(agent, 'worker', 'standard')),
       member('hera', 'worker', 'light'),
       member('calliope', 'reviewer', 'standard'),
@@ -1066,7 +1066,7 @@ async function withTiers(context, { workers = ['zeus', 'diana'] } = {}) {
     context.ledger.project(project.id).participants.find((p) => p.handle === handle).id
   const open = (extra = {}) =>
     context.ledger.createTask(project.id, {
-      from: 'lead',
+      from: 'chief',
       pool: 'worker',
       tier: 'standard',
       body: 'Write the parser',
@@ -1152,11 +1152,11 @@ describe('the dispatcher assigns open tasks', () => {
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       assert.equal(task(3).state, 'open')
-      assert.deepEqual(notes('lead'), [
+      assert.deepEqual(notes('chief'), [
         'T-3 waits for a free standard worker: @zeus is low on quota; @diana is low on quota.',
       ])
       await context.dispatcher.pass()
-      assert.equal(notes('lead').length, 1, 'told once')
+      assert.equal(notes('chief').length, 1, 'told once')
       context.clock.advance(2 * 3_600_000)
       await context.dispatcher.pass()
       assert.match(task(3).assignee, /^zeus-/, 'the earliest joined, once the hour has passed')
@@ -1191,11 +1191,11 @@ describe('the dispatcher runs a review like any task', () => {
       assert.equal(task(2).state, 'working')
       context.adapter.answer('calliope', 'No test for empty input.')
       await context.dispatcher.pass()
-      assert.deepEqual([task(1).state, task(2).state], ['done', 'done'], 'the lead decides both')
+      assert.deepEqual([task(1).state, task(2).state], ['done', 'done'], 'the chief decides both')
       const result = task(2).messages.at(-1)
       assert.deepEqual(
         [result.kind, result.recipient, result.body],
-        ['result', 'lead', 'No test for empty input.'],
+        ['result', 'chief', 'No test for empty input.'],
       )
     })
   })
@@ -1221,7 +1221,7 @@ describe('the dispatcher watches quota', () => {
         task(1).body,
         /Reassigned from @zeus-amber-pine \(ran out of quota after starting\); check the working tree/,
       )
-      assert.deepEqual(notes('lead'), [
+      assert.deepEqual(notes('chief'), [
         'T-1 was taken back from @zeus-amber-pine (ran out of quota after starting) and waits for another standard worker.',
       ])
       assert.equal(
@@ -1294,15 +1294,15 @@ describe('the dispatcher watches quota', () => {
       await context.dispatcher.pass()
       const question = context.ledger.ask(1, {
         from: 'zeus-amber-pine',
-        to: 'lead',
+        to: 'chief',
         task: 1,
         body: 'Which?',
       })
       context.adapter.agent('zeus').arrive = false
       context.adapter.answer('zeus', 'asked')
       await context.dispatcher.pass()
-      context.adapter.answer('lead', 'This one, replying')
-      const answer = context.ledger.answer(question.id, { from: 'lead', body: 'This one' })
+      context.adapter.answer('chief', 'This one, replying')
+      const answer = context.ledger.answer(question.id, { from: 'chief', body: 'This one' })
       await context.dispatcher.pass()
       assert.equal(context.ledger.message(answer.id).state, 'delivering')
       context.adapter.quota('zeus', { state: 'exhausted', at: context.clock.now().toISOString() })
@@ -1313,17 +1313,17 @@ describe('the dispatcher watches quota', () => {
         'the task goes back to the board and the answer in flight goes with it',
       )
 
-      context.adapter.answer('lead', 'noted')
-      const own = context.ledger.createTask(1, { from: 'human', to: 'lead', body: 'Plan' })
+      context.adapter.answer('chief', 'noted')
+      const own = context.ledger.createTask(1, { from: 'human', to: 'chief', body: 'Plan' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       assert.equal(task(own.task.number).state, 'working')
-      context.adapter.quota('lead', { state: 'exhausted', at: context.clock.now().toISOString() })
-      context.adapter.agent('lead').settled = true
+      context.adapter.quota('chief', { state: 'exhausted', at: context.clock.now().toISOString() })
+      context.adapter.agent('chief').settled = true
       await context.dispatcher.pass()
       assert.equal(task(own.task.number).state, 'working', 'a coordinator keeps its task')
-      assert.equal(context.dispatcher.activity(id('lead')).state, 'out')
-      const later = context.ledger.note(1, { from: 'zeus', to: 'lead', body: 'Ready' })
+      assert.equal(context.dispatcher.activity(id('chief')).state, 'out')
+      const later = context.ledger.note(1, { from: 'zeus', to: 'chief', body: 'Ready' })
       await context.dispatcher.pass()
       assert.equal(context.ledger.message(later.id).state, 'queued', 'nothing reaches it while out')
       context.clock.advance(2 * 3_600_000)
@@ -1394,7 +1394,7 @@ describe('a member out of quota mid-task', () => {
         'held with its window: diana is free, but the reset is twenty minutes away',
       )
       assert.match(
-        notes('lead').at(-1),
+        notes('chief').at(-1),
         /^T-1 waits with @zeus-amber-pine: out of quota until .*; it goes on by itself then\.$/,
       )
       assert.deepEqual(context.host.killed, [], 'the window waits, as any paused task’s')
@@ -1437,7 +1437,7 @@ describe('a member with several roles', () => {
         directory: '/work/app',
         name: 'app',
         harness: 'claude-code',
-        team: [
+        staff: [
           { agent: 'zeus', harness: 'claude-code', role: 'worker', tier: 'standard' },
           {
             agent: 'hera',
@@ -1453,7 +1453,7 @@ describe('a member with several roles', () => {
           .filter((request) => request.participant.handle.startsWith(`${handle}-`))
           .map((request) => [request.role, request.instructions])
       const open = (body, tier, pool = 'worker') =>
-        context.ledger.createTask(project.id, { from: 'lead', pool, tier, body })
+        context.ledger.createTask(project.id, { from: 'chief', pool, tier, body })
       open('Write the parser', 'standard')
       await context.dispatcher.pass()
       await context.dispatcher.pass()
@@ -1500,7 +1500,7 @@ describe('a member with several roles', () => {
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       assert.equal(task(4).state, 'done')
-      assert.equal(context.ledger.task(project.id, 4).messages.at(-1).recipient, 'lead')
+      assert.equal(context.ledger.task(project.id, 4).messages.at(-1).recipient, 'chief')
     })
   })
 })
@@ -1544,7 +1544,7 @@ describe('one task per member session', () => {
       assert.match(launch.message, /Write the lexer/)
       assert.equal(zeusWindows(context).length, 2)
 
-      context.ledger.acceptTask(project.id, 1, { by: 'lead' })
+      context.ledger.acceptTask(project.id, 1, { by: 'chief' })
       await context.dispatcher.pass()
       assert.notEqual(
         context.ledger.currentConversation(session),
@@ -1575,22 +1575,22 @@ describe('one task per member session', () => {
     })
   })
 
-  it('never closes a coordinator: the lead keeps its window after its own task', async () => {
+  it('never closes a coordinator: the chief keeps its window after its own task', async () => {
     await setup(async (context) => {
-      const { project, id } = await withTeam(context)
-      context.ledger.createTask(project.id, { from: 'human', to: 'lead', body: 'Plan the week' })
+      const { project, id } = await withStaff(context)
+      context.ledger.createTask(project.id, { from: 'human', to: 'chief', body: 'Plan the week' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
-      context.adapter.answer('lead', 'Planned.')
+      context.adapter.answer('chief', 'Planned.')
       context.ledger.recordResult(project.id, 1, { body: 'Planned.' })
       await context.dispatcher.pass()
       assert.equal(context.ledger.task(project.id, 1).state, 'done')
       assert.deepEqual(context.host.killed, [])
-      assert.notEqual(context.dispatcher.pane(id('lead')), null)
+      assert.notEqual(context.dispatcher.pane(id('chief')), null)
     })
   })
 
-  it('after a restart, pauses a member task with no window for the lead to resume, and resumes one whose answer is due', async () => {
+  it('after a restart, pauses a member task with no window for the chief to resume, and resumes one whose answer is due', async () => {
     await setup(async (context) => {
       const { project, id, open, task } = await withTiers(context)
       open()
@@ -1603,11 +1603,11 @@ describe('one task per member session', () => {
       )
       const question = context.ledger.ask(project.id, {
         from: 'diana-brisk-birch',
-        to: 'lead',
+        to: 'chief',
         task: 2,
         body: 'Which dialect?',
       })
-      context.adapter.answer('diana', 'I asked the lead.')
+      context.adapter.answer('diana', 'I asked the chief.')
       await context.dispatcher.pass()
       assert.deepEqual([task(1).state, task(2).state], ['working', 'waiting'])
       const native = context.ledger.currentConversation(id('diana-brisk-birch')).nativeSession
@@ -1616,12 +1616,12 @@ describe('one task per member session', () => {
       context.ledger.suspendForRestart()
       const after = context.make()
       await after.resumeAfterRestart()
-      context.ledger.answer(question.id, { from: 'lead', body: 'ANSI' })
+      context.ledger.answer(question.id, { from: 'chief', body: 'ANSI' })
       await after.pass()
       assert.deepEqual(
         [task(1).state, task(1).assignee],
         ['paused', 'zeus-amber-pine'],
-        'its window is gone; its session and conversation wait for the lead',
+        'its window is gone; its session and conversation wait for the chief',
       )
       assert.match(
         task(1).messages.find((m) => m.kind === 'note').body,
@@ -1633,10 +1633,10 @@ describe('one task per member session', () => {
         ['diana-brisk-birch', native],
         'its own session, with the brief in it',
       )
-      assert.match(launch.message, /^\[ConsensFlow m-\d+ · T-2 · answer from @lead\]\nANSI$/)
+      assert.match(launch.message, /^\[ConsensFlow m-\d+ · T-2 · answer from @chief\]\nANSI$/)
       await after.pass()
       assert.equal(task(2).state, 'working')
-      context.ledger.resumeTask(project.id, 1, { by: 'lead', body: 'Go on' })
+      context.ledger.resumeTask(project.id, 1, { by: 'chief', body: 'Go on' })
       await after.pass()
       const back = context.adapter.prepared.at(-1)
       assert.deepEqual(
@@ -1644,7 +1644,7 @@ describe('one task per member session', () => {
         ['zeus-amber-pine', nativeZeus],
         'the same conversation, with its memory',
       )
-      assert.match(back.message, /T-1 · task from @lead\]\nResumed: Go on$/)
+      assert.match(back.message, /T-1 · task from @chief\]\nResumed: Go on$/)
     })
   })
 
@@ -1652,7 +1652,7 @@ describe('one task per member session', () => {
     await setup(async (context) => {
       const { project, id, task } = await finished(context)
       const native = context.ledger.currentConversation(id('zeus-amber-pine')).nativeSession
-      context.ledger.reopenTask(project.id, 1, { by: 'lead', body: 'Handle empty input too' })
+      context.ledger.reopenTask(project.id, 1, { by: 'chief', body: 'Handle empty input too' })
       await context.dispatcher.pass()
       const launch = context.adapter.prepared.at(-1)
       assert.deepEqual(
@@ -1662,7 +1662,7 @@ describe('one task per member session', () => {
       )
       assert.match(
         launch.message,
-        /^\[ConsensFlow m-\d+ · T-1 · task from @lead\]\nHandle empty input too$/,
+        /^\[ConsensFlow m-\d+ · T-1 · task from @chief\]\nHandle empty input too$/,
         'it remembers the brief: only the follow-up goes in',
       )
       await context.dispatcher.pass()
@@ -1675,7 +1675,7 @@ describe('one task per member session', () => {
       const { project, id, task } = await finished(context)
       const native = context.ledger.currentConversation(id('zeus-amber-pine')).nativeSession
       context.ledger.createTask(project.id, {
-        from: 'lead',
+        from: 'chief',
         after: 1,
         body: 'Now the lexer, in the same style',
       })
@@ -1688,7 +1688,7 @@ describe('one task per member session', () => {
       )
       assert.match(
         launch.message,
-        /^\[ConsensFlow m-\d+ · T-2 · task from @lead\]\nNow the lexer, in the same style$/,
+        /^\[ConsensFlow m-\d+ · T-2 · task from @chief\]\nNow the lexer, in the same style$/,
         'no brief in front: the window remembers',
       )
       await context.dispatcher.pass()
@@ -1709,7 +1709,7 @@ describe('one task per member session', () => {
         context.ledger.project(project.id).participants.some((p) => p.handle === 'zeus-amber-pine'),
         'nothing expires',
       )
-      assert.equal(task(1).state, 'done', 'its work stays for the lead to accept')
+      assert.equal(task(1).state, 'done', 'its work stays for the chief to accept')
       const native = context.ledger.currentConversation(
         context.ledger.project(project.id).participants.find((p) => p.handle === 'zeus-amber-pine')
           .id,
@@ -1738,7 +1738,7 @@ describe('one task per member session', () => {
       await assert.rejects(context.dispatcher.endSession(project.id, working.assignee), {
         code: 'session-busy',
       })
-      context.ledger.cancelTask(project.id, 2, { by: 'lead' })
+      context.ledger.cancelTask(project.id, 2, { by: 'chief' })
       await context.dispatcher.pass()
       assert.equal(
         context.host.killed.at(-1).id,
@@ -1766,7 +1766,7 @@ describe('the dispatcher traces what its windows do', () => {
         assert.equal(task(1).state, 'working')
         const activity = entries.filter((entry) => entry.kind === 'window.activity')
         assert.deepEqual(activity.map((entry) => [entry.participant, entry.state]).slice(0, 2), [
-          ['lead', 'idle'],
+          ['chief', 'idle'],
           ['zeus-amber-pine', 'working'],
         ])
         assert.deepEqual(Object.keys(activity[0]).sort(), [
@@ -1799,13 +1799,13 @@ describe('a window that is not ready for a paste', () => {
         await context.dispatcher.pass()
         await context.dispatcher.pass()
         assert.equal(task(1).state, 'done')
-        const result = () => context.ledger.inbox(id('lead')).find((m) => m.kind === 'result')
-        assert.equal(result().state, 'queued', 'the lead is typing: the result waits')
+        const result = () => context.ledger.inbox(id('chief')).find((m) => m.kind === 'result')
+        assert.equal(result().state, 'queued', 'the chief is typing: the result waits')
         const held = entries.filter(
           (entry) => entry.kind === 'delivery.held' && entry.message === result().id,
         )
         assert.equal(held.length, 1, 'said once, not every pass')
-        assert.deepEqual([held[0].participant, held[0].project], ['lead', 1])
+        assert.deepEqual([held[0].participant, held[0].project], ['chief', 1])
         assert.match(held[0].reason, /not ready for a paste/)
         ready = true
         await context.dispatcher.pass()
@@ -1817,7 +1817,7 @@ describe('a window that is not ready for a paste', () => {
 })
 
 describe('a member whose saved agent is gone', () => {
-  it('gives a member whose agent is gone no work: the task waits and the lead hears why', async () => {
+  it('gives a member whose agent is gone no work: the task waits and the chief hears why', async () => {
     await setup(
       async (context) => {
         const { open, task, notes } = await withTiers(context, { workers: ['zeus'] })
@@ -1826,10 +1826,10 @@ describe('a member whose saved agent is gone', () => {
         await context.dispatcher.pass()
         assert.deepEqual([task(1).state, task(1).assignee], ['open', null])
         assert.match(
-          notes('lead').at(-1),
+          notes('chief').at(-1),
           /T-1 waits for a free standard worker: @zeus has no agent any more \(zeus is not among your agents: define it, or remove the member\)/,
         )
-        assert.equal(context.host.opened.length, 1, 'only the lead window opened')
+        assert.equal(context.host.opened.length, 1, 'only the chief window opened')
       },
       { roster: (name) => (name === 'zeus' ? null : { id: name, model: 'm', profile: {} }) },
     )
@@ -1857,13 +1857,13 @@ describe('a member whose saved agent is gone', () => {
         )
         await after.pass()
         assert.match(
-          notes('lead').at(-1),
+          notes('chief').at(-1),
           /waits for a free standard worker: @zeus has no agent any more/,
         )
         assert.equal(
           context.host.opened.length,
           3,
-          'the lead before and after the restart, zeus before it, nothing for zeus after',
+          'the chief before and after the restart, zeus before it, nothing for zeus after',
         )
       },
       {
