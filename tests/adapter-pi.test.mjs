@@ -126,26 +126,34 @@ describe('the Pi adapter', () => {
       const extension = setInterval(async () => {
         if (busy) return
         busy = true
-        const names = await readdir(inbox).catch(() => [])
-        for (const name of names.filter((n) => n.endsWith('.json'))) {
-          const record = JSON.parse(await readFile(path.join(inbox, name), 'utf8'))
-          await mkdir(ack, { recursive: true })
-          await writeFile(
-            path.join(ack, `${record.id}.json`),
-            JSON.stringify({ id: record.id, admitted: true, mode: 'tui' }),
-          )
-          await rm(path.join(inbox, name), { force: true })
-          clearInterval(extension)
+        try {
+          const names = await readdir(inbox).catch(() => [])
+          for (const name of names.filter((n) => n.endsWith('.json'))) {
+            const record = JSON.parse(await readFile(path.join(inbox, name), 'utf8'))
+            await mkdir(ack, { recursive: true })
+            await writeFile(
+              path.join(ack, `${record.id}.json`),
+              JSON.stringify({ id: record.id, admitted: true, mode: 'tui' }),
+            )
+            await rm(path.join(inbox, name), { force: true })
+            clearInterval(extension)
+          }
+        } finally {
+          busy = false
         }
       }, 5)
-      const pane = { id: 's1-zeus', generation: 2 }
-      assert.deepEqual(await adapter.deliver({ launch, pane, host, text: 'hi' }), {
-        admitted: true,
-        queued: true,
-      })
-      assert.deepEqual(claims, [
-        ['pane.claim_native_epoch', { pane: 's1-zeus', generation: 2, epoch: 3 }],
-      ])
+      try {
+        const pane = { id: 's1-zeus', generation: 2 }
+        assert.deepEqual(await adapter.deliver({ launch, pane, host, text: 'hi' }), {
+          admitted: true,
+          queued: true,
+        })
+        assert.deepEqual(claims, [
+          ['pane.claim_native_epoch', { pane: 's1-zeus', generation: 2, epoch: 3 }],
+        ])
+      } finally {
+        clearInterval(extension)
+      }
     })
   })
 
