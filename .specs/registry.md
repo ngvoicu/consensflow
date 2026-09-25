@@ -12,7 +12,7 @@
 | sessions-are-the-humans | Sessions are the human's — no expiry, no cap, a window opened, closed or deleted from its lane | completed | high | 2/2 | 2026-09-21 |
 | reviews-are-tasks | Reviews are tasks — no automatic reviews, no review buttons; the lead adds a review for a reviewer | completed | high | 2/2 | 2026-09-21 |
 | one-roster | One roster — every catalog agent is an agent, as the catalog has it; teams pick from all of them | completed | high | 7/7 | 2026-09-23 |
-| quota-hold | Quota mid-work — hold the task with its window when the reset is near or nobody else can take it | in-progress | high | 0/6 | 2026-09-24 |
+| quota-hold | Quota mid-work — hold the task with its window when the reset is near or nobody else can take it | completed | high | 6/6 | 2026-09-24 |
 | reliable-delivery | Reliable delivery, markers and daemon load (board redesign phase 1) | active | critical | 17/19 | 2026-09-19 |
 | session-task-board | Session task board and operational graph | completed | high | 12/12 | 2026-09-13 |
 | devin-and-receiver-cleanup | Devin roles and receiver integration cleanup | paused | high | 38/39 | 2026-09-13 |

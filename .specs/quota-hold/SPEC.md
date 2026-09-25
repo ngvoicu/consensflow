@@ -1,7 +1,7 @@
 ---
 id: quota-hold
 title: Quota mid-work — hold the task with its window when the reset is near or nobody else can take it
-status: in-progress
+status: completed
 created: 2026-09-24
 updated: 2026-09-24
 priority: high
@@ -46,23 +46,25 @@ want to handle it?" → the rule below → "implement".
 
 ### Phase A: the ledger
 
-- [ ] [TEST-QH-01] `holdTask` pauses with `heldUntil`; `heldTasksDue`
+- [x] [TEST-QH-01] `holdTask` pauses with `heldUntil`; `heldTasksDue`
   lists the ones whose time has come; any move clears `heldUntil`;
   `resumeTask` works without `by` (the daemon) and keeps the window.
-- [ ] [IMPL-QH-02] Migration 3 (`task.held_until`), the methods, the view.
+- [x] [IMPL-QH-02] Migration 3 (`task.held_until`), the methods, the view.
 
 ### Phase B: the dispatcher
 
-- [ ] [TEST-QH-03] Reset in 20 min → held, note, window closed; the clock
+- [x] [TEST-QH-03] Reset in 20 min → held, note, window closed; the clock
   past the reset → resumed in the same window with the resume words.
   Reset in 3 h with a free teammate → released as before. Reset in 3 h
   with no teammate → held.
-- [ ] [IMPL-QH-04] `#outOfQuota` decides per task; `pass()` resumes what
+- [x] [IMPL-QH-04] `#outOfQuota` decides per task; `pass()` resumes what
   is due.
 
 ### Phase C: the board
 
-- [ ] [TEST-QH-05] A held task's card reads "out of quota until HH:MM".
-- [ ] [IMPL-QH-06] `route()`.
+- [x] [TEST-QH-05] A held task's card reads "out of quota until HH:MM".
+- [x] [IMPL-QH-06] `route()`.
 
 ## TDD log
+
+- 2026-09-24, all phases in one commit (`77e0664`, README `d89200c`): migration 3 `task.held_until`, `holdTask`/`heldTasksDue`, `resumeTask` without `by`; `#outOfQuota` holds or releases per task and `#resumeHeld` resumes what is due in the same window; the card reads "out of quota until HH:MM". Ledger, dispatcher and page suites green in the gate. The record here was ticked on 2026-09-25, a day late.
