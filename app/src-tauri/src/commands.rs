@@ -948,7 +948,12 @@ fn bundled_cli(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
             .ok_or_else(|| "the app executable has no directory".to_string())?
             .join(sidecar)
     };
-    let cli = resources.join("cli/bin/cf.mjs");
+    let cli = resources.join("cli").join("bin").join("cf.mjs");
+    // Tauri may answer its resource directory in Windows' verbatim form
+    // (`\\?\C:\…`), which Node cannot take as a script path: it stops at
+    // the drive with `lstat 'C:'`. The plain spelling names the same file.
+    let node = plain_path(node);
+    let cli = plain_path(cli);
     if !node.is_absolute() || !node.exists() {
         return Err(format!(
             "the bundled runtime is missing from this app ({node:?})"
@@ -960,6 +965,18 @@ fn bundled_cli(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
         ));
     }
     Ok((node, cli))
+}
+
+/// A Windows path without the `\\?\` verbatim prefix; any other path as it is.
+fn plain_path(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    if let Some(rest) = text.strip_prefix("\\\\?\\UNC\\") {
+        return PathBuf::from(format!("\\\\{rest}"));
+    }
+    if let Some(rest) = text.strip_prefix("\\\\?\\") {
+        return PathBuf::from(rest);
+    }
+    path
 }
 
 fn login_path() -> Option<String> {
@@ -1843,6 +1860,22 @@ mod tests {
         assert!(validate_size(MAX_TERMINAL_DIMENSION + 1, 24).is_err());
         assert!(pane_key("", 1).is_err());
         assert!(pane_key("pane", 0).is_err());
+    }
+
+    #[test]
+    fn a_verbatim_windows_path_is_spelled_plainly_for_node() {
+        assert_eq!(
+            plain_path(PathBuf::from(r"\\?\C:\Users\me\app\cli\bin\cf.mjs")),
+            PathBuf::from(r"C:\Users\me\app\cli\bin\cf.mjs")
+        );
+        assert_eq!(
+            plain_path(PathBuf::from(r"\\?\UNC\server\share\cf.mjs")),
+            PathBuf::from(r"\\server\share\cf.mjs")
+        );
+        assert_eq!(
+            plain_path(PathBuf::from("/Applications/ConsensFlow.app/node")),
+            PathBuf::from("/Applications/ConsensFlow.app/node")
+        );
     }
 
     #[test]
