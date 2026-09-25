@@ -650,6 +650,9 @@ impl AppRuntime {
             .unwrap_or_else(|error| error.into_inner())
             .take()
         {
+            if let Some(bridge) = &self.bridge {
+                bridge.close_input();
+            }
             stop_editor(&mut editor);
         }
         true
@@ -701,22 +704,21 @@ impl Drop for AppRuntime {
     }
 }
 
-/// Asks the daemon to stop and gives it a moment: it writes down why it
-/// stopped and closes its ledger. Only what has not gone by then is killed, so
-/// a start with no stop after it in the daemon's log means it was killed from
-/// outside, never by the app.
+/// Gives the daemon a moment to stop on its own once its input has ended:
+/// it writes down why it stopped and closes its ledger. The same on every
+/// platform, since an input ending is the one stop Windows can deliver too.
+/// Only what has not gone by then is killed, so a start with no stop after it
+/// in the daemon's log means it was killed from outside, never by the app.
 fn stop_editor(editor: &mut Child) {
-    #[cfg(unix)]
-    {
-        // SAFETY: a plain signal to a child this process spawned and still holds.
-        unsafe { libc::kill(editor.id() as i32, libc::SIGTERM) };
-        let deadline = Instant::now() + EDITOR_STOP_GRACE;
-        while Instant::now() < deadline {
-            if matches!(editor.try_wait(), Ok(Some(_))) {
-                return;
-            }
-            thread::sleep(Duration::from_millis(20));
+    // The bridge holds the daemon's input and has let it go; a child whose
+    // input is still ours (a stand-in in a test) gets its EOF here.
+    drop(editor.stdin.take());
+    let deadline = Instant::now() + EDITOR_STOP_GRACE;
+    while Instant::now() < deadline {
+        if matches!(editor.try_wait(), Ok(Some(_))) {
+            return;
         }
+        thread::sleep(Duration::from_millis(20));
     }
     let _ = editor.kill();
     let _ = editor.wait();
@@ -2467,10 +2469,11 @@ mod tests {
     ///
     /// This is the ordering proof. `Bridge::admit_handler` refuses every new
     /// handler once the transport is `closed`, and only EOF from the peer
-    /// closes it — so killing the editor IS the act that shuts admission, and
-    /// nothing else in `shutdown()` can do it. What follows the kill is a
-    /// drain of what was ALREADY admitted, and only then the reap, so a pane
-    /// whose spawn was in flight is in the table before anything reaps it.
+    /// closes it — so ending the editor (its input closed, and the kill for
+    /// one that does not stop on that) IS the act that shuts admission, and
+    /// nothing else in `shutdown()` can do it. What follows is a drain of what
+    /// was ALREADY admitted, and only then the reap, so a pane whose spawn
+    /// was in flight is in the table before anything reaps it.
     #[cfg(unix)]
     #[test]
     fn gui_shutdown_kills_a_present_editor_then_drains_its_admitted_launch() {
@@ -2571,9 +2574,9 @@ mod tests {
         );
     }
 
-    /// The daemon is asked before it is killed: one that stops on the signal
-    /// gets to write its last lines, and one that ignores it is killed once
-    /// the grace is over.
+    /// The daemon is asked before it is killed: one that stops when its
+    /// input ends gets to write its last lines, and one that ignores it is
+    /// killed once the grace is over.
     #[cfg(unix)]
     #[test]
     fn gui_shutdown_asks_the_editor_first_and_kills_only_what_stays() {
@@ -2611,7 +2614,7 @@ mod tests {
         };
 
         let (polite, polite_pid) = runtime_for(format!(
-            "trap 'echo asked > {}; exit 0' TERM; echo ready; while :; do sleep 0.05; done",
+            "echo ready; cat >/dev/null; echo asked > {}; exit 0",
             mark.display()
         ));
         let started = Instant::now();
@@ -2624,7 +2627,7 @@ mod tests {
         assert!(!process_exists(polite_pid));
         let _ = std::fs::remove_file(&mark);
 
-        let (deaf, deaf_pid) = runtime_for("trap '' TERM; echo ready; exec sleep 60".to_string());
+        let (deaf, deaf_pid) = runtime_for("echo ready; exec sleep 60".to_string());
         let started = Instant::now();
         deaf.shutdown();
         assert!(started.elapsed() >= EDITOR_STOP_GRACE, "it had its grace");

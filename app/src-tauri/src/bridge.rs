@@ -453,6 +453,18 @@ impl Bridge {
         self.inner.closed.load(Ordering::Acquire)
     }
 
+    /// Ends the peer's input, the way a parent tells a child it is done:
+    /// the writer goes, and with it the pipe the peer reads. What the peer
+    /// still writes is read to its own EOF, which alone closes the
+    /// transport, so nothing it says while stopping is lost. A frame queued
+    /// after this is refused as EOF.
+    pub fn close_input(&self) {
+        match self.inner.writer.lock() {
+            Ok(mut writer) => drop(writer.take()),
+            Err(poisoned) => drop(poisoned.into_inner().take()),
+        }
+    }
+
     pub fn wait_closed(&self) -> Result<(), BridgeError> {
         let mut guard = self
             .inner
@@ -1100,7 +1112,21 @@ pub fn stdin_is_pipe() -> bool {
     })
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+pub fn stdin_is_pipe() -> bool {
+    use std::os::windows::io::AsRawHandle;
+
+    unsafe extern "system" {
+        fn GetFileType(handle: *mut core::ffi::c_void) -> u32;
+    }
+    const FILE_TYPE_PIPE: u32 = 0x0003;
+
+    // SAFETY: GetFileType only inspects the handle; the standard input handle
+    // stays owned by the process.
+    unsafe { GetFileType(std::io::stdin().as_raw_handle()) == FILE_TYPE_PIPE }
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn stdin_is_pipe() -> bool {
     false
 }
