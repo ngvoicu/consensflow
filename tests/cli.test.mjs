@@ -77,7 +77,9 @@ describe('cf manages the roster', () => {
     assert.match(out.stdout, /3\.0\.0/)
   })
 
-  it('survives its output pipe closing early, like `cf … | head`', async () => {
+  it('survives its output pipe closing early, like `cf … | head`', {
+    skip: process.platform === 'win32' && 'a POSIX shell pipeline',
+  }, async () => {
     const { spawn } = await import('node:child_process')
     // `false` never reads: the pipe is closed before cf writes anything, so
     // every write EPIPEs. PIPESTATUS surfaces cf's own exit code.

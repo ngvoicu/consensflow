@@ -172,5 +172,6 @@ test('an unchanged role text is not rewritten, a changed one is, always private'
   })
   assert.equal(await readFile(file, 'utf8'), 'worker text, v2')
   assert.equal(refreshed.args.at(-1), 'worker text, v2')
-  assert.equal((await stat(file)).mode & 0o777, 0o600)
+  // Windows has no POSIX modes; its files answer 0o666 whatever the writer asked.
+  if (process.platform !== 'win32') assert.equal((await stat(file)).mode & 0o777, 0o600)
 })

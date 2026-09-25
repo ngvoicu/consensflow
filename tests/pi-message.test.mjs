@@ -257,8 +257,8 @@ describe('consensflow Pi worker followup', () => {
         bytesWritten: 0,
         reason: 'expired-before-send',
       })
-      assert.equal(await exists(join(s.inbox, `${id}.json`)), false)
-      assert.equal(await exists(join(s.expired, `${id}.json`)), true)
+      assert.equal(await exists(join(s.inbox, `${id}.json`)), false, s.logs.join('; '))
+      assert.equal(await exists(join(s.expired, `${id}.json`)), true, s.logs.join('; '))
       assert.deepEqual(s.pi.sent, [])
     } finally {
       await s.close()
@@ -338,7 +338,7 @@ describe('consensflow Pi worker followup', () => {
       await writeFile(join(s.inbox, `${id}.json`), record)
       await s.extension.consume()
       assert.deepEqual(s.pi.sent, ['acknowledged followup'])
-      assert.equal(await exists(join(s.inbox, `${id}.json`)), false)
+      assert.equal(await exists(join(s.inbox, `${id}.json`)), false, s.logs.join('; '))
     } finally {
       await s.close()
     }

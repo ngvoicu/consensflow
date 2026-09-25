@@ -122,7 +122,10 @@ describe('the Pi adapter', () => {
       }
       // The extension's part: take the record from the inbox, acknowledge it.
       const { inbox, ack } = launch.channel
+      let busy = false
       const extension = setInterval(async () => {
+        if (busy) return
+        busy = true
         const names = await readdir(inbox).catch(() => [])
         for (const name of names.filter((n) => n.endsWith('.json'))) {
           const record = JSON.parse(await readFile(path.join(inbox, name), 'utf8'))

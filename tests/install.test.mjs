@@ -57,8 +57,7 @@ describe('BO12: the path a pane is launched with is absolute, whatever PATH says
     const previous = process.cwd()
     try {
       mkdirSync(join(root, 'bin'), { recursive: true })
-      const shim = join(root, 'bin', 'claude')
-      fakeExecutable(shim)
+      const shim = fakeExecutable(join(root, 'bin', 'claude'))
       process.chdir(root)
 
       const found = harnessPath('claude', { PATH: 'bin', HOME: root })

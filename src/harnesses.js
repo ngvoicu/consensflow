@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
-import { accessSync, constants, statSync } from 'node:fs'
+import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { delimiter, join, resolve } from 'node:path'
+import { delimiter, dirname, join, resolve, sep } from 'node:path'
 
 /** Discover CLI executables on PATH and native user install paths.
  * Finder-launched apps may lack the interactive shell's tool directories.
@@ -153,17 +153,59 @@ function locate(harness, env) {
 const CMD_META = /([()\][%!^"`<>&|;, *?])/g
 
 /**
+ * What an npm-style `.cmd` shim runs, read from its last line: `"<program>"
+ * "<script>" %*`, where the program is `%_prog%` or `%NODE_EXE%` (the node
+ * beside the shim, else the node on PATH, else this one) and the script may
+ * begin with `%dp0%` or `%~dp0`, the shim's own directory. Null when the file
+ * is not of that shape, or names something that is not there.
+ */
+function shimTarget(shim, env) {
+  let text
+  try {
+    text = readFileSync(shim, 'utf8')
+  } catch {
+    return null
+  }
+  const line = text
+    .split(/\r?\n/)
+    .reverse()
+    .find((candidate) => candidate.includes('%*'))
+  if (line === undefined) return null
+  const quoted = [...line.matchAll(/"([^"]+)"/g)].map((match) => match[1])
+  if (quoted.length < 2) return null
+  const dir = dirname(shim)
+  // The shim spells its paths with backslashes; the platform's separator here.
+  const expand = (value) =>
+    value.replace(/^%(?:~dp0|dp0%)\\?/i, `${dir}${sep}`).replaceAll('\\', sep)
+  const [program, script] = quoted.slice(-2)
+  const scriptPath = expand(script)
+  if (scriptPath.includes('%') || !existsSync(scriptPath)) return null
+  let programPath = expand(program)
+  if (/^%(_prog|NODE_EXE)%$/i.test(program)) {
+    const beside = join(dir, 'node.exe')
+    programPath = existsSync(beside) ? beside : (pathOnPath('node', env) ?? process.execPath)
+  }
+  if (programPath.includes('%')) return null
+  return { program: programPath, script: scriptPath }
+}
+
+/**
  * How to run `executable` with `args` on this machine, for spawn or execFile:
  * `{ file, args, options }`.
  *
  * A `.cmd` or `.bat` on Windows (an npm-installed CLI is one) is a script for
- * cmd.exe, not a program, and Node refuses to spawn it directly. It goes
- * through cmd.exe instead, with every argument quoted and escaped the way
- * cmd.exe reads its line, then read again by the script (the shape npm itself
- * uses through cross-spawn). Anything else runs as it is.
+ * cmd.exe, not a program, and Node refuses to spawn it directly. An npm-style
+ * shim is read for what it runs, and that runs directly: no cmd.exe, so an
+ * argument may hold anything, a newline included. Any other `.cmd` goes
+ * through cmd.exe, with every argument quoted and escaped the way cmd.exe
+ * reads its line, then read again by the script (the shape npm itself uses
+ * through cross-spawn); cmd.exe ends an argument at a newline, so that path
+ * cannot carry one. Anything else runs as it is.
  */
 export function runnable(executable, args = [], env = process.env) {
   if (!/\.(cmd|bat)$/i.test(executable)) return { file: executable, args, options: {} }
+  const target = shimTarget(executable, env)
+  if (target !== null) return { file: target.program, args: [target.script, ...args], options: {} }
   const quote = (arg) =>
     `"${String(arg)
       .replace(/(\\*)"/g, '$1$1\\"')
@@ -171,8 +213,10 @@ export function runnable(executable, args = [], env = process.env) {
       .replace(CMD_META, '^$1')
       .replace(CMD_META, '^$1')
   const line = [executable.replace(CMD_META, '^$1'), ...args.map(quote)].join(' ')
+  // Named absolutely: a launch environment may carry a PATH of its own that
+  // has no System32 on it, and cmd.exe must still be found.
   return {
-    file: env.ComSpec ?? env.COMSPEC ?? 'cmd.exe',
+    file: env.ComSpec ?? process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe',
     args: ['/d', '/s', '/c', `"${line}"`],
     options: { windowsVerbatimArguments: true },
   }

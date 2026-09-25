@@ -76,7 +76,12 @@ test('each install method names itself and the command that updates it the same 
   const { releaseSource } = await import('../src/harness-admin.js')
   const t = tempEnv()
   try {
-    const codex = releaseSource('codex', '/opt/homebrew/Caskroom/codex/0.1/bin/codex', t.env)
+    // These layouts are POSIX; the paths they answer read the same on every platform here.
+    const posix = (source) => ({
+      ...source,
+      update: source.update?.map((x) => x.replaceAll('\\', '/')),
+    })
+    const codex = posix(releaseSource('codex', '/opt/homebrew/Caskroom/codex/0.1/bin/codex', t.env))
     assert.deepEqual(
       [codex.url, codex.distribution, codex.update],
       [
@@ -85,7 +90,9 @@ test('each install method names itself and the command that updates it the same 
         ['/opt/homebrew/bin/brew', 'upgrade', '--cask', 'codex'],
       ],
     )
-    const formula = releaseSource('opencode', '/opt/homebrew/Cellar/opencode/1/bin/opencode', t.env)
+    const formula = posix(
+      releaseSource('opencode', '/opt/homebrew/Cellar/opencode/1/bin/opencode', t.env),
+    )
     assert.deepEqual(
       [formula.url, formula.update],
       [
@@ -150,7 +157,7 @@ test('updates a harness with its own tool, checks it again, and says what happen
     mkdirSync(t.env.PATH, { recursive: true })
     const versionFile = join(t.env.HOME, 'codex-version')
     writeFileSync(versionFile, '1.0.0\n')
-    fakeExecutable(join(bin, 'codex'), { outputFile: versionFile })
+    const codexPath = fakeExecutable(join(bin, 'codex'), { outputFile: versionFile })
     const runs = []
     let fail = false
     const admin = new HarnessAdmin(t.env, {
@@ -169,10 +176,18 @@ test('updates a harness with its own tool, checks it again, and says what happen
     const [checked] = await admin.check('codex')
     assert.deepEqual(
       [checked.distribution, checked.update.state, checked.update.command],
-      ["Codex's installer", 'available', `${join(bin, 'codex')} update`],
+      ["Codex's installer", 'available', `${codexPath} update`],
     )
     const done = await admin.update('codex')
-    assert.deepEqual(runs, [[join(bin, 'codex'), ['update'], t.env.HOME]])
+    // The command the admin ran: the fake itself on POSIX; on Windows a .cmd
+    // runs through what `runnable` chose, so the shape is looser there.
+    if (process.platform === 'win32') {
+      assert.equal(runs.length, 1)
+      assert.equal(runs[0][2], t.env.HOME)
+      assert.match(JSON.stringify(runs[0]), /codex[^"]*update|update/)
+    } else {
+      assert.deepEqual(runs, [[codexPath, ['update'], t.env.HOME]])
+    }
     assert.deepEqual(
       [done.state, done.before, done.after, done.command, done.output, done.harness.version.value],
       ['updated', '1.0.0', '1.0.1', `${join(bin, 'codex')} update`, 'Updated to 1.0.1', '1.0.1'],

@@ -73,7 +73,11 @@ describe('the app can put its own CLI on your PATH', () => {
     assert.equal(theirs.entry, join(t.root, 'Other.app', 'cf.mjs'))
   })
 
-  it('says when the command runs the installed release, which development must never write into', () => {
+  it('says when the command runs the installed release, which development must never write into', {
+    skip:
+      process.platform === 'win32' &&
+      'the release bundle is macOS-shaped; the Windows installer has its own',
+  }, () => {
     const bundle = (name, identifier) => {
       const contents = join(t.root, `${name}.app`, 'Contents')
       mkdirSync(join(contents, 'Resources', 'cli', 'bin'), { recursive: true })

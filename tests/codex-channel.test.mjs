@@ -271,7 +271,13 @@ it('stops a timed-out helper and does not retry the ambiguous queue operation', 
     )
     const entries = await f.capture()
     assert.equal(entries.filter((entry) => entry.kind === 'start').length, 1)
-    assert.equal(entries.filter((entry) => entry.kind === 'stopped').length, 1)
+    if (process.platform === 'win32') {
+      // No signal a helper could act on there: it is ended, and gone.
+      const { pid } = entries.find((entry) => entry.kind === 'start')
+      assert.throws(() => process.kill(pid, 0), 'the helper is gone')
+    } else {
+      assert.equal(entries.filter((entry) => entry.kind === 'stopped').length, 1)
+    }
   } finally {
     await f.cleanup()
   }

@@ -176,7 +176,11 @@ describe('retired Claude development channel (TEST-PANE-121)', () => {
         ...YOLO,
         hooks: { PreToolUse: [QUESTION], Stop: [TURN_END] },
       })
-      assert.deepEqual(await readdir(root), ['claude'], 'nothing is written into the project')
+      assert.deepEqual(
+        (await readdir(root)).map((name) => name.replace(/\.cmd$/, '')),
+        ['claude'],
+        'nothing is written into the project',
+      )
     } finally {
       await rm(root, { recursive: true, force: true })
       await rm(home, { recursive: true, force: true })
