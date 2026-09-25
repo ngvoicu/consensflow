@@ -624,6 +624,7 @@ mod tests {
     use crate::pty::{serial_pty_test, OpenedPane, PaneTable};
     use crate::pty::{PaneError, PaneInputWriter, PaneKey};
 
+    #[cfg(unix)]
     fn terminal_size() -> PtySize {
         PtySize {
             rows: 24,
@@ -671,6 +672,7 @@ mod tests {
         assert_eq!(&ready, b"ready");
     }
 
+    #[cfg(unix)]
     fn read_hex(mut reader: Box<dyn Read + Send>) -> String {
         let (sender, receiver) = mpsc::channel::<IoResult<Vec<u8>>>();
         thread::spawn(move || {

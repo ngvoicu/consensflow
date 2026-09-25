@@ -1099,8 +1099,8 @@ mod tests {
     use portable_pty::PtySize;
 
     #[cfg(unix)]
-    use super::{OpenedPane, PaneEnvironment, PaneKey};
-    use super::{serial_pty_test, PaneError, PaneTable};
+    use super::{serial_pty_test, OpenedPane, PaneEnvironment, PaneKey};
+    use super::{PaneError, PaneTable};
 
     fn terminal_size(rows: u16, cols: u16) -> PtySize {
         PtySize {
@@ -1262,6 +1262,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn read_to_end(mut reader: Box<dyn Read + Send>) -> Vec<u8> {
         let (sender, receiver) = std::sync::mpsc::channel();
         thread::spawn(move || {
@@ -1821,6 +1822,7 @@ mod tests {
         assert!(table.list().expect("list panes").is_empty());
     }
 
+    #[cfg(unix)]
     fn fill_backlog(
         output: &std::sync::mpsc::Receiver<super::PaneOutput>,
         backlog_bytes: usize,
@@ -1838,6 +1840,7 @@ mod tests {
         (received_bytes, last_seq)
     }
 
+    #[cfg(unix)]
     fn assert_output_closes(output: std::sync::mpsc::Receiver<super::PaneOutput>) {
         let deadline = Instant::now() + Duration::from_secs(1);
         loop {
