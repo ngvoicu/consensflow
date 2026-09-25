@@ -69,6 +69,19 @@ export function chiefEnvironment(chief, model = undefined) {
 }
 
 /**
+ * The last `count` non-empty lines a window printed, control sequences already
+ * stripped: near enough its screen, for a report to show why a chief said
+ * nothing (a login page, a quota wall, a model that does not exist).
+ */
+export function lastLines(text, count = 40) {
+  return text
+    .split(/\r\n|\r|\n/)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim() !== '')
+    .slice(-count)
+}
+
+/**
  * The scripted human's answer: the first of the scenario's `answers` whose
  * pattern matches the question wins, free text or not; then a question with
  * options takes each one's first option; then the scenario's `fallback`.

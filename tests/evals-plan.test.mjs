@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { answerFor, chiefEnvironment, HARNESSES, staffFor } from '../evals/plan.mjs'
+import { answerFor, chiefEnvironment, HARNESSES, lastLines, staffFor } from '../evals/plan.mjs'
 
 /** The eval's plan: who is on the staff, how the chief gets its model, how the human answers. */
 describe('an eval run’s plan', () => {
@@ -40,6 +40,11 @@ describe('an eval run’s plan', () => {
     assert.deepEqual(chiefEnvironment('claude').model, 'claude-opus-5')
     assert.deepEqual(chiefEnvironment('opencode').model, HARNESSES.opencode.model)
     assert.throws(() => chiefEnvironment('kimi', 'x'), /no such eval harness/)
+  })
+
+  it('keeps the last non-empty lines a window printed, whatever the line ending', () => {
+    assert.deepEqual(lastLines('a\r\n\r\nb  \rc\n\n  \nd\n', 3), ['b', 'c', 'd'])
+    assert.deepEqual(lastLines(''), [])
   })
 
   it('answers by the scenario’s patterns first, free text included, then by options, then the fallback', () => {

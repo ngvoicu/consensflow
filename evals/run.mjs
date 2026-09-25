@@ -5,7 +5,10 @@
  * evals/README.md. Spends real tokens; never part of a gate.
  *
  *   npm run eval -- --scenario six-decisions [--chief claude] [--staff claude,codex]
- *                   [--model claude-opus-5] [--claude-staff-model …] [--repeat 1] [--timeout-min 40]
+ *                   [--model …] [--claude-staff-model …] [--repeat 1] [--timeout-min 40]
+ *
+ * `--model` is the chief's: Opus for Claude Code and the cheap model for OpenCode
+ * unless given; Codex, Pi and Devin run their own default and ignore it.
  */
 import { execFileSync } from 'node:child_process'
 import { cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -14,7 +17,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 import { startIntegration } from '../tests/integration/harness.mjs'
 import { measure, verdict } from './measure.mjs'
-import { answerFor, chiefEnvironment, HARNESSES, staffFor } from './plan.mjs'
+import { answerFor, chiefEnvironment, HARNESSES, lastLines, staffFor } from './plan.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const EDITOR = join(HERE, '..', 'tests', 'live', 'core-live-editor.mjs')
@@ -72,6 +75,26 @@ const ENV = {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * Wait until a window's output has grown and then held still for `stillMs`:
+ * the harness has drawn its prompt. A window can read idle the moment it
+ * opens (Pi and Devin do), and text typed before the prompt is lost.
+ */
+async function settled(size, { stillMs = 3_000, capMs = 60_000 } = {}) {
+  const started = Date.now()
+  let last = size()
+  let since = started
+  for (;;) {
+    await sleep(500)
+    const now = size()
+    if (now !== last) {
+      last = now
+      since = Date.now()
+    } else if (now > 0 && Date.now() - since >= stillMs) return
+    if (Date.now() - started > capMs) return
+  }
+}
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-')
 
 async function run(index) {
@@ -92,6 +115,8 @@ async function run(index) {
     process.stdout.write(`  [${at}s] ${line}\n`)
   }
   let file = null
+  let pane = null
+  let screen = []
   try {
     writeFileSync(
       join(app.env.CONSENSFLOW_HOME, 'agents.json'),
@@ -113,8 +138,16 @@ async function run(index) {
         (m) => m.kind === 'question' && m.sender === 'chief' && m.state !== 'answered',
       )
     await app.waitFor(async () => (await chiefLane())?.activity?.state === 'idle', 240_000)
+    pane = (await chiefLane()).pane
+    await settled(() => app.output(pane.id).length)
     note(`chief (${chief}) ready; typing the prompt`)
     await app.tell(project, scenario.prompt, { idleMs: 240_000 })
+    await sleep(5_000)
+    if ((await chiefLane())?.activity?.state === 'idle') {
+      // Devin takes a pasted prompt into its box and waits for an Enter of its own.
+      await app.request('pane.input', { id: pane.id, generation: pane.generation, bytes: [13] })
+      note('Enter pressed again: the window had not taken the prompt')
+    }
 
     const answered = new Set()
     let lastChange = Date.now()
@@ -158,6 +191,7 @@ async function run(index) {
       }
     }
   } finally {
+    if (pane !== null) screen = lastLines(app.output(pane.id))
     await app.close({ preserveRoot: true })
   }
   const metrics = measure(file, {
@@ -175,6 +209,7 @@ async function run(index) {
     seconds: Math.round((Date.now() - started) / 1000),
     metrics,
     checks,
+    chiefScreen: screen,
     log,
   }
   mkdirSync(REPORTS, { recursive: true })
@@ -188,6 +223,13 @@ async function run(index) {
   )
   for (const check of checks)
     process.stdout.write(`  ${check.ok ? 'PASS' : 'FAIL'} ${check.name}\n`)
+  if (metrics.chiefTurns === 0)
+    process.stdout.write(
+      `  the chief's screen ended with:\n${screen
+        .slice(-8)
+        .map((l) => `    ${l}`)
+        .join('\n')}\n`,
+    )
   process.stdout.write(
     `  tasks ${metrics.tasks.length} (parallel ${metrics.parallel}, advice ${metrics.advice}, reviews ${metrics.reviews}) · questions ${metrics.questionsToHuman.length} · notes ${metrics.notesToHuman.length} · chief edits ${metrics.chiefEdits ?? '?'} in ${metrics.chiefTurns} turns · files changed ${metrics.filesChanged.length}\n  report: ${out}\n`,
   )

@@ -22,8 +22,8 @@ harnesses named logged in on this machine, and your word for the spend.
 Everything is real but the human. The daemon, the pane host and the harnesses
 are the ones the app uses (the live bench's shape). `--chief` names the
 chief's harness (claude, codex, pi, opencode, devin); Claude Code and
-OpenCode take the chief's model from `--model`, the others run their own
-configured default. `--staff` names the staff's harnesses: each gives two
+OpenCode take the chief's model from `--model` (Opus and OpenCode's cheap
+model unless given), the others run their own configured default. `--staff` names the staff's harnesses: each gives two
 workers, an advisor and a reviewer on its cheap model (`evals/plan.mjs`), all
 standard tier, so the daemon picks among them by its own rule and any of them
 may get any task. The scenario's fixture is copied into a fixed, trusted
@@ -37,8 +37,9 @@ moved for the scenario's quiet time.
 Then the ledger is read: tasks by pool and tier and how many ran side by
 side, questions and notes to the human, advice and reviews, the chief's own
 edits (the transcript copy's Edit and Write results, counted for a Claude
-chief only), its last words, and which files of the fixture the run changed
-or added. The
+chief only), its last words, which files of the fixture the run changed or
+added, and the last lines of the chief's screen (why a chief said nothing:
+a quota wall, a login page). The
 scenario's expectations are checked against those numbers; the report goes
 to `evals/reports/` and a verdict to stdout. Reports are kept in git: a run is
 evidence, and a later run beside it is the comparison. `npm run eval:summary`
