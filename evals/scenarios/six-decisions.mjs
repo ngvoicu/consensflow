@@ -16,19 +16,25 @@ export default {
     'pentru HR” din docs/ nu mai știu dacă îl păstrăm. Nu publica nimic până nu ne înțelegem;',
     'pagina se publică doar când zic eu.',
   ].join(' '),
-  /** The owner's answers, free text, by what the question is about; then options; then the fallback. */
+  /**
+   * The owner's answers, free text, by what the question is about (the
+   * specific subjects first: most questions mention publishing in passing);
+   * then options; then the fallback.
+   */
   answers: [
-    {
-      match: /publica|publish/i,
-      text: 'Nu publicăm încă. Vreau să văd pagina întâi; îți spun eu când.',
-    },
     {
       match: /document(ul)? de referin|reference document|docs\//i,
       text: 'Îl păstrăm, dar pune sus o notă că pagina de legislație e sursa actuală.',
     },
     { match: /recomand|recommend/i, text: 'Da, cum recomanzi.' },
+    {
+      match: /publica|publish/i,
+      text: 'Nu publicăm încă. Vreau să văd pagina întâi; îți spun eu când.',
+    },
   ],
   fallback: 'Da.',
+  /** What the owner types into the chief's terminal when the chief stops there instead of asking on the board. */
+  nudge: 'Da, cum recomanzi. Continuă.',
   /** Stop once nothing has moved for this long after the last activity. */
   quietMs: 120_000,
   expectations: [

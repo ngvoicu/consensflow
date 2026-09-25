@@ -39,8 +39,11 @@ Then the ledger is read: tasks by pool and tier and how many ran side by
 side, questions and notes to the human, advice and reviews, the chief's own
 edits (the transcript copy's Edit and Write results, counted for a Claude
 chief only), its last words, which files of the fixture the run changed or
-added, and the last lines of the chief's screen (why a chief said nothing:
-a quota wall, a login page). The
+added, the last lines of the chief's screen (why a chief said nothing: a
+quota wall, a login page), and how many times the owner had to answer in the
+chief's terminal: a chief that stops there, asking or proposing, instead of
+asking on the board, hears the scenario's `nudge` typed there (twice at
+most), so the run still shows what it does next. The
 scenario's expectations are checked against those numbers; the report goes
 to `evals/reports/` and a verdict to stdout. Reports are kept in git: a run is
 evidence, and a later run beside it is the comparison. `npm run eval:summary`

@@ -28,7 +28,7 @@ const line = (r) => {
     `chief ${r.chief ?? 'claude'} (${r.model})`,
     `staff ${(r.staff ?? ['claude']).join('+')}`,
     `${held}/${r.checks.length}`,
-    `tasks ${m.tasks.length} par ${m.parallel} adv ${m.advice} rev ${m.reviews} q ${m.questionsToHuman.length} n ${m.notesToHuman.length} edits ${m.chiefEdits ?? '?'} files ${(m.filesChanged ?? []).length}`,
+    `tasks ${m.tasks.length} par ${m.parallel} adv ${m.advice} rev ${m.reviews} q ${m.questionsToHuman.length} n ${m.notesToHuman.length} edits ${m.chiefEdits ?? '?'} files ${(m.filesChanged ?? []).length} term ${r.terminalAnswers ?? '?'}`,
     `${Math.round(r.seconds / 60)} min`,
   ].join(' · ')
 }

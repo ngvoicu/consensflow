@@ -17,8 +17,8 @@ export default {
     'publicabil (accesibilitate, ce pagini lipsesc în engleză, ce texte sunt vechi), cu o recomandare',
     'de ordine. Nu publicăm nimic fără să văd eu; unde trebuie o decizie care e a mea, întreabă-mă.',
   ].join(' '),
+  /** The specific subjects first: most questions mention publishing in passing. */
   answers: [
-    { match: /publica|publish/i, text: 'Nu încă; după ce văd paginile.' },
     {
       match: /document(ul)? de referin|reference document/i,
       text: 'Îl păstrăm, cu o notă că e vechi.',
@@ -28,8 +28,10 @@ export default {
       text: 'Legislația întâi, apoi managerii, apoi raportul.',
     },
     { match: /recomand|recommend/i, text: 'Da, cum recomanzi.' },
+    { match: /publica|publish/i, text: 'Nu încă; după ce văd paginile.' },
   ],
   fallback: 'Da.',
+  nudge: 'Da, cum recomanzi. Continuă.',
   quietMs: 150_000,
   expectations: [
     { name: 'at least three tasks go on the board', holds: (m) => m.tasks.length >= 3 },

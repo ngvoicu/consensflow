@@ -82,6 +82,8 @@ const ENV = {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+/** How long a chief may sit idle with nothing on the board before the owner answers it in its terminal. */
+const NUDGE_AFTER_MS = 60_000
 
 /**
  * Wait until a window's output has grown and then held still for `stillMs`:
@@ -129,6 +131,7 @@ async function run(index) {
   let file = null
   let pane = null
   let screen = []
+  let terminalAnswers = 0
   try {
     writeFileSync(
       join(app.env.CONSENSFLOW_HOME, 'agents.json'),
@@ -153,19 +156,39 @@ async function run(index) {
     pane = (await chiefLane()).pane
     await settled(() => app.output(pane.id).length)
     note(`chief (${chief}) ready; typing the prompt`)
-    await app.tell(project, scenario.prompt, { idleMs: 240_000 })
-    await sleep(5_000)
-    if ((await chiefLane())?.activity?.state === 'idle') {
-      // Devin takes a pasted prompt into its box and waits for an Enter of its own.
-      await app.request('pane.input', { id: pane.id, generation: pane.generation, bytes: [13] })
-      note('Enter pressed again: the window had not taken the prompt')
+    /** Type into the chief's terminal as the owner would, Enter pressed again if the window kept the text. */
+    const say = async (text) => {
+      await app.tell(project, text, { idleMs: 240_000 })
+      await sleep(5_000)
+      if ((await chiefLane())?.activity?.state === 'idle') {
+        // Devin takes a pasted prompt into its box and waits for an Enter of its own.
+        await app.request('pane.input', { id: pane.id, generation: pane.generation, bytes: [13] })
+        note('Enter pressed again: the window had not taken the text')
+      }
     }
+    await say(scenario.prompt)
 
     const answered = new Set()
     let lastChange = Date.now()
     let signature = ''
     for (;;) {
       await sleep(5_000)
+      // A chief that stops in its terminal, asking or proposing there, hears the
+      // owner there too (twice at most), so the run sees what it does next; the
+      // report counts these, because they are what the board was for.
+      if (
+        scenario.nudge !== undefined &&
+        terminalAnswers < 2 &&
+        Date.now() - lastChange > NUDGE_AFTER_MS &&
+        (await chiefLane())?.activity?.state === 'idle' &&
+        (await questions()).length === 0
+      ) {
+        terminalAnswers += 1
+        note(`the chief stopped in its terminal; the owner typed there: ${scenario.nudge}`)
+        await say(scenario.nudge)
+        lastChange = Date.now()
+        continue
+      }
       for (const question of await questions()) {
         if (answered.has(question.id)) continue
         answered.add(question.id)
@@ -222,6 +245,7 @@ async function run(index) {
     metrics,
     checks,
     chiefScreen: screen,
+    terminalAnswers,
     log,
   }
   mkdirSync(REPORTS, { recursive: true })
@@ -243,7 +267,7 @@ async function run(index) {
         .join('\n')}\n`,
     )
   process.stdout.write(
-    `  tasks ${metrics.tasks.length} (parallel ${metrics.parallel}, advice ${metrics.advice}, reviews ${metrics.reviews}) · questions ${metrics.questionsToHuman.length} · notes ${metrics.notesToHuman.length} · chief edits ${metrics.chiefEdits ?? '?'} in ${metrics.chiefTurns} turns · files changed ${metrics.filesChanged.length}\n  report: ${out}\n`,
+    `  tasks ${metrics.tasks.length} (parallel ${metrics.parallel}, advice ${metrics.advice}, reviews ${metrics.reviews}) · questions ${metrics.questionsToHuman.length} · notes ${metrics.notesToHuman.length} · chief edits ${metrics.chiefEdits ?? '?'} in ${metrics.chiefTurns} turns · files changed ${metrics.filesChanged.length} · answered in the terminal ${terminalAnswers}\n  report: ${out}\n`,
   )
   return checks.every((check) => check.ok)
 }
