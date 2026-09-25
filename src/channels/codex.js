@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { isAbsolute } from 'node:path'
-import { runnable } from '../harnesses.js'
+import { runnable, terminate } from '../harnesses.js'
 import { claimEpoch } from './pty.js'
 
 export const DEFAULT_DEADLINE_MS = 3_000
@@ -128,9 +128,9 @@ function runQueue(config, launch, session, text, deadline) {
 
     const stop = () => {
       if (child?.exitCode === null && child.signalCode === null) {
-        child.kill('SIGTERM')
+        terminate(child, 'SIGTERM')
         killTimer = setTimeout(() => {
-          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+          if (child.exitCode === null && child.signalCode === null) terminate(child, 'SIGKILL')
         }, KILL_GRACE_MS)
         killTimer.unref?.()
       }

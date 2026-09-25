@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import WebSocket, { WebSocketServer } from 'ws'
-import { runnable } from '../src/harnesses.js'
+import { runnable, terminate } from '../src/harnesses.js'
 import { configRoot } from '../src/roster.js'
 import { askTheBoard, boardClient } from './lib/question-door.js'
 import { createReceiver } from './lib/receiver.js'
@@ -486,8 +486,8 @@ async function supervise(executable, args) {
   let broker
   let tui
   const stop = () => {
-    tui?.kill('SIGTERM')
-    backend.kill('SIGTERM')
+    if (tui) terminate(tui, 'SIGTERM')
+    terminate(backend, 'SIGTERM')
   }
   process.on('SIGTERM', stop)
   process.on('SIGINT', stop)
@@ -520,14 +520,16 @@ async function supervise(executable, args) {
       env: { ...env, CF_CODEX_TUI_TOKEN: configuration.token },
       stdio: 'inherit',
     })
-    backend.once('exit', () => tui?.kill('SIGTERM'))
+    backend.once('exit', () => {
+      if (tui) terminate(tui, 'SIGTERM')
+    })
     const [code] = await once(tui, 'exit')
     return code ?? 0
   } finally {
     stop()
     await broker?.close()
     if (backend.exitCode === null && !backend.signalCode) {
-      const killer = setTimeout(() => backend.kill('SIGKILL'), 1500)
+      const killer = setTimeout(() => terminate(backend, 'SIGKILL'), 1500)
       await once(backend, 'exit').catch(() => {})
       clearTimeout(killer)
     }

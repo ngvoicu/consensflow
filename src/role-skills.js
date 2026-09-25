@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { runnable } from './harnesses.js'
+import { runnable, terminate } from './harnesses.js'
 import { configRoot } from './roster.js'
 
 /**
@@ -87,7 +87,7 @@ function codexInstructions(executable, cwd, env) {
       if (settled) return
       settled = true
       clearTimeout(timer)
-      child.kill()
+      terminate(child)
       if (error) reject(new Error('Cannot read native Codex instructions safely'))
       else resolve(value)
     }

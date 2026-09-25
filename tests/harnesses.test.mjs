@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { runnable } from '../src/harnesses.js'
+import { runnable, terminate } from '../src/harnesses.js'
 
 /** How a harness CLI is run: a program as it is, a Windows .cmd through cmd.exe with its quoting. */
 describe('runnable', () => {
@@ -30,6 +30,16 @@ describe('runnable', () => {
       run.args[3],
       '"C:\\Program^ Files\\nodejs\\codex.cmd ^^^"-c^^^" ^^^"developer_instructions=\\^^^"hi\\^^^"^^^ ^^^&^^^ more^^^" ^^^"trailing\\\\^^^""',
     )
+  })
+
+  it('ends a child with the signal asked for, where signals exist', {
+    skip: process.platform === 'win32',
+  }, () => {
+    const signals = []
+    const child = () => ({ pid: 1, exitCode: null, signalCode: null, kill: (s) => signals.push(s) })
+    terminate(child())
+    terminate(child(), 'SIGKILL')
+    assert.deepEqual(signals, ['SIGTERM', 'SIGKILL'])
   })
 
   it('treats .bat the same and everything else as a program', () => {

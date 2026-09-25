@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { accessSync, constants, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
@@ -175,6 +176,25 @@ export function runnable(executable, args = [], env = process.env) {
     args: ['/d', '/s', '/c', `"${line}"`],
     options: { windowsVerbatimArguments: true },
   }
+}
+
+/**
+ * Ends a child started through `runnable`, and everything it started. On
+ * Windows the child may be the cmd.exe wrapper of a `.cmd`, and killing it
+ * alone leaves the program it started running, so the whole tree goes, at
+ * once (Windows has no gentle signal a process can act on). Elsewhere the
+ * signal goes to the child as asked.
+ */
+export function terminate(child, signal = 'SIGTERM') {
+  if (process.platform !== 'win32') {
+    child.kill(signal)
+    return
+  }
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return
+  spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+    stdio: 'ignore',
+    windowsHide: true,
+  })
 }
 
 export function harnessPath(id, env) {

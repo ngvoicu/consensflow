@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { realpath } from 'node:fs/promises'
-import { runnable } from '../harnesses.js'
+import { runnable, terminate } from '../harnesses.js'
 
 /**
  * The P5 prompt_async endpoint admits a request but may stay silent forever.
@@ -529,7 +529,7 @@ export async function createSession({
   // synchronously — SIGTERM could outlive the parent and the port with it.
   const onProcessExit = () => {
     try {
-      child.kill('SIGKILL')
+      terminate(child, 'SIGKILL')
     } catch {}
   }
   process.once('exit', onProcessExit)
@@ -537,13 +537,13 @@ export async function createSession({
   const stop = async () => {
     if (!closed && child.exitCode === null && child.signalCode == null && !spawnError) {
       try {
-        child.kill('SIGTERM')
+        terminate(child, 'SIGTERM')
       } catch {}
     }
     const fallback = setTimeout(() => {
       if (!closed) {
         try {
-          child.kill('SIGKILL')
+          terminate(child, 'SIGKILL')
         } catch {}
       }
     }, CREATE_TERM_WAIT_MS)
