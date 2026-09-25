@@ -605,8 +605,10 @@ pub fn sanitize(body: &[u8]) -> Result<Vec<u8>, SanitizeError> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::collections::HashMap;
     use std::io::{Read, Result as IoResult};
+    #[cfg(unix)]
     use std::path::Path;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{mpsc, Arc, Barrier, Mutex};
@@ -615,8 +617,12 @@ mod tests {
 
     use portable_pty::PtySize;
 
-    use super::{sanitize, ArbiterError, ClearOutcome, InputArbiter, PaneEvent, SanitizeError};
-    use crate::pty::{serial_pty_test, OpenedPane, PaneError, PaneInputWriter, PaneKey, PaneTable};
+    #[cfg(unix)]
+    use super::ClearOutcome;
+    use super::{sanitize, ArbiterError, InputArbiter, PaneEvent, SanitizeError};
+    #[cfg(unix)]
+    use crate::pty::{serial_pty_test, OpenedPane, PaneTable};
+    use crate::pty::{PaneError, PaneInputWriter, PaneKey};
 
     fn terminal_size() -> PtySize {
         PtySize {

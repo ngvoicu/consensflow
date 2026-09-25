@@ -1098,7 +1098,9 @@ mod tests {
 
     use portable_pty::PtySize;
 
-    use super::{serial_pty_test, OpenedPane, PaneEnvironment, PaneError, PaneKey, PaneTable};
+    #[cfg(unix)]
+    use super::{OpenedPane, PaneEnvironment, PaneKey};
+    use super::{serial_pty_test, PaneError, PaneTable};
 
     fn terminal_size(rows: u16, cols: u16) -> PtySize {
         PtySize {
@@ -1228,6 +1230,7 @@ mod tests {
         assert!(table.begin_update().is_ok());
     }
 
+    #[cfg(unix)]
     #[test]
     fn update_installation_and_real_spawn_share_one_atomic_boundary() {
         let _serial = serial_pty_test();
