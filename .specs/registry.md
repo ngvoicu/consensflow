@@ -23,7 +23,7 @@
 | standalone-panes-delivery | ConsensFlow owns the panes — standalone mode in the app, results delivered to the lead | completed | high | 272/272 | 2026-09-12 |
 | agent-catalog-redesign | Coherent agent catalog and roster browsing | completed | high | 42/42 | 2026-09-10 |
 | chief-of-staff | Chief of Staff and Staff — the lead and the team renamed everywhere, data included | completed | high | 5/5 | 2026-09-25 |
-| chief-evals | Chief evals — a real chief on a toy project, its judgment measured from the ledger | in-progress | high | 2/5 | 2026-09-25 |
+| chief-evals | Chief evals — a real chief on a toy project, its judgment measured from the ledger | in-progress | high | 4/5 | 2026-09-25 |
 
 Phase 19 is complete: alpha.37 is installed and source is integrated into the
 original checkout. Native delivery, persistent results, PM window, updater and

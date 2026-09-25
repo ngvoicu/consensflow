@@ -65,7 +65,7 @@ the whole transcripts or you can invent cases/prompts" → "da".
 - [x] [TEST-CE-01] `measure(ledgerFile, project)` reads a ledger and reports the counts above; a unit test builds a ledger with the real API (tasks, questions, notes, a transcript copy with edit results) and checks every number; the scenario's `verdict(metrics)` names each expectation that held or failed.
 - [x] [IMPL-CE-02] `evals/run.mjs` (the live run, the scripted human, the report), `evals/measure.mjs`, `evals/scenarios/six-decisions.mjs`, its fixture, README; the old evals removed. Satisfies TEST-CE-01.
 
-### Phase C: every harness in every role [ ]
+### Phase C: every harness in every role [done]
 
 Gabriel, after the first run: "test all the combinations of harnesses, cc,
 codex, pi and opencode with cheap models, in every role from chief to
@@ -73,8 +73,8 @@ workers, advisors and reviewers; simpler and more complex cases too; keep
 the tests, do not delete or replace them if they are good; free text as an
 answer to questions; and devin."
 
-- [ ] [TEST-CE-04] `staffFor(harnesses)` gives each harness two workers, an advisor and a reviewer on its cheap model, all standard tier; `chiefEnvironment(chief, model)` sets the model through the environment for Claude Code and OpenCode and says "default" for the rest; `answerFor(scenario, question)` takes the scenario's first matching pattern (free text), else the first option, else the fallback. Unit tests, no spend.
-- [ ] [IMPL-CE-05] `--chief` and `--staff` on the runner, `evals/plan.mjs`, reports named by scenario, chief and staff and kept in git, `npm run eval:summary`; the `simple-fix` and `complex-launch` scenarios on the shared `site` fixture; `answers` on every scenario. Satisfies TEST-CE-04.
+- [x] [TEST-CE-04] `staffFor(harnesses)` gives each harness two workers, an advisor and a reviewer on its cheap model, all standard tier; `chiefEnvironment(chief, model)` sets the model through the environment for Claude Code (Opus unless given) and OpenCode (its cheap model unless given) and says "default" for the rest; `answerFor(scenario, question)` takes the scenario's first matching pattern (free text), else the first option, else the fallback. Unit tests, no spend.
+- [x] [IMPL-CE-05] `--chief` and `--staff` on the runner, `evals/plan.mjs`, reports named by scenario, chief and staff and kept in git, `npm run eval:summary`; the `simple-fix` and `complex-launch` scenarios on the shared `site` fixture; `answers` on every scenario. Satisfies TEST-CE-04.
 
 ### Phase B: the first measurement [ ]
 
@@ -83,3 +83,6 @@ answer to questions; and devin."
 ## TDD log
 
 - 2026-09-25, Phase A: the measurer's unit test builds a ledger with the real API and checks every number; the first live run (chief Sonnet, staff Haiku, 22 min) proved the pipe: the chief put four tasks on the board and workers did every edit (chief edits 3 in 44 turns), it asked the human once (free text, a plan with a question at its end), sent one note (the final summary), asked no advice, requested no review, and decided on its own that the old document is outdated. Parallel 1, because the staff had one worker: two now.
+- 2026-09-25, Phase C: plan and measure tested without spend (staff roster, chief environment, free-text answers, the workspace-vs-fixture diff). The second live run (chief OpenCode on its cheap model, staff Pi, `simple-fix`, 2 min) exposed two runner faults, both fixed: the report named Opus for an OpenCode chief because `--model` defaulted to it for every harness, and the only edit count read Claude's tool text, so the chief's own fix of the page counted as no fix. Now `filesChanged` diffs the workspace against the fixture for any harness; the Claude-only count is null elsewhere. The run itself: the chief fixed the page by hand in one turn, put no task on the board, asked nothing, requested no advice or review.
+- 2026-09-25, Phase B, run 3 (chief OpenCode on its cheap model, staff Pi, `simple-fix`, 144 s, 4/5): the chief found the planted contradiction (the docs say a scale of 1 to 5), asked the owner on the board which value is right, with options, although the prompt had said 0 to 10 (the one failed expectation, kept: the question blocked on what the owner had already said), fixed the page after the answer, touched nothing else, and put the finding about the docs in its last words in the terminal, not in a `cf note --human`. The pattern from the btb transcripts, reproduced on a cheap model in two minutes.
+

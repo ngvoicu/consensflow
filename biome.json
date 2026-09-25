@@ -28,7 +28,8 @@
       "!!**/coverage",
       "!!**/test-results",
       "!!app/ui/vendor",
-      "!!**/.specs"
+      "!!**/.specs",
+      "!!evals/reports"
     ]
   },
   "formatter": {
