@@ -1088,7 +1088,9 @@ fn signal_process_group(process_group_id: i32) -> Result<(), PaneError> {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::io::{BufRead, BufReader, Read};
+    #[cfg(unix)]
+    use std::io::{BufRead, BufReader};
+    use std::io::Read;
     use std::path::Path;
     use std::sync::Arc;
     use std::thread;

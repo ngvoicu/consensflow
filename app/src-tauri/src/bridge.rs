@@ -139,6 +139,7 @@ impl BridgeBuilder {
     }
 
     #[cfg(test)]
+    #[cfg_attr(not(unix), allow(dead_code))]
     fn with_default_request_deadline_ms(mut self, milliseconds: u64) -> Self {
         self.default_request_deadline = Duration::from_millis(milliseconds);
         self
@@ -217,6 +218,7 @@ impl BridgeBuilder {
     }
 
     #[cfg(test)]
+    #[cfg_attr(not(unix), allow(dead_code))]
     fn connect_uninterruptible<R, W>(
         self,
         input: R,
