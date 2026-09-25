@@ -854,7 +854,7 @@ fn start_editor(
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
+        .stderr(daemon_stderr())
         .spawn()
         .map_err(|error| format!("the bundled ConsensFlow could not be started: {error}"))?;
     let input = child
@@ -886,6 +886,37 @@ fn start_editor(
             ))
         }
     }
+}
+
+/// Where the daemon's error output goes. On Windows a windowed app has no
+/// stderr to hand down (inheriting an invalid handle fails the spawn), so the
+/// daemon writes to `<home>/app/app.log`, the file the macOS build redirects
+/// the app's own stderr to; elsewhere the daemon inherits the app's.
+#[cfg(windows)]
+fn daemon_stderr() -> Stdio {
+    let home = std::env::var_os("CONSENSFLOW_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(|p| PathBuf::from(p).join(".consensflow")));
+    let Some(home) = home else {
+        return Stdio::null();
+    };
+    let directory = home.join("app");
+    if std::fs::create_dir_all(&directory).is_err() {
+        return Stdio::null();
+    }
+    match std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(directory.join("app.log"))
+    {
+        Ok(file) => Stdio::from(file),
+        Err(_) => Stdio::null(),
+    }
+}
+
+#[cfg(not(windows))]
+fn daemon_stderr() -> Stdio {
+    Stdio::inherit()
 }
 
 /// Node's `state.changed` becomes the page's `state-changed`.
