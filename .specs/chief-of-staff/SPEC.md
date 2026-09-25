@@ -1,7 +1,7 @@
 ---
 id: chief-of-staff
 title: Chief of Staff and Staff — the lead and the team renamed everywhere, data included
-status: in-progress
+status: completed
 created: 2026-09-25
 updated: 2026-09-25
 priority: high
@@ -60,10 +60,11 @@ In prose, "the chief" is the short form and "Chief of Staff" the title
 - [x] [TEST-COS-03] The board page and the Agents screen say Staff and Chief of Staff wherever they said Team and Lead; the New project dialog picks the staff; the Staff dialog edits it; the chief's lane reads "Chief of Staff".
 - [x] [IMPL-COS-04] `app/ui` (index.html, core/*.js), the UI tests, the packaged smoke. Satisfies TEST-COS-03.
 
-### Phase C: the words around it [ ]
+### Phase C: the words around it [done]
 
-- [ ] [IMPL-COS-05] README, this spec's registry row, the brain: a decision record, the glossary, the status board; the memory notes that say lead.
+- [x] [IMPL-COS-05] README, this spec's registry row, the brain: a decision record, the glossary, the status board; the memory notes that say lead.
 
 ## TDD log
 
 - 2026-09-25, Phases A and B in one pass: every `lead`/`Lead`/`team`/`Team` word and identifier renamed across src, hosts, bin, skill, tests, evals, the board page and the Rust allow-list (`staff.last`); `skill/core/lead.md` → `chief.md`; migration 5 rebuilds `participant` with `chief` (a test opens a version-4 ledger with `lead` rows and reads `chief` with every id kept), and migrations now run with foreign keys off and a reference check after, since dropping the table had cascaded through task and message. Node 684/0, browser 84/84, Rust 111, integration 9/9.
+- 2026-09-25, Phase C: README first mentions carry the title; the brain has the decision record, the glossary (Chief of Staff, Staff; Lead and Project team marked renamed) and a status row.
