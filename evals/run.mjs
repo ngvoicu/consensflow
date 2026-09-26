@@ -83,12 +83,17 @@ wrapper('claude', realOnPath('claude', process.env.PATH ?? ''), [
   '--no-chrome',
 ])
 const realCodex = realOnPath('codex', process.env.PATH ?? '')
+// Codex also opens on an update prompt whenever a newer release exists
+// (seen 2026-09-26 with 0.157.0 out), and a chief started without a first
+// message waits on it for good: the eval turns the startup check off.
 wrapper(
   'codex',
   realCodex,
-  codexIsolation(
-    JSON.parse(
-      execFileSync(realCodex, ['mcp', 'list', '--json'], { encoding: 'utf8', timeout: 30_000 }),
+  ['-c', 'check_for_update_on_startup=false'].concat(
+    codexIsolation(
+      JSON.parse(
+        execFileSync(realCodex, ['mcp', 'list', '--json'], { encoding: 'utf8', timeout: 30_000 }),
+      ),
     ),
   ),
 )
