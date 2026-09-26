@@ -766,6 +766,33 @@ test('completion/pi: toolCallId closes the loop and a 120-second quiet window de
   assert.equal(result.settlement.boundary, 'session.quiet_window')
 })
 
+test('completion/pi: a turn stopped by Escape (aborted) is over, not failed, settled by its evidence or the quiet window', async () => {
+  const abort = (records) => {
+    records.at(-1).message.stopReason = 'aborted'
+    return records
+  }
+  const nativeStage = await stageJsonl('pi', 'hazy-ridge', 'pi/tool-loop.jsonl', {
+    mutate: abort,
+    settlement: { launchId: 'launch-pi-1', frontierId: '3f9b029e' },
+  })
+  const native = await answers('pi', 'hazy-ridge', nativeStage.env)
+  shape(native)
+  assert.equal(native.inFlight, false)
+  assert.equal(native.cancelled, true)
+  assert.equal(native.failed, false)
+  assert.equal(native.items.at(-1).complete, false)
+  assert.equal(native.settlement.state, 'settled')
+  assert.equal(native.settlement.provenance, 'native')
+
+  const quietStage = await stageJsonl('pi', 'hazy-ridge', 'pi/tool-loop.jsonl', {
+    mutate: abort,
+    ageMs: PI_QUIET_MS + 1_000,
+  })
+  const quiet = await answers('pi', 'hazy-ridge', quietStage.env)
+  assert.equal(quiet.inFlight, false)
+  assert.equal(quiet.settlement.state, 'settled', 'without the evidence, the quiet window ends it')
+})
+
 test('completion/pi: matching settlement evidence promotes the native boundary, mismatches stay derived', async () => {
   const settledStage = await stageJsonl('pi', 'hazy-ridge', 'pi/tool-loop.jsonl', {
     settlement: { launchId: 'launch-pi-1', frontierId: '3f9b029e' },

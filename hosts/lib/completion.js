@@ -1405,11 +1405,26 @@ async function piAnswers(sessionId, env, options = {}) {
       turnOpen = true
       result.failed = false
       result.failure = null
+      result.cancelled = false
       terminal = {
         provenance: 'derived',
         complete: true,
         item,
         boundary: boundary('message.assistant.stop', seq, at, { id }),
+      }
+    } else if (message.stopReason === 'aborted') {
+      // Stopped by an Escape (a pause, a tell, the human): the turn is over,
+      // not failed, and the extension's settled evidence names this message.
+      turnOpen = true
+      result.failed = false
+      result.failure = null
+      result.cancelled = true
+      terminal = {
+        provenance: 'derived',
+        complete: false,
+        aborted: true,
+        item,
+        boundary: boundary('message.assistant.aborted', seq, at, { id }),
       }
     } else if (message.stopReason === 'error') {
       turnOpen = true
@@ -1438,7 +1453,7 @@ async function piAnswers(sessionId, env, options = {}) {
   const { mtimeMs } = await fs.stat(file)
   const quiet = Date.now() - mtimeMs >= PI_SETTLEMENT_QUIET_MS
   const open = [...openTools]
-  const canSettle = Boolean(terminal?.complete && quiet && open.length === 0)
+  const canSettle = Boolean((terminal?.complete || terminal?.aborted) && quiet && open.length === 0)
   const nativeSettled = Boolean(hasNativeBoundary && open.length === 0)
   if (canSettle || nativeSettled) terminal.item.settled = true
 

@@ -1835,16 +1835,19 @@ class Ledger {
     return row === undefined ? null : this.task(row.project_id, row.number)
   }
 
-  /** A tell for this task is in the participant's window and not yet answered. */
-  tellPending(participantId, taskId) {
+  /** A tell for this task has reached the participant's window since the task was last paused. */
+  toldSincePaused(participantId, taskId) {
     return (
       this.#db
         .prepare(
-          `SELECT 1 FROM message q WHERE q.recipient_id = ? AND q.task_id = ?
-             AND q.kind = 'question' AND q.urgent = 1
-             AND q.state IN ('delivering', 'delivered', 'read')
-             AND NOT EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id
-               AND a.kind = 'answer' AND a.state != 'cancelled')`,
+          `SELECT 1 FROM message q JOIN task t ON t.id = q.task_id
+             WHERE q.recipient_id = ? AND q.task_id = ?
+               AND q.kind = 'question' AND q.urgent = 1
+               AND q.state IN ('delivering', 'delivered', 'read')
+               AND q.created_at >= (SELECT MAX(e.at) FROM event e
+                 WHERE e.project_id = t.project_id AND e.kind = 'task.state'
+                   AND json_extract(e.data, '$.task') = t.number
+                   AND json_extract(e.data, '$.to') = 'paused')`,
         )
         .get(participantId, taskId) !== undefined
     )

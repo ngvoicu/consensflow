@@ -438,7 +438,7 @@ describe('the dispatcher', () => {
     })
   })
 
-  it("leaves the window alone while it answers the chief's tell, and stops it again once answered", async () => {
+  it("leaves the window alone once the chief's tell reaches it, answered or not, until the task goes on", async () => {
     await setup(async (context) => {
       const { project } = await withStaff(context)
       context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
@@ -465,14 +465,14 @@ describe('the dispatcher', () => {
       context.clock.advance(3_100)
       await context.dispatcher.pass()
       assert.equal(escapes(), 1, 'its answer to the tell is not interrupted')
-      // Answered, the task still paused: an agent that works on is stopped again.
+      // Answered, it ends its own turn: an Escape now would cut its last words.
       context.ledger.answer(told.id, {
         from: context.ledger.task(project.id, 1).assignee,
         body: 'a.txt',
       })
       context.clock.advance(3_100)
       await context.dispatcher.pass()
-      assert.equal(escapes(), 2, 'the pause holds again once the tell is answered')
+      assert.equal(escapes(), 1, 'nor its wrap-up after the answer')
     })
   })
 

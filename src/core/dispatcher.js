@@ -525,8 +525,9 @@ export class Dispatcher {
   async #interruptIfPaused(participant, runtime) {
     const paused = this.#ledger.pausedTask(participant.id)
     if (paused === null) return
-    // The chief's tell is in the window: the agent answers it, uninterrupted.
-    if (this.#ledger.tellPending(participant.id, paused.id)) return
+    // The chief's tell reached the window during this pause: the agent answers
+    // it and ends its own turn, uninterrupted; the chief resumes the task.
+    if (this.#ledger.toldSincePaused(participant.id, paused.id)) return
     const done = runtime.interrupted?.task === paused.id ? runtime.interrupted : null
     if (
       done !== null &&
