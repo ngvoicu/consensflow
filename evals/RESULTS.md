@@ -23,3 +23,11 @@ before that column existed.
 | 2026-09-25T23-27 | six-decisions | pi (pi's default) | claude+opencode+devin | 5/7 | ? | 5 | 2 | 1 | 1 | 1 | 1 | ? | 3 | 0 | 40 |
 | 2026-09-26T00-07 | six-decisions | opencode (opencode/muse-spark-1.3-contributor-free) | claude+pi+devin | 2/7 | ? | 0 | 0 | 0 | 0 | 1 | 0 | ? | 0 | 0 | 40 |
 | 2026-09-26T00-13 | six-decisions | devin (devin's default) | claude+pi+opencode | 1/7 | ? | 0 | 0 | 0 | 0 | 0 | 0 | ? | 7 | 2 | 6 |
+| 2026-09-26T04-46 | round-trip | claude (claude-opus-5) | pi+opencode+devin | 7/7 | 5/5 | 2 | 1 | 0 | 1 | 0 | 0 | 0 | 1 | 0 | 4 |
+| 2026-09-26T04-50 | round-trip | pi (pi's default) | claude+opencode+devin | 7/7 | 5/5 | 2 | 1 | 0 | 1 | 0 | 0 | ? | 1 | 0 | 4 |
+| 2026-09-26T04-55 | round-trip | opencode (opencode-go/deepseek-v4-flash) | claude+pi+devin | 7/7 | 5/5 | 2 | 1 | 0 | 1 | 0 | 0 | ? | 1 | 0 | 6 |
+| 2026-09-26T04-58 | round-trip | devin (devin's default) | claude+pi+opencode | 1/7 | 5/5 | 0 | 0 | 0 | 0 | 1 | 0 | ? | 1 | 0 | 3 |
+| 2026-09-26T05-03 | round-trip | claude (claude-opus-5) | opencode | 7/7 | 5/5 | 2 | 1 | 0 | 1 | 0 | 0 | 0 | 1 | 0 | 4 |
+| 2026-09-26T05-28 | round-trip | claude (claude-opus-5) | devin | 6/7 | 5/5 | 2 | 1 | 0 | 1 | 0 | 0 | 0 | 1 | 0 | 25 |
+| 2026-09-26T06-08 | six-decisions | claude (claude-opus-5) | pi+opencode+devin | 5/7 | 5/5 | 4 | 4 | 0 | 1 | 1 | 1 | 0 | 0 | 0 | 40 |
+| 2026-09-26T06-48 | six-decisions | opencode (opencode-go/deepseek-v4-flash) | claude+pi+devin | 2/7 | 5/5 | 0 | 0 | 0 | 0 | 1 | 0 | ? | 0 | 0 | 40 |
