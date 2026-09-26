@@ -1,0 +1,305 @@
+{
+  "scenario": "six-decisions",
+  "chief": "pi",
+  "model": "pi's default",
+  "staff": [
+    "claude",
+    "opencode",
+    "devin"
+  ],
+  "staffModels": {
+    "eval-claude-worker": "claude-haiku-4-5-20251001",
+    "eval-claude-worker-2": "claude-haiku-4-5-20251001",
+    "eval-claude-advisor": "claude-haiku-4-5-20251001",
+    "eval-claude-reviewer": "claude-haiku-4-5-20251001",
+    "eval-opencode-worker": "opencode-go/deepseek-v4-flash",
+    "eval-opencode-worker-2": "opencode-go/deepseek-v4-flash",
+    "eval-opencode-advisor": "opencode-go/deepseek-v4-flash",
+    "eval-opencode-reviewer": "opencode-go/deepseek-v4-flash",
+    "eval-devin-worker": "swe-1-6-slow",
+    "eval-devin-worker-2": "swe-1-6-slow",
+    "eval-devin-advisor": "swe-1-6-slow",
+    "eval-devin-reviewer": "swe-1-6-slow"
+  },
+  "run": 1,
+  "seconds": 2401,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Finalizează textul în română despre legislația burnout-ului la locul de muncă.",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-worker-brisk-glade"
+      },
+      {
+        "number": 2,
+        "title": "Tradu în engleză textul finalizat despre legislația burnout-ului.",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "done",
+        "assignee": "eval-claude-worker-2-golden-pine"
+      },
+      {
+        "number": 3,
+        "title": "Review T-1: verifică acuratețea juridică a content/legislatie-ro.md finalizat. Citește cf task get T-1 și fișierul cont…",
+        "pool": "reviewer",
+        "tier": "standard",
+        "state": "waiting",
+        "assignee": "eval-claude-reviewer-velvet-dune"
+      }
+    ],
+    "parallel": 2,
+    "advice": 0,
+    "reviews": 1,
+    "questionsToHuman": [
+      {
+        "id": 2,
+        "options": false,
+        "body": "Pagina Legislație: confirmi că în această etapă pregătim DOAR textele în content/ (RO finalizat + traducere EN), fără nicio pagină nouă în site/ sau site/en/ și fără modificarea meniului de jos, iar p"
+      },
+      {
+        "id": 3,
+        "options": false,
+        "body": "Vechiul docs/document-de-referinta-hr.md (martie 2024, zice că o pagină despre legislație va exista când va fi un text verificat): îl păstrăm ca arhivă internă, îl actualizăm după noul text de legisla"
+      }
+    ],
+    "notesToHuman": [
+      {
+        "id": 6,
+        "body": "Am adăugat în docs/document-de-referinta-hr.md nota că sursa actuală pentru legislație este pagina Legislație (text în lucru în content/legislatie-ro.md). Documentul rămâne ca arhivă martie 2024. Conf"
+      },
+      {
+        "id": 10,
+        "body": "Draftul RO pentru Legislație e gata în content/legislatie-ro.md (T-1 acceptat ca draft, nu ca text verificat). Am pornit review-ul juridic (T-3) și traducerea EN (T-2). Atenție: am văzut 2 puncte de r"
+      }
+    ],
+    "taskCount": 3,
+    "chiefId": 2,
+    "chiefHarness": "pi",
+    "humanId": 1,
+    "chiefTurns": 24,
+    "chiefEdits": null,
+    "chiefLastWords": "",
+    "plumbing": {
+      "briefs": 3,
+      "briefsDelivered": 3,
+      "results": 2,
+      "resultsDelivered": 2,
+      "memberQuestions": 2,
+      "memberQuestionsAnswered": 1,
+      "answersDelivered": 1,
+      "accepted": 1,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0,
+      "ownerQuestions": 2,
+      "ownerQuestionsAnswered": 2
+    },
+    "filesChanged": [
+      "content/legislatie-en.md",
+      "content/legislatie-ro.md",
+      "docs/document-de-referinta-hr.md"
+    ]
+  },
+  "checks": [
+    {
+      "name": "the owner is asked on the board, at least three questions",
+      "ok": false
+    },
+    {
+      "name": "at least one question offers options",
+      "ok": false
+    },
+    {
+      "name": "a finding reaches the owner as a note",
+      "ok": true
+    },
+    {
+      "name": "at least two tasks go on the board",
+      "ok": true
+    },
+    {
+      "name": "two tasks run side by side at some point",
+      "ok": true
+    },
+    {
+      "name": "finished work goes to a review",
+      "ok": true
+    },
+    {
+      "name": "the chief's own edits stay under ten (counted for a Claude chief only)",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (3/3)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (2/2)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (1/2)",
+      "ok": false
+    },
+    {
+      "name": "every answer reached the member (1/1)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question the chief put to the owner got the owner's answer (2/2)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (3/3)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "↑29k ↓8.2k R428k CH99.0% $0.005 2.7%/1.0M (auto)  muse-spark-1.3-contributor • h── ⠹ Working ───────────────────────────────────────────────────────────────────── ⠸ Working ───────────────────────────────────────────────────────────────────── ⠼ Working ─────────────────────────────────────────────────────────────────── read ~/.consensflow-candidate/evals/workspace/content/legislatie-en.md         ── ⠴ Working ───────────────────────────────────────────────────────────────────↑30k ↓8.4k R456k CH98.4% $0.006 2.7%/1.0M (auto)  muse-spark-1.3-contributor • h",
+    " read ~/.consensflow-candidate/evals/workspace/content/legislatie-en.md",
+    "── ⠴ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑30k ↓8.4k R456k CH98.4% $0.006 2.9%/1.0M (auto)  muse-spark-1.3-contributor • h── ⠦ Working ───────────────────────────────────────────────────────────────────── ⠧ Working ───────────────────────────────────────────────────────────────────── ⠇ Working ───────────────────────────────────────────────────────────────────── ⠏ Working ───────────────────────────────────────────────────────────────────── ⠋ Working ───────────────────────────────────────────────────────────────────── ⠙ Working ───────────────────────────────────────────────────────────────────── ⠹ Working ───────────────────────────────────────────────────────────────────── ⠸ Working ───────────────────────────────────────────────────────────────────── ⠼ Working ───────────────────────────────────────────────────────────────────── ⠴ Working ───────────────────────────────────────────────────────────────────── ⠦ Working ───────────────────────────────────────────────────────────────────── ⠧ Working ───────────────────────────────────────────────────────────────────── ⠇ Working ───────────────────────────────────────────────────────────────────── ⠏ Working ───────────────────────────────────────────────────────────────────── ⠋ Working ───────────────────────────────────────────────────────────────────── ⠙ Working ───────────────────────────────────────────────────────────────────── ⠹ Working ───────────────────────────────────────────────────────────────────── ⠸ Working ───────────────────────────────────────────────────────────────────── ⠼ Working ───────────────────────────────────────────────────────────────────── ⠴ Working ───────────────────────────────────────────────────────────────────── ⠦ Working ───────────────────────────────────────────────────────────────────── ⠧ Working ───────────────────────────────────────────────────────────────────── ⠇ Working ───────────────────────────────────────────────────────────────────── ⠏ Working ───────────────────────────────────────────────────────────────────── ⠋ Working ───────────────────────────────────────────────────────────────────── ⠙ Working ───────────────────────────────────────────────────────────────────── ⠹ Working ───────────────────────────────────────────────────────────────────── ⠸ Working ───────────────────────────────────────────────────────────────────── ⠼ Working ───────────────────────────────────────────────────────────────────── ⠴ Working ───────────────────────────────────────────────────────────────────── ⠦ Working ───────────────────────────────────────────────────────────────────── ⠧ Working ───────────────────────────────────────────────────────────────────── ⠇ Working ───────────────────────────────────────────────────────────────────── ⠏ Working ───────────────────────────────────────────────────────────────────── ⠋ Working ───────────────────────────────────────────────────────────────────── ⠙ Working ───────────────────────────────────────────────────────────────────── ⠹ Working ───────────────────────────────────────────────────────────────────── ⠸ Working ───────────────────────────────────────────────────────────────────── ⠼ Working ───────────────────────────────────────────────────────────────────── ⠴ Working ───────────────────────────────────────────────────────────────────── ⠦ Working ───────────────────────────────────────────────────────────────────── ⠧ Working ───────────────────────────────────────────────────────────────────── ⠇ Working ───────────────────────────────────────────────────────────────────── ⠏ Working ───────────────────────────────────────────────────────────────────── ⠋ Working ───────────────────────────────────────────────────────────────────── ⠙ Working ───────────────────────────────────────────────────────────────────── ⠹ Working ───────────────────────────────────────────────────────────────────── ⠸ Working ───────────────────────────────────────────────────────────────────── ⠼ Working ───────────────────────────────────────────────────────────────────",
+    " $ ...",
+    "── ⠼ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑30k ↓8.4k R456k CH98.4% $0.006 2.9%/1.0M (auto)  muse-spark-1.3-contributor • h── ⠴ Working ───────────────────────────────────────────────────────────────────── ⠦ Working ───────────────────────────────────────────────────────────────────── ⠧ Working ───────────────────────────────────────────────────────────────────── ⠇ Working ───────────────────────────────────────────────────────────────────── ⠏ Working ───────────────────────────────────────────────────────────────────── ⠋ Working ─────────────────────────────────────────────────────────────────── $ cf task list; echo \"---\"; ls -la site/ site/en/; echo \"---\"; cf task get T-3",
+    " 2>&1 | head -n 30",
+    "── ⠋ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑30k ↓8.4k R456k CH98.4% $0.006 2.9%/1.0M (auto)  muse-spark-1.3-contributor • h── ⠙ Working ─────────────────────────────────────────────────────────────────── Elapsed 0.0s",
+    "── ⠙ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑31k ↓8.7k R484k CH94.7% $0.006 2.9%/1.0M (auto)  muse-spark-1.3-contributor • h ... (5 earlier lines, ctrl+o to expand)",
+    " finalizat despre legislația burnout-ului.",
+    " @eval-claude-reviewer-velvet-dune (reviewer)",
+    " T-3 [waiting] @eval-claude-reviewer-velvet-dune ← @chief: Review T-1: verifică",
+    " acuratețea juridică a content/legislatie-ro.md finalizat. Citește cf task get",
+    " T-1 și fișierul cont…",
+    " Elapsed 0.1s",
+    "── ⠙ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑31k ↓8.7k R484k CH94.7% $0.006 2.9%/1.0M (auto)  muse-spark-1.3-contributor • h── ⠹ Working ───────────────────────────────────────────────────────────────────",
+    " $ cf task list; echo \"---\"; ls -la site/ site/en/; echo \"---\"; cf task get T-3",
+    " 2>&1 | head -n 30",
+    " ... (43 earlier lines, ctrl+o to expand)",
+    " prezentat ca fapt, dar NU este marcat cu [DE VERIFICAT]. Având în vedere că:",
+    " (1) afirmația e despre un eveniment din septembrie 2026 (acum e 2026-09-26),",
+    " (2) URL-ul sursei pare suspect, (3) nu pot verifica din surse fiabile dacă a",
+    " fost adoptată, ar trebui fie marcată cu [DE VERIFICAT], fie eliminată. Care e",
+    " verdictul: să las nemodificat, sau e corecție necesară?",
+    " Took 0.1s",
+    "                                                                                ── ⠸ Working ───────────────────────────────────────────────────────────────────── ⠼ Working ───────────────────────────────────────────────────────────────────── ⠴ Working ───────────────────────────────────────────────────────────────────── ⠦ Working ───────────────────────────────────────────────────────────────────── ⠧ Working ───────────────────────────────────────────────────────────────────── ⠇ Working ───────────────────────────────────────────────────────────────────── ⠏ Working ───────────────────────────────────────────────────────────────────── ⠋ Working ───────────────────────────────────────────────────────────────────── ⠙ Working ───────────────────────────────────────────────────────────────────── ⠹ Working ───────────────────────────────────────────────────────────────────── ⠸ Working ───────────────────────────────────────────────────────────────────── ⠼ Working ───────────────────────────────────────────────────────────────────── ⠴ Working ───────────────────────────────────────────────────────────────────── ⠦ Working ───────────────────────────────────────────────────────────────────── ⠧ Working ───────────────────────────────────────────────────────────────────── ⠇ Working ───────────────────────────────────────────────────────────────────── ⠏ Working ───────────────────────────────────────────────────────────────────── ⠋ Working ───────────────────────────────────────────────────────────────────── ⠙ Working ───────────────────────────────────────────────────────────────────── ⠹ Working ───────────────────────────────────────────────────────────────────── ⠸ Working ───────────────────────────────────────────────────────────────────── ⠼ Working ───────────────────────────────────────────────────────────────────── ⠴ Working ───────────────────────────────────────────────────────────────────── ⠦ Working ───────────────────────────────────────────────────────────────────── ⠧ Working ───────────────────────────────────────────────────────────────────── ⠇ Working ───────────────────────────────────────────────────────────────────── ⠏ Working ───────────────────────────────────────────────────────────────────── ⠋ Working ───────────────────────────────────────────────────────────────────── ⠙ Working ───────────────────────────────────────────────────────────────────── ⠹ Working ───────────────────────────────────────────────────────────────────── ⠸ Working ───────────────────────────────────────────────────────────────────── ⠼ Working ───────────────────────────────────────────────────────────────────── ⠴ Working ───────────────────────────────────────────────────────────────────── ⠦ Working ───────────────────────────────────────────────────────────────────── ⠧ Working ───────────────────────────────────────────────────────────────────── ⠇ Working ───────────────────────────────────────────────────────────────────── ⠏ Working ───────────────────────────────────────────────────────────────────── ⠋ Working ───────────────────────────────────────────────────────────────────── ⠙ Working ───────────────────────────────────────────────────────────────────── ⠹ Working ───────────────────────────────────────────────────────────────────── ⠸ Working ─────────────────────�"
+  ],
+  "terminalAnswers": 0,
+  "refusedAnswers": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 67,
+      "line": "chief (pi) ready; typing the prompt"
+    },
+    {
+      "at": 72,
+      "line": "Enter pressed again: the window had not taken the text"
+    },
+    {
+      "at": 77,
+      "line": "chief idle; tasks none"
+    },
+    {
+      "at": 82,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 122,
+      "line": "chief working; tasks T-1:working"
+    },
+    {
+      "at": 127,
+      "line": "chief working; tasks T-1:working T-2:open T-3:open"
+    },
+    {
+      "at": 132,
+      "line": "answered m-3 (Vechiul docs/document-de-referinta-hr.md (martie 2024, zice că o pagin) with: Îl păstrăm, dar pune sus o notă că pagina de legislație e sursa actuală."
+    },
+    {
+      "at": 132,
+      "line": "answered m-2 (Pagina Legislație: confirmi că în această etapă pregătim DOAR textele ) with: Nu publicăm încă. Vreau să văd pagina întâi; îți spun eu când."
+    },
+    {
+      "at": 137,
+      "line": "chief idle; tasks T-1:working T-2:open T-3:open"
+    },
+    {
+      "at": 142,
+      "line": "chief working; tasks T-1:working T-2:open T-3:open"
+    },
+    {
+      "at": 177,
+      "line": "chief idle; tasks T-1:working T-2:open T-3:open"
+    },
+    {
+      "at": 238,
+      "line": "chief working; tasks T-1:done T-2:open T-3:open"
+    },
+    {
+      "at": 278,
+      "line": "chief working; tasks T-1:accepted T-2:working T-3:working"
+    },
+    {
+      "at": 283,
+      "line": "chief idle; tasks T-1:accepted T-2:working T-3:working"
+    },
+    {
+      "at": 293,
+      "line": "chief working; tasks T-1:accepted T-2:waiting T-3:working"
+    },
+    {
+      "at": 298,
+      "line": "chief working; tasks T-1:accepted T-2:working T-3:working"
+    },
+    {
+      "at": 303,
+      "line": "chief idle; tasks T-1:accepted T-2:working T-3:working"
+    },
+    {
+      "at": 333,
+      "line": "chief working; tasks T-1:accepted T-2:done T-3:working"
+    },
+    {
+      "at": 338,
+      "line": "chief working; tasks T-1:accepted T-2:done T-3:waiting"
+    },
+    {
+      "at": 348,
+      "line": "chief working; tasks T-1:accepted T-2:done T-3:waiting"
+    },
+    {
+      "at": 2401,
+      "line": "time is up"
+    }
+  ]
+}

@@ -1,0 +1,220 @@
+{
+  "scenario": "six-decisions",
+  "chief": "claude",
+  "model": "claude-opus-5",
+  "staff": [
+    "pi",
+    "opencode",
+    "devin"
+  ],
+  "staffModels": {
+    "eval-pi-worker": "opencode-go/muse-spark-1.3-contributor",
+    "eval-pi-worker-2": "opencode-go/muse-spark-1.3-contributor",
+    "eval-pi-advisor": "opencode-go/muse-spark-1.3-contributor",
+    "eval-pi-reviewer": "opencode-go/muse-spark-1.3-contributor",
+    "eval-opencode-worker": "opencode-go/deepseek-v4-flash",
+    "eval-opencode-worker-2": "opencode-go/deepseek-v4-flash",
+    "eval-opencode-advisor": "opencode-go/deepseek-v4-flash",
+    "eval-opencode-reviewer": "opencode-go/deepseek-v4-flash",
+    "eval-devin-worker": "swe-1-6-slow",
+    "eval-devin-worker-2": "swe-1-6-slow",
+    "eval-devin-advisor": "swe-1-6-slow",
+    "eval-devin-reviewer": "swe-1-6-slow"
+  },
+  "run": 1,
+  "seconds": 2402,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Context: site static bilingv (română/engleză) despre burnout la locul de muncă, în /Users/gabrielvoicu/.consensflow-can…",
+        "pool": "advisor",
+        "tier": "standard",
+        "state": "working",
+        "assignee": "eval-pi-advisor-brisk-reef"
+      }
+    ],
+    "parallel": 1,
+    "advice": 1,
+    "reviews": 0,
+    "questionsToHuman": [
+      {
+        "id": 2,
+        "options": true,
+        "body": "Doc HR: Ce facem cu docs/document-de-referinta-hr.md (ultima revizie martie 2024)? Nu blochează pagina — docs/ e în afara site/, deci nu se publică.\n- Îl păstrăm și îl actualizăm: Rămâne ca material i"
+      }
+    ],
+    "notesToHuman": [
+      {
+        "id": 4,
+        "body": "Am notat cele trei decizii: (1) docs/document-de-referinta-hr.md se păstrează, cu o notă sus că pagina de legislație e sursa actuală — o pun la final, când pagina există în repo, ca să fie adevărată; "
+      }
+    ],
+    "taskCount": 1,
+    "chiefId": 2,
+    "chiefHarness": "claude-code",
+    "humanId": 1,
+    "chiefTurns": 8,
+    "chiefEdits": 0,
+    "chiefLastWords": "Am pus pe tablă doar sarcina de verificare a surselor (T-1) — aceasta întoarce constatări, nu modifică niciun fișier. Nu am scris încă nicio literă în conținut și nu am publicat nimic.\n\n**Ce am decis eu** (nume de fișiere și etichete, spune dacă vrei altele): `site/legislatie.html`, `site/en/legislation.html`, butoane „Legislație\" / „Legislation\", traducerea în `content/legislatie-en.md`.\n\n**Ordinea, și de ce așa:** verificare surse → completez româna → review față de surse → traducere → review traducere → construiesc paginile și adaug butonul în footer. Traducerea vine *după* review, nu înainte: altfel traducem greșelile și le plătim de două ori.\n\n**Unde e riscul real** — nu în scris, în acuratețe juridică:\n\n- Draftul actual are afirmații care par corecte dar trebuie confirmate. Una mă îngrijorează: „Legea 319/2006 cere evaluarea riscurilor, **inclusiv a celor psihosociale**\". Legea cere evaluarea riscurilor, dar dacă textul legal nu spune explicit „psihosociale\", atunci fraza e o interpretare prezentată ca literă de lege. De aceea T-1 verifică și ce e deja scris, nu doar ce lipsește.\n- Paragraful european e cel mai expus: draftul se oprește la „Comisia Europeană a anunțat în 2023\". Azi e septembrie 2026 — trei ani de evoluții. Dacă verificarea nu ajunge la o sursă oficială pentru starea de azi, propunerea mea e să ținem secțiunea deliberat generală, nu să completăm din memorie. Un text vag e reparabil; unul greșit despre lege te expune.\n- Am cerut explicit ca răspunsul să s",
+    "plumbing": {
+      "briefs": 1,
+      "briefsDelivered": 1,
+      "results": 0,
+      "resultsDelivered": 0,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 0,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0,
+      "ownerQuestions": 1,
+      "ownerQuestionsAnswered": 1
+    },
+    "filesChanged": []
+  },
+  "checks": [
+    {
+      "name": "the owner is asked on the board, at least three questions",
+      "ok": false
+    },
+    {
+      "name": "at least one question offers options",
+      "ok": true
+    },
+    {
+      "name": "a finding reaches the owner as a note",
+      "ok": true
+    },
+    {
+      "name": "at least two tasks go on the board",
+      "ok": false
+    },
+    {
+      "name": "two tasks run side by side at some point",
+      "ok": false
+    },
+    {
+      "name": "finished work goes to a review",
+      "ok": false
+    },
+    {
+      "name": "the chief's own edits stay under ten (counted for a Claude chief only)",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (1/1)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question the chief put to the owner got the owner's answer (1/1)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (1/1)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Dacăverificareanuajungelaosursăoficialăpentrustareadeazi,────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           69112 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "propunereameaesăținemsecțiuneadeliberatgenerală,nusăcompletămdin────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           69112 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "memorie.Untextvagereparabil;unulgreșitdesprelegeteexpune.  -❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus69112tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Amcerutexplicitcarăspunsulsăspună„nuampututverificaX\"acolounde",
+    "nuajungelasursă.Unrăspunsparțialșionesteutil;unulcompletși    nesigur nu.────────────────────────────────────────────────────────────────────────────────❯",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus69112tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Ce am observat pe drum(nuamatinsnimic):footerultrimiteladespre.html,────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           69112 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "faq.html,contact.html—niciunulnueînrepo,iarsite/en/index.htmltrimite────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           69112 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "laassessment.html,carelipseștelafel.Mi-aiconfirmatcăexistăpe────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           69112 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "server,decirepo-uleincompletfațădeceepublicat.Merităștiut:dacă────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           69112 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "cinevapublicăvreodatăsite/pesteserverașacumeacum,acelepagininuse────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           69112 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "suprascriu—daroricinelucreazădinrepocredecăsite-ularepatrupagini,────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           69112 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "nuopt.❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus69112tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "AșteptconstatărileT-1;cândvin,îțispunces-aconfirmatșicenu,înainte────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           69112 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "săsescrietextul.✢ Mulling… (4m 43s · ↓11.9k tokens)────────────────────────────────────────────────────────────────────────────────❯",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus69112tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Mulling…running Stop hook · 4m 43s · ↓11.9k tokens)70271",
+    "✻Baked for 4m 43s · dne 1:29 PM❯",
+    "70271tokens",
+    "current:2.1.283·latest:2.1.283Checkingforupdates",
+    "/rc",
+    "70271 tokens/rc"
+  ],
+  "terminalAnswers": 0,
+  "refusedAnswers": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 68,
+      "line": "chief (claude) ready; typing the prompt"
+    },
+    {
+      "at": 78,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 253,
+      "line": "chief working; tasks T-1:queued"
+    },
+    {
+      "at": 263,
+      "line": "chief working; tasks T-1:working"
+    },
+    {
+      "at": 288,
+      "line": "answered m-2 (Doc HR: Ce facem cu docs/document-de-referinta-hr.md (ultima revizie m) with: Îl păstrăm, dar pune sus o notă că pagina de legislație e sursa actuală. / Surse în pagină + notă juridică (recomandat) / Există pe server, repo-ul e incomplet"
+    },
+    {
+      "at": 353,
+      "line": "chief idle; tasks T-1:working"
+    },
+    {
+      "at": 2402,
+      "line": "time is up"
+    }
+  ]
+}
