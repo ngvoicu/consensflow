@@ -57,3 +57,9 @@ before that column existed.
 | 2026-09-26T15-27 | round-trip | opencode (opencode-go/deepseek-v4-flash) | codex | 4/7 | 7/7 | 2 | 1 | 0 | 1 | 1 | 0 | ? | 1 | 0 | 5 |
 | 2026-09-26T15-52 | control-trip | opencode (opencode-go/deepseek-v4-flash) | codex | 2/7 | 6/7 | 1 | 1 | 0 | 0 | 0 | 0 | ? | 0 | 0 | 25 |
 | 2026-09-26T16-11 | six-decisions | codex (gpt-5.6-luna) | opencode+devin | 1/7 | 7/7 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 14 | 2 | 19 |
+| 2026-09-26T21-32 | control-trip | opencode (opencode-go/deepseek-v4-flash) | codex | 7/7 | 7/7 | 2 | 1 | 0 | 0 | 0 | 0 | ? | 1 | 0 | 11 |
+| 2026-09-26T21-36 | round-trip | opencode (opencode-go/deepseek-v4-flash) | codex | 7/7 | 7/7 | 2 | 1 | 0 | 1 | 0 | 0 | ? | 1 | 0 | 4 |
+| 2026-09-26T21-40 | round-trip | opencode (opencode-go/deepseek-v4-flash) | devin | 5/7 | 7/7 | 2 | 1 | 0 | 1 | 0 | 0 | ? | 1 | 0 | 4 |
+| 2026-09-26T21-43 | round-trip | devin (devin's default) | opencode | 1/7 | 7/7 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 0 | 0 | 2 |
+| 2026-09-26T21-47 | round-trip | opencode (opencode-go/deepseek-v4-flash) | claude | 7/7 | 7/7 | 2 | 1 | 0 | 1 | 0 | 0 | ? | 1 | 0 | 4 |
+| 2026-09-26T21-50 | round-trip | opencode (opencode-go/deepseek-v4-flash) | devin | 7/7 | 7/7 | 2 | 1 | 0 | 1 | 0 | 0 | ? | 1 | 0 | 3 |
