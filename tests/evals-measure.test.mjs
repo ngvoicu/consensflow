@@ -94,8 +94,13 @@ describe('measuring a chief from the ledger', () => {
         body: 'Review T-1',
       })
       assert.deepEqual([advice.task.pool, review.task.pool], ['advisor', 'reviewer'])
-      // To the human: two questions (one with options), one note.
-      ledger.ask(project.id, { from: 'chief', to: 'human', body: 'Keep the old document?' })
+      // To the human: two questions (one with options, left unanswered), one note.
+      const keep = ledger.ask(project.id, {
+        from: 'chief',
+        to: 'human',
+        body: 'Keep the old document?',
+      })
+      ledger.answer(keep.id, { from: 'human', body: 'Keep it' })
       ledger.ask(project.id, {
         from: 'chief',
         to: 'human',
@@ -182,6 +187,8 @@ describe('measuring a chief from the ledger', () => {
         memberQuestionsAnswered: 1,
         answersDelivered: 1,
         accepted: 1,
+        ownerQuestions: 2,
+        ownerQuestionsAnswered: 1,
       })
       assert.equal(metrics.taskCount, 4)
       assert.deepEqual(
@@ -191,6 +198,7 @@ describe('measuring a chief from the ledger', () => {
           ['every result reached the chief (1/2)', false],
           ['every question a member asked the chief was answered (1/1)', true],
           ['every answer reached the member (1/1)', true],
+          ["every question the chief put to the owner got the owner's answer (1/2)", false],
           ['the board showed every task (4/4)', true],
         ],
       )

@@ -96,23 +96,27 @@ export function lastLines(text, count = 40) {
 }
 
 /**
- * The scripted human's answer: the first of the scenario's `answers` whose
- * pattern matches the question's first line (its subject) wins, then the
- * first whose pattern matches anywhere in it, free text or not; then a
- * question with options takes each one's first option; then the scenario's
- * `fallback`.
+ * The scripted owner's answer, shaped as the board sends it. A question with
+ * options gets `choices`, one pick per sub-question as the board's form
+ * does: the first of the scenario's `answers` whose pattern matches that
+ * sub-question (free text, like the form's "Something else"), else its first
+ * option, else the fallback. A plain question gets a `body`: the first
+ * pattern that matches its first line (its subject), then the first that
+ * matches anywhere in it, then the fallback.
  */
 export function answerFor(scenario, question) {
   const answers = scenario.answers ?? []
-  const subject = question.body.split('\n')[0]
-  for (const { match, text } of answers) {
-    if (match.test(subject)) return text
-  }
-  for (const { match, text } of answers) {
-    if (match.test(question.body)) return text
-  }
+  const matching = (text) => answers.find(({ match }) => match.test(text))?.text
   if (question.questions !== null && question.questions.length > 0) {
-    return question.questions.map((q) => q.options?.[0]?.label ?? scenario.fallback).join('\n')
+    return {
+      choices: question.questions.map((q) => [
+        matching(`${q.header ?? ''} ${q.question ?? ''}`) ??
+          q.options?.[0]?.label ??
+          scenario.fallback,
+      ]),
+    }
   }
-  return scenario.fallback
+  return {
+    body: matching(question.body.split('\n')[0]) ?? matching(question.body) ?? scenario.fallback,
+  }
 }

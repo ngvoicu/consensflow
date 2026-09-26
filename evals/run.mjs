@@ -133,6 +133,7 @@ async function run(index) {
   let screen = []
   let terminalAnswers = 0
   let boardTasks = 0
+  const refused = []
   try {
     writeFileSync(
       join(app.env.CONSENSFLOW_HOME, 'agents.json'),
@@ -177,11 +178,18 @@ async function run(index) {
       for (const question of await questions()) {
         if (answered.has(question.id)) continue
         answered.add(question.id)
-        const body = answerFor(scenario, question)
-        await app.requestNode('message.answer', { question: question.id, body })
-        note(
-          `answered m-${question.id} (${question.body.split('\n')[0].slice(0, 70)}) with: ${body.split('\n')[0]}`,
-        )
+        const answer = answerFor(scenario, question)
+        const reply = await app.requestNode('message.answer', { question: question.id, ...answer })
+        const shown = answer.body ?? answer.choices.map((picks) => picks.join(', ')).join(' / ')
+        const subject = question.body.split('\n')[0].slice(0, 70)
+        if (reply?.ok === false || reply?.message === undefined) {
+          // A refused answer leaves the asker waiting for good: the report says so.
+          refused.push({ question: question.id, error: reply?.error ?? 'no reply' })
+          note(`the owner's answer to m-${question.id} (${subject}) was REFUSED: ${reply?.error}`)
+        } else {
+          await app.requestNode('message.read', { message: question.id })
+          note(`answered m-${question.id} (${subject}) with: ${shown}`)
+        }
       }
       const current = await board()
       const lane = current.lanes.find((l) => l.participant.handle === 'chief')
@@ -253,6 +261,7 @@ async function run(index) {
     mechanics: plumbing,
     chiefScreen: screen,
     terminalAnswers,
+    refusedAnswers: refused,
     log,
   }
   mkdirSync(REPORTS, { recursive: true })

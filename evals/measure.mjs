@@ -125,6 +125,17 @@ function plumbing(file, chiefId, humanId) {
         humanId,
       ),
       accepted: count("SELECT COUNT(*) AS n FROM task WHERE state = 'accepted'"),
+      ownerQuestions: count(
+        "SELECT COUNT(*) AS n FROM message WHERE kind = 'question' AND recipient_id = ? AND sender_id = ?",
+        humanId,
+        chiefId,
+      ),
+      ownerQuestionsAnswered: count(
+        `SELECT COUNT(*) AS n FROM message q WHERE q.kind = 'question' AND q.recipient_id = ? AND q.sender_id = ?
+           AND EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer' AND a.state != 'cancelled')`,
+        humanId,
+        chiefId,
+      ),
     }
   } finally {
     db.close()
@@ -134,7 +145,9 @@ function plumbing(file, chiefId, humanId) {
 /**
  * Did the board's plumbing hold, whatever the chief decided: every brief
  * delivered, every result back to the chief, every member's question
- * answered and the answer delivered, every task shown on the board
+ * answered and the answer delivered, every question the chief put to the
+ * owner answered (a refused answer leaves the chief waiting), every task
+ * shown on the board
  * (`boardTasks`: how many the board listed when the run ended).
  */
 export function mechanics(metrics, boardTasks) {
@@ -149,6 +162,11 @@ export function mechanics(metrics, boardTasks) {
       p.memberQuestions,
     ),
     held('every answer reached the member', p.answersDelivered, p.memberQuestionsAnswered),
+    held(
+      "every question the chief put to the owner got the owner's answer",
+      p.ownerQuestionsAnswered,
+      p.ownerQuestions,
+    ),
     held('the board showed every task', boardTasks, metrics.taskCount),
   ]
 }

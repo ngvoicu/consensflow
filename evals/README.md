@@ -47,7 +47,10 @@ most), so the run still shows what it does next. Beside the scenario's
 expectations, every report carries the board's own plumbing checks, counted
 from the ledger whatever the chief decided: every brief delivered, every
 result back to the chief, every question a member asked the chief answered
-and the answer delivered, every task shown on the board. The
+and the answer delivered, every question the chief put to the owner answered
+(the scripted owner answers as the board's form does: a pick or free text per
+sub-question; a refused answer is recorded in the report), every task shown
+on the board. The
 scenario's expectations are checked against those numbers; the report goes
 to `evals/reports/` and a verdict to stdout. Reports are kept in git: a run is
 evidence, and a later run beside it is the comparison. `npm run eval:summary`
@@ -72,3 +75,6 @@ a score).
 - `round-trip`: the plumbing, not the judgment. The owner asks for one task
   whose worker must ask the chief something first, an answer, a result, a
   review, an acceptance. Expected: exactly that, and only `site/notes.md` new.
+- `advice-trip`: the advisor's plumbing. The owner asks for advice through
+  the board; the advice comes back, is accepted and reaches the owner as a
+  note. Expected: one advice task, a note, no file changed.
