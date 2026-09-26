@@ -65,8 +65,10 @@ export function measure(file, { fixture = null, workspace = null } = {}) {
       notesToHuman: toHuman
         .filter((m) => m.kind === 'note')
         .map((m) => ({ id: m.id, body: m.body.slice(0, 200) })),
+      taskCount: tasks.length,
       chiefId: chief.id,
       chiefHarness: chief.harness,
+      humanId: human.id,
     }
   } finally {
     ledger.close()
@@ -74,8 +76,81 @@ export function measure(file, { fixture = null, workspace = null } = {}) {
   return {
     ...metrics,
     ...chiefWindow(file, metrics.chiefId, metrics.chiefHarness),
+    plumbing: plumbing(file, metrics.chiefId, metrics.humanId),
     filesChanged: fixture === null || workspace === null ? [] : changed(fixture, workspace),
   }
+}
+
+/**
+ * The board's plumbing, counted from the ledger whatever the chief decided:
+ * briefs delivered to members, results delivered back to the chief, questions
+ * members put to the chief and the answers delivered back, tasks accepted.
+ */
+function plumbing(file, chiefId, humanId) {
+  const db = new DatabaseSync(file, { readOnly: true })
+  try {
+    const count = (sql, ...args) => db.prepare(sql).get(...args).n
+    const fromMember = 'sender_id IS NOT NULL AND sender_id != ? AND sender_id != ?'
+    return {
+      briefs: count("SELECT COUNT(*) AS n FROM message WHERE kind = 'task'"),
+      briefsDelivered: count(
+        "SELECT COUNT(*) AS n FROM message WHERE kind = 'task' AND state IN ('delivered', 'read')",
+      ),
+      results: count(
+        "SELECT COUNT(*) AS n FROM message WHERE kind = 'result' AND recipient_id = ?",
+        chiefId,
+      ),
+      resultsDelivered: count(
+        "SELECT COUNT(*) AS n FROM message WHERE kind = 'result' AND recipient_id = ? AND state IN ('delivered', 'read')",
+        chiefId,
+      ),
+      memberQuestions: count(
+        `SELECT COUNT(*) AS n FROM message WHERE kind = 'question' AND recipient_id = ? AND ${fromMember}`,
+        chiefId,
+        chiefId,
+        humanId,
+      ),
+      memberQuestionsAnswered: count(
+        `SELECT COUNT(*) AS n FROM message q WHERE q.kind = 'question' AND q.recipient_id = ? AND ${fromMember.replaceAll('sender_id', 'q.sender_id')}
+           AND EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer' AND a.state != 'cancelled')`,
+        chiefId,
+        chiefId,
+        humanId,
+      ),
+      answersDelivered: count(
+        `SELECT COUNT(*) AS n FROM message a JOIN message q ON q.id = a.reply_to
+           WHERE a.kind = 'answer' AND a.state IN ('delivered', 'read') AND q.kind = 'question' AND q.recipient_id = ? AND ${fromMember.replaceAll('sender_id', 'q.sender_id')}`,
+        chiefId,
+        chiefId,
+        humanId,
+      ),
+      accepted: count("SELECT COUNT(*) AS n FROM task WHERE state = 'accepted'"),
+    }
+  } finally {
+    db.close()
+  }
+}
+
+/**
+ * Did the board's plumbing hold, whatever the chief decided: every brief
+ * delivered, every result back to the chief, every member's question
+ * answered and the answer delivered, every task shown on the board
+ * (`boardTasks`: how many the board listed when the run ended).
+ */
+export function mechanics(metrics, boardTasks) {
+  const p = metrics.plumbing
+  const held = (name, got, of) => ({ name: `${name} (${got}/${of})`, ok: got === of })
+  return [
+    held('every task brief was delivered', p.briefsDelivered, p.briefs),
+    held('every result reached the chief', p.resultsDelivered, p.results),
+    held(
+      'every question a member asked the chief was answered',
+      p.memberQuestionsAnswered,
+      p.memberQuestions,
+    ),
+    held('every answer reached the member', p.answersDelivered, p.memberQuestionsAnswered),
+    held('the board showed every task', boardTasks, metrics.taskCount),
+  ]
 }
 
 /** Files of the fixture that differ in the workspace, and files the run added, relative. */

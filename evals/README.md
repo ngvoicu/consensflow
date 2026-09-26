@@ -11,7 +11,7 @@ npm run eval -- --scenario six-decisions                       # chief Claude on
 npm run eval -- --scenario simple-fix --chief codex --staff pi   # a Codex chief, a Pi staff
 npm run eval -- --scenario complex-launch --chief opencode --staff claude,codex,pi,opencode,devin
 npm run eval -- --scenario six-decisions --model claude-sonnet-5 --repeat 3
-npm run eval:summary                                            # every report, one line each
+npm run eval:summary                                            # every report, one line each, and evals/RESULTS.md
 ```
 
 **This spends real tokens and is not part of any gate.** It needs the
@@ -43,11 +43,15 @@ added, the last lines of the chief's screen (why a chief said nothing: a
 quota wall, a login page), and how many times the owner had to answer in the
 chief's terminal: a chief that stops there, asking or proposing, instead of
 asking on the board, hears the scenario's `nudge` typed there (twice at
-most), so the run still shows what it does next. The
+most), so the run still shows what it does next. Beside the scenario's
+expectations, every report carries the board's own plumbing checks, counted
+from the ledger whatever the chief decided: every brief delivered, every
+result back to the chief, every question a member asked the chief answered
+and the answer delivered, every task shown on the board. The
 scenario's expectations are checked against those numbers; the report goes
 to `evals/reports/` and a verdict to stdout. Reports are kept in git: a run is
 evidence, and a later run beside it is the comparison. `npm run eval:summary`
-lists them.
+lists them and rewrites `evals/RESULTS.md`, the same numbers as a table.
 
 ## Scenarios
 
@@ -65,3 +69,6 @@ a score).
 - `complex-launch`: three things at once, a hard call, a sign-off. Expected:
   three or more tasks, parallel work, advice, a review, the owner asked, the
   discrepancy noted.
+- `round-trip`: the plumbing, not the judgment. The owner asks for one task
+  whose worker must ask the chief something first, an answer, a result, a
+  review, an acceptance. Expected: exactly that, and only `site/notes.md` new.

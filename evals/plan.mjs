@@ -5,12 +5,16 @@
  * question. Everything here is tested without spending a token.
  */
 
-/** One cheap model per harness (brain: operations/test-models.md), for the staff. */
+/**
+ * One cheap model per harness (brain: operations/test-models.md), for the
+ * staff and, on OpenCode, for the chief. OpenCode's free Muse Spark died
+ * mid-run twice out of two (a dead turn), so OpenCode runs a paid Go model.
+ */
 export const HARNESSES = {
   claude: { kind: 'claude-code', model: 'claude-haiku-4-5-20251001' },
   codex: { kind: 'codex', model: 'gpt-5.6-luna' },
   pi: { kind: 'pi', model: 'opencode-go/muse-spark-1.3-contributor' },
-  opencode: { kind: 'opencode', model: 'opencode/muse-spark-1.3-contributor-free' },
+  opencode: { kind: 'opencode', model: 'opencode-go/deepseek-v4-flash' },
   devin: { kind: 'devin', model: 'swe-1-6-slow' },
 }
 

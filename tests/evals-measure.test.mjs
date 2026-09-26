@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { changed, measure, verdict } from '../evals/measure.mjs'
+import { changed, measure, mechanics, verdict } from '../evals/measure.mjs'
 import sixDecisions from '../evals/scenarios/six-decisions.mjs'
 import { openLedger } from '../src/ledger/index.js'
 
@@ -68,8 +68,19 @@ describe('measuring a chief from the ledger', () => {
       })
       deliver(one.message)
       deliver(two.message)
-      ledger.recordResult(project.id, 1, { body: 'Written' })
+      // The plumbing: zeus asks the chief, the chief answers, both delivered;
+      // both results reach the chief; one task is accepted.
+      const asked = ledger.ask(project.id, {
+        from: 'zeus',
+        to: 'chief',
+        body: 'Which colour?',
+        task: 1,
+      })
+      deliver(asked)
+      deliver(ledger.answer(asked.id, { from: 'chief', body: 'Blue' }))
+      deliver(ledger.recordResult(project.id, 1, { body: 'Written' }).message)
       ledger.recordResult(project.id, 2, { body: 'Translated' })
+      ledger.acceptTask(project.id, 1, { by: 'chief' })
       const advice = ledger.createTask(project.id, {
         from: 'chief',
         pool: 'advisor',
@@ -161,6 +172,29 @@ describe('measuring a chief from the ledger', () => {
       assert.deepEqual([metrics.chiefTurns, metrics.chiefEdits], [3, 2])
       assert.equal(metrics.chiefLastWords, 'Done: the page is in place.')
       assert.deepEqual(metrics.filesChanged, [], 'no fixture given: nothing compared')
+      // A task given by pool has no brief until a member takes it: two briefs.
+      assert.deepEqual(metrics.plumbing, {
+        briefs: 2,
+        briefsDelivered: 2,
+        results: 2,
+        resultsDelivered: 1,
+        memberQuestions: 1,
+        memberQuestionsAnswered: 1,
+        answersDelivered: 1,
+        accepted: 1,
+      })
+      assert.equal(metrics.taskCount, 4)
+      assert.deepEqual(
+        mechanics(metrics, 4).map((c) => [c.name, c.ok]),
+        [
+          ['every task brief was delivered (2/2)', true],
+          ['every result reached the chief (1/2)', false],
+          ['every question a member asked the chief was answered (1/1)', true],
+          ['every answer reached the member (1/1)', true],
+          ['the board showed every task (4/4)', true],
+        ],
+      )
+      assert.equal(mechanics(metrics, 3).at(-1).ok, false, 'a task the board did not list')
 
       const checks = verdict(sixDecisions, metrics)
       assert.deepEqual(
@@ -174,6 +208,14 @@ describe('measuring a chief from the ledger', () => {
           ['finished work goes to a review', true],
           ["the chief's own edits stay under ten (counted for a Claude chief only)", true],
         ],
+      )
+      const trip = (await import('../evals/scenarios/round-trip.mjs')).default
+      assert.deepEqual(
+        verdict(trip, { ...metrics, filesChanged: ['site/notes.md'], questionsToHuman: [] }).map(
+          (c) => c.ok,
+        ),
+        [true, true, true, true, true, true, true],
+        'the round trip holds on this ledger once only notes.md is new and the owner was not asked',
       )
     } finally {
       await rm(dir, { recursive: true, force: true })

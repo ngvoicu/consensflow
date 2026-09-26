@@ -16,7 +16,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 import { startIntegration } from '../tests/integration/harness.mjs'
-import { measure, verdict } from './measure.mjs'
+import { measure, mechanics, verdict } from './measure.mjs'
 import {
   answerFor,
   chiefEnvironment,
@@ -132,6 +132,7 @@ async function run(index) {
   let pane = null
   let screen = []
   let terminalAnswers = 0
+  let boardTasks = 0
   try {
     writeFileSync(
       join(app.env.CONSENSFLOW_HOME, 'agents.json'),
@@ -185,6 +186,7 @@ async function run(index) {
       const current = await board()
       const lane = current.lanes.find((l) => l.participant.handle === 'chief')
       const tasks = current.lanes.flatMap((l) => l.tasks).concat(current.open)
+      boardTasks = tasks.length
       const now = JSON.stringify([
         lane?.activity?.state,
         tasks.map((t) => [t.number, t.state]),
@@ -237,6 +239,7 @@ async function run(index) {
     workspace: WORKSPACE,
   })
   const checks = verdict(scenario, metrics)
+  const plumbing = mechanics(metrics, boardTasks)
   const report = {
     scenario: scenario.id,
     chief,
@@ -247,6 +250,7 @@ async function run(index) {
     seconds: Math.round((Date.now() - started) / 1000),
     metrics,
     checks,
+    mechanics: plumbing,
     chiefScreen: screen,
     terminalAnswers,
     log,
@@ -262,6 +266,9 @@ async function run(index) {
   )
   for (const check of checks)
     process.stdout.write(`  ${check.ok ? 'PASS' : 'FAIL'} ${check.name}\n`)
+  process.stdout.write('  the plumbing:\n')
+  for (const check of plumbing)
+    process.stdout.write(`  ${check.ok ? 'PASS' : 'FAIL'} ${check.name}\n`)
   if (metrics.chiefTurns === 0)
     process.stdout.write(
       `  the chief's screen ended with:\n${screen
@@ -272,7 +279,7 @@ async function run(index) {
   process.stdout.write(
     `  tasks ${metrics.tasks.length} (parallel ${metrics.parallel}, advice ${metrics.advice}, reviews ${metrics.reviews}) · questions ${metrics.questionsToHuman.length} · notes ${metrics.notesToHuman.length} · chief edits ${metrics.chiefEdits ?? '?'} in ${metrics.chiefTurns} turns · files changed ${metrics.filesChanged.length} · answered in the terminal ${terminalAnswers}\n  report: ${out}\n`,
   )
-  return checks.every((check) => check.ok)
+  return checks.every((check) => check.ok) && plumbing.every((check) => check.ok)
 }
 
 let allOk = true
