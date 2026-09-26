@@ -125,6 +125,27 @@ function plumbing(file, chiefId, humanId) {
         humanId,
       ),
       accepted: count("SELECT COUNT(*) AS n FROM task WHERE state = 'accepted'"),
+      tells: count(
+        `SELECT COUNT(*) AS n FROM message WHERE kind = 'question' AND urgent = 1 AND sender_id = ?`,
+        chiefId,
+      ),
+      tellsAnswered: count(
+        `SELECT COUNT(*) AS n FROM message q WHERE q.kind = 'question' AND q.urgent = 1 AND q.sender_id = ?
+           AND EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer' AND a.state != 'cancelled')`,
+        chiefId,
+      ),
+      pauses: count(
+        "SELECT COUNT(*) AS n FROM event WHERE kind = 'task.state' AND json_extract(data, '$.to') = 'paused'",
+      ),
+      resumes: count(
+        "SELECT COUNT(*) AS n FROM event WHERE kind = 'task.state' AND json_extract(data, '$.from') = 'paused' AND json_extract(data, '$.to') IN ('queued', 'working')",
+      ),
+      // A task given straight to a session's window: only `--after` does that.
+      continuations: count(
+        `SELECT COUNT(*) AS n FROM event e JOIN participant p
+           ON p.project_id = e.project_id AND p.handle = json_extract(e.data, '$.to')
+         WHERE e.kind = 'task.created' AND p.member_id IS NOT NULL`,
+      ),
       ownerQuestions: count(
         "SELECT COUNT(*) AS n FROM message WHERE kind = 'question' AND recipient_id = ? AND sender_id = ?",
         humanId,
@@ -162,6 +183,7 @@ export function mechanics(metrics, boardTasks) {
       p.memberQuestions,
     ),
     held('every answer reached the member', p.answersDelivered, p.memberQuestionsAnswered),
+    held('every tell the chief sent was answered', p.tellsAnswered, p.tells),
     held(
       "every question the chief put to the owner got the owner's answer",
       p.ownerQuestionsAnswered,

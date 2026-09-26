@@ -40,6 +40,7 @@ const { values } = parseArgs({
     chief: { type: 'string', default: 'claude' },
     staff: { type: 'string' },
     model: { type: 'string' },
+    gate: { type: 'boolean', default: false },
     'claude-staff-model': { type: 'string', default: HARNESSES.claude.model },
     repeat: { type: 'string', default: '1' },
     'timeout-min': { type: 'string', default: '40' },
@@ -134,6 +135,7 @@ async function run(index) {
   let terminalAnswers = 0
   let boardTasks = 0
   const refused = []
+  let approvals = 0
   try {
     writeFileSync(
       join(app.env.CONSENSFLOW_HOME, 'agents.json'),
@@ -144,6 +146,7 @@ async function run(index) {
       directory: WORKSPACE,
       harness: HARNESSES[chief].kind,
       staff,
+      ...(values.gate ? { gate: true } : {}),
     })
     if (opened.ok !== true) throw new Error(`project.open: ${JSON.stringify(opened)}`)
     const project = opened.project.id
@@ -190,6 +193,14 @@ async function run(index) {
           await app.requestNode('message.read', { message: question.id })
           note(`answered m-${question.id} (${subject}) with: ${shown}`)
         }
+      }
+      // With the gate on, the owner approves every message as the board's For you does.
+      for (const waiting of (await board()).gated ?? []) {
+        const reply = await app.requestNode('message.approve', { message: waiting.id })
+        if (reply?.ok === false) {
+          refused.push({ approve: waiting.id, error: reply.error })
+          note(`approving m-${waiting.id} was REFUSED: ${reply.error}`)
+        } else approvals += 1
       }
       const current = await board()
       const lane = current.lanes.find((l) => l.participant.handle === 'chief')
@@ -248,6 +259,11 @@ async function run(index) {
   })
   const checks = verdict(scenario, metrics)
   const plumbing = mechanics(metrics, boardTasks)
+  if (values.gate)
+    plumbing.push({
+      name: `the gate held the messages for the owner's approval (${approvals} approved)`,
+      ok: approvals > 0 && refused.every((r) => r.approve === undefined),
+    })
   const report = {
     scenario: scenario.id,
     chief,
@@ -262,6 +278,8 @@ async function run(index) {
     chiefScreen: screen,
     terminalAnswers,
     refusedAnswers: refused,
+    gate: values.gate,
+    approvals,
     log,
   }
   mkdirSync(REPORTS, { recursive: true })

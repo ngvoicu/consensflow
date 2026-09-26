@@ -35,6 +35,87 @@ describe('what a run changed on disk', () => {
 })
 
 describe('measuring a chief from the ledger', () => {
+  it('counts the chief’s controls: a tell and its answer, a pause and a resume, an --after follow-up', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-evals-controls-'))
+    const file = path.join(dir, 'consensflow.db')
+    try {
+      const ledger = openLedger(file)
+      const project = ledger.createProject({
+        directory: '/work/site',
+        name: 'site',
+        chief: { harness: 'claude-code' },
+      })
+      ledger.addMember(project.id, {
+        agent: 'zeus',
+        harness: 'claude-code',
+        role: 'worker',
+        tier: 'standard',
+      })
+      const deliver = (message) => {
+        ledger.beginDelivery(message.id)
+        ledger.confirmDelivery(message.id, { evidence: 'native' })
+      }
+      // As the dispatcher does it: an open task, given to a member, opens its session.
+      ledger.createTask(project.id, {
+        from: 'chief',
+        pool: 'worker',
+        tier: 'standard',
+        body: 'Sleep, then write',
+      })
+      const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
+      const given = ledger.assignTask(project.id, 1, zeus.id)
+      deliver(given.message)
+      const session = given.task.assignee
+      // cf tell: the task paused, an urgent question to its window, answered.
+      ledger.pauseTask(project.id, 1, { by: 'chief' })
+      const told = ledger.ask(project.id, {
+        from: 'chief',
+        to: session,
+        task: 1,
+        body: 'Which file?',
+        urgent: true,
+      })
+      deliver(told)
+      deliver(ledger.answer(told.id, { from: session, body: 'site/notes.md' }))
+      const resumed = ledger.resumeTask(project.id, 1, { by: 'chief', body: 'Go on' })
+      if (resumed.message !== null) deliver(resumed.message)
+      ledger.recordResult(project.id, 1, { body: 'Written' })
+      ledger.acceptTask(project.id, 1, { by: 'chief' })
+      const next = ledger.createTask(project.id, { from: 'chief', after: 1, body: 'Add a line' })
+      assert.equal(next.task.assignee, session, 'the follow-up goes to the same window')
+      ledger.close()
+
+      const metrics = measure(file)
+      const p = metrics.plumbing
+      assert.deepEqual(
+        [p.tells, p.tellsAnswered, p.pauses, p.resumes, p.continuations],
+        [1, 1, 1, 1, 1],
+      )
+      assert.deepEqual(
+        mechanics(metrics, 2)
+          .filter((c) => c.name.startsWith('every tell'))
+          .map((c) => [c.name, c.ok]),
+        [['every tell the chief sent was answered (1/1)', true]],
+      )
+      const trip = (await import('../evals/scenarios/control-trip.mjs')).default
+      assert.deepEqual(
+        verdict(trip, { ...metrics, filesChanged: ['site/notes.md'] }).map((c) => [c.name, c.ok]),
+        [
+          ['the chief stops the task with cf tell', true],
+          ['the worker answers the tell', true],
+          ['the task is paused and resumed', true],
+          ['a follow-up goes to the same window (--after)', true],
+          ['both tasks are accepted', false],
+          ['only site/notes.md is new', true],
+          ['the owner is not asked anything', true],
+        ],
+        'the follow-up is not yet accepted here',
+      )
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('counts tasks, parallel work, advice, reviews, questions, notes and the chief’s own edits', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-evals-'))
     const file = path.join(dir, 'consensflow.db')
@@ -187,6 +268,11 @@ describe('measuring a chief from the ledger', () => {
         memberQuestionsAnswered: 1,
         answersDelivered: 1,
         accepted: 1,
+        tells: 0,
+        tellsAnswered: 0,
+        pauses: 0,
+        resumes: 0,
+        continuations: 0,
         ownerQuestions: 2,
         ownerQuestionsAnswered: 1,
       })
@@ -198,6 +284,7 @@ describe('measuring a chief from the ledger', () => {
           ['every result reached the chief (1/2)', false],
           ['every question a member asked the chief was answered (1/1)', true],
           ['every answer reached the member (1/1)', true],
+          ['every tell the chief sent was answered (0/0)', true],
           ["every question the chief put to the owner got the owner's answer (1/2)", false],
           ['the board showed every task (4/4)', true],
         ],

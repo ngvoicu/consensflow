@@ -50,7 +50,9 @@ result back to the chief, every question a member asked the chief answered
 and the answer delivered, every question the chief put to the owner answered
 (the scripted owner answers as the board's form does: a pick or free text per
 sub-question; a refused answer is recorded in the report), every task shown
-on the board. The
+on the board, every tell the chief sent answered. `--gate` opens the project
+with the owner's approval required: the scripted owner approves every
+message waiting for it, and the report counts the approvals. The
 scenario's expectations are checked against those numbers; the report goes
 to `evals/reports/` and a verdict to stdout. Reports are kept in git: a run is
 evidence, and a later run beside it is the comparison. `npm run eval:summary`
@@ -75,6 +77,10 @@ a score).
 - `round-trip`: the plumbing, not the judgment. The owner asks for one task
   whose worker must ask the chief something first, an answer, a result, a
   review, an acceptance. Expected: exactly that, and only `site/notes.md` new.
+- `control-trip`: the chief's controls over a running task: `cf tell` stops a
+  worker and asks it something, the worker answers, `cf task resume` sends it
+  on, `cf task add --after` gives a follow-up to the same window. Expected:
+  a tell answered, a pause and a resume, a continuation, both accepted.
 - `advice-trip`: the advisor's plumbing. The owner asks for advice through
   the board; the advice comes back, is accepted and reaches the owner as a
   note. Expected: one advice task, a note, no file changed.
