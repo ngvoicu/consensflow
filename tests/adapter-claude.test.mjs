@@ -111,6 +111,8 @@ describe('the Claude Code adapter', () => {
         path.join(roles, '.claude', 'skills', 'consensflow-worker', 'SKILL.md'),
         '--system-prompt-snapshot',
         'off',
+        '--strict-mcp-config',
+        '--no-chrome',
         '--session-id',
         plan.nativeSession,
         '--model',
@@ -141,6 +143,23 @@ describe('the Claude Code adapter', () => {
     })
   })
 
+  it("keeps a member away from the human's connectors and browser; the chief keeps them", async () => {
+    await withHome(async ({ env }) => {
+      const adapter = claudeCodeAdapter({ env, peer: false })
+      const member = await adapter.prepare(request())
+      assert.ok(member.argv.includes('--strict-mcp-config') && member.argv.includes('--no-chrome'))
+      const chief = await adapter.prepare(
+        request({
+          role: 'chief',
+          participant: { ...worker, handle: 'chief', role: 'chief', agent: null },
+          agent: null,
+          message: null,
+        }),
+      )
+      assert.ok(!chief.argv.includes('--strict-mcp-config') && !chief.argv.includes('--no-chrome'))
+    })
+  })
+
   it('resumes a conversation on the session it already has', async () => {
     await withHome(async ({ env }) => {
       const session = '0f8fad5b-d9cb-469f-a165-70867728950e'
@@ -149,7 +168,7 @@ describe('the Claude Code adapter', () => {
         request({ resume: session, message: null }),
       )
       assert.equal(plan.nativeSession, session)
-      assert.deepEqual(plan.argv.slice(9), [
+      assert.deepEqual(plan.argv.slice(11), [
         '--resume',
         session,
         '--model',

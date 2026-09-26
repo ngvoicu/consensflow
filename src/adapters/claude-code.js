@@ -28,6 +28,15 @@ import { executableFor } from './shared.js'
 /** How long a human draft holds pastes after the last keystroke behind it. */
 export const DRAFT_GRACE_MS = 120_000
 
+/**
+ * A member runs in full-permission mode and reads what others wrote, so it
+ * starts without the human's MCP servers, claude.ai connectors and Claude in
+ * Chrome: an eval reviewer reached for the human's own browser, and this Mac's
+ * setup includes a brokerage connector. The chief, which works with the human,
+ * keeps them. ConsensFlow's own hooks come from --settings, not from MCP.
+ */
+const MEMBER_ISOLATION = ['--strict-mcp-config', '--no-chrome']
+
 export function claudeCodeAdapter({
   env,
   peer = false,
@@ -63,7 +72,13 @@ export function claudeCodeAdapter({
         ? interactiveResume(identity, resume, message)
         : interactiveStart(identity, nativeSession, message)
       return {
-        argv: [executable, ...settings, ...roleSetup.args, ...runner.args],
+        argv: [
+          executable,
+          ...settings,
+          ...roleSetup.args,
+          ...(role === 'chief' ? [] : MEMBER_ISOLATION),
+          ...runner.args,
+        ],
         env: { ...roleSetup.env },
         dropEnv: runner.dropEnv,
         nativeSession,

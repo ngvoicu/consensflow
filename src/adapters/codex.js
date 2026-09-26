@@ -1,4 +1,6 @@
+import { execFile } from 'node:child_process'
 import { setTimeout as wait } from 'node:timers/promises'
+import { promisify } from 'node:util'
 import { cachedAnswers } from '../../hosts/lib/completion.js'
 import { interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
 import {
@@ -7,6 +9,7 @@ import {
   send as sendCodex,
 } from '../channels/codex.js'
 import { launchConfiguration, withNativeBridge } from '../channels.js'
+import { runnable } from '../harnesses.js'
 import { roleConfiguration } from '../role-skills.js'
 import { admission, executableFor, recordState } from './shared.js'
 
@@ -35,12 +38,52 @@ const QUESTION_TOOL = [
  */
 const WINDOW = ['-c', 'check_for_update_on_startup=false', '-c', 'allow_login_shell=false']
 
+/** The MCP servers Codex would start, as `codex mcp list --json` names them. */
+async function codexMcpServers(executable, env) {
+  const run = runnable(executable, ['mcp', 'list', '--json'], env)
+  try {
+    const { stdout } = await promisify(execFile)(run.file, run.args, {
+      ...run.options,
+      env,
+      timeout: 15_000,
+      maxBuffer: 1024 * 1024,
+    })
+    const servers = JSON.parse(stdout)
+    return Array.isArray(servers) ? servers : []
+  } catch (cause) {
+    throw new Error(`could not list Codex's MCP servers to switch them off: ${cause.message}`)
+  }
+}
+
+/**
+ * A member runs in full-permission mode and reads what others wrote, so every
+ * MCP server Codex would start is switched off: this Mac's Codex drives the
+ * browser and the screen through them (the ChatGPT app's, since 2026-09-26).
+ * Each gets a harmless, disabled definition; a bare `enabled=false` is refused
+ * for servers defined outside config.toml, and a name that needs quotes would
+ * define a new server instead, so such a name stops the launch.
+ */
+function mcpIsolation(servers) {
+  return servers.flatMap(({ name }) => {
+    if (!/^[A-Za-z0-9_-]+$/.test(name ?? '')) {
+      throw new Error(`cannot switch off the Codex MCP server ${JSON.stringify(name)} for a member`)
+    }
+    return [
+      '-c',
+      `mcp_servers.${name}.command="/usr/bin/true"`,
+      '-c',
+      `mcp_servers.${name}.enabled=false`,
+    ]
+  })
+}
+
 export function codexAdapter({
   env,
   harness = 'codex',
   send = sendCodex,
   currentSession = brokerSession,
   sessionAvailable = brokerAvailable,
+  mcpServers = codexMcpServers,
   answers = cachedAnswers(),
   discoverEveryMs = 250,
   discoverForMs = 60_000,
@@ -63,6 +106,8 @@ export function codexAdapter({
         executable,
         content: instructions,
       })
+      // The chief works with the human and keeps the human's connectors.
+      const isolation = role === 'chief' ? [] : mcpIsolation(await mcpServers(executable, env))
       const runner =
         resume === null
           ? interactiveStart(
@@ -76,7 +121,7 @@ export function codexAdapter({
       const invocation = withNativeBridge(
         {
           command: executable,
-          args: [...roleSetup.args, ...QUESTION_TOOL, ...WINDOW, ...runner.args],
+          args: [...roleSetup.args, ...QUESTION_TOOL, ...WINDOW, ...isolation, ...runner.args],
         },
         configuration,
         env.CONSENSFLOW_NODE ?? process.execPath,

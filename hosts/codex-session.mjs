@@ -461,6 +461,20 @@ export function codexProcessArguments(args) {
   return { backend, tui }
 }
 
+/**
+ * ConsensFlow's own variables, set explicitly in Codex's shell policy: a user
+ * policy of `inherit = "core"` keeps only a handful of names, and a window
+ * whose commands lose CONSENSFLOW_URL, _TOKEN and _NODE has a `cf` that
+ * reaches nothing (a Codex chief, 2026-09-26). Everything else stays as the
+ * user's policy says.
+ */
+export function consensflowShellEnvironment(env) {
+  return Object.keys(env)
+    .filter((name) => /^CONSENSFLOW_[A-Z0-9_]+$/.test(name) && typeof env[name] === 'string')
+    .sort()
+    .flatMap((name) => ['-c', `shell_environment_policy.set.${name}=${JSON.stringify(env[name])}`])
+}
+
 /** Whether a socket at `<prefix>XXXXXX/native.sock` fits sun_path (macOS: 104 bytes with the final NUL). */
 const socketFits = (prefix) => Buffer.byteLength(join(`${prefix}XXXXXX`, 'native.sock')) < 104
 
@@ -489,7 +503,13 @@ async function supervise(executable, args) {
   delete env.OPENAI_API_KEY
   const backendRun = runnable(
     executable,
-    [...split.backend, 'app-server', '--listen', `unix://${socket}`],
+    [
+      ...split.backend,
+      ...consensflowShellEnvironment(env),
+      'app-server',
+      '--listen',
+      `unix://${socket}`,
+    ],
     env,
   )
   const backend = spawn(backendRun.file, backendRun.args, {

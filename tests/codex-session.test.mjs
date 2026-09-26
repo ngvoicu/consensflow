@@ -5,7 +5,11 @@ import { join } from 'node:path'
 import { it } from 'node:test'
 import WebSocket, { WebSocketServer } from 'ws'
 import * as codexSession from '../hosts/codex-session.mjs'
-import { codexProcessArguments, startBroker } from '../hosts/codex-session.mjs'
+import {
+  codexProcessArguments,
+  consensflowShellEnvironment,
+  startBroker,
+} from '../hosts/codex-session.mjs'
 
 const A = '01a09094-938f-7fd1-a2d3-315cf92b4559'
 const B = '01a09094-a559-7db0-bf50-e2309856c3c0'
@@ -371,6 +375,24 @@ it('restores a rejected switch, rejects invalid ingress, and reports a possible 
   tui.terminate()
   await new Promise((resolve) => setTimeout(resolve, 20))
   assert.equal((await f.read()).sessionId, null)
+})
+
+it("sets ConsensFlow's own variables in Codex's shell policy, so a user policy that inherits only core ones keeps them", () => {
+  assert.deepEqual(
+    consensflowShellEnvironment({
+      CONSENSFLOW_URL: 'http://127.0.0.1:4100',
+      CONSENSFLOW_TOKEN: 'tok"en',
+      CF_CODEX_TUI_TOKEN: 'internal',
+      HOME: '/home/user',
+    }),
+    [
+      '-c',
+      'shell_environment_policy.set.CONSENSFLOW_TOKEN="tok\\"en"',
+      '-c',
+      'shell_environment_policy.set.CONSENSFLOW_URL="http://127.0.0.1:4100"',
+    ],
+  )
+  assert.deepEqual(consensflowShellEnvironment({ HOME: '/home/user' }), [])
 })
 
 it('keeps native TUI arguments while explicitly forwarding backend model, effort and full role configuration', () => {

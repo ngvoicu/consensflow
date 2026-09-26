@@ -26,13 +26,16 @@ async function withHome(fn, { queue = true } = {}) {
     CONSENSFLOW_NODE: process.execPath,
   }
   await mkdir(env.PATH, { recursive: true })
-  // A Codex that answers the two things a launch asks of it: whether it has
-  // the native queue, and its effective instructions over the app-server.
+  // A Codex that answers the three things a launch asks of it: whether it has
+  // the native queue, its effective instructions over the app-server, and the
+  // MCP servers a member's window switches off (none here).
   const executable = fakeNodeExecutable(
     path.join(env.PATH, 'codex'),
     `#!${process.execPath}
 import { createInterface } from 'node:readline'
-if (process.argv[2] === 'queue') {
+if (process.argv[2] === 'mcp' && process.argv[3] === 'list') {
+  console.log('[]')
+} else if (process.argv[2] === 'queue') {
   ${queue ? "console.log('Usage: codex queue --thread <id> --message <text>')" : 'process.exit(2)'}
 } else if (process.argv[2] === 'app-server') {
   createInterface({ input: process.stdin }).on('line', (line) => {
@@ -144,6 +147,32 @@ describe('the Codex adapter', () => {
       const { launch } = await adapter.prepare(request())
       assert.deepEqual(await adapter.started({ launch }), { nativeSession: thread })
       assert.equal(launch.nativeSession, thread)
+    })
+  })
+
+  it('switches off every MCP server Codex would start for a member; the chief keeps them', async () => {
+    await withHome(async ({ env }) => {
+      const adapter = codexAdapter({
+        env,
+        mcpServers: async () => [{ name: 'cua_repl' }, { name: 'computer-history' }],
+      })
+      const member = await adapter.prepare(request())
+      const flags = [
+        '-c',
+        'mcp_servers.cua_repl.command="/usr/bin/true"',
+        '-c',
+        'mcp_servers.cua_repl.enabled=false',
+        '-c',
+        'mcp_servers.computer-history.command="/usr/bin/true"',
+        '-c',
+        'mcp_servers.computer-history.enabled=false',
+      ]
+      const at = member.argv.indexOf(flags[1])
+      assert.deepEqual(member.argv.slice(at - 1, at - 1 + flags.length), flags)
+      const chief = await adapter.prepare(request({ role: 'chief', agent: null, message: null }))
+      assert.ok(!chief.argv.some((arg) => arg.startsWith('mcp_servers.')))
+      const odd = codexAdapter({ env, mcpServers: async () => [{ name: 'a.b' }] })
+      await assert.rejects(odd.prepare(request()), /cannot switch off the Codex MCP server "a\.b"/)
     })
   })
 
