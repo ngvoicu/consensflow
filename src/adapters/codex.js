@@ -1,7 +1,11 @@
 import { setTimeout as wait } from 'node:timers/promises'
 import { cachedAnswers } from '../../hosts/lib/completion.js'
 import { interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
-import { currentSession as brokerSession, send as sendCodex } from '../channels/codex.js'
+import {
+  sessionAvailable as brokerAvailable,
+  currentSession as brokerSession,
+  send as sendCodex,
+} from '../channels/codex.js'
 import { launchConfiguration, withNativeBridge } from '../channels.js'
 import { roleConfiguration } from '../role-skills.js'
 import { admission, executableFor, recordState } from './shared.js'
@@ -36,6 +40,7 @@ export function codexAdapter({
   harness = 'codex',
   send = sendCodex,
   currentSession = brokerSession,
+  sessionAvailable = brokerAvailable,
   answers = cachedAnswers(),
   discoverEveryMs = 250,
   discoverForMs = 60_000,
@@ -100,7 +105,12 @@ export function codexAdapter({
     },
 
     async ready({ launch, pane, host }) {
-      if (launch.channel !== null) return true
+      // Held, not failed: a refusal here would spend the message's attempts
+      // in seconds (an answer to a Codex worker was lost that way).
+      if (launch.channel !== null)
+        return (await sessionAvailable(launch.channel))
+          ? true
+          : 'the Codex window cannot take a message yet: starting, resuming or reconnecting'
       const snapshot = await host.request('pane.snapshot', pane)
       return snapshot?.ok === true && snapshot.draftLatched !== true && !snapshot.pasteInFlight
     },

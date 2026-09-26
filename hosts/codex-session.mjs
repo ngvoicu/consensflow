@@ -161,6 +161,14 @@ export async function startBroker({
         sessionId: switching ? null : selected,
         revision,
         empty: !switching && empty,
+        // Whether a delivery would be taken now: the dispatcher holds a
+        // message while this is false, instead of spending its attempts.
+        available:
+          !closed &&
+          ready &&
+          control.readyState === WebSocket.OPEN &&
+          !switching &&
+          selected !== null,
       })
     if (incoming.method !== 'POST' || incoming.url !== '/deliver')
       return reply(response, refused('invalid-record'), 404)
@@ -191,17 +199,30 @@ export async function startBroker({
       return reply(response, refused('native-session-unavailable'))
     if (selected !== record.sessionId) return reply(response, refused('native-session-changed'))
     empty = false
-    // No await between comparing the selected main and forwarding this queue request.
+    // An idle thread gets the message as its turn; Codex's queue drains only
+    // when a running turn ends, and after an interrupt it kept a message for
+    // good (a tell to a paused worker, 2026-09-26). While a turn runs, the
+    // queue is right: the message goes in when the turn ends.
+    const input = [{ type: 'text', text: record.text, text_elements: [] }]
+    const deadline = Math.min(record.expiresAt, Date.now() + 3000)
+    const idleNow = idle.get(selected) === true
+    if (idleNow) idle.set(selected, false)
+    // No await between comparing the selected main and forwarding this request.
     // A subsequent switch can only retire later submissions, never replay this one.
-    const result = await request(
-      'thread/queue/add',
-      {
-        threadId: selected,
-        input: [{ type: 'text', text: record.text, text_elements: [] }],
-        clientUserMessageId: randomUUID(),
-      },
-      Math.min(record.expiresAt, Date.now() + 3000),
-    )
+    let result = idleNow
+      ? await request('turn/start', { threadId: selected, input }, deadline)
+      : await request(
+          'thread/queue/add',
+          { threadId: selected, input, clientUserMessageId: randomUUID() },
+          deadline,
+        )
+    // A turn the TUI started a moment before is an explicit refusal: queue it.
+    if (idleNow && result?.error)
+      result = await request(
+        'thread/queue/add',
+        { threadId: selected, input, clientUserMessageId: randomUUID() },
+        deadline,
+      )
     reply(response, result?.result ? { ok: true, admitted: true } : uncertain())
   })
   server.requestTimeout = 5000

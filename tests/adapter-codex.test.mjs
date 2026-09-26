@@ -147,6 +147,17 @@ describe('the Codex adapter', () => {
     })
   })
 
+  it('holds a message while its broker cannot take one: a window starting, resuming or reconnecting', async () => {
+    await withHome(async ({ env }) => {
+      let available = false
+      const adapter = codexAdapter({ env, sessionAvailable: async () => available })
+      const { launch } = await adapter.prepare(request())
+      assert.match(await adapter.ready({ launch }), /cannot take a message yet/)
+      available = true
+      assert.equal(await adapter.ready({ launch }), true)
+    })
+  })
+
   it('queues a message through the real channel: an epoch claim, then the broker', async () => {
     await withHome(async ({ env }) => {
       const posted = []

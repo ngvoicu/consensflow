@@ -212,6 +212,52 @@ it('follows successful main new/resume while ignoring title threads, child focus
   assert.deepEqual(await delivery, { ok: true, admitted: true })
 })
 
+it('starts a turn with a delivery when the thread is idle, queues it only while a turn runs, and says when it can take one', async (t) => {
+  const f = await fixture(t)
+  const tui = await f.connect()
+  assert.equal((await f.read()).available, false, 'no thread yet')
+  tui.send(
+    JSON.stringify({
+      id: 1,
+      method: 'thread/start',
+      params: { ephemeral: false, threadSource: 'user' },
+    }),
+  )
+  await f.respond('thread/start', { thread: { id: A, status: { type: 'idle' } } })
+  await f.wait(() => f.requests.some((r) => r.id === 1))
+  assert.deepEqual([(await f.read()).sessionId, (await f.read()).available], [A, true])
+  // Idle, as after an interrupt: the message starts the turn itself.
+  const first = f.deliver(A)
+  const started = await f.respond('turn/start', { turn: { id: 'turn-1' } })
+  assert.deepEqual(
+    [started.params.threadId, started.params.input[0].text],
+    [A, 'complete\nworker result'],
+  )
+  assert.deepEqual(await first, { ok: true, admitted: true })
+  // A turn runs: the next one waits in Codex's queue.
+  const second = f.deliver(A)
+  const queued = await f.respond('thread/queue/add', { queuedMessage: { id: 'queue-1' } })
+  assert.equal(queued.params.threadId, A)
+  assert.deepEqual(await second, { ok: true, admitted: true })
+  // The turn ends (completed or interrupted): idle again, a turn again.
+  f.sockets[0].send(JSON.stringify({ method: 'turn/completed', params: { threadId: A } }))
+  await f.wait(() => true)
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  const third = f.deliver(A)
+  await f.respond('turn/start', { turn: { id: 'turn-2' } })
+  assert.deepEqual(await third, { ok: true, admitted: true })
+  // While the TUI switches threads, nothing can be taken.
+  tui.send(
+    JSON.stringify({
+      id: 2,
+      method: 'thread/resume',
+      params: { threadId: B, runtimeWorkspaceRoots: [] },
+    }),
+  )
+  await f.wait(() => f.pending.some((p) => p.message.id === 2))
+  assert.equal((await f.read()).available, false)
+})
+
 it('promotes durable forks and preserves native permission changes after the initial launch', async (t) => {
   const f = await fixture(t, { freshBypass: true })
   const tui = await f.connect()
@@ -267,7 +313,8 @@ it('consumes native empty-thread proof at admission and never forces fresh permi
   await f.respond('thread/start', { thread: { id: A, turns: [], status: { type: 'idle' } } })
   assert.equal((await f.read()).empty, true)
   const delivery = f.deliver(A)
-  await f.respond('thread/queue/add', {})
+  // An idle thread takes the delivery as its turn.
+  await f.respond('turn/start', {})
   await delivery
   assert.equal((await f.read()).empty, false)
   const resume = { threadId: B, runtimeWorkspaceRoots: [], approvalPolicy: null, sandbox: null }

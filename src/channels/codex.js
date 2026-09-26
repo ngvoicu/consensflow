@@ -191,6 +191,11 @@ export async function currentSession(config) {
   return (await currentSessionState(config))?.sessionId
 }
 
+/** Whether the broker would take a delivery now (a thread shown, no switch, its upstream open). */
+export async function sessionAvailable(config) {
+  return (await currentSessionState(config))?.available === true
+}
+
 async function currentSessionState(config) {
   if (!config?.sessionBridge || !config.launchId) return undefined
   try {
@@ -201,7 +206,11 @@ async function currentSessionState(config) {
     const current = await response.json()
     if (!response.ok || current.launchId !== config.launchId) return undefined
     if (current.sessionId !== null && !UUID.test(current.sessionId ?? '')) return undefined
-    return { sessionId: current.sessionId, empty: current.empty === true }
+    return {
+      sessionId: current.sessionId,
+      empty: current.empty === true,
+      available: current.available === true,
+    }
   } catch {
     return undefined
   }
