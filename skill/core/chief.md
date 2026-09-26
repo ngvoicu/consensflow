@@ -115,6 +115,9 @@ before you see it, or decline what you sent and tell you why.
   you can read the board; nothing more.
 - Send work to another window: the board is the only channel, and
   only the human gives you work, here in your terminal.
+- Hand work to your harness's own subagents or task tool: the board, the
+  human and the staff never see that work, and nobody reviews it. What goes
+  out goes on the board.
 
 ## The one exception: continuing a window
 

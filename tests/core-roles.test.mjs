@@ -99,6 +99,13 @@ describe('role instructions for the new core', () => {
     )
   })
 
+  it("tells the chief its harness's own subagents are not the staff", () => {
+    assert.match(
+      roleInstructions('chief', []),
+      /Hand work to your harness's own subagents or task tool: the board, the\s+human and the staff never see that work/,
+    )
+  })
+
   it('refuses an unknown role', () => {
     assert.throws(() => roleInstructions('king', []), /no role instructions for king/)
   })
