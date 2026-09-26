@@ -26,9 +26,9 @@ OpenCode and Codex take the chief's model from `--model` (Opus for Claude
 Code, the harness's cheap model for the other two, unless given); Pi and
 Devin run their own configured default. Claude and Codex windows start
 through wrappers the runner writes (`~/.consensflow-candidate/evals/bin`)
-that shut out MCP servers, connectors and the browser; the Codex one also
-passes the window's environment to Codex's commands, which a user policy
-of `shell_environment_policy.inherit = "core"` would otherwise strip. `--staff` names the staff's harnesses: each gives two
+that shut out MCP servers, connectors and the browser for the chief too
+(ConsensFlow already does it for members), and give Codex the chief's
+model. `--staff` names the staff's harnesses: each gives two
 workers, an advisor and a reviewer on its cheap model (`evals/plan.mjs`), all
 standard tier, so the daemon picks among them by its own rule and any of them
 may get any task. The scenario's fixture is copied into a fixed, trusted
