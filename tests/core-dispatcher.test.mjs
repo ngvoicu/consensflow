@@ -78,6 +78,7 @@ function fakeAdapter(harness = 'claude-code') {
         waiting: agent.waiting,
         quota: agent.quota,
         failed: false,
+        openTools: agent.openTools ?? 0,
       }
     },
   }
@@ -473,6 +474,69 @@ describe('the dispatcher', () => {
       context.clock.advance(3_100)
       await context.dispatcher.pass()
       assert.equal(escapes(), 1, 'nor its wrap-up after the answer')
+    })
+  })
+
+  it('stops a member window that made no progress for ten minutes and tells the requester; a running tool is progress', async () => {
+    await setup(async (context) => {
+      const { project } = await withStaff(context)
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.adapter.busy('zeus')
+      const zeus = context.adapter.agent('zeus')
+      zeus.openTools = 1
+      await context.dispatcher.pass()
+      context.clock.advance(11 * 60_000)
+      await context.dispatcher.pass()
+      assert.equal(
+        context.ledger.task(project.id, 1).state,
+        'working',
+        'a long command is not a hang',
+      )
+      zeus.openTools = 0
+      context.clock.advance(5 * 60_000)
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.task(project.id, 1).state, 'working')
+      context.clock.advance(6 * 60_000)
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.task(project.id, 1).state, 'paused')
+      const chief = context.ledger
+        .project(project.id)
+        .participants.find((p) => p.handle === 'chief')
+      const note = context.ledger.inbox(chief.id).find((m) => m.kind === 'note')
+      assert.match(
+        note.body,
+        /^T-1 is paused: @zeus's window made no progress for 11 minutes, so it was stopped\. Resume it with: cf task resume T-1 "…"; it goes on in the same window\.$/,
+      )
+      await context.dispatcher.pass()
+      assert.equal(
+        context.host.requests.filter(([op]) => op === 'pane.input').length,
+        1,
+        'the pause stops the window',
+      )
+    })
+  })
+
+  it('shows a chief window that made no progress for ten minutes as stalled, until it moves again', async () => {
+    await setup(async (context) => {
+      const { project } = await withStaff(context)
+      await context.dispatcher.pass()
+      context.adapter.busy('chief')
+      await context.dispatcher.pass()
+      const chief = context.ledger
+        .project(project.id)
+        .participants.find((p) => p.handle === 'chief')
+      context.clock.advance(11 * 60_000)
+      await context.dispatcher.pass()
+      assert.deepEqual(context.dispatcher.activity(chief.id), {
+        state: 'stalled',
+        reason:
+          'no progress for 11 minutes: a request may have hung; Escape in its window stops it',
+      })
+      context.adapter.answer('chief', 'Back')
+      await context.dispatcher.pass()
+      assert.equal(context.dispatcher.activity(chief.id).state, 'idle')
     })
   })
 

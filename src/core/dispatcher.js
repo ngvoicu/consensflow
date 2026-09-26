@@ -63,6 +63,8 @@ const OPENING = 3000
 const RECEIVED_ROLES = new Set(['user', 'custom', 'tool'])
 
 /** How a message reads in the recipient's pane. The header doubles as the arrival marker. */
+const minutes = (ms) => Math.round(ms / 60_000)
+
 export function deliveryText(message) {
   const from = message.sender === null ? 'ConsensFlow' : `@${message.sender}`
   const task =
@@ -110,6 +112,7 @@ export class Dispatcher {
   #launchFiles
   #roles
   #arrivalTimeoutMs
+  #stuckAfterMs
   #launchTimeoutMs
   #maxAttempts
   /** Told each change of a window's activity, for the event file in the home. */
@@ -129,6 +132,7 @@ export class Dispatcher {
     roster = () => null,
     roles = () => undefined,
     arrivalTimeoutMs = 60_000,
+    stuckAfterMs = 600_000,
     launchTimeoutMs = 180_000,
     maxAttempts = 3,
     trace = () => {},
@@ -143,6 +147,7 @@ export class Dispatcher {
     this.#roster = roster
     this.#roles = roles
     this.#arrivalTimeoutMs = arrivalTimeoutMs
+    this.#stuckAfterMs = stuckAfterMs
     this.#trace = trace
     this.#launchFiles = launchFiles
     this.#launchTimeoutMs = launchTimeoutMs
@@ -393,13 +398,49 @@ export class Dispatcher {
    * human closed) is paused, not given up: its session and conversation stay,
    * and the chief resumes it into the same window with its memory.
    */
-  #stall(project, task, because) {
+  #stall(project, task, because, then = 'its window comes back on its own conversation') {
     this.#ledger.pauseTask(project.id, task.number, { because })
     this.#ledger.note(project.id, {
       to: task.requester,
       task: task.number,
-      body: `T-${task.number} is paused: ${because}. Resume it with: cf task resume T-${task.number} "…"; its window comes back on its own conversation.`,
+      body: `T-${task.number} is paused: ${because}. Resume it with: cf task resume T-${task.number} "…"; ${then}.`,
     })
+  }
+
+  /**
+   * How long a window has worked with nothing new in its record and no tool
+   * open: a model request that hung (a Pi window whose provider dropped the
+   * connection waited forever, four times in the evals). A running tool, a
+   * settled or waiting window, or any new item starts the count again.
+   */
+  #silence(runtime, observed) {
+    const last = observed.items.at(-1)
+    const signature = `${observed.items.length}:${last?.id ?? ''}:${last?.text?.length ?? 0}:${last?.complete === true}`
+    const now = this.#now()
+    if (
+      observed.settled ||
+      observed.waiting ||
+      (observed.openTools ?? 0) > 0 ||
+      runtime.progress?.signature !== signature
+    ) {
+      runtime.progress = { signature, at: now }
+      return 0
+    }
+    return now - runtime.progress.at
+  }
+
+  /** A member's window that made no progress: its task pauses, which stops the window, and its requester hears. */
+  #stallSilent(project, participant, runtime, silentMs) {
+    const task = this.#ledger.activeTask(participant.id)
+    if (task === null || task.state !== 'working') return
+    runtime.progress = null
+    this.#stall(
+      project,
+      task,
+      `@${participant.handle}'s window made no progress for ${minutes(silentMs)} minutes, so it was stopped`,
+      'it goes on in the same window',
+    )
+    this.#changed()
   }
 
   // --- one participant's step ----------------------------------------------------
@@ -440,13 +481,22 @@ export class Dispatcher {
     }
     // Quota belongs to the member: a session that runs out takes its member out.
     const owner = this.#memberOf(project, participant)
+    const silentMs = this.#silence(runtime, observed)
+    const stuck = silentMs >= this.#stuckAfterMs
     // An out member's window says so, and nothing else, until the reset.
     if (!this.#isOut(owner)) {
       this.#setActivity(
         runtime,
         observed.waiting
           ? { state: 'waiting', reason: observed.waiting.reason ?? null }
-          : { state: observed.settled ? 'idle' : 'working' },
+          : observed.settled
+            ? { state: 'idle' }
+            : stuck && participant.role === 'chief'
+              ? {
+                  state: 'stalled',
+                  reason: `no progress for ${minutes(silentMs)} minutes: a request may have hung; Escape in its window stops it`,
+                }
+              : { state: 'working' },
       )
     }
     this.#copyTranscript(participant, runtime, observed)
@@ -477,6 +527,7 @@ export class Dispatcher {
     if (runtime.delivering !== null) this.#watchArrival(runtime, observed)
     await this.#releaseDraft(runtime, observed)
     if (participant.role !== 'chief') {
+      if (stuck) this.#stallSilent(project, participant, runtime, silentMs)
       await this.#interruptIfPaused(participant, runtime)
       this.#collect(project, participant, observed)
       // The window may have gone during this step (a launch that timed out).

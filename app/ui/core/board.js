@@ -49,6 +49,7 @@ const ACTIVITY_LABEL = {
   closed: 'No window',
   unknown: 'Unknown',
   out: 'Out of quota',
+  stalled: 'Stalled',
 }
 /** The work tiers, in the order the composer offers them. */
 const KIND_LABEL = {
@@ -528,11 +529,13 @@ export class BoardView {
           ? `Out of quota until ${clock(participant.outUntil)}`
           : activity?.state === 'waiting' && activity.reason
             ? `Waiting: ${activity.reason}`
-            : resting(participant, activity)
-              ? sessionsNote(lane, board)
-              : participant.member !== null && (activity?.state ?? 'closed') === 'closed'
-                ? 'Terminal closed'
-                : (ACTIVITY_LABEL[activity?.state] ?? 'No window'),
+            : activity?.state === 'stalled'
+              ? `Stalled: ${activity.reason ?? 'no progress for a while'}`
+              : resting(participant, activity)
+                ? sessionsNote(lane, board)
+                : participant.member !== null && (activity?.state ?? 'closed') === 'closed'
+                  ? 'Terminal closed'
+                  : (ACTIVITY_LABEL[activity?.state] ?? 'No window'),
     )
     status.dataset.state = lane.agentMissing
       ? 'missing'
