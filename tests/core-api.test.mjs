@@ -212,6 +212,46 @@ describe('the agents API', () => {
     })
   })
 
+  it('takes a text from standard input when it is -, which no shell expands', async () => {
+    await withApi(async ({ ledger, project, token, cf }) => {
+      const chief = token('chief')
+      const brief = 'Ask me with `cf ask --human "x"` first; keep $(date) and "quotes" as they are.'
+      const added = await cf(chief, 'task', 'add', '--tier', 'standard', '-', {
+        input: `${brief}\n`,
+      })
+      assert.equal(added.code, 0, added.err)
+      assert.equal(ledger.task(project.id, 1).body, brief, 'verbatim, the final newline dropped')
+      const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
+      ledger.assignTask(project.id, 1, zeus.id)
+      deliver(
+        ledger,
+        ledger.task(project.id, 1).messages.find((m) => m.kind === 'task'),
+      )
+      const worker = ledger.task(project.id, 1).assignee
+      const asked = await cf(token(worker), 'ask', '-', { input: 'Which `file`?' })
+      assert.equal(asked.code, 0, asked.err)
+      const question = ledger.task(project.id, 1).messages.find((m) => m.kind === 'question')
+      assert.equal(question.body, 'Which `file`?')
+      const answered = await cf(chief, 'answer', `m-${question.id}`, '-', { input: 'Use `a.txt`.' })
+      assert.equal(answered.code, 0, answered.err)
+      const noted = await cf(chief, 'note', '--human', '-', { input: 'See `a.txt`.' })
+      assert.equal(noted.code, 0, noted.err)
+      const told = await cf(chief, 'tell', 'T-1', '-', { input: 'Stop: `v2` now.' })
+      assert.equal(told.code, 0, told.err)
+      const resumed = await cf(chief, 'task', 'resume', 'T-1', '-', { input: 'Go on with `v2`.' })
+      assert.equal(resumed.code, 0, resumed.err)
+      const bodies = ledger.task(project.id, 1).messages.map((m) => m.body)
+      for (const text of ['Use `a.txt`.', 'Stop: `v2` now.']) {
+        assert.ok(
+          bodies.some((body) => body.includes(text)),
+          text,
+        )
+      }
+      const empty = await cf(chief, 'note', '-', { input: '  \n' })
+      assert.equal(empty.code, 2, 'nothing on standard input is no text')
+    })
+  })
+
   it("tells a task's window something urgent: the task is paused for it and the question queued", async () => {
     await withApi(async ({ ledger, project, token, cf, call }) => {
       const { message } = ledger.createTask(project.id, {

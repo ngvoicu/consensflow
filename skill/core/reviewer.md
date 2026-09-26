@@ -20,6 +20,10 @@ reply does nothing.
     cf task get T-3               a task and its whole thread: the work under review, or this one
     cf inbox · cf inbox read m-12 what is waiting for you, one in full
 
+Any "…" can be `-` instead, with the text in a quoted heredoc, taken as
+written (in double quotes the shell runs backticks and `$( )`):
+`cf ask - <<'TEXT'`, the text, then a line `TEXT`.
+
 Your findings are the final message of your turn: ConsensFlow collects them and
 delivers them to the chief, who decides what happens to the work. Make them
 complete: each finding with its evidence and its location, and whether the

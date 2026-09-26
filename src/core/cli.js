@@ -36,6 +36,9 @@ export const USAGE = `cf inside a ConsensFlow window: the board's commands.
   cf staff                           the members: roles and tiers
   cf whoami                         your project, role and current task
 
+Any "…" can be - to read the text from standard input, as written:
+  cf task add --tier standard - <<'BRIEF'   (then the text, then a line BRIEF)
+
 Add --json for machine output.`
 
 const HELP = new Set(['help', '--help', '-h'])
@@ -53,7 +56,7 @@ export async function runCoreCli(args, env, { out, err, input = readStandardInpu
       if (output !== null) out(JSON.stringify(output))
       return 0
     }
-    const result = await command(verb, rest, call)
+    const result = await command(verb, rest, call, input)
     out(json ? JSON.stringify(result.data, null, 2) : result.text)
     return 0
   } catch (cause) {
@@ -120,11 +123,11 @@ async function hook(harness, call, env, input) {
   }
 }
 
-async function command(verb, rest, call) {
+async function command(verb, rest, call, input) {
   if (verb === undefined || HELP.has(verb)) return { data: { usage: USAGE }, text: USAGE }
   switch (verb) {
     case 'task':
-      return taskCommand(rest, call)
+      return taskCommand(rest, call, input)
     case 'inbox': {
       if (rest[0] === 'read') {
         const id = messageId(rest[1])
@@ -140,7 +143,7 @@ async function command(verb, rest, call) {
     case 'note': {
       const { flags, text } = split(rest, ['--human'], [])
       const { message } = await call('POST', '/api/notes', {
-        body: requireText(text, 'cf note "what to know"'),
+        body: requireText(await textOf(text, input), 'cf note "what to know"'),
         ...(flags['--human'] ? { to: 'human' } : {}),
       })
       return {
@@ -151,7 +154,7 @@ async function command(verb, rest, call) {
     case 'ask': {
       const { flags, text } = split(rest, ['--human'], [])
       const { message } = await call('POST', '/api/questions', {
-        body: requireText(text, 'cf ask "your question"'),
+        body: requireText(await textOf(text, input), 'cf ask "your question"'),
         ...(flags['--human'] ? { to: 'human' } : {}),
       })
       return {
@@ -163,7 +166,10 @@ async function command(verb, rest, call) {
       const [id, ...words] = rest
       const number = taskNumber(id)
       const { message } = await call('POST', `/api/tasks/${number}/tell`, {
-        body: requireText(words.join(' '), 'cf tell T-<n> "what to put to its window now"'),
+        body: requireText(
+          await textOf(words.join(' '), input),
+          'cf tell T-<n> "what to put to its window now"',
+        ),
       })
       return {
         data: message,
@@ -174,7 +180,7 @@ async function command(verb, rest, call) {
       const [id, ...words] = rest
       const { message } = await call('POST', '/api/answers', {
         question: messageId(id),
-        body: requireText(words.join(' '), 'cf answer m-<id> "your answer"'),
+        body: requireText(await textOf(words.join(' '), input), 'cf answer m-<id> "your answer"'),
       })
       return {
         data: message,
@@ -212,7 +218,7 @@ async function command(verb, rest, call) {
   }
 }
 
-async function taskCommand([action, ...rest], call) {
+async function taskCommand([action, ...rest], call, input) {
   if (HELP.has(action)) {
     const lines = USAGE.split('\n').filter((line) => /^\s+cf task |^ {36}/.test(line))
     return { data: { usage: lines.join('\n') }, text: lines.join('\n') }
@@ -242,7 +248,7 @@ async function taskCommand([action, ...rest], call) {
     ) {
       throw usage(ADD_USAGE)
     }
-    const body = requireText(text, ADD_USAGE)
+    const body = requireText(await textOf(text, input), ADD_USAGE)
     const address = flags['--self']
       ? { self: true }
       : after !== undefined
@@ -317,7 +323,7 @@ async function taskCommand([action, ...rest], call) {
     return { data: task, text: `${taskLine(task)}\n\n${thread}` }
   }
   if (['done', 'accept', 'cancel', 'reopen', 'pause', 'resume'].includes(action)) {
-    const text = rest.slice(1).join(' ')
+    const text = await textOf(rest.slice(1).join(' '), input)
     if (['done', 'reopen', 'resume'].includes(action) && text.trim().length === 0) {
       throw usage(
         `cf task ${action} T-${number} "${action === 'done' ? 'your result' : action === 'resume' ? 'what to do now' : 'the follow-up'}"`,
@@ -412,6 +418,16 @@ function messageId(value) {
   const match = /^(?:m-)?(\d+)$/i.exec(value ?? '')
   if (match === null) throw usage(`not a message: ${JSON.stringify(value ?? '')} (write m-12)`)
   return Number(match[1])
+}
+
+/**
+ * The text a command was given, or standard input when it is `-`: a brief
+ * in a quoted heredoc (`cf task add --tier standard - <<'BRIEF'`) reaches the
+ * board as written, where the shell would run the backticks and `$( )` of a
+ * double-quoted one. The final newline is the heredoc's, not the text's.
+ */
+async function textOf(text, input) {
+  return text === '-' ? (await input()).replace(/\n$/, '') : text
 }
 
 function requireText(text, example) {

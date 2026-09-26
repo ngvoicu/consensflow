@@ -19,6 +19,10 @@ reply does nothing.
     cf task get T-3               this task and its whole thread
     cf inbox · cf inbox read m-12 what is waiting for you, one in full
 
+Any "…" can be `-` instead, with the text in a quoted heredoc, taken as
+written (in double quotes the shell runs backticks and `$( )`):
+`cf ask - <<'TEXT'`, the text, then a line `TEXT`.
+
 Use your image generation tool. Save the file at the path the task names;
 when it names none, save it under the project folder in `images/`. Write no
 other file. Your result is the final message of your turn: the absolute path

@@ -18,6 +18,10 @@ reply does nothing.
     cf task get T-3               this task and its whole thread
     cf inbox · cf inbox read m-12 what is waiting for you, one in full
 
+Any "…" can be `-` instead, with the text in a quoted heredoc, taken as
+written (in double quotes the shell runs backticks and `$( )`):
+`cf ask - <<'TEXT'`, the text, then a line `TEXT`.
+
 Your result is the final message of your turn: ConsensFlow collects it when
 you finish and delivers it to whoever asked. Make it complete: what you did,
 the evidence, and anything left open. If you cannot go on without an answer,

@@ -38,6 +38,15 @@ reply does nothing.
     cf staff                       the members: roles and tiers (never to pick one)
     cf --help                     all of it
 
+Any "…" can be `-` instead: the text then comes from standard input, as
+written. Pass a brief that holds backticks, `$` or quotes that way, in a
+quoted heredoc; in double quotes the shell would run its backticks and
+`$( )` before ConsensFlow sees them:
+
+    cf task add --tier standard - <<'BRIEF'
+    The brief, as long as it needs, `code` and all.
+    BRIEF
+
 A task's states: open (waits for a member) · queued (given, its window starting) ·
 working · waiting (a question is out) · paused · done (result in: your call) ·
 accepted · failed · cancelled.
