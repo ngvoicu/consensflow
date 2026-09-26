@@ -20,7 +20,12 @@ export default {
   ].join(' '),
   answers: [],
   fallback: 'Da.',
-  quietMs: 120_000,
+  /**
+   * Longer than the Claude and Devin adapters' two-minute draft grace: the
+   * daemon's own Escape on a pause counts as typing, so a tell to those
+   * windows waits out the grace before it is pasted (a known bug).
+   */
+  quietMs: 240_000,
   expectations: [
     { name: 'the chief stops the task with cf tell', holds: (m) => m.plumbing.tells >= 1 },
     { name: 'the worker answers the tell', holds: (m) => m.plumbing.tellsAnswered >= 1 },

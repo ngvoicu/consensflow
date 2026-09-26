@@ -39,3 +39,6 @@ before that column existed.
 | 2026-09-26T10-23 | advice-trip | claude (claude-opus-5) | devin | 5/5 | 7/7 | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 0 | 3 |
 | 2026-09-26T11-03 | six-decisions | claude (claude-opus-5) | pi+opencode+devin | 3/7 | 7/7 | 1 | 1 | 1 | 0 | 1 | 1 | 0 | 0 | 0 | 40 |
 | 2026-09-26T11-44 | six-decisions | pi (pi's default) | claude+opencode+devin | 5/7 | 6/7 | 3 | 2 | 0 | 1 | 2 | 2 | ? | 3 | 0 | 40 |
+| 2026-09-26T11-47 | control-trip | claude (claude-opus-5) | claude | 2/7 | 6/7 | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 4 |
+| 2026-09-26T11-51 | control-trip | claude (claude-opus-5) | pi | 2/7 | 6/7 | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 4 |
+| 2026-09-26T12-00 | control-trip | claude (claude-opus-5) | opencode | 7/7 | 7/7 | 2 | 1 | 0 | 0 | 0 | 1 | 0 | 1 | 0 | 9 |
