@@ -425,7 +425,7 @@ describe('the dispatcher', () => {
       await context.dispatcher.pass()
       assert.match(
         zeus.items.at(-1).text,
-        /^\[ConsensFlow m-\d+ · T-1 · question from @chief\]\nStop: use grammar v2\n\nT-1 is paused for this\. Answer with: cf answer m-\d+ "…"; the chief resumes the task\.$/,
+        /^\[ConsensFlow m-\d+ · T-1 · question from @chief\]\nStop: use grammar v2\n\nT-1 is paused for this\. Run in your shell: cf answer m-\d+ "…"; the chief resumes the task\.$/,
         'the tell goes in once the window is idle',
       )
       assert.equal(
@@ -1048,16 +1048,16 @@ describe('the delivered text', () => {
     const base = { id: 12, taskNumber: 3, sender: 'zeus', body: 'Which format?' }
     assert.equal(
       deliveryText({ ...base, kind: 'question' }),
-      '[ConsensFlow m-12 · T-3 · question from @zeus]\nWhich format?\n\nAnswer with: cf answer m-12 "…"',
+      '[ConsensFlow m-12 · T-3 · question from @zeus]\nWhich format?\n\nRun in your shell: cf answer m-12 "…"',
     )
     const options = [{ question: 'Which?', header: 'Format', options: [], multiple: false }]
     assert.equal(
       deliveryText({ ...base, kind: 'question', questions: options }),
-      '[ConsensFlow m-12 · T-3 · question from @zeus]\nWhich format?\n\nAnswer with: cf answer m-12 "…" (a label or your own words)',
+      '[ConsensFlow m-12 · T-3 · question from @zeus]\nWhich format?\n\nRun in your shell: cf answer m-12 "…" (a label or your own words)',
     )
     assert.equal(
       deliveryText({ ...base, kind: 'question', questions: [...options, ...options] }),
-      '[ConsensFlow m-12 · T-3 · question from @zeus]\nWhich format?\n\nAnswer with: cf answer m-12 "…" (a label or your own words; one line per question)',
+      '[ConsensFlow m-12 · T-3 · question from @zeus]\nWhich format?\n\nRun in your shell: cf answer m-12 "…" (a label or your own words; one line per question)',
     )
     assert.equal(
       deliveryText({ ...base, kind: 'note', sender: null, taskNumber: null, body: 'hi' }),

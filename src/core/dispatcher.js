@@ -79,10 +79,10 @@ export function deliveryText(message) {
   const footer =
     message.kind === 'question'
       ? message.questions
-        ? `\n\nAnswer with: cf answer m-${message.id} "…" (a label or your own words${message.questions.length > 1 ? '; one line per question' : ''})`
+        ? `\n\nRun in your shell: cf answer m-${message.id} "…" (a label or your own words${message.questions.length > 1 ? '; one line per question' : ''})`
         : message.urgent && message.taskNumber != null
-          ? `\n\nT-${message.taskNumber} is paused for this. Answer with: cf answer m-${message.id} "…"; the chief resumes the task.`
-          : `\n\nAnswer with: cf answer m-${message.id} "…"`
+          ? `\n\nT-${message.taskNumber} is paused for this. Run in your shell: cf answer m-${message.id} "…"; the chief resumes the task.`
+          : `\n\nRun in your shell: cf answer m-${message.id} "…"`
       : message.kind === 'result' && message.taskNumber != null
         ? `\n\nDecide with: cf task accept T-${message.taskNumber} · cf task reopen T-${message.taskNumber} "…"`
         : ''
