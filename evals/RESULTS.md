@@ -42,3 +42,10 @@ before that column existed.
 | 2026-09-26T11-47 | control-trip | claude (claude-opus-5) | claude | 2/7 | 6/7 | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 4 |
 | 2026-09-26T11-51 | control-trip | claude (claude-opus-5) | pi | 2/7 | 6/7 | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 4 |
 | 2026-09-26T12-00 | control-trip | claude (claude-opus-5) | opencode | 7/7 | 7/7 | 2 | 1 | 0 | 0 | 0 | 1 | 0 | 1 | 0 | 9 |
+| 2026-09-26T12-09 | control-trip | claude (claude-opus-5) | claude | 7/7 | 7/7 | 2 | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 8 |
+| 2026-09-26T12-34 | control-trip | claude (claude-opus-5) | pi | 4/7 | 6/7 | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 25 |
+| 2026-09-26T12-44 | control-trip | claude (claude-opus-5) | claude | 2/7 | 6/7 | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 6 |
+| 2026-09-26T12-53 | control-trip | claude (claude-opus-5) | pi | 7/7 | 7/7 | 2 | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 9 |
+| 2026-09-26T12-58 | control-trip | claude (claude-opus-5) | devin | 2/7 | 6/7 | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 6 |
+| 2026-09-26T13-09 | control-trip | claude (claude-opus-5) | opencode | 7/7 | 7/7 | 2 | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 11 |
+| 2026-09-26T13-14 | round-trip | claude (claude-opus-5) | claude | 7/7 | 8/8 | 2 | 1 | 0 | 1 | 0 | 1 | 0 | 1 | 0 | 5 |

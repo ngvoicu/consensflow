@@ -1,0 +1,191 @@
+{
+  "scenario": "control-trip",
+  "chief": "claude",
+  "model": "claude-opus-5",
+  "staff": [
+    "devin"
+  ],
+  "staffModels": {
+    "eval-devin-worker": "swe-1-6-slow",
+    "eval-devin-worker-2": "swe-1-6-slow",
+    "eval-devin-advisor": "swe-1-6-slow",
+    "eval-devin-reviewer": "swe-1-6-slow"
+  },
+  "run": 1,
+  "seconds": 338,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Test de funcționare a fluxului pause/resume. Lucrezi în directorul de lucru al proiectului (workspace-ul curent). Nu ai…",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "paused",
+        "assignee": "eval-devin-worker-misty-oriole"
+      }
+    ],
+    "parallel": 1,
+    "advice": 0,
+    "reviews": 0,
+    "questionsToHuman": [],
+    "notesToHuman": [],
+    "taskCount": 1,
+    "chiefId": 2,
+    "chiefHarness": "claude-code",
+    "humanId": 1,
+    "chiefTurns": 7,
+    "chiefEdits": 0,
+    "chiefLastWords": "T-1 is paused and the question is in its window. Ending my turn so its answer can land.",
+    "plumbing": {
+      "briefs": 1,
+      "briefsDelivered": 1,
+      "results": 0,
+      "resultsDelivered": 0,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 0,
+      "tells": 1,
+      "tellsAnswered": 0,
+      "pauses": 1,
+      "resumes": 0,
+      "continuations": 0,
+      "ownerQuestions": 0,
+      "ownerQuestionsAnswered": 0
+    },
+    "filesChanged": []
+  },
+  "checks": [
+    {
+      "name": "the chief stops the task with cf tell",
+      "ok": true
+    },
+    {
+      "name": "the worker answers the tell",
+      "ok": false
+    },
+    {
+      "name": "the task is paused and resumed",
+      "ok": false
+    },
+    {
+      "name": "a follow-up goes to the same window (--after)",
+      "ok": false
+    },
+    {
+      "name": "both tasks are accepted",
+      "ok": false
+    },
+    {
+      "name": "only site/notes.md is new",
+      "ok": false
+    },
+    {
+      "name": "the owner is not asked anything",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (1/1)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/1)",
+      "ok": false
+    },
+    {
+      "name": "every question the chief put to the owner got the owner's answer (0/0)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (1/1)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "✶Bp",
+    "✳",
+    "✢othinking with xhigh effort",
+    "·othinking with xhigh effort",
+    "∴T-1 confirmed it's working, so now I need to ask it which file it will write to.⏺ T-1isnowworking.Step2—interruptingitwithaquestion.·Booping… (3s · thinking with xhigh effort)",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "❯",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus58925tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "⏺Bash(cf tell T-1 \"Întrebare scurtă înaintesăcontinui:încefișierurmeazăsăscrii?Răspundedoarcucaleaexactăafișierului,apoitereiaucasă      continui.\")  ⎿  Running…·Booping… (3s · thought for 3s)",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "❯",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus58925tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Booping…↓ 25 tokens· thought for 3s)",
+    "⏺T-1 is pausedandm-2putto@eval-devin-worker-misty-oriole;itsanswerarrivesasamessage.Then:cftaskresumeT-1\"…\"·Booping… (3s · ↓25 tokens · thought for 3s)────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           59165 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Booping…63",
+    "Booping…88",
+    "✢Booping…113 tokens · thought for 3s)",
+    "Booping…438",
+    "✳75",
+    "✶200",
+    "✻Booping…2",
+    "✽Booping…31",
+    "Booping…4",
+    "Booping…3",
+    "Booping…4",
+    "Booping…",
+    "✻8",
+    "⏺✻ Booping… (4s · ↓ 248 tokens · thought for 3s)❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus59165tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "✶550",
+    "2",
+    "T-1ispausedandthequestionisinitswindow.Endingmyturnsoitsanswercanland.✶Booping… (5s · ↓252 tokens · thought for 3s)────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           59258 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "✻Crunched for5s · done 3:54PM❯ 80"
+  ],
+  "terminalAnswers": 0,
+  "refusedAnswers": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 68,
+      "line": "chief (claude) ready; typing the prompt"
+    },
+    {
+      "at": 78,
+      "line": "chief working; tasks T-1:queued"
+    },
+    {
+      "at": 83,
+      "line": "chief working; tasks T-1:working"
+    },
+    {
+      "at": 98,
+      "line": "chief idle; tasks T-1:paused"
+    },
+    {
+      "at": 338,
+      "line": "quiet: the run is over"
+    }
+  ]
+}
