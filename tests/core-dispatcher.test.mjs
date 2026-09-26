@@ -413,7 +413,7 @@ describe('the dispatcher', () => {
       const pane = context.host.last('zeus')
       assert.deepEqual(
         context.host.requests.filter(([op]) => op === 'pane.input'),
-        [['pane.input', { id: pane.id, generation: pane.generation, bytes: [27] }]],
+        [['pane.input', { id: pane.id, generation: pane.generation, bytes: [27], draft: false }]],
         'the agent is interrupted first',
       )
       const zeus = context.adapter.agent('zeus')
@@ -438,6 +438,44 @@ describe('the dispatcher', () => {
     })
   })
 
+  it("leaves the window alone while it answers the chief's tell, and stops it again once answered", async () => {
+    await setup(async (context) => {
+      const { project } = await withStaff(context)
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.adapter.busy('zeus')
+      context.ledger.pauseTask(project.id, 1, { by: 'chief' })
+      const told = context.ledger.ask(project.id, {
+        from: 'chief',
+        to: 'zeus',
+        task: 1,
+        body: 'Which file?',
+        urgent: true,
+      })
+      await context.dispatcher.pass()
+      context.adapter.answer('zeus', 'Stopped')
+      await context.dispatcher.pass()
+      const escapes = () => context.host.requests.filter(([op]) => op === 'pane.input').length
+      assert.equal(escapes(), 1, 'one Escape stopped the task')
+      // The tell is in; the agent works on its answer, past the next round's time.
+      context.adapter.busy('zeus')
+      context.clock.advance(3_100)
+      await context.dispatcher.pass()
+      context.clock.advance(3_100)
+      await context.dispatcher.pass()
+      assert.equal(escapes(), 1, 'its answer to the tell is not interrupted')
+      // Answered, the task still paused: an agent that works on is stopped again.
+      context.ledger.answer(told.id, {
+        from: context.ledger.task(project.id, 1).assignee,
+        body: 'a.txt',
+      })
+      context.clock.advance(3_100)
+      await context.dispatcher.pass()
+      assert.equal(escapes(), 2, 'the pause holds again once the tell is answered')
+    })
+  })
+
   it('presses Escape twice in a row for a harness that asks for it', async () => {
     await setup(async (context) => {
       const { project } = await withStaff(context)
@@ -451,8 +489,8 @@ describe('the dispatcher', () => {
       assert.deepEqual(
         context.host.requests.filter(([op]) => op === 'pane.input'),
         [
-          ['pane.input', { id: pane.id, generation: pane.generation, bytes: [27] }],
-          ['pane.input', { id: pane.id, generation: pane.generation, bytes: [27] }],
+          ['pane.input', { id: pane.id, generation: pane.generation, bytes: [27], draft: false }],
+          ['pane.input', { id: pane.id, generation: pane.generation, bytes: [27], draft: false }],
         ],
       )
     })
@@ -642,7 +680,7 @@ describe('the dispatcher', () => {
       const escapes = () => context.host.requests.filter(([op]) => op === 'pane.input')
       assert.deepEqual(
         escapes(),
-        [['pane.input', { id: pane.id, generation: pane.generation, bytes: [27] }]],
+        [['pane.input', { id: pane.id, generation: pane.generation, bytes: [27], draft: false }]],
         'Escape, once',
       )
       assert.deepEqual(context.host.killed, [], 'the window stays')

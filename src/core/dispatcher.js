@@ -525,6 +525,8 @@ export class Dispatcher {
   async #interruptIfPaused(participant, runtime) {
     const paused = this.#ledger.pausedTask(participant.id)
     if (paused === null) return
+    // The chief's tell is in the window: the agent answers it, uninterrupted.
+    if (this.#ledger.tellPending(participant.id, paused.id)) return
     const done = runtime.interrupted?.task === paused.id ? runtime.interrupted : null
     if (
       done !== null &&
@@ -538,7 +540,10 @@ export class Dispatcher {
     const presses = runtime.adapter.interrupt?.presses ?? 1
     for (let press = 0; press < presses; press += 1) {
       if (press > 0) await new Promise((resolve) => setTimeout(resolve, DOUBLE_PRESS_MS))
-      await this.#host.request('pane.input', { ...runtime.pane, bytes: [ESCAPE] }).catch(() => {})
+      // A key that types nothing: it must not look like the human's draft and hold the tell.
+      await this.#host
+        .request('pane.input', { ...runtime.pane, bytes: [ESCAPE], draft: false })
+        .catch(() => {})
     }
   }
 

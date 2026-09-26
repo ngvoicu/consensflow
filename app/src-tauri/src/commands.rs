@@ -318,8 +318,9 @@ impl InputQueue {
         &self,
         key: PaneKey,
         bytes: Vec<u8>,
+        draft: bool,
     ) -> Result<oneshot::Receiver<InputResponse>, String> {
-        self.submit(key, InputWork::Human { bytes, draft: true })
+        self.submit(key, InputWork::Human { bytes, draft })
     }
 
     fn reply(
@@ -782,6 +783,18 @@ struct BytesRequest {
     bytes: Vec<u8>,
 }
 
+/// `pane.input`: `draft: false` for keys that type nothing (the daemon's
+/// Escape on a pause), which reach the pane without latching a draft, as the
+/// page's own control keys do.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InputRequest {
+    id: String,
+    generation: u64,
+    bytes: Vec<u8>,
+    draft: Option<bool>,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PasteRequest {
@@ -1072,10 +1085,11 @@ fn register_pane_handlers(
 
     let input_queue = Arc::clone(&inputs);
     builder.on("pane.input", move |_bridge, body| {
-        let request: BytesRequest = parse_body(body)?;
+        let request: InputRequest = parse_body(body)?;
         validate_input(&request.bytes)?;
         let key = pane_key(&request.id, request.generation)?;
-        match wait_for_input_blocking(input_queue.human(key, request.bytes)?)? {
+        let draft = request.draft.unwrap_or(true);
+        match wait_for_input_blocking(input_queue.human(key, request.bytes, draft)?)? {
             InputSuccess::Human { epoch } => Ok(json!({"ok":true,"epoch":epoch})),
             InputSuccess::Written => Err("pane.input returned the wrong outcome".to_string()),
         }
@@ -2816,6 +2830,16 @@ mod tests {
         let latched = |ask: &mut dyn FnMut(&str, Value) -> Value| {
             ask("pane.snapshot", pane.clone())["draftLatched"] == true
         };
+
+        let escape = ask(
+            "pane.input",
+            json!({"id":"draft-pane","generation":1,"bytes":[27],"draft":false}),
+        );
+        assert_eq!(escape["ok"], true, "{escape}");
+        assert!(
+            !latched(&mut ask),
+            "the daemon's Escape types nothing, so it leaves no draft to hold a paste"
+        );
 
         let typed = ask(
             "pane.input",
