@@ -2054,6 +2054,26 @@ async function openOpencodeDb(env) {
 
 // Devin persists revisions, including cancelled assistant text. Only its main
 // chain plus a matching native request/complete boundary proves a reply.
+/**
+ * The text a Devin message is compared by: its wire streams a file link as
+ * `[name](file:///path)` and its store keeps `<ref_file file="/path" />`
+ * (Devin 3000.11, 2026-09-26), so both are read as the path; nothing else is
+ * loosened, since the comparison is what tells a final message from a half
+ * one.
+ */
+function devinComparable(text) {
+  const path = (value) => {
+    try {
+      return decodeURI(value)
+    } catch {
+      return value
+    }
+  }
+  return text
+    .replace(/<ref_file\s+file="([^"]*)"\s*\/>/g, (_, file) => path(file))
+    .replace(/\[[^\]]*\]\(file:\/\/([^)\s]*)\)/g, (_, file) => path(file))
+}
+
 async function devinAnswers(sessionId, env) {
   const { DatabaseSync } = await import('node:sqlite')
   const file = path.join(
@@ -2176,7 +2196,7 @@ async function devinAnswers(sessionId, env) {
     item.complete =
       finalByRequest.get(item._request) === item.id &&
       outcome?.cause === 'complete' &&
-      outcome.text === item.text
+      devinComparable(outcome.text) === devinComparable(item.text)
     item.settled = item.complete
   }
   const last = result.items.findLast((item) => item.role !== 'custom')
