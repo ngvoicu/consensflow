@@ -21,6 +21,16 @@ const QUESTION_TOOL = [
   'suppress_unstable_features_warning=true',
 ]
 
+/**
+ * A window that opens on Codex's "Update now?" prompt, whenever a newer
+ * release exists, never starts its thread, so a chief opened without a first
+ * message waited on it for good. And a login shell re-reads the user's
+ * profile, which can put another install's `cf` ahead of this daemon's (an
+ * eval worker's `cf` was the live app's older one): without it, commands keep
+ * the PATH the daemon gave the window. Both probed on Codex 0.156.1.
+ */
+const WINDOW = ['-c', 'check_for_update_on_startup=false', '-c', 'allow_login_shell=false']
+
 export function codexAdapter({
   env,
   harness = 'codex',
@@ -59,7 +69,10 @@ export function codexAdapter({
       // Codex's question tool (request_user_input) is behind a feature still
       // marked under development; the broker answers it from the board.
       const invocation = withNativeBridge(
-        { command: executable, args: [...roleSetup.args, ...QUESTION_TOOL, ...runner.args] },
+        {
+          command: executable,
+          args: [...roleSetup.args, ...QUESTION_TOOL, ...WINDOW, ...runner.args],
+        },
         configuration,
         env.CONSENSFLOW_NODE ?? process.execPath,
       )
