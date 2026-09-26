@@ -86,10 +86,26 @@ const realCodex = realOnPath('codex', process.env.PATH ?? '')
 // Codex also opens on an update prompt whenever a newer release exists
 // (seen 2026-09-26 with 0.157.0 out), and a chief started without a first
 // message waits on it for good: the eval turns the startup check off.
+// With its MCP servers off, Codex runs commands through its own shell, which
+// applies the user's shell_environment_policy; a policy of inherit = "core"
+// (this Mac's, 2026-09-26) strips every ConsensFlow variable, so cf in the
+// window can reach nothing. The eval environment is ours and holds no
+// secret, so Codex windows pass it on whole. The model is the chief's, or
+// the cheap one; a member's own --model still wins.
+const codexModel = chief === 'codex' ? chiefSetup.model : HARNESSES.codex.model
 wrapper(
   'codex',
   realCodex,
-  ['-c', 'check_for_update_on_startup=false'].concat(
+  [
+    '-c',
+    'check_for_update_on_startup=false',
+    '-c',
+    'shell_environment_policy.inherit="all"',
+    '-c',
+    'shell_environment_policy.ignore_default_excludes=true',
+    '-c',
+    `model=${JSON.stringify(codexModel)}`,
+  ].concat(
     codexIsolation(
       JSON.parse(
         execFileSync(realCodex, ['mcp', 'list', '--json'], { encoding: 'utf8', timeout: 30_000 }),

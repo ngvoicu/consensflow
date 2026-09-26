@@ -50,7 +50,9 @@ describe('an eval run’s plan', () => {
       env: { OPENCODE_CONFIG_CONTENT: '{"model":"opencode/x"}' },
       model: 'opencode/x',
     })
-    assert.deepEqual(chiefEnvironment('codex', 'ignored'), { env: {}, model: "codex's default" })
+    assert.deepEqual(chiefEnvironment('codex'), { env: {}, model: HARNESSES.codex.model })
+    assert.deepEqual(chiefEnvironment('codex', 'gpt-x'), { env: {}, model: 'gpt-x' })
+    assert.deepEqual(chiefEnvironment('pi', 'ignored'), { env: {}, model: "pi's default" })
     assert.deepEqual(chiefEnvironment('claude').model, 'claude-opus-5')
     assert.deepEqual(chiefEnvironment('opencode').model, HARNESSES.opencode.model)
     assert.throws(() => chiefEnvironment('kimi', 'x'), /no such eval harness/)

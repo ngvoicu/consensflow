@@ -49,3 +49,7 @@ before that column existed.
 | 2026-09-26T12-58 | control-trip | claude (claude-opus-5) | devin | 2/7 | 6/7 | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 6 |
 | 2026-09-26T13-09 | control-trip | claude (claude-opus-5) | opencode | 7/7 | 7/7 | 2 | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 11 |
 | 2026-09-26T13-14 | round-trip | claude (claude-opus-5) | claude | 7/7 | 8/8 | 2 | 1 | 0 | 1 | 0 | 1 | 0 | 1 | 0 | 5 |
+| 2026-09-26T13-54 | six-decisions | claude (claude-opus-5) | claude+opencode+devin | 6/7 | 7/7 | 5 | 4 | 0 | 1 | 2 | 1 | 0 | 1 | 0 | 40 |
+| 2026-09-26T14-21 | round-trip | claude (claude-opus-5) | codex | 4/7 | 6/7 | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 25 |
+| 2026-09-26T14-39 | simple-fix | codex (codex's default) | pi | 5/5 | 7/7 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 1 | 0 | 2 |
+| 2026-09-26T15-12 | advice-trip | claude (claude-opus-5) | codex | 5/5 | 7/7 | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 0 | 4 |
