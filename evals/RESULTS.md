@@ -53,3 +53,7 @@ before that column existed.
 | 2026-09-26T14-21 | round-trip | claude (claude-opus-5) | codex | 4/7 | 6/7 | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 25 |
 | 2026-09-26T14-39 | simple-fix | codex (codex's default) | pi | 5/5 | 7/7 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 1 | 0 | 2 |
 | 2026-09-26T15-12 | advice-trip | claude (claude-opus-5) | codex | 5/5 | 7/7 | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 0 | 4 |
+| 2026-09-26T15-22 | round-trip | codex (gpt-5.6-luna) | opencode | 7/7 | 7/7 | 2 | 1 | 0 | 1 | 0 | 0 | ? | 1 | 0 | 7 |
+| 2026-09-26T15-27 | round-trip | opencode (opencode-go/deepseek-v4-flash) | codex | 4/7 | 7/7 | 2 | 1 | 0 | 1 | 1 | 0 | ? | 1 | 0 | 5 |
+| 2026-09-26T15-52 | control-trip | opencode (opencode-go/deepseek-v4-flash) | codex | 2/7 | 6/7 | 1 | 1 | 0 | 0 | 0 | 0 | ? | 0 | 0 | 25 |
+| 2026-09-26T16-11 | six-decisions | codex (gpt-5.6-luna) | opencode+devin | 1/7 | 7/7 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 14 | 2 | 19 |
