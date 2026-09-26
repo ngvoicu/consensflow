@@ -130,7 +130,10 @@ export async function startCore(
     adapters: createAdapters(env, { peer }),
     credentials,
     roster: (agent) => agentRow(agent, env) ?? null,
-    roles: (participant, project) => roleInstructions(participant.role, teamOf(project)),
+    roles: (participant, project) =>
+      roleInstructions(participant.role, teamOf(project), {
+        cf: join(BUNDLE_BIN, process.platform === 'win32' ? 'cf.cmd' : 'cf'),
+      }),
     trace,
     launchFiles: { forget: (launch) => forgetLaunch(home, launch) },
     paneEnv: (participant, project) => ({

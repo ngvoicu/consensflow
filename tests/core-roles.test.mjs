@@ -83,6 +83,22 @@ describe('role instructions for the new core', () => {
     )
   })
 
+  it("names this window's cf by its full path, for a shell that finds another cf first", () => {
+    for (const role of ['chief', 'worker', 'advisor', 'reviewer', 'designer']) {
+      const text = roleInstructions(role, [], { cf: '/opt/consensflow/bin/cf' })
+      assert.match(
+        text,
+        /## This window's cf\n\nHere `cf` is \/opt\/consensflow\/bin\/cf\. If `cf` says a command is unknown, or answers as another program, another `cf` comes first on this shell's PATH: run \/opt\/consensflow\/bin\/cf instead\.\n$/,
+        role,
+      )
+    }
+    assert.doesNotMatch(
+      roleInstructions('worker', []),
+      /This window's cf/,
+      'only when the daemon says',
+    )
+  })
+
   it('refuses an unknown role', () => {
     assert.throws(() => roleInstructions('king', []), /no role instructions for king/)
   })
