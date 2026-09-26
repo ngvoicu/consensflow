@@ -2074,6 +2074,14 @@ function devinComparable(text) {
     .replace(/\[[^\]]*\]\(file:\/\/([^)\s]*)\)/g, (_, file) => path(file))
 }
 
+/** The wire updates that mean Devin is on a turn; settings and mode updates are not work. */
+const DEVIN_WORK = new Set([
+  'agent_thought_chunk',
+  'agent_message_chunk',
+  'tool_call',
+  'tool_call_update',
+])
+
 async function devinAnswers(sessionId, env) {
   const { DatabaseSync } = await import('node:sqlite')
   const file = path.join(
@@ -2154,13 +2162,21 @@ async function devinAnswers(sessionId, env) {
     if (error.code !== 'ENOENT') throw error
   }
   const outcomes = new Map()
+  // A turn Devin is still on shows only on the wire: thoughts, messages and
+  // tool calls after the last end; its store holds the finished steps. Judged
+  // by the launch whose wire was written last (a resume opens a new one).
+  let working = false
+  let latestWire = -1
   for (const launch of launches) {
     if (!launch.isDirectory()) continue
     let active = null
+    let busy = false
+    const wire = path.join(root, launch.name, 'wire.jsonl')
     try {
-      await readJsonl(path.join(root, launch.name, 'wire.jsonl'), (event) => {
+      await readJsonl(wire, (event) => {
         if (event.sessionId !== sessionId) return
         const update = event.update
+        if (DEVIN_WORK.has(update?.sessionUpdate)) busy = true
         if (update?.sessionUpdate === 'agent_message_chunk') {
           const id = update._meta?.['cognition.ai/streamingMessageId']
           // History replay has timestamps but no streaming UUID.
@@ -2179,8 +2195,14 @@ async function devinAnswers(sessionId, env) {
             outcomes.set(active.request, outcome)
           }
           active = null
+          busy = false
         }
       })
+      const { mtimeMs } = await fs.stat(wire)
+      if (mtimeMs >= latestWire) {
+        latestWire = mtimeMs
+        working = busy
+      }
     } catch (error) {
       if (error.code !== 'ENOENT') throw error
     }
@@ -2204,10 +2226,14 @@ async function devinAnswers(sessionId, env) {
   result.cancelled = outcome?.cause === 'cancelled'
   result.failed = outcome?.cause === 'error'
   result.inFlight =
-    last?.role === 'assistant' && !last.complete && !result.cancelled && !result.failed
+    working || (last?.role === 'assistant' && !last.complete && !result.cancelled && !result.failed)
   setSettlement(
     result,
-    last?.complete || result.cancelled || result.failed ? 'settled' : 'unknown',
+    working
+      ? 'in-flight'
+      : last?.complete || result.cancelled || result.failed
+        ? 'settled'
+        : 'unknown',
     'native',
     null,
     result.cursor,

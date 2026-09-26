@@ -1817,64 +1817,69 @@ test('quota/opencode: a 429 on the message is exhaustion; a completed turn after
 
 // ------------------------------------------------------------------- devin
 
+/** A Devin store with a user message and an assistant reply, and a wire log of `events`, in a temporary home. */
+async function stageDevin(stored, events) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-completion-devin-'))
+  const env = {
+    HOME: root,
+    XDG_DATA_HOME: path.join(root, 'data'),
+    CONSENSFLOW_HOME: path.join(root, 'home'),
+  }
+  const store = path.join(env.XDG_DATA_HOME, 'devin', 'cli')
+  await fs.mkdir(store, { recursive: true })
+  const db = new DatabaseSync(path.join(store, 'sessions.db'))
+  db.exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, main_chain_id TEXT);
+    CREATE TABLE message_nodes (row_id INTEGER PRIMARY KEY, session_id TEXT, node_id TEXT,
+      parent_node_id TEXT, chat_message TEXT, created_at TEXT)`)
+  const node = db.prepare(
+    'INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at) VALUES (?, ?, ?, ?, ?)',
+  )
+  const user = {
+    message_id: 'u-1',
+    role: 'user',
+    content: 'Review T-1',
+    metadata: { extensions: { 'chisel/client-message-id': 'request-1' } },
+  }
+  node.run('calm-river', 'n-1', null, JSON.stringify(user), '2026-09-26T05:09:30Z')
+  node.run(
+    'calm-river',
+    'n-2',
+    'n-1',
+    JSON.stringify({ message_id: 'a-1', role: 'assistant', content: stored }),
+    '2026-09-26T05:10:00Z',
+  )
+  db.prepare('INSERT INTO sessions (id, main_chain_id) VALUES (?, ?)').run('calm-river', 'n-2')
+  db.close()
+  const launch = path.join(env.CONSENSFLOW_HOME, 'integrations', 'devin', 'launch-1')
+  await fs.mkdir(launch, { recursive: true })
+  await fs.writeFile(
+    path.join(launch, 'wire.jsonl'),
+    `${events.map((e) => JSON.stringify(e)).join('\n')}\n`,
+  )
+  return { root, env }
+}
+
+const devinChunk = (text, request = 'request-1', stream = 'stream-1') => ({
+  sessionId: 'calm-river',
+  turnClientMessageId: request,
+  update: {
+    sessionUpdate: 'agent_message_chunk',
+    content: { type: 'text', text },
+    _meta: { 'cognition.ai/streamingMessageId': stream },
+  },
+})
+
 test('completion/devin: a final message that links a file settles, though Devin stores the link as a tag', async () => {
   const { streamed, stored } = JSON.parse(
     await fs.readFile(path.join(FIX, 'devin/file-link.json'), 'utf8'),
   )
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-completion-devin-'))
+  const half = Math.floor(streamed.length / 2)
+  const { root, env } = await stageDevin(stored, [
+    devinChunk(streamed.slice(0, half)),
+    devinChunk(streamed.slice(half)),
+    { sessionId: 'calm-river', turnClientMessageId: 'request-1', cause: 'complete' },
+  ])
   try {
-    const env = {
-      HOME: root,
-      XDG_DATA_HOME: path.join(root, 'data'),
-      CONSENSFLOW_HOME: path.join(root, 'home'),
-    }
-    const store = path.join(env.XDG_DATA_HOME, 'devin', 'cli')
-    await fs.mkdir(store, { recursive: true })
-    const db = new DatabaseSync(path.join(store, 'sessions.db'))
-    db.exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, main_chain_id TEXT);
-      CREATE TABLE message_nodes (row_id INTEGER PRIMARY KEY, session_id TEXT, node_id TEXT,
-        parent_node_id TEXT, chat_message TEXT, created_at TEXT)`)
-    const node = db.prepare(
-      'INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at) VALUES (?, ?, ?, ?, ?)',
-    )
-    const user = {
-      message_id: 'u-1',
-      role: 'user',
-      content: 'Review T-1',
-      metadata: { extensions: { 'chisel/client-message-id': 'request-1' } },
-    }
-    node.run('calm-river', 'n-1', null, JSON.stringify(user), '2026-09-26T05:09:30Z')
-    node.run(
-      'calm-river',
-      'n-2',
-      'n-1',
-      JSON.stringify({ message_id: 'a-1', role: 'assistant', content: stored }),
-      '2026-09-26T05:10:00Z',
-    )
-    db.prepare('INSERT INTO sessions (id, main_chain_id) VALUES (?, ?)').run('calm-river', 'n-2')
-    db.close()
-    const launch = path.join(env.CONSENSFLOW_HOME, 'integrations', 'devin', 'launch-1')
-    await fs.mkdir(launch, { recursive: true })
-    const chunk = (text) => ({
-      sessionId: 'calm-river',
-      turnClientMessageId: 'request-1',
-      update: {
-        sessionUpdate: 'agent_message_chunk',
-        content: { type: 'text', text },
-        _meta: { 'cognition.ai/streamingMessageId': 'stream-1' },
-      },
-    })
-    const half = Math.floor(streamed.length / 2)
-    const wire = [
-      chunk(streamed.slice(0, half)),
-      chunk(streamed.slice(half)),
-      { sessionId: 'calm-river', turnClientMessageId: 'request-1', cause: 'complete' },
-    ]
-    await fs.writeFile(
-      path.join(launch, 'wire.jsonl'),
-      `${wire.map((e) => JSON.stringify(e)).join('\n')}\n`,
-    )
-
     const result = await completion.answers('devin', 'calm-river', env)
     const final = result.items.at(-1)
     assert.equal(final.text, stored)
@@ -1883,5 +1888,38 @@ test('completion/devin: a final message that links a file settles, though Devin 
     assert.equal(result.settlement.state, 'settled')
   } finally {
     await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('completion/devin: a turn whose work shows on the wire after the last end is in flight, whatever the store says', async () => {
+  // Devin writes a turn to its store as it goes, but a turn it is still on
+  // shows only on the wire: thoughts, messages and tool calls after the last end.
+  const work = (sessionUpdate) => ({ sessionId: 'calm-river', update: { sessionUpdate } })
+  const ended = [
+    devinChunk('Done.'),
+    { sessionId: 'calm-river', turnClientMessageId: 'request-1', cause: 'complete' },
+  ]
+  const { root, env } = await stageDevin('Done.', [
+    ...ended,
+    work('agent_thought_chunk'),
+    work('tool_call'),
+    work('tool_call_update'),
+  ])
+  try {
+    const working = await completion.answers('devin', 'calm-river', env)
+    assert.equal(working.inFlight, true)
+    assert.equal(working.settlement.state, 'in-flight')
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+  const settings = await stageDevin('Done.', [
+    { sessionId: 'calm-river', update: { sessionUpdate: 'config_option_update' } },
+    ...ended,
+  ])
+  try {
+    const idle = await completion.answers('devin', 'calm-river', settings.env)
+    assert.equal(idle.settlement.state, 'settled', 'settings updates are not work')
+  } finally {
+    await fs.rm(settings.root, { recursive: true, force: true })
   }
 })
