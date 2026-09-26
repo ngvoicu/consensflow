@@ -6,10 +6,11 @@ import { describe, it } from 'node:test'
 import {
   answerFor,
   chiefEnvironment,
-  claudeOnPath,
   claudeProjectKey,
+  codexIsolation,
   HARNESSES,
   lastLines,
+  realOnPath,
   staffFor,
 } from '../evals/plan.mjs'
 import sixDecisions from '../evals/scenarios/six-decisions.mjs'
@@ -62,15 +63,37 @@ describe('an eval run’s plan', () => {
     )
   })
 
-  it('finds the real claude on PATH, never the eval wrapper', () => {
-    const present = new Set(['/h/.consensflow-candidate/evals/bin/claude', '/h/.local/bin/claude'])
+  it('finds the real claude or codex on PATH, never the eval wrapper', () => {
+    const present = new Set([
+      '/h/.consensflow-candidate/evals/bin/claude',
+      '/h/.local/bin/claude',
+      '/opt/homebrew/bin/codex',
+    ])
+    const path = '/h/.consensflow-candidate/evals/bin:/h/.local/bin:/opt/homebrew/bin'
     assert.equal(
-      claudeOnPath('/h/.consensflow-candidate/evals/bin:/h/.local/bin:/usr/bin', (f) =>
-        present.has(f),
-      ),
+      realOnPath('claude', path, (f) => present.has(f)),
       '/h/.local/bin/claude',
     )
-    assert.throws(() => claudeOnPath('/usr/bin', () => false), /claude is not on PATH/)
+    assert.equal(
+      realOnPath('codex', path, (f) => present.has(f)),
+      '/opt/homebrew/bin/codex',
+    )
+    assert.throws(() => realOnPath('claude', '/usr/bin', () => false), /claude is not on PATH/)
+  })
+
+  it('switches off every Codex MCP server with a harmless, disabled definition', () => {
+    assert.deepEqual(codexIsolation([{ name: 'cua_repl' }, { name: 'computer-history' }]), [
+      '-c',
+      'mcp_servers.cua_repl.command="/usr/bin/true"',
+      '-c',
+      'mcp_servers.cua_repl.enabled=false',
+      '-c',
+      'mcp_servers.computer-history.command="/usr/bin/true"',
+      '-c',
+      'mcp_servers.computer-history.enabled=false',
+    ])
+    assert.deepEqual(codexIsolation([]), [])
+    assert.throws(() => codexIsolation([{ name: 'a.b' }]), /cannot switch off/)
   })
 
   it('keeps the last non-empty lines a window printed, whatever the line ending', () => {

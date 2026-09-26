@@ -124,16 +124,38 @@ export function answerFor(scenario, question) {
 }
 
 /**
- * The real `claude` on this PATH, skipping the eval's own wrapper directory,
- * so the wrapper can exec it by absolute path.
+ * The real `name` (claude, codex) on this PATH, skipping the eval's own
+ * wrapper directory, so a wrapper can exec it by absolute path.
  */
-export function claudeOnPath(pathVariable, exists = defaultExists) {
+export function realOnPath(name, pathVariable, exists = defaultExists) {
   for (const dir of pathVariable.split(':')) {
     if (dir === '' || dir.endsWith('/evals/bin')) continue
-    const candidate = `${dir.replace(/\/$/, '')}/claude`
+    const candidate = `${dir.replace(/\/$/, '')}/${name}`
     if (exists(candidate)) return candidate
   }
-  throw new Error('claude is not on PATH')
+  throw new Error(`${name} is not on PATH`)
+}
+
+/**
+ * The `-c` overrides that switch off every MCP server Codex would start
+ * (`codex mcp list --json`): each gets a harmless, disabled definition,
+ * which also covers servers a plugin or the ChatGPT app adds outside
+ * config.toml (a bare `enabled=false` is refused for those).
+ */
+export function codexIsolation(servers) {
+  return servers.flatMap(({ name }) => {
+    // Codex's -c takes the key's segments literally: a quoted name would
+    // define a new server and leave the real one on. Refuse, never half-isolate.
+    if (!/^[A-Za-z0-9_-]+$/.test(name)) {
+      throw new Error(`cannot switch off the Codex MCP server ${JSON.stringify(name)}`)
+    }
+    return [
+      '-c',
+      `mcp_servers.${name}.command="/usr/bin/true"`,
+      '-c',
+      `mcp_servers.${name}.enabled=false`,
+    ]
+  })
 }
 
 function defaultExists(file) {

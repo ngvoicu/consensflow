@@ -20,10 +20,11 @@ import { measure, mechanics, verdict } from './measure.mjs'
 import {
   answerFor,
   chiefEnvironment,
-  claudeOnPath,
   claudeProjectKey,
+  codexIsolation,
   HARNESSES,
   lastLines,
+  realOnPath,
   staffFor,
 } from './plan.mjs'
 
@@ -59,20 +60,38 @@ const chiefSetup = chiefEnvironment(chief, values.model)
 
 /** The bench's clean environment: the real logins, never this shell's session identity. */
 /**
- * Every Claude window in a run starts through this wrapper, first on the
- * daemon's PATH: no MCP servers, no claude.ai connectors, no Chrome. The
- * windows run in full-permission mode on the user's own Claude setup, which
- * reaches their browser and accounts (on 2026-09-26 an eval reviewer called
- * the Chrome tools); a scripted run must reach neither.
+ * Every Claude and Codex window in a run starts through a wrapper, first on
+ * the daemon's PATH, that shuts out MCP servers, connectors and the browser.
+ * The windows run in full-permission mode on the user's own setup, which
+ * reaches their browser, screen and accounts: on 2026-09-26 an eval reviewer
+ * called the Claude in Chrome tools, and Codex's setup gained browser and
+ * computer-use servers the same day. A scripted run must reach none of them.
  */
 const ISOLATED_BIN = join(H, '.consensflow-candidate', 'evals', 'bin')
-const realClaude = claudeOnPath(process.env.PATH ?? '')
+const wrapper = (name, real, flags) => {
+  const file = join(ISOLATED_BIN, name)
+  const args = [real, ...flags].map((arg) => JSON.stringify(arg)).join(' ')
+  writeFileSync(
+    file,
+    `#!/bin/sh\n# Written by evals/run.mjs: eval windows reach no MCP server and no browser.\nexec ${args} "$@"\n`,
+  )
+  chmodSync(file, 0o755)
+}
 mkdirSync(ISOLATED_BIN, { recursive: true })
-writeFileSync(
-  join(ISOLATED_BIN, 'claude'),
-  `#!/bin/sh\n# Written by evals/run.mjs: eval windows reach no MCP server and no browser.\nexec ${JSON.stringify(realClaude)} --strict-mcp-config --no-chrome "$@"\n`,
+wrapper('claude', realOnPath('claude', process.env.PATH ?? ''), [
+  '--strict-mcp-config',
+  '--no-chrome',
+])
+const realCodex = realOnPath('codex', process.env.PATH ?? '')
+wrapper(
+  'codex',
+  realCodex,
+  codexIsolation(
+    JSON.parse(
+      execFileSync(realCodex, ['mcp', 'list', '--json'], { encoding: 'utf8', timeout: 30_000 }),
+    ),
+  ),
 )
-chmodSync(join(ISOLATED_BIN, 'claude'), 0o755)
 
 const ENV = {
   HOME: H,
