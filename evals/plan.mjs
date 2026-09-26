@@ -93,11 +93,18 @@ export function lastLines(text, count = 40) {
 
 /**
  * The scripted human's answer: the first of the scenario's `answers` whose
- * pattern matches the question wins, free text or not; then a question with
- * options takes each one's first option; then the scenario's `fallback`.
+ * pattern matches the question's first line (its subject) wins, then the
+ * first whose pattern matches anywhere in it, free text or not; then a
+ * question with options takes each one's first option; then the scenario's
+ * `fallback`.
  */
 export function answerFor(scenario, question) {
-  for (const { match, text } of scenario.answers ?? []) {
+  const answers = scenario.answers ?? []
+  const subject = question.body.split('\n')[0]
+  for (const { match, text } of answers) {
+    if (match.test(subject)) return text
+  }
+  for (const { match, text } of answers) {
     if (match.test(question.body)) return text
   }
   if (question.questions !== null && question.questions.length > 0) {

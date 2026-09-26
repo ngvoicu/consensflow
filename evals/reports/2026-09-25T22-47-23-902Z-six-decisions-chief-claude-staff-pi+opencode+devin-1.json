@@ -1,0 +1,168 @@
+{
+  "scenario": "six-decisions",
+  "chief": "claude",
+  "model": "claude-haiku-4-5-20251001",
+  "staff": [
+    "pi",
+    "opencode",
+    "devin"
+  ],
+  "staffModels": {
+    "eval-pi-worker": "opencode-go/muse-spark-1.3-contributor",
+    "eval-pi-worker-2": "opencode-go/muse-spark-1.3-contributor",
+    "eval-pi-advisor": "opencode-go/muse-spark-1.3-contributor",
+    "eval-pi-reviewer": "opencode-go/muse-spark-1.3-contributor",
+    "eval-opencode-worker": "opencode/muse-spark-1.3-contributor-free",
+    "eval-opencode-worker-2": "opencode/muse-spark-1.3-contributor-free",
+    "eval-opencode-advisor": "opencode/muse-spark-1.3-contributor-free",
+    "eval-opencode-reviewer": "opencode/muse-spark-1.3-contributor-free",
+    "eval-devin-worker": "swe-1-6-slow",
+    "eval-devin-worker-2": "swe-1-6-slow",
+    "eval-devin-advisor": "swe-1-6-slow",
+    "eval-devin-reviewer": "swe-1-6-slow"
+  },
+  "run": 1,
+  "seconds": 413,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [],
+    "parallel": 0,
+    "advice": 0,
+    "reviews": 0,
+    "questionsToHuman": [],
+    "notesToHuman": [],
+    "chiefId": 2,
+    "chiefHarness": "claude-code",
+    "chiefTurns": 12,
+    "chiefEdits": 9,
+    "chiefLastWords": "Perfect. Toate paginile cu footer au fost actualizate. Iată statusul final:\n\n## Rezumat complet\n\n✅ **Conținut markdown** (nepublic, de referință)\n- `content/legislatie-ro.md` — complet\n- `content/legislatie-en.md` — complet\n\n✅ **Pagini HTML — toate actualizate cu linkul Legislație**\n- `site/index.html` — footer are linkul \"Legislație\"\n- `site/evaluare.html` — footer are linkul \"Legislație\"\n- `site/legislatie.html` — pagina nouă (RO)\n- `site/en/index.html` — footer are linkul \"Legislation\"\n- `site/en/legislatie.html` — pagina nouă (EN)\n\n✅ **Fișierul vechi**\n- `docs/document-de-referinta-hr.md` — lăsat pe loc, fără ștergere\n\n**Status**: Gata de publicare. Paginele legislației sunt linkate din footer pe toate paginile, în limba respectivă (RO/EN). \n\nPoți verifica local cum arată, și când zici \"publică\" (sau orice variație), marcez munca ca finalizată. Ce zici?",
+    "filesChanged": [
+      "content/legislatie-en.md",
+      "content/legislatie-ro.md",
+      "site/en/index.html",
+      "site/en/legislatie.html",
+      "site/evaluare.html",
+      "site/index.html",
+      "site/legislatie.html"
+    ]
+  },
+  "checks": [
+    {
+      "name": "the owner is asked on the board, at least three questions",
+      "ok": false
+    },
+    {
+      "name": "at least one question offers options",
+      "ok": false
+    },
+    {
+      "name": "a finding reaches the owner as a note",
+      "ok": false
+    },
+    {
+      "name": "at least two tasks go on the board",
+      "ok": false
+    },
+    {
+      "name": "two tasks run side by side at some point",
+      "ok": false
+    },
+    {
+      "name": "finished work goes to a review",
+      "ok": false
+    },
+    {
+      "name": "the chief's own edits stay under ten (counted for a Claude chief only)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "✅Conținut markdown(nepublic,dereferință)  -────────────────────────────────────────────────────────────────────────────────❯",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "workspace Haiku4.554101tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "content/legislatie-ro.md—complet-────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Haiku 4.5                                      54101 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "-content/legislatie-ro.md—completen",
+    "✅Pagini HTML — toate actualizate cu linkul Legislație  -────────────────────────────────────────────────────────────────────────────────❯",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "workspace Haiku4.554101tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "site/index.html—footerarelinkul\"Legislație\"-────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Haiku 4.5                                      54101 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "site/evaluare.html—footerarelinkul\"Legislație\"-────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Haiku 4.5                                      54101 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "site/legislatie.html—paginanouă(RO)-────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Haiku 4.5                                      54101 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "site/en/index.html—footerarelinkul\"Legislation\"-────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Haiku 4.5                                      54101 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "-site/index.html—footerarelinkul\"Legislație\"evaluare.html — foote are linkul \"Legislație\"legislatie.html— pagin nouă (RO)en/ndex.html —footer re linkul \"Legislation\"legislaie.html — pagina nouă (EN)",
+    "✅Fișierul vechi  -────────────────────────────────────────────────────────────────────────────────❯",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "workspace Haiku4.554101tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "-docs/document-de-referinta-hr.md—lăsatpeloc,fărăștergere",
+    "Status:Gatadepublicare.Paginelelegislațieisuntlinkatedinfooterpe────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Haiku 4.5                                      54101 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "toatepaginile,înlimbarespectivă(RO/EN).❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Haiku4.554101tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Poțiverificalocalcumarată,șicândzici\"publică\"(sauoricevariație),────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Haiku 4.5                                      54101 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "marcezmuncacafinalizată.Cezici?✻ Recombobulating… (15s · ↓1.1k tokens)  ⎿  Tip: Hit shift+tab to cycle between manual mode, auto-accept edit mode, and   plan mode",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "❯",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "workspace Haiku4.554101tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Recombobulating…running Stophok · 15s · ↓1.1k tokens)655",
+    "✻Brewed for 15s · done 1:45 AM────────────────────────────────────────────────────────────────────────────────❯   workspace Haiku 4.554655 tokens  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent                /rc"
+  ],
+  "terminalAnswers": 2,
+  "log": [
+    {
+      "at": 68,
+      "line": "chief (claude) ready; typing the prompt"
+    },
+    {
+      "at": 78,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 93,
+      "line": "chief idle; tasks none"
+    },
+    {
+      "at": 153,
+      "line": "the chief stopped in its terminal; the owner typed there: Da, cum recomanzi. Continuă."
+    },
+    {
+      "at": 163,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 213,
+      "line": "chief idle; tasks none"
+    },
+    {
+      "at": 273,
+      "line": "the chief stopped in its terminal; the owner typed there: Da, cum recomanzi. Continuă."
+    },
+    {
+      "at": 283,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 293,
+      "line": "chief idle; tasks none"
+    },
+    {
+      "at": 413,
+      "line": "quiet: the run is over"
+    }
+  ]
+}

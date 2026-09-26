@@ -173,22 +173,6 @@ async function run(index) {
     let signature = ''
     for (;;) {
       await sleep(5_000)
-      // A chief that stops in its terminal, asking or proposing there, hears the
-      // owner there too (twice at most), so the run sees what it does next; the
-      // report counts these, because they are what the board was for.
-      if (
-        scenario.nudge !== undefined &&
-        terminalAnswers < 2 &&
-        Date.now() - lastChange > NUDGE_AFTER_MS &&
-        (await chiefLane())?.activity?.state === 'idle' &&
-        (await questions()).length === 0
-      ) {
-        terminalAnswers += 1
-        note(`the chief stopped in its terminal; the owner typed there: ${scenario.nudge}`)
-        await say(scenario.nudge)
-        lastChange = Date.now()
-        continue
-      }
       for (const question of await questions()) {
         if (answered.has(question.id)) continue
         answered.add(question.id)
@@ -216,6 +200,25 @@ async function run(index) {
       const busy =
         lane?.activity?.state !== 'idle' ||
         tasks.some((t) => ['queued', 'working', 'waiting'].includes(t.state))
+      // A chief that stops in its terminal, asking or proposing there, with
+      // nothing ever put on the board, hears the owner there too (twice at
+      // most), so the run sees what it does next; the report counts these,
+      // because they are what the board was for.
+      if (
+        scenario.nudge !== undefined &&
+        terminalAnswers < 2 &&
+        !busy &&
+        tasks.length === 0 &&
+        answered.size === 0 &&
+        Date.now() - lastChange > NUDGE_AFTER_MS
+      ) {
+        terminalAnswers += 1
+        note(`the chief stopped in its terminal; the owner typed there: ${scenario.nudge}`)
+        await settled(() => app.output(pane.id).length)
+        await say(scenario.nudge)
+        lastChange = Date.now()
+        continue
+      }
       if (!busy && Date.now() - lastChange > scenario.quietMs) {
         note('quiet: the run is over')
         break

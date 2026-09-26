@@ -84,6 +84,11 @@ describe('an eval run’s plan', () => {
     )
     assert.equal(answerFor(scenario, { body: 'Keep the old document?', questions: null }), 'Yes.')
     assert.equal(
+      answerFor(scenario, { body: 'Recommend an order?\nWe publish after that.', questions: null }),
+      'Yes, as you recommend.',
+      'the first line, the subject, wins over a word further down',
+    )
+    assert.equal(
       answerFor(scenario, {
         body: 'I recommend a note. Publish?',
         questions: [{ question: 'x', options: [{ label: 'A' }] }],
