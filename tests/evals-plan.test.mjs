@@ -6,6 +6,7 @@ import { describe, it } from 'node:test'
 import {
   answerFor,
   chiefEnvironment,
+  claudeOnPath,
   claudeProjectKey,
   HARNESSES,
   lastLines,
@@ -59,6 +60,17 @@ describe('an eval run’s plan', () => {
       claudeProjectKey('/Users/x/.consensflow-candidate/evals/workspace'),
       '-Users-x--consensflow-candidate-evals-workspace',
     )
+  })
+
+  it('finds the real claude on PATH, never the eval wrapper', () => {
+    const present = new Set(['/h/.consensflow-candidate/evals/bin/claude', '/h/.local/bin/claude'])
+    assert.equal(
+      claudeOnPath('/h/.consensflow-candidate/evals/bin:/h/.local/bin:/usr/bin', (f) =>
+        present.has(f),
+      ),
+      '/h/.local/bin/claude',
+    )
+    assert.throws(() => claudeOnPath('/usr/bin', () => false), /claude is not on PATH/)
   })
 
   it('keeps the last non-empty lines a window printed, whatever the line ending', () => {

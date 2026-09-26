@@ -11,7 +11,7 @@
  * unless given; Codex, Pi and Devin run their own default and ignore it.
  */
 import { execFileSync } from 'node:child_process'
-import { cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
@@ -20,6 +20,7 @@ import { measure, mechanics, verdict } from './measure.mjs'
 import {
   answerFor,
   chiefEnvironment,
+  claudeOnPath,
   claudeProjectKey,
   HARNESSES,
   lastLines,
@@ -57,6 +58,22 @@ const { agents, staff } = staffFor(staffHarnesses, { claude: values['claude-staf
 const chiefSetup = chiefEnvironment(chief, values.model)
 
 /** The bench's clean environment: the real logins, never this shell's session identity. */
+/**
+ * Every Claude window in a run starts through this wrapper, first on the
+ * daemon's PATH: no MCP servers, no claude.ai connectors, no Chrome. The
+ * windows run in full-permission mode on the user's own Claude setup, which
+ * reaches their browser and accounts (on 2026-09-26 an eval reviewer called
+ * the Chrome tools); a scripted run must reach neither.
+ */
+const ISOLATED_BIN = join(H, '.consensflow-candidate', 'evals', 'bin')
+const realClaude = claudeOnPath(process.env.PATH ?? '')
+mkdirSync(ISOLATED_BIN, { recursive: true })
+writeFileSync(
+  join(ISOLATED_BIN, 'claude'),
+  `#!/bin/sh\n# Written by evals/run.mjs: eval windows reach no MCP server and no browser.\nexec ${JSON.stringify(realClaude)} --strict-mcp-config --no-chrome "$@"\n`,
+)
+chmodSync(join(ISOLATED_BIN, 'claude'), 0o755)
+
 const ENV = {
   HOME: H,
   USER: process.env.USER,
@@ -64,6 +81,7 @@ const ENV = {
   LANG: 'en_US.UTF-8',
   TERM: 'xterm-256color',
   PATH: [
+    ISOLATED_BIN,
     join(H, '.local', 'bin'),
     join(H, '.opencode', 'bin'),
     join(H, '.codex', 'bin'),

@@ -1,3 +1,5 @@
+import { statSync } from 'node:fs'
+
 /**
  * The pure part of an eval run: which agents make up the staff for a set of
  * harnesses, what environment gives a chief its model where the harness
@@ -118,5 +120,26 @@ export function answerFor(scenario, question) {
   }
   return {
     body: matching(question.body.split('\n')[0]) ?? matching(question.body) ?? scenario.fallback,
+  }
+}
+
+/**
+ * The real `claude` on this PATH, skipping the eval's own wrapper directory,
+ * so the wrapper can exec it by absolute path.
+ */
+export function claudeOnPath(pathVariable, exists = defaultExists) {
+  for (const dir of pathVariable.split(':')) {
+    if (dir === '' || dir.endsWith('/evals/bin')) continue
+    const candidate = `${dir.replace(/\/$/, '')}/claude`
+    if (exists(candidate)) return candidate
+  }
+  throw new Error('claude is not on PATH')
+}
+
+function defaultExists(file) {
+  try {
+    return statSync(file).isFile()
+  } catch {
+    return false
   }
 }
