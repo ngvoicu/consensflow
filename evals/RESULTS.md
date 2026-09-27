@@ -99,3 +99,4 @@ before that column existed.
 | 2026-09-27T22-54 | long-trip | devin (devin's default, default) | pi (medium) | 1/10 | 7/7 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 0 | 0 | 3 |
 | 2026-09-27T23-24 | long-trip | devin (devin's default, default) | opencode (medium) | 1/10 | 7/7 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 0 | 0 | 30 |
 | 2026-09-27T23-27 | long-trip | devin (devin's default, default) | devin (medium) | 1/10 | 7/7 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 0 | 0 | 3 |
+| 2026-09-27T23-48 | long-trip | claude (claude-opus-5, high) | pi (medium) | 10/10 | 7/7 | 3 | 3 | 1 | 1 | 1 | 1 | 0 | 0 | 0 | 19 |
