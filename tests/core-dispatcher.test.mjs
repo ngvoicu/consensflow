@@ -128,7 +128,7 @@ function fakeHost() {
     holdExits: false,
     async request(op, body) {
       host.requests.push([op, body])
-      return { ok: true, outcome: 'cleared' }
+      return { ok: true, outcome: 'cleared', ...(op === 'pane.snapshot' ? host.snapshot : {}) }
     },
     onEnter(listener) {
       enters.push(listener)
@@ -538,6 +538,25 @@ describe('the dispatcher', () => {
         context.ledger.inbox(chief.id).find((m) => m.kind === 'note').body,
         /made no progress for 61 minutes, a tool still running, so it was stopped/,
       )
+    })
+  })
+
+  it('keeps a fresh window starting until its screen is drawn: printed, then still a moment', async () => {
+    await setup(async (context) => {
+      context.host.snapshot = { outputQuietMs: null }
+      const { project } = await withStaff(context)
+      const chief = context.ledger
+        .project(project.id)
+        .participants.find((p) => p.handle === 'chief')
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(context.dispatcher.activity(chief.id).state, 'starting', 'nothing printed yet')
+      context.host.snapshot = { outputQuietMs: 300 }
+      await context.dispatcher.pass()
+      assert.equal(context.dispatcher.activity(chief.id).state, 'starting', 'still drawing')
+      context.host.snapshot = { outputQuietMs: 2_000 }
+      await context.dispatcher.pass()
+      assert.equal(context.dispatcher.activity(chief.id).state, 'idle')
     })
   })
 

@@ -64,6 +64,8 @@ const RECEIVED_ROLES = new Set(['user', 'custom', 'tool'])
 
 /** How a message reads in the recipient's pane. The header doubles as the arrival marker. */
 const minutes = (ms) => Math.round(ms / 60_000)
+/** How long a fresh window's output must hold still before its screen counts as drawn. */
+const DRAWN_QUIET_MS = 1_500
 
 export function deliveryText(message) {
   const from = message.sender === null ? 'ConsensFlow' : `@${message.sender}`
@@ -429,6 +431,22 @@ export class Dispatcher {
     return now - runtime.progress.at
   }
 
+  /**
+   * Whether a window has drawn its screen: it printed, then held still for a
+   * moment (the pane host says how long it has printed nothing). A host that
+   * cannot tell is taken as drawn.
+   */
+  async #drawn(runtime) {
+    if (runtime.drawn) return true
+    const snapshot = await this.#host.request('pane.snapshot', runtime.pane).catch(() => null)
+    const quiet = snapshot?.outputQuietMs
+    if (quiet === undefined || (quiet !== null && quiet >= DRAWN_QUIET_MS)) {
+      runtime.drawn = true
+      return true
+    }
+    return false
+  }
+
   /** A member's window that made no progress: its task pauses, which stops the window, and its requester hears. */
   #stallSilent(project, participant, runtime, silentMs, toolOpen) {
     const task = this.#ledger.activeTask(participant.id)
@@ -481,6 +499,9 @@ export class Dispatcher {
     }
     // Quota belongs to the member: a session that runs out takes its member out.
     const owner = this.#memberOf(project, participant)
+    // A window with nothing in its record may still be drawing its screen:
+    // Pi and Devin read idle before they could take a keystroke.
+    const drawing = observed.items.length === 0 && !(await this.#drawn(runtime))
     const silentMs = this.#silence(runtime, observed)
     const toolOpen = (observed.openTools ?? 0) > 0
     const stuck = silentMs >= (toolOpen ? this.#toolStuckAfterMs : this.#stuckAfterMs)
@@ -488,16 +509,18 @@ export class Dispatcher {
     if (!this.#isOut(owner)) {
       this.#setActivity(
         runtime,
-        observed.waiting
-          ? { state: 'waiting', reason: observed.waiting.reason ?? null }
-          : observed.settled
-            ? { state: 'idle' }
-            : stuck && participant.role === 'chief'
-              ? {
-                  state: 'stalled',
-                  reason: `no progress for ${minutes(silentMs)} minutes: a request may have hung; Escape in its window stops it`,
-                }
-              : { state: 'working' },
+        drawing
+          ? { state: 'starting' }
+          : observed.waiting
+            ? { state: 'waiting', reason: observed.waiting.reason ?? null }
+            : observed.settled
+              ? { state: 'idle' }
+              : stuck && participant.role === 'chief'
+                ? {
+                    state: 'stalled',
+                    reason: `no progress for ${minutes(silentMs)} minutes: a request may have hung; Escape in its window stops it`,
+                  }
+                : { state: 'working' },
       )
     }
     this.#copyTranscript(participant, runtime, observed)
@@ -542,7 +565,7 @@ export class Dispatcher {
         return
       }
     }
-    if (runtime.delivering === null && observed.settled && !observed.waiting) {
+    if (runtime.delivering === null && observed.settled && !observed.waiting && !drawing) {
       const next = this.#ledger.nextDelivery(participant.id)
       if (next !== null) await this.#deliver(runtime, next)
     }
@@ -871,6 +894,7 @@ export class Dispatcher {
       enters: [],
       humanItems: null,
       activity: { state: 'starting' },
+      drawn: false,
     })
     const started = await adapter
       .started({ launch: plan.launch, pane, host: this.#host })

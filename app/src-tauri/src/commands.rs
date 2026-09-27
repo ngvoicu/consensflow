@@ -1073,6 +1073,7 @@ fn register_pane_handlers(
         stream_to_page(
             streamed,
             bridge,
+            Arc::clone(&open_arbiter),
             Arc::clone(&open_output),
             Arc::clone(&open_launches),
             request.launch_id,
@@ -1264,6 +1265,7 @@ fn register_pane_handlers(
             "inputFailed":snapshot.input_failed,
             "queuedHumanBytes":snapshot.queued_human_bytes,
             "lastSubmissionId":snapshot.last_submission_id,
+            "outputQuietMs":snapshot.output_quiet_ms,
         }))
     });
 }
@@ -1282,6 +1284,7 @@ fn launch_response(result: Result<PaneKey, String>, deduplicated: bool) -> Resul
 fn stream_to_page(
     streamed: StreamedPane,
     bridge: Bridge,
+    arbiter: Arc<InputArbiter>,
     output: Arc<OutputHub>,
     launches: Arc<LaunchRegistry>,
     launch_id: Option<String>,
@@ -1289,6 +1292,7 @@ fn stream_to_page(
     thread::spawn(move || {
         let key = streamed.key;
         for message in streamed.output {
+            arbiter.note_output(&key);
             output.publish(message.into());
         }
         if let Some(launch_id) = launch_id {

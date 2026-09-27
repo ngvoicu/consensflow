@@ -2,6 +2,7 @@ use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::fmt;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Instant;
 
 use crate::pty::{write_paste_via, PaneError, PaneInputWriter, PaneKey, PaneTable};
 
@@ -93,6 +94,9 @@ pub struct ArbiterSnapshot {
     pub input_failed: bool,
     pub queued_human_bytes: usize,
     pub last_submission_id: Option<String>,
+    /// How long the pane has printed nothing, once it has printed anything:
+    /// a harness still drawing its screen is not ready for input.
+    pub output_quiet_ms: Option<u64>,
 }
 
 struct QueuedHumanInput {
@@ -111,6 +115,7 @@ struct PaneInputState {
     input_failed: bool,
     queued_human: VecDeque<QueuedHumanInput>,
     last_submission_id: Option<String>,
+    last_output: Option<Instant>,
 }
 
 type PaneState = Arc<Mutex<PaneInputState>>;
@@ -129,6 +134,7 @@ impl PaneInputState {
             input_failed: false,
             queued_human: VecDeque::new(),
             last_submission_id: None,
+            last_output: None,
         }
     }
 
@@ -145,6 +151,9 @@ impl PaneInputState {
                 .map(|queued| queued.bytes.len())
                 .sum(),
             last_submission_id: self.last_submission_id.clone(),
+            output_quiet_ms: self
+                .last_output
+                .map(|at| u64::try_from(at.elapsed().as_millis()).unwrap_or(u64::MAX)),
         }
     }
 
@@ -185,6 +194,17 @@ impl InputArbiter {
             panes: Mutex::new(HashMap::new()),
             enter_delay_ms,
             events,
+        }
+    }
+
+    /// The pane printed something now.
+    pub fn note_output(&self, pane: &PaneKey) {
+        if let Ok(state) = self.pane_state(pane) {
+            if let Ok(mut state) = lock_state(&state) {
+                if state.generation == pane.generation {
+                    state.last_output = Some(Instant::now());
+                }
+            }
         }
     }
 
@@ -625,6 +645,30 @@ mod tests {
     #[cfg(unix)]
     use crate::pty::{serial_pty_test, OpenedPane, PaneTable};
     use crate::pty::{PaneError, PaneInputWriter, PaneKey};
+
+    #[test]
+    fn a_snapshot_says_how_long_the_pane_has_printed_nothing() {
+        let (events, _received) = mpsc::channel();
+        let arbiter = InputArbiter::new(0, events);
+        let pane = PaneKey::new("quiet-pane", 1);
+        arbiter.register(&pane).expect("register");
+        assert_eq!(
+            arbiter.snapshot(&pane).expect("snapshot").output_quiet_ms,
+            None
+        );
+        arbiter.note_output(&pane);
+        thread::sleep(Duration::from_millis(20));
+        let quiet = arbiter.snapshot(&pane).expect("snapshot").output_quiet_ms;
+        assert!(
+            quiet.is_some_and(|ms| (20..5_000).contains(&ms)),
+            "{quiet:?}"
+        );
+        arbiter.note_output(&PaneKey::new("quiet-pane", 2));
+        assert!(
+            arbiter.snapshot(&pane).expect("snapshot").output_quiet_ms >= Some(20),
+            "another generation's output is not this pane's"
+        );
+    }
 
     #[cfg(unix)]
     fn terminal_size() -> PtySize {
@@ -1351,6 +1395,7 @@ mod tests {
                 input_failed: false,
                 queued_human_bytes: 0,
                 last_submission_id: None,
+                output_quiet_ms: None,
             }
         );
     }
