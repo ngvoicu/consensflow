@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { readFileSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -64,7 +64,13 @@ export function releaseSource(id, executable, env) {
       update: [join(brew[1], 'bin', 'brew'), 'upgrade', ...(cask ? ['--cask'] : []), brew[3]],
     }
   }
-  if (id === 'claude' && path?.includes('/claude/versions/')) {
+  // Claude's installer links ~/.local/bin/claude into ~/.local/share/claude/versions;
+  // on Windows it copies the current version there as claude.exe instead.
+  const copied = path?.match(/^(.*)\/\.local\/bin\/claude\.exe$/i)
+  const native =
+    path?.includes('/claude/versions/') ||
+    (Boolean(copied) && existsSync(join(copied[1], '.local', 'share', 'claude', 'versions')))
+  if (id === 'claude' && native) {
     let channel = 'latest'
     try {
       const settings = JSON.parse(

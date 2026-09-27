@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { agentsUi } from '../src/core/agents-server.js'
 import { Credentials, startApi } from '../src/core/api.js'
@@ -139,6 +139,18 @@ test('each install method names itself and the command that updates it the same 
         "Devin's installer",
         ['/Users/me/.local/share/devin/cli/_versions/current/bin/devin', 'update'],
       ],
+    )
+    // On Windows the installer copies the current version to ~/.local/bin, no link.
+    const home = t.env.HOME
+    const copy = join(home, '.local', 'bin', 'claude.exe')
+    mkdirSync(dirname(copy), { recursive: true })
+    writeFileSync(copy, '')
+    assert.equal(releaseSource('claude', copy, t.env).distribution, null, 'no versions beside it')
+    mkdirSync(join(home, '.local', 'share', 'claude', 'versions', '2.1.274'), { recursive: true })
+    const copied = releaseSource('claude', copy, t.env)
+    assert.deepEqual(
+      [copied.distribution, copied.update],
+      ["Claude's installer, latest channel", [copy, 'update']],
     )
     const unknown = releaseSource('codex', '/somewhere/else/codex', t.env)
     assert.deepEqual(
