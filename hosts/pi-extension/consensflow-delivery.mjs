@@ -104,10 +104,16 @@ export function createDeliveryExtension(
     editorGuard,
     receiver,
     logger = console,
+    // How the inbox is watched, and how often it is read anyway: on macOS a
+    // watch event can be lost under load, and a message nobody reads never
+    // lands (a loaded test machine lost one again and again, 2026-09-28).
+    watchInbox = (path, onChange) => watch(path, { persistent: false }, onChange),
+    pollMs = 1000,
   } = {},
 ) {
   let context
   let watcher
+  let poller
   let running = false
   let queued = false
   const pending = new Map()
@@ -333,6 +339,7 @@ export function createDeliveryExtension(
   pi.on('session_start', async (_event, ctx) => {
     context = ctx
     watcher?.close()
+    clearInterval(poller)
     if (receiver && !resultReceiver) {
       resultReceiver = createReceiver({
         ...receiver,
@@ -377,7 +384,9 @@ export function createDeliveryExtension(
       await writeSettlement()
     if (typeof inbox !== 'string' || typeof ack !== 'string') return
     await mkdir(inbox, { recursive: true })
-    watcher = watch(inbox, { persistent: false }, () => void consume())
+    watcher = watchInbox(inbox, () => void consume())
+    poller = setInterval(() => void consume(), pollMs)
+    poller.unref?.()
     await consume()
   })
   pi.on('agent_start', newWork)
@@ -391,6 +400,8 @@ export function createDeliveryExtension(
   pi.on('session_shutdown', async () => {
     watcher?.close()
     watcher = undefined
+    clearInterval(poller)
+    poller = undefined
     for (const entry of pending.values()) {
       if (entry.timer !== null) clearTimeout(entry.timer)
     }

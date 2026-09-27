@@ -66,6 +66,8 @@ async function setup(
     mode = 'tui',
     leaf,
     pendingMessages = false,
+    watchInbox,
+    pollMs,
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'consensflow-pi-extension-'))
@@ -87,6 +89,8 @@ async function setup(
     editorGuard,
     ackTimeoutMs,
     logger: { error: (...args) => logs.push(args.join(' ')) },
+    ...(watchInbox ? { watchInbox } : {}),
+    ...(pollMs ? { pollMs } : {}),
   })
   let currentIdle = idle
   const ctx = context(() => currentIdle)
@@ -215,6 +219,27 @@ describe('consensflow Pi extension', () => {
         mode: 'tui',
       })
       assert.equal(await exists(join(s.inbox, 'm-00000000000000000000000000000051.json')), false)
+    } finally {
+      await s.close()
+    }
+  })
+
+  it('delivers an inbox arrival whose watch event was lost: the inbox is read anyway', async () => {
+    // A watcher that never reports, as a macOS watch that lost the event under load.
+    const s = await setup(null, {
+      watchInbox: () => ({ close() {} }),
+      pollMs: 50,
+    })
+    try {
+      await writeFile(
+        join(s.inbox, `${envelopeRecord.id}.json`),
+        `${JSON.stringify({ ...envelopeRecord, expiresAt: Date.now() + 5000 })}\n`,
+      )
+      const deadline = Date.now() + 2000
+      while (s.pi.sent.length === 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      }
+      assert.deepEqual(s.pi.sent, [envelope])
     } finally {
       await s.close()
     }
