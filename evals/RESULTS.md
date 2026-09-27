@@ -64,3 +64,13 @@ before that column existed.
 | 2026-09-26T21-47 | round-trip | opencode (opencode-go/deepseek-v4-flash) | claude | 7/7 | 7/7 | 2 | 1 | 0 | 1 | 0 | 0 | ? | 1 | 0 | 4 |
 | 2026-09-26T21-50 | round-trip | opencode (opencode-go/deepseek-v4-flash) | devin | 7/7 | 7/7 | 2 | 1 | 0 | 1 | 0 | 0 | ? | 1 | 0 | 3 |
 | 2026-09-27T05-27 | simple-fix | pi (pi's default) | opencode | 5/5 | 7/7 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 1 | 0 | 2 |
+| 2026-09-27T13-19 | six-decisions | codex (gpt-5.6-sol) | opencode+devin | 6/7 | 7/7 | 9 | 3 | 1 | 2 | 9 | 5 | ? | 6 | 0 | 40 |
+| 2026-09-27T13-49 | six-decisions | claude (claude-opus-5) | claude+codex+pi+opencode+devin | 5/7 | 7/7 | 5 | 1 | 0 | 1 | 1 | 6 | 0 | 9 | 0 | 30 |
+| 2026-09-27T14-26 | six-decisions | codex (gpt-5.6-sol) | claude+codex+pi+opencode+devin | 6/7 | 7/7 | 6 | 3 | 1 | 3 | 2 | 8 | ? | 6 | 0 | 37 |
+| 2026-09-27T15-06 | six-decisions | pi (pi's default) | claude+codex+pi+opencode+devin | 4/7 | 6/7 | 4 | 3 | 0 | 0 | 2 | 3 | ? | 2 | 0 | 40 |
+| 2026-09-27T15-28 | six-decisions | opencode (opencode-go/deepseek-v4-flash) | claude+codex+pi+opencode+devin | 4/7 | 7/7 | 5 | 2 | 0 | 1 | 2 | 0 | ? | 8 | 0 | 22 |
+| 2026-09-27T15-35 | six-decisions | devin (devin's default) | claude+codex+pi+opencode+devin | 1/7 | 7/7 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 8 | 2 | 8 |
+| 2026-09-27T15-39 | round-trip | opencode (opencode-go/deepseek-v4-flash) | opencode | 7/7 | 7/7 | 2 | 1 | 0 | 1 | 0 | 0 | ? | 1 | 0 | 2 |
+| 2026-09-27T15-43 | round-trip | pi (pi's default) | codex | 7/7 | 7/7 | 2 | 1 | 0 | 1 | 0 | 0 | ? | 1 | 0 | 4 |
+| 2026-09-27T15-46 | round-trip | pi (pi's default) | pi | 7/7 | 7/7 | 2 | 1 | 0 | 1 | 0 | 0 | ? | 1 | 0 | 3 |
+| 2026-09-27T15-50 | round-trip | pi (pi's default) | devin | 5/7 | 7/7 | 2 | 1 | 0 | 1 | 0 | 0 | ? | 1 | 0 | 4 |

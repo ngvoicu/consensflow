@@ -1,0 +1,550 @@
+{
+  "scenario": "six-decisions",
+  "chief": "codex",
+  "model": "gpt-5.6-sol",
+  "staff": [
+    "claude",
+    "codex",
+    "pi",
+    "opencode",
+    "devin"
+  ],
+  "staffModels": {
+    "eval-claude-worker": "claude-haiku-4-5-20251001",
+    "eval-claude-worker-2": "claude-haiku-4-5-20251001",
+    "eval-claude-advisor": "claude-haiku-4-5-20251001",
+    "eval-claude-reviewer": "claude-haiku-4-5-20251001",
+    "eval-codex-worker": "gpt-5.6-luna",
+    "eval-codex-worker-2": "gpt-5.6-luna",
+    "eval-codex-advisor": "gpt-5.6-luna",
+    "eval-codex-reviewer": "gpt-5.6-luna",
+    "eval-pi-worker": "opencode-go/muse-spark-1.3-contributor",
+    "eval-pi-worker-2": "opencode-go/muse-spark-1.3-contributor",
+    "eval-pi-advisor": "opencode-go/muse-spark-1.3-contributor",
+    "eval-pi-reviewer": "opencode-go/muse-spark-1.3-contributor",
+    "eval-opencode-worker": "opencode-go/deepseek-v4-flash",
+    "eval-opencode-worker-2": "opencode-go/deepseek-v4-flash",
+    "eval-opencode-advisor": "opencode-go/deepseek-v4-flash",
+    "eval-opencode-reviewer": "opencode-go/deepseek-v4-flash",
+    "eval-devin-worker": "swe-1-6-slow",
+    "eval-devin-worker-2": "swe-1-6-slow",
+    "eval-devin-advisor": "swe-1-6-slow",
+    "eval-devin-reviewer": "swe-1-6-slow"
+  },
+  "run": 1,
+  "seconds": 2195,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Advise on the approach for a bilingual Romanian/English legislation page for a tiny static burnout-at-work website.",
+        "pool": "advisor",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-advisor-frosty-window"
+      },
+      {
+        "number": 2,
+        "title": "Research the current project architecture and testing approach for a proposed bilingual legislation page. You may only …",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "cancelled",
+        "assignee": "eval-claude-worker-silver-ember"
+      },
+      {
+        "number": 3,
+        "title": "Research the current legal substance needed to complete content/legislatie-ro.md as of 2026-09-27. Do not edit any file…",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-worker-2-jolly-window"
+      },
+      {
+        "number": 4,
+        "title": "Review the corrected result of T-2 for the proposed bilingual legislation page in /Users/gabrielvoicu/.consensflow-cand…",
+        "pool": "reviewer",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-reviewer-vivid-birch"
+      },
+      {
+        "number": 5,
+        "title": "Review T-3, the completed legal research dossier for the proposed Romanian/English workplace-burnout legislation page. …",
+        "pool": "reviewer",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-codex-reviewer-quiet-juniper"
+      },
+      {
+        "number": 6,
+        "title": "Re-review revised T-3 after the corrections from review T-5. Read T-3 and T-5 with `cf task get`. Do not edit files.",
+        "pool": "reviewer",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-pi-reviewer-lively-valley"
+      }
+    ],
+    "parallel": 3,
+    "advice": 1,
+    "reviews": 3,
+    "questionsToHuman": [
+      {
+        "id": 39,
+        "options": true,
+        "body": "Footer: Unde adăugăm noul link „Legislație” în această schimbare?\n- Toate footerurile (Recommended): Îl adăugăm pe indexurile RO/EN și pe evaluare.html, singura altă pagină existentă cu același footer"
+      },
+      {
+        "id": 47,
+        "options": true,
+        "body": "Detaliu: Cât de multă cronologie legislativă afișăm pe pagină?\n- Stadiu concis (Recommended): Menționăm proiectul activ, stadiul și data verificării, fără istoricul complet al voturilor.\n- Cronologie "
+      }
+    ],
+    "notesToHuman": [
+      {
+        "id": 4,
+        "body": "Constatare inițială, fără publicare și fără modificarea site-ului: vechiul docs/document-de-referinta-hr.md conține deja două informații depășite față de site — scala 1–5, în timp ce site/evaluare.htm"
+      },
+      {
+        "id": 6,
+        "body": "Constatare juridică preliminară: paragraful din content/legislatie-ro.md despre „inițiativa anunțată în 2023” este depășit. La 20 iulie 2026, Comisia Europeană a deschis a doua etapă de consultare a p"
+      },
+      {
+        "id": 7,
+        "body": "Audit tehnic preliminar: toate cele trei destinații existente din footer lipsesc în ambele limbi (despre/about, FAQ, contact), iar linkul englezesc Assessment lipsește de asemenea. Cererea actuală poa"
+      },
+      {
+        "id": 12,
+        "body": "Actualizare juridică verificată în sursele oficiale: proiectul L640/2024 despre burnout a fost retras. Există însă o inițiativă nouă, L87/2026 / Pl-x 263/2026, „Propunere legislativă privind prevenire"
+      },
+      {
+        "id": 24,
+        "body": "Sarcina tehnică T-2 a fost închisă fără acceptare după patru rezultate care descriau, dar nu includeau, comenzile TDD solicitate. Constatările structurale verificate rămân utile: baza este 3 fișiere c"
+      },
+      {
+        "id": 28,
+        "body": "Corecție juridică importantă: B749/2025 și L87/2026 nu sunt două proiecte diferite. Istoricul oficial al Senatului arată că aceeași inițiativă a fost înregistrată ca B749 la 23.12.2025, a primit număr"
+      },
+      {
+        "id": 41,
+        "body": "Decizii înregistrate pentru pagina Legislație: link în toate footerurile existente, inclusiv evaluare.html; documentul HR se păstrează cu notă de arhivare; paginile și linkurile vechi lipsă rămân în a"
+      },
+      {
+        "id": 49,
+        "body": "Specificația pentru pagina bilingvă Legislație este pregătită pentru aprobare: 12 sarcini în 6 cicluri RED/GREEN, 3 fișiere de produs create, 5 modificate, toate footerurile existente incluse, documen"
+      }
+    ],
+    "taskCount": 6,
+    "chiefId": 2,
+    "chiefHarness": "codex",
+    "humanId": 1,
+    "chiefTurns": 44,
+    "chiefEdits": null,
+    "chiefLastWords": "Specificația este pregătită pentru aprobare: [SPEC.md](/Users/gabrielvoicu/.consensflow-candidate/evals/workspace/.specs/legislation-page/SPEC.md).\n\nInclude:\n\n- 12 sarcini în 6 cicluri RED/GREEN;\n- 3 fișiere create și 5 modificate;\n- linkul în toate footerurile existente;\n- arhivarea documentului HR;\n- surse oficiale și text bilingv;\n- review juridic și medical obligatoriu înainte de publicare;\n- nicio reparare a linkurilor vechi;\n- nicio publicare.\n\nPână acum au fost create numai fișierele din `.specs/`; site-ul și conținutul existent nu au fost modificate.\n\nDacă specificația este în regulă, spune „aprob specificația” și încep implementarea locală TDD.",
+    "plumbing": {
+      "briefs": 11,
+      "briefsDelivered": 11,
+      "results": 10,
+      "resultsDelivered": 10,
+      "memberQuestions": 8,
+      "memberQuestionsAnswered": 8,
+      "answersDelivered": 8,
+      "accepted": 5,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0,
+      "ownerQuestions": 2,
+      "ownerQuestionsAnswered": 2
+    },
+    "filesChanged": [
+      ".specs/legislation-page/SPEC.md",
+      ".specs/legislation-page/interview-01.md",
+      ".specs/legislation-page/interview-02.md",
+      ".specs/legislation-page/research-01.md",
+      ".specs/legislation-page/research-02.md",
+      ".specs/registry.md"
+    ]
+  },
+  "checks": [
+    {
+      "name": "the owner is asked on the board, at least three questions",
+      "ok": false
+    },
+    {
+      "name": "at least one question offers options",
+      "ok": true
+    },
+    {
+      "name": "a finding reaches the owner as a note",
+      "ok": true
+    },
+    {
+      "name": "at least two tasks go on the board",
+      "ok": true
+    },
+    {
+      "name": "two tasks run side by side at some point",
+      "ok": true
+    },
+    {
+      "name": "finished work goes to a review",
+      "ok": true
+    },
+    {
+      "name": "the chief's own edits stay under ten (counted for a Claude chief only)",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (11/11)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (10/10)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (8/8)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (8/8)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question the chief put to the owner got the owner's answer (2/2)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (6/6)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "• Ran /Users/gabrielvoicu/Projects/ngvoicu/consensflow/bin/cf inbox read m-26",
+    "  └ m-26 [delivered] question T-3 from @eval-claude-worker-2-jolly-window",
+    "    # COMPLETE RESEARCH DOSSIER: Romanian Legal Framework on Burnout &",
+    "    +523 lines (ctrl+t to view transcript)•••9••••10s • esc to interupt)•••••••1•••2•••••••3•••4•••••••5•••6••••••7••••8",
+    "• Ran /Users/gabrielvoicu/Projects/ngvoicu/consensflow/bin/cf inbox read m-26 |",
+    "  │ sed -n '180,360p'",
+    "  └ ---",
+    "    **Article 25(2) — Occupational Health Surveillance**",
+    "    +178 lines (ctrl+t to view transcript)••••••9••••20••••••1••••2••••••3•••• · 1 background terminal running · /ps to vie…",
+    "• Ran /Users/gabrielvoicu/Projects/ngvoicu/consensflow/bin/cf inbox read m-26 |",
+    "  │ sed -n '360,540p'",
+    "  └",
+    "    Doctorul de familie sau medicii specialiști emit certificate de incapacitate",
+    "    de muncă temporară atunci când determină că un lucrător nu poate lucra din",
+    "    +165 lines (ctrl+t to view transcript)4•••••••5•••6•••••••7•••8•••••••9•••30••••••1••••2•••••••3•••4•••••••5•••6••••••7••••",
+    " • Browsing the web • Working (37s • esc to interrupt)  › Ask Codex to do anything   GPT-5.6-Sol xhigh · ~/.consensflow-candidate/evals/workspace 8••••••••••••••9••\u001bM\u001bM",
+    "• Browsing the web",
+    "• Searched the web • Working (39s • esc to interrupt)  › Ask Codex to do anything   GPT-5.6-Sol xhigh · ~/.consensflow-candidate/evals/workspace ••40••••••1••••2••••••3••••4••••••5••••6••••••7••••8••••••9••••50•••••••1•••2•••••••3•••4•••••••5•••6•••••••7•••8••••••9••••1m 00s • escto interrupt)••••••1••••2••",
+    "• Ran /Users/gabrielvoicu/Projects/ngvoicu/consensflow/bin/cf answer m-26 -",
+    "  │ <<'ANSWER'",
+    "  │ The full dossier is now visible, but it has material legal/factual errors",
+    "  │ … +69 lines",
+    "  └ m-27 answered @eval-claude-worker-2-jolly-window.•••••3•••4•••••••5•••6••••••7••••8••••••9••",
+    "• Ran /Users/gabrielvoicu/Projects/ngvoicu/consensflow/bin/cf note --human -",
+    "  │ <<'NOTE'",
+    "  │ Corecție juridică importantă: B749/2025 și L87/2026 nu sunt două proiecte",
+    "  │ … +6 lines",
+    "  └ m-28 noted to @human; nothing waits on it.••10••••••1••••• Dosarulintegralapermisidentificareauneierorimajore:`B749/2025B749/2025,`L87/202",
+    " • Dosarul integral a permis identificarea unei erori majore: B749/2025,  `L87/2026  › Ask Codex to do anything   GPT-5.6-Sol xhigh · ~/.consensflow-candidate/evals/workspace  • Dosarul integral a permis identificarea unei erori majore: B749/2025, L87/2026  › Ask Codex to do anything   GPT-5.6-Sol xhigh · ~/.consensflow-candidate/evals/workspace  • Dosarul integral a permis identificarea unei erori majore: B749/2025, L87/2026  și  › Ask Codex to do anything   GPT-5.6-Sol xhigh · ~/.consensflow-candidate/evals/workspace `Pl-x263/2026Pl-x 263/2026suntetapesuccesivealeaceleiașiinițiative,nuproiecte",
+    " • Dosarul integral a permis identificarea unei erori majore: B749/2025, L87/2026  și Pl-x 263/2026 sunt etape succesive ale aceleiași inițiative, nu proiecte  separate  › Ask Codex to do anything   GPT-5.6-Sol xhigh · ~/.consensflow-candidate/evals/workspace   › Ask Codex to do anything   GPT-5.6-Sol xhigh · ~/.consensflow-candidate/evals/workspace \u001bM\u001bM",
+    "• Dosarul integral a permis identificarea unei erori majore: B749/2025, L87/2026 \u001bM",
+    "  și Pl-x 263/2026 sunt etape succesive ale aceleiași inițiative, nu proiecte",
+    "  separate.   Am  › Ask Codex to do anything   GPT-5.6-Sol xhigh · ~/.consensflow-candidate/evals/workspace maicerutcorectareaurmătoarelor  › Ask Codex to do anything   GPT-5.6-Sol xhigh · ~/.consensflow-candidate/evals/workspace",
+    "   - Direct  › Ask Codex to do anything   GPT-5.6-Sol xhigh · ~/.consensflow-candidate/evals/workspace",
+    "  Am mai cerut corectarea următoarelor:iva89/391nunumeștetextualriscurilepsihosociale;includerea",
+    "   - Directiva 89/391 nu numește textual riscurile psihosociale; includerea lor    rezultă  › Ask Codex to do anything   GPT-5.6-Sol xhigh · ~/.consensflow-candidate/evals/workspace dininterpretareaobligațiilorgenerale  › Ask Codex to do anything   GPT-5.6-Sol xhigh · ~/.consensflow-candidate/evals/workspace \u001bM",
+    " \u001bM",
+    "  - Directiva 89/391 nu numește textual riscurile psihosociale; includerea lor",
+    "    rezultă din interpretarea obligațiilor generale;   - consult  › Ask Codex to do anything   GPT-5.6-Sol xhigh · ~/.consensflow-candidate/evals/workspace areaQualityJobsActesteconsultareapartenerilorsociali,nuuna",
+    "   - consultarea Quality Jobs Act este consultarea partenerilor sociali, nu una    public  › Ask Codex to do anything   GPT-5.6-Sol xhigh · ~/.consensflow-candidate/evals/workspace ă\u001b[?20"
+  ],
+  "terminalAnswers": 0,
+  "refusedAnswers": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 70,
+      "line": "chief (codex) ready; typing the prompt"
+    },
+    {
+      "at": 80,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 141,
+      "line": "chief working; tasks T-1:queued T-2:queued T-3:queued"
+    },
+    {
+      "at": 146,
+      "line": "chief working; tasks T-1:working T-2:working T-3:working"
+    },
+    {
+      "at": 206,
+      "line": "chief working; tasks T-1:done T-2:working T-3:working"
+    },
+    {
+      "at": 241,
+      "line": "chief working; tasks T-1:accepted T-2:working T-3:working"
+    },
+    {
+      "at": 256,
+      "line": "chief idle; tasks T-1:accepted T-2:working T-3:working"
+    },
+    {
+      "at": 271,
+      "line": "chief working; tasks T-1:accepted T-2:done T-3:working"
+    },
+    {
+      "at": 286,
+      "line": "chief working; tasks T-1:accepted T-2:queued T-3:working"
+    },
+    {
+      "at": 291,
+      "line": "chief working; tasks T-1:accepted T-2:working T-3:waiting"
+    },
+    {
+      "at": 296,
+      "line": "chief working; tasks T-1:accepted T-2:working T-3:waiting"
+    },
+    {
+      "at": 311,
+      "line": "chief working; tasks T-1:accepted T-2:working T-3:working"
+    },
+    {
+      "at": 326,
+      "line": "chief working; tasks T-1:accepted T-2:done T-3:working"
+    },
+    {
+      "at": 346,
+      "line": "chief idle; tasks T-1:accepted T-2:done T-3:working T-4:working"
+    },
+    {
+      "at": 436,
+      "line": "chief working; tasks T-1:accepted T-2:done T-3:waiting T-4:working"
+    },
+    {
+      "at": 446,
+      "line": "chief working; tasks T-1:accepted T-2:done T-3:waiting T-4:done"
+    },
+    {
+      "at": 451,
+      "line": "chief working; tasks T-1:accepted T-2:done T-3:working T-4:done"
+    },
+    {
+      "at": 471,
+      "line": "chief working; tasks T-1:accepted T-2:working T-3:working T-4:accepted"
+    },
+    {
+      "at": 476,
+      "line": "chief idle; tasks T-1:accepted T-2:working T-3:working T-4:accepted"
+    },
+    {
+      "at": 551,
+      "line": "chief idle; tasks T-1:accepted T-2:done T-3:working T-4:accepted"
+    },
+    {
+      "at": 556,
+      "line": "chief working; tasks T-1:accepted T-2:done T-3:working T-4:accepted"
+    },
+    {
+      "at": 571,
+      "line": "chief working; tasks T-1:accepted T-2:working T-3:working T-4:accepted"
+    },
+    {
+      "at": 576,
+      "line": "chief idle; tasks T-1:accepted T-2:working T-3:working T-4:accepted"
+    },
+    {
+      "at": 581,
+      "line": "chief working; tasks T-1:accepted T-2:working T-3:waiting T-4:accepted"
+    },
+    {
+      "at": 596,
+      "line": "chief working; tasks T-1:accepted T-2:working T-3:working T-4:accepted"
+    },
+    {
+      "at": 601,
+      "line": "chief idle; tasks T-1:accepted T-2:working T-3:working T-4:accepted"
+    },
+    {
+      "at": 632,
+      "line": "chief idle; tasks T-1:accepted T-2:done T-3:working T-4:accepted"
+    },
+    {
+      "at": 637,
+      "line": "chief working; tasks T-1:accepted T-2:done T-3:working T-4:accepted"
+    },
+    {
+      "at": 652,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:working T-4:accepted"
+    },
+    {
+      "at": 657,
+      "line": "chief idle; tasks T-1:accepted T-2:cancelled T-3:working T-4:accepted"
+    },
+    {
+      "at": 737,
+      "line": "chief idle; tasks T-1:accepted T-2:cancelled T-3:waiting T-4:accepted"
+    },
+    {
+      "at": 742,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:waiting T-4:accepted"
+    },
+    {
+      "at": 747,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:waiting T-4:accepted"
+    },
+    {
+      "at": 802,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:working T-4:accepted"
+    },
+    {
+      "at": 817,
+      "line": "chief idle; tasks T-1:accepted T-2:cancelled T-3:working T-4:accepted"
+    },
+    {
+      "at": 877,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:waiting T-4:accepted"
+    },
+    {
+      "at": 882,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:waiting T-4:accepted"
+    },
+    {
+      "at": 912,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:working T-4:accepted"
+    },
+    {
+      "at": 917,
+      "line": "chief idle; tasks T-1:accepted T-2:cancelled T-3:working T-4:accepted"
+    },
+    {
+      "at": 977,
+      "line": "chief idle; tasks T-1:accepted T-2:cancelled T-3:waiting T-4:accepted"
+    },
+    {
+      "at": 982,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:waiting T-4:accepted"
+    },
+    {
+      "at": 987,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:waiting T-4:accepted"
+    },
+    {
+      "at": 997,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:working T-4:accepted"
+    },
+    {
+      "at": 1002,
+      "line": "chief idle; tasks T-1:accepted T-2:cancelled T-3:working T-4:accepted"
+    },
+    {
+      "at": 1062,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:waiting T-4:accepted"
+    },
+    {
+      "at": 1067,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:waiting T-4:accepted"
+    },
+    {
+      "at": 1072,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:working T-4:accepted"
+    },
+    {
+      "at": 1077,
+      "line": "chief idle; tasks T-1:accepted T-2:cancelled T-3:done T-4:accepted"
+    },
+    {
+      "at": 1082,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:done T-4:accepted"
+    },
+    {
+      "at": 1097,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:done T-4:accepted T-5:queued"
+    },
+    {
+      "at": 1102,
+      "line": "chief idle; tasks T-1:accepted T-2:cancelled T-3:done T-4:accepted T-5:working"
+    },
+    {
+      "at": 1633,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:done T-4:accepted T-5:done"
+    },
+    {
+      "at": 1658,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:working T-4:accepted T-5:accepted"
+    },
+    {
+      "at": 1678,
+      "line": "answered m-39 (Footer: Unde adăugăm noul link „Legislație” în această schimbare?) with: Toate footerurile (Recommended) / Arhivăm cu notă (Recommended) / Le lăsăm separat (Recommended)"
+    },
+    {
+      "at": 1718,
+      "line": "chief idle; tasks T-1:accepted T-2:cancelled T-3:working T-4:accepted T-5:accepted"
+    },
+    {
+      "at": 1723,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:waiting T-4:accepted T-5:accepted"
+    },
+    {
+      "at": 1734,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:waiting T-4:accepted T-5:accepted"
+    },
+    {
+      "at": 1749,
+      "line": "chief idle; tasks T-1:accepted T-2:cancelled T-3:done T-4:accepted T-5:accepted"
+    },
+    {
+      "at": 1754,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:done T-4:accepted T-5:accepted"
+    },
+    {
+      "at": 1764,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:done T-4:accepted T-5:accepted T-6:working"
+    },
+    {
+      "at": 1769,
+      "line": "chief idle; tasks T-1:accepted T-2:cancelled T-3:done T-4:accepted T-5:accepted T-6:working"
+    },
+    {
+      "at": 1804,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:done T-4:accepted T-5:accepted T-6:done"
+    },
+    {
+      "at": 1809,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:done T-4:accepted T-5:accepted T-6:accepted"
+    },
+    {
+      "at": 1814,
+      "line": "chief working; tasks T-1:accepted T-2:cancelled T-3:accepted T-4:accepted T-5:accepted T-6:accepted"
+    },
+    {
+      "at": 1874,
+      "line": "answered m-47 (Detaliu: Cât de multă cronologie legislativă afișăm pe pagină?) with: Stadiu concis (Recommended) / Linkuri pe secțiuni (Recommended) / Concis și vizibil (Recommended)"
+    },
+    {
+      "at": 2074,
+      "line": "chief idle; tasks T-1:accepted T-2:cancelled T-3:accepted T-4:accepted T-5:accepted T-6:accepted"
+    },
+    {
+      "at": 2195,
+      "line": "quiet: the run is over"
+    }
+  ]
+}

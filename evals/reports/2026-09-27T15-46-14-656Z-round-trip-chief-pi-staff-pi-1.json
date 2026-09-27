@@ -1,0 +1,233 @@
+{
+  "scenario": "round-trip",
+  "chief": "pi",
+  "model": "pi's default",
+  "staff": [
+    "pi"
+  ],
+  "staffModels": {
+    "eval-pi-worker": "opencode-go/muse-spark-1.3-contributor",
+    "eval-pi-worker-2": "opencode-go/muse-spark-1.3-contributor",
+    "eval-pi-advisor": "opencode-go/muse-spark-1.3-contributor",
+    "eval-pi-reviewer": "opencode-go/muse-spark-1.3-contributor"
+  },
+  "run": 1,
+  "seconds": 181,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Sarcină de test de funcționare.",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-pi-worker-noble-willow"
+      },
+      {
+        "number": 2,
+        "title": "Review T-1: verifică fișierul site/notes.md creat de worker.",
+        "pool": "reviewer",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-pi-reviewer-coral-ember"
+      }
+    ],
+    "parallel": 1,
+    "advice": 0,
+    "reviews": 1,
+    "questionsToHuman": [],
+    "notesToHuman": [],
+    "taskCount": 2,
+    "chiefId": 2,
+    "chiefHarness": "pi",
+    "humanId": 1,
+    "chiefTurns": 8,
+    "chiefEdits": null,
+    "chiefLastWords": "Test complet: workerul a întrebat culoarea, am răspuns „albastru”, a scris site/notes.md cu o singură linie `albastru`. Reviewerul a verificat (PASS: fișier la calea corectă, 1 linie, 9 bytes cu newline). Am acceptat T-1 și T-2. N-am modificat alte fișiere.",
+    "plumbing": {
+      "briefs": 2,
+      "briefsDelivered": 2,
+      "results": 2,
+      "resultsDelivered": 2,
+      "memberQuestions": 1,
+      "memberQuestionsAnswered": 1,
+      "answersDelivered": 1,
+      "accepted": 2,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0,
+      "ownerQuestions": 0,
+      "ownerQuestionsAnswered": 0
+    },
+    "filesChanged": [
+      "site/notes.md"
+    ]
+  },
+  "checks": [
+    {
+      "name": "one task goes to a worker",
+      "ok": true
+    },
+    {
+      "name": "the worker asks the chief on the board",
+      "ok": true
+    },
+    {
+      "name": "the chief answers on the board",
+      "ok": true
+    },
+    {
+      "name": "the finished work goes to a review",
+      "ok": true
+    },
+    {
+      "name": "the task is accepted",
+      "ok": true
+    },
+    {
+      "name": "only site/notes.md is new",
+      "ok": true
+    },
+    {
+      "name": "the owner is not asked anything",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (2/2)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (2/2)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (1/1)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (1/1)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question the chief put to the owner got the owner's answer (0/0)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (2/2)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    " funcționare.",
+    " Elapsed 0.1s",
+    "── ⠋ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑13k ↓2.6k R92k CH96.8% $0.002 1.6%/1.0M (auto)  muse-spark-1.3-contributor • hi── ⠙ Working ───────────────────────────────────────────────────────────────────",
+    " $ cf task accept T-1 && cf task accept T-2",
+    " T-1 [accepted] @eval-pi-worker-noble-willow ← @chief: Sarcină de test de",
+    " funcționare.",
+    " T-2 [accepted] @eval-pi-reviewer-coral-ember ← @chief: Review T-1: verifică",
+    " fișierul site/notes.md creat de worker.",
+    " Took 0.1s",
+    "── ⠙ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑13k ↓2.6k R92k CH96.8% $0.002 1.6%/1.0M (auto)  muse-spark-1.3-contributor • hi── ⠹ Working ───────────────────────────────────────────────────────────────────── ⠸ Working ───────────────────────────────────────────────────────────────────── ⠼ Working ───────────────────────────────────────────────────────────────────── ⠴ Working ───────────────────────────────────────────────────────────────────── ⠦ Working ───────────────────────────────────────────────────────────────────── ⠧ Working ───────────────────────────────────────────────────────────────────── ⠇ Working ───────────────────────────────────────────────────────────────────── ⠏ Working ───────────────────────────────────────────────────────────────────── ⠋ Working ───────────────────────────────────────────────────────────────────── ⠙ Working ───────────────────────────────────────────────────────────────────── ⠹ Working ───────────────────────────────────────────────────────────────────── ⠸ Working ───────────────────────────────────────────────────────────────────── ⠼ Working ───────────────────────────────────────────────────────────────────── ⠴ Working ───────────────────────────────────────────────────────────────────── ⠦ Working ───────────────────────────────────────────────────────────────────── ⠧ Working ───────────────────────────────────────────────────────────────────── ⠇ Working ───────────────────────────────────────────────────────────────────── ⠏ Working ───────────────────────────────────────────────────────────────────── ⠋ Working ───────────────────────────────────────────────────────────────────── ⠙ Working ───────────────────────────────────────────────────────────────────── ⠹ Working ───────────────────────────────────────────────────────────────────── ⠸ Working ───────────────────────────────────────────────────────────────────── ⠼ Working ───────────────────────────────────────────────────────────────────── ⠴ Working ───────────────────────────────────────────────────────────────────── ⠦ Working ───────────────────────────────────────────────────────────────────── ⠧ Working ───────────────────────────────────────────────────────────────────── ⠇ Working ───────────────────────────────────────────────────────────────────── ⠏ Working ───────────────────────────────────────────────────────────────────── ⠋ Working ───────────────────────────────────────────────────────────────────── ⠙ Working ───────────────────────────────────────────────────────────────────── ⠹ Working ───────────────────────────────────────────────────────────────────── ⠸ Working ───────────────────────────────────────────────────────────────────── ⠼ Working ───────────────────────────────────────────────────────────────────── ⠴ Working ───────────────────────────────────────────────────────────────────── ⠦ Working ───────────────────────────────────────────────────────────────────── ⠧ Working ───────────────────────────────────────────────────────────────────── ⠇ Working ───────────────────────────────────────────────────────────────────── ⠏ Working ───────────────────────────────────────────────────────────────────── ⠋ Working ───────────────────────────────────────────────────────────────────── ⠙ Working ───────────────────────────────────────────────────────────────────── ⠹ Working ───────────────────────────────────────────────────────────────────── ⠸ Working ───────────────────────────────────────────────────────────────────── ⠼ Working ───────────────────────────────────────────────────────────────────",
+    " Test complet: workerul a",
+    "── ⠼ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑13k ↓2.6k R92k CH96.8% $0.002 1.6%/1.0M (auto)  muse-spark-1.3-contributor • hi Test complet: workerul a întrebat culoarea",
+    "── ⠴ Working ───────────────────────────────────────────────────────────────────── ⠦ Working ─────────────────────────────────────────────────────────────────── Test complet: workerul a întrebat culoarea, am răspuns                         ── ⠧ Working ─────────────────────────────────────────────────────────────────── Test complet: workerul a întrebat culoarea, am răspuns „albastru”, a            Test complet: workerul a întrebat culoarea, am răspuns „albastru”, a scris",
+    " site/notes.md cu o singură linie",
+    "── ⠧ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑13k ↓2.6k R92k CH96.8% $0.002 1.6%/1.0M (auto)  muse-spark-1.3-contributor • hi── ⠇ Working ─────────────────────────────────────────────────────────────────── site/notes.md cu o singură linie albastru. Reviewer                            ── ⠏ Working ─────────────────────────────────────────────────────────────────── site/notes.md cu o singură linie albastru. Reviewerul a verificat (            ── ⠋ Working ─────────────────────────────────────────────────────────────────── site/notes.md cu o singură linie albastru. Reviewerul a verificat (PASS:       ── ⠙ Working ─────────────────────────────────────────────────────────────────── site/notes.md cu o singură linie albastru. Reviewerul a verificat (PASS:",
+    " fișier la",
+    "── ⠙ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑13k ↓2.6k R92k CH96.8% $0.002 1.6%/1.0M (auto)  muse-spark-1.3-contributor • hi── ⠹ Working ─────────────────────────────────────────────────────────────────── fișier la calea corectă, 1 linie, 9 bytes cu                                   ── ⠸ Working ─────────────────────────────────────────────────────────────────── fișier la calea corectă, 1 linie, 9 bytes cu newline). Am accept               ── ⠼ Working ─────────────────────────────────────────────────────────────────── fișier la calea corectă, 1 linie, 9 bytes cu newline). Am acceptat T-1 și T-2.",
+    " N-am",
+    "── ⠼ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑13k ↓2.6k R92k CH96.8% $0.002 1.6%/1.0M (auto)  muse-spark-1.3-contributor • hi── ⠴ Working ─────────────────────────────────────────────────────────────────── N-am modificat alte                                                             N-am modificat alte fișiere.                                                   ── ⠦ Working ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑13k ↓2.8k R108k CH98.1% $0.002 1.6%/1.0M (auto)  muse-spark-1.3-contributor • h"
+  ],
+  "terminalAnswers": 0,
+  "refusedAnswers": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 6,
+      "line": "chief (pi) ready; typing the prompt"
+    },
+    {
+      "at": 11,
+      "line": "Enter pressed again: the window had not taken the text"
+    },
+    {
+      "at": 16,
+      "line": "chief idle; tasks none"
+    },
+    {
+      "at": 31,
+      "line": "chief working; tasks T-1:queued"
+    },
+    {
+      "at": 36,
+      "line": "chief working; tasks T-1:waiting"
+    },
+    {
+      "at": 41,
+      "line": "chief idle; tasks T-1:working"
+    },
+    {
+      "at": 61,
+      "line": "chief working; tasks T-1:done"
+    },
+    {
+      "at": 66,
+      "line": "chief working; tasks T-1:done T-2:queued"
+    },
+    {
+      "at": 71,
+      "line": "chief idle; tasks T-1:done T-2:working"
+    },
+    {
+      "at": 81,
+      "line": "chief working; tasks T-1:done T-2:done"
+    },
+    {
+      "at": 86,
+      "line": "chief working; tasks T-1:accepted T-2:accepted"
+    },
+    {
+      "at": 91,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted"
+    },
+    {
+      "at": 181,
+      "line": "quiet: the run is over"
+    }
+  ]
+}
