@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
-import { runnable, terminate } from '../src/harnesses.js'
+import { paneArgv, runnable, terminate } from '../src/harnesses.js'
 
 /** The last line of the shim npm writes for a global package, with npm's variables. */
 const NPM_SHIM =
@@ -90,6 +90,19 @@ describe('runnable', () => {
       const opaque = join(root, 'opaque.cmd')
       writeFileSync(opaque, '@echo off\r\n"%NODE_EXE%" "%NPM_CLI_JS%" %*\r\n')
       assert.match(runnable(opaque, [], {}).file, /\\cmd\.exe$/i)
+    })
+
+    it('and a window opens on the shim as its node and script, or not at all', () => {
+      const env = { OS: 'Windows_NT', PATH: '' }
+      assert.deepEqual(paneArgv([shim, '--model', 'a b'], env), [
+        join(bin, 'node.exe'),
+        script,
+        '--model',
+        'a b',
+      ])
+      const opaque = join(root, 'opaque.cmd')
+      assert.throws(() => paneArgv([opaque], env), /is not an npm shim/)
+      assert.deepEqual(paneArgv(['/usr/local/bin/pi', 'x'], env), ['/usr/local/bin/pi', 'x'])
     })
   })
 

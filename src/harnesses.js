@@ -223,6 +223,22 @@ export function runnable(executable, args = [], env = process.env) {
 }
 
 /**
+ * A window's program as the pane host can start it. The host starts a file
+ * with each argument quoted the way programs read them, which cmd.exe does
+ * not, so an npm-installed harness on Windows (a `.cmd` shim) opens as the
+ * shim's own node and script; a `.cmd` of any other shape cannot open a window.
+ */
+export function paneArgv(argv, env = process.env) {
+  const [executable, ...args] = argv
+  if (!/\.(cmd|bat)$/i.test(executable)) return argv
+  const target = shimTarget(executable, env)
+  if (target === null) {
+    throw new Error(`${executable} is not an npm shim, and only cmd.exe could run it in a window`)
+  }
+  return [target.program, target.script, ...args]
+}
+
+/**
  * Ends a child started through `runnable`, and everything it started. On
  * Windows the child may be the cmd.exe wrapper of a `.cmd`, and killing it
  * alone leaves the program it started running, so the whole tree goes, at
