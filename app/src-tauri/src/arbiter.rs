@@ -1677,16 +1677,55 @@ mod tests {
 
     #[cfg(windows)]
     mod windows {
+        use std::collections::HashMap;
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        use super::super::{InputArbiter, PaneEvent};
+        use crate::pty::conpty_test::{line_echo, open, read_until};
+        use crate::pty::{serial_pty_test, PaneTable};
+
+        /// A delivery is a bracketed paste and a delayed Enter; the harness
+        /// must read the text alone, as one submitted line.
         #[test]
-        #[ignore = "macOS-first PTY contract"]
-        fn raw_paste_and_enter_contract() {
-            panic!("implement with the Windows PTY backend");
+        fn a_paste_and_its_enter_reach_the_child_as_one_line() {
+            let _pty_guard = serial_pty_test();
+            let table = PaneTable::new();
+            let (key, output) = open(&table, &line_echo(), &HashMap::new(), 1 << 20);
+            let (events, _received) = mpsc::channel();
+            let arbiter = InputArbiter::new(5, events);
+            arbiter.register(&key).expect("register pane");
+            read_until(&table, &key, &output, "READY");
+
+            arbiter
+                .write_paste(&table, &key, 0, b"pasted words")
+                .expect("paste into the pane");
+            let text = read_until(&table, &key, &output, "#");
+            assert!(text.contains("GOT=[pasted words]"), "{text:?}");
+            table.kill(&key).expect("kill the pane");
         }
 
+        /// A human's typing reaches the child, and their Enter is heard.
         #[test]
-        #[ignore = "macOS-first PTY contract"]
-        fn queued_human_input_contract() {
-            panic!("implement with the Windows PTY backend");
+        fn human_typing_reaches_the_child_and_its_enter_is_heard() {
+            let _pty_guard = serial_pty_test();
+            let table = PaneTable::new();
+            let (key, output) = open(&table, &line_echo(), &HashMap::new(), 1 << 20);
+            let (events, received) = mpsc::channel();
+            let arbiter = InputArbiter::new(5, events);
+            arbiter.register(&key).expect("register pane");
+            read_until(&table, &key, &output, "READY");
+
+            arbiter
+                .write_human(&table, &key, b"typed\r")
+                .expect("type into the pane");
+            assert!(matches!(
+                received.recv_timeout(Duration::from_secs(5)),
+                Ok(PaneEvent::Enter { .. })
+            ));
+            let text = read_until(&table, &key, &output, "#");
+            assert!(text.contains("GOT=[typed]"), "{text:?}");
+            table.kill(&key).expect("kill the pane");
         }
     }
 }

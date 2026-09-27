@@ -87,6 +87,7 @@ dependencies = [
  "tempfile",
  "time",
  "url",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

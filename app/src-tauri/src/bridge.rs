@@ -2768,10 +2768,46 @@ mod tests {
 
     #[cfg(windows)]
     mod windows {
+        use std::io::{BufRead, BufReader, Write};
+        use std::time::{Duration, Instant};
+
+        use serde_json::{json, Value};
+
+        use super::super::BridgeBuilder;
+
+        /// The daemon's side of the app's pipes: its handle first, then a
+        /// frame per line each way, and the bridge closes when its input ends.
         #[test]
-        #[ignore = "macOS-first pipe protocol contract"]
-        fn child_stdio_protocol_contract() {
-            panic!("exercise with Windows child pipes");
+        fn frames_cross_os_pipes_and_the_bridge_closes_at_their_end() {
+            let (bridge_input, mut to_bridge) = std::io::pipe().expect("input pipe");
+            let (from_bridge, bridge_output) = std::io::pipe().expect("output pipe");
+            let handle = json!({"url":"http://127.0.0.1:1234","token":"secret"});
+            writeln!(to_bridge, "{handle}").expect("send the handle");
+            let connected = BridgeBuilder::new(1024)
+                .connect(bridge_input, bridge_output)
+                .expect("connect over pipes");
+            assert_eq!(connected.handle, handle);
+            let mut lines = BufReader::new(from_bridge);
+
+            let request =
+                json!({"v":1,"id":"n-unknown","kind":"req","op":"does.not.exist","body":null});
+            writeln!(to_bridge, "{request}").expect("send a frame");
+            let mut line = String::new();
+            lines.read_line(&mut line).expect("read a frame");
+            assert_eq!(
+                serde_json::from_str::<Value>(&line).expect("a JSON frame"),
+                json!({"v":1,"id":"n-unknown","kind":"res","op":"does.not.exist","body":{"ok":false,"error":"unknown-op"}})
+            );
+
+            drop(to_bridge);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !connected.bridge.is_closed() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(
+                connected.bridge.is_closed(),
+                "the bridge outlived its input"
+            );
         }
     }
 }
