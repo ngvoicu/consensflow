@@ -210,29 +210,28 @@ export async function runSelftest({
     )
     await report('echo', { typed, hex })
 
-    // A task through the board: the chief's own `cf`, the core, the
-    // dispatcher, the pane host's paste, the child. The human talks to the chief
-    // in its terminal and never gives it a task from the board, so the chief's
-    // window puts its own on the board (`cf task add --self`). The child's hex
-    // of the delivered header line is the proof that the board reaches a
-    // window; the core's own confirmation, read back from the record the fake
-    // harness keeps, is the proof that it knows it did.
-    await sendInput(pane, 'SELF\r')
-    const given = await until('the chief put its own task on the board', async () => {
-      const { board } = await core('board.get', { project: opened.project.id })
+    // The board both ways: the chief's own `cf`, the core, the human's answer
+    // on the board, the dispatcher, the pane host's paste, the child. The
+    // chief's window asks the human (`cf ask`); the page answers the way the
+    // board's answer box does. The child's hex of the delivered header line is
+    // the proof that the board reaches a window; the core's own confirmation,
+    // read back from the record the fake harness keeps, is the proof that it
+    // knows it did.
+    await sendInput(pane, 'ASK\r')
+    const question = await until('the chief asked the human', async () => {
+      const { messages } = await core('inbox.get', { project: opened.project.id })
       return (
-        board?.lanes
-          .find((lane) => lane.participant.handle === 'chief')
-          ?.tasks.find((task) => task.requester === 'chief') ?? null
+        messages.find((message) => message.kind === 'question' && message.sender === 'chief') ??
+        null
       )
     })
-    const { task: thread } = await core('task.get', {
-      project: opened.project.id,
-      task: given.number,
+    const { message: answer } = await core('message.answer', {
+      question: question.id,
+      body: 'SMOKE ANSWER',
     })
-    const header = `[ConsensFlow m-${thread.messages.find((message) => message.kind === 'task').id} ·`
+    const header = `[ConsensFlow m-${answer.id} ·`
     const delivered = await until(
-      'the task reached the chief window',
+      'the answer reached the chief window',
       () => {
         for (const row of screen(emulator)) {
           const match = HEX.exec(row)
@@ -260,13 +259,13 @@ export async function runSelftest({
         throw new Error(`the core did not confirm the delivery (the message is ${state})`)
       }
       await sleep(200)
-      const { task } = await core('task.get', {
+      const { messages } = await core('inbox.get', {
         project: opened.project.id,
-        task: given.number,
+        participant: 'chief',
       })
-      state = task.messages.find((message) => message.kind === 'task')?.state ?? null
+      state = messages.find((message) => message.id === answer.id)?.state ?? null
     }
-    await report('board', { task: given.number, hex: delivered, delivered: true })
+    await report('board', { question: question.id, hex: delivered, delivered: true })
 
     // The agents screens: their own window at the daemon's address, reused
     // on the second ask. The daemon's pages themselves are proven elsewhere.

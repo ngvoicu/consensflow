@@ -196,6 +196,11 @@ while IFS= read -r line; do
     stty raw -echo
     "$CFSMOKE_PASTE_NODE" "$CFSMOKE_PASTE_READER"
     stty "$saved"
+  elif [ "$line" = "ASK" ]; then
+    # The chief asks the human from its terminal, the way a real chief does;
+    # the human answers on the board and the core delivers it into this window.
+    cf ask "SMOKE"
+    turn "ASK"
   elif [ "$line" = "FLOOD" ]; then
     n=1
     while [ $n -le ${FLOOD_LINES} ]; do
@@ -500,13 +505,13 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     'the child echoed something other than what was typed',
   )
 
-  // The board reaches the window: the task the chief put on the board from its
-  // own terminal came back as a paste the child hexed, header first.
+  // The board reaches the window: the human's answer to what the chief asked
+  // from its own terminal came back as a paste the child hexed, header first.
   const board = await app.waitFor('board')
-  assert.equal(board.data.task, 1)
+  assert.ok(Number.isInteger(board.data.question), 'the chief never asked the human')
   assert.match(
     Buffer.from(board.data.hex, 'hex').toString('utf8'),
-    /^\[ConsensFlow m-\d+ · T-1 · task from @chief\]/,
+    /^\[ConsensFlow m-\d+ · answer from @human\]/,
   )
   assert.equal(board.data.delivered, true, 'the core never confirmed the delivery from the record')
 
