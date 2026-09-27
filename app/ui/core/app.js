@@ -370,7 +370,15 @@ const byRoleAndTier = (a, b) =>
  * tier a task finds it by, effort included when it has one.
  */
 const runsLabel = (agent, tier = agent.profile?.workTier) =>
-  [agent.model ?? 'model unknown', agent.harness, agent.effort, tier].filter(Boolean).join(' · ')
+  [
+    agent.model ?? 'model unknown',
+    // An image agent runs through Codex: Codex is its harness to the human.
+    agent.harness === 'image' ? 'codex' : agent.harness,
+    agent.effort,
+    tier,
+  ]
+    .filter(Boolean)
+    .join(' · ')
 
 /**
  * The two selects that add a member: a role first, then the saved agents

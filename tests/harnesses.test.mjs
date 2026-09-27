@@ -142,5 +142,9 @@ describe('what the pickers offer', () => {
       { name: 'ares', harness: 'devin', hidden: true, notInstalled: true },
       { name: 'iris', harness: 'image' },
     ])
+    // An image agent runs through Codex: without Codex it is not offered.
+    assert.deepEqual(offerable([{ name: 'pygmalion', harness: 'image' }], ['codex']), [
+      { name: 'pygmalion', harness: 'image', hidden: true, notInstalled: true },
+    ])
   })
 })

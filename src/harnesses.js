@@ -270,10 +270,13 @@ export function missingHarnesses(env) {
 /**
  * Agents as the pickers offer them: one whose harness is not installed here is
  * hidden, so only the Harnesses page shows that harness, where it is installed.
+ * An image agent (@pygmalion) runs through Codex, so it goes with Codex.
  */
 export function offerable(agents, missing) {
   return agents.map((agent) =>
-    missing.includes(agent.harness) ? { ...agent, hidden: true, notInstalled: true } : agent,
+    missing.includes(agent.harness === 'image' ? 'codex' : agent.harness)
+      ? { ...agent, hidden: true, notInstalled: true }
+      : agent,
   )
 }
 

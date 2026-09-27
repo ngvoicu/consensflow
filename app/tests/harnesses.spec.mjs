@@ -554,12 +554,9 @@ test('model capability order takes precedence over agent names and reasoning eff
       await fixture.second.getByLabel('Group by').selectOption(group)
       await expect(fixture.second.locator('.callsign')).toHaveText(names)
     }
+    // The image agent runs through Codex and groups with it: one Codex group, in capability order.
     await fixture.second.getByLabel('Group by').selectOption('harness')
-    await expect(fixture.second.locator('.callsign')).toHaveText([
-      ...names.slice(0, -2),
-      names.at(-1),
-      names.at(-2),
-    ])
+    await expect(fixture.second.locator('.callsign')).toHaveText(names)
     for (const group of ['none', 'model-reasoning', 'harness']) {
       await page.getByRole('searchbox').fill('GPT-')
       await page.getByLabel('Group by').selectOption(group)
@@ -745,10 +742,9 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     await group.selectOption('harness')
     await expect(own.getByRole('heading', { level: 3 })).toHaveText([
       'Claude Code · 1',
-      'Codex · 3',
+      'Codex · 4',
       'Pi · 2',
       'Kimi · 1',
-      'Images · 1',
     ])
     await page.getByLabel('Group by').selectOption('harness')
     await expect(page.getByRole('heading', { level: 3 })).toHaveText([

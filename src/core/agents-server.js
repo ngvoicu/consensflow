@@ -89,7 +89,10 @@ export function agentsUi(
           const missing = missingHarnesses(env)
           return json(200, {
             agents: offerable(listAgents(env), missing),
-            harnesss: HARNESSES.filter((harness) => !missing.includes(harness)),
+            // An image agent runs through Codex: it goes when Codex is missing.
+            harnesss: HARNESSES.filter(
+              (harness) => !missing.includes(harness === 'image' ? 'codex' : harness),
+            ),
             efforts: EFFORTS,
             preferences: preferences(env),
           })
@@ -330,7 +333,7 @@ const el = (tag, className, text) => {
   return node;
 };
 
-const HARNESS_LABELS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi', kimi: 'Kimi', devin: 'Devin', image: 'Images' };
+const HARNESS_LABELS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi', kimi: 'Kimi', devin: 'Devin', image: 'Codex' };
 const WORK_TIERS = ${JSON.stringify(WORK_TIERS)};
 const EFFORT_ORDER = ['ultra', 'max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'off', 'default', 'kimi-setting', 'not-applicable'];
 const effortValue = p => p.harness === 'image' ? 'not-applicable' : (p.effort || (p.harness === 'kimi' ? 'kimi-setting' : 'default'));
@@ -372,7 +375,8 @@ function browsingGroups(entries, sectionId) {
   const groups = new Map();
   for (const p of filtered) {
     const effort = effortValue(p);
-    const key = by === 'model-reasoning' ? JSON.stringify([p.profile.modelKey, effort]) : by === 'harness' ? p.harness : by === 'tier' ? p.profile.workTier : '';
+    // An image agent runs through Codex, so it groups with Codex.
+    const key = by === 'model-reasoning' ? JSON.stringify([p.profile.modelKey, effort]) : by === 'harness' ? (p.harness === 'image' ? 'codex' : p.harness) : by === 'tier' ? p.profile.workTier : '';
     const title = by === 'model-reasoning' ? p.profile.modelLabel + ' · ' + effortLabel(effort) : by === 'harness' ? (HARNESS_LABELS[key] || key) : by === 'tier' ? WORK_TIERS[key].label : '';
     if (!groups.has(key)) groups.set(key, { key, title, modelGroup: by === 'model-reasoning', modelKey: p.profile.modelKey, modelLabel: p.profile.modelLabel, effort, rows: [] });
     groups.get(key).rows.push(p);
@@ -547,7 +551,8 @@ function removeButton(agent, label) {
 function renderForm(data) {
   const harnessSelect = document.querySelector('select[name=harness]');
   if (harnessSelect.options.length === 0) {
-    for (const r of data.harnesss) harnessSelect.add(new Option(r, r));
+    // An image agent is Codex's own image generation, not a harness of its own.
+    for (const r of data.harnesss) harnessSelect.add(new Option(r === 'image' ? 'codex images' : r, r));
     harnessSelect.onchange = () => showEfforts(data.efforts, harnessSelect.value);
   }
   showEfforts(data.efforts, harnessSelect.value);
