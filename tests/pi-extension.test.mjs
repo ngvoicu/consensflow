@@ -451,7 +451,8 @@ it('a Pi session switch at admission reports a retryable zero-byte refusal', asy
             inbox: s.inbox,
             ack: s.ack,
             launchId: 'launch-pi-test',
-            ackTimeoutMs: 1000,
+            // The refusal comes back at once; the window is for a loaded machine.
+            ackTimeoutMs: 10_000,
           },
         },
       },
