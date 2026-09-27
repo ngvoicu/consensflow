@@ -63,3 +63,4 @@ before that column existed.
 | 2026-09-26T21-43 | round-trip | devin (devin's default) | opencode | 1/7 | 7/7 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 0 | 0 | 2 |
 | 2026-09-26T21-47 | round-trip | opencode (opencode-go/deepseek-v4-flash) | claude | 7/7 | 7/7 | 2 | 1 | 0 | 1 | 0 | 0 | ? | 1 | 0 | 4 |
 | 2026-09-26T21-50 | round-trip | opencode (opencode-go/deepseek-v4-flash) | devin | 7/7 | 7/7 | 2 | 1 | 0 | 1 | 0 | 0 | ? | 1 | 0 | 3 |
+| 2026-09-27T05-27 | simple-fix | pi (pi's default) | opencode | 5/5 | 7/7 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 1 | 0 | 2 |
