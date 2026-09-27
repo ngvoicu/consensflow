@@ -65,6 +65,36 @@ export function measure(file, { fixture = null, workspace = null } = {}) {
       notesToHuman: toHuman
         .filter((m) => m.kind === 'note')
         .map((m) => ({ id: m.id, body: m.body.slice(0, 200) })),
+      // The whole text of the chief's notes: a scenario may look for words at the end.
+      notesText: toHuman
+        .filter((m) => m.kind === 'note')
+        .map((m) => m.body)
+        .join('\n'),
+      // The longest result each kind of member sent the chief, in characters
+      // (a worker's task may name no pool: one given to a window by name).
+      longestResult: Object.fromEntries(
+        ['worker', 'advisor', 'reviewer'].map((pool) => [
+          pool,
+          Math.max(
+            0,
+            ...tasks
+              .filter(
+                (t) =>
+                  t.requester === chief.handle &&
+                  (pool === 'worker'
+                    ? t.pool !== 'advisor' && t.pool !== 'reviewer'
+                    : t.pool === pool),
+              )
+              .flatMap((t) => t.messages.filter((m) => m.kind === 'result'))
+              .map((m) => m.body.length),
+          ),
+        ]),
+      ),
+      // The human's answers to the chief, in characters.
+      answersToChief: ledger
+        .inbox(chief.id, { limit: 500 })
+        .filter((m) => m.kind === 'answer' && m.sender === human.handle)
+        .map((m) => m.body.length),
       taskCount: tasks.length,
       chiefId: chief.id,
       chiefHarness: chief.harness,

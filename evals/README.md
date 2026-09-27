@@ -28,7 +28,12 @@ Devin run their own configured default. Claude and Codex windows start
 through wrappers the runner writes (`~/.consensflow-candidate/evals/bin`)
 that shut out MCP servers, connectors and the browser for the chief too
 (ConsensFlow already does it for members), and give Codex the chief's
-model. `--staff` names the staff's harnesses: each gives two
+model. `--effort` (default `high`) is the chief's reasoning level, through
+those wrappers and a Pi one; OpenCode's window and Devin have no switch for
+it, and the report says so (`effort: null`). `--staff-effort` (default
+`medium`) is every member's, on its roster agent. Before 2026-09-27 no run
+set either: each window ran at the user's own configured default.
+`--staff` names the staff's harnesses: each gives two
 workers, an advisor and a reviewer on its cheap model (`evals/plan.mjs`), all
 standard tier, so the daemon picks among them by its own rule and any of them
 may get any task. The scenario's fixture is copied into a fixed, trusted
@@ -89,3 +94,11 @@ a score).
 - `advice-trip`: the advisor's plumbing. The owner asks for advice through
   the board; the advice comes back, is accepted and reaches the owner as a
   note. Expected: one advice task, a note, no file changed.
+- `long-trip`: long messages both ways. The owner pastes about 8000
+  characters into the chief's terminal; a worker, an advisor and a reviewer
+  each send a result of 8000 characters or more; the owner answers the
+  chief's one question in about 6000. The daemon delivers a message over
+  4000 characters as its opening and `cf inbox read m-N`, so each ends in a
+  code (the members read theirs from `interne/`), and the chief's one note
+  must hold all five. Expected: the three long results, the long answer
+  delivered, the five codes in the note, no file changed.

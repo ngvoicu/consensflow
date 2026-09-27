@@ -11,8 +11,8 @@ export function row(report) {
   return [
     report.name?.slice(0, 16) ?? '',
     report.scenario,
-    `${report.chief ?? 'claude'} (${report.model})`,
-    (report.staff ?? ['claude']).join('+'),
+    `${report.chief ?? 'claude'} (${report.model}${'effort' in report ? `, ${report.effort ?? 'default'}` : ''})`,
+    `${(report.staff ?? ['claude']).join('+')}${report.staffEffort ? ` (${report.staffEffort})` : ''}`,
     held(report.checks),
     held(report.mechanics),
     String(m.tasks.length),
@@ -31,7 +31,7 @@ export function row(report) {
 export const COLUMNS = [
   'when',
   'scenario',
-  'chief (model)',
+  'chief (model, effort)',
   'staff',
   'judgment',
   'plumbing',

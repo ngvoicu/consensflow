@@ -6,9 +6,12 @@
  *
  *   npm run eval -- --scenario six-decisions [--chief claude] [--staff claude,codex]
  *                   [--model …] [--claude-staff-model …] [--repeat 1] [--timeout-min 40]
+ *                   [--effort high] [--staff-effort medium]
  *
  * `--model` is the chief's: Opus for Claude Code and the cheap model for OpenCode
  * unless given; Codex, Pi and Devin run their own default and ignore it.
+ * `--effort` is the chief's reasoning level (Claude, Codex, Pi; OpenCode's
+ * window and Devin have no switch for it), `--staff-effort` every member's.
  */
 import { execFileSync } from 'node:child_process'
 import { chmodSync, cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -46,6 +49,8 @@ const { values } = parseArgs({
     'claude-staff-model': { type: 'string', default: HARNESSES.claude.model },
     repeat: { type: 'string', default: '1' },
     'timeout-min': { type: 'string', default: '40' },
+    effort: { type: 'string', default: 'high' },
+    'staff-effort': { type: 'string', default: 'medium' },
   },
 })
 const scenario = (
@@ -55,7 +60,13 @@ const chief = values.chief
 const staffHarnesses = (values.staff ?? chief).split(',').map((s) => s.trim())
 const repeat = Number(values.repeat)
 const timeoutMs = Number(values['timeout-min']) * 60_000
-const { agents, staff } = staffFor(staffHarnesses, { claude: values['claude-staff-model'] })
+const { agents, staff } = staffFor(
+  staffHarnesses,
+  { claude: values['claude-staff-model'] },
+  values['staff-effort'],
+)
+/** The chief's effort as it reached the chief: null where its harness has no switch for it. */
+const chiefEffort = ['claude', 'codex', 'pi'].includes(chief) ? values.effort : null
 const chiefSetup = chiefEnvironment(chief, values.model)
 
 /** The bench's clean environment: the real logins, never this shell's session identity. */
@@ -77,11 +88,25 @@ const wrapper = (name, real, flags) => {
   )
   chmodSync(file, 0o755)
 }
+// Fresh each run: a wrapper written for another chief must not outlive its run.
+rmSync(ISOLATED_BIN, { recursive: true, force: true })
 mkdirSync(ISOLATED_BIN, { recursive: true })
+// The chief's effort goes first; a member's own, later on its command line, wins.
 wrapper('claude', realOnPath('claude', process.env.PATH ?? ''), [
   '--strict-mcp-config',
   '--no-chrome',
+  ...(chief === 'claude' ? ['--effort', values.effort] : []),
 ])
+if (chief === 'pi') {
+  // Only a window takes `--thinking`; Pi's own subcommands (install, list) do not.
+  const realPi = realOnPath('pi', process.env.PATH ?? '')
+  const file = join(ISOLATED_BIN, 'pi')
+  writeFileSync(
+    file,
+    `#!/bin/sh\n# Written by evals/run.mjs: the Pi chief's thinking level.\ncase "$1" in\n  -*|'') exec ${JSON.stringify(realPi)} --thinking ${JSON.stringify(values.effort)} "$@" ;;\n  *) exec ${JSON.stringify(realPi)} "$@" ;;\nesac\n`,
+  )
+  chmodSync(file, 0o755)
+}
 const realCodex = realOnPath('codex', process.env.PATH ?? '')
 // Codex also opens on an update prompt whenever a newer release exists
 // (seen 2026-09-26 with 0.157.0 out), and a chief started without a first
@@ -94,13 +119,17 @@ const codexModel = chief === 'codex' ? chiefSetup.model : HARNESSES.codex.model
 wrapper(
   'codex',
   realCodex,
-  ['-c', `model=${JSON.stringify(codexModel)}`].concat(
-    codexIsolation(
-      JSON.parse(
-        execFileSync(realCodex, ['mcp', 'list', '--json'], { encoding: 'utf8', timeout: 30_000 }),
+  ['-c', `model=${JSON.stringify(codexModel)}`]
+    .concat(
+      chief === 'codex' ? ['-c', `model_reasoning_effort=${JSON.stringify(values.effort)}`] : [],
+    )
+    .concat(
+      codexIsolation(
+        JSON.parse(
+          execFileSync(realCodex, ['mcp', 'list', '--json'], { encoding: 'utf8', timeout: 30_000 }),
+        ),
       ),
     ),
-  ),
 )
 
 const ENV = {
@@ -315,6 +344,8 @@ async function run(index) {
     scenario: scenario.id,
     chief,
     model: chiefSetup.model,
+    effort: chiefEffort,
+    staffEffort: values['staff-effort'],
     staff: staffHarnesses,
     staffModels: Object.fromEntries(agents.map((a) => [a.id, a.model])),
     run: index,
@@ -336,7 +367,7 @@ async function run(index) {
   )
   writeFileSync(out, `${JSON.stringify(report, null, 2)}\n`)
   process.stdout.write(
-    `\n${scenario.id} · chief ${chief} (${chiefSetup.model}) · staff ${staffHarnesses.join('+')} · run ${index} · ${report.seconds}s\n`,
+    `\n${scenario.id} · chief ${chief} (${chiefSetup.model}, effort ${chiefEffort ?? 'its default'}) · staff effort ${values['staff-effort']} · staff ${staffHarnesses.join('+')} · run ${index} · ${report.seconds}s\n`,
   )
   for (const check of checks)
     process.stdout.write(`  ${check.ok ? 'PASS' : 'FAIL'} ${check.name}\n`)

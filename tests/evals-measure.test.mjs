@@ -116,6 +116,56 @@ describe('measuring a chief from the ledger', () => {
     }
   })
 
+  it('measures long messages: the longest result of each kind, the owner’s answers, the notes whole', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-evals-long-'))
+    const file = path.join(dir, 'consensflow.db')
+    try {
+      const ledger = openLedger(file)
+      const project = ledger.createProject({
+        directory: '/work/site',
+        name: 'site',
+        chief: { harness: 'claude-code' },
+      })
+      for (const [agent, role] of [
+        ['zeus', 'worker'],
+        ['athena', 'advisor'],
+      ]) {
+        ledger.addMember(project.id, { agent, harness: 'claude-code', role, tier: 'standard' })
+      }
+      const deliver = (message) => {
+        ledger.beginDelivery(message.id)
+        ledger.confirmDelivery(message.id, { evidence: 'native' })
+      }
+      deliver(ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Report' }).message)
+      ledger.createTask(project.id, {
+        from: 'chief',
+        pool: 'advisor',
+        tier: 'standard',
+        body: 'Advise',
+      })
+      const athena = ledger.project(project.id).participants.find((p) => p.handle === 'athena')
+      ledger.assignTask(project.id, 2, athena.id)
+      deliver(ledger.task(project.id, 2).messages.find((m) => m.kind === 'task'))
+      ledger.recordResult(project.id, 1, { body: `${'r'.repeat(8999)}\nCEDRU-7314` })
+      ledger.recordResult(project.id, 2, { body: 'short advice' })
+      const asked = ledger.ask(project.id, { from: 'chief', to: 'human', body: 'Name?' })
+      ledger.answer(asked.id, { from: 'human', body: 'a'.repeat(6000) })
+      ledger.note(project.id, {
+        from: 'chief',
+        to: 'human',
+        body: `${'n'.repeat(300)} DELTA-5530 at the end`,
+      })
+      ledger.close()
+
+      const metrics = measure(file)
+      assert.deepEqual(metrics.longestResult, { worker: 9010, advisor: 12, reviewer: 0 })
+      assert.deepEqual(metrics.answersToChief, [6000])
+      assert.match(metrics.notesText, /DELTA-5530 at the end$/)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('counts tasks, parallel work, advice, reviews, questions, notes and the chief’s own edits', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-evals-'))
     const file = path.join(dir, 'consensflow.db')

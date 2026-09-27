@@ -32,9 +32,10 @@ const ROLES = [
  * The roster rows and the project staff for these harnesses: for each, two
  * workers, an advisor and a reviewer on its cheap model (`models` overrides
  * a harness's model). Every member is standard tier, so the daemon picks
- * among them by its own rule and any harness may get any task.
+ * among them by its own rule and any harness may get any task. `effort` is
+ * each member's reasoning level (Pi calls it thinking); Devin has none.
  */
-export function staffFor(harnesses, models = {}) {
+export function staffFor(harnesses, models = {}, effort = undefined) {
   const agents = []
   const staff = []
   for (const name of harnesses) {
@@ -47,6 +48,9 @@ export function staffFor(harnesses, models = {}) {
         kind: harness.kind,
         model: models[name] ?? harness.model,
         workTier: 'standard',
+        ...(effort === undefined || name === 'devin'
+          ? {}
+          : { [name === 'pi' ? 'thinking' : 'effort']: effort }),
       })
       staff.push({ agent: id, roles: [role] })
     }

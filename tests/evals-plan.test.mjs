@@ -37,6 +37,13 @@ describe('an eval run’s plan', () => {
       staff.map((s) => [s.agent, s.roles[0]]),
       agents.map((a, i) => [a.id, ['worker', 'worker', 'advisor', 'reviewer'][i % 4]]),
     )
+    // An effort reaches every member as its harness names it; Devin has none.
+    const effort = staffFor(['claude', 'pi', 'devin'], {}, 'medium').agents
+    assert.deepEqual(
+      [effort[0].effort, effort[4].thinking, effort[4].effort, 'effort' in effort[8]],
+      ['medium', 'medium', undefined, false],
+    )
+    assert.equal('effort' in agents[0], false, 'no effort unless one is given')
     assert.throws(() => staffFor(['kimi']), /no such eval harness: kimi/)
     assert.deepEqual(Object.keys(HARNESSES), ['claude', 'codex', 'pi', 'opencode', 'devin'])
   })

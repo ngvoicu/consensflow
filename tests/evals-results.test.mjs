@@ -45,6 +45,19 @@ describe('the results file', () => {
       '6',
     ])
     assert.equal(row(report).length, COLUMNS.length)
+    // A run with explicit effort says it for the chief (or that it had none) and the staff.
+    const withEffort = {
+      ...report,
+      chief: 'codex',
+      model: 'gpt-5.6-sol',
+      effort: 'high',
+      staffEffort: 'medium',
+    }
+    assert.deepEqual(row(withEffort).slice(2, 4), [
+      'codex (gpt-5.6-sol, high)',
+      'claude+pi (medium)',
+    ])
+    assert.equal(row({ ...withEffort, effort: null }).at(2), 'codex (gpt-5.6-sol, default)')
   })
 
   it('says ? for a column a report predates, and writes a Markdown table', () => {
