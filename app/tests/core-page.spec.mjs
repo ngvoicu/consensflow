@@ -669,6 +669,8 @@ test('answers a question with options by picking, one pick per question at least
   )
   await form.getByRole('checkbox', { name: 'vite' }).check()
   await form.getByRole('checkbox', { name: 'esbuild' }).check()
+  // A box, not a line: the human's own words may run long.
+  await expect(form.getByLabel('Something else for Colour')).toHaveJSProperty('tagName', 'TEXTAREA')
   await form.getByLabel('Something else for Colour').fill('purple')
   await form.getByRole('button', { name: 'Send answer' }).click()
   await expect

@@ -449,7 +449,10 @@ function requireChoices(questions, { choices, body }) {
     }
     return pick.map((text) => {
       const wanted = String(text).trim()
-      if (wanted.length === 0 || wanted.length > MAX_TITLE * 10) throw badChoices('empty pick')
+      if (wanted.length === 0) throw badChoices('empty pick')
+      // A pick in the human's own words ("Something else") is an answer like any other.
+      if (wanted.length > MAX_BODY)
+        throw badChoices(`pick too long (at most ${MAX_BODY} characters)`)
       const label = question.options.find((o) => o.label.toLowerCase() === wanted.toLowerCase())
       return label === undefined ? wanted : label.label
     })

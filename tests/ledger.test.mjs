@@ -1189,6 +1189,27 @@ describe('tasks and the inbox queue', () => {
     })
   })
 
+  it('takes a long answer in the human’s own words to a question with options', async () => {
+    await withLedger((ledger) => {
+      const { question } = asked(ledger, [
+        { question: 'Name?', header: 'Name', options: [{ label: 'a' }, { label: 'b' }] },
+      ])
+      // An empty pick is empty; one past the body limit is too long, and says so.
+      assert.throws(
+        () => ledger.answer(question.id, { from: 'chief', choices: [['  ']] }),
+        /empty pick/,
+      )
+      assert.throws(
+        () => ledger.answer(question.id, { from: 'chief', choices: [['x'.repeat(1_000_001)]] }),
+        /too long/,
+      )
+      // "Something else" at the length of a real answer (6000 characters in the evals) goes through.
+      const long = `${'Why this name. '.repeat(400)}DELTA-5530`
+      const answer = ledger.answer(question.id, { from: 'chief', choices: [[long]] })
+      assert.deepEqual(answer.choices, [[long]])
+    })
+  })
+
   it("lets the human answer any question, and shows a coordinator's unanswered question as overdue", async () => {
     await withDir((dir) => {
       let at = Date.parse('2026-09-19T10:00:00.000Z')

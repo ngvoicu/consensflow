@@ -319,8 +319,9 @@ export class BoardView {
         if (option.description) label.append(element('span', 'choice-desc', option.description))
         group.append(label)
       }
-      const custom = element('input', 'choice-custom')
-      custom.type = 'text'
+      // The human's own words may be as long as any answer: a box, not a line.
+      const custom = element('textarea', 'choice-custom')
+      custom.rows = 2
       custom.name = `custom-${at}`
       custom.placeholder = 'Something else'
       custom.setAttribute('aria-label', `Something else for ${question.header}`)
