@@ -1,0 +1,49 @@
+# The gate on both platforms the app ships for: lint and the Node suite, the
+# integration suite on a real pane host (the release bridge), and the Rust
+# host's own tests and clippy. The packaged smoke and the page's Playwright
+# suite need a built, signed app and stay with the release build.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  gate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            app/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+
+      - run: npm ci
+      - run: npm ci --prefix app
+      # The page and the Node sidecar the Rust build expects beside it.
+      - run: npm --prefix app run bundle:ui
+      - run: npm --prefix app run prepare-sidecar
+
+      - run: npm run check
+      - run: cargo build --release --bin consensflow-bridge --manifest-path app/src-tauri/Cargo.toml
+      - run: npm run test:integration
+      - run: cargo test --lib --manifest-path app/src-tauri/Cargo.toml
+      - run: cargo clippy --manifest-path app/src-tauri/Cargo.toml --all-targets -- -D warnings
