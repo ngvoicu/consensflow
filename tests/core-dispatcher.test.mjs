@@ -477,24 +477,14 @@ describe('the dispatcher', () => {
     })
   })
 
-  it('stops a member window that made no progress for ten minutes and tells the requester; a running tool is progress', async () => {
+  it('stops a member window that made no progress for ten minutes and tells the requester', async () => {
     await setup(async (context) => {
       const { project } = await withStaff(context)
       context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       context.adapter.busy('zeus')
-      const zeus = context.adapter.agent('zeus')
-      zeus.openTools = 1
       await context.dispatcher.pass()
-      context.clock.advance(11 * 60_000)
-      await context.dispatcher.pass()
-      assert.equal(
-        context.ledger.task(project.id, 1).state,
-        'working',
-        'a long command is not a hang',
-      )
-      zeus.openTools = 0
       context.clock.advance(5 * 60_000)
       await context.dispatcher.pass()
       assert.equal(context.ledger.task(project.id, 1).state, 'working')
@@ -514,6 +504,39 @@ describe('the dispatcher', () => {
         context.host.requests.filter(([op]) => op === 'pane.input').length,
         1,
         'the pause stops the window',
+      )
+    })
+  })
+
+  it('gives a window whose tool is running an hour before it counts as stuck', async () => {
+    await setup(async (context) => {
+      const { project } = await withStaff(context)
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Build' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.adapter.busy('zeus')
+      context.adapter.agent('zeus').openTools = 1
+      await context.dispatcher.pass()
+      context.clock.advance(59 * 60_000)
+      await context.dispatcher.pass()
+      assert.equal(
+        context.ledger.task(project.id, 1).state,
+        'working',
+        'a long build is not a hang',
+      )
+      context.clock.advance(2 * 60_000)
+      await context.dispatcher.pass()
+      assert.equal(
+        context.ledger.task(project.id, 1).state,
+        'paused',
+        'a tool that never returns is',
+      )
+      const chief = context.ledger
+        .project(project.id)
+        .participants.find((p) => p.handle === 'chief')
+      assert.match(
+        context.ledger.inbox(chief.id).find((m) => m.kind === 'note').body,
+        /made no progress for 61 minutes, a tool still running, so it was stopped/,
       )
     })
   })

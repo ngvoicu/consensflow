@@ -113,6 +113,7 @@ export class Dispatcher {
   #roles
   #arrivalTimeoutMs
   #stuckAfterMs
+  #toolStuckAfterMs
   #launchTimeoutMs
   #maxAttempts
   /** Told each change of a window's activity, for the event file in the home. */
@@ -133,6 +134,7 @@ export class Dispatcher {
     roles = () => undefined,
     arrivalTimeoutMs = 60_000,
     stuckAfterMs = 600_000,
+    toolStuckAfterMs = 3_600_000,
     launchTimeoutMs = 180_000,
     maxAttempts = 3,
     trace = () => {},
@@ -148,6 +150,7 @@ export class Dispatcher {
     this.#roles = roles
     this.#arrivalTimeoutMs = arrivalTimeoutMs
     this.#stuckAfterMs = stuckAfterMs
+    this.#toolStuckAfterMs = toolStuckAfterMs
     this.#trace = trace
     this.#launchFiles = launchFiles
     this.#launchTimeoutMs = launchTimeoutMs
@@ -408,21 +411,18 @@ export class Dispatcher {
   }
 
   /**
-   * How long a window has worked with nothing new in its record and no tool
-   * open: a model request that hung (a Pi window whose provider dropped the
-   * connection waited forever, four times in the evals). A running tool, a
-   * settled or waiting window, or any new item starts the count again.
+   * How long a window has worked with nothing new in its record: a model
+   * request that hung (a Pi window whose provider dropped the connection
+   * waited forever, four times in the evals), or a tool that never returned
+   * (a Pi web search). A running tool gets longer before it counts as stuck
+   * (a build may take a while); a settled or waiting window, or any new
+   * item, starts the count again.
    */
   #silence(runtime, observed) {
     const last = observed.items.at(-1)
     const signature = `${observed.items.length}:${last?.id ?? ''}:${last?.text?.length ?? 0}:${last?.complete === true}`
     const now = this.#now()
-    if (
-      observed.settled ||
-      observed.waiting ||
-      (observed.openTools ?? 0) > 0 ||
-      runtime.progress?.signature !== signature
-    ) {
+    if (observed.settled || observed.waiting || runtime.progress?.signature !== signature) {
       runtime.progress = { signature, at: now }
       return 0
     }
@@ -430,14 +430,14 @@ export class Dispatcher {
   }
 
   /** A member's window that made no progress: its task pauses, which stops the window, and its requester hears. */
-  #stallSilent(project, participant, runtime, silentMs) {
+  #stallSilent(project, participant, runtime, silentMs, toolOpen) {
     const task = this.#ledger.activeTask(participant.id)
     if (task === null || task.state !== 'working') return
     runtime.progress = null
     this.#stall(
       project,
       task,
-      `@${participant.handle}'s window made no progress for ${minutes(silentMs)} minutes, so it was stopped`,
+      `@${participant.handle}'s window made no progress for ${minutes(silentMs)} minutes${toolOpen ? ', a tool still running' : ''}, so it was stopped`,
       'it goes on in the same window',
     )
     this.#changed()
@@ -482,7 +482,8 @@ export class Dispatcher {
     // Quota belongs to the member: a session that runs out takes its member out.
     const owner = this.#memberOf(project, participant)
     const silentMs = this.#silence(runtime, observed)
-    const stuck = silentMs >= this.#stuckAfterMs
+    const toolOpen = (observed.openTools ?? 0) > 0
+    const stuck = silentMs >= (toolOpen ? this.#toolStuckAfterMs : this.#stuckAfterMs)
     // An out member's window says so, and nothing else, until the reset.
     if (!this.#isOut(owner)) {
       this.#setActivity(
@@ -527,7 +528,7 @@ export class Dispatcher {
     if (runtime.delivering !== null) this.#watchArrival(runtime, observed)
     await this.#releaseDraft(runtime, observed)
     if (participant.role !== 'chief') {
-      if (stuck) this.#stallSilent(project, participant, runtime, silentMs)
+      if (stuck) this.#stallSilent(project, participant, runtime, silentMs, toolOpen)
       await this.#interruptIfPaused(participant, runtime)
       this.#collect(project, participant, observed)
       // The window may have gone during this step (a launch that timed out).
