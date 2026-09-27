@@ -1,0 +1,265 @@
+{
+  "scenario": "long-trip",
+  "chief": "pi",
+  "model": "pi's default",
+  "effort": "high",
+  "staffEffort": "medium",
+  "staff": [
+    "claude"
+  ],
+  "staffModels": {
+    "eval-claude-worker": "claude-haiku-4-5-20251001",
+    "eval-claude-worker-2": "claude-haiku-4-5-20251001",
+    "eval-claude-advisor": "claude-haiku-4-5-20251001",
+    "eval-claude-reviewer": "claude-haiku-4-5-20251001"
+  },
+  "run": 1,
+  "seconds": 310,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Citește fișierul interne/worker.txt și fișierul site/index.html.",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-worker-calm-birch"
+      },
+      {
+        "number": 2,
+        "title": "Citește fișierul interne/advisor.txt și fișierul site/index.html.",
+        "pool": "advisor",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-advisor-pale-thistle"
+      },
+      {
+        "number": 3,
+        "title": "Citește fișierul interne/reviewer.txt și fișierul site/index.html.",
+        "pool": "reviewer",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-reviewer-rosy-yarrow"
+      }
+    ],
+    "parallel": 3,
+    "advice": 1,
+    "reviews": 1,
+    "questionsToHuman": [
+      {
+        "id": 4,
+        "options": false,
+        "body": "Cum se numește raportul final?"
+      }
+    ],
+    "notesToHuman": [
+      {
+        "id": 9,
+        "body": "Codul workerului: CEDRU-7314\nCodul advisorului: ARTAR-2659\nCodul reviewerului: STEJAR-4087\nNumele raportului final: DELTA-5530\nCodul mesajului: FARUL-2208"
+      }
+    ],
+    "notesText": "Codul workerului: CEDRU-7314\nCodul advisorului: ARTAR-2659\nCodul reviewerului: STEJAR-4087\nNumele raportului final: DELTA-5530\nCodul mesajului: FARUL-2208",
+    "longestResult": {
+      "worker": 6891,
+      "advisor": 6421,
+      "reviewer": 8200
+    },
+    "answersToChief": [
+      6071
+    ],
+    "taskCount": 3,
+    "chiefId": 2,
+    "chiefHarness": "pi",
+    "humanId": 1,
+    "chiefTurns": 16,
+    "chiefEdits": null,
+    "chiefLastWords": "Am citit integral toate rezultatele și răspunsul, am acceptat T-1, T-2, T-3 și am trimis nota unică cu cele cinci elemente: CEDRU-7314, ARTAR-2659, STEJAR-4087, DELTA-5530, FARUL-2208.",
+    "plumbing": {
+      "briefs": 3,
+      "briefsDelivered": 3,
+      "results": 3,
+      "resultsDelivered": 3,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 3,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0,
+      "ownerQuestions": 1,
+      "ownerQuestionsAnswered": 1
+    },
+    "filesChanged": []
+  },
+  "checks": [
+    {
+      "name": "the worker's result is long (8000 characters or more)",
+      "ok": false
+    },
+    {
+      "name": "the advisor's advice is long (8000 characters or more)",
+      "ok": false
+    },
+    {
+      "name": "the reviewer's review is long (8000 characters or more)",
+      "ok": true
+    },
+    {
+      "name": "the owner's long answer went to the chief",
+      "ok": true
+    },
+    {
+      "name": "the note holds the worker's code",
+      "ok": true
+    },
+    {
+      "name": "the note holds the advisor's code",
+      "ok": true
+    },
+    {
+      "name": "the note holds the reviewer's code",
+      "ok": true
+    },
+    {
+      "name": "the note holds the report's name from the owner's answer",
+      "ok": true
+    },
+    {
+      "name": "the note holds the code at the end of the owner's message",
+      "ok": true
+    },
+    {
+      "name": "no file changes",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (3/3)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (3/3)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question the chief put to the owner got the owner's answer (1/1)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (3/3)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    " Codul mesajului: FARUL-2208",
+    " NOTE",
+    "── ⠏ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑32k ↓3.3k R267k CH93.2% $0.004 3.0%/1.0M (auto)  muse-spark-1.3-contributor • h Elapsed 0.0s",
+    "── ⠏ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑32k ↓3.4k R298k CH97.7% $0.005 3.0%/1.0M (auto)  muse-spark-1.3-contributor • h── ⠋ Working ─────────────────────────────────────────────────────────────────── m-9 noted to @human; nothing waits on it.",
+    " Elapsed 0.1s",
+    "── ⠋ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑32k ↓3.4k R298k CH97.7% $0.005 3.0%/1.0M (auto)  muse-spark-1.3-contributor • h",
+    " $ /Users/gabrielvoicu/Projects/ngvoicu/consensflow/bin/cf note --human -",
+    " <<'NOTE'",
+    " Codul workerului: CEDRU-7314",
+    " Codul advisorului: ARTAR-2659",
+    " Codul reviewerului: STEJAR-4087",
+    " Numele raportului final: DELTA-5530",
+    " Codul mesajului: FARUL-2208",
+    " NOTE",
+    " m-9 noted to @human; nothing waits on it.",
+    " Took 0.1s",
+    "                                                                                ── ⠙ Working ───────────────────────────────────────────────────────────────────── ⠹ Working ───────────────────────────────────────────────────────────────────── ⠸ Working ───────────────────────────────────────────────────────────────────── ⠼ Working ───────────────────────────────────────────────────────────────────── ⠴ Working ───────────────────────────────────────────────────────────────────── ⠦ Working ───────────────────────────────────────────────────────────────────── ⠧ Working ───────────────────────────────────────────────────────────────────── ⠇ Working ───────────────────────────────────────────────────────────────────── ⠏ Working ───────────────────────────────────────────────────────────────────── ⠋ Working ───────────────────────────────────────────────────────────────────── ⠙ Working ───────────────────────────────────────────────────────────────────── ⠹ Working ───────────────────────────────────────────────────────────────────── ⠸ Working ───────────────────────────────────────────────────────────────────",
+    " Am citit integral toate rezultatele și răspunsul, am acceptat T-1, T-2, T-3 și",
+    " am trimis",
+    "── ⠸ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑32k ↓3.4k R298k CH97.7% $0.005 3.0%/1.0M (auto)  muse-spark-1.3-contributor • h am trimis nota unică cu cele cinci                                             ── ⠼ Working ─────────────────────────────────────────────────────────────────── am trimis nota unică cu cele cinci elemente                                    ── ⠴ Working ─────────────────────────────────────────────────────────────────── am trimis nota unică cu cele cinci elemente: CEDRU-7314, ARTAR-2659, STEJAR     am trimis nota unică cu cele cinci elemente: CEDRU-7314, ARTAR-2659,",
+    " STEJAR-4087, DELTA-5530,",
+    "── ⠴ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑32k ↓3.4k R298k CH97.7% $0.005 3.0%/1.0M (auto)  muse-spark-1.3-contributor • h── ⠦ Working ─────────────────────────────────────────────────────────────────── STEJAR-4087, DELTA-5530, FARUL-2208.                                           ────────────────────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑33k ↓3.5k R330k CH99.2% $0.005 3.0%/1.0M (auto)  muse-spark-1.3-contributor • h"
+  ],
+  "terminalAnswers": 0,
+  "refusedAnswers": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 69,
+      "line": "chief (pi) ready; typing the prompt"
+    },
+    {
+      "at": 74,
+      "line": "Enter pressed again: the window had not taken the text"
+    },
+    {
+      "at": 79,
+      "line": "chief working; tasks T-1:working T-2:working"
+    },
+    {
+      "at": 84,
+      "line": "answered m-4 (Cum se numește raportul final?) with: Punctul 1: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 2: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 3: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 4: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 5: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 6: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 7: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 8: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 9: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 10: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 11: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 12: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 13: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 14: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 15: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nNumele raportului final: DELTA-5530"
+    },
+    {
+      "at": 84,
+      "line": "chief idle; tasks T-1:working T-2:working T-3:working"
+    },
+    {
+      "at": 109,
+      "line": "chief working; tasks T-1:done T-2:working T-3:working"
+    },
+    {
+      "at": 114,
+      "line": "chief working; tasks T-1:done T-2:done T-3:working"
+    },
+    {
+      "at": 119,
+      "line": "chief working; tasks T-1:done T-2:done T-3:done"
+    },
+    {
+      "at": 124,
+      "line": "chief working; tasks T-1:done T-2:done T-3:done"
+    },
+    {
+      "at": 129,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:accepted"
+    },
+    {
+      "at": 310,
+      "line": "quiet: the run is over"
+    }
+  ]
+}

@@ -7,7 +7,7 @@ answered and the answers delivered, every task on the board). Terminal: how ofte
 had to answer in the chief's terminal because nothing was on the board. `?` is a report from
 before that column existed.
 
-| when | scenario | chief (model) | staff | judgment | plumbing | tasks | parallel | advice | reviews | questions | notes | chief edits | files | terminal | min |
+| when | scenario | chief (model, effort) | staff | judgment | plumbing | tasks | parallel | advice | reviews | questions | notes | chief edits | files | terminal | min |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-25T20-09 | six-decisions | claude (claude-sonnet-5) | claude | 3/7 | ? | 4 | 1 | 0 | 0 | 1 | 1 | 3 | 0 | ? | 23 |
 | 2026-09-25T20-26 | simple-fix | opencode (claude-opus-5) | pi | 4/5 | ? | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 2 |
@@ -74,3 +74,28 @@ before that column existed.
 | 2026-09-27T15-43 | round-trip | pi (pi's default) | codex | 7/7 | 7/7 | 2 | 1 | 0 | 1 | 0 | 0 | ? | 1 | 0 | 4 |
 | 2026-09-27T15-46 | round-trip | pi (pi's default) | pi | 7/7 | 7/7 | 2 | 1 | 0 | 1 | 0 | 0 | ? | 1 | 0 | 3 |
 | 2026-09-27T15-50 | round-trip | pi (pi's default) | devin | 5/7 | 7/7 | 2 | 1 | 0 | 1 | 0 | 0 | ? | 1 | 0 | 4 |
+| 2026-09-27T18-40 | long-trip | codex (gpt-5.6-sol, high) | claude (medium) | 10/10 | 7/7 | 3 | 3 | 1 | 1 | 1 | 1 | ? | 0 | 0 | 10 |
+| 2026-09-27T18-49 | long-trip | claude (claude-opus-5, high) | claude (medium) | 10/10 | 7/7 | 3 | 3 | 1 | 1 | 1 | 1 | 0 | 0 | 0 | 9 |
+| 2026-09-27T18-57 | long-trip | claude (claude-opus-5, high) | codex (medium) | 10/10 | 7/7 | 3 | 3 | 1 | 1 | 1 | 1 | 0 | 0 | 0 | 8 |
+| 2026-09-27T19-27 | long-trip | claude (claude-opus-5, high) | pi (medium) | 2/10 | 6/7 | 3 | 3 | 1 | 1 | 1 | 0 | 0 | 0 | 0 | 30 |
+| 2026-09-27T19-37 | long-trip | claude (claude-opus-5, high) | opencode (medium) | 10/10 | 7/7 | 3 | 3 | 1 | 1 | 1 | 1 | 0 | 0 | 0 | 10 |
+| 2026-09-27T19-46 | long-trip | claude (claude-opus-5, high) | devin (medium) | 10/10 | 7/7 | 3 | 2 | 1 | 1 | 1 | 1 | 0 | 0 | 0 | 9 |
+| 2026-09-27T19-52 | long-trip | codex (gpt-5.6-sol, high) | codex (medium) | 10/10 | 7/7 | 3 | 3 | 1 | 1 | 1 | 1 | ? | 0 | 0 | 6 |
+| 2026-09-27T20-22 | long-trip | codex (gpt-5.6-sol, high) | pi (medium) | 3/10 | 5/7 | 7 | 5 | 1 | 2 | 1 | 0 | ? | 0 | 0 | 30 |
+| 2026-09-27T20-57 | long-trip | codex (gpt-5.6-sol, high) | opencode (medium) | 10/10 | 7/7 | 3 | 3 | 1 | 1 | 1 | 1 | ? | 0 | 0 | 6 |
+| 2026-09-27T21-03 | long-trip | codex (gpt-5.6-sol, high) | devin (medium) | 10/10 | 7/7 | 3 | 3 | 1 | 1 | 1 | 1 | ? | 0 | 0 | 6 |
+| 2026-09-27T21-08 | long-trip | pi (pi's default, high) | claude (medium) | 8/10 | 7/7 | 3 | 3 | 1 | 1 | 1 | 1 | ? | 0 | 0 | 5 |
+| 2026-09-27T21-14 | long-trip | pi (pi's default, high) | codex (medium) | 10/10 | 7/7 | 3 | 3 | 1 | 1 | 1 | 2 | ? | 0 | 0 | 7 |
+| 2026-09-27T21-31 | long-trip | pi (pi's default, high) | pi (medium) | 10/10 | 7/7 | 3 | 3 | 1 | 1 | 1 | 1 | ? | 0 | 0 | 17 |
+| 2026-09-27T21-36 | long-trip | pi (pi's default, high) | opencode (medium) | 10/10 | 7/7 | 3 | 3 | 1 | 1 | 1 | 1 | ? | 0 | 0 | 5 |
+| 2026-09-27T21-40 | long-trip | pi (pi's default, high) | devin (medium) | 9/10 | 7/7 | 3 | 3 | 1 | 1 | 1 | 1 | ? | 0 | 0 | 4 |
+| 2026-09-27T21-46 | long-trip | opencode (opencode-go/deepseek-v4-flash, default) | claude (medium) | 10/10 | 7/7 | 3 | 3 | 1 | 1 | 1 | 1 | ? | 0 | 0 | 6 |
+| 2026-09-27T21-52 | long-trip | opencode (opencode-go/deepseek-v4-flash, default) | codex (medium) | 10/10 | 7/7 | 3 | 3 | 1 | 1 | 1 | 1 | ? | 0 | 0 | 6 |
+| 2026-09-27T22-07 | long-trip | opencode (opencode-go/deepseek-v4-flash, default) | pi (medium) | 10/10 | 7/7 | 3 | 3 | 1 | 1 | 1 | 1 | ? | 0 | 0 | 15 |
+| 2026-09-27T22-12 | long-trip | opencode (opencode-go/deepseek-v4-flash, default) | opencode (medium) | 10/10 | 7/7 | 3 | 3 | 1 | 1 | 1 | 1 | ? | 0 | 0 | 5 |
+| 2026-09-27T22-16 | long-trip | opencode (opencode-go/deepseek-v4-flash, default) | devin (medium) | 10/10 | 7/7 | 3 | 3 | 1 | 1 | 1 | 1 | ? | 0 | 0 | 4 |
+| 2026-09-27T22-20 | long-trip | devin (devin's default, default) | claude (medium) | 1/10 | 7/7 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 0 | 0 | 4 |
+| 2026-09-27T22-50 | long-trip | devin (devin's default, default) | codex (medium) | 1/10 | 6/7 | 0 | 0 | 0 | 0 | 1 | 0 | ? | 0 | 0 | 30 |
+| 2026-09-27T22-54 | long-trip | devin (devin's default, default) | pi (medium) | 1/10 | 7/7 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 0 | 0 | 3 |
+| 2026-09-27T23-24 | long-trip | devin (devin's default, default) | opencode (medium) | 1/10 | 7/7 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 0 | 0 | 30 |
+| 2026-09-27T23-27 | long-trip | devin (devin's default, default) | devin (medium) | 1/10 | 7/7 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 0 | 0 | 3 |

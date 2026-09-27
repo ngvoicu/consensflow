@@ -1,0 +1,203 @@
+{
+  "scenario": "long-trip",
+  "chief": "devin",
+  "model": "devin's default",
+  "effort": null,
+  "staffEffort": "medium",
+  "staff": [
+    "opencode"
+  ],
+  "staffModels": {
+    "eval-opencode-worker": "opencode-go/deepseek-v4-flash",
+    "eval-opencode-worker-2": "opencode-go/deepseek-v4-flash",
+    "eval-opencode-advisor": "opencode-go/deepseek-v4-flash",
+    "eval-opencode-reviewer": "opencode-go/deepseek-v4-flash"
+  },
+  "run": 1,
+  "seconds": 1804,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [],
+    "parallel": 0,
+    "advice": 0,
+    "reviews": 0,
+    "questionsToHuman": [],
+    "notesToHuman": [],
+    "notesText": "",
+    "longestResult": {
+      "worker": 0,
+      "advisor": 0,
+      "reviewer": 0
+    },
+    "answersToChief": [],
+    "taskCount": 0,
+    "chiefId": 2,
+    "chiefHarness": "devin",
+    "humanId": 1,
+    "chiefTurns": 3,
+    "chiefEdits": null,
+    "chiefLastWords": "",
+    "plumbing": {
+      "briefs": 0,
+      "briefsDelivered": 0,
+      "results": 0,
+      "resultsDelivered": 0,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 0,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0,
+      "ownerQuestions": 0,
+      "ownerQuestionsAnswered": 0
+    },
+    "filesChanged": []
+  },
+  "checks": [
+    {
+      "name": "the worker's result is long (8000 characters or more)",
+      "ok": false
+    },
+    {
+      "name": "the advisor's advice is long (8000 characters or more)",
+      "ok": false
+    },
+    {
+      "name": "the reviewer's review is long (8000 characters or more)",
+      "ok": false
+    },
+    {
+      "name": "the owner's long answer went to the chief",
+      "ok": false
+    },
+    {
+      "name": "the note holds the worker's code",
+      "ok": false
+    },
+    {
+      "name": "the note holds the advisor's code",
+      "ok": false
+    },
+    {
+      "name": "the note holds the reviewer's code",
+      "ok": false
+    },
+    {
+      "name": "the note holds the report's name from the owner's answer",
+      "ok": false
+    },
+    {
+      "name": "the note holds the code at the end of the owner's message",
+      "ok": false
+    },
+    {
+      "name": "no file changes",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question the chief put to the owner got the owner's answer (0/0)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (0/0)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    " ● Ran general subagent Reviewer Task",
+    " └ Background subagent started.",
+    "⠇⠀ Thinking · 9s (esc twice to interrupt)",
+    "────────────────────────────────────────────────────── (bypass permissions on) ─",
+    "❭ Guide Devin while it works",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                    Context: 25k / 200k tokens (12%)",
+    "3 subagents (3 running) · ↓ select⠋⠉⠁⠈⠉ ● Subagent \"Reviewer Task\" failed",
+    " └ 0s · 0 tool calls",
+    " ● Subagent \"Worker Task\" failed",
+    " └ 0s · 0 tool calls",
+    "⠈⠉ Thinking · 9s (esc twice to interrupt)",
+    "────────────────────────────────────────────────────── (bypass permissions on) ─",
+    "❭ Guide Devin while it works",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                    Context: 25k / 200k tokens (12%)",
+    "3 subagents (1 running) · ↓ select ● Subagent \"Advisor Task\" failed",
+    " └ 0s · 0 tool calls",
+    "⠀⠙ Thinking · 9s (esc twice to interrupt)",
+    "────────────────────────────────────────────────────── (bypass permissions on) ─",
+    "❭ Guide Devin while it works",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                    Context: 25k / 200k tokens (12%)",
+    "3 subagents · ↓ select⠀⠚ ⚠︎ Quota exhausted",
+    "   Your daily usage quota has been exhausted. Visit https://app.devin.ai/",
+    "   settings/usage to purchase on-demand usage or turn on auto-reload. (trace ID:",
+    "   8d5011324819e52afcbcb965ee47ba8f)",
+    "────────────────────────────────────────────────────── (bypass permissions on) ─",
+    "❭ Ask Devin to build features, fix bugs, or work on your code",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                    Context: 25k / 200k tokens (12%)",
+    "3 subagents · ↓ select ⚠︎ Quota exhausted",
+    "   Your daily usage quota has been exhausted. Visit https://app.devin.ai/",
+    "   settings/usage to purchase on-demand usage or turn on auto-reload. (trace ID:",
+    "   ae74731e5e1867839618c8b18d8ba342)",
+    "────────────────────────────────────────────────────── (bypass permissions on) ─",
+    "❭ Ask Devin to build features, fix bugs, or work on your code",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                    Context: 25k / 200k tokens (12%)",
+    "3 subagents · ↓ select"
+  ],
+  "terminalAnswers": 0,
+  "refusedAnswers": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 7,
+      "line": "chief (devin) ready; typing the prompt"
+    },
+    {
+      "at": 12,
+      "line": "Enter pressed again: the window had not taken the text"
+    },
+    {
+      "at": 17,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 627,
+      "line": "chief stalled; tasks none"
+    },
+    {
+      "at": 1804,
+      "line": "time is up"
+    }
+  ]
+}
