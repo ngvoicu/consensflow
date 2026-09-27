@@ -497,14 +497,41 @@ describe('the dispatcher', () => {
       const note = context.ledger.inbox(chief.id).find((m) => m.kind === 'note')
       assert.match(
         note.body,
-        /^T-1 is paused: @zeus's window made no progress for 11 minutes, so it was stopped\. Resume it with: cf task resume T-1 "…"; it goes on in the same window\.$/,
+        /^T-1 is paused: @zeus's window made no progress for 11 minutes, so it was stopped\. Resume it with: cf task resume T-1 "…"; its window comes back on its own conversation\.$/,
       )
       await context.dispatcher.pass()
+      assert.equal(context.host.killed.length, 1, 'the stall closes the window')
+    })
+  })
+
+  it('closes a stuck member window, so a resume reopens it on its own conversation', async () => {
+    await setup(async (context) => {
+      const { project, id } = await withStaff(context)
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Report' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const native = context.ledger.currentConversation(id('zeus')).nativeSession
+      const stuck = context.host.last('zeus')
+      context.adapter.busy('zeus')
+      await context.dispatcher.pass()
+      context.clock.advance(11 * 60_000)
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      // A model request that never returns does not answer Escape (a Pi window,
+      // 2026-09-27): the window closes, or a resume would wait on it for good.
+      assert.deepEqual(context.host.killed, [{ id: stuck.id, generation: stuck.generation }])
+      const task = context.ledger.task(project.id, 1)
+      assert.equal(task.state, 'paused')
       assert.equal(
-        context.host.requests.filter(([op]) => op === 'pane.input').length,
+        task.messages.filter((m) => m.kind === 'note').length,
         1,
-        'the pause stops the window',
+        'one note: the stall, not a second one for the window it closed',
       )
+      context.ledger.resumeTask(project.id, 1, { by: 'chief', body: 'Go on' })
+      await context.dispatcher.pass()
+      const launch = context.adapter.prepared.at(-1)
+      assert.deepEqual([launch.participant.handle, launch.resume], ['zeus', native])
+      assert.match(launch.message, /Resumed: Go on$/)
     })
   })
 

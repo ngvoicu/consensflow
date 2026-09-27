@@ -448,17 +448,23 @@ export class Dispatcher {
   }
 
   /** A member's window that made no progress: its task pauses, which stops the window, and its requester hears. */
-  #stallSilent(project, participant, runtime, silentMs, toolOpen) {
+  /**
+   * A stuck member's task pauses and its window closes: a model request that
+   * never returns does not answer Escape (three Pi windows at once,
+   * 2026-09-27), so a window left open would hold the resume for good. The
+   * resume reopens it on its own conversation. Says whether it stalled.
+   */
+  async #stallSilent(project, participant, runtime, silentMs, toolOpen) {
     const task = this.#ledger.activeTask(participant.id)
-    if (task === null || task.state !== 'working') return
+    if (task === null || task.state !== 'working') return false
     runtime.progress = null
     this.#stall(
       project,
       task,
       `@${participant.handle}'s window made no progress for ${minutes(silentMs)} minutes${toolOpen ? ', a tool still running' : ''}, so it was stopped`,
-      'it goes on in the same window',
     )
-    this.#changed()
+    await this.#retire(participant, runtime)
+    return true
   }
 
   // --- one participant's step ----------------------------------------------------
@@ -551,7 +557,8 @@ export class Dispatcher {
     if (runtime.delivering !== null) this.#watchArrival(runtime, observed)
     await this.#releaseDraft(runtime, observed)
     if (participant.role !== 'chief') {
-      if (stuck) this.#stallSilent(project, participant, runtime, silentMs, toolOpen)
+      if (stuck && (await this.#stallSilent(project, participant, runtime, silentMs, toolOpen)))
+        return
       await this.#interruptIfPaused(participant, runtime)
       this.#collect(project, participant, observed)
       // The window may have gone during this step (a launch that timed out).
