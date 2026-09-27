@@ -10,9 +10,19 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import test from 'node:test'
+import test, { after } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import * as completion from '../../hosts/lib/completion.js'
+
+/** Every temporary root a test here makes, removed when the file's tests end. */
+const roots = []
+after(() => Promise.all(roots.map((root) => fs.rm(root, { recursive: true, force: true }))))
+
+async function tempRoot(prefix) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), prefix))
+  roots.push(root)
+  return root
+}
 
 const FIX = fileURLToPath(new URL('./fixtures/completion/', import.meta.url))
 const { answers } = completion
@@ -73,7 +83,7 @@ test('completion/claude-code: synchronous hook context is exact native receipt e
 })
 
 async function stageJsonl(kind, sessionId, fixture, options = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-completion-'))
+  const root = await tempRoot('cf-completion-')
   const source = await fs.readFile(path.join(FIX, fixture), 'utf8')
   let records = source.trimEnd().split('\n')
   if (options.take !== undefined) records = records.slice(0, options.take)
@@ -137,7 +147,7 @@ async function stageJsonl(kind, sessionId, fixture, options = {}) {
 }
 
 async function stageOpencode(fixtureName, options = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-completion-opencode-'))
+  const root = await tempRoot('cf-completion-opencode-')
   const dir = path.join(root, 'opencode')
   await fs.mkdir(dir, { recursive: true })
   const fixture = JSON.parse(await fs.readFile(path.join(FIX, fixtureName), 'utf8'))
@@ -1548,7 +1558,7 @@ test('completion: env is mandatory and never defaults to the ambient process', a
 })
 
 test('completion: readable corrupted storage and absent storage fail closed', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-completion-corrupt-'))
+  const root = await tempRoot('cf-completion-corrupt-')
   const dir = path.join(root, 'sessions')
   await fs.mkdir(dir, { recursive: true })
   await fs.writeFile(path.join(dir, 'rollout-corrupt.jsonl'), '{bad}\n')
@@ -1556,7 +1566,7 @@ test('completion: readable corrupted storage and absent storage fail closed', as
   assert.equal(corrupt.unknown, true)
   assert.match(corrupt.reason, /malformed JSONL/)
 
-  const empty = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-completion-empty-'))
+  const empty = await tempRoot('cf-completion-empty-')
   for (const kind of ['codex', 'claude-code', 'pi', 'kimi', 'opencode']) {
     const result = await answers(kind, 'no-such-session', { HOME: empty, XDG_DATA_HOME: empty })
     assert.deepEqual(Object.keys(result).sort(), ['reason', 'unknown'])

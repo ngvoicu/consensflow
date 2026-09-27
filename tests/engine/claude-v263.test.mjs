@@ -13,9 +13,19 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import test from 'node:test'
+import test, { after } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { answers } from '../../hosts/lib/completion.js'
+
+/** Every temporary root a test here makes, removed when the file's tests end. */
+const roots = []
+after(() => Promise.all(roots.map((root) => fs.rm(root, { recursive: true, force: true }))))
+
+async function tempRoot(prefix) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), prefix))
+  roots.push(root)
+  return root
+}
 
 const FIXTURE = fileURLToPath(
   new URL('./fixtures/completion/claude-code/v263-tool-loop.jsonl', import.meta.url),
@@ -23,7 +33,7 @@ const FIXTURE = fileURLToPath(
 const SESSION = '5cbf8973-f472-448a-8763-59fb4268a9d7'
 
 async function stage(take, mutate = (records) => records) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-claude-v263-'))
+  const root = await tempRoot('cf-claude-v263-')
   const dir = path.join(root, 'projects')
   await fs.mkdir(dir, { recursive: true })
   const source = await fs.readFile(FIXTURE, 'utf8')
