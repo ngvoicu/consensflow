@@ -121,7 +121,12 @@ describe('the page protocol of the new core', () => {
 
   it('lists the saved agents for the staff picker and adds one with its own harness', async () => {
     await withPage(async ({ operations }) => {
-      const { agents } = await operations['agents.list']({})
+      const { agents, missing } = await operations['agents.list']({})
+      // An agent on a harness not installed here is on the list but not offered.
+      assert.ok(Array.isArray(missing))
+      for (const agent of agents.filter((a) => missing.includes(a.harness))) {
+        assert.deepEqual([agent.hidden, agent.notInstalled], [true, true], agent.name)
+      }
       // Every catalog agent is on offer, as the catalog has it: the file's
       // copies of zeus and diana change nothing.
       const mine = agents.filter((a) => ['zeus', 'diana'].includes(a.name))

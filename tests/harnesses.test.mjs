@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
-import { paneArgv, runnable, terminate } from '../src/harnesses.js'
+import { missingHarnesses, offerable, paneArgv, runnable, terminate } from '../src/harnesses.js'
 
 /** The last line of the shim npm writes for a global package, with npm's variables. */
 const NPM_SHIM =
@@ -109,5 +109,38 @@ describe('runnable', () => {
   it('treats .bat the same and everything else as a program', () => {
     assert.match(runnable('C:\\x\\tool.BAT', [], {}).file, /\\cmd\.exe$/i)
     assert.equal(runnable('C:\\x\\claude.exe', []).file, 'C:\\x\\claude.exe')
+  })
+})
+
+/** A harness not installed here shows only on the Harnesses page, not in the pickers. */
+describe('what the pickers offer', () => {
+  it('names every harness missing from a machine with none installed', () => {
+    const empty = mkdtempSync(join(tmpdir(), 'cf-none-'))
+    try {
+      const env = { HOME: empty, USERPROFILE: empty, PATH: empty }
+      assert.deepEqual(missingHarnesses(env).sort(), [
+        'claude',
+        'codex',
+        'devin',
+        'kimi',
+        'opencode',
+        'pi',
+      ])
+    } finally {
+      rmSync(empty, { recursive: true, force: true })
+    }
+  })
+
+  it('hides the agents on a missing harness and leaves the rest as they are', () => {
+    const agents = [
+      { name: 'zeus', harness: 'claude' },
+      { name: 'ares', harness: 'devin' },
+      { name: 'iris', harness: 'image' },
+    ]
+    assert.deepEqual(offerable(agents, ['devin']), [
+      { name: 'zeus', harness: 'claude' },
+      { name: 'ares', harness: 'devin', hidden: true, notInstalled: true },
+      { name: 'iris', harness: 'image' },
+    ])
   })
 })

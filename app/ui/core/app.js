@@ -451,6 +451,12 @@ function teamRow(who, role, remove) {
 const newProjectDialog = $('#new-project-dialog')
 const newProjectForm = newProjectDialog.querySelector('form')
 const newProjectStaff = $('#new-project-staff')
+// Every chief harness the form knows; the dialog offers those installed here.
+const CHIEF_HARNESSES = [...newProjectForm.elements.harness.options].map((option) => [
+  option.value,
+  option.textContent,
+])
+const HARNESS_OF_KIND = { 'claude-code': 'claude' }
 $('#new-project').addEventListener('click', async () => {
   if (typeof tauri.dialog?.open !== 'function') {
     report('The folder picker is not available in this window.')
@@ -463,7 +469,20 @@ $('#new-project').addEventListener('click', async () => {
       multiple: false,
     })
     if (typeof directory !== 'string' || directory.length === 0) return
-    const [{ agents }, { staff }] = await Promise.all([core('agents.list'), core('staff.last')])
+    const [{ agents, missing = [] }, { staff }] = await Promise.all([
+      core('agents.list'),
+      core('staff.last'),
+    ])
+    const chiefs = CHIEF_HARNESSES.filter(
+      ([kind]) => !missing.includes(HARNESS_OF_KIND[kind] ?? kind),
+    )
+    if (chiefs.length === 0) {
+      report('No harness is installed here: install one from Agents, Harnesses.')
+      return
+    }
+    newProjectForm.elements.harness.replaceChildren(
+      ...chiefs.map(([kind, label]) => new Option(label, kind)),
+    )
     state.agents = agents
     renderNewProjectStaff(staff)
     newProjectForm.elements.directory.value = directory
@@ -478,7 +497,7 @@ let picked = []
 
 function renderNewProjectStaff(lastStaff) {
   picked = lastStaff.flatMap(({ agent, roles }) =>
-    state.agents.some((saved) => saved.name === agent)
+    state.agents.some((saved) => saved.name === agent && !saved.notInstalled)
       ? roles.map((role) => ({ agent, role }))
       : [],
   )

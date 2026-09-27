@@ -262,6 +262,21 @@ export function harnessPath(id, env) {
   return harness === undefined ? null : locate(harness, env)
 }
 
+/** The supported harnesses whose CLI is not installed here, by id. */
+export function missingHarnesses(env) {
+  return HARNESSES.filter((harness) => !isInstalled(harness, env)).map((harness) => harness.id)
+}
+
+/**
+ * Agents as the pickers offer them: one whose harness is not installed here is
+ * hidden, so only the Harnesses page shows that harness, where it is installed.
+ */
+export function offerable(agents, missing) {
+  return agents.map((agent) =>
+    missing.includes(agent.harness) ? { ...agent, hidden: true, notInstalled: true } : agent,
+  )
+}
+
 /** All supported harness identities, whether installed or not. */
 export function knownHarnesses() {
   return HARNESSES.map(({ id }) => ({ id }))

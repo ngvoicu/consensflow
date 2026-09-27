@@ -331,7 +331,7 @@ async function open(page, data = model()) {
     const answer = (value) => JSON.parse(JSON.stringify({ ok: true, ...value }))
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
-      'agents.list': () => answer({ agents: data.agents }),
+      'agents.list': () => answer({ agents: data.agents, missing: data.missing ?? [] }),
       'staff.last': () => answer({ staff: data.lastStaff ?? [] }),
       'member.roles': ({ project, agent, roles }) => {
         const lane = data.boards[project].lanes.find((l) => l.participant.handle === agent)
@@ -1267,6 +1267,32 @@ test('starts a project with human approval required, and posts the checkbox with
   await expect
     .poll(() => calls(page, 'project.open'))
     .toEqual([{ directory: '/work/fresh', harness: 'claude-code', gate: true, staff: [] }])
+})
+
+test('offers a new project only the harnesses installed here, and no agent on another', async ({
+  page,
+}) => {
+  const data = model()
+  data.missing = ['claude', 'devin']
+  data.agents.push({
+    name: 'ares',
+    harness: 'devin',
+    model: 'swe-1-6-slow',
+    profile: { workTier: 'light' },
+    hidden: true,
+    notInstalled: true,
+  })
+  data.lastStaff = [{ agent: 'ares', roles: ['worker'] }]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await expect(dialog.getByLabel('The chief runs in').locator('option')).toHaveText([
+    'Codex',
+    'OpenCode',
+    'Pi',
+  ])
+  await expect(dialog.locator('tr[data-agent="ares"]')).toHaveCount(0)
+  await expect(dialog.locator('option', { hasText: 'ares' })).toHaveCount(0)
 })
 
 test('shows and sets human approval from the staff dialog, which has no review policy', async ({

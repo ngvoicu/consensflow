@@ -8,13 +8,21 @@ import { openLedger } from '../../src/ledger/index.js'
 import { addAgent, listAgents } from '../../src/roster.js'
 import { tempEnv } from '../../tests/helpers.mjs'
 
+const INSTALLED = ['claude', 'codex', 'pi', 'opencode', 'kimi', 'devin']
+
 /**
  * The agents screens the way the daemon serves them: Agents, one list of the
  * catalog's agents (with the human's edits on them) and the agents defined by
  * hand, and Harnesses, behind the API, opened with the UI token.
  */
-async function agentsServer(env, options = {}) {
+async function agentsServer(env, { installed = INSTALLED, ...options } = {}) {
   mkdirSync(env.CONSENSFLOW_HOME, { recursive: true })
+  // The pickers offer only agents on an installed harness: stand-ins on PATH.
+  mkdirSync(env.PATH, { recursive: true })
+  for (const command of installed) {
+    writeFileSync(join(env.PATH, command), '#!/bin/sh\necho 1.2.3\n')
+    chmodSync(join(env.PATH, command), 0o755)
+  }
   const ledger = openLedger(join(env.CONSENSFLOW_HOME, 'consensflow.db'))
   const token = 'ui-token'
   const server = await startApi({
@@ -54,6 +62,7 @@ for (const [harness, label] of [
     writeFileSync(join(t.env.CONSENSFLOW_HOME, 'extensions'), 'installation blocked')
     let checks = 0
     const server = await agentsServer(t.env, {
+      installed: [],
       harnessLatest: async () => {
         checks++
         return '1.2.4'

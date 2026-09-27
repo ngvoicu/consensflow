@@ -864,6 +864,15 @@ fn start_editor(
     if let Some(path) = login_path() {
         command.env("PATH", path);
     }
+    // node.exe is a console program: started from a windowed app it gets a
+    // console window of its own, and every console program it starts shows in
+    // it. The daemon runs without one; its windows are the app's panes.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1722,8 +1731,10 @@ pub fn roster_handle<R: Runtime>(app: AppHandle<R>) -> Value {
 /// frame inside it as mixed content. A second window loads the address as a
 /// top-level page, which is allowed. One window, reused: a later call turns
 /// it to the asked page and brings it forward.
+// Async on purpose: on Windows a window built from a synchronous command
+// deadlocks with the main thread (a white window that neither loads nor closes).
 #[tauri::command]
-pub fn open_agents_window<R: Runtime>(app: AppHandle<R>, page: String) -> Value {
+pub async fn open_agents_window<R: Runtime>(app: AppHandle<R>, page: String) -> Value {
     let Some(roster) = app.state::<AppRuntime>().roster.clone() else {
         return json!({"ok":false,"error":"the agents screens are not available: the daemon is not up"});
     };

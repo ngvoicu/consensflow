@@ -6,6 +6,7 @@ import { WORK_TIERS } from '../../hosts/lib/presets.js'
 import { EFFORTS } from '../catalog.js'
 import { HarnessAdmin } from '../harness-admin.js'
 import { harnessPage } from '../harness-page.js'
+import { missingHarnesses, offerable } from '../harnesses.js'
 import {
   addAgent,
   editAgent,
@@ -85,9 +86,10 @@ export function agentsUi(
         if (request.method === 'GET' && path === '/') return html(PAGE(token))
         if (request.method === 'GET' && path === '/harnesses') return html(harnessPage(token))
         if (request.method === 'GET' && path === '/api/agents') {
+          const missing = missingHarnesses(env)
           return json(200, {
-            agents: listAgents(env),
-            harnesss: HARNESSES,
+            agents: offerable(listAgents(env), missing),
+            harnesss: HARNESSES.filter((harness) => !missing.includes(harness)),
             efforts: EFFORTS,
             preferences: preferences(env),
           })
@@ -449,12 +451,14 @@ function renderAgents(data) {
   host.innerHTML = '';
   const show = document.querySelector('#agents-section [name=show]').value;
   const offered = data.agents.filter(p => !p.hidden);
-  const hidden = data.agents.length - offered.length;
+  const missing = data.agents.filter(p => p.notInstalled).length;
+  const hidden = data.agents.length - offered.length - missing;
   const entries = offered.filter(p => show === 'all' || p.custom);
   const mine = offered.filter(p => p.custom).length;
   document.querySelector('#lede').textContent = offered.length + ' agents, the catalog’s and your own; a project’s staff is picked from them.' +
     (mine === 0 ? '' : ' ' + mine + ' ' + (mine === 1 ? 'is' : 'are') + ' yours, defined here.') +
-    (hidden === 0 ? '' : ' ' + hidden + ' hidden on Pi and OpenCode: Claude and OpenAI models run on their own harnesses.');
+    (hidden === 0 ? '' : ' ' + hidden + ' hidden on Pi and OpenCode: Claude and OpenAI models run on their own harnesses.') +
+    (missing === 0 ? '' : ' ' + missing + ' on a harness not installed here: see Harnesses.');
   const groups = browsingGroups(entries, '#agents-section');
   if (groups.length === 0) { host.append(el('p', 'empty', 'No agents match these filters.')); return; }
   for (const group of groups) {

@@ -1,4 +1,5 @@
 import { basename } from 'node:path'
+import { missingHarnesses, offerable } from '../harnesses.js'
 import { RESUME_WORDS } from '../ledger/index.js'
 import { agentRow, listAgents } from '../roster.js'
 
@@ -46,7 +47,11 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       project: await dispatcher.deleteProject(project),
     })),
 
-    'agents.list': async () => ({ agents: listAgents(env) }),
+    // The pickers offer only agents on a harness installed here, and say which are not.
+    'agents.list': async () => {
+      const missing = missingHarnesses(env)
+      return { agents: offerable(listAgents(env), missing), missing }
+    },
 
     'staff.last': async () => ({ staff: lastStaffNow(ledger, env) }),
 
