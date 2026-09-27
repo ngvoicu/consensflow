@@ -100,6 +100,16 @@ export class TerminalsView {
     ) {
       this.#stage.replaceChildren(...wanted)
     }
+    // The chief's window takes a whole column; the members' go two to a
+    // column, and the last one left alone takes its column whole.
+    const chiefs = new Set(
+      ordered.filter((lane) => lane.participant.role === 'chief').map((l) => l.participant.handle),
+    )
+    const members = cards.filter((entry) => !chiefs.has(entry.handle))
+    const alone = members.length % 2 === 1 ? members.at(-1) : null
+    for (const entry of cards) {
+      entry.card.dataset.tall = String(chiefs.has(entry.handle) || entry === alone)
+    }
     const shown = cards.find((entry) => entry.handle === focused) ?? cards[0]
     for (const entry of cards) entry.card.dataset.focused = String(entry === shown)
     for (const entry of cards) {

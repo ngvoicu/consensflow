@@ -1511,6 +1511,87 @@ test('resumes a suspended project from the list', async ({ page }) => {
   await expect.poll(() => calls(page, 'project.resume')).toEqual([{ project: 2 }])
 })
 
+test('lays the windows out: the chief a whole column, the members two to a column', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await open(page)
+  const stage = page.getByRole('region', { name: 'Terminals' })
+  const box = (handle) => stage.locator(`.terminal-card[data-handle="${handle}"]`).boundingBox()
+  const addMember = (id, name) =>
+    page.evaluate(
+      ({ id, name }) => {
+        const zeus = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+        window.__model.boards[1].lanes.push({
+          participant: {
+            ...zeus.participant,
+            id,
+            handle: `zeus-${name}`,
+            memberId: zeus.participant.id,
+            member: 'zeus',
+            session: name,
+          },
+          tasks: [],
+          activity: { state: 'working' },
+          pane: { id: `p1-zeus-${name}`, generation: 1 },
+        })
+        window.__listeners.get('state-changed')()
+      },
+      { id, name },
+    )
+  // One member: a column of its own, as tall as the chief's.
+  await expect(stage.locator('.terminal-card')).toHaveCount(2)
+  let [chief, zeus] = [await box('chief'), await box('zeus')]
+  expect(zeus.x).toBeGreaterThan(chief.x)
+  expect(Math.abs(zeus.height - chief.height)).toBeLessThan(2)
+  // Two: one column, one above the other.
+  await addMember(40, 'amber-pine')
+  await expect(stage.locator('.terminal-card')).toHaveCount(3)
+  await expect.poll(async () => (await box('zeus')).height).toBeLessThan(chief.height / 2 + 1)
+  zeus = await box('zeus')
+  const second = await box('zeus-amber-pine')
+  expect(second.x).toBe(zeus.x)
+  expect(second.y).toBeGreaterThan(zeus.y)
+  // Three: the third starts a column of its own, whole.
+  await addMember(41, 'brisk-birch')
+  await expect(stage.locator('.terminal-card')).toHaveCount(4)
+  await expect.poll(async () => (await box('zeus-brisk-birch')).x).toBeGreaterThan(zeus.x)
+  chief = await box('chief')
+  expect(Math.abs((await box('zeus-brisk-birch')).height - chief.height)).toBeLessThan(2)
+})
+
+test('folds the board away to the left for the windows, and moves the divider with the keys', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await open(page)
+  const board = page.getByRole('region', { name: 'Board' })
+  const dock = page.getByRole('complementary', { name: 'Terminal dock' })
+  const width = (locator) => locator.evaluate((node) => node.getBoundingClientRect().width)
+  const room = await page.locator('.main').evaluate((node) => node.getBoundingClientRect().width)
+  await page.getByRole('button', { name: 'Hide board' }).click()
+  await expect(board).toBeHidden()
+  await expect.poll(() => width(dock)).toBeGreaterThan(room - 40)
+  // The board and the windows cannot both fold: folding the windows brings the board back.
+  await dock.getByRole('button', { name: 'Hide terminals' }).click()
+  await expect(board).toBeVisible()
+  await page.getByRole('button', { name: 'Show terminals' }).click()
+  // The divider, moved with the keys, sets the board's width, kept across a reload.
+  const before = await width(board)
+  const divider = page.getByRole('separator', { name: 'Board width' })
+  await divider.focus()
+  for (let press = 0; press < 3; press += 1) await divider.press('ArrowLeft')
+  const near = async (locator) => Math.abs((await width(locator)) - (before - 96)) < 1.5
+  await expect.poll(() => near(board)).toBe(true)
+  await page.reload()
+  await expect.poll(() => near(page.getByRole('region', { name: 'Board' }))).toBe(true)
+  // It stops where the windows keep 300px.
+  for (let press = 0; press < 40; press += 1) await page.getByRole('separator').press('ArrowRight')
+  await expect
+    .poll(() => width(page.getByRole('complementary', { name: 'Terminal dock' })))
+    .toBeGreaterThanOrEqual(300)
+})
+
 test('folds the projects sidebar and the terminal dock away, and remembers it in this browser', async ({
   page,
 }) => {

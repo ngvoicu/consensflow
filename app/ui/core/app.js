@@ -769,7 +769,10 @@ const main = $('.main')
 const FOLDS = [
   ['projects', shell, 'data-projects', $('#toggle-projects'), 'projects'],
   ['dock', main, 'data-dock', $('#toggle-dock'), 'terminals'],
+  ['board', main, 'data-board', $('#toggle-board'), 'board'],
 ]
+/** The board and the windows share one space: folding one brings the other back. */
+const OPPOSITE = { board: 'dock', dock: 'board' }
 const foldKey = (name) => `cf.layout.${name}`
 function readFold(name) {
   try {
@@ -791,6 +794,8 @@ for (const [name, , , button] of FOLDS) {
     const next = readFold(name) === 'hidden' ? 'shown' : 'hidden'
     try {
       localStorage.setItem(foldKey(name), next)
+      if (next === 'hidden' && OPPOSITE[name])
+        localStorage.setItem(foldKey(OPPOSITE[name]), 'shown')
     } catch {
       // No storage: the fold still applies for this page.
     }
@@ -799,6 +804,55 @@ for (const [name, , , button] of FOLDS) {
   })
 }
 applyFolds()
+
+// The divider between the board and the windows: dragged, or moved with the
+// arrow keys, it sets the board's width, kept in this browser like the folds.
+const boardResize = $('#board-resize')
+const boardWidthKey = foldKey('board-width')
+/** The board keeps 280px and leaves the windows 300px beside the divider. */
+function setBoardWidth(pixels, { save = false } = {}) {
+  const room = main.getBoundingClientRect().width
+  const width = Math.round(Math.min(Math.max(pixels, 280), Math.max(280, room - 318)))
+  main.style.setProperty('--board-width', `${width}px`)
+  boardResize.setAttribute('aria-valuenow', String(width))
+  boardResize.setAttribute('aria-valuemin', '280')
+  boardResize.setAttribute('aria-valuemax', String(Math.max(280, Math.round(room - 318))))
+  if (!save) return
+  try {
+    localStorage.setItem(boardWidthKey, String(width))
+  } catch {
+    // No storage: the width holds for this page.
+  }
+}
+try {
+  const saved = Number(localStorage.getItem(boardWidthKey))
+  if (saved > 0) setBoardWidth(saved)
+} catch {
+  // No storage: the board keeps its default share.
+}
+boardResize.addEventListener('pointerdown', (event) => {
+  event.preventDefault()
+  boardResize.setPointerCapture(event.pointerId)
+  main.dataset.resizing = 'true'
+  const left = $('#board').getBoundingClientRect().left
+  const move = (moved) => setBoardWidth(moved.clientX - left)
+  const done = (ended) => {
+    boardResize.removeEventListener('pointermove', move)
+    boardResize.removeEventListener('pointerup', done)
+    boardResize.removeEventListener('pointercancel', done)
+    delete main.dataset.resizing
+    setBoardWidth(ended.clientX - left, { save: true })
+  }
+  boardResize.addEventListener('pointermove', move)
+  boardResize.addEventListener('pointerup', done)
+  boardResize.addEventListener('pointercancel', done)
+})
+boardResize.addEventListener('keydown', (event) => {
+  const step = { ArrowLeft: -32, ArrowRight: 32 }[event.key]
+  if (step === undefined) return
+  event.preventDefault()
+  setBoardWidth($('#board').getBoundingClientRect().width + step, { save: true })
+})
 
 /** A panel the page needs to show comes back unfolded. */
 function unfold(name) {

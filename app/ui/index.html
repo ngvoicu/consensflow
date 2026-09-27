@@ -72,7 +72,13 @@
     .shell[data-projects="hidden"] .sidebar-title, .shell[data-projects="hidden"] #projects { display: none; }
     .shell[data-projects="hidden"] .sidebar .panel-head { justify-content: center; }
     .shell[data-projects="hidden"] .sidebar .fold-icon svg { transform: rotate(180deg); }
-    .main[data-dock="hidden"] { grid-template-columns: minmax(0, 1fr) 34px; }
+    .main[data-dock="hidden"] { grid-template-columns: minmax(0, 1fr) 0 34px; }
+    .main[data-dock="hidden"] .divider { display: none; }
+    .main[data-board="hidden"] { grid-template-columns: 0 34px minmax(0, 1fr); }
+    .main[data-board="hidden"] .board, .main[data-board="hidden"] .divider-grip { display: none; }
+    .main[data-board="hidden"] .divider { border-right: 1px solid var(--line-soft); }
+    .main[data-board="hidden"] .divider .fold-icon { width: 24px; }
+    .main[data-board="hidden"] #toggle-board svg { transform: rotate(180deg); }
     .main[data-dock="hidden"] .dock-title, .main[data-dock="hidden"] .stage { display: none; }
     .main[data-dock="hidden"] .dock-head { justify-content: center; padding: 10px 4px; }
     .main[data-dock="hidden"] .fold-icon svg { transform: rotate(180deg); }
@@ -176,15 +182,46 @@
     .project-tools .quiet-button { padding: 3px 9px; font-size: 12px; }
     .projects-empty, .staff-empty { color: var(--muted); padding: 6px 9px; }
 
-    /* The board on the left, one window docked on the right, a third of the width. */
+    /* The board on the left, the windows on the right, the divider between
+       them: drag it to share the width, or fold the board away to the left. */
     .main {
       grid-area: main;
       position: relative;
       min-height: 0;
       display: grid;
-      grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+      grid-template-columns: minmax(280px, var(--board-width, 2fr)) 18px minmax(300px, 1fr);
       grid-template-rows: minmax(0, 1fr);
     }
+    /* Each in its own column, so a folded neighbour leaves the others where they are. */
+    .main > .board { grid-column: 1; }
+    .main > .divider { grid-column: 2; }
+    .main > .dock { grid-column: 3; }
+    .divider {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding-top: 8px;
+      min-height: 0;
+      background: var(--ink);
+    }
+    .divider .fold-icon { width: 18px; padding: 0; }
+    .divider .fold-icon svg { flex: none; }
+    .divider-grip { flex: 1; width: 100%; cursor: col-resize; }
+    .divider-grip::after {
+      content: '';
+      display: block;
+      width: 2px;
+      height: 36px;
+      margin: 32px auto 0;
+      border-radius: 2px;
+      background: var(--line);
+    }
+    .divider-grip:hover::after, .divider-grip:focus-visible::after { background: var(--seafoam); }
+    .divider-grip:focus-visible { outline: none; }
+    /* While the divider moves, the terminals under the pointer must not take it. */
+    .main[data-resizing="true"] { cursor: col-resize; user-select: none; }
+    .main[data-resizing="true"] .stage { pointer-events: none; }
     .dock {
       display: grid;
       grid-template-rows: auto minmax(0, 1fr);
@@ -569,8 +606,13 @@
     .drawer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
 
     /* The live windows. */
+    /* The chief's window takes a whole column; the members' go two to a
+       column, one above the other, and one left alone takes its column whole. */
     .stage {
-      display: flex;
+      display: grid;
+      grid-auto-flow: column;
+      grid-template-rows: repeat(2, minmax(0, 1fr));
+      grid-auto-columns: minmax(min(100%, 420px), 1fr);
       gap: 8px;
       padding: 8px;
       min-height: 0;
@@ -578,7 +620,8 @@
       overflow-y: hidden;
       scroll-snap-type: x proximity;
     }
-    .stage .terminal-card { flex: 0 0 min(100%, 720px); scroll-snap-align: start; }
+    .stage .terminal-card { scroll-snap-align: start; }
+    .stage .terminal-card[data-tall="true"], .stage .stage-empty { grid-row: span 2; }
     .stage-empty { color: var(--muted); margin: 40px auto; }
     .terminal-card {
       min-width: 0;
@@ -667,8 +710,13 @@
     .settings-menu .quiet-button { width: 100%; }
 
     @media (max-width: 760px) {
-      .main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) 42vh; }
+      .main, .main[data-board="hidden"] { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) 42vh; }
       .main[data-dock="hidden"] { grid-template-rows: minmax(0, 1fr) auto; grid-template-columns: 1fr; }
+      .divider { display: none; }
+      .main > .board, .main > .dock { grid-column: 1; }
+      .main[data-board="hidden"] .board { display: grid; }
+      .stage { display: flex; }
+      .stage .terminal-card { flex: 0 0 min(100%, 720px); }
       .dock { border-left: 0; border-top: 1px solid var(--line-soft); }
       .shell {
         grid-template-columns: 1fr;
@@ -715,6 +763,12 @@
     </nav>
     <main class="main">
       <section class="board" id="board" aria-label="Board"></section>
+      <div class="divider">
+        <button class="fold-icon" id="toggle-board" type="button" aria-pressed="true" aria-label="Hide board" title="Hide board">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m10 3-5 5 5 5"/></svg>
+        </button>
+        <div class="divider-grip" id="board-resize" role="separator" aria-orientation="vertical" aria-label="Board width" tabindex="0"></div>
+      </div>
       <aside class="dock" id="dock" aria-label="Terminal dock">
         <div class="panel-head dock-head">
           <h2 class="dock-title">Terminals</h2>
