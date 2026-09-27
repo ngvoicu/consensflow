@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { openLedger } from '../src/ledger/index.js'
 
@@ -196,11 +196,14 @@ export function mechanics(metrics, boardTasks) {
 /** Files of the fixture that differ in the workspace, and files the run added, relative. */
 export function changed(fixture, workspace) {
   const digest = (path) => createHash('sha256').update(readFileSync(path)).digest('hex')
+  // Reports name files with forward slashes on every platform.
   const list = (root, dir = root) =>
     readdirSync(dir).flatMap((name) => {
       const path = join(dir, name)
       if (name === '.git' || name === 'node_modules') return []
-      return statSync(path).isDirectory() ? list(root, path) : [relative(root, path)]
+      return statSync(path).isDirectory()
+        ? list(root, path)
+        : [relative(root, path).split(sep).join('/')]
     })
   const before = new Map(list(fixture).map((path) => [path, digest(join(fixture, path))]))
   return list(workspace)

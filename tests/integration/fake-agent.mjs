@@ -115,7 +115,9 @@ function askThroughHook(questions) {
     tool_input: { questions },
   }
   return new Promise((resolve) => {
-    const child = spawn('/bin/sh', ['-c', command], {
+    // The platform's shell, as Claude runs a hook: /bin/sh here, cmd.exe on Windows.
+    const child = spawn(command, {
+      shell: true,
       env: process.env,
       stdio: ['pipe', 'pipe', 'pipe'],
     })

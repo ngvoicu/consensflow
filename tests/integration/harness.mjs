@@ -2,13 +2,25 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { delimiter, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+const WINDOWS = process.platform === 'win32'
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const BRIDGE =
   process.env.CONSENSFLOW_TEST_BRIDGE ??
-  join(REPO, 'app', 'src-tauri', 'target', 'release', 'consensflow-bridge')
+  join(
+    REPO,
+    'app',
+    'src-tauri',
+    'target',
+    'release',
+    WINDOWS ? 'consensflow-bridge.exe' : 'consensflow-bridge',
+  )
+// A terminal asks where the cursor is; ConPTY asks before the child may print
+// at all. The page's xterm answers, and with no page this harness does.
+const CURSOR_QUERY = Buffer.from('\u001b[6n')
+const CURSOR_REPLY = [...Buffer.from('\u001b[1;1R')]
 const EDITOR = fileURLToPath(new URL('./core-editor.mjs', import.meta.url))
 const FAKE = join(dirname(fileURLToPath(import.meta.url)), 'fake-agent.mjs')
 
@@ -76,7 +88,20 @@ function safeEnvironment(root, fakeBin, harnessFile) {
     CLAUDE_CONFIG_DIR: join(home, '.claude'),
     CODEX_HOME: join(home, '.codex'),
     XDG_CONFIG_HOME: join(home, '.config'),
-    PATH: `${fakeBin}:/usr/local/bin:/usr/bin:/bin`,
+    PATH: WINDOWS
+      ? [fakeBin, join(process.env.SystemRoot ?? 'C:\\Windows', 'System32')].join(delimiter)
+      : `${fakeBin}:/usr/local/bin:/usr/bin:/bin`,
+    // What Windows itself needs to start a process, and the home Node reads there.
+    ...(WINDOWS
+      ? {
+          SystemRoot: process.env.SystemRoot,
+          ComSpec: process.env.ComSpec,
+          PATHEXT: process.env.PATHEXT,
+          TEMP: tmpdir(),
+          TMP: tmpdir(),
+          USERPROFILE: home,
+        }
+      : {}),
     CONSENSFLOW_NODE: process.execPath,
     CF_TEST_HARNESS: harnessFile,
     CF_TEST_WORKER_ANSWER: 'worker completed from a real PTY child',
@@ -84,16 +109,25 @@ function safeEnvironment(root, fakeBin, harnessFile) {
   }
 }
 
-function writeFakeInstall(root, env) {
+function writeFakeInstall(root, sandbox, harnessFile) {
   const fakeBin = join(root, 'fake-bin')
-  const projects = join(env.CLAUDE_CONFIG_DIR, 'projects', 'integration')
+  const projects = join(sandbox.CLAUDE_CONFIG_DIR, 'projects', 'integration')
   mkdirSync(fakeBin, { recursive: true })
   mkdirSync(projects, { recursive: true })
-  writeFileSync(
-    join(fakeBin, 'claude'),
-    '#!/bin/sh\nexec "$CONSENSFLOW_NODE" "$CF_TEST_HARNESS" "$@"\n',
-    { mode: 0o755 },
-  )
+  // On Windows the shape of an npm shim, naming node and the script outright,
+  // which is how a window opens on it.
+  if (WINDOWS) {
+    writeFileSync(
+      join(fakeBin, 'claude.cmd'),
+      `@echo off\r\n"${process.execPath}" "${harnessFile}" %*\r\n`,
+    )
+  } else {
+    writeFileSync(
+      join(fakeBin, 'claude'),
+      '#!/bin/sh\nexec "$CONSENSFLOW_NODE" "$CF_TEST_HARNESS" "$@"\n',
+      { mode: 0o755 },
+    )
+  }
   return fakeBin
 }
 
@@ -138,7 +172,7 @@ export async function startIntegration({
   const workspace = join(root, 'workspace')
   mkdirSync(workspace, { recursive: true })
   const initial = safeEnvironment(root, join(root, 'fake-bin'), FAKE)
-  const fakeBin = writeFakeInstall(root, initial)
+  const fakeBin = writeFakeInstall(root, initial, fakeEnv.CF_TEST_HARNESS ?? FAKE)
   // A null override removes the sandbox default: a run on the real harnesses
   // must leave CLAUDE_CONFIG_DIR unset, so Claude keeps its own home config.
   const env = Object.fromEntries(
@@ -198,7 +232,12 @@ export async function startIntegration({
     rustFrames.push(frame)
     if (frame.op === 'pane.output' && Array.isArray(frame.body?.bytes)) {
       const key = frame.body.id
-      outputs.set(key, [...(outputs.get(key) ?? []), Buffer.from(frame.body.bytes)])
+      const bytes = Buffer.from(frame.body.bytes)
+      outputs.set(key, [...(outputs.get(key) ?? []), bytes])
+      if (bytes.includes(CURSOR_QUERY)) {
+        const { id, generation } = frame.body
+        request('pane.reply', { id, generation, bytes: CURSOR_REPLY }).catch(() => {})
+      }
     }
     if (frame.op === 'pane.exit') exits.push(frame.body)
     if (frame.kind === 'res' && rustPending.has(frame.id)) {
