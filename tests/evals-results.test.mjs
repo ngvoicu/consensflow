@@ -42,6 +42,7 @@ describe('the results file', () => {
       '?',
       '3',
       '2',
+      '?',
       '6',
     ])
     assert.equal(row(report).length, COLUMNS.length)
@@ -73,6 +74,35 @@ describe('the results file', () => {
         : lines.at(-3),
     )
     assert.match(lines.at(-2), /^\| 2026-09-26T00-13 \| six-decisions \| devin/)
-    assert.match(lines.at(-1), /\| \? \| 2 \| 2 \| 1 \| 1 \| 1 \| 0 \| \? \| 3 \| \? \| 6 \|$/)
+    assert.match(
+      lines.at(-1),
+      /\| \? \| 2 \| 2 \| 1 \| 1 \| 1 \| 0 \| \? \| 3 \| \? \| \? \| 6 \|$/,
+    )
+  })
+
+  it('names the arm, and what the owner was asked: board decisions / terminal questions, pickers', () => {
+    const asked = (board, terminal) => ({
+      board: { decisions: board },
+      terminal: { questions: terminal },
+    })
+    const nocard = {
+      ...report,
+      arm: 'nocard',
+      metrics: { ...report.metrics, ownerQuestions: asked(1, 4) },
+    }
+    assert.deepEqual([row(nocard)[2], row(nocard)[15]], ["devin [nocard] (devin's default)", '1/4'])
+    const bare = {
+      ...report,
+      arm: 'bare',
+      staff: undefined,
+      mechanics: undefined,
+      pickerAnswers: 2,
+      metrics: { ...report.metrics, tasks: [], ownerQuestions: asked(0, 3) },
+    }
+    assert.deepEqual(
+      [row(bare)[2], row(bare)[3], row(bare)[15]],
+      ["devin [bare] (devin's default)", 'none', '0/3+2p'],
+    )
+    assert.equal(row({ ...report, arm: 'card' })[2], "devin (devin's default)")
   })
 })

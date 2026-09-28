@@ -11,8 +11,8 @@ export function row(report) {
   return [
     report.name?.slice(0, 16) ?? '',
     report.scenario,
-    `${report.chief ?? 'claude'} (${report.model}${'effort' in report ? `, ${report.effort ?? 'default'}` : ''})`,
-    `${(report.staff ?? ['claude']).join('+')}${report.staffEffort ? ` (${report.staffEffort})` : ''}`,
+    `${report.chief ?? 'claude'}${report.arm && report.arm !== 'card' ? ` [${report.arm}]` : ''} (${report.model}${'effort' in report ? `, ${report.effort ?? 'default'}` : ''})`,
+    `${report.arm === 'bare' ? 'none' : (report.staff ?? ['claude']).join('+')}${report.staffEffort ? ` (${report.staffEffort})` : ''}`,
     held(report.checks),
     held(report.mechanics),
     String(m.tasks.length),
@@ -24,6 +24,9 @@ export function row(report) {
     String(m.chiefEdits ?? '?'),
     String((m.filesChanged ?? []).length),
     String(report.terminalAnswers ?? '?'),
+    m.ownerQuestions === undefined
+      ? '?'
+      : `${m.ownerQuestions.board.decisions}/${m.ownerQuestions.terminal.questions}${report.pickerAnswers ? `+${report.pickerAnswers}p` : ''}`,
     String(Math.round(report.seconds / 60)),
   ]
 }
@@ -44,6 +47,7 @@ export const COLUMNS = [
   'chief edits',
   'files',
   'terminal',
+  'asked',
   'min',
 ]
 
@@ -57,7 +61,9 @@ export function resultsTable(reports) {
     "board's own checks held (briefs delivered, results back to the chief, members' questions",
     'answered and the answers delivered, every task on the board). Terminal: how often the owner',
     "had to answer in the chief's terminal because nothing was on the board. `?` is a report from",
-    'before that column existed.',
+    'before that column existed. Asked: the decisions put to the owner on the board / the questions',
+    'the chief ended its turns with in its terminal, +Np for pickers the owner had to answer. A chief',
+    'marked [nocard] had a one-line card naming no board; [bare] ran without ConsensFlow.',
     '',
     `| ${COLUMNS.join(' | ')} |`,
     `| ${COLUMNS.map(() => '---').join(' | ')} |`,

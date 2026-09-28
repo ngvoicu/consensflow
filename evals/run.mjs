@@ -14,13 +14,18 @@
  * window and Devin have no switch for it), `--staff-effort` every member's.
  */
 import { execFileSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { chmodSync, cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
+import { answers } from '../hosts/lib/completion.js'
+import { interactiveStart } from '../hosts/lib/windows.js'
+import { recordState } from '../src/adapters/shared.js'
 import { startIntegration } from '../tests/integration/harness.mjs'
-import { countQuestions, measure, mechanics, verdict } from './measure.mjs'
+import { askingTurnEnd, bareMetrics, findSession } from './bare.mjs'
+import { changed, countQuestions, measure, mechanics, verdict } from './measure.mjs'
 import {
   answerFor,
   chiefEnvironment,
@@ -59,7 +64,6 @@ const { values } = parseArgs({
   },
 })
 if (!['card', 'nocard', 'bare'].includes(values.arm)) throw new Error(`no such arm: ${values.arm}`)
-if (values.arm === 'bare') throw new Error('the bare arm is not built yet')
 const scenario = (
   await import(pathToFileURL(join(HERE, 'scenarios', `${values.scenario}.mjs`)).href)
 ).default
@@ -229,8 +233,8 @@ async function settled(size, { stillMs = 3_000, capMs = 60_000 } = {}) {
 }
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-')
 
-async function run(index) {
-  const started = Date.now()
+/** The scenario's fixture in a fresh workspace, which Claude trusts, with nothing it remembered from the last run. */
+function freshWorkspace() {
   rmSync(WORKSPACE, { recursive: true, force: true })
   mkdirSync(WORKSPACE, { recursive: true })
   // A fresh run: nothing Claude remembered about this folder from the last one.
@@ -244,6 +248,11 @@ async function run(index) {
       `trust: ${execFileSync('python3', [TRUST, WORKSPACE], { encoding: 'utf8', env: { ...process.env, HOME: H } }).trim()}\n`,
     )
   }
+}
+
+async function run(index) {
+  const started = Date.now()
+  freshWorkspace()
   const app = await startIntegration({ editor: EDITOR, fakeEnv: ENV })
   const log = []
   const note = (line) => {
@@ -380,6 +389,7 @@ async function run(index) {
       if (
         scenario.nudge !== undefined &&
         terminalAnswers < 2 &&
+        terminalReplies === 0 &&
         !busy &&
         tasks.length === 0 &&
         answered.size === 0 &&
@@ -475,6 +485,200 @@ async function run(index) {
   return checks.every((check) => check.ok) && plumbing.every((check) => check.ok)
 }
 
+/** How long a busy bare window's record and screen hold still before the owner takes it for a picker waiting on a key. */
+const PICKER_AFTER_MS = 45_000
+/** Where a harness looks for its native records, without the eval's removals (null means unset). */
+const RECORD_ENV = Object.fromEntries(Object.entries(ENV).filter(([, value]) => value !== null))
+
+/**
+ * The chief as a bare harness: no ConsensFlow project, the harness alone in
+ * a window of the same pane host, started through the same wrappers (model,
+ * effort, no MCP), its state read from its own record. The owner types the
+ * prompt and the follow-ups, answers what it asks at the end of a turn, and
+ * nudges it once or twice when it stops without asking, as in the other arms.
+ */
+async function runBare(index) {
+  const started = Date.now()
+  freshWorkspace()
+  const app = await startIntegration({ editor: EDITOR, fakeEnv: ENV })
+  const log = []
+  const note = (line) => {
+    const at = Math.round((Date.now() - started) / 1000)
+    log.push({ at, line })
+    process.stdout.write(`  [${at}s] ${line}\n`)
+  }
+  const kind = HARNESSES[chief].kind
+  // Claude and Pi open on an id they are given; the others name theirs in their stores.
+  let session = kind === 'claude-code' || kind === 'pi' ? randomUUID() : null
+  const start = interactiveStart({ kind }, session, null)
+  const executable = ['claude', 'codex', 'pi'].includes(start.command)
+    ? join(ISOLATED_BIN, start.command)
+    : realOnPath(start.command, ENV.PATH)
+  const pane = { id: 'bare-chief', generation: 1 }
+  let screen = []
+  let items = []
+  let terminalAnswers = 0
+  let terminalReplies = 0
+  let pickerAnswers = 0
+  let followUpsSent = 0
+  const repliedTo = new Set()
+  try {
+    const opened = await app.request('pane.open', {
+      ...pane,
+      launch: `bare-${index}`,
+      cwd: WORKSPACE,
+      argv: [executable, ...start.args],
+      env: {},
+      dropEnv: start.dropEnv,
+    })
+    if (opened?.ok !== true) throw new Error(`pane.open: ${JSON.stringify(opened)}`)
+    const record = async () => {
+      session ??= findSession(kind, {
+        workspace: WORKSPACE,
+        since: started,
+        home: H,
+        env: RECORD_ENV,
+      })
+      if (session === null) return null
+      const read = await answers(kind, session, RECORD_ENV).catch(() => null)
+      return read === null || read.unknown ? null : recordState(read)
+    }
+    const type = async (text) => {
+      await settled(() => app.output(pane.id).length)
+      const before = (await record())?.items.length ?? 0
+      await app.request('pane.input', {
+        ...pane,
+        bytes: [...Buffer.from(`\u001b[200~${text}\u001b[201~\r`)],
+      })
+      await sleep(8_000)
+      // Devin takes a pasted prompt into its box and waits for an Enter of its own.
+      if (((await record())?.items.length ?? 0) === before) {
+        await app.request('pane.input', { ...pane, bytes: [13] })
+        note('Enter pressed again: the window had not taken the text')
+      }
+    }
+    await settled(() => app.output(pane.id).length)
+    note(`chief (${chief}, bare) ready; typing the prompt`)
+    await type(scenario.prompt)
+    const followUps = [...(scenario.followUps ?? [])]
+    let lastChange = Date.now()
+    let signature = ''
+    let screenAt = { length: -1, at: Date.now() }
+    for (;;) {
+      await sleep(5_000)
+      const state = await record()
+      items = state?.items ?? items
+      const busy = state === null || !state.settled
+      const now = JSON.stringify([items.length, items.at(-1)?.id, items.at(-1)?.text?.length, busy])
+      if (now !== signature) {
+        signature = now
+        lastChange = Date.now()
+        note(`chief ${busy ? 'working' : 'idle'}; ${items.length} items in its record`)
+      }
+      const printed = app.output(pane.id).length
+      if (printed !== screenAt.length) screenAt = { length: printed, at: Date.now() }
+      const quiet = Date.now() - lastChange
+      // A question tool (Claude's, OpenCode's) draws a picker and waits on a
+      // key: busy, nothing moving in its record or on its screen. Enter takes
+      // its first, recommended option; the report counts these.
+      if (
+        busy &&
+        state !== null &&
+        pickerAnswers < MAX_TERMINAL_REPLIES &&
+        quiet > PICKER_AFTER_MS &&
+        Date.now() - screenAt.at > PICKER_AFTER_MS
+      ) {
+        pickerAnswers += 1
+        note(
+          `the chief looks held on a picker; the owner pressed Enter. Its screen: ${lastLines(app.output(pane.id)).slice(-6).join(' ⏎ ')}`,
+        )
+        await app.request('pane.input', { ...pane, bytes: [13] })
+        lastChange = Date.now()
+        continue
+      }
+      if (!busy && terminalReplies < MAX_TERMINAL_REPLIES && quiet > FOLLOW_UP_AFTER_MS) {
+        const end = askingTurnEnd(items)
+        if (end !== undefined && !repliedTo.has(end.id)) {
+          repliedTo.add(end.id)
+          terminalReplies += 1
+          const reply = terminalAnswer(scenario, end.text)
+          note(`the chief asked in its terminal; the owner answered there: ${reply}`)
+          await type(reply)
+          lastChange = Date.now()
+          continue
+        }
+      }
+      if (
+        scenario.nudge !== undefined &&
+        terminalAnswers < 2 &&
+        terminalReplies === 0 &&
+        pickerAnswers === 0 &&
+        !busy &&
+        quiet > NUDGE_AFTER_MS
+      ) {
+        terminalAnswers += 1
+        note(`the chief stopped in its terminal; the owner typed there: ${scenario.nudge}`)
+        await type(scenario.nudge)
+        lastChange = Date.now()
+        continue
+      }
+      if (followUps.length > 0 && !busy && quiet > FOLLOW_UP_AFTER_MS) {
+        const next = followUps.shift()
+        followUpsSent += 1
+        note(`the owner's next message (${followUpsSent}): ${next.slice(0, 80)}`)
+        await type(next)
+        lastChange = Date.now()
+        continue
+      }
+      if (followUps.length === 0 && !busy && quiet > scenario.quietMs) {
+        note('quiet: the run is over')
+        break
+      }
+      if (Date.now() - started > timeoutMs) {
+        note('time is up')
+        break
+      }
+    }
+  } finally {
+    screen = lastLines(app.output(pane.id))
+    await app.close({ preserveRoot: true })
+  }
+  const metrics = bareMetrics(items, {
+    filesChanged: changed(join(HERE, 'fixtures', scenario.fixture), WORKSPACE),
+  })
+  const checks = verdict(scenario, metrics)
+  const report = {
+    scenario: scenario.id,
+    chief,
+    model: chiefSetup.model,
+    effort: chiefEffort,
+    arm: 'bare',
+    session,
+    run: index,
+    seconds: Math.round((Date.now() - started) / 1000),
+    metrics,
+    checks,
+    chiefScreen: screen,
+    terminalAnswers,
+    terminalReplies,
+    pickerAnswers,
+    followUpsSent,
+    log,
+  }
+  mkdirSync(REPORTS, { recursive: true })
+  const out = join(REPORTS, `${stamp()}-${scenario.id}-chief-${chief}-bare-${index}.json`)
+  writeFileSync(out, `${JSON.stringify(report, null, 2)}\n`)
+  const asked = metrics.ownerQuestions
+  process.stdout.write(
+    `\n${scenario.id} · chief ${chief} [bare] (${chiefSetup.model}, effort ${chiefEffort ?? 'its default'}) · run ${index} · ${report.seconds}s\n` +
+      checks.map((check) => `  ${check.ok ? 'PASS' : 'FAIL'} ${check.name}\n`).join('') +
+      `  turns ${metrics.chiefTurns} · files changed ${metrics.filesChanged.length} · answered in the terminal ${terminalAnswers} (nudges) + ${terminalReplies} (its questions) + ${pickerAnswers} (pickers)\n` +
+      `  the owner was asked: in the terminal ${asked.terminal.questions} questions in ${asked.terminal.turnsAsking} turns · pickers ${pickerAnswers}\n  report: ${out}\n`,
+  )
+  return checks.every((check) => check.ok)
+}
+
 let allOk = true
-for (let index = 1; index <= repeat; index += 1) allOk = (await run(index)) && allOk
+for (let index = 1; index <= repeat; index += 1)
+  allOk = (await (values.arm === 'bare' ? runBare(index) : run(index))) && allOk
 process.exit(allOk ? 0 : 1)
