@@ -930,6 +930,78 @@ describe('the dispatcher', () => {
     })
   })
 
+  it('carries an advisor’s and a reviewer’s question to the chief and the answer back to their own window', async () => {
+    await setup(async (context) => {
+      const project = await context.dispatcher.openProject({
+        directory: '/work/app',
+        name: 'app',
+        harness: 'claude-code',
+        staff: [
+          { agent: 'athena', harness: 'claude-code', role: 'advisor', tier: 'standard' },
+          { agent: 'calliope', harness: 'claude-code', role: 'reviewer', tier: 'standard' },
+        ],
+      })
+      const task = (number) => context.ledger.task(project.id, number)
+      for (const [pool, agent, body] of [
+        ['advisor', 'athena', 'Which law applies to the page?'],
+        ['reviewer', 'calliope', 'Review the legislation page'],
+      ]) {
+        const { task: created } = context.ledger.createTask(project.id, {
+          from: 'chief',
+          pool,
+          tier: 'standard',
+          body,
+        })
+        await context.dispatcher.pass()
+        await context.dispatcher.pass()
+        const session = task(created.number).assignee
+        assert.match(session, new RegExp(`^${agent}-`), `${pool}: its own session`)
+        const question = context.ledger.ask(project.id, {
+          from: session,
+          to: 'chief',
+          task: created.number,
+          body: `${pool}: which audience, managers or HR?`,
+        })
+        context.adapter.answer(agent, 'I asked the chief.')
+        await context.dispatcher.pass()
+        assert.equal(
+          task(created.number).state,
+          'waiting',
+          `${pool}: waits for the answer, no result`,
+        )
+        // The chief's window gets the question, answers it.
+        await context.dispatcher.pass()
+        const chiefSaw = context.adapter
+          .agent('chief')
+          .items.map((i) => i.text)
+          .join('\n')
+        assert.match(chiefSaw, new RegExp(`question from @${session}\\]\\n${pool}: which audience`))
+        context.adapter.answer('chief', 'Answered.')
+        context.ledger.answer(question.id, { from: 'chief', body: 'Managers first.' })
+        await context.dispatcher.pass()
+        await context.dispatcher.pass()
+        const memberSaw = context.adapter
+          .agent(agent)
+          .items.map((i) => i.text)
+          .join('\n')
+        assert.match(
+          memberSaw,
+          /answer from @chief\]\nManagers first\./,
+          `${pool}: the answer in its own window`,
+        )
+        assert.equal(task(created.number).state, 'working')
+        context.adapter.answer(agent, `${pool} findings, for managers`)
+        await context.dispatcher.pass()
+        assert.equal(task(created.number).state, 'done')
+        assert.equal(task(created.number).messages.at(-1).body, `${pool} findings, for managers`)
+        // The chief takes one message at a time: it reads the result first.
+        await context.dispatcher.pass()
+        context.adapter.answer('chief', 'Read.')
+        await context.dispatcher.pass()
+      }
+    })
+  })
+
   it('releases the typing latch once the harness shows the message the human submitted', async () => {
     await setup(async (context) => {
       await withStaff(context)

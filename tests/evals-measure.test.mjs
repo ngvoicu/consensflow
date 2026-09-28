@@ -337,6 +337,17 @@ describe('measuring a chief from the ledger', () => {
         [2, 2, 2, 1],
       )
       assert.deepEqual(metrics.filesChanged, [], 'no fixture given: nothing compared')
+      // Who asked the chief, by role and harness: every run tells it.
+      assert.deepEqual(metrics.memberQuestionsBy, [
+        {
+          role: 'worker',
+          harness: 'claude-code',
+          asked: 1,
+          answered: 1,
+          delivered: 1,
+          longest: 13,
+        },
+      ])
       // A task given by pool has no brief until a member takes it: two briefs.
       assert.deepEqual(metrics.plumbing, {
         briefs: 2,
@@ -444,5 +455,65 @@ describe('counting what a chief asks the owner', () => {
     // What was counted, for a human to check.
     assert.deepEqual(counted.terminal.texts, ['Should I also translate the FAQ? And the footer?'])
     assert.equal(counted.board.texts.length, 3)
+  })
+})
+
+describe('the question trip', () => {
+  const asked = (role, longest = 60) => ({
+    role,
+    harness: 'pi',
+    asked: 1,
+    answered: 1,
+    delivered: 1,
+    longest,
+  })
+  const good = {
+    tasks: [{ pool: null }, { pool: 'advisor' }, { pool: 'reviewer' }],
+    memberQuestionsBy: [asked('advisor'), asked('reviewer', 6250), asked('worker')],
+    notesText: 'The reviewer asked about the English version; its code: PLOP-6142.',
+    plumbing: { accepted: 3 },
+    questionsToHuman: [],
+  }
+
+  it('holds when every kind of member asked, got its answer, and the long question was read whole', async () => {
+    for (const id of ['question-trip', 'question-trip-native']) {
+      const trip = (await import(`../evals/scenarios/${id}.mjs`)).default
+      assert.equal(trip.id, id)
+      assert.deepEqual(
+        verdict(trip, good)
+          .filter((c) => !c.ok)
+          .map((c) => c.name),
+        [],
+      )
+    }
+  })
+
+  it('names what is missing: a role that never asked, an answer not delivered, a short question, no code', async () => {
+    const trip = (await import('../evals/scenarios/question-trip.mjs')).default
+    const failing = (metrics) =>
+      verdict(trip, metrics)
+        .filter((c) => !c.ok)
+        .map((c) => c.name)
+    assert.deepEqual(failing({ ...good, memberQuestionsBy: [asked('advisor'), asked('worker')] }), [
+      'the reviewer asks the chief, and the answer reaches its window',
+      'the long question reaches the chief whole (over 4000 characters)',
+    ])
+    assert.deepEqual(
+      failing({
+        ...good,
+        memberQuestionsBy: [
+          asked('advisor'),
+          { ...asked('reviewer', 6250), delivered: 0 },
+          asked('worker'),
+        ],
+      }),
+      ['the reviewer asks the chief, and the answer reaches its window'],
+    )
+    assert.deepEqual(failing({ ...good, notesText: 'Done.' }), [
+      "the chief's note holds the long question's code",
+    ])
+    assert.deepEqual(failing({ ...good, questionsToHuman: [{}] }), [
+      'the owner is not asked anything',
+    ])
   })
 })

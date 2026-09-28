@@ -114,6 +114,7 @@ export function measure(file, { fixture = null, workspace = null } = {}) {
     ...seen,
     ownerQuestions: ownerQuestions({ board: boardQuestions, terminal: turnEnds }),
     plumbing: plumbing(file, metrics.chiefId, metrics.humanId),
+    memberQuestionsBy: memberQuestionsBy(file, metrics.chiefId, metrics.humanId),
     filesChanged: fixture === null || workspace === null ? [] : changed(fixture, workspace),
   }
 }
@@ -123,6 +124,31 @@ export function measure(file, { fixture = null, workspace = null } = {}) {
  * briefs delivered to members, results delivered back to the chief, questions
  * members put to the chief and the answers delivered back, tasks accepted.
  */
+/**
+ * The questions members put to the chief, by the asker's role and harness:
+ * how many, how many the chief answered, how many answers reached the
+ * member's window, and the longest question in characters.
+ */
+function memberQuestionsBy(file, chiefId, humanId) {
+  const db = new DatabaseSync(file, { readOnly: true })
+  try {
+    return db
+      .prepare(
+        `SELECT p.role, p.harness, COUNT(*) AS asked,
+           SUM(EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer' AND a.state != 'cancelled')) AS answered,
+           SUM(EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer' AND a.state IN ('delivered', 'read'))) AS delivered,
+           MAX(LENGTH(q.body)) AS longest
+         FROM message q JOIN participant p ON p.id = q.sender_id
+         WHERE q.kind = 'question' AND q.recipient_id = ? AND q.sender_id NOT IN (?, ?)
+         GROUP BY p.role, p.harness ORDER BY p.role, p.harness`,
+      )
+      .all(chiefId, chiefId, humanId)
+      .map((row) => ({ ...row }))
+  } finally {
+    db.close()
+  }
+}
+
 function plumbing(file, chiefId, humanId) {
   const db = new DatabaseSync(file, { readOnly: true })
   try {

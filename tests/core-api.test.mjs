@@ -379,6 +379,49 @@ describe('the agents API', () => {
     })
   })
 
+  it("lets an advisor and a reviewer ask the chief with cf ask, and routes the chief's answer back to them", async () => {
+    await withApi(async ({ ledger, project, token, cf }) => {
+      const chief = token('chief')
+      for (const [agent, role] of [
+        ['athena', 'advisor'],
+        ['calliope', 'reviewer'],
+      ])
+        ledger.addMember(project.id, { agent, harness: 'claude-code', role, tier: 'standard' })
+      const member = (handle) =>
+        ledger.project(project.id).participants.find((p) => p.handle === handle)
+      for (const [number, flag, agent] of [
+        [1, '--advice', 'athena'],
+        [2, '--review', 'calliope'],
+      ]) {
+        const added = await cf(
+          chief,
+          'task',
+          'add',
+          flag,
+          '--tier',
+          'standard',
+          `Task for ${agent}`,
+        )
+        assert.equal(added.code, 0, added.err)
+        deliver(ledger, ledger.assignTask(project.id, number, member(agent).id).message)
+        const session = ledger.task(project.id, number).assignee
+        const asked = await cf(token(session), 'ask', 'Managers or HR first?')
+        assert.equal(asked.code, 0, asked.err)
+        const task = ledger.task(project.id, number)
+        const question = task.messages.find((m) => m.kind === 'question')
+        assert.deepEqual(
+          [question.sender, question.recipient, task.state],
+          [session, 'chief', 'waiting'],
+          `${flag}: to the chief, the task waiting`,
+        )
+        const answered = await cf(chief, 'answer', `m-${question.id}`, 'Managers first.')
+        assert.equal(answered.code, 0, answered.err)
+        const answer = ledger.task(project.id, number).messages.find((m) => m.kind === 'answer')
+        assert.deepEqual([answer.recipient, answer.body], [session, 'Managers first.'])
+      }
+    })
+  })
+
   it('gives the chief every character of a long result with cf inbox read', async () => {
     await withApi(async ({ ledger, project, token, cf }) => {
       const chief = token('chief')
