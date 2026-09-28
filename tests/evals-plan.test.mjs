@@ -19,7 +19,7 @@ import { openLedger } from '../src/ledger/index.js'
 /** The eval's plan: who is on the staff, how the chief gets its model, how the human answers. */
 describe('an eval run’s plan', () => {
   it('gives each staff harness two workers, an advisor and a reviewer on its cheap model, all standard tier', () => {
-    const { agents, staff } = staffFor(['codex', 'pi'], { pi: 'opencode-go/other' })
+    const { agents, staff } = staffFor(['codex', 'pi'], { pi: 'openrouter/other' })
     assert.deepEqual(
       agents.map((a) => [a.id, a.kind, a.model, a.workTier]),
       [
@@ -27,10 +27,10 @@ describe('an eval run’s plan', () => {
         ['eval-codex-worker-2', 'codex', 'gpt-5.6-luna', 'standard'],
         ['eval-codex-advisor', 'codex', 'gpt-5.6-luna', 'standard'],
         ['eval-codex-reviewer', 'codex', 'gpt-5.6-luna', 'standard'],
-        ['eval-pi-worker', 'pi', 'opencode-go/other', 'standard'],
-        ['eval-pi-worker-2', 'pi', 'opencode-go/other', 'standard'],
-        ['eval-pi-advisor', 'pi', 'opencode-go/other', 'standard'],
-        ['eval-pi-reviewer', 'pi', 'opencode-go/other', 'standard'],
+        ['eval-pi-worker', 'pi', 'openrouter/other', 'standard'],
+        ['eval-pi-worker-2', 'pi', 'openrouter/other', 'standard'],
+        ['eval-pi-advisor', 'pi', 'openrouter/other', 'standard'],
+        ['eval-pi-reviewer', 'pi', 'openrouter/other', 'standard'],
       ],
     )
     assert.deepEqual(

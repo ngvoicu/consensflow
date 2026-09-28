@@ -57,7 +57,7 @@ const AGENTS = {
   pi: {
     id: 'bench-pi',
     kind: 'pi',
-    model: 'opencode-go/muse-spark-1.3-contributor',
+    model: 'openrouter/meta/muse-spark-1.3',
     workTier: 'standard',
   },
   devin: { id: 'bench-devin', kind: 'devin', model: 'swe-1-6-slow', workTier: 'critical' },

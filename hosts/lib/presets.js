@@ -1168,9 +1168,7 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
   const contributor = known && key === 'muse-spark-1.3' && model.includes('-contributor')
   const routeLabel = model?.startsWith('openrouter/')
     ? 'OpenRouter · API'
-    : model?.startsWith('opencode-go/')
-      ? 'OpenCode Go'
-      : model?.startsWith('opencode/')
+    : model?.startsWith('opencode/')
         ? 'OpenCode Zen'
         : model?.startsWith('openai-codex/')
           ? 'Codex subscription'
