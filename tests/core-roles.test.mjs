@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
@@ -157,5 +157,29 @@ describe('role instructions for the new core', () => {
     } finally {
       await rm(home, { recursive: true, force: true })
     }
+  })
+})
+
+describe("an eval's chief without ConsensFlow's card", () => {
+  it('gives the chief only the named card, nothing of the board, and leaves the other roles alone', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-card-'))
+    const card = path.join(dir, 'no-card.md')
+    await writeFile(card, 'You work in this project for its owner.\n')
+    const staff = [{ name: 'zeus', roles: ['worker'], workTier: 'standard' }]
+    const saved = process.env.CONSENSFLOW_EVAL_CHIEF_CARD
+    process.env.CONSENSFLOW_EVAL_CHIEF_CARD = card
+    try {
+      assert.equal(
+        roleInstructions('chief', staff, { cf: '/app/bin/cf' }),
+        'You work in this project for its owner.\n',
+        'no tiers, no staff, no cf',
+      )
+      assert.match(roleInstructions('worker', staff, { cf: '/app/bin/cf' }), /\/app\/bin\/cf/)
+    } finally {
+      if (saved === undefined) delete process.env.CONSENSFLOW_EVAL_CHIEF_CARD
+      else process.env.CONSENSFLOW_EVAL_CHIEF_CARD = saved
+      await rm(dir, { recursive: true, force: true })
+    }
+    assert.match(roleInstructions('chief', staff, {}), /You do not change the project yourself/)
   })
 })

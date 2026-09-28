@@ -16,10 +16,11 @@
 import { execFileSync } from 'node:child_process'
 import { chmodSync, cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 import { startIntegration } from '../tests/integration/harness.mjs'
-import { measure, mechanics, verdict } from './measure.mjs'
+import { countQuestions, measure, mechanics, verdict } from './measure.mjs'
 import {
   answerFor,
   chiefEnvironment,
@@ -29,6 +30,7 @@ import {
   lastLines,
   realOnPath,
   staffFor,
+  terminalAnswer,
 } from './plan.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -51,8 +53,13 @@ const { values } = parseArgs({
     'timeout-min': { type: 'string', default: '40' },
     effort: { type: 'string', default: 'high' },
     'staff-effort': { type: 'string', default: 'medium' },
+    // card: ConsensFlow's chief card. nocard: ConsensFlow with a one-line
+    // card that names no board. bare: the harness alone, no ConsensFlow.
+    arm: { type: 'string', default: 'card' },
   },
 })
+if (!['card', 'nocard', 'bare'].includes(values.arm)) throw new Error(`no such arm: ${values.arm}`)
+if (values.arm === 'bare') throw new Error('the bare arm is not built yet')
 const scenario = (
   await import(pathToFileURL(join(HERE, 'scenarios', `${values.scenario}.mjs`)).href)
 ).default
@@ -169,14 +176,37 @@ const ENV = {
   CLAUDE_CONFIG_DIR: null,
   CODEX_HOME: join(H, '.codex'),
   XDG_CONFIG_HOME: join(H, '.config'),
+  ...(values.arm === 'nocard'
+    ? { CONSENSFLOW_EVAL_CHIEF_CARD: join(HERE, 'fixtures', 'no-card.md') }
+    : {}),
   ...chiefSetup.env,
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 /** How long the chief and the board stay quiet before the owner sends the next message of a conversation. */
 const FOLLOW_UP_AFTER_MS = 20_000
+/** How many times at most the owner answers questions a chief left in its terminal. */
+const MAX_TERMINAL_REPLIES = 8
 /** How long a chief may sit idle with nothing on the board before the owner answers it in its terminal. */
 const NUDGE_AFTER_MS = 60_000
+
+/** The chief's newest message that ended a turn, read from the ledger's copy of its window. */
+function lastTurnEnd(file) {
+  const db = new DatabaseSync(file, { readOnly: true })
+  try {
+    return db
+      .prepare(
+        `SELECT t.item_id AS id, t.text FROM transcript t
+         JOIN conversation c ON c.id = t.conversation_id
+         JOIN participant p ON p.id = c.participant_id
+         WHERE p.role = 'chief' AND t.role = 'assistant' AND t.complete = 1
+         ORDER BY t.conversation_id DESC, t.seq DESC LIMIT 1`,
+      )
+      .get()
+  } finally {
+    db.close()
+  }
+}
 
 /**
  * Wait until a window's output has grown and then held still for `stillMs`:
@@ -225,6 +255,8 @@ async function run(index) {
   let pane = null
   let screen = []
   let terminalAnswers = 0
+  let terminalReplies = 0
+  const repliedTo = new Set()
   let followUpsSent = 0
   let boardTasks = 0
   const refused = []
@@ -317,6 +349,30 @@ async function run(index) {
       const busy =
         lane?.activity?.state !== 'idle' ||
         tasks.some((t) => ['queued', 'working', 'waiting'].includes(t.state))
+      // A chief that ended its turn asking in its terminal hears the owner
+      // there, as on the board: its questions answered from the scenario's
+      // answers, once per turn, the same way in every arm.
+      if (
+        !busy &&
+        terminalReplies < MAX_TERMINAL_REPLIES &&
+        Date.now() - lastChange > FOLLOW_UP_AFTER_MS
+      ) {
+        const end = lastTurnEnd(file)
+        if (
+          end !== undefined &&
+          !repliedTo.has(end.id) &&
+          countQuestions(end.text) > 0 &&
+          (await questions()).length === 0
+        ) {
+          repliedTo.add(end.id)
+          terminalReplies += 1
+          const reply = terminalAnswer(scenario, end.text)
+          note(`the chief asked in its terminal; the owner answered there: ${reply}`)
+          await say(reply)
+          lastChange = Date.now()
+          continue
+        }
+      }
       // A chief that stops in its terminal, asking or proposing there, with
       // nothing ever put on the board, hears the owner there too (twice at
       // most), so the run sees what it does next; the report counts these,
@@ -383,7 +439,9 @@ async function run(index) {
     checks,
     mechanics: plumbing,
     chiefScreen: screen,
+    arm: values.arm,
     terminalAnswers,
+    terminalReplies,
     followUpsSent,
     refusedAnswers: refused,
     gate: values.gate,
@@ -393,11 +451,11 @@ async function run(index) {
   mkdirSync(REPORTS, { recursive: true })
   const out = join(
     REPORTS,
-    `${stamp()}-${scenario.id}-chief-${chief}-staff-${staffHarnesses.join('+')}-${index}.json`,
+    `${stamp()}-${scenario.id}-chief-${chief}${values.arm === 'card' ? '' : `-${values.arm}`}-staff-${staffHarnesses.join('+')}-${index}.json`,
   )
   writeFileSync(out, `${JSON.stringify(report, null, 2)}\n`)
   process.stdout.write(
-    `\n${scenario.id} · chief ${chief} (${chiefSetup.model}, effort ${chiefEffort ?? 'its default'}) · staff effort ${values['staff-effort']} · staff ${staffHarnesses.join('+')} · run ${index} · ${report.seconds}s\n`,
+    `\n${scenario.id} · chief ${chief}${values.arm === 'card' ? '' : ` [${values.arm}]`} (${chiefSetup.model}, effort ${chiefEffort ?? 'its default'}) · staff effort ${values['staff-effort']} · staff ${staffHarnesses.join('+')} · run ${index} · ${report.seconds}s\n`,
   )
   for (const check of checks)
     process.stdout.write(`  ${check.ok ? 'PASS' : 'FAIL'} ${check.name}\n`)
@@ -412,7 +470,7 @@ async function run(index) {
         .join('\n')}\n`,
     )
   process.stdout.write(
-    `  tasks ${metrics.tasks.length} (parallel ${metrics.parallel}, advice ${metrics.advice}, reviews ${metrics.reviews}) · questions ${metrics.questionsToHuman.length} · notes ${metrics.notesToHuman.length} · chief edits ${metrics.chiefEdits ?? '?'} in ${metrics.chiefTurns} turns · files changed ${metrics.filesChanged.length} · answered in the terminal ${terminalAnswers}\n  the owner was asked: on the board ${metrics.ownerQuestions.board.asked} (${metrics.ownerQuestions.board.decisions} decisions) · in the terminal ${metrics.ownerQuestions.terminal.questions} questions in ${metrics.ownerQuestions.terminal.turnsAsking} turns\n  report: ${out}\n`,
+    `  tasks ${metrics.tasks.length} (parallel ${metrics.parallel}, advice ${metrics.advice}, reviews ${metrics.reviews}) · questions ${metrics.questionsToHuman.length} · notes ${metrics.notesToHuman.length} · chief edits ${metrics.chiefEdits ?? '?'} in ${metrics.chiefTurns} turns · files changed ${metrics.filesChanged.length} · answered in the terminal ${terminalAnswers} (nudges) + ${terminalReplies} (its questions)\n  the owner was asked: on the board ${metrics.ownerQuestions.board.asked} (${metrics.ownerQuestions.board.decisions} decisions) · in the terminal ${metrics.ownerQuestions.terminal.questions} questions in ${metrics.ownerQuestions.terminal.turnsAsking} turns\n  report: ${out}\n`,
   )
   return checks.every((check) => check.ok) && plumbing.every((check) => check.ok)
 }

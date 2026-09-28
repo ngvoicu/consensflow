@@ -13,6 +13,7 @@ import {
   lastLines,
   realOnPath,
   staffFor,
+  terminalAnswer,
 } from '../evals/plan.mjs'
 import sixDecisions from '../evals/scenarios/six-decisions.mjs'
 import { openLedger } from '../src/ledger/index.js'
@@ -183,5 +184,30 @@ describe('an eval run’s plan', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe("the owner's answer in a chief's terminal", () => {
+  const scenario = {
+    answers: [
+      { match: /document/i, text: 'Keep it, with a note on top.' },
+      { match: /publish/i, text: 'Not yet.' },
+    ],
+    fallback: 'Yes.',
+  }
+
+  it('answers each question the chief left there, once per subject, in order', () => {
+    const text = [
+      'I read the files. Two things:',
+      '1. Do we keep the old document in docs/?',
+      '2. Should I publish the page today?',
+      'Also: the reference document, do we keep it as is?',
+    ].join('\n')
+    assert.equal(terminalAnswer(scenario, text), 'Keep it, with a note on top. Not yet.')
+  })
+
+  it('falls back for a question it has no answer for', () => {
+    assert.equal(terminalAnswer(scenario, 'Shall I start with the footer?'), 'Yes.')
+    assert.equal(terminalAnswer(scenario, 'Keep the `docs/?` folder? And the footer?'), 'Yes.')
   })
 })

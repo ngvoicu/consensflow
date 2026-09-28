@@ -1,4 +1,5 @@
 import { statSync } from 'node:fs'
+import { questionSentences } from './measure.mjs'
 
 /**
  * The pure part of an eval run: which agents make up the staff for a set of
@@ -140,6 +141,19 @@ export function answerFor(scenario, question) {
   return {
     body: matching(question.body.split('\n')[0]) ?? matching(question.body) ?? scenario.fallback,
   }
+}
+
+/**
+ * The owner's reply to questions a chief left in its terminal: for each
+ * question sentence, the scenario's answer on its subject or its fallback,
+ * each answer once, in the order asked.
+ */
+export function terminalAnswer(scenario, text) {
+  const answers = scenario.answers ?? []
+  const replies = questionSentences(text).map(
+    (question) => answers.find(({ match }) => match.test(question))?.text ?? scenario.fallback,
+  )
+  return [...new Set(replies)].join(' ')
 }
 
 /**

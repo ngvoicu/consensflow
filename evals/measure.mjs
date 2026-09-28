@@ -304,17 +304,25 @@ export function verdict(scenario, metrics) {
 }
 
 /**
- * The question sentences in a text put to the owner: a question mark that
- * ends a sentence, not one in fenced or inline code or in a link. A
+ * The question sentences in a text put to the owner: a sentence that ends in
+ * a question mark, not one in fenced or inline code or in a link. A
  * rhetorical question counts too; the report keeps the texts for a person
  * to check.
  */
-export function countQuestions(text) {
+export function questionSentences(text) {
   const prose = String(text ?? '')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/`[^`\n]*`/g, ' ')
     .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, ' ')
-  return (prose.match(/\?+(?=[\s"'”»)\]]|$)/g) ?? []).length
+  return prose
+    .split('\n')
+    .flatMap((line) => line.split(/(?<=[.!?])\s+/))
+    .map((sentence) => sentence.trim().replace(/["'”»)\]]+$/, ''))
+    .filter((sentence) => sentence.endsWith('?'))
+}
+
+export function countQuestions(text) {
+  return questionSentences(text).length
 }
 
 /**

@@ -20,6 +20,11 @@ export function roleInstructions(role, staff, { cf } = {}) {
       ? ''
       : `\n## This window's cf\n\nHere \`cf\` is ${cf}. If \`cf\` says a command is unknown, or answers as another program, another \`cf\` comes first on this shell's PATH: run ${cf} instead.\n`
   if (role !== 'chief') return base + where
+  // Evals only: a chief measured without ConsensFlow's card gets this file's
+  // text instead of all of it (tiers, staff and its cf too), so nothing tells
+  // it the board exists. Nothing in the app sets it.
+  const card = process.env.CONSENSFLOW_EVAL_CHIEF_CARD
+  if (card) return readFileSync(card, 'utf8')
   return (
     base +
     text('coordinating')
