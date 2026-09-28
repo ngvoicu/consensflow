@@ -283,7 +283,7 @@ async function taskCommand([action, ...rest], call, input) {
         ? `T-${number} is yours; finish it with: cf task done T-${number} "what you did".${waits}`
         : after !== undefined
           ? `T-${number} continues in @${assignee}, the window that did T-${after}; its result arrives in your inbox.${gated}${waits}`
-          : `T-${number} is on the board for ${aPool(pool, tier)}; the first free one gets it, and its result arrives in your inbox.${waits}${holds}${gated}`,
+          : `T-${number} is on the board for ${aPool(pool, created.task.tier ?? tier)}${created.asked === undefined ? '' : ` (no ${created.asked} ${pool} is on the staff, so the nearest tier)`}; the first free one gets it, and its result arrives in your inbox.${waits}${holds}${gated}`,
     }
   }
   if (action === 'list' || action === undefined) {

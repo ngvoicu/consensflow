@@ -618,6 +618,27 @@ describe('cf inside a core window', () => {
 })
 
 describe('tiered tasks through the API and cf', () => {
+  it('puts work for a tier nobody holds on the nearest tier held, and says so', async () => {
+    await withApi(async ({ ledger, project, token, cf }) => {
+      const moved = await cf(
+        token('chief'),
+        'task',
+        'add',
+        '--tier',
+        'critical',
+        '--purpose',
+        'hard-problem',
+        'Why is it slow?',
+      )
+      assert.deepEqual(moved, {
+        code: 0,
+        out: 'T-1 is on the board for a standard worker (no critical worker is on the staff, so the nearest tier); the first free one gets it, and its result arrives in your inbox.',
+        err: '',
+      })
+      assert.equal(ledger.task(project.id, 1).tier, 'standard')
+    })
+  })
+
   it('opens a task for a tier, never for a member by name', async () => {
     await withApi(async ({ ledger, project, token, cf }) => {
       const chief = token('chief')
@@ -638,10 +659,12 @@ describe('tiered tasks through the API and cf', () => {
       const noPurpose = await cf(chief, 'task', 'add', '--tier', 'critical', 'Why is it slow?')
       assert.equal(noPurpose.code, 1)
       assert.match(noPurpose.err, /critical work names its purpose/)
+      // Nobody at all for the role is still a refusal; a tier nobody holds is not (below).
       const critical = await cf(
         chief,
         'task',
         'add',
+        '--advice',
         '--tier',
         'critical',
         '--purpose',
@@ -649,7 +672,7 @@ describe('tiered tasks through the API and cf', () => {
         'Why is it slow?',
       )
       assert.equal(critical.code, 1)
-      assert.match(critical.err, /no critical worker is on the staff: ask the human for one/)
+      assert.match(critical.err, /no advisor is on the staff: ask the human for one/)
       const noTier = await cf(chief, 'task', 'add', 'Just do it')
       assert.deepEqual(
         [noTier.code, noTier.err],
@@ -681,10 +704,10 @@ describe('tiered tasks through the API and cf', () => {
         role: 'advisor',
         tier: 'standard',
       })
-      const noAdvisor = await cf(chief, 'task', 'add', '--advice', '--tier', 'light', 'Which one?')
+      const noReviewer = await cf(chief, 'task', 'add', '--review', '--tier', 'light', 'Check it')
       assert.deepEqual(
-        [noAdvisor.code, noAdvisor.err],
-        [1, 'cf: no light advisor is on the staff: ask the human for one with cf ask --human "…"'],
+        [noReviewer.code, noReviewer.err],
+        [1, 'cf: no reviewer is on the staff: ask the human for one with cf ask --human "…"'],
       )
       const advice = await cf(
         chief,
@@ -754,10 +777,7 @@ describe('tiered tasks through the API and cf', () => {
       )
       assert.deepEqual(
         [noReviewer.code, noReviewer.err],
-        [
-          1,
-          'cf: no standard reviewer is on the staff: ask the human for one with cf ask --human "…"',
-        ],
+        [1, 'cf: no reviewer is on the staff: ask the human for one with cf ask --human "…"'],
       )
       ledger.addMember(project.id, {
         agent: 'diana',

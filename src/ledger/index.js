@@ -61,6 +61,8 @@ export const TIERS = ['critical', 'complex', 'standard', 'light']
 const POOLS = ['worker', 'advisor', 'reviewer', 'designer']
 export const PURPOSES = ['critical-review', 'architecture', 'hard-problem', 'important-question']
 /** "standard worker", "image designer": who an open task waits for; `aPool` adds the article. */
+/** When a task's tier moved to one the staff holds, the tier that was asked. */
+const moved = (asked, tier) => (asked !== undefined && asked !== tier ? { asked } : {})
 const poolName = (pool, tier) => (pool === 'designer' ? 'image designer' : `${tier} ${pool}`)
 const aPool = (pool, tier) => `${pool === 'designer' ? 'an' : 'a'} ${poolName(pool, tier)}`
 const CRITICAL_RULE =
@@ -1004,10 +1006,14 @@ class Ledger {
           : to === undefined
             ? null
             : this.#participantByHandle(projectId, to)
+      // A tier nobody on the staff holds goes to the nearest one somebody does,
+      // the next one up first: light work with only critical members still goes.
+      const asked = tier
+      if (assignee === null) tier = this.#nearestTier(projectId, pool, tier)
       if (assignee === null && this.#members(projectId, pool, tier).length === 0) {
         throw new LedgerError(
           'no-member-of-tier',
-          `no ${poolName(pool, tier)} is on the staff: ask the human for one with cf ask --human "…"`,
+          `no ${pool === 'designer' ? 'image designer' : pool} is on the staff: ask the human for one with cf ask --human "…"`,
           409,
         )
       }
@@ -1082,7 +1088,7 @@ class Ledger {
           ...(needed.length === 0 ? {} : { needs: needed }),
           ...(blocking.length === 0 ? {} : { before: blocking }),
         })
-        return { task: this.#task(taskId), message: null }
+        return { task: this.#task(taskId), message: null, ...moved(asked, tier) }
       }
       const messageId = this.#queue(projectId, {
         to: assignee.id,
@@ -1097,7 +1103,7 @@ class Ledger {
         to: assignee.handle,
         message: messageId,
       })
-      return { task: this.#task(taskId), message: this.#message(messageId) }
+      return { task: this.#task(taskId), message: this.#message(messageId), ...moved(asked, tier) }
     })
   }
 
@@ -2177,6 +2183,23 @@ class Ledger {
 
   /** The active members of one pool and tier, in join order. */
   /** The staff's members of one role and tier (any tier when null), whatever role they were saved with first. */
+  /**
+   * The tier a task for `pool` goes to: the one asked, when somebody holds it;
+   * else the nearest one somebody does, the next one up before the next one
+   * down. A pool with no tier (the designer) keeps none.
+   */
+  #nearestTier(projectId, pool, tier) {
+    if (tier === null || tier === undefined || this.#members(projectId, pool, tier).length > 0)
+      return tier
+    const at = TIERS.indexOf(tier)
+    const near = TIERS.filter((other) => other !== tier).sort(
+      (a, b) =>
+        Math.abs(TIERS.indexOf(a) - at) - Math.abs(TIERS.indexOf(b) - at) ||
+        TIERS.indexOf(a) - TIERS.indexOf(b),
+    )
+    return near.find((other) => this.#members(projectId, pool, other).length > 0) ?? tier
+  }
+
   #members(projectId, pool, tier) {
     return this.#db
       .prepare(

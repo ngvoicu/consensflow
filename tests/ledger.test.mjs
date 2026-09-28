@@ -1507,15 +1507,25 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
     })
   })
 
-  it('refuses what no member could take: a bad tier or pool, an empty tier, critical work without its purpose', async () => {
+  it('refuses a bad tier or pool and critical work without its purpose; a tier nobody holds goes to the nearest', async () => {
     await withLedger((ledger) => {
       const { project } = tiered(ledger)
       const refuses = (extra, code) =>
         assert.throws(() => openTask(ledger, project, extra), { code })
       refuses({ tier: 'max' }, 'invalid-tier')
       refuses({ pool: 'chief' }, 'invalid-pool')
-      refuses({ tier: 'critical', purpose: 'architecture' }, 'no-member-of-tier')
-      refuses({ pool: 'worker', tier: 'complex' }, 'no-member-of-tier')
+      // Workers are standard and light: critical and complex work goes to the
+      // nearest tier held, the next one up first, and says what was asked.
+      const up = openTask(ledger, project, { tier: 'critical', purpose: 'architecture' })
+      assert.deepEqual([up.task.tier, up.asked], ['standard', 'critical'])
+      const near = openTask(ledger, project, { pool: 'worker', tier: 'complex' })
+      assert.deepEqual([near.task.tier, near.asked], ['standard', 'complex'])
+      // Light advice with only a complex advisor goes up to it.
+      const advice = openTask(ledger, project, { pool: 'advisor', tier: 'light' })
+      assert.deepEqual([advice.task.tier, advice.asked], ['complex', 'light'])
+      // Held tiers stay as asked.
+      assert.equal(openTask(ledger, project, { tier: 'light' }).asked, undefined)
+      for (const number of [1, 2, 3, 4]) ledger.cancelTask(project.id, number, { by: 'chief' })
       ledger.addMember(project.id, {
         agent: 'calliope',
         harness: 'claude-code',
@@ -1580,9 +1590,9 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
   it('counts a member for every role it holds when a tier is checked, not only its first', async () => {
     await withLedger((ledger) => {
       const { project } = tiered(ledger)
-      assert.throws(() => openTask(ledger, project, { pool: 'advisor', tier: 'light' }), {
-        code: 'no-member-of-tier',
-      })
+      const before = openTask(ledger, project, { pool: 'advisor', tier: 'light' })
+      assert.equal(before.task.tier, 'complex', 'no light advisor yet: the nearest')
+      ledger.cancelTask(project.id, before.task.number, { by: 'chief' })
       ledger.setRoles(project.id, 'hera', ['worker', 'advisor'])
       const { task } = openTask(ledger, project, { pool: 'advisor', tier: 'light' })
       assert.deepEqual([task.pool, task.tier, task.state], ['advisor', 'light', 'open'])
@@ -1730,9 +1740,11 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
         ledger.candidates(project.id, 2).map((c) => c.handle),
         ['nemesis'],
       )
-      assert.throws(() => openTask(ledger, project, { pool: 'reviewer', tier: 'complex' }), {
-        code: 'no-member-of-tier',
-      })
+      assert.equal(
+        openTask(ledger, project, { pool: 'reviewer', tier: 'complex' }).task.tier,
+        'standard',
+        'no complex reviewer: the nearest tier held',
+      )
       deliver(ledger, ledger.assignTask(project.id, 2, id('nemesis')).message)
       const done = ledger.recordResult(project.id, 2, { body: 'No test for empty input.' })
       assert.deepEqual(
