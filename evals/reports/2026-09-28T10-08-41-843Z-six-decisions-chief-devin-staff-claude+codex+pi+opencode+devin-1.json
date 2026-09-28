@@ -1,0 +1,250 @@
+{
+  "scenario": "six-decisions",
+  "chief": "devin",
+  "model": "devin's default",
+  "effort": null,
+  "staffEffort": "medium",
+  "staff": [
+    "claude",
+    "codex",
+    "pi",
+    "opencode",
+    "devin"
+  ],
+  "staffModels": {
+    "eval-claude-worker": "claude-haiku-4-5-20251001",
+    "eval-claude-worker-2": "claude-haiku-4-5-20251001",
+    "eval-claude-advisor": "claude-haiku-4-5-20251001",
+    "eval-claude-reviewer": "claude-haiku-4-5-20251001",
+    "eval-codex-worker": "gpt-5.6-luna",
+    "eval-codex-worker-2": "gpt-5.6-luna",
+    "eval-codex-advisor": "gpt-5.6-luna",
+    "eval-codex-reviewer": "gpt-5.6-luna",
+    "eval-pi-worker": "openrouter/meta/muse-spark-1.3",
+    "eval-pi-worker-2": "openrouter/meta/muse-spark-1.3",
+    "eval-pi-advisor": "openrouter/meta/muse-spark-1.3",
+    "eval-pi-reviewer": "openrouter/meta/muse-spark-1.3",
+    "eval-opencode-worker": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-opencode-worker-2": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-opencode-advisor": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-opencode-reviewer": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-devin-worker": "swe-1-6-slow",
+    "eval-devin-worker-2": "swe-1-6-slow",
+    "eval-devin-advisor": "swe-1-6-slow",
+    "eval-devin-reviewer": "swe-1-6-slow"
+  },
+  "run": 1,
+  "seconds": 492,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [],
+    "parallel": 0,
+    "advice": 0,
+    "reviews": 0,
+    "questionsToHuman": [],
+    "notesToHuman": [],
+    "notesText": "",
+    "longestResult": {
+      "worker": 0,
+      "advisor": 0,
+      "reviewer": 0
+    },
+    "answersToChief": [],
+    "taskCount": 0,
+    "chiefId": 2,
+    "chiefHarness": "devin",
+    "humanId": 1,
+    "chiefTurns": 24,
+    "chiefEdits": null,
+    "chiefLastWords": "Am terminat toate modificările:\n\n✅ **Conținut completat** - `content/legislatie-ro.md` cu toate secțiunile (obligații angajator, drepturi angajat, inițiativă europeană)\n\n✅ **Traducere** - `content/legislation-en.md` creat\n\n✅ **Pagini HTML** - `site/legislatie.html` și `site/en/legislation.html` create, cu stil consistent și navigare corectă\n\n✅ **Navegație** - Butonul \"Legislație\" adăugat în footer-ul românesc, \"Legislation\" în footer-ul englezesc\n\n✅ **Curățenie** - `docs/document-de-referinta-hr.md` șters (era obsolet)\n\nPagina este pregătită local în `site/legislatie.html` și `site/en/legislation.html`. Totul așteaptă publicarea când decizi tu.",
+    "plumbing": {
+      "briefs": 0,
+      "briefsDelivered": 0,
+      "results": 0,
+      "resultsDelivered": 0,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 0,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0,
+      "ownerQuestions": 0,
+      "ownerQuestionsAnswered": 0
+    },
+    "filesChanged": [
+      "content/legislatie-ro.md",
+      "content/legislation-en.md",
+      "site/en/index.html",
+      "site/en/legislation.html",
+      "site/index.html",
+      "site/legislatie.html"
+    ]
+  },
+  "checks": [
+    {
+      "name": "the owner is asked on the board, at least three questions",
+      "ok": false
+    },
+    {
+      "name": "at least one question offers options",
+      "ok": false
+    },
+    {
+      "name": "a finding reaches the owner as a note",
+      "ok": false
+    },
+    {
+      "name": "at least two tasks go on the board",
+      "ok": false
+    },
+    {
+      "name": "two tasks run side by side at some point",
+      "ok": false
+    },
+    {
+      "name": "finished work goes to a review",
+      "ok": false
+    },
+    {
+      "name": "the chief's own edits stay under ten (counted for a Claude chief only)",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question the chief put to the owner got the owner's answer (0/0)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (0/0)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    " ✅ Tradu",
+    "⠒⠂ Typing · 9s (esc twice to interrupt)",
+    "────────────────────────────────────────────────────── (bypass permissions on) ─",
+    "❭ Guide Devin while it works",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                  ctrl+v to paste image in clipboardcere- co ntent/legi slation-en.m ⠖⠀ ✅ Traducere -  content/legislation-en.md  creat",
+    " ✅",
+    "⠖⠀ Typing · 9s (esc twice to interrupt)",
+    "────────────────────────────────────────────────────── (bypass permissions on) ─",
+    "❭ Guide Devin while it works",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                  ctrl+v to paste image in clipboardPagini HTML- site/le ⠦10s (esc twice to interupt)gislatie.html și site/en/legis lation.html cr⠤⠄eate,custi                                        ⠤⠄ Typing · 10s (esc twice to interrupt)                                      ──────────────────────────────────────────────────────(bypass permissions on)─❭ Guide Devin while it works                                                    ────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                  ctrl+v to paste image in clipboardlconsistentșinavigare⠠⠤ ✅ Pagini HTML -  site/legislatie.html  și  site/en/legislation.html  create,",
+    " cu stil consistent și navigare corectă",
+    " ✅",
+    "⠠⠤ Typing · 10s (esc twice to interrupt)",
+    "────────────────────────────────────────────────────── (bypass permissions on) ─",
+    "❭ Guide Devin while it works",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                  ctrl+v to paste image in clipboardNavegație-Butonul⠀⢤\"Legislație\"adăugatînfooter-ul⣠românesc,\"Legislation            \"Legislation\"înfooter                                        ⢀⣀ Typing · 10s (esc twice to interrupt)                                      ──────────────────────────────────────────────────────(bypass permissions on)─❭ Guide Devin while it works                                                    ────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                  ctrl+v to paste image in clipboard-ulenglezesc ✅ Navegație - Butonul \"Legislație\" adăugat în footer-ul românesc,",
+    " \"Legislation\" în footer-ul englezesc",
+    " ✅ *Curățenie",
+    "⢀⣀ Typing · 10s (esc twice to interrupt)",
+    "────────────────────────────────────────────────────── (bypass permissions on) ─",
+    "❭ Guide Devin while it works",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                  ctrl+v to paste image in clipboardCurățenie - docs/do ⣀⡀cument-de-re ferinta-hr.md șters(er⣄⠀aobsolet) ✅ Curățenie -  docs/document-de-referinta-hr.md  șters (era obsolet)",
+    " Pagina este",
+    "⣄⠀ Typing · 10s (esc twice to interrupt)",
+    "────────────────────────────────────────────────────── (bypass permissions on) ─",
+    "❭ Guide Devin while it works",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                  ctrl+v to paste image in clipboardpregătitălo⡆⠀calîn site/leg islatie.html și site/e ⠇n/legislation .html .Totu                                        ⠇⠀ Typing · 10s (esc twice to interrupt)                                      ──────────────────────────────────────────────────────(bypass permissions on)─❭ Guide Devin while it works                                                    ────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                  ctrl+v to paste image in clipboardlașteapt⠋ăpublicareacân⠙⠀dd1ecizi⠸ Pagina este pregătită local în  site/legislatie.html  și  site/en/legislation.h",
+    " tml . Totul așteaptă publicarea când decizi tu.",
+    "────────────────────────────────────────────────────── (bypass permissions on) ─",
+    "❭ Ask Devin to build features, fix bugs, or work on your code",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                  ctrl+v to paste image in clipboard"
+  ],
+  "terminalAnswers": 2,
+  "refusedAnswers": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 70,
+      "line": "chief (devin) ready; typing the prompt"
+    },
+    {
+      "at": 75,
+      "line": "Enter pressed again: the window had not taken the text"
+    },
+    {
+      "at": 80,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 110,
+      "line": "chief idle; tasks none"
+    },
+    {
+      "at": 170,
+      "line": "the chief stopped in its terminal; the owner typed there: Da, cum recomanzi. Continuă."
+    },
+    {
+      "at": 178,
+      "line": "Enter pressed again: the window had not taken the text"
+    },
+    {
+      "at": 183,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 289,
+      "line": "chief idle; tasks none"
+    },
+    {
+      "at": 349,
+      "line": "the chief stopped in its terminal; the owner typed there: Da, cum recomanzi. Continuă."
+    },
+    {
+      "at": 357,
+      "line": "Enter pressed again: the window had not taken the text"
+    },
+    {
+      "at": 362,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 372,
+      "line": "chief idle; tasks none"
+    },
+    {
+      "at": 492,
+      "line": "quiet: the run is over"
+    }
+  ]
+}

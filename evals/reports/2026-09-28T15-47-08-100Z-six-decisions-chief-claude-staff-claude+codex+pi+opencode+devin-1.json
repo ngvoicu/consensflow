@@ -1,0 +1,431 @@
+{
+  "scenario": "six-decisions",
+  "chief": "claude",
+  "model": "claude-opus-5",
+  "effort": "high",
+  "staffEffort": "medium",
+  "staff": [
+    "claude",
+    "codex",
+    "pi",
+    "opencode",
+    "devin"
+  ],
+  "staffModels": {
+    "eval-claude-worker": "claude-haiku-4-5-20251001",
+    "eval-claude-worker-2": "claude-haiku-4-5-20251001",
+    "eval-claude-advisor": "claude-haiku-4-5-20251001",
+    "eval-claude-reviewer": "claude-haiku-4-5-20251001",
+    "eval-codex-worker": "gpt-5.6-luna",
+    "eval-codex-worker-2": "gpt-5.6-luna",
+    "eval-codex-advisor": "gpt-5.6-luna",
+    "eval-codex-reviewer": "gpt-5.6-luna",
+    "eval-pi-worker": "openrouter/meta/muse-spark-1.3",
+    "eval-pi-worker-2": "openrouter/meta/muse-spark-1.3",
+    "eval-pi-advisor": "openrouter/meta/muse-spark-1.3",
+    "eval-pi-reviewer": "openrouter/meta/muse-spark-1.3",
+    "eval-opencode-worker": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-opencode-worker-2": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-opencode-advisor": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-opencode-reviewer": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-devin-worker": "swe-1-6-slow",
+    "eval-devin-worker-2": "swe-1-6-slow",
+    "eval-devin-advisor": "swe-1-6-slow",
+    "eval-devin-reviewer": "swe-1-6-slow"
+  },
+  "run": 1,
+  "seconds": 1148,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Completează textul în română despre legislația burnout-ului (nu publica nimic)",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-worker-sandy-island"
+      },
+      {
+        "number": 5,
+        "title": "Revizuiește textul românesc despre legislație înainte de traducere (T-1)",
+        "pool": "reviewer",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-reviewer-lunar-dune"
+      },
+      {
+        "number": 2,
+        "title": "Tradu în engleză textul despre legislație (nu publica nimic)",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-codex-worker-lunar-fjord"
+      },
+      {
+        "number": 3,
+        "title": "Construiește paginile Legislație / Legislation și adaugă butonul în meniul de jos (fără publicare)",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-pi-worker-hazel-yarrow"
+      },
+      {
+        "number": 4,
+        "title": "Adaugă o notă în capul documentului de referință pentru HR (o singură modificare mică)",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-opencode-worker-keen-oriole"
+      }
+    ],
+    "parallel": 1,
+    "advice": 0,
+    "reviews": 1,
+    "questionsToHuman": [
+      {
+        "id": 4,
+        "options": true,
+        "body": "Doc HR: Ce facem cu docs/document-de-referinta-hr.md („Document de referință pentru HR, People Management & C-Suite”)?\n- Îl păstrăm ca atare: Rămâne în docs/, nemodificat. Continuă să spună scară 1–5 "
+      }
+    ],
+    "notesToHuman": [
+      {
+        "id": 6,
+        "body": "Două lucruri despre meniul de jos, ca să le știi înainte de publicare.\n\n1. Linkurile care există deja în footer — „Despre noi” (despre.html), „FAQ”\n   (faq.html) și „Contact” (contact.html), plus „Ass"
+      },
+      {
+        "id": 7,
+        "body": "Despre textul juridic — ce am pus în loc și ce rămâne în sarcina ta.\n\nPrima versiune a textului românesc a venit cu trimiteri la articole scrise ca\nfapte sigure (Codul Muncii art. 307, HG 1425/2006 ar"
+      },
+      {
+        "id": 12,
+        "body": "O decizie mică pe care am luat-o singur, ca să o știi: am cerut să se pună\nmarcaje `[de verificat]` și în paragraful de început al textului, cel scris de\nvoi — atât pe „Burnout-ul nu este recunoscut î"
+      },
+      {
+        "id": 26,
+        "body": "BILANȚ — pagina Legislație e construită, nu e gata de publicat.\n\nCE EXISTĂ ACUM\nCreate:\n  content/legislatie-ro.md      textul RO, cele trei secțiuni completate\n  content/legislation-en.md     traduce"
+      }
+    ],
+    "notesText": "Două lucruri despre meniul de jos, ca să le știi înainte de publicare.\n\n1. Linkurile care există deja în footer — „Despre noi” (despre.html), „FAQ”\n   (faq.html) și „Contact” (contact.html), plus „Assessment” (assessment.html)\n   în meniul de sus al versiunii engleze — nu duc nicăieri: paginile acelea nu\n   există în site/. După ce se face pagina nouă, „Legislație” va fi singurul\n   link funcțional din meniul de jos. Nu am pus nimic pe board pentru asta,\n   e în afara a ce mi-ai cerut; spune-mi dacă vrei să mă ocup.\n\n2. O nepotrivire între documente: site-ul (site/evaluare.html) spune că\n   echipa primește un scor între 0 și 100 plus o culoare, iar cele două\n   documente din docs/ (ghidul managerului și documentul pentru HR) spun\n   „un indicator general de risc, pe o scară de la 1 la 5”. Una dintre ele e\n   veche. Nu am atins niciuna.\nDespre textul juridic — ce am pus în loc și ce rămâne în sarcina ta.\n\nPrima versiune a textului românesc a venit cu trimiteri la articole scrise ca\nfapte sigure (Codul Muncii art. 307, HG 1425/2006 art. 19, Legea 319/2006\nart. 31, Codul Muncii art. 71-72 ș.a.) fără nicio confirmare în spate. Am\ntrimis-o înapoi: cer ca tot ce nu poate fi susținut cu certitudine să apară în\ntext ca „[de verificat: ...]”, vizibil. Un text care își arată golurile e mai\nsigur decât unul care pare verificat fără să fie. Marcajele rămân în pagină\npână le rezolvi tu — nu se publică cu ele.\n\nAm adăugat și un rând de final: textul are scop informativ și nu constituie\nconsultanță juridică. Mi s-a părut necesar pe o pagină despre legislație;\nspune-mi dacă îl vrei altfel formulat sau deloc.\n\nCe nu pot acoperi eu: nimeni din echipa care scrie textul nu e jurist, iar o\nrecitire de către altcineva verifică formularea și coerența, nu dreptul.\nÎnainte de publicare, textul ar trebui citit de cineva calificat în dreptul\nmuncii — mai ales secțiunea despre drepturile angajatului.\n\nNu se publică nimic; aștept semnalul tău, cum am stabilit.\nO decizie mică pe care am luat-o singur, ca să o știi: am cerut să se pună\nmarcaje `[de verificat]` și în paragraful de început al textului, cel scris de\nvoi — atât pe „Burnout-ul nu este recunoscut în România ca boală profesională\nde sine stătătoare”, cât și pe trimiterea la art. 175 din Codul Muncii.\n\nInițial spusesem să nu se atingă textul existent. L-am deschis pentru că\nprima afirmație e cea pe care se sprijină toată pagina, iar art. 175 ar fi\nrămas singura trimitere nemarcată dintr-un text unde toate celelalte sunt\nmarcate — ceea ce ar sugera, greșit, că tocmai aceea e verificată.\n\nMarcajele nu schimbă conținutul și dispar înainte de publicare. Dacă știi deja\ncă afirmațiile sunt corecte, scoate-le pur și simplu.\n\nAm ales tot eu, ca să nu te opresc pentru un fleac: peste tot în text\n„medicina muncii”, nu „medicină ocupațională”.\nBILANȚ — pagina Legislație e construită, nu e gata de publicat.\n\nCE EXISTĂ ACUM\nCreate:\n  content/legislatie-ro.md      textul RO, cele trei secțiuni completate\n  content/legislation-en.md     traducerea EN\n  site/legislatie.html          pagina RO\n  site/en/legislation.html      pagina EN\nModificate (doar footer-ul):\n  site/index.html · site/evaluare.html · site/en/index.html\n  → butonul „Legislație” / „Legislation”, la final, după Contact\nAdnotat, conform deciziei tale:\n  docs/document-de-referinta-hr.md — nota din capul documentului\nNeatinse: style.css, README.md, docs/ghidul-managerului.md.\nNu s-a copiat nimic pe server, nu s-a pornit niciun deploy.\n\nCE RĂMÂNE LA TINE ÎNAINTE DE PUBLICARE\n1. Cele 10 marcaje [de verificat] / [to verify], în ambele limbi:\n   - statutul legal al burnout-ului în România (2026)\n   - Codul Muncii art. 175, art. 307, art. 71 și 72\n   - Legea 319/2006 art. 3 și 6, art. 9, art. 31\n   - HG 1425/2006 art. 19\n   - OUG 158/2005, articolul aplicabil\n   - stadiul inițiativei UE privind riscurile psihosociale, la 2026\n   Pot pune un task de documentare pe board, care să încerce să confirme\n   fiecare trimitere din surse primare (legislatie.just.ro, EUR-Lex) și să\n   raporteze care rezistă și care nu — apoi o rundă care le curăță pe cele\n   confirmate și lasă marcate restul. Nu l-am pornit: spune tu dacă vrei.\n2. O citire de către cineva calificat în dreptul muncii. Recenzia pe care am\n   pus-o a verificat disciplina textului și formularea, nu dreptul.\n\nDE ACTUALIZAT ÎN ZIUA PUBLICĂRII\n3. docs/document-de-referinta-hr.md spune sus că pagina de legislație e sursa\n   actuală, iar jos, la „Ce urmează”, că pagina va exista „când va exista un\n   text verificat”. Azi ambele sunt adevărate; în ziua publicării, a doua\n   devine învechită.\n4. Footer-ul trimite la despre.html, faq.html, contact.html (și about.html în\n   EN), care nu există; la fel assessment.html din meniul de sus EN.\n   Legislație va fi singurul link funcțional din meniul de jos.\n5. Site-ul spune scor 0-100 plus culoare (evaluare.html), iar cele două\n   documente din docs/ spun scară 1-5. Una e veche.\n\nCE AM DECIS SINGUR (toate ușor de întors)\n- marcaje [de verificat] și în paragraful scris de voi — art. 175 ar fi rămas\n  altfel singura trimitere nemarcată, sugerând fals că tocmai aceea e sigură;\n- „medicina muncii” peste tot, nu „medicină ocupațională”;\n- <h1> scurt pe paginile noi („Legislație” / „Legislation”), ca la „Evaluarea”;\n- rândul final: textul are scop informativ, nu e consultanță juridică.\n\nNu mai pun nimic pe board până nu-mi spui. Pagina se publică doar când zici tu.",
+    "longestResult": {
+      "worker": 2241,
+      "advisor": 0,
+      "reviewer": 3478
+    },
+    "answersToChief": [
+      80
+    ],
+    "taskCount": 5,
+    "chiefId": 2,
+    "chiefHarness": "claude-code",
+    "humanId": 1,
+    "chiefTurns": 52,
+    "chiefEdits": 0,
+    "chiefLastWords": "Gata tot ce se putea face fără tine. Bilanțul complet ți l-am trimis ca notă pe board (m-26); pe scurt:\n\n**Există acum:** textul RO completat și tradus în EN (`content/`), cele două pagini (`site/legislatie.html`, `site/en/legislation.html`), butonul din meniul de jos pe toate paginile, și nota din documentul HR conform deciziei tale. `style.css`, `README.md` și ghidul managerului — neatinse. Nimic copiat pe server.\n\n**Pagina nu e gata de publicat**, și asta e intenționat. Ai cerut textul „terminat\"; ce ai e un text cu **10 goluri marcate** `[de verificat]` — nouă trimiteri la articole plus stadiul inițiativei UE. Niciunul dintre cei care au scris nu a putut confirma articolele din surse primare, și am preferat golurile vizibile în locul unor referințe plauzibile dar neverificate. Două dintre marcaje sunt în paragraful scris de voi.\n\n**Îți trebuie o decizie:** pot pune pe board un task de documentare care să încerce să confirme fiecare trimitere din surse primare (legislatie.just.ro, EUR-Lex) și să raporteze care rezistă — apoi o rundă care le curăță pe cele confirmate. Nu l-am pornit. Separat, textul ar trebui citit de cineva calificat în dreptul muncii; recenzia pe care am pus-o a verificat disciplina și formularea, nu dreptul.\n\nTrei lucruri devin învechite în ziua publicării — linia „Ce urmează\" din documentul HR, linkurile moarte din footer și nepotrivirea 0–100 vs. 1–5 — le ai listate în notă.\n\nNu mai pun nimic pe board până nu-mi spui.",
+    "plumbing": {
+      "briefs": 10,
+      "briefsDelivered": 10,
+      "results": 10,
+      "resultsDelivered": 10,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 5,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0,
+      "ownerQuestions": 1,
+      "ownerQuestionsAnswered": 1
+    },
+    "filesChanged": [
+      "content/legislatie-ro.md",
+      "content/legislation-en.md",
+      "docs/document-de-referinta-hr.md",
+      "site/en/index.html",
+      "site/en/legislation.html",
+      "site/evaluare.html",
+      "site/index.html",
+      "site/legislatie.html"
+    ]
+  },
+  "checks": [
+    {
+      "name": "the owner is asked on the board, at least three questions",
+      "ok": false
+    },
+    {
+      "name": "at least one question offers options",
+      "ok": true
+    },
+    {
+      "name": "a finding reaches the owner as a note",
+      "ok": true
+    },
+    {
+      "name": "at least two tasks go on the board",
+      "ok": true
+    },
+    {
+      "name": "two tasks run side by side at some point",
+      "ok": false
+    },
+    {
+      "name": "finished work goes to a review",
+      "ok": true
+    },
+    {
+      "name": "the chief's own edits stay under ten (counted for a Claude chief only)",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (10/10)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (10/10)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question the chief put to the owner got the owner's answer (1/1)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (5/5)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "„terminat\";ceaieuntextcu10 goluri marcate[de verificat]—nouă────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           124790 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "trimiterilaarticoleplusstadiulinițiativeiUE.Niciunuldintreceicareau────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           124790 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "scrisnuapututconfirmaarticoleledinsurseprimare,șiampreferat────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           124790 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "golurilevizibileînloculunorreferințeplauzibiledarneverificate.Două────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           124790 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "dintremarcajesuntînparagrafulscrisdevoi.❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus124790tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Îți trebuie o decizie:potpunepeboarduntaskdedocumentarecaresă────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           124790 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "încercesăconfirmefiecaretrimiteredinsurseprimare(legislatie.just.ro,────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           124790 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "EUR-Lex)șisăraportezecarerezistă—apoiorundăcarelecurățăpecele────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           124790 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "confirmate.Nul-ampornit.Separat,textulartrebuicititdecineva────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           124790 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "calificatîndreptulmuncii;recenziapecareampus-oaverificatdisciplina────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           124790 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "șiformularea,nudreptul.❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus124790tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Treilucruridevinînvechiteînziuapublicării—linia„Ceurmează\"din────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           124790 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "documentulHR,linkurilemoartedinfooterșinepotrivirea0–100vs.1–5—le────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           124790 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "ailistateînnotă.❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus124790tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Numaipunnimicpeboardpânănu-mispui.· Fluttering… (1m 43s · ↓3.0k tokens)  ⎿  Tip: Run /install-github-app to tag @claude right from your Github issues    and PRs",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "❯",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus124841tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Fluttering…running Stop hook · 1m 43s · ↓3.0k tokens)5472",
+    "✻Cooked for 1m 43s · done 6:45 PM────────────────────────────────────────────────────────────────────────────────❯   workspace Opus125472 tokens  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent                /rc"
+  ],
+  "terminalAnswers": 0,
+  "followUpsSent": 0,
+  "refusedAnswers": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 70,
+      "line": "chief (claude) ready; typing the prompt"
+    },
+    {
+      "at": 80,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 191,
+      "line": "chief working; tasks T-1:working"
+    },
+    {
+      "at": 206,
+      "line": "chief working; tasks T-1:working T-2:open"
+    },
+    {
+      "at": 226,
+      "line": "chief working; tasks T-1:working T-2:open T-3:open"
+    },
+    {
+      "at": 246,
+      "line": "chief working; tasks T-1:done T-2:open T-3:open"
+    },
+    {
+      "at": 281,
+      "line": "chief working; tasks T-1:working T-2:open T-3:open"
+    },
+    {
+      "at": 286,
+      "line": "answered m-4 (Doc HR: Ce facem cu docs/document-de-referinta-hr.md („Document de ref) with: Îl păstrăm, dar pune sus o notă că pagina de legislație e sursa actuală."
+    },
+    {
+      "at": 306,
+      "line": "chief working; tasks T-1:working T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 341,
+      "line": "chief working; tasks T-1:done T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 376,
+      "line": "chief working; tasks T-1:done T-5:queued T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 381,
+      "line": "chief working; tasks T-1:done T-5:working T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 396,
+      "line": "chief idle; tasks T-1:done T-5:working T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 421,
+      "line": "chief idle; tasks T-1:done T-5:done T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 426,
+      "line": "chief working; tasks T-1:done T-5:done T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 451,
+      "line": "chief working; tasks T-1:working T-5:done T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 456,
+      "line": "chief working; tasks T-1:working T-5:accepted T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 471,
+      "line": "chief idle; tasks T-1:working T-5:accepted T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 486,
+      "line": "chief idle; tasks T-1:done T-5:accepted T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 491,
+      "line": "chief working; tasks T-1:done T-5:accepted T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 516,
+      "line": "chief working; tasks T-1:working T-5:accepted T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 521,
+      "line": "chief idle; tasks T-1:working T-5:accepted T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 531,
+      "line": "chief working; tasks T-1:done T-5:accepted T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 536,
+      "line": "chief working; tasks T-1:accepted T-5:accepted T-2:queued T-3:open T-4:open"
+    },
+    {
+      "at": 541,
+      "line": "chief working; tasks T-1:accepted T-5:accepted T-2:working T-3:open T-4:open"
+    },
+    {
+      "at": 546,
+      "line": "chief idle; tasks T-1:accepted T-5:accepted T-2:working T-3:open T-4:open"
+    },
+    {
+      "at": 651,
+      "line": "chief working; tasks T-1:accepted T-5:accepted T-2:done T-3:open T-4:open"
+    },
+    {
+      "at": 682,
+      "line": "chief working; tasks T-1:accepted T-5:accepted T-2:queued T-3:open T-4:open"
+    },
+    {
+      "at": 687,
+      "line": "chief idle; tasks T-1:accepted T-5:accepted T-2:working T-3:open T-4:open"
+    },
+    {
+      "at": 792,
+      "line": "chief working; tasks T-1:accepted T-5:accepted T-2:done T-3:open T-4:open"
+    },
+    {
+      "at": 802,
+      "line": "chief working; tasks T-1:accepted T-5:accepted T-2:accepted T-3:working T-4:open"
+    },
+    {
+      "at": 807,
+      "line": "chief idle; tasks T-1:accepted T-5:accepted T-2:accepted T-3:working T-4:open"
+    },
+    {
+      "at": 842,
+      "line": "chief idle; tasks T-1:accepted T-5:accepted T-2:accepted T-3:done T-4:open"
+    },
+    {
+      "at": 847,
+      "line": "chief working; tasks T-1:accepted T-5:accepted T-2:accepted T-3:done T-4:open"
+    },
+    {
+      "at": 882,
+      "line": "chief working; tasks T-1:accepted T-5:accepted T-2:accepted T-3:working T-4:open"
+    },
+    {
+      "at": 892,
+      "line": "chief working; tasks T-1:accepted T-5:accepted T-2:accepted T-3:done T-4:open"
+    },
+    {
+      "at": 902,
+      "line": "chief idle; tasks T-1:accepted T-5:accepted T-2:accepted T-3:accepted T-4:working"
+    },
+    {
+      "at": 922,
+      "line": "chief working; tasks T-1:accepted T-5:accepted T-2:accepted T-3:accepted T-4:done"
+    },
+    {
+      "at": 937,
+      "line": "chief working; tasks T-1:accepted T-5:accepted T-2:accepted T-3:accepted T-4:accepted"
+    },
+    {
+      "at": 1027,
+      "line": "chief idle; tasks T-1:accepted T-5:accepted T-2:accepted T-3:accepted T-4:accepted"
+    },
+    {
+      "at": 1148,
+      "line": "quiet: the run is over"
+    }
+  ]
+}

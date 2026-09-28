@@ -100,3 +100,20 @@ before that column existed.
 | 2026-09-27T23-24 | long-trip | devin (devin's default, default) | opencode (medium) | 1/10 | 7/7 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 0 | 0 | 30 |
 | 2026-09-27T23-27 | long-trip | devin (devin's default, default) | devin (medium) | 1/10 | 7/7 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 0 | 0 | 3 |
 | 2026-09-27T23-48 | long-trip | claude (claude-opus-5, high) | pi (medium) | 10/10 | 7/7 | 3 | 3 | 1 | 1 | 1 | 1 | 0 | 0 | 0 | 19 |
+| 2026-09-28T08-30 | six-decisions | claude (claude-opus-5, high) | claude+codex+pi+opencode+devin (medium) | 6/7 | 7/7 | 5 | 2 | 0 | 2 | 4 | 5 | 0 | 8 | 0 | 40 |
+| 2026-09-28T09-10 | six-decisions | codex (gpt-5.6-sol, high) | claude+codex+pi+opencode+devin (medium) | 6/7 | 7/7 | 12 | 3 | 1 | 3 | 2 | 16 | ? | 14 | 0 | 40 |
+| 2026-09-28T09-51 | six-decisions | pi (pi's default, high) | claude+codex+pi+opencode+devin (medium) | 4/7 | 7/7 | 4 | 3 | 0 | 0 | 1 | 1 | ? | 1 | 0 | 40 |
+| 2026-09-28T10-00 | six-decisions | opencode (openrouter/deepseek/deepseek-v4.1-flash, default) | claude+codex+pi+opencode+devin (medium) | 7/7 | 7/7 | 5 | 5 | 0 | 1 | 4 | 2 | ? | 2 | 0 | 9 |
+| 2026-09-28T10-08 | six-decisions | devin (devin's default, default) | claude+codex+pi+opencode+devin (medium) | 1/7 | 7/7 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 6 | 2 | 8 |
+| 2026-09-28T13-20 | conversation | claude (claude-opus-5, high) | claude+codex+pi+opencode+devin (medium) | 2/4 | 7/7 | 0 | 0 | 0 | 0 | 1 | 0 | 0 | 7 | 0 | 12 |
+| 2026-09-28T13-35 | conversation | codex (gpt-5.6-sol, high) | claude+codex+pi+opencode+devin (medium) | 4/4 | 7/7 | 5 | 1 | 0 | 2 | 1 | 9 | ? | 6 | 0 | 15 |
+| 2026-09-28T14-06 | conversation | claude (claude-opus-5, high) | claude+codex+pi+opencode+devin (medium) | 3/3 | 7/7 | 6 | 1 | 0 | 0 | 1 | 8 | 0 | 7 | 0 | 32 |
+| 2026-09-28T14-29 | conversation | codex (gpt-5.6-sol, high) | claude+codex+pi+opencode+devin (medium) | 3/3 | 7/7 | 12 | 1 | 0 | 6 | 0 | 8 | ? | 5 | 0 | 23 |
+| 2026-09-28T15-09 | conversation | pi (pi's default, high) | claude+codex+pi+opencode+devin (medium) | 3/3 | 6/7 | 5 | 1 | 0 | 0 | 1 | 4 | ? | 4 | 0 | 40 |
+| 2026-09-28T15-19 | conversation | opencode (openrouter/deepseek/deepseek-v4.1-flash, default) | claude+codex+pi+opencode+devin (medium) | 2/3 | 7/7 | 6 | 1 | 0 | 0 | 3 | 7 | ? | 5 | 0 | 10 |
+| 2026-09-28T15-28 | conversation | devin (devin's default, default) | claude+codex+pi+opencode+devin (medium) | 0/3 | 7/7 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 6 | 0 | 8 |
+| 2026-09-28T15-47 | six-decisions | claude (claude-opus-5, high) | claude+codex+pi+opencode+devin (medium) | 5/7 | 7/7 | 5 | 1 | 0 | 1 | 1 | 4 | 0 | 8 | 0 | 19 |
+| 2026-09-28T16-19 | six-decisions | codex (gpt-5.6-sol, high) | claude+codex+pi+opencode+devin (medium) | 6/7 | 6/7 | 4 | 2 | 1 | 1 | 1 | 6 | ? | 9 | 0 | 32 |
+| 2026-09-28T16-59 | six-decisions | pi (pi's default, high) | claude+codex+pi+opencode+devin (medium) | 5/7 | 6/7 | 9 | 7 | 0 | 4 | 1 | 1 | ? | 2 | 0 | 40 |
+| 2026-09-28T17-12 | six-decisions | opencode (openrouter/deepseek/deepseek-v4.1-flash, default) | claude+codex+pi+opencode+devin (medium) | 6/7 | 6/7 | 9 | 2 | 0 | 2 | 2 | 1 | ? | 8 | 0 | 13 |
+| 2026-09-28T17-20 | six-decisions | devin (devin's default, default) | claude+codex+pi+opencode+devin (medium) | 1/7 | 7/7 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 7 | 2 | 8 |

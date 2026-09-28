@@ -1,0 +1,486 @@
+{
+  "scenario": "conversation",
+  "chief": "claude",
+  "model": "claude-opus-5",
+  "effort": "high",
+  "staffEffort": "medium",
+  "staff": [
+    "claude",
+    "codex",
+    "pi",
+    "opencode",
+    "devin"
+  ],
+  "staffModels": {
+    "eval-claude-worker": "claude-haiku-4-5-20251001",
+    "eval-claude-worker-2": "claude-haiku-4-5-20251001",
+    "eval-claude-advisor": "claude-haiku-4-5-20251001",
+    "eval-claude-reviewer": "claude-haiku-4-5-20251001",
+    "eval-codex-worker": "gpt-5.6-luna",
+    "eval-codex-worker-2": "gpt-5.6-luna",
+    "eval-codex-advisor": "gpt-5.6-luna",
+    "eval-codex-reviewer": "gpt-5.6-luna",
+    "eval-pi-worker": "openrouter/meta/muse-spark-1.3",
+    "eval-pi-worker-2": "openrouter/meta/muse-spark-1.3",
+    "eval-pi-advisor": "openrouter/meta/muse-spark-1.3",
+    "eval-pi-reviewer": "openrouter/meta/muse-spark-1.3",
+    "eval-opencode-worker": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-opencode-worker-2": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-opencode-advisor": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-opencode-reviewer": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-devin-worker": "swe-1-6-slow",
+    "eval-devin-worker-2": "swe-1-6-slow",
+    "eval-devin-advisor": "swe-1-6-slow",
+    "eval-devin-reviewer": "swe-1-6-slow"
+  },
+  "run": 1,
+  "seconds": 1897,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Corectează scara scorului de risc în două documente, ca să fie consecventă cu site-ul.",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-worker-silver-dune"
+      },
+      {
+        "number": 2,
+        "title": "Adaugă în subsolul paginii principale române un link către pagina de evaluare.",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-codex-worker-frosty-quarry"
+      },
+      {
+        "number": 3,
+        "title": "Mută culorile hardcodate din site/style.css în variabile CSS pe :root.",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-pi-worker-olive-comet"
+      },
+      {
+        "number": 4,
+        "title": "Creează versiunea în engleză a paginii de evaluare, la site/en/evaluare.html, și",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-opencode-worker-noble-island"
+      },
+      {
+        "number": 5,
+        "title": "Schimbă elementul <title> al paginii principale române.",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-devin-worker-brisk-canyon"
+      },
+      {
+        "number": 6,
+        "title": "Adaugă în README.md o secțiune scurtă cu modificările făcute azi, 2026-09-28.",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-worker-2-jolly-dune"
+      }
+    ],
+    "parallel": 1,
+    "advice": 0,
+    "reviews": 0,
+    "questionsToHuman": [
+      {
+        "id": 2,
+        "options": true,
+        "body": "Scara: Care scară este cea corectă, pe care s-o aplic în tot proiectul?\n- 0–100 (Recommended): Cum e deja pe site în site/evaluare.html. Se schimbă doar cele două documente (ghidul managerului + docum"
+      }
+    ],
+    "notesToHuman": [
+      {
+        "id": 1,
+        "body": "Inventar site: există doar 3 pagini — site/index.html (RO), site/evaluare.html (RO), site/en/index.html (EN), plus site/style.css. Constatare: 7 linkuri din nav/footer duc la pagini inexistente — desp"
+      },
+      {
+        "id": 6,
+        "body": "T-1 acceptat. Scara scorului este acum 0-100 în ambele documente:\ndocs/ghidul-managerului.md:5 și docs/document-de-referinta-hr.md:12-13.\nsite/evaluare.html nu a fost atins (era deja corect, 0 și 100)"
+      },
+      {
+        "id": 9,
+        "body": "T-2 acceptat. Subsolul paginii principale RO (site/index.html, linia 22) are acum\nlinkul „Evaluare\" pe prima poziție: Evaluare · Despre noi · FAQ · Contact.\n\nVerificat de mine direct: 2 referințe href"
+      },
+      {
+        "id": 12,
+        "body": "T-3 acceptat. site/style.css are acum un bloc :root la început, cu două variabile:\n--color-text: #222 și --color-border: #ddd. Cele 3 apariții hardcodate s-au\nînlocuit cu var(): color în body, border "
+      },
+      {
+        "id": 15,
+        "body": "T-4 acceptat. Site-ul are acum 4 pagini: site/index.html, site/evaluare.html,\nsite/en/index.html, site/en/evaluare.html (nou, 15 linii, oglinda paginii RO).\nNavigația EN trimite spre evaluare.html; as"
+      },
+      {
+        "id": 18,
+        "body": "T-5 acceptat. site/index.html linia 5 este acum:\n  <title>Burnout la locul de muncă — ghid pentru manageri</title>\n\nVerificat de mine direct: separatorul este em dash U+2014 (octeții e2 80 94), cu\nspa"
+      },
+      {
+        "id": 19,
+        "body": "Verificarea linkurilor interne, făcută de mine (nu prin board): am extras fiecare\nhref/src din cele 4 pagini HTML, l-am rezolvat relativ la fișierul din care pleacă\nși l-am căutat pe disc. 23 de linku"
+      },
+      {
+        "id": 22,
+        "body": "T-6 acceptat. README.md are acum 21 de linii: cele 7 originale, plus o secțiune\n„## Changes\" / „### 2026-09-28\" cu 4 puncte — scara scorului în cele două documente,\ncele două schimbări din site/index."
+      }
+    ],
+    "notesText": "Inventar site: există doar 3 pagini — site/index.html (RO), site/evaluare.html (RO), site/en/index.html (EN), plus site/style.css. Constatare: 7 linkuri din nav/footer duc la pagini inexistente — despre.html, faq.html, contact.html (RO, în ambele pagini) și en/assessment.html, en/about.html, en/faq.html, en/contact.html. În plus, evaluare.html nu are navigație sus, doar titlul.\nT-1 acceptat. Scara scorului este acum 0-100 în ambele documente:\ndocs/ghidul-managerului.md:5 și docs/document-de-referinta-hr.md:12-13.\nsite/evaluare.html nu a fost atins (era deja corect, 0 și 100). Am verificat eu\ndirect ambele fișiere: în afara acelor linii nu s-a schimbat nimic altceva, nici\ndata de revizie, iar ruperea rândurilor și diacriticele s-au păstrat.\n\nO observație despre verificare, nu despre rezultat: comanda de verificare din\nbrief-ul meu era greșită. Am cerut grep pe \"0 la 100\" și am prezis două\npotriviri, dar în documentul HR fraza e ruptă pe două rânduri (\"de la 0\" /\n\"la 100,\"), deci acel pattern nu poate potrivi acolo niciodată. Worker-ul a\nlărgit pattern-ul ca să acopere ruperea și a raportat acel output, fără să arate\ncă schimbase comanda. Rezultatul lui este reproductibil și corect; lipsea doar\nmenționarea schimbării. Pentru brief-urile viitoare: când textul verificat poate\nfi rupt pe două rânduri, cer grep -A1 sau diff, nu un pattern pe un singur rând.\nT-2 acceptat. Subsolul paginii principale RO (site/index.html, linia 22) are acum\nlinkul „Evaluare\" pe prima poziție: Evaluare · Despre noi · FAQ · Contact.\n\nVerificat de mine direct: 2 referințe href=\"evaluare.html\" în site/index.html\n(header + subsol), 0 în site/en/index.html. site/evaluare.html, site/en/index.html\nși site/style.css neatinse; cele trei linkuri fără pagină au rămas exact cum erau.\nRaportul worker-ului s-a potrivit cu verificarea mea, iar comanda suplimentară de\ndiff a fost arătată întreagă.\n\nDecizii pe care le-am luat singur: doar pagina RO, fiindcă în EN pagina țintă\n(en/assessment.html) nu există și linkul ar fi fost mort.\n\nRămâne deschis: cele 7 linkuri din nav/footer către pagini inexistente\n(despre.html, faq.html, contact.html în RO; assessment.html, about.html, faq.html,\ncontact.html în EN). Aștept decizia ta: paginile create, sau linkurile scoase.\nT-3 acceptat. site/style.css are acum un bloc :root la început, cu două variabile:\n--color-text: #222 și --color-border: #ddd. Cele 3 apariții hardcodate s-au\nînlocuit cu var(): color în body, border în .cards article, border-top în footer.\nFișierul a trecut de la 26 la 30 de linii.\n\nVerificat de mine direct: singurele culori literale rămase sunt cele două din\n:root; 3 utilizări var(--color-*); restul regulilor (dimensiuni, font, grid)\nidentice cu originalul; cele trei fișiere HTML neschimbate. Randarea este\nidentică — aceleași valori, doar prin var(). Raportul worker-ului s-a potrivit\nexact cu verificarea mea, cu comenzile arătate întregi.\n\nNotă de scală, pentru context: „scrise direct peste tot\" erau 3 apariții a 2\nvalori. Extragerea e corectă, dar câștigul e mic deocamdată; devine util când\napar culori de accent sau stările verde/galben/portocaliu/roșu ale scorului, care\nîncă nu există în CSS deși site-ul le descrie.\n\nRămâne deschis: cele 7 linkuri din nav/footer către pagini inexistente.\nT-4 acceptat. Site-ul are acum 4 pagini: site/index.html, site/evaluare.html,\nsite/en/index.html, site/en/evaluare.html (nou, 15 linii, oglinda paginii RO).\nNavigația EN trimite spre evaluare.html; assessment.html nu mai apare nicăieri.\n\nVerificat de mine direct: fișierul nou este identic cu textul din brief; ../style.css\nse resolvă corect din site/en/; ortografie britanică („colour\"); scorul „0 and 100\";\nfișierele RO neatinse (26/15/30 linii). Raportul worker-ului s-a potrivit exact.\n\nActualizare la numărătoarea linkurilor moarte, din inventarul de la început: nu mai\nsunt 7 ci 6 pagini lipsă, fiindcă en/assessment.html s-a rezolvat prin T-4. Lipsesc:\ndespre.html, faq.html, contact.html (RO) și en/about.html, en/faq.html,\nen/contact.html. Ele sunt referite din subsolul fiecăreia din cele 4 pagini.\n\nRămân deschise două lucruri, amândouă ale tale de decis:\n1. Paginile lipsă: create, sau linkurile scoase până există.\n2. Navigație în header pe ambele pagini de evaluare, RO și EN. Acum niciuna nu are\n   drum de întoarcere spre Acasă și nici comutare între limbi; paginile principale au.\nT-5 acceptat. site/index.html linia 5 este acum:\n  <title>Burnout la locul de muncă — ghid pentru manageri</title>\n\nVerificat de mine direct: separatorul este em dash U+2014 (octeții e2 80 94), cu\nspațiu normal de o parte și de alta, același caracter ca în site/evaluare.html;\n<h1> de pe linia 10 a rămas „Burnout la locul de muncă\"; navigația și subsolul\nneatinse; 26 de linii; site/en/index.html nemodificat. Raportul worker-ului s-a\npotrivit exact.\n\nTitlurile site-ului acum:\n  site/index.html        title: Burnout la locul de muncă — ghid pentru manageri | h1: Burnout la locul de muncă\n  site/evaluare.html     title: Evaluare — Burnout la locul de muncă             | h1: Evaluarea\n  site/en/index.html     title: Burnout at Work                                  | h1: Burnout at Work\n  site/en/evaluare.html  title: Assessment — Burnout at Work                     | h1: The assessment\n\nTrei lucruri așteaptă decizia ta:\n1. Paginile lipsă (6): despre.html, faq.html, contact.html în RO; en/about.html,\n   en/faq.html, en/contact.html. Create, sau linkurile scoase până există.\n2. Navigație în header pe cele două pagini de evaluare, RO și EN.\n3. „Ghid pentru manageri\" ca direcție: acum apare doar în title-ul RO, în timp ce\n   textul paginii descrie un program pentru echipe, iar docs/ghidul-managerului.md\n   este un document separat, nepublicat. Dacă asta e direcția, textul paginii sau\n   publicarea ghidului ar trebui să urmeze. Dacă era doar un title mai descriptiv\n   pentru căutare, e complet.\nVerificarea linkurilor interne, făcută de mine (nu prin board): am extras fiecare\nhref/src din cele 4 pagini HTML, l-am rezolvat relativ la fișierul din care pleacă\nși l-am căutat pe disc. 23 de linkuri interne în total.\n\nMERG (11): toate cele 5 referințe către style.css (inclusiv ../style.css din\nsite/en/), și toate cele 6 linkuri de navigație din header-ele paginilor principale:\nRO index -> evaluare.html, en/index.html; EN index -> evaluare.html, ../index.html;\nplus linkul „Evaluare\" din subsolul RO adăugat prin T-2.\n\nRUPTE (12 apariții, 6 fișiere lipsă). Toate sunt în subsoluri, toate cele 4 pagini\nau același set:\n  site/despre.html      <- site/index.html:22, site/evaluare.html:13\n  site/faq.html         <- site/index.html:22, site/evaluare.html:13\n  site/contact.html     <- site/index.html:22, site/evaluare.html:13\n  site/en/about.html    <- site/en/index.html:22, site/en/evaluare.html:13\n  site/en/faq.html      <- site/en/index.html:22, site/en/evaluare.html:13\n  site/en/contact.html  <- site/en/index.html:22, site/en/evaluare.html:13\n\nDeci fiecare pagină are un subsol în care 3 din 3 linkuri sunt moarte (4 din 4 la\npagina principală RO, unde unul merge). Niciun link rupt nu este o greșeală de\nscriere: toate țintesc pagini care pur și simplu nu au fost făcute încă.\n\nAlte constatări din aceeași verificare:\n- Nicio problemă de majuscule: toate numele de fișier sunt minuscule, deci nu apar\n  linkuri care merg pe macOS și se rup pe un server Linux.\n- Toate cele 4 pagini sunt accesibile plecând de la pagina principală RO.\n- Cele două pagini de evaluare sunt fundături: din ele pleacă DOAR cele 3 linkuri\n  moarte din subsol. Nu au nici întoarcere la Acasă, nici comutare RO<->EN. Cine\n  intră direct pe ele, din căutare, rămâne blocat. Acesta este singurul defect de\n  navigație care nu depinde de paginile lipsă: se rezolvă adăugând un <nav> în\n  header, cu linkuri care există deja.\nT-6 acceptat. README.md are acum 21 de linii: cele 7 originale, plus o secțiune\n„## Changes\" / „### 2026-09-28\" cu 4 puncte — scara scorului în cele două documente,\ncele două schimbări din site/index.html, variabilele CSS, pagina EN nouă împreună cu\nlinkul de navigație corectat.\n\nVerificat de mine direct:\n- liniile 1-7 sunt identice octet cu octet (sha256 al celor 7 linii se potrivește cu\n  cel al textului original);\n- liniuțele sunt corecte, verificate prin scanare de codepoint-uri: linia 17 are em\n  dash U+2014 în titlul românesc, linia 14 are en dash U+2013 în „1–5\" și „0–100\";\n- „colours\" britanic, zero apariții de „colors\";\n- 4 puncte, titlurile exacte, fișierul se termină cu un singur caracter de linie nouă;\n- niciun alt fișier atins: site/ (26/15/26/15/30), docs/ (9/17), content/ neschimbate.\n\nRaportul worker-ului s-a potrivit exact cu verificarea mea.\n\nCe NU este în README, intenționat, fiindcă e „ce lipsește\", nu „ce s-a schimbat\":\ncele 6 pagini lipsă și faptul că ambele pagini de evaluare sunt fundături. Dacă vrei,\nadaug o secțiune „Known gaps\" ca task separat.\n\nRămân deschise, toate ale tale de decis:\n1. Cele 6 pagini lipsă: create, sau linkurile scoase.\n2. Navigație în header pe cele două pagini de evaluare (recomandarea mea: asta prima,\n   e mică și nu depinde de nimic).\n3. „Ghid pentru manageri\" ca direcție, plus oglinda EN a title-ului.",
+    "longestResult": {
+      "worker": 1763,
+      "advisor": 0,
+      "reviewer": 0
+    },
+    "answersToChief": [
+      26
+    ],
+    "taskCount": 6,
+    "chiefId": 2,
+    "chiefHarness": "claude-code",
+    "humanId": 1,
+    "chiefTurns": 55,
+    "chiefEdits": 0,
+    "chiefLastWords": "Gata, T-6 acceptat. README.md are acum 21 de linii — cele 7 originale, neatinse, plus:\n\n```markdown\n## Changes\n\n### 2026-09-28\n\n- The risk score scale in `docs/ghidul-managerului.md` and\n  `docs/document-de-referinta-hr.md` was corrected from 1–5 to 0–100,\n  matching `site/evaluare.html`.\n- `site/index.html`: an \"Evaluare\" link was added to the footer, and the\n  `<title>` is now \"Burnout la locul de muncă — ghid pentru manageri\".\n- `site/style.css`: the three hard-coded colours moved to two CSS variables\n  on `:root` (`--color-text`, `--color-border`); rendering is unchanged.\n- `site/en/evaluare.html` is new, the English assessment page. The EN header\n  nav now points to it instead of the missing `assessment.html`.\n```\n\nVerificat de mine: liniile 1–7 identice octet cu octet (hash-ul se potrivește), liniuțele corecte prin scanare de codepoint-uri — em dash U+2014 în titlul românesc, en dash U+2013 în intervale — și niciun alt fișier atins.\n\n**Ce am lăsat afară intenționat:** paginile lipsă și fundăturile de navigație. Alea sunt ce lipsește, nu ce s-a schimbat. Dacă vrei un „Known gaps\" în README, e un task mic separat.\n\nRămân aceleași trei fire deschise, nemișcate de trei runde. Recomand să începem cu **navigația pe cele două pagini de evaluare** — e mică, repară o problemă reală și nu depinde de nicio decizie de conținut. Zi doar „da\" și o pun pe board.",
+    "plumbing": {
+      "briefs": 6,
+      "briefsDelivered": 6,
+      "results": 6,
+      "resultsDelivered": 6,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 6,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0,
+      "ownerQuestions": 1,
+      "ownerQuestionsAnswered": 1
+    },
+    "filesChanged": [
+      "README.md",
+      "docs/document-de-referinta-hr.md",
+      "docs/ghidul-managerului.md",
+      "site/en/evaluare.html",
+      "site/en/index.html",
+      "site/index.html",
+      "site/style.css"
+    ]
+  },
+  "checks": [
+    {
+      "name": "at least three changes go to the board",
+      "ok": true
+    },
+    {
+      "name": "the English page is a worker’s (a translation runs on its own)",
+      "ok": true
+    },
+    {
+      "name": "the work is done: the English evaluation page exists",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (6/6)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (6/6)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question the chief put to the owner got the owner's answer (1/1)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (6/6)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "✢",
+    "·",
+    "✢5",
+    "✳",
+    "⏺",
+    "✶",
+    "✻",
+    "✽",
+    "✻6",
+    "✶",
+    "✳",
+    "✢",
+    "⏺",
+    "·",
+    "✢7",
+    "✳",
+    "✶",
+    "✻",
+    "✽",
+    "⏺",
+    "✻8",
+    "✶",
+    "✳",
+    " ✢",
+    "⏺  ⎿  ✔ Advisor has reviewed the conversation and will apply the feedback✢ Enchanting… (2m18s · ↓ 825 tokens)  ⎿  Tip: Runnin multiple Claude sessions? Use /color and /rename to tell them apart at a glance.────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           91429 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "⏺✢Enchanting… (2m 18s · ↓825 tokens)  ⎿  Tip: Running multiple Claude sessions? Use /color and /rename to tell them      apart at a glance.❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus91429tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "·",
+    "✢9",
+    "✳Enchanting… 6",
+    "✶",
+    "✻",
+    "✽",
+    "8",
+    "Punpeboard.Iau„titlul\"cafiindelementul<title>—astaeșisensul",
+    "30",
+    "✻201",
+    "✶\u001b[38;2"
+  ],
+  "terminalAnswers": 0,
+  "followUpsSent": 7,
+  "refusedAnswers": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 70,
+      "line": "chief (claude) ready; typing the prompt"
+    },
+    {
+      "at": 80,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 146,
+      "line": "chief idle; tasks none"
+    },
+    {
+      "at": 166,
+      "line": "the owner's next message (1): În site/evaluare.html scorul e de la 0 la 10, dar docs/ghidul-managerului.md zic"
+    },
+    {
+      "at": 179,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 289,
+      "line": "answered m-2 (Scara: Care scară este cea corectă, pe care s-o aplic în tot proiectul) with: 0–100 (Recommended)"
+    },
+    {
+      "at": 319,
+      "line": "chief working; tasks T-1:working"
+    },
+    {
+      "at": 329,
+      "line": "chief idle; tasks T-1:working"
+    },
+    {
+      "at": 349,
+      "line": "chief working; tasks T-1:done"
+    },
+    {
+      "at": 515,
+      "line": "chief working; tasks T-1:accepted"
+    },
+    {
+      "at": 525,
+      "line": "chief idle; tasks T-1:accepted"
+    },
+    {
+      "at": 545,
+      "line": "the owner's next message (2): Adaugă în subsolul paginii principale un link către pagina de evaluare."
+    },
+    {
+      "at": 558,
+      "line": "chief working; tasks T-1:accepted"
+    },
+    {
+      "at": 623,
+      "line": "chief working; tasks T-1:accepted T-2:working"
+    },
+    {
+      "at": 628,
+      "line": "chief idle; tasks T-1:accepted T-2:working"
+    },
+    {
+      "at": 663,
+      "line": "chief idle; tasks T-1:accepted T-2:done"
+    },
+    {
+      "at": 668,
+      "line": "chief working; tasks T-1:accepted T-2:done"
+    },
+    {
+      "at": 693,
+      "line": "chief working; tasks T-1:accepted T-2:accepted"
+    },
+    {
+      "at": 698,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted"
+    },
+    {
+      "at": 718,
+      "line": "the owner's next message (3): Culorile din site/style.css sunt scrise direct peste tot; mută-le în variabile C"
+    },
+    {
+      "at": 731,
+      "line": "chief working; tasks T-1:accepted T-2:accepted"
+    },
+    {
+      "at": 782,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:working"
+    },
+    {
+      "at": 792,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:done"
+    },
+    {
+      "at": 812,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted"
+    },
+    {
+      "at": 822,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:accepted"
+    },
+    {
+      "at": 842,
+      "line": "the owner's next message (4): Fă și versiunea în engleză a paginii de evaluare, în site/en/evaluare.html."
+    },
+    {
+      "at": 855,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted"
+    },
+    {
+      "at": 990,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:queued"
+    },
+    {
+      "at": 995,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:working"
+    },
+    {
+      "at": 1005,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:accepted T-4:working"
+    },
+    {
+      "at": 1010,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:done"
+    },
+    {
+      "at": 1046,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted"
+    },
+    {
+      "at": 1061,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted"
+    },
+    {
+      "at": 1081,
+      "line": "the owner's next message (5): Titlul paginii principale să fie „Burnout la locul de muncă — ghid pentru manage"
+    },
+    {
+      "at": 1094,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted"
+    },
+    {
+      "at": 1249,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted T-5:queued"
+    },
+    {
+      "at": 1254,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted T-5:working"
+    },
+    {
+      "at": 1259,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted T-5:working"
+    },
+    {
+      "at": 1279,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted T-5:done"
+    },
+    {
+      "at": 1304,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted T-5:accepted"
+    },
+    {
+      "at": 1319,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted T-5:accepted"
+    },
+    {
+      "at": 1339,
+      "line": "the owner's next message (6): Verifică dacă merg toate linkurile interne din site."
+    },
+    {
+      "at": 1352,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted T-5:accepted"
+    },
+    {
+      "at": 1408,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted T-5:accepted"
+    },
+    {
+      "at": 1428,
+      "line": "the owner's next message (7): Scrie în README ce s-a schimbat azi, pe scurt."
+    },
+    {
+      "at": 1441,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted T-5:accepted"
+    },
+    {
+      "at": 1526,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted T-5:accepted T-6:queued"
+    },
+    {
+      "at": 1531,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted T-5:accepted T-6:working"
+    },
+    {
+      "at": 1541,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted T-5:accepted T-6:working"
+    },
+    {
+      "at": 1576,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted T-5:accepted T-6:done"
+    },
+    {
+      "at": 1616,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted T-5:accepted T-6:accepted"
+    },
+    {
+      "at": 1776,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted T-5:accepted T-6:accepted"
+    },
+    {
+      "at": 1897,
+      "line": "quiet: the run is over"
+    }
+  ]
+}
