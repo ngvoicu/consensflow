@@ -992,7 +992,10 @@ fn signal_for_termination(pane: &mut Pane) -> Result<bool, PaneError> {
     if let Some(process_group_id) = pane.process_group_id {
         if let Err(error) = signal_process_group(process_group_id) {
             if is_permission_denied(&error) {
-                let deadline = Instant::now() + Duration::from_millis(100);
+                // macOS refuses a signal to a group left with only a dying or
+                // dead process (EPERM); a slow machine (a CI runner) takes more
+                // than a moment to show the child's exit.
+                let deadline = Instant::now() + Duration::from_secs(2);
                 while !child_exited && Instant::now() < deadline {
                     child_exited = has_exited(pane)?;
                     if !child_exited {
