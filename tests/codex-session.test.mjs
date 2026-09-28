@@ -5,7 +5,11 @@ import { join } from 'node:path'
 import { it } from 'node:test'
 import WebSocket, { WebSocketServer } from 'ws'
 import * as codexSession from '../hosts/codex-session.mjs'
-import { codexProcessArguments, startBroker } from '../hosts/codex-session.mjs'
+import {
+  codexProcessArguments,
+  consensflowShellEnvironment,
+  startBroker,
+} from '../hosts/codex-session.mjs'
 
 const A = '01a09094-938f-7fd1-a2d3-315cf92b4559'
 const B = '01a09094-a559-7db0-bf50-e2309856c3c0'
@@ -16,15 +20,17 @@ async function fixture(t, options = {}) {
   await once(upstream, 'listening')
   const requests = []
   const pending = []
-  upstream.on('connection', (socket) =>
+  const sockets = []
+  upstream.on('connection', (socket) => {
+    sockets.push(socket)
     socket.on('message', (raw) => {
       const message = JSON.parse(raw)
       requests.push(message)
       if (message.method === 'initialize')
         socket.send(JSON.stringify({ id: message.id, result: {} }))
       else if (message.id !== undefined) pending.push({ socket, message })
-    }),
-  )
+    })
+  })
   const broker = await startBroker({
     ...options,
     port: 0,
@@ -87,7 +93,7 @@ async function fixture(t, options = {}) {
     entry.socket.send(JSON.stringify({ id: entry.message.id, ...(error ? { error } : { result }) }))
     return entry.message
   }
-  return { broker, requests, pending, wait, connect, read, deliver, respond }
+  return { broker, requests, pending, sockets, wait, connect, read, deliver, respond }
 }
 
 it('Codex receiver pulls full bodies into the selected main, holds busy, and fences a concurrent new', async (t) => {
@@ -210,6 +216,52 @@ it('follows successful main new/resume while ignoring title threads, child focus
   assert.deepEqual(await delivery, { ok: true, admitted: true })
 })
 
+it('starts a turn with a delivery when the thread is idle, queues it only while a turn runs, and says when it can take one', async (t) => {
+  const f = await fixture(t)
+  const tui = await f.connect()
+  assert.equal((await f.read()).available, false, 'no thread yet')
+  tui.send(
+    JSON.stringify({
+      id: 1,
+      method: 'thread/start',
+      params: { ephemeral: false, threadSource: 'user' },
+    }),
+  )
+  await f.respond('thread/start', { thread: { id: A, status: { type: 'idle' } } })
+  await f.wait(() => f.requests.some((r) => r.id === 1))
+  assert.deepEqual([(await f.read()).sessionId, (await f.read()).available], [A, true])
+  // Idle, as after an interrupt: the message starts the turn itself.
+  const first = f.deliver(A)
+  const started = await f.respond('turn/start', { turn: { id: 'turn-1' } })
+  assert.deepEqual(
+    [started.params.threadId, started.params.input[0].text],
+    [A, 'complete\nworker result'],
+  )
+  assert.deepEqual(await first, { ok: true, admitted: true })
+  // A turn runs: the next one waits in Codex's queue.
+  const second = f.deliver(A)
+  const queued = await f.respond('thread/queue/add', { queuedMessage: { id: 'queue-1' } })
+  assert.equal(queued.params.threadId, A)
+  assert.deepEqual(await second, { ok: true, admitted: true })
+  // The turn ends (completed or interrupted): idle again, a turn again.
+  f.sockets[0].send(JSON.stringify({ method: 'turn/completed', params: { threadId: A } }))
+  await f.wait(() => true)
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  const third = f.deliver(A)
+  await f.respond('turn/start', { turn: { id: 'turn-2' } })
+  assert.deepEqual(await third, { ok: true, admitted: true })
+  // While the TUI switches threads, nothing can be taken.
+  tui.send(
+    JSON.stringify({
+      id: 2,
+      method: 'thread/resume',
+      params: { threadId: B, runtimeWorkspaceRoots: [] },
+    }),
+  )
+  await f.wait(() => f.pending.some((p) => p.message.id === 2))
+  assert.equal((await f.read()).available, false)
+})
+
 it('promotes durable forks and preserves native permission changes after the initial launch', async (t) => {
   const f = await fixture(t, { freshBypass: true })
   const tui = await f.connect()
@@ -265,7 +317,8 @@ it('consumes native empty-thread proof at admission and never forces fresh permi
   await f.respond('thread/start', { thread: { id: A, turns: [], status: { type: 'idle' } } })
   assert.equal((await f.read()).empty, true)
   const delivery = f.deliver(A)
-  await f.respond('thread/queue/add', {})
+  // An idle thread takes the delivery as its turn.
+  await f.respond('turn/start', {})
   await delivery
   assert.equal((await f.read()).empty, false)
   const resume = { threadId: B, runtimeWorkspaceRoots: [], approvalPolicy: null, sandbox: null }
@@ -324,8 +377,26 @@ it('restores a rejected switch, rejects invalid ingress, and reports a possible 
   assert.equal((await f.read()).sessionId, null)
 })
 
+it("sets ConsensFlow's own variables in Codex's shell policy, so a user policy that inherits only core ones keeps them", () => {
+  assert.deepEqual(
+    consensflowShellEnvironment({
+      CONSENSFLOW_URL: 'http://127.0.0.1:4100',
+      CONSENSFLOW_TOKEN: 'tok"en',
+      CF_CODEX_TUI_TOKEN: 'internal',
+      HOME: '/home/user',
+    }),
+    [
+      '-c',
+      'shell_environment_policy.set.CONSENSFLOW_TOKEN="tok\\"en"',
+      '-c',
+      'shell_environment_policy.set.CONSENSFLOW_URL="http://127.0.0.1:4100"',
+    ],
+  )
+  assert.deepEqual(consensflowShellEnvironment({ HOME: '/home/user' }), [])
+})
+
 it('keeps native TUI arguments while explicitly forwarding backend model, effort and full role configuration', () => {
-  const role = 'developer_instructions="existing instructions\\ncomplete lead role"'
+  const role = 'developer_instructions="existing instructions\\ncomplete chief role"'
   const args = [
     '-c',
     role,
@@ -376,14 +447,16 @@ it('launches the bundled supervisor for owned panes without changing legacy Code
   }
   const wrapped = withNativeBridge(invocation, configured, process.execPath)
   assert.equal(wrapped.command, process.execPath)
-  assert.match(wrapped.args[0], /hosts\/codex-session\.mjs$/)
+  assert.match(wrapped.args[0].replaceAll('\\', '/'), /hosts\/codex-session\.mjs$/)
   assert.deepEqual(wrapped.args.slice(1), ['/native/codex', 'resume', A])
   assert.deepEqual(wrapped.env, invocation.env)
   assert.deepEqual(wrapped.dropEnv, invocation.dropEnv)
   assert.deepEqual(withNativeBridge(invocation, { channel: null }, process.execPath), invocation)
 })
 
-it('keeps native Codex sockets private and inside ConsensFlow home', async (t) => {
+it('keeps native Codex sockets private and inside ConsensFlow home', {
+  skip: process.platform === 'win32' && 'Unix sockets only',
+}, async (t) => {
   const root = await mkdtemp('/tmp/cf-socket-home-')
   t.after(() => rm(root, { recursive: true, force: true }))
   const home = join(root, '.consensflow')
@@ -391,8 +464,121 @@ it('keeps native Codex sockets private and inside ConsensFlow home', async (t) =
   assert.ok(directory.startsWith(`${join(home, 'tmp')}/`))
   assert.equal((await stat(directory)).mode & 0o777, 0o700)
   assert.ok(Buffer.byteLength(join(directory, 'native.sock')) < 104)
+  // A home too deep for a Unix socket (a temporary tree) falls back to the
+  // user's own temporary directory, still private; nowhere short and it fails.
+  const deep = join(root, 'x'.repeat(110))
+  const fallback = await codexSession.createSocketDirectory({
+    CONSENSFLOW_HOME: deep,
+    TMPDIR: root,
+  })
+  assert.ok(fallback.startsWith(`${join(root, 'consensflow')}/`))
+  assert.equal((await stat(fallback)).mode & 0o777, 0o700)
+  assert.ok(Buffer.byteLength(join(fallback, 'native.sock')) < 104)
   await assert.rejects(
-    codexSession.createSocketDirectory({ CONSENSFLOW_HOME: join(root, 'x'.repeat(110)) }),
+    codexSession.createSocketDirectory({ CONSENSFLOW_HOME: deep, TMPDIR: deep }),
     /socket path.*too long/i,
   )
+})
+
+/** A stand-in for the board's API: the questions posted, the answer once the test gives it. */
+async function fakeBoard(t) {
+  const { createServer } = await import('node:http')
+  const state = { posted: [], answer: null }
+  const server = createServer(async (request, response) => {
+    const chunks = []
+    for await (const chunk of request) chunks.push(chunk)
+    const json = (status, value) => {
+      response.writeHead(status, { 'content-type': 'application/json' })
+      response.end(JSON.stringify(value))
+    }
+    if (request.method === 'POST' && request.url === '/api/questions') {
+      state.posted.push(JSON.parse(Buffer.concat(chunks).toString('utf8')))
+      return json(201, { message: { id: 61 } })
+    }
+    if (request.method === 'GET' && request.url.startsWith('/api/questions/61')) {
+      for (let i = 0; i < 40 && state.answer === null; i++)
+        await new Promise((r) => setTimeout(r, 25))
+      return json(200, { question: {}, answer: state.answer })
+    }
+    json(404, {})
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise((resolve) => server.close(resolve)))
+  return { state, url: `http://127.0.0.1:${server.address().port}` }
+}
+
+const REQUEST_USER_INPUT = {
+  id: 'ask-1',
+  method: 'item/tool/requestUserInput',
+  params: {
+    threadId: A,
+    turnId: 'turn-1',
+    itemId: 'item-1',
+    isBlocking: true,
+    questions: [
+      {
+        id: 'colour',
+        header: 'Colour',
+        question: 'Which colour?',
+        options: [
+          { label: 'red', description: 'Warm' },
+          { label: 'blue', description: 'Cool' },
+        ],
+      },
+    ],
+  },
+}
+
+it("Codex's question tool is answered from the board by the broker, and the TUI never sees it", async (t) => {
+  const board = await fakeBoard(t)
+  const f = await fixture(t, { board: { url: board.url, token: 'window-token' } })
+  const tui = await f.connect()
+  const seen = []
+  tui.on('message', (raw) => seen.push(JSON.parse(raw)))
+  f.sockets.at(-1).send(JSON.stringify(REQUEST_USER_INPUT))
+  await f.wait(() => board.state.posted.length === 1)
+  assert.deepEqual(board.state.posted[0].questions, [
+    {
+      question: 'Which colour?',
+      header: 'Colour',
+      options: [
+        { label: 'red', description: 'Warm' },
+        { label: 'blue', description: 'Cool' },
+      ],
+      multiple: false,
+    },
+  ])
+  board.state.answer = { id: 70, from: 'chief', body: 'Colour: blue', choices: [['blue']] }
+  await f.wait(() => f.requests.some((m) => m.id === 'ask-1'))
+  assert.deepEqual(
+    f.requests.find((m) => m.id === 'ask-1'),
+    { id: 'ask-1', result: { answers: { colour: { answers: ['blue'] } } } },
+  )
+  assert.deepEqual(
+    seen.filter((m) => m.method === 'item/tool/requestUserInput'),
+    [],
+    'the window showed no dialog',
+  )
+})
+
+it("Codex's question goes on to the TUI when the board does not answer in time, or there is no board", async (t) => {
+  const board = await fakeBoard(t)
+  const f = await fixture(t, {
+    board: { url: board.url, token: 'window-token' },
+    questionWaitMs: 50,
+  })
+  const tui = await f.connect()
+  const seen = []
+  tui.on('message', (raw) => seen.push(JSON.parse(raw)))
+  f.sockets.at(-1).send(JSON.stringify(REQUEST_USER_INPUT))
+  await f.wait(() => seen.some((m) => m.id === 'ask-1'))
+  assert.equal(seen.find((m) => m.id === 'ask-1').method, 'item/tool/requestUserInput')
+  assert.equal(board.state.posted.length, 1, 'it was asked on the board first')
+
+  const plain = await fixture(t)
+  const plainTui = await plain.connect()
+  const shown = []
+  plainTui.on('message', (raw) => shown.push(JSON.parse(raw)))
+  plain.sockets.at(-1).send(JSON.stringify(REQUEST_USER_INPUT))
+  await plain.wait(() => shown.some((m) => m.id === 'ask-1'))
 })

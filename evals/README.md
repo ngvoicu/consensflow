@@ -1,70 +1,104 @@
-# Evals — does the skill change what a lead *does*?
+# Evals — what a chief *does* with its role text
 
-`npm test` checks what the skill **says**. Nothing checked what a lead **does**
-with it, so behavioural failures were each answered with more prose, and no
-change was ever measured.
+`npm test` checks what the role text says. These runs check what a real chief
+does with it on a toy project: whether it puts work that can run side by side
+on the board, asks advice for a hard call, sends finished work to review, and
+puts the owner's decisions and its findings on the board (`cf ask --human`,
+`cf note --human`) instead of a report in its terminal.
 
 ```sh
-npm run eval                                  # every scenario, once
-npm run eval -- --scenario look-before-you-send --repeat 5
-npm run eval -- --lead codex
+npm run eval -- --scenario six-decisions                       # chief Claude on Opus, staff Claude on Haiku
+npm run eval -- --scenario simple-fix --chief codex --staff pi   # a Codex chief, a Pi staff
+npm run eval -- --scenario complex-launch --chief opencode --staff claude,codex,pi,opencode,devin
+npm run eval -- --scenario six-decisions --model claude-sonnet-5 --repeat 3
+npm run eval:summary                                            # every report, one line each, and evals/RESULTS.md
 ```
 
-**This spends real tokens and is not part of any automated gate.** Do not run
-it in CI or as part of `check:all`: it needs a real lead CLI, a configured roster, and your approval for the spend.
+**This spends real tokens and is not part of any gate.** It needs the
+harnesses named logged in on this machine, and your word for the spend.
 
-## How it works
+## How a run works
 
-The lead is a real CLI reading the bundled `consensflow-lead` document through
-the app’s role-loading code. Each evaluation has a private app root and a copy
-of the roster; it does not depend on a globally installed ConsensFlow skill. What
-*is* replaced is `cf`: a stub that answers plausibly and records every
-invocation, first on `PATH`. The lead runs in a throwaway directory.
+Everything is real but the human. The daemon, the pane host and the harnesses
+are the ones the app uses (the live bench's shape). `--chief` names the
+chief's harness (claude, codex, pi, opencode, devin); Claude Code,
+OpenCode and Codex take the chief's model from `--model` (Opus for Claude
+Code, the harness's cheap model for the other two, unless given); Pi and
+Devin run their own configured default. Claude and Codex windows start
+through wrappers the runner writes (`~/.consensflow-candidate/evals/bin`)
+that shut out MCP servers, connectors and the browser for the chief too
+(ConsensFlow already does it for members), and give Codex the chief's
+model. `--effort` (default `high`) is the chief's reasoning level, through
+those wrappers and a Pi one; OpenCode's window and Devin have no switch for
+it, and the report says so (`effort: null`). `--staff-effort` (default
+`medium`) is every member's, on its roster agent. Before 2026-09-27 no run
+set either: each window ran at the user's own configured default.
+`--staff` names the staff's harnesses: each gives two
+workers, an advisor and a reviewer on its cheap model (`evals/plan.mjs`), all
+standard tier, so the daemon picks among them by its own rule and any of them
+may get any task. The scenario's fixture is copied into a fixed, trusted
+workspace under the Candidate's home (what Claude Code remembered about that
+folder from the last run is cleared first), and the scenario's prompt is typed into
+the chief's terminal. From then on the human is a script: every question the
+chief puts on the board is answered by the scenario's `answers` (a pattern on
+the question, free text back), else by the first option, else by the
+scenario's fallback; nothing else is said. The run ends once nothing has
+moved for the scenario's quiet time.
 
-So its choices become a log, and a log can be asserted. Nothing reaches a real
-agent or a real conversation. There is no pane tooling to stub: ConsensFlow
-has one shape, the app owns the panes, and the skill never names a pane
-command or a harness CLI.
+Then the ledger is read: tasks by pool and tier and how many ran side by
+side, questions and notes to the human, advice and reviews, the chief's own
+edits (the transcript copy's Edit and Write results, counted for a Claude
+chief only), its last words, which files of the fixture the run changed or
+added, the last lines of the chief's screen (why a chief said nothing: a
+quota wall, a login page), and how many times the owner had to answer in the
+chief's terminal: a chief that stops there, asking or proposing, instead of
+asking on the board, hears the scenario's `nudge` typed there (twice at
+most), so the run still shows what it does next. Beside the scenario's
+expectations, every report carries the board's own plumbing checks, counted
+from the ledger whatever the chief decided: every brief delivered, every
+result back to the chief, every question a member asked the chief answered
+and the answer delivered, every question the chief put to the owner answered
+(the scripted owner answers as the board's form does: a pick or free text per
+sub-question; a refused answer is recorded in the report), every task shown
+on the board, every tell the chief sent answered. `--gate` opens the project
+with the owner's approval required: the scripted owner approves every
+message waiting for it, and the report counts the approvals. The
+scenario's expectations are checked against those numbers; the report goes
+to `evals/reports/` and a verdict to stdout. Reports are kept in git: a run is
+evidence, and a later run beside it is the comparison. `npm run eval:summary`
+lists them and rewrites `evals/RESULTS.md`, the same numbers as a table.
 
-The stub `cf` mints conversation names on `run --new`, continues on a bare
-run or `--session`, answers `say`, `results` and `read` from a per-scenario
-transcript, pastes a `deliver` fixture into the lead's transcript, and prints
-a long `read` fixture in numbered parts. A turn may also carry a `delivery`
-field, which the runner prefixes into what the lead receives — the envelope
-or pointer arriving in lead context, the way the app pastes it into the pane.
-Every invocation is logged, so a lead that invents a command the skill never
-taught is caught by the log.
+## Scenarios
 
-Each scenario is one lead session across several turns, because every failure
-worth checking happened on turn two or later.
+`evals/scenarios/<id>.mjs` exports the prompt, the answers, the fallback, the
+quiet time and the expectations; `evals/fixtures/<name>/` is the toy project
+(`site`: a small bilingual site about burnout at work, with a planted
+discrepancy: the guides say "a scale from 1 to 5", the site shows a colour and
+a score).
 
-## Reading the result
-
-A rate per check, not a verdict. Leads are not deterministic: a check that
-passes 4/5 is a **failing** check, because the user meets it on the run it
-misses. The runner exits non-zero if any check missed even once.
-
-## The scenarios are the standalone contract
-
-| Scenario | What it guards |
-|---|---|
-| `consult-opens-a-pane` | the consult is `cf run --new`, via `cf` only — no pane tool, no harness CLI |
-| `look-before-you-send` | a follow-up rides on the answer already delivered in context — `cf say`, never a restart, no `results`/`read` round-trip |
-| `an-independent-task-gets-its-own-conversation` | unrelated work starts fresh with `--new`, nothing sent into the old conversation |
-| `a-dependent-task-stays-in-its-conversation` | work that leans on the conversation is a `cf say` on the delivered context where it belongs — no retrieval, no second conversation |
-| `a-delivered-answer-is-read-whole` | the envelope arrives in the turn, as pasted into the pane — the lead reports its top verdict with no `catchup`, no `read` |
-| `a-delivered-file-is-read` | the pointer arrives in the turn — the lead runs every `cf read` part and its report holds the beginning, the middle AND the end |
-| `manual-is-the-humans` | the lead can read for its authorized task and leaves a human-set `manual` policy alone |
-| `a-lead-sends-and-returns` | after `cf run --new` or `cf say` the lead reports what is running and where — no `--wait`, no polling |
-| `after-dispatch-continues-independent-work` | after dispatch the lead reports what is running and does the authorized independent work in the same turn — no `--wait`, no polling, no retrieval |
-| `a-delivered-result-is-used-without-asking` | an automatically delivered full result is used at once — verdict in the report, no retrieval, no read/authorize ask-back |
-| `zero-runs-is-not-failure` | a `0 runs` count starts no replacement, polls nothing, and is never declared a failed dispatch or a fallback |
-
-## History
-
-The cmux-era scenarios (pane recipes, `mint`, `tree`, tail-pipe guards) were
-retired with the switch-over: they measured a shape that no longer exists.
-What they taught is kept — the honest-stage rules: a scenario whose prompt
-names a file ships that file, a scenario whose follow-up refers to what the
-agent said ships that transcript, and a miss prints every command the lead
-ran. A check that passes because nothing was sent is no check at all.
+- `simple-fix`: one wrong word on one page. Expected: fixed, nothing asked, at
+  most one task, no advice.
+- `six-decisions`: from the btb transcript of 2026-09-25. A new page to write
+  and translate, choices only the owner can make. Expected: the owner asked on
+  the board, a note, parallel work, a review, few edits by the chief.
+- `complex-launch`: three things at once, a hard call, a sign-off. Expected:
+  three or more tasks, parallel work, advice, a review, the owner asked, the
+  discrepancy noted.
+- `round-trip`: the plumbing, not the judgment. The owner asks for one task
+  whose worker must ask the chief something first, an answer, a result, a
+  review, an acceptance. Expected: exactly that, and only `site/notes.md` new.
+- `control-trip`: the chief's controls over a running task: `cf tell` stops a
+  worker and asks it something, the worker answers, `cf task resume` sends it
+  on, `cf task add --after` gives a follow-up to the same window. Expected:
+  a tell answered, a pause and a resume, a continuation, both accepted.
+- `advice-trip`: the advisor's plumbing. The owner asks for advice through
+  the board; the advice comes back, is accepted and reaches the owner as a
+  note. Expected: one advice task, a note, no file changed.
+- `long-trip`: long messages both ways. The owner pastes about 8000
+  characters into the chief's terminal; a worker, an advisor and a reviewer
+  each send a result of 8000 characters or more; the owner answers the
+  chief's one question in about 6000. The daemon delivers a message over
+  4000 characters as its opening and `cf inbox read m-N`, so each ends in a
+  code (the members read theirs from `interne/`), and the chief's one note
+  must hold all five. Expected: the three long results, the long answer
+  delivered, the five codes in the note, no file changed.

@@ -1,18 +1,18 @@
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
+import { pathToFileURL } from 'node:url'
 import { launchConfiguration } from '../src/channels.js'
 import { HarnessAdmin } from '../src/harness-admin.js'
-import { installEverywhere } from '../src/install.js'
-import { tempEnv } from './helpers.mjs'
+import { prepareApp } from '../src/install.js'
+import { fakeExecutable, tempEnv } from './helpers.mjs'
 
 function detected(t) {
   const f = tempEnv()
   t.after(() => f.cleanup())
   mkdirSync(f.env.PATH, { recursive: true })
-  writeFileSync(join(f.env.PATH, 'opencode'), '#!/bin/sh\necho 1.18.30\n')
-  chmodSync(join(f.env.PATH, 'opencode'), 0o755)
+  fakeExecutable(join(f.env.PATH, 'opencode'), { output: '1.18.30' })
   return f
 }
 
@@ -25,9 +25,9 @@ test('OpenCode preparation is private, immutable, importable and installed with 
   const extension = prepareOpenCodeExtension(f.env)
   assert.equal(extension.state, 'installed-unverified')
   assert.ok(extension.path.startsWith(f.env.CONSENSFLOW_HOME))
-  assert.equal(typeof (await import(extension.path)).tui, 'function')
+  assert.equal(typeof (await import(pathToFileURL(extension.path).href)).tui, 'function')
   assert.deepEqual(prepareOpenCodeExtension(f.env), extension)
-  assert.equal(installEverywhere(f.env).opencodeExtension.path, extension.path)
+  assert.equal(prepareApp(f.env).opencodeExtension.path, extension.path)
   assert.equal(readFileSync(global, 'utf8'), '{"plugin":["user-plugin"]}')
   writeFileSync(extension.path, 'drifted')
   assert.equal(prepareOpenCodeExtension(f.env).state, 'error')

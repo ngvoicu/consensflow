@@ -346,7 +346,7 @@ function recordedPids(box) {
     .filter((pid) => Number.isInteger(pid) && pid > 0)
 }
 
-function killRecordedLeadPids(box) {
+function killRecordedChiefPids(box) {
   for (const pid of new Set(recordedPids(box))) {
     if (!pidAlive(pid)) continue
     try {
@@ -544,7 +544,7 @@ test('the packaged updater replaces only the isolated copy after pane admission 
   let app
   t.after(async () => {
     app?.killRecorded()
-    killRecordedLeadPids(box)
+    killRecordedChiefPids(box)
     if (server !== undefined) await new Promise((resolveClosed) => server.close(resolveClosed))
     if (process.env.CONSENSFLOW_UPDATER_SMOKE_KEEP !== '1') {
       rmSync(box.root, { recursive: true, force: true })
@@ -634,7 +634,7 @@ test('the packaged updater replaces only the isolated copy after pane admission 
     2,
     'the ready snapshot did not expose both open panes',
   )
-  const leadPids = await until('two fake lead processes', () => {
+  const leadPids = await until('two fake chief processes', () => {
     const pids = [...new Set(recordedPids(box))]
     return pids.length === 2 ? pids : null
   })
@@ -697,7 +697,7 @@ test('the packaged updater replaces only the isolated copy after pane admission 
   await until('all recorded app processes exit', () =>
     [...app.appPids].every((pid) => !pidAlive(pid)),
   )
-  assert.deepEqual(recordedPids(box).filter(pidAlive), [], 'a fake lead survived app shutdown')
+  assert.deepEqual(recordedPids(box).filter(pidAlive), [], 'a fake chief survived app shutdown')
   assert.deepEqual(
     app.events.filter((event) => event.event === 'update-failure'),
     [],

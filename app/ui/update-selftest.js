@@ -30,20 +30,6 @@ async function status(invoke, operation = 'update_status') {
   return result
 }
 
-function paneRef(result, operation) {
-  if (!record(result?.pane)) throw new Error(`${operation} returned no pane identity`)
-  const { id, generation } = result.pane
-  if (
-    typeof id !== 'string' ||
-    id.length === 0 ||
-    !Number.isInteger(generation) ||
-    generation < 1
-  ) {
-    throw new Error(`${operation} returned an invalid pane identity`)
-  }
-  return { id, generation }
-}
-
 function expectedCandidate(snapshot, expected) {
   return (
     record(snapshot.available) &&
@@ -60,12 +46,9 @@ function expectedReady(snapshot, expected, blockers) {
   )
 }
 
-async function closeOwnPanes(invoke, refresh, panes) {
-  for (const pane of panes) {
-    const result = await invoke('close_pane', pane)
-    if (result?.ok !== true) {
-      throw new Error(`close_pane refused: ${JSON.stringify(result)}`)
-    }
+async function closeOwnProjects(core, refresh, projects) {
+  for (const project of projects) {
+    await core('project.close', { project })
     await refresh()
   }
 }
@@ -85,12 +68,14 @@ async function waitForNoBlockers(invoke, timeoutMs = 10_000) {
 /**
  * Packaged updater selftest. It is intentionally a command-level driver:
  * update_status, update_check, update_download and update_install are the
- * same guarded bridge calls a human's updater dialog uses, while the Node
- * smoke owns the external HTTPS/signature/build boundary.
+ * same guarded bridge calls a human's updater dialog uses, and the windows
+ * that block the install belong to two projects opened the way a human's New
+ * project opens them and closed the way a human's Close closes them. The
+ * Node smoke owns the external HTTPS/signature/build boundary.
  */
-export async function runUpdateSelftest({ config, invoke, refresh }) {
+export async function runUpdateSelftest({ config, invoke, core, refresh }) {
   const expected = config?.updaterExpectedVersion
-  const ownPanes = []
+  const ownProjects = []
   let installStarted = false
 
   try {
@@ -116,12 +101,12 @@ export async function runUpdateSelftest({ config, invoke, refresh }) {
       throw new Error('the updater selftest has no workspace directory')
     }
     const secondDir = `${config.dir}/${SECOND_WORKSPACE}`
-    for (const dir of [config.dir, secondDir]) {
-      const opened = await invoke('open_lead', { dir, harness: 'claude-code' })
-      if (opened?.ok !== true || opened.outcome !== 'opened') {
-        throw new Error(`open_lead refused: ${JSON.stringify(opened)}`)
+    for (const directory of [config.dir, secondDir]) {
+      const { project } = await core('project.open', { directory, harness: 'claude-code' })
+      if (!Number.isInteger(project?.id)) {
+        throw new Error(`project.open returned no project: ${JSON.stringify(project)}`)
       }
-      ownPanes.push(paneRef(opened, 'open_lead'))
+      ownProjects.push(project.id)
       await refresh()
     }
 
@@ -161,8 +146,8 @@ export async function runUpdateSelftest({ config, invoke, refresh }) {
     }
 
     await report(invoke, 'update-blocked', blocked)
-    await closeOwnPanes(invoke, refresh, ownPanes)
-    ownPanes.length = 0
+    await closeOwnProjects(core, refresh, ownProjects)
+    ownProjects.length = 0
     const clear = await waitForNoBlockers(invoke)
     if (!expectedReady(clear, expected, 0)) {
       throw new Error(`blockers did not clear before install: ${JSON.stringify(clear)}`)
@@ -200,7 +185,7 @@ export async function runUpdateSelftest({ config, invoke, refresh }) {
   } catch (cause) {
     if (installStarted) return
     try {
-      await closeOwnPanes(invoke, refresh, ownPanes)
+      await closeOwnProjects(core, refresh, ownProjects)
     } catch {
       // The original failure is the useful evidence; the app's normal
       // selftest shutdown still owns the recorded process group.

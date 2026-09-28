@@ -36,6 +36,7 @@ export const EFFORTS = {
   opencode: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
   // K3 uses the supported per-process KIMI_MODEL_THINKING_EFFORT control.
   kimi: KIMI_EFFORTS,
+  devin: [],
 }
 
 /**
@@ -50,6 +51,7 @@ const KIND_TO_HARNESS = {
   pi: 'pi',
   opencode: 'opencode',
   kimi: 'kimi',
+  devin: 'devin',
   image: 'image',
 }
 

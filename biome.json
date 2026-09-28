@@ -5,15 +5,19 @@
       "src/**",
       "bin/**",
       "tests/**",
+      "evals/**",
       "app/ui/*.js",
+      "app/ui/core/**",
       "app/tests/**",
       "hosts/lib/completion.js",
       "hosts/lib/deliveries.js",
       "hosts/lib/inbox.js",
       "hosts/lib/receiver.js",
       "hosts/claude-receiver.mjs",
+      "hosts/devin-receiver.mjs",
       "hosts/lib/policy.js",
-      "hosts/lib/session-binding.js",
+      "hosts/lib/windows.js",
+      "hosts/lib/utils.js",
       "hosts/pi-extension/**",
       "hosts/opencode-extension/**",
       "hosts/codex-session.mjs",
@@ -24,7 +28,8 @@
       "!!**/coverage",
       "!!**/test-results",
       "!!app/ui/vendor",
-      "!!**/.specs"
+      "!!**/.specs",
+      "!!evals/reports"
     ]
   },
   "formatter": {

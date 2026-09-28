@@ -1,0 +1,199 @@
+{
+  "scenario": "long-trip",
+  "chief": "devin",
+  "model": "devin's default",
+  "effort": null,
+  "staffEffort": "medium",
+  "staff": [
+    "devin"
+  ],
+  "staffModels": {
+    "eval-devin-worker": "swe-1-6-slow",
+    "eval-devin-worker-2": "swe-1-6-slow",
+    "eval-devin-advisor": "swe-1-6-slow",
+    "eval-devin-reviewer": "swe-1-6-slow"
+  },
+  "run": 1,
+  "seconds": 197,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [],
+    "parallel": 0,
+    "advice": 0,
+    "reviews": 0,
+    "questionsToHuman": [],
+    "notesToHuman": [],
+    "notesText": "",
+    "longestResult": {
+      "worker": 0,
+      "advisor": 0,
+      "reviewer": 0
+    },
+    "answersToChief": [],
+    "taskCount": 0,
+    "chiefId": 2,
+    "chiefHarness": "devin",
+    "humanId": 1,
+    "chiefTurns": 0,
+    "chiefEdits": null,
+    "chiefLastWords": "",
+    "plumbing": {
+      "briefs": 0,
+      "briefsDelivered": 0,
+      "results": 0,
+      "resultsDelivered": 0,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 0,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0,
+      "ownerQuestions": 0,
+      "ownerQuestionsAnswered": 0
+    },
+    "filesChanged": []
+  },
+  "checks": [
+    {
+      "name": "the worker's result is long (8000 characters or more)",
+      "ok": false
+    },
+    {
+      "name": "the advisor's advice is long (8000 characters or more)",
+      "ok": false
+    },
+    {
+      "name": "the reviewer's review is long (8000 characters or more)",
+      "ok": false
+    },
+    {
+      "name": "the owner's long answer went to the chief",
+      "ok": false
+    },
+    {
+      "name": "the note holds the worker's code",
+      "ok": false
+    },
+    {
+      "name": "the note holds the advisor's code",
+      "ok": false
+    },
+    {
+      "name": "the note holds the reviewer's code",
+      "ok": false
+    },
+    {
+      "name": "the note holds the report's name from the owner's answer",
+      "ok": false
+    },
+    {
+      "name": "the note holds the code at the end of the owner's message",
+      "ok": false
+    },
+    {
+      "name": "no file changes",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question the chief put to the owner got the owner's answer (0/0)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (0/0)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "  Versiunea în engleză urmează după ce textul românesc e aprobat. Nimic din",
+    "  secțiunea aceasta nu cere vreo modificare acum; e doar context pentru cine",
+    "  citește până la capăt.",
+    "  Secțiunea 10 din notițele ședinței despre site. Am discutat structura paginii",
+    "  principale, tonul textelor și felul în care un manager găsește repede",
+    "  evaluarea de burnout. Echipa vrea fraze scurte, un singur îndemn pe ecran și",
+    "  trimiteri clare către legislație, fără jargon medical. Pagina de evaluare",
+    "  rămâne pe scara de la 0 la 10, iar rezultatele nu se salvează nicăieri.",
+    "  Versiunea în engleză urmează după ce textul românesc e aprobat. Nimic din",
+    "  secțiunea aceasta nu cere vreo modificare acum; e doar context pentru cine",
+    "  citește până la capăt.",
+    "  Secțiunea 11 din notițele ședinței despre site. Am discutat structura paginii",
+    "  principale, tonul textelor și felul în care un manager găsește repede",
+    "  evaluarea de burnout. Echipa vrea fraze scurte, un singur îndemn pe ecran și",
+    "  trimiteri clare către legislație, fără jargon medical. Pagina de evaluare",
+    "  rămâne pe scara de la 0 la 10, iar rezultatele nu se salvează nicăieri.",
+    "  Versiunea în engleză urmează după ce textul românesc e aprobat. Nimic din",
+    "  secțiunea aceasta nu cere vreo modificare acum; e doar context pentru cine",
+    "  citește până la capăt.",
+    "  Secțiunea 12 din notițele ședinței despre site. Am discutat structura paginii",
+    "  principale, tonul textelor și felul în care un manager găsește repede",
+    "  evaluarea de burnout. Echipa vrea fraze scurte, un singur îndemn pe ecran și",
+    "  trimiteri clare către legislație, fără jargon medical. Pagina de evaluare",
+    "  rămâne pe scara de la 0 la 10, iar rezultatele nu se salvează nicăieri.",
+    "  Versiunea în engleză urmează după ce textul românesc e aprobat. Nimic din",
+    "  secțiunea aceasta nu cere vreo modificare acum; e doar context pentru cine",
+    "  citește până la capăt.",
+    "  Codul acestui mesaj: FARUL-2208",
+    "⡆⠀ Thinking · 0s (esc twice to interrupt)",
+    "────────────────────────────────────────────────────── (bypass permissions on) ─",
+    "❭ Guide Devin while it works",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                        Press Ctrl+O to view the full thinking trace⠇⠋⠙⠀⠸⢰⢠⡀⢀⡄⠀⡆⠀⠇⠋⠙1⠀⠸⢰ ⚠︎ Quota exhausted",
+    "   Your daily usage quota has been exhausted. Visit https://app.devin.ai/",
+    "   settings/usage to purchase on-demand usage or turn on auto-reload. (trace ID:",
+    "   750e03108f7b10a25b4fd910709a150f)",
+    "────────────────────────────────────────────────────── (bypass permissions on) ─",
+    "❭ Ask Devin to build features, fix bugs, or work on your code",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                       Use /help to see all available slash commands"
+  ],
+  "terminalAnswers": 0,
+  "refusedAnswers": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 7,
+      "line": "chief (devin) ready; typing the prompt"
+    },
+    {
+      "at": 12,
+      "line": "Enter pressed again: the window had not taken the text"
+    },
+    {
+      "at": 17,
+      "line": "chief idle; tasks none"
+    },
+    {
+      "at": 197,
+      "line": "quiet: the run is over"
+    }
+  ]
+}

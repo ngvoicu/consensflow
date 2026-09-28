@@ -205,6 +205,8 @@ struct Pane {
     process_group_id: Option<i32>,
     #[cfg(target_os = "macos")]
     process_tree: crate::process_tree::ProcessTree,
+    #[cfg(windows)]
+    job: crate::job_object::JobObject,
     output_flow: Option<Arc<OutputFlow>>,
     active_writes: Arc<AtomicU64>,
     alive: bool,
@@ -460,11 +462,25 @@ impl PaneTable {
         let mut process_tree = crate::process_tree::ProcessTree::new();
         #[cfg(target_os = "macos")]
         command.env(crate::process_tree::OWNER_ENV, &process_tree.marker);
-        let child = pair
+        #[cfg(windows)]
+        let job = crate::job_object::JobObject::new()?;
+        #[cfg_attr(not(windows), allow(unused_mut))]
+        let mut child = pair
             .slave
             .spawn_command(command)
             .map_err(|error| PaneError::Pty(error.to_string()))?;
         drop(pair.slave);
+        // A window whose tree cannot be owned does not open: closing it could
+        // not end what the harness starts.
+        #[cfg(windows)]
+        if let Err(error) = child
+            .process_id()
+            .ok_or_else(|| io::Error::other("the harness has no process id"))
+            .and_then(|pid| job.assign(pid))
+        {
+            let _ = child.kill();
+            return Err(PaneError::Io(error));
+        }
 
         #[cfg(unix)]
         let process_group_id = child.process_id().and_then(|pid| i32::try_from(pid).ok());
@@ -489,6 +505,8 @@ impl PaneTable {
                 process_group_id,
                 #[cfg(target_os = "macos")]
                 process_tree,
+                #[cfg(windows)]
+                job,
                 output_flow: None,
                 active_writes: Arc::new(AtomicU64::new(0)),
                 alive: true,
@@ -965,13 +983,9 @@ fn terminate_detached(mut pane: Pane, teardown: Arc<Teardown>) -> Result<(), Pan
 
 fn signal_for_termination(pane: &mut Pane) -> Result<bool, PaneError> {
     #[cfg(target_os = "macos")]
-    {
-        pane.process_tree.terminate()?;
-        return has_exited(pane);
-    }
+    pane.process_tree.terminate()?;
 
-    #[cfg(not(target_os = "macos"))]
-    {
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut child_exited = has_exited(pane)?;
 
     #[cfg(unix)]
@@ -992,13 +1006,12 @@ fn signal_for_termination(pane: &mut Pane) -> Result<bool, PaneError> {
         }
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     if !child_exited {
-        pane.child.kill()?;
+        pane.job.terminate()?;
     }
 
     Ok(child_exited)
-    }
 }
 
 // A continuation can create a new process group while staying below the pane.
@@ -1063,12 +1076,12 @@ fn continuation_ancestry_accepts_detached_descendant_and_refuses_foreign_group()
     assert!(!process_owned_by_group(i32::MAX, group));
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(unix)]
 fn is_permission_denied(error: &PaneError) -> bool {
     matches!(error, PaneError::Io(error) if error.kind() == io::ErrorKind::PermissionDenied)
 }
 
-#[cfg(all(unix, any(test, not(target_os = "macos"))))]
+#[cfg(unix)]
 fn signal_process_group(process_group_id: i32) -> Result<(), PaneError> {
     unsafe extern "C" {
         fn kill(pid: i32, signal: i32) -> i32;
@@ -1090,18 +1103,108 @@ fn signal_process_group(process_group_id: i32) -> Result<(), PaneError> {
     }
 }
 
-#[cfg(test)]
-mod tests {
+/// ConPTY helpers the Windows tests of the pane table and the arbiter share.
+#[cfg(all(test, windows))]
+pub(crate) mod conpty_test {
     use std::collections::HashMap;
-    use std::io::{BufRead, BufReader, Read};
-    use std::path::Path;
-    use std::sync::Arc;
-    use std::thread;
+    use std::sync::mpsc::Receiver;
     use std::time::{Duration, Instant};
 
     use portable_pty::PtySize;
 
-    use super::{serial_pty_test, OpenedPane, PaneEnvironment, PaneError, PaneKey, PaneTable};
+    use super::{PaneEnvironment, PaneKey, PaneOutput, PaneTable};
+
+    pub fn system(program: &str) -> String {
+        let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        format!(r"{root}\System32\{program}")
+    }
+
+    pub fn powershell(script: &str) -> Vec<String> {
+        vec![
+            system(r"WindowsPowerShell\v1.0\powershell.exe"),
+            "-NoProfile".into(),
+            "-Command".into(),
+            script.into(),
+        ]
+    }
+
+    pub fn open(
+        table: &PaneTable,
+        argv: &[String],
+        env: &HashMap<String, String>,
+        backlog: usize,
+    ) -> (PaneKey, Receiver<PaneOutput>) {
+        let streamed = table
+            .open_streamed(
+                &std::env::temp_dir(),
+                argv,
+                PaneEnvironment::new(env, &[]),
+                PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+                backlog,
+            )
+            .expect("open a ConPTY pane");
+        (streamed.key, streamed.output)
+    }
+
+    /// Everything the pane printed until `needle`, acknowledged as read.
+    /// ConPTY wraps the child's text in its own escape sequences, and its
+    /// output does not end when the child does, so a test reads for text. It
+    /// also opens by asking where the cursor is and holds the child's output
+    /// until a terminal answers; the page's xterm does, and so does this.
+    pub fn read_until(
+        table: &PaneTable,
+        key: &PaneKey,
+        output: &Receiver<PaneOutput>,
+        needle: &str,
+    ) -> String {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let mut seen = String::new();
+        while !seen.contains(needle) {
+            let left = deadline.saturating_duration_since(Instant::now());
+            let chunk = output
+                .recv_timeout(left)
+                .unwrap_or_else(|error| panic!("no {needle:?} in the pane ({error}): {seen:?}"));
+            table.ack(key, chunk.seq).expect("ack output");
+            if chunk.bytes.windows(4).any(|bytes| bytes == b"\x1b[6n") {
+                table
+                    .write(key, b"\x1b[1;1R")
+                    .expect("answer the cursor query");
+            }
+            seen.push_str(&String::from_utf8_lossy(&chunk.bytes));
+        }
+        seen
+    }
+
+    /// A child that says READY, reads one line and prints it back as `GOT=[…]#`.
+    pub fn line_echo() -> Vec<String> {
+        powershell(
+            "Write-Output READY; $line = [Console]::In.ReadLine(); Write-Output \"GOT=[$line]#\"",
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    #[cfg(unix)]
+    use std::io::{BufRead, BufReader, Read};
+    use std::path::Path;
+    use std::sync::Arc;
+    #[cfg(unix)]
+    use std::thread;
+    #[cfg(unix)]
+    use std::time::{Duration, Instant};
+
+    use portable_pty::PtySize;
+
+    #[cfg(unix)]
+    use super::{serial_pty_test, OpenedPane, PaneEnvironment, PaneKey};
+    use super::{PaneError, PaneTable};
 
     fn terminal_size(rows: u16, cols: u16) -> PtySize {
         PtySize {
@@ -1112,10 +1215,12 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn shell(script: &str) -> Vec<String> {
         vec!["/bin/sh".to_string(), "-c".to_string(), script.to_string()]
     }
 
+    #[cfg(unix)]
     fn open_shell(table: &PaneTable, script: &str) -> OpenedPane {
         table
             .open(
@@ -1197,6 +1302,8 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+
     #[test]
     fn update_installation_blocks_all_pane_launches_and_failure_restores_admission() {
         let _serial = serial_pty_test();
@@ -1227,6 +1334,7 @@ mod tests {
         assert!(table.begin_update().is_ok());
     }
 
+    #[cfg(unix)]
     #[test]
     fn update_installation_and_real_spawn_share_one_atomic_boundary() {
         let _serial = serial_pty_test();
@@ -1258,6 +1366,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn read_to_end(mut reader: Box<dyn Read + Send>) -> Vec<u8> {
         let (sender, receiver) = std::sync::mpsc::channel();
         thread::spawn(move || {
@@ -1283,6 +1392,8 @@ mod tests {
         result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(1)
     }
 
+    #[cfg(unix)]
+
     #[test]
     fn open_reads_hello_then_eof() {
         let _pty_guard = serial_pty_test();
@@ -1300,6 +1411,8 @@ mod tests {
             }]
         );
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn pane_table_keys_same_id_by_generation() {
@@ -1344,6 +1457,8 @@ mod tests {
         assert_eq!(read_to_end(second_reader), b"");
     }
 
+    #[cfg(unix)]
+
     #[test]
     fn streamed_open_at_preserves_the_store_reserved_identity() {
         let _pty_guard = serial_pty_test();
@@ -1371,6 +1486,8 @@ mod tests {
         assert_eq!(bytes, b"reserved");
     }
 
+    #[cfg(unix)]
+
     #[test]
     fn resize_reaches_the_child_terminal() {
         let _pty_guard = serial_pty_test();
@@ -1394,6 +1511,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn kill_closes_the_reader_and_reaps_the_process_group() {
         let _pty_guard = serial_pty_test();
@@ -1442,22 +1560,32 @@ mod tests {
     }
 
     #[cfg(target_os = "macos")]
-    fn detached_child(table: &PaneTable, parent_exits: bool, clear_environment: bool) -> (PaneKey, i32) {
+    fn detached_child(
+        table: &PaneTable,
+        parent_exits: bool,
+        clear_environment: bool,
+    ) -> (PaneKey, i32) {
         let script = format!(
             "import subprocess,time; p=subprocess.Popen(['/bin/sleep','60'], start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL{}); print(p.pid, flush=True); {}",
             if clear_environment { ", env={}" } else { "" },
             if parent_exits { "" } else { "time.sleep(60)" },
         );
-        let OpenedPane { key, reader } = table.open(
-            Path::new("/tmp"),
-            &["/usr/bin/python3".into(), "-c".into(), script],
-            &HashMap::new(), terminal_size(24, 80),
-        ).expect("launch a parent with a detached child");
+        let OpenedPane { key, reader } = table
+            .open(
+                Path::new("/tmp"),
+                &["/usr/bin/python3".into(), "-c".into(), script],
+                &HashMap::new(),
+                terminal_size(24, 80),
+            )
+            .expect("launch a parent with a detached child");
         let mut reader = BufReader::new(reader);
         let mut line = String::new();
         reader.read_line(&mut line).unwrap();
         let pid = line.trim().parse::<i32>().expect("native child pid");
-        assert_ne!(unsafe { libc::getpgid(pid) }, table.process_group_id(&key).unwrap());
+        assert_ne!(
+            unsafe { libc::getpgid(pid) },
+            table.process_group_id(&key).unwrap()
+        );
         if parent_exits {
             let mut tail = Vec::new();
             reader.read_to_end(&mut tail).unwrap();
@@ -1477,7 +1605,11 @@ mod tests {
         }
         let stopped = !process_exists(pid);
         // A failing regression must not leave the test's own sleeper behind.
-        if !stopped { unsafe { libc::kill(pid, libc::SIGKILL); } }
+        if !stopped {
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
+        }
         stopped
     }
 
@@ -1495,7 +1627,10 @@ mod tests {
         let foreign_stopped = stopped_with_cleanup(foreign_pid);
         assert!(own_stopped, "detached child survived pane close");
         assert!(foreign_alive, "closing a pane killed another pane's child");
-        assert!(foreign_stopped, "second pane's child survived its own close");
+        assert!(
+            foreign_stopped,
+            "second pane's child survived its own close"
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -1506,7 +1641,10 @@ mod tests {
         let (key, pid) = detached_child(&table, true, false);
         assert!(process_exists(pid), "fixture needs a live orphan");
         table.kill(&key).unwrap();
-        assert!(stopped_with_cleanup(pid), "reparented child survived pane close");
+        assert!(
+            stopped_with_cleanup(pid),
+            "reparented child survived pane close"
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -1516,7 +1654,10 @@ mod tests {
         let table = PaneTable::new();
         let (key, pid) = detached_child(&table, false, true);
         table.kill(&key).unwrap();
-        assert!(stopped_with_cleanup(pid), "owned child with empty environment survived");
+        assert!(
+            stopped_with_cleanup(pid),
+            "owned child with empty environment survived"
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -1526,7 +1667,10 @@ mod tests {
         let table = PaneTable::new();
         let (_, pid) = detached_child(&table, false, false);
         drop(table);
-        assert!(stopped_with_cleanup(pid), "detached child survived table drop");
+        assert!(
+            stopped_with_cleanup(pid),
+            "detached child survived table drop"
+        );
     }
 
     #[cfg(unix)]
@@ -1563,6 +1707,8 @@ mod tests {
         assert!(!process_exists(child_pid), "background child survived Drop");
     }
 
+    #[cfg(unix)]
+
     #[test]
     fn environment_map_reaches_the_child() {
         let _pty_guard = serial_pty_test();
@@ -1580,6 +1726,8 @@ mod tests {
 
         assert_eq!(read_to_end(reader), b"from-env-map");
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn child_environment_is_inherited_then_overlaid() {
@@ -1621,6 +1769,8 @@ mod tests {
             .expect("open child with the supplied sentinel");
         assert_eq!(read_to_end(reader), b"role-value");
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn raw_mode_recorder_receives_exact_bytes() {
@@ -1729,6 +1879,8 @@ mod tests {
         let _ = table.kill(&responsive_key);
     }
 
+    #[cfg(unix)]
+
     #[test]
     fn pane_table_write_paste_writes_brackets_then_delayed_enter() {
         let _pty_guard = serial_pty_test();
@@ -1774,6 +1926,7 @@ mod tests {
         assert!(table.list().expect("list panes").is_empty());
     }
 
+    #[cfg(unix)]
     fn fill_backlog(
         output: &std::sync::mpsc::Receiver<super::PaneOutput>,
         backlog_bytes: usize,
@@ -1791,6 +1944,7 @@ mod tests {
         (received_bytes, last_seq)
     }
 
+    #[cfg(unix)]
     fn assert_output_closes(output: std::sync::mpsc::Receiver<super::PaneOutput>) {
         let deadline = Instant::now() + Duration::from_secs(1);
         loop {
@@ -1802,6 +1956,8 @@ mod tests {
             }
         }
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn reader_activity_resets_idle_then_silence_increases_it() {
@@ -1836,6 +1992,8 @@ mod tests {
         assert!(idle_after_silence >= idle_after_output + 80);
         table.kill(&streamed.key).expect("kill delayed-output pane");
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn unacked_yes_output_is_bounded_then_resumes_after_ack() {
@@ -1872,6 +2030,8 @@ mod tests {
         table.kill(&key).expect("kill streamed pane");
         assert_output_closes(output);
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn ack_rejects_future_sequences_and_cumulative_progress_stays_bounded() {
@@ -1949,6 +2109,8 @@ mod tests {
         table.kill(&key).expect("kill chunked output pane");
         assert_output_closes(output);
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn input_remains_responsive_while_output_waits_for_ack() {
@@ -2073,28 +2235,147 @@ mod tests {
 
     #[cfg(windows)]
     mod windows {
-        #[test]
-        #[ignore = "macOS-first PTY contract"]
-        fn open_resize_and_environment_contract() {
-            panic!("implement with the Windows PTY backend");
+        use std::collections::HashMap;
+        use std::sync::mpsc::RecvTimeoutError;
+        use std::time::{Duration, Instant};
+
+        use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+        use windows_sys::Win32::System::Threading::{
+            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+
+        use super::super::conpty_test::{line_echo, open, powershell, read_until, system};
+        use super::super::{serial_pty_test, PaneTable};
+
+        fn number_after(text: &str, marker: &str) -> u32 {
+            let at = text.find(marker).expect("marker printed") + marker.len();
+            text[at..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+                .parse()
+                .expect("a number after the marker")
+        }
+
+        fn running(pid: u32) -> bool {
+            // SAFETY: a query-only handle, closed before returning.
+            unsafe {
+                let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+                if process.is_null() {
+                    return false;
+                }
+                let mut code = 0u32;
+                let read = GetExitCodeProcess(process, &mut code);
+                CloseHandle(process);
+                read != 0 && code == STILL_ACTIVE as u32
+            }
         }
 
         #[test]
-        #[ignore = "macOS-first PTY contract"]
-        fn kill_process_group_contract() {
-            panic!("implement with the Windows PTY backend");
+        fn the_environment_and_a_resize_reach_the_child() {
+            let _pty_guard = serial_pty_test();
+            let table = PaneTable::new();
+            let env = HashMap::from([("CF_PANE_VALUE".to_string(), "overlaid".to_string())]);
+            let (key, output) = open(
+                &table,
+                &powershell(
+                    "Write-Output \"ENV=$env:CF_PANE_VALUE\"; [Console]::In.ReadLine() | Out-Null; \
+                     Write-Output \"SIZE=$([Console]::WindowWidth)#\"",
+                ),
+                &env,
+                1 << 20,
+            );
+            assert!(read_until(&table, &key, &output, "ENV=overlaid").contains("ENV=overlaid"));
+            table.resize(&key, 30, 100).expect("resize the pane");
+            table.write(&key, b"\r").expect("go on");
+            let text = read_until(&table, &key, &output, "#");
+            assert_eq!(number_after(&text, "SIZE="), 100, "{text:?}");
+            table.kill(&key).expect("kill the pane");
         }
 
         #[test]
-        #[ignore = "macOS-first PTY contract"]
-        fn raw_input_contract() {
-            panic!("implement with the Windows PTY backend");
+        fn kill_ends_everything_the_harness_started() {
+            let _pty_guard = serial_pty_test();
+            let table = PaneTable::new();
+            let ping = system("PING.EXE");
+            let (key, output) = open(
+                &table,
+                &powershell(&format!(
+                    "$p = Start-Process -PassThru -WindowStyle Hidden -FilePath '{ping}' -ArgumentList '-n','1000','127.0.0.1'; \
+                     Write-Output \"PID=$($p.Id)#\"; Start-Sleep 1000"
+                )),
+                &HashMap::new(),
+                1 << 20,
+            );
+            let text = read_until(&table, &key, &output, "#");
+            let started = number_after(&text, "PID=");
+            assert!(running(started), "the detached child is not running");
+
+            table.kill(&key).expect("kill the pane");
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while running(started) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            assert!(
+                !running(started),
+                "a child the harness started survived its window"
+            );
         }
 
         #[test]
-        #[ignore = "macOS-first PTY contract"]
-        fn ack_gated_backpressure_contract() {
-            panic!("implement with the Windows PTY backend");
+        fn input_reaches_the_child() {
+            let _pty_guard = serial_pty_test();
+            let table = PaneTable::new();
+            let (key, output) = open(&table, &line_echo(), &HashMap::new(), 1 << 20);
+            read_until(&table, &key, &output, "READY");
+            table
+                .write(&key, b"typed words\r")
+                .expect("type into the pane");
+            assert!(read_until(&table, &key, &output, "#").contains("GOT=[typed words]"));
+            table.kill(&key).expect("kill the pane");
+        }
+
+        #[test]
+        fn unacked_output_is_bounded_then_resumes_after_ack() {
+            const BACKLOG_BYTES: usize = 128;
+            let _pty_guard = serial_pty_test();
+            let table = PaneTable::new();
+            let (key, output) = open(
+                &table,
+                &[
+                    system("cmd.exe"),
+                    "/d".into(),
+                    "/c".into(),
+                    "for /L %i in (1,0,2) do @echo y".into(),
+                ],
+                &HashMap::new(),
+                BACKLOG_BYTES,
+            );
+            let mut received = 0;
+            let mut last_seq = 0;
+            while received < BACKLOG_BYTES {
+                let chunk = output
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("output up to the backlog");
+                if chunk.bytes.windows(4).any(|bytes| bytes == b"\x1b[6n") {
+                    table
+                        .write(&key, b"\x1b[1;1R")
+                        .expect("answer the cursor query");
+                }
+                received += chunk.bytes.len();
+                last_seq = chunk.seq;
+            }
+            assert_eq!(received, BACKLOG_BYTES);
+            assert!(matches!(
+                output.recv_timeout(Duration::from_millis(200)),
+                Err(RecvTimeoutError::Timeout)
+            ));
+            table.ack(&key, last_seq).expect("ack the backlog");
+            let resumed = output
+                .recv_timeout(Duration::from_secs(5))
+                .expect("output resumes after the ack");
+            assert_eq!(resumed.seq, last_seq + 1);
+            table.kill(&key).expect("kill the pane");
         }
     }
 }

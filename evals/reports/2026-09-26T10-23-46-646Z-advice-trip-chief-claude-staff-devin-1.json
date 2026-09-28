@@ -1,0 +1,200 @@
+{
+  "scenario": "advice-trip",
+  "chief": "claude",
+  "model": "claude-opus-5",
+  "staff": [
+    "devin"
+  ],
+  "staffModels": {
+    "eval-devin-worker": "swe-1-6-slow",
+    "eval-devin-worker-2": "swe-1-6-slow",
+    "eval-devin-advisor": "swe-1-6-slow",
+    "eval-devin-reviewer": "swe-1-6-slow"
+  },
+  "run": 1,
+  "seconds": 203,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Test de funcționare al platformei. Context: construim un site public de informare despre burnout (epuizare profesională…",
+        "pool": "advisor",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-devin-advisor-sandy-saddle"
+      }
+    ],
+    "parallel": 1,
+    "advice": 1,
+    "reviews": 0,
+    "questionsToHuman": [],
+    "notesToHuman": [
+      {
+        "id": 3,
+        "body": "Test de funcționare reușit. T-1 (advice, tier standard) a mers la un advisor și e acceptată; niciun fișier atins, nicio altă sarcină pusă.\n\nRecomandarea advisorului pentru butonul Contact de pe site-u"
+      }
+    ],
+    "taskCount": 1,
+    "chiefId": 2,
+    "chiefHarness": "claude-code",
+    "humanId": 1,
+    "chiefTurns": 5,
+    "chiefEdits": 0,
+    "chiefLastWords": "Testul a trecut, pe tot lanțul: sarcină pe board → advisor → rezultat → acceptare → notă.\n\nCe s-a întâmplat, pe scurt:\n- **T-1** — `cf task add --advice --tier standard` a ajuns la `@eval-devin-advisor-sandy-saddle` (advisorul standard de pe staff).\n- Rezultatul a venit în inbox ca **m-2**, l-am acceptat cu `cf task accept T-1` (decizia asupra rezultatelor e a mea, nu a ta).\n- Recomandarea ți-a plecat ca notă **m-3**, cu citatul lui integral.\n\nRăspunsul lui: **albastru** — încredere și profesionalism pentru cineva care caută ajutor, efect de calmare a anxietății, contrast suficient pe fundal deschis.\n\nNiciun fișier modificat, nicio altă sarcină pusă — doar cele două comenzi cerute plus nota.\n\nUn lucru pe care merită să-l știi despre cum funcționează: un rezultat rămas nedecis stă în starea *Done* și blochează orice sarcină care depinde de el (`--needs`). De aceea acceptarea nu e o formalitate — e ce deblochează restul planului.",
+    "plumbing": {
+      "briefs": 1,
+      "briefsDelivered": 1,
+      "results": 1,
+      "resultsDelivered": 1,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 1,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0,
+      "ownerQuestions": 0,
+      "ownerQuestionsAnswered": 0
+    },
+    "filesChanged": []
+  },
+  "checks": [
+    {
+      "name": "one advice task goes on the board",
+      "ok": true
+    },
+    {
+      "name": "the advice task is accepted",
+      "ok": true
+    },
+    {
+      "name": "the recommendation reaches the owner as a note",
+      "ok": true
+    },
+    {
+      "name": "no file changes",
+      "ok": true
+    },
+    {
+      "name": "the owner is not asked anything",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (1/1)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (1/1)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question the chief put to the owner got the owner's answer (0/0)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (1/1)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "✳n2",
+    "✶4",
+    "✻i…",
+    "✽tg2",
+    "cn6",
+    "Testulatrecut,petotlanțul:sarcinăpeboard→advisor→rezultat→acceptare→notă.────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────  workspace Opus                                                  53731 tokens⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent         /rcCes-aîntâmplat,pescurt:  -────────────────────────────────────────────────────────────────────────────────❯",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus53731tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "T-1—cf task add --advice --tier standardaajunsla",
+    "@eval-devin-advisor-sandy-saddle(advisorulstandarddepestaff).  -❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus53731tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Rezultatulavenitîninboxcam-2,l-amacceptatcucf task accept T-1",
+    "(deciziaasuprarezultateloreamea,nuata).  -❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus53731tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "-T-1—cf task add --advice --tier standardaajunsla @eval-devin-advisorsandy-saddl (advisorul standard depestaff).-Rezultatul a venit în inbox ca m-2, l-am acceptat cucf task accept T-1 (decizia asupra rezultatelor ea mea, nu ta).-Recomandarea ți-a plec ca notăm-3ccitulluiintegral.",
+    "Răspunsullui:albastru—încredereșiprofesionalismpentrucinevacarecaută────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           53731 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "ajutor,efectdecalmareaanxietății,contrastsuficientpefundaldeschis.❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus53731tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Niciunfișiermodificat,nicioaltăsarcinăpusă—doarceledouăcomenzi────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           53731 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "ceruteplusnota.❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus53731tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Unlucrupecaremerităsă-lștiidesprecumfuncționează:unrezultatrămas────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           53731 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "nedecisstăînstareaDoneșiblocheazăoricesarcinăcaredepindedeel────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           53731 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "(--needs).Deaceeaacceptareanueoformalitate—ecedeblocheazărestul────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           53731 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "planului.✽ Effecting… (20s · ↓727 tokens)  ⎿  Tip: Use ctrl+v to paste images from your clipboard────────────────────────────────────────────────────────────────────────────────",
+    "❯",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus53780tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "✻Worked for 20s · done 1:22 PM────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────  workspace Opus                                                  54210 tokens⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent         /rc"
+  ],
+  "terminalAnswers": 0,
+  "refusedAnswers": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 68,
+      "line": "chief (claude) ready; typing the prompt"
+    },
+    {
+      "at": 78,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 83,
+      "line": "chief idle; tasks T-1:queued"
+    },
+    {
+      "at": 88,
+      "line": "chief idle; tasks T-1:working"
+    },
+    {
+      "at": 93,
+      "line": "chief working; tasks T-1:done"
+    },
+    {
+      "at": 98,
+      "line": "chief working; tasks T-1:accepted"
+    },
+    {
+      "at": 113,
+      "line": "chief idle; tasks T-1:accepted"
+    },
+    {
+      "at": 203,
+      "line": "quiet: the run is over"
+    }
+  ]
+}

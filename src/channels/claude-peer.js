@@ -58,6 +58,13 @@ async function discover(config, session, deadline, allowBackground = false) {
     throw error
   }
   const { file, row } = matches[0]
+  // A Claude that keeps only its status here (no peer messaging on this
+  // build, or it is switched off) has no inbox; its terminal is the way in.
+  if (typeof row.messagingSocketPath !== 'string') {
+    const error = Error('native Claude inbox is not registered')
+    error.code = 'native-session-unavailable'
+    throw error
+  }
   if (row.kind === 'bg' && !allowBackground) {
     const error = Error('native Claude background inbox requires verified continuation ownership')
     error.code = 'background-peer'
@@ -70,7 +77,6 @@ async function discover(config, session, deadline, allowBackground = false) {
     (row.kind !== 'interactive' && !(allowBackground && row.kind === 'bg')) ||
     row.entrypoint !== 'cli' ||
     typeof row.procStart !== 'string' ||
-    typeof row.messagingSocketPath !== 'string' ||
     !isAbsolute(row.messagingSocketPath)
   ) {
     throw Error('native Claude inbox has unsupported or inconsistent identity')
@@ -261,7 +267,7 @@ async function sendText(target, text) {
       { deadlineMs: timeoutMs + 100 },
     )
     // A write only starts receipt tracking. The watcher accepts the result
-    // from the complete envelope in the native lead history, never from flush.
+    // from the complete envelope in the native chief history, never from flush.
     return result
   } catch {
     // Once handed to the bridge, even a timeout may follow a complete write.

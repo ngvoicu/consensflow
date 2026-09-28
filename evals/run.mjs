@@ -1,161 +1,392 @@
 #!/usr/bin/env node
-import { parseArgs } from 'node:util'
-import { listAgents } from '../src/roster.js'
-import { AGENT, leadSession, makeStage, runLead, threadFrom } from './harness.mjs'
-import { SCENARIOS } from './scenarios.mjs'
-
 /**
- * Does the skill actually change what a lead does?
+ * One eval run: a real chief on a toy project, with a real staff on cheap
+ * models and a scripted human, measured from the ledger at the end. See
+ * evals/README.md. Spends real tokens; never part of a gate.
  *
- * `npm test` checks what the skill SAYS. Nothing checked what a lead DOES
- * with it, so three behavioural failures in one day were each answered with
- * more prose and none of the fixes was ever measured. This spends real tokens
- * on a real lead to turn "is it better?" into a number.
+ *   npm run eval -- --scenario six-decisions [--chief claude] [--staff claude,codex]
+ *                   [--model …] [--claude-staff-model …] [--repeat 1] [--timeout-min 40]
+ *                   [--effort high] [--staff-effort medium]
  *
- * Leads are not deterministic, so a single pass proves little: `--repeat`
- * reports a rate per check, which is the unit a prose change can be judged in.
+ * `--model` is the chief's: Opus for Claude Code and the cheap model for OpenCode
+ * unless given; Codex, Pi and Devin run their own default and ignore it.
+ * `--effort` is the chief's reasoning level (Claude, Codex, Pi; OpenCode's
+ * window and Devin have no switch for it), `--staff-effort` every member's.
  */
+import { execFileSync } from 'node:child_process'
+import { chmodSync, cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { parseArgs } from 'node:util'
+import { startIntegration } from '../tests/integration/harness.mjs'
+import { measure, mechanics, verdict } from './measure.mjs'
+import {
+  answerFor,
+  chiefEnvironment,
+  claudeProjectKey,
+  codexIsolation,
+  HARNESSES,
+  lastLines,
+  realOnPath,
+  staffFor,
+} from './plan.mjs'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+const EDITOR = join(HERE, '..', 'tests', 'live', 'core-live-editor.mjs')
+const TRUST = join(HERE, '..', 'tests', 'live', 'trust-claude-folder.py')
+const H = process.env.HOME
+// One fixed workspace, trusted once per run: Claude asks about an unknown folder.
+const WORKSPACE = join(H, '.consensflow-candidate', 'evals', 'workspace')
+const REPORTS = join(HERE, 'reports')
+
 const { values } = parseArgs({
   options: {
-    lead: { type: 'string', default: 'claude' },
+    scenario: { type: 'string', default: 'six-decisions' },
+    chief: { type: 'string', default: 'claude' },
+    staff: { type: 'string' },
+    model: { type: 'string' },
+    gate: { type: 'boolean', default: false },
+    'claude-staff-model': { type: 'string', default: HARNESSES.claude.model },
     repeat: { type: 'string', default: '1' },
-    scenario: { type: 'string' },
-    // 180s was the default until 2026-09-02, and it reported a SIGKILL as a
-    // scenario failure: three runs "failed" checks they hold comfortably when
-    // given time, and one of them read as a prose regression until it was
-    // measured against HEAD and came back identical. A measurement tool that
-    // manufactures failures is worse than a slow one.
-    timeout: { type: 'string', default: '420' },
+    'timeout-min': { type: 'string', default: '40' },
+    effort: { type: 'string', default: 'high' },
+    'staff-effort': { type: 'string', default: 'medium' },
   },
 })
+const scenario = (
+  await import(pathToFileURL(join(HERE, 'scenarios', `${values.scenario}.mjs`)).href)
+).default
+const chief = values.chief
+const staffHarnesses = (values.staff ?? chief).split(',').map((s) => s.trim())
+const repeat = Number(values.repeat)
+const timeoutMs = Number(values['timeout-min']) * 60_000
+const { agents, staff } = staffFor(
+  staffHarnesses,
+  { claude: values['claude-staff-model'] },
+  values['staff-effort'],
+)
+/** The chief's effort as it reached the chief: null where its harness has no switch for it. */
+const chiefEffort = ['claude', 'codex', 'pi'].includes(chief) ? values.effort : null
+const chiefSetup = chiefEnvironment(chief, values.model)
 
-const repeat = Number.parseInt(values.repeat, 10)
-const timeoutMs = Number.parseInt(values.timeout, 10) * 1000
-const chosen = values.scenario ? SCENARIOS.filter((s) => s.id === values.scenario) : SCENARIOS
-if (chosen.length === 0) {
-  console.error(
-    `no scenario ${JSON.stringify(values.scenario)}; have: ${SCENARIOS.map((s) => s.id).join(', ')}`,
+/** The bench's clean environment: the real logins, never this shell's session identity. */
+/**
+ * Every Claude and Codex window in a run starts through a wrapper, first on
+ * the daemon's PATH, that shuts out MCP servers, connectors and the browser.
+ * The windows run in full-permission mode on the user's own setup, which
+ * reaches their browser, screen and accounts: on 2026-09-26 an eval reviewer
+ * called the Claude in Chrome tools, and Codex's setup gained browser and
+ * computer-use servers the same day. A scripted run must reach none of them.
+ */
+const ISOLATED_BIN = join(H, '.consensflow-candidate', 'evals', 'bin')
+const wrapper = (name, real, flags) => {
+  const file = join(ISOLATED_BIN, name)
+  const args = [real, ...flags].map((arg) => JSON.stringify(arg)).join(' ')
+  writeFileSync(
+    file,
+    `#!/bin/sh\n# Written by evals/run.mjs: eval windows reach no MCP server and no browser.\nexec ${args} "$@"\n`,
   )
-  process.exit(2)
+  chmodSync(file, 0o755)
 }
-
-// The same roster is copied into each private evaluation app root.
-if (!listAgents(process.env).some(agent => agent.name === AGENT)) {
-  console.error(`The roster does not list ${AGENT}; set CF_EVAL_AGENT to a roster name (cf agent list)`)
-  process.exit(2)
+// Fresh each run: a wrapper written for another chief must not outlive its run.
+rmSync(ISOLATED_BIN, { recursive: true, force: true })
+mkdirSync(ISOLATED_BIN, { recursive: true })
+// The chief's effort goes first; a member's own, later on its command line, wins.
+wrapper('claude', realOnPath('claude', process.env.PATH ?? ''), [
+  '--strict-mcp-config',
+  '--no-chrome',
+  ...(chief === 'claude' ? ['--effort', values.effort] : []),
+])
+if (chief === 'pi') {
+  // Only a window takes `--thinking`; Pi's own subcommands (install, list) do not.
+  const realPi = realOnPath('pi', process.env.PATH ?? '')
+  const file = join(ISOLATED_BIN, 'pi')
+  writeFileSync(
+    file,
+    `#!/bin/sh\n# Written by evals/run.mjs: the Pi chief's thinking level.\ncase "$1" in\n  -*|'') exec ${JSON.stringify(realPi)} --thinking ${JSON.stringify(values.effort)} "$@" ;;\n  *) exec ${JSON.stringify(realPi)} "$@" ;;\nesac\n`,
+  )
+  chmodSync(file, 0o755)
 }
-
-console.log(`lead: ${values.lead} · ${chosen.length} scenarios × ${repeat} · agent @${AGENT}`)
-console.log('this spends real tokens on a real lead, and touches nothing real')
-console.log('')
-
-const tally = new Map()
-const note = (scenario, check, ok) => {
-  const key = `${scenario} ${check}`
-  const row = tally.get(key) ?? { scenario, check, passed: 0, of: 0 }
-  row.passed += ok ? 1 : 0
-  row.of += 1
-  tally.set(key, row)
-}
-// Lead executions that never completed, per pass label. Counted as misses
-// in the summary below so a dead lead can never read as green.
-const brokenLabels = []
-
-for (const scenario of chosen) {
-  for (let pass = 0; pass < repeat; pass += 1) {
-    const label = repeat > 1 ? `${scenario.id} (${pass + 1}/${repeat})` : scenario.id
-    const stage = makeStage(scenario.stage)
-    const nextTurn = leadSession(values.lead)
-    let thread = null
-    let broke = null
-    const failures = []
-    const evidence = []
-    // Every turn's commands, kept so a miss on turn 3 can show turns 1 and
-    // 2 as well: a lead that sends into a pane it never opened THIS turn
-    // opened it (or two) on a turn with no checks, and that is where the
-    // explanation was (2026-09-06).
-    const turnLogs = []
-    try {
-      for (const turn of scenario.turns) {
-        const before = stage.read().length
-        // A delivery arrives IN the lead's context, not behind a command:
-        // prefix the envelope into the turn so the lead reads it as arrived
-        // text, exactly as the app pastes it into the pane.
-        const prompt = turn.delivery ? `${turn.delivery}\n\n${turn.say}` : turn.say
-        const invocation = nextTurn(prompt, thread)
-        const result = await runLead(invocation, stage, timeoutMs)
-        if (invocation.capturesThread) thread = threadFrom(result.stdout) ?? thread
-        if (result.code !== 0) {
-          broke = `the lead exited ${result.code}: ${(result.stderr || result.stdout).slice(0, 300)}`
-          break
-        }
-        const log = stage.read().slice(before)
-        turnLogs.push({ say: turn.say, log })
-        let missedHere = false
-        for (const [check, holds] of turn.expect) {
-          // What the lead DID, and what it then told the user: some failures are
-          // only visible in the report — a lead that read the tail of a long
-          // answer ran exactly the right command and still reported the wrong thing.
-          const ok = holds(log, result.reply ?? result.stdout)
-          note(scenario.id, check, ok)
-          if (!ok) {
-            failures.push(check)
-            missedHere = true
-          }
-        }
-        // The stage is thrown away below, so a missed check is the last chance
-        // to see WHAT the lead ran — a rate says a fix did not work, only the
-        // commands say why (2026-09-05: two checks missed on a turn that ran
-        // no `cmux send` at all, and nothing said whether it had asked the
-        // user instead or sent something the check did not count).
-        if (missedHere && evidence.length === 0) {
-          for (const { say, log: ran } of turnLogs) {
-            const mark = say === turn.say ? ' (missed)' : ''
-            evidence.push(`    turn ${JSON.stringify(say.slice(0, 60))} ran${mark}:`)
-            for (const line of ran) evidence.push(`      $ ${line}`)
-            if (ran.length === 0) evidence.push('      (nothing)')
-          }
-        } else if (missedHere) {
-          evidence.push(`    turn ${JSON.stringify(turn.say.slice(0, 60))} ran (missed):`)
-          for (const line of log) evidence.push(`      $ ${line}`)
-          if (log.length === 0) evidence.push('      (nothing)')
-        }
-        if (missedHere) evidence.push(`    lead reply: ${result.reply ?? result.stdout}`)
-      }
-    } finally {
-      stage.cleanup()
-    }
-    if (broke) {
-      console.log(`  ${label}: could not run — ${broke}`)
-      // A lead that never ran is not a pass: failed executions count as
-      // misses, or a dead lead reads as green.
-      brokenLabels.push(label)
-      continue
-    }
-    console.log(
-      failures.length === 0
-        ? `  ${label}: all checks held`
-        : `  ${label}: ${failures.join('; ')}`,
+const realCodex = realOnPath('codex', process.env.PATH ?? '')
+// Codex also opens on an update prompt whenever a newer release exists
+// (seen 2026-09-26 with 0.157.0 out), and a chief started without a first
+// message waits on it for good: the eval turns the startup check off.
+// The chief's model, or the cheap one; a member's own --model still wins.
+// The product itself now skips Codex's update prompt, keeps ConsensFlow's
+// variables for Codex's commands and isolates members; the eval adds only
+// what is eval-only: the chief isolated too, and the model.
+const codexModel = chief === 'codex' ? chiefSetup.model : HARNESSES.codex.model
+wrapper(
+  'codex',
+  realCodex,
+  ['-c', `model=${JSON.stringify(codexModel)}`]
+    .concat(
+      chief === 'codex' ? ['-c', `model_reasoning_effort=${JSON.stringify(values.effort)}`] : [],
     )
-    for (const line of evidence) console.log(line)
-  }
+    .concat(
+      codexIsolation(
+        JSON.parse(
+          execFileSync(realCodex, ['mcp', 'list', '--json'], { encoding: 'utf8', timeout: 30_000 }),
+        ),
+      ),
+    ),
+)
+
+const ENV = {
+  HOME: H,
+  USER: process.env.USER,
+  LOGNAME: process.env.USER,
+  LANG: 'en_US.UTF-8',
+  TERM: 'xterm-256color',
+  PATH: [
+    ISOLATED_BIN,
+    join(H, '.local', 'bin'),
+    join(H, '.opencode', 'bin'),
+    join(H, '.codex', 'bin'),
+    join(H, '.pi', 'bin'),
+    '/opt/homebrew/bin',
+    '/usr/bin',
+    '/bin',
+    '/usr/sbin',
+    '/sbin',
+  ].join(':'),
+  // Unset on purpose (null removes the harness's sandbox default): with it set,
+  // Claude finds no completed onboarding and opens on the first-run dialog.
+  CLAUDE_CONFIG_DIR: null,
+  CODEX_HOME: join(H, '.codex'),
+  XDG_CONFIG_HOME: join(H, '.config'),
+  ...chiefSetup.env,
 }
 
-console.log('')
-let missed = 0
-for (const scenario of chosen) {
-  const rows = [...tally.values()].filter((r) => r.scenario === scenario.id)
-  if (rows.length === 0) continue
-  console.log(scenario.id)
-  for (const row of rows) {
-    const rate = row.passed / row.of
-    missed += row.of - row.passed
-    const mark = rate === 1 ? '  ok  ' : rate === 0 ? ' FAIL ' : ' flaky'
-    console.log(`  ${mark} ${String(row.passed).padStart(2)}/${row.of}  ${row.check}`)
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+/** How long a chief may sit idle with nothing on the board before the owner answers it in its terminal. */
+const NUDGE_AFTER_MS = 60_000
+
+/**
+ * Wait until a window's output has grown and then held still for `stillMs`:
+ * the harness has drawn its prompt. A window can read idle the moment it
+ * opens (Pi and Devin do), and text typed before the prompt is lost.
+ */
+async function settled(size, { stillMs = 3_000, capMs = 60_000 } = {}) {
+  const started = Date.now()
+  let last = size()
+  let since = started
+  for (;;) {
+    await sleep(500)
+    const now = size()
+    if (now !== last) {
+      last = now
+      since = Date.now()
+    } else if (now > 0 && Date.now() - since >= stillMs) return
+    if (Date.now() - started > capMs) return
   }
 }
-// A flaky check is a failing check: the user meets it on the run it misses.
-// So is a lead that never ran at all.
-missed += brokenLabels.length
-for (const label of brokenLabels) console.log(`  FAIL  0/1  ${label} could not run`)
-process.exitCode = missed === 0 ? 0 : 1
+const stamp = () => new Date().toISOString().replace(/[:.]/g, '-')
+
+async function run(index) {
+  const started = Date.now()
+  rmSync(WORKSPACE, { recursive: true, force: true })
+  mkdirSync(WORKSPACE, { recursive: true })
+  // A fresh run: nothing Claude remembered about this folder from the last one.
+  rmSync(join(H, '.claude', 'projects', claudeProjectKey(WORKSPACE), 'memory'), {
+    recursive: true,
+    force: true,
+  })
+  cpSync(join(HERE, 'fixtures', scenario.fixture), WORKSPACE, { recursive: true })
+  if (chief === 'claude' || staffHarnesses.includes('claude')) {
+    process.stdout.write(
+      `trust: ${execFileSync('python3', [TRUST, WORKSPACE], { encoding: 'utf8', env: { ...process.env, HOME: H } }).trim()}\n`,
+    )
+  }
+  const app = await startIntegration({ editor: EDITOR, fakeEnv: ENV })
+  const log = []
+  const note = (line) => {
+    const at = Math.round((Date.now() - started) / 1000)
+    log.push({ at, line })
+    process.stdout.write(`  [${at}s] ${line}\n`)
+  }
+  let file = null
+  let pane = null
+  let screen = []
+  let terminalAnswers = 0
+  let boardTasks = 0
+  const refused = []
+  let approvals = 0
+  try {
+    writeFileSync(
+      join(app.env.CONSENSFLOW_HOME, 'agents.json'),
+      `${JSON.stringify({ schemaVersion: 1, agents }, null, 2)}\n`,
+    )
+    file = join(app.env.CONSENSFLOW_HOME, 'consensflow.db')
+    const opened = await app.requestNode('project.open', {
+      directory: WORKSPACE,
+      harness: HARNESSES[chief].kind,
+      staff,
+      ...(values.gate ? { gate: true } : {}),
+    })
+    if (opened.ok !== true) throw new Error(`project.open: ${JSON.stringify(opened)}`)
+    const project = opened.project.id
+    const board = async () => (await app.requestNode('board.get', { project })).board
+    const chiefLane = async () =>
+      (await board()).lanes.find((l) => l.participant.handle === 'chief')
+    const questions = async () =>
+      (await app.requestNode('inbox.get', { project, participant: 'human' })).messages.filter(
+        (m) => m.kind === 'question' && m.sender === 'chief' && m.state !== 'answered',
+      )
+    await app.waitFor(async () => (await chiefLane())?.activity?.state === 'idle', 240_000)
+    pane = (await chiefLane()).pane
+    await settled(() => app.output(pane.id).length)
+    note(`chief (${chief}) ready; typing the prompt`)
+    /** Type into the chief's terminal as the owner would, Enter pressed again if the window kept the text. */
+    const say = async (text) => {
+      await app.tell(project, text, { idleMs: 240_000 })
+      await sleep(5_000)
+      if ((await chiefLane())?.activity?.state === 'idle') {
+        // Devin takes a pasted prompt into its box and waits for an Enter of its own.
+        await app.request('pane.input', { id: pane.id, generation: pane.generation, bytes: [13] })
+        note('Enter pressed again: the window had not taken the text')
+      }
+    }
+    await say(scenario.prompt)
+
+    const answered = new Set()
+    let lastChange = Date.now()
+    let signature = ''
+    for (;;) {
+      await sleep(5_000)
+      for (const question of await questions()) {
+        if (answered.has(question.id)) continue
+        answered.add(question.id)
+        const answer = answerFor(scenario, question)
+        const reply = await app.requestNode('message.answer', { question: question.id, ...answer })
+        const shown = answer.body ?? answer.choices.map((picks) => picks.join(', ')).join(' / ')
+        const subject = question.body.split('\n')[0].slice(0, 70)
+        if (reply?.ok === false || reply?.message === undefined) {
+          // A refused answer leaves the asker waiting for good: the report says so.
+          refused.push({ question: question.id, error: reply?.error ?? 'no reply' })
+          note(`the owner's answer to m-${question.id} (${subject}) was REFUSED: ${reply?.error}`)
+        } else {
+          await app.requestNode('message.read', { message: question.id })
+          note(`answered m-${question.id} (${subject}) with: ${shown}`)
+        }
+      }
+      // With the gate on, the owner approves every message as the board's For you does.
+      for (const waiting of (await board()).gated ?? []) {
+        const reply = await app.requestNode('message.approve', { message: waiting.id })
+        if (reply?.ok === false) {
+          refused.push({ approve: waiting.id, error: reply.error })
+          note(`approving m-${waiting.id} was REFUSED: ${reply.error}`)
+        } else approvals += 1
+      }
+      const current = await board()
+      const lane = current.lanes.find((l) => l.participant.handle === 'chief')
+      const tasks = current.lanes.flatMap((l) => l.tasks).concat(current.open)
+      boardTasks = tasks.length
+      const now = JSON.stringify([
+        lane?.activity?.state,
+        tasks.map((t) => [t.number, t.state]),
+        current.lanes.map((l) => [l.participant.handle, l.activity?.state]),
+      ])
+      if (now !== signature) {
+        signature = now
+        lastChange = Date.now()
+        note(
+          `chief ${lane?.activity?.state}; tasks ${tasks.map((t) => `T-${t.number}:${t.state}`).join(' ') || 'none'}`,
+        )
+      }
+      const busy =
+        lane?.activity?.state !== 'idle' ||
+        tasks.some((t) => ['queued', 'working', 'waiting'].includes(t.state))
+      // A chief that stops in its terminal, asking or proposing there, with
+      // nothing ever put on the board, hears the owner there too (twice at
+      // most), so the run sees what it does next; the report counts these,
+      // because they are what the board was for.
+      if (
+        scenario.nudge !== undefined &&
+        terminalAnswers < 2 &&
+        !busy &&
+        tasks.length === 0 &&
+        answered.size === 0 &&
+        Date.now() - lastChange > NUDGE_AFTER_MS
+      ) {
+        terminalAnswers += 1
+        note(`the chief stopped in its terminal; the owner typed there: ${scenario.nudge}`)
+        await settled(() => app.output(pane.id).length)
+        await say(scenario.nudge)
+        lastChange = Date.now()
+        continue
+      }
+      if (!busy && Date.now() - lastChange > scenario.quietMs) {
+        note('quiet: the run is over')
+        break
+      }
+      if (Date.now() - started > timeoutMs) {
+        note('time is up')
+        break
+      }
+    }
+  } finally {
+    if (pane !== null) screen = lastLines(app.output(pane.id))
+    await app.close({ preserveRoot: true })
+  }
+  const metrics = measure(file, {
+    fixture: join(HERE, 'fixtures', scenario.fixture),
+    workspace: WORKSPACE,
+  })
+  const checks = verdict(scenario, metrics)
+  const plumbing = mechanics(metrics, boardTasks)
+  if (values.gate)
+    plumbing.push({
+      name: `the gate held the messages for the owner's approval (${approvals} approved)`,
+      ok: approvals > 0 && refused.every((r) => r.approve === undefined),
+    })
+  const report = {
+    scenario: scenario.id,
+    chief,
+    model: chiefSetup.model,
+    effort: chiefEffort,
+    staffEffort: values['staff-effort'],
+    staff: staffHarnesses,
+    staffModels: Object.fromEntries(agents.map((a) => [a.id, a.model])),
+    run: index,
+    seconds: Math.round((Date.now() - started) / 1000),
+    metrics,
+    checks,
+    mechanics: plumbing,
+    chiefScreen: screen,
+    terminalAnswers,
+    refusedAnswers: refused,
+    gate: values.gate,
+    approvals,
+    log,
+  }
+  mkdirSync(REPORTS, { recursive: true })
+  const out = join(
+    REPORTS,
+    `${stamp()}-${scenario.id}-chief-${chief}-staff-${staffHarnesses.join('+')}-${index}.json`,
+  )
+  writeFileSync(out, `${JSON.stringify(report, null, 2)}\n`)
+  process.stdout.write(
+    `\n${scenario.id} · chief ${chief} (${chiefSetup.model}, effort ${chiefEffort ?? 'its default'}) · staff effort ${values['staff-effort']} · staff ${staffHarnesses.join('+')} · run ${index} · ${report.seconds}s\n`,
+  )
+  for (const check of checks)
+    process.stdout.write(`  ${check.ok ? 'PASS' : 'FAIL'} ${check.name}\n`)
+  process.stdout.write('  the plumbing:\n')
+  for (const check of plumbing)
+    process.stdout.write(`  ${check.ok ? 'PASS' : 'FAIL'} ${check.name}\n`)
+  if (metrics.chiefTurns === 0)
+    process.stdout.write(
+      `  the chief's screen ended with:\n${screen
+        .slice(-8)
+        .map((l) => `    ${l}`)
+        .join('\n')}\n`,
+    )
+  process.stdout.write(
+    `  tasks ${metrics.tasks.length} (parallel ${metrics.parallel}, advice ${metrics.advice}, reviews ${metrics.reviews}) · questions ${metrics.questionsToHuman.length} · notes ${metrics.notesToHuman.length} · chief edits ${metrics.chiefEdits ?? '?'} in ${metrics.chiefTurns} turns · files changed ${metrics.filesChanged.length} · answered in the terminal ${terminalAnswers}\n  report: ${out}\n`,
+  )
+  return checks.every((check) => check.ok) && plumbing.every((check) => check.ok)
+}
+
+let allOk = true
+for (let index = 1; index <= repeat; index += 1) allOk = (await run(index)) && allOk
+process.exit(allOk ? 0 : 1)

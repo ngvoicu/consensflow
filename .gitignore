@@ -2,3 +2,5 @@ node_modules/
 .DS_Store
 .consensflow/
 /deliveries/d-*.md
+test-results/
+.idea

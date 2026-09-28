@@ -3,10 +3,13 @@ import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { once } from 'node:events'
 import { chmod, mkdir, mkdtemp, rm, stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import WebSocket, { WebSocketServer } from 'ws'
+import { runnable, terminate } from '../src/harnesses.js'
 import { configRoot } from '../src/roster.js'
+import { askTheBoard, boardClient } from './lib/question-door.js'
 import { createReceiver } from './lib/receiver.js'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -14,7 +17,7 @@ const MAX_FRAME = 64 * 1024 * 1024
 const refused = (error) => ({ ok: false, admitted: false, bytesWritten: 0, error })
 const uncertain = () => ({ ok: false, admitted: null, error: 'uncertain' })
 
-/** The broker owns the main lead identity and the last check before native admission. */
+/** The broker owns the main chief identity and the last check before native admission. */
 export async function startBroker({
   port,
   token,
@@ -22,6 +25,8 @@ export async function startBroker({
   upstream,
   freshBypass = false,
   receiver: receiverOptions,
+  board: boardOptions,
+  questionWaitMs,
 }) {
   if (
     !Number.isInteger(port) ||
@@ -49,6 +54,11 @@ export async function startBroker({
   }
   const connections = new Set()
   const pending = new Map()
+  // The question tool's door: the app-server asks the client; this broker is
+  // the client, so it asks the board instead and answers the app-server with
+  // what the board said. When nobody answers in time, or there is no board,
+  // the request goes on to the TUI and its own dialog takes over.
+  const board = boardClient(boardOptions)
   const control = new WebSocket(upstream, {
     maxPayload: MAX_FRAME,
     handshakeTimeout: 3000,
@@ -151,6 +161,14 @@ export async function startBroker({
         sessionId: switching ? null : selected,
         revision,
         empty: !switching && empty,
+        // Whether a delivery would be taken now: the dispatcher holds a
+        // message while this is false, instead of spending its attempts.
+        available:
+          !closed &&
+          ready &&
+          control.readyState === WebSocket.OPEN &&
+          !switching &&
+          selected !== null,
       })
     if (incoming.method !== 'POST' || incoming.url !== '/deliver')
       return reply(response, refused('invalid-record'), 404)
@@ -181,17 +199,30 @@ export async function startBroker({
       return reply(response, refused('native-session-unavailable'))
     if (selected !== record.sessionId) return reply(response, refused('native-session-changed'))
     empty = false
-    // No await between comparing the selected main and forwarding this queue request.
+    // An idle thread gets the message as its turn; Codex's queue drains only
+    // when a running turn ends, and after an interrupt it kept a message for
+    // good (a tell to a paused worker, 2026-09-26). While a turn runs, the
+    // queue is right: the message goes in when the turn ends.
+    const input = [{ type: 'text', text: record.text, text_elements: [] }]
+    const deadline = Math.min(record.expiresAt, Date.now() + 3000)
+    const idleNow = idle.get(selected) === true
+    if (idleNow) idle.set(selected, false)
+    // No await between comparing the selected main and forwarding this request.
     // A subsequent switch can only retire later submissions, never replay this one.
-    const result = await request(
-      'thread/queue/add',
-      {
-        threadId: selected,
-        input: [{ type: 'text', text: record.text, text_elements: [] }],
-        clientUserMessageId: randomUUID(),
-      },
-      Math.min(record.expiresAt, Date.now() + 3000),
-    )
+    let result = idleNow
+      ? await request('turn/start', { threadId: selected, input }, deadline)
+      : await request(
+          'thread/queue/add',
+          { threadId: selected, input, clientUserMessageId: randomUUID() },
+          deadline,
+        )
+    // A turn the TUI started a moment before is an explicit refusal: queue it.
+    if (idleNow && result?.error)
+      result = await request(
+        'thread/queue/add',
+        { threadId: selected, input, clientUserMessageId: randomUUID() },
+        deadline,
+      )
     reply(response, result?.result ? { ok: true, admitted: true } : uncertain())
   })
   server.requestTimeout = 5000
@@ -346,8 +377,40 @@ export async function startBroker({
         observeStatus(message)
         if (message.method === 'turn/started' && message.params?.threadId === selected)
           empty = false
+        if (message.method === 'item/tool/requestUserInput' && message.id !== undefined && board) {
+          void holdQuestion(message, raw)
+          return
+        }
         forward(client, raw)
       })
+      const holdQuestion = async (message, raw) => {
+        const questions = message.params?.questions ?? []
+        try {
+          const asked = await askTheBoard(
+            board,
+            questions.map((q) => ({
+              question: q.question,
+              header: q.header,
+              options: (q.options ?? []).map((o) => ({
+                label: o.label,
+                description: o.description,
+              })),
+              multiple: false,
+            })),
+            questionWaitMs === undefined ? {} : { waitMs: questionWaitMs },
+          )
+          if (asked.answer !== null) {
+            const answers = Object.fromEntries(
+              questions.map((q, at) => [q.id, { answers: asked.answer.choices[at] ?? [] }]),
+            )
+            forward(native, JSON.stringify({ id: message.id, result: { answers } }))
+            return
+          }
+        } catch {
+          // The board could not be reached or refused: the window asks instead.
+        }
+        forward(client, raw)
+      }
     })
   })
   server.listen(port, '127.0.0.1')
@@ -398,14 +461,35 @@ export function codexProcessArguments(args) {
   return { backend, tui }
 }
 
+/**
+ * ConsensFlow's own variables, set explicitly in Codex's shell policy: a user
+ * policy of `inherit = "core"` keeps only a handful of names, and a window
+ * whose commands lose CONSENSFLOW_URL, _TOKEN and _NODE has a `cf` that
+ * reaches nothing (a Codex chief, 2026-09-26). Everything else stays as the
+ * user's policy says.
+ */
+export function consensflowShellEnvironment(env) {
+  return Object.keys(env)
+    .filter((name) => /^CONSENSFLOW_[A-Z0-9_]+$/.test(name) && typeof env[name] === 'string')
+    .sort()
+    .flatMap((name) => ['-c', `shell_environment_policy.set.${name}=${JSON.stringify(env[name])}`])
+}
+
+/** Whether a socket at `<prefix>XXXXXX/native.sock` fits sun_path (macOS: 104 bytes with the final NUL). */
+const socketFits = (prefix) => Buffer.byteLength(join(`${prefix}XXXXXX`, 'native.sock')) < 104
+
+/**
+ * The socket's private directory: under the ConsensFlow home, or, when that
+ * path is too long for a Unix socket (a home deep in a temporary tree), under
+ * the user's own temporary directory. The socket is a runtime endpoint, not
+ * state: it is removed with the session.
+ */
 export async function createSocketDirectory(env) {
-  const root = join(configRoot(env), 'tmp')
-  const prefix = join(root, 'codex-')
-  // mkdtemp adds six characters; macOS sun_path includes the final NUL byte.
-  if (Buffer.byteLength(join(`${prefix}XXXXXX`, 'native.sock')) >= 104)
-    throw new Error('ConsensFlow home makes the Codex socket path too long')
+  const homes = [join(configRoot(env), 'tmp'), join(env.TMPDIR ?? tmpdir(), 'consensflow')]
+  const root = homes.find((candidate) => socketFits(join(candidate, 'codex-')))
+  if (root === undefined) throw new Error('ConsensFlow home makes the Codex socket path too long')
   await mkdir(root, { recursive: true, mode: 0o700 })
-  const directory = await mkdtemp(prefix)
+  const directory = await mkdtemp(join(root, 'codex-'))
   await chmod(directory, 0o700)
   return directory
 }
@@ -417,11 +501,22 @@ async function supervise(executable, args) {
   const socket = join(directory, 'native.sock')
   const env = { ...process.env }
   delete env.OPENAI_API_KEY
-  const backend = spawn(
+  const backendRun = runnable(
     executable,
-    [...split.backend, 'app-server', '--listen', `unix://${socket}`],
-    { env, stdio: ['ignore', 'ignore', 'pipe'] },
+    [
+      ...split.backend,
+      ...consensflowShellEnvironment(env),
+      'app-server',
+      '--listen',
+      `unix://${socket}`,
+    ],
+    env,
   )
+  const backend = spawn(backendRun.file, backendRun.args, {
+    ...backendRun.options,
+    env,
+    stdio: ['ignore', 'ignore', 'pipe'],
+  })
   let startupError = ''
   backend.stderr.on('data', (chunk) => {
     startupError = (startupError + chunk).slice(-4000)
@@ -432,8 +527,8 @@ async function supervise(executable, args) {
   let broker
   let tui
   const stop = () => {
-    tui?.kill('SIGTERM')
-    backend.kill('SIGTERM')
+    if (tui) terminate(tui, 'SIGTERM')
+    terminate(backend, 'SIGTERM')
   }
   process.on('SIGTERM', stop)
   process.on('SIGINT', stop)
@@ -450,7 +545,7 @@ async function supervise(executable, args) {
       upstream: `ws+unix://${socket}`,
       freshBypass: args.includes('--dangerously-bypass-approvals-and-sandbox'),
     })
-    tui = spawn(
+    const tuiRun = runnable(
       executable,
       [
         '--remote',
@@ -459,16 +554,23 @@ async function supervise(executable, args) {
         'CF_CODEX_TUI_TOKEN',
         ...split.tui,
       ],
-      { env: { ...env, CF_CODEX_TUI_TOKEN: configuration.token }, stdio: 'inherit' },
+      env,
     )
-    backend.once('exit', () => tui?.kill('SIGTERM'))
+    tui = spawn(tuiRun.file, tuiRun.args, {
+      ...tuiRun.options,
+      env: { ...env, CF_CODEX_TUI_TOKEN: configuration.token },
+      stdio: 'inherit',
+    })
+    backend.once('exit', () => {
+      if (tui) terminate(tui, 'SIGTERM')
+    })
     const [code] = await once(tui, 'exit')
     return code ?? 0
   } finally {
     stop()
     await broker?.close()
     if (backend.exitCode === null && !backend.signalCode) {
-      const killer = setTimeout(() => backend.kill('SIGKILL'), 1500)
+      const killer = setTimeout(() => terminate(backend, 'SIGKILL'), 1500)
       await once(backend, 'exit').catch(() => {})
       clearTimeout(killer)
     }

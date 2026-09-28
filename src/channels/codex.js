@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { isAbsolute } from 'node:path'
+import { runnable, terminate } from '../harnesses.js'
 import { claimEpoch } from './pty.js'
 
 export const DEFAULT_DEADLINE_MS = 3_000
@@ -28,7 +29,7 @@ function paneTarget(target) {
 function launchConfig(target) {
   const launch = target?.launch
   if (launch === null || typeof launch !== 'object' || Array.isArray(launch)) {
-    throw new Error('codex-queue delivery needs the lead launch configuration')
+    throw new Error('codex-queue delivery needs the chief launch configuration')
   }
 
   const config =
@@ -127,16 +128,18 @@ function runQueue(config, launch, session, text, deadline) {
 
     const stop = () => {
       if (child?.exitCode === null && child.signalCode === null) {
-        child.kill('SIGTERM')
+        terminate(child, 'SIGTERM')
         killTimer = setTimeout(() => {
-          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+          if (child.exitCode === null && child.signalCode === null) terminate(child, 'SIGKILL')
         }, KILL_GRACE_MS)
         killTimer.unref?.()
       }
     }
 
     try {
-      child = spawn(config.executable, args, {
+      const run = runnable(config.executable, args)
+      child = spawn(run.file, run.args, {
+        ...run.options,
         cwd: config.cwd,
         env: childEnvironment(launch, config),
         shell: false,
@@ -183,12 +186,17 @@ function runQueue(config, launch, session, text, deadline) {
   })
 }
 
-/** Native TUI replies identify the main lead, independently of transcript recency. */
+/** Native TUI replies identify the main chief, independently of transcript recency. */
 export async function currentSession(config) {
   return (await currentSessionState(config))?.sessionId
 }
 
-export async function currentSessionState(config) {
+/** Whether the broker would take a delivery now (a thread shown, no switch, its upstream open). */
+export async function sessionAvailable(config) {
+  return (await currentSessionState(config))?.available === true
+}
+
+async function currentSessionState(config) {
   if (!config?.sessionBridge || !config.launchId) return undefined
   try {
     const response = await fetch(new URL('/session', config.sessionBridge.endpoint), {
@@ -198,7 +206,11 @@ export async function currentSessionState(config) {
     const current = await response.json()
     if (!response.ok || current.launchId !== config.launchId) return undefined
     if (current.sessionId !== null && !UUID.test(current.sessionId ?? '')) return undefined
-    return { sessionId: current.sessionId, empty: current.empty === true }
+    return {
+      sessionId: current.sessionId,
+      empty: current.empty === true,
+      available: current.available === true,
+    }
   } catch {
     return undefined
   }

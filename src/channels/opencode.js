@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { realpath } from 'node:fs/promises'
+import { runnable, terminate } from '../harnesses.js'
 
 /**
  * The P5 prompt_async endpoint admits a request but may stay silent forever.
@@ -16,7 +17,7 @@ export const DEFAULT_DEADLINE_MS = 3_000
 function launchConfig(target) {
   const launch = target?.launch
   if (launch === null || typeof launch !== 'object') {
-    throw new Error('opencode-server delivery needs the lead launch configuration')
+    throw new Error('opencode-server delivery needs the chief launch configuration')
   }
   return launch
 }
@@ -103,8 +104,14 @@ async function claimEpoch(target) {
   throw new Error('opencode-server delivery needs pane.claim_epoch')
 }
 
-/** Only the launch-owned TUI can attest which native conversation is displayed. */
-export async function currentSession(config) {
+/**
+ * Only the launch-owned TUI can attest which native conversation is
+ * displayed: that conversation (null when none is) and what OpenCode says it
+ * is doing, `{type: 'idle' | 'busy'}` or `{type: 'retry', message, next, …}`
+ * while it waits to retry a refused request. Undefined when the plugin does
+ * not answer for this launch.
+ */
+export async function sessionState(config) {
   const bridge = config?.sessionBridge
   if (!bridge?.endpoint || !bridge.token || !config.launchId) return undefined
   try {
@@ -114,8 +121,9 @@ export async function currentSession(config) {
     })
     const current = await response.json()
     if (!response.ok || current.launchId !== config.launchId) return undefined
-    if (current.sessionId === null) return null
-    return /^ses_[A-Za-z0-9]+$/.test(current.sessionId ?? '') ? current.sessionId : undefined
+    if (current.sessionId === null) return { sessionId: null, status: null }
+    if (!/^ses_[A-Za-z0-9]+$/.test(current.sessionId ?? '')) return undefined
+    return { sessionId: current.sessionId, status: current.status ?? null }
   } catch {
     return undefined
   }
@@ -490,7 +498,9 @@ export async function createSession({
 
   let child
   try {
-    child = spawn(executable, ['serve', ...configuration.args], {
+    const run = runnable(executable, ['serve', ...configuration.args], baseEnv)
+    child = spawn(run.file, run.args, {
+      ...run.options,
       cwd: canonical,
       env: { ...baseEnv, ...(configuration.env ?? {}), OPENCODE_SERVER_USERNAME: 'opencode' },
       stdio: ['ignore', 'ignore', 'pipe'],
@@ -519,7 +529,7 @@ export async function createSession({
   // synchronously — SIGTERM could outlive the parent and the port with it.
   const onProcessExit = () => {
     try {
-      child.kill('SIGKILL')
+      terminate(child, 'SIGKILL')
     } catch {}
   }
   process.once('exit', onProcessExit)
@@ -527,13 +537,13 @@ export async function createSession({
   const stop = async () => {
     if (!closed && child.exitCode === null && child.signalCode == null && !spawnError) {
       try {
-        child.kill('SIGTERM')
+        terminate(child, 'SIGTERM')
       } catch {}
     }
     const fallback = setTimeout(() => {
       if (!closed) {
         try {
-          child.kill('SIGKILL')
+          terminate(child, 'SIGKILL')
         } catch {}
       }
     }, CREATE_TERM_WAIT_MS)

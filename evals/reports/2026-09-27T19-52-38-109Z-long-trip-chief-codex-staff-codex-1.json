@@ -1,0 +1,281 @@
+{
+  "scenario": "long-trip",
+  "chief": "codex",
+  "model": "gpt-5.6-sol",
+  "effort": "high",
+  "staffEffort": "medium",
+  "staff": [
+    "codex"
+  ],
+  "staffModels": {
+    "eval-codex-worker": "gpt-5.6-luna",
+    "eval-codex-worker-2": "gpt-5.6-luna",
+    "eval-codex-advisor": "gpt-5.6-luna",
+    "eval-codex-reviewer": "gpt-5.6-luna"
+  },
+  "run": 1,
+  "seconds": 388,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Lucrezi într-un test ConsensFlow de mesaje lungi, în workspace-ul /Users/gabrielvoicu/.consensflow-candidate/evals/work…",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-codex-worker-rusty-window"
+      },
+      {
+        "number": 2,
+        "title": "Lucrezi într-un test ConsensFlow de mesaje lungi, în workspace-ul /Users/gabrielvoicu/.consensflow-candidate/evals/work…",
+        "pool": "advisor",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-codex-advisor-sandy-harbor"
+      },
+      {
+        "number": 3,
+        "title": "Lucrezi într-un test ConsensFlow de mesaje lungi, în workspace-ul /Users/gabrielvoicu/.consensflow-candidate/evals/work…",
+        "pool": "reviewer",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-codex-reviewer-silver-birch"
+      }
+    ],
+    "parallel": 3,
+    "advice": 1,
+    "reviews": 1,
+    "questionsToHuman": [
+      {
+        "id": 2,
+        "options": false,
+        "body": "Cum se numește raportul final?"
+      }
+    ],
+    "notesToHuman": [
+      {
+        "id": 9,
+        "body": "1. Codul workerului: CEDRU-7314\n2. Codul advisorului: ARTAR-2659\n3. Codul reviewerului: STEJAR-4087\n4. Numele raportului final: DELTA-5530\n5. Codul de la sfârșitul mesajului: FARUL-2208"
+      }
+    ],
+    "notesText": "1. Codul workerului: CEDRU-7314\n2. Codul advisorului: ARTAR-2659\n3. Codul reviewerului: STEJAR-4087\n4. Numele raportului final: DELTA-5530\n5. Codul de la sfârșitul mesajului: FARUL-2208",
+    "longestResult": {
+      "worker": 22389,
+      "advisor": 17600,
+      "reviewer": 23936
+    },
+    "answersToChief": [
+      6071
+    ],
+    "taskCount": 3,
+    "chiefId": 2,
+    "chiefHarness": "codex",
+    "humanId": 1,
+    "chiefTurns": 10,
+    "chiefEdits": null,
+    "chiefLastWords": "Am citit integral toate cele trei rezultate și răspunsul tău. T-1, T-2 și T-3 sunt acceptate, iar nota unică m-9 a fost trimisă cu cele cinci valori solicitate. Nu am modificat niciun fișier și nu am citit direct fișierele din `interne/`.\n\n",
+    "plumbing": {
+      "briefs": 3,
+      "briefsDelivered": 3,
+      "results": 3,
+      "resultsDelivered": 3,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 3,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0,
+      "ownerQuestions": 1,
+      "ownerQuestionsAnswered": 1
+    },
+    "filesChanged": []
+  },
+  "checks": [
+    {
+      "name": "the worker's result is long (8000 characters or more)",
+      "ok": true
+    },
+    {
+      "name": "the advisor's advice is long (8000 characters or more)",
+      "ok": true
+    },
+    {
+      "name": "the reviewer's review is long (8000 characters or more)",
+      "ok": true
+    },
+    {
+      "name": "the owner's long answer went to the chief",
+      "ok": true
+    },
+    {
+      "name": "the note holds the worker's code",
+      "ok": true
+    },
+    {
+      "name": "the note holds the advisor's code",
+      "ok": true
+    },
+    {
+      "name": "the note holds the reviewer's code",
+      "ok": true
+    },
+    {
+      "name": "the note holds the report's name from the owner's answer",
+      "ok": true
+    },
+    {
+      "name": "the note holds the code at the end of the owner's message",
+      "ok": true
+    },
+    {
+      "name": "no file changes",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (3/3)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (3/3)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question the chief put to the owner got the owner's answer (1/1)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (3/3)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "  ### 1. Documentul HTML este bine inițializat",
+    "  La liniile 1–2, declarația `<!doctype html>` și atributul `lang=\"ro\"` sunt",
+    "  corecte. Acestea ajută browserul să interpreteze documentul în modul standard",
+    "  și indică tehnologiilor asistive limba principală a paginii.",
+    "  La linia 4, meta tagul pentru `charset=\"utf-8\"` este plasat suficient de",
+    "  devreme în document și este potrivit pentru conținutul în limba română. Nu",
+    "  există, în fișierul verificat, caractere românești corupte sau entități",
+    "  utilizate incorect.",
+    "  Acesta este un aspect pozitiv și nu necesită schimbare, cu excepția cazului",
+    "  în care proiectul are cerințe suplimentare privind metadata SEO sau social",
+    "  sharing.",
+    "  ### 2. Titlul paginii este clar, dar prea generic pentru o pagină de produs",
+    "  Linia 5 conține titlul `Burnout la locul de muncă`, iar linia 9 repetă",
+    "  aceeași formulare în `h1`. Repetarea este coerentă și nu este o eroare HTML.",
+    "  Titlul este însă generic și nu explică diferențiatorul serviciului: evaluare",
+    "  de echipă, prevenție, recomandări sau caracter anonim.",
+    "  Pentru rezultatele de căutare și pentru utilizatorii care au mai multe file",
+    "  deschis",
+    "  … (23936 characters; read all of it with: cf inbox read m-8)",
+    "  Decide with: cf task accept T-3 · cf task reopen T-3 \"…\"",
+    "• Am primit ultimul rezultat, dar notificarea îl trunchiază. Îl citesc integral",
+    "  acum. Dacă respectă cerința, accept T-1, T-2 și T-3, apoi trimit exact o",
+    "  singură notă pe board cu cele cinci valori solicitate.",
+    "• Ran /Users/gabrielvoicu/Projects/ngvoicu/consensflow/bin/cf inbox read m-8",
+    "  └ m-8 [delivered] result T-3 from @eval-codex-reviewer-silver-birch",
+    "    Verdict: `site/index.html` este un punct de pornire valid și relativ curat",
+    "    +281 lines (ctrl+t to view transcript)",
+    "• Ran /Users/gabrielvoicu/Projects/ngvoicu/consensflow/bin/cf task accept T-1",
+    "  │ /Users/gabrielvoicu/Projects/ngvoicu/consensflow/bin/cf task accept T-2",
+    "  │ /Users/gabrielvoicu/Projects/ngvoicu/consensflow/bin/cf task accept T-3",
+    "  │ … +8 lines",
+    "  └ T-3 [accepted] @eval-codex-reviewer-silver-birch ← @chief: Lucrezi într-un",
+    "    test ConsensFlow de mesaje lungi, în workspace-ul /Users/",
+    "    gabrielvoicu/.consensflow-candidate/evals/work…",
+    "    +1 line (ctrl+t to view transcript)",
+    "• Am citit integral toate cele trei rezultate și răspunsul tău. T-1, T-2 și T-3",
+    "  sunt acceptate, iar nota unică m-9 a fost trimisă cu cele cinci valori",
+    "  solicitate. Nu am modificat niciun fișier și nu am citit direct fișierele din",
+    "  interne/.  › Ask Codex to do anything   GPT-5.6-Sol high · ~/.consensflow-candidate/evals/workspace",
+    "  22:49"
+  ],
+  "terminalAnswers": 0,
+  "refusedAnswers": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 7,
+      "line": "chief (codex) ready; typing the prompt"
+    },
+    {
+      "at": 17,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 42,
+      "line": "answered m-2 (Cum se numește raportul final?) with: Punctul 1: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 2: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 3: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 4: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 5: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 6: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 7: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 8: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 9: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 10: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 11: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 12: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 13: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 14: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 15: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nNumele raportului final: DELTA-5530"
+    },
+    {
+      "at": 42,
+      "line": "chief working; tasks T-1:working T-2:queued T-3:queued"
+    },
+    {
+      "at": 47,
+      "line": "chief idle; tasks T-1:working T-2:working T-3:working"
+    },
+    {
+      "at": 52,
+      "line": "chief working; tasks T-1:working T-2:working T-3:working"
+    },
+    {
+      "at": 62,
+      "line": "chief idle; tasks T-1:working T-2:working T-3:working"
+    },
+    {
+      "at": 147,
+      "line": "chief working; tasks T-1:working T-2:done T-3:working"
+    },
+    {
+      "at": 162,
+      "line": "chief idle; tasks T-1:done T-2:done T-3:working"
+    },
+    {
+      "at": 167,
+      "line": "chief working; tasks T-1:done T-2:done T-3:working"
+    },
+    {
+      "at": 172,
+      "line": "chief idle; tasks T-1:done T-2:done T-3:working"
+    },
+    {
+      "at": 177,
+      "line": "chief working; tasks T-1:done T-2:done T-3:done"
+    },
+    {
+      "at": 202,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted"
+    },
+    {
+      "at": 207,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:accepted"
+    },
+    {
+      "at": 387,
+      "line": "quiet: the run is over"
+    }
+  ]
+}

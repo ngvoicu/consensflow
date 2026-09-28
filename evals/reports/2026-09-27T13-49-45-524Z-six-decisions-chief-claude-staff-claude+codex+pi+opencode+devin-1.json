@@ -1,0 +1,408 @@
+{
+  "scenario": "six-decisions",
+  "chief": "claude",
+  "model": "claude-opus-5",
+  "staff": [
+    "claude",
+    "codex",
+    "pi",
+    "opencode",
+    "devin"
+  ],
+  "staffModels": {
+    "eval-claude-worker": "claude-haiku-4-5-20251001",
+    "eval-claude-worker-2": "claude-haiku-4-5-20251001",
+    "eval-claude-advisor": "claude-haiku-4-5-20251001",
+    "eval-claude-reviewer": "claude-haiku-4-5-20251001",
+    "eval-codex-worker": "gpt-5.6-luna",
+    "eval-codex-worker-2": "gpt-5.6-luna",
+    "eval-codex-advisor": "gpt-5.6-luna",
+    "eval-codex-reviewer": "gpt-5.6-luna",
+    "eval-pi-worker": "opencode-go/muse-spark-1.3-contributor",
+    "eval-pi-worker-2": "opencode-go/muse-spark-1.3-contributor",
+    "eval-pi-advisor": "opencode-go/muse-spark-1.3-contributor",
+    "eval-pi-reviewer": "opencode-go/muse-spark-1.3-contributor",
+    "eval-opencode-worker": "opencode-go/deepseek-v4-flash",
+    "eval-opencode-worker-2": "opencode-go/deepseek-v4-flash",
+    "eval-opencode-advisor": "opencode-go/deepseek-v4-flash",
+    "eval-opencode-reviewer": "opencode-go/deepseek-v4-flash",
+    "eval-devin-worker": "swe-1-6-slow",
+    "eval-devin-worker-2": "swe-1-6-slow",
+    "eval-devin-advisor": "swe-1-6-slow",
+    "eval-devin-reviewer": "swe-1-6-slow"
+  },
+  "run": 1,
+  "seconds": 1805,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Finish the Romanian draft of a legislation page for a small static website about burnout at work.",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-worker-calm-pine"
+      },
+      {
+        "number": 2,
+        "title": "Review the legal accuracy of a Romanian web page draft about burnout legislation. You change no file; you return findin…",
+        "pool": "reviewer",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-reviewer-pale-brook"
+      },
+      {
+        "number": 3,
+        "title": "Translate a Romanian web page text into English for a small static website about burnout at work.",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-worker-2-zesty-window"
+      },
+      {
+        "number": 4,
+        "title": "Build two HTML pages for a small static website about burnout at work, and add one link to the footer menu.",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-codex-worker-keen-thistle"
+      },
+      {
+        "number": 5,
+        "title": "Add a short note at the top of an internal document, pointing readers to a new page.",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-codex-worker-2-gentle-ridge"
+      }
+    ],
+    "parallel": 1,
+    "advice": 0,
+    "reviews": 1,
+    "questionsToHuman": [
+      {
+        "id": 5,
+        "options": true,
+        "body": "Doc HR: Ce facem cu docs/document-de-referinta-hr.md („Document de referință pentru HR, People Management & C-Suite\")?\n- Îl arhivăm, fără pagină nouă: Documentul spune el însuși, la „Ce urmează\", că p"
+      }
+    ],
+    "notesToHuman": [
+      {
+        "id": 2,
+        "body": "Doua lucruri gasite in timp ce ma uitam prin proiect, in afara sarcinii, doar ca sa stii. (1) Scala rezultatului nu e la fel peste tot: docs/document-de-referinta-hr.md si docs/ghidul-managerului.md v"
+      },
+      {
+        "id": 3,
+        "body": "Stadiul lucrului: T-1 (terminarea textului romanesc in content/legislatie-ro.md) e pe board acum. T-2 e o verificare a fiecarei trimiteri la lege fata de sursa primara, inclusiv a paragrafelor scrise "
+      },
+      {
+        "id": 10,
+        "body": "Vesti de la T-1, si una conteaza pentru planul cu avocatul. Lucratorul nu a putut ajunge la legislatie.just.ro si la eur-lex, deci nu a scris niciun numar de articol. A lasat in loc sase marcaje 'de v"
+      },
+      {
+        "id": 13,
+        "body": "Am acceptat T-1 (textul romanesc, cu cele sapte goluri marcate) si a pornit T-2, verificarea. Un lucru nou si util: am testat si eu accesul la internet din fereastra mea si il am - deci lipsa surselor"
+      },
+      {
+        "id": 16,
+        "body": "Am facut eu verificarea juridica, pentru ca doua ferestre la rand au primit 403 pe legislatie.just.ro si nu pot alege eu cui ii dau o sarcina - a treia incercare era un pariu. Am citit fiecare sursa p"
+      },
+      {
+        "id": 24,
+        "body": "Gata tot ce era pe board; nimic nu e publicat. Pachetul pentru avocat: content/legislatie-ro.md (textul RO), content/legislation-en.md (traducerea EN) si content/legislatie-surse.md (tabelul cu fiecar"
+      }
+    ],
+    "taskCount": 5,
+    "chiefId": 2,
+    "chiefHarness": "claude-code",
+    "humanId": 1,
+    "chiefTurns": 60,
+    "chiefEdits": 0,
+    "chiefLastWords": "Gata tot ce era pe board. **Nimic nu e publicat** — `site/` e doar pe disc.\n\n**Pachetul pentru avocat:** `content/legislatie-ro.md`, `content/legislation-en.md` și `content/legislatie-surse.md` — tabel cu fiecare afirmație, linkul și citatul din lege, plus întrebările pentru el. Pe disc mai sunt cele două pagini și link-ul `Legislație` / `Legislation` în toate cele cinci footere. Documentul HR a rămas, cu nota sus care trimite la pagina nouă.\n\n**Două corecturi la mine însumi, după o a doua trecere.** Îți spun pentru că sunt exact greșeala pe care le-o reproșasem lucrătorilor:\n\n1. Dosarul promitea „totul citit la sursa primară\", dar trei rânduri se sprijineau pe agregatoare sau pe memorie. Le-am reverificat pe portal, cu textele integrale descărcate, și acum tabelul spune pe ce se sprijină fiecare.\n2. Dădusem intrarea în vigoare a ICD-11 ca 1 ianuarie 2022. Nu am putut confirma ziua la OMS — doar anul. Textul spune acum „2022\", fără zi, în toate patru fișierele.\n\n**Afirmația cea mai grea am dovedit-o de două ori:** textul integral al Legii 319/2006, în ambele forme, nu conține rădăcina „psihosocial\" — 0 apariții. La fel anexa 22, acum citită pe portal: un singur rând la afecțiuni psihice, „Sindrom posttraumatic\", și zero „burnout\" în tot documentul de 1,4 MB. Absența e o dovadă mai slabă decât prezența, de-aia am verificat-o cu altă metodă.\n\n**Ce reține avocatul:** Codul Muncii art. 175 zice „salariaţilor\", Legea 319/2006 zice „lucrătorilor\", iar pagina folosește „lucrătorilor",
+    "plumbing": {
+      "briefs": 7,
+      "briefsDelivered": 7,
+      "results": 7,
+      "resultsDelivered": 7,
+      "memberQuestions": 1,
+      "memberQuestionsAnswered": 1,
+      "answersDelivered": 1,
+      "accepted": 5,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0,
+      "ownerQuestions": 1,
+      "ownerQuestionsAnswered": 1
+    },
+    "filesChanged": [
+      "content/legislatie-ro.md",
+      "content/legislatie-surse.md",
+      "content/legislation-en.md",
+      "docs/document-de-referinta-hr.md",
+      "site/en/index.html",
+      "site/en/legislation.html",
+      "site/evaluare.html",
+      "site/index.html",
+      "site/legislatie.html"
+    ]
+  },
+  "checks": [
+    {
+      "name": "the owner is asked on the board, at least three questions",
+      "ok": false
+    },
+    {
+      "name": "at least one question offers options",
+      "ok": true
+    },
+    {
+      "name": "a finding reaches the owner as a note",
+      "ok": true
+    },
+    {
+      "name": "at least two tasks go on the board",
+      "ok": true
+    },
+    {
+      "name": "two tasks run side by side at some point",
+      "ok": false
+    },
+    {
+      "name": "finished work goes to a review",
+      "ok": true
+    },
+    {
+      "name": "the chief's own edits stay under ten (counted for a Claude chief only)",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (7/7)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (7/7)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (1/1)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (1/1)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question the chief put to the owner got the owner's answer (1/1)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (5/5)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "ai14",
+    "6",
+    "✢tz7",
+    "734",
+    "✳az42",
+    " Bash(echo \"=== six fixes ===\" && grep-niE\"post-traumatic|breakdown|binding  in Romania|legislative-initiative report|considersthatproposal\"content/legislation-en.md;echo\"===leftoversthatshouldbegone===\"&&  grep -niE \"stress disorder|binding for us|discusses based|Law  319/2006|GovernmentDecision\"content/legislation-en.md||echo\"none-good\";  echo \"=== instrument names ===\" && grep -oE \"Legea 319/2006|HG 1425/2006|HG355/2007|OUG 158/2005|CodulMuncii\"content/legislation-en.md| sort | uniq-c; echo \"=== citationsintact===\"&&grep-oE\"art\\.[0-9]+(alin\\.",
+    "\\([0-9]+\\))?(lit\\.[a-z]\\))?\"content/legislation-en.md|sort|uniq-c;",
+    "echo\"===numbers===\"&&grep-oE\"55%|65%|75%|2026/2023\\(INL\\)|1January",
+    "2022|May2019|2September2026|7September2026|5October2026\"",
+    "content/legislation-en.md|sort|uniq-c;echo\"===files===\"&&ls",
+    "content)",
+    "✳Razzmatazzing… (7s·↓242tokens)",
+    " ⎿ Tip:Use/themetochangethecolortheme",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "❯",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus112868tokens",
+    "pasteagaintoexpand/rc",
+    "✶6",
+    "⏺  ⎿  ===sixfixes===    5:Burnout is not recognised in Romaniaasanindependentoccupational     disease. The table of occupational diseaseswithmandatoryreporting(Annex22totheimplementationrulesofLegea319/2006,theoccupationalsafety     and health act, approved by HG 1425/2006) includes a category of mental and  behaviouraldisorders,buttheonlydiseaselistedthereispost-traumatic     syndrome following head injuries from work accidents. Burnout does not   appear in thetable.   21:Job adaptation isnotanautomaticobligationoftheemployer,asis",
+    "oftenbelieved.Theoccupationalhealthphysicianistheonewhomay",
+    "proposeadaptingthejobtotheworker'sanatomical,physiological,",
+    "psychologicalcharacteristicsandhealthstatus(art.14ofHG355/2007).",
+    "Theemployerthenconsidersthatproposal.",
+    "23:Aworkerhastherighttostopworkandimmediatelyleavetheworkplace",
+    "whenthereisseriousandimminentdanger–forexampleabreakdownthat",
+    "putstheirlifeatrisk.Theemployermustgivethemthisoption(art.11",
+    "alin.(1)lit.b)ofthesamelaw),andaworkerwhodoesthismustnotbe",
+    "disadvantagedandmustbeprotectedagainstanynegativeconsequences(art.",
+    "11alin.(2)).",
+    "29:AtEuropeanlevel,thereiscurrentlynodirectiveonpsychosocial",
+    "risks.Whatexistsisanongoingprocedure:theEuropeanParliamentis",
+    "workingonalegislative-initiativereportonpsychosocialrisks,stress",
+    "andmentalhealthatwork(procedure2026/2023(INL)).TheCommitteeon",
+    "EmploymentandSocialAffairsvotedonthereporton2September2026,the",
+    "reportwassubmittedtoplenaryon7September2026,andtheplenaryvote",
+    "wasscheduledfor5October2026.Throughit,ParliamentaskstheEuropean",
+    "Commissiontoproposelegislation;itisnotitselfalaw.",
+    "31:ForemployersinRomania,thismeansthatnothingconcretechanges",
+    "today.Ifthisprocedureultimatelyresultsin\u001b[5"
+  ],
+  "terminalAnswers": 0,
+  "refusedAnswers": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 70,
+      "line": "chief (claude) ready; typing the prompt"
+    },
+    {
+      "at": 80,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 211,
+      "line": "chief working; tasks T-1:working"
+    },
+    {
+      "at": 231,
+      "line": "chief working; tasks T-1:working T-2:open"
+    },
+    {
+      "at": 256,
+      "line": "chief working; tasks T-1:waiting T-2:open"
+    },
+    {
+      "at": 271,
+      "line": "answered m-5 (Doc HR: Ce facem cu docs/document-de-referinta-hr.md („Document de ref) with: Îl păstrăm, dar pune sus o notă că pagina de legislație e sursa actuală. / Un avocat / consilier juridic (recomandat)"
+    },
+    {
+      "at": 311,
+      "line": "chief working; tasks T-1:working T-2:open"
+    },
+    {
+      "at": 321,
+      "line": "chief idle; tasks T-1:working T-2:open"
+    },
+    {
+      "at": 366,
+      "line": "chief working; tasks T-1:done T-2:open"
+    },
+    {
+      "at": 401,
+      "line": "chief working; tasks T-1:working T-2:open"
+    },
+    {
+      "at": 431,
+      "line": "chief idle; tasks T-1:working T-2:open"
+    },
+    {
+      "at": 441,
+      "line": "chief working; tasks T-1:done T-2:open"
+    },
+    {
+      "at": 466,
+      "line": "chief working; tasks T-1:accepted T-2:working"
+    },
+    {
+      "at": 522,
+      "line": "chief idle; tasks T-1:accepted T-2:working"
+    },
+    {
+      "at": 537,
+      "line": "chief working; tasks T-1:accepted T-2:done"
+    },
+    {
+      "at": 647,
+      "line": "chief working; tasks T-1:accepted T-2:accepted"
+    },
+    {
+      "at": 898,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:working"
+    },
+    {
+      "at": 918,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:working T-4:open"
+    },
+    {
+      "at": 958,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:working T-4:open"
+    },
+    {
+      "at": 1043,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:done T-4:open"
+    },
+    {
+      "at": 1048,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:done T-4:open"
+    },
+    {
+      "at": 1078,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:working T-4:open"
+    },
+    {
+      "at": 1088,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:working T-4:open"
+    },
+    {
+      "at": 1123,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:done T-4:open"
+    },
+    {
+      "at": 1148,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:queued"
+    },
+    {
+      "at": 1153,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:working"
+    },
+    {
+      "at": 1158,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:working T-5:open"
+    },
+    {
+      "at": 1168,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:accepted T-4:working T-5:open"
+    },
+    {
+      "at": 1319,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:done T-5:open"
+    },
+    {
+      "at": 1359,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted T-5:queued"
+    },
+    {
+      "at": 1364,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted T-5:working"
+    },
+    {
+      "at": 1369,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted T-5:working"
+    },
+    {
+      "at": 1424,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted T-5:done"
+    },
+    {
+      "at": 1439,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted T-5:accepted"
+    },
+    {
+      "at": 1685,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:accepted T-4:accepted T-5:accepted"
+    },
+    {
+      "at": 1805,
+      "line": "quiet: the run is over"
+    }
+  ]
+}

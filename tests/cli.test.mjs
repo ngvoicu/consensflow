@@ -1,24 +1,18 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import {
-  chmodSync,
-  cpSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { promisify } from 'node:util'
 import { rosterPath } from '../src/roster.js'
-import { tempEnv } from './helpers.mjs'
+import { fakeExecutable, tempEnv } from './helpers.mjs'
+
+/** A launcher is `cf` on POSIX and `cf.cmd` on Windows. */
+const CMD = process.platform === 'win32' ? '.cmd' : ''
 
 const run = promisify(execFile)
 const CF = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
 const FIXTURES = join(import.meta.dirname, 'fixtures')
-
 async function cf(args, env) {
   try {
     const { stdout, stderr } = await run(process.execPath, [CF, ...args], {
@@ -34,8 +28,7 @@ async function cf(args, env) {
 function stubCli(t, name) {
   mkdirSync(t.env.PATH, { recursive: true })
   const path = join(t.env.PATH, name)
-  writeFileSync(path, '#!/bin/sh\nexit 0\n')
-  chmodSync(path, 0o755)
+  fakeExecutable(path)
 }
 
 describe('cf manages the roster', () => {
@@ -47,7 +40,7 @@ describe('cf manages the roster', () => {
       [
         'agent',
         'add',
-        'zeus',
+        'mine',
         '--harness',
         'claude',
         '--model',
@@ -60,18 +53,18 @@ describe('cf manages the roster', () => {
     assert.equal(added.code, 0)
 
     const listed = await cf(['agent', 'list'], t.env)
-    assert.match(listed.stdout, /zeus/)
+    assert.match(listed.stdout, /mine/)
     assert.match(listed.stdout, /claude-opus-5/)
 
     const asJson = await cf(['agent', 'list', '--json'], t.env)
-    assert.equal(JSON.parse(asJson.stdout).agents[0].effort, 'max')
+    assert.equal(JSON.parse(asJson.stdout).agents.find((p) => p.name === 'mine').effort, 'max')
 
-    const edited = await cf(['agent', 'edit', 'zeus', '--model', 'claude-fable-5-1'], t.env)
+    const edited = await cf(['agent', 'edit', 'mine', '--model', 'claude-fable-5-1'], t.env)
     assert.equal(edited.code, 0)
 
-    const removed = await cf(['agent', 'remove', 'zeus'], t.env)
+    const removed = await cf(['agent', 'remove', 'mine'], t.env)
     assert.equal(removed.code, 0)
-    assert.doesNotMatch((await cf(['agent', 'list'], t.env)).stdout, /zeus/)
+    assert.doesNotMatch((await cf(['agent', 'list'], t.env)).stdout, /mine/)
   })
 
   it('fails an unknown verb loudly', async () => {
@@ -84,7 +77,9 @@ describe('cf manages the roster', () => {
     assert.match(out.stdout, /3\.0\.0/)
   })
 
-  it('survives its output pipe closing early, like `cf … | head`', async () => {
+  it('survives its output pipe closing early, like `cf … | head`', {
+    skip: process.platform === 'win32' && 'a POSIX shell pipeline',
+  }, async () => {
     const { spawn } = await import('node:child_process')
     // `false` never reads: the pipe is closed before cf writes anything, so
     // every write EPIPEs. PIPESTATUS surfaces cf's own exit code.
@@ -106,69 +101,52 @@ describe('cf manages the roster', () => {
   })
 })
 
-describe('roster changes keep installed skills current', () => {
+describe('role files belong to pane launch, not CLI administration', () => {
   const t = tempEnv()
   after(() => t.cleanup())
   stubCli(t, 'claude')
-  stubCli(t, 'codex')
 
-  it('roster creation prepares private context and retired skill installation is a no-op', async () => {
-    await cf(['agent', 'add', 'zeus', '--harness', 'claude', '--model', 'claude-opus-5'], t.env)
-    const out = await cf(['skills', 'install'], t.env)
-    assert.equal(out.code, 0)
-
-    const installed = readFileSync(
-      join(
-        t.env.CONSENSFLOW_HOME,
-        'roles',
-        'lead',
-        '.claude',
-        'skills',
-        'consensflow-lead',
-        'SKILL.md',
-      ),
-      'utf8',
+  it('roster edits, setup and diagnostic reads leave role files and old manifests alone', async () => {
+    const role = join(
+      t.env.CONSENSFLOW_HOME,
+      'roles',
+      'chief',
+      '.claude',
+      'skills',
+      'consensflow-chief',
+      'SKILL.md',
     )
-    assert.match(installed, /zeus/)
-    assert.match(installed, /claude-opus-5/)
-  })
-
-  it('editing an agent regenerates the private lead skill', async () => {
-    await cf(['agent', 'edit', 'zeus', '--model', 'claude-fable-5-1'], t.env)
-
-    for (const dir of [join(t.env.CONSENSFLOW_HOME, 'roles', 'lead', '.claude')]) {
-      const installed = readFileSync(join(dir, 'skills', 'consensflow-lead', 'SKILL.md'), 'utf8')
-      assert.match(installed, /claude-fable-5-1/)
+    mkdirSync(dirname(role), { recursive: true })
+    writeFileSync(role, 'role canary')
+    const manifest = join(t.env.CONSENSFLOW_HOME, 'skills-manifest.json')
+    writeFileSync(manifest, '{"files":{}}')
+    for (const args of [
+      ['agent', 'add', 'mine', '--harness', 'claude', '--model', 'example'],
+      ['agent', 'edit', 'mine', '--effort', 'high'],
+      ['agent', 'list', '--json'],
+      ['catalog'],
+      ['doctor'],
+      ['setup'],
+      ['agent', 'remove', 'mine'],
+    ]) {
+      const result = await cf(args, t.env)
+      assert.equal(result.code, 0, result.stderr)
+      assert.equal(readFileSync(role, 'utf8'), 'role canary', args.join(' '))
+      assert.equal(readFileSync(manifest, 'utf8'), '{"files":{}}')
     }
+    assert.ok(existsSync(join(t.env.CONSENSFLOW_BIN_DIR, `cf${CMD}`)))
   })
 
-  it('skills status reports every owned file, and uninstall clears them', async () => {
-    const status = await cf(['skills', 'status'], t.env)
-    assert.match(status.stdout, /consensflow-lead\/SKILL\.md/)
-    assert.match(status.stdout, /ok/)
-
-    const out = await cf(['skills', 'uninstall'], t.env)
-    assert.equal(out.code, 0)
-    assert.equal((await cf(['skills', 'status'], t.env)).stdout.trim(), 'no skills installed')
+  it('skills administration is absent, including forced uninstall', async () => {
+    for (const action of ['install', 'update', 'status', 'uninstall']) {
+      const result = await cf(['skills', action, '--force'], t.env)
+      assert.equal(result.code, 1)
+      assert.match(result.stderr, /unknown command/)
+    }
   })
 })
 
 describe('the standalone switch-over (TEST-PANE-47)', () => {
-  it('retires use and mode with the current command list', async () => {
-    const t = tempEnv()
-    try {
-      for (const args of [['mode'], ['use', 'cmux'], ['use', 'claude'], ['use', 'pi']]) {
-        const result = await cf(args, t.env)
-        assert.equal(result.code, 1)
-        assert.match(result.stderr, /ConsensFlow has one shape now/)
-        assert.match(result.stdout + result.stderr, /cf <command>/)
-        assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'mode.json')), false)
-      }
-    } finally {
-      t.cleanup()
-    }
-  })
-
   it('doctor reports a legacy mode file once without treating it as configuration', async () => {
     const t = tempEnv()
     try {
@@ -186,63 +164,11 @@ describe('the standalone switch-over (TEST-PANE-47)', () => {
       t.cleanup()
     }
   })
-
-  it('run outside an app pane refuses without launching or writing conversations', async () => {
-    const t = tempEnv()
-    try {
-      stubCli(t, 'codex')
-      await cf(['agent', 'add', 'diana'], t.env)
-      const result = await cf(['run', '@diana', 'hello', '--new'], t.env)
-      assert.equal(result.code, 1)
-      assert.match(result.stderr, /ConsensFlow.*app|app.*ConsensFlow/i)
-      assert.doesNotMatch(result.stderr, /cmux/)
-      assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'workspaces')), false)
-    } finally {
-      t.cleanup()
-    }
-  })
-
   it('removes direct conversation writes and terminal-window discovery from cf', () => {
     const source = readFileSync(CF, 'utf8')
     assert.doesNotMatch(source, /\bsaveThread\b|liveWindowElsewhere|CMUX_SURFACE_ID|cmux tree/)
   })
 })
-
-describe('app-owned conversation names (TEST-PANE-47)', () => {
-  it('retires pre-minting a name outside the app', async () => {
-    const t = tempEnv()
-    try {
-      await cf(['agent', 'add', 'zeus'], t.env)
-      const result = await cf(['mint', '@zeus'], t.env)
-      assert.equal(result.code, 1)
-      assert.match(result.stderr, /app.*names|names.*app/i)
-      assert.match(result.stderr, /cf run/)
-    } finally {
-      t.cleanup()
-    }
-  })
-})
-
-describe('the standalone CLI installs the skill without a mode selection', () => {
-  const t = tempEnv()
-  after(() => t.cleanup())
-  stubCli(t, 'claude')
-  stubCli(t, 'codex')
-
-  it('roster creation and explicit install maintain the private lead skill', async () => {
-    const added = await cf(['agent', 'add', 'zeus'], t.env)
-    assert.equal(added.code, 0, added.stderr)
-    mkdirSync(t.env.CONSENSFLOW_HOME, { recursive: true })
-    writeFileSync(join(t.env.CONSENSFLOW_HOME, 'mode.json'), JSON.stringify({ mode: 'claude' }))
-    rmSync(join(t.env.CODEX_HOME, 'skills', 'consensflow'), { recursive: true, force: true })
-    const installed = await cf(['skills', 'install'], t.env)
-    assert.equal(installed.code, 0, installed.stderr)
-    for (const home of [join(t.env.CONSENSFLOW_HOME, 'roles', 'lead', '.claude')]) {
-      assert.ok(existsSync(join(home, 'skills', 'consensflow-lead', 'SKILL.md')))
-    }
-  })
-})
-
 describe('the host-integration verbs are gone, not hidden', () => {
   const t = tempEnv()
   after(() => t.cleanup())
@@ -254,76 +180,6 @@ describe('the host-integration verbs are gone, not hidden', () => {
       assert.match(out.stdout + out.stderr, /unknown command/)
     })
   }
-})
-
-describe('private skill installation is independent of old host integrations', () => {
-  const t = tempEnv()
-  after(() => t.cleanup())
-  stubCli(t, 'claude')
-  stubCli(t, 'codex')
-
-  it('setup generates the private role even when an old host integration exists', async () => {
-    mkdirSync(join(t.env.HOME, '.claude', 'plugins', 'cache', 'consensflow-cc'), {
-      recursive: true,
-    })
-    await cf(['agent', 'add', 'zeus'], t.env)
-
-    const out = await cf(['setup'], t.env)
-    assert.equal(out.code, 0)
-    assert.match(out.stdout, /claude/)
-    assert.equal(
-      existsSync(
-        join(
-          t.env.CONSENSFLOW_HOME,
-          'roles',
-          'lead',
-          '.claude',
-          'skills',
-          'consensflow-lead',
-          'SKILL.md',
-        ),
-      ),
-      true,
-    )
-    assert.ok(
-      existsSync(
-        join(
-          t.env.CONSENSFLOW_HOME,
-          'roles',
-          'lead',
-          '.claude',
-          'skills',
-          'consensflow-lead',
-          'SKILL.md',
-        ),
-      ),
-    )
-  })
-
-  it('legacy --all does not change the private destination', async () => {
-    const out = await cf(['skills', 'install', '--all'], t.env)
-    assert.equal(out.code, 0)
-    assert.ok(
-      existsSync(
-        join(
-          t.env.CONSENSFLOW_HOME,
-          'roles',
-          'lead',
-          '.claude',
-          'skills',
-          'consensflow-lead',
-          'SKILL.md',
-        ),
-      ),
-    )
-  })
-
-  it('doctor reports detected harnesses without retired plugin status', async () => {
-    const out = await cf(['doctor'], t.env)
-    assert.match(out.stdout, /claude/)
-    assert.match(out.stdout, /harnesses:\s+claude, codex/)
-    assert.doesNotMatch(out.stdout, /own consensflow|native/i)
-  })
 })
 
 describe('the catalog turns a name into a working agent', () => {
@@ -349,34 +205,25 @@ describe('the catalog turns a name into a working agent', () => {
     assert.ok(JSON.parse(json.stdout).catalog.pi.length > 0)
   })
 
-  it('adds a catalog agent from its name alone', async () => {
-    const out = await cf(['agent', 'add', 'hyperion'], t.env)
-    assert.equal(out.code, 0)
-
+  it('lists a catalog agent from its name alone, and refuses to add it again', async () => {
     const listed = JSON.parse((await cf(['agent', 'list', '--json'], t.env)).stdout)
-    const hyperion = listed.agents[0]
+    const hyperion = listed.agents.find((p) => p.name === 'hyperion')
     assert.equal(hyperion.harness, 'codex')
     assert.equal(hyperion.model, 'gpt-5.6-sol')
     assert.equal(hyperion.effort, 'max')
+    const out = await cf(['agent', 'add', 'hyperion'], t.env)
+    assert.equal(out.code, 1)
+    assert.match(out.stderr, /catalog agent/)
   })
 
-  it('syncs a hyperion row from ultra to max — label, effort and description', async () => {
-    // The row was added when the catalog still named ultra; pin it back to
-    // the old values, then `cf agent sync` moves the preset-owned fields.
-    const path = rosterPath(t.env)
-    const document = JSON.parse(readFileSync(path, 'utf8'))
-    const row = document.agents.find((r) => r.id === 'hyperion')
-    row.effort = 'ultra'
-    row.description = 'Codex GPT 5.6 Sol ULTRA'
-    writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`)
-
-    const out = await cf(['agent', 'sync', 'hyperion'], t.env)
-    assert.equal(out.code, 0)
-
-    const listed = JSON.parse((await cf(['agent', 'list', '--json'], t.env)).stdout)
-    const hyperion = listed.agents.find((p) => p.name === 'hyperion')
-    assert.equal(hyperion.effort, 'max')
-    assert.equal(hyperion.description, 'Codex GPT 5.6 Sol MAX')
+  it('a catalog agent is not edited or removed from here either', async () => {
+    const edited = await cf(['agent', 'edit', 'hyperion', '--effort', 'low'], t.env)
+    assert.equal(edited.code, 1)
+    assert.match(edited.stderr, /catalog agent and stays/)
+    const removed = await cf(['agent', 'remove', 'hyperion'], t.env)
+    assert.equal(removed.code, 1)
+    assert.match(removed.stderr, /not yours to remove/)
+    assert.equal((await cf(['agent', 'reset', 'hyperion'], t.env)).code, 1)
   })
 
   it('still requires harness and model for a name it does not know', async () => {
@@ -385,136 +232,43 @@ describe('the catalog turns a name into a working agent', () => {
     assert.match(out.stdout + out.stderr, /cf catalog|--harness/)
   })
 
-  it('lets explicit flags override a catalog entry', async () => {
-    await cf(['agent', 'add', 'diana', '--effort', 'low'], t.env)
+  it('an edit changes one field of an agent of your own and keeps the rest', async () => {
+    await cf(
+      [
+        'agent',
+        'add',
+        'my-luna',
+        '--harness',
+        'codex',
+        '--model',
+        'gpt-5.6-luna',
+        '--effort',
+        'xhigh',
+      ],
+      t.env,
+    )
+    await cf(['agent', 'edit', 'my-luna', '--effort', 'low'], t.env)
     const listed = JSON.parse((await cf(['agent', 'list', '--json'], t.env)).stdout)
-    const diana = listed.agents.find((p) => p.name === 'diana')
-    assert.equal(diana.model, 'gpt-5.6-luna')
-    assert.equal(diana.effort, 'low')
+    const luna = listed.agents.find((p) => p.name === 'my-luna')
+    assert.equal(luna.model, 'gpt-5.6-luna')
+    assert.equal(luna.effort, 'low')
   })
 })
 
-describe('the skill heals itself when cc or pi edit the shared roster', () => {
+it('setup preserves a legacy roster and prepares no role or manifest before pane launch', async () => {
   const t = tempEnv()
-  after(() => t.cleanup())
-  stubCli(t, 'claude')
-
-  it('any cf invocation regenerates a skill the roster has outrun', async () => {
-    await cf(['agent', 'add', 'zeus', '--harness', 'claude', '--model', 'claude-opus-5'], t.env)
-
-    // cc adds an agent behind v3's back: a raw write to the shared file.
-    const rosterFile = rosterPath(t.env)
-    const raw = JSON.parse(readFileSync(rosterFile, 'utf8'))
-    raw.agents.push({
-      id: 'apollo',
-      name: 'Apollo',
-      kind: 'codex',
-      toolsPolicy: 'workspace-write',
-      model: 'gpt-5.6-terra',
-      effort: 'xhigh',
-    })
-    writeFileSync(rosterFile, JSON.stringify(raw, null, 2))
-
-    // Any verb at all — not a skills verb — notices and heals.
-    await cf(['doctor'], t.env)
-
-    const installed = readFileSync(
-      join(
-        t.env.CONSENSFLOW_HOME,
-        'roles',
-        'lead',
-        '.claude',
-        'skills',
-        'consensflow-lead',
-        'SKILL.md',
-      ),
-      'utf8',
-    )
-    assert.match(installed, /apollo/)
-  })
-
-  it('never resurrects a skill the user uninstalled', async () => {
-    await cf(['skills', 'uninstall'], t.env)
-
-    const rosterFile = rosterPath(t.env)
-    const raw = JSON.parse(readFileSync(rosterFile, 'utf8'))
-    raw.agents[0].model = 'changed-again'
-    writeFileSync(rosterFile, JSON.stringify(raw, null, 2))
-
-    await cf(['doctor'], t.env)
-
-    assert.equal(
-      existsSync(
-        join(
-          t.env.CONSENSFLOW_HOME,
-          'roles',
-          'lead',
-          '.claude',
-          'skills',
-          'consensflow-lead',
-          'SKILL.md',
-        ),
-      ),
-      false,
-    )
-  })
-})
-
-describe('cf setup readies a machine in one command', () => {
-  const t = tempEnv()
-  after(() => t.cleanup())
-  stubCli(t, 'claude')
-
-  it('a machine that already ran cc or pi gets its skill from the shared roster', async () => {
-    // The cc/pi roster IS the roster: no import, no copy.
+  try {
     mkdirSync(dirname(rosterPath(t.env)), { recursive: true })
     cpSync(join(FIXTURES, 'v1-agents.json'), rosterPath(t.env))
-
-    const out = await cf(['setup'], t.env)
-    assert.equal(out.code, 0)
-
-    const installed = readFileSync(
-      join(
-        t.env.CONSENSFLOW_HOME,
-        'roles',
-        'lead',
-        '.claude',
-        'skills',
-        'consensflow-lead',
-        'SKILL.md',
-      ),
-      'utf8',
-    )
-    assert.match(installed, /hyperion/)
-    // The image agent is in the skill too now: one verb spawns it like the rest.
-    assert.match(installed, /pygmalion/)
-    const listed = await cf(['agent', 'list'], t.env)
-    assert.match(listed.stdout, /pygmalion/)
-  })
-
-  it('an agent added on top regenerates the installed skill', async () => {
-    await cf(['agent', 'add', 'freya', '--harness', 'claude', '--model', 'claude-opus-5'], t.env)
-
-    const installed = readFileSync(
-      join(
-        t.env.CONSENSFLOW_HOME,
-        'roles',
-        'lead',
-        '.claude',
-        'skills',
-        'consensflow-lead',
-        'SKILL.md',
-      ),
-      'utf8',
-    )
-    assert.match(installed, /freya/)
-    assert.match(installed, /hyperion/)
-  })
-
-  it('is idempotent', async () => {
-    const out = await cf(['setup'], t.env)
-    assert.equal(out.code, 0)
-  })
+    const before = readFileSync(rosterPath(t.env))
+    for (let i = 0; i < 2; i++) assert.equal((await cf(['setup'], t.env)).code, 0)
+    assert.deepEqual(readFileSync(rosterPath(t.env)), before)
+    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'roles')), false)
+    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'skills-manifest.json')), false)
+    assert.match((await cf(['agent', 'list'], t.env)).stdout, /pygmalion/)
+  } finally {
+    t.cleanup()
+  }
 })
 
 describe('retired off/reset CLI commands preserve the installation and saved data', () => {
@@ -522,13 +276,13 @@ describe('retired off/reset CLI commands preserve the installation and saved dat
     it(`rejects cf ${args.join(' ')}`, async () => {
       const t = tempEnv()
       try {
-        await cf(['agent', 'add', 'zeus', '--harness', 'claude', '--model', 'example'], t.env)
+        await cf(['agent', 'add', 'mine', '--harness', 'claude', '--model', 'example'], t.env)
         assert.equal((await cf(['setup'], t.env)).code, 0)
         const history = join(t.env.CONSENSFLOW_HOME, 'workspaces', 'project', 'runs', 'run-1')
         mkdirSync(history, { recursive: true })
         const files = [
           rosterPath(t.env),
-          join(t.env.CONSENSFLOW_BIN_DIR, 'cf'),
+          join(t.env.CONSENSFLOW_BIN_DIR, `cf${CMD}`),
           join(history, 'answer.txt'),
         ]
         writeFileSync(files[2], 'saved result')
@@ -546,85 +300,34 @@ describe('retired off/reset CLI commands preserve the installation and saved dat
     })
   }
 })
-
-it('retired skill install/update commands explain bundled skills without creating files', async () => {
+it('the chief can discover saved capability profiles without refreshing or changing role files', async () => {
   const t = tempEnv()
   try {
-    for (const action of ['install', 'update']) {
-      const result = await cf(['skills', action], t.env)
-      assert.equal(result.code, 0)
-      assert.match(result.stdout, /included with ConsensFlow/)
-      assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'roles')), false)
-    }
-  } finally {
-    t.cleanup()
-  }
-})
-
-it('PM CLI sends exact file contents and retrieves immutable lead parts in one request', async () => {
-  const { createServer } = await import('node:http')
-  const t = tempEnv()
-  const requests = []
-  const server = createServer(async (request, response) => {
-    let body = ''
-    for await (const chunk of request) body += chunk
-    requests.push({ path: request.url, body: JSON.parse(body) })
-    response.setHeader('content-type', 'application/json')
-    response.end(
-      JSON.stringify(
-        request.url.endsWith('lead.send')
-          ? { outcome: 'admitted' }
-          : { text: 'whole requested part\n', deliveryId: 'd-12', of: 2, part: 2 },
-      ),
+    const added = await cf(
+      ['agent', 'add', 'mine', '--harness', 'codex', '--model', 'gpt-5.6-luna'],
+      t.env,
     )
-  })
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-  try {
-    const env = {
-      ...t.env,
-      CONSENSFLOW_APP: `http://127.0.0.1:${server.address().port}`,
-      CONSENSFLOW_APP_TOKEN: 'pm-token',
-      CONSENSFLOW_TAB: 't-2',
-      CONSENSFLOW_ROLE: 'pm',
-    }
-    const file = join(t.root, 'message.md')
-    writeFileSync(file, 'Exact plan\nwith its final newline.\n')
-    const sent = await cf(['lead', 'send', '--message-file', file], env)
-    assert.equal(sent.code, 0, sent.stderr)
-    assert.equal(requests[0].path, '/api/panes/lead.send')
-    assert.equal(requests[0].body.text, readFileSync(file, 'utf8'))
-    const read = await cf(['lead', 'read', '--answer', 'd-12', '--part', '2'], env)
-    assert.equal(read.code, 0, read.stderr)
-    assert.equal(read.stdout, 'whole requested part\n')
-    assert.equal(requests.length, 2)
-    assert.equal(requests[1].body.answerId, 'd-12')
-    assert.equal(requests[1].body.part, 2)
-  } finally {
-    await new Promise((resolve) => server.close(resolve))
-    t.cleanup()
-  }
-})
-
-it('PM CLI rejects local roster and administration commands before changing any app files', async () => {
-  const t = tempEnv()
-  try {
-    const env = {
-      ...t.env,
-      CONSENSFLOW_ROLE: 'pm',
-      CONSENSFLOW_APP: 'http://127.0.0.1:1',
-      CONSENSFLOW_APP_TOKEN: 'pm-token',
-      CONSENSFLOW_TAB: 't-2',
-    }
-    for (const args of [
-      ['agent', 'add', 'forbidden', '--harness', 'codex'],
-      ['skills', 'uninstall', '--force'],
-      ['reset', '--yes'],
-    ]) {
-      const result = await cf(args, env)
-      assert.equal(result.code, 1)
-      assert.match(result.stderr, /PM.*lead send.*lead read/)
-    }
-    assert.equal(existsSync(rosterPath(t.env)), false)
+    assert.equal(added.code, 0, added.stderr)
+    const refused = await cf(['agent', 'add', 'hyperion'], t.env)
+    assert.equal(refused.code, 1)
+    assert.match(refused.stderr, /catalog agent/)
+    const role = join(
+      t.env.CONSENSFLOW_HOME,
+      'roles/chief/.claude/skills/consensflow-chief/SKILL.md',
+    )
+    mkdirSync(dirname(role), { recursive: true })
+    writeFileSync(role, 'Keep existing chief context untouched')
+    const roster = readFileSync(rosterPath(t.env), 'utf8')
+    const result = await cf(['agent', 'list', '--json'], { ...t.env, CONSENSFLOW_ROLE: 'chief' })
+    assert.equal(result.code, 0, result.stderr)
+    const agents = JSON.parse(result.stdout).agents
+    const hyperion = agents.find((agent) => agent.name === 'hyperion')
+    assert.ok(hyperion, 'every catalog agent is listed')
+    assert.equal(agents.find((agent) => agent.name === 'mine').custom, true)
+    assert.equal(Object.hasOwn(hyperion.profile, 'categories'), false, 'no role pills')
+    assert.ok(hyperion.profile.workTier)
+    assert.equal(readFileSync(rosterPath(t.env), 'utf8'), roster)
+    assert.equal(readFileSync(role, 'utf8'), 'Keep existing chief context untouched')
   } finally {
     t.cleanup()
   }

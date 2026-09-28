@@ -1,0 +1,369 @@
+import assert from 'node:assert/strict'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { describe, it } from 'node:test'
+import { changed, measure, mechanics, verdict } from '../evals/measure.mjs'
+import sixDecisions from '../evals/scenarios/six-decisions.mjs'
+import { openLedger } from '../src/ledger/index.js'
+
+/** The eval's numbers come from the ledger; a ledger built with the real API proves each one. */
+describe('what a run changed on disk', () => {
+  it('lists the fixture files that differ in the workspace and the files the run added', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-evals-diff-'))
+    try {
+      for (const [file, text] of [
+        ['fixture/site/index.html', 'home'],
+        ['fixture/site/evaluare.html', 'scor 0 și 100'],
+        ['fixture/docs/guide.md', 'guide'],
+        ['workspace/site/index.html', 'home'],
+        ['workspace/site/evaluare.html', 'scor 0 și 10'],
+        ['workspace/docs/guide.md', 'guide'],
+        ['workspace/site/legislatie.html', 'new page'],
+      ]) {
+        await mkdir(path.dirname(path.join(dir, file)), { recursive: true })
+        await writeFile(path.join(dir, file), text)
+      }
+      assert.deepEqual(changed(path.join(dir, 'fixture'), path.join(dir, 'workspace')), [
+        'site/evaluare.html',
+        'site/legislatie.html',
+      ])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('measuring a chief from the ledger', () => {
+  it('counts the chief’s controls: a tell and its answer, a pause and a resume, an --after follow-up', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-evals-controls-'))
+    const file = path.join(dir, 'consensflow.db')
+    try {
+      const ledger = openLedger(file)
+      const project = ledger.createProject({
+        directory: '/work/site',
+        name: 'site',
+        chief: { harness: 'claude-code' },
+      })
+      ledger.addMember(project.id, {
+        agent: 'zeus',
+        harness: 'claude-code',
+        role: 'worker',
+        tier: 'standard',
+      })
+      const deliver = (message) => {
+        ledger.beginDelivery(message.id)
+        ledger.confirmDelivery(message.id, { evidence: 'native' })
+      }
+      // As the dispatcher does it: an open task, given to a member, opens its session.
+      ledger.createTask(project.id, {
+        from: 'chief',
+        pool: 'worker',
+        tier: 'standard',
+        body: 'Sleep, then write',
+      })
+      const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
+      const given = ledger.assignTask(project.id, 1, zeus.id)
+      deliver(given.message)
+      const session = given.task.assignee
+      // cf tell: the task paused, an urgent question to its window, answered.
+      ledger.pauseTask(project.id, 1, { by: 'chief' })
+      const told = ledger.ask(project.id, {
+        from: 'chief',
+        to: session,
+        task: 1,
+        body: 'Which file?',
+        urgent: true,
+      })
+      deliver(told)
+      deliver(ledger.answer(told.id, { from: session, body: 'site/notes.md' }))
+      const resumed = ledger.resumeTask(project.id, 1, { by: 'chief', body: 'Go on' })
+      if (resumed.message !== null) deliver(resumed.message)
+      ledger.recordResult(project.id, 1, { body: 'Written' })
+      ledger.acceptTask(project.id, 1, { by: 'chief' })
+      const next = ledger.createTask(project.id, { from: 'chief', after: 1, body: 'Add a line' })
+      assert.equal(next.task.assignee, session, 'the follow-up goes to the same window')
+      ledger.close()
+
+      const metrics = measure(file)
+      const p = metrics.plumbing
+      assert.deepEqual(
+        [p.tells, p.tellsAnswered, p.pauses, p.resumes, p.continuations],
+        [1, 1, 1, 1, 1],
+      )
+      assert.deepEqual(
+        mechanics(metrics, 2)
+          .filter((c) => c.name.startsWith('every tell'))
+          .map((c) => [c.name, c.ok]),
+        [['every tell the chief sent was answered (1/1)', true]],
+      )
+      const trip = (await import('../evals/scenarios/control-trip.mjs')).default
+      assert.deepEqual(
+        verdict(trip, { ...metrics, filesChanged: ['site/notes.md'] }).map((c) => [c.name, c.ok]),
+        [
+          ['the chief stops the task with cf tell', true],
+          ['the worker answers the tell', true],
+          ['the task is paused and resumed', true],
+          ['a follow-up goes to the same window (--after)', true],
+          ['both tasks are accepted', false],
+          ['only site/notes.md is new', true],
+          ['the owner is not asked anything', true],
+        ],
+        'the follow-up is not yet accepted here',
+      )
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('measures long messages: the longest result of each kind, the owner’s answers, the notes whole', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-evals-long-'))
+    const file = path.join(dir, 'consensflow.db')
+    try {
+      const ledger = openLedger(file)
+      const project = ledger.createProject({
+        directory: '/work/site',
+        name: 'site',
+        chief: { harness: 'claude-code' },
+      })
+      for (const [agent, role] of [
+        ['zeus', 'worker'],
+        ['athena', 'advisor'],
+      ]) {
+        ledger.addMember(project.id, { agent, harness: 'claude-code', role, tier: 'standard' })
+      }
+      const deliver = (message) => {
+        ledger.beginDelivery(message.id)
+        ledger.confirmDelivery(message.id, { evidence: 'native' })
+      }
+      deliver(ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Report' }).message)
+      ledger.createTask(project.id, {
+        from: 'chief',
+        pool: 'advisor',
+        tier: 'standard',
+        body: 'Advise',
+      })
+      const athena = ledger.project(project.id).participants.find((p) => p.handle === 'athena')
+      ledger.assignTask(project.id, 2, athena.id)
+      deliver(ledger.task(project.id, 2).messages.find((m) => m.kind === 'task'))
+      ledger.recordResult(project.id, 1, { body: `${'r'.repeat(8999)}\nCEDRU-7314` })
+      ledger.recordResult(project.id, 2, { body: 'short advice' })
+      const asked = ledger.ask(project.id, { from: 'chief', to: 'human', body: 'Name?' })
+      ledger.answer(asked.id, { from: 'human', body: 'a'.repeat(6000) })
+      ledger.note(project.id, {
+        from: 'chief',
+        to: 'human',
+        body: `${'n'.repeat(300)} DELTA-5530 at the end`,
+      })
+      ledger.close()
+
+      const metrics = measure(file)
+      assert.deepEqual(metrics.longestResult, { worker: 9010, advisor: 12, reviewer: 0 })
+      assert.deepEqual(metrics.answersToChief, [6000])
+      assert.match(metrics.notesText, /DELTA-5530 at the end$/)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('counts tasks, parallel work, advice, reviews, questions, notes and the chief’s own edits', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-evals-'))
+    const file = path.join(dir, 'consensflow.db')
+    try {
+      const ledger = openLedger(file)
+      const project = ledger.createProject({
+        directory: '/work/site',
+        name: 'site',
+        chief: { harness: 'claude-code' },
+      })
+      for (const [agent, role] of [
+        ['zeus', 'worker'],
+        ['diana', 'worker'],
+        ['athena', 'advisor'],
+        ['hera', 'reviewer'],
+      ]) {
+        ledger.addMember(project.id, { agent, harness: 'claude-code', role, tier: 'standard' })
+      }
+      const participant = (handle) =>
+        ledger.project(project.id).participants.find((p) => p.handle === handle)
+      const deliver = (message) => {
+        ledger.beginDelivery(message.id)
+        ledger.confirmDelivery(message.id, { evidence: 'native' })
+      }
+      // Two tasks side by side, one after them; advice; a review.
+      const one = ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Write it' })
+      const two = ledger.createTask(project.id, {
+        from: 'chief',
+        to: 'diana',
+        body: 'Translate it',
+      })
+      deliver(one.message)
+      deliver(two.message)
+      // The plumbing: zeus asks the chief, the chief answers, both delivered;
+      // both results reach the chief; one task is accepted.
+      const asked = ledger.ask(project.id, {
+        from: 'zeus',
+        to: 'chief',
+        body: 'Which colour?',
+        task: 1,
+      })
+      deliver(asked)
+      deliver(ledger.answer(asked.id, { from: 'chief', body: 'Blue' }))
+      deliver(ledger.recordResult(project.id, 1, { body: 'Written' }).message)
+      ledger.recordResult(project.id, 2, { body: 'Translated' })
+      ledger.acceptTask(project.id, 1, { by: 'chief' })
+      const advice = ledger.createTask(project.id, {
+        from: 'chief',
+        pool: 'advisor',
+        tier: 'standard',
+        body: 'Which law applies?',
+      })
+      const review = ledger.createTask(project.id, {
+        from: 'chief',
+        pool: 'reviewer',
+        tier: 'standard',
+        body: 'Review T-1',
+      })
+      assert.deepEqual([advice.task.pool, review.task.pool], ['advisor', 'reviewer'])
+      // To the human: two questions (one with options, left unanswered), one note.
+      const keep = ledger.ask(project.id, {
+        from: 'chief',
+        to: 'human',
+        body: 'Keep the old document?',
+      })
+      ledger.answer(keep.id, { from: 'human', body: 'Keep it' })
+      ledger.ask(project.id, {
+        from: 'chief',
+        to: 'human',
+        body: 'Publish now?',
+        questions: [
+          {
+            question: 'Publish now?',
+            header: 'Publish',
+            options: [{ label: 'Yes' }, { label: 'No' }],
+          },
+        ],
+      })
+      ledger.note(project.id, {
+        from: 'chief',
+        to: 'human',
+        body: 'The guide says 1 to 5; the site shows a colour.',
+      })
+      // The chief's own window: three turns, two edits.
+      const conversation = ledger.startConversation(participant('chief').id, {
+        harness: 'claude-code',
+      })
+      ledger.copyTranscript(conversation.id, [
+        { id: 'u1', role: 'user', text: 'Add the page', complete: true, at: null },
+        { id: 'a1', role: 'assistant', text: 'Looking.', complete: true, at: null },
+        {
+          id: 't1',
+          role: 'tool',
+          text: 'The file /work/site/index.html has been updated.',
+          complete: true,
+          at: null,
+        },
+        { id: 'a2', role: 'assistant', text: 'Now the menu.', complete: true, at: null },
+        {
+          id: 't2',
+          role: 'tool',
+          text: 'File created successfully at: /work/site/legislatie.html',
+          complete: true,
+          at: null,
+        },
+        { id: 't3', role: 'tool', text: 'diff --git a/x b/x', complete: true, at: null },
+        {
+          id: 'a3',
+          role: 'assistant',
+          text: 'Done: the page is in place.',
+          complete: true,
+          at: null,
+        },
+      ])
+      ledger.close()
+
+      const metrics = measure(file)
+      assert.equal(metrics.chief, 'chief')
+      assert.deepEqual(
+        metrics.tasks.map((t) => [t.number, t.pool]),
+        [
+          [1, null],
+          [2, null],
+          [3, 'advisor'],
+          [4, 'reviewer'],
+        ]
+          .map(([n, p]) => [n, p])
+          .sort((a, b) => a[0] - b[0]),
+      )
+      assert.deepEqual(
+        [metrics.parallel, metrics.advice, metrics.reviews],
+        [2, 1, 1],
+        'two briefs delivered before either result',
+      )
+      assert.deepEqual(
+        [metrics.questionsToHuman.length, metrics.questionsToHuman.map((q) => q.options)],
+        [2, [false, true]],
+      )
+      assert.equal(metrics.notesToHuman.length, 1)
+      assert.deepEqual([metrics.chiefTurns, metrics.chiefEdits], [3, 2])
+      assert.equal(metrics.chiefLastWords, 'Done: the page is in place.')
+      assert.deepEqual(metrics.filesChanged, [], 'no fixture given: nothing compared')
+      // A task given by pool has no brief until a member takes it: two briefs.
+      assert.deepEqual(metrics.plumbing, {
+        briefs: 2,
+        briefsDelivered: 2,
+        results: 2,
+        resultsDelivered: 1,
+        memberQuestions: 1,
+        memberQuestionsAnswered: 1,
+        answersDelivered: 1,
+        accepted: 1,
+        tells: 0,
+        tellsAnswered: 0,
+        pauses: 0,
+        resumes: 0,
+        continuations: 0,
+        ownerQuestions: 2,
+        ownerQuestionsAnswered: 1,
+      })
+      assert.equal(metrics.taskCount, 4)
+      assert.deepEqual(
+        mechanics(metrics, 4).map((c) => [c.name, c.ok]),
+        [
+          ['every task brief was delivered (2/2)', true],
+          ['every result reached the chief (1/2)', false],
+          ['every question a member asked the chief was answered (1/1)', true],
+          ['every answer reached the member (1/1)', true],
+          ['every tell the chief sent was answered (0/0)', true],
+          ["every question the chief put to the owner got the owner's answer (1/2)", false],
+          ['the board showed every task (4/4)', true],
+        ],
+      )
+      assert.equal(mechanics(metrics, 3).at(-1).ok, false, 'a task the board did not list')
+
+      const checks = verdict(sixDecisions, metrics)
+      assert.deepEqual(
+        checks.map((c) => [c.name, c.ok]),
+        [
+          ['the owner is asked on the board, at least three questions', false],
+          ['at least one question offers options', true],
+          ['a finding reaches the owner as a note', true],
+          ['at least two tasks go on the board', true],
+          ['two tasks run side by side at some point', true],
+          ['finished work goes to a review', true],
+          ["the chief's own edits stay under ten (counted for a Claude chief only)", true],
+        ],
+      )
+      const trip = (await import('../evals/scenarios/round-trip.mjs')).default
+      assert.deepEqual(
+        verdict(trip, { ...metrics, filesChanged: ['site/notes.md'], questionsToHuman: [] }).map(
+          (c) => c.ok,
+        ),
+        [true, true, true, true, true, true, true],
+        'the round trip holds on this ledger once only notes.md is new and the owner was not asked',
+      )
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})

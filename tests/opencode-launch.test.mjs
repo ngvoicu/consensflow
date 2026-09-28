@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
-import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import * as nativeOpenCode from '../src/channels/opencode.js'
 import { launchConfiguration } from '../src/channels.js'
+import { fakeNodeExecutable } from './helpers.mjs'
 
 const { createSession } = nativeOpenCode
 
@@ -393,9 +394,7 @@ async function setup(mode = 'ok', extraEnv = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-opencode-create-'))
   const rawWorkspace = await mkdtemp(path.join(os.tmpdir(), 'cf-opencode-ws-'))
   const workspace = await realpath(rawWorkspace)
-  const exe = path.join(dir, 'fake-opencode')
-  await writeFile(exe, FIXTURE, 'utf8')
-  await chmod(exe, 0o755)
+  const exe = fakeNodeExecutable(path.join(dir, 'fake-opencode'), FIXTURE)
   const state = path.join(dir, 'state')
   const configuration = await launchConfiguration('opencode', {
     launchId: `t-${Date.now().toString(36)}`,

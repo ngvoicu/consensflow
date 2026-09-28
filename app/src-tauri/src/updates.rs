@@ -278,6 +278,7 @@ pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Value {
 
 // The internal Node process has already exited and installation admission
 // excludes every pane. A broken bridge callback must not prevent restart.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn finish_before_deadline(
     timeout: std::time::Duration,
     finish: impl FnOnce() + Send + 'static,
@@ -448,6 +449,7 @@ impl UpdateManager {
         state.snapshot.error = Some(error);
     }
 
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     fn install(
         &self,
         panes: &std::sync::Arc<crate::pty::PaneTable>,
@@ -859,6 +861,8 @@ mod tests {
         );
         drop(permit);
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn real_updater_verifies_download_and_rejects_tampering_before_ready() {

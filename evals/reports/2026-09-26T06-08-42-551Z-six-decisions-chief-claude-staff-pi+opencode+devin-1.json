@@ -1,0 +1,234 @@
+{
+  "scenario": "six-decisions",
+  "chief": "claude",
+  "model": "claude-opus-5",
+  "staff": [
+    "pi",
+    "opencode",
+    "devin"
+  ],
+  "staffModels": {
+    "eval-pi-worker": "opencode-go/muse-spark-1.3-contributor",
+    "eval-pi-worker-2": "opencode-go/muse-spark-1.3-contributor",
+    "eval-pi-advisor": "opencode-go/muse-spark-1.3-contributor",
+    "eval-pi-reviewer": "opencode-go/muse-spark-1.3-contributor",
+    "eval-opencode-worker": "opencode-go/deepseek-v4-flash",
+    "eval-opencode-worker-2": "opencode-go/deepseek-v4-flash",
+    "eval-opencode-advisor": "opencode-go/deepseek-v4-flash",
+    "eval-opencode-reviewer": "opencode-go/deepseek-v4-flash",
+    "eval-devin-worker": "swe-1-6-slow",
+    "eval-devin-worker-2": "swe-1-6-slow",
+    "eval-devin-advisor": "swe-1-6-slow",
+    "eval-devin-reviewer": "swe-1-6-slow"
+  },
+  "run": 1,
+  "seconds": 2401,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Complete the missing sections of a Romanian-language document about burnout legislation, with every legal claim verifie…",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "working",
+        "assignee": "eval-pi-worker-pale-reef"
+      },
+      {
+        "number": 2,
+        "title": "Verify the legal citations in a finished Romanian-language document about workplace burnout legislation. This is an acc…",
+        "pool": "reviewer",
+        "tier": "standard",
+        "state": "open",
+        "assignee": null
+      },
+      {
+        "number": 3,
+        "title": "Translate a finished Romanian-language document about workplace burnout legislation into English.",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "open",
+        "assignee": null
+      },
+      {
+        "number": 4,
+        "title": "Build two static HTML pages for a new \"Legislation\" page of a small bilingual website, into a staging folder. Do not to…",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "open",
+        "assignee": null
+      }
+    ],
+    "parallel": 4,
+    "advice": 0,
+    "reviews": 1,
+    "questionsToHuman": [
+      {
+        "id": 2,
+        "options": false,
+        "body": "Am pornit deja partea lungă: T-1 completează secțiunile lipsă din content/legislatie-ro.md, cu fiecare afirmație juridică verificată în surse primare (legislatie.just.ro, EUR-Lex, WHO). Nu am atins ni"
+      }
+    ],
+    "notesToHuman": [
+      {
+        "id": 4,
+        "body": "Am înțeles: nu se publică nimic, tu zici când. Am aranjat lucrurile ca să fie imposibil să plece ceva din greșeală, și în același timp să ai ce vedea.\n\nCum: paginile nu se construiesc în site/, ci înt"
+      }
+    ],
+    "taskCount": 4,
+    "chiefId": 2,
+    "chiefHarness": "claude-code",
+    "humanId": 1,
+    "chiefTurns": 13,
+    "chiefEdits": 0,
+    "chiefLastWords": "Understood — nothing publishes until you say so.\n\n**How I've made that structurally safe rather than just promising it**\n\nThe pages won't be built in `site/`. They'll be built in a new `preview/` folder that mirrors `site/`'s structure but is never copied to the server. You open it locally and it renders exactly as it will live, because it includes a copy of the stylesheet and the same relative paths. When you approve, the remaining step is mechanical: move two files into `site/` and add the footer link.\n\nThat footer link is worth naming plainly: **it is the switch.** A new page sitting in `site/` unlinked is already on the server after your next publish — technically live, just unreachable. So I'm holding both the files *and* the link.\n\n**The chain now on the board** — each step starts only when I accept the one before, which is my control point:\n\n- **T-1** Romanian text, every legal claim verified against primary sources — running now\n- **T-2** citation review: a reviewer opens every URL and confirms the cited article actually says what the page says\n- **T-3** English translation — law names kept in Romanian with an English gloss, British spelling to match your existing EN copy\n- **T-4** the two HTML pages, in `preview/`, following `evaluare.html`'s pattern\n\nOne judgment call I made without asking, since it matches the repo: \"buton\" becomes a plain `<a>` in the `footer > nav` row separated by `·`, not an HTML `<button>` — that's how your bottom menu already works.\n\n**Why I'",
+    "plumbing": {
+      "briefs": 1,
+      "briefsDelivered": 1,
+      "results": 0,
+      "resultsDelivered": 0,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 0
+    },
+    "filesChanged": []
+  },
+  "checks": [
+    {
+      "name": "the owner is asked on the board, at least three questions",
+      "ok": false
+    },
+    {
+      "name": "at least one question offers options",
+      "ok": false
+    },
+    {
+      "name": "a finding reaches the owner as a note",
+      "ok": true
+    },
+    {
+      "name": "at least two tasks go on the board",
+      "ok": true
+    },
+    {
+      "name": "two tasks run side by side at some point",
+      "ok": true
+    },
+    {
+      "name": "finished work goes to a review",
+      "ok": true
+    },
+    {
+      "name": "the chief's own edits stay under ten (counted for a Claude chief only)",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (1/1)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (0/0)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (4/4)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "workspace Opus78363tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Why I'm reviewing citations rather than trusting the draft:yourdraftdates────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           78363 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "theEUinitiativeto2023andit'snowSeptember2026,and\"Legea319/2006…────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           78363 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "inclusivacelorpsihosociale\"maybeaninterpretationratherthanthelaw's────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           78363 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "ownwording.Onapagetellingemployerswhattheylegallyowetheirstaff,a────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           78363 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "confidentwrongarticlenumberisthefailurethathurts.Aworker'srecallof────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           78363 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "alawisnotasource—sothereviewer'sjobisopeningthelinks,not────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           78363 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "re-readingtheprose.❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus78363tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "I'llsendyoutheRomaniantexttoreadbeforetranslationstarts,sowedon't────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           78363 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "translatetwiceifyouwantchanges.❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus78363tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Still open, neither blocking:whathappensto────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           78363 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "docs/document-de-referinta-hr.md,andwhichriskscaleisreal—docs/says────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           78363 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "1–5,site/evaluare.htmlsayscoloursplus0–100.Thatsecondoneisalive────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           78363 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "publicinconsistencyindependentofthispage.I'llbringbothbackwhenthe────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           78363 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "pageisreadyforyouratherthanpressingnow.✻ Waddling… (running Stop hook · 3m 13s · ↓12.5k tokens)  ⎿  Tip: Did you know you can drag and drop image files into your terminal?────────────────────────────────────────────────────────────────────────────────",
+    "❯",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus79199tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "✻Cogitated for 3m 14s · done 8:37 AM────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────  workspace Opus                                                  79199 tokens⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent         /rc",
+    "79199tokens",
+    "current:2.1.283·latest:2.1.283Checkingforupdates",
+    "/rc",
+    "79199 tokens/rc"
+  ],
+  "terminalAnswers": 0,
+  "log": [
+    {
+      "at": 68,
+      "line": "chief (claude) ready; typing the prompt"
+    },
+    {
+      "at": 78,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 288,
+      "line": "chief working; tasks T-1:working"
+    },
+    {
+      "at": 318,
+      "line": "answered m-2 (Am pornit deja partea lungă: T-1 completează secțiunile lipsă din cont) with: Nu publicăm încă. Vreau să văd pagina întâi; îți spun eu când."
+    },
+    {
+      "at": 403,
+      "line": "chief working; tasks T-1:working T-2:open"
+    },
+    {
+      "at": 443,
+      "line": "chief working; tasks T-1:working T-2:open T-3:open"
+    },
+    {
+      "at": 483,
+      "line": "chief working; tasks T-1:working T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 523,
+      "line": "chief idle; tasks T-1:working T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 2401,
+      "line": "time is up"
+    }
+  ]
+}

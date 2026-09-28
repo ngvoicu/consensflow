@@ -1,0 +1,191 @@
+{
+  "scenario": "control-trip",
+  "chief": "claude",
+  "model": "claude-opus-5",
+  "staff": [
+    "claude"
+  ],
+  "staffModels": {
+    "eval-claude-worker": "claude-haiku-4-5-20251001",
+    "eval-claude-worker-2": "claude-haiku-4-5-20251001",
+    "eval-claude-advisor": "claude-haiku-4-5-20251001",
+    "eval-claude-reviewer": "claude-haiku-4-5-20251001"
+  },
+  "run": 1,
+  "seconds": 218,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Test de funcționare al fluxului ConsensFlow. Lucrezi în directorul de lucru al proiectului (/Users/gabrielvoicu/.consen…",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "paused",
+        "assignee": "eval-claude-worker-coral-ember"
+      }
+    ],
+    "parallel": 1,
+    "advice": 0,
+    "reviews": 0,
+    "questionsToHuman": [],
+    "notesToHuman": [],
+    "taskCount": 1,
+    "chiefId": 2,
+    "chiefHarness": "claude-code",
+    "humanId": 1,
+    "chiefTurns": 4,
+    "chiefEdits": 0,
+    "chiefLastWords": "Întrebarea e la fereastra lui T-1, care e pus pe pauză. Aștept răspunsul — închei tura aici și reiau când sosește mesajul.",
+    "plumbing": {
+      "briefs": 1,
+      "briefsDelivered": 1,
+      "results": 0,
+      "resultsDelivered": 0,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 0,
+      "tells": 1,
+      "tellsAnswered": 0,
+      "pauses": 1,
+      "resumes": 0,
+      "continuations": 0,
+      "ownerQuestions": 0,
+      "ownerQuestionsAnswered": 0
+    },
+    "filesChanged": []
+  },
+  "checks": [
+    {
+      "name": "the chief stops the task with cf tell",
+      "ok": true
+    },
+    {
+      "name": "the worker answers the tell",
+      "ok": false
+    },
+    {
+      "name": "the task is paused and resumed",
+      "ok": false
+    },
+    {
+      "name": "a follow-up goes to the same window (--after)",
+      "ok": false
+    },
+    {
+      "name": "both tasks are accepted",
+      "ok": false
+    },
+    {
+      "name": "only site/notes.md is new",
+      "ok": false
+    },
+    {
+      "name": "the owner is not asked anything",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (1/1)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/1)",
+      "ok": false
+    },
+    {
+      "name": "every question the chief put to the owner got the owner's answer (0/0)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (1/1)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "⏺T-1 is pausedandm-2putto@eval-claude-worker-coral-ember;itsanswerarrivesasamessage.Then:cftaskresumeT-1\"…\"✶Undulating… (25s · ↓984 tokens · thought for 4s)────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           54157 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "✳1.0k tokens · thought for 4s)",
+    "✢Undulating…",
+    "Undulating…1",
+    "·Undulating…",
+    "Undulating…",
+    "Undulating…",
+    "✢Undulating…6",
+    "Undulating…",
+    "✳",
+    "✶",
+    "✻Undulating…",
+    "✽Undulating…",
+    "Undulating…",
+    ")",
+    "Undulating…",
+    "Undulating…",
+    "✻Undulating…7",
+    "Undulating…",
+    "⏺✻ Undulating… (27s · ↓ 1.1k tokens)❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus54157tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "✶",
+    "✳",
+    "✢",
+    "·",
+    "✢8",
+    "✳",
+    "✶",
+    "ÎntrebareaelafereastraluiT-1,careepuspepauză.Așteptrăspunsul—",
+    "✻",
+    "✽",
+    "2",
+    "…",
+    "încheituraaicișireiaucândsoseștemesajul.✽Undulating… (28s · ↓1.2k tokens)────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           54243 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Undulating…running Stophok · 28s · ↓1.2k tokens)300",
+    "✻Brewed for 28s · done 2:45 PM❯"
+  ],
+  "terminalAnswers": 0,
+  "refusedAnswers": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 68,
+      "line": "chief (claude) ready; typing the prompt"
+    },
+    {
+      "at": 78,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 88,
+      "line": "chief working; tasks T-1:working"
+    },
+    {
+      "at": 98,
+      "line": "chief idle; tasks T-1:paused"
+    },
+    {
+      "at": 218,
+      "line": "quiet: the run is over"
+    }
+  ]
+}

@@ -10,6 +10,7 @@ import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { piSessionDir } from '../../src/harnesses.js'
+import { codexQuota, exhaustedQuota } from './quota.js'
 
 const SUPPORTED = {
   kimi: new Set(['1.5']),
@@ -27,13 +28,15 @@ export async function answers(kind, sessionId, env, options = {}) {
       case 'codex':
         return await codexAnswers(sessionId, env, options)
       case 'claude-code':
-        return await claudeAnswers(sessionId, env)
+        return await claudeAnswers(sessionId, env, options)
       case 'pi':
         return await piAnswers(sessionId, env, options)
       case 'kimi':
         return await kimiAnswers(sessionId, env)
       case 'opencode':
         return await opencodeAnswers(sessionId, env, options)
+      case 'devin':
+        return await devinAnswers(sessionId, env)
       default:
         return { unknown: true, reason: `unknown kind: ${kind}` }
     }
@@ -42,6 +45,70 @@ export async function answers(kind, sessionId, env, options = {}) {
       return { unknown: true, reason: error.message }
     }
     return { unknown: true, reason: `unreadable: ${describeError(error)}` }
+  }
+}
+
+/**
+ * `answers` for a caller that re-reads the same sessions every second (the
+ * delivery watcher; the live chief's transcript reached 135 MB). Each JSONL
+ * transcript is located once, and a file whose size and modification time
+ * have not changed returns the previous result instead of being searched for
+ * and parsed again. Calls with options, and harnesses read through a
+ * database query, always read. Results are shared: callers must not mutate them.
+ */
+export function cachedAnswers() {
+  const known = new Map()
+  return async (kind, sessionId, env, options = {}) => {
+    if (
+      Object.keys(options).length > 0 ||
+      !['claude-code', 'codex', 'pi'].includes(kind) ||
+      !sessionId ||
+      env === null ||
+      typeof env !== 'object'
+    )
+      return answers(kind, sessionId, env, options)
+    const key = `${kind}\n${sessionId}`
+    const previous = known.get(key)
+    let file = previous?.file ?? null
+    let stat = file === null ? null : await fs.stat(file).catch(() => null)
+    if (stat === null) {
+      file = await locateTranscript(kind, sessionId, env).catch(() => null)
+      stat = file === null ? null : await fs.stat(file).catch(() => null)
+    }
+    if (stat === null) {
+      known.delete(key)
+      return answers(kind, sessionId, env)
+    }
+    const stamp = `${stat.size}:${stat.mtimeMs}`
+    if (previous?.file === file && previous.stamp === stamp) return previous.result
+    const result = await answers(kind, sessionId, env, { file })
+    known.set(key, { file, stamp, result })
+    return result
+  }
+}
+
+/** Where a JSONL harness keeps one session's transcript, or null. */
+/** Whether the harness has kept a record of the conversation at all. */
+export async function hasTranscript(kind, sessionId, env) {
+  return (await locateTranscript(kind, sessionId, env)) !== null
+}
+
+async function locateTranscript(kind, sessionId, env) {
+  switch (kind) {
+    case 'claude-code':
+      return findFile(
+        path.join(env.CLAUDE_CONFIG_DIR ?? path.join(home(env), '.claude'), 'projects'),
+        (name) => name === `${sessionId}.jsonl`,
+      )
+    case 'codex':
+      return findFile(
+        path.join(env.CODEX_HOME ?? path.join(home(env), '.codex'), 'sessions'),
+        (name) => name.includes(sessionId),
+      )
+    case 'pi':
+      return findFile(piSessionDir(env), (name) => name.includes(sessionId))
+    default:
+      return null
   }
 }
 
@@ -61,46 +128,10 @@ const cursorKindCodes = Object.freeze(
     pi: 3,
     kimi: 4,
     opencode: 5,
+    devin: 6,
   }),
 )
 const ITEM_ROLES = new Set(['user', 'assistant', 'tool', 'custom'])
-
-/**
- * Return items strictly after an adapter-minted cursor. An empty array is a
- * verified empty suffix; null means the items or cursor could not be parsed by
- * that adapter. Cursors are opaque to consumers even though their current wire
- * representation is a safe integer; only this adapter decodes or compares it.
- */
-export function itemsAfterCursor(kind, items, cursor) {
-  if (!Array.isArray(items)) return null
-  for (const item of items) {
-    if (!isNormalisedItem(kind, item)) return null
-  }
-  if (cursorPosition(kind, cursor) === null) return null
-  const after = []
-  for (const item of items) {
-    if (compareCursors(kind, item.seq, cursor) > 0) after.push(item)
-  }
-  return after
-}
-
-function isNormalisedItem(kind, item) {
-  if (item === null || typeof item !== 'object' || Array.isArray(item)) return false
-  for (const field of ['id', 'role', 'text', 'complete', 'settled', 'at', 'seq']) {
-    if (!Object.hasOwn(item, field)) return false
-  }
-  return (
-    typeof item.id === 'string' &&
-    item.id.length > 0 &&
-    ITEM_ROLES.has(item.role) &&
-    typeof item.text === 'string' &&
-    typeof item.complete === 'boolean' &&
-    typeof item.settled === 'boolean' &&
-    item.at !== null &&
-    item.at !== undefined &&
-    cursorPosition(kind, item.seq) !== null
-  )
-}
 
 function cursorKindCode(kind) {
   if (typeof kind !== 'string' || !Object.hasOwn(cursorKindCodes, kind)) return null
@@ -120,21 +151,6 @@ function mintCursor(kind, position) {
   return CURSOR_NAMESPACE + code * CURSOR_KIND_SPAN + position
 }
 
-function cursorPosition(kind, cursor) {
-  const code = cursorKindCode(kind)
-  if (code === null || !Number.isSafeInteger(cursor)) return null
-  const start = CURSOR_NAMESPACE + code * CURSOR_KIND_SPAN
-  if (cursor < start || cursor >= start + CURSOR_KIND_SPAN) return null
-  return cursor - start
-}
-
-function compareCursors(kind, left, right) {
-  const leftPosition = cursorPosition(kind, left)
-  const rightPosition = cursorPosition(kind, right)
-  if (leftPosition === null || rightPosition === null) throw new Error('unrecognised cursor')
-  return leftPosition - rightPosition
-}
-
 function checkedVersion(kind, value) {
   const version = value === undefined || value === null ? 'missing' : String(value)
   if (!SUPPORTED[kind].has(version)) {
@@ -151,6 +167,7 @@ function resultBase() {
     replaced: false,
     failed: false,
     failure: null,
+    quota: null,
     cursor: null,
     settlement: {
       state: 'unknown',
@@ -499,8 +516,7 @@ function codexTurn(turns, turnId) {
 }
 
 async function codexAnswers(sessionId, env, options) {
-  const root = path.join(env.CODEX_HOME ?? path.join(home(env), '.codex'), 'sessions')
-  const file = await findFile(root, (name) => name.includes(sessionId))
+  const file = options.file ?? (await locateTranscript('codex', sessionId, env))
   if (file === null) {
     // Only a current authenticated native observation proves an empty thread.
     // The adapter owns its initial cursor; missing history alone proves nothing.
@@ -608,6 +624,11 @@ async function codexAnswers(sessionId, env, options) {
     const payload = record.payload ?? {}
     const turnId = payload.turn_id ?? currentTurnId
     const turn = codexTurn(turns, turnId)
+
+    if (payload.type === 'token_count') {
+      if (payload.rate_limits) result.quota = codexQuota(payload.rate_limits)
+      return
+    }
 
     if (payload.type === 'task_started') {
       currentTurnId = payload.turn_id
@@ -794,6 +815,18 @@ const CLAUDE_INTERRUPT_MARKERS = new Set([
   '[Request interrupted by user for tool use]',
 ])
 
+/**
+ * Whether a queue removal names the same queued message. Claude Code wraps
+ * cross-session messages in an envelope tag whose attributes differ between
+ * the enqueue and the remove record (2.1.275 adds `hop-chain` to one only), so
+ * the envelope's attributes are set aside after an exact match fails.
+ */
+function sameQueuedContent(queued, removed) {
+  if (queued === removed) return true
+  const envelope = (content) => content.replace(/^<([A-Za-z][\w-]*)(?:\s[^>]*)?>/, '<$1>')
+  return envelope(queued) === envelope(removed)
+}
+
 function isClaudeInterrupt(record) {
   if (
     record.type !== 'user' ||
@@ -812,9 +845,8 @@ function isClaudeInterrupt(record) {
   )
 }
 
-async function claudeAnswers(sessionId, env) {
-  const root = path.join(env.CLAUDE_CONFIG_DIR ?? path.join(home(env), '.claude'), 'projects')
-  const file = await findFile(root, (name) => name === `${sessionId}.jsonl`)
+async function claudeAnswers(sessionId, env, options = {}) {
+  const file = options.file ?? (await locateTranscript('claude-code', sessionId, env))
   if (file === null) {
     return { unknown: true, reason: `unreadable: no claude session ${sessionId}` }
   }
@@ -977,7 +1009,7 @@ async function claudeAnswers(sessionId, env) {
         dequeued.push(queued.shift() ?? { id: `queue:${recordIndex}`, content: '' })
       } else if (record.operation === 'popAll') {
         const content = String(record.content ?? '')
-        const queuedIndex = queued.findIndex((entry) => entry.content === content)
+        const queuedIndex = queued.findIndex((entry) => sameQueuedContent(entry.content, content))
         popped.push(
           queuedIndex === -1
             ? { id: `queue:${recordIndex}`, content }
@@ -985,9 +1017,11 @@ async function claudeAnswers(sessionId, env) {
         )
       } else if (record.operation === 'remove') {
         const content = String(record.content ?? '')
-        const queuedIndex = queued.findIndex((entry) => entry.content === content)
+        const queuedIndex = queued.findIndex((entry) => sameQueuedContent(entry.content, content))
         if (queuedIndex !== -1) queued.splice(queuedIndex, 1)
-        const dequeuedIndex = dequeued.findIndex((entry) => entry.content === content)
+        const dequeuedIndex = dequeued.findIndex((entry) =>
+          sameQueuedContent(entry.content, content),
+        )
         if (dequeuedIndex !== -1) dequeued.splice(dequeuedIndex, 1)
       }
       return
@@ -1010,6 +1044,8 @@ async function claudeAnswers(sessionId, env) {
         result.failed = false
         result.failure = null
       }
+      // The latest assistant record has the last word on quota.
+      result.quota = null
       const item = addAssistant(message.id, at, seq)
       const text = claudeText(message.content)
       updateNativeFragment(item, nativeId(record.uuid, 'claude record', seq), text, '\n')
@@ -1032,6 +1068,9 @@ async function claudeAnswers(sessionId, env) {
         turnOpen = false
         result.failed = true
         result.failure = String(record.errorDetails ?? record.error ?? text)
+        if (record.apiErrorStatus === 429 || record.error === 'rate_limit') {
+          result.quota = exhaustedQuota(text, Date.parse(record.timestamp))
+        }
         terminal = {
           provenance: 'native',
           complete: false,
@@ -1272,8 +1311,7 @@ async function piSettlementEvidence(sessionId, env, options) {
 }
 
 async function piAnswers(sessionId, env, options = {}) {
-  const root = piSessionDir(env)
-  const file = await findFile(root, (name) => name.includes(sessionId))
+  const file = options.file ?? (await locateTranscript('pi', sessionId, env))
   if (file === null) return { unknown: true, reason: `unreadable: no pi session ${sessionId}` }
 
   const result = resultBase()
@@ -1362,20 +1400,39 @@ async function piAnswers(sessionId, env, options = {}) {
     }
     result.items.push(item)
 
+    result.quota = null
     if (message.stopReason === 'stop') {
       turnOpen = true
       result.failed = false
       result.failure = null
+      result.cancelled = false
       terminal = {
         provenance: 'derived',
         complete: true,
         item,
         boundary: boundary('message.assistant.stop', seq, at, { id }),
       }
+    } else if (message.stopReason === 'aborted') {
+      // Stopped by an Escape (a pause, a tell, the human): the turn is over,
+      // not failed, and the extension's settled evidence names this message.
+      turnOpen = true
+      result.failed = false
+      result.failure = null
+      result.cancelled = true
+      terminal = {
+        provenance: 'derived',
+        complete: false,
+        aborted: true,
+        item,
+        boundary: boundary('message.assistant.aborted', seq, at, { id }),
+      }
     } else if (message.stopReason === 'error') {
       turnOpen = true
       result.failed = true
       result.failure = String(message.errorMessage ?? 'provider error')
+      if (/^429\b/.test(result.failure)) {
+        result.quota = exhaustedQuota(result.failure, Number(message.timestamp))
+      }
       terminal = {
         provenance: 'derived',
         complete: false,
@@ -1396,7 +1453,7 @@ async function piAnswers(sessionId, env, options = {}) {
   const { mtimeMs } = await fs.stat(file)
   const quiet = Date.now() - mtimeMs >= PI_SETTLEMENT_QUIET_MS
   const open = [...openTools]
-  const canSettle = Boolean(terminal?.complete && quiet && open.length === 0)
+  const canSettle = Boolean((terminal?.complete || terminal?.aborted) && quiet && open.length === 0)
   const nativeSettled = Boolean(hasNativeBoundary && open.length === 0)
   if (canSettle || nativeSettled) terminal.item.settled = true
 
@@ -1908,9 +1965,13 @@ async function opencodeAnswers(sessionId, env, options) {
         })
       }
 
+      if (completed) result.quota = null
       if (isFailure) {
         result.failed = true
         result.failure = String(data.error?.data?.message ?? visibleText(data.error))
+        if (data.error?.data?.statusCode === 429) {
+          result.quota = exhaustedQuota(result.failure, Number(data.time?.completed ?? at))
+        }
       }
 
       if (closesTurn) {
@@ -1989,4 +2050,195 @@ async function openOpencodeDb(env) {
   } catch {
     return null
   }
+}
+
+// Devin persists revisions, including cancelled assistant text. Only its main
+// chain plus a matching native request/complete boundary proves a reply.
+/**
+ * The text a Devin message is compared by: its wire streams a file link as
+ * `[name](file:///path)` and its store keeps `<ref_file file="/path" />`
+ * (Devin 3000.11, 2026-09-26), so both are read as the path; nothing else is
+ * loosened, since the comparison is what tells a final message from a half
+ * one.
+ */
+function devinComparable(text) {
+  const path = (value) => {
+    try {
+      return decodeURI(value)
+    } catch {
+      return value
+    }
+  }
+  return text
+    .replace(/<ref_file\s+file="([^"]*)"\s*\/>/g, (_, file) => path(file))
+    .replace(/\[[^\]]*\]\(file:\/\/([^)\s]*)\)/g, (_, file) => path(file))
+}
+
+/** The wire updates that mean Devin is on a turn; settings and mode updates are not work. */
+const DEVIN_WORK = new Set([
+  'agent_thought_chunk',
+  'agent_message_chunk',
+  'tool_call',
+  'tool_call_update',
+])
+
+async function devinAnswers(sessionId, env) {
+  const { DatabaseSync } = await import('node:sqlite')
+  const file = path.join(
+    env.XDG_DATA_HOME ?? path.join(home(env), '.local', 'share'),
+    'devin',
+    'cli',
+    'sessions.db',
+  )
+  const db = new DatabaseSync(file, { readOnly: true })
+  const result = resultBase()
+  try {
+    db.exec('BEGIN')
+    const session = db.prepare('select main_chain_id from sessions where id = ?').get(sessionId)
+    if (!session) throw new Error('missing Devin session')
+    const rows = db
+      .prepare(
+        'select row_id, node_id, parent_node_id, chat_message, created_at from message_nodes where session_id = ? order by row_id',
+      )
+      .all(sessionId)
+    const nodes = new Map(rows.map((row) => [row.node_id, row]))
+    const chain = [],
+      visited = new Set()
+    let node = session.main_chain_id
+    while (node !== null) {
+      if (visited.has(node)) throw new Error('cyclic Devin main chain')
+      visited.add(node)
+      const row = nodes.get(node)
+      if (!row) throw new Error('missing Devin main chain ancestor')
+      chain.push(row)
+      node = row.parent_node_id
+    }
+    const ids = new Set()
+    let request = null
+    for (const row of chain.reverse()) {
+      const message = JSON.parse(row.chat_message)
+      if (typeof message.message_id !== 'string' || ids.has(message.message_id))
+        throw new Error('invalid Devin message identity')
+      ids.add(message.message_id)
+      const role = message.role === 'system' ? 'custom' : message.role
+      if (role === 'user')
+        request = message.metadata?.extensions?.['chisel/client-message-id'] ?? message.message_id
+      if (!ITEM_ROLES.has(role)) throw new Error('unknown Devin message role')
+      const text =
+        typeof message.content === 'string'
+          ? message.content
+          : Array.isArray(message.content)
+            ? message.content
+                .filter((part) => part.type === 'text')
+                .map((part) => part.text)
+                .join('')
+            : ''
+      const seq = mintCursor('devin', Number(row.row_id))
+      result.items.push({
+        id: message.message_id,
+        role,
+        text,
+        complete: role !== 'assistant',
+        settled: role !== 'assistant',
+        at: message.metadata?.created_at ?? row.created_at,
+        seq,
+        _request: request,
+      })
+      result.cursor = Math.max(result.cursor ?? seq, seq)
+    }
+    db.exec('COMMIT')
+  } finally {
+    db.close()
+  }
+  const root = path.join(
+    env.CONSENSFLOW_HOME ?? path.join(home(env), '.consensflow'),
+    'integrations',
+    'devin',
+  )
+  let launches = []
+  try {
+    launches = await fs.readdir(root, { withFileTypes: true })
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+  }
+  const outcomes = new Map()
+  // A turn Devin is still on shows only on the wire: thoughts, messages and
+  // tool calls after the last end; its store holds the finished steps. Judged
+  // by the launch whose wire was written last (a resume opens a new one).
+  let working = false
+  let latestWire = -1
+  for (const launch of launches) {
+    if (!launch.isDirectory()) continue
+    let active = null
+    let busy = false
+    const wire = path.join(root, launch.name, 'wire.jsonl')
+    try {
+      await readJsonl(wire, (event) => {
+        if (event.sessionId !== sessionId) return
+        const update = event.update
+        if (DEVIN_WORK.has(update?.sessionUpdate)) busy = true
+        if (update?.sessionUpdate === 'agent_message_chunk') {
+          const id = update._meta?.['cognition.ai/streamingMessageId']
+          // History replay has timestamps but no streaming UUID.
+          if (typeof id !== 'string' || update.content?.type !== 'text') return
+          if (active?.id !== id) active = { id, text: '', request: null }
+          active.text += update.content.text
+        }
+        if (active && typeof event.turnClientMessageId === 'string')
+          active.request = event.turnClientMessageId
+        if (['complete', 'cancelled', 'error'].includes(event.cause)) {
+          if (active?.request) {
+            const outcome = { ...active, cause: event.cause }
+            const previous = outcomes.get(active.request)
+            if (previous && (previous.text !== outcome.text || previous.cause !== outcome.cause))
+              throw new Error('conflicting Devin completion evidence')
+            outcomes.set(active.request, outcome)
+          }
+          active = null
+          busy = false
+        }
+      })
+      const { mtimeMs } = await fs.stat(wire)
+      if (mtimeMs >= latestWire) {
+        latestWire = mtimeMs
+        working = busy
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+    }
+  }
+  const finalByRequest = new Map(
+    result.items
+      .filter((item) => item.role === 'assistant')
+      .map((item) => [item._request, item.id]),
+  )
+  for (const item of result.items) {
+    if (item.role !== 'assistant') continue
+    const outcome = outcomes.get(item._request)
+    item.complete =
+      finalByRequest.get(item._request) === item.id &&
+      outcome?.cause === 'complete' &&
+      devinComparable(outcome.text) === devinComparable(item.text)
+    item.settled = item.complete
+  }
+  const last = result.items.findLast((item) => item.role !== 'custom')
+  const outcome = outcomes.get(last?._request)
+  result.cancelled = outcome?.cause === 'cancelled'
+  result.failed = outcome?.cause === 'error'
+  result.inFlight =
+    working || (last?.role === 'assistant' && !last.complete && !result.cancelled && !result.failed)
+  setSettlement(
+    result,
+    working
+      ? 'in-flight'
+      : last?.complete || result.cancelled || result.failed
+        ? 'settled'
+        : 'unknown',
+    'native',
+    null,
+    result.cursor,
+    { complete: last?.complete === true, openTools: [], queuedTurns: [], hooksInFlight: [] },
+  )
+  for (const item of result.items) delete item._request
+  return result
 }

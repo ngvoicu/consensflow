@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import {
   chmodSync,
   existsSync,
@@ -46,6 +47,15 @@ const FLOOD_WIDTH = 384
  * arrive if the page kept returning credit.
  */
 const FLOOD_BYTES = FLOOD_LINES * (FLOOD_WIDTH + 'CFSMOKE-FLOOD 1234 '.length + 1)
+
+/** The app writes its error output to <home>/app/app.log, not to its stderr. */
+function appLog(box) {
+  try {
+    return readFileSync(join(box.env.CONSENSFLOW_HOME, 'app', 'app.log'), 'utf8').slice(-4000)
+  } catch {
+    return '(none)'
+  }
+}
 
 function candidateApp() {
   const override = process.env.CONSENSFLOW_SMOKE_APP
@@ -112,54 +122,116 @@ function gate(t) {
   return found
 }
 
-const FAKE_HARNESS = `#!/bin/sh
+const FAKE_HARNESS = String.raw`#!/bin/sh
 # The smoke's stand-in harness. It exists to be recognisable on screen, to
 # prove that what the human types reaches a real child — every line it reads
 # comes back as hex, which no echo, no replay and no cached frame could
 # produce — and, on request, to out-run the output window.
 #
+# It also keeps the two records a Claude window keeps, because the core reads
+# them before it delivers and after: sessions/<pid>.json says the window is
+# idle, and the transcript holds every line the window took as a user turn
+# answered by an assistant turn. The human's Enter releases the typing latch
+# on the first; a delivery from the board is confirmed by the second.
+#
 # The flood is asked for rather than printed at start-up: 1.5 MiB of wrapped
 # lines pushes far more rows than xterm keeps, so a banner printed before it
 # is gone by the time anything can look for it. The page says when it has
 # seen the banner; only then does the flood run.
+LC_ALL=C
+export LC_ALL
 echo $$ > "$CFSMOKE_PIDFILE"
-printf 'CFSMOKE-READY %s\\n' "$CFSMOKE_TAG"
-# Says whether the pane inherited a usable PATH. A lead whose PATH holds only
+session=''
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --session-id|--resume) session="$2"; shift ;;
+  esac
+  shift
+done
+config="${'$'}{CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+transcript="$config/projects/smoke/$session.jsonl"
+status="$config/sessions/$$.json"
+mkdir -p "$config/projects/smoke" "$config/sessions"
+trap 'rm -f "$status"' EXIT
+n=0
+stamp() { date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo 1970-01-01T00:00:00Z; }
+state() {
+  printf '{"pid":%s,"sessionId":"%s","kind":"interactive","status":"%s"}' "$$" "$session" "$1" > "$status"
+}
+record() {
+  n=$((n + 1))
+  printf '{"sessionId":"%s","version":"2.1.277","timestamp":"%s","uuid":"%s-%s-%s",%s}\n' \
+    "$session" "$(stamp)" "$session" "$$" "$n" "$1" >> "$transcript"
+}
+# One line read is one turn, the way the integration suite's fake agent does it.
+turn() {
+  state busy
+  record "\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"$1\"}"
+  record "\"type\":\"assistant\",\"message\":{\"id\":\"$session-message-$$-$n\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"noted\"}],\"stop_reason\":\"end_turn\"}"
+  record "\"type\":\"system\",\"subtype\":\"stop_hook_summary\",\"preventedContinuation\":false,\"hookCount\":1"
+  state idle
+}
+state idle
+printf 'CFSMOKE-READY %s\n' "$CFSMOKE_TAG"
+# Says whether the pane inherited a usable PATH. A chief whose PATH holds only
 # ConsensFlow's own directories cannot run git, ripgrep or any of what a real
 # harness shells out to, and every test that stubs the environment would still
 # pass. One system command settles it.
 if command -v uname >/dev/null 2>&1; then
-  printf 'CFSMOKE-TOOLS ok\\n'
+  printf 'CFSMOKE-TOOLS ok\n'
 else
-  printf 'CFSMOKE-TOOLS missing\\n'
+  printf 'CFSMOKE-TOOLS missing\n'
 fi
 pad=''
 n=0
 while [ $n -lt ${FLOOD_WIDTH} ]; do
-  pad="\${pad}x"
+  pad="${'$'}{pad}x"
   n=$((n + 1))
 done
+n=0
+esc=$(printf '\033')
 while IFS= read -r line; do
-  if [ "$line" = "FLOOD" ]; then
+  if [ "$line" = "BIGPASTE" ]; then
+    saved=$(stty -g)
+    stty raw -echo
+    "$CFSMOKE_PASTE_NODE" "$CFSMOKE_PASTE_READER"
+    stty "$saved"
+  elif [ "$line" = "ASK" ]; then
+    # The chief asks the human from its terminal, the way a real chief does;
+    # the human answers on the board and the core delivers it into this window.
+    cf ask "SMOKE"
+    turn "ASK"
+  elif [ "$line" = "FLOOD" ]; then
     n=1
     while [ $n -le ${FLOOD_LINES} ]; do
-      printf 'CFSMOKE-FLOOD %s %s\\n' "$n" "$pad"
+      printf 'CFSMOKE-FLOOD %s %s\n' "$n" "$pad"
       n=$((n + 1))
     done
-    printf 'CFSMOKE-FLOODED %s\\n' "$CFSMOKE_TAG"
+    printf 'CFSMOKE-FLOODED %s\n' "$CFSMOKE_TAG"
   else
-    # Shell builtins only, on purpose. A lead pane's PATH once carried just
+    # A paste arrives bracketed; the record and the hex are of the text.
+    line=${'$'}{line#"$esc[200~"}
+    line=${'$'}{line%"$esc[201~"}
+    # Shell builtins only, on purpose. A chief pane's PATH once carried just
     # ConsensFlow's own bin directories — this fixture is what found that,
     # by failing on a missing \`od\` — and it is fixed now. Keeping the hex in
     # the shell means this test measures the app, not the machine's coreutils.
     hex=''
+    json=''
     rest=$line
     while [ -n "$rest" ]; do
-      ch=$\{rest%"$\{rest#?}"}
-      hex="$hex$(printf '%02x' "'$ch")"
-      rest=$\{rest#?}
+      ch=${'$'}{rest%"${'$'}{rest#?}"}
+      # Bytes above 0x7f come back sign-extended from printf; keep the byte.
+      hex="$hex$(printf '%02x' $(( $(printf '%d' "'$ch") & 255 )))"
+      case "$ch" in
+        \\) json="$json\\\\" ;;
+        \") json="$json\\\"" ;;
+        *) json="$json$ch" ;;
+      esac
+      rest=${'$'}{rest#?}
     done
-    printf 'CFSMOKE-HEX %s\\n' "$hex"
+    turn "$json"
+    printf 'CFSMOKE-HEX %s\n' "$hex"
   fi
 done
 `
@@ -192,6 +264,22 @@ function sandbox() {
   const harness = join(paths.bin, 'claude')
   writeFileSync(harness, FAKE_HARNESS, 'utf8')
   chmodSync(harness, 0o755)
+  const pasteReader = join(paths.probe, 'paste-reader.mjs')
+  writeFileSync(
+    pasteReader,
+    `
+import { createHash } from 'node:crypto'
+const chunks = []
+process.stdout.write('CFSMOKE-PASTE-READY\\r\\n')
+process.stdin.on('data', chunk => {
+  chunks.push(chunk)
+  const bytes = Buffer.concat(chunks)
+  if (!bytes.subarray(-6).equals(Buffer.from('\\x1b[201~'))) return
+  const hash = createHash('sha256').update(bytes).digest('base64')
+  process.stdout.write('CFSMOKE-PASTE ' + bytes.length + ' ' + hash + '\\r\\n', () => process.exit(0))
+})
+`,
+  )
   return {
     ...paths,
     tag,
@@ -207,6 +295,7 @@ function sandbox() {
       CONSENSFLOW_SELFTEST_DIR: paths.workspace,
       CONSENSFLOW_SELFTEST_TAG: tag,
       CFSMOKE_PIDFILE: paths.pidFile,
+      CFSMOKE_PASTE_READER: pasteReader,
       CFSMOKE_TAG: tag,
     },
     cleanup: () => rmSync(root, { recursive: true, force: true }),
@@ -263,6 +352,14 @@ function launch(binary, box) {
     return lines
   }
 
+  // WebKit reports "ResizeObserver loop completed with undelivered
+  // notifications" as a window error when xterm refits inside a dock that is
+  // still settling: a frame was skipped, nothing in the page failed.
+  const fatal = (event) =>
+    event.event === 'failed' ||
+    event.event === 'page-rejection' ||
+    (event.event === 'page-error' && !/ResizeObserver loop/.test(event.data?.message ?? ''))
+
   async function waitFor(name, timeoutMs = HANDSHAKE_MS) {
     const deadline = Date.now() + timeoutMs
     for (;;) {
@@ -270,13 +367,12 @@ function launch(binary, box) {
       if (found !== undefined) return found
       // A driver that has already given up will never report anything else.
       // Waiting out the rest of the timeout only delays the same failure.
-      const dead = events.find((event) =>
-        ['failed', 'page-error', 'page-rejection'].includes(event.event),
-      )
+      const dead = events.find((event) => fatal(event))
       if (dead !== undefined) {
         throw new Error(
           `the app gave up before reporting "${name}".\n${trouble().join('\n')}\n` +
-            `sandbox kept at ${box.root}\nstderr: ${stderr.join('').slice(-4000)}`,
+            `sandbox kept at ${box.root}\nstderr: ${stderr.join('').slice(-4000)}\n` +
+            `app.log: ${appLog(box)}`,
         )
       }
       const left = deadline - Date.now()
@@ -291,7 +387,8 @@ function launch(binary, box) {
             `reported: ${events.map((event) => event.event).join(', ') || '(nothing)'}\n` +
             `${seen.length > 0 ? `${seen.join('\n')}\n` : ''}` +
             `sandbox kept at ${box.root}\n` +
-            `stderr: ${stderr.join('').slice(-4000)}`,
+            `stderr: ${stderr.join('').slice(-4000)}\n` +
+            `app.log: ${appLog(box)}`,
         )
       }
       await new Promise((wake) => {
@@ -362,6 +459,7 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   if (found === null) return
 
   const box = sandbox()
+  box.env.CFSMOKE_PASTE_NODE = found.node
   const app = launch(found.binary, box)
   // A failed smoke leaves its machine behind on purpose: the harness, its pid
   // file, the state root and the app's own launchers are the evidence, and
@@ -382,10 +480,11 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     )
   }
 
-  // 2. A tab, a lead pane, and the fake harness's own first line drawn by the
-  //    real xterm — through `open_lead`, the production command.
-  const opened = await app.waitFor('tab')
-  assert.equal(opened.data.ok, true, `open_lead refused: ${JSON.stringify(opened.data)}`)
+  // 2. A project, its chief window docked beside the board, and the fake
+  //    harness's own first line drawn by the real xterm — through
+  //    `project.open`, the production operation.
+  const opened = await app.waitFor('project')
+  assert.equal(opened.data.ok, true, `project.open refused: ${JSON.stringify(opened.data)}`)
 
   const rendered = await app.waitFor('rendered')
   assert.match(rendered.data.banner, new RegExp(`CFSMOKE-READY ${box.tag}`))
@@ -394,7 +493,7 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   assert.equal(
     rendered.data.tools,
     'ok',
-    'the lead pane inherited a PATH with no system commands on it',
+    'the chief pane inherited a PATH with no system commands on it',
   )
 
   // 3. Input typed through the page's own path reached the child: it came
@@ -406,6 +505,35 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     'the child echoed something other than what was typed',
   )
 
+  // The board reaches the window: the human's answer to what the chief asked
+  // from its own terminal came back as a paste the child hexed, header first.
+  const board = await app.waitFor('board')
+  assert.ok(Number.isInteger(board.data.question), 'the chief never asked the human')
+  assert.match(
+    Buffer.from(board.data.hex, 'hex').toString('utf8'),
+    /^\[ConsensFlow m-\d+ · answer from @human\]/,
+  )
+  assert.equal(board.data.delivered, true, 'the core never confirmed the delivery from the record')
+
+  const agentsWindow = await app.waitFor('agents-window')
+  assert.deepEqual(
+    [agentsWindow.data.first.ok, agentsWindow.data.first.label, agentsWindow.data.first.reused],
+    [true, 'agents', false],
+    JSON.stringify(agentsWindow.data.first),
+  )
+  assert.match(agentsWindow.data.first.url, /^http:\/\/localhost:\d+\/\?token=/)
+  assert.deepEqual(
+    [agentsWindow.data.again.ok, agentsWindow.data.again.reused],
+    [true, true],
+    'the second ask reuses the window',
+  )
+  assert.match(agentsWindow.data.again.url, /\/harnesses\?token=/)
+
+  const pasted = await app.waitFor('large-paste')
+  const expectedPaste = Buffer.from('\x1b[200~' + '漢字 résumé 🙂\r'.repeat(30_000) + '\x1b[201~')
+  assert.equal(pasted.data.bytes, expectedPaste.length)
+  assert.equal(pasted.data.hash, createHash('sha256').update(expectedPaste).digest('base64'))
+
   // 4. Acks flow. The flood is ~${FLOOD_BYTES} bytes by construction, well
   //    over the 1 MiB unacked-output window, so its LAST line can only be on
   //    screen if the page returned credit for everything before it. The ack
@@ -414,10 +542,6 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   assert.ok(FLOOD_BYTES > 1024 * 1024, 'the flood no longer exceeds the output window')
   assert.equal(drained.data.lastFloodLine, FLOOD_LINES)
   assert.ok(drained.data.acks > 1, `only ${drained.data.acks} acks for ${FLOOD_BYTES} bytes`)
-
-  const pm = await app.waitFor('pm-echo')
-  assert.equal(pm.data.hex, Buffer.from(pm.data.typed, 'utf8').toString('hex'))
-  assert.notEqual(pm.data.pane.id, rendered.data.pane.id)
 
   const harnessPid = Number(readFileSync(box.pidFile, 'utf8').trim())
   assert.ok(Number.isInteger(harnessPid) && harnessPid > 0, 'the fake harness wrote no pid')
@@ -520,32 +644,33 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   assert.equal(receiver.code, 0, receiver.err)
   assert.equal(receiver.out, 'PACKAGED-RECEIVER-OK')
 
-  // 6. The state root is the app's, held by a kernel lock the bundled node
-  //    cannot take a second time.
+  // 6. The ledger is the app's: its exclusive lock refuses the bundled node a
+  //    second opening while the app runs.
   const lock = await withBundledNode(
     found.node,
     box,
     `
-    import { Store } from ${JSON.stringify(join(bundleRoot, 'src', 'store.js'))}
+    import { openLedger } from ${JSON.stringify(join(bundleRoot, 'src', 'ledger', 'index.js'))}
+    import { join } from 'node:path'
     import { writeFileSync } from 'node:fs'
-    const store = new Store(process.env.CONSENSFLOW_HOME)
     try {
-      await store.open()
+      openLedger(join(process.env.CONSENSFLOW_HOME, 'consensflow.db'))
       writeFileSync(1, 'SECOND-OWNER\\n')
     } catch (error) {
-      writeFileSync(1, 'REFUSED ' + error.message + '\\n')
+      writeFileSync(1, 'REFUSED ' + error.code + ' ' + error.message + '\\n')
     }
     `,
   )
   assert.equal(lock.code, 0, `the lock probe crashed: ${lock.err}`)
   assert.match(
     lock.out,
-    /^REFUSED another ConsensFlow instance holds .*instance\.lock/m,
-    `the bundled node took a second lock on the running app's state root: ${lock.out}`,
+    /^REFUSED ledger-locked another ConsensFlow has .*consensflow\.db open/m,
+    `the bundled node opened the running app's ledger: ${lock.out}`,
   )
 
   // 7. The app's own exit: stdin EOF, `RunEvent::Exit`, and nothing left.
-  await app.waitFor('settled')
+  const settled = await app.waitFor('settled')
+  assert.equal(settled.data.terminalPreserved, true)
   app.quit()
   const ended = await app.exited
   assert.equal(ended.code, 0, `the app exited ${ended.code} / ${ended.signal}`)
@@ -564,35 +689,44 @@ test('built Agents catalog serves complete saved profiles and current browsing c
     box,
     `
     import assert from 'node:assert/strict'
-    import { existsSync, readFileSync } from 'node:fs'
-    import { METRICS } from ${JSON.stringify(join(cli, 'hosts/lib/benchmarks.js'))}
+    import { mkdirSync, readFileSync } from 'node:fs'
+    import { join } from 'node:path'
     import { CATALOG, catalogEntry } from ${JSON.stringify(join(cli, 'src/catalog.js'))}
-    import { addAgent, rosterPath } from ${JSON.stringify(join(cli, 'src/roster.js'))}
-    import { startUiServer } from ${JSON.stringify(join(cli, 'src/ui.js'))}
-    assert.equal(Object.values(CATALOG).flat().length, 98, 'packaged preset count')
-    assert.equal(METRICS.length, 14)
-    for (const secretFile of ['artificial-analysis-key', 'artificial-analysis-cache.json']) assert.equal(existsSync(${JSON.stringify(cli)} + '/' + secretFile), false)
+    import { agentsUi } from ${JSON.stringify(join(cli, 'src/core/agents-server.js'))}
+    import { Credentials, startApi } from ${JSON.stringify(join(cli, 'src/core/api.js'))}
+    import { openLedger } from ${JSON.stringify(join(cli, 'src/ledger/index.js'))}
+    import { addAgent, listAgents, rosterPath } from ${JSON.stringify(join(cli, 'src/roster.js'))}
+    assert.equal(Object.values(CATALOG).flat().length, 90, 'packaged preset count')
     assert.equal(catalogEntry('pygmalion').model, 'codex-image')
-    addAgent(catalogEntry('maia'), process.env)
-    const server = await startUiServer(process.env)
+    // Every catalog agent is in the roster, as the catalog has it; the file keeps only your own.
+    assert.equal(listAgents(process.env).length, 90)
+    addAgent({ name: 'my-maia', harness: 'codex', model: 'gpt-6-astra', effort: 'low' }, process.env)
+    // The agents pages the way the daemon serves them: behind its API, opened with the UI token.
+    mkdirSync(process.env.CONSENSFLOW_HOME, { recursive: true })
+    const ledger = openLedger(join(process.env.CONSENSFLOW_HOME, 'consensflow.db'))
+    const token = 'smoke-ui-token'
+    const server = await startApi({ ledger, credentials: new Credentials(), ui: agentsUi(process.env, { token }) })
     try {
-      const headers = { authorization: 'Bearer ' + server.token }
+      const headers = { authorization: 'Bearer ' + token }
       const data = await (await fetch(server.url + '/api/agents', { headers })).json()
-      const saved = JSON.parse(readFileSync(rosterPath(process.env), 'utf8')).agents.find(a => a.id === 'maia')
-      assert.deepEqual(saved.profile, data.agents.find(a => a.name === 'maia').profile)
-      assert.deepEqual(saved.profile.categories, ['coding', 'reviewer'])
+      const stored = JSON.parse(readFileSync(rosterPath(process.env), 'utf8')).agents.find(a => a.id === 'my-maia')
+      assert.deepEqual([stored.effort, stored.model, Object.hasOwn(stored, 'profile')], ['low', 'gpt-6-astra', false])
+      const mine = data.agents.find(a => a.name === 'my-maia')
+      assert.deepEqual([mine.effort, mine.custom, mine.profile.workTier], ['low', true, 'light'])
+      assert.equal(data.agents.length, 91)
       const html = await (await fetch(server.url, { headers })).text()
-      for (const text of ['aria-label="Your agents"', 'Model and reasoning', 'Already added', 'offer__actions', 'category-pill', 'Recommended PM', 'Reviewer / second opinion', 'Sort by', 'benchmark-pills', 'About benchmark scores', 'model-summary', 'model-group', 'AA reasoning level not specified', 'value="model-reasoning" selected']) assert.ok(html.includes(text), text)
-      assert.ok(!html.includes('id="catalog-section"'))
-      const library = await (await fetch(server.url + '/library', { headers })).text()
-      assert.ok(library.includes('aria-label="Agent library"'))
-      assert.ok(!library.includes('id="roster-section"'))
-      assert.equal((await fetch(server.url + '/api/agents/maia', { method: 'DELETE', headers })).status, 204)
+      for (const text of ['aria-label="Agents"', 'Model and reasoning', 'My own agents', 'model-summary', 'model-group', 'value="model-reasoning" selected', 'Work tier', 'tier-pill', 'Important work only · No coding']) assert.ok(html.includes(text), text)
+      for (const text of ['id="catalog-section"', 'Agent library', 'Your agents', 'PM candidate', 'name="tags"', 'category-pill', 'Chief of Staff candidate', 'name="category"', 'Name in use', 'offer__actions', 'Saved only', 'Sort by', 'benchmark', 'Artificial Analysis', 'AA ']) assert.ok(!html.includes(text), 'gone: ' + text)
+      assert.equal((await fetch(server.url + '/api/agents/maia', { method: 'DELETE', headers })).status, 400)
+      assert.equal((await fetch(server.url + '/api/agents/my-maia', { method: 'DELETE', headers })).status, 204)
       const after = await (await fetch(server.url + '/api/agents', { headers })).json()
-      assert.equal(after.agents.length, 0)
-      assert.equal(Object.values(after.catalog).flat().length, 98)
+      assert.equal(after.agents.length, 90)
+      assert.equal(Object.hasOwn(after, 'catalog'), false)
       console.log('packaged catalog and saved profiles verified')
-    } finally { await server.close() }
+    } finally {
+      await server.close()
+      ledger.close()
+    }
   `,
   )
   assert.equal(result.code, 0, result.err)

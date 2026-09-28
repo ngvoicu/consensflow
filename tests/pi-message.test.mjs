@@ -91,7 +91,7 @@ async function setup(
   await pi.handlers.get('session_start')({}, ctx)
   const targetFor = (overrides = {}) => ({
     session: 'native-pi-session',
-    pane: 'lead-pane',
+    pane: 'chief-pane',
     generation: 1,
     epoch: 0,
     claimEpoch: async () => ({ ok: true }),
@@ -257,8 +257,8 @@ describe('consensflow Pi worker followup', () => {
         bytesWritten: 0,
         reason: 'expired-before-send',
       })
-      assert.equal(await exists(join(s.inbox, `${id}.json`)), false)
-      assert.equal(await exists(join(s.expired, `${id}.json`)), true)
+      assert.equal(await exists(join(s.inbox, `${id}.json`)), false, s.logs.join('; '))
+      assert.equal(await exists(join(s.expired, `${id}.json`)), true, s.logs.join('; '))
       assert.deepEqual(s.pi.sent, [])
     } finally {
       await s.close()
@@ -275,10 +275,18 @@ describe('consensflow Pi worker followup', () => {
         launchId: 'launch-pi-test',
         session: 'native-pi-session',
         text: 'duplicate followup',
-        expiresAt: Date.now() + 1000,
+        // Expiry is not under test here: a 1 s window expired before the
+        // extension read it when the full suite loaded the machine.
+        expiresAt: Date.now() + 60_000,
       }
       await writeFile(join(s.inbox, `${id}.json`), `${JSON.stringify(record)}\n`)
+      // The extension's own inbox watcher may start the scan first; a consume
+      // that finds a scan running only queues a rerun and returns, so wait for
+      // the send instead of assuming these two calls made it.
       await Promise.all([s.extension.consume(), s.extension.consume()])
+      const deadline = Date.now() + 2000
+      while (s.pi.sent.length === 0 && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 5))
       assert.deepEqual(s.pi.sent, ['duplicate followup'])
       await s.pi.handlers.get('message_start')(
         {
@@ -300,8 +308,58 @@ describe('consensflow Pi worker followup', () => {
     }
   })
 
+  it('never sends a message id again once it was acknowledged', async () => {
+    // A scan that listed the file before the acknowledgement removed it, or a
+    // second copy written with the same id, must not reach the model twice.
+    const s = await setup()
+    try {
+      const id = `m-${'c'.repeat(32)}`
+      const record = `${JSON.stringify({
+        id,
+        type: 'message',
+        launchId: 'launch-pi-test',
+        session: 'native-pi-session',
+        text: 'acknowledged followup',
+        expiresAt: Date.now() + 60_000,
+      })}\n`
+      await writeFile(join(s.inbox, `${id}.json`), record)
+      await s.extension.consume()
+      const deadline = Date.now() + 2000
+      while (s.pi.sent.length === 0 && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      await s.pi.handlers.get('message_start')(
+        { message: { role: 'user', content: [{ type: 'text', text: 'acknowledged followup' }] } },
+        s.ctx,
+      )
+      await waitFor(join(s.ack, `${id}.json`))
+      while ((await exists(join(s.inbox, `${id}.json`))) && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 5))
+
+      await writeFile(join(s.inbox, `${id}.json`), record)
+      await s.extension.consume()
+      assert.deepEqual(s.pi.sent, ['acknowledged followup'])
+      // A consume that found the first pass still running queues a rerun; the
+      // copy goes when that rerun comes, not before.
+      while ((await exists(join(s.inbox, `${id}.json`))) && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      assert.equal(await exists(join(s.inbox, `${id}.json`)), false, s.logs.join('; '))
+    } finally {
+      await s.close()
+    }
+  })
+
+  it('ignores a late consume after its inbox is gone', async () => {
+    // A watcher event or a queued rerun can outlive the inbox (pane closed,
+    // folder cleaned). Inside Pi an unhandled rejection can end the process.
+    const s = await setup()
+    await s.close()
+    await s.extension.consume()
+  })
+
   it('reports uncertain on ack timeout without an automatic retry', async () => {
-    const s = await setup({ ackTimeoutMs: 40 })
+    // The ack timeout is also the message's lifetime: 40 ms expired before the
+    // extension read it under load, which is a refusal, not "admission unknown".
+    const s = await setup({ ackTimeoutMs: 1000 })
     const pump = setInterval(() => void s.extension.consume(), 5)
     pump.unref()
     try {

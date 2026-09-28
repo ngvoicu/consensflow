@@ -1,0 +1,285 @@
+{
+  "scenario": "long-trip",
+  "chief": "claude",
+  "model": "claude-opus-5",
+  "effort": "high",
+  "staffEffort": "medium",
+  "staff": [
+    "claude"
+  ],
+  "staffModels": {
+    "eval-claude-worker": "claude-haiku-4-5-20251001",
+    "eval-claude-worker-2": "claude-haiku-4-5-20251001",
+    "eval-claude-advisor": "claude-haiku-4-5-20251001",
+    "eval-claude-reviewer": "claude-haiku-4-5-20251001"
+  },
+  "run": 1,
+  "seconds": 541,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Raport despre pagina site/index.html dintr-un mic proiect de site (test de funcționare pentru mesaje lungi). Nu ai cont…",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-worker-velvet-glade"
+      },
+      {
+        "number": 2,
+        "title": "Sfat despre cum se poate îmbunătăți pagina site/index.html dintr-un mic proiect de site (test de funcționare pentru mes…",
+        "pool": "advisor",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-advisor-lively-harbor"
+      },
+      {
+        "number": 3,
+        "title": "Recenzie a paginii site/index.html dintr-un mic proiect de site (test de funcționare pentru mesaje lungi). Nu ai contex…",
+        "pool": "reviewer",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-reviewer-ivory-summit"
+      }
+    ],
+    "parallel": 3,
+    "advice": 1,
+    "reviews": 1,
+    "questionsToHuman": [
+      {
+        "id": 4,
+        "options": false,
+        "body": "Cum se numește raportul final?"
+      }
+    ],
+    "notesToHuman": [
+      {
+        "id": 9,
+        "body": "Testul de mesaje lungi s-a încheiat. Am citit integral toate cele trei rezultate (12910, 11399 și 14439 de caractere) și răspunsul tău (6453 de caractere), iar T-1, T-2 și T-3 sunt acceptate. Niciun f"
+      }
+    ],
+    "notesText": "Testul de mesaje lungi s-a încheiat. Am citit integral toate cele trei rezultate (12910, 11399 și 14439 de caractere) și răspunsul tău (6453 de caractere), iar T-1, T-2 și T-3 sunt acceptate. Niciun fișier nu a fost modificat.\n\nCele cinci lucruri:\n1. Codul workerului (T-1): CEDRU-7314\n2. Codul advisorului (T-2): ARTAR-2659\n3. Codul reviewerului (T-3): STEJAR-4087\n4. Numele raportului final (din răspunsul tău): DELTA-5530\n5. Codul mesajului tău inițial: FARUL-2208",
+    "longestResult": {
+      "worker": 12504,
+      "advisor": 10834,
+      "reviewer": 13877
+    },
+    "answersToChief": [
+      6071
+    ],
+    "taskCount": 3,
+    "chiefId": 2,
+    "chiefHarness": "claude-code",
+    "humanId": 1,
+    "chiefTurns": 23,
+    "chiefEdits": 0,
+    "chiefLastWords": "Verificat și închis. Nota a plecat (m-9), cele trei sarcini sunt acceptate.\n\n**Recapitulare**\n\n- **Ce a plecat pe board:** T-1 worker (raport), T-2 advisor `--advice` (sfat), T-3 reviewer `--review` (recenzie), toate tier standard — singurul tier din staff — plus întrebarea m-4 fără opțiuni. Eu n-am citit nimic din `interne/`; codurile le-am luat doar din ultima linie a rezultatelor.\n- **Ce a venit înapoi și cum am verificat:** am citit integral fiecare rezultat cu `cf inbox read`, salvat în scratchpad și măsurat: 12910 / 11399 / 14439 caractere (toate peste pragul de 8000), iar `tail -1` a confirmat că ultima linie e codul singur pe rând. Fiecare raport conține exact un singur cod, deci nu există ambiguitate între text și ultima linie.\n- **Niciun fișier modificat — verificat, nu presupus:** toate fișierele din `workspace` au aceeași dată de modificare, 21:40:42 (momentul creării), iar acum e 21:46. `find -newer README.md` le listase, dar asta era doar ordinea în aceeași secundă, nu o editare.\n- **De reținut:** pentru mesaje lungi, textul din notificare e trunchiat („… 12504 characters\"). Tiparul sigur e `cf inbox read m-N > fișier`, apoi `wc -c` (câte caractere) și `tail -1` (ultima linie) — altfel rișți să decizi pe o jumătate de rezultat. Numele raportului, **DELTA-5530**, respectă toate condițiile tale: fără diacritice, fără spații, scurt, majuscule, număr la final.",
+    "plumbing": {
+      "briefs": 3,
+      "briefsDelivered": 3,
+      "results": 3,
+      "resultsDelivered": 3,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 3,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0,
+      "ownerQuestions": 1,
+      "ownerQuestionsAnswered": 1
+    },
+    "filesChanged": []
+  },
+  "checks": [
+    {
+      "name": "the worker's result is long (8000 characters or more)",
+      "ok": true
+    },
+    {
+      "name": "the advisor's advice is long (8000 characters or more)",
+      "ok": true
+    },
+    {
+      "name": "the reviewer's review is long (8000 characters or more)",
+      "ok": true
+    },
+    {
+      "name": "the owner's long answer went to the chief",
+      "ok": true
+    },
+    {
+      "name": "the note holds the worker's code",
+      "ok": true
+    },
+    {
+      "name": "the note holds the advisor's code",
+      "ok": true
+    },
+    {
+      "name": "the note holds the reviewer's code",
+      "ok": true
+    },
+    {
+      "name": "the note holds the report's name from the owner's answer",
+      "ok": true
+    },
+    {
+      "name": "the note holds the code at the end of the owner's message",
+      "ok": true
+    },
+    {
+      "name": "no file changes",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (3/3)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (3/3)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question the chief put to the owner got the owner's answer (1/1)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (3/3)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "❯",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus76159tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "—plusîntrebaream-4fărăopțiuni.Eun-amcititnimicdininterne/;────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           76159 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "codurilele-amluatdoardinultimaliniearezultatelor.  -❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus76159tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Ce a venit înapoi și cum am verificat:amcititintegralfiecarerezultatcu",
+    "cf inbox read,salvatînscratchpadșimăsurat:12910/11399/14439────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           76159 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "caractere(toatepestepragulde 8000),iartail -1aconfirmatcăultima────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           76159 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "linieecodulsingurperând.Fiecareraportconțineexactunsingurcod,────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           76159 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "decinuexistăambiguitateîntretextșiultimalinie.  -❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus76159tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Niciun fișier modificat — verificat, nu presupus:toatefișiereledin",
+    "workspaceauaceeașidatădemodificare,21:40:42(momentulcreării),iar────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           76159 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "acume21:46.find -newer README.mdlelistase,darastaeradoarordineaîn────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           76159 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "aceeașisecundă,nuoeditare.  -❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus76159tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "De reținut:pentrumesajelungi,textuldinnotificareetrunchiat(„…12504",
+    "characters\").Tiparulsigurecf inbox read m-N > fișier,apoiwc -c(câte────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           76159 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "caractere)șitail -1(ultimalinie)—altfelrișțisădecizipeojumătate────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           76159 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "derezultat.Numeleraportului,DELTA-5530,respectătoatecondițiiletale:────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           76159 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "fărădiacritice,fărăspații,scurt,majuscule,numărlafinal.✢ Gitifying… (running Stop hook · 1m 34s · ↓2.7k tokens)  ⎿  Tip: Did you know you can drag and drop image files into your terminal?────────────────────────────────────────────────────────────────────────────────",
+    "❯",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus76873tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "✻Cogitated fo 1m 34s · done 9:46 PM────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────  workspace Opus                                                  76873 tokens⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent         /rcAcum scrie raportul final DELTA-5530"
+  ],
+  "terminalAnswers": 0,
+  "refusedAnswers": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 70,
+      "line": "chief (claude) ready; typing the prompt"
+    },
+    {
+      "at": 80,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 165,
+      "line": "chief working; tasks T-1:working"
+    },
+    {
+      "at": 175,
+      "line": "chief working; tasks T-1:working T-2:working"
+    },
+    {
+      "at": 185,
+      "line": "chief working; tasks T-1:working T-2:working T-3:queued"
+    },
+    {
+      "at": 190,
+      "line": "answered m-4 (Cum se numește raportul final?) with: Punctul 1: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 2: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 3: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 4: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 5: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 6: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 7: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 8: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 9: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 10: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 11: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 12: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 13: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 14: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 15: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nNumele raportului final: DELTA-5530"
+    },
+    {
+      "at": 190,
+      "line": "chief working; tasks T-1:working T-2:working T-3:working"
+    },
+    {
+      "at": 210,
+      "line": "chief idle; tasks T-1:working T-2:working T-3:working"
+    },
+    {
+      "at": 225,
+      "line": "chief idle; tasks T-1:done T-2:working T-3:working"
+    },
+    {
+      "at": 230,
+      "line": "chief working; tasks T-1:done T-2:working T-3:working"
+    },
+    {
+      "at": 235,
+      "line": "chief working; tasks T-1:done T-2:done T-3:working"
+    },
+    {
+      "at": 250,
+      "line": "chief idle; tasks T-1:done T-2:done T-3:working"
+    },
+    {
+      "at": 265,
+      "line": "chief working; tasks T-1:done T-2:done T-3:done"
+    },
+    {
+      "at": 280,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted"
+    },
+    {
+      "at": 361,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:accepted"
+    },
+    {
+      "at": 541,
+      "line": "quiet: the run is over"
+    }
+  ]
+}

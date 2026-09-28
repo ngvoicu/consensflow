@@ -1,26 +1,36 @@
 import { spawn } from 'node:child_process'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { configRoot, listAgents } from './roster.js'
-import { generateSkill } from './skill.js'
+import { runnable, terminate } from './harnesses.js'
+import { configRoot } from './roster.js'
 
-/** Role documents live outside all native global/project discovery directories. */
+/**
+ * Role documents live outside all native global/project discovery directories.
+ * The core passes each window's role text as `content`; this writes it where
+ * the harness loads it and returns the launch arguments that make it load.
+ */
 export async function roleConfiguration(
   kind,
-  { role, env, executable, cwd, readInstructions = codexInstructions },
+  { role, env, executable, cwd, content: given, readInstructions = codexInstructions },
 ) {
-  if (!['lead', 'pm', 'advisor'].includes(role)) return { args: [], env: {} }
+  if (typeof given !== 'string' || given.length === 0) {
+    throw new Error(`the ${role} window needs its role text`)
+  }
   const name = `consensflow-${role}`
   const root = join(configRoot(env), 'roles', role)
   const skills = join(root, '.claude', 'skills')
   const directory = join(skills, name)
   const file = join(directory, 'SKILL.md')
-  const content =
-    role === 'lead'
-      ? generateSkill(listAgents(env))
-      : await readFile(new URL(`../skill/roles/${name}/SKILL.md`, import.meta.url), 'utf8')
-  await mkdir(directory, { recursive: true, mode: 0o700 })
-  await writeFile(file, content, { mode: 0o600 })
+  const content = given
+  const previous = await readFile(file, 'utf8').catch((error) => {
+    if (error.code !== 'ENOENT') throw error
+    return null
+  })
+  if (previous !== content) {
+    await mkdir(directory, { recursive: true, mode: 0o700 })
+    await writeFile(file, content, { mode: 0o600 })
+  }
+  if (kind === 'devin') return { args: [], env: { CF_DEVIN_ROLE_FILE: file } }
   if (kind === 'claude-code') {
     // Resumed conversations otherwise retain the system prompt from their first turn.
     return {
@@ -64,14 +74,20 @@ export async function roleConfiguration(
 /** Ask the native resolver to preserve profile/project layering; never read versions. */
 function codexInstructions(executable, cwd, env) {
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, ['app-server'], { cwd, env, stdio: ['pipe', 'pipe', 'ignore'] })
+    const run = runnable(executable, ['app-server'], env)
+    const child = spawn(run.file, run.args, {
+      ...run.options,
+      cwd,
+      env,
+      stdio: ['pipe', 'pipe', 'ignore'],
+    })
     let buffer = ''
     let settled = false
     const finish = (error, value) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
-      child.kill()
+      terminate(child)
       if (error) reject(new Error('Cannot read native Codex instructions safely'))
       else resolve(value)
     }

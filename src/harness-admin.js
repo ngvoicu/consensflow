@@ -1,8 +1,10 @@
 import { execFile } from 'node:child_process'
-import { readFileSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { harnessPath, knownHarnesses } from './harnesses.js'
+import { DEVIN_MINIMUM_VERSION, supportedDevinVersion } from './devin-install.js'
+import { harnessPath, knownHarnesses, runnable } from './harnesses.js'
 import { prepareOpenCodeExtension } from './opencode-install.js'
 import { preparePiExtension } from './pi-install.js'
 
@@ -13,29 +15,67 @@ const SOURCES = {
   opencode: 'https://registry.npmjs.org/opencode-ai/latest',
   pi: 'https://registry.npmjs.org/@earendil-works/pi-coding-agent/latest',
   kimi: 'https://pypi.org/pypi/kimi-cli/json',
+  devin: 'https://static.devin.ai/cli/current/manifest.json',
 }
 
+const NAME = {
+  claude: 'Claude',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+  pi: 'Pi',
+  kimi: 'Kimi',
+  devin: 'Devin',
+}
+const NPM_PACKAGES = {
+  claude: '@anthropic-ai/claude-code',
+  codex: '@openai/codex',
+  opencode: 'opencode-ai',
+  pi: '@earendil-works/pi-coding-agent',
+}
+/** Each harness's own installer: where it puts the CLI, and its command that updates it. */
+const OWN_INSTALLER = {
+  codex: { marker: '/.codex/bin/', update: ['update'] },
+  opencode: { marker: '/.opencode/bin/', update: ['upgrade'] },
+  pi: { marker: '/.pi/bin/', update: ['update', '--self'] },
+  devin: { marker: '/devin/cli/', update: ['update'] },
+}
+
+/**
+ * How a harness got onto this machine, read from where its executable really
+ * lives: the release feed to compare against, the words for the page, and the
+ * command that brings it to the latest release the same way (null when the
+ * method is not recognized, so the human updates it as they installed it).
+ */
 export function releaseSource(id, executable, env) {
   let path = executable
   try {
     path = realpathSync(executable)
   } catch {}
-  const brew = path?.match(/\/(Caskroom|Cellar)\/([^/]+)\//)
+  // The layouts below are spelled with `/`; Windows answers with `\`.
+  path = path?.replaceAll('\\', '/')
+  const brew = path?.match(/^(.*)\/(Caskroom|Cellar)\/([^/]+)\//)
   const expected = id === 'claude' ? ['claude-code', 'claude-code@latest'] : [id]
-  if (brew && expected.includes(brew[2])) {
-    const type = brew[1] === 'Caskroom' ? 'cask' : 'formula'
+  if (brew && expected.includes(brew[3])) {
+    const cask = brew[2] === 'Caskroom'
     return {
-      url: `https://formulae.brew.sh/api/${type}/${brew[2]}.json`,
-      format: type,
-      distribution: `Homebrew ${brew[2]}`,
+      url: `https://formulae.brew.sh/api/${cask ? 'cask' : 'formula'}/${brew[3]}.json`,
+      format: cask ? 'cask' : 'formula',
+      distribution: 'Homebrew',
+      update: [join(brew[1], 'bin', 'brew'), 'upgrade', ...(cask ? ['--cask'] : []), brew[3]],
     }
   }
-  if (id === 'claude' && path?.includes('/claude/versions/')) {
+  // Claude's installer links ~/.local/bin/claude into ~/.local/share/claude/versions;
+  // on Windows it copies the current version there as claude.exe instead.
+  const copied = path?.match(/^(.*)\/\.local\/bin\/claude\.exe$/i)
+  const native =
+    path?.includes('/claude/versions/') ||
+    (Boolean(copied) && existsSync(join(copied[1], '.local', 'share', 'claude', 'versions')))
+  if (id === 'claude' && native) {
     let channel = 'latest'
     try {
       const settings = JSON.parse(
         readFileSync(
-          join(env.CLAUDE_CONFIG_DIR ?? join(env.HOME, '.claude'), 'settings.json'),
+          join(env.CLAUDE_CONFIG_DIR ?? join(env.HOME ?? homedir(), '.claude'), 'settings.json'),
           'utf8',
         ),
       )
@@ -44,18 +84,28 @@ export function releaseSource(id, executable, env) {
     return {
       url: `https://downloads.claude.ai/claude-code-releases/${channel}`,
       format: 'text',
-      distribution: `Claude native ${channel}`,
+      distribution: `Claude's installer, ${channel} channel`,
+      update: [executable, 'update'],
     }
   }
-  return {
-    url: SOURCES[id],
-    format: id === 'kimi' ? 'pypi' : 'npm',
-    distribution: path?.includes('/node_modules/')
-      ? 'npm'
-      : id === 'kimi'
-        ? 'PyPI'
-        : 'publisher release',
+  const npm = path?.match(/^(.*)\/lib\/node_modules\//)
+  const source = { url: SOURCES[id], format: id === 'kimi' ? 'pypi' : 'npm' }
+  if (npm && NPM_PACKAGES[id]) {
+    return {
+      ...source,
+      distribution: 'npm',
+      update: [join(npm[1], 'bin', 'npm'), 'install', '-g', `${NPM_PACKAGES[id]}@latest`],
+    }
   }
+  const own = OWN_INSTALLER[id]
+  if (own && path?.includes(own.marker)) {
+    return {
+      ...source,
+      distribution: `${NAME[id]}'s installer`,
+      update: [executable, ...own.update],
+    }
+  }
+  return { ...source, distribution: null, update: null }
 }
 
 function versionOf(text) {
@@ -99,15 +149,67 @@ async function latestRelease(_id, source) {
 export class HarnessAdmin {
   #env
   #latest
+  #run
   #cache = new Map()
   #pending = new Map()
-  constructor(env, { latest = latestRelease } = {}) {
+  constructor(env, { latest = latestRelease, run = execute } = {}) {
     this.#env = env
     this.#latest = latest
+    this.#run = run
+  }
+
+  /**
+   * Brings a harness to its latest release the way it was installed (its own
+   * updater, Homebrew or npm), then checks it again and says what happened:
+   * updated, unchanged, failed (with the tool's last lines), or unsupported
+   * when the install method is not recognized.
+   */
+  async update(id) {
+    const [row] = await this.check(id)
+    if (!row.installed) throw new Error(`${NAME[id]} is not installed`)
+    const source = releaseSource(id, row.path, this.#env)
+    if (source.update === null) {
+      return {
+        id,
+        state: 'unsupported',
+        reason: `ConsensFlow does not recognize how ${NAME[id]} was installed here: update it the way you installed it.`,
+        harness: row,
+      }
+    }
+    const before = row.version.value ?? null
+    const command = source.update.join(' ')
+    let output = ''
+    let failure = null
+    try {
+      const run = runnable(source.update[0], source.update.slice(1), this.#env)
+      const result = await this.#run(run.file, run.args, {
+        ...run.options,
+        env: this.#env,
+        cwd: this.#env.HOME,
+        timeout: 600_000,
+        maxBuffer: 1_000_000,
+        windowsHide: true,
+      })
+      output = `${result.stdout ?? ''}${result.stderr ?? ''}`
+    } catch (error) {
+      output = `${error.stdout ?? ''}${error.stderr ?? ''}`
+      failure = error.killed ? 'the update ran for ten minutes and was stopped' : error.message
+    }
+    const [after] = await this.check(id, { refresh: true })
+    return {
+      id,
+      state: failure !== null ? 'failed' : after.version.value !== before ? 'updated' : 'unchanged',
+      before,
+      after: after.version.value ?? null,
+      command,
+      output: output.trim().split('\n').slice(-20).join('\n').slice(-2000),
+      ...(failure === null ? {} : { reason: failure }),
+      harness: after,
+    }
   }
 
   async check(id = null, { refresh = false } = {}) {
-    const ids = knownHarnesses(this.#env).map((row) => row.id)
+    const ids = knownHarnesses().map((row) => row.id)
     if (id !== null && !ids.includes(id)) throw new Error('Unknown harness')
     return Promise.all(
       (id ? [id] : ids).map(async (name) => {
@@ -135,14 +237,16 @@ export class HarnessAdmin {
       id,
       path,
       installed: Boolean(path),
-      lead: id !== 'kimi',
+      chief: id !== 'kimi',
       checkedAt: Date.now(),
       version: { state: 'not-installed' },
       update: { state: 'not-checked' },
     }
     if (!path) return row
     try {
-      const { stdout } = await execute(path, ['--version'], {
+      const run = runnable(path, ['--version'], this.#env)
+      const { stdout } = await execute(run.file, run.args, {
+        ...run.options,
         env: this.#env,
         cwd: this.#env.HOME,
         timeout: 3000,
@@ -159,8 +263,16 @@ export class HarnessAdmin {
         reason: error.killed ? 'Version check timed out' : 'Version command failed',
       }
     }
+    if (id === 'devin')
+      row.setup = supportedDevinVersion(row.version.value)
+        ? { state: 'ready' }
+        : {
+            state: 'update-required',
+            reason: `Devin ${DEVIN_MINIMUM_VERSION} or newer is required. Update Devin before opening a pane.`,
+          }
     const source = releaseSource(id, path, this.#env)
     row.distribution = source.distribution
+    const command = source.update === null ? null : source.update.join(' ')
     try {
       const value = await this.#latest(id, source)
       const comparison = newer(row.version.value, value)
@@ -168,13 +280,10 @@ export class HarnessAdmin {
         state: comparison === null ? 'unknown' : comparison ? 'available' : 'current',
         value,
         source: source.url,
-        note:
-          source.distribution === 'publisher release'
-            ? 'Publisher release; installation channel could not be identified'
-            : `Release from ${source.distribution}`,
+        command,
       }
     } catch (error) {
-      row.update = { state: 'error', reason: error.message }
+      row.update = { state: 'error', reason: error.message, command }
     }
     if (id === 'pi') row.extension = preparePiExtension(this.#env)
     if (id === 'opencode') row.extension = prepareOpenCodeExtension(this.#env)

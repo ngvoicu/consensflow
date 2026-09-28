@@ -6,15 +6,11 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { answers } from '../../hosts/lib/completion.js'
-import { harnessTurns } from '../../hosts/lib/harness-transcript.js'
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/completion/pi/tool-loop.jsonl', import.meta.url))
 const SESSION_ID = 'hazy-ridge'
 const SESSION_FILE = `2026-08-24T18-00-00-000Z_${SESSION_ID}.jsonl`
 const DECOY = 'DEFAULT_PI_PATH_DECOY'
-const EXPECTED_USER = '[redacted 5865 chars]'
-const EXPECTED_ASSISTANT =
-  "I'll start by reading the design record and README, then run the verification commands."
 
 async function stageFixture(sessionRoot) {
   const directory = path.join(sessionRoot, 'project')
@@ -46,24 +42,7 @@ async function stageDecoy(sessionRoot) {
 }
 
 async function assertPiFixtureIsRead(env, label) {
-  const [turns, completion] = await Promise.all([
-    harnessTurns('pi', SESSION_ID, env),
-    answers('pi', SESSION_ID, env),
-  ])
-  assert.equal(turns.length, 3, `${label}: harnessTurns should read the real Pi fixture`)
-  assert.deepEqual(turns[0], { role: 'user', text: EXPECTED_USER }, `${label}: fixture user turn`)
-  assert.deepEqual(
-    turns[1],
-    { role: 'assistant', text: EXPECTED_ASSISTANT },
-    `${label}: fixture assistant turn`,
-  )
-  assert.equal(turns[2].role, 'assistant', `${label}: fixture terminal assistant turn`)
-  assert.equal(
-    turns.some((turn) => turn.text === DECOY),
-    false,
-    `${label}: default-path decoy was read by harnessTurns`,
-  )
-
+  const completion = await answers('pi', SESSION_ID, env)
   assert.equal(
     completion.unknown,
     undefined,
@@ -86,7 +65,7 @@ async function assertPiFixtureIsRead(env, label) {
   )
 }
 
-test('TEST-PANE-67: tilde-expanded PI_CODING_AGENT_DIR drives harnessTurns and completion.answers', async () => {
+test('TEST-PANE-67: tilde-expanded PI_CODING_AGENT_DIR drives completion.answers', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-pi-paths-dir-'))
   try {
     await stageFixture(path.join(root, 'pi-custom', 'sessions'))

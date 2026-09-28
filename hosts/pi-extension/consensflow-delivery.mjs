@@ -5,8 +5,6 @@ import { createReceiver } from '../lib/receiver.js'
 
 const MESSAGE_ID = /^m-[a-f0-9]{32}$/
 const SAFE_PATH_SEGMENT = /^[A-Za-z0-9._-]+$/
-const EDITOR_PROBE_ID = /^editor-[a-f0-9]{32}$/
-const SESSION_PROBE_ID = /^session-[a-f0-9]{32}$/
 const MESSAGE_FIELDS = new Set(['id', 'type', 'launchId', 'session', 'text', 'expiresAt'])
 
 // Interactive Pi reads the expanded editor, including pasted attachment paths.
@@ -23,7 +21,7 @@ function nativeEditorState(ctx, session) {
     if (typeof text !== 'string') return { ready: false, reason: 'native editor unavailable' }
     if (text !== '') return { ready: false, reason: 'draft open' }
     if (ctx.isIdle?.() !== true || ctx.hasPendingMessages?.() !== false)
-      return { ready: false, reason: 'lead busy' }
+      return { ready: false, reason: 'chief busy' }
     return { ready: true }
   } catch {
     return { ready: false, reason: 'native editor unavailable' }
@@ -106,13 +104,24 @@ export function createDeliveryExtension(
     editorGuard,
     receiver,
     logger = console,
+    // How the inbox is watched, and how often it is read anyway: on macOS a
+    // watch event can be lost under load, and a message nobody reads never
+    // lands (a loaded test machine lost one again and again, 2026-09-28).
+    watchInbox = (path, onChange) => watch(path, { persistent: false }, onChange),
+    pollMs = 1000,
   } = {},
 ) {
   let context
   let watcher
+  let poller
   let running = false
   let queued = false
   const pending = new Map()
+  // Ids settled in this process, sent or refused. A scan that listed a file
+  // before its acknowledgement removed it, or a second copy with the same id,
+  // must never reach the model again; a new process is a new launch, whose
+  // inbox refuses the old launch's records anyway.
+  const settledIds = new Set()
   let resultReceiver
 
   const logError = (...args) => logger?.error?.(...args)
@@ -172,6 +181,7 @@ export function createDeliveryExtension(
     const entry = pending.get(id)
     if (entry === undefined || entry.done) return
     entry.done = true
+    settledIds.add(id)
     if (entry.timer !== null) clearTimeout(entry.timer)
     const response = { id, admitted }
     if (admitted === false && editorGuard === 1) response.bytesWritten = 0
@@ -221,7 +231,12 @@ export function createDeliveryExtension(
     if (typeof inbox !== 'string' || typeof ack !== 'string') return
     running = true
     try {
-      const files = (await readdir(inbox))
+      // A watcher event or queued rerun can outlive the inbox; nothing to read.
+      const names = await readdir(inbox).catch((cause) => {
+        if (cause?.code === 'ENOENT') return []
+        throw cause
+      })
+      const files = names
         .filter((name) => name.endsWith('.json'))
         .sort(
           (a, b) =>
@@ -238,38 +253,6 @@ export function createDeliveryExtension(
           continue
         }
         const id = record?.id
-        if (
-          editorGuard === 1 &&
-          (EDITOR_PROBE_ID.test(id) || SESSION_PROBE_ID.test(id)) &&
-          file === `${id}.json`
-        ) {
-          // A fresh launch/session-bound challenge, never cached editor text.
-          if (
-            record.launchId === launchId &&
-            validExpiry(record.expiresAt) &&
-            record.expiresAt > Date.now()
-          ) {
-            const response = {
-              id,
-              launchId,
-              expiresAt: record.expiresAt,
-              ...(SESSION_PROBE_ID.test(id)
-                ? {
-                    sessionId:
-                      context?.mode === 'tui' && context.hasUI === true
-                        ? sessionIdOf(context)
-                        : null,
-                  }
-                : { session: record.session, ...nativeEditorState(context, record.session) }),
-            }
-            await mkdir(ack, { recursive: true })
-            const destination = join(ack, file)
-            await writeFile(`${destination}.tmp`, `${JSON.stringify(response)}\n`, 'utf8')
-            await rename(`${destination}.tmp`, destination)
-          }
-          await unlink(path).catch(() => {})
-          continue
-        }
         if (record?.type === 'message') {
           if (!validMessageId(id)) {
             if (typeof quarantine === 'string') {
@@ -287,6 +270,10 @@ export function createDeliveryExtension(
             continue
           }
           if (pending.has(id)) continue
+          if (settledIds.has(id)) {
+            await unlink(path).catch(() => {})
+            continue
+          }
           const shapeError = invalidMessageShape(record)
           if (shapeError !== null) {
             logError(`message ${id} is ${shapeError}`)
@@ -352,6 +339,7 @@ export function createDeliveryExtension(
   pi.on('session_start', async (_event, ctx) => {
     context = ctx
     watcher?.close()
+    clearInterval(poller)
     if (receiver && !resultReceiver) {
       resultReceiver = createReceiver({
         ...receiver,
@@ -396,7 +384,9 @@ export function createDeliveryExtension(
       await writeSettlement()
     if (typeof inbox !== 'string' || typeof ack !== 'string') return
     await mkdir(inbox, { recursive: true })
-    watcher = watch(inbox, { persistent: false }, () => void consume())
+    watcher = watchInbox(inbox, () => void consume())
+    poller = setInterval(() => void consume(), pollMs)
+    poller.unref?.()
     await consume()
   })
   pi.on('agent_start', newWork)
@@ -410,6 +400,8 @@ export function createDeliveryExtension(
   pi.on('session_shutdown', async () => {
     watcher?.close()
     watcher = undefined
+    clearInterval(poller)
+    poller = undefined
     for (const entry of pending.values()) {
       if (entry.timer !== null) clearTimeout(entry.timer)
     }

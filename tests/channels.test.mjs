@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,6 +8,7 @@ import { describe, it } from 'node:test'
 import { Bridge } from '../src/bridge.js'
 import { send as sendOpenCode } from '../src/channels/opencode.js'
 import { enabledChannels, launchConfiguration, send } from '../src/channels.js'
+import { fakeExecutable } from './helpers.mjs'
 
 function bridgePair() {
   const nodeToRust = new PassThrough()
@@ -88,11 +89,8 @@ it('OpenCode worker messages claim native authority and preserve raw text (TEST-
 
 it('Codex launch enables only an installed native queue capability (TEST-PANE-109)', async () => {
   const root = await mkdtemp(join(tmpdir(), 'cf-native-capability-'))
-  const executable = join(root, 'codex')
-  const { chmod } = await import('node:fs/promises')
   try {
-    await writeFile(executable, '#!/bin/sh\nprintf "%s\\n" "--thread --message"\n')
-    await chmod(executable, 0o755)
+    const executable = fakeExecutable(join(root, 'codex'), { output: '--thread --message' })
     const configured = await launchConfiguration('codex', {
       launchId: 'launch-codex',
       workspace: root,
@@ -103,7 +101,7 @@ it('Codex launch enables only an installed native queue capability (TEST-PANE-10
     assert.equal(configured.channel.executable, executable)
     assert.equal(configured.channel.cwd, root)
     assert.deepEqual(configured.args, [])
-    await writeFile(executable, '#!/bin/sh\nexit 0\n')
+    fakeExecutable(executable)
     assert.equal(
       (await launchConfiguration('codex', { launchId: 'old-codex', workspace: root, executable }))
         .channel,
@@ -114,20 +112,39 @@ it('Codex launch enables only an installed native queue capability (TEST-PANE-10
   }
 })
 
+const TURN_END = { hooks: [{ type: 'command', command: 'exit 0' }] }
+// Claude's question tool, answered from the board through `cf hook claude`.
+const QUESTION = {
+  matcher: 'AskUserQuestion',
+  hooks: [{ type: 'command', command: 'cf hook claude', timeout: 3600 }],
+}
+// Full-permission mode without the one-time acceptance dialog, and messages
+// from ConsensFlow's other sessions delivered instead of held for approval
+// (a bypass-mode session holds them by default and drops them after 5 min).
+const YOLO = {
+  permissions: { defaultMode: 'bypassPermissions' },
+  skipDangerousModePermissionPrompt: true,
+  crossSessionInbound: 'accept',
+  tui: 'default',
+}
+
+/** The settings file a Claude launch was given, read back from its flag. */
+async function claudeSettings(configuration, home) {
+  assert.equal(configuration.args.length, 2)
+  assert.equal(configuration.args[0], '--settings')
+  assert.ok(configuration.args[1].startsWith(join(home, 'integrations', 'claude')))
+  return JSON.parse(await readFile(configuration.args[1], 'utf8'))
+}
+
 describe('retired Claude development channel (TEST-PANE-121)', () => {
   async function claudeExecutable(root) {
-    const executable = join(root, 'claude')
-    const { chmod } = await import('node:fs/promises')
-    await writeFile(
-      executable,
-      `#!/bin/sh\nprintf called > '${join(root, 'probe-called')}'\nexit 1\n`,
-    )
-    await chmod(executable, 0o755)
-    return executable
+    return fakeExecutable(join(root, 'claude'), { touch: join(root, 'probe-called'), exit: 1 })
   }
 
   it('opens Claude without development channels regardless of version', async () => {
     const root = await mkdtemp(join(tmpdir(), 'cf-claude-retired-'))
+    const home = await mkdtemp(join(tmpdir(), 'cf-claude-home-'))
+    const env = { HOME: home, CONSENSFLOW_HOME: home }
     try {
       for (const version of ['2.1.263', '2.1.265', '2.1.262', '2.2.0']) {
         const executable = await claudeExecutable(root)
@@ -136,28 +153,79 @@ describe('retired Claude development channel (TEST-PANE-121)', () => {
           workspace: root,
           executable,
           node: process.execPath,
+          env,
         })
-        assert.deepEqual(configuration.args, [], version)
+        // The only flag is the launch's settings file; no channel of its own.
+        assert.deepEqual(await claudeSettings(configuration, home), {
+          ...YOLO,
+          hooks: { PreToolUse: [QUESTION], Stop: [TURN_END] },
+        })
         assert.deepEqual(configuration.env, {}, version)
         if (process.platform === 'darwin') {
           assert.equal(configuration.channel?.kind, 'claude-peer', version)
           assert.equal(configuration.channel?.preservesDraft, 1)
         } else assert.equal(configuration.channel, null, version)
       }
+      const missing = await launchConfiguration('claude-code', {
+        launchId: 'retired-missing',
+        workspace: root,
+        env,
+      })
+      assert.deepEqual({ ...missing, args: [] }, { args: [], env: {}, channel: null })
+      assert.deepEqual(await claudeSettings(missing, home), {
+        ...YOLO,
+        hooks: { PreToolUse: [QUESTION], Stop: [TURN_END] },
+      })
       assert.deepEqual(
-        await launchConfiguration('claude-code', {
-          launchId: 'retired-missing',
-          workspace: root,
-        }),
-        { args: [], env: {}, channel: null },
+        (await readdir(root)).map((name) => name.replace(/\.cmd$/, '')),
+        ['claude'],
+        'nothing is written into the project',
       )
-      assert.deepEqual(await readdir(root), ['claude'], 'no delivery directories are authored')
     } finally {
       await rm(root, { recursive: true, force: true })
+      await rm(home, { recursive: true, force: true })
     }
   })
 
-  it('offers no claude-channel to the lead harness', () => {
+  it('ends every Claude turn in a Stop hook, merged with any coordinator hooks', async () => {
+    // Claude omits its turn_duration record on some turns (every Calliope turn
+    // on 2.1.274), and those answers never counted as finished. A Stop hook
+    // makes Claude record stop_hook_summary at the end of every turn.
+    const home = await mkdtemp(join(tmpdir(), 'cf-claude-turn-end-'))
+    const env = { HOME: home, CONSENSFLOW_HOME: home }
+    try {
+      const worker = await launchConfiguration('claude-code', {
+        launchId: 'turn-end',
+        workspace: home,
+        env,
+      })
+      assert.deepEqual(await claudeSettings(worker, home), {
+        ...YOLO,
+        hooks: { PreToolUse: [QUESTION], Stop: [TURN_END] },
+      })
+      const receiver = { type: 'command', command: 'receiver', asyncRewake: true }
+      const chief = await claudeSettings(
+        await launchConfiguration('claude-code', {
+          launchId: 'turn-end-chief',
+          workspace: home,
+          env,
+          hooks: { SessionStart: [{ hooks: [receiver] }], Stop: [{ hooks: [receiver] }] },
+        }),
+        home,
+      )
+      assert.deepEqual(chief.hooks.SessionStart, [{ hooks: [receiver] }])
+      assert.deepEqual(chief.hooks.Stop, [{ hooks: [receiver] }, TURN_END])
+      await assert.rejects(
+        launchConfiguration('claude-code', { launchId: 'no-home', workspace: home }),
+        /ConsensFlow environment/,
+        'a launch without a home never falls back to the live one',
+      )
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('offers no claude-channel to the chief harness', () => {
     assert.deepEqual(enabledChannels('claude-code'), ['claude-peer'])
   })
 
@@ -170,7 +238,7 @@ describe('retired Claude development channel (TEST-PANE-121)', () => {
     const claims = []
     const stale = {
       session: '11111111-2222-4333-8444-555555555555',
-      pane: 'lead-pane',
+      pane: 'chief-pane',
       generation: 4,
       epoch: 19,
       enabledChannels: enabledChannels('claude-code'),

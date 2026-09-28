@@ -1,25 +1,27 @@
-import { readFileSync } from 'node:fs'
-import { HARNESSES } from './roster.js'
+import { WORK_TIERS } from '../hosts/lib/presets.js'
 
-export function agentCommand(agent) {
-  return `cf run @${agent.name} "<task>"`
-}
-
-/** Only the app lead receives this document; roster discovery stays explicit. */
-export function generateSkill(agents) {
-  const base = readFileSync(
-    new URL('../skill/roles/consensflow-lead/SKILL.md', import.meta.url),
-    'utf8',
-  )
-  const supported = agents.filter((agent) => HARNESSES.includes(agent.harness))
-  if (supported.length === 0) return base
+/** The project staff as the chief reads it: one row per member with its roles and tier. */
+export function teamTable(members) {
   const cell = (value) =>
     String(value ?? '')
       .replace(/\|/g, '\\|')
       .replace(/[\r\n]+/g, ' ')
-  const rows = supported.map(
-    (agent) =>
-      `| ${cell(agent.name)} | ${cell(agent.harness)} | ${cell(agent.model)} | ${cell(agent.description)} |`,
+  // Name, roles and tier, nothing else: the chief names a tier and never picks
+  // a member, so it needs no model, route or description here.
+  const rows = members.map(
+    (member) =>
+      `| ${[member.name, member.roles.join(', '), WORK_TIERS[member.workTier].label]
+        .map(cell)
+        .join(' | ')} |`,
   )
-  return `${base}\n## Available workers\n\n| Agent | Harness | Model | Purpose |\n|---|---|---|---|\n${rows.join('\n')}\n`
+  return rows.length
+    ? ['| Member | Roles | Work tier |', '|---|---|---|', ...rows].join('\n')
+    : 'Nobody is on the staff yet: the human adds members in the app. Ask the human for the members your work needs (cf ask --human "…"); do the work that is yours, and do not create agents as a side effect.'
+}
+
+/** The saved work tiers, one line each. */
+export function workTierList() {
+  return Object.values(WORK_TIERS)
+    .map((tier) => `- ${tier.label}: ${tier.description}`)
+    .join('\n')
 }

@@ -1,61 +1,43 @@
-import { accessSync, constants, statSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { delimiter, join, resolve } from 'node:path'
+import { delimiter, dirname, join, resolve, sep } from 'node:path'
 
-/**
- * Where each coding harness keeps its skills, and whether it is installed here.
- * Detection is "the CLI resolves on PATH" — the same test the generated
- * commands live or die by. Directories honour each harness's own override
- * variable, which is also what keeps tests off the real machine.
- */
-
-/**
- * Where these CLIs install themselves, beyond whatever PATH we were handed.
- *
- * PATH alone is not a reliable answer to "is this harness on the machine". A
- * .app from Finder inherits almost none, and the login shell we ask instead is
- * NON-interactive — `zsh -lc` reads .zshenv/.zprofile/.zlogin but never
- * .zshrc, which is where per-tool bin directories usually get added. So the
- * app saw claude, codex and pi but not opencode, decided opencode was out of
- * scope, and took its skill back on every mode apply — while a terminal put it
- * straight back. Detection has to be the same answer wherever it runs.
+/** Discover CLI executables on PATH and native user install paths.
+ * Finder-launched apps may lack the interactive shell's tool directories.
  */
 const HOMED = (parts) => (env) => join(home(env), ...parts)
 
 const HARNESSES = [
   {
+    id: 'devin',
+    command: 'devin',
+    locations: [HOMED(['.local', 'bin'])],
+  },
+  {
     id: 'claude',
     command: 'claude',
     locations: [HOMED(['.local', 'bin']), HOMED(['.claude', 'local'])],
-    skillsDir: (env) => join(env.CLAUDE_CONFIG_DIR ?? join(home(env), '.claude'), 'skills'),
   },
   {
     id: 'codex',
     command: 'codex',
     locations: [HOMED(['.codex', 'bin']), HOMED(['.local', 'bin'])],
-    skillsDir: (env) => join(env.CODEX_HOME ?? join(home(env), '.codex'), 'skills'),
   },
   {
     id: 'opencode',
     command: 'opencode',
     locations: [HOMED(['.opencode', 'bin']), HOMED(['.local', 'bin'])],
-    skillsDir: (env) =>
-      join(env.XDG_CONFIG_HOME ?? join(home(env), '.config'), 'opencode', 'skills'),
   },
   {
     id: 'pi',
     command: 'pi',
     locations: [HOMED(['.pi', 'bin']), HOMED(['.local', 'bin'])],
-    skillsDir: (env) => join(piAgentDir(env), 'skills'),
   },
   {
-    // The CLI is `kimi`; the product is Kimi Code, which is why its home is
-    // `.kimi-code`. `KIMI_CODE_HOME` moves the whole thing, its own importer
-    // skill says so, and skills sit at User scope directly under it.
     id: 'kimi',
     command: 'kimi',
     locations: [HOMED(['.kimi-code', 'bin']), HOMED(['.local', 'bin'])],
-    skillsDir: (env) => join(env.KIMI_CODE_HOME ?? join(home(env), '.kimi-code'), 'skills'),
   },
 ]
 
@@ -84,7 +66,7 @@ function piPath(configured, env) {
   return configured
 }
 
-export function piAgentDir(env) {
+function piAgentDir(env) {
   return piPath(env.PI_CODING_AGENT_DIR || join(home(env), '.pi', 'agent'), env)
 }
 
@@ -167,27 +149,145 @@ function locate(harness, env) {
  * not the login shell's — the same reason detection looks past PATH at all.
  * So the launcher asks for the path, not the name.
  */
+/** cmd.exe's own special characters; each is escaped with a caret. */
+const CMD_META = /([()\][%!^"`<>&|;, *?])/g
+
+/**
+ * What an npm-style `.cmd` shim runs, read from its last line: `"<program>"
+ * "<script>" %*`, where the program is `%_prog%` or `%NODE_EXE%` (the node
+ * beside the shim, else the node on PATH, else this one) and the script may
+ * begin with `%dp0%` or `%~dp0`, the shim's own directory. Null when the file
+ * is not of that shape, or names something that is not there.
+ */
+function shimTarget(shim, env) {
+  let text
+  try {
+    text = readFileSync(shim, 'utf8')
+  } catch {
+    return null
+  }
+  const line = text
+    .split(/\r?\n/)
+    .reverse()
+    .find((candidate) => candidate.includes('%*'))
+  if (line === undefined) return null
+  const quoted = [...line.matchAll(/"([^"]+)"/g)].map((match) => match[1])
+  if (quoted.length < 2) return null
+  const dir = dirname(shim)
+  // The shim spells its paths with backslashes; the platform's separator here.
+  const expand = (value) =>
+    value.replace(/^%(?:~dp0|dp0%)\\?/i, `${dir}${sep}`).replaceAll('\\', sep)
+  const [program, script] = quoted.slice(-2)
+  const scriptPath = expand(script)
+  if (scriptPath.includes('%') || !existsSync(scriptPath)) return null
+  let programPath = expand(program)
+  if (/^%(_prog|NODE_EXE)%$/i.test(program)) {
+    const beside = join(dir, 'node.exe')
+    programPath = existsSync(beside) ? beside : (pathOnPath('node', env) ?? process.execPath)
+  }
+  if (programPath.includes('%')) return null
+  return { program: programPath, script: scriptPath }
+}
+
+/**
+ * How to run `executable` with `args` on this machine, for spawn or execFile:
+ * `{ file, args, options }`.
+ *
+ * A `.cmd` or `.bat` on Windows (an npm-installed CLI is one) is a script for
+ * cmd.exe, not a program, and Node refuses to spawn it directly. An npm-style
+ * shim is read for what it runs, and that runs directly: no cmd.exe, so an
+ * argument may hold anything, a newline included. Any other `.cmd` goes
+ * through cmd.exe, with every argument quoted and escaped the way cmd.exe
+ * reads its line, then read again by the script (the shape npm itself uses
+ * through cross-spawn); cmd.exe ends an argument at a newline, so that path
+ * cannot carry one. Anything else runs as it is.
+ */
+export function runnable(executable, args = [], env = process.env) {
+  if (!/\.(cmd|bat)$/i.test(executable)) return { file: executable, args, options: {} }
+  const target = shimTarget(executable, env)
+  if (target !== null) return { file: target.program, args: [target.script, ...args], options: {} }
+  const quote = (arg) =>
+    `"${String(arg)
+      .replace(/(\\*)"/g, '$1$1\\"')
+      .replace(/(\\+)$/, '$1$1')}"`
+      .replace(CMD_META, '^$1')
+      .replace(CMD_META, '^$1')
+  const line = [executable.replace(CMD_META, '^$1'), ...args.map(quote)].join(' ')
+  // Named absolutely: a launch environment may carry a PATH of its own that
+  // has no System32 on it, and cmd.exe must still be found.
+  return {
+    file: env.ComSpec ?? process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe',
+    args: ['/d', '/s', '/c', `"${line}"`],
+    options: { windowsVerbatimArguments: true },
+  }
+}
+
+/**
+ * A window's program as the pane host can start it. The host starts a file
+ * with each argument quoted the way programs read them, which cmd.exe does
+ * not, so an npm-installed harness on Windows (a `.cmd` shim) opens as the
+ * shim's own node and script; a `.cmd` of any other shape cannot open a window.
+ */
+export function paneArgv(argv, env = process.env) {
+  const [executable, ...args] = argv
+  if (!/\.(cmd|bat)$/i.test(executable)) return argv
+  const target = shimTarget(executable, env)
+  if (target === null) {
+    throw new Error(`${executable} is not an npm shim, and only cmd.exe could run it in a window`)
+  }
+  return [target.program, target.script, ...args]
+}
+
+/**
+ * Ends a child started through `runnable`, and everything it started. On
+ * Windows the child may be the cmd.exe wrapper of a `.cmd`, and killing it
+ * alone leaves the program it started running, so the whole tree goes, at
+ * once (Windows has no gentle signal a process can act on). Elsewhere the
+ * signal goes to the child as asked.
+ */
+export function terminate(child, signal = 'SIGTERM') {
+  if (process.platform !== 'win32') {
+    child.kill(signal)
+    return
+  }
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return
+  spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+    stdio: 'ignore',
+    windowsHide: true,
+  })
+}
+
 export function harnessPath(id, env) {
   const harness = HARNESSES.find((candidate) => candidate.id === id)
   return harness === undefined ? null : locate(harness, env)
 }
 
+/** The supported harnesses whose CLI is not installed here, by id. */
+export function missingHarnesses(env) {
+  return HARNESSES.filter((harness) => !isInstalled(harness, env)).map((harness) => harness.id)
+}
+
 /**
- * Every harness we know of and where its skills live — installed or not.
- *
- * Scope decisions may narrow to what is detected, but REMOVAL must not: a
- * harness that simply did not resolve on this run has not stopped existing,
- * and taking its skill away on that basis is how the same skill flapped in
- * and out on every mode apply.
+ * Agents as the pickers offer them: one whose harness is not installed here is
+ * hidden, so only the Harnesses page shows that harness, where it is installed.
+ * An image agent (@pygmalion) runs through Codex, so it goes with Codex.
  */
-export function knownHarnesses(env) {
-  return HARNESSES.map((harness) => ({ id: harness.id, skillsDir: harness.skillsDir(env) }))
+export function offerable(agents, missing) {
+  return agents.map((agent) =>
+    missing.includes(agent.harness === 'image' ? 'codex' : agent.harness)
+      ? { ...agent, hidden: true, notInstalled: true }
+      : agent,
+  )
+}
+
+/** All supported harness identities, whether installed or not. */
+export function knownHarnesses() {
+  return HARNESSES.map(({ id }) => ({ id }))
 }
 
 export function detectHarnesses(env) {
   return HARNESSES.filter((harness) => isInstalled(harness, env)).map((harness) => ({
     id: harness.id,
     command: harness.command,
-    skillsDir: harness.skillsDir(env),
   }))
 }

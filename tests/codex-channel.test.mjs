@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict'
-import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { it } from 'node:test'
 import { send } from '../src/channels/codex.js'
+import { fakeNodeExecutable } from './helpers.mjs'
 
 const SESSION = '01a0817b-e6b0-7f32-8e11-370dc000cbc0'
 
 async function fakeCli(root, mode = 'success') {
-  const executable = join(root, 'codex-fake')
-  await writeFile(
-    executable,
+  const executable = fakeNodeExecutable(
+    join(root, 'codex-fake'),
     `#!${process.execPath}
 import { appendFileSync } from 'node:fs'
 
@@ -40,9 +40,7 @@ if (process.env.CF_FAKE_MODE === 'timeout') {
   setInterval(() => {}, 1000)
 }
 `,
-    'utf8',
   )
-  await chmod(executable, 0o755)
   return { executable, mode }
 }
 
@@ -273,7 +271,13 @@ it('stops a timed-out helper and does not retry the ambiguous queue operation', 
     )
     const entries = await f.capture()
     assert.equal(entries.filter((entry) => entry.kind === 'start').length, 1)
-    assert.equal(entries.filter((entry) => entry.kind === 'stopped').length, 1)
+    if (process.platform === 'win32') {
+      // No signal a helper could act on there: it is ended, and gone.
+      const { pid } = entries.find((entry) => entry.kind === 'start')
+      assert.throws(() => process.kill(pid, 0), 'the helper is gone')
+    } else {
+      assert.equal(entries.filter((entry) => entry.kind === 'stopped').length, 1)
+    }
   } finally {
     await f.cleanup()
   }

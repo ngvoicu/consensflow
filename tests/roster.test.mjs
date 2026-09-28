@@ -2,161 +2,189 @@ import assert from 'node:assert/strict'
 import { cpSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { after, describe, it } from 'node:test'
+import { AGENT_PRESETS } from '../hosts/lib/presets.js'
 import {
   addAgent,
-  agentDrift,
+  agentRow,
   configRoot,
   editAgent,
   legacyConfigRoot,
   listAgents,
   migrateStateRoot,
+  normalizeRoster,
+  preferences,
   removeAgent,
   rosterPath,
-  syncAgents,
+  setPreferences,
 } from '../src/roster.js'
 import { tempEnv } from './helpers.mjs'
 
 const FIXTURES = join(import.meta.dirname, 'fixtures')
+const raw = (env) => JSON.parse(readFileSync(rosterPath(env), 'utf8'))
+const byName = (env) => Object.fromEntries(listAgents(env).map((p) => [p.name, p]))
 
 function seedSharedRoster(t) {
   mkdirSync(dirname(rosterPath(t.env)), { recursive: true })
   cpSync(join(FIXTURES, 'v1-agents.json'), rosterPath(t.env))
 }
 
-describe('the saved roster preserves the v1 execution schema', () => {
+describe('the roster is the catalog plus what is the human’s own', () => {
   const t = tempEnv()
   after(() => t.cleanup())
 
   it('uses agents.json inside the explicitly configured private home', () => {
-    const path = rosterPath(t.env)
-    assert.equal(path, join(t.root, 'consensflow', 'agents.json'))
+    assert.equal(rosterPath(t.env), join(t.root, 'consensflow', 'agents.json'))
+  })
+
+  it('lists every catalog agent with no file at all, as the catalog has it', () => {
+    const agents = listAgents(t.env)
+    assert.equal(agents.length, AGENT_PRESETS.length)
+    const gefjon = agents.find((p) => p.name === 'gefjon')
+    assert.deepEqual(
+      [gefjon.harness, gefjon.model, gefjon.effort, gefjon.preset, gefjon.custom, gefjon.edited],
+      [
+        'opencode',
+        'opencode/muse-spark-1.3-contributor-free',
+        'xhigh',
+        'gefjon',
+        undefined,
+        undefined,
+      ],
+    )
+    assert.equal(gefjon.description, 'OpenCode Zen Muse Spark 1.3 Contributor FREE XHIGH')
+    assert.ok(gefjon.profile.workTier)
+    assert.equal(existsSync(rosterPath(t.env)), false, 'listing writes nothing')
+    const row = agentRow('gefjon', t.env)
+    assert.deepEqual([row.kind, row.model, row.effort], ['opencode', gefjon.model, 'xhigh'])
+    assert.equal(agentRow('@gefjon', t.env).id, 'gefjon')
   })
 
   it('reads v1 rows as agents: kind→harness, thinking/effort→effort', () => {
     seedSharedRoster(t)
-    const byName = Object.fromEntries(listAgents(t.env).map((p) => [p.name, p]))
-
-    assert.equal(byName.zeus.harness, 'claude')
-    assert.equal(byName.zeus.effort, 'max')
-    assert.equal(byName.endymion.harness, 'pi')
-    assert.equal(byName.endymion.effort, 'xhigh')
-    assert.equal(byName.mani.harness, 'opencode')
+    const agents = byName(t.env)
+    assert.equal(agents.zeus.harness, 'claude')
+    assert.equal(agents.zeus.effort, 'max')
+    assert.equal(agents.endymion.harness, 'pi')
+    // The fixture's copy says xhigh; a catalog agent reads as the catalog has it.
+    assert.equal(agents.endymion.effort, 'max')
+    assert.equal(agents.mani.harness, 'opencode')
   })
 
   it('lists an image agent as a harness it runs, not as an oddity', () => {
-    const pygmalion = listAgents(t.env).find((p) => p.name === 'pygmalion')
+    const pygmalion = byName(t.env).pygmalion
     assert.equal(pygmalion.harness, 'image')
     assert.equal(pygmalion.unsupported, undefined, 'cf run spawns it like any other')
   })
 })
 
-describe('writes are v1-faithful: cc and pi keep working on the same file', () => {
+it('reports current tiers from legacy rows without writing during discovery', () => {
   const t = tempEnv()
-  after(() => t.cleanup())
-  seedSharedRoster(t)
-
-  it('edit updates mapped fields in place and preserves everything else', () => {
-    editAgent('zeus', { model: 'claude-fable-5-1', effort: 'xhigh' }, t.env)
-
-    const raw = JSON.parse(readFileSync(rosterPath(t.env), 'utf8'))
-    const zeus = raw.agents.find((p) => p.id === 'zeus')
-    // v1 keys the runner reads:
-    assert.equal(zeus.model, 'claude-fable-5-1')
-    assert.equal(zeus.effort, 'xhigh')
-    assert.equal(zeus.kind, 'claude-code')
-    // v1 keys v3 does not understand must survive untouched:
-    assert.equal(zeus.skillsPolicy, 'default')
-    assert.equal(zeus.preset, 'zeus')
-    assert.equal(zeus.name, 'Zeus')
-    assert.equal(raw.schemaVersion, 1)
-  })
-
-  it('a pi agent edit lands in `thinking`, the key the pi runner reads', () => {
-    editAgent('endymion', { effort: 'high' }, t.env)
-    const raw = JSON.parse(readFileSync(rosterPath(t.env), 'utf8'))
-    const endymion = raw.agents.find((p) => p.id === 'endymion')
-    assert.equal(endymion.thinking, 'high')
-    assert.equal(endymion.effort, undefined)
-  })
-
-  it('add writes a complete v1-shaped row', () => {
-    addAgent({ name: 'freya', harness: 'codex', model: 'gpt-5.6-terra', effort: 'xhigh' }, t.env)
-
-    const raw = JSON.parse(readFileSync(rosterPath(t.env), 'utf8'))
-    const freya = raw.agents.find((p) => p.id === 'freya')
-    assert.equal(freya.kind, 'codex')
-    assert.equal(freya.name, 'Freya')
-    assert.equal(freya.effort, 'xhigh')
-    assert.ok(freya.createdAt)
-  })
-
-  it('remove deletes exactly that row, any kind included', () => {
-    removeAgent('freya', t.env)
-    removeAgent('pygmalion', t.env)
-    const raw = JSON.parse(readFileSync(rosterPath(t.env), 'utf8'))
-    assert.equal(
-      raw.agents.some((p) => p.id === 'freya'),
-      false,
-    )
-    assert.equal(
-      raw.agents.some((p) => p.id === 'pygmalion'),
-      false,
-    )
-  })
-
-  it('refuses an effort edit on an image agent, which has none, plainly', () => {
-    const raw = JSON.parse(readFileSync(rosterPath(t.env), 'utf8'))
-    raw.agents.push({ id: 'img', name: 'Img', kind: 'image', model: 'gpt-5.5' })
-    writeFileSync(rosterPath(t.env), JSON.stringify(raw, null, 2))
-
-    assert.throws(() => editAgent('img', { effort: 'high' }, t.env), /no effort level/)
-    editAgent('img', { description: 'still editable' }, t.env)
-    removeAgent('img', t.env)
-  })
+  try {
+    mkdirSync(dirname(rosterPath(t.env)), { recursive: true })
+    const original = JSON.stringify({
+      agents: [
+        {
+          id: 'renamed',
+          kind: 'claude-code',
+          model: 'claude-fable-5-1',
+          effort: 'max',
+          skillsPolicy: 'default',
+          profile: { categories: ['coding', 'chief', 'pm'] },
+        },
+      ],
+    })
+    writeFileSync(rosterPath(t.env), original)
+    const agent = byName(t.env).renamed
+    assert.equal(agent.profile.workTier, 'critical')
+    assert.equal(agent.custom, true)
+    assert.equal(Object.hasOwn(agent.profile, 'categories'), false, 'stale pills are dropped')
+    assert.equal(readFileSync(rosterPath(t.env), 'utf8'), original)
+  } finally {
+    t.cleanup()
+  }
 })
 
-describe('an absent shared roster is simply empty, and add creates it', () => {
+describe('a catalog agent stays as the catalog has it', () => {
   const t = tempEnv()
   after(() => t.cleanup())
 
-  it('starts empty and creates the v1 file shape on first add', () => {
-    assert.deepEqual(listAgents(t.env), [])
-    addAgent({ name: 'zeus', harness: 'claude', model: 'claude-opus-5' }, t.env)
-
-    const raw = JSON.parse(readFileSync(rosterPath(t.env), 'utf8'))
-    assert.equal(raw.schemaVersion, 1)
-    assert.equal(raw.agents[0].id, 'zeus')
+  it('is neither edited nor removed, and its name cannot be defined again', () => {
+    assert.throws(() => editAgent('gefjon', { effort: 'low' }, t.env), /catalog agent and stays/)
+    assert.throws(() => editAgent('gefjon', { description: 'x' }, t.env), /catalog agent and stays/)
+    assert.throws(() => removeAgent('gefjon', t.env), /not yours to remove/)
+    assert.throws(
+      () => addAgent({ name: 'gefjon', harness: 'codex', model: 'm' }, t.env),
+      /catalog agent: pick another name/,
+    )
+    assert.equal(existsSync(rosterPath(t.env)), false, 'nothing was written')
+    assert.deepEqual(
+      [byName(t.env).gefjon.effort, byName(t.env).gefjon.custom],
+      ['xhigh', undefined],
+    )
   })
 
-  it('validates adds: bad names, unknown harnesss, empty models, duplicates', () => {
-    assert.throws(() => addAgent({ name: 'Bad Name', harness: 'claude', model: 'm' }, t.env))
-    assert.throws(() => addAgent({ name: 'ok', harness: 'not-a-cli', model: 'm' }, t.env))
-    assert.throws(() => addAgent({ name: 'ok', harness: 'claude', model: '' }, t.env))
-    assert.throws(() => addAgent({ name: 'zeus', harness: 'codex', model: 'm' }, t.env))
-  })
-
-  it('names the missing agent on edit and remove', () => {
+  it('names an unknown agent on edit and remove', () => {
     assert.throws(() => editAgent('nobody', { model: 'm' }, t.env), /nobody/)
     assert.throws(() => removeAgent('nobody', t.env), /nobody/)
   })
 })
 
-it('Kimi effort changes are explicit, validated and persisted without altering inherited saved settings', () => {
+describe('agents defined by hand are stored in full, v1-shaped', () => {
   const t = tempEnv()
-  try {
-    addAgent(
-      { name: 'ilmarinen', harness: 'kimi', model: 'moonshot-ai/kimi-k3', preset: 'ilmarinen' },
-      t.env,
+  after(() => t.cleanup())
+
+  it('starts with the catalog only and creates the v1 file shape on first add', () => {
+    assert.equal(
+      listAgents(t.env).every((p) => p.custom === undefined),
+      true,
     )
-    assert.equal(listAgents(t.env)[0].effort, undefined)
-    assert.ok(agentDrift(t.env)[0].changes.some((c) => c.field === 'effort' && c.to === 'max'))
-    syncAgents(t.env, { name: 'ilmarinen' })
-    assert.equal(listAgents(t.env)[0].effort, 'max')
-    editAgent('ilmarinen', { effort: 'low' }, t.env)
-    assert.equal(listAgents(t.env)[0].effort, 'low')
-    const before = readFileSync(rosterPath(t.env), 'utf8')
+    addAgent({ name: 'mine', harness: 'claude', model: 'claude-opus-5' }, t.env)
+    const file = raw(t.env)
+    assert.equal(file.schemaVersion, 1)
+    assert.equal(file.agents[0].id, 'mine')
+    assert.equal(file.agents[0].name, 'Mine')
+    assert.equal(file.agents[0].kind, 'claude-code')
+    assert.ok(file.agents[0].createdAt)
+    assert.equal(Object.hasOwn(file.agents[0], 'profile'), false, 'no display data in the file')
+    const mine = byName(t.env).mine
+    assert.deepEqual([mine.custom, mine.preset, mine.harness], [true, undefined, 'claude'])
+    assert.equal(listAgents(t.env).length, AGENT_PRESETS.length + 1)
+  })
+
+  it('validates adds: bad names, unknown harnesses, empty models, duplicates', () => {
+    assert.throws(() => addAgent({ name: 'Bad Name', harness: 'claude', model: 'm' }, t.env))
+    assert.throws(() => addAgent({ name: 'ok', harness: 'not-a-cli', model: 'm' }, t.env))
+    assert.throws(() => addAgent({ name: 'ok', harness: 'claude', model: '' }, t.env))
+    assert.throws(() => addAgent({ name: 'mine', harness: 'codex', model: 'm' }, t.env))
+    // A pi agent edit lands in `thinking`, the key the pi runner reads.
+    addAgent({ name: 'my-pi', harness: 'pi', model: 'openrouter/moonshotai/kimi-k3' }, t.env)
+    editAgent('my-pi', { effort: 'high' }, t.env)
+    const pi = raw(t.env).agents.find((p) => p.id === 'my-pi')
+    assert.deepEqual(
+      [pi.thinking, pi.effort, byName(t.env)['my-pi'].effort],
+      ['high', undefined, 'high'],
+    )
+    // An image agent has no effort to edit, plainly.
+    addAgent({ name: 'my-image', harness: 'image', model: 'codex-image' }, t.env)
+    assert.throws(() => editAgent('my-image', { effort: 'high' }, t.env), /no effort level/)
+    editAgent('my-image', { description: 'still editable' }, t.env)
+  })
+
+  it('edits and removes a custom agent in place', () => {
+    addAgent({ name: 'freya-2', harness: 'codex', model: 'gpt-5.6-terra', effort: 'xhigh' }, t.env)
+    editAgent('freya-2', { model: 'gpt-6-astra', effort: 'low' }, t.env)
+    const stored = raw(t.env).agents.find((p) => p.id === 'freya-2')
+    assert.deepEqual([stored.model, stored.effort, stored.kind], ['gpt-6-astra', 'low', 'codex'])
+    removeAgent('freya-2', t.env)
+    assert.equal(
+      raw(t.env).agents.some((p) => p.id === 'freya-2'),
+      false,
+    )
+    assert.equal(byName(t.env)['freya-2'], undefined)
+  })
+
+  it('a Kimi agent takes only the efforts Kimi accepts, on add and on edit', () => {
     for (const effort of ['medium', 'xhigh', 'ultra', 'off', 'on', 0, false]) {
-      assert.throws(() => editAgent('ilmarinen', { effort }, t.env), /low.*high.*max/)
       assert.throws(
         () =>
           addAgent(
@@ -165,84 +193,96 @@ it('Kimi effort changes are explicit, validated and persisted without altering i
           ),
         /low.*high.*max/,
       )
-      assert.equal(readFileSync(rosterPath(t.env), 'utf8'), before)
     }
-    editAgent('ilmarinen', { effort: '' }, t.env)
-    assert.equal(listAgents(t.env)[0].effort, undefined, 'blank restores native settings')
-  } finally {
-    t.cleanup()
-  }
+    addAgent(
+      { name: 'my-kimi', harness: 'kimi', model: 'moonshot-ai/kimi-k3', effort: 'low' },
+      t.env,
+    )
+    assert.throws(() => editAgent('my-kimi', { effort: 'medium' }, t.env), /low.*high.*max/)
+    editAgent('my-kimi', { effort: '' }, t.env)
+    assert.equal(byName(t.env)['my-kimi'].effort, undefined, 'blank restores native settings')
+  })
+
+  it('a custom row that took a catalog name on another harness hides that entry', () => {
+    mkdirSync(dirname(rosterPath(t.env)), { recursive: true })
+    const file = raw(t.env)
+    file.agents.push({
+      id: 'zeus',
+      name: 'Zeus',
+      kind: 'opencode',
+      model: 'opencode/muse-spark-1.3',
+    })
+    writeFileSync(rosterPath(t.env), JSON.stringify(file, null, 2))
+    const zeus = byName(t.env).zeus
+    assert.deepEqual([zeus.harness, zeus.custom, zeus.preset], ['opencode', true, undefined])
+    assert.equal(listAgents(t.env).filter((p) => p.name === 'zeus').length, 1)
+    removeAgent('zeus', t.env)
+    assert.equal(byName(t.env).zeus.harness, 'claude', 'the catalog entry is back')
+  })
 })
 
-describe('a catalog agent can be told its model moved', () => {
+describe('what older builds wrote is read the same, and folded at start', () => {
   const t = tempEnv()
   after(() => t.cleanup())
 
-  /** Rewrites a row in place, standing in for a catalog that has moved on. */
-  function pin(name, model, env) {
-    const path = rosterPath(env)
-    const document = JSON.parse(readFileSync(path, 'utf8'))
-    const row = document.agents.find((r) => r.id === name)
-    row.model = model
-    row.description = 'my own words'
-    writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`)
-  }
-
-  it('records which catalog entry it came from, and only then', () => {
-    addAgent(
-      { name: 'diana', harness: 'codex', model: 'gpt-5.6-luna', effort: 'xhigh', preset: 'diana' },
-      t.env,
+  it('a copy of a catalog entry, edited or not, reads as the catalog has it, without writing', () => {
+    mkdirSync(dirname(rosterPath(t.env)), { recursive: true })
+    const original = JSON.stringify({
+      schemaVersion: 1,
+      agents: [
+        {
+          id: 'gefjon',
+          name: 'Gefjon',
+          kind: 'opencode',
+          model: 'opencode/muse-spark-1.3-contributor-free',
+          effort: 'xhigh',
+          preset: 'gefjon',
+          profile: { workTier: 'light' },
+        },
+        {
+          id: 'apollo',
+          name: 'Apollo',
+          kind: 'claude-code',
+          model: 'claude-opus-5',
+          effort: 'low',
+          preset: 'apollo',
+        },
+        {
+          id: 'mine',
+          name: 'Mine',
+          kind: 'codex',
+          model: 'gpt-6-astra',
+          effort: 'low',
+          skillsPolicy: 'default',
+        },
+      ],
+    })
+    writeFileSync(rosterPath(t.env), original)
+    const agents = byName(t.env)
+    assert.deepEqual(
+      [agents.gefjon.custom, agents.apollo.effort, agents.mine.custom],
+      [undefined, 'xhigh', true],
     )
-    addAgent({ name: 'mine', harness: 'codex', model: 'gpt-5.6-sol' }, t.env)
-
-    const byName = Object.fromEntries(listAgents(t.env).map((p) => [p.name, p]))
-    assert.equal(byName.diana.preset, 'diana', 'a catalog add carries its provenance')
-    assert.equal(byName.mine.preset, undefined, 'a hand-made agent is nobody else’s to move')
+    assert.equal(readFileSync(rosterPath(t.env), 'utf8'), original, 'a read writes nothing')
   })
 
-  it('reports what the catalog would change, and nothing for pinned rows', () => {
-    pin('diana', 'gpt-5.5', t.env)
-    pin('mine', 'gpt-5.4', t.env)
-
-    const drift = agentDrift(t.env)
-    assert.equal(drift.length, 1, 'only the catalog-backed row drifts')
-    assert.equal(drift[0].name, 'diana')
-    assert.deepEqual(drift[0].changes, [
-      { field: 'model', from: 'gpt-5.5', to: 'gpt-5.6-luna' },
-      { field: 'description', from: 'my own words', to: 'Codex GPT 5.6 Luna XHIGH' },
-    ])
-  })
-
-  it('a dry run says what would happen and writes nothing', () => {
-    const applied = syncAgents(t.env, { dryRun: true })
-    assert.equal(applied.length, 1)
-    assert.equal(
-      listAgents(t.env).find((p) => p.name === 'diana').model,
-      'gpt-5.5',
-      'the roster is untouched',
+  it('normalizing keeps only the human’s own agents, drops stored display data, and is idempotent', () => {
+    assert.equal(normalizeRoster(t.env), true)
+    assert.deepEqual(
+      raw(t.env).agents.map((row) => [row.id, Object.keys(row).sort()]),
+      [['mine', ['effort', 'id', 'kind', 'model', 'name']]],
     )
+    assert.equal(normalizeRoster(t.env), false)
   })
 
-  it('syncs every field the preset owns, the label included', () => {
-    const applied = syncAgents(t.env, {})
-    assert.equal(applied.length, 1)
-
-    const byName = Object.fromEntries(listAgents(t.env).map((p) => [p.name, p]))
-    assert.equal(byName.diana.model, 'gpt-5.6-luna', 'the model caught up')
-    assert.equal(
-      byName.diana.description,
-      'Codex GPT 5.6 Luna XHIGH',
-      'the label follows the catalog too: a name for a model it no longer runs is what the skill table would print',
-    )
-    assert.equal(byName.mine.model, 'gpt-5.4', 'a pinned agent stays pinned')
-    assert.equal(agentDrift(t.env).length, 0, 'nothing left to do')
-  })
-
-  it('a name the catalog has dropped stays where it is', () => {
-    addAgent({ name: 'ghost', harness: 'codex', model: 'gpt-5.4', preset: 'no-such-preset' }, t.env)
-    assert.equal(agentDrift(t.env).length, 0)
-    assert.equal(syncAgents(t.env, {}).length, 0)
-    assert.equal(listAgents(t.env).find((p) => p.name === 'ghost').model, 'gpt-5.4')
+  it('normalizing a home with no roster writes nothing', () => {
+    const fresh = tempEnv()
+    try {
+      assert.equal(normalizeRoster(fresh.env), false)
+      assert.equal(existsSync(rosterPath(fresh.env)), false)
+    } finally {
+      fresh.cleanup()
+    }
   })
 })
 
@@ -257,164 +297,22 @@ describe('a roster written before the rename keeps working', () => {
     cpSync(join(FIXTURES, 'v1-participants.json'), legacy)
 
     const listed = listAgents(t.env)
-    assert.ok(listed.length > 0, 'the old file is read, not ignored')
-    assert.ok(listed.some((a) => a.name === 'zeus'))
+    assert.ok(
+      listed.some((a) => a.name === 'zeus'),
+      'the old file is read, not ignored',
+    )
 
     // The first write moves the roster to its new name, rows intact.
     addAgent({ name: 'newcomer', harness: 'codex', model: 'gpt-5.6-luna' }, t.env)
-    const written = JSON.parse(readFileSync(rosterPath(t.env), 'utf8'))
+    const written = raw(t.env)
     assert.ok(Array.isArray(written.agents), 'written under the agents key')
     assert.equal(written.participants, undefined, 'the old key does not survive the write')
-    assert.equal(written.agents.length, listed.length + 1, 'nothing was dropped on the way')
-    assert.ok(written.agents.some((row) => row.id === 'zeus'))
-  })
-})
-
-describe('CONSENSFLOW_HOME means one root, to both halves', () => {
-  it('puts the roster where the payload looks for it', async () => {
-    // The manager read this variable as its state root and the payload read it
-    // as the roster root, so setting it split the machine in two: `cf agent
-    // list` showed your agents while the session hook said "none configured".
-    const t = tempEnv()
-    try {
-      addAgent({ name: 'diana', harness: 'codex', model: 'gpt-5.6-luna' }, t.env)
-
-      const { agentsPath } = await import('../hosts/lib/state.js')
-      const payloadEnv = process.env.CONSENSFLOW_HOME
-      process.env.CONSENSFLOW_HOME = t.env.CONSENSFLOW_HOME
-      try {
-        assert.equal(
-          rosterPath(t.env),
-          agentsPath(t.root),
-          'both halves resolve the roster to the same file',
-        )
-      } finally {
-        if (payloadEnv === undefined) delete process.env.CONSENSFLOW_HOME
-        else process.env.CONSENSFLOW_HOME = payloadEnv
-      }
-    } finally {
-      t.cleanup()
-    }
-  })
-
-  it('puts everything in one directory when it is not set', () => {
-    // One answer to "where is ConsensFlow on this machine", and one place for
-    // an uninstall to sweep.
-    const bare = { HOME: '/home/someone' }
-    assert.equal(rosterPath(bare), '/home/someone/.consensflow/agents.json')
-    assert.equal(configRoot(bare), '/home/someone/.consensflow')
-  })
-
-  it("imports an older machine's state without writing outside the private home", () => {
-    const t = tempEnv()
-    try {
-      // A machine from before the merge: state under XDG, roster beside it.
-      const legacy = legacyConfigRoot(t.env)
-      mkdirSync(legacy, { recursive: true })
-      writeFileSync(join(legacy, 'mode.json'), JSON.stringify({ mode: 'claude' }))
-      writeFileSync(join(legacy, 'hosts.json'), JSON.stringify({ hosts: {} }))
-
-      const moved = migrateStateRoot(t.env)
-      assert.ok(moved, 'it reports what it did')
-      assert.ok(existsSync(join(configRoot(t.env), 'mode.json')), 'the mode came along')
-      assert.ok(existsSync(join(configRoot(t.env), 'hosts.json')))
-      assert.equal(existsSync(legacy), true, 'the old root is never changed')
-      assert.equal(readFileSync(join(legacy, 'hosts.json'), 'utf8'), JSON.stringify({ hosts: {} }))
-
-      // Running again is a no-op, not a second copy.
-      assert.equal(migrateStateRoot(t.env), null)
-    } finally {
-      t.cleanup()
-    }
-  })
-
-  it('never overwrites a machine that already has the new root', () => {
-    const t = tempEnv()
-    try {
-      mkdirSync(configRoot(t.env), { recursive: true })
-      writeFileSync(join(configRoot(t.env), 'mode.json'), JSON.stringify({ mode: 'cmux' }))
-      const legacy = legacyConfigRoot(t.env)
-      mkdirSync(legacy, { recursive: true })
-      writeFileSync(join(legacy, 'mode.json'), JSON.stringify({ mode: 'claude' }))
-
-      assert.equal(migrateStateRoot(t.env), null, 'nothing is merged behind the user')
-      const kept = JSON.parse(readFileSync(join(configRoot(t.env), 'mode.json'), 'utf8'))
-      assert.equal(kept.mode, 'cmux', 'the live state wins')
-    } finally {
-      t.cleanup()
-    }
-  })
-})
-
-it('Pi Claude provider updates are explicit and leave custom rows pinned', () => {
-  const t = tempEnv()
-  try {
-    addAgent(
-      {
-        name: 'erato',
-        harness: 'pi',
-        model: 'anthropic/claude-fable-5',
-        effort: 'medium',
-        preset: 'erato',
-      },
-      t.env,
+    assert.ok(written.agents.some((row) => row.id === 'newcomer'))
+    assert.equal(
+      listAgents(t.env).some((a) => a.name === 'newcomer'),
+      true,
     )
-    addAgent(
-      {
-        name: 'my-claude',
-        harness: 'pi',
-        model: 'anthropic/claude-opus-5',
-        effort: 'medium',
-        description: 'personal',
-      },
-      t.env,
-    )
-    const before = readFileSync(rosterPath(t.env), 'utf8')
-    assert.equal(listAgents(t.env)[0].model, 'anthropic/claude-fable-5')
-    assert.equal(readFileSync(rosterPath(t.env), 'utf8'), before)
-    assert.ok(
-      agentDrift(t.env)
-        .find((a) => a.name === 'erato')
-        .changes.some((c) => c.to === 'openrouter/anthropic/claude-fable-5.1'),
-    )
-    syncAgents(t.env, { name: 'erato' })
-    const rows = JSON.parse(readFileSync(rosterPath(t.env), 'utf8')).agents
-    assert.equal(rows[0].model, 'openrouter/anthropic/claude-fable-5.1')
-    assert.equal(rows[0].thinking, 'medium')
-    assert.equal(rows[0].effort, undefined)
-    assert.equal(rows[1].model, 'anthropic/claude-opus-5')
-    assert.equal(rows[1].description, 'personal')
-  } finally {
-    t.cleanup()
-  }
-})
-
-it('stores the full UI profile on add, edit and explicit sync', async () => {
-  const { agentProfile } = await import('../src/catalog.js')
-  const t = tempEnv()
-  const raw = () => JSON.parse(readFileSync(rosterPath(t.env), 'utf8')).agents[0]
-  try {
-    addAgent(
-      {
-        name: 'custom',
-        harness: 'codex',
-        model: 'gpt-6-astra',
-        effort: 'medium',
-        preset: 'maia',
-        description: 'Keep my notes',
-      },
-      t.env,
-    )
-    assert.deepEqual(raw().profile, agentProfile(listAgents(t.env)[0]))
-    assert.deepEqual(listAgents(t.env)[0].profile, raw().profile)
-    editAgent('custom', { effort: 'low' }, t.env)
-    assert.deepEqual(raw().profile.categories, ['coding'])
-    assert.equal(raw().description, 'Keep my notes')
-    syncAgents(t.env, { name: 'custom' })
-    assert.deepEqual(raw().profile.categories, ['coding', 'reviewer'])
-  } finally {
-    t.cleanup()
-  }
+  })
 })
 
 it('legacy import never copies a link that could redirect a future write outside the home', () => {
@@ -433,4 +331,32 @@ it('legacy import never copies a link that could redirect a future write outside
   } finally {
     t.cleanup()
   }
+})
+
+describe('the roster keeps what the human chose about it', () => {
+  const t = tempEnv()
+  after(() => t.cleanup())
+
+  it('hides Claude and OpenAI models on Pi and OpenCode when they are kept to their own harnesses', () => {
+    {
+      assert.deepEqual(preferences(t.env), { ownHarnessOnly: false })
+      assert.ok(!listAgents(t.env).some((p) => p.hidden), 'nothing hidden by default')
+      assert.deepEqual(setPreferences({ ownHarnessOnly: true }, t.env), { ownHarnessOnly: true })
+      const hidden = (name) => listAgents(t.env).find((p) => p.name === name).hidden === true
+      assert.deepEqual(
+        ['kronos', 'baldr', 'phoebe', 'bil', 'aurora', 'apollo', 'diana', 'ares', 'gefjon'].map(
+          hidden,
+        ),
+        [true, true, true, true, true, false, false, false, false],
+        'Opus, Luna and Sol through Pi or OpenCode; never on Claude Code or Codex, never Grok or Muse',
+      )
+      assert.deepEqual(raw(t.env).preferences, { ownHarnessOnly: true }, 'kept in the file')
+      normalizeRoster(t.env)
+      assert.deepEqual(preferences(t.env), { ownHarnessOnly: true }, 'a fold at start keeps it')
+      assert.throws(() => setPreferences({ ownHarnessOnly: 'yes' }, t.env), /is on or off/)
+      assert.throws(() => setPreferences({ colour: true }, t.env), /no preference named colour/)
+      setPreferences({ ownHarnessOnly: false }, t.env)
+      assert.ok(!listAgents(t.env).some((p) => p.hidden))
+    }
+  })
 })

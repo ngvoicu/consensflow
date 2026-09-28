@@ -1,0 +1,1346 @@
+{
+  "session": {
+    "id": "achieved-visitor",
+    "main_chain_id": 35
+  },
+  "rows": [
+    {
+      "row_id": 54,
+      "session_id": "achieved-visitor",
+      "node_id": 0,
+      "parent_node_id": null,
+      "chat_message": "{\"message_id\":\"dc7b40e5-ce6c-4005-91d8-19db94e372c5\",\"role\":\"system\",\"content\":\"[Native system context omitted from test fixture]\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":null,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"extensions\":{\"affogato/cog-context\":{\"key\":\"workspace/context\"}},\"created_at\":\"2026-09-12T20:39:30.198062Z\",\"telemetry\":{\"source\":\"system\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245570
+    },
+    {
+      "row_id": 55,
+      "session_id": "achieved-visitor",
+      "node_id": 1,
+      "parent_node_id": 0,
+      "chat_message": "{\"message_id\":\"6d569968-6c4e-4498-817f-a9a87c787dd4\",\"role\":\"system\",\"content\":\"[Native system context omitted from test fixture]\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":null,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"created_at\":\"2026-09-12T20:39:30.234129Z\",\"telemetry\":{\"source\":\"system\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245570
+    },
+    {
+      "row_id": 56,
+      "session_id": "achieved-visitor",
+      "node_id": 2,
+      "parent_node_id": 1,
+      "chat_message": "{\"message_id\":\"95476037-dedb-460e-ae72-3d5e024a4d6a\",\"role\":\"user\",\"content\":\"[consensflow launch probe]\\nHUMAN_TUI_A\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":true,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"extensions\":{\"chisel/client-message-id\":\"fca4f387-c435-4dd6-b167-0cecf0c0c595\"},\"created_at\":\"2026-09-12T20:39:30.272123Z\",\"telemetry\":{\"source\":\"user\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245570
+    },
+    {
+      "row_id": 57,
+      "session_id": "achieved-visitor",
+      "node_id": 3,
+      "parent_node_id": null,
+      "chat_message": "{\"message_id\":\"dd00db5d-1cd3-4d03-b669-6680299a5a4d\",\"role\":\"system\",\"content\":\"[Native system context omitted from test fixture]\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":null,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"created_at\":\"2026-09-12T20:39:30.197641Z\",\"telemetry\":{\"source\":\"sysprompt\",\"operation\":\"normal\"}}}",
+      "created_at": 1789245570
+    },
+    {
+      "row_id": 58,
+      "session_id": "achieved-visitor",
+      "node_id": 4,
+      "parent_node_id": 3,
+      "chat_message": "{\"message_id\":\"bc74042f-73b7-47eb-a505-f5a73e3baa30\",\"role\":\"system\",\"content\":\"[Native system context omitted from test fixture]\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":null,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"created_at\":\"2026-09-12T20:39:30.197825Z\",\"telemetry\":{\"source\":\"sysprompt\",\"operation\":\"subagent_profiles\"}}}",
+      "created_at": 1789245570
+    },
+    {
+      "row_id": 59,
+      "session_id": "achieved-visitor",
+      "node_id": 5,
+      "parent_node_id": 4,
+      "chat_message": "{\"message_id\":\"62456fe9-52b2-4162-8c22-dc2b5b543761\",\"role\":\"system\",\"content\":\"[Native system context omitted from test fixture]\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":null,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"created_at\":\"2026-09-12T20:39:30.197813Z\",\"telemetry\":{\"source\":\"system\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245570
+    },
+    {
+      "row_id": 60,
+      "session_id": "achieved-visitor",
+      "node_id": 6,
+      "parent_node_id": 5,
+      "chat_message": "{\"message_id\":\"dc7b40e5-ce6c-4005-91d8-19db94e372c5\",\"role\":\"system\",\"content\":\"[Native system context omitted from test fixture]\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":null,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"extensions\":{\"affogato/cog-context\":{\"key\":\"workspace/context\"}},\"created_at\":\"2026-09-12T20:39:30.198062Z\",\"telemetry\":{\"source\":\"system\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245570
+    },
+    {
+      "row_id": 61,
+      "session_id": "achieved-visitor",
+      "node_id": 7,
+      "parent_node_id": 6,
+      "chat_message": "{\"message_id\":\"6d569968-6c4e-4498-817f-a9a87c787dd4\",\"role\":\"system\",\"content\":\"[Native system context omitted from test fixture]\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":null,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"created_at\":\"2026-09-12T20:39:30.234129Z\",\"telemetry\":{\"source\":\"system\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245570
+    },
+    {
+      "row_id": 62,
+      "session_id": "achieved-visitor",
+      "node_id": 8,
+      "parent_node_id": 7,
+      "chat_message": "{\"message_id\":\"95476037-dedb-460e-ae72-3d5e024a4d6a\",\"role\":\"user\",\"content\":\"[consensflow launch probe]\\nHUMAN_TUI_A\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":true,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"extensions\":{\"chisel/client-message-id\":\"fca4f387-c435-4dd6-b167-0cecf0c0c595\"},\"created_at\":\"2026-09-12T20:39:30.272123Z\",\"telemetry\":{\"source\":\"user\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245570
+    },
+    {
+      "row_id": 63,
+      "session_id": "achieved-visitor",
+      "node_id": 9,
+      "parent_node_id": null,
+      "chat_message": "{\"message_id\":\"dd00db5d-1cd3-4d03-b669-6680299a5a4d\",\"role\":\"system\",\"content\":\"[Native system context omitted from test fixture]\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":null,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"created_at\":\"2026-09-12T20:39:30.197641Z\",\"telemetry\":{\"source\":\"sysprompt\",\"operation\":\"normal\"}}}",
+      "created_at": 1789245570
+    },
+    {
+      "row_id": 64,
+      "session_id": "achieved-visitor",
+      "node_id": 10,
+      "parent_node_id": 9,
+      "chat_message": "{\"message_id\":\"bc74042f-73b7-47eb-a505-f5a73e3baa30\",\"role\":\"system\",\"content\":\"[Native system context omitted from test fixture]\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":null,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"created_at\":\"2026-09-12T20:39:30.197825Z\",\"telemetry\":{\"source\":\"sysprompt\",\"operation\":\"subagent_profiles\"}}}",
+      "created_at": 1789245570
+    },
+    {
+      "row_id": 65,
+      "session_id": "achieved-visitor",
+      "node_id": 11,
+      "parent_node_id": 10,
+      "chat_message": "{\"message_id\":\"62456fe9-52b2-4162-8c22-dc2b5b543761\",\"role\":\"system\",\"content\":\"[Native system context omitted from test fixture]\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":null,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"created_at\":\"2026-09-12T20:39:30.197813Z\",\"telemetry\":{\"source\":\"system\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245570
+    },
+    {
+      "row_id": 66,
+      "session_id": "achieved-visitor",
+      "node_id": 12,
+      "parent_node_id": 11,
+      "chat_message": "{\"message_id\":\"dc7b40e5-ce6c-4005-91d8-19db94e372c5\",\"role\":\"system\",\"content\":\"[Native system context omitted from test fixture]\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":null,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"extensions\":{\"affogato/cog-context\":{\"key\":\"workspace/context\"}},\"created_at\":\"2026-09-12T20:39:30.198062Z\",\"telemetry\":{\"source\":\"system\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245570
+    },
+    {
+      "row_id": 67,
+      "session_id": "achieved-visitor",
+      "node_id": 13,
+      "parent_node_id": 12,
+      "chat_message": "{\"message_id\":\"6d569968-6c4e-4498-817f-a9a87c787dd4\",\"role\":\"system\",\"content\":\"[Native system context omitted from test fixture]\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":null,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"created_at\":\"2026-09-12T20:39:30.234129Z\",\"telemetry\":{\"source\":\"system\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245570
+    },
+    {
+      "row_id": 68,
+      "session_id": "achieved-visitor",
+      "node_id": 14,
+      "parent_node_id": 13,
+      "chat_message": "{\"message_id\":\"95476037-dedb-460e-ae72-3d5e024a4d6a\",\"role\":\"user\",\"content\":\"[consensflow launch probe]\\nHUMAN_TUI_A\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":true,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"extensions\":{\"chisel/client-message-id\":\"fca4f387-c435-4dd6-b167-0cecf0c0c595\"},\"created_at\":\"2026-09-12T20:39:30.272123Z\",\"telemetry\":{\"source\":\"user\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245570
+    },
+    {
+      "row_id": 69,
+      "session_id": "achieved-visitor",
+      "node_id": 15,
+      "parent_node_id": 2,
+      "chat_message": "{\"message_id\":\"71376d98-4d28-49b1-b3a3-2ac1f13cc8e1\",\"role\":\"system\",\"content\":\"[Native system context omitted from test fixture]\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":null,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"extensions\":{\"agent-ext/skills-loaded\":{\"skills\":[{\"name\":\"devin-cli\",\"description\":\"Look up Devin CLI documentation (skills, extensibility, configuration, commands, models, troubleshooting)\",\"path\":\"/Users/gabrielvoicu/.consensflow/tmp/devin-native-research/docs/devin-3000.10.21/share/devin/docs\",\"model_invocable\":true,\"provider\":\"builtin\",\"skill_id\":\"builtin:devin-cli\"},{\"name\":\"declarative-repo-setup\",\"description\":\"Generate and verify a working environment.yaml (Devin snapshot-setup blueprint) for a repo\",\"path\":\"builtin:drs\",\"model_invocable\":true,\"provider\":\"builtin\",\"skill_id\":\"builtin:declarative-repo-setup\"},{\"name\":\"upload-secrets\",\"description\":\"Securely upload local secrets (dotenv files, env vars, API keys) to the Devin Cloud secrets manager \\u2014 values never enter the conversation\",\"path\":\"builtin:upload-secrets\",\"model_invocable\":true,\"provider\":\"builtin\",\"skill_id\":\"builtin:upload-secrets\"}],\"is_initial_listing\":true}},\"created_at\":\"2026-09-12T20:39:30.272595Z\",\"telemetry\":{\"source\":\"system\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245570
+    },
+    {
+      "row_id": 77,
+      "session_id": "achieved-visitor",
+      "node_id": 23,
+      "parent_node_id": 22,
+      "chat_message": "{\"message_id\":\"0744bd09-12f1-4951-810e-d09e7589b274\",\"role\":\"assistant\",\"content\":\"LOCAL_NATIVE_REPLY_1\",\"tool_calls\":[],\"metadata\":{\"num_tokens\":0,\"is_user_input\":null,\"request_id\":null,\"metrics\":{\"ttft_ms\":0,\"total_time_ms\":0,\"input_tokens\":null,\"output_tokens\":0,\"cache_read_tokens\":null,\"cache_creation_tokens\":null,\"tpot_ms\":0.0,\"tokens_per_sec\":0.0},\"finish_reason\":null,\"started_generation_at\":\"2026-09-12T20:39:30.283567Z\",\"created_at\":\"2026-09-12T20:39:30.283615Z\",\"generation_model\":\"swe-1-6-fast\",\"telemetry\":{\"source\":\"assistant\",\"operation\":\"inference\"}}}",
+      "created_at": 1789245570
+    },
+    {
+      "row_id": 80,
+      "session_id": "achieved-visitor",
+      "node_id": 26,
+      "parent_node_id": 25,
+      "chat_message": "{\"message_id\":\"6f1082ae-c2c3-478c-9d26-1e1148778bc4\",\"role\":\"assistant\",\"content\":\"LOCAL_NATIVE_REPLY_2\",\"tool_calls\":[],\"metadata\":{\"num_tokens\":0,\"is_user_input\":null,\"request_id\":null,\"metrics\":{\"ttft_ms\":1,\"total_time_ms\":1,\"input_tokens\":null,\"output_tokens\":0,\"cache_read_tokens\":null,\"cache_creation_tokens\":null,\"tpot_ms\":0.0,\"tokens_per_sec\":0.0},\"finish_reason\":null,\"started_generation_at\":\"2026-09-12T20:39:30.713872Z\",\"created_at\":\"2026-09-12T20:39:30.713911Z\",\"generation_model\":\"swe-1-6-fast\",\"telemetry\":{\"source\":\"assistant\",\"operation\":\"inference\"}}}",
+      "created_at": 1789245570
+    },
+    {
+      "row_id": 154,
+      "session_id": "achieved-visitor",
+      "node_id": 16,
+      "parent_node_id": null,
+      "chat_message": "{\"message_id\":\"dd00db5d-1cd3-4d03-b669-6680299a5a4d\",\"role\":\"system\",\"content\":\"[Native system context omitted from test fixture]\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":null,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"created_at\":\"2026-09-12T20:39:30.197641Z\",\"telemetry\":{\"source\":\"sysprompt\",\"operation\":\"normal\"}}}",
+      "created_at": 1789245573
+    },
+    {
+      "row_id": 155,
+      "session_id": "achieved-visitor",
+      "node_id": 17,
+      "parent_node_id": 16,
+      "chat_message": "{\"message_id\":\"bc74042f-73b7-47eb-a505-f5a73e3baa30\",\"role\":\"system\",\"content\":\"[Native system context omitted from test fixture]\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":null,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"created_at\":\"2026-09-12T20:39:30.197825Z\",\"telemetry\":{\"source\":\"sysprompt\",\"operation\":\"subagent_profiles\"}}}",
+      "created_at": 1789245573
+    },
+    {
+      "row_id": 156,
+      "session_id": "achieved-visitor",
+      "node_id": 18,
+      "parent_node_id": 17,
+      "chat_message": "{\"message_id\":\"62456fe9-52b2-4162-8c22-dc2b5b543761\",\"role\":\"system\",\"content\":\"[Native system context omitted from test fixture]\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":null,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"created_at\":\"2026-09-12T20:39:30.197813Z\",\"telemetry\":{\"source\":\"system\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245573
+    },
+    {
+      "row_id": 157,
+      "session_id": "achieved-visitor",
+      "node_id": 19,
+      "parent_node_id": 18,
+      "chat_message": "{\"message_id\":\"dc7b40e5-ce6c-4005-91d8-19db94e372c5\",\"role\":\"system\",\"content\":\"[Native system context omitted from test fixture]\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":null,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"extensions\":{\"affogato/cog-context\":{\"key\":\"workspace/context\"}},\"created_at\":\"2026-09-12T20:39:30.198062Z\",\"telemetry\":{\"source\":\"system\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245573
+    },
+    {
+      "row_id": 158,
+      "session_id": "achieved-visitor",
+      "node_id": 20,
+      "parent_node_id": 19,
+      "chat_message": "{\"message_id\":\"6d569968-6c4e-4498-817f-a9a87c787dd4\",\"role\":\"system\",\"content\":\"[Native system context omitted from test fixture]\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":null,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"created_at\":\"2026-09-12T20:39:30.234129Z\",\"telemetry\":{\"source\":\"system\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245573
+    },
+    {
+      "row_id": 159,
+      "session_id": "achieved-visitor",
+      "node_id": 21,
+      "parent_node_id": 20,
+      "chat_message": "{\"message_id\":\"95476037-dedb-460e-ae72-3d5e024a4d6a\",\"role\":\"user\",\"content\":\"[consensflow launch probe]\\nHUMAN_TUI_A\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":true,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"extensions\":{\"chisel/client-message-id\":\"fca4f387-c435-4dd6-b167-0cecf0c0c595\"},\"created_at\":\"2026-09-12T20:39:30.272123Z\",\"telemetry\":{\"source\":\"user\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245573
+    },
+    {
+      "row_id": 160,
+      "session_id": "achieved-visitor",
+      "node_id": 22,
+      "parent_node_id": 21,
+      "chat_message": "{\"message_id\":\"71376d98-4d28-49b1-b3a3-2ac1f13cc8e1\",\"role\":\"system\",\"content\":\"[Native system context omitted from test fixture]\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":null,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"extensions\":{\"agent-ext/skills-loaded\":{\"skills\":[{\"name\":\"devin-cli\",\"description\":\"Look up Devin CLI documentation (skills, extensibility, configuration, commands, models, troubleshooting)\",\"path\":\"/Users/gabrielvoicu/.consensflow/tmp/devin-native-research/docs/devin-3000.10.21/share/devin/docs\",\"model_invocable\":true,\"provider\":\"builtin\",\"skill_id\":\"builtin:devin-cli\"},{\"name\":\"declarative-repo-setup\",\"description\":\"Generate and verify a working environment.yaml (Devin snapshot-setup blueprint) for a repo\",\"path\":\"builtin:drs\",\"model_invocable\":true,\"provider\":\"builtin\",\"skill_id\":\"builtin:declarative-repo-setup\"},{\"name\":\"upload-secrets\",\"description\":\"Securely upload local secrets (dotenv files, env vars, API keys) to the Devin Cloud secrets manager \\u2014 values never enter the conversation\",\"path\":\"builtin:upload-secrets\",\"model_invocable\":true,\"provider\":\"builtin\",\"skill_id\":\"builtin:upload-secrets\"}],\"is_initial_listing\":true}},\"created_at\":\"2026-09-12T20:39:30.272595Z\",\"telemetry\":{\"source\":\"system\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245573
+    },
+    {
+      "row_id": 161,
+      "session_id": "achieved-visitor",
+      "node_id": 24,
+      "parent_node_id": 22,
+      "chat_message": "{\"message_id\":\"0744bd09-12f1-4951-810e-d09e7589b274\",\"role\":\"assistant\",\"content\":\"LOCAL_NATIVE_REPLY_1\",\"tool_calls\":[],\"metadata\":{\"num_tokens\":0,\"is_user_input\":null,\"request_id\":null,\"metrics\":{\"ttft_ms\":0,\"total_time_ms\":0,\"input_tokens\":null,\"output_tokens\":0,\"cache_read_tokens\":null,\"cache_creation_tokens\":null,\"tpot_ms\":0.0,\"tokens_per_sec\":0.0},\"finish_reason\":null,\"started_generation_at\":\"2026-09-12T20:39:30.283567Z\",\"created_at\":\"2026-09-12T20:39:30.283615Z\",\"generation_model\":\"swe-1-6-fast\",\"telemetry\":{\"source\":\"assistant\",\"operation\":\"inference\"}}}",
+      "created_at": 1789245573
+    },
+    {
+      "row_id": 162,
+      "session_id": "achieved-visitor",
+      "node_id": 25,
+      "parent_node_id": 24,
+      "chat_message": "{\"message_id\":\"3678323c-c1c9-4e33-9516-5a13b9c86cfa\",\"role\":\"user\",\"content\":\"HUMAN_SECOND\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":true,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"extensions\":{\"chisel/client-message-id\":\"52a353ca-3d39-45ef-956b-dde7fe4a1f30\"},\"created_at\":\"2026-09-12T20:39:30.712271Z\",\"telemetry\":{\"source\":\"user\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245573
+    },
+    {
+      "row_id": 163,
+      "session_id": "achieved-visitor",
+      "node_id": 27,
+      "parent_node_id": 25,
+      "chat_message": "{\"message_id\":\"6f1082ae-c2c3-478c-9d26-1e1148778bc4\",\"role\":\"assistant\",\"content\":\"LOCAL_NATIVE_REPLY_2\",\"tool_calls\":[],\"metadata\":{\"num_tokens\":0,\"is_user_input\":null,\"request_id\":null,\"metrics\":{\"ttft_ms\":1,\"total_time_ms\":1,\"input_tokens\":null,\"output_tokens\":0,\"cache_read_tokens\":null,\"cache_creation_tokens\":null,\"tpot_ms\":0.0,\"tokens_per_sec\":0.0},\"finish_reason\":null,\"started_generation_at\":\"2026-09-12T20:39:30.713872Z\",\"created_at\":\"2026-09-12T20:39:30.713911Z\",\"generation_model\":\"swe-1-6-fast\",\"telemetry\":{\"source\":\"assistant\",\"operation\":\"inference\"}}}",
+      "created_at": 1789245573
+    },
+    {
+      "row_id": 164,
+      "session_id": "achieved-visitor",
+      "node_id": 28,
+      "parent_node_id": 27,
+      "chat_message": "{\"message_id\":\"1f4105ae-262b-400a-aecc-b2053f5b67c5\",\"role\":\"system\",\"content\":\"[Native system context omitted from test fixture]\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":null,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"created_at\":\"2026-09-12T20:39:32.044747Z\",\"telemetry\":{\"source\":\"system\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245573
+    },
+    {
+      "row_id": 165,
+      "session_id": "achieved-visitor",
+      "node_id": 29,
+      "parent_node_id": 28,
+      "chat_message": "{\"message_id\":\"9581c6d3-22f0-47b3-8024-d0030afc3461\",\"role\":\"user\",\"content\":\"HUMAN_THIRD_AFTER_RESUME\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":true,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"extensions\":{\"chisel/client-message-id\":\"25426224-0cb8-41dd-a997-7095bb6b9b73\"},\"created_at\":\"2026-09-12T20:39:32.394791Z\",\"telemetry\":{\"source\":\"user\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245573
+    },
+    {
+      "row_id": 166,
+      "session_id": "achieved-visitor",
+      "node_id": 30,
+      "parent_node_id": 29,
+      "chat_message": "{\"message_id\":\"abb5e78e-f715-48d8-a35a-c61be6cdba2d\",\"role\":\"assistant\",\"content\":\"LOCAL_NATIVE_REPLY_4\",\"tool_calls\":[],\"metadata\":{\"num_tokens\":0,\"is_user_input\":null,\"request_id\":null,\"metrics\":{\"ttft_ms\":1,\"total_time_ms\":1,\"input_tokens\":null,\"output_tokens\":0,\"cache_read_tokens\":null,\"cache_creation_tokens\":null,\"tpot_ms\":0.0,\"tokens_per_sec\":0.0},\"finish_reason\":null,\"started_generation_at\":\"2026-09-12T20:39:32.396857Z\",\"created_at\":\"2026-09-12T20:39:32.396918Z\",\"generation_model\":\"swe-1-6-fast\",\"telemetry\":{\"source\":\"assistant\",\"operation\":\"inference\"}}}",
+      "created_at": 1789245573
+    },
+    {
+      "row_id": 167,
+      "session_id": "achieved-visitor",
+      "node_id": 31,
+      "parent_node_id": 29,
+      "chat_message": "{\"message_id\":\"abb5e78e-f715-48d8-a35a-c61be6cdba2d\",\"role\":\"assistant\",\"content\":\"LOCAL_NATIVE_REPLY_4\",\"tool_calls\":[],\"metadata\":{\"num_tokens\":0,\"is_user_input\":null,\"request_id\":null,\"metrics\":{\"ttft_ms\":1,\"total_time_ms\":1,\"input_tokens\":null,\"output_tokens\":0,\"cache_read_tokens\":null,\"cache_creation_tokens\":null,\"tpot_ms\":0.0,\"tokens_per_sec\":0.0},\"finish_reason\":null,\"started_generation_at\":\"2026-09-12T20:39:32.396857Z\",\"created_at\":\"2026-09-12T20:39:32.396918Z\",\"generation_model\":\"swe-1-6-fast\",\"telemetry\":{\"source\":\"assistant\",\"operation\":\"inference\"}}}",
+      "created_at": 1789245573
+    },
+    {
+      "row_id": 168,
+      "session_id": "achieved-visitor",
+      "node_id": 32,
+      "parent_node_id": 31,
+      "chat_message": "{\"message_id\":\"b5b36422-28ca-4186-85ea-7d8baa190031\",\"role\":\"user\",\"content\":\"CANCEL_THIS_TURN\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":true,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"extensions\":{\"chisel/client-message-id\":\"bd45dfa5-747c-49b7-a42e-ea1da547e8fc\"},\"created_at\":\"2026-09-12T20:39:32.804146Z\",\"telemetry\":{\"source\":\"user\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245573
+    },
+    {
+      "row_id": 169,
+      "session_id": "achieved-visitor",
+      "node_id": 33,
+      "parent_node_id": 32,
+      "chat_message": "{\"message_id\":\"0cdf12e3-e7c0-4663-8a9c-dcf3f855a26c\",\"role\":\"assistant\",\"content\":\"LOCAL_NATIVE_REPLY_5\",\"tool_calls\":[],\"metadata\":{\"num_tokens\":0,\"is_user_input\":null,\"request_id\":null,\"metrics\":{\"ttft_ms\":1,\"total_time_ms\":262,\"input_tokens\":null,\"output_tokens\":0,\"cache_read_tokens\":null,\"cache_creation_tokens\":null,\"tpot_ms\":0.0,\"tokens_per_sec\":0.0},\"finish_reason\":null,\"started_generation_at\":\"2026-09-12T20:39:32.806250Z\",\"created_at\":\"2026-09-12T20:39:33.066704Z\",\"generation_model\":\"swe-1-6-fast\",\"telemetry\":{\"source\":\"assistant\",\"operation\":\"inference\"}}}",
+      "created_at": 1789245573
+    },
+    {
+      "row_id": 170,
+      "session_id": "achieved-visitor",
+      "node_id": 34,
+      "parent_node_id": 32,
+      "chat_message": "{\"message_id\":\"0cdf12e3-e7c0-4663-8a9c-dcf3f855a26c\",\"role\":\"assistant\",\"content\":\"LOCAL_NATIVE_REPLY_5\",\"metadata\":{\"num_tokens\":0,\"is_user_input\":null,\"request_id\":null,\"metrics\":{\"ttft_ms\":1,\"total_time_ms\":262,\"input_tokens\":null,\"output_tokens\":0,\"cache_read_tokens\":null,\"cache_creation_tokens\":null,\"tpot_ms\":0.0,\"tokens_per_sec\":0.0},\"finish_reason\":null,\"started_generation_at\":\"2026-09-12T20:39:32.806250Z\",\"created_at\":\"2026-09-12T20:39:33.066704Z\",\"generation_model\":\"swe-1-6-fast\",\"telemetry\":{\"source\":\"assistant\",\"operation\":\"inference\"}}}",
+      "created_at": 1789245573
+    },
+    {
+      "row_id": 171,
+      "session_id": "achieved-visitor",
+      "node_id": 35,
+      "parent_node_id": 34,
+      "chat_message": "{\"message_id\":\"debd2e75-fc6c-49e8-8e34-dc643b758f06\",\"role\":\"system\",\"content\":\"[Native system context omitted from test fixture]\",\"metadata\":{\"num_tokens\":null,\"is_user_input\":null,\"request_id\":null,\"metrics\":null,\"finish_reason\":null,\"created_at\":\"2026-09-12T20:39:33.066854Z\",\"telemetry\":{\"source\":\"system\",\"operation\":\"unknown\"}}}",
+      "created_at": 1789245573
+    }
+  ],
+  "wire": [
+    {
+      "sessionId": "achieved-visitor",
+      "update": {
+        "sessionUpdate": "config_option_update",
+        "configOptions": [
+          {
+            "id": "mode",
+            "name": "Session Mode",
+            "category": "mode",
+            "type": "select",
+            "currentValue": "normal",
+            "options": [
+              {
+                "value": "normal",
+                "name": "Code",
+                "description": "Write and edit code",
+                "_meta": {
+                  "cognition.ai/icon": "code"
+                }
+              },
+              {
+                "value": "accept-edits",
+                "name": "Code",
+                "description": "Write and edit code",
+                "_meta": {
+                  "cognition.ai/icon": "code"
+                }
+              },
+              {
+                "value": "ask",
+                "name": "Ask",
+                "description": "Answer questions without code changes",
+                "_meta": {
+                  "cognition.ai/icon": "message-circle"
+                }
+              },
+              {
+                "value": "plan",
+                "name": "Plan",
+                "description": "Plan changes before implementing",
+                "_meta": {
+                  "cognition.ai/icon": "file-text"
+                }
+              },
+              {
+                "value": "bypass",
+                "name": "Bypass Permissions",
+                "description": "Auto-approve all tool calls",
+                "_meta": {
+                  "cognition.ai/icon": "shield-off"
+                }
+              }
+            ]
+          },
+          {
+            "id": "model",
+            "name": "Model",
+            "description": "AI model to use",
+            "category": "model",
+            "type": "select",
+            "currentValue": "swe-1-6-fast",
+            "options": []
+          },
+          {
+            "id": "ignore-files",
+            "name": "Ignore Files",
+            "description": "Comma-separated list of ignore filenames to enforce (e.g. .gitignore,.codeiumignore,.windsurfignore,.devinignore)",
+            "category": "_windsurf_ignore_files",
+            "type": "select",
+            "currentValue": "",
+            "options": []
+          },
+          {
+            "id": "max-turn-requests",
+            "name": "Max Turn Requests",
+            "description": "Maximum LLM inference requests per turn (0 = unlimited)",
+            "category": "_windsurf_max_turn_requests",
+            "type": "select",
+            "currentValue": "0",
+            "options": []
+          },
+          {
+            "id": "subagents",
+            "name": "Subagents (Preview)",
+            "description": "Allow the agent to delegate work to subagents. Persisted to the user config (config.json).",
+            "category": "_windsurf_subagents",
+            "type": "select",
+            "currentValue": "enabled",
+            "options": [
+              {
+                "value": "enabled",
+                "name": "Enabled"
+              },
+              {
+                "value": "disabled",
+                "name": "Disabled"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "update": {
+        "sessionUpdate": "current_mode_update",
+        "currentModeId": "normal"
+      }
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "update": {
+        "sessionUpdate": "available_commands_update",
+        "availableCommands": [
+          {
+            "name": "login",
+            "description": "Authenticate with an API key",
+            "input": {
+              "hint": "[api-key]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "log-in",
+              "cognition.ai/category": "Account"
+            }
+          },
+          {
+            "name": "logout",
+            "description": "Clear authentication",
+            "_meta": {
+              "cognition.ai/icon": "log-out",
+              "cognition.ai/category": "Account"
+            }
+          },
+          {
+            "name": "status",
+            "description": "Check authentication status",
+            "_meta": {
+              "cognition.ai/icon": "user-check",
+              "cognition.ai/category": "Account"
+            }
+          },
+          {
+            "name": "workspace",
+            "description": "List workspace directories",
+            "_meta": {
+              "cognition.ai/icon": "folder-open",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "add-dir",
+            "description": "Add additional workspace directory",
+            "input": {
+              "hint": "<path>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "folder-plus",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "undo-add-dir",
+            "description": "Remove a workspace directory",
+            "input": {
+              "hint": "<path>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "folder-minus",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "remove-dir",
+            "description": "Remove a workspace directory",
+            "input": {
+              "hint": "<path>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "folder-minus",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "ask",
+            "description": "Switch to Ask mode (read-only)",
+            "input": {
+              "hint": "[question]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "message-circle",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "plan",
+            "description": "Switch to Plan mode, or plan with a prompt",
+            "input": {
+              "hint": "[prompt]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "file-text",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "code",
+            "description": "Switch to Code mode, or run a prompt in it",
+            "input": {
+              "hint": "[prompt]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "code",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "bypass",
+            "description": "Switch to Bypass Permissions mode, or run a prompt under it",
+            "input": {
+              "hint": "[prompt]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "shield-off",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "compact",
+            "description": "Force conversation compaction",
+            "_meta": {
+              "cognition.ai/icon": "archive",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "context",
+            "description": "Show context window usage",
+            "_meta": {
+              "cognition.ai/icon": "pie-chart",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "fast",
+            "description": "Switch to the fastest model available to you, or run a prompt with it",
+            "input": {
+              "hint": "[prompt]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "zap",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "loop",
+            "description": "Run a prompt then auto-review the diff in a loop",
+            "input": {
+              "hint": "<prompt>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "repeat",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "btw",
+            "description": "Ask a quick side question without disrupting the main conversation",
+            "input": {
+              "hint": "<prompt>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "message-circle-question",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "recap",
+            "description": "Recap the session so far with a short summary",
+            "_meta": {
+              "cognition.ai/icon": "history",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "session-stats",
+            "description": "Show session statistics",
+            "_meta": {
+              "cognition.ai/icon": "bar-chart-2",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "rename",
+            "description": "Rename this session",
+            "input": {
+              "hint": "<new title>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "pencil",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "mcp",
+            "description": "List configured MCP servers and their status",
+            "_meta": {
+              "cognition.ai/icon": "plug",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "bug",
+            "description": "Report a bug to the Devin CLI developers",
+            "input": {
+              "hint": "<description>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "bug",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "help",
+            "description": "Show available commands",
+            "_meta": {
+              "cognition.ai/icon": "help-circle",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "declarative-repo-setup",
+            "description": "Generate and verify a working environment.yaml (Devin snapshot-setup blueprint) for a repo",
+            "input": {
+              "hint": "<owner/repo>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "zap",
+              "cognition.ai/category": "Skills"
+            }
+          },
+          {
+            "name": "upload-secrets",
+            "description": "Securely upload local secrets (dotenv files, env vars, API keys) to the Devin Cloud secrets manager \u2014 values never enter the conversation",
+            "_meta": {
+              "cognition.ai/icon": "zap",
+              "cognition.ai/category": "Skills"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "steps": []
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "steps": [
+        {
+          "stepId": "95476037-dedb-460e-ae72-3d5e024a4d6a",
+          "stepNumber": 1,
+          "kind": "prompt",
+          "userMessageId": "fca4f387-c435-4dd6-b167-0cecf0c0c595",
+          "revertTargetNodeId": 1,
+          "forkTargetNodeId": 2,
+          "summary": "[consensflow launch probe]"
+        }
+      ]
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "LOCAL_NATIVE_REPLY_1"
+        },
+        "_meta": {
+          "cognition.ai/streamingMessageId": "307e74e5-464b-4315-b5d6-be9d9623b38b"
+        }
+      }
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "steps": [
+        {
+          "stepId": "95476037-dedb-460e-ae72-3d5e024a4d6a",
+          "stepNumber": 1,
+          "kind": "prompt",
+          "userMessageId": "fca4f387-c435-4dd6-b167-0cecf0c0c595",
+          "revertTargetNodeId": 20,
+          "forkTargetNodeId": 22,
+          "summary": "[consensflow launch probe]"
+        }
+      ]
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "turnClientMessageId": "fca4f387-c435-4dd6-b167-0cecf0c0c595"
+    },
+    {
+      "cause": "complete",
+      "stats": {
+        "toolCalls": 0,
+        "filesChanged": 0,
+        "commandsRun": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "ttftMs": 0,
+        "tokensPerSec": 0.0,
+        "totalTimeMs": 0
+      },
+      "sessionId": "achieved-visitor"
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "steps": [
+        {
+          "stepId": "95476037-dedb-460e-ae72-3d5e024a4d6a",
+          "stepNumber": 1,
+          "kind": "prompt",
+          "userMessageId": "fca4f387-c435-4dd6-b167-0cecf0c0c595",
+          "revertTargetNodeId": 20,
+          "forkTargetNodeId": 24,
+          "summary": "[consensflow launch probe]"
+        },
+        {
+          "stepId": "3678323c-c1c9-4e33-9516-5a13b9c86cfa",
+          "stepNumber": 2,
+          "kind": "prompt",
+          "userMessageId": "52a353ca-3d39-45ef-956b-dde7fe4a1f30",
+          "revertTargetNodeId": 24,
+          "forkTargetNodeId": 25,
+          "summary": "HUMAN_SECOND"
+        }
+      ]
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "LOCAL_NATIVE_REPLY_2"
+        },
+        "_meta": {
+          "cognition.ai/streamingMessageId": "61c4b41a-2957-408e-b353-d73961ab4d31"
+        }
+      }
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "turnClientMessageId": "52a353ca-3d39-45ef-956b-dde7fe4a1f30"
+    },
+    {
+      "cause": "complete",
+      "stats": {
+        "toolCalls": 0,
+        "filesChanged": 0,
+        "commandsRun": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "ttftMs": 1,
+        "tokensPerSec": 0.0,
+        "totalTimeMs": 1
+      },
+      "sessionId": "achieved-visitor"
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "update": {
+        "sessionUpdate": "user_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "[consensflow launch probe]\nHUMAN_TUI_A"
+        },
+        "_meta": {
+          "cognition.ai/clientMessageId": "fca4f387-c435-4dd6-b167-0cecf0c0c595",
+          "cognition.ai/messageSubIndex": 0,
+          "cognition.ai/timestamp": "2026-09-12T20:39:30.272123+00:00"
+        }
+      }
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "LOCAL_NATIVE_REPLY_1"
+        },
+        "_meta": {
+          "cognition.ai/timestamp": "2026-09-12T20:39:30.283615+00:00"
+        }
+      }
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "update": {
+        "sessionUpdate": "user_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "HUMAN_SECOND"
+        },
+        "_meta": {
+          "cognition.ai/clientMessageId": "52a353ca-3d39-45ef-956b-dde7fe4a1f30",
+          "cognition.ai/messageSubIndex": 0,
+          "cognition.ai/timestamp": "2026-09-12T20:39:30.712271+00:00"
+        }
+      }
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "LOCAL_NATIVE_REPLY_2"
+        },
+        "_meta": {
+          "cognition.ai/timestamp": "2026-09-12T20:39:30.713911+00:00"
+        }
+      }
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "title": "[consensflow launch probe]\nHUMAN_TUI_A"
+      }
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "update": {
+        "sessionUpdate": "config_option_update",
+        "configOptions": [
+          {
+            "id": "mode",
+            "name": "Session Mode",
+            "category": "mode",
+            "type": "select",
+            "currentValue": "normal",
+            "options": [
+              {
+                "value": "normal",
+                "name": "Code",
+                "description": "Write and edit code",
+                "_meta": {
+                  "cognition.ai/icon": "code"
+                }
+              },
+              {
+                "value": "accept-edits",
+                "name": "Code",
+                "description": "Write and edit code",
+                "_meta": {
+                  "cognition.ai/icon": "code"
+                }
+              },
+              {
+                "value": "ask",
+                "name": "Ask",
+                "description": "Answer questions without code changes",
+                "_meta": {
+                  "cognition.ai/icon": "message-circle"
+                }
+              },
+              {
+                "value": "plan",
+                "name": "Plan",
+                "description": "Plan changes before implementing",
+                "_meta": {
+                  "cognition.ai/icon": "file-text"
+                }
+              },
+              {
+                "value": "bypass",
+                "name": "Bypass Permissions",
+                "description": "Auto-approve all tool calls",
+                "_meta": {
+                  "cognition.ai/icon": "shield-off"
+                }
+              }
+            ]
+          },
+          {
+            "id": "model",
+            "name": "Model",
+            "description": "AI model to use",
+            "category": "model",
+            "type": "select",
+            "currentValue": "swe-1-6-fast",
+            "options": []
+          },
+          {
+            "id": "ignore-files",
+            "name": "Ignore Files",
+            "description": "Comma-separated list of ignore filenames to enforce (e.g. .gitignore,.codeiumignore,.windsurfignore,.devinignore)",
+            "category": "_windsurf_ignore_files",
+            "type": "select",
+            "currentValue": "",
+            "options": []
+          },
+          {
+            "id": "max-turn-requests",
+            "name": "Max Turn Requests",
+            "description": "Maximum LLM inference requests per turn (0 = unlimited)",
+            "category": "_windsurf_max_turn_requests",
+            "type": "select",
+            "currentValue": "0",
+            "options": []
+          },
+          {
+            "id": "subagents",
+            "name": "Subagents (Preview)",
+            "description": "Allow the agent to delegate work to subagents. Persisted to the user config (config.json).",
+            "category": "_windsurf_subagents",
+            "type": "select",
+            "currentValue": "enabled",
+            "options": [
+              {
+                "value": "enabled",
+                "name": "Enabled"
+              },
+              {
+                "value": "disabled",
+                "name": "Disabled"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "update": {
+        "sessionUpdate": "current_mode_update",
+        "currentModeId": "normal"
+      }
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "update": {
+        "sessionUpdate": "available_commands_update",
+        "availableCommands": [
+          {
+            "name": "login",
+            "description": "Authenticate with an API key",
+            "input": {
+              "hint": "[api-key]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "log-in",
+              "cognition.ai/category": "Account"
+            }
+          },
+          {
+            "name": "logout",
+            "description": "Clear authentication",
+            "_meta": {
+              "cognition.ai/icon": "log-out",
+              "cognition.ai/category": "Account"
+            }
+          },
+          {
+            "name": "status",
+            "description": "Check authentication status",
+            "_meta": {
+              "cognition.ai/icon": "user-check",
+              "cognition.ai/category": "Account"
+            }
+          },
+          {
+            "name": "workspace",
+            "description": "List workspace directories",
+            "_meta": {
+              "cognition.ai/icon": "folder-open",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "add-dir",
+            "description": "Add additional workspace directory",
+            "input": {
+              "hint": "<path>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "folder-plus",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "undo-add-dir",
+            "description": "Remove a workspace directory",
+            "input": {
+              "hint": "<path>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "folder-minus",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "remove-dir",
+            "description": "Remove a workspace directory",
+            "input": {
+              "hint": "<path>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "folder-minus",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "ask",
+            "description": "Switch to Ask mode (read-only)",
+            "input": {
+              "hint": "[question]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "message-circle",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "plan",
+            "description": "Switch to Plan mode, or plan with a prompt",
+            "input": {
+              "hint": "[prompt]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "file-text",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "code",
+            "description": "Switch to Code mode, or run a prompt in it",
+            "input": {
+              "hint": "[prompt]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "code",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "bypass",
+            "description": "Switch to Bypass Permissions mode, or run a prompt under it",
+            "input": {
+              "hint": "[prompt]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "shield-off",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "compact",
+            "description": "Force conversation compaction",
+            "_meta": {
+              "cognition.ai/icon": "archive",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "context",
+            "description": "Show context window usage",
+            "_meta": {
+              "cognition.ai/icon": "pie-chart",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "fast",
+            "description": "Switch to the fastest model available to you, or run a prompt with it",
+            "input": {
+              "hint": "[prompt]"
+            },
+            "_meta": {
+              "cognition.ai/icon": "zap",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "loop",
+            "description": "Run a prompt then auto-review the diff in a loop",
+            "input": {
+              "hint": "<prompt>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "repeat",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "btw",
+            "description": "Ask a quick side question without disrupting the main conversation",
+            "input": {
+              "hint": "<prompt>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "message-circle-question",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "recap",
+            "description": "Recap the session so far with a short summary",
+            "_meta": {
+              "cognition.ai/icon": "history",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "session-stats",
+            "description": "Show session statistics",
+            "_meta": {
+              "cognition.ai/icon": "bar-chart-2",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "rename",
+            "description": "Rename this session",
+            "input": {
+              "hint": "<new title>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "pencil",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "mcp",
+            "description": "List configured MCP servers and their status",
+            "_meta": {
+              "cognition.ai/icon": "plug",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "bug",
+            "description": "Report a bug to the Devin CLI developers",
+            "input": {
+              "hint": "<description>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "bug",
+              "cognition.ai/category": "System"
+            }
+          },
+          {
+            "name": "help",
+            "description": "Show available commands",
+            "_meta": {
+              "cognition.ai/icon": "help-circle",
+              "cognition.ai/category": "Session"
+            }
+          },
+          {
+            "name": "declarative-repo-setup",
+            "description": "Generate and verify a working environment.yaml (Devin snapshot-setup blueprint) for a repo",
+            "input": {
+              "hint": "<owner/repo>"
+            },
+            "_meta": {
+              "cognition.ai/icon": "zap",
+              "cognition.ai/category": "Skills"
+            }
+          },
+          {
+            "name": "upload-secrets",
+            "description": "Securely upload local secrets (dotenv files, env vars, API keys) to the Devin Cloud secrets manager \u2014 values never enter the conversation",
+            "_meta": {
+              "cognition.ai/icon": "zap",
+              "cognition.ai/category": "Skills"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "turnClientMessageId": "fca4f387-c435-4dd6-b167-0cecf0c0c595"
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "turnClientMessageId": "52a353ca-3d39-45ef-956b-dde7fe4a1f30"
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "steps": [
+        {
+          "stepId": "95476037-dedb-460e-ae72-3d5e024a4d6a",
+          "stepNumber": 1,
+          "kind": "prompt",
+          "userMessageId": "fca4f387-c435-4dd6-b167-0cecf0c0c595",
+          "revertTargetNodeId": 20,
+          "forkTargetNodeId": 24,
+          "summary": "[consensflow launch probe]"
+        },
+        {
+          "stepId": "3678323c-c1c9-4e33-9516-5a13b9c86cfa",
+          "stepNumber": 2,
+          "kind": "prompt",
+          "userMessageId": "52a353ca-3d39-45ef-956b-dde7fe4a1f30",
+          "revertTargetNodeId": 24,
+          "forkTargetNodeId": 28,
+          "summary": "HUMAN_SECOND"
+        }
+      ]
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "steps": [
+        {
+          "stepId": "95476037-dedb-460e-ae72-3d5e024a4d6a",
+          "stepNumber": 1,
+          "kind": "prompt",
+          "userMessageId": "fca4f387-c435-4dd6-b167-0cecf0c0c595",
+          "revertTargetNodeId": 20,
+          "forkTargetNodeId": 24,
+          "summary": "[consensflow launch probe]"
+        },
+        {
+          "stepId": "3678323c-c1c9-4e33-9516-5a13b9c86cfa",
+          "stepNumber": 2,
+          "kind": "prompt",
+          "userMessageId": "52a353ca-3d39-45ef-956b-dde7fe4a1f30",
+          "revertTargetNodeId": 24,
+          "forkTargetNodeId": 28,
+          "summary": "HUMAN_SECOND"
+        },
+        {
+          "stepId": "9581c6d3-22f0-47b3-8024-d0030afc3461",
+          "stepNumber": 3,
+          "kind": "prompt",
+          "userMessageId": "25426224-0cb8-41dd-a997-7095bb6b9b73",
+          "revertTargetNodeId": 28,
+          "forkTargetNodeId": 29,
+          "summary": "HUMAN_THIRD_AFTER_RESUME"
+        }
+      ]
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "LOCAL_NATIVE_REPLY_4"
+        },
+        "_meta": {
+          "cognition.ai/streamingMessageId": "f809f67c-c247-4fe3-993c-7eae9120cc67"
+        }
+      }
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "turnClientMessageId": "25426224-0cb8-41dd-a997-7095bb6b9b73"
+    },
+    {
+      "cause": "complete",
+      "stats": {
+        "toolCalls": 0,
+        "filesChanged": 0,
+        "commandsRun": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "ttftMs": 1,
+        "tokensPerSec": 0.0,
+        "totalTimeMs": 1
+      },
+      "sessionId": "achieved-visitor"
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "steps": [
+        {
+          "stepId": "95476037-dedb-460e-ae72-3d5e024a4d6a",
+          "stepNumber": 1,
+          "kind": "prompt",
+          "userMessageId": "fca4f387-c435-4dd6-b167-0cecf0c0c595",
+          "revertTargetNodeId": 20,
+          "forkTargetNodeId": 24,
+          "summary": "[consensflow launch probe]"
+        },
+        {
+          "stepId": "3678323c-c1c9-4e33-9516-5a13b9c86cfa",
+          "stepNumber": 2,
+          "kind": "prompt",
+          "userMessageId": "52a353ca-3d39-45ef-956b-dde7fe4a1f30",
+          "revertTargetNodeId": 24,
+          "forkTargetNodeId": 28,
+          "summary": "HUMAN_SECOND"
+        },
+        {
+          "stepId": "9581c6d3-22f0-47b3-8024-d0030afc3461",
+          "stepNumber": 3,
+          "kind": "prompt",
+          "userMessageId": "25426224-0cb8-41dd-a997-7095bb6b9b73",
+          "revertTargetNodeId": 28,
+          "forkTargetNodeId": 31,
+          "summary": "HUMAN_THIRD_AFTER_RESUME"
+        },
+        {
+          "stepId": "b5b36422-28ca-4186-85ea-7d8baa190031",
+          "stepNumber": 4,
+          "kind": "prompt",
+          "userMessageId": "bd45dfa5-747c-49b7-a42e-ea1da547e8fc",
+          "revertTargetNodeId": 31,
+          "forkTargetNodeId": 32,
+          "summary": "CANCEL_THIS_TURN"
+        }
+      ]
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "LOCAL_NATIVE_REPLY_5"
+        },
+        "_meta": {
+          "cognition.ai/streamingMessageId": "5ad72fc8-a8e5-4707-b94d-b15318df8848"
+        }
+      }
+    },
+    {
+      "sessionId": "achieved-visitor",
+      "turnClientMessageId": "bd45dfa5-747c-49b7-a42e-ea1da547e8fc"
+    },
+    {
+      "cause": "cancelled",
+      "stats": {
+        "toolCalls": 0,
+        "filesChanged": 0,
+        "commandsRun": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "ttftMs": 1,
+        "tokensPerSec": 0.0,
+        "totalTimeMs": 262
+      },
+      "sessionId": "achieved-visitor"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "productName": "ConsensFlow Candidate",
+  "identifier": "dev.ngvoicu.consensflow.candidate",
+  "bundle": {
+    "targets": ["app"],
+    "createUpdaterArtifacts": false
+  }
+}

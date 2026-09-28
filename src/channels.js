@@ -7,8 +7,12 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { send as sendClaude } from './channels/claude-peer.js'
 import { send as sendCodex } from './channels/codex.js'
+import { send as sendDevin } from './channels/devin.js'
 import { DEFAULT_DEADLINE_MS, send as sendOpenCode } from './channels/opencode.js'
 import { send as sendPi } from './channels/pi.js'
+import { prepareClaudeSettings } from './claude-install.js'
+import { prepareDevinIntegration } from './devin-install.js'
+import { runnable } from './harnesses.js'
 import { configRoot } from './roster.js'
 
 const PROBES = Object.freeze({
@@ -20,6 +24,7 @@ const PROBES = Object.freeze({
   codex: Object.freeze({ channel: 'codex-queue', probe: 'P14-Codex', date: '2026-09-08' }),
   opencode: Object.freeze({ channel: 'opencode-server', probe: 'P5', date: '2026-09-07' }),
   pi: Object.freeze({ channel: 'pi-extension', probe: 'P6', date: '2026-09-07' }),
+  devin: Object.freeze({ channel: 'devin-tui', probe: 'Devin-native-TUI', date: '2026-09-12' }),
 })
 
 export function enabledChannels(kind) {
@@ -58,12 +63,16 @@ async function freeLoopbackPort() {
 const runHelp = promisify(execFile)
 
 // Feature detection uses the resolved executable, never a second CLI from PATH.
+// A timeout here silently downgrades delivery to pasting, so it is generous:
+// a busy machine took more than 2 s to answer `--help`.
 async function hasNativeQueue(kind, executable) {
   if (typeof executable !== 'string' || !isAbsolute(executable)) return false
   if (kind === 'claude-code') return process.platform === 'darwin'
   try {
-    const { stdout } = await runHelp(executable, ['queue', '--help'], {
-      timeout: 2000,
+    const run = runnable(executable, ['queue', '--help'])
+    const { stdout } = await runHelp(run.file, run.args, {
+      ...run.options,
+      timeout: 10_000,
       maxBuffer: 128 * 1024,
       encoding: 'utf8',
       env: { ...process.env, OPENAI_API_KEY: undefined, ANTHROPIC_API_KEY: undefined },
@@ -77,13 +86,22 @@ async function hasNativeQueue(kind, executable) {
 
 export async function launchConfiguration(kind, input) {
   const { launchId, workspace } = requireLaunchInput(input)
+  if (kind === 'devin')
+    return prepareDevinIntegration(input.env, {
+      launchId,
+      node: input.node,
+      executable: input.executable,
+    })
   if (kind === 'claude-code') {
-    // Claude registers its own peer inbox. No development channel, native
-    // plugin, launch flag, settings or credential file is created by the app.
-    if (!(await hasNativeQueue(kind, input.executable))) return { args: [], env: {}, channel: null }
-    const env = input.env ?? process.env
+    // Claude registers its own peer inbox. The app writes one settings file per
+    // launch: a Stop hook on every turn, plus a coordinator's receiver hooks.
+    if (!input.env || typeof input.env !== 'object')
+      throw new Error('Claude launch configuration needs the ConsensFlow environment')
+    const env = input.env
+    const args = await prepareClaudeSettings(env, launchId, input.hooks)
+    if (!(await hasNativeQueue(kind, input.executable))) return { args, env: {}, channel: null }
     return {
-      args: [],
+      args,
       env: {},
       channel: {
         kind: 'claude-peer',
@@ -205,6 +223,7 @@ export async function send(channel, target, text) {
   const sender = {
     'claude-peer': sendClaude,
     'codex-queue': sendCodex,
+    'devin-tui': sendDevin,
     'opencode-server': sendOpenCode,
     'pi-extension': sendPi,
   }[channel]
@@ -212,7 +231,7 @@ export async function send(channel, target, text) {
   return await sender(target, text)
 }
 
-/** Keep native argument construction in the runners; only owned Codex panes need a supervisor. */
+/** Native argument construction stays in the window builders; only owned Codex panes need a supervisor. */
 export function withNativeBridge(invocation, configuration, node) {
   if (configuration?.channel?.kind !== 'codex-queue' || !configuration.channel.sessionBridge)
     return invocation

@@ -1,0 +1,203 @@
+{
+  "scenario": "control-trip",
+  "chief": "claude",
+  "model": "claude-opus-5",
+  "staff": [
+    "pi"
+  ],
+  "staffModels": {
+    "eval-pi-worker": "opencode-go/muse-spark-1.3-contributor",
+    "eval-pi-worker-2": "opencode-go/muse-spark-1.3-contributor",
+    "eval-pi-advisor": "opencode-go/muse-spark-1.3-contributor",
+    "eval-pi-reviewer": "opencode-go/muse-spark-1.3-contributor"
+  },
+  "run": 1,
+  "seconds": 1505,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Test de funcționare a fluxului ConsensFlow. Lucrezi în directorul de proiect /Users/gabrielvoicu/.consensflow-candidate…",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "queued",
+        "assignee": "eval-pi-worker-brisk-quarry"
+      }
+    ],
+    "parallel": 1,
+    "advice": 0,
+    "reviews": 0,
+    "questionsToHuman": [],
+    "notesToHuman": [],
+    "taskCount": 1,
+    "chiefId": 2,
+    "chiefHarness": "claude-code",
+    "humanId": 1,
+    "chiefTurns": 11,
+    "chiefEdits": 0,
+    "chiefLastWords": "T-1 is running again in the same window. Waiting for its result.",
+    "plumbing": {
+      "briefs": 2,
+      "briefsDelivered": 1,
+      "results": 0,
+      "resultsDelivered": 0,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 0,
+      "tells": 1,
+      "tellsAnswered": 1,
+      "pauses": 1,
+      "resumes": 1,
+      "continuations": 0,
+      "ownerQuestions": 0,
+      "ownerQuestionsAnswered": 0
+    },
+    "filesChanged": []
+  },
+  "checks": [
+    {
+      "name": "the chief stops the task with cf tell",
+      "ok": true
+    },
+    {
+      "name": "the worker answers the tell",
+      "ok": true
+    },
+    {
+      "name": "the task is paused and resumed",
+      "ok": true
+    },
+    {
+      "name": "a follow-up goes to the same window (--after)",
+      "ok": false
+    },
+    {
+      "name": "both tasks are accepted",
+      "ok": false
+    },
+    {
+      "name": "only site/notes.md is new",
+      "ok": false
+    },
+    {
+      "name": "the owner is not asked anything",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (1/2)",
+      "ok": false
+    },
+    {
+      "name": "every result reached the chief (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (1/1)",
+      "ok": true
+    },
+    {
+      "name": "every question the chief put to the owner got the owner's answer (0/0)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (1/1)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "Undulating…3",
+    "Undulating…7",
+    "✢Undulating…9",
+    "Undulating…40",
+    "✳3",
+    "✶4",
+    "✻Undulating…6",
+    "✽Undulating…7",
+    "Undulating…9",
+    "Undulating…851",
+    "Undulating…",
+    "✻Undulating…",
+    "Undulating…",
+    "✶",
+    "✳",
+    "✢Undulating…",
+    "·Undulating…",
+    "Undulating…9",
+    "Undulating…",
+    "Undulating…",
+    "✢Undulating…",
+    "Undulating…",
+    "✳",
+    "✶",
+    "✻Undulating…",
+    "✽Undulating…",
+    "Undulating…30",
+    "Undulating…",
+    "Undulating…",
+    "✻Undulating…",
+    "✶Undulating…",
+    "Und",
+    "d",
+    "⏺✶Undulating… (30s · ↓151 tokens)  ⎿  Tip: Use /theme to change the color theme❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus59599tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "✳n",
+    "✢",
+    "T-1isrunningagaininthesamewindow.Waitingforitsresult.658",
+    "✻Worked for 30s ·done 3:12 PM────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────  workspace Opus                                                  59679 tokens⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent         /rc"
+  ],
+  "terminalAnswers": 0,
+  "refusedAnswers": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 68,
+      "line": "chief (claude) ready; typing the prompt"
+    },
+    {
+      "at": 78,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 98,
+      "line": "chief working; tasks T-1:queued"
+    },
+    {
+      "at": 103,
+      "line": "chief working; tasks T-1:working"
+    },
+    {
+      "at": 128,
+      "line": "chief working; tasks T-1:paused"
+    },
+    {
+      "at": 168,
+      "line": "chief working; tasks T-1:queued"
+    },
+    {
+      "at": 173,
+      "line": "chief idle; tasks T-1:queued"
+    },
+    {
+      "at": 1505,
+      "line": "time is up"
+    }
+  ]
+}

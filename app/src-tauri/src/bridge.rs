@@ -3,7 +3,7 @@ use std::fmt;
 use std::io::{BufRead, BufReader, Read, Write};
 #[cfg(unix)]
 use std::os::fd::{AsRawFd, RawFd};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -15,6 +15,9 @@ const PROTOCOL_VERSION: u8 = 1;
 const RUST_ID_PREFIX: &str = "r-";
 const NODE_ID_PREFIX: &str = "n-";
 const WRITER_QUEUE_CAPACITY: usize = 32;
+/// The most of the writer queue a stream may fill, so a response always finds
+/// room behind a burst of pane output.
+const STREAM_QUEUE_SHARE: usize = WRITER_QUEUE_CAPACITY / 2;
 const DEFAULT_REQUEST_DEADLINE_MS: u64 = 30_000;
 
 type RequestHandler = dyn Fn(Bridge, Value) -> Result<Value, String> + Send + Sync;
@@ -84,12 +87,15 @@ struct Lifecycle {
 
 struct TransportShutdown {
     requested: AtomicBool,
+    #[cfg_attr(not(unix), allow(dead_code))]
     wait_lock: Mutex<()>,
     ready: Condvar,
 }
 
 struct BridgeInner {
     writer: Mutex<Option<mpsc::SyncSender<WriteJob>>>,
+    /// Frames in the writer queue the writer has not taken yet.
+    queued: AtomicUsize,
     pending: Mutex<HashMap<String, PendingRequest>>,
     handlers: HashMap<String, RequestHandlerEntry>,
     event_handlers: HashMap<String, Vec<Arc<EventHandler>>>,
@@ -133,6 +139,7 @@ impl BridgeBuilder {
     }
 
     #[cfg(test)]
+    #[cfg_attr(not(unix), allow(dead_code))]
     fn with_default_request_deadline_ms(mut self, milliseconds: u64) -> Self {
         self.default_request_deadline = Duration::from_millis(milliseconds);
         self
@@ -211,6 +218,7 @@ impl BridgeBuilder {
     }
 
     #[cfg(test)]
+    #[cfg_attr(not(unix), allow(dead_code))]
     fn connect_uninterruptible<R, W>(
         self,
         input: R,
@@ -309,6 +317,7 @@ impl BridgeBuilder {
         let bridge = Bridge {
             inner: Arc::new(BridgeInner {
                 writer: Mutex::new(Some(writer)),
+                queued: AtomicUsize::new(0),
                 pending: Mutex::new(HashMap::new()),
                 handlers: self.handlers,
                 event_handlers: self.event_handlers,
@@ -379,7 +388,12 @@ impl Bridge {
             pending.insert(id.clone(), PendingRequest { op, sender });
         }
         let canceled = Arc::new(AtomicBool::new(false));
-        let admitted = self.enqueue_encoded(encoded, Arc::clone(&canceled), Some(deadline))?;
+        let admitted = self.enqueue_encoded(
+            encoded,
+            Arc::clone(&canceled),
+            Some(deadline),
+            WRITER_QUEUE_CAPACITY,
+        )?;
         if !admitted {
             canceled.store(true, Ordering::Release);
             self.remove_pending(&id);
@@ -399,26 +413,59 @@ impl Bridge {
     }
 
     pub fn event(&self, op: impl Into<String>, body: Value) -> Result<bool, BridgeError> {
-        if self.is_closed() {
+        let Some(encoded) = self.encode_event(op.into(), body)? else {
             return Ok(false);
+        };
+        self.write_encoded(encoded)?;
+        Ok(true)
+    }
+
+    /// An event from a stream the peer must not lose, such as pane output. It
+    /// waits for the writer instead of failing the transport: a burst is a
+    /// busy peer, not a broken one, and the pane's unacknowledged-output
+    /// budget already bounds how much can wait. A stream fills at most half the
+    /// queue, so a response still finds room and keeps its fail-fast rule.
+    pub fn stream_event(&self, op: impl Into<String>, body: Value) -> Result<bool, BridgeError> {
+        let Some(encoded) = self.encode_event(op.into(), body)? else {
+            return Ok(false);
+        };
+        self.enqueue_encoded(
+            encoded,
+            Arc::new(AtomicBool::new(false)),
+            None,
+            STREAM_QUEUE_SHARE,
+        )
+    }
+
+    fn encode_event(&self, op: String, body: Value) -> Result<Option<Vec<u8>>, BridgeError> {
+        if self.is_closed() {
+            return Ok(None);
         }
         let frame = Frame {
             v: PROTOCOL_VERSION,
             id: self.next_id(),
             kind: "evt".to_string(),
-            op: op.into(),
+            op,
             body,
         };
         let encoded = self.encode(&frame)?;
-        if encoded.len() > self.inner.max_frame_bytes {
-            return Ok(false);
-        }
-        self.write_encoded(encoded)?;
-        Ok(true)
+        Ok((encoded.len() <= self.inner.max_frame_bytes).then_some(encoded))
     }
 
     pub fn is_closed(&self) -> bool {
         self.inner.closed.load(Ordering::Acquire)
+    }
+
+    /// Ends the peer's input, the way a parent tells a child it is done:
+    /// the writer goes, and with it the pipe the peer reads. What the peer
+    /// still writes is read to its own EOF, which alone closes the
+    /// transport, so nothing it says while stopping is lost. A frame queued
+    /// after this is refused as EOF.
+    pub fn close_input(&self) {
+        match self.inner.writer.lock() {
+            Ok(mut writer) => drop(writer.take()),
+            Err(poisoned) => drop(poisoned.into_inner().take()),
+        }
     }
 
     pub fn wait_closed(&self) -> Result<(), BridgeError> {
@@ -707,6 +754,7 @@ impl Bridge {
             encoded,
             Arc::new(AtomicBool::new(false)),
             Some(Instant::now()),
+            WRITER_QUEUE_CAPACITY,
         )? {
             return Ok(());
         }
@@ -715,11 +763,15 @@ impl Bridge {
         Err(error)
     }
 
+    /// Queues a frame once fewer than `depth` frames are waiting, retrying
+    /// until `deadline`; with no deadline it waits for as long as the
+    /// transport is open.
     fn enqueue_encoded(
         &self,
         mut encoded: Vec<u8>,
         canceled: Arc<AtomicBool>,
         deadline: Option<Instant>,
+        depth: usize,
     ) -> Result<bool, BridgeError> {
         encoded.push(b'\n');
         let mut job = WriteJob {
@@ -739,7 +791,21 @@ impl Bridge {
                 let Some(writer) = writer.as_ref() else {
                     return Err(BridgeError::Eof);
                 };
-                writer.try_send(job)
+                // Counted under the writer lock, so no other sender slips in
+                // between the look and the send. The count runs one ahead of
+                // the channel while the writer holds a job it has taken but not
+                // yet counted, so only a share stops at it: a frame allowed the
+                // whole queue asks the channel itself.
+                if depth < WRITER_QUEUE_CAPACITY
+                    && self.inner.queued.load(Ordering::Acquire) >= depth
+                {
+                    Err(mpsc::TrySendError::Full(job))
+                } else {
+                    self.inner.queued.fetch_add(1, Ordering::AcqRel);
+                    writer.try_send(job).inspect_err(|_| {
+                        self.inner.queued.fetch_sub(1, Ordering::AcqRel);
+                    })
+                }
             };
             match send_result {
                 Ok(()) => return Ok(true),
@@ -870,12 +936,13 @@ fn writer_loop(
     weak_inner: Weak<BridgeInner>,
 ) {
     while let Ok(job) = jobs.recv() {
-        if job.canceled.load(Ordering::Acquire) {
-            continue;
-        }
         let Some(inner) = weak_inner.upgrade() else {
             return;
         };
+        inner.queued.fetch_sub(1, Ordering::AcqRel);
+        if job.canceled.load(Ordering::Acquire) {
+            continue;
+        }
         if inner.closed.load(Ordering::Acquire) {
             return;
         }
@@ -903,10 +970,12 @@ impl TransportShutdown {
         self.ready.notify_all();
     }
 
+    #[cfg_attr(not(unix), allow(dead_code))]
     fn is_requested(&self) -> bool {
         self.requested.load(Ordering::Acquire)
     }
 
+    #[cfg_attr(not(unix), allow(dead_code))]
     fn wait_for_retry(&self) {
         let guard = self
             .wait_lock
@@ -1048,7 +1117,21 @@ pub fn stdin_is_pipe() -> bool {
     })
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+pub fn stdin_is_pipe() -> bool {
+    use std::os::windows::io::AsRawHandle;
+
+    unsafe extern "system" {
+        fn GetFileType(handle: *mut core::ffi::c_void) -> u32;
+    }
+    const FILE_TYPE_PIPE: u32 = 0x0003;
+
+    // SAFETY: GetFileType only inspects the handle; the standard input handle
+    // stays owned by the process.
+    unsafe { GetFileType(std::io::stdin().as_raw_handle()) == FILE_TYPE_PIPE }
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn stdin_is_pipe() -> bool {
     false
 }
@@ -1361,6 +1444,15 @@ mod tests {
                 let (state, ready) = &*self.state;
                 state.lock().expect("gated writer lock").released = true;
                 ready.notify_all();
+            }
+
+            fn bytes(&self) -> Vec<u8> {
+                self.state
+                    .0
+                    .lock()
+                    .expect("gated writer lock")
+                    .bytes
+                    .clone()
             }
         }
 
@@ -2038,6 +2130,65 @@ mod tests {
         }
 
         #[test]
+        fn stream_events_wait_for_a_busy_peer_and_leave_room_for_responses() {
+            let (writer, gate) = gated_writer();
+            let (connected, mut peer) = connect_with_writer(BridgeBuilder::new(1024), writer);
+            assert!(connected
+                .bridge
+                .event("occupy", json!(null))
+                .expect("occupy the writer"));
+            gate.wait_until_entered();
+
+            // Three queues' worth of pane output while the peer reads nothing.
+            let burst_size = 3 * WRITER_QUEUE_CAPACITY;
+            let streamer = connected.bridge.clone();
+            let burst = thread::spawn(move || {
+                for seq in 0..burst_size {
+                    streamer
+                        .stream_event("pane.output", json!({"seq":seq}))
+                        .expect("stream to a busy peer");
+                }
+            });
+            thread::sleep(Duration::from_millis(50));
+            send_frame(
+                &mut peer,
+                json!({"v":1,"id":"n-mid-burst","kind":"req","op":"unknown","body":null}),
+            );
+            thread::sleep(Duration::from_millis(50));
+            let open_while_busy = !connected.bridge.is_closed();
+
+            gate.release();
+            burst.join().expect("burst thread");
+            let expected_lines = burst_size + 2;
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let mut written = gate.bytes();
+            while written.iter().filter(|&&byte| byte == b'\n').count() < expected_lines
+                && Instant::now() < deadline
+            {
+                thread::sleep(Duration::from_millis(5));
+                written = gate.bytes();
+            }
+            let frames = written
+                .split(|&byte| byte == b'\n')
+                .filter(|line| !line.is_empty())
+                .map(|line| serde_json::from_slice::<Value>(line).expect("parse a written frame"))
+                .collect::<Vec<_>>();
+            let streamed = frames
+                .iter()
+                .filter(|frame| frame["op"] == "pane.output")
+                .map(|frame| frame["body"]["seq"].as_u64().expect("seq"))
+                .collect::<Vec<_>>();
+
+            assert!(open_while_busy, "a busy peer closed the bridge");
+            assert!(!connected.bridge.is_closed());
+            assert_eq!(frames.len(), expected_lines);
+            assert!(frames
+                .iter()
+                .any(|frame| frame["kind"] == "res" && frame["id"] == "n-mid-burst"));
+            assert_eq!(streamed, (0..burst_size as u64).collect::<Vec<_>>());
+        }
+
+        #[test]
         fn eof_interrupts_blocked_real_output_and_releases_both_endpoints() {
             let max_frame_bytes = 9 * 1024 * 1024;
             let (connected, peer_input, peer_output, input_probe, mut output_probe) =
@@ -2617,10 +2768,46 @@ mod tests {
 
     #[cfg(windows)]
     mod windows {
+        use std::io::{BufRead, BufReader, Write};
+        use std::time::{Duration, Instant};
+
+        use serde_json::{json, Value};
+
+        use super::super::BridgeBuilder;
+
+        /// The daemon's side of the app's pipes: its handle first, then a
+        /// frame per line each way, and the bridge closes when its input ends.
         #[test]
-        #[ignore = "macOS-first pipe protocol contract"]
-        fn child_stdio_protocol_contract() {
-            panic!("exercise with Windows child pipes");
+        fn frames_cross_os_pipes_and_the_bridge_closes_at_their_end() {
+            let (bridge_input, mut to_bridge) = std::io::pipe().expect("input pipe");
+            let (from_bridge, bridge_output) = std::io::pipe().expect("output pipe");
+            let handle = json!({"url":"http://127.0.0.1:1234","token":"secret"});
+            writeln!(to_bridge, "{handle}").expect("send the handle");
+            let connected = BridgeBuilder::new(1024)
+                .connect(bridge_input, bridge_output)
+                .expect("connect over pipes");
+            assert_eq!(connected.handle, handle);
+            let mut lines = BufReader::new(from_bridge);
+
+            let request =
+                json!({"v":1,"id":"n-unknown","kind":"req","op":"does.not.exist","body":null});
+            writeln!(to_bridge, "{request}").expect("send a frame");
+            let mut line = String::new();
+            lines.read_line(&mut line).expect("read a frame");
+            assert_eq!(
+                serde_json::from_str::<Value>(&line).expect("a JSON frame"),
+                json!({"v":1,"id":"n-unknown","kind":"res","op":"does.not.exist","body":{"ok":false,"error":"unknown-op"}})
+            );
+
+            drop(to_bridge);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !connected.bridge.is_closed() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(
+                connected.bridge.is_closed(),
+                "the bridge outlived its input"
+            );
         }
     }
 }

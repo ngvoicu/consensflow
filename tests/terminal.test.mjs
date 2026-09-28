@@ -5,6 +5,9 @@ import { after, describe, it } from 'node:test'
 import { installTerminalCommand, terminalCommandStatus, terminalRuntime } from '../src/terminal.js'
 import { tempEnv } from './helpers.mjs'
 
+/** A launcher is `cf` on POSIX and `cf.cmd` on Windows. */
+const CMD = process.platform === 'win32' ? '.cmd' : ''
+
 describe('the app can put its own CLI on your PATH', () => {
   const t = tempEnv()
   after(() => t.cleanup())
@@ -19,7 +22,7 @@ describe('the app can put its own CLI on your PATH', () => {
     const outcome = installTerminalCommand(t.env, { candidates: [bin] })
 
     assert.equal(outcome.installed, true)
-    const launcher = join(bin, 'consensflow')
+    const launcher = join(bin, `consensflow${CMD}`)
     assert.ok(existsSync(launcher))
 
     // It must point at the harness and sources running right now, so the
@@ -27,13 +30,13 @@ describe('the app can put its own CLI on your PATH', () => {
     const script = readFileSync(launcher, 'utf8')
     assert.ok(script.includes(process.execPath))
     assert.ok(script.includes('cf.mjs'))
-    assert.ok((statSync(launcher).mode & 0o111) !== 0, 'must be executable')
+    if (!CMD) assert.ok((statSync(launcher).mode & 0o111) !== 0, 'must be executable')
   })
 
   it('says where it went, and whether that place is on PATH', () => {
     const status = terminalCommandStatus({ ...t.env, PATH: bin }, { candidates: [bin] })
     assert.equal(status.installed, true)
-    assert.equal(status.path, join(bin, 'consensflow'))
+    assert.equal(status.path, join(bin, `consensflow${CMD}`))
     assert.equal(status.onPath, true)
 
     const elsewhere = terminalCommandStatus({ ...t.env, PATH: '/nowhere' }, { candidates: [bin] })
@@ -53,9 +56,12 @@ describe('the app can put its own CLI on your PATH', () => {
     const other = join(t.root, 'Other.app', 'node')
     mkdirSync(dirname(other), { recursive: true })
     writeFileSync(other, '')
+    const otherCli = join(t.root, 'Other.app', 'cf.mjs')
     writeFileSync(
-      join(bin, 'consensflow'),
-      `#!/bin/sh\n# Installed by ConsensFlow.\nexec "${other}" "${join(t.root, 'Other.app', 'cf.mjs')}" "$@"\n`,
+      join(bin, `consensflow${CMD}`),
+      CMD
+        ? `@echo off\r\nREM Installed by ConsensFlow.\r\n"${other}" "${otherCli}" %*\r\n`
+        : `#!/bin/sh\n# Installed by ConsensFlow.\nexec "${other}" "${otherCli}" "$@"\n`,
     )
 
     const theirs = terminalRuntime(t.env, { candidates: [bin] })
@@ -67,9 +73,65 @@ describe('the app can put its own CLI on your PATH', () => {
     assert.equal(theirs.entry, join(t.root, 'Other.app', 'cf.mjs'))
   })
 
+  it('says when the command runs the installed release, which development must never write into', {
+    skip:
+      process.platform === 'win32' &&
+      'the release bundle is macOS-shaped; the Windows installer has its own',
+  }, () => {
+    const bundle = (name, identifier) => {
+      const contents = join(t.root, `${name}.app`, 'Contents')
+      mkdirSync(join(contents, 'Resources', 'cli', 'bin'), { recursive: true })
+      writeFileSync(
+        join(contents, 'Info.plist'),
+        `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n\t<key>CFBundleIdentifier</key>\n\t<string>${identifier}</string>\n</dict>\n</plist>\n`,
+      )
+      const entry = join(contents, 'Resources', 'cli', 'bin', 'cf.mjs')
+      writeFileSync(entry, '')
+      writeFileSync(
+        join(bin, 'consensflow'),
+        `#!/bin/sh\n# Installed by ConsensFlow.\nexec "${process.execPath}" "${entry}" "$@"\n`,
+      )
+    }
+    bundle('Live', 'dev.ngvoicu.consensflow')
+    assert.equal(terminalRuntime(t.env, { candidates: [bin] }).live, true)
+    bundle('Candidate', 'dev.ngvoicu.consensflow.candidate')
+    assert.equal(terminalRuntime(t.env, { candidates: [bin] }).live, false)
+    installTerminalCommand(t.env, { candidates: [bin] })
+    assert.equal(
+      terminalRuntime(t.env, { candidates: [bin] }).live,
+      false,
+      'a checkout is not a bundle',
+    )
+  })
+
+  it('keeps a separate home when run from a terminal that does not name one', () => {
+    // The candidate's launcher is run from an ordinary terminal, where no
+    // CONSENSFLOW_HOME is set: without the pin it would fall back to the
+    // live ~/.consensflow.
+    installTerminalCommand(t.env, { candidates: [bin] })
+    const script = readFileSync(join(bin, `cf${CMD}`), 'utf8')
+    assert.ok(
+      script.includes(
+        CMD
+          ? `set "CONSENSFLOW_HOME=${t.env.CONSENSFLOW_HOME}"`
+          : `export CONSENSFLOW_HOME="${t.env.CONSENSFLOW_HOME}"`,
+      ),
+    )
+    assert.equal(terminalRuntime(t.env, { candidates: [bin] }).mine, true)
+
+    const { CONSENSFLOW_HOME, ...defaults } = t.env
+    const plain = join(t.root, 'plain-bin')
+    mkdirSync(plain)
+    installTerminalCommand(defaults, { candidates: [plain] })
+    assert.ok(!readFileSync(join(plain, `cf${CMD}`), 'utf8').includes('CONSENSFLOW_HOME'))
+  })
+
   it('explains itself when no candidate directory can be written', () => {
+    // A file where a directory is wanted cannot be written into, anywhere.
+    const blocked = join(t.root, 'blocked')
+    writeFileSync(blocked, '')
     assert.throws(
-      () => installTerminalCommand(t.env, { candidates: ['/System/nope'] }),
+      () => installTerminalCommand(t.env, { candidates: [join(blocked, 'bin')] }),
       /could not write|no writable/i,
     )
   })
@@ -83,7 +145,7 @@ it('keeps default CLI launchers in ConsensFlow home despite a project bin overri
     assert.equal(outcome.dir, join(t.env.CONSENSFLOW_HOME, 'bin'))
     assert.equal(existsSync(t.env.CONSENSFLOW_BIN_DIR), false)
     assert.equal(existsSync(join(t.env.HOME, '.local', 'bin')), false)
-    assert.equal(existsSync(join(outcome.dir, 'cf')), true)
+    assert.equal(existsSync(join(outcome.dir, `cf${CMD}`)), true)
   } finally {
     t.cleanup()
   }

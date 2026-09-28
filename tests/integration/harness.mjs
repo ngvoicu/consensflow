@@ -2,18 +2,27 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { delimiter, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { resultStatus } from '../../hosts/lib/inbox.js'
-import { workspaceKey } from '../../hosts/lib/state.js'
 
+const WINDOWS = process.platform === 'win32'
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
-const CF = join(REPO, 'bin', 'cf.mjs')
 const BRIDGE =
   process.env.CONSENSFLOW_TEST_BRIDGE ??
-  join(REPO, 'app', 'src-tauri', 'target', 'release', 'consensflow-bridge')
-const EDITOR = fileURLToPath(new URL('./pty-editor.mjs', import.meta.url))
-const FAKE = join(dirname(fileURLToPath(import.meta.url)), 'fake-claude.mjs')
+  join(
+    REPO,
+    'app',
+    'src-tauri',
+    'target',
+    'release',
+    WINDOWS ? 'consensflow-bridge.exe' : 'consensflow-bridge',
+  )
+// A terminal asks where the cursor is; ConPTY asks before the child may print
+// at all. The page's xterm answers, and with no page this harness does.
+const CURSOR_QUERY = Buffer.from('\u001b[6n')
+const CURSOR_REPLY = [...Buffer.from('\u001b[1;1R')]
+const EDITOR = fileURLToPath(new URL('./core-editor.mjs', import.meta.url))
+const FAKE = join(dirname(fileURLToPath(import.meta.url)), 'fake-agent.mjs')
 
 function parser(onLine) {
   let carry = Buffer.alloc(0)
@@ -39,6 +48,10 @@ function firstLine(readable, child) {
       const end = carry.indexOf(0x0a)
       if (end === -1) return
       readable.removeListener('data', onData)
+      // Hold what follows until the router is attached: a flowing stream with
+      // no listener drops it, and the daemon's first frames are its restart
+      // resume. The app's bridge keeps its reader, so it never loses them.
+      readable.pause()
       resolve({
         line: carry.subarray(0, end).toString('utf8').replace(/\r$/, ''),
         rest: carry.subarray(end + 1),
@@ -75,7 +88,20 @@ function safeEnvironment(root, fakeBin, harnessFile) {
     CLAUDE_CONFIG_DIR: join(home, '.claude'),
     CODEX_HOME: join(home, '.codex'),
     XDG_CONFIG_HOME: join(home, '.config'),
-    PATH: `${fakeBin}:/usr/local/bin:/usr/bin:/bin`,
+    PATH: WINDOWS
+      ? [fakeBin, join(process.env.SystemRoot ?? 'C:\\Windows', 'System32')].join(delimiter)
+      : `${fakeBin}:/usr/local/bin:/usr/bin:/bin`,
+    // What Windows itself needs to start a process, and the home Node reads there.
+    ...(WINDOWS
+      ? {
+          SystemRoot: process.env.SystemRoot,
+          ComSpec: process.env.ComSpec,
+          PATHEXT: process.env.PATHEXT,
+          TEMP: tmpdir(),
+          TMP: tmpdir(),
+          USERPROFILE: home,
+        }
+      : {}),
     CONSENSFLOW_NODE: process.execPath,
     CF_TEST_HARNESS: harnessFile,
     CF_TEST_WORKER_ANSWER: 'worker completed from a real PTY child',
@@ -83,16 +109,25 @@ function safeEnvironment(root, fakeBin, harnessFile) {
   }
 }
 
-function writeFakeInstall(root, env) {
+function writeFakeInstall(root, sandbox, harnessFile) {
   const fakeBin = join(root, 'fake-bin')
-  const projects = join(env.CLAUDE_CONFIG_DIR, 'projects', 'integration')
+  const projects = join(sandbox.CLAUDE_CONFIG_DIR, 'projects', 'integration')
   mkdirSync(fakeBin, { recursive: true })
   mkdirSync(projects, { recursive: true })
-  writeFileSync(
-    join(fakeBin, 'claude'),
-    '#!/bin/sh\nexec "$CONSENSFLOW_NODE" "$CF_TEST_HARNESS" "$@"\n',
-    { mode: 0o755 },
-  )
+  // On Windows the shape of an npm shim, naming node and the script outright,
+  // which is how a window opens on it.
+  if (WINDOWS) {
+    writeFileSync(
+      join(fakeBin, 'claude.cmd'),
+      `@echo off\r\n"${process.execPath}" "${harnessFile}" %*\r\n`,
+    )
+  } else {
+    writeFileSync(
+      join(fakeBin, 'claude'),
+      '#!/bin/sh\nexec "$CONSENSFLOW_NODE" "$CF_TEST_HARNESS" "$@"\n',
+      { mode: 0o755 },
+    )
+  }
   return fakeBin
 }
 
@@ -126,17 +161,28 @@ function waitFor(predicate, timeoutMs = 10_000, intervalMs = 25) {
  * their production JSON-lines pipes. The helper only observes and routes the
  * bytes; pane.open, PTYs, input arbitration and cleanup stay native.
  */
-export async function startIntegration({ fakeEnv = {}, bridgeEnv = {}, existingRoot = null } = {}) {
+export async function startIntegration({
+  fakeEnv = {},
+  bridgeEnv = {},
+  existingRoot = null,
+  editor = EDITOR,
+} = {}) {
   assert.equal(existsSync(BRIDGE), true, `missing built bridge: ${BRIDGE}`)
   const root = existingRoot ?? mkdtempSync(join(tmpdir(), 'consensflow-integration-'))
   const workspace = join(root, 'workspace')
   mkdirSync(workspace, { recursive: true })
   const initial = safeEnvironment(root, join(root, 'fake-bin'), FAKE)
-  const fakeBin = writeFakeInstall(root, initial)
-  const env = { ...safeEnvironment(root, fakeBin, FAKE), ...fakeEnv }
+  const fakeBin = writeFakeInstall(root, initial, fakeEnv.CF_TEST_HARNESS ?? FAKE)
+  // A null override removes the sandbox default: a run on the real harnesses
+  // must leave CLAUDE_CONFIG_DIR unset, so Claude keeps its own home config.
+  const env = Object.fromEntries(
+    Object.entries({ ...safeEnvironment(root, fakeBin, FAKE), ...fakeEnv }).filter(
+      ([, value]) => value !== null && value !== undefined,
+    ),
+  )
   writeRoster(env)
 
-  const ui = spawn(process.execPath, [EDITOR], {
+  const ui = spawn(process.execPath, [editor], {
     cwd: REPO,
     env,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -150,6 +196,9 @@ export async function startIntegration({ fakeEnv = {}, bridgeEnv = {}, existingR
   const nodeFrames = []
   const rustFrames = []
   const openFrames = []
+  // What every pane printed and how it ended, for a failure to explain itself.
+  const outputs = new Map()
+  const exits = []
   const nodePending = new Map()
   const rustPending = new Map()
   const rust = spawn(BRIDGE, [], {
@@ -181,6 +230,16 @@ export async function startIntegration({ fakeEnv = {}, bridgeEnv = {}, existingR
   const rustToNode = parser((line) => {
     const frame = JSON.parse(line)
     rustFrames.push(frame)
+    if (frame.op === 'pane.output' && Array.isArray(frame.body?.bytes)) {
+      const key = frame.body.id
+      const bytes = Buffer.from(frame.body.bytes)
+      outputs.set(key, [...(outputs.get(key) ?? []), bytes])
+      if (bytes.includes(CURSOR_QUERY)) {
+        const { id, generation } = frame.body
+        request('pane.reply', { id, generation, bytes: CURSOR_REPLY }).catch(() => {})
+      }
+    }
+    if (frame.op === 'pane.exit') exits.push(frame.body)
     if (frame.kind === 'res' && rustPending.has(frame.id)) {
       rustPending.get(frame.id).resolve(frame.body)
     }
@@ -207,6 +266,8 @@ export async function startIntegration({ fakeEnv = {}, bridgeEnv = {}, existingR
   if (rustHandleLine.rest.length > 0) {
     rustToNode.push(rustHandleLine.rest)
   }
+  ui.stdout.resume()
+  rust.stdout.resume()
   ui.stdin.on('error', () => {})
   rust.stdin.on('error', () => {})
 
@@ -255,75 +316,6 @@ export async function startIntegration({ fakeEnv = {}, bridgeEnv = {}, existingR
     })
   }
 
-  const http = async (pathname, { method = 'GET', body, token = handle.token } = {}) => {
-    const response = await fetch(`${handle.url}${pathname.replace(/^\//, '')}`, {
-      method,
-      headers: {
-        authorization: `Bearer ${token}`,
-        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    })
-    const text = await response.text()
-    return { status: response.status, body: text.length === 0 ? null : JSON.parse(text) }
-  }
-
-  const runCli = (args, extraEnv = {}, timeoutMs = 10_000) =>
-    new Promise((resolveRun, rejectRun) => {
-      const child = spawn(process.execPath, [CF, ...args], {
-        cwd: workspace,
-        env: { ...env, ...extraEnv },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      })
-      let stdout = ''
-      let stderr = ''
-      let settled = false
-      const timer = setTimeout(() => {
-        if (settled) return
-        child.kill('SIGKILL')
-        rejectRun(new Error(`CLI timed out: cf ${args.join(' ')}`))
-      }, timeoutMs)
-      child.stdout.on('data', (chunk) => {
-        stdout += String(chunk)
-      })
-      child.stderr.on('data', (chunk) => {
-        stderr += String(chunk)
-      })
-      child.on('error', (cause) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        rejectRun(cause)
-      })
-      child.on('close', (code, signal) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        resolveRun({ code, signal, stdout, stderr })
-      })
-    })
-
-  const threads = (dir = workspace) => {
-    const file = join(env.CONSENSFLOW_HOME, 'workspaces', workspaceKey(dir), 'threads.json')
-    try {
-      return JSON.parse(readFileSync(file, 'utf8'))
-    } catch {
-      return {}
-    }
-  }
-
-  const deliveries = (dir = workspace) => {
-    const file = join(env.CONSENSFLOW_HOME, 'workspaces', workspaceKey(dir), 'inbox.json')
-    try {
-      return Object.values(JSON.parse(readFileSync(file, 'utf8')).results).map((result) => ({
-        ...result,
-        state: resultStatus(result),
-      }))
-    } catch {
-      return []
-    }
-  }
-
   const transcript = (sessionId) => {
     const file = join(env.CLAUDE_CONFIG_DIR, 'projects', 'integration', `${sessionId}.jsonl`)
     try {
@@ -366,11 +358,44 @@ export async function startIntegration({ fakeEnv = {}, bridgeEnv = {}, existingR
     nodeFrames,
     rustFrames,
     openFrames,
+    exits,
+    /** Everything a pane printed so far, control sequences stripped, newest last. */
+    output(paneId) {
+      const esc = String.fromCharCode(27)
+      const bell = String.fromCharCode(7)
+      return Buffer.concat(outputs.get(paneId) ?? [])
+        .toString('utf8')
+        .replace(new RegExp(`${esc}\\[[0-9;?]*[ -/]*[@-~]`, 'g'), '')
+        .replace(new RegExp(`${esc}\\][^${bell}]*${bell}`, 'g'), '')
+        .replaceAll('\r', '')
+    },
     request,
     requestNode,
     requestRust: request,
+    /**
+     * The human types into the chief's terminal, the one way work reaches the
+     * chief: a bracketed paste of `text`, then Enter, once the chief is idle.
+     */
+    async tell(project, text, { idleMs = 60_000 } = {}) {
+      const chief = async () =>
+        (await requestNode('board.get', { project })).board.lanes.find(
+          (lane) => lane.participant.handle === 'chief',
+        )
+      await waitFor(async () => (await chief())?.activity?.state === 'idle', idleMs)
+      const { pane } = await chief()
+      const typed = await request('pane.input', {
+        id: pane.id,
+        generation: pane.generation,
+        bytes: [...Buffer.from(`\u001b[200~${text}\u001b[201~\r`)],
+      })
+      assert.equal(typed.ok, true, JSON.stringify(typed))
+    },
     killRust(signal = 'SIGKILL') {
       return rust.kill(signal)
+    },
+    /** The app's own quit order: the daemon dies first, then the pane host. */
+    killEditor(signal = 'SIGKILL') {
+      return ui.kill(signal)
     },
     rustExited() {
       return rust.exitCode !== null || rust.signalCode !== null
@@ -381,22 +406,19 @@ export async function startIntegration({ fakeEnv = {}, bridgeEnv = {}, existingR
     rustPid() {
       return rust.pid
     },
+    uiPid() {
+      return ui.pid
+    },
     signalRust(signal) {
       return process.kill(rust.pid, signal)
     },
-    http,
-    async openTab(options = {}) {
-      const opened = await http('/api/tabs', {
-        method: 'POST',
-        body: { dir: workspace, harness: 'claude-code', ...options },
-      })
-      assert.equal(opened.status, 201, JSON.stringify(opened.body))
-      return opened.body
-    },
-    runCli,
-    waitFor,
-    threads,
-    deliveries,
+    // A timeout names what both processes said on stderr: an automatic resume
+    // that failed, for one, logs there and nowhere else.
+    waitFor: (predicate, timeoutMs, intervalMs) =>
+      waitFor(predicate, timeoutMs, intervalMs).catch((cause) => {
+        cause.message += `; ui stderr=${uiErrors.join('').trim()} rust stderr=${rustErrors.join('').trim()}`
+        throw cause
+      }),
     transcript,
     processes,
     pidAlive,

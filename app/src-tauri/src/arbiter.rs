@@ -2,6 +2,7 @@ use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::fmt;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Instant;
 
 use crate::pty::{write_paste_via, PaneError, PaneInputWriter, PaneKey, PaneTable};
 
@@ -93,6 +94,9 @@ pub struct ArbiterSnapshot {
     pub input_failed: bool,
     pub queued_human_bytes: usize,
     pub last_submission_id: Option<String>,
+    /// How long the pane has printed nothing, once it has printed anything:
+    /// a harness still drawing its screen is not ready for input.
+    pub output_quiet_ms: Option<u64>,
 }
 
 struct QueuedHumanInput {
@@ -105,10 +109,13 @@ struct PaneInputState {
     input_epoch: u64,
     draft_epoch: Option<u64>,
     emitted_enter_epochs: BTreeSet<u64>,
+    human_bracketed_paste: bool,
+    human_marker_position: usize,
     paste_in_flight: bool,
     input_failed: bool,
     queued_human: VecDeque<QueuedHumanInput>,
     last_submission_id: Option<String>,
+    last_output: Option<Instant>,
 }
 
 type PaneState = Arc<Mutex<PaneInputState>>;
@@ -121,10 +128,13 @@ impl PaneInputState {
             input_epoch: 0,
             draft_epoch: None,
             emitted_enter_epochs: BTreeSet::new(),
+            human_bracketed_paste: false,
+            human_marker_position: 0,
             paste_in_flight: false,
             input_failed: false,
             queued_human: VecDeque::new(),
             last_submission_id: None,
+            last_output: None,
         }
     }
 
@@ -141,7 +151,34 @@ impl PaneInputState {
                 .map(|queued| queued.bytes.len())
                 .sum(),
             last_submission_id: self.last_submission_id.clone(),
+            output_quiet_ms: self
+                .last_output
+                .map(|at| u64::try_from(at.elapsed().as_millis()).unwrap_or(u64::MAX)),
         }
+    }
+
+    fn human_enter_epochs(&mut self, bytes: &[u8], first_epoch: u64) -> Vec<u64> {
+        let mut enters = Vec::new();
+        for (index, byte) in bytes.iter().copied().enumerate() {
+            let marker = if self.human_bracketed_paste {
+                b"\x1b[201~"
+            } else {
+                b"\x1b[200~"
+            };
+            if byte == marker[self.human_marker_position] {
+                self.human_marker_position += 1;
+                if self.human_marker_position == marker.len() {
+                    self.human_bracketed_paste = !self.human_bracketed_paste;
+                    self.human_marker_position = 0;
+                }
+            } else {
+                self.human_marker_position = usize::from(byte == 0x1b);
+            }
+            if byte == b'\r' && !self.human_bracketed_paste {
+                enters.push(first_epoch + index as u64 + 1);
+            }
+        }
+        enters
     }
 }
 
@@ -157,6 +194,17 @@ impl InputArbiter {
             panes: Mutex::new(HashMap::new()),
             enter_delay_ms,
             events,
+        }
+    }
+
+    /// The pane printed something now.
+    pub fn note_output(&self, pane: &PaneKey) {
+        if let Ok(state) = self.pane_state(pane) {
+            if let Ok(mut state) = lock_state(&state) {
+                if state.generation == pane.generation {
+                    state.last_output = Some(Instant::now());
+                }
+            }
         }
     }
 
@@ -252,11 +300,33 @@ impl InputArbiter {
         self.write_human_via(table, pane, bytes)
     }
 
+    /// Keys that type nothing (arrows, function keys, mouse and wheel reports,
+    /// Escape): they reach the pane in order with the typing, but leave no
+    /// draft behind, so they never hold a paste.
+    pub fn write_control(
+        &self,
+        table: &PaneTable,
+        pane: &PaneKey,
+        bytes: &[u8],
+    ) -> Result<u64, ArbiterError> {
+        self.write_human_latching(table, pane, bytes, false)
+    }
+
     fn write_human_via<W: PaneInputWriter + ?Sized>(
         &self,
         writer: &W,
         pane: &PaneKey,
         bytes: &[u8],
+    ) -> Result<u64, ArbiterError> {
+        self.write_human_latching(writer, pane, bytes, true)
+    }
+
+    fn write_human_latching<W: PaneInputWriter + ?Sized>(
+        &self,
+        writer: &W,
+        pane: &PaneKey,
+        bytes: &[u8],
+        latch: bool,
     ) -> Result<u64, ArbiterError> {
         let state = self.pane_state(pane)?;
         let mut state = lock_state(&state)?;
@@ -273,14 +343,11 @@ impl InputArbiter {
         let next_epoch = first_epoch
             .checked_add(byte_count)
             .ok_or(ArbiterError::EpochOverflow)?;
-        let enter_epochs = bytes
-            .iter()
-            .enumerate()
-            .filter(|(_, byte)| **byte == b'\r')
-            .map(|(index, _)| first_epoch + index as u64 + 1)
-            .collect::<Vec<_>>();
+        let enter_epochs = state.human_enter_epochs(bytes, first_epoch);
         state.input_epoch = next_epoch;
-        state.draft_epoch = Some(next_epoch);
+        if latch {
+            state.draft_epoch = Some(next_epoch);
+        }
 
         if state.paste_in_flight {
             state.queued_human.push_back(QueuedHumanInput {
@@ -558,19 +625,52 @@ pub fn sanitize(body: &[u8]) -> Result<Vec<u8>, SanitizeError> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::collections::HashMap;
+    #[cfg(unix)]
     use std::io::{Read, Result as IoResult};
+    #[cfg(unix)]
     use std::path::Path;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{mpsc, Arc, Barrier, Mutex};
     use std::thread;
     use std::time::{Duration, Instant};
 
+    #[cfg(unix)]
     use portable_pty::PtySize;
 
-    use super::{sanitize, ArbiterError, ClearOutcome, InputArbiter, PaneEvent, SanitizeError};
-    use crate::pty::{serial_pty_test, OpenedPane, PaneError, PaneInputWriter, PaneKey, PaneTable};
+    #[cfg(unix)]
+    use super::ClearOutcome;
+    use super::{sanitize, ArbiterError, InputArbiter, PaneEvent, SanitizeError};
+    #[cfg(unix)]
+    use crate::pty::{serial_pty_test, OpenedPane, PaneTable};
+    use crate::pty::{PaneError, PaneInputWriter, PaneKey};
 
+    #[test]
+    fn a_snapshot_says_how_long_the_pane_has_printed_nothing() {
+        let (events, _received) = mpsc::channel();
+        let arbiter = InputArbiter::new(0, events);
+        let pane = PaneKey::new("quiet-pane", 1);
+        arbiter.register(&pane).expect("register");
+        assert_eq!(
+            arbiter.snapshot(&pane).expect("snapshot").output_quiet_ms,
+            None
+        );
+        arbiter.note_output(&pane);
+        thread::sleep(Duration::from_millis(20));
+        let quiet = arbiter.snapshot(&pane).expect("snapshot").output_quiet_ms;
+        assert!(
+            quiet.is_some_and(|ms| (20..5_000).contains(&ms)),
+            "{quiet:?}"
+        );
+        arbiter.note_output(&PaneKey::new("quiet-pane", 2));
+        assert!(
+            arbiter.snapshot(&pane).expect("snapshot").output_quiet_ms >= Some(20),
+            "another generation's output is not this pane's"
+        );
+    }
+
+    #[cfg(unix)]
     fn terminal_size() -> PtySize {
         PtySize {
             rows: 24,
@@ -580,6 +680,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn raw_recorder(table: &PaneTable, byte_count: usize) -> (PaneKey, Box<dyn Read + Send>) {
         let script = format!("stty raw -echo; printf ready; od -An -tx1 -N {byte_count}");
         let OpenedPane { key, mut reader } = table
@@ -594,6 +695,7 @@ mod tests {
         (key, reader)
     }
 
+    #[cfg(unix)]
     fn raw_recorder_at(table: &PaneTable, key: PaneKey, byte_count: usize) -> Box<dyn Read + Send> {
         let script = format!("stty raw -echo; printf ready; od -An -tx1 -N {byte_count}");
         let mut reader = table
@@ -609,12 +711,14 @@ mod tests {
         reader
     }
 
+    #[cfg(unix)]
     fn await_ready(reader: &mut Box<dyn Read + Send>) {
         let mut ready = [0_u8; 5];
         reader.read_exact(&mut ready).expect("raw recorder ready");
         assert_eq!(&ready, b"ready");
     }
 
+    #[cfg(unix)]
     fn read_hex(mut reader: Box<dyn Read + Send>) -> String {
         let (sender, receiver) = mpsc::channel::<IoResult<Vec<u8>>>();
         thread::spawn(move || {
@@ -738,6 +842,41 @@ mod tests {
     }
 
     #[test]
+    fn multiline_bracketed_paste_does_not_emit_enter_events_even_across_chunk_boundaries() {
+        let body = format!("\x1b[200~{}\x1b[201~", "line\r".repeat(2_000));
+        for chunk_size in 1..=7 {
+            let key = PaneKey::new("human-paste", chunk_size);
+            let (writer, _observed) = RecordingWriter::new(None);
+            let (events, receiver) = mpsc::channel();
+            let arbiter = InputArbiter::new(0, events);
+            arbiter.register(&key).unwrap();
+            for chunk in body.as_bytes().chunks(chunk_size as usize) {
+                arbiter
+                    .write_human_via(writer.as_ref(), &key, chunk)
+                    .unwrap();
+            }
+            assert!(
+                receiver.try_recv().is_err(),
+                "pasted lines must not become submission events"
+            );
+            assert_eq!(
+                arbiter.snapshot(&key).unwrap().input_epoch,
+                body.len() as u64
+            );
+            assert!(arbiter.snapshot(&key).unwrap().draft_latched);
+            arbiter
+                .write_human_via(writer.as_ref(), &key, b"\r")
+                .unwrap();
+            assert!(
+                matches!(receiver.try_recv().unwrap(), PaneEvent::Enter { epoch, .. } if epoch == body.len() as u64 + 1)
+            );
+            assert!(receiver.try_recv().is_err());
+            let written: Vec<u8> = writer.records().into_iter().flat_map(|r| r.bytes).collect();
+            assert_eq!(written, format!("{body}\r").as_bytes());
+        }
+    }
+
+    #[test]
     fn paste_is_bracketed_then_enter_is_a_delayed_separate_write() {
         let key = PaneKey::new("recorded", 1);
         let (writer, _observed) = RecordingWriter::new(None);
@@ -755,6 +894,8 @@ mod tests {
         assert_eq!(records[1].bytes, b"\r");
         assert!(records[1].at.duration_since(records[0].at) >= Duration::from_millis(25));
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn human_bytes_latch_the_draft_bump_epoch_and_emit_enter() {
@@ -920,6 +1061,8 @@ mod tests {
         let _ = table.kill(&responsive_key);
     }
 
+    #[cfg(unix)]
+
     #[test]
     fn native_editor_claim_preserves_latch_and_rejects_newer_input() {
         let _pty_guard = serial_pty_test();
@@ -957,6 +1100,8 @@ mod tests {
         assert!(arbiter.snapshot(&key).expect("snapshot").draft_latched);
         table.kill(&key).expect("kill pane");
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn epoch_claims_and_pastes_share_stale_and_draft_guards() {
@@ -997,6 +1142,8 @@ mod tests {
             Err(ArbiterError::Stale)
         ));
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn delayed_clear_for_submission_a_preserves_newer_draft_b() {
@@ -1069,6 +1216,8 @@ mod tests {
         assert!(!arbiter.snapshot(&key).expect("cleared state").draft_latched);
         assert_eq!(read_hex(reader), "6472616674410d42210d");
     }
+
+    #[cfg(unix)]
 
     #[test]
     fn clear_rejects_unissued_and_future_submission_epochs() {
@@ -1246,8 +1395,35 @@ mod tests {
                 input_failed: false,
                 queued_human_bytes: 0,
                 last_submission_id: None,
+                output_quiet_ms: None,
             }
         );
+    }
+
+    #[test]
+    fn control_keys_reach_the_pane_in_order_without_latching_a_draft() {
+        let key = PaneKey::new("recorded", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let (events, _receiver) = mpsc::channel();
+        let arbiter = Arc::new(InputArbiter::new(100, events));
+        arbiter.register(&key).expect("register pane");
+
+        // An arrow key, a wheel report and Escape: written, counted, no draft.
+        let epoch = arbiter
+            .write_human_latching(writer.as_ref(), &key, b"\x1b[A", false)
+            .expect("arrow key");
+        assert_eq!(epoch, 3);
+        assert!(!arbiter.snapshot(&key).expect("snapshot").draft_latched);
+        // A typed letter after them is a draft as before.
+        let typed = arbiter
+            .write_human_via(writer.as_ref(), &key, b"h")
+            .expect("typed letter");
+        assert_eq!(typed, 4);
+        assert!(arbiter.snapshot(&key).expect("snapshot").draft_latched);
+        let records = writer.records();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].bytes, b"\x1b[A");
+        assert_eq!(records[1].bytes, b"h");
     }
 
     #[test]
@@ -1501,16 +1677,55 @@ mod tests {
 
     #[cfg(windows)]
     mod windows {
+        use std::collections::HashMap;
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        use super::super::{InputArbiter, PaneEvent};
+        use crate::pty::conpty_test::{line_echo, open, read_until};
+        use crate::pty::{serial_pty_test, PaneTable};
+
+        /// A delivery is a bracketed paste and a delayed Enter; the harness
+        /// must read the text alone, as one submitted line.
         #[test]
-        #[ignore = "macOS-first PTY contract"]
-        fn raw_paste_and_enter_contract() {
-            panic!("implement with the Windows PTY backend");
+        fn a_paste_and_its_enter_reach_the_child_as_one_line() {
+            let _pty_guard = serial_pty_test();
+            let table = PaneTable::new();
+            let (key, output) = open(&table, &line_echo(), &HashMap::new(), 1 << 20);
+            let (events, _received) = mpsc::channel();
+            let arbiter = InputArbiter::new(5, events);
+            arbiter.register(&key).expect("register pane");
+            read_until(&table, &key, &output, "READY");
+
+            arbiter
+                .write_paste(&table, &key, 0, b"pasted words")
+                .expect("paste into the pane");
+            let text = read_until(&table, &key, &output, "#");
+            assert!(text.contains("GOT=[pasted words]"), "{text:?}");
+            table.kill(&key).expect("kill the pane");
         }
 
+        /// A human's typing reaches the child, and their Enter is heard.
         #[test]
-        #[ignore = "macOS-first PTY contract"]
-        fn queued_human_input_contract() {
-            panic!("implement with the Windows PTY backend");
+        fn human_typing_reaches_the_child_and_its_enter_is_heard() {
+            let _pty_guard = serial_pty_test();
+            let table = PaneTable::new();
+            let (key, output) = open(&table, &line_echo(), &HashMap::new(), 1 << 20);
+            let (events, received) = mpsc::channel();
+            let arbiter = InputArbiter::new(5, events);
+            arbiter.register(&key).expect("register pane");
+            read_until(&table, &key, &output, "READY");
+
+            arbiter
+                .write_human(&table, &key, b"typed\r")
+                .expect("type into the pane");
+            assert!(matches!(
+                received.recv_timeout(Duration::from_secs(5)),
+                Ok(PaneEvent::Enter { .. })
+            ));
+            let text = read_until(&table, &key, &output, "#");
+            assert!(text.contains("GOT=[typed]"), "{text:?}");
+            table.kill(&key).expect("kill the pane");
         }
     }
 }

@@ -1,0 +1,5 @@
+# LF everywhere, on every checkout: on Windows Git would turn text into CRLF
+# and the linter (Biome, LF) then fails every file (the first CI run there).
+* text=auto eol=lf
+# Batch files need CRLF line endings on Windows (cmd.exe misreads some LF-only constructs).
+*.cmd text eol=crlf

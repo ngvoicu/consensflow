@@ -4,22 +4,25 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use futures_channel::oneshot;
 use portable_pty::PtySize;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
-use crate::arbiter::{ArbiterError, InputArbiter, PaneEvent};
+use crate::arbiter::{ArbiterError, ClearOutcome, InputArbiter, PaneEvent};
 use crate::bridge::{Bridge, BridgeBuilder, ConnectedBridge};
 use crate::pty::{
     validate_drop_env, PaneEnvironment, PaneKey, PaneOutput, PaneTable, StreamedPane,
 };
 
 const MAX_FRAME_BYTES: usize = 1024 * 1024;
+/// How long the daemon gets to stop on its own before it is killed.
+const EDITOR_STOP_GRACE: Duration = Duration::from_secs(2);
 /// The page-side name of Node's `state.changed`. No dot: Tauri rejects it.
 const PAGE_STATE_EVENT: &str = "state-changed";
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
@@ -84,7 +87,9 @@ struct OutputHubState {
 }
 
 /// Where one pane's bytes go. `false` means the destination is gone, and the
-/// hub parks what follows until a new one arrives.
+/// hub parks what follows until a new one arrives. The sink runs under the
+/// hub's lock and the headless one waits while its peer is busy, so publish
+/// only from a pane's own output thread, never from a bridge handler.
 type OutputSink = Arc<dyn Fn(PaneOutputMessage) -> bool + Send + Sync>;
 
 struct OutputHub {
@@ -92,7 +97,7 @@ struct OutputHub {
 }
 
 enum InputWork {
-    Human(Vec<u8>),
+    Human { bytes: Vec<u8>, draft: bool },
     Reply(Vec<u8>),
     Paste { epoch: u64, body: Vec<u8> },
     ClaimEpoch { epoch: u64, native_editor: bool },
@@ -101,7 +106,7 @@ enum InputWork {
 impl InputWork {
     fn byte_count(&self) -> usize {
         match self {
-            Self::Human(bytes) | Self::Reply(bytes) => bytes.len(),
+            Self::Human { bytes, .. } | Self::Reply(bytes) => bytes.len(),
             Self::Paste { body, .. } => body.len().saturating_add(13),
             Self::ClaimEpoch { .. } => 0,
         }
@@ -281,7 +286,7 @@ impl InputQueue {
 
         page.last_sequences.insert(key.clone(), sequence);
         match &work {
-            InputWork::Human(bytes) | InputWork::Reply(bytes) => validate_input(bytes)?,
+            InputWork::Human { bytes, .. } | InputWork::Reply(bytes) => validate_input(bytes)?,
             InputWork::Paste { body, .. } => validate_input(body)?,
             InputWork::ClaimEpoch { .. } => {}
         }
@@ -313,8 +318,9 @@ impl InputQueue {
         &self,
         key: PaneKey,
         bytes: Vec<u8>,
+        draft: bool,
     ) -> Result<oneshot::Receiver<InputResponse>, String> {
-        self.submit(key, InputWork::Human(bytes))
+        self.submit(key, InputWork::Human { bytes, draft })
     }
 
     fn reply(
@@ -447,8 +453,12 @@ fn input_worker(
 ) {
     for job in jobs {
         let result = match job.work {
-            InputWork::Human(bytes) => arbiter
+            InputWork::Human { bytes, draft: true } => arbiter
                 .write_human(&panes, &key, &bytes)
+                .map(|epoch| InputSuccess::Human { epoch })
+                .map_err(|error| error.to_string()),
+            InputWork::Human { bytes, draft: false } => arbiter
+                .write_control(&panes, &key, &bytes)
                 .map(|epoch| InputSuccess::Human { epoch })
                 .map_err(|error| error.to_string()),
             InputWork::Reply(bytes) => arbiter
@@ -555,7 +565,6 @@ pub struct AppRuntime {
     startup_error: Option<String>,
     output: Arc<OutputHub>,
     inputs: Arc<InputQueue>,
-    launches: Arc<LaunchRegistry>,
     shutting_down: AtomicBool,
 }
 
@@ -588,7 +597,7 @@ impl AppRuntime {
                     Err(error) => {
                         let mut editor = editor;
                         let _ = editor.kill();
-                        return Self::unavailable(panes, output, inputs, launches, error);
+                        return Self::unavailable(panes, output, inputs, error);
                     }
                 };
                 forward_input_events(event_receiver, connected.bridge.clone());
@@ -600,11 +609,10 @@ impl AppRuntime {
                     startup_error: None,
                     output,
                     inputs,
-                    launches,
                     shutting_down: AtomicBool::new(false),
                 }
             }
-            Err(error) => Self::unavailable(panes, output, inputs, launches, error),
+            Err(error) => Self::unavailable(panes, output, inputs, error),
         }
     }
 
@@ -612,7 +620,6 @@ impl AppRuntime {
         panes: Arc<PaneTable>,
         output: Arc<OutputHub>,
         inputs: Arc<InputQueue>,
-        launches: Arc<LaunchRegistry>,
         error: String,
     ) -> Self {
         eprintln!("consensflow: {error}");
@@ -624,7 +631,6 @@ impl AppRuntime {
             startup_error: Some(error),
             output,
             inputs,
-            launches,
             shutting_down: AtomicBool::new(false),
         }
     }
@@ -645,8 +651,10 @@ impl AppRuntime {
             .unwrap_or_else(|error| error.into_inner())
             .take()
         {
-            let _ = editor.kill();
-            let _ = editor.wait();
+            if let Some(bridge) = &self.bridge {
+                bridge.close_input();
+            }
+            stop_editor(&mut editor);
         }
         true
     }
@@ -691,41 +699,30 @@ fn request_node(
     }
 }
 
-fn compose_state(
-    node: Value,
-    roster: Option<RosterHandle>,
-    startup_error: Option<String>,
-) -> Value {
-    let mut object = match node {
-        Value::Object(object) => object,
-        other => Map::from_iter([
-            ("ok".to_string(), Value::Bool(true)),
-            ("state".to_string(), other),
-        ]),
-    };
-    if let Some(roster) = roster {
-        object.insert(
-            "roster".to_string(),
-            serde_json::to_value(roster).unwrap_or(Value::Null),
-        );
-    }
-    if object.get("error").and_then(Value::as_str) == Some("not-available-yet") {
-        object.insert("available".to_string(), Value::Bool(false));
-    } else {
-        object
-            .entry("available".to_string())
-            .or_insert(Value::Bool(true));
-    }
-    if let Some(error) = startup_error {
-        object.insert("startupError".to_string(), Value::String(error));
-    }
-    Value::Object(object)
-}
-
 impl Drop for AppRuntime {
     fn drop(&mut self) {
         self.shutdown();
     }
+}
+
+/// Gives the daemon a moment to stop on its own once its input has ended:
+/// it writes down why it stopped and closes its ledger. The same on every
+/// platform, since an input ending is the one stop Windows can deliver too.
+/// Only what has not gone by then is killed, so a start with no stop after it
+/// in the daemon's log means it was killed from outside, never by the app.
+fn stop_editor(editor: &mut Child) {
+    // The bridge holds the daemon's input and has let it go; a child whose
+    // input is still ours (a stand-in in a test) gets its EOF here.
+    drop(editor.stdin.take());
+    let deadline = Instant::now() + EDITOR_STOP_GRACE;
+    while Instant::now() < deadline {
+        if matches!(editor.try_wait(), Ok(Some(_))) {
+            return;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    let _ = editor.kill();
+    let _ = editor.wait();
 }
 
 #[derive(Deserialize)]
@@ -786,6 +783,18 @@ struct BytesRequest {
     bytes: Vec<u8>,
 }
 
+/// `pane.input`: `draft: false` for keys that type nothing (the daemon's
+/// Escape on a pause), which reach the pane without latching a draft, as the
+/// page's own control keys do.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InputRequest {
+    id: String,
+    generation: u64,
+    bytes: Vec<u8>,
+    draft: Option<bool>,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PasteRequest {
@@ -804,6 +813,7 @@ struct PeerSendRequest {
     socket: PathBuf,
     peer_pid: i32,
     #[serde(default)]
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     allow_descendant: bool,
     body: String,
     timeout_ms: u64,
@@ -815,6 +825,17 @@ struct ClaimEpochRequest {
     pane: String,
     generation: u64,
     epoch: u64,
+}
+
+/// A human submission the core saw the harness record: the Enter at `epoch`
+/// released the draft, unless the human typed again after it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DraftClearRequest {
+    id: String,
+    generation: u64,
+    epoch: u64,
+    submission: String,
 }
 
 #[derive(Deserialize)]
@@ -843,10 +864,19 @@ fn start_editor(
     if let Some(path) = login_path() {
         command.env("PATH", path);
     }
+    // node.exe is a console program: started from a windowed app it gets a
+    // console window of its own, and every console program it starts shows in
+    // it. The daemon runs without one; its windows are the app's panes.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
+        .stderr(daemon_stderr())
         .spawn()
         .map_err(|error| format!("the bundled ConsensFlow could not be started: {error}"))?;
     let input = child
@@ -880,6 +910,37 @@ fn start_editor(
     }
 }
 
+/// Where the daemon's error output goes. On Windows a windowed app has no
+/// stderr to hand down (inheriting an invalid handle fails the spawn), so the
+/// daemon writes to `<home>/app/app.log`, the file the macOS build redirects
+/// the app's own stderr to; elsewhere the daemon inherits the app's.
+#[cfg(windows)]
+fn daemon_stderr() -> Stdio {
+    let home = std::env::var_os("CONSENSFLOW_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(|p| PathBuf::from(p).join(".consensflow")));
+    let Some(home) = home else {
+        return Stdio::null();
+    };
+    let directory = home.join("app");
+    if std::fs::create_dir_all(&directory).is_err() {
+        return Stdio::null();
+    }
+    match std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(directory.join("app.log"))
+    {
+        Ok(file) => Stdio::from(file),
+        Err(_) => Stdio::null(),
+    }
+}
+
+#[cfg(not(windows))]
+fn daemon_stderr() -> Stdio {
+    Stdio::inherit()
+}
+
 /// Node's `state.changed` becomes the page's `state-changed`.
 ///
 /// The two names are not the same namespace and cannot be. Tauri 2 accepts
@@ -896,7 +957,10 @@ fn bundled_cli(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
         .path()
         .resource_dir()
         .map_err(|error| format!("the app could not find its own resources: {error}"))?;
-    let resource_node = resources.join("binaries/node");
+    // Tauri strips the target triple from a sidecar's name and, on Windows,
+    // keeps the `.exe`: `node` on macOS, `node.exe` beside the app there.
+    let sidecar = if cfg!(windows) { "node.exe" } else { "node" };
+    let resource_node = resources.join("binaries").join(sidecar);
     let node = if resource_node.exists() {
         resource_node
     } else {
@@ -904,9 +968,14 @@ fn bundled_cli(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
             .map_err(|error| format!("the app could not find itself: {error}"))?
             .parent()
             .ok_or_else(|| "the app executable has no directory".to_string())?
-            .join("node")
+            .join(sidecar)
     };
-    let cli = resources.join("cli/bin/cf.mjs");
+    let cli = resources.join("cli").join("bin").join("cf.mjs");
+    // Tauri may answer its resource directory in Windows' verbatim form
+    // (`\\?\C:\…`), which Node cannot take as a script path: it stops at
+    // the drive with `lstat 'C:'`. The plain spelling names the same file.
+    let node = plain_path(node);
+    let cli = plain_path(cli);
     if !node.is_absolute() || !node.exists() {
         return Err(format!(
             "the bundled runtime is missing from this app ({node:?})"
@@ -918,6 +987,18 @@ fn bundled_cli(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
         ));
     }
     Ok((node, cli))
+}
+
+/// A Windows path without the `\\?\` verbatim prefix; any other path as it is.
+fn plain_path(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    if let Some(rest) = text.strip_prefix("\\\\?\\UNC\\") {
+        return PathBuf::from(format!("\\\\{rest}"));
+    }
+    if let Some(rest) = text.strip_prefix("\\\\?\\") {
+        return PathBuf::from(rest);
+    }
+    path
 }
 
 fn login_path() -> Option<String> {
@@ -1001,6 +1082,7 @@ fn register_pane_handlers(
         stream_to_page(
             streamed,
             bridge,
+            Arc::clone(&open_arbiter),
             Arc::clone(&open_output),
             Arc::clone(&open_launches),
             request.launch_id,
@@ -1013,10 +1095,11 @@ fn register_pane_handlers(
 
     let input_queue = Arc::clone(&inputs);
     builder.on("pane.input", move |_bridge, body| {
-        let request: BytesRequest = parse_body(body)?;
+        let request: InputRequest = parse_body(body)?;
         validate_input(&request.bytes)?;
         let key = pane_key(&request.id, request.generation)?;
-        match wait_for_input_blocking(input_queue.human(key, request.bytes)?)? {
+        let draft = request.draft.unwrap_or(true);
+        match wait_for_input_blocking(input_queue.human(key, request.bytes, draft)?)? {
             InputSuccess::Human { epoch } => Ok(json!({"ok":true,"epoch":epoch})),
             InputSuccess::Written => Err("pane.input returned the wrong outcome".to_string()),
         }
@@ -1153,6 +1236,29 @@ fn register_pane_handlers(
         Ok(json!({"ok":true,"panes":panes}))
     });
 
+    let clear_arbiter = Arc::clone(&arbiter);
+    builder.on("draft.clear", move |_bridge, body| {
+        let request: DraftClearRequest = parse_body(body)?;
+        if request.submission.is_empty() || request.submission.len() > 200 {
+            return Err("draft.clear needs a submission id of 1 to 200 bytes".to_string());
+        }
+        Ok(
+            match clear_arbiter.clear_draft(
+                &request.id,
+                request.generation,
+                request.epoch,
+                &request.submission,
+            ) {
+                Ok(ClearOutcome::Cleared) => json!({"ok":true,"outcome":"cleared"}),
+                Ok(ClearOutcome::PreservedNewerInput) => {
+                    json!({"ok":true,"outcome":"preserved-newer-input"})
+                }
+                Err(ArbiterError::Stale) => json!({"ok":false,"error":"stale"}),
+                Err(error) => json!({"ok":false,"error":error.to_string()}),
+            },
+        )
+    });
+
     let snapshot_arbiter = Arc::clone(&arbiter);
     builder.on("pane.snapshot", move |_bridge, body| {
         let request: PaneRequest = parse_body(body)?;
@@ -1168,6 +1274,7 @@ fn register_pane_handlers(
             "inputFailed":snapshot.input_failed,
             "queuedHumanBytes":snapshot.queued_human_bytes,
             "lastSubmissionId":snapshot.last_submission_id,
+            "outputQuietMs":snapshot.output_quiet_ms,
         }))
     });
 }
@@ -1186,6 +1293,7 @@ fn launch_response(result: Result<PaneKey, String>, deduplicated: bool) -> Resul
 fn stream_to_page(
     streamed: StreamedPane,
     bridge: Bridge,
+    arbiter: Arc<InputArbiter>,
     output: Arc<OutputHub>,
     launches: Arc<LaunchRegistry>,
     launch_id: Option<String>,
@@ -1193,6 +1301,7 @@ fn stream_to_page(
     thread::spawn(move || {
         let key = streamed.key;
         for message in streamed.output {
+            arbiter.note_output(&key);
             output.publish(message.into());
         }
         if let Some(launch_id) = launch_id {
@@ -1245,12 +1354,14 @@ pub fn run_headless() -> Result<(), String> {
         )
         .map_err(|error| error.to_string())?;
 
-    // No page to draw into, so a pane's bytes go back over the same bridge.
-    // Registered after `serve` on purpose: whatever a pane produced in between
-    // is parked in the hub and drains into this sink the moment it attaches.
+    // No page to draw into, so a pane's bytes go back over the same bridge, as
+    // a stream: a burst waits for the peer to read instead of closing the
+    // bridge. Registered after `serve` on purpose: whatever a pane produced in
+    // between is parked in the hub and drains into this sink the moment it
+    // attaches.
     let sink = bridge.clone();
     output.register_sink(Arc::new(move |message: PaneOutputMessage| {
-        sink.event("pane.output", json!(message)).is_ok()
+        sink.stream_event("pane.output", json!(message)).is_ok()
     }));
     forward_input_events(event_receiver, bridge.clone());
 
@@ -1404,165 +1515,12 @@ async fn input_result(result: Result<PageInputCompletion, String>) -> Value {
     }
 }
 
-#[tauri::command]
-pub async fn open_pm<R: Runtime>(app: AppHandle<R>, tab: String, harness: String) -> Value {
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("pm.open", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "pm.open".into(),
-            json!({"tab":tab,"harness":harness}),
-        )
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn open_lead<R: Runtime>(app: AppHandle<R>, dir: String, harness: String) -> Value {
-    if let Err(error) =
-        validate_text(&dir, "directory").and_then(|()| validate_text(&harness, "harness"))
-    {
-        return json!({"ok":false,"error":error});
-    }
-    if !Path::new(&dir).is_absolute() {
-        return json!({"ok":false,"error":"directory must be absolute"});
-    }
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("tab.open", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "tab.open".to_string(),
-            json!({"dir":dir,"harness":harness}),
-        )
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn open_shell<R: Runtime>(app: AppHandle<R>, tab: String) -> Value {
-    if let Err(error) = validate_text(&tab, "tab") {
-        return json!({"ok":false,"error":error});
-    }
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("shell.open", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "shell.open".to_string(),
-            json!({"tab":tab}),
-        )
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn open_consult<R: Runtime>(
-    app: AppHandle<R>,
-    tab: String,
-    agent: String,
-    task: Option<String>,
-    conversation: Option<String>,
-) -> Value {
-    if let Err(error) = validate_text(&tab, "tab").and_then(|()| validate_text(&agent, "agent")) {
-        return json!({"ok":false,"error":error});
-    }
-    let (operation, body) = match task {
-        Some(task) if !task.trim().is_empty() => {
-            ("consult", json!({"tab":tab,"agent":agent,"task":task}))
-        }
-        Some(_) => return json!({"ok":false,"error":"task is required"}),
-        None => match conversation {
-            Some(conversation) if !conversation.trim().is_empty() => (
-                "attach",
-                json!({"tab":tab,"agent":agent,"session":conversation}),
-            ),
-            _ => return json!({"ok":false,"error":"conversation is required when task is absent"}),
-        },
-    };
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking(operation, move || {
-        request_node(bridge, startup_error, operation.to_string(), body)
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn delete_pane<R: Runtime>(app: AppHandle<R>, id: String, generation: u64) -> Value {
-    if let Err(error) = pane_key(&id, generation) {
-        return json!({"ok":false,"error":error});
-    }
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("pane.delete", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "pane.delete".into(),
-            json!({"id":id,"generation":generation}),
-        )
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn close_pane<R: Runtime>(app: AppHandle<R>, id: String, generation: u64) -> Value {
-    let key = match pane_key(&id, generation) {
-        Ok(key) => key,
-        Err(error) => return json!({"ok":false,"error":error}),
-    };
-    let (panes, launches, bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (
-            Arc::clone(&state.panes),
-            Arc::clone(&state.launches),
-            state.bridge.clone(),
-            state.startup_error.clone(),
-        )
-    };
-    run_blocking("pane.close", move || {
-        if let Err(error) = panes.kill(&key) {
-            return json!({"ok":false,"error":error.to_string()});
-        }
-        launches.remove_key(&key);
-        let response = request_node(
-            bridge,
-            startup_error,
-            "pane.close".to_string(),
-            json!({"id":id,"generation":generation}),
-        );
-        if response.get("ok") == Some(&Value::Bool(false)) {
-            let mut object = response.as_object().cloned().unwrap_or_default();
-            object.insert("paneClosed".to_string(), Value::Bool(true));
-            Value::Object(object)
-        } else {
-            response
-        }
-    })
-    .await
-}
-
 fn enqueue_page_input<R: Runtime>(
     app: AppHandle<R>,
     id: String,
     generation: u64,
     sequence: u64,
-    bytes: Vec<u8>,
+    work: InputWork,
     human: bool,
 ) -> Value {
     let key = match pane_key(&id, generation) {
@@ -1572,11 +1530,6 @@ fn enqueue_page_input<R: Runtime>(
     let inputs = {
         let state = app.state::<AppRuntime>();
         Arc::clone(&state.inputs)
-    };
-    let work = if human {
-        InputWork::Human(bytes)
-    } else {
-        InputWork::Reply(bytes)
     };
     match inputs.enqueue_page(key, sequence, work, human) {
         Ok(ticket) => json!({"ok":true,"ticket":ticket}),
@@ -1591,8 +1544,13 @@ pub fn pane_input_enqueue<R: Runtime>(
     generation: u64,
     sequence: u64,
     bytes: Vec<u8>,
+    draft: Option<bool>,
 ) -> Value {
-    enqueue_page_input(app, id, generation, sequence, bytes, true)
+    let work = InputWork::Human {
+        bytes,
+        draft: draft.unwrap_or(true),
+    };
+    enqueue_page_input(app, id, generation, sequence, work, true)
 }
 
 #[tauri::command]
@@ -1603,7 +1561,7 @@ pub fn pane_reply_enqueue<R: Runtime>(
     sequence: u64,
     bytes: Vec<u8>,
 ) -> Value {
-    enqueue_page_input(app, id, generation, sequence, bytes, false)
+    enqueue_page_input(app, id, generation, sequence, InputWork::Reply(bytes), false)
 }
 
 #[tauri::command]
@@ -1674,187 +1632,64 @@ pub async fn pane_ack<R: Runtime>(
     }
 }
 
-#[tauri::command]
-pub async fn set_policy<R: Runtime>(
+async fn task_operation<R: Runtime>(
     app: AppHandle<R>,
-    scope: String,
-    id: String,
-    mode: String,
+    operation: &'static str,
+    body: Value,
 ) -> Value {
-    let valid = match scope.as_str() {
-        "tab" => matches!(mode.as_str(), "auto" | "manual"),
-        "pane" => matches!(mode.as_str(), "auto" | "manual" | "inherit"),
-        _ => false,
-    };
-    if !valid || id.trim().is_empty() {
-        return json!({"ok":false,"error":"invalid policy scope, id, or mode"});
-    }
     let (bridge, startup_error) = {
         let state = app.state::<AppRuntime>();
         (state.bridge.clone(), state.startup_error.clone())
     };
-    run_blocking("notify.set", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "notify.set".to_string(),
-            json!({"scope":scope,"id":id,"mode":mode}),
-        )
+    run_blocking(operation, move || {
+        request_node(bridge, startup_error, operation.to_string(), body)
     })
     .await
 }
 
-#[tauri::command]
-pub async fn answers_list<R: Runtime>(
-    app: AppHandle<R>,
-    tab: String,
-    pane: String,
-    conversation: String,
-) -> Value {
-    if let Err(error) = validate_text(&tab, "tab")
-        .and_then(|()| validate_text(&pane, "pane"))
-        .and_then(|()| validate_text(&conversation, "conversation"))
-    {
-        return json!({"ok":false,"error":error});
-    }
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("answers.list", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "answers.list".to_string(),
-            json!({"tab":tab,"pane":pane,"conversation":conversation}),
-        )
-    })
-    .await
-}
+/// What the board page may ask the new core. The page names the operation and
+/// its body; anything else is refused here, before it reaches the daemon.
+const CORE_OPERATIONS: &[&str] = &[
+    "projects.list",
+    "project.open",
+    "project.resume",
+    "project.close",
+    "project.delete",
+    "project.gate",
+    "board.get",
+    "inbox.get",
+    "member.add",
+    "member.remove",
+    "member.roles",
+    "session.open",
+    "session.close",
+    "session.end",
+    "task.get",
+    "task.transcript",
+    "task.cancel",
+    "task.pause",
+    "task.reassign",
+    "task.resume",
+    "message.read",
+    "message.answer",
+    "message.approve",
+    "message.decline",
+    "agents.list",
+    "staff.last",
+];
 
 #[tauri::command]
-pub async fn result_body<R: Runtime>(
-    app: AppHandle<R>,
-    tab: String,
-    result: String,
-    offset: Option<usize>,
-) -> Value {
-    if let Err(error) = validate_text(&tab, "tab").and_then(|()| validate_text(&result, "result")) {
-        return json!({"ok":false,"error":error});
-    }
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
+pub async fn core_request<R: Runtime>(app: AppHandle<R>, operation: String, body: Value) -> Value {
+    let Some(operation) = CORE_OPERATIONS
+        .iter()
+        .find(|allowed| **allowed == operation)
+    else {
+        return json!({"ok":false,"error":format!("unknown core operation {operation}")});
     };
-    run_blocking("result.body", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "result.body".to_string(),
-            json!({"tab":tab,"result":result,"offset":offset.unwrap_or(0)}),
-        )
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn result_collect<R: Runtime>(app: AppHandle<R>, tab: String, result: String) -> Value {
-    if let Err(error) = validate_text(&tab, "tab").and_then(|()| validate_text(&result, "result")) {
-        return json!({"ok":false,"error":error});
+    if !body.is_object() {
+        return json!({"ok":false,"error":"a core request body is an object"});
     }
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("result.collect", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "result.collect".to_string(),
-            json!({"tab":tab,"result":result}),
-        )
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn result_cancel<R: Runtime>(app: AppHandle<R>, tab: String, result: String) -> Value {
-    if let Err(error) = validate_text(&tab, "tab").and_then(|()| validate_text(&result, "result")) {
-        return json!({"ok":false,"error":error});
-    }
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("result.cancel", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "result.cancel".to_string(),
-            json!({"tab":tab,"result":result}),
-        )
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn rename_session<R: Runtime>(app: AppHandle<R>, tab: String, name: String) -> Value {
-    if let Err(error) = validate_text(&tab, "tab") {
-        return json!({"ok":false,"error":error});
-    }
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("tab.rename", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "tab.rename".to_string(),
-            json!({"tab":tab,"name":name}),
-        )
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn tab_delete<R: Runtime>(app: AppHandle<R>, tab: String, generation: u64) -> Value {
-    if let Err(error) = validate_text(&tab, "tab") {
-        return json!({"ok":false,"error":error});
-    }
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("tab.delete", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "tab.delete".into(),
-            json!({"tab":tab,"generation":generation}),
-        )
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn tab_resume<R: Runtime>(app: AppHandle<R>, tab: String) -> Value {
-    if let Err(error) = validate_text(&tab, "tab") {
-        return json!({"ok":false,"error":error});
-    }
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
-    run_blocking("tab.resume", move || {
-        request_node(
-            bridge,
-            startup_error,
-            "tab.resume".to_string(),
-            json!({"tab":tab}),
-        )
-    })
-    .await
+    task_operation(app, operation, body).await
 }
 
 /// The page's pane-output subscription, taken ONCE for the life of the page.
@@ -1880,30 +1715,73 @@ pub async fn subscribe_output<R: Runtime>(
     json!({"ok":true})
 }
 
-/// The page's whole picture. Carries no channel, on purpose — see
-/// [`subscribe_output`].
+/// Where the human's agents screens are: the daemon's URL and the UI token it
+/// handed the app, or null while the daemon is not up.
 #[tauri::command]
-pub async fn list_state<R: Runtime>(app: AppHandle<R>) -> Value {
-    let (bridge, startup_error, roster) = {
-        let state = app.state::<AppRuntime>();
-        (
-            state.bridge.clone(),
-            state.startup_error.clone(),
-            state.roster.clone(),
-        )
+pub fn roster_handle<R: Runtime>(app: AppHandle<R>) -> Value {
+    match app.state::<AppRuntime>().roster.clone() {
+        Some(roster) => serde_json::to_value(roster).unwrap_or(Value::Null),
+        None => Value::Null,
+    }
+}
+
+/// The agents screens (the agents, the harnesses) in their own
+/// window at the daemon's address. The board's page cannot frame them: it
+/// is served over the app's secure scheme and WebKit blocks a plain-HTTP
+/// frame inside it as mixed content. A second window loads the address as a
+/// top-level page, which is allowed. One window, reused: a later call turns
+/// it to the asked page and brings it forward.
+// Async on purpose: on Windows a window built from a synchronous command
+// deadlocks with the main thread (a white window that neither loads nor closes).
+#[tauri::command]
+pub async fn open_agents_window<R: Runtime>(app: AppHandle<R>, page: String) -> Value {
+    let Some(roster) = app.state::<AppRuntime>().roster.clone() else {
+        return json!({"ok":false,"error":"the agents screens are not available: the daemon is not up"});
     };
-    let state_error = startup_error.clone();
-    run_blocking("state.list", move || {
-        let node = request_node(bridge, startup_error, "state.list".to_string(), json!({}));
-        compose_state(node, roster, state_error)
-    })
-    .await
+    let url = match agents_url(&roster, &page) {
+        Ok(url) => url,
+        Err(error) => return json!({"ok":false,"error":error}),
+    };
+    if let Some(window) = app.get_webview_window(AGENTS_WINDOW) {
+        if let Err(error) = window.navigate(url.clone()) {
+            return json!({"ok":false,"error":format!("the agents window could not turn to {page:?}: {error}")});
+        }
+        let _ = window.set_focus();
+        return json!({"ok":true,"label":AGENTS_WINDOW,"url":url.as_str(),"reused":true});
+    }
+    match tauri::WebviewWindowBuilder::new(&app, AGENTS_WINDOW, tauri::WebviewUrl::External(url.clone()))
+        .title("ConsensFlow agents")
+        .inner_size(1120.0, 820.0)
+        .build()
+    {
+        Ok(_) => json!({"ok":true,"label":AGENTS_WINDOW,"url":url.as_str(),"reused":false}),
+        Err(error) => json!({"ok":false,"error":format!("the agents window could not open: {error}")}),
+    }
+}
+
+const AGENTS_WINDOW: &str = "agents";
+const AGENTS_PAGES: &[&str] = &["", "harnesses"];
+
+/// The daemon's page for one agents screen, carrying the UI token.
+fn agents_url(roster: &RosterHandle, page: &str) -> Result<tauri::Url, String> {
+    if !AGENTS_PAGES.contains(&page) {
+        return Err(format!("no agents screen {page:?}"));
+    }
+    let mut url = tauri::Url::parse(&roster.url)
+        .map_err(|error| format!("the editor handle is not an address: {error}"))?;
+    url.set_path(&format!("/{page}"));
+    url.query_pairs_mut()
+        .clear()
+        .append_pair("token", &roster.token);
+    Ok(url)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::io::Read;
+    #[cfg(unix)]
     use std::time::Duration;
 
     #[test]
@@ -1940,7 +1818,7 @@ mod tests {
             copy.lock().unwrap().push(message.id);
             true
         }));
-        for id in ["p-pm", "p-lead", "p-pm"] {
+        for id in ["p-pm", "p-chief", "p-pm"] {
             hub.publish(PaneOutputMessage {
                 id: id.into(),
                 generation: 1,
@@ -1948,7 +1826,7 @@ mod tests {
                 bytes: vec![65],
             });
         }
-        assert_eq!(*seen.lock().unwrap(), vec!["p-pm", "p-lead", "p-pm"]);
+        assert_eq!(*seen.lock().unwrap(), vec!["p-pm", "p-chief", "p-pm"]);
     }
 
     #[test]
@@ -1980,6 +1858,29 @@ mod tests {
     }
 
     #[test]
+    fn agents_screens_open_at_the_daemon_pages_with_the_token() {
+        let roster = RosterHandle::from_value(json!({
+            "url":"http://127.0.0.1:43123/",
+            "token":"secret",
+        }))
+        .unwrap();
+        assert_eq!(
+            agents_url(&roster, "").unwrap().as_str(),
+            "http://localhost:43123/?token=secret"
+        );
+        assert_eq!(
+            agents_url(&roster, "harnesses").unwrap().as_str(),
+            "http://localhost:43123/harnesses?token=secret"
+        );
+        assert_eq!(
+            agents_url(&roster, "harnesses").unwrap().as_str(),
+            "http://localhost:43123/harnesses?token=secret"
+        );
+        assert!(agents_url(&roster, "admin").is_err());
+        assert!(agents_url(&roster, "../etc").is_err());
+    }
+
+    #[test]
     fn browser_input_and_dimensions_are_bounded() {
         assert!(validate_input(&vec![0; MAX_INPUT_BYTES]).is_ok());
         assert!(validate_input(&vec![0; MAX_INPUT_BYTES + 1]).is_err());
@@ -1991,7 +1892,30 @@ mod tests {
     }
 
     #[test]
+    fn a_verbatim_windows_path_is_spelled_plainly_for_node() {
+        assert_eq!(
+            plain_path(PathBuf::from(r"\\?\C:\Users\me\app\cli\bin\cf.mjs")),
+            PathBuf::from(r"C:\Users\me\app\cli\bin\cf.mjs")
+        );
+        assert_eq!(
+            plain_path(PathBuf::from(r"\\?\UNC\server\share\cf.mjs")),
+            PathBuf::from(r"\\server\share\cf.mjs")
+        );
+        assert_eq!(
+            plain_path(PathBuf::from("/Applications/ConsensFlow.app/node")),
+            PathBuf::from("/Applications/ConsensFlow.app/node")
+        );
+    }
+
+    #[test]
     fn open_request_requires_absolute_launch_inputs() {
+        // A directory and a program that are absolute here: `/tmp` and
+        // `/bin/sh` are not, on Windows.
+        let (directory, program) = if cfg!(windows) {
+            ("C:\\Windows", "C:\\Windows\\System32\\cmd.exe")
+        } else {
+            ("/tmp", "/bin/sh")
+        };
         let relative: OpenRequest = parse_body(json!({
             "cwd":"relative",
             "argv":["sh"],
@@ -2003,8 +1927,8 @@ mod tests {
         let absolute: OpenRequest = parse_body(json!({
             "id":"p-1",
             "generation":1,
-            "cwd":"/tmp",
-            "argv":["/bin/sh"],
+            "cwd":directory,
+            "argv":[program],
             "dropEnv":["OPENAI_API_KEY"],
             "size":{"rows":24,"cols":80},
         }))
@@ -2014,16 +1938,16 @@ mod tests {
         let half_reserved: OpenRequest = parse_body(json!({
             "id":"p-1",
             "launchId":"launch-1",
-            "cwd":"/tmp",
-            "argv":["/bin/sh"],
+            "cwd":directory,
+            "argv":[program],
             "size":{"rows":24,"cols":80},
         }))
         .unwrap();
         assert!(validate_open_request(&half_reserved).is_err());
 
         let invalid_drop_env: OpenRequest = parse_body(json!({
-            "cwd":"/tmp",
-            "argv":["/bin/sh"],
+            "cwd":directory,
+            "argv":[program],
             "dropEnv":["BAD=NAME"],
         }))
         .unwrap();
@@ -2032,8 +1956,8 @@ mod tests {
             .contains("environment variable name"));
 
         assert!(parse_body::<OpenRequest>(json!({
-            "cwd":"/tmp",
-            "argv":["/bin/sh"],
+            "cwd":directory,
+            "argv":[program],
             "dropEnv":[],
             "silentlyIgnoredSecurityField":true,
         }))
@@ -2054,23 +1978,9 @@ mod tests {
             );
         }
         for command in [
-            "open_lead",
-            "open_shell",
-            "open_consult",
-            "close_pane",
-            "delete_pane",
             "pane_input_wait",
             "pane_resize",
             "pane_ack",
-            "set_policy",
-            "answers_list",
-            "result_collect",
-            "result_cancel",
-            "result_body",
-            "tab_resume",
-            "tab_delete",
-            "rename_session",
-            "list_state",
         ] {
             assert!(
                 source.contains(&format!("pub async fn {command}")),
@@ -2126,7 +2036,6 @@ mod tests {
             startup_error: None,
             output: Arc::new(OutputHub::new()),
             inputs,
-            launches: Arc::new(LaunchRegistry::new()),
             shutting_down: AtomicBool::new(false),
         };
         let app = tauri::test::mock_builder()
@@ -2236,7 +2145,6 @@ mod tests {
             startup_error: None,
             output: Arc::new(OutputHub::new()),
             inputs,
-            launches: Arc::new(LaunchRegistry::new()),
             shutting_down: AtomicBool::new(false),
         };
         let app = tauri::test::mock_builder()
@@ -2405,7 +2313,6 @@ mod tests {
             startup_error: None,
             output: Arc::new(OutputHub::new()),
             inputs: Arc::clone(&inputs),
-            launches: Arc::new(LaunchRegistry::new()),
             shutting_down: AtomicBool::new(false),
         };
         let app = tauri::test::mock_builder()
@@ -2422,6 +2329,7 @@ mod tests {
                     blocked_key.generation,
                     index + 1,
                     vec![b'x'; MAX_INPUT_BYTES],
+                    None,
                 )
             })
             .collect::<Vec<_>>();
@@ -2435,6 +2343,7 @@ mod tests {
             responsive_key.generation,
             1,
             b"R".to_vec(),
+            None,
         );
         assert_eq!(responsive_admission["ok"], true);
         let responsive_ticket = responsive_admission["ticket"]
@@ -2610,7 +2519,6 @@ mod tests {
             startup_error: None,
             output: Arc::new(OutputHub::new()),
             inputs,
-            launches: Arc::new(LaunchRegistry::new()),
             shutting_down: AtomicBool::new(false),
         });
         node_stream
@@ -2667,10 +2575,11 @@ mod tests {
     ///
     /// This is the ordering proof. `Bridge::admit_handler` refuses every new
     /// handler once the transport is `closed`, and only EOF from the peer
-    /// closes it — so killing the editor IS the act that shuts admission, and
-    /// nothing else in `shutdown()` can do it. What follows the kill is a
-    /// drain of what was ALREADY admitted, and only then the reap, so a pane
-    /// whose spawn was in flight is in the table before anything reaps it.
+    /// closes it — so ending the editor (its input closed, and the kill for
+    /// one that does not stop on that) IS the act that shuts admission, and
+    /// nothing else in `shutdown()` can do it. What follows is a drain of what
+    /// was ALREADY admitted, and only then the reap, so a pane whose spawn
+    /// was in flight is in the table before anything reaps it.
     #[cfg(unix)]
     #[test]
     fn gui_shutdown_kills_a_present_editor_then_drains_its_admitted_launch() {
@@ -2737,7 +2646,6 @@ mod tests {
             startup_error: None,
             output: Arc::new(OutputHub::new()),
             inputs,
-            launches: Arc::new(LaunchRegistry::new()),
             shutting_down: AtomicBool::new(false),
         });
         admitted_receiver
@@ -2770,6 +2678,66 @@ mod tests {
             !process_exists(editor_pid),
             "the editor child outlived shutdown"
         );
+    }
+
+    /// The daemon is asked before it is killed: one that stops when its
+    /// input ends gets to write its last lines, and one that ignores it is
+    /// killed once the grace is over.
+    #[cfg(unix)]
+    #[test]
+    fn gui_shutdown_asks_the_editor_first_and_kills_only_what_stays() {
+        let mark = std::env::temp_dir().join(format!("consensflow-stop-{}", std::process::id()));
+        let _ = std::fs::remove_file(&mark);
+        let runtime_for = |script: String| {
+            use std::io::{BufRead, BufReader};
+            let mut editor = Command::new("/bin/sh")
+                .arg("-c")
+                .arg(script)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .expect("spawn the stand-in editor");
+            let pid = editor.id() as i32;
+            let mut ready = String::new();
+            BufReader::new(editor.stdout.take().expect("editor stdout"))
+                .read_line(&mut ready)
+                .expect("the stand-in says it is ready");
+            assert_eq!(ready, "ready\n");
+            let (event_sender, _event_receiver) = mpsc::channel();
+            let arbiter = Arc::new(InputArbiter::new(0, event_sender));
+            let panes = Arc::new(PaneTable::new());
+            let runtime = AppRuntime {
+                panes: Arc::clone(&panes),
+                bridge: None,
+                editor: Mutex::new(Some(editor)),
+                roster: None,
+                startup_error: None,
+                output: Arc::new(OutputHub::new()),
+                inputs: Arc::new(InputQueue::new(panes, arbiter)),
+                shutting_down: AtomicBool::new(false),
+            };
+            (runtime, pid)
+        };
+
+        let (polite, polite_pid) = runtime_for(format!(
+            "echo ready; cat >/dev/null; echo asked > {}; exit 0",
+            mark.display()
+        ));
+        let started = Instant::now();
+        polite.shutdown();
+        assert!(started.elapsed() < EDITOR_STOP_GRACE, "it went on its own");
+        assert_eq!(
+            std::fs::read_to_string(&mark).expect("the editor wrote its last line"),
+            "asked\n"
+        );
+        assert!(!process_exists(polite_pid));
+        let _ = std::fs::remove_file(&mark);
+
+        let (deaf, deaf_pid) = runtime_for("echo ready; exec sleep 60".to_string());
+        let started = Instant::now();
+        deaf.shutdown();
+        assert!(started.elapsed() >= EDITOR_STOP_GRACE, "it had its grace");
+        assert!(!process_exists(deaf_pid), "and was killed after it");
     }
 
     /// Why the editor is killed FIRST, stated as a test rather than a comment.
@@ -2819,6 +2787,129 @@ mod tests {
             "wait_launches_closed failed after the peer closed"
         );
         wait.join().expect("wait thread");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn draft_clear_releases_a_submitted_draft_and_keeps_newer_typing() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+
+        let _pty_guard = crate::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let (event_sender, events) = mpsc::channel();
+        let arbiter = Arc::new(InputArbiter::new(0, event_sender));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let mut builder = BridgeBuilder::new(1024 * 1024);
+        register_pane_handlers(
+            &mut builder,
+            Arc::clone(&panes),
+            arbiter,
+            Arc::new(OutputHub::new()),
+            Arc::new(LaunchRegistry::new()),
+            Arc::clone(&inputs),
+        );
+        let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
+        node_stream
+            .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
+            .expect("write bridge handle");
+        let connected = builder
+            .connect(rust_stream.try_clone().expect("clone socket"), rust_stream)
+            .expect("connect bridge");
+        let mut reader = BufReader::new(node_stream.try_clone().expect("clone node reader"));
+        let mut number = 0;
+        let mut ask = |op: &str, body: Value| -> Value {
+            number += 1;
+            let id = format!("n-draft-{number}");
+            let mut frame =
+                serde_json::to_vec(&json!({"v":1,"id":id,"kind":"req","op":op,"body":body}))
+                    .expect("serialize request");
+            frame.push(b'\n');
+            node_stream.write_all(&frame).expect("write request");
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).expect("read response");
+                let frame: Value = serde_json::from_str(line.trim()).expect("response JSON");
+                if frame["kind"] == "res" && frame["id"] == id.as_str() {
+                    return frame["body"].clone();
+                }
+            }
+        };
+        let pane = json!({"id":"draft-pane","generation":1});
+        let opened = ask(
+            "pane.open",
+            json!({"id":"draft-pane","generation":1,"cwd":"/tmp","argv":["/bin/sh","-c","sleep 30"],
+                   "env":{},"size":{"rows":24,"cols":80},"backlogBytes":1024}),
+        );
+        assert_eq!(opened["ok"], true, "{opened}");
+        let latched = |ask: &mut dyn FnMut(&str, Value) -> Value| {
+            ask("pane.snapshot", pane.clone())["draftLatched"] == true
+        };
+
+        let escape = ask(
+            "pane.input",
+            json!({"id":"draft-pane","generation":1,"bytes":[27],"draft":false}),
+        );
+        assert_eq!(escape["ok"], true, "{escape}");
+        assert!(
+            !latched(&mut ask),
+            "the daemon's Escape types nothing, so it leaves no draft to hold a paste"
+        );
+
+        let typed = ask(
+            "pane.input",
+            json!({"id":"draft-pane","generation":1,"bytes":b"hi\r".to_vec()}),
+        );
+        assert_eq!(typed["ok"], true, "{typed}");
+        let PaneEvent::Enter { epoch, .. } = events
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the human Enter is announced");
+        assert!(latched(&mut ask));
+        let cleared = ask(
+            "draft.clear",
+            json!({"id":"draft-pane","generation":1,"epoch":epoch,"submission":"seen-1"}),
+        );
+        assert_eq!(cleared, json!({"ok":true,"outcome":"cleared"}));
+        assert!(!latched(&mut ask));
+        assert_eq!(
+            ask(
+                "draft.clear",
+                json!({"id":"draft-pane","generation":1,"epoch":epoch,"submission":"again"})
+            ),
+            json!({"ok":false,"error":"stale"}),
+            "an Enter is released once",
+        );
+
+        ask(
+            "pane.input",
+            json!({"id":"draft-pane","generation":1,"bytes":b"a\r".to_vec()}),
+        );
+        let PaneEvent::Enter { epoch: second, .. } = events
+            .recv_timeout(Duration::from_secs(1))
+            .expect("second Enter");
+        ask(
+            "pane.input",
+            json!({"id":"draft-pane","generation":1,"bytes":b"still typing".to_vec()}),
+        );
+        assert_eq!(
+            ask(
+                "draft.clear",
+                json!({"id":"draft-pane","generation":1,"epoch":second,"submission":"seen-2"})
+            ),
+            json!({"ok":true,"outcome":"preserved-newer-input"}),
+        );
+        assert!(
+            latched(&mut ask),
+            "text typed after the Enter keeps the latch"
+        );
+
+        panes
+            .kill(&PaneKey::new("draft-pane", 1))
+            .expect("kill the pane");
+        inputs.close_and_drain();
+        drop(reader);
+        drop(node_stream);
+        connected.bridge.wait_closed().expect("bridge closes");
     }
 
     #[cfg(unix)]
@@ -2923,82 +3014,16 @@ mod tests {
 
         let routes = vec![
             (
-                "rename_session",
-                json!({"tab":"tab-1","name":"Build review"}),
-                "tab.rename",
-                json!({"tab":"tab-1","name":"Build review"}),
+                "core_request",
+                json!({"operation":"board.get","body":{"project":1}}),
+                "board.get",
+                json!({"project":1}),
             ),
             (
-                "open_lead",
-                json!({"dir":"/tmp","harness":"claude-code"}),
-                "tab.open",
-                json!({"dir":"/tmp","harness":"claude-code"}),
-            ),
-            (
-                "open_shell",
-                json!({"tab":"tab-1"}),
-                "shell.open",
-                json!({"tab":"tab-1"}),
-            ),
-            (
-                "open_consult",
-                json!({"tab":"tab-1","agent":"asteria","task":"review","conversation":null}),
-                "consult",
-                json!({"tab":"tab-1","agent":"asteria","task":"review"}),
-            ),
-            (
-                "open_consult",
-                json!({"tab":"tab-1","agent":"asteria","task":null,"conversation":"answer-1"}),
-                "attach",
-                json!({"tab":"tab-1","agent":"asteria","session":"answer-1"}),
-            ),
-            (
-                "set_policy",
-                json!({"scope":"pane","id":"pane-1","mode":"manual"}),
-                "notify.set",
-                json!({"scope":"pane","id":"pane-1","mode":"manual"}),
-            ),
-            (
-                "answers_list",
-                json!({"tab":"tab-1","pane":"pane-1","conversation":"answer-1"}),
-                "answers.list",
-                json!({"tab":"tab-1","pane":"pane-1","conversation":"answer-1"}),
-            ),
-            (
-                "result_collect",
-                json!({"tab":"tab-1","result":"d-1"}),
-                "result.collect",
-                json!({"tab":"tab-1","result":"d-1"}),
-            ),
-            (
-                "result_cancel",
-                json!({"tab":"tab-1","result":"d-1"}),
-                "result.cancel",
-                json!({"tab":"tab-1","result":"d-1"}),
-            ),
-            (
-                "result_body",
-                json!({"tab":"tab-1","result":"d-1","offset":0}),
-                "result.body",
-                json!({"tab":"tab-1","result":"d-1","offset":0}),
-            ),
-            (
-                "tab_resume",
-                json!({"tab":"tab-1"}),
-                "tab.resume",
-                json!({"tab":"tab-1"}),
-            ),
-            (
-                "tab_delete",
-                json!({"tab":"tab-1","generation":7}),
-                "tab.delete",
-                json!({"tab":"tab-1","generation":7}),
-            ),
-            (
-                "list_state",
-                json!({"onOutput":"__CHANNEL__:99"}),
-                "state.list",
-                json!({}),
+                "core_request",
+                json!({"operation":"task.cancel","body":{"project":1,"task":1}}),
+                "task.cancel",
+                json!({"project":1,"task":1}),
             ),
         ];
 
@@ -3055,31 +3080,42 @@ mod tests {
             startup_error: None,
             output: Arc::new(OutputHub::new()),
             inputs,
-            launches: Arc::new(LaunchRegistry::new()),
             shutting_down: AtomicBool::new(false),
         };
         let app = tauri::test::mock_builder()
             .manage(runtime)
-            .invoke_handler(tauri::generate_handler![
-                open_lead,
-                open_shell,
-                open_consult,
-                set_policy,
-                answers_list,
-                result_collect,
-                result_cancel,
-                result_body,
-                tab_resume,
-                tab_delete,
-                rename_session,
-                list_state,
-            ])
+            .invoke_handler(tauri::generate_handler![core_request])
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("build mock app");
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .expect("build mock webview");
 
+        // These must be refused before requesting the bridge: the peer expects only valid routes.
+        for (command, args) in [
+            ("core_request", json!({"operation":"state.list","body":{}})),
+            ("core_request", json!({"operation":"board.get","body":[1]})),
+        ] {
+            let response = tauri::test::get_ipc_response(
+                &webview,
+                tauri::webview::InvokeRequest {
+                    cmd: command.into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "tauri://localhost".parse().expect("invoke URL"),
+                    body: tauri::ipc::InvokeBody::Json(args),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.to_string(),
+                },
+            )
+            .expect("validation response")
+            .deserialize::<Value>()
+            .expect("JSON");
+            assert_eq!(
+                response["ok"], false,
+                "invalid {command} accepted: {response}"
+            );
+        }
         for (command, args, _, _) in routes {
             let response = tauri::test::get_ipc_response(
                 &webview,
@@ -3096,11 +3132,7 @@ mod tests {
             .expect("command succeeds")
             .deserialize::<Value>()
             .expect("command response JSON");
-            if command == "list_state" {
-                assert_eq!(response, json!({"ok":true,"available":true}));
-            } else {
-                assert_eq!(response, json!({"ok":true}));
-            }
+            assert_eq!(response, json!({"ok":true}), "{command}");
         }
 
         node.join().expect("Node peer");

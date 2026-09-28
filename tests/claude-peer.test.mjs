@@ -8,6 +8,9 @@ import test from 'node:test'
 import { promisify } from 'node:util'
 import { currentSession, send } from '../src/channels/claude-peer.js'
 
+/** Claude's native inbox is a Unix socket; on Windows deliveries paste. */
+const UNIX_ONLY = { skip: process.platform === 'win32' && 'Unix sockets only' }
+
 const session = '17499106-8778-48e1-a306-87bd186c9f7e'
 const run = promisify(execFile)
 
@@ -70,28 +73,32 @@ async function fixture(t) {
   return { root, registry, key, native, target, record, calls }
 }
 
-test('Claude native peer sends a complete result without claiming native acceptance from a write', async (t) => {
-  const f = await fixture(t)
-  const response = await send(f.target, f.record.answer)
-  assert.equal(response.ok, true)
-  assert.equal(response.admitted, undefined)
-  assert.equal(f.calls.length, 1)
-  assert.equal(f.calls[0].op, 'pane.send_peer')
-  const { body } = f.calls[0]
-  assert.equal(body.epoch, 17)
-  assert.equal(body.peerPid, f.native.pid)
-  const [auth, message] = body.body.trimEnd().split('\n').map(JSON.parse)
-  assert.equal(auth.type, 'auth')
-  assert.equal(message.session_id, session)
-  assert.match(message.uuid, /^[a-f0-9-]{36}$/)
-  assert.equal(message.msg_id, message.uuid)
-  assert.equal(message.msgV, 1)
-  assert.equal(message.priority, 'next')
-  assert.equal(message.message.content, f.record.answer)
-  assert.doesNotMatch(JSON.stringify(response), /111111111111/)
-})
+test(
+  'Claude native peer sends a complete result without claiming native acceptance from a write',
+  UNIX_ONLY,
+  async (t) => {
+    const f = await fixture(t)
+    const response = await send(f.target, f.record.answer)
+    assert.equal(response.ok, true)
+    assert.equal(response.admitted, undefined)
+    assert.equal(f.calls.length, 1)
+    assert.equal(f.calls[0].op, 'pane.send_peer')
+    const { body } = f.calls[0]
+    assert.equal(body.epoch, 17)
+    assert.equal(body.peerPid, f.native.pid)
+    const [auth, message] = body.body.trimEnd().split('\n').map(JSON.parse)
+    assert.equal(auth.type, 'auth')
+    assert.equal(message.session_id, session)
+    assert.match(message.uuid, /^[a-f0-9-]{36}$/)
+    assert.equal(message.msg_id, message.uuid)
+    assert.equal(message.msgV, 1)
+    assert.equal(message.priority, 'next')
+    assert.equal(message.message.content, f.record.answer)
+    assert.doesNotMatch(JSON.stringify(response), /111111111111/)
+  },
+)
 
-test('Claude native registry ignores version metadata', async (t) => {
+test('Claude native registry ignores version metadata', UNIX_ONLY, async (t) => {
   const f = await fixture(t)
   await writeFile(f.registry, JSON.stringify({ ...f.native, version: 'arbitrary-version' }), {
     mode: 0o600,
@@ -104,7 +111,7 @@ for (const [label, fields] of [
   ['stale PID incarnation', { procStart: 'Mon Jan 1 00:00:00 2001' }],
   ['session mismatch', { sessionId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' }],
 ])
-  test(`Claude native peer refuses ${label} before sending`, async (t) => {
+  test(`Claude native peer refuses ${label} before sending`, UNIX_ONLY, async (t) => {
     const f = await fixture(t)
     await writeFile(f.registry, JSON.stringify({ ...f.native, ...fields }))
     const response = await send(f.target, f.record.answer)
@@ -113,21 +120,44 @@ for (const [label, fields] of [
     assert.equal(f.calls.length, 0)
   })
 
-test('Claude native peer rejects an ambiguous live session and a symlinked key', async (t) => {
-  const f = await fixture(t)
-  await writeFile(join(f.root, 'sessions', '99999.json'), JSON.stringify(f.native))
-  assert.equal((await send(f.target, f.record.answer)).admitted, false)
-  await rm(join(f.root, 'sessions', '99999.json'))
-  const original = await readFile(f.key)
-  const elsewhere = join(f.root, 'key')
-  await writeFile(elsewhere, original, { mode: 0o600 })
-  await rm(f.key)
-  await symlink(elsewhere, f.key)
-  assert.equal((await send(f.target, f.record.answer)).admitted, false)
-  assert.equal(f.calls.length, 0)
-})
+test(
+  'Claude native peer reports a status row without a messaging socket as an unregistered inbox',
+  UNIX_ONLY,
+  async (t) => {
+    // A Claude build that keeps only its status here has no inbox to reach; the
+    // terminal still takes a paste, so the caller must hear "unavailable", not
+    // the refusal it hears for an inbox whose identity is wrong.
+    const f = await fixture(t)
+    const { procStart, messagingSocketPath, entrypoint, peerProtocol, ...statusOnly } = f.native
+    for (const row of [statusOnly, { ...statusOnly, messagingSocketPath: null }]) {
+      await writeFile(f.registry, JSON.stringify({ ...row, status: 'idle' }), { mode: 0o600 })
+      const response = await send(f.target, f.record.answer)
+      assert.equal(response.error, 'native-session-unavailable')
+      assert.equal(response.cause, 'native Claude inbox is not registered')
+    }
+    assert.equal(f.calls.length, 0)
+  },
+)
 
-test('Claude native peer never retries a possibly written request', async (t) => {
+test(
+  'Claude native peer rejects an ambiguous live session and a symlinked key',
+  UNIX_ONLY,
+  async (t) => {
+    const f = await fixture(t)
+    await writeFile(join(f.root, 'sessions', '99999.json'), JSON.stringify(f.native))
+    assert.equal((await send(f.target, f.record.answer)).admitted, false)
+    await rm(join(f.root, 'sessions', '99999.json'))
+    const original = await readFile(f.key)
+    const elsewhere = join(f.root, 'key')
+    await writeFile(elsewhere, original, { mode: 0o600 })
+    await rm(f.key)
+    await symlink(elsewhere, f.key)
+    assert.equal((await send(f.target, f.record.answer)).admitted, false)
+    assert.equal(f.calls.length, 0)
+  },
+)
+
+test('Claude native peer never retries a possibly written request', UNIX_ONLY, async (t) => {
   const f = await fixture(t)
   f.target.bridge.request = async (...args) => {
     f.calls.push(args)
@@ -139,87 +169,95 @@ test('Claude native peer never retries a possibly written request', async (t) =>
   assert.equal(f.calls.length, 1)
 })
 
-test('Claude peer enforces the complete serialized frame byte limit before sending', async (t) => {
-  const f = await fixture(t)
-  await send(f.target, '')
-  const overhead = Buffer.byteLength(f.calls[0].body.body)
-  const text = 'x'.repeat(64 * 1024 - overhead)
-  assert.equal((await send(f.target, text)).ok, true)
-  assert.equal(Buffer.byteLength(f.calls[1].body.body), 64 * 1024)
-  const refused = await send(f.target, `${text}x`)
-  assert.equal(refused.admitted, false)
-  assert.equal(refused.bytesWritten, 0)
-  assert.equal(f.calls.length, 2)
-})
+test(
+  'Claude peer enforces the complete serialized frame byte limit before sending',
+  UNIX_ONLY,
+  async (t) => {
+    const f = await fixture(t)
+    await send(f.target, '')
+    const overhead = Buffer.byteLength(f.calls[0].body.body)
+    const text = 'x'.repeat(64 * 1024 - overhead)
+    assert.equal((await send(f.target, text)).ok, true)
+    assert.equal(Buffer.byteLength(f.calls[1].body.body), 64 * 1024)
+    const refused = await send(f.target, `${text}x`)
+    assert.equal(refused.admitted, false)
+    assert.equal(refused.bytesWritten, 0)
+    assert.equal(f.calls.length, 2)
+  },
+)
 
-test('Claude continuation needs explicit native linkage and descendant ownership even while the old process lives', async (t) => {
-  const f = await fixture(t)
-  const next = 'e6acbeb1-181f-4fdc-a963-6ff6d6d792ee'
-  // A separate process group beneath the registered interactive root, as native continuation uses.
-  const launcher = spawn(
-    process.execPath,
-    [
-      '-e',
-      `const {spawn}=require('node:child_process');const c=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'}); console.log(c.pid); process.on('SIGTERM',()=>{c.kill();process.exit()}); setInterval(()=>{},1000)`,
-    ],
-    { stdio: ['ignore', 'pipe', 'ignore'], detached: true },
-  )
-  t.after(() => launcher.kill())
-  const nextPid = await new Promise((resolve) =>
-    launcher.stdout.once('data', (chunk) => resolve(Number(String(chunk).trim()))),
-  )
-  t.after(() => {
-    try {
-      process.kill(nextPid)
-    } catch {}
-  })
-  const register = async (pid, id, kind) => {
-    const procStart = (
-      await run('/bin/ps', ['-p', String(pid), '-o', 'lstart='], {
-        env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' },
-      })
-    ).stdout.trim()
-    const socket = `/tmp/cc-socks/${pid}.sock`
-    const row = { ...f.native, pid, sessionId: id, kind, procStart, messagingSocketPath: socket }
-    await writeFile(join(f.root, 'sessions', `${pid}.json`), JSON.stringify(row), { mode: 0o600 })
-    await writeFile(
-      join(f.root, 'sessions', `${pid}.${createHash('sha256').update(socket).digest('hex')}.key`),
-      JSON.stringify({ peerToken: '1'.repeat(32), procStart }),
-      { mode: 0o600 },
+test(
+  'Claude continuation needs explicit native linkage and descendant ownership even while the old process lives',
+  UNIX_ONLY,
+  async (t) => {
+    const f = await fixture(t)
+    const next = 'e6acbeb1-181f-4fdc-a963-6ff6d6d792ee'
+    // A separate process group beneath the registered interactive root, as native continuation uses.
+    const launcher = spawn(
+      process.execPath,
+      [
+        '-e',
+        `const {spawn}=require('node:child_process');const c=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'}); console.log(c.pid); process.on('SIGTERM',()=>{c.kill();process.exit()}); setInterval(()=>{},1000)`,
+      ],
+      { stdio: ['ignore', 'pipe', 'ignore'], detached: true },
     )
-  }
-  await rm(f.registry)
-  await register(launcher.pid, session, 'interactive')
-  await register(nextPid, next, 'bg')
-  const bridge = {
-    request: async () => ({
-      panes: [{ id: 'p-1', generation: 1, alive: true, processGroupId: launcher.pid }],
-    }),
-  }
-  await mkdir(join(f.root, 'projects', 'test'), { recursive: true })
-  const transcript = join(f.root, 'projects', 'test', `${session}.jsonl`)
-  await writeFile(transcript, `${JSON.stringify({ type: 'system', sessionId: session })}\n`)
-  assert.equal(
-    await currentSession(f.target.launch, { id: 'p-1', generation: 1 }, bridge),
-    session,
-    'background children alone do not change the lead',
-  )
-  await writeFile(
-    join(f.root, 'projects', 'test', `${next}.jsonl`),
-    `${JSON.stringify({ type: 'system', sessionId: next })}\n`,
-  )
-  await writeFile(
-    transcript,
-    `${JSON.stringify({
-      type: 'continued-in',
-      sessionId: session,
-      continuedInSessionId: next,
-      timestamp: '2026-09-12T13:57:18.549Z',
-    })}\n`,
-  )
-  assert.equal(await currentSession(f.target.launch, { id: 'p-1', generation: 1 }, bridge), next)
-  // An unrelated process with the same asserted successor ID must fail closed.
-  await rm(join(f.root, 'sessions', `${nextPid}.json`))
-  await register(f.native.pid, next, 'bg')
-  assert.equal(await currentSession(f.target.launch, { id: 'p-1', generation: 1 }, bridge), null)
-})
+    t.after(() => launcher.kill())
+    const nextPid = await new Promise((resolve) =>
+      launcher.stdout.once('data', (chunk) => resolve(Number(String(chunk).trim()))),
+    )
+    t.after(() => {
+      try {
+        process.kill(nextPid)
+      } catch {}
+    })
+    const register = async (pid, id, kind) => {
+      const procStart = (
+        await run('/bin/ps', ['-p', String(pid), '-o', 'lstart='], {
+          env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' },
+        })
+      ).stdout.trim()
+      const socket = `/tmp/cc-socks/${pid}.sock`
+      const row = { ...f.native, pid, sessionId: id, kind, procStart, messagingSocketPath: socket }
+      await writeFile(join(f.root, 'sessions', `${pid}.json`), JSON.stringify(row), { mode: 0o600 })
+      await writeFile(
+        join(f.root, 'sessions', `${pid}.${createHash('sha256').update(socket).digest('hex')}.key`),
+        JSON.stringify({ peerToken: '1'.repeat(32), procStart }),
+        { mode: 0o600 },
+      )
+    }
+    await rm(f.registry)
+    await register(launcher.pid, session, 'interactive')
+    await register(nextPid, next, 'bg')
+    const bridge = {
+      request: async () => ({
+        panes: [{ id: 'p-1', generation: 1, alive: true, processGroupId: launcher.pid }],
+      }),
+    }
+    await mkdir(join(f.root, 'projects', 'test'), { recursive: true })
+    const transcript = join(f.root, 'projects', 'test', `${session}.jsonl`)
+    await writeFile(transcript, `${JSON.stringify({ type: 'system', sessionId: session })}\n`)
+    assert.equal(
+      await currentSession(f.target.launch, { id: 'p-1', generation: 1 }, bridge),
+      session,
+      'background children alone do not change the chief',
+    )
+    await writeFile(
+      join(f.root, 'projects', 'test', `${next}.jsonl`),
+      `${JSON.stringify({ type: 'system', sessionId: next })}\n`,
+    )
+    await writeFile(
+      transcript,
+      `${JSON.stringify({
+        type: 'continued-in',
+        sessionId: session,
+        continuedInSessionId: next,
+        timestamp: '2026-09-12T13:57:18.549Z',
+      })}\n`,
+    )
+    assert.equal(await currentSession(f.target.launch, { id: 'p-1', generation: 1 }, bridge), next)
+    // An unrelated process with the same asserted successor ID must fail closed.
+    await rm(join(f.root, 'sessions', `${nextPid}.json`))
+    await register(f.native.pid, next, 'bg')
+    assert.equal(await currentSession(f.target.launch, { id: 'p-1', generation: 1 }, bridge), null)
+  },
+)

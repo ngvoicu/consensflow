@@ -10,9 +10,19 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import test from 'node:test'
+import test, { after } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import * as completion from '../../hosts/lib/completion.js'
+
+/** Every temporary root a test here makes, removed when the file's tests end. */
+const roots = []
+after(() => Promise.all(roots.map((root) => fs.rm(root, { recursive: true, force: true }))))
+
+async function tempRoot(prefix) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), prefix))
+  roots.push(root)
+  return root
+}
 
 const FIX = fileURLToPath(new URL('./fixtures/completion/', import.meta.url))
 const { answers } = completion
@@ -73,7 +83,7 @@ test('completion/claude-code: synchronous hook context is exact native receipt e
 })
 
 async function stageJsonl(kind, sessionId, fixture, options = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-completion-'))
+  const root = await tempRoot('cf-completion-')
   const source = await fs.readFile(path.join(FIX, fixture), 'utf8')
   let records = source.trimEnd().split('\n')
   if (options.take !== undefined) records = records.slice(0, options.take)
@@ -137,7 +147,7 @@ async function stageJsonl(kind, sessionId, fixture, options = {}) {
 }
 
 async function stageOpencode(fixtureName, options = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-completion-opencode-'))
+  const root = await tempRoot('cf-completion-opencode-')
   const dir = path.join(root, 'opencode')
   await fs.mkdir(dir, { recursive: true })
   const fixture = JSON.parse(await fs.readFile(path.join(FIX, fixtureName), 'utf8'))
@@ -590,6 +600,61 @@ test('completion/claude-code: queued work prevents a settled window through dequ
   assert.equal(nextTurn.inFlight, true, 'the dequeued user turn is now open')
 })
 
+test('completion/claude-code: a removed cross-session message clears its queue entry when the envelope attributes differ', async () => {
+  // Claude Code 2.1.275 logs a mid-turn cross-session message with a
+  // hop-chain attribute on enqueue and without it on remove. Matching the
+  // removal by exact text left the chief "queued" forever, which held every
+  // result from 2026-09-18 11:00 on.
+  const session = '1b09fb15-feb1-4595-9f47-5eb9ff768191'
+  const envelope = (attributes) =>
+    `<cross-session-message from="uds:/tmp/cc-socks/0000.sock"${attributes} from-name="worker-01">worker result</cross-session-message>`
+  const { env, root } = await stageJsonl('claude-code', session, 'claude-code/queued-turn.jsonl', {
+    mutate: ([enqueue, assistant, , stopHooks]) => [
+      { ...enqueue, content: envelope(' hop-chain="ce0e9fe0365a224d1a5ef3fe"') },
+      assistant,
+      { ...enqueue, operation: 'remove', content: envelope('') },
+      stopHooks,
+    ],
+  })
+  try {
+    const result = await answers('claude-code', session, env)
+    shape(result)
+    assert.deepEqual(result.settlement.evidence.queuedTurns, [])
+    assert.equal(result.settlement.state, 'settled')
+    assert.equal(result.inFlight, false)
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('completion/cached: an unchanged transcript returns the previous result; a grown one is read again', async () => {
+  // The watcher re-reads every bound session each second; the live chief's
+  // transcript is 135 MB. Nothing about an unchanged file can have changed.
+  const session = '1b09fb15-feb1-4595-9f47-5eb9ff768191'
+  const { env, file, root } = await stageJsonl(
+    'claude-code',
+    session,
+    'claude-code/queued-turn.jsonl',
+    {
+      take: 2,
+    },
+  )
+  try {
+    const read = completion.cachedAnswers()
+    const first = await read('claude-code', session, env)
+    assert.equal(await read('claude-code', session, env), first, 'unchanged: the same result')
+    await fs.appendFile(
+      file,
+      `${JSON.stringify({ type: 'system', subtype: 'stop_hook_summary', timestamp: '2026-09-19T00:00:00.000Z' })}\n`,
+    )
+    const grown = await read('claude-code', session, env)
+    assert.notEqual(grown, first, 'grown: read again')
+    assert.deepEqual(grown, await answers('claude-code', session, env), 'and read correctly')
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
 test('completion/claude-code: the captured interrupt cancels; compaction keeps prior answers', async () => {
   const session = '1b09fb15-feb1-4595-9f47-5eb9ff768191'
   const interruptedStage = await stageJsonl('claude-code', session, 'claude-code/interrupted.jsonl')
@@ -709,6 +774,33 @@ test('completion/pi: toolCallId closes the loop and a 120-second quiet window de
   assert.equal(result.settlement.state, 'settled')
   assert.equal(result.settlement.provenance, 'derived')
   assert.equal(result.settlement.boundary, 'session.quiet_window')
+})
+
+test('completion/pi: a turn stopped by Escape (aborted) is over, not failed, settled by its evidence or the quiet window', async () => {
+  const abort = (records) => {
+    records.at(-1).message.stopReason = 'aborted'
+    return records
+  }
+  const nativeStage = await stageJsonl('pi', 'hazy-ridge', 'pi/tool-loop.jsonl', {
+    mutate: abort,
+    settlement: { launchId: 'launch-pi-1', frontierId: '3f9b029e' },
+  })
+  const native = await answers('pi', 'hazy-ridge', nativeStage.env)
+  shape(native)
+  assert.equal(native.inFlight, false)
+  assert.equal(native.cancelled, true)
+  assert.equal(native.failed, false)
+  assert.equal(native.items.at(-1).complete, false)
+  assert.equal(native.settlement.state, 'settled')
+  assert.equal(native.settlement.provenance, 'native')
+
+  const quietStage = await stageJsonl('pi', 'hazy-ridge', 'pi/tool-loop.jsonl', {
+    mutate: abort,
+    ageMs: PI_QUIET_MS + 1_000,
+  })
+  const quiet = await answers('pi', 'hazy-ridge', quietStage.env)
+  assert.equal(quiet.inFlight, false)
+  assert.equal(quiet.settlement.state, 'settled', 'without the evidence, the quiet window ends it')
 })
 
 test('completion/pi: matching settlement evidence promotes the native boundary, mismatches stay derived', async () => {
@@ -1084,135 +1176,6 @@ test('completion/opencode: tool output and long final text are emitted whole fro
   assert.equal(final.complete, true)
   assert.equal(result.settlement.state, 'settled')
   assert.equal(result.settlement.state, 'settled')
-})
-
-test('completion/opencode: metadata updates preserve native admission order and settlement', async () => {
-  const session = 'ses_f87e22f72ffewC2qJ2dAyyfPe1'
-  const before = await answers(
-    'opencode',
-    session,
-    await stageOpencode('opencode/tool-result.json', { eventThrough: 2362 }),
-  )
-  const after = await answers('opencode', session, await stageOpencode('opencode/tool-result.json'))
-  shape(before)
-  shape(after)
-
-  const expectedIds = [
-    'msg_0781dd0a1001NxYXxddKs7UGGM',
-    'prt_07834de0e001LFavSKJTkpG9xh',
-    'msg_07834cf2a001ZxKIEEils8Twxd',
-    'msg_07834e4450017pCEw2eVdPoUxQ',
-  ]
-  assert.deepEqual(
-    before.items.map((item) => item.id),
-    expectedIds,
-  )
-  assert.deepEqual(
-    after.items.map((item) => item.id),
-    expectedIds,
-  )
-  assert.equal(after.settlement.state, 'settled')
-  assert.equal(after.settlement.state, 'settled')
-  assert.equal(after.settlement.cursor, before.settlement.cursor)
-  assert.ok(after.cursor > before.cursor, 'the metadata event advances only the snapshot frontier')
-  assert.equal(
-    after.items[0].seq,
-    before.items[0].seq,
-    'the original prompt keeps its admission position',
-  )
-  assert.deepEqual(
-    completion.itemsAfterCursor('opencode', after.items, before.cursor),
-    [],
-    'old prompt text is not newly eligible after the completed snapshot cursor',
-  )
-})
-
-test('completion/opencode: native event seq is the opaque cursor and orders equal timestamps', async () => {
-  const session = 'ses_f87e22f72ffewC2qJ2dAyyfPe1'
-  const env = await stageOpencode('opencode/tool-result.json', {
-    mutate({ messages, parts }) {
-      for (const row of [...messages, ...parts]) {
-        row.time_created = 777
-        row.time_updated = 777
-        const data = JSON.parse(row.data)
-        if (data.time) {
-          for (const key of Object.keys(data.time)) data.time[key] = 777
-        }
-        if (data.state?.time) {
-          for (const key of Object.keys(data.state.time)) data.state.time[key] = 777
-        }
-        row.data = JSON.stringify(data)
-      }
-    },
-  })
-  const result = await answers('opencode', session, env)
-  shape(result)
-  assert.ok(result.cursor > result.settlement.cursor)
-  assert.deepEqual(
-    result.items.map((item) => item.id),
-    [
-      'msg_0781dd0a1001NxYXxddKs7UGGM',
-      'prt_07834de0e001LFavSKJTkpG9xh',
-      'msg_07834cf2a001ZxKIEEils8Twxd',
-      'msg_07834e4450017pCEw2eVdPoUxQ',
-    ],
-  )
-  assert.ok(result.items[0].seq < result.items[1].seq)
-  assert.ok(result.items[1].seq < result.items[2].seq)
-  assert.ok(result.items[2].seq < result.items[3].seq)
-  const intermediate = result.items.find((item) => item.id === 'msg_07834cf2a001ZxKIEEils8Twxd')
-  assert.deepEqual(
-    completion.itemsAfterCursor('opencode', result.items, intermediate.seq).map((item) => item.id),
-    ['msg_07834e4450017pCEw2eVdPoUxQ'],
-  )
-  assert.deepEqual(completion.itemsAfterCursor('opencode', result.items, result.cursor), [])
-})
-
-test('completion/itemsAfterCursor: an unrecognised cursor returns null, not verified empty', async () => {
-  const result = await answers(
-    'opencode',
-    'ses_f87e22f72ffewC2qJ2dAyyfPe1',
-    await stageOpencode('opencode/tool-result.json'),
-  )
-  shape(result)
-  assert.equal(completion.itemsAfterCursor('opencode', result.items, 2353), null)
-})
-
-test('completion/itemsAfterCursor: a cursor minted by another harness returns null', async () => {
-  const opencode = await answers(
-    'opencode',
-    'ses_f87e22f72ffewC2qJ2dAyyfPe1',
-    await stageOpencode('opencode/tool-result.json'),
-  )
-  const kimiSession = 'session_11c123b3-dd33-4f21-8862-beabdc50cd18'
-  const kimiStage = await stageJsonl('kimi', kimiSession, 'kimi/tool-result.jsonl')
-  const kimi = await answers('kimi', kimiSession, kimiStage.env)
-  shape(opencode)
-  shape(kimi)
-  assert.equal(completion.itemsAfterCursor('opencode', opencode.items, kimi.cursor), null)
-})
-
-test('completion/itemsAfterCursor: unparseable items return null, not verified empty', async () => {
-  const result = await answers(
-    'opencode',
-    'ses_f87e22f72ffewC2qJ2dAyyfPe1',
-    await stageOpencode('opencode/tool-result.json'),
-  )
-  shape(result)
-  assert.equal(completion.itemsAfterCursor('opencode', undefined, result.cursor), null)
-  assert.equal(
-    completion.itemsAfterCursor('opencode', [{ id: 'broken', seq: 'not-a-cursor' }], result.cursor),
-    null,
-  )
-  assert.equal(
-    completion.itemsAfterCursor('opencode', [{ seq: result.items[0].seq }], result.cursor),
-    null,
-    'a valid cursor cannot make a malformed item readable',
-  )
-  const arrayItem = Object.assign([], result.items[0])
-  assert.equal(completion.itemsAfterCursor('opencode', [arrayItem], result.cursor), null)
-  assert.equal(completion.itemsAfterCursor('__proto__', [], 0), null)
-  assert.equal(completion.itemsAfterCursor('toString', [], 0), null)
 })
 
 test('completion/opencode: one read transaction rejects a competing writer from its snapshot', async () => {
@@ -1595,7 +1558,7 @@ test('completion: env is mandatory and never defaults to the ambient process', a
 })
 
 test('completion: readable corrupted storage and absent storage fail closed', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-completion-corrupt-'))
+  const root = await tempRoot('cf-completion-corrupt-')
   const dir = path.join(root, 'sessions')
   await fs.mkdir(dir, { recursive: true })
   await fs.writeFile(path.join(dir, 'rollout-corrupt.jsonl'), '{bad}\n')
@@ -1603,7 +1566,7 @@ test('completion: readable corrupted storage and absent storage fail closed', as
   assert.equal(corrupt.unknown, true)
   assert.match(corrupt.reason, /malformed JSONL/)
 
-  const empty = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-completion-empty-'))
+  const empty = await tempRoot('cf-completion-empty-')
   for (const kind of ['codex', 'claude-code', 'pi', 'kimi', 'opencode']) {
     const result = await answers(kind, 'no-such-session', { HOME: empty, XDG_DATA_HOME: empty })
     assert.deepEqual(Object.keys(result).sort(), ['reason', 'unknown'])
@@ -1698,4 +1661,275 @@ test('completion: extraction is streamed, snapshot-consistent, and never display
   assert.match(source, /createReadStream/)
   assert.ok(!/adaptLine\s*\(/.test(source))
   assert.ok(!/from\s+['"][^'"]*transcript-events['"]/.test(source))
+})
+
+// ------------------------------------------------------------------ quota
+
+test('quota/codex: the rollout says how much of the window is used, and when it resets', async () => {
+  const session = '01a077c2-5d0f-7452-a2be-ace096bbe3be'
+  const limits = (used, reached = null) => ({
+    timestamp: '2026-09-06T17:27:06.000Z',
+    ordinal: 2490,
+    type: 'event_msg',
+    payload: {
+      type: 'token_count',
+      info: null,
+      rate_limits: {
+        limit_id: 'codex',
+        primary: { used_percent: used, window_minutes: 10080, resets_at: 1790423393 },
+        secondary: { used_percent: 12.5, window_minutes: 300, resets_at: 1789900000 },
+        rate_limit_reached_type: reached,
+      },
+    },
+  })
+  const read = async (record) => {
+    const { env } = await stageJsonl('codex', session, 'codex/completed.jsonl', {
+      mutate: (records) => [...records, record],
+    })
+    return (await answers('codex', session, env)).quota
+  }
+  assert.deepEqual(await read(limits(5)), {
+    state: 'ok',
+    usedPercent: 12.5,
+    resetsAt: new Date(1789900000 * 1000).toISOString(),
+  })
+  assert.deepEqual(await read(limits(97)), {
+    state: 'low',
+    usedPercent: 97,
+    resetsAt: new Date(1790423393 * 1000).toISOString(),
+  })
+  assert.equal((await read(limits(100, 'primary'))).state, 'exhausted')
+  const { env } = await stageJsonl('codex', session, 'codex/completed.jsonl')
+  assert.equal((await answers('codex', session, env)).quota, null, 'no token_count, no word on it')
+})
+
+test('quota/claude-code: a 429 is exhaustion until a later turn succeeds', async () => {
+  const session = '33383216-87a0-4e6d-a273-07c4b229cdb1'
+  const { env } = await stageJsonl('claude-code', session, 'claude-code/provider-429.jsonl')
+  const refused = await answers('claude-code', session, env)
+  assert.equal(refused.failed, true)
+  assert.deepEqual(refused.quota, {
+    state: 'exhausted',
+    at: refused.items.at(-1).at,
+    resetsAt: null,
+  })
+
+  const later = await stageJsonl('claude-code', session, 'claude-code/provider-429.jsonl', {
+    mutate: (records) => {
+      const error = records.findLast((record) => record.isApiErrorMessage === true)
+      error.message.content = [{ type: 'text', text: "You've hit your limit. Resets in 2 hours." }]
+      error.timestamp = '2026-09-19T10:00:00.000Z'
+      return [
+        ...records,
+        {
+          ...error,
+          uuid: 'after-reset',
+          parentUuid: error.uuid,
+          timestamp: '2026-09-19T13:00:00.000Z',
+          isApiErrorMessage: undefined,
+          apiErrorStatus: undefined,
+          error: undefined,
+          message: {
+            ...error.message,
+            id: 'msg_after_reset',
+            content: [{ type: 'text', text: 'Back to work.' }],
+          },
+        },
+      ]
+    },
+  })
+  const resumed = await answers('claude-code', session, later.env)
+  assert.equal(resumed.quota, null, 'the refusal is history once a turn succeeds')
+  const named = await stageJsonl('claude-code', session, 'claude-code/provider-429.jsonl', {
+    mutate: (records) => {
+      const error = records.findLast((record) => record.isApiErrorMessage === true)
+      error.message.content = [{ type: 'text', text: "You've hit your limit. Resets in 2 hours." }]
+      error.timestamp = '2026-09-19T10:00:00.000Z'
+      return records
+    },
+  })
+  assert.deepEqual((await answers('claude-code', session, named.env)).quota, {
+    state: 'exhausted',
+    at: '2026-09-19T10:00:00.000Z',
+    resetsAt: '2026-09-19T12:00:00.000Z',
+  })
+})
+
+test('quota/pi: a 429 names its reset in the message; a later stop clears it', async () => {
+  const session = 'hazy-429'
+  const stage = (mutate) => stageJsonl('pi', session, 'pi/provider-429.jsonl', { mutate })
+  const upToError = (records) => {
+    const last = records.findLastIndex((record) => record.message?.stopReason === 'error')
+    return records.slice(0, last + 1)
+  }
+  const refused = await stage((records) => {
+    const cut = upToError(records)
+    const error = cut.at(-1)
+    error.message.errorMessage =
+      '429: {"type":"GoUsageLimitError","message":"Weekly usage limit reached. Resets in 3 days."}'
+    error.message.timestamp = Date.parse('2026-09-19T10:00:00.000Z')
+    return cut
+  })
+  assert.deepEqual((await answers('pi', session, refused.env)).quota, {
+    state: 'exhausted',
+    at: '2026-09-19T10:00:00.000Z',
+    resetsAt: '2026-09-22T10:00:00.000Z',
+  })
+  const other = await stage((records) => {
+    const cut = upToError(records)
+    cut.at(-1).message.errorMessage = '500: provider down'
+    return cut
+  })
+  assert.equal((await answers('pi', session, other.env)).quota, null, 'a 500 is not quota')
+  const retried = await stage((records) => records)
+  assert.equal(
+    (await answers('pi', session, retried.env)).quota,
+    null,
+    'the fixture retries and succeeds',
+  )
+})
+
+test('quota/opencode: a 429 on the message is exhaustion; a completed turn after it clears it', async () => {
+  const fixture = JSON.parse(
+    await fs.readFile(path.join(FIX, 'opencode/completion-window.json'), 'utf8'),
+  )
+  const sessionId = fixture.session[0].id
+  let completedAt = null
+  const refused = await answers(
+    'opencode',
+    sessionId,
+    await stageOpencode('opencode/completion-window.json', {
+      snapshot: 'after',
+      mutate: ({ messages }) => {
+        const data = JSON.parse(messages[0].data)
+        completedAt = data.time.completed
+        data.error = {
+          name: 'APIError',
+          data: { message: 'Weekly usage limit reached. Resets in 1 day.', statusCode: 429 },
+        }
+        messages[0].data = JSON.stringify(data)
+      },
+    }),
+  )
+  assert.equal(refused.failed, true, JSON.stringify(refused).slice(0, 300))
+  assert.deepEqual(refused.quota, {
+    state: 'exhausted',
+    at: new Date(completedAt).toISOString(),
+    resetsAt: new Date(completedAt + 86_400_000).toISOString(),
+  })
+  const fine = await answers(
+    'opencode',
+    sessionId,
+    await stageOpencode('opencode/completion-window.json', { snapshot: 'after' }),
+  )
+  assert.equal(fine.quota, null)
+})
+
+// ------------------------------------------------------------------- devin
+
+/** A Devin store with a user message and an assistant reply, and a wire log of `events`, in a temporary home. */
+async function stageDevin(stored, events) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-completion-devin-'))
+  const env = {
+    HOME: root,
+    XDG_DATA_HOME: path.join(root, 'data'),
+    CONSENSFLOW_HOME: path.join(root, 'home'),
+  }
+  const store = path.join(env.XDG_DATA_HOME, 'devin', 'cli')
+  await fs.mkdir(store, { recursive: true })
+  const db = new DatabaseSync(path.join(store, 'sessions.db'))
+  db.exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, main_chain_id TEXT);
+    CREATE TABLE message_nodes (row_id INTEGER PRIMARY KEY, session_id TEXT, node_id TEXT,
+      parent_node_id TEXT, chat_message TEXT, created_at TEXT)`)
+  const node = db.prepare(
+    'INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at) VALUES (?, ?, ?, ?, ?)',
+  )
+  const user = {
+    message_id: 'u-1',
+    role: 'user',
+    content: 'Review T-1',
+    metadata: { extensions: { 'chisel/client-message-id': 'request-1' } },
+  }
+  node.run('calm-river', 'n-1', null, JSON.stringify(user), '2026-09-26T05:09:30Z')
+  node.run(
+    'calm-river',
+    'n-2',
+    'n-1',
+    JSON.stringify({ message_id: 'a-1', role: 'assistant', content: stored }),
+    '2026-09-26T05:10:00Z',
+  )
+  db.prepare('INSERT INTO sessions (id, main_chain_id) VALUES (?, ?)').run('calm-river', 'n-2')
+  db.close()
+  const launch = path.join(env.CONSENSFLOW_HOME, 'integrations', 'devin', 'launch-1')
+  await fs.mkdir(launch, { recursive: true })
+  await fs.writeFile(
+    path.join(launch, 'wire.jsonl'),
+    `${events.map((e) => JSON.stringify(e)).join('\n')}\n`,
+  )
+  return { root, env }
+}
+
+const devinChunk = (text, request = 'request-1', stream = 'stream-1') => ({
+  sessionId: 'calm-river',
+  turnClientMessageId: request,
+  update: {
+    sessionUpdate: 'agent_message_chunk',
+    content: { type: 'text', text },
+    _meta: { 'cognition.ai/streamingMessageId': stream },
+  },
+})
+
+test('completion/devin: a final message that links a file settles, though Devin stores the link as a tag', async () => {
+  const { streamed, stored } = JSON.parse(
+    await fs.readFile(path.join(FIX, 'devin/file-link.json'), 'utf8'),
+  )
+  const half = Math.floor(streamed.length / 2)
+  const { root, env } = await stageDevin(stored, [
+    devinChunk(streamed.slice(0, half)),
+    devinChunk(streamed.slice(half)),
+    { sessionId: 'calm-river', turnClientMessageId: 'request-1', cause: 'complete' },
+  ])
+  try {
+    const result = await completion.answers('devin', 'calm-river', env)
+    const final = result.items.at(-1)
+    assert.equal(final.text, stored)
+    assert.equal(final.complete, true, 'the same text once the file link is read as its path')
+    assert.equal(result.inFlight, false)
+    assert.equal(result.settlement.state, 'settled')
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('completion/devin: a turn whose work shows on the wire after the last end is in flight, whatever the store says', async () => {
+  // Devin writes a turn to its store as it goes, but a turn it is still on
+  // shows only on the wire: thoughts, messages and tool calls after the last end.
+  const work = (sessionUpdate) => ({ sessionId: 'calm-river', update: { sessionUpdate } })
+  const ended = [
+    devinChunk('Done.'),
+    { sessionId: 'calm-river', turnClientMessageId: 'request-1', cause: 'complete' },
+  ]
+  const { root, env } = await stageDevin('Done.', [
+    ...ended,
+    work('agent_thought_chunk'),
+    work('tool_call'),
+    work('tool_call_update'),
+  ])
+  try {
+    const working = await completion.answers('devin', 'calm-river', env)
+    assert.equal(working.inFlight, true)
+    assert.equal(working.settlement.state, 'in-flight')
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+  const settings = await stageDevin('Done.', [
+    { sessionId: 'calm-river', update: { sessionUpdate: 'config_option_update' } },
+    ...ended,
+  ])
+  try {
+    const idle = await completion.answers('devin', 'calm-river', settings.env)
+    assert.equal(idle.settlement.state, 'settled', 'settings updates are not work')
+  } finally {
+    await fs.rm(settings.root, { recursive: true, force: true })
+  }
 })

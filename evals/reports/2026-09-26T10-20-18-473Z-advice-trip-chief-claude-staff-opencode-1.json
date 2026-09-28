@@ -1,0 +1,200 @@
+{
+  "scenario": "advice-trip",
+  "chief": "claude",
+  "model": "claude-opus-5",
+  "staff": [
+    "opencode"
+  ],
+  "staffModels": {
+    "eval-opencode-worker": "opencode-go/deepseek-v4-flash",
+    "eval-opencode-worker-2": "opencode-go/deepseek-v4-flash",
+    "eval-opencode-advisor": "opencode-go/deepseek-v4-flash",
+    "eval-opencode-reviewer": "opencode-go/deepseek-v4-flash"
+  },
+  "run": 1,
+  "seconds": 213,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Întrebare de design pentru un site public despre burnout (epuizare profesională). Publicul: oameni stresați, mulți apro…",
+        "pool": "advisor",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-opencode-advisor-amber-willow"
+      }
+    ],
+    "parallel": 1,
+    "advice": 1,
+    "reviews": 0,
+    "questionsToHuman": [],
+    "notesToHuman": [
+      {
+        "id": 3,
+        "body": "Recomandarea advisorului (T-1, buton Contact pe site-ul despre burnout): VERDE, nu albastru.\n\nMotivul, în cuvintele lui: verdele evocă calm, natură, recuperare și siguranță — exact semnalele care redu"
+      }
+    ],
+    "taskCount": 1,
+    "chiefId": 2,
+    "chiefHarness": "claude-code",
+    "humanId": 1,
+    "chiefTurns": 4,
+    "chiefEdits": 0,
+    "chiefLastWords": "Testul a trecut, în tot lanțul:\n\n1. **T-1** a plecat pe board ca sarcină de sfat (`--advice`, tier standard) — fără să te întreb nimic.\n2. A fost preluată de `@eval-opencode-advisor-amber-willow`, iar rezultatul a ajuns în inbox-ul meu ca mesaj `m-2`.\n3. **T-1 este acceptat** — decizia asupra rezultatului e a mea, deci nu rămâne blocat în starea „done\".\n4. Recomandarea a plecat către tine ca notă, `m-3`.\n\n**Recomandarea lui: verde, nu albastru** — pentru un public epuizat, verdele citește ca recuperare și siguranță, în timp ce albastrul, deși transmite încredere, poate suna rece și instituțional.\n\nCe s-a respectat din cererea ta: niciun fișier atins, nicio altă sarcină pusă pe board, nicio întrebare către tine.\n\nUn lucru de ținut minte despre cum funcționează sistemul: un advisor nu schimbă niciodată fișiere — întoarce doar constatări. Asta îl face varianta corectă pentru o întrebare de judecată ca aceasta, exact ca acum. Dacă mai târziu vrei ca butonul să fie chiar colorat în verde în cod, aceea e muncă pentru un worker (`cf task add --tier …`), nu pentru un advisor.",
+    "plumbing": {
+      "briefs": 1,
+      "briefsDelivered": 1,
+      "results": 1,
+      "resultsDelivered": 1,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 1,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0,
+      "ownerQuestions": 0,
+      "ownerQuestionsAnswered": 0
+    },
+    "filesChanged": []
+  },
+  "checks": [
+    {
+      "name": "one advice task goes on the board",
+      "ok": true
+    },
+    {
+      "name": "the advice task is accepted",
+      "ok": true
+    },
+    {
+      "name": "the recommendation reaches the owner as a note",
+      "ok": true
+    },
+    {
+      "name": "no file changes",
+      "ok": true
+    },
+    {
+      "name": "the owner is not asked anything",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (1/1)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (1/1)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question the chief put to the owner got the owner's answer (0/0)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (1/1)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "săteîntrebnimic.  2.❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus53873tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Afostpreluatăde@eval-opencode-advisor-amber-willow,iarrezultatula",
+    "ajunsîninbox-ulmeucamesajm-2.────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           53873 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "3.────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           53873 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "T-1 este acceptat—deciziaasuprarezultatuluieamea,decinurămâne",
+    "blocatînstarea„done\".  4.❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus53873tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Recomandareaaplecatcătretinecanotă,m-3.────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           53873 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Recomandarea lui: verde, nu albastru—pentruunpublicepuizat,verdele────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           53873 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "citeștecarecuperareșisiguranță,întimpcealbastrul,deșitransmite────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           53873 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "încredere,poatesunareceșiinstituțional.❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus53873tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Ces-arespectatdincerereata:niciunfișieratins,nicioaltăsarcinăpusă────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           53873 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "peboard,nicioîntrebarecătretine.❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus53873tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Unlucrudeținutmintedesprecumfuncționeazăsistemul:unadvisornu────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           53873 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "schimbăniciodatăfișiere—întoarcedoarconstatări.Astaîlfacevarianta────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           53873 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "corectăpentruoîntrebaredejudecatăcaaceasta,exactcaacum.Dacămai────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           53873 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "târziuvreicabutonulsăfiechiarcoloratînverdeîncod,aceeaemuncă────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           53873 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "pentruunworker(cf task add --tier …),nupentruunadvisor.· Determining… (20s · ↓739 tokens)  ⎿  Tip: Use /theme to change the color theme────────────────────────────────────────────────────────────────────────────────",
+    "❯",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus54050tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "✻Cooked for 20s · done 1:18 PM────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────  workspace Opus                                                  54545 tokens⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent         /rc"
+  ],
+  "terminalAnswers": 0,
+  "refusedAnswers": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 68,
+      "line": "chief (claude) ready; typing the prompt"
+    },
+    {
+      "at": 78,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 83,
+      "line": "chief working; tasks T-1:queued"
+    },
+    {
+      "at": 88,
+      "line": "chief idle; tasks T-1:working"
+    },
+    {
+      "at": 98,
+      "line": "chief idle; tasks T-1:done"
+    },
+    {
+      "at": 103,
+      "line": "chief working; tasks T-1:accepted"
+    },
+    {
+      "at": 123,
+      "line": "chief idle; tasks T-1:accepted"
+    },
+    {
+      "at": 213,
+      "line": "quiet: the run is over"
+    }
+  ]
+}

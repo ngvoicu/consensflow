@@ -2,13 +2,28 @@
 
 | ID | Title | Status | Priority | Progress | Updated |
 |---|---|---|---|---|---|
-| devin-and-receiver-cleanup | Devin roles and receiver integration cleanup | active | high | 3/8 | 2026-09-12 |
+| tiered-dispatch | Tiered dispatch, review gate and quota — the daemon picks the member | completed | critical | 14/14 | 2026-09-19 |
+| board-daemon-core | Board, daemon and inboxes — the Stage 2 rewrite of the daemon core | active | critical | 23/25 | 2026-09-19 |
+| candidate-feedback-1 | First hands-on round on the Candidate — kanban, team, agents window, questions | active | critical | 17/18 | 2026-09-20 |
+| candidate-feedback-2 | Second hands-on round on the Candidate — wide dialogs, settings gear, agent cards, named worker sessions | completed | critical | 8/8 | 2026-09-20 |
+| candidate-feedback-3 | Third hands-on round — one Agents screen, no PM, three member roles, tiers instead of tags | completed | critical | 5/5 | 2026-09-20 |
+| plan-on-the-board | A plan on the board — task needs, blocked tasks, and a task put before others | completed | high | 2/2 | 2026-09-20 |
+| pause-and-resume | Pause and resume — the lead stops a worker's task and brings it back, and a lost window waits for the lead | completed | high | 2/2 | 2026-09-21 |
+| sessions-are-the-humans | Sessions are the human's — no expiry, no cap, a window opened, closed or deleted from its lane | completed | high | 2/2 | 2026-09-21 |
+| reviews-are-tasks | Reviews are tasks — no automatic reviews, no review buttons; the lead adds a review for a reviewer | completed | high | 2/2 | 2026-09-21 |
+| one-roster | One roster — every catalog agent is an agent, as the catalog has it; teams pick from all of them | completed | high | 7/7 | 2026-09-23 |
+| quota-hold | Quota mid-work — hold the task with its window when the reset is near or nobody else can take it | completed | high | 6/6 | 2026-09-24 |
+| reliable-delivery | Reliable delivery, markers and daemon load (board redesign phase 1) | active | critical | 17/19 | 2026-09-19 |
+| session-task-board | Session task board and operational graph | completed | high | 12/12 | 2026-09-13 |
+| devin-and-receiver-cleanup | Devin roles and receiver integration cleanup | paused | high | 38/39 | 2026-09-13 |
 | consensflow-v3-skills-first | ConsensFlow v3 — Skills-First (SPEC.md missing) | completed | high | 12/12 | 2026-08-19 |
 | cmux-agent-threads | Agent Threads — named, resumable conversations (SPEC.md missing) | completed | high | 16/16 | 2026-08-23 |
 | cmux-attached-consults | Attached consults — the pane IS the agent's window (SPEC.md missing) | completed | high | 10/10 | 2026-08-24 |
 | kimi-harness | Kimi Code as a fifth harness (SPEC.md missing) | completed | high | 8/8 | 2026-08-24 |
 | standalone-panes-delivery | ConsensFlow owns the panes — standalone mode in the app, results delivered to the lead | completed | high | 272/272 | 2026-09-12 |
 | agent-catalog-redesign | Coherent agent catalog and roster browsing | completed | high | 42/42 | 2026-09-10 |
+| chief-of-staff | Chief of Staff and Staff — the lead and the team renamed everywhere, data included | completed | high | 5/5 | 2026-09-25 |
+| chief-evals | Chief evals — a real chief on a toy project, its judgment measured from the ledger | in-progress | high | 4/5 | 2026-09-25 |
 
 Phase 19 is complete: alpha.37 is installed and source is integrated into the
 original checkout. Native delivery, persistent results, PM window, updater and
@@ -130,3 +145,60 @@ Devin integration remains active at 2/6; no installed app or current session cha
 selected. Eleven actual TUI scenarios / 54 assertions establish repeated native
 hook collection and next-prompt recovery, with cancellation delayed by a waiting
 Stop hook. Full automatic idle wake remains unresolved. [TUI findings](devin-and-receiver-cleanup/research-devin-tui.md).
+
+
+2026-09-12 Devin/cleanup development complete at 14/14. Stock Devin TUI requires
+3000.10.21; private candidate carries that version without changing global Devin.
+Child cleanup, stored-read stall and bounded paste fixes are included. Node 1,105
+passed / six gated skips; Rust 114, bridge 19, browser 123 scenarios and packaged
+smoke 2 passed, including exact 630,012-byte native paste. All 62 bundled source
+files match and strict signing verifies. Live acceptance remains pending; installed
+ConsensFlow and current sessions are untouched. Candidate launcher:
+`~/.consensflow/candidates/devin-20260912/Launch candidate.command`.
+[Full acceptance and limitations](devin-and-receiver-cleanup/SPEC.md#final-candidate-acceptance).
+
+2026-09-13 paste follow-up: failed session refresh now preserves the existing
+terminals and retries, including first load. Three regressions, full browser 126
+and packaged smoke 2 pass. Separate candidate rebuilt and signed; launcher retains
+exit diagnostics. Stock Claude TUI accepts 22,000-character ASCII/Unicode pastes
+with a local mock provider. The reported installed whole-app restart remains
+unreproduced (VERIFY-PASTE-13). Installed alpha.61 and live session data untouched.
+
+Paste follow-up: five 22,000-codepoint clipboard/submission cases also pass through
+the actual packaged WebKit/xterm/Rust/PTY path into stock Claude with a local mock
+provider; complete input and rendered replies verified, same app PID, clean exit.
+This uses a private self-test driver, not OS-level Cmd-V. Intermittent installed
+restart remains unconfirmed; no production code or installed app changed.
+
+Roster selection/review context is complete in the private candidate: lead and PM
+choose saved agents from capability/effort/benchmark profiles; cross-model reviews
+cover substantial coordinator, worker and advisor output. PM can read the roster
+without administration authority. Five coordinator harnesses verified; Node 1,113
+passed / six skips, focused CLI/role 77, packaged smoke 2. Integration initially
+17/19, then focused 9/9 and sequential-file full 19/19; initial failures retained.
+Signed candidate/source hashes verified; installed app unchanged. Only the
+intermittent paste restart remains open at 19/20; live routing quality is untested.
+
+
+Four work tiers and tag cleanup complete in the private candidate (28/29).
+Critical specialists require an allowed purpose for every task/follow-up and have
+no Coding or lead/PM recommendation. Shared defaults, saved overrides, readable
+pills and tier filters/grouping agree between library, roster and coordinator
+instructions. Final Node 1,119 pass/six skips, integration 19, browser 33 and packaged
+smoke 2 pass. One repeat concurrent Node fixture failure is retained; isolated and
+final sequential-file runs pass. Installed app/live roster unchanged. Only the
+unreproduced paste restart remains open; live model adherence is not yet evaluated.
+
+Bundled skill cleanup complete in the private candidate (33/34): one generator
+for all roles, shared coordinator policy, launch-only preparation, retired
+skill administration/manifest/repair/removal code deleted. Final Node 1,099 pass,
+six skips; integration 19, browser 33, packaged smoke 2 and skill validation 3
+pass. Installed app and live roster unchanged. Earlier failed trials retained;
+only the intermittent paste restart remains open.
+
+Automatic pane activity and deletion complete in the private candidate (38/39).
+Working/Idle/Unknown and lifecycle states appear in headers/sidebar; closed panes
+delete safely, with explicit worker/PM/session scopes. Native activity is cached
+by current binding and expires after ten seconds. Node 1,102 pass/six gated skips;
+integration 19, browser 129 and packaged smoke 2 pass. Installed app, live roster
+and active process unchanged. Only the intermittent paste restart remains open.
