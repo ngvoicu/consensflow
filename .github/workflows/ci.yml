@@ -17,6 +17,8 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    # A hang fails the job in an hour, not GitHub's six.
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash
@@ -48,7 +50,10 @@ jobs:
       - run: cargo build --release --bin consensflow-bridge
         working-directory: app/src-tauri
       - run: npm run test:integration
+      # The PTY tests read their children with no time limit of their own; a
+      # stuck read on a runner (seen once on macOS) ends here.
       - run: cargo test --lib
         working-directory: app/src-tauri
+        timeout-minutes: 15
       - run: cargo clippy --all-targets -- -D warnings
         working-directory: app/src-tauri
