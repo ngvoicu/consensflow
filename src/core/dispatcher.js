@@ -757,12 +757,18 @@ export class Dispatcher {
       return
     }
     if (!observed.settled) return
-    const answer = observed.items
-      .slice(start + 1)
-      .filter((item) => item.role === 'assistant' && item.complete)
-      .at(-1)
-    if (answer === undefined) return
-    const body = answer.text.trim() || '(the agent ended its turn without a written answer)'
+    // The turn is over once its last message is complete (the one that ended
+    // it; a message that ended in a tool call never is). The result is
+    // everything the member wrote in it, in order: a report written before a
+    // last command, then "Committed.", is not the last word alone. A tool's
+    // output is not the member's words.
+    const written = observed.items.slice(start + 1).filter((item) => item.role === 'assistant')
+    if (written.at(-1)?.complete !== true) return
+    const body =
+      written
+        .map((item) => item.text.trim())
+        .filter((text) => text !== '')
+        .join('\n\n') || '(the agent ended its turn without a written answer)'
     this.#ledger.recordResult(project.id, task.number, { body })
     this.#changed()
   }

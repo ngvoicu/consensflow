@@ -379,6 +379,25 @@ describe('the agents API', () => {
     })
   })
 
+  it('gives the chief every character of a long result with cf inbox read', async () => {
+    await withApi(async ({ ledger, project, token, cf }) => {
+      const chief = token('chief')
+      assert.equal(
+        (await cf(chief, 'task', 'add', '--tier', 'standard', 'Write the report')).code,
+        0,
+      )
+      const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
+      deliver(ledger, ledger.assignTask(project.id, 1, zeus.id).message)
+      // The window shows the first 3000 characters; the rest is read with this.
+      const body = `${'Line of the report.\n'.repeat(1000)}The code at the end: CEDRU-7314`
+      ledger.recordResult(project.id, 1, { body })
+      const result = ledger.task(project.id, 1).messages.find((m) => m.kind === 'result')
+      const read = await cf(chief, 'inbox', 'read', `m-${result.id}`)
+      assert.equal(read.code, 0, read.err)
+      assert.ok(read.out.includes(body), 'the whole body, unshortened')
+    })
+  })
+
   it('shows an agent nothing that still waits for the human', async () => {
     await withApi(async ({ ledger, project, token, call, cf }) => {
       ledger.setGate(project.id, true)

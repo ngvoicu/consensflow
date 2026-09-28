@@ -291,6 +291,34 @@ describe('the dispatcher', () => {
     })
   })
 
+  it('keeps everything a member wrote in its turn, not only its last message', async () => {
+    await setup(async (context) => {
+      const { project } = await withStaff(context)
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Write the report' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      // The report, a command, then a short last word: collecting the last
+      // message alone would give the chief "Committed." and nothing else.
+      const report = `${'Line of the report.\n'.repeat(500)}The code at the end: CEDRU-7314`
+      const zeus = context.adapter.agent('zeus')
+      // As every adapter reports it: a message that ended in a tool call is not
+      // complete; only the one that ends the turn is.
+      zeus.items.push(
+        item('assistant', report, { complete: false }),
+        item('tool', 'git commit: 1 file changed'),
+      )
+      context.adapter.answer('zeus', 'Committed.')
+      await context.dispatcher.pass()
+      const result = context.ledger.task(project.id, 1).messages.find((m) => m.kind === 'result')
+      assert.ok(result.body.includes(report), 'the report, whole')
+      assert.ok(result.body.includes('Committed.'), 'and the last word')
+      assert.ok(
+        !result.body.includes('git commit: 1 file changed'),
+        "a tool's output is not the member's words",
+      )
+    })
+  })
+
   it('opens no window for a brief the human has not approved, and delivers a result only once approved', async () => {
     await setup(async (context) => {
       const { project, id } = await withStaff(context)
