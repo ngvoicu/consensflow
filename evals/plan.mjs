@@ -16,7 +16,7 @@ export const HARNESSES = {
   claude: { kind: 'claude-code', model: 'claude-haiku-4-5-20251001' },
   codex: { kind: 'codex', model: 'gpt-5.6-luna' },
   // OpenRouter only since 2026-09-28: OpenCode Go is out of ConsensFlow.
-  pi: { kind: 'pi', model: 'openrouter/meta/muse-spark-1.3' },
+  pi: { kind: 'pi', model: 'openrouter/deepseek/deepseek-v4.1-flash' },
   opencode: { kind: 'opencode', model: 'openrouter/deepseek/deepseek-v4.1-flash' },
   devin: { kind: 'devin', model: 'swe-1-6-slow' },
 }
@@ -60,12 +60,21 @@ export function staffFor(harnesses, models = {}, effort = undefined) {
 }
 
 /**
+ * A Pi or OpenCode chief's model: a step above the staff's DeepSeek Flash and
+ * well below sol's price (2026-09-28, Gabriel's choice), the same for both so
+ * the two harnesses compare as harnesses.
+ */
+export const CHIEF_MODELS = {
+  pi: 'openrouter/deepseek/deepseek-v4-pro-0813',
+  opencode: 'openrouter/deepseek/deepseek-v4-pro-0813',
+}
+
+/**
  * The chief has no model of its own in the roster: it runs its harness's
  * default. Claude Code and OpenCode take one from the environment (Opus, and
- * OpenCode's cheap model, unless `model` says otherwise), Codex from the
- * eval's Codex wrapper (its cheap model unless `model` says otherwise); Pi
- * and Devin run the model their own configuration names, so `model` is
- * ignored there and the report says so.
+ * DeepSeek V4 Pro, unless `model` says otherwise), Codex and Pi from the
+ * eval's wrappers (Codex's cheap model, DeepSeek V4 Pro); Devin runs the
+ * model its own configuration names, so `model` is ignored there.
  */
 export function chiefEnvironment(chief, model = undefined) {
   if (chief === 'claude') {
@@ -73,9 +82,11 @@ export function chiefEnvironment(chief, model = undefined) {
     return { env: { ANTHROPIC_MODEL: chosen }, model: chosen }
   }
   if (chief === 'opencode') {
-    const chosen = model ?? HARNESSES.opencode.model
+    const chosen = model ?? CHIEF_MODELS.opencode
     return { env: { OPENCODE_CONFIG_CONTENT: JSON.stringify({ model: chosen }) }, model: chosen }
   }
+  // Pi takes it through the eval's Pi wrapper (`--model`, see run.mjs).
+  if (chief === 'pi') return { env: {}, model: model ?? CHIEF_MODELS.pi }
   // Codex takes it through the eval's Codex wrapper (`-c model=…`, see run.mjs).
   if (chief === 'codex') return { env: {}, model: model ?? HARNESSES.codex.model }
   if (!(chief in HARNESSES)) throw new Error(`no such eval harness: ${chief}`)

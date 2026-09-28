@@ -5,6 +5,7 @@ import path from 'node:path'
 import { describe, it } from 'node:test'
 import {
   answerFor,
+  CHIEF_MODELS,
   chiefEnvironment,
   claudeProjectKey,
   codexIsolation,
@@ -59,9 +60,11 @@ describe('an eval run’s plan', () => {
     })
     assert.deepEqual(chiefEnvironment('codex'), { env: {}, model: HARNESSES.codex.model })
     assert.deepEqual(chiefEnvironment('codex', 'gpt-x'), { env: {}, model: 'gpt-x' })
-    assert.deepEqual(chiefEnvironment('pi', 'ignored'), { env: {}, model: "pi's default" })
+    assert.deepEqual(chiefEnvironment('pi', 'openrouter/x'), { env: {}, model: 'openrouter/x' })
+    assert.deepEqual(chiefEnvironment('pi').model, CHIEF_MODELS.pi)
     assert.deepEqual(chiefEnvironment('claude').model, 'claude-opus-5')
-    assert.deepEqual(chiefEnvironment('opencode').model, HARNESSES.opencode.model)
+    assert.deepEqual(chiefEnvironment('opencode').model, CHIEF_MODELS.opencode)
+    assert.deepEqual(chiefEnvironment('devin', 'x').model, "devin's default")
     assert.throws(() => chiefEnvironment('kimi', 'x'), /no such eval harness/)
   })
 

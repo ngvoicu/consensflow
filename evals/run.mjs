@@ -98,12 +98,26 @@ wrapper('claude', realOnPath('claude', process.env.PATH ?? ''), [
   ...(chief === 'claude' ? ['--effort', values.effort] : []),
 ])
 if (chief === 'pi') {
-  // Only a window takes `--thinking`; Pi's own subcommands (install, list) do not.
-  const realPi = realOnPath('pi', process.env.PATH ?? '')
+  // The chief's model and thinking level, for a window only (Pi's own
+  // subcommands take neither) and only where the window names none: a
+  // member's roster agent passes its own, and it must not depend on which of
+  // two flags Pi keeps.
+  const realPi = JSON.stringify(realOnPath('pi', process.env.PATH ?? ''))
   const file = join(ISOLATED_BIN, 'pi')
   writeFileSync(
     file,
-    `#!/bin/sh\n# Written by evals/run.mjs: the Pi chief's thinking level.\ncase "$1" in\n  -*|'') exec ${JSON.stringify(realPi)} --thinking ${JSON.stringify(values.effort)} "$@" ;;\n  *) exec ${JSON.stringify(realPi)} "$@" ;;\nesac\n`,
+    [
+      '#!/bin/sh',
+      "# Written by evals/run.mjs: the Pi chief's model and thinking level.",
+      'case "$1" in',
+      `  -*|'') ;;`,
+      `  *) exec ${realPi} "$@" ;;`,
+      'esac',
+      `case " $* " in *" --model "*) ;; *) set -- --model ${JSON.stringify(chiefSetup.model)} "$@" ;; esac`,
+      `case " $* " in *" --thinking "*) ;; *) set -- --thinking ${JSON.stringify(values.effort)} "$@" ;; esac`,
+      `exec ${realPi} "$@"`,
+      '',
+    ].join('\n'),
   )
   chmodSync(file, 0o755)
 }
