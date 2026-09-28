@@ -947,7 +947,7 @@ fn wait_for_exit(pane: &mut Pane) -> Result<(), PaneError> {
 }
 
 fn terminate(pane: &mut Pane) -> Result<(), PaneError> {
-    let child_exited = signal_for_termination(pane)?;
+    let child_exited = signal_for_termination(pane, false)?;
 
     if !child_exited {
         wait_for_exit(pane)?;
@@ -957,7 +957,7 @@ fn terminate(pane: &mut Pane) -> Result<(), PaneError> {
 }
 
 fn terminate_detached(mut pane: Pane, teardown: Arc<Teardown>) -> Result<(), PaneError> {
-    let child_exited = match signal_for_termination(&mut pane) {
+    let child_exited = match signal_for_termination(&mut pane, true) {
         Ok(exited) => exited,
         Err(error) => {
             teardown.resolve(false);
@@ -981,7 +981,11 @@ fn terminate_detached(mut pane: Pane, teardown: Arc<Teardown>) -> Result<(), Pan
     Ok(())
 }
 
-fn signal_for_termination(pane: &mut Pane) -> Result<bool, PaneError> {
+/// `detached`: the caller does not wait for the exit (a write is still in
+/// progress in the pane), and a reaper confirms it later.
+fn signal_for_termination(pane: &mut Pane, detached: bool) -> Result<bool, PaneError> {
+    #[cfg(not(target_os = "macos"))]
+    let _ = detached;
     #[cfg(target_os = "macos")]
     pane.process_tree.terminate()?;
 
@@ -991,11 +995,16 @@ fn signal_for_termination(pane: &mut Pane) -> Result<bool, PaneError> {
     #[cfg(unix)]
     if let Some(process_group_id) = pane.process_group_id {
         if let Err(error) = signal_process_group(process_group_id) {
+            // macOS answers EPERM when a member of the group cannot take the
+            // signal: here one already killed with the tree above, whose exit
+            // waits on the pane's blocked write. A caller that does not wait
+            // hands that exit to the reaper; one that waits keeps the check.
+            #[cfg(target_os = "macos")]
+            if detached && is_permission_denied(&error) {
+                return Ok(child_exited);
+            }
             if is_permission_denied(&error) {
-                // macOS refuses a signal to a group left with only a dying or
-                // dead process (EPERM); a slow machine (a CI runner) takes more
-                // than a moment to show the child's exit.
-                let deadline = Instant::now() + Duration::from_secs(2);
+                let deadline = Instant::now() + Duration::from_millis(100);
                 while !child_exited && Instant::now() < deadline {
                     child_exited = has_exited(pane)?;
                     if !child_exited {

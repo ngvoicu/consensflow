@@ -335,14 +335,19 @@ describe('consensflow Pi extension', () => {
           'm-00000000000000000000000000000054',
         ),
       },
-      { ackTimeoutMs: 20 },
+      // The admission window is also the record's expiry: 20 ms expired it on
+      // a loaded machine before the inbox was even read, and it was refused.
+      { ackTimeoutMs: 500 },
     )
     try {
-      assert.deepEqual(await waitFor(join(s.ack, 'm-00000000000000000000000000000054.json')), {
-        id: 'm-00000000000000000000000000000054',
-        admitted: null,
-        reason: 'admission-unknown',
-      })
+      assert.deepEqual(
+        await waitFor(join(s.ack, 'm-00000000000000000000000000000054.json'), 3000),
+        {
+          id: 'm-00000000000000000000000000000054',
+          admitted: null,
+          reason: 'admission-unknown',
+        },
+      )
       assert.equal(await exists(join(s.inbox, 'm-00000000000000000000000000000054.json')), false)
     } finally {
       await s.close()
