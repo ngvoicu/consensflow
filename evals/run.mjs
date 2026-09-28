@@ -159,6 +159,8 @@ const ENV = {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+/** How long the chief and the board stay quiet before the owner sends the next message of a conversation. */
+const FOLLOW_UP_AFTER_MS = 20_000
 /** How long a chief may sit idle with nothing on the board before the owner answers it in its terminal. */
 const NUDGE_AFTER_MS = 60_000
 
@@ -209,6 +211,7 @@ async function run(index) {
   let pane = null
   let screen = []
   let terminalAnswers = 0
+  let followUpsSent = 0
   let boardTasks = 0
   const refused = []
   let approvals = 0
@@ -248,6 +251,9 @@ async function run(index) {
       }
     }
     await say(scenario.prompt)
+    // A conversation: the owner's next message once the chief is done with
+    // the last one (idle, nothing running on the board, a moment of quiet).
+    const followUps = [...(scenario.followUps ?? [])]
 
     const answered = new Set()
     let lastChange = Date.now()
@@ -316,7 +322,16 @@ async function run(index) {
         lastChange = Date.now()
         continue
       }
-      if (!busy && Date.now() - lastChange > scenario.quietMs) {
+      if (followUps.length > 0 && !busy && Date.now() - lastChange > FOLLOW_UP_AFTER_MS) {
+        const next = followUps.shift()
+        followUpsSent += 1
+        note(`the owner's next message (${followUpsSent}): ${next.slice(0, 80)}`)
+        await settled(() => app.output(pane.id).length)
+        await say(next)
+        lastChange = Date.now()
+        continue
+      }
+      if (followUps.length === 0 && !busy && Date.now() - lastChange > scenario.quietMs) {
         note('quiet: the run is over')
         break
       }
@@ -355,6 +370,7 @@ async function run(index) {
     mechanics: plumbing,
     chiefScreen: screen,
     terminalAnswers,
+    followUpsSent,
     refusedAnswers: refused,
     gate: values.gate,
     approvals,
