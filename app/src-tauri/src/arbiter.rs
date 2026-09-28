@@ -711,11 +711,42 @@ mod tests {
         reader
     }
 
+    /// The recorder's first word, read with a watchdog: on a CI runner this
+    /// read once waited for good, holding the PTY tests' lock. After 20 s the
+    /// watchdog writes what arrived to stderr (past the test's capture) and
+    /// aborts, so the run fails at once and says why.
     #[cfg(unix)]
     fn await_ready(reader: &mut Box<dyn Read + Send>) {
-        let mut ready = [0_u8; 5];
-        reader.read_exact(&mut ready).expect("raw recorder ready");
-        assert_eq!(&ready, b"ready");
+        use std::io::Write as _;
+        use std::sync::atomic::AtomicBool;
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let done = Arc::new(AtomicBool::new(false));
+        let (watched, finished) = (Arc::clone(&seen), Arc::clone(&done));
+        thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while Instant::now() < deadline {
+                if finished.load(Ordering::SeqCst) {
+                    return;
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+            let bytes = watched.lock().map(|b| b.clone()).unwrap_or_default();
+            let _ = std::io::stderr().write_all(
+                format!(
+                    "raw recorder never said ready in 20 s; it printed {:?}\n",
+                    String::from_utf8_lossy(&bytes)
+                )
+                .as_bytes(),
+            );
+            std::process::abort();
+        });
+        let mut byte = [0_u8; 1];
+        while seen.lock().expect("ready bytes").len() < 5 {
+            reader.read_exact(&mut byte).expect("raw recorder ready");
+            seen.lock().expect("ready bytes").push(byte[0]);
+        }
+        done.store(true, Ordering::SeqCst);
+        assert_eq!(&seen.lock().expect("ready bytes")[..], b"ready");
     }
 
     #[cfg(unix)]
