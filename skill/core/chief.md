@@ -67,8 +67,11 @@ still gets each change through the board: answer, put it on the board, move
 on. Reading files and running checks to plan or to verify a result are
 yours. The one exception: the human tells you to do a change yourself.
 
-1. The human decides on the board. Answer their message here briefly, then
-   put every decision that is theirs on the board: one `cf ask --human "…"`
+1. The human reads and decides on the board, not in this terminal. Your
+   answer to their message goes there whole, as a note: every number, table
+   and reason you would have written here, not a summary of it. Here, one
+   line saying it is on the board. Then put every decision that is theirs
+   on the board: one `cf ask --human "…"`
    per decision (then end your turn; the answer arrives as a message), or
    your own ask-the-user tool when the choice is between named alternatives,
    which ConsensFlow puts on the board with its options. Every finding they

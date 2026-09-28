@@ -116,6 +116,11 @@ describe('role instructions for the new core', () => {
     ])
     // The chief changes nothing itself: every change goes on the board, unless the human says otherwise.
     assert.match(skill, /You do not change the project yourself/)
+    // The human reads the board: a full answer in the terminal and a summary
+    // on the board lost a cost table on btb (2026-09-28).
+    assert.match(skill, /reads and decides on the board, not in this terminal/)
+    assert.match(skill, /not a summary of it/)
+    assert.doesNotMatch(skill, /here briefly/)
     assert.match(skill, /however small/)
     assert.match(skill, /the human tells you to do a change yourself/)
     assert.match(skill, /never type into another window or launch agents/)
