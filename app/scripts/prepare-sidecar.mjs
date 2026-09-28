@@ -66,7 +66,10 @@ function fetchNode() {
     execFileSync('curl', ['-fsSL', '-o', archive, url], { stdio: ['ignore', 'inherit', 'inherit'] })
   }
   if (!existsSync(extracted)) {
-    execFileSync('tar', ['-xf', archive, '-C', CACHE], { stdio: 'inherit' })
+    // Windows' own tar reads a zip; a GNU tar first on PATH (Git Bash's, in CI)
+    // reads `D:\...` as a remote host and fails, so Windows names its own.
+    const tar = WINDOWS ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar'
+    execFileSync(tar, ['-xf', archive, '-C', CACHE], { stdio: 'inherit' })
   }
   return WINDOWS ? join(extracted, 'node.exe') : join(extracted, 'bin', 'node')
 }
