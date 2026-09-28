@@ -95,6 +95,9 @@ export function measure(file, { fixture = null, workspace = null } = {}) {
         .inbox(chief.id, { limit: 500 })
         .filter((m) => m.kind === 'answer' && m.sender === human.handle)
         .map((m) => m.body.length),
+      boardQuestions: toHuman
+        .filter((m) => m.kind === 'question')
+        .map((m) => ({ body: m.body, questions: m.questions })),
       taskCount: tasks.length,
       chiefId: chief.id,
       chiefHarness: chief.harness,
@@ -103,9 +106,13 @@ export function measure(file, { fixture = null, workspace = null } = {}) {
   } finally {
     ledger.close()
   }
+  const { boardQuestions, ...kept } = metrics
+  const window = chiefWindow(file, metrics.chiefId, metrics.chiefHarness)
+  const { turnEnds, ...seen } = window
   return {
-    ...metrics,
-    ...chiefWindow(file, metrics.chiefId, metrics.chiefHarness),
+    ...kept,
+    ...seen,
+    ownerQuestions: ownerQuestions({ board: boardQuestions, terminal: turnEnds }),
     plumbing: plumbing(file, metrics.chiefId, metrics.humanId),
     filesChanged: fixture === null || workspace === null ? [] : changed(fixture, workspace),
   }
@@ -250,7 +257,7 @@ function chiefWindow(file, chiefId, harness) {
   try {
     const items = db
       .prepare(
-        `SELECT t.role, t.text FROM transcript t
+        `SELECT t.role, t.text, t.complete FROM transcript t
          JOIN conversation c ON c.id = t.conversation_id
          WHERE c.participant_id = ? ORDER BY t.conversation_id, t.seq`,
       )
@@ -265,6 +272,8 @@ function chiefWindow(file, chiefId, harness) {
           ? tools.filter((i) => /has been updated|File created successfully/.test(i.text)).length
           : null,
       chiefLastWords: assistant.at(-1)?.text.slice(0, 1500) ?? '',
+      // The messages that ended its turns: what it left the owner to read.
+      turnEnds: assistant.filter((i) => i.complete === 1).map((i) => i.text),
     }
   } finally {
     db.close()
@@ -292,4 +301,48 @@ function mostAtOnce(spans) {
 /** Each of a scenario's expectations against the metrics: what held, what did not. */
 export function verdict(scenario, metrics) {
   return scenario.expectations.map(({ name, holds }) => ({ name, ok: Boolean(holds(metrics)) }))
+}
+
+/**
+ * The question sentences in a text put to the owner: a question mark that
+ * ends a sentence, not one in fenced or inline code or in a link. A
+ * rhetorical question counts too; the report keeps the texts for a person
+ * to check.
+ */
+export function countQuestions(text) {
+  const prose = String(text ?? '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`[^`\n]*`/g, ' ')
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, ' ')
+  return (prose.match(/\?+(?=[\s"'”»)\]]|$)/g) ?? []).length
+}
+
+/**
+ * What a chief asked the owner, counted the same way whatever its setup: on
+ * the board, each decision of a question with options, or a plain question's
+ * sentences (one at least); in its terminal, the question sentences of each
+ * message that ended a turn. The two are kept apart: a chief on the board may
+ * restate in its terminal what it asked there.
+ */
+export function ownerQuestions({ board = [], terminal = [] }) {
+  const asking = terminal.filter((text) => countQuestions(text) > 0)
+  return {
+    board: {
+      asked: board.length,
+      decisions: board.reduce(
+        (sum, q) =>
+          sum +
+          (Array.isArray(q.questions) && q.questions.length > 0
+            ? q.questions.length
+            : Math.max(1, countQuestions(q.body))),
+        0,
+      ),
+      texts: board.map((q) => q.body),
+    },
+    terminal: {
+      questions: asking.reduce((sum, text) => sum + countQuestions(text), 0),
+      turnsAsking: asking.length,
+      texts: asking,
+    },
+  }
 }

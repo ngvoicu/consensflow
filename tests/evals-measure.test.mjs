@@ -3,7 +3,14 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { changed, measure, mechanics, verdict } from '../evals/measure.mjs'
+import {
+  changed,
+  countQuestions,
+  measure,
+  mechanics,
+  ownerQuestions,
+  verdict,
+} from '../evals/measure.mjs'
 import sixDecisions from '../evals/scenarios/six-decisions.mjs'
 import { openLedger } from '../src/ledger/index.js'
 
@@ -255,7 +262,8 @@ describe('measuring a chief from the ledger', () => {
       })
       ledger.copyTranscript(conversation.id, [
         { id: 'u1', role: 'user', text: 'Add the page', complete: true, at: null },
-        { id: 'a1', role: 'assistant', text: 'Looking.', complete: true, at: null },
+        // As the adapters report a turn: only the message that ends it is complete.
+        { id: 'a1', role: 'assistant', text: 'Looking.', complete: false, at: null },
         {
           id: 't1',
           role: 'tool',
@@ -263,7 +271,7 @@ describe('measuring a chief from the ledger', () => {
           complete: true,
           at: null,
         },
-        { id: 'a2', role: 'assistant', text: 'Now the menu.', complete: true, at: null },
+        { id: 'a2', role: 'assistant', text: 'Now the menu?', complete: false, at: null },
         {
           id: 't2',
           role: 'tool',
@@ -276,6 +284,14 @@ describe('measuring a chief from the ledger', () => {
           id: 'a3',
           role: 'assistant',
           text: 'Done: the page is in place.',
+          complete: true,
+          at: null,
+        },
+        { id: 'u2', role: 'user', text: 'Next', complete: true, at: null },
+        {
+          id: 'a4',
+          role: 'assistant',
+          text: 'Shall I translate it? Or wait for you?',
           complete: true,
           at: null,
         },
@@ -305,8 +321,21 @@ describe('measuring a chief from the ledger', () => {
         [2, [false, true]],
       )
       assert.equal(metrics.notesToHuman.length, 1)
-      assert.deepEqual([metrics.chiefTurns, metrics.chiefEdits], [3, 2])
-      assert.equal(metrics.chiefLastWords, 'Done: the page is in place.')
+      assert.deepEqual([metrics.chiefTurns, metrics.chiefEdits], [4, 2])
+      assert.equal(metrics.chiefLastWords, 'Shall I translate it? Or wait for you?')
+      // What the owner was asked: two board questions (one with a single
+      // decision in options), and two questions in the terminal, in one turn's
+      // end; a question mid-turn ("Now the menu?") is not put to anyone.
+      const owner = metrics.ownerQuestions
+      assert.deepEqual(
+        [
+          owner.board.asked,
+          owner.board.decisions,
+          owner.terminal.questions,
+          owner.terminal.turnsAsking,
+        ],
+        [2, 2, 2, 1],
+      )
       assert.deepEqual(metrics.filesChanged, [], 'no fixture given: nothing compared')
       // A task given by pool has no brief until a member takes it: two briefs.
       assert.deepEqual(metrics.plumbing, {
@@ -365,5 +394,55 @@ describe('measuring a chief from the ledger', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('counting what a chief asks the owner', () => {
+  it('counts question sentences, not a question mark in code or a link', () => {
+    const terminal = [
+      'Am citit fișierele. Păstrăm vechiul document din docs/? Sau îl ștergem?',
+      '',
+      '```sh',
+      'grep -n "ce?" site/*.html',
+      '```',
+      'Vezi `a ? b : c` și https://example.com/page?lang=en pentru detalii.',
+      '- Publicăm acum sau după ce vezi pagina?',
+    ].join('\n')
+    assert.equal(countQuestions(terminal), 3)
+    assert.equal(countQuestions('Gata. Pagina e făcută.'), 0)
+    assert.equal(countQuestions(''), 0)
+  })
+
+  it('counts each decision of a board question, and a plain board question as at least one', () => {
+    const counted = ownerQuestions({
+      board: [
+        {
+          body: 'Routing and model test',
+          questions: [
+            { question: 'Where may requests go?' },
+            { question: 'Test EU models?' },
+            { question: 'When?' },
+          ],
+        },
+        { body: 'Keep the old document?', questions: null },
+        { body: 'Please decide the menu label.', questions: null },
+      ],
+      terminal: [
+        'Two decisions are on the board.',
+        'Should I also translate the FAQ? And the footer?',
+      ],
+    })
+    assert.deepEqual(
+      [
+        counted.board.decisions,
+        counted.board.asked,
+        counted.terminal.questions,
+        counted.terminal.turnsAsking,
+      ],
+      [5, 3, 2, 1],
+    )
+    // What was counted, for a human to check.
+    assert.deepEqual(counted.terminal.texts, ['Should I also translate the FAQ? And the footer?'])
+    assert.equal(counted.board.texts.length, 3)
   })
 })
