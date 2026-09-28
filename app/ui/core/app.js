@@ -35,14 +35,28 @@ const state = {
   openTask: null,
 }
 
+// The status line says what just happened, then goes: a note after a few
+// seconds, a refusal a little later, so it is read; left, it sat over the
+// windows long after it meant anything ("btb is deleted.").
+const NOTE_MS = 6_000
+const REFUSAL_MS = 12_000
+let statusTimer = null
+function say(text, tone, ms) {
+  status.textContent = text
+  status.dataset.tone = tone
+  clearTimeout(statusTimer)
+  statusTimer = setTimeout(() => {
+    status.textContent = ''
+    delete status.dataset.tone
+  }, ms)
+}
+
 function report(cause) {
-  status.textContent = cause instanceof Error ? cause.message : String(cause)
-  status.dataset.tone = 'error'
+  say(cause instanceof Error ? cause.message : String(cause), 'error', REFUSAL_MS)
 }
 
 function note(text) {
-  status.textContent = text
-  status.dataset.tone = 'info'
+  say(text, 'info', NOTE_MS)
 }
 
 async function core(operation, body = {}) {

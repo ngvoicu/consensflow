@@ -1505,6 +1505,8 @@ test('deletes a closed project for good once the human confirms, never an open o
   await expect(dialog).toBeHidden()
   await expect.poll(() => calls(page, 'project.delete')).toEqual([{ project: 2 }])
   await expect(page.locator('#status')).toHaveText('foundry is deleted.')
+  // The note goes by itself; it does not sit over the windows.
+  await expect(page.locator('#status')).toHaveText('', { timeout: 8_000 })
 })
 
 test('resumes a suspended project from the list', async ({ page }) => {
