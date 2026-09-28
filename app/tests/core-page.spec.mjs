@@ -179,10 +179,7 @@ function model() {
           {
             participant: participant(2, 'chief', 'chief'),
             tasks: [task(1, 'Ship the release notes', 'working', 'human', 'chief', 12)],
-            activity: {
-              state: 'stalled',
-              reason: 'no progress for 11 minutes: a request may have hung',
-            },
+            activity: { state: 'working' },
             pane: { id: 'p1-chief', generation: 5 },
           },
           {
@@ -443,9 +440,7 @@ test('draws the kanban: a row per participant, a column per state, and cards tha
   await expect(zeus.getByTestId('lamp')).toHaveAttribute('data-state', 'waiting')
   await expect(zeus.locator('.row-status')).toHaveText('Waiting: permission to run a command')
   const chief = table.locator('tr[data-handle="chief"]')
-  await expect(chief.locator('.row-status')).toHaveText(
-    'Stalled: no progress for 11 minutes: a request may have hung',
-  )
+  await expect(chief.locator('.row-status')).toHaveText('Working')
   await expect(zeus.locator('td[data-state="queued"] .card-title')).toHaveText(['Add the tests'])
   const done = zeus.locator('td[data-state="done"] button.card[data-task="2"]')
   await expect(done.locator('.card-title')).toHaveText('Write the parser')

@@ -62,11 +62,10 @@ const INLINE_LIMIT = 4000
 const OPENING = 3000
 const RECEIVED_ROLES = new Set(['user', 'custom', 'tool'])
 
-/** How a message reads in the recipient's pane. The header doubles as the arrival marker. */
-const minutes = (ms) => Math.round(ms / 60_000)
 /** How long a fresh window's output must hold still before its screen counts as drawn. */
 const DRAWN_QUIET_MS = 1_500
 
+/** How a message reads in the recipient's pane. The header doubles as the arrival marker. */
 export function deliveryText(message) {
   const from = message.sender === null ? 'ConsensFlow' : `@${message.sender}`
   const task =
@@ -114,8 +113,6 @@ export class Dispatcher {
   #launchFiles
   #roles
   #arrivalTimeoutMs
-  #stuckAfterMs
-  #toolStuckAfterMs
   #launchTimeoutMs
   #maxAttempts
   /** Told each change of a window's activity, for the event file in the home. */
@@ -135,8 +132,6 @@ export class Dispatcher {
     roster = () => null,
     roles = () => undefined,
     arrivalTimeoutMs = 60_000,
-    stuckAfterMs = 600_000,
-    toolStuckAfterMs = 3_600_000,
     launchTimeoutMs = 180_000,
     maxAttempts = 3,
     trace = () => {},
@@ -151,8 +146,6 @@ export class Dispatcher {
     this.#roster = roster
     this.#roles = roles
     this.#arrivalTimeoutMs = arrivalTimeoutMs
-    this.#stuckAfterMs = stuckAfterMs
-    this.#toolStuckAfterMs = toolStuckAfterMs
     this.#trace = trace
     this.#launchFiles = launchFiles
     this.#launchTimeoutMs = launchTimeoutMs
@@ -370,7 +363,6 @@ export class Dispatcher {
     const [participantId, runtime] = entry
     this.#credentials.revoke(runtime.token)
     const delivering = runtime.delivering
-    const restarting = runtime.restarting
     // The window's files in the home go with it.
     this.#launchFiles.forget(runtime.launchId)
     Object.assign(runtime, {
@@ -380,7 +372,6 @@ export class Dispatcher {
       token: null,
       delivering: null,
       retiring: false,
-      restarting: false,
       activity: { state: 'closed' },
     })
     const project = this.#projectOf(participantId)
@@ -392,9 +383,7 @@ export class Dispatcher {
       })
     }
     if (participant.role === 'chief') {
-      // A chief closed for being stuck reopens on its note; any other exit suspends.
-      if (project.state === 'open' && !restarting)
-        this.#ledger.setProjectState(project.id, 'suspended')
+      if (project.state === 'open') this.#ledger.setProjectState(project.id, 'suspended')
     } else {
       const task = this.#ledger.activeTask(participantId)
       if (task !== null) this.#stall(project, task, `@${participant.handle}'s window closed`)
@@ -417,25 +406,6 @@ export class Dispatcher {
   }
 
   /**
-   * How long a window has worked with nothing new in its record: a model
-   * request that hung (a Pi window whose provider dropped the connection
-   * waited forever, four times in the evals), or a tool that never returned
-   * (a Pi web search). A running tool gets longer before it counts as stuck
-   * (a build may take a while); a settled or waiting window, or any new
-   * item, starts the count again.
-   */
-  #silence(runtime, observed) {
-    const last = observed.items.at(-1)
-    const signature = `${observed.items.length}:${last?.id ?? ''}:${last?.text?.length ?? 0}:${last?.complete === true}`
-    const now = this.#now()
-    if (observed.settled || observed.waiting || runtime.progress?.signature !== signature) {
-      runtime.progress = { signature, at: now }
-      return 0
-    }
-    return now - runtime.progress.at
-  }
-
-  /**
    * Whether a window has drawn its screen: it printed, then held still for a
    * moment (the pane host says how long it has printed nothing). A host that
    * cannot tell is taken as drawn.
@@ -449,42 +419,6 @@ export class Dispatcher {
       return true
     }
     return false
-  }
-
-  /** A member's window that made no progress: its task pauses, which stops the window, and its requester hears. */
-  /**
-   * A stuck member's task pauses and its window closes: a model request that
-   * never returns does not answer Escape (three Pi windows at once,
-   * 2026-09-27), so a window left open would hold the resume for good. The
-   * resume reopens it on its own conversation. Says whether it stalled.
-   */
-  async #stallSilent(project, participant, runtime, silentMs, toolOpen) {
-    const task = this.#ledger.activeTask(participant.id)
-    if (task === null || task.state !== 'working') return false
-    runtime.progress = null
-    this.#stall(
-      project,
-      task,
-      `@${participant.handle}'s window made no progress for ${minutes(silentMs)} minutes${toolOpen ? ', a tool still running' : ''}, so it was stopped`,
-    )
-    await this.#retire(participant, runtime)
-    return true
-  }
-
-  /**
-   * A stuck chief's window closes and reopens on its own conversation, with a
-   * note that says why: a model request that never returns does not answer
-   * Escape (a Pi chief on DeepSeek V4 Pro, 2026-09-28), and a chief left
-   * stalled stops the whole project until someone notices.
-   */
-  async #restartStuckChief(project, participant, runtime, silentMs) {
-    runtime.restarting = true
-    runtime.progress = null
-    this.#ledger.note(project.id, {
-      to: participant.handle,
-      body: `Your window made no progress for ${minutes(silentMs)} minutes (a model request that never returned), so ConsensFlow reopened it on this same conversation. Carry on where you were; nothing on the board was lost.`,
-    })
-    await this.#retire(participant, runtime)
   }
 
   // --- one participant's step ----------------------------------------------------
@@ -528,9 +462,6 @@ export class Dispatcher {
     // A window with nothing in its record may still be drawing its screen:
     // Pi and Devin read idle before they could take a keystroke.
     const drawing = observed.items.length === 0 && !(await this.#drawn(runtime))
-    const silentMs = this.#silence(runtime, observed)
-    const toolOpen = (observed.openTools ?? 0) > 0
-    const stuck = silentMs >= (toolOpen ? this.#toolStuckAfterMs : this.#stuckAfterMs)
     // An out member's window says so, and nothing else, until the reset.
     if (!this.#isOut(owner)) {
       this.#setActivity(
@@ -544,8 +475,6 @@ export class Dispatcher {
               : { state: 'working' },
       )
     }
-    if (participant.role === 'chief' && stuck && !drawing && !observed.settled && !observed.waiting)
-      return this.#restartStuckChief(project, participant, runtime, silentMs)
     this.#copyTranscript(participant, runtime, observed)
     if (observed.quota !== undefined) {
       runtime.quota = observed.quota ?? null
@@ -574,8 +503,6 @@ export class Dispatcher {
     if (runtime.delivering !== null) this.#watchArrival(runtime, observed)
     await this.#releaseDraft(runtime, observed)
     if (participant.role !== 'chief') {
-      if (stuck && (await this.#stallSilent(project, participant, runtime, silentMs, toolOpen)))
-        return
       await this.#interruptIfPaused(participant, runtime)
       this.#collect(project, participant, observed)
       // The window may have gone during this step (a launch that timed out).
@@ -1215,7 +1142,6 @@ export class Dispatcher {
         lowUntil: null,
         running: null,
         retiring: false,
-        restarting: false,
         enters: [],
         humanItems: null,
         copied: null,

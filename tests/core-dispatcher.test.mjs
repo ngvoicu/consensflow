@@ -78,7 +78,6 @@ function fakeAdapter(harness = 'claude-code') {
         waiting: agent.waiting,
         quota: agent.quota,
         failed: false,
-        openTools: agent.openTools ?? 0,
       }
     },
   }
@@ -506,93 +505,47 @@ describe('the dispatcher', () => {
     })
   })
 
-  it('stops a member window that made no progress for ten minutes and tells the requester', async () => {
+  it('never stops a window for how long it works: a six-hour command or model turn is left alone', async () => {
     await setup(async (context) => {
-      const { project } = await withStaff(context)
-      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
+      const { project } = await withStaff(context, ['zeus', 'diana'])
+      context.ledger.createTask(project.id, {
+        from: 'chief',
+        to: 'zeus',
+        body: 'Run the Rust tests',
+      })
+      context.ledger.createTask(project.id, {
+        from: 'chief',
+        to: 'diana',
+        body: 'Write the report',
+      })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
+      context.adapter.busy('chief')
       context.adapter.busy('zeus')
+      context.adapter.busy('diana')
+      // One command that runs for hours (Rust tests take 4 to 6), or a model
+      // turn that goes on: nothing in any record moves, and nothing is stopped.
       await context.dispatcher.pass()
-      context.clock.advance(5 * 60_000)
-      await context.dispatcher.pass()
-      assert.equal(context.ledger.task(project.id, 1).state, 'working')
-      context.clock.advance(6 * 60_000)
-      await context.dispatcher.pass()
-      assert.equal(context.ledger.task(project.id, 1).state, 'paused')
-      const chief = context.ledger
-        .project(project.id)
-        .participants.find((p) => p.handle === 'chief')
-      const note = context.ledger.inbox(chief.id).find((m) => m.kind === 'note')
-      assert.match(
-        note.body,
-        /^T-1 is paused: @zeus's window made no progress for 11 minutes, so it was stopped\. Resume it with: cf task resume T-1 "…"; its window comes back on its own conversation\.$/,
+      for (let hour = 0; hour < 6; hour += 1) {
+        context.clock.advance(60 * 60_000)
+        await context.dispatcher.pass()
+      }
+      assert.deepEqual(context.host.killed, [], 'no window closed')
+      assert.deepEqual(
+        [1, 2].map((n) => context.ledger.task(project.id, n).state),
+        ['working', 'working'],
       )
-      await context.dispatcher.pass()
-      assert.equal(context.host.killed.length, 1, 'the stall closes the window')
-    })
-  })
-
-  it('closes a stuck member window, so a resume reopens it on its own conversation', async () => {
-    await setup(async (context) => {
-      const { project, id } = await withStaff(context)
-      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Report' })
-      await context.dispatcher.pass()
-      await context.dispatcher.pass()
-      const native = context.ledger.currentConversation(id('zeus')).nativeSession
-      const stuck = context.host.last('zeus')
-      context.adapter.busy('zeus')
-      await context.dispatcher.pass()
-      context.clock.advance(11 * 60_000)
-      await context.dispatcher.pass()
-      await context.dispatcher.pass()
-      // A model request that never returns does not answer Escape (a Pi window,
-      // 2026-09-27): the window closes, or a resume would wait on it for good.
-      assert.deepEqual(context.host.killed, [{ id: stuck.id, generation: stuck.generation }])
-      const task = context.ledger.task(project.id, 1)
-      assert.equal(task.state, 'paused')
-      assert.equal(
-        task.messages.filter((m) => m.kind === 'note').length,
-        1,
-        'one note: the stall, not a second one for the window it closed',
-      )
-      context.ledger.resumeTask(project.id, 1, { by: 'chief', body: 'Go on' })
-      await context.dispatcher.pass()
-      const launch = context.adapter.prepared.at(-1)
-      assert.deepEqual([launch.participant.handle, launch.resume], ['zeus', native])
-      assert.match(launch.message, /Resumed: Go on$/)
-    })
-  })
-
-  it('gives a window whose tool is running an hour before it counts as stuck', async () => {
-    await setup(async (context) => {
-      const { project } = await withStaff(context)
-      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Build' })
-      await context.dispatcher.pass()
-      await context.dispatcher.pass()
-      context.adapter.busy('zeus')
-      context.adapter.agent('zeus').openTools = 1
-      await context.dispatcher.pass()
-      context.clock.advance(59 * 60_000)
-      await context.dispatcher.pass()
-      assert.equal(
-        context.ledger.task(project.id, 1).state,
-        'working',
-        'a long build is not a hang',
-      )
-      context.clock.advance(2 * 60_000)
-      await context.dispatcher.pass()
-      assert.equal(
-        context.ledger.task(project.id, 1).state,
-        'paused',
-        'a tool that never returns is',
-      )
-      const chief = context.ledger
-        .project(project.id)
-        .participants.find((p) => p.handle === 'chief')
-      assert.match(
-        context.ledger.inbox(chief.id).find((m) => m.kind === 'note').body,
-        /made no progress for 61 minutes, a tool still running, so it was stopped/,
+      assert.equal(context.ledger.project(project.id).state, 'open')
+      const participants = context.ledger.project(project.id).participants
+      for (const handle of ['chief', 'zeus', 'diana']) {
+        const participant = participants.find((p) => p.handle === handle)
+        assert.equal(context.dispatcher.activity(participant.id).state, 'working', handle)
+      }
+      const chief = participants.find((p) => p.handle === 'chief')
+      assert.deepEqual(
+        context.ledger.inbox(chief.id).filter((m) => m.kind === 'note'),
+        [],
+        'no note',
       )
     })
   })
@@ -613,29 +566,6 @@ describe('the dispatcher', () => {
       context.host.snapshot = { outputQuietMs: 2_000 }
       await context.dispatcher.pass()
       assert.equal(context.dispatcher.activity(chief.id).state, 'idle')
-    })
-  })
-
-  it('reopens a chief window that made no progress for ten minutes on its own conversation', async () => {
-    await setup(async (context) => {
-      const { project, id } = await withStaff(context)
-      await context.dispatcher.pass()
-      context.adapter.busy('chief')
-      await context.dispatcher.pass()
-      const native = context.ledger.currentConversation(id('chief')).nativeSession
-      const stuck = context.host.last('chief')
-      context.clock.advance(11 * 60_000)
-      await context.dispatcher.pass()
-      // A hung model request (a Pi chief, 2026-09-28) does not answer Escape:
-      // the window closes, and the project stays open, not suspended.
-      assert.deepEqual(context.host.killed, [{ id: stuck.id, generation: stuck.generation }])
-      assert.equal(context.ledger.project(project.id).state, 'open')
-      await context.dispatcher.pass()
-      const again = context.host.last('chief')
-      assert.notEqual(again.generation, stuck.generation, 'a new window')
-      const launch = context.adapter.prepared.at(-1)
-      assert.deepEqual([launch.participant.handle, launch.resume], ['chief', native])
-      assert.match(launch.message, /made no progress for 11 minutes.*same conversation/s)
     })
   })
 

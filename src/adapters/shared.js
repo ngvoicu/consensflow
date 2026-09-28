@@ -23,8 +23,6 @@ export function recordState(record) {
     settled: state === 'settled' || (state !== 'in-flight' && empty),
     failed: record?.failed === true,
     quota: record?.quota ?? null,
-    // Tool calls the record shows started and not yet answered: a running command.
-    openTools: record?.settlement?.evidence?.openTools?.length ?? 0,
   }
 }
 
