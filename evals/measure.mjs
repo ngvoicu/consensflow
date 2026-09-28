@@ -122,7 +122,10 @@ function plumbing(file, chiefId, humanId) {
     const count = (sql, ...args) => db.prepare(sql).get(...args).n
     const fromMember = 'sender_id IS NOT NULL AND sender_id != ? AND sender_id != ?'
     return {
-      briefs: count("SELECT COUNT(*) AS n FROM message WHERE kind = 'task'"),
+      // A brief withdrawn with its cancelled task was rightly never delivered.
+      briefs: count(
+        "SELECT COUNT(*) AS n FROM message WHERE kind = 'task' AND state != 'cancelled'",
+      ),
       briefsDelivered: count(
         "SELECT COUNT(*) AS n FROM message WHERE kind = 'task' AND state IN ('delivered', 'read')",
       ),

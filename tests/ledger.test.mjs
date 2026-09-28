@@ -1265,6 +1265,31 @@ describe('tasks and the inbox queue', () => {
     })
   })
 
+  it('withdraws what is still on its way to the member when its task is accepted', async () => {
+    await withLedger((ledger) => {
+      const { project } = staff(ledger)
+      deliver(
+        ledger,
+        ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' }).message,
+      )
+      // The worker asks, goes on without waiting, and finishes; the answer comes after the result.
+      const question = ledger.ask(project.id, {
+        from: 'zeus',
+        to: 'chief',
+        task: 1,
+        body: 'Blue or green?',
+      })
+      deliver(ledger, question)
+      ledger.recordResult(project.id, 1, { body: 'done, in blue' })
+      const answer = ledger.answer(question.id, { from: 'chief', body: 'Green' })
+      assert.equal(answer.state, 'queued')
+      ledger.acceptTask(project.id, 1, { by: 'chief' })
+      const after = ledger.message(answer.id)
+      assert.equal(after.state, 'cancelled', 'no window will ever take it')
+      assert.match(after.reason, /T-1 was accepted before it reached @zeus/)
+    })
+  })
+
   it('follows the task state machine for accept, reopen, cancel and fail', async () => {
     await withLedger((ledger) => {
       const { project, id } = staff(ledger)

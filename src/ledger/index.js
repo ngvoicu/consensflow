@@ -1765,6 +1765,21 @@ class Ledger {
       const task = this.#taskRow(projectId, number)
       this.#requireTaskState(task, ['done'], 'accept')
       this.#withdrawGated(task.id, `accepted by @${by}`)
+      // What is still on its way to the member (an answer that came after its
+      // result, say) has no window left to take it.
+      if (task.assignee_id !== null) {
+        const member = this.#participantRow(task.assignee_id)
+        this.#db
+          .prepare(
+            `UPDATE message SET state = 'cancelled', reason = ?
+             WHERE task_id = ? AND recipient_id = ? AND state = 'queued'`,
+          )
+          .run(
+            `T-${task.number} was accepted before it reached @${member.handle}`,
+            task.id,
+            member.id,
+          )
+      }
       this.#moveTask(task, 'accepted', { by })
       this.#releaseWaiting(projectId, task.id)
       return this.#task(task.id)
