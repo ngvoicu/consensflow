@@ -942,7 +942,7 @@ export class Dispatcher {
       const candidates = this.#ledger.candidates(project.id, task.number)
       const free = candidates.filter((member) => this.#available(member))
       if (free.length > 0) {
-        this.#ledger.assignTask(project.id, task.number, this.#rank(free)[0].id)
+        this.#ledger.assignTask(project.id, task.number, this.#rank(free, candidates)[0].id)
         this.#waitingNoted.delete(task.id)
         this.#changed()
       } else if (!this.#waitingNoted.has(task.id)) {
@@ -994,10 +994,23 @@ export class Dispatcher {
    * then the earliest joined: a reassigned task goes to another member when
    * one is free, and back to the same one only when it is the only one.
    */
-  #rank(members) {
+  /**
+   * Who of the free members takes a task: one it was taken from goes last;
+   * then the harness whose members of this role and tier have taken the fewest
+   * tasks, so a tier's work is shared across harnesses; then the member with
+   * the fewest; then the earliest joined.
+   */
+  #rank(members, candidates = members) {
+    const load = new Map()
+    for (const member of candidates) {
+      load.set(member.harness, (load.get(member.harness) ?? 0) + member.taken)
+    }
     return [...members].sort(
       (a, b) =>
-        Number(a.hadIt === true) - Number(b.hadIt === true) || a.taken - b.taken || a.id - b.id,
+        Number(a.hadIt === true) - Number(b.hadIt === true) ||
+        load.get(a.harness) - load.get(b.harness) ||
+        a.taken - b.taken ||
+        a.id - b.id,
     )
   }
 

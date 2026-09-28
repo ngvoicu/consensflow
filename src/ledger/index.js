@@ -1166,6 +1166,7 @@ class Ledger {
         id: row.id,
         handle: row.handle,
         agent: row.agent,
+        harness: row.harness,
         tier: row.tier,
         roles: JSON.parse(row.roles),
         taken: row.taken,

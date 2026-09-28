@@ -197,7 +197,8 @@ async function setup(fn, options = {}) {
     new Dispatcher({
       ledger,
       host,
-      adapters: { 'claude-code': adapter },
+      // The fake answers for any harness; OpenCode is here for a mixed staff.
+      adapters: { 'claude-code': adapter, opencode: adapter },
       clock,
       credentials: {
         issue: ({ participant }) => `token-${participant.handle}`,
@@ -1286,6 +1287,40 @@ describe('the dispatcher assigns open tasks', () => {
       open({ tier: 'light', body: 'Rename a file' })
       await context.dispatcher.pass()
       assert.match(task(5).assignee, /^hera-/)
+    })
+  })
+
+  it('shares the work of one tier across harnesses: the harness with the fewest tasks first', async () => {
+    await setup(async (context) => {
+      const member = (agent, harness) => ({ agent, harness, role: 'worker', tier: 'standard' })
+      const project = await context.dispatcher.openProject({
+        directory: '/work/app',
+        name: 'app',
+        harness: 'claude-code',
+        staff: [
+          member('zeus', 'claude-code'),
+          member('diana', 'claude-code'),
+          member('ares', 'opencode'),
+        ],
+      })
+      const open = (body) =>
+        context.ledger.createTask(project.id, {
+          from: 'chief',
+          pool: 'worker',
+          tier: 'standard',
+          body,
+        })
+      const task = (number) => context.ledger.task(project.id, number)
+      open('Parser')
+      await context.dispatcher.pass()
+      assert.match(task(1).assignee, /^zeus-/, 'nothing taken yet: the earliest joined')
+      open('Docs')
+      await context.dispatcher.pass()
+      // Before: diana, the next Claude worker, since members ranked by their own count.
+      assert.match(task(2).assignee, /^ares-/, 'Claude has one task, OpenCode none')
+      open('Tests')
+      await context.dispatcher.pass()
+      assert.match(task(3).assignee, /^diana-/, 'one each: the free member with fewest tasks')
     })
   })
 
