@@ -15,8 +15,9 @@ import { statSync } from 'node:fs'
 export const HARNESSES = {
   claude: { kind: 'claude-code', model: 'claude-haiku-4-5-20251001' },
   codex: { kind: 'codex', model: 'gpt-5.6-luna' },
-  pi: { kind: 'pi', model: 'opencode-go/muse-spark-1.3-contributor' },
-  opencode: { kind: 'opencode', model: 'opencode-go/deepseek-v4-flash' },
+  // OpenRouter only since 2026-09-28: OpenCode Go is out of ConsensFlow.
+  pi: { kind: 'pi', model: 'openrouter/meta/muse-spark-1.3' },
+  opencode: { kind: 'opencode', model: 'openrouter/deepseek/deepseek-v4.1-flash' },
   devin: { kind: 'devin', model: 'swe-1-6-slow' },
 }
 

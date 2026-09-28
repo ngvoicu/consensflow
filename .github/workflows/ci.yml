@@ -43,7 +43,12 @@ jobs:
       - run: npm --prefix app run prepare-sidecar
 
       - run: npm run check
-      - run: cargo build --release --bin consensflow-bridge --manifest-path app/src-tauri/Cargo.toml
+      # Cargo reads app/src-tauri/.cargo/config.toml from the folder it runs in:
+      # on Windows its runner gives each test binary the manifest it needs.
+      - run: cargo build --release --bin consensflow-bridge
+        working-directory: app/src-tauri
       - run: npm run test:integration
-      - run: cargo test --lib --manifest-path app/src-tauri/Cargo.toml
-      - run: cargo clippy --manifest-path app/src-tauri/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --lib
+        working-directory: app/src-tauri
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: app/src-tauri

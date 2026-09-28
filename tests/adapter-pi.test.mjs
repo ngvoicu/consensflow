@@ -44,7 +44,7 @@ const request = (overrides = {}) => ({
   directory: '/work/app',
   resume: null,
   message: '[ConsensFlow m-1 · T-1 · task from @chief]\nWrite the parser',
-  agent: { model: 'opencode-go/muse-spark-1.3-contributor', thinking: 'high' },
+  agent: { model: 'openrouter/meta/muse-spark-1.3', thinking: 'high' },
   ...overrides,
 })
 
@@ -78,7 +78,7 @@ describe('the Pi adapter', () => {
         '--session-id',
         plan.nativeSession,
         '--model',
-        'opencode-go/muse-spark-1.3-contributor',
+        'openrouter/meta/muse-spark-1.3',
         '--thinking',
         'high',
         '--approve',
@@ -102,7 +102,7 @@ describe('the Pi adapter', () => {
         '--session-id',
         'cf-1-zeus-0000abcd',
         '--model',
-        'opencode-go/muse-spark-1.3-contributor',
+        'openrouter/meta/muse-spark-1.3',
         '--approve',
       ])
     })

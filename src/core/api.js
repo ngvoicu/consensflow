@@ -165,6 +165,8 @@ export async function startApi({
         body: {
           task: summary(created.task),
           message: created.message?.id ?? null,
+          // The tier asked, when nobody on the staff holds it and the task went to the nearest.
+          ...(created.asked === undefined ? {} : { asked: created.asked }),
           gated: ledger.project(project.id).gate,
         },
       }
