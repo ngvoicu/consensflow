@@ -173,7 +173,7 @@ export class TerminalsView {
       const card = element('section', 'terminal-card')
       const head = element('header', 'terminal-head')
       const host = element('div', 'terminal-host')
-      const ended = element('span', 'terminal-ended', 'ended')
+      const ended = element('span', 'terminal-ended', 'closed')
       ended.hidden = true
       card.append(head, host)
       entry = {
@@ -204,7 +204,7 @@ export class TerminalsView {
       stop.addEventListener('click', () => this.#onClose(lane.participant))
       const close = element('button', 'quiet-button terminal-close', 'Close')
       close.type = 'button'
-      close.setAttribute('aria-label', `Close ${name}'s ended terminal`)
+      close.setAttribute('aria-label', `Close ${name}'s closed terminal`)
       close.addEventListener('click', () => this.#closeEnded(key))
       entry.head.replaceChildren(
         lamp,

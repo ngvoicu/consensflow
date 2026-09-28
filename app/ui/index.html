@@ -657,6 +657,8 @@
     .terminal-stop { margin-left: auto; }
     .terminal-close { display: none; }
     .terminal-card[data-ended="true"] { border-style: dashed; }
+    /* Its last frame still shows the agent's prompt: faded, it no longer looks live. */
+    .terminal-card[data-ended="true"] .terminal-host { opacity: .45; }
     .terminal-card[data-ended="true"] .terminal-stop { display: none; }
     .terminal-card[data-ended="true"] .terminal-close { display: inline-block; }
     .terminal-host { min-height: 0; padding: 4px 2px 2px 6px; }

@@ -1746,7 +1746,7 @@ test("keeps each project's terminals, scrollback and all, when the human switche
   ).toBe(true)
 })
 
-test("keeps an ended window's terminal in the strip until the human closes it", async ({
+test("keeps a closed window's terminal in the strip, faded, until the human closes it", async ({
   page,
 }) => {
   await open(page)
@@ -1760,8 +1760,15 @@ test("keeps an ended window's terminal in the strip until the human closes it", 
   })
   const ended = dock.locator('.terminal-card[data-handle="zeus"]')
   await expect(ended).toHaveAttribute('data-ended', 'true')
-  await expect(ended.getByText('ended')).toBeVisible()
-  await ended.getByRole('button', { name: "Close @zeus's ended terminal" }).click()
+  // The same word as its lane ("Terminal closed"), and a screen that no
+  // longer looks live: its last frame still shows the agent's prompt.
+  await expect(ended.getByText('closed', { exact: true })).toBeVisible()
+  expect(
+    Number(
+      await ended.locator('.terminal-host').evaluate((host) => getComputedStyle(host).opacity),
+    ),
+  ).toBeLessThan(1)
+  await ended.getByRole('button', { name: "Close @zeus's closed terminal" }).click()
   await expect(dock.locator('.terminal-card[data-handle="zeus"]')).toHaveCount(0)
   await expect(page.locator('tr[data-handle="zeus"] .row-tools button')).toHaveCount(0)
 })
