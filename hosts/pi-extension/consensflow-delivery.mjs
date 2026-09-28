@@ -129,6 +129,9 @@ export function createDeliveryExtension(
     typeof settled === 'string' && typeof launchId === 'string' && SAFE_PATH_SEGMENT.test(launchId)
       ? join(settled, `${launchId}.json`)
       : null
+  // A turn on: Pi saves nothing until an answer is complete, so a first
+  // request that hangs would leave ConsensFlow nothing to read but this.
+  const workingFile = evidenceFile === null ? null : join(settled, `${launchId}.working.json`)
 
   const uniquePath = async (directory, file) => {
     await mkdir(directory, { recursive: true })
@@ -155,8 +158,29 @@ export function createDeliveryExtension(
     }
   }
 
+  const writeWorking = async () => {
+    if (workingFile === null) return
+    const sessionId = sessionIdOf(context)
+    if (sessionId === null) return
+    try {
+      await mkdir(settled, { recursive: true })
+      await writeFile(
+        `${workingFile}.tmp`,
+        `${JSON.stringify({ launchId, sessionId, startedAt: Date.now() })}\n`,
+        'utf8',
+      )
+      await rename(`${workingFile}.tmp`, workingFile)
+    } catch (cause) {
+      logError(`could not record a working turn: ${cause?.message ?? String(cause)}`)
+    }
+  }
+
   const writeSettlement = async () => {
     if (evidenceFile === null) return
+    await unlink(workingFile).catch((cause) => {
+      if (cause?.code !== 'ENOENT')
+        logError(`could not clear a working turn: ${cause?.message ?? String(cause)}`)
+    })
     const sessionId = sessionIdOf(context)
     const frontier = frontierOf(context)
     if (sessionId === null || frontier === null) {
@@ -221,6 +245,7 @@ export function createDeliveryExtension(
   const newWork = async (_event, ctx) => {
     context = ctx ?? context
     await invalidateSettlement()
+    await writeWorking()
   }
 
   const consume = async () => {

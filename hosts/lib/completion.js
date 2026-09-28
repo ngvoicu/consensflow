@@ -1310,9 +1310,45 @@ async function piSettlementEvidence(sessionId, env, options) {
   }
 }
 
+/**
+ * Pi writes no session file until an assistant message is complete
+ * (session-manager.js `_persist`), so a first request that hangs leaves
+ * nothing to read. ConsensFlow's extension writes `<launchId>.working.json`
+ * when a turn starts and removes it when Pi settles: with it, that turn is in
+ * flight, not unknown, and a window's watchdog sees it.
+ */
+async function piWorkingEvidence(sessionId, env, options) {
+  const config = options?.piSettlement ?? options?.pi ?? {}
+  const directory = config.directory ?? env.CF_DELIVERY_SETTLED
+  const launchId = config.launchId ?? env.CF_DELIVERY_LAUNCH_ID
+  if (
+    typeof directory !== 'string' ||
+    typeof launchId !== 'string' ||
+    !SAFE_PATH_SEGMENT.test(launchId)
+  )
+    return false
+  try {
+    const marker = JSON.parse(
+      await fs.readFile(path.join(directory, `${launchId}.working.json`), 'utf8'),
+    )
+    return marker?.launchId === launchId && marker?.sessionId === sessionId
+  } catch (cause) {
+    if (cause?.code === 'ENOENT' || cause instanceof SyntaxError) return false
+    throw cause
+  }
+}
+
 async function piAnswers(sessionId, env, options = {}) {
   const file = options.file ?? (await locateTranscript('pi', sessionId, env))
-  if (file === null) return { unknown: true, reason: `unreadable: no pi session ${sessionId}` }
+  if (file === null) {
+    if (!(await piWorkingEvidence(sessionId, env, options)))
+      return { unknown: true, reason: `unreadable: no pi session ${sessionId}` }
+    const working = resultBase()
+    working.inFlight = true
+    working.cursor = mintCursor('pi', 0)
+    setSettlement(working, 'in-flight', 'native', null, working.cursor, {})
+    return working
+  }
 
   const result = resultBase()
   const openTools = new Set()

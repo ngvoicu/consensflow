@@ -739,6 +739,34 @@ test('completion/claude-code: native API error settles incomplete as failure, no
 
 // -------------------------------------------------------------------- pi
 
+test('completion/pi: before its first answer is saved, a turn the extension saw start is in flight', async () => {
+  // Pi writes no session file until an assistant message is complete
+  // (session-manager.js _persist), so a first request that hangs leaves
+  // nothing to read: the extension's working marker says a turn is on.
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-pi-working-'))
+  const settled = path.join(root, 'settled')
+  await fs.mkdir(settled, { recursive: true })
+  const env = { HOME: root, CF_DELIVERY_SETTLED: settled, CF_DELIVERY_LAUNCH_ID: 'launch-1' }
+  assert.equal((await answers('pi', 'pi-first', env)).unknown, true, 'no file, no marker')
+  const marker = path.join(settled, 'launch-1.working.json')
+  await fs.writeFile(
+    marker,
+    JSON.stringify({ launchId: 'launch-1', sessionId: 'other', startedAt: 1 }),
+  )
+  assert.equal((await answers('pi', 'pi-first', env)).unknown, true, "another session's marker")
+  await fs.writeFile(
+    marker,
+    JSON.stringify({ launchId: 'launch-1', sessionId: 'pi-first', startedAt: 1 }),
+  )
+  const working = await answers('pi', 'pi-first', env)
+  shape(working)
+  assert.deepEqual(
+    [working.items, working.inFlight, working.settlement.state],
+    [[], true, 'in-flight'],
+  )
+  await fs.rm(root, { recursive: true, force: true })
+})
+
 test('completion/pi: a turn stays open between tool results and the next assistant step', async () => {
   const session = 'hazy-ridge'
   const betweenStage = await stageJsonl('pi', session, 'pi/between-tool-steps.jsonl', { take: 5 })

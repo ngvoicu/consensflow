@@ -446,9 +446,16 @@ describe('consensflow Pi extension', () => {
 
       await s.pi.handlers.get('turn_start')({}, s.ctx)
       assert.equal(await exists(join(s.settled, 'launch-pi-test.json')), false)
+      // A turn on, before Pi has saved anything: the watchdog's evidence.
+      const working = await waitFor(join(s.settled, 'launch-pi-test.working.json'))
+      assert.deepEqual(
+        [working.launchId, working.sessionId, typeof working.startedAt],
+        ['launch-pi-test', 'native-pi-session', 'number'],
+      )
 
       await s.pi.handlers.get('agent_settled')({}, s.ctx)
       assert.equal(await exists(join(s.settled, 'launch-pi-test.json')), true)
+      assert.equal(await exists(join(s.settled, 'launch-pi-test.working.json')), false)
       await s.pi.handlers.get('message_start')(
         { message: { role: 'user', content: [{ type: 'text', text: 'new prompt' }] } },
         s.ctx,
