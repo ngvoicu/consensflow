@@ -3,8 +3,9 @@
  * short messages, each after the chief is done with the last, most of them
  * small changes. On btb (2026-09-25 to 28) a Claude chief took three days of
  * such messages and put nothing on the board, doing every change itself.
- * This measures how much of that work goes out: tasks on the board, and (for
- * a Claude chief) how many edits it made itself.
+ * This measures how much of that work goes out: tasks on the board against
+ * the files that changed. (A chief's own edit count misses edits made with
+ * shell commands, which is how an Opus chief made all seven here.)
  */
 export default {
   id: 'conversation',
@@ -28,10 +29,6 @@ export default {
     {
       name: 'the English page is a worker’s (a translation runs on its own)',
       holds: (m) => m.tasks.some((t) => /engl|english|en\/evaluare/i.test(t.title ?? '')),
-    },
-    {
-      name: 'the chief’s own edits stay under three (counted for a Claude chief only)',
-      holds: (m) => m.chiefEdits === null || m.chiefEdits === undefined || m.chiefEdits < 3,
     },
     {
       name: 'the work is done: the English evaluation page exists',

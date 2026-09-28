@@ -79,7 +79,7 @@ describe('role instructions for the new core', () => {
     assert.match(roleInstructions('chief', [zeus]), /## What you never do/)
     assert.match(
       roleInstructions('chief', [zeus]),
-      /## What you never do\n\n- Give a task to a worker by name, or write a task with one worker in mind/,
+      /## What you never do\n\n- Change the project yourself: edit a file, commit, push, build or deploy/,
     )
   })
 
@@ -114,7 +114,10 @@ describe('role instructions for the new core', () => {
     const skill = roleInstructions('chief', [
       { name: 'zeus', roles: ['worker'], workTier: 'critical' },
     ])
-    assert.match(skill, /authorized work/)
+    // The chief changes nothing itself: every change goes on the board, unless the human says otherwise.
+    assert.match(skill, /You do not change the project yourself/)
+    assert.match(skill, /however small/)
+    assert.match(skill, /the human tells you to do a change yourself/)
     assert.match(skill, /never type into another window or launch agents/)
     assert.match(skill, /only the human gives you work, here in your terminal/)
     assert.match(skill, /the human never accepts work on the board/)
