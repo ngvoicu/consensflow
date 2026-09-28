@@ -370,6 +370,7 @@ export class Dispatcher {
     const [participantId, runtime] = entry
     this.#credentials.revoke(runtime.token)
     const delivering = runtime.delivering
+    const restarting = runtime.restarting
     // The window's files in the home go with it.
     this.#launchFiles.forget(runtime.launchId)
     Object.assign(runtime, {
@@ -379,6 +380,7 @@ export class Dispatcher {
       token: null,
       delivering: null,
       retiring: false,
+      restarting: false,
       activity: { state: 'closed' },
     })
     const project = this.#projectOf(participantId)
@@ -390,7 +392,9 @@ export class Dispatcher {
       })
     }
     if (participant.role === 'chief') {
-      if (project.state === 'open') this.#ledger.setProjectState(project.id, 'suspended')
+      // A chief closed for being stuck reopens on its note; any other exit suspends.
+      if (project.state === 'open' && !restarting)
+        this.#ledger.setProjectState(project.id, 'suspended')
     } else {
       const task = this.#ledger.activeTask(participantId)
       if (task !== null) this.#stall(project, task, `@${participant.handle}'s window closed`)
@@ -467,6 +471,22 @@ export class Dispatcher {
     return true
   }
 
+  /**
+   * A stuck chief's window closes and reopens on its own conversation, with a
+   * note that says why: a model request that never returns does not answer
+   * Escape (a Pi chief on DeepSeek V4 Pro, 2026-09-28), and a chief left
+   * stalled stops the whole project until someone notices.
+   */
+  async #restartStuckChief(project, participant, runtime, silentMs) {
+    runtime.restarting = true
+    runtime.progress = null
+    this.#ledger.note(project.id, {
+      to: participant.handle,
+      body: `Your window made no progress for ${minutes(silentMs)} minutes (a model request that never returned), so ConsensFlow reopened it on this same conversation. Carry on where you were; nothing on the board was lost.`,
+    })
+    await this.#retire(participant, runtime)
+  }
+
   // --- one participant's step ----------------------------------------------------
 
   async #step(project, participant) {
@@ -521,14 +541,11 @@ export class Dispatcher {
             ? { state: 'waiting', reason: observed.waiting.reason ?? null }
             : observed.settled
               ? { state: 'idle' }
-              : stuck && participant.role === 'chief'
-                ? {
-                    state: 'stalled',
-                    reason: `no progress for ${minutes(silentMs)} minutes: a request may have hung; Escape in its window stops it`,
-                  }
-                : { state: 'working' },
+              : { state: 'working' },
       )
     }
+    if (participant.role === 'chief' && stuck && !drawing && !observed.settled && !observed.waiting)
+      return this.#restartStuckChief(project, participant, runtime, silentMs)
     this.#copyTranscript(participant, runtime, observed)
     if (observed.quota !== undefined) {
       runtime.quota = observed.quota ?? null
@@ -1192,6 +1209,7 @@ export class Dispatcher {
         lowUntil: null,
         running: null,
         retiring: false,
+        restarting: false,
         enters: [],
         humanItems: null,
         copied: null,

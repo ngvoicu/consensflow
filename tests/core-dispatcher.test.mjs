@@ -588,25 +588,26 @@ describe('the dispatcher', () => {
     })
   })
 
-  it('shows a chief window that made no progress for ten minutes as stalled, until it moves again', async () => {
+  it('reopens a chief window that made no progress for ten minutes on its own conversation', async () => {
     await setup(async (context) => {
-      const { project } = await withStaff(context)
+      const { project, id } = await withStaff(context)
       await context.dispatcher.pass()
       context.adapter.busy('chief')
       await context.dispatcher.pass()
-      const chief = context.ledger
-        .project(project.id)
-        .participants.find((p) => p.handle === 'chief')
+      const native = context.ledger.currentConversation(id('chief')).nativeSession
+      const stuck = context.host.last('chief')
       context.clock.advance(11 * 60_000)
       await context.dispatcher.pass()
-      assert.deepEqual(context.dispatcher.activity(chief.id), {
-        state: 'stalled',
-        reason:
-          'no progress for 11 minutes: a request may have hung; Escape in its window stops it',
-      })
-      context.adapter.answer('chief', 'Back')
+      // A hung model request (a Pi chief, 2026-09-28) does not answer Escape:
+      // the window closes, and the project stays open, not suspended.
+      assert.deepEqual(context.host.killed, [{ id: stuck.id, generation: stuck.generation }])
+      assert.equal(context.ledger.project(project.id).state, 'open')
       await context.dispatcher.pass()
-      assert.equal(context.dispatcher.activity(chief.id).state, 'idle')
+      const again = context.host.last('chief')
+      assert.notEqual(again.generation, stuck.generation, 'a new window')
+      const launch = context.adapter.prepared.at(-1)
+      assert.deepEqual([launch.participant.handle, launch.resume], ['chief', native])
+      assert.match(launch.message, /made no progress for 11 minutes.*same conversation/s)
     })
   })
 
