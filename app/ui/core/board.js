@@ -93,8 +93,6 @@ export function age(iso, now = Date.now()) {
   return `${Math.round(hours / 24)}d`
 }
 
-const COORDINATORS = ['human', 'chief']
-
 /** The human and the chief first, then each member with its sessions right under it. */
 /** The role a member's task is for: its pool's. */
 const roleOf = (task, roles) => task.pool ?? roles[0]
@@ -102,10 +100,11 @@ const roleOf = (task, roles) => task.pool ?? roles[0]
 /**
  * The board's rows: a member with several roles heads one row per role, each
  * followed by that role's sessions and holding that role's cards, so a worker
- * and a reviewer read as two things; everything else in lane order.
+ * and a reviewer read as two things; everything else in lane order. The human
+ * has no row: nothing assigns them a task, and what is for them is in For you.
  */
 export function boardRows(lanes) {
-  const ordered = laneOrder(lanes)
+  const ordered = laneOrder(lanes).filter((lane) => lane.participant.role !== 'human')
   const members = new Set(
     ordered
       .filter((lane) => lane.participant.agent !== null && lane.participant.member === null)
@@ -138,7 +137,7 @@ export function boardRows(lanes) {
 
 export function laneOrder(lanes) {
   const rank = ({ participant }) => [
-    COORDINATORS.includes(participant.role) ? 0 : 1,
+    participant.role === 'chief' ? 0 : 1,
     participant.memberId ?? participant.id,
     participant.memberId === null ? 0 : participant.id,
   ]
@@ -425,10 +424,6 @@ export class BoardView {
     const { participant, activity, pane } = lane
     const head = element('th', 'row-head')
     head.setAttribute('scope', 'row')
-    if (participant.role === 'human') {
-      head.append(element('span', 'row-name', 'You'))
-      return head
-    }
     const coordinator = participant.role === 'chief'
     // A session's row says whose window it is; the member's row says what it is.
     const identity = (

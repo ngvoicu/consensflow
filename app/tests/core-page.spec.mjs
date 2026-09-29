@@ -393,8 +393,9 @@ test('draws the kanban: a row per participant, a column per state, and cards tha
     'Finished',
   ])
   const rows = table.locator('tbody tr')
-  await expect(rows).toHaveCount(4)
-  await expect(rows.locator('.row-name')).toHaveText(['You', 'Chief of Staff', '@zeus', '@diana'])
+  // Nothing assigns the human a task: what is for them is in For you, not a row.
+  await expect(rows).toHaveCount(3)
+  await expect(rows.locator('.row-name')).toHaveText(['Chief of Staff', '@zeus', '@diana'])
   const zeus = table.locator('tr[data-handle="zeus"]')
   await expect(zeus.getByTestId('lamp')).toHaveAttribute('data-state', 'waiting')
   await expect(zeus.locator('.row-status')).toHaveText('Waiting: permission to run a command')
@@ -566,7 +567,6 @@ test("draws a member's sessions as lanes under it, named, and counts its open wi
   await open(page, data)
   const rows = page.locator('table[aria-label="Tasks"] tbody tr')
   await expect(rows.evaluateAll((nodes) => nodes.map((n) => n.dataset.handle))).resolves.toEqual([
-    'human',
     'chief',
     'zeus',
     'zeus-amber-pine',
@@ -1308,7 +1308,7 @@ test("lists every member under the chief, with no staff groups, on the board and
     await page
       .locator('tbody tr[data-handle]')
       .evaluateAll((rows) => rows.map((row) => row.dataset.handle)),
-  ).toEqual(['human', 'chief', 'zeus', 'diana', 'athena'])
+  ).toEqual(['chief', 'zeus', 'diana', 'athena'])
   await expect(page.locator('tr[data-handle="athena"] .row-name')).toHaveText('@athena')
   await expect(page.locator('tr[data-handle="athena"] .row-meta')).toContainText('advisor')
 
@@ -1325,7 +1325,7 @@ test("lists every member under the chief, with no staff groups, on the board and
   await expect(page.getByRole('button', { name: "Open @athena's terminal" })).toHaveCount(0)
   expect(await page.evaluate(() => window.__emulators.length)).toBe(3)
   expect(await page.locator('tbody tr[data-handle]').count()).toBe(
-    5,
+    4,
     'the board stays beside the dock',
   )
 })
@@ -1475,6 +1475,34 @@ test('lays the windows out: the chief a whole column, the members two to a colum
   await expect.poll(async () => (await box('zeus-brisk-birch')).x).toBeGreaterThan(zeus.x)
   chief = await box('chief')
   expect(Math.abs((await box('zeus-brisk-birch')).height - chief.height)).toBeLessThan(2)
+})
+
+test("counts the human's unread notes on Inbox, and opens For you with it, from a folded board too", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  const data = model()
+  // An older ledger's question to the human is no note: For you shows none, Inbox counts none.
+  data.inbox[1].push({
+    id: 12,
+    kind: 'question',
+    state: 'queued',
+    sender: 'chief',
+    recipient: 'human',
+    taskNumber: 1,
+    body: 'Ship it?',
+    questions: null,
+    createdAt: at(2),
+  })
+  await open(page, data)
+  const inbox = page.getByRole('button', { name: 'Inbox (1)' })
+  await expect(inbox).toHaveAttribute('data-waiting', 'true')
+  const board = page.getByRole('region', { name: 'Board' })
+  await page.getByRole('button', { name: 'Hide board' }).click()
+  await expect(board).toBeHidden()
+  await inbox.click()
+  await expect(board).toBeVisible()
+  await expect(page.getByRole('region', { name: 'For you' })).toBeInViewport()
 })
 
 test('folds the board away to the left for the windows, and moves the divider with the keys', async ({

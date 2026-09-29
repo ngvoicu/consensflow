@@ -223,7 +223,10 @@ function render() {
   const project = state.projects.find((s) => s.id === state.selected) ?? null
   projectTitle.textContent = project?.name ?? 'No project'
   projectDirectory.textContent = project?.directory ?? ''
-  const waiting = state.inbox.filter((message) => message.state === 'queued').length
+  // What For you lists for the human: their unread notes.
+  const waiting = state.inbox.filter(
+    (message) => message.state === 'queued' && message.kind === 'note',
+  ).length
   inboxButton.textContent = waiting === 0 ? 'Inbox' : `Inbox (${waiting})`
   inboxButton.dataset.waiting = String(waiting > 0)
   // A closed project is read-only: nothing runs, so nothing here may act on it.
@@ -342,8 +345,17 @@ function renderProjects() {
   projectList.replaceChildren(...items)
 }
 
+// The notes are in For you, at the top of the board: a folded board unfolds for them.
 inboxButton.addEventListener('click', () => {
-  boardRoot.querySelector('[data-handle="human"]')?.scrollIntoView({ block: 'start' })
+  if (readFold('board') === 'hidden') {
+    try {
+      localStorage.setItem(foldKey('board'), 'shown')
+    } catch {
+      // No storage: nothing was folded to begin with.
+    }
+    applyFolds()
+  }
+  boardRoot.querySelector('.foryou')?.scrollIntoView({ block: 'start' })
 })
 
 const ROLES = ['worker', 'advisor', 'reviewer', 'designer']
