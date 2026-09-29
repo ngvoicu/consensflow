@@ -1,4 +1,4 @@
-import { askTheBoard } from '../../hosts/lib/question-door.js'
+import { askTheBoard, refusalReason } from '../../hosts/lib/question-door.js'
 
 /** `cf` inside a window the new core opened: the agents' commands (`USAGE` lists them). */
 export const USAGE = `cf inside a ConsensFlow window: the board's commands.
@@ -82,8 +82,10 @@ const QUESTION_TOOLS = { claude: 'AskUserQuestion', devin: 'ask_user_question' }
  * back as the tool's input, the way it documents; Devin draws its dialog even
  * over a pre-filled input (probed 2026-09-20), so its hook refuses the tool
  * and hands the answer over as the refusal's reason, which Devin reads and
- * continues with. Anything that goes wrong (no ConsensFlow, a timeout, another
- * tool) ends silently: the harness then shows its own dialog in the window.
+ * continues with. A question the board refuses is refused in the window too,
+ * with the board's reason, so the model asks with cf ask. Anything else (no
+ * ConsensFlow, a timeout, another tool) ends silently: the harness then shows
+ * its own dialog in the window.
  */
 async function hook(harness, call, env, input) {
   const tool = QUESTION_TOOLS[harness]
@@ -119,8 +121,18 @@ async function hook(harness, call, env, input) {
         updatedInput: { ...event.tool_input, answers: Object.fromEntries(answers) },
       },
     }
-  } catch {
-    return null
+  } catch (cause) {
+    if (!cause?.refused) return null
+    const reason = refusalReason(cause)
+    return harness === 'devin'
+      ? { decision: 'block', reason }
+      : {
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: reason,
+          },
+        }
   }
 }
 
@@ -376,7 +388,12 @@ function client(env) {
       throw new Error(`ConsensFlow is not answering at ${url} (${cause.message})`)
     })
     const value = await response.json().catch(() => ({}))
-    if (!response.ok) throw new Error(value.message ?? `ConsensFlow answered ${response.status}`)
+    if (!response.ok) {
+      // Answered, and refused: not the same as a ConsensFlow that cannot be reached.
+      throw Object.assign(new Error(value.message ?? `ConsensFlow answered ${response.status}`), {
+        refused: true,
+      })
+    }
     return value
   }
 }

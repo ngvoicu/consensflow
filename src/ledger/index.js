@@ -395,8 +395,13 @@ function requireQuestions(questions) {
     if (question === null || typeof question !== 'object' || !Array.isArray(question.options)) {
       throw badQuestions('each question is an object with an options array')
     }
+    // The question itself may run as long as any message; its header and
+    // labels are what a picker shows, and stay short.
+    if (typeof question.question !== 'string' || question.question.trim().length === 0) {
+      throw badQuestions('each question has its text')
+    }
     return {
-      question: shortText(question.question, 'question'),
+      question: requireText(question.question.trim(), 'question', MAX_BODY),
       header: shortText(question.header, 'header'),
       options: question.options.map((option) => ({
         label: shortText(option?.label, 'an option label'),

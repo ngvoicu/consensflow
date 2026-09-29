@@ -27,10 +27,23 @@ export function boardClient({
       ...(signal === undefined ? {} : { signal }),
     })
     const value = await response.json().catch(() => ({}))
-    if (!response.ok) throw new Error(value.message ?? `ConsensFlow answered ${response.status}`)
+    if (!response.ok) {
+      // Answered, and refused: not the same as a board that cannot be reached.
+      throw Object.assign(new Error(value.message ?? `ConsensFlow answered ${response.status}`), {
+        refused: true,
+      })
+    }
     return value
   }
 }
+
+/**
+ * What a member's window tells its model when the board refuses its
+ * question: nobody watches a member's window, so its own dialog would hold
+ * the task for good.
+ */
+export const refusalReason = (cause) =>
+  `ConsensFlow could not put this question to the chief (${cause.message}). Ask with cf ask "…" instead.`
 
 /**
  * Puts the questions on the board and waits for their answer: `{ id, answer }`,

@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url'
 import WebSocket, { WebSocketServer } from 'ws'
 import { runnable, terminate } from '../src/harnesses.js'
 import { configRoot } from '../src/roster.js'
-import { askTheBoard, boardClient } from './lib/question-door.js'
+import { askTheBoard, boardClient, refusalReason } from './lib/question-door.js'
 import { createReceiver } from './lib/receiver.js'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -406,8 +406,15 @@ export async function startBroker({
             forward(native, JSON.stringify({ id: message.id, result: { answers } }))
             return
           }
-        } catch {
-          // The board could not be reached or refused: the window asks instead.
+        } catch (cause) {
+          // Refused: the model hears why, as the answer. Not reached: the
+          // window asks instead.
+          if (cause?.refused) {
+            const reason = refusalReason(cause)
+            const answers = Object.fromEntries(questions.map((q) => [q.id, { answers: [reason] }]))
+            forward(native, JSON.stringify({ id: message.id, result: { answers } }))
+            return
+          }
         }
         forward(client, raw)
       }

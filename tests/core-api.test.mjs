@@ -968,6 +968,38 @@ describe("cf hook claude: Claude's question tool answered from the board", () =>
     })
   })
 
+  it('tells the member why the board refused its question, instead of a dialog nobody sees', async () => {
+    // A member's window is watched by no one: a refused question left to the
+    // harness's own dialog held a reviewer's task for good (2026-09-29).
+    await withApi(async ({ ledger, project, token, cf }) => {
+      deliver(
+        ledger,
+        ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' }).message,
+      )
+      const five = {
+        ...EVENT,
+        tool_input: { questions: Array(5).fill(EVENT.tool_input.questions[0]) },
+      }
+      const claude = await cf(token('zeus'), 'hook', 'claude', { input: JSON.stringify(five) })
+      assert.deepEqual(JSON.parse(claude.out), {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason:
+            'ConsensFlow could not put this question to the chief (questions: one to 4 questions). Ask with cf ask "…" instead.',
+        },
+      })
+      const devin = await cf(token('zeus'), 'hook', 'devin', {
+        input: JSON.stringify({ ...five, tool_name: 'ask_user_question' }),
+      })
+      assert.deepEqual(JSON.parse(devin.out), {
+        decision: 'block',
+        reason:
+          'ConsensFlow could not put this question to the chief (questions: one to 4 questions). Ask with cf ask "…" instead.',
+      })
+    })
+  })
+
   it('stays silent for any other tool, and when ConsensFlow cannot be reached', async () => {
     await withApi(async ({ token, cf }) => {
       const other = await cf(token('zeus'), 'hook', 'claude', {

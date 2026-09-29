@@ -215,7 +215,7 @@ test('OpenCode loads the native default export and process-local launch configur
 /** A stand-in for the board's API: the question posted, the answer when the test gives it. */
 async function fakeBoard(t) {
   const { createServer: createHttpServer } = await import('node:http')
-  const state = { posted: [], answered: [], answer: null, tokens: [] }
+  const state = { posted: [], answered: [], answer: null, tokens: [], refuse: null }
   const server = createHttpServer(async (request, response) => {
     state.tokens.push(request.headers.authorization)
     const chunks = []
@@ -227,6 +227,7 @@ async function fakeBoard(t) {
     }
     if (request.method === 'POST' && request.url === '/api/questions') {
       state.posted.push(body)
+      if (state.refuse) return json(400, { error: 'bad-questions', message: state.refuse })
       return json(201, { message: { id: 40 + state.posted.length } })
     }
     if (request.method === 'GET' && request.url.startsWith('/api/questions/')) {
@@ -287,6 +288,25 @@ test("OpenCode's question tool is answered from the board through the plugin", a
   for (let i = 0; i < 100 && f.replies.length === 0; i++)
     await new Promise((r) => setTimeout(r, 10))
   assert.deepEqual(f.replies, [{ requestID: 'q-1', answers: [['blue']] }])
+})
+
+test('OpenCode: a question the board refuses is answered with the reason, never left to a dialog nobody sees', async (t) => {
+  const board = await fakeBoard(t)
+  board.state.refuse = 'questions: one to 4 questions'
+  const f = await fixture(t, false, board.url)
+  f.emit('question.asked', ASKED)
+  for (let i = 0; i < 100 && f.replies.length === 0; i++)
+    await new Promise((r) => setTimeout(r, 10))
+  assert.deepEqual(f.replies, [
+    {
+      requestID: 'q-1',
+      answers: [
+        [
+          'ConsensFlow could not put this question to the chief (questions: one to 4 questions). Ask with cf ask "…" instead.',
+        ],
+      ],
+    },
+  ])
 })
 
 test("OpenCode: the chief's question tool stays in its window, where the human answers it", async (t) => {

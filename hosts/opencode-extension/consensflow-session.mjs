@@ -1,5 +1,5 @@
 import { createServer } from 'node:http'
-import { answerFromWindow, askTheBoard, boardClient } from '../lib/question-door.js'
+import { answerFromWindow, askTheBoard, boardClient, refusalReason } from '../lib/question-door.js'
 import { createReceiver } from '../lib/receiver.js'
 
 export const id = 'consensflow-session'
@@ -82,8 +82,15 @@ export async function tui(api, options) {
       } else if (asked.answer !== null) {
         await api.client.question.reply({ requestID: id, answers: asked.answer.choices })
       }
-    } catch {
-      // The board could not be reached or refused: the window's own dialog stays.
+    } catch (cause) {
+      // Refused: the model hears why, as the answer. Not reached: the window's
+      // own dialog stays.
+      if (cause?.refused) {
+        const reason = refusalReason(cause)
+        await api.client.question
+          .reply({ requestID: id, answers: questions.map(() => [reason]) })
+          .catch(() => {})
+      }
     } finally {
       held.delete(id)
     }

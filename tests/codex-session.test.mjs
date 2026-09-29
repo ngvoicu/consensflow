@@ -483,7 +483,7 @@ it('keeps native Codex sockets private and inside ConsensFlow home', {
 /** A stand-in for the board's API: the questions posted, the answer once the test gives it. */
 async function fakeBoard(t) {
   const { createServer } = await import('node:http')
-  const state = { posted: [], answer: null }
+  const state = { posted: [], answer: null, refuse: null }
   const server = createServer(async (request, response) => {
     const chunks = []
     for await (const chunk of request) chunks.push(chunk)
@@ -493,6 +493,7 @@ async function fakeBoard(t) {
     }
     if (request.method === 'POST' && request.url === '/api/questions') {
       state.posted.push(JSON.parse(Buffer.concat(chunks).toString('utf8')))
+      if (state.refuse) return json(400, { error: 'bad-questions', message: state.refuse })
       return json(201, { message: { id: 61 } })
     }
     if (request.method === 'GET' && request.url.startsWith('/api/questions/61')) {
@@ -558,6 +559,36 @@ it("Codex's question tool is answered from the board by the broker, and the TUI 
     seen.filter((m) => m.method === 'item/tool/requestUserInput'),
     [],
     'the window showed no dialog',
+  )
+})
+
+it("Codex's question the board refuses is answered with the reason, never left to a dialog nobody sees", async (t) => {
+  const board = await fakeBoard(t)
+  board.state.refuse = 'questions: one to 4 questions'
+  const f = await fixture(t, { board: { url: board.url, token: 'window-token' } })
+  const tui = await f.connect()
+  const seen = []
+  tui.on('message', (raw) => seen.push(JSON.parse(raw)))
+  f.sockets.at(-1).send(JSON.stringify(REQUEST_USER_INPUT))
+  await f.wait(() => f.requests.some((m) => m.id === 'ask-1'))
+  assert.deepEqual(
+    f.requests.find((m) => m.id === 'ask-1'),
+    {
+      id: 'ask-1',
+      result: {
+        answers: {
+          colour: {
+            answers: [
+              'ConsensFlow could not put this question to the chief (questions: one to 4 questions). Ask with cf ask "…" instead.',
+            ],
+          },
+        },
+      },
+    },
+  )
+  assert.deepEqual(
+    seen.filter((m) => m.method === 'item/tool/requestUserInput'),
+    [],
   )
 })
 

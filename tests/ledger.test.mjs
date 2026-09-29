@@ -1093,6 +1093,26 @@ describe('tasks and the inbox queue', () => {
           { code: 'bad-questions' },
         )
       }
+      // A question's text may run as long as any message (a reviewer's 6249
+      // characters, 2026-09-29); its header and labels stay short.
+      const long = `${'Întrebarea, pe larg. '.repeat(300)}Codul: PLOP-6142`
+      const option = { label: 'Doar româna' }
+      const longAsked = ledger.ask(project.id, {
+        from: 'zeus',
+        to: 'chief',
+        task: 1,
+        questions: [{ question: long, header: 'Limba', options: [option] }],
+      })
+      assert.ok(longAsked.body.endsWith('PLOP-6142\n- Doar româna'))
+      for (const bad of [
+        [{ question: 'x', header: 'h'.repeat(1201), options: [option] }],
+        [{ question: 'x', header: 'h', options: [{ label: 'l'.repeat(1201) }] }],
+      ]) {
+        assert.throws(
+          () => ledger.ask(project.id, { from: 'zeus', to: 'chief', task: 1, questions: bad }),
+          { code: 'bad-questions' },
+        )
+      }
     })
   })
 
