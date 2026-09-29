@@ -467,10 +467,10 @@ async function run(index) {
 }
 
 /**
- * How long a bare window's screen holds still before it counts as idle
- * whatever its record says: a working harness keeps drawing (a spinner, a
- * timer), and without ConsensFlow Devin's and OpenCode's records never say a
- * turn is over.
+ * How long a bare window's screen and record both hold still before it
+ * counts as idle whatever its record says: a working harness keeps drawing
+ * (a spinner, a timer) or adding to its record, and without ConsensFlow
+ * Devin's and OpenCode's records never say a turn is over.
  */
 const SCREEN_IDLE_MS = 30_000
 /** Where a harness looks for its native records, without the eval's removals (null means unset). */
@@ -550,13 +550,17 @@ async function runBare(index) {
     let lastChange = Date.now()
     let signature = ''
     let screenAt = { length: -1, at: Date.now() }
+    let recordAt = { shape: '', at: Date.now() }
     for (;;) {
       await sleep(5_000)
       const state = await record()
       items = state?.items ?? items
       const printed = app.output(pane.id).length
       if (printed !== screenAt.length) screenAt = { length: printed, at: Date.now() }
-      const busy = (state === null || !state.settled) && Date.now() - screenAt.at < SCREEN_IDLE_MS
+      const grown = JSON.stringify([items.length, items.at(-1)?.id, items.at(-1)?.text?.length])
+      if (grown !== recordAt.shape) recordAt = { shape: grown, at: Date.now() }
+      const moving = Date.now() - Math.max(screenAt.at, recordAt.at) < SCREEN_IDLE_MS
+      const busy = (state === null || !state.settled) && moving
       // At rest, its newest message ended the turn.
       const newest = items.filter((item) => item.role === 'assistant').at(-1)
       if (!busy && newest !== undefined) ends.add(newest.id)
