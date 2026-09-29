@@ -74,8 +74,7 @@ credentials, takes no API key, and writes only inside its own home.
 - **Human approval required.** With this project setting on, every message
   between two agents (a task, a result after its review, a question, an
   answer) waits in your bay until you pass it on. You may also decline a task
-  or an answer with a word to its sender, or send a result back with a
-  follow-up. What you send, what reaches you
+  or an answer with a word to its sender. What you send, what reaches you
   and what ConsensFlow itself notes never wait.
 
 ## Install
