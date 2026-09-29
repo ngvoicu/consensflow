@@ -421,6 +421,16 @@ describe('counting what a chief asks the owner', () => {
       '- Publicăm acum sau după ce vezi pagina?',
     ].join('\n')
     assert.equal(countQuestions(terminal), 3)
+    // Markdown around a question still makes it one (an Opus chief, 2026-09-29).
+    const bold = [
+      'Nu am pornit nimic pe board încă — două întrebări:',
+      '',
+      '1. **Cum se numește fișierul paginii?** (spune-mi exact numele, inclusiv extensia)',
+      '2. **În ce limbă o facem întâi — română sau engleză?**',
+      '',
+      '_Pornesc imediat?_',
+    ].join('\n')
+    assert.equal(countQuestions(bold), 3)
     assert.equal(countQuestions('Gata. Pagina e făcută.'), 0)
     assert.equal(countQuestions(''), 0)
   })

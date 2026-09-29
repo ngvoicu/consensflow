@@ -328,6 +328,8 @@ export function questionSentences(text) {
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/`[^`\n]*`/g, ' ')
     .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, ' ')
+    // Emphasis marks around a question (**Which one?**) are not its end.
+    .replace(/[*_]+/g, '')
   return prose
     .split('\n')
     .flatMap((line) => line.split(/(?<=[.!?])\s+/))

@@ -7,7 +7,7 @@ import { interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
 import { send as sendDevin } from '../channels/devin.js'
 import { prepareDevinIntegration, prepareDevinPrompt } from '../devin-install.js'
 import { roleConfiguration } from '../role-skills.js'
-import { admission, executableFor, recordState } from './shared.js'
+import { admission, dialogWaiting, executableFor, recordState } from './shared.js'
 
 /**
  * Devin, for the new core. Each launch runs on a config of our own (the
@@ -108,7 +108,7 @@ export function devinAdapter({
         answers('devin', launch.nativeSession, env),
         wireQuota(launch.channel),
       ])
-      return { ...recordState(record), waiting: null, quota }
+      return { ...recordState(record), waiting: dialogWaiting(record), quota }
     },
 
     transcript({ launch }) {

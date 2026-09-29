@@ -26,6 +26,14 @@ export function recordState(record) {
   }
 }
 
+/**
+ * A window whose own question dialog is open waits for an answer there (the
+ * chief's, from the human; a member's, from the board through its door):
+ * nothing is pasted into it, and the board says it waits.
+ */
+export const dialogWaiting = (record) =>
+  record?.asking === true ? { reason: 'its own question dialog is open' } : null
+
 /** How the native channels answer a send, as an adapter delivery outcome. */
 export function admission(sent, refusal, { queued = false } = {}) {
   if (sent?.ok === true) return queued ? { admitted: true, queued: true } : { admitted: true }

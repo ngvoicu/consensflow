@@ -1188,6 +1188,26 @@ test('completion/opencode: MessageAbortedError is a failure, never cancellation 
   assert.equal(result.settlement.provenance, 'native')
 })
 
+test('completion/opencode: its question tool still running is asking; a finished one is not', async () => {
+  const session = 'ses_f87e22f72ffewC2qJ2dAyyfPe1'
+  const env = await stageOpencode('opencode/tool-result.json')
+  assert.equal((await answers('opencode', session, env)).asking, false)
+  const db = new DatabaseSync(path.join(env.XDG_DATA_HOME, 'opencode', 'opencode.db'))
+  try {
+    const row = db
+      .prepare("SELECT id, data FROM part WHERE json_extract(data, '$.type') = 'tool'")
+      .get()
+    const part = JSON.parse(row.data)
+    db.prepare('UPDATE part SET data = ? WHERE id = ?').run(
+      JSON.stringify({ ...part, tool: 'question', state: { ...part.state, status: 'running' } }),
+      row.id,
+    )
+  } finally {
+    db.close()
+  }
+  assert.equal((await answers('opencode', session, env)).asking, true)
+})
+
 test('completion/opencode: tool output and long final text are emitted whole from one snapshot', async () => {
   const session = 'ses_f87e22f72ffewC2qJ2dAyyfPe1'
   const result = await answers(
@@ -1905,6 +1925,53 @@ const devinChunk = (text, request = 'request-1', stream = 'stream-1') => ({
     content: { type: 'text', text },
     _meta: { 'cognition.ai/streamingMessageId': stream },
   },
+})
+
+test('completion/devin: a question dialog still open is asking, until its answer comes back', async () => {
+  const { root, env } = await stageDevin('Voi întreba:', [])
+  const file = path.join(env.XDG_DATA_HOME, 'devin', 'cli', 'sessions.db')
+  const edit = (fn) => {
+    const db = new DatabaseSync(file)
+    try {
+      fn(db)
+    } finally {
+      db.close()
+    }
+  }
+  try {
+    assert.equal((await completion.answers('devin', 'calm-river', env)).asking, false)
+    edit((db) =>
+      db.prepare("UPDATE message_nodes SET chat_message = ? WHERE node_id = 'n-2'").run(
+        JSON.stringify({
+          message_id: 'a-1',
+          role: 'assistant',
+          content: 'Voi întreba:',
+          tool_calls: [{ id: 'call-1', name: 'ask_user_question', arguments: { questions: [] } }],
+        }),
+      ),
+    )
+    assert.equal((await completion.answers('devin', 'calm-river', env)).asking, true)
+    edit((db) => {
+      db.prepare(
+        'INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at) VALUES (?, ?, ?, ?, ?)',
+      ).run(
+        'calm-river',
+        'n-3',
+        'n-2',
+        JSON.stringify({
+          message_id: 't-1',
+          role: 'tool',
+          content: 'cariere',
+          tool_call_id: 'call-1',
+        }),
+        '2026-09-26T05:11:00Z',
+      )
+      db.prepare("UPDATE sessions SET main_chain_id = 'n-3'").run()
+    })
+    assert.equal((await completion.answers('devin', 'calm-river', env)).asking, false)
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
 })
 
 test('completion/devin: a final message that links a file settles, though Devin stores the link as a tag', async () => {

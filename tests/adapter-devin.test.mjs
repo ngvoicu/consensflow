@@ -183,6 +183,27 @@ describe('the Devin adapter', () => {
     })
   })
 
+  it('reads its own question dialog, still open, as waiting', async () => {
+    await withHome(async ({ env }) => {
+      const adapter = devinAdapter({
+        env,
+        answers: async () => ({
+          items: [],
+          inFlight: true,
+          asking: true,
+          settlement: { state: 'in-flight' },
+        }),
+        discoverEveryMs: 5,
+      })
+      const { launch } = await adapter.prepare(request())
+      await selects(env, 'dev-1')
+      await adapter.started({ launch })
+      assert.deepEqual((await adapter.observe({ launch })).waiting, {
+        reason: 'its own question dialog is open',
+      })
+    })
+  })
+
   it("reads Devin's own refusal from the wire log, until the next prompt", async () => {
     await withHome(async ({ env }) => {
       const adapter = devinAdapter({

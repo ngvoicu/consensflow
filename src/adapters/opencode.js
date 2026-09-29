@@ -10,7 +10,7 @@ import {
 import { launchConfiguration } from '../channels.js'
 import { prepareOpenCodeExtension } from '../opencode-install.js'
 import { roleConfiguration } from '../role-skills.js'
-import { admission, executableFor, recordState } from './shared.js'
+import { admission, dialogWaiting, executableFor, recordState } from './shared.js'
 
 /**
  * OpenCode, for the new core. A fresh conversation is created on a throwaway
@@ -145,7 +145,7 @@ export function openCodeAdapter({
         ...state,
         quota: retry ?? state.quota,
         settled: showing && !retrying && (state.settled || idle),
-        waiting: null,
+        waiting: dialogWaiting(record),
       }
     },
 

@@ -245,6 +245,28 @@ describe('the OpenCode adapter', () => {
     })
   })
 
+  it('reads its own question dialog, still open, as waiting', async () => {
+    await withHome(async ({ env }) => {
+      let asking = true
+      const adapter = openCodeAdapter({
+        env,
+        answers: async () => ({
+          items: [{ id: 'u', role: 'user' }],
+          inFlight: true,
+          asking,
+          settlement: { state: 'in-flight' },
+        }),
+        sessionState: async () => ({ sessionId: 'ses_abc123', status: { type: 'busy' } }),
+      })
+      const launch = { nativeSession: 'ses_abc123' }
+      assert.deepEqual((await adapter.observe({ launch })).waiting, {
+        reason: 'its own question dialog is open',
+      })
+      asking = false
+      assert.equal((await adapter.observe({ launch })).waiting, null)
+    })
+  })
+
   it("reads OpenCode waiting out a usage or rate limit as the member's quota spent", async () => {
     await withHome(async ({ env }) => {
       const now = Date.now()

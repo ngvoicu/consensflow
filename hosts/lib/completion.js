@@ -163,6 +163,8 @@ function resultBase() {
   return {
     items: [],
     inFlight: false,
+    // Its own question dialog is open: the window waits for the human's answer.
+    asking: false,
     cancelled: false,
     replaced: false,
     failed: false,
@@ -1963,8 +1965,10 @@ async function opencodeAnswers(sessionId, env, options) {
         if (part.type !== 'tool') continue
         const status = part.state?.status
         const toolId = part.callID ?? partRow.id
-        if (status === 'completed' || status === 'error') openTools.delete(toolId)
+        const done = status === 'completed' || status === 'error'
+        if (done) openTools.delete(toolId)
         else openTools.add(toolId)
+        if (part.tool === 'question') result.asking = !done
       }
 
       const errorName = data.error?.name
@@ -2151,8 +2155,13 @@ async function devinAnswers(sessionId, env) {
     }
     const ids = new Set()
     let request = null
+    // Its question tool's call, until a tool message answers it.
+    let asking = null
     for (const row of chain.reverse()) {
       const message = JSON.parse(row.chat_message)
+      const call = message.tool_calls?.find((c) => c.name === 'ask_user_question')
+      if (message.role === 'assistant' && call) asking = call.id
+      else if (message.role === 'tool' && message.tool_call_id === asking) asking = null
       if (typeof message.message_id !== 'string' || ids.has(message.message_id))
         throw new Error('invalid Devin message identity')
       ids.add(message.message_id)
@@ -2182,6 +2191,7 @@ async function devinAnswers(sessionId, env) {
       })
       result.cursor = Math.max(result.cursor ?? seq, seq)
     }
+    result.asking = asking !== null
     db.exec('COMMIT')
   } finally {
     db.close()
