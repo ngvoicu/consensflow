@@ -1,0 +1,180 @@
+{
+  "scenario": "six-decisions",
+  "chief": "pi",
+  "model": "openrouter/deepseek/deepseek-v4-pro-0813",
+  "effort": "high",
+  "arm": "bare",
+  "session": "ac73c858-1421-4996-99a2-ff1546cd36f8",
+  "run": 1,
+  "seconds": 469,
+  "metrics": {
+    "chief": "chief",
+    "tasks": [],
+    "parallel": 0,
+    "advice": 0,
+    "reviews": 0,
+    "questionsToHuman": [],
+    "notesToHuman": [],
+    "notesText": "",
+    "longestResult": {
+      "worker": 0,
+      "advisor": 0,
+      "reviewer": 0
+    },
+    "answersToChief": [],
+    "taskCount": 0,
+    "chiefTurns": 6,
+    "chiefEdits": null,
+    "chiefLastWords": "",
+    "ownerQuestions": {
+      "board": {
+        "asked": 0,
+        "decisions": 0,
+        "texts": []
+      },
+      "terminal": {
+        "questions": 0,
+        "turnsAsking": 0,
+        "texts": []
+      }
+    },
+    "filesChanged": []
+  },
+  "checks": [
+    {
+      "name": "the owner is asked on the board, at least three questions",
+      "ok": false
+    },
+    {
+      "name": "at least one question offers options",
+      "ok": false
+    },
+    {
+      "name": "a finding reaches the owner as a note",
+      "ok": false
+    },
+    {
+      "name": "at least two tasks go on the board",
+      "ok": false
+    },
+    {
+      "name": "two tasks run side by side at some point",
+      "ok": false
+    },
+    {
+      "name": "finished work goes to a review",
+      "ok": false
+    },
+    {
+      "name": "the chief's own edits stay under ten (counted for a Claude chief only)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑14k ↓3.3k R60k CH99.5% $0.044 2.2%/1.0M (auto)  deepseek/deepseek-v4-pro-0813 •── ⠴ Working ───────────────────────────────────────────────────────────────────── ⠦ Working ─────────────────────────────────────────────────────────────────── psychosocial via risk assessment; EU-OSHA research 2022-2025; Peer Review",
+    " 2024.",
+    " Let me note",
+    "── ⠦ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑14k ↓3.3k R60k CH99.5% $0.044 2.2%/1.0M (auto)  deepseek/deepseek-v4-pro-0813 •── ⠧ Working ───────────────────────────────────────────────────────────────────── ⠇ Working ─────────────────────────────────────────────────────────────────── Let me note the exact timeline: The Peer Review on legislative and enforcement",
+    " approaches for psychosocial risks was one of the flagships. It happened",
+    " 2024-202",
+    "── ⠇ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑14k ↓3.3k R60k CH99.5% $0.044 2.2%/1.0M (auto)  deepseek/deepseek-v4-pro-0813 •── ⠏ Working ───────────────────────────────────────────────────────────────────── ⠋ Working ─────────────────────────────────────────────────────────────────── 2024-2025.",
+    " I should be careful about stating \"what it means for Romanian employers\" —",
+    " that's analysis: since no binding",
+    "── ⠋ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑14k ↓3.3k R60k CH99.5% $0.044 2.2%/1.0M (auto)  deepseek/deepseek-v4-pro-0813 •── ⠙ Working ───────────────────────────────────────────────────────────────────── ⠹ Working ─────────────────────────────────────────────────────────────────── that's analysis: since no binding directive yet, no                             that's analysis: since no binding directive yet, no immediate transposition",
+    " obligation; but EU strategic framework 2021-2027",
+    "── ⠸ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑14k ↓3.3k R60k CH99.5% $0.044 2.2%/1.0M (auto)  deepseek/deepseek-v4-pro-0813 •── ⠼ Working ─────────────────────────────────────────────────────────────────── obligation; but EU strategic framework 2021-2027 and Council conclusions",
+    " signal direction; risk assessment under Law 319/2006 already covers",
+    " psychosocial risks so Romanian employers should treat",
+    "── ⠼ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑14k ↓3.3k R60k CH99.5% $0.044 2.2%/1.0M (auto)  deepseek/deepseek-v4-pro-0813 •── ⠴ Working ───────────────────────────────────────────────────────────────────── ⠦ Working ─────────────────────────────────────────────────────────────────── psychosocial risks so Romanian employers should treat them as part of existing",
+    " obligations.",
+    " I have enough verified material. Now let me write the completed RO draft and",
+    " create the EN translation.",
+    " Regarding the model and",
+    "── ⠦ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑14k ↓3.3k R60k CH99.5% $0.044 2.2%/1.0M (auto)  deepseek/deepseek-v4-pro-0813 •── ⠧ Working ───────────────────────────────────────────────────────────────────── ⠇ Working ───────────────────────────────────────────────────────────────────\u001b"
+  ],
+  "terminalAnswers": 2,
+  "terminalReplies": 0,
+  "followUpsSent": 0,
+  "log": [
+    {
+      "at": 5,
+      "line": "chief (pi, bare) ready; typing the prompt"
+    },
+    {
+      "at": 16,
+      "line": "Enter pressed again: the window had not taken the text"
+    },
+    {
+      "at": 21,
+      "line": "chief working; 0 items in its record"
+    },
+    {
+      "at": 31,
+      "line": "chief working; 3 items in its record"
+    },
+    {
+      "at": 66,
+      "line": "chief working; 6 items in its record"
+    },
+    {
+      "at": 101,
+      "line": "chief working; 10 items in its record"
+    },
+    {
+      "at": 126,
+      "line": "chief working; 15 items in its record"
+    },
+    {
+      "at": 141,
+      "line": "chief working; 18 items in its record"
+    },
+    {
+      "at": 166,
+      "line": "chief working; 20 items in its record"
+    },
+    {
+      "at": 206,
+      "line": "chief idle; 20 items in its record"
+    },
+    {
+      "at": 266,
+      "line": "the chief stopped in its terminal; the owner typed there: Da, cum recomanzi. Continuă."
+    },
+    {
+      "at": 277,
+      "line": "Enter pressed again: the window had not taken the text"
+    },
+    {
+      "at": 337,
+      "line": "the chief stopped in its terminal; the owner typed there: Da, cum recomanzi. Continuă."
+    },
+    {
+      "at": 348,
+      "line": "Enter pressed again: the window had not taken the text"
+    },
+    {
+      "at": 469,
+      "line": "quiet: the run is over"
+    }
+  ]
+}

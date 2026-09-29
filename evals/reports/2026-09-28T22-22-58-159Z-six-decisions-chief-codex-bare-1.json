@@ -1,0 +1,137 @@
+{
+  "scenario": "six-decisions",
+  "chief": "codex",
+  "model": "gpt-5.6-luna",
+  "effort": "high",
+  "arm": "bare",
+  "session": null,
+  "run": 1,
+  "seconds": 2401,
+  "metrics": {
+    "chief": "chief",
+    "tasks": [],
+    "parallel": 0,
+    "advice": 0,
+    "reviews": 0,
+    "questionsToHuman": [],
+    "notesToHuman": [],
+    "notesText": "",
+    "longestResult": {
+      "worker": 0,
+      "advisor": 0,
+      "reviewer": 0
+    },
+    "answersToChief": [],
+    "taskCount": 0,
+    "chiefTurns": 0,
+    "chiefEdits": null,
+    "chiefLastWords": "",
+    "ownerQuestions": {
+      "board": {
+        "asked": 0,
+        "decisions": 0,
+        "texts": []
+      },
+      "terminal": {
+        "questions": 0,
+        "turnsAsking": 0,
+        "texts": []
+      }
+    },
+    "filesChanged": []
+  },
+  "checks": [
+    {
+      "name": "the owner is asked on the board, at least three questions",
+      "ok": false
+    },
+    {
+      "name": "at least one question offers options",
+      "ok": false
+    },
+    {
+      "name": "a finding reaches the owner as a note",
+      "ok": false
+    },
+    {
+      "name": "at least two tasks go on the board",
+      "ok": false
+    },
+    {
+      "name": "two tasks run side by side at some point",
+      "ok": false
+    },
+    {
+      "name": "finished work goes to a review",
+      "ok": false
+    },
+    {
+      "name": "the chief's own edits stay under ten (counted for a Claude chief only)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "hidapitester: Command-line tool to exercise USB HID devices via HIDAPI",
+    "kubectl-radar: Missing open-source Kubernetes UI with a built-in MCP server for AI agents",
+    "plink1: Whole-genome association analysis toolset",
+    "sofka: Kubernetes TUI, reimagined in Rust",
+    "somalier: Relatedness, QC and ancestry checks from BAM/CRAM/VCF",
+    "tcltls: OpenSSL extension to Tcl",
+    "vortix: Terminal UI for WireGuard and OpenVPN with live telemetry and leak guarding",
+    "==> New Casks",
+    "activitywatch@experimental: Time tracker",
+    "amp-app: Coding agent and development environment",
+    "buholaunchpad: Launchpad alternative",
+    "font-pennstander",
+    "font-xmind",
+    "jpki: Digital signature and authentication client for the My Number Card (JPKI)",
+    "local-studio: Local workstation for running and managing language models",
+    "mdhero: Markdown viewer and editor",
+    "mindroom: Self-hostable AI stack for multi-user, multi-agent workflows on Matrix",
+    "plane: Project management tool for tasks, sprints and docs",
+    "robbietilton-compositor: Photoshop alternative",
+    "ssl-360: Plugin mixer and control software for SSL 360-enabled hardware",
+    "ssl-download-manager: Software manager for SSL plug-ins",
+    "You have 30 outdated formulae and 3 outdated casks installed.",
+    "==> Would upgrade 1 requested outdated package",
+    "codex 0.156.1 -> 0.158.0",
+    "==> Fetching downloads for: codex",
+    "⠋ Cask codex (0.158.0)⠋ Cask codex (0.158.0)⠙ Cask codex (0.158.0)⠙ Cask codex (0.158.0)⠚ Cask codex (0.158.0)                              Downloading  77.8KB/129.2MB⠚ Cask codex (0.158.0)                              Downloading 307.2KB/129.2MB⠞ Cask codex (0.158.0)                              Downloading 983.0KB/129.2MB⠞ Cask codex (0.158.0) #                            Downloading   2.7MB/129.2MB⠖ Cask codex (0.158.0) ##                           Downloading   7.2MB/129.2MB⠖ Cask codex (0.158.0) ##                           Downloading   9.6MB/129.2MB⠦ Cask codex (0.158.0) ###                          Downloading  14.7MB/129.2MB⠦ Cask codex (0.158.0) ####                         Downloading  19.5MB/129.2MB⠴ Cask codex (0.158.0) #####                        Downloading  23.8MB/129.2MB⠴ Cask codex (0.158.0) ######                       Downloading  28.2MB/129.2MB⠲ Cask codex (0.158.0) #######                      Downloading  33.0MB/129.2MB⠲ Cask codex (0.158.0) ########                     Downloading  37.7MB/129.2MB⠳ Cask codex (0.158.0) #########                    Downloading  43.0MB/129.2MB⠳ Cask codex (0.158.0) ##########                   Downloading  47.7MB/129.2MB⠓ Cask codex (0.158.0) ###########                  Downloading  52.8MB/129.2MB⠓ Cask codex (0.158.0) ############                 Downloading  57.3MB/129.2MB⠋ Cask codex (0.158.0) #############                Downloading  62.0MB/129.2MB⠋ Cask codex (0.158.0) ##############               Downloading  66.7MB/129.2MB⠙ Cask codex (0.158.0) ################             Downloading  71.6MB/129.2MB⠙ Cask codex (0.158.0) #################            Downloading  76.4MB/129.2MB⠚ Cask codex (0.158.0) #################            Downloading  80.5MB/129.2MB⠚ Cask codex (0.158.0) ###################          Downloading  85.9MB/129.2MB",
+    "⠞ Cask codex (0.158.0) ####################         Downloading  90.9MB/129.2MB⠞ Cask codex (0.158.0) #####################        Downloading  95.3MB/129.2MB⠖ Cask codex (0.158.0) ######################       Downloading 100.4MB/129.2MB⠖ Cask codex (0.158.0) #######################      Downloading 105.9MB/129.2MB⠦ Cask codex (0.158.0) ########################     Downloading 110.3MB/129.2MB⠦ Cask codex (0.158.0) #########################    Downloading 115.7MB/129.2MB⠴ Cask codex (0.158.0) ##########################   Downloading 120.9MB/129.2MB⠴ Cask codex (0.158.0) ###########################  Downloading 125.9MB/129.2MB⠲ Cask codex (0.158.0)                              Downloaded  129.2MB/129.2MB⠲ Cask codex (0.158.0)                              Verifying   129.2MB/129.2MB⠳ Cask codex (0.158.0)                              Verified    129.2MB/129.2MB⠳ Cask codex (0.158.0)                              Verified    129.2MB/129.2MB⠓ Cask codex (0.158.0)                              Verified    129.2MB/129.2MB⠓ Cask codex (0.158.0)                              Verified    129.2MB/129.2MB⠋ Cask codex (0.158.0)                              Verified    129.2MB/129.2MB⠋ Cask codex (0.158.0)                              Verified    129.2MB/129.2MB⠙ Cask codex (0.158.0)                              Verified    129.2MB/129.2MB⠙ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠚ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠚ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠞ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠞ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠖ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠖ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠦ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠦ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠴ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠴ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠲ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠲ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠳ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠳ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠓ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠓ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠋ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠋ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠙ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠙ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠚ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠚ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠞ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠞ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠖ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠖ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠦ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠦ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠴ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠴ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠲ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠲ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠳ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠳ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠓ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB⠓ Cask codex (0.158.0)                              Extracting  129.2MB/129.2MB✔︎ Cask codex (0.158.0)                              Downloaded  129.2MB/129.2MB",
+    "==> Upgrading codex",
+    "  0.156.1 -> 0.158.0",
+    "==> Unlinking Binary '/opt/homebrew/bin/codex'",
+    "==> Linking Binary 'codex' to '/opt/homebrew/bin/codex'",
+    "==> Purging files for version 0.156.1 of Cask codex",
+    "🍺  codex was successfully upgraded!",
+    "==> Cleanup",
+    "Removing: /Users/gabrielvoicu/Library/Caches/Homebrew/Cask/codex--0.156.1.tar.gz... (127.4MB)",
+    "Disable this behaviour by setting `HOMEBREW_NO_INSTALL_CLEANUP=1`.",
+    "Hide these hints with `HOMEBREW_NO_ENV_HINTS=1` (see `man brew`).",
+    "==> Upgraded 1 requested outdated package",
+    "codex 0.156.1 -> 0.158.0",
+    "🎉 Update ran successfully! Please restart Codex."
+  ],
+  "terminalAnswers": 0,
+  "terminalReplies": 0,
+  "pickerAnswers": 0,
+  "followUpsSent": 0,
+  "log": [
+    {
+      "at": 4,
+      "line": "chief (codex, bare) ready; typing the prompt"
+    },
+    {
+      "at": 15,
+      "line": "Enter pressed again: the window had not taken the text"
+    },
+    {
+      "at": 20,
+      "line": "chief working; 0 items in its record"
+    },
+    {
+      "at": 2401,
+      "line": "time is up"
+    }
+  ]
+}

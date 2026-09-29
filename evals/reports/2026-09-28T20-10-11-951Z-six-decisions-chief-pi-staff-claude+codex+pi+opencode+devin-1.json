@@ -1,0 +1,317 @@
+{
+  "scenario": "six-decisions",
+  "chief": "pi",
+  "model": "openrouter/deepseek/deepseek-v4-pro-0813",
+  "effort": "high",
+  "staffEffort": "medium",
+  "staff": [
+    "claude",
+    "codex",
+    "pi",
+    "opencode",
+    "devin"
+  ],
+  "staffModels": {
+    "eval-claude-worker": "claude-haiku-4-5-20251001",
+    "eval-claude-worker-2": "claude-haiku-4-5-20251001",
+    "eval-claude-advisor": "claude-haiku-4-5-20251001",
+    "eval-claude-reviewer": "claude-haiku-4-5-20251001",
+    "eval-codex-worker": "gpt-5.6-luna",
+    "eval-codex-worker-2": "gpt-5.6-luna",
+    "eval-codex-advisor": "gpt-5.6-luna",
+    "eval-codex-reviewer": "gpt-5.6-luna",
+    "eval-pi-worker": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-pi-worker-2": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-pi-advisor": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-pi-reviewer": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-opencode-worker": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-opencode-worker-2": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-opencode-advisor": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-opencode-reviewer": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-devin-worker": "swe-1-6-slow",
+    "eval-devin-worker-2": "swe-1-6-slow",
+    "eval-devin-advisor": "swe-1-6-slow",
+    "eval-devin-reviewer": "swe-1-6-slow"
+  },
+  "run": 1,
+  "seconds": 2404,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Completează fișierul content/legislatie-ro.md (text despre legislația burnout-ului la locul de muncă, pentru un site st…",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "done",
+        "assignee": "eval-claude-worker-vivid-saddle"
+      },
+      {
+        "number": 5,
+        "title": "Modifică fișierul docs/document-de-referinta-hr.md adăugând o notă la începutul documentului, imediat după titlul „# Do…",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-codex-worker-brisk-pine"
+      },
+      {
+        "number": 2,
+        "title": "Tradu în engleză fișierul content/legislatie-ro.md (textul COMPLET, așa cum va rămâne după ce sarcina T-1 este acceptat…",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "open",
+        "assignee": null
+      },
+      {
+        "number": 3,
+        "title": "Adaugă butonul „Legislație\" în meniul de jos al site-ului și creează paginile noi de legislație, în română și engleză.",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "open",
+        "assignee": null
+      },
+      {
+        "number": 4,
+        "title": "Verifică acuratețea juridică a fișierului content/legislatie-ro.md completat în sarcina T-1 (vezi cu `cf task get T-1` …",
+        "pool": "reviewer",
+        "tier": "standard",
+        "state": "open",
+        "assignee": null
+      }
+    ],
+    "parallel": 5,
+    "advice": 0,
+    "reviews": 1,
+    "questionsToHuman": [
+      {
+        "id": 1,
+        "options": false,
+        "body": "Ce facem cu docs/document-de-referinta-hr.md („Document de referință pentru HR, People Management & C-Suite\", ultima revizie martie 2024)? Azi conține o parte din conținutul deja pe site (Despre noi, "
+      }
+    ],
+    "notesToHuman": [
+      {
+        "id": 2,
+        "body": "Plan pentru „Legislație\":\n\nAm citit site-ul și conținutul. Ce am pus pe bord (nimic nu se publică):\n\n1. **Completarea textului românesc** — cele trei secțiuni marcate cu „de completat\" din content/leg"
+      }
+    ],
+    "notesText": "Plan pentru „Legislație\":\n\nAm citit site-ul și conținutul. Ce am pus pe bord (nimic nu se publică):\n\n1. **Completarea textului românesc** — cele trei secțiuni marcate cu „de completat\" din content/legislatie-ro.md, cu trimiteri legale verificate (Codul Muncii, Legea 319/2006, OUG 158/2005 privind concediile medicale, ICD-11/OMS, inițiativa Comisiei Europene 2023 privind riscurile psihosociale).\n2. **Traducerea în engleză** a textului finalizat.\n3. **Butonul „Legislație\" / „Legislation\"** în meniul de jos al tuturor paginilor + paginile noi site/legislatie.html și site/en/legislation.html, în același stil simplu (style.css).\n\nPublicarea (copierea site/ pe server) NU o fac — doar când îmi spui tu.\n\nO observație, mai veche decât cererea ta, de care nu mă ating fără acordul tău: meniul de jos trimite deja către pagini care nu există în site/ — despre.html, faq.html, contact.html (și variantele englezești about.html, faq.html, contact.html). Spune-mi dacă vrei să mă ocup și de ele.\n\nRămâne o singură decizie pe care o aștept de la tine (vezi întrebarea): ce facem cu docs/document-de-referinta-hr.md.",
+    "longestResult": {
+      "worker": 383,
+      "advisor": 0,
+      "reviewer": 0
+    },
+    "answersToChief": [
+      72
+    ],
+    "taskCount": 5,
+    "chiefId": 2,
+    "chiefHarness": "pi",
+    "humanId": 1,
+    "chiefTurns": 14,
+    "chiefEdits": null,
+    "chiefLastWords": "",
+    "ownerQuestions": {
+      "board": {
+        "asked": 1,
+        "decisions": 1,
+        "texts": [
+          "Ce facem cu docs/document-de-referinta-hr.md („Document de referință pentru HR, People Management & C-Suite\", ultima revizie martie 2024)? Azi conține o parte din conținutul deja pe site (Despre noi, Evaluare) și, la „Ce urmează\", scrie „O pagină despre legislație, când va exista un text verificat\".\n\nOpțiuni:\n1. Îl păstrăm așa cum este, nu-l atingem.\n2. Îl păstrăm, dar actualizăm secțiunea „Ce urmează\" ca să trimită la noua pagină de legislație.\n3. Îl ștergem.\n4. Altceva (spune-mi ce)."
+        ]
+      },
+      "terminal": {
+        "questions": 0,
+        "turnsAsking": 0,
+        "texts": []
+      }
+    },
+    "plumbing": {
+      "briefs": 2,
+      "briefsDelivered": 2,
+      "results": 2,
+      "resultsDelivered": 1,
+      "memberQuestions": 1,
+      "memberQuestionsAnswered": 1,
+      "answersDelivered": 1,
+      "accepted": 1,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0,
+      "ownerQuestions": 1,
+      "ownerQuestionsAnswered": 1
+    },
+    "filesChanged": [
+      "content/legislatie-ro.md",
+      "docs/document-de-referinta-hr.md"
+    ]
+  },
+  "checks": [
+    {
+      "name": "the owner is asked on the board, at least three questions",
+      "ok": false
+    },
+    {
+      "name": "at least one question offers options",
+      "ok": false
+    },
+    {
+      "name": "a finding reaches the owner as a note",
+      "ok": true
+    },
+    {
+      "name": "at least two tasks go on the board",
+      "ok": true
+    },
+    {
+      "name": "two tasks run side by side at some point",
+      "ok": true
+    },
+    {
+      "name": "finished work goes to a review",
+      "ok": true
+    },
+    {
+      "name": "the chief's own edits stay under ten (counted for a Claude chief only)",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (2/2)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (1/2)",
+      "ok": false
+    },
+    {
+      "name": "every question a member asked the chief was answered (1/1)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (1/1)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question the chief put to the owner got the owner's answer (1/1)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (5/5)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    " Actually, I realize I should also think about whether T-2 (translation) should",
+    " wait for T-4 too. If review finds citation errors in RO text, translation",
+    " would need fixing too. But translation is fast and the fixes are typically",
+    " just article numbers/terms which are language-independent (article numbers",
+    " stay same in EN actually — \"art. 175\" vs \"Art. 175\" — the numbers don't change",
+    " in translation). If the review says \"the correct article is 22, not 11\", then",
+    " BOTH RO and EN need the number changed. So translation might need a small fix",
+    " too.",
+    " But gating T-2 on T-4 serializes translation after review, which is slower.",
+    " The article-number fixes in EN are trivial and could be done in T-3 (the",
+    " builder) or via reopen of T-2. Actually, cleanest: gate T-3 (build) on T-4",
+    " (review), and if review flags issues, reopen T-1 (fix RO) then reopen T-2 (fix",
+    " EN translation of those numbers), then T-3 builds. Since T-3 waits on both T-2",
+    " and T-4 (and T-1), reopening T-1/T-2 will re-block T-3 until they're",
+    " re-accepted. That's coherent.",
+    " OK let me execute:",
+    " 1. cf task accept T-1",
+    " 2. cf task cancel T-3, then cf task add --needs T-2,T-4 (new build task)",
+    " Let me do accept first, then cancel T-3 and re-add.",
+    " Actually — do I want to cancel T-3 and re-add, or is there risk? Canceling T-3",
+    " loses nothing (it was just sitting blocked). Re-adding with additional --needs",
+    " T-4. Fine.",
+    " Let me write the re-add brief (same as before, but I need to re-paste the",
+    " brief). I have the original brief text. Let me re-add with the same content",
+    " plus note that it now also waits for review.",
+    " Actually, I can keep the brief essentially identical. Let me do it.",
+    " Let me run accept T-1 and cancel T-3 first (parallel-ish, independent), then",
+    " add new T-3.",
+    " Actually accept T-1 and cancel T-3 are independent, can run in same block.",
+    " Then add new build task (needs T-2, T-4).",
+    " Wait, ordering: the new build task's --needs references T-2 and T-4 (existing",
+    " tasks), no dependency on the canceled task's new ID. So I can add it right",
+    " after cancel. All independent of each other's IDs except I refer to T-2 and",
+    " T-4 by their IDs which already exist.",
+    " Let me do it all in one bash block sequentially.",
+    " $ ...",
+    "── ⠸ Working ───────────────────────────────────────────────────────────────────",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "~/.consensflow-candidate/evals/workspace",
+    "↑110k ↓15k R263k CH99.5% $0.213 3.5%/1.0M (auto)  deepseek/deepseek-v4-pro-0813 ── ⠼ Working ───────────────────────────────"
+  ],
+  "arm": "card",
+  "terminalAnswers": 0,
+  "terminalReplies": 0,
+  "followUpsSent": 0,
+  "refusedAnswers": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 69,
+      "line": "chief (pi) ready; typing the prompt"
+    },
+    {
+      "at": 79,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 144,
+      "line": "answered m-1 (Ce facem cu docs/document-de-referinta-hr.md („Document de referință p) with: Îl păstrăm, dar pune sus o notă că pagina de legislație e sursa actuală."
+    },
+    {
+      "at": 149,
+      "line": "chief working; tasks T-1:working"
+    },
+    {
+      "at": 240,
+      "line": "chief working; tasks T-1:waiting"
+    },
+    {
+      "at": 776,
+      "line": "chief working; tasks T-1:waiting T-5:queued T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 781,
+      "line": "chief working; tasks T-1:waiting T-5:working T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 801,
+      "line": "chief working; tasks T-1:waiting T-5:done T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 2039,
+      "line": "chief closed; tasks T-1:waiting T-5:done T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 2044,
+      "line": "chief working; tasks T-1:waiting T-5:done T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 2049,
+      "line": "chief idle; tasks T-1:working T-5:accepted T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 2054,
+      "line": "chief working; tasks T-1:done T-5:accepted T-2:open T-3:open T-4:open"
+    },
+    {
+      "at": 2404,
+      "line": "time is up"
+    }
+  ]
+}

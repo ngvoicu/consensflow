@@ -1,0 +1,250 @@
+{
+  "scenario": "six-decisions",
+  "chief": "devin",
+  "model": "devin's default",
+  "effort": null,
+  "staffEffort": "medium",
+  "staff": [
+    "claude",
+    "codex",
+    "pi",
+    "opencode",
+    "devin"
+  ],
+  "staffModels": {
+    "eval-claude-worker": "claude-haiku-4-5-20251001",
+    "eval-claude-worker-2": "claude-haiku-4-5-20251001",
+    "eval-claude-advisor": "claude-haiku-4-5-20251001",
+    "eval-claude-reviewer": "claude-haiku-4-5-20251001",
+    "eval-codex-worker": "gpt-5.6-luna",
+    "eval-codex-worker-2": "gpt-5.6-luna",
+    "eval-codex-advisor": "gpt-5.6-luna",
+    "eval-codex-reviewer": "gpt-5.6-luna",
+    "eval-pi-worker": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-pi-worker-2": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-pi-advisor": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-pi-reviewer": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-opencode-worker": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-opencode-worker-2": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-opencode-advisor": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-opencode-reviewer": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-devin-worker": "swe-1-6-slow",
+    "eval-devin-worker-2": "swe-1-6-slow",
+    "eval-devin-advisor": "swe-1-6-slow",
+    "eval-devin-reviewer": "swe-1-6-slow"
+  },
+  "run": 1,
+  "seconds": 275,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [],
+    "parallel": 0,
+    "advice": 0,
+    "reviews": 0,
+    "questionsToHuman": [
+      {
+        "id": 1,
+        "options": true,
+        "body": "Document HR: Păstrăm documentul vechi 'Document de referință pentru HR' din docs/?\n- Îl ștergem: Conținutul relevant va fi public pe site, documentul nu mai e necesar\n- Îl păstrăm: Rămâne ca document "
+      }
+    ],
+    "notesToHuman": [],
+    "notesText": "",
+    "longestResult": {
+      "worker": 0,
+      "advisor": 0,
+      "reviewer": 0
+    },
+    "answersToChief": [
+      85
+    ],
+    "taskCount": 0,
+    "chiefId": 2,
+    "chiefHarness": "devin",
+    "humanId": 1,
+    "chiefTurns": 20,
+    "chiefEdits": null,
+    "chiefLastWords": "Am finalizat modificările. Iată rezumatul:\n\n## Modificări făcute:\n\n1. **Conținut completat** în `content/legislatie-ro.md`:\n   - Secțiunea \"Obligațiile angajatorului\" - evaluarea riscurilor psihosociale, medicina muncii, informarea și consultarea lucrătorilor\n   - Secțiunea \"Drepturile angajatului\" - concediul medical, adaptarea postului, dreptul de a refuza munca\n   - Secțiunea \"Ce se schimbă la nivel european\" - inițiativa UE, impact pentru România, recomandări preventive\n\n2. **Traducere în engleză** creată în `content/legislatie-en.md`\n\n3. **Pagini HTML create**:\n   - `site/legislatie.html` (română)\n   - `site/en/legislatie.html` (engleză)\n\n4. **Buton \"Legislație\" adăugat în footer**:\n   - `site/index.html` (română)\n   - `site/evaluare.html` (română)\n   - `site/en/index.html` (engleză)\n\n5. **Notă adăugată** în `docs/document-de-referinta-hr.md` că pagina de legislație este sursa actuală\n\n**Pagina NU este publicată** - doar am creat fișierele locale. Aștept aprobarea ta pentru a publica.",
+    "ownerQuestions": {
+      "board": {
+        "asked": 1,
+        "decisions": 1,
+        "texts": [
+          "Document HR: Păstrăm documentul vechi 'Document de referință pentru HR' din docs/?\n- Îl ștergem: Conținutul relevant va fi public pe site, documentul nu mai e necesar\n- Îl păstrăm: Rămâne ca document intern pentru HR/management"
+        ]
+      },
+      "terminal": {
+        "questions": 0,
+        "turnsAsking": 0,
+        "texts": []
+      }
+    },
+    "plumbing": {
+      "briefs": 0,
+      "briefsDelivered": 0,
+      "results": 0,
+      "resultsDelivered": 0,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 0,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0,
+      "ownerQuestions": 1,
+      "ownerQuestionsAnswered": 1
+    },
+    "memberQuestionsBy": [],
+    "filesChanged": [
+      "content/legislatie-en.md",
+      "content/legislatie-ro.md",
+      "docs/document-de-referinta-hr.md",
+      "site/en/index.html",
+      "site/en/legislatie.html",
+      "site/evaluare.html",
+      "site/index.html",
+      "site/legislatie.html"
+    ]
+  },
+  "checks": [
+    {
+      "name": "the owner is asked on the board, at least three questions",
+      "ok": false
+    },
+    {
+      "name": "at least one question offers options",
+      "ok": true
+    },
+    {
+      "name": "a finding reaches the owner as a note",
+      "ok": false
+    },
+    {
+      "name": "at least two tasks go on the board",
+      "ok": false
+    },
+    {
+      "name": "two tasks run side by side at some point",
+      "ok": false
+    },
+    {
+      "name": "finished work goes to a review",
+      "ok": false
+    },
+    {
+      "name": "the chief's own edits stay under ten (counted for a Claude chief only)",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "every question the chief put to the owner got the owner's answer (1/1)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (0/0)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "SWE-1.6 Slow                                    Context: 35k / 200k tokens (17%)seschimbălaniveleuropean\"-inițiativaUE,impactpent    pentruRomânia,recoma                                           ⣄⠀ Typing · 1m 13s (esc twice to interrupt)                                   ──────────────────────────────────────────────────────(bypass permissions on)─❭ Guide Devin while it works                                                    ────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                    Context: 35k / 200k tokens (17%)ndăripreventive2. T                                           ⣄⠀ Typing · 1m 13s (esc twice to interrupt)                                   ──────────────────────────────────────────────────────(bypass permissions on)─❭ Guide Devin while it works                                                    ────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                    Context: 35k / 200k tokens (17%)raducere în⡆⠀ englezăcreată4în content/le ⠇gislatie-en.md 3. Pagini H                                           ⠇⠀ Typing · 1m 14s (esc twice to interrupt)                                   ──────────────────────────────────────────────────────(bypass permissions on)─❭ Guide Devin while it works                                                    ────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                    Context: 35k / 200k tokens (17%)TML create:⠋•  site/legislat                                            ⠋⠀ Typing · 1m 14s (esc twice to interrupt)                                   ──────────────────────────────────────────────────────(bypass permissions on)─❭ Guide Devin while it works                                                    ────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                    Context: 35k / 200k tokens (17%)ie.html (română)•  site/en/legisl                                            ⠉⠁ Typing · 1m 14s (esc twice to interrupt)                                   ──────────────────────────────────────────────────────(bypass permissions on)─❭ Guide Devin while it works                                                    ────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                    Context: 35k / 200k tokens (17%)atie.html (engleză)4. Buton \"Legi                                           ⠉⠁ Typing · 1m 14s (esc twice to interrupt)                                   ──────────────────────────────────────────────────────(bypass permissions on)─❭ Guide Devin while it works                                                    ────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                    Context: 35k / 200k tokens (17%)slație\" adăugat în foo⠈⠉ter:•  site/index                                            ⠈⠉ Typing · 1m 14s (esc twice to interrupt)                                   ──────────────────────────────────────────────────────(bypass permissions on)─❭ Guide Devin while it works                                                    ────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                    Context: 35k / 200k tokens (17%).html (română)• `                                           ⠈⠉ Typing · 1m 14s (esc twice to interrupt)                                   ──────────────────────────────────────────────────────(bypass permissions on)─❭ Guide Devin while it works                                                    ────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                    Context: 35k / 200k tokens (17%) site/evaluare.html ⠀⠙(română)•  site/en                                            ⠀⠙ Typing · 1m 14s (esc twice to interrupt)                                   ──────────────────────────────────────────────────────(bypass permissions on)─❭ Guide Devin while it works                                                    ────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                    Context: 35k / 200k tokens (17%)/index.html (engleză)5. Notă adăugatăîn                                           ⠀⠚ Typing · 1m 14s (esc twice to interrupt)                                   ──────────────────────────────────────────────────────(bypass permissions on)─❭ Guide Devin while it works                                                    ────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                    Context: 35k / 200k tokens (17%) docs/document-de-ref erinta-hr.md căpaginadelegislațieestesu                                           ⠐⠒ Typing · 1m 14s (esc twice to interrupt)                                   ──────────────────────────────────────────────────────(bypass permissions on)─❭ Guide Devin while it works                                                    ────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                    Context: 35k / 200k tokens (17%)   1. Conținut completat în  content/legislatie-ro.md :",
+    "     • Secțiunea \"Obligațiile angajatorului\" - evaluarea riscurilor",
+    "     psihosociale, medicina muncii, informarea și consultarea lucrătorilor",
+    "     • Secțiunea \"Drepturile angajatului\" - concediul medical, adaptarea",
+    "     postului, dreptul de a refuza munca",
+    "     • Secțiunea \"Ce se schimbă la nivel european\" - inițiativa UE, impact",
+    "     pentru România, recomandări preventive",
+    "   2. Traducere în engleză creată în  content/legislatie-en.md",
+    "   3. Pagini HTML create:",
+    "     •  site/legislatie.html  (română)",
+    "     •  site/en/legislatie.html  (engleză)",
+    "   4. Buton \"Legislație\" adăugat în footer:",
+    "     •  site/index.html  (română)",
+    "     •  site/evaluare.html  (română)",
+    "     •  site/en/index.html  (engleză)",
+    "   5. Notă adăugată în  docs/document-de-referinta-hr.md  că pagina de",
+    "   legislație este sursa actuală",
+    " Pagina N",
+    "⠐⠒ Typing · 1m 14s (esc twice to interrupt)",
+    "────────────────────────────────────────────────────── (bypass permissions on) ─",
+    "❭ Guide Devin while it works",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                    Context: 35k / 200k tokens (17%)U este publicată-doaramcreatfiși⠒⠂erelelocale.Așteptaprobar⠖⠀eatapen                                           ⠖⠀ Typing · 1m 14s (esc twice to interrupt)                                   ──────────────────────────────────────────────────────(bypass permissions on)─❭ Guide Devin while it works                                                    ────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                    Context: 35k / 200k tokens (17%)tru⠦apublic⠤⠄ Pagina NU este publicată - doar am creat fișierele locale. Aștept aprobarea ta",
+    " pentru a publica.",
+    "────────────────────────────────────────────────────── (bypass permissions on) ─",
+    "❭ Ask Devin to build features, fix bugs, or work on your code",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "SWE-1.6 Slow                                    Context: 36k / 200k tokens (17%)"
+  ],
+  "arm": "card",
+  "terminalAnswers": 0,
+  "terminalReplies": 0,
+  "followUpsSent": 0,
+  "refusedAnswers": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 70,
+      "line": "chief (devin) ready; typing the prompt"
+    },
+    {
+      "at": 75,
+      "line": "Enter pressed again: the window had not taken the text"
+    },
+    {
+      "at": 80,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 90,
+      "line": "answered m-1 (Document HR: Păstrăm documentul vechi 'Document de referință pentru HR) with: Îl păstrăm, dar pune sus o notă că pagina de legislație e sursa actuală."
+    },
+    {
+      "at": 155,
+      "line": "chief idle; tasks none"
+    },
+    {
+      "at": 275,
+      "line": "quiet: the run is over"
+    }
+  ]
+}
