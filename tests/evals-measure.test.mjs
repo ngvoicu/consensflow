@@ -5,6 +5,7 @@ import path from 'node:path'
 import { describe, it } from 'node:test'
 import {
   changed,
+  chiefTurnEnd,
   countQuestions,
   measure,
   mechanics,
@@ -515,5 +516,32 @@ describe('the question trip', () => {
     assert.deepEqual(failing({ ...good, questionsToHuman: [{}] }), [
       'the owner is not asked anything',
     ])
+  })
+})
+
+describe("reading the chief's last turn while the daemon runs", () => {
+  it('reads it from a copy: the running ledger holds its file exclusively', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-turn-'))
+    const file = path.join(dir, 'consensflow.db')
+    const ledger = openLedger(file)
+    try {
+      const project = ledger.createProject({
+        directory: '/work/site',
+        name: 'site',
+        chief: { harness: 'claude-code' },
+      })
+      const chief = ledger.project(project.id).participants.find((p) => p.role === 'chief')
+      assert.equal(chiefTurnEnd(file), undefined, 'no turn yet')
+      const conversation = ledger.startConversation(chief.id, { harness: 'claude-code' })
+      ledger.copyTranscript(conversation.id, [
+        { id: 'a1', role: 'assistant', text: 'Reading?', complete: false, at: null },
+        { id: 'a2', role: 'assistant', text: 'Keep the old document?', complete: true, at: null },
+      ])
+      // The ledger is still open, as the daemon's is during a run.
+      assert.deepEqual({ ...chiefTurnEnd(file) }, { id: 'a2', text: 'Keep the old document?' })
+    } finally {
+      ledger.close()
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

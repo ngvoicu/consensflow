@@ -17,7 +17,6 @@ import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { chmodSync, cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 import { answers } from '../hosts/lib/completion.js'
@@ -25,7 +24,7 @@ import { interactiveStart } from '../hosts/lib/windows.js'
 import { recordState } from '../src/adapters/shared.js'
 import { startIntegration } from '../tests/integration/harness.mjs'
 import { askingTurnEnd, bareMetrics, findSession } from './bare.mjs'
-import { changed, countQuestions, measure, mechanics, verdict } from './measure.mjs'
+import { changed, chiefTurnEnd, countQuestions, measure, mechanics, verdict } from './measure.mjs'
 import {
   answerFor,
   chiefEnvironment,
@@ -194,24 +193,6 @@ const MAX_TERMINAL_REPLIES = 8
 /** How long a chief may sit idle with nothing on the board before the owner answers it in its terminal. */
 const NUDGE_AFTER_MS = 60_000
 
-/** The chief's newest message that ended a turn, read from the ledger's copy of its window. */
-function lastTurnEnd(file) {
-  const db = new DatabaseSync(file, { readOnly: true })
-  try {
-    return db
-      .prepare(
-        `SELECT t.item_id AS id, t.text FROM transcript t
-         JOIN conversation c ON c.id = t.conversation_id
-         JOIN participant p ON p.id = c.participant_id
-         WHERE p.role = 'chief' AND t.role = 'assistant' AND t.complete = 1
-         ORDER BY t.conversation_id DESC, t.seq DESC LIMIT 1`,
-      )
-      .get()
-  } finally {
-    db.close()
-  }
-}
-
 /**
  * Wait until a window's output has grown and then held still for `stillMs`:
  * the harness has drawn its prompt. A window can read idle the moment it
@@ -366,7 +347,7 @@ async function run(index) {
         terminalReplies < MAX_TERMINAL_REPLIES &&
         Date.now() - lastChange > FOLLOW_UP_AFTER_MS
       ) {
-        const end = lastTurnEnd(file)
+        const end = chiefTurnEnd(file)
         if (
           end !== undefined &&
           !repliedTo.has(end.id) &&
@@ -485,8 +466,13 @@ async function run(index) {
   return checks.every((check) => check.ok) && plumbing.every((check) => check.ok)
 }
 
-/** How long a busy bare window's record and screen hold still before the owner takes it for a picker waiting on a key. */
-const PICKER_AFTER_MS = 45_000
+/**
+ * How long a bare window's screen holds still before it counts as idle
+ * whatever its record says: a working harness keeps drawing (a spinner, a
+ * timer), and without ConsensFlow Devin's and OpenCode's records never say a
+ * turn is over.
+ */
+const SCREEN_IDLE_MS = 30_000
 /** Where a harness looks for its native records, without the eval's removals (null means unset). */
 const RECORD_ENV = Object.fromEntries(Object.entries(ENV).filter(([, value]) => value !== null))
 
@@ -519,9 +505,9 @@ async function runBare(index) {
   let items = []
   let terminalAnswers = 0
   let terminalReplies = 0
-  let pickerAnswers = 0
   let followUpsSent = 0
   const repliedTo = new Set()
+  const ends = new Set()
   try {
     const opened = await app.request('pane.open', {
       ...pane,
@@ -568,36 +554,21 @@ async function runBare(index) {
       await sleep(5_000)
       const state = await record()
       items = state?.items ?? items
-      const busy = state === null || !state.settled
+      const printed = app.output(pane.id).length
+      if (printed !== screenAt.length) screenAt = { length: printed, at: Date.now() }
+      const busy = (state === null || !state.settled) && Date.now() - screenAt.at < SCREEN_IDLE_MS
+      // At rest, its newest message ended the turn.
+      const newest = items.filter((item) => item.role === 'assistant').at(-1)
+      if (!busy && newest !== undefined) ends.add(newest.id)
       const now = JSON.stringify([items.length, items.at(-1)?.id, items.at(-1)?.text?.length, busy])
       if (now !== signature) {
         signature = now
         lastChange = Date.now()
         note(`chief ${busy ? 'working' : 'idle'}; ${items.length} items in its record`)
       }
-      const printed = app.output(pane.id).length
-      if (printed !== screenAt.length) screenAt = { length: printed, at: Date.now() }
       const quiet = Date.now() - lastChange
-      // A question tool (Claude's, OpenCode's) draws a picker and waits on a
-      // key: busy, nothing moving in its record or on its screen. Enter takes
-      // its first, recommended option; the report counts these.
-      if (
-        busy &&
-        state !== null &&
-        pickerAnswers < MAX_TERMINAL_REPLIES &&
-        quiet > PICKER_AFTER_MS &&
-        Date.now() - screenAt.at > PICKER_AFTER_MS
-      ) {
-        pickerAnswers += 1
-        note(
-          `the chief looks held on a picker; the owner pressed Enter. Its screen: ${lastLines(app.output(pane.id)).slice(-6).join(' ⏎ ')}`,
-        )
-        await app.request('pane.input', { ...pane, bytes: [13] })
-        lastChange = Date.now()
-        continue
-      }
       if (!busy && terminalReplies < MAX_TERMINAL_REPLIES && quiet > FOLLOW_UP_AFTER_MS) {
-        const end = askingTurnEnd(items)
+        const end = askingTurnEnd(items, ends)
         if (end !== undefined && !repliedTo.has(end.id)) {
           repliedTo.add(end.id)
           terminalReplies += 1
@@ -612,7 +583,6 @@ async function runBare(index) {
         scenario.nudge !== undefined &&
         terminalAnswers < 2 &&
         terminalReplies === 0 &&
-        pickerAnswers === 0 &&
         !busy &&
         quiet > NUDGE_AFTER_MS
       ) {
@@ -645,6 +615,7 @@ async function runBare(index) {
   }
   const metrics = bareMetrics(items, {
     filesChanged: changed(join(HERE, 'fixtures', scenario.fixture), WORKSPACE),
+    ends,
   })
   const checks = verdict(scenario, metrics)
   const report = {
@@ -661,7 +632,6 @@ async function runBare(index) {
     chiefScreen: screen,
     terminalAnswers,
     terminalReplies,
-    pickerAnswers,
     followUpsSent,
     log,
   }
@@ -672,8 +642,8 @@ async function runBare(index) {
   process.stdout.write(
     `\n${scenario.id} · chief ${chief} [bare] (${chiefSetup.model}, effort ${chiefEffort ?? 'its default'}) · run ${index} · ${report.seconds}s\n` +
       checks.map((check) => `  ${check.ok ? 'PASS' : 'FAIL'} ${check.name}\n`).join('') +
-      `  turns ${metrics.chiefTurns} · files changed ${metrics.filesChanged.length} · answered in the terminal ${terminalAnswers} (nudges) + ${terminalReplies} (its questions) + ${pickerAnswers} (pickers)\n` +
-      `  the owner was asked: in the terminal ${asked.terminal.questions} questions in ${asked.terminal.turnsAsking} turns · pickers ${pickerAnswers}\n  report: ${out}\n`,
+      `  turns ${metrics.chiefTurns} · files changed ${metrics.filesChanged.length} · answered in the terminal ${terminalAnswers} (nudges) + ${terminalReplies} (its questions)\n` +
+      `  the owner was asked: in the terminal ${asked.terminal.questions} questions in ${asked.terminal.turnsAsking} turns\n  report: ${out}\n`,
   )
   return checks.every((check) => check.ok)
 }

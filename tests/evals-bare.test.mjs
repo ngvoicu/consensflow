@@ -126,3 +126,31 @@ describe("a bare chief's numbers", () => {
     )
   })
 })
+
+describe('a bare record that never marks the end of a turn (Devin, OpenCode)', () => {
+  const items = [
+    { id: 'u1', role: 'user', text: 'Add the page', complete: true },
+    { id: 'a1', role: 'assistant', text: 'Keep the old document? Publish today?', complete: false },
+    { id: 'u2', role: 'user', text: 'Keep it. Not yet.', complete: true },
+    {
+      id: 'a2',
+      role: 'assistant',
+      text: 'Pages done. Waiting for your feedback.',
+      complete: false,
+    },
+  ]
+
+  it('takes the message the window rested on as the end of that turn', () => {
+    assert.equal(
+      askingTurnEnd(items.slice(0, 2)),
+      undefined,
+      'nothing marked, nothing seen at rest',
+    )
+    assert.equal(askingTurnEnd(items.slice(0, 2), new Set(['a1']))?.id, 'a1')
+    const metrics = bareMetrics(items, { ends: new Set(['a1', 'a2']) })
+    assert.deepEqual(
+      [metrics.ownerQuestions.terminal.questions, metrics.ownerQuestions.terminal.turnsAsking],
+      [2, 1],
+    )
+  })
+})

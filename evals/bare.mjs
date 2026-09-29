@@ -96,9 +96,9 @@ function codexSession(workspace, since, codexHome) {
  * so the same expectations read them: no board, so no tasks, notes or board
  * questions; what the owner was asked is its turns' ends.
  */
-export function bareMetrics(items, { filesChanged = [] } = {}) {
+export function bareMetrics(items, { filesChanged = [], ends = new Set() } = {}) {
   const assistant = items.filter((item) => item.role === 'assistant')
-  const turnEnds = assistant.filter((item) => item.complete).map((item) => item.text)
+  const turnEnds = assistant.filter((item) => endsTurn(item, ends)).map((item) => item.text)
   return {
     chief: 'chief',
     tasks: [],
@@ -119,8 +119,15 @@ export function bareMetrics(items, { filesChanged = [] } = {}) {
   }
 }
 
+/**
+ * A message ended a turn when its record says so, or when the window sat idle
+ * after it: without ConsensFlow, Devin's and OpenCode's records never mark
+ * the message that ends a turn, so the runner keeps the ids it saw at rest.
+ */
+const endsTurn = (item, ends) => item.complete || ends.has(item.id)
+
 /** The chief's newest message that ended a turn, if it asked the owner anything. */
-export function askingTurnEnd(items) {
-  const end = items.filter((item) => item.role === 'assistant' && item.complete).at(-1)
+export function askingTurnEnd(items, ends = new Set()) {
+  const end = items.filter((item) => item.role === 'assistant' && endsTurn(item, ends)).at(-1)
   return end !== undefined && countQuestions(end.text) > 0 ? end : undefined
 }

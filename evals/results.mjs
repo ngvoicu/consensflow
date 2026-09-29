@@ -26,7 +26,7 @@ export function row(report) {
     String(report.terminalAnswers ?? '?'),
     m.ownerQuestions === undefined
       ? '?'
-      : `${m.ownerQuestions.board.decisions}/${m.ownerQuestions.terminal.questions}${report.pickerAnswers ? `+${report.pickerAnswers}p` : ''}`,
+      : `${m.ownerQuestions.board.decisions}/${m.ownerQuestions.terminal.questions}`,
     String(Math.round(report.seconds / 60)),
   ]
 }
@@ -62,7 +62,7 @@ export function resultsTable(reports) {
     'answered and the answers delivered, every task on the board). Terminal: how often the owner',
     "had to answer in the chief's terminal because nothing was on the board. `?` is a report from",
     'before that column existed. Asked: the decisions put to the owner on the board / the questions',
-    'the chief ended its turns with in its terminal, +Np for pickers the owner had to answer. A chief',
+    'the chief ended its turns with in its terminal. A chief',
     'marked [nocard] had a one-line card naming no board; [bare] ran without ConsensFlow.',
     '',
     `| ${COLUMNS.join(' | ')} |`,

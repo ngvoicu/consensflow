@@ -80,7 +80,7 @@ describe('the results file', () => {
     )
   })
 
-  it('names the arm, and what the owner was asked: board decisions / terminal questions, pickers', () => {
+  it('names the arm, and what the owner was asked: board decisions / terminal questions', () => {
     const asked = (board, terminal) => ({
       board: { decisions: board },
       terminal: { questions: terminal },
@@ -96,12 +96,11 @@ describe('the results file', () => {
       arm: 'bare',
       staff: undefined,
       mechanics: undefined,
-      pickerAnswers: 2,
       metrics: { ...report.metrics, tasks: [], ownerQuestions: asked(0, 3) },
     }
     assert.deepEqual(
       [row(bare)[2], row(bare)[3], row(bare)[15]],
-      ["devin [bare] (devin's default)", 'none', '0/3+2p'],
+      ["devin [bare] (devin's default)", 'none', '0/3'],
     )
     assert.equal(row({ ...report, arm: 'card' })[2], "devin (devin's default)")
   })

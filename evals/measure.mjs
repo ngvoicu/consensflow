@@ -1,5 +1,14 @@
 import { createHash } from 'node:crypto'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { openLedger } from '../src/ledger/index.js'
@@ -378,5 +387,36 @@ export function ownerQuestions({ board = [], terminal = [] }) {
       turnsAsking: asking.length,
       texts: asking,
     },
+  }
+}
+
+/**
+ * The chief's newest message that ended a turn, during a run. The daemon's
+ * ledger holds its file exclusively (PRAGMA locking_mode = EXCLUSIVE), so
+ * another connection finds it locked: this reads a copy of the file and its
+ * write-ahead log.
+ */
+export function chiefTurnEnd(file) {
+  const dir = mkdtempSync(join(tmpdir(), 'cf-eval-ledger-'))
+  try {
+    const copy = join(dir, 'ledger.db')
+    copyFileSync(file, copy)
+    if (existsSync(`${file}-wal`)) copyFileSync(`${file}-wal`, `${copy}-wal`)
+    const db = new DatabaseSync(copy)
+    try {
+      return db
+        .prepare(
+          `SELECT t.item_id AS id, t.text FROM transcript t
+           JOIN conversation c ON c.id = t.conversation_id
+           JOIN participant p ON p.id = c.participant_id
+           WHERE p.role = 'chief' AND t.role = 'assistant' AND t.complete = 1
+           ORDER BY t.conversation_id DESC, t.seq DESC LIMIT 1`,
+        )
+        .get()
+    } finally {
+      db.close()
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
   }
 }
