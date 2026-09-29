@@ -42,9 +42,10 @@ credentials, takes no API key, and writes only inside its own home.
   back, pause, and approve what waits for you.
 - **The board is the only channel.** No agent gives another a task by name,
   types into another window, or reads another agent's session files.
-  Questions go up: a member asks the chief, the chief asks you. You answer on the
-  board, and the answer lands in the window that asked, through the harness's
-  own question tool where it has one.
+  Questions go up: a member asks the chief on the board, and the answer lands in
+  the window that asked, through the harness's own question tool where it has
+  one. The chief asks you in its own terminal, where you work with it: nothing
+  asks you on the board.
 - **Review.** A project reviews its workers' finished work, or nothing. The
   reviewer must run a different model than the author; a request for changes
   goes back to the author once, and after a second round the chief decides with
@@ -73,8 +74,8 @@ credentials, takes no API key, and writes only inside its own home.
 - **Human approval required.** With this project setting on, every message
   between two agents (a task, a result after its review, a question, an
   answer) waits in your bay until you pass it on. You may also decline a task
-  or an answer with a word to its sender, send a result back with a
-  follow-up, or answer a question yourself. What you send, what reaches you
+  or an answer with a word to its sender, or send a result back with a
+  follow-up. What you send, what reaches you
   and what ConsensFlow itself notes never wait.
 
 ## Install
@@ -131,7 +132,7 @@ only subject:
     cf task add --self --needs T-3 "…"                         the chief's own later step, woken when T-3 is accepted
     cf task list | get T-3 [--transcript] | done T-3 "…" | accept | reopen | cancel | pause | resume
     cf tell T-3 "…"                                            stop T-3 and put this to its window; its answer comes back; then resume it
-    cf inbox [read m-12] · cf ask "…" [--human] · cf answer m-12 "…" · cf staff · cf whoami
+    cf inbox [read m-12] · cf ask "…" · cf answer m-12 "…" · cf staff · cf whoami
     cf note "…" [--human]                                     something to know; nothing waits on it
 
 Every role's window opens with its role text: what it does, what it never

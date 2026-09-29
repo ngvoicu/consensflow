@@ -118,32 +118,6 @@ export function lastLines(text, count = 40) {
 }
 
 /**
- * The scripted owner's answer, shaped as the board sends it. A question with
- * options gets `choices`, one pick per sub-question as the board's form
- * does: the first of the scenario's `answers` whose pattern matches that
- * sub-question (free text, like the form's "Something else"), else its first
- * option, else the fallback. A plain question gets a `body`: the first
- * pattern that matches its first line (its subject), then the first that
- * matches anywhere in it, then the fallback.
- */
-export function answerFor(scenario, question) {
-  const answers = scenario.answers ?? []
-  const matching = (text) => answers.find(({ match }) => match.test(text))?.text
-  if (question.questions !== null && question.questions.length > 0) {
-    return {
-      choices: question.questions.map((q) => [
-        matching(`${q.header ?? ''} ${q.question ?? ''}`) ??
-          q.options?.[0]?.label ??
-          scenario.fallback,
-      ]),
-    }
-  }
-  return {
-    body: matching(question.body.split('\n')[0]) ?? matching(question.body) ?? scenario.fallback,
-  }
-}
-
-/**
  * The owner's reply to questions a chief left in its terminal: for each
  * question sentence, the scenario's answer on its subject or its fallback,
  * each answer once, in the order asked.

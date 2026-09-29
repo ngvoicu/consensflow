@@ -22,7 +22,7 @@ import { openLedger } from '../src/ledger/index.js'
  * the run changed or added (`workspace` against `fixture`, any harness).
  * The daemon must have closed the ledger first: the ledger holds its file.
  */
-export function measure(file, { fixture = null, workspace = null } = {}) {
+export function measure(file, { fixture = null, workspace = null, pickers = 0 } = {}) {
   const ledger = openLedger(file)
   let metrics
   try {
@@ -68,9 +68,9 @@ export function measure(file, { fixture = null, workspace = null } = {}) {
       parallel: mostAtOnce(spans),
       advice: tasks.filter((t) => t.requester === chief.handle && t.pool === 'advisor').length,
       reviews: tasks.filter((t) => t.requester === chief.handle && t.pool === 'reviewer').length,
-      questionsToHuman: toHuman
-        .filter((m) => m.kind === 'question')
-        .map((m) => ({ id: m.id, options: m.questions !== null, body: m.body.slice(0, 200) })),
+      // The human is asked in the chief's terminal: the ledger refuses a
+      // question for them, so this stays 0, and a run says so.
+      questionsOnBoard: toHuman.filter((m) => m.kind === 'question').length,
       notesToHuman: toHuman
         .filter((m) => m.kind === 'note')
         .map((m) => ({ id: m.id, body: m.body.slice(0, 200) })),
@@ -99,14 +99,6 @@ export function measure(file, { fixture = null, workspace = null } = {}) {
           ),
         ]),
       ),
-      // The human's answers to the chief, in characters.
-      answersToChief: ledger
-        .inbox(chief.id, { limit: 500 })
-        .filter((m) => m.kind === 'answer' && m.sender === human.handle)
-        .map((m) => m.body.length),
-      boardQuestions: toHuman
-        .filter((m) => m.kind === 'question')
-        .map((m) => ({ body: m.body, questions: m.questions })),
       taskCount: tasks.length,
       chiefId: chief.id,
       chiefHarness: chief.harness,
@@ -115,13 +107,11 @@ export function measure(file, { fixture = null, workspace = null } = {}) {
   } finally {
     ledger.close()
   }
-  const { boardQuestions, ...kept } = metrics
-  const window = chiefWindow(file, metrics.chiefId, metrics.chiefHarness)
-  const { turnEnds, ...seen } = window
+  const { turnEnds, ...seen } = chiefWindow(file, metrics.chiefId, metrics.chiefHarness)
   return {
-    ...kept,
+    ...metrics,
     ...seen,
-    ownerQuestions: ownerQuestions({ board: boardQuestions, terminal: turnEnds }),
+    ownerQuestions: ownerQuestions(turnEnds, { pickers }),
     plumbing: plumbing(file, metrics.chiefId, metrics.humanId),
     memberQuestionsBy: memberQuestionsBy(file, metrics.chiefId, metrics.humanId),
     filesChanged: fixture === null || workspace === null ? [] : changed(fixture, workspace),
@@ -221,17 +211,6 @@ function plumbing(file, chiefId, humanId) {
            ON p.project_id = e.project_id AND p.handle = json_extract(e.data, '$.to')
          WHERE e.kind = 'task.created' AND p.member_id IS NOT NULL`,
       ),
-      ownerQuestions: count(
-        "SELECT COUNT(*) AS n FROM message WHERE kind = 'question' AND recipient_id = ? AND sender_id = ?",
-        humanId,
-        chiefId,
-      ),
-      ownerQuestionsAnswered: count(
-        `SELECT COUNT(*) AS n FROM message q WHERE q.kind = 'question' AND q.recipient_id = ? AND q.sender_id = ?
-           AND EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer' AND a.state != 'cancelled')`,
-        humanId,
-        chiefId,
-      ),
     }
   } finally {
     db.close()
@@ -241,9 +220,7 @@ function plumbing(file, chiefId, humanId) {
 /**
  * Did the board's plumbing hold, whatever the chief decided: every brief
  * delivered, every result back to the chief, every member's question
- * answered and the answer delivered, every question the chief put to the
- * owner answered (a refused answer leaves the chief waiting), every task
- * shown on the board
+ * answered and the answer delivered, every task shown on the board
  * (`boardTasks`: how many the board listed when the run ended).
  */
 export function mechanics(metrics, boardTasks) {
@@ -259,11 +236,6 @@ export function mechanics(metrics, boardTasks) {
     ),
     held('every answer reached the member', p.answersDelivered, p.memberQuestionsAnswered),
     held('every tell the chief sent was answered', p.tellsAnswered, p.tells),
-    held(
-      "every question the chief put to the owner got the owner's answer",
-      p.ownerQuestionsAnswered,
-      p.ownerQuestions,
-    ),
     held('the board showed every task', boardTasks, metrics.taskCount),
   ]
 }
@@ -309,6 +281,13 @@ function chiefWindow(file, chiefId, harness) {
       chiefLastWords: assistant.at(-1)?.text.slice(0, 1500) ?? '',
       // The messages that ended its turns: what it left the owner to read.
       turnEnds: assistant.filter((i) => i.complete === 1).map((i) => i.text),
+      // What the owner typed into its window (ConsensFlow's own carry its header), in characters.
+      ownerMessages: items
+        .filter((i) => i.role === 'user' && !i.text.startsWith('[ConsensFlow m-'))
+        .map((i) => i.text.length),
+      // A `cf ask` it tried: refused, it is told to ask in its terminal.
+      askRefused: tools.filter((i) => i.text.includes('ask the human here in your terminal'))
+        .length,
     }
   } finally {
     db.close()
@@ -360,33 +339,22 @@ export function countQuestions(text) {
   return questionSentences(text).length
 }
 
+/** How many questions the chief put to the owner in its terminal, in words or in a picker. */
+export const askedInTerminal = (m) => m.ownerQuestions.questions + m.ownerQuestions.pickers
+
 /**
- * What a chief asked the owner, counted the same way whatever its setup: on
- * the board, each decision of a question with options, or a plain question's
- * sentences (one at least); in its terminal, the question sentences of each
- * message that ended a turn. The two are kept apart: a chief on the board may
- * restate in its terminal what it asked there.
+ * What a chief asked the owner, all of it in its terminal: the question
+ * sentences of each message that ended a turn, and the pickers (its harness's
+ * own question dialog) the owner answered there. The texts stay for a person
+ * to check.
  */
-export function ownerQuestions({ board = [], terminal = [] }) {
-  const asking = terminal.filter((text) => countQuestions(text) > 0)
+export function ownerQuestions(turnEnds, { pickers = 0 } = {}) {
+  const asking = turnEnds.filter((text) => countQuestions(text) > 0)
   return {
-    board: {
-      asked: board.length,
-      decisions: board.reduce(
-        (sum, q) =>
-          sum +
-          (Array.isArray(q.questions) && q.questions.length > 0
-            ? q.questions.length
-            : Math.max(1, countQuestions(q.body))),
-        0,
-      ),
-      texts: board.map((q) => q.body),
-    },
-    terminal: {
-      questions: asking.reduce((sum, text) => sum + countQuestions(text), 0),
-      turnsAsking: asking.length,
-      texts: asking,
-    },
+    questions: asking.reduce((sum, text) => sum + countQuestions(text), 0),
+    turnsAsking: asking.length,
+    pickers,
+    texts: asking,
   }
 }
 

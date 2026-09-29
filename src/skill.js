@@ -16,7 +16,7 @@ export function teamTable(members) {
   )
   return rows.length
     ? ['| Member | Roles | Work tier |', '|---|---|---|', ...rows].join('\n')
-    : 'Nobody is on the staff yet: the human adds members in the app. Ask the human for the members your work needs (cf ask --human "…"); do the work that is yours, and do not create agents as a side effect.'
+    : 'Nobody is on the staff yet: only the human adds members, in the app. Ask them here in your terminal for the members your work needs, and do not create agents as a side effect.'
 }
 
 /** The saved work tiers, one line each. */

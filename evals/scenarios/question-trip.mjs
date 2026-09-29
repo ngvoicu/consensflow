@@ -9,6 +9,7 @@
  * Run with one harness as the whole staff, once per harness; the report
  * says who asked, by role and harness.
  */
+import { askedInTerminal } from '../measure.mjs'
 
 /** How the members ask: `cf ask`, or (question-trip-native) their harness's own question tool. */
 export function questionTrip({ id, title, how }) {
@@ -57,7 +58,7 @@ export function questionTrip({ id, title, how }) {
         holds: (m) => m.notesText.includes('PLOP-6142'),
       },
       { name: 'all three tasks are accepted', holds: (m) => m.plumbing.accepted >= 3 },
-      { name: 'the owner is not asked anything', holds: (m) => m.questionsToHuman.length === 0 },
+      { name: 'the owner is not asked anything', holds: (m) => askedInTerminal(m) === 0 },
     ],
   }
 }

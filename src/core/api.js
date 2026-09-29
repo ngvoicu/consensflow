@@ -191,13 +191,19 @@ export async function startApi({
       return ok({ message: found })
     }
     if (at === 'POST /api/questions') {
+      // The human works with the chief in its terminal and is asked there.
+      if (participant.role === 'chief') {
+        throw new Refusal(
+          403,
+          'ask-in-your-terminal',
+          'ask the human here in your terminal: they read and answer you there',
+        )
+      }
       const body = await readJson(request)
       const active = ledger.activeTask(participant.id, { queued: true })
-      // The chief's question goes to the human; a member's to whoever gave its task.
-      const to = active?.requester ?? (participant.role === 'chief' ? 'human' : 'chief')
       const asked = ledger.ask(project.id, {
         from: participant.handle,
-        to,
+        to: 'chief',
         task: active?.number,
         body: body.body,
         ...(body.questions === undefined ? {} : { questions: body.questions }),

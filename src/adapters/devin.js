@@ -35,6 +35,7 @@ export function devinAdapter({
         launchId,
         node: env.CONSENSFLOW_NODE ?? process.execPath,
         executable,
+        boardQuestions: role !== 'chief',
       })
       const roleSetup = await roleConfiguration('devin', {
         role,

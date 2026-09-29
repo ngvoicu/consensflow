@@ -117,11 +117,13 @@ export function codexAdapter({
             )
           : interactiveResume({ kind: harness }, resume, message)
       // Codex's question tool (request_user_input) is behind a feature still
-      // marked under development; the broker answers it from the board.
+      // marked under development; the broker answers a member's from the board.
+      // The chief has none: it asks the human in plain words in its window.
+      const questions = role === 'chief' ? [] : QUESTION_TOOL
       const invocation = withNativeBridge(
         {
           command: executable,
-          args: [...roleSetup.args, ...QUESTION_TOOL, ...WINDOW, ...isolation, ...runner.args],
+          args: [...roleSetup.args, ...questions, ...WINDOW, ...isolation, ...runner.args],
         },
         configuration,
         env.CONSENSFLOW_NODE ?? process.execPath,

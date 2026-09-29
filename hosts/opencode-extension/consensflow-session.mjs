@@ -55,11 +55,12 @@ export async function tui(api, options) {
         },
       })
     : null
-  // The question tool's door: the questions go to the board as this window's
-  // participant, the board's answer comes back through the API as the
-  // question's reply, and a reply given in the window first goes to the board
-  // instead, so the question is answered once either way.
-  const board = boardClient()
+  // The question tool's door in a member's window: the questions go to the
+  // board as this window's participant, the board's answer comes back through
+  // the API as the question's reply, and a reply given in the window first
+  // goes to the board instead, so the question is answered once either way.
+  // The chief's question stays in its window, where the human answers it.
+  const board = process.env.CONSENSFLOW_PARTICIPANT === 'chief' ? null : boardClient()
   const held = new Map()
   const relay = async ({ id, sessionID, questions }) => {
     if (board === null || sessionID !== currentSession() || held.has(id)) return

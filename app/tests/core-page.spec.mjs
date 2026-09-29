@@ -236,47 +236,6 @@ function model() {
     inbox: {
       1: [
         {
-          id: 12,
-          kind: 'question',
-          state: 'queued',
-          sender: 'chief',
-          recipient: 'human',
-          taskNumber: 1,
-          body: 'Ship it to production today?',
-          questions: null,
-          createdAt: at(2),
-        },
-        {
-          id: 14,
-          kind: 'question',
-          state: 'queued',
-          sender: 'chief',
-          recipient: 'human',
-          taskNumber: 1,
-          body: 'Colour: Which colour?\n- red: Warm\n- blue\n\nTools: Which tools?\n- vite\n- esbuild',
-          questions: [
-            {
-              question: 'Which colour?',
-              header: 'Colour',
-              options: [
-                { label: 'red', description: 'Warm' },
-                { label: 'blue', description: null },
-              ],
-              multiple: false,
-            },
-            {
-              question: 'Which tools?',
-              header: 'Tools',
-              options: [
-                { label: 'vite', description: null },
-                { label: 'esbuild', description: null },
-              ],
-              multiple: true,
-            },
-          ],
-          createdAt: at(1),
-        },
-        {
           id: 9,
           kind: 'note',
           state: 'queued',
@@ -630,56 +589,28 @@ test("draws a member's sessions as lanes under it, named, and counts its open wi
   ).toHaveText('@zeus · amber-pine')
 })
 
-test('writes out a long one-line question in For you, where the human answers it', async ({
-  page,
-}) => {
+test('asks the human nothing in For you: the chief asks in its terminal', async ({ page }) => {
   const data = model()
-  const long =
-    'I tried to put a joke task on the board for a light-tier worker, but the staff has no members yet, so the task was refused. Could you add one light worker in the app? Any tier would do for a joke.'
-  const question = data.inbox[1].find((message) => message.id === 12)
-  question.body = long
-  await open(page, data)
-  const strip = page.locator(`.strip-message[data-message="${question.id}"]`)
-  await expect(strip.locator('.strip-title')).toHaveText(long)
-  await expect(strip.locator('.strip-body')).toHaveCount(0)
-  await expect(strip.getByLabel(`Answer to m-${question.id}`)).toBeVisible()
-})
-
-test('answers a question with options by picking, one pick per question at least', async ({
-  page,
-}) => {
-  await open(page)
-  const question = page.locator('.strip-message[data-message="14"]')
-  await expect(question.locator('.strip-body')).toHaveCount(0)
-  await expect(question.locator('.strip-title')).toHaveText('', {
-    useInnerText: false,
+  // Even a question that reached the human's inbox (an older ledger's) is not shown.
+  data.inbox[1].push({
+    id: 12,
+    kind: 'question',
+    state: 'queued',
+    sender: 'chief',
+    recipient: 'human',
+    taskNumber: 1,
+    body: 'Ship it to production today?',
+    questions: null,
+    createdAt: at(2),
   })
-  const form = question.getByRole('form', { name: 'Answer to m-14' })
-  await expect(form.getByRole('group', { name: 'Colour: Which colour?' })).toContainText('Warm')
-  await form.getByRole('radio', { name: 'blue' }).check()
-  await form.getByRole('button', { name: 'Send answer' }).click()
-  expect(await calls(page, 'message.answer')).toEqual([])
-  await expect(form.getByRole('group', { name: 'Tools: Which tools?' })).toHaveClass(
-    /choice-missing/,
+  await open(page, data)
+  const bay = page.getByRole('region', { name: 'For you' })
+  await expect(bay.locator('.foryou-status')).toHaveText('1 note')
+  await expect(bay.locator('.strip-message[data-message="12"]')).toHaveCount(0)
+  await expect(bay.getByRole('textbox')).toHaveCount(0)
+  await expect(bay.locator('.bay-empty')).toHaveText(
+    'Nothing waits for you on the board: the chief asks in its terminal.',
   )
-  await form.getByRole('checkbox', { name: 'vite' }).check()
-  await form.getByRole('checkbox', { name: 'esbuild' }).check()
-  // A box, not a line: the human's own words may run long.
-  await expect(form.getByLabel('Something else for Colour')).toHaveJSProperty('tagName', 'TEXTAREA')
-  await form.getByLabel('Something else for Colour').fill('purple')
-  await form.getByRole('button', { name: 'Send answer' }).click()
-  await expect
-    .poll(() => calls(page, 'message.answer'))
-    .toEqual([
-      {
-        question: 14,
-        choices: [
-          ['blue', 'purple'],
-          ['vite', 'esbuild'],
-        ],
-      },
-    ])
-  await expect.poll(() => calls(page, 'message.read')).toEqual([{ message: 14 }])
 })
 
 test('shows a question the chief left unanswered in For you as a notice, with nothing to write', async ({
@@ -712,25 +643,12 @@ test('shows a question the chief left unanswered in For you as a notice, with no
   await expect(page.getByRole('complementary', { name: 'Task T-2' })).toBeVisible()
 })
 
-test("answers a question in the human's bay and routes it back", async ({ page }) => {
-  await open(page)
-  const question = page.locator('.strip-message[data-message="12"]')
-  await expect(question.locator('.strip-route')).toHaveText('Question from @chief · T-1')
-  await question.getByLabel('Answer to m-12').fill('Yes, after the smoke passes.')
-  await question.getByRole('button', { name: 'Send answer' }).click()
-  await expect
-    .poll(() => calls(page, 'message.answer'))
-    .toEqual([{ question: 12, body: 'Yes, after the smoke passes.' }])
-  await expect.poll(() => calls(page, 'message.read')).toEqual([{ message: 12 }])
-  await expect(page.locator('#status')).toHaveText('Answer sent to @chief.')
-})
-
 test("shows a task waiting for a member in its requester's backlog, with the tier it waits for", async ({
   page,
 }) => {
   await open(page)
   const foryou = page.getByRole('region', { name: 'For you' })
-  await expect(foryou.locator('.foryou-status')).toHaveText('2 waiting · 1 note')
+  await expect(foryou.locator('.foryou-status')).toHaveText('1 note')
   // The human puts no task on the board: the chief does, told in its terminal.
   await expect(page.getByRole('button', { name: 'New task' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: /^Give .* a task$/ })).toHaveCount(0)
@@ -1067,7 +985,7 @@ test('a note from an agent reads in its own list, marked read when seen', async 
   })
   await open(page, data)
   const bay = page.getByRole('region', { name: 'For you' })
-  await expect(bay.locator('.foryou-status')).toHaveText('2 waiting · 2 notes')
+  await expect(bay.locator('.foryou-status')).toHaveText('2 notes')
   await expect(
     bay.getByRole('list', { name: 'Waiting for you' }).locator('li[data-message="16"]'),
   ).toHaveCount(0)
@@ -1336,7 +1254,7 @@ test('lists what waits for approval in For you, and approves or declines it, wri
   ]
   await open(page, data)
   const bay = page.getByRole('region', { name: 'For you' })
-  await expect(bay.locator('.foryou-status')).toHaveText('6 waiting · 1 note')
+  await expect(bay.locator('.foryou-status')).toHaveText('4 waiting · 1 note')
   const brief = bay.locator('.strip-message[data-message="30"]')
   await expect(brief).toHaveAttribute('data-gated', 'true')
   await expect(brief.locator('.strip-route')).toHaveText(

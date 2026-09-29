@@ -4,6 +4,8 @@
  * that runs side by side, advice for the call, a review before the owner
  * sees it, and the owner's decisions put to the owner.
  */
+import { askedInTerminal } from '../measure.mjs'
+
 export default {
   id: 'complex-launch',
   title: 'A launch: research, pages, a hard call, a sign-off',
@@ -39,8 +41,8 @@ export default {
     { name: 'advice is asked at least once', holds: (m) => m.advice >= 1 },
     { name: 'finished work goes to a review', holds: (m) => m.reviews >= 1 },
     {
-      name: 'the owner is asked on the board, at least two questions',
-      holds: (m) => m.questionsToHuman.length >= 2,
+      name: 'the owner is asked in the terminal, at least two questions',
+      holds: (m) => askedInTerminal(m) >= 2,
     },
     {
       name: 'a finding reaches the owner as a note (the guide and the site disagree)',

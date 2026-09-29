@@ -53,7 +53,14 @@ export function claudeCodeAdapter({
 
     async prepare({ launchId, role, directory, resume, message, agent, instructions }) {
       const executable = executableFor('claude-code', env)
-      const settings = await prepareClaudeSettings(env, launchId)
+      const settings = await prepareClaudeSettings(
+        env,
+        launchId,
+        {},
+        {
+          boardQuestions: role !== 'chief',
+        },
+      )
       const roleSetup = await roleConfiguration('claude-code', {
         role,
         env,

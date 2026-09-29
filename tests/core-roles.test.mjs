@@ -36,10 +36,12 @@ describe('role instructions for the new core', () => {
           'cf task add --review --tier',
           'cf answer',
           'cf task done',
-          'cf ask --human',
+          'cf note --human',
           'cf staff',
         ])
           assert.ok(text.includes(command), `${role} learns ${command}`)
+        // The chief asks the human in its terminal: no command asks on the board.
+        assert.doesNotMatch(text, /cf ask/)
         assert.doesNotMatch(text, /cf task add @/, 'no agent gives another a task by name')
         assert.match(text, /never read another agent's\s+session files/i)
         assert.match(
@@ -58,7 +60,12 @@ describe('role instructions for the new core', () => {
         assert.ok(text.includes('cf ask'), `${role} can ask`)
         assert.match(text, /^## Your commands$/m, 'the command card comes first')
         assert.match(text, /final message of your turn/)
-        assert.match(text, /never to another member/)
+        assert.match(text, /Questions go to the chief, never to another member/)
+        assert.doesNotMatch(
+          text,
+          /the human/,
+          `${role} is asked and answers only through the chief`,
+        )
         assert.match(text, /never read another agent's\s+session files/i)
         assert.doesNotMatch(text, /cf task add/)
         assert.doesNotMatch(text, /PM\b|coordinator/, `${role} answers to the chief`)
@@ -116,11 +123,13 @@ describe('role instructions for the new core', () => {
     ])
     // The chief changes nothing itself: every change goes on the board, unless the human says otherwise.
     assert.match(skill, /You do not change the project yourself/)
-    // The human reads the board: a full answer in the terminal and a summary
-    // on the board lost a cost table on btb (2026-09-28).
-    assert.match(skill, /reads and decides on the board, not in this terminal/)
-    assert.match(skill, /not a summary of it/)
-    assert.doesNotMatch(skill, /here briefly/)
+    // The human works with the chief in its terminal: answered and asked
+    // there, whole (a summary on the board once lost a cost table, btb
+    // 2026-09-28); nobody is asked on the board.
+    assert.match(skill, /The human works with you here, in this terminal/)
+    assert.match(skill, /Nobody is asked on the board/)
+    assert.match(skill, /whole, not a summary/)
+    assert.doesNotMatch(skill, /here briefly|answer a worker's question before you see it/)
     assert.match(skill, /however small/)
     assert.match(skill, /the human tells you to do a change yourself/)
     assert.match(skill, /never type into another window or launch agents/)

@@ -372,10 +372,19 @@ describe('the agents API', () => {
     })
   })
 
-  it("sends the chief's question with no task to the human", async () => {
-    await withApi(async ({ token, call }) => {
+  it("refuses the chief's question: the chief asks the human in its own terminal", async () => {
+    await withApi(async ({ ledger, project, token, call, cf }) => {
       const chief = await call(token('chief'), 'POST', '/api/questions', { body: 'Ship?' })
-      assert.deepEqual([chief.status, chief.body.message.recipient], [201, 'human'])
+      assert.deepEqual([chief.status, chief.body.error], [403, 'ask-in-your-terminal'])
+      const asked = await cf(token('chief'), 'ask', 'Ship?')
+      assert.deepEqual(
+        [asked.code, asked.err],
+        [1, 'cf: ask the human here in your terminal: they read and answer you there'],
+      )
+      assert.deepEqual(
+        ledger.inbox(ledger.project(project.id).participants.find((p) => p.role === 'human').id),
+        [],
+      )
     })
   })
 
@@ -769,7 +778,7 @@ describe('tiered tasks through the API and cf', () => {
       const noReviewer = await cf(chief, 'task', 'add', '--review', '--tier', 'light', 'Check it')
       assert.deepEqual(
         [noReviewer.code, noReviewer.err],
-        [1, 'cf: no reviewer is on the staff: ask the human for one with cf ask --human "…"'],
+        [1, 'cf: no reviewer is on the staff: ask the human for one, in your terminal'],
       )
       const advice = await cf(
         chief,
@@ -839,7 +848,7 @@ describe('tiered tasks through the API and cf', () => {
       )
       assert.deepEqual(
         [noReviewer.code, noReviewer.err],
-        [1, 'cf: no reviewer is on the staff: ask the human for one with cf ask --human "…"'],
+        [1, 'cf: no reviewer is on the staff: ask the human for one, in your terminal'],
       )
       ledger.addMember(project.id, {
         agent: 'diana',
@@ -856,8 +865,9 @@ describe('tiered tasks through the API and cf', () => {
       const gone = await cf(chief, 'task', 'review', 'T-1')
       assert.equal(gone.code, 2, 'no command asks for a review: it is a task')
 
+      // A member's question goes to the chief; there is no asking the human.
       const human = await cf(token('zeus'), 'ask', '--human', 'Which parser?')
-      assert.equal(human.code, 0)
+      assert.equal(human.code, 2, human.err)
     })
   })
 })
@@ -1044,7 +1054,7 @@ describe('cf inside a window explains itself', () => {
       const { code, text } = await run(args)
       assert.equal(code, 0)
       assert.match(text, /cf task add --tier <critical\|complex\|standard\|light>/)
-      assert.match(text, /cf ask "…" \[--human\]/)
+      assert.match(text, /cf ask "…" {24}a question to the chief/)
     }
   })
   it('prints the task commands on cf task --help', async () => {

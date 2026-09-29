@@ -4,6 +4,8 @@
  * make. That evening the real chief did every edit itself, put one task on
  * the board, and wrote its six questions as a report in its terminal.
  */
+import { askedInTerminal } from '../measure.mjs'
+
 export default {
   id: 'six-decisions',
   title: 'A new page with owner decisions in it',
@@ -33,19 +35,17 @@ export default {
     },
   ],
   fallback: 'Da.',
-  /** What the owner types into the chief's terminal when the chief stops there instead of asking on the board. */
+  /** What the owner types into the chief's terminal when the chief stops there without asking anything. */
   nudge: 'Da, cum recomanzi. Continuă.',
   /** Stop once nothing has moved for this long after the last activity. */
   quietMs: 120_000,
   expectations: [
     {
-      name: 'the owner is asked on the board, at least three questions',
-      holds: (m) => m.questionsToHuman.length >= 3,
+      name: 'the owner is asked in the terminal, at least three questions',
+      holds: (m) => askedInTerminal(m) >= 3,
     },
-    {
-      name: 'at least one question offers options',
-      holds: (m) => m.questionsToHuman.some((q) => q.options),
-    },
+    { name: 'nothing is asked on the board', holds: (m) => m.questionsOnBoard === 0 },
+    { name: 'the chief never tries cf ask', holds: (m) => m.askRefused === 0 },
     {
       name: 'a finding reaches the owner as a note',
       holds: (m) => m.notesToHuman.length >= 1,

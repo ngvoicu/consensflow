@@ -1013,7 +1013,7 @@ class Ledger {
       if (assignee === null && this.#members(projectId, pool, tier).length === 0) {
         throw new LedgerError(
           'no-member-of-tier',
-          `no ${pool === 'designer' ? 'image designer' : pool} is on the staff: ask the human for one with cf ask --human "…"`,
+          `no ${pool === 'designer' ? 'image designer' : pool} is on the staff: ask the human for one, in your terminal`,
           409,
         )
       }
@@ -1419,8 +1419,9 @@ class Ledger {
   }
 
   /**
-   * A question for a coordinator or the human; the asker's task waits for the
-   * answer. With `questions`, the question carries options as a harness's own
+   * A question for a coordinator; the asker's task waits for the answer. The
+   * human is never asked on the board: the chief asks them in its own terminal,
+   * where they work with it. With `questions`, the question carries options as a harness's own
    * question tool asked them, and its text is rendered from them. An `urgent`
    * question is the chief's `cf tell` to a task's window: the task is paused
    * for it, and the question says so.
@@ -1431,6 +1432,13 @@ class Ledger {
     }
     const options = questions === undefined ? null : requireQuestions(questions)
     return this.#write(() => {
+      if (this.#participantByHandle(projectId, to).role === 'human') {
+        throw new LedgerError(
+          'ask-in-your-terminal',
+          "the human is asked in the chief's terminal, not on the board",
+          403,
+        )
+      }
       const message = this.#send(projectId, {
         from,
         to,
@@ -1452,8 +1460,7 @@ class Ledger {
   }
 
   /**
-   * The answer goes back to whoever asked; the one asked or the human may
-   * answer. A plain question's answer is delivered into the asker's window. A
+   * The answer goes back to whoever asked; the one asked answers. A plain question's answer is delivered into the asker's window. A
    * question with options is answered by choice (or by text, one line per
    * question): that answer is read at once and never delivered, because the
    * harness door that asked collects it and the tool call completes with it;
@@ -1465,10 +1472,10 @@ class Ledger {
       if (question === null || question.kind !== 'question') {
         throw new LedgerError('not-a-question', `message ${questionId} is not a question`, 409)
       }
-      // The one asked, the human, or (a question with options) the asker itself:
-      // its window may have answered first, and the board's copy takes that answer.
+      // The one asked, or (a question with options) the asker itself: its
+      // window may have answered first, and the board's copy takes that answer.
       const fromWindow = question.questions !== null && from === question.sender
-      if (question.recipient !== from && from !== 'human' && !fromWindow) {
+      if (question.recipient !== from && !fromWindow) {
         throw new LedgerError(
           'not-your-question',
           `the question was put to ${question.recipient}, not ${from}`,

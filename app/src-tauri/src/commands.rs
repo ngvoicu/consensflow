@@ -1671,7 +1671,6 @@ const CORE_OPERATIONS: &[&str] = &[
     "task.reassign",
     "task.resume",
     "message.read",
-    "message.answer",
     "message.approve",
     "message.decline",
     "agents.list",

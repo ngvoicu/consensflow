@@ -4,6 +4,8 @@
  * `cf task add --after` gives a follow-up to the same window. Plumbing, not
  * judgment: the owner spells out the steps.
  */
+import { askedInTerminal } from '../measure.mjs'
+
 export default {
   id: 'control-trip',
   title: 'Tell, answer, resume, a follow-up to the same window',
@@ -39,6 +41,6 @@ export default {
     },
     { name: 'both tasks are accepted', holds: (m) => m.plumbing.accepted >= 2 },
     { name: 'only site/notes.md is new', holds: (m) => m.filesChanged.join() === 'site/notes.md' },
-    { name: 'the owner is not asked anything', holds: (m) => m.questionsToHuman.length === 0 },
+    { name: 'the owner is not asked anything', holds: (m) => askedInTerminal(m) === 0 },
   ],
 }

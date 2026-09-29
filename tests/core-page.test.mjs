@@ -531,24 +531,20 @@ describe('the page protocol of the new core', () => {
     })
   })
 
-  it("shows the human's inbox and routes an answer back to whoever asked", async () => {
+  it("shows the human's notes and marks them read; the human answers nothing on the page", async () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
         harness: 'pi',
       })
-      const question = ledger.ask(project.id, { from: 'chief', to: 'human', body: 'Deploy now?' })
+      const note = ledger.note(project.id, { from: 'chief', to: 'human', body: 'T-1 is done.' })
       const { messages } = await operations['inbox.get']({ project: project.id })
       assert.deepEqual(
         messages.map((m) => [m.id, m.kind, m.state]),
-        [[question.id, 'question', 'queued']],
+        [[note.id, 'note', 'queued']],
       )
-      assert.equal(
-        (await operations['message.read']({ message: question.id })).message.state,
-        'read',
-      )
-      const { message } = await operations['message.answer']({ question: question.id, body: 'Yes' })
-      assert.deepEqual([message.kind, message.recipient], ['answer', 'chief'])
+      assert.equal((await operations['message.read']({ message: note.id })).message.state, 'read')
+      assert.equal(operations['message.answer'], undefined, 'the chief asks in its terminal')
     })
   })
 

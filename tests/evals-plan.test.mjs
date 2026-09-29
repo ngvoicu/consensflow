@@ -1,10 +1,6 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
-import os from 'node:os'
-import path from 'node:path'
 import { describe, it } from 'node:test'
 import {
-  answerFor,
   CHIEF_MODELS,
   chiefEnvironment,
   claudeProjectKey,
@@ -15,8 +11,6 @@ import {
   staffFor,
   terminalAnswer,
 } from '../evals/plan.mjs'
-import sixDecisions from '../evals/scenarios/six-decisions.mjs'
-import { openLedger } from '../src/ledger/index.js'
 
 /** The eval's plan: who is on the staff, how the chief gets its model, how the human answers. */
 describe('an eval run’s plan', () => {
@@ -112,78 +106,6 @@ describe('an eval run’s plan', () => {
   it('keeps the last non-empty lines a window printed, whatever the line ending', () => {
     assert.deepEqual(lastLines('a\r\n\r\nb  \rc\n\n  \nd\n', 3), ['b', 'c', 'd'])
     assert.deepEqual(lastLines(''), [])
-  })
-
-  it('answers as the board does: a body for a plain question, one pick per sub-question for options', () => {
-    const scenario = {
-      answers: [
-        { match: /publish/i, text: 'Not yet; after I see it.' },
-        { match: /recommend/i, text: 'Yes, as you recommend.' },
-      ],
-      fallback: 'Yes.',
-    }
-    assert.deepEqual(answerFor(scenario, { body: 'Shall we publish now?', questions: null }), {
-      body: 'Not yet; after I see it.',
-    })
-    assert.deepEqual(answerFor(scenario, { body: 'Keep the old document?', questions: null }), {
-      body: 'Yes.',
-    })
-    assert.deepEqual(
-      answerFor(scenario, { body: 'Recommend an order?\nWe publish after that.', questions: null }),
-      { body: 'Yes, as you recommend.' },
-      'the first line, the subject, wins over a word further down',
-    )
-    assert.deepEqual(
-      answerFor(scenario, {
-        body: 'Three things to settle',
-        questions: [
-          { header: 'Publish', question: 'Publish now?', options: [{ label: 'Yes' }] },
-          { header: 'Order', question: 'Which order?', options: [{ label: 'Law first' }] },
-          { header: 'Tone', question: 'Do you recommend a formal tone?', options: [] },
-        ],
-      }),
-      { choices: [['Not yet; after I see it.'], ['Law first'], ['Yes, as you recommend.']] },
-      'free text where a pattern matches, else the first option, one pick each',
-    )
-  })
-
-  it('gives an answer the ledger takes, for a question with several sub-questions', async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-evals-answer-'))
-    try {
-      const ledger = openLedger(path.join(dir, 'consensflow.db'))
-      const project = ledger.createProject({
-        directory: '/work/site',
-        name: 'site',
-        chief: { harness: 'opencode' },
-      })
-      const questions = [
-        {
-          question: 'Ce facem cu documentul de referință HR din docs/?',
-          header: 'HR document',
-          options: [{ label: 'Keep it' }, { label: 'Delete it' }],
-        },
-        {
-          question: 'When do we publish?',
-          header: 'Publish',
-          options: [{ label: 'Now' }, { label: 'Later' }],
-        },
-      ]
-      const asked = ledger.ask(project.id, {
-        from: 'chief',
-        to: 'human',
-        body: 'HR document: Ce facem cu documentul de referință HR din docs/?',
-        questions,
-      })
-      const answer = answerFor(sixDecisions, asked)
-      const stored = ledger.answer(asked.id, { from: 'human', ...answer })
-      assert.equal(
-        stored.body,
-        'HR document: Îl păstrăm, dar pune sus o notă că pagina de legislație e sursa actuală.\nPublish: Nu publicăm încă. Vreau să văd pagina întâi; îți spun eu când.',
-      )
-      ledger.close()
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
   })
 })
 

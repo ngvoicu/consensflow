@@ -645,7 +645,7 @@ describe('the project staff', () => {
       ledger.beginDelivery(note.id)
       const question = ledger.ask(project.id, {
         from: 'zeus',
-        to: 'human',
+        to: 'chief',
         body: 'Which parser?',
         task: 1,
       })
@@ -1210,7 +1210,7 @@ describe('tasks and the inbox queue', () => {
     })
   })
 
-  it("lets the human answer any question, and shows a coordinator's unanswered question as overdue", async () => {
+  it("lets only the one asked answer, and shows a coordinator's unanswered question as overdue until then", async () => {
     await withDir((dir) => {
       let at = Date.parse('2026-09-19T10:00:00.000Z')
       const ledger = openLedger(path.join(dir, 'consensflow.db'), { now: () => new Date(at) })
@@ -1233,7 +1233,10 @@ describe('tasks and the inbox queue', () => {
           ledger.board(project.id).overdue.map((m) => [m.id, m.recipient]),
           [[question.id, 'chief']],
         )
-        const answer = ledger.answer(question.id, { from: 'human', body: 'JSON' })
+        assert.throws(() => ledger.answer(question.id, { from: 'human', body: 'JSON' }), {
+          code: 'not-your-question',
+        })
+        const answer = ledger.answer(question.id, { from: 'chief', body: 'JSON' })
         assert.deepEqual(
           [answer.recipient, answer.state, answer.choices],
           ['zeus', 'queued', null],
@@ -1249,19 +1252,26 @@ describe('tasks and the inbox queue', () => {
     })
   })
 
-  it('keeps messages for the human in the human inbox until they are read', async () => {
+  it('keeps notes for the human in the human inbox until they are read, and never asks the human there', async () => {
     await withLedger((ledger) => {
       const { project, id } = staff(ledger)
-      const question = ledger.ask(project.id, { from: 'chief', to: 'human', body: 'Deploy now?' })
+      const note = ledger.note(project.id, { from: 'chief', to: 'human', body: 'T-1 is done.' })
       assert.equal(ledger.nextDelivery(id('human')), null, 'the human reads in the app')
-      assert.throws(() => ledger.beginDelivery(question.id), { code: 'human-reads-in-app' })
+      assert.throws(() => ledger.beginDelivery(note.id), { code: 'human-reads-in-app' })
       assert.deepEqual(
         ledger.inbox(id('human')).map((m) => [m.id, m.state]),
-        [[question.id, 'queued']],
+        [[note.id, 'queued']],
       )
-      assert.equal(ledger.markRead(question.id).state, 'read')
-      const answer = ledger.answer(question.id, { from: 'human', body: 'Yes' })
-      assert.equal(ledger.nextDelivery(id('chief')).id, answer.id)
+      assert.equal(ledger.markRead(note.id).state, 'read')
+      // The chief asks the human in its own terminal; nobody asks on the board.
+      for (const from of ['chief', 'zeus'])
+        assert.throws(() => ledger.ask(project.id, { from, to: 'human', body: 'Deploy now?' }), {
+          code: 'ask-in-your-terminal',
+        })
+      assert.deepEqual(
+        ledger.inbox(id('human')).map((m) => m.id),
+        [note.id],
+      )
     })
   })
 
@@ -2412,7 +2422,7 @@ describe('human approval required: the gate', () => {
     })
   })
 
-  it("holds a worker's question for the human, who passes it to the chief or answers it", async () => {
+  it("holds a worker's question for the human, who passes it to the chief; one its window answered first goes no further", async () => {
     await withDir(async (dir) => {
       let at = Date.parse('2026-09-20T10:00:00.000Z')
       const ledger = openLedger(path.join(dir, 'consensflow.db'), {
@@ -2456,14 +2466,23 @@ describe('human approval required: the gate', () => {
           from: session,
           to: 'chief',
           task: number,
-          body: 'Which size?',
+          questions: [
+            {
+              question: 'Which size?',
+              header: 'Size',
+              options: [{ label: 'Large' }, { label: 'Small' }],
+            },
+          ],
         })
-        const answer = ledger.answer(other.id, { from: 'human', body: 'Large' })
-        assert.deepEqual([answer.state, answer.recipient], ['queued', question.sender])
+        assert.throws(() => ledger.answer(other.id, { from: 'human', body: 'Large' }), {
+          code: 'not-your-question',
+        })
+        const answer = ledger.answer(other.id, { from: session, choices: [['Large']] })
+        assert.deepEqual([answer.state, answer.recipient], ['read', session])
         assert.deepEqual(
           [ledger.message(other.id).state, ledger.message(other.id).reason],
-          ['cancelled', 'answered by @human'],
-          'the chief never gets a question the human answered',
+          ['cancelled', `answered by @${session}`],
+          'the chief never gets a question its window answered first',
         )
         assert.equal(ledger.answerTo(other.id).id, answer.id)
         assert.deepEqual(gatedIds(ledger, project), [])
@@ -2539,9 +2558,9 @@ describe('human approval required: the gate', () => {
       const own = ledger.createTask(project.id, { from: 'chief', to: 'chief', body: 'Plan' })
       assert.equal(own.message.state, 'queued', "the chief's own work")
       assert.equal(
-        ledger.ask(project.id, { from: 'chief', to: 'human', body: 'Ship it?' }).state,
+        ledger.note(project.id, { from: 'chief', to: 'human', body: 'T-1 shipped.' }).state,
         'queued',
-        'a question for the human',
+        'a note for the human',
       )
       assert.equal(
         ledger.note(project.id, { to: 'chief', body: 'T-9 waits for a free worker.' }).state,

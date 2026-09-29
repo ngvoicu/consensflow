@@ -118,11 +118,11 @@ export async function runSelftest({
       ],
     })
 
-    // A project on the smoke's folder, its chief on the fake `claude`.
+    // A project on the smoke's folder, its chief and one worker on the fake `claude`.
     const opened = await core('project.open', {
       directory: config.dir,
       harness: 'claude-code',
-      review: 'none',
+      staff: [{ agent: 'terpsichore', roles: ['worker'] }],
     })
     await report('project', opened)
     if (opened?.ok !== true) throw new Error(`project.open refused: ${JSON.stringify(opened)}`)
@@ -210,28 +210,24 @@ export async function runSelftest({
     )
     await report('echo', { typed, hex })
 
-    // The board both ways: the chief's own `cf`, the core, the human's answer
-    // on the board, the dispatcher, the pane host's paste, the child. The
-    // chief's window asks the human (`cf ask`); the page answers the way the
-    // board's answer box does. The child's hex of the delivered header line is
-    // the proof that the board reaches a window; the core's own confirmation,
-    // read back from the record the fake harness keeps, is the proof that it
-    // knows it did.
-    await sendInput(pane, 'ASK\r')
-    const question = await until('the chief asked the human', async () => {
-      const { messages } = await core('inbox.get', { project: opened.project.id })
-      return (
-        messages.find((message) => message.kind === 'question' && message.sender === 'chief') ??
-        null
-      )
+    // The board both ways: the chief's own `cf`, the core, a worker window the
+    // dispatcher opens, its result, the pane host's paste, the chief's child.
+    // The chief's window puts a task on the board (`cf task add`); the worker,
+    // on the same stand-in, answers its brief. The child's hex of the delivered
+    // header line is the proof that the board reaches a window; the core's own
+    // confirmation, read back from the record the fake harness keeps, is the
+    // proof that it knows it did.
+    await sendInput(pane, 'HANDOFF\r')
+    const result = await until("the worker's result is on its way to the chief", async () => {
+      const { messages } = await core('inbox.get', {
+        project: opened.project.id,
+        participant: 'chief',
+      })
+      return messages.find((message) => message.kind === 'result') ?? null
     })
-    const { message: answer } = await core('message.answer', {
-      question: question.id,
-      body: 'SMOKE ANSWER',
-    })
-    const header = `[ConsensFlow m-${answer.id} ·`
+    const header = `[ConsensFlow m-${result.id} ·`
     const delivered = await until(
-      'the answer reached the chief window',
+      'the result reached the chief window',
       () => {
         for (const row of screen(emulator)) {
           const match = HEX.exec(row)
@@ -263,9 +259,9 @@ export async function runSelftest({
         project: opened.project.id,
         participant: 'chief',
       })
-      state = messages.find((message) => message.id === answer.id)?.state ?? null
+      state = messages.find((message) => message.id === result.id)?.state ?? null
     }
-    await report('board', { question: question.id, hex: delivered, delivered: true })
+    await report('board', { result: result.id, hex: delivered, delivered: true })
 
     // The agents screens: their own window at the daemon's address, reused
     // on the second ask. The daemon's pages themselves are proven elsewhere.

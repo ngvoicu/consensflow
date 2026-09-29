@@ -7,8 +7,8 @@ comes from the image designer (`--design`, no tier): say what to draw, what to
 use as reference and where to save it, and its result names the file.
 ConsensFlow gives the task to a free member of that role and tier on this
 project's staff; you never pick the member. A task for a tier with no member
-of that role on the staff is refused: only the human adds members, so ask for
-one (`cf ask --human "…"`) and end your turn. When the staff below already
+of that role on the staff is refused: only the human adds members, so ask
+them for one here in your terminal and end your turn. When the staff below already
 shows no member of that tier, do not run the command to see the refusal: ask.
 
 The tiers:

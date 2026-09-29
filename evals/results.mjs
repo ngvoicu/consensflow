@@ -3,6 +3,18 @@
  * summary prints. Pure, so it is tested without a report on disk.
  */
 
+/**
+ * The questions the chief put to the owner in its terminal, +Np for its
+ * question dialog: `?` before they were counted; a report from when the board
+ * took questions counted the terminal's apart.
+ */
+const asked = (q) =>
+  q === undefined
+    ? '?'
+    : q.terminal !== undefined
+      ? String(q.terminal.questions)
+      : `${q.questions}${q.pickers ? `+${q.pickers}p` : ''}`
+
 /** The columns of one report, as strings. */
 export function row(report) {
   const m = report.metrics
@@ -19,14 +31,13 @@ export function row(report) {
     String(m.parallel),
     String(m.advice),
     String(m.reviews),
-    String(m.questionsToHuman.length),
+    // Reports from before 2026-09-29 counted the board's questions as a list.
+    String(m.questionsOnBoard ?? m.questionsToHuman.length),
     String(m.notesToHuman.length),
     String(m.chiefEdits ?? '?'),
     String((m.filesChanged ?? []).length),
     String(report.terminalAnswers ?? '?'),
-    m.ownerQuestions === undefined
-      ? '?'
-      : `${m.ownerQuestions.board.decisions}/${m.ownerQuestions.terminal.questions}`,
+    asked(m.ownerQuestions),
     String(Math.round(report.seconds / 60)),
   ]
 }
@@ -42,7 +53,7 @@ export const COLUMNS = [
   'parallel',
   'advice',
   'reviews',
-  'questions',
+  'on board',
   'notes',
   'chief edits',
   'files',
@@ -59,11 +70,12 @@ export function resultsTable(reports) {
     'One row per report in `evals/reports/`, oldest first; `npm run eval:summary` rewrites this file.',
     "Judgment: how many of the scenario's expectations the chief met. Plumbing: how many of the",
     "board's own checks held (briefs delivered, results back to the chief, members' questions",
-    'answered and the answers delivered, every task on the board). Terminal: how often the owner',
-    "had to answer in the chief's terminal because nothing was on the board. `?` is a report from",
-    'before that column existed. Asked: the decisions put to the owner on the board / the questions',
-    'the chief ended its turns with in its terminal. A chief',
-    'marked [nocard] had a one-line card naming no board; [bare] ran without ConsensFlow.',
+    'answered and the answers delivered, every task on the board). On board: questions put to the',
+    'owner on the board, none since 2026-09-29, when the chief began asking in its terminal.',
+    'Terminal: how often the owner nudged a chief that stopped without asking. Asked: the questions',
+    'the chief ended its turns with in its terminal, +Np for its own question dialog. `?` is a',
+    'report from before that column existed. A chief marked [nocard] had a one-line card naming no',
+    'board; [bare] ran without ConsensFlow.',
     '',
     `| ${COLUMNS.join(' | ')} |`,
     `| ${COLUMNS.map(() => '---').join(' | ')} |`,

@@ -56,7 +56,10 @@ async function nativeConfiguration(env) {
 }
 
 /** Mutable native preferences are per launch; loaded helper code is immutable. */
-export async function prepareDevinIntegration(env, { launchId, node, executable }) {
+export async function prepareDevinIntegration(
+  env,
+  { launchId, node, executable, boardQuestions = true },
+) {
   if (!/^[A-Za-z0-9_-]{1,200}$/.test(launchId ?? '')) throw new Error('invalid Devin launch')
   if (typeof node !== 'string' || !isAbsolute(node))
     throw new Error('Devin requires an absolute runtime')
@@ -87,16 +90,21 @@ export async function prepareDevinIntegration(env, { launchId, node, executable 
       { matcher: '', hooks: [{ type: 'command', command, timeout: 5 }] },
     ]
   }
-  // Devin's question tool, answered from the board: the hook holds the call
-  // while the question waits for its answer (`cf hook devin`).
+  // A member's question tool, answered from the board: the hook holds the call
+  // while the question waits for its answer (`cf hook devin`). The chief's
+  // shows Devin's own dialog, where the human answers it.
   const questions = configuration.hooks.PreToolUse ?? []
   if (!Array.isArray(questions)) throw new Error('Invalid native Devin hook configuration')
   configuration.hooks.PreToolUse = [
     ...questions,
-    {
-      matcher: 'ask_user_question',
-      hooks: [{ type: 'command', command: 'cf hook devin', timeout: QUESTION_HOOK_SECONDS }],
-    },
+    ...(boardQuestions
+      ? [
+          {
+            matcher: 'ask_user_question',
+            hooks: [{ type: 'command', command: 'cf hook devin', timeout: QUESTION_HOOK_SECONDS }],
+          },
+        ]
+      : []),
   ]
   configuration.auto_update = false
   const file = join(root, 'config.json')

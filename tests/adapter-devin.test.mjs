@@ -94,6 +94,20 @@ describe('the Devin adapter', () => {
     })
   })
 
+  it("leaves the chief's question tool to Devin's own dialog, where the human answers it", async () => {
+    await withHome(async ({ env }) => {
+      await devinAdapter({ env }).prepare(
+        request({
+          role: 'chief',
+          participant: { ...participant, handle: 'chief', role: 'chief', agent: null },
+          message: null,
+        }),
+      )
+      const config = JSON.parse(await readFile(path.join(integration(env), 'config.json'), 'utf8'))
+      assert.deepEqual(config.hooks.PreToolUse, [])
+    })
+  })
+
   it('resumes the session it has', async () => {
     await withHome(async ({ env }) => {
       const plan = await devinAdapter({ env }).prepare(

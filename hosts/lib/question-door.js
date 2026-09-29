@@ -1,8 +1,8 @@
 /**
- * The door a harness's own question tool opens onto the board. A window's
- * plugin, hook or broker posts the questions as the window's participant,
- * waits for whoever gave the task to answer on the board, and hands the
- * answer back into the tool call, so nothing is typed into the window. When
+ * The door a member's harness question tool opens onto the board. The
+ * window's plugin, hook or broker posts the questions as its participant,
+ * waits for the chief to answer on the board, and hands the answer back
+ * into the tool call, so nothing is typed into the window. When
  * the answer does not come in time, the door gives up and the harness's own
  * dialog takes over; when the window answered first, the board's copy of the
  * question gets that answer, so nobody answers it twice.

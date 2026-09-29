@@ -176,6 +176,17 @@ describe('the Codex adapter', () => {
     })
   })
 
+  it('gives the chief no question tool: it asks the human in plain words in its window', async () => {
+    await withHome(async ({ env }) => {
+      const adapter = codexAdapter({ env })
+      const member = await adapter.prepare(request())
+      assert.ok(member.argv.includes('default_mode_request_user_input'), 'a member asks the board')
+      const chief = await adapter.prepare(request({ role: 'chief', agent: null, message: null }))
+      assert.ok(!chief.argv.includes('default_mode_request_user_input'))
+      assert.ok(!chief.argv.includes('suppress_unstable_features_warning=true'))
+    })
+  })
+
   it('holds a message while its broker cannot take one: a window starting, resuming or reconnecting', async () => {
     await withHome(async ({ env }) => {
       let available = false

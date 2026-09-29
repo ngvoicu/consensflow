@@ -416,7 +416,7 @@
     .card[data-state="accepted"] { --state: var(--seafoam-dim); }
     .card[data-state="cancelled"] { opacity: .6; }
 
-    /* A message waiting for the human: a strip with its answer box. */
+    /* A message waiting for the human: a strip with what they may do with it. */
     .strips { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
     .strip {
       --state: var(--slate);
@@ -474,27 +474,10 @@
     .strip-message[data-kind="question"] { --state: var(--amber); --state-ink: var(--ink); }
     .strip-message[data-kind="result"] { --state: var(--seafoam); --state-ink: var(--ink); }
     .strip-message[data-kind="answer"] { --state: var(--seafoam-dim); }
-    .answer, .strip-actions { display: flex; gap: 8px; padding: 8px 12px 10px 78px; align-items: flex-start; }
-    .answer-choices { flex-direction: column; align-items: stretch; gap: 10px; }
-    .choice { margin: 0; padding: 8px 10px 10px; border: 1px solid var(--line-soft); border-radius: 6px; display: grid; gap: 6px; }
-    .choice legend { padding: 0 4px; font-size: 12px; color: var(--foam); }
-    .choice-option { display: flex; gap: 8px; align-items: baseline; font-size: 13px; cursor: pointer; }
-    .choice-desc { color: var(--muted); font-size: 12px; }
-    .choice-custom { padding: 5px 8px; border-radius: 5px; border: 1px solid var(--line); background: var(--ink); color: var(--foam); font-family: inherit; font-size: 12px; resize: vertical; min-height: 2.6em; }
-    .choice-missing { border-color: var(--buoy); }
+    .strip-actions { display: flex; gap: 8px; padding: 8px 12px 10px 78px; align-items: flex-start; }
     .strip[data-overdue="true"] .strip-route { color: var(--amber); }
     .strip[data-gated="true"] .strip-route { color: var(--seafoam); }
     .strip[data-gated="true"] { border-left: 3px solid var(--seafoam-dim); }
-    .answer-choices .primary-button { align-self: flex-start; }
-    .answer textarea {
-      flex: 1;
-      resize: vertical;
-      min-height: 38px;
-      padding: 7px 9px;
-      border-radius: 6px;
-      border: 1px solid var(--line);
-      background: var(--ink);
-    }
     .backlog {
       background: var(--deep);
       border: 1px dashed var(--slate);
@@ -730,7 +713,7 @@
       .strip { grid-template-columns: 58px minmax(0, 1fr) 76px; }
       .strip-route, .strip-age, .strip-line > .strip-route { display: none !important; }
       .strip-line { grid-template-columns: 58px minmax(0, 1fr) 60px; }
-      .answer, .strip-actions { padding-left: 12px; }
+      .strip-actions { padding-left: 12px; }
       .board { padding: 12px 12px 48px; }
     }
     @media (prefers-reduced-motion: reduce) {

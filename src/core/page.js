@@ -144,14 +144,6 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
     'message.decline': change(async ({ message }) => ({
       message: ledger.declineMessage(message, { by: 'human' }),
     })),
-
-    'message.answer': change(async ({ question, body, choices }) => ({
-      message: ledger.answer(question, {
-        from: 'human',
-        body,
-        ...(choices === undefined ? {} : { choices }),
-      }),
-    })),
   }
 }
 

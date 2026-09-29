@@ -30,7 +30,8 @@ export const USAGE = `cf inside a ConsensFlow window: the board's commands.
   cf tell T-3 "…"                   stop T-3 and put this to its window: its answer arrives as
                                     a message; then cf task resume T-3 "…"
   cf inbox [read m-12]              what is waiting for you, or one message in full
-  cf ask "…" [--human]              a question to whoever gave you your task (or the human)
+  cf ask "…"                        a question to the chief (a member's; the chief asks the
+                                    human in its own terminal)
   cf note "…" [--human]             something they should know; nothing waits on it
   cf answer m-12 "…"                answer a question put to you
   cf staff                           the members: roles and tiers
@@ -77,7 +78,7 @@ const QUESTION_TOOLS = { claude: 'AskUserQuestion', devin: 'ask_user_question' }
 /**
  * A harness's question tool, answered from the board: a PreToolUse hook on
  * Claude Code's AskUserQuestion or Devin's ask_user_question. The questions go
- * to whoever gave the task and the hook waits for the answer. Claude takes it
+ * to the chief and the hook waits for the answer. Claude takes it
  * back as the tool's input, the way it documents; Devin draws its dialog even
  * over a pre-filled input (probed 2026-09-20), so its hook refuses the tool
  * and hands the answer over as the refusal's reason, which Devin reads and
@@ -152,10 +153,12 @@ async function command(verb, rest, call, input) {
       }
     }
     case 'ask': {
-      const { flags, text } = split(rest, ['--human'], [])
+      // Nobody asks the human on the board: the chief asks them in its terminal.
+      if (rest.includes('--human')) {
+        throw usage('the human is not asked with cf ask: the chief asks them in its own terminal')
+      }
       const { message } = await call('POST', '/api/questions', {
-        body: requireText(await textOf(text, input), 'cf ask "your question"'),
-        ...(flags['--human'] ? { to: 'human' } : {}),
+        body: requireText(await textOf(rest.join(' '), input), 'cf ask "your question"'),
       })
       return {
         data: message,

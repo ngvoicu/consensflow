@@ -80,16 +80,6 @@ async function act(work) {
 }
 
 const board = new BoardView(boardRoot, {
-  // A question put to the human is answered here and marked read.
-  onAnswer: (message, text, choices) =>
-    act(async () => {
-      await core('message.answer', {
-        question: message.id,
-        ...(choices === undefined ? { body: text } : { choices }),
-      })
-      await core('message.read', { message: message.id })
-      note(`Answer sent to @${message.sender}.`)
-    }),
   onRead: (message) => act(() => core('message.read', { message: message.id })),
   // What waits for the human's approval goes on, goes back, or is declined with a word to its sender.
   onApprove: (message) =>

@@ -5,6 +5,8 @@
  * question from a member to the chief, the answer back, the result back,
  * a review, the task accepted. Any harness in any role.
  */
+import { askedInTerminal } from '../measure.mjs'
+
 export default {
   id: 'round-trip',
   title: 'A task out, a question back, an answer, a result, a review',
@@ -35,6 +37,6 @@ export default {
     { name: 'the finished work goes to a review', holds: (m) => m.reviews >= 1 },
     { name: 'the task is accepted', holds: (m) => m.plumbing.accepted >= 1 },
     { name: 'only site/notes.md is new', holds: (m) => m.filesChanged.join() === 'site/notes.md' },
-    { name: 'the owner is not asked anything', holds: (m) => m.questionsToHuman.length === 0 },
+    { name: 'the owner is not asked anything', holds: (m) => askedInTerminal(m) === 0 },
   ],
 }

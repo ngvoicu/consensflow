@@ -156,8 +156,26 @@ describe('measuring a chief from the ledger', () => {
       deliver(ledger.task(project.id, 2).messages.find((m) => m.kind === 'task'))
       ledger.recordResult(project.id, 1, { body: `${'r'.repeat(8999)}\nCEDRU-7314` })
       ledger.recordResult(project.id, 2, { body: 'short advice' })
-      const asked = ledger.ask(project.id, { from: 'chief', to: 'human', body: 'Name?' })
-      ledger.answer(asked.id, { from: 'human', body: 'a'.repeat(6000) })
+      // The owner answers the chief in its window: typed there, no ConsensFlow header.
+      const chief = ledger.project(project.id).participants.find((p) => p.handle === 'chief')
+      ledger.copyTranscript(ledger.startConversation(chief.id, { harness: 'claude-code' }).id, [
+        { id: 'u1', role: 'user', text: 'The report?', complete: true, at: null },
+        {
+          id: 'a1',
+          role: 'assistant',
+          text: 'Which name should it have?',
+          complete: true,
+          at: null,
+        },
+        { id: 'u2', role: 'user', text: 'a'.repeat(6000), complete: true, at: null },
+        {
+          id: 'u3',
+          role: 'user',
+          text: '[ConsensFlow m-9 · note from ConsensFlow]\nnot the owner',
+          complete: true,
+          at: null,
+        },
+      ])
       ledger.note(project.id, {
         from: 'chief',
         to: 'human',
@@ -167,7 +185,7 @@ describe('measuring a chief from the ledger', () => {
 
       const metrics = measure(file)
       assert.deepEqual(metrics.longestResult, { worker: 9010, advisor: 12, reviewer: 0 })
-      assert.deepEqual(metrics.answersToChief, [6000])
+      assert.deepEqual(metrics.ownerMessages, [11, 6000])
       assert.match(metrics.notesText, /DELTA-5530 at the end$/)
     } finally {
       await rm(dir, { recursive: true, force: true })
@@ -233,25 +251,7 @@ describe('measuring a chief from the ledger', () => {
         body: 'Review T-1',
       })
       assert.deepEqual([advice.task.pool, review.task.pool], ['advisor', 'reviewer'])
-      // To the human: two questions (one with options, left unanswered), one note.
-      const keep = ledger.ask(project.id, {
-        from: 'chief',
-        to: 'human',
-        body: 'Keep the old document?',
-      })
-      ledger.answer(keep.id, { from: 'human', body: 'Keep it' })
-      ledger.ask(project.id, {
-        from: 'chief',
-        to: 'human',
-        body: 'Publish now?',
-        questions: [
-          {
-            question: 'Publish now?',
-            header: 'Publish',
-            options: [{ label: 'Yes' }, { label: 'No' }],
-          },
-        ],
-      })
+      // To the human on the board: one note; the chief asks in its terminal.
       ledger.note(project.id, {
         from: 'chief',
         to: 'human',
@@ -269,6 +269,13 @@ describe('measuring a chief from the ledger', () => {
           id: 't1',
           role: 'tool',
           text: 'The file /work/site/index.html has been updated.',
+          complete: true,
+          at: null,
+        },
+        {
+          id: 't0',
+          role: 'tool',
+          text: 'cf: ask the human here in your terminal: they read and answer you there',
           complete: true,
           at: null,
         },
@@ -317,26 +324,19 @@ describe('measuring a chief from the ledger', () => {
         [2, 1, 1],
         'two briefs delivered before either result',
       )
-      assert.deepEqual(
-        [metrics.questionsToHuman.length, metrics.questionsToHuman.map((q) => q.options)],
-        [2, [false, true]],
+      assert.equal(metrics.questionsOnBoard, 0)
+      assert.equal(
+        metrics.askRefused,
+        1,
+        'the chief tried cf ask once and was sent to its terminal',
       )
       assert.equal(metrics.notesToHuman.length, 1)
       assert.deepEqual([metrics.chiefTurns, metrics.chiefEdits], [4, 2])
       assert.equal(metrics.chiefLastWords, 'Shall I translate it? Or wait for you?')
-      // What the owner was asked: two board questions (one with a single
-      // decision in options), and two questions in the terminal, in one turn's
+      // What the owner was asked in the terminal: two questions, in one turn's
       // end; a question mid-turn ("Now the menu?") is not put to anyone.
       const owner = metrics.ownerQuestions
-      assert.deepEqual(
-        [
-          owner.board.asked,
-          owner.board.decisions,
-          owner.terminal.questions,
-          owner.terminal.turnsAsking,
-        ],
-        [2, 2, 2, 1],
-      )
+      assert.deepEqual([owner.questions, owner.turnsAsking, owner.pickers], [2, 1, 0])
       assert.deepEqual(metrics.filesChanged, [], 'no fixture given: nothing compared')
       // Who asked the chief, by role and harness: every run tells it.
       assert.deepEqual(metrics.memberQuestionsBy, [
@@ -364,8 +364,6 @@ describe('measuring a chief from the ledger', () => {
         pauses: 0,
         resumes: 0,
         continuations: 0,
-        ownerQuestions: 2,
-        ownerQuestionsAnswered: 1,
       })
       assert.equal(metrics.taskCount, 4)
       assert.deepEqual(
@@ -376,7 +374,6 @@ describe('measuring a chief from the ledger', () => {
           ['every question a member asked the chief was answered (1/1)', true],
           ['every answer reached the member (1/1)', true],
           ['every tell the chief sent was answered (0/0)', true],
-          ["every question the chief put to the owner got the owner's answer (1/2)", false],
           ['the board showed every task (4/4)', true],
         ],
       )
@@ -386,8 +383,9 @@ describe('measuring a chief from the ledger', () => {
       assert.deepEqual(
         checks.map((c) => [c.name, c.ok]),
         [
-          ['the owner is asked on the board, at least three questions', false],
-          ['at least one question offers options', true],
+          ['the owner is asked in the terminal, at least three questions', false],
+          ['nothing is asked on the board', true],
+          ['the chief never tries cf ask', false],
           ['a finding reaches the owner as a note', true],
           ['at least two tasks go on the board', true],
           ['two tasks run side by side at some point', true],
@@ -397,9 +395,11 @@ describe('measuring a chief from the ledger', () => {
       )
       const trip = (await import('../evals/scenarios/round-trip.mjs')).default
       assert.deepEqual(
-        verdict(trip, { ...metrics, filesChanged: ['site/notes.md'], questionsToHuman: [] }).map(
-          (c) => c.ok,
-        ),
+        verdict(trip, {
+          ...metrics,
+          filesChanged: ['site/notes.md'],
+          ownerQuestions: { questions: 0, turnsAsking: 0, pickers: 0, texts: [] },
+        }).map((c) => c.ok),
         [true, true, true, true, true, true, true],
         'the round trip holds on this ledger once only notes.md is new and the owner was not asked',
       )
@@ -425,37 +425,14 @@ describe('counting what a chief asks the owner', () => {
     assert.equal(countQuestions(''), 0)
   })
 
-  it('counts each decision of a board question, and a plain board question as at least one', () => {
-    const counted = ownerQuestions({
-      board: [
-        {
-          body: 'Routing and model test',
-          questions: [
-            { question: 'Where may requests go?' },
-            { question: 'Test EU models?' },
-            { question: 'When?' },
-          ],
-        },
-        { body: 'Keep the old document?', questions: null },
-        { body: 'Please decide the menu label.', questions: null },
-      ],
-      terminal: [
-        'Two decisions are on the board.',
-        'Should I also translate the FAQ? And the footer?',
-      ],
-    })
-    assert.deepEqual(
-      [
-        counted.board.decisions,
-        counted.board.asked,
-        counted.terminal.questions,
-        counted.terminal.turnsAsking,
-      ],
-      [5, 3, 2, 1],
+  it("counts the questions of each turn's end, and the pickers the owner answered", () => {
+    const counted = ownerQuestions(
+      ['Two pages are done.', 'Should I also translate the FAQ? And the footer?'],
+      { pickers: 2 },
     )
+    assert.deepEqual([counted.questions, counted.turnsAsking, counted.pickers], [2, 1, 2])
     // What was counted, for a human to check.
-    assert.deepEqual(counted.terminal.texts, ['Should I also translate the FAQ? And the footer?'])
-    assert.equal(counted.board.texts.length, 3)
+    assert.deepEqual(counted.texts, ['Should I also translate the FAQ? And the footer?'])
   })
 })
 
@@ -473,7 +450,7 @@ describe('the question trip', () => {
     memberQuestionsBy: [asked('advisor'), asked('reviewer', 6250), asked('worker')],
     notesText: 'The reviewer asked about the English version; its code: PLOP-6142.',
     plumbing: { accepted: 3 },
-    questionsToHuman: [],
+    ownerQuestions: { questions: 0, turnsAsking: 0, pickers: 0, texts: [] },
   }
 
   it('holds when every kind of member asked, got its answer, and the long question was read whole', async () => {
@@ -513,7 +490,8 @@ describe('the question trip', () => {
     assert.deepEqual(failing({ ...good, notesText: 'Done.' }), [
       "the chief's note holds the long question's code",
     ])
-    assert.deepEqual(failing({ ...good, questionsToHuman: [{}] }), [
+    const inTerminal = { questions: 1, turnsAsking: 1, pickers: 0, texts: ['Which one?'] }
+    assert.deepEqual(failing({ ...good, ownerQuestions: inTerminal }), [
       'the owner is not asked anything',
     ])
   })
@@ -543,5 +521,48 @@ describe("reading the chief's last turn while the daemon runs", () => {
       ledger.close()
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('the terminal questions eval', () => {
+  const good = {
+    ownerQuestions: {
+      questions: 1,
+      turnsAsking: 1,
+      pickers: 1,
+      texts: ['Cum se numește fișierul?'],
+    },
+    questionsOnBoard: 0,
+    askRefused: 0,
+    tasks: [{ number: 1 }],
+    filesChanged: ['site/cariere.html'],
+  }
+
+  it('holds when the chief asked in its terminal and the answer reached the work', async () => {
+    const trip = (await import('../evals/scenarios/terminal-questions.mjs')).default
+    assert.deepEqual(
+      verdict(trip, good)
+        .filter((c) => !c.ok)
+        .map((c) => c.name),
+      [],
+    )
+  })
+
+  it('fails a chief that asked nothing, tried cf ask, or whose answer never reached the work', async () => {
+    const trip = (await import('../evals/scenarios/terminal-questions.mjs')).default
+    const failing = (metrics) =>
+      verdict(trip, { ...good, ...metrics })
+        .filter((c) => !c.ok)
+        .map((c) => c.name)
+    assert.deepEqual(
+      failing({
+        ownerQuestions: { questions: 0, turnsAsking: 0, pickers: 0, texts: [] },
+        askRefused: 1,
+      }),
+      ['the owner is asked in the terminal', 'the chief never tries cf ask'],
+    )
+    assert.deepEqual(failing({ filesChanged: ['site/careers.html'] }), [
+      "the owner's answer reaches the work: site/cariere.html exists",
+    ])
   })
 })

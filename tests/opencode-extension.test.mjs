@@ -289,6 +289,23 @@ test("OpenCode's question tool is answered from the board through the plugin", a
   assert.deepEqual(f.replies, [{ requestID: 'q-1', answers: [['blue']] }])
 })
 
+test("OpenCode: the chief's question tool stays in its window, where the human answers it", async (t) => {
+  const board = await fakeBoard(t)
+  const previous = process.env.CONSENSFLOW_PARTICIPANT
+  process.env.CONSENSFLOW_PARTICIPANT = 'chief'
+  let f
+  try {
+    f = await fixture(t, false, board.url)
+  } finally {
+    if (previous === undefined) delete process.env.CONSENSFLOW_PARTICIPANT
+    else process.env.CONSENSFLOW_PARTICIPANT = previous
+  }
+  f.emit('question.asked', ASKED)
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  assert.deepEqual(board.state.posted, [], 'nothing goes to the board')
+  assert.deepEqual(f.replies, [], "OpenCode's own dialog answers it")
+})
+
 test('OpenCode: a question answered in the window first is recorded on the board, never replied twice', async (t) => {
   const board = await fakeBoard(t)
   const f = await fixture(t, false, board.url)

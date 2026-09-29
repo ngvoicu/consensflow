@@ -3,6 +3,8 @@
  * advice comes back to the chief, the chief accepts it and passes the
  * recommendation to the owner as a note. No file changes.
  */
+import { askedInTerminal } from '../measure.mjs'
+
 export default {
   id: 'advice-trip',
   title: 'Advice out, advice back, a note to the owner',
@@ -28,6 +30,6 @@ export default {
       holds: (m) => m.notesToHuman.length >= 1,
     },
     { name: 'no file changes', holds: (m) => m.filesChanged.length === 0 },
-    { name: 'the owner is not asked anything', holds: (m) => m.questionsToHuman.length === 0 },
+    { name: 'the owner is not asked anything', holds: (m) => askedInTerminal(m) === 0 },
   ],
 }

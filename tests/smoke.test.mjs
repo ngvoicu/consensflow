@@ -142,9 +142,12 @@ LC_ALL=C
 export LC_ALL
 echo $$ > "$CFSMOKE_PIDFILE"
 session=''
+seed=''
 while [ $# -gt 0 ]; do
   case "$1" in
     --session-id|--resume) session="$2"; shift ;;
+    # A worker's window opens with its brief as the last argument.
+    '[ConsensFlow'*) seed="$1" ;;
   esac
   shift
 done
@@ -182,6 +185,13 @@ if command -v uname >/dev/null 2>&1; then
 else
   printf 'CFSMOKE-TOOLS missing\n'
 fi
+# A worker's first turn is its brief, answered at once: its header line is
+# the record the core looks for, and "noted" is its result.
+if [ -n "$seed" ]; then
+  nl='
+'
+  turn "${'$'}{seed%%"$nl"*}"
+fi
 pad=''
 n=0
 while [ $n -lt ${FLOOD_WIDTH} ]; do
@@ -196,11 +206,12 @@ while IFS= read -r line; do
     stty raw -echo
     "$CFSMOKE_PASTE_NODE" "$CFSMOKE_PASTE_READER"
     stty "$saved"
-  elif [ "$line" = "ASK" ]; then
-    # The chief asks the human from its terminal, the way a real chief does;
-    # the human answers on the board and the core delivers it into this window.
-    cf ask "SMOKE"
-    turn "ASK"
+  elif [ "$line" = "HANDOFF" ]; then
+    # The chief puts a task on the board, the way a real chief does; a worker
+    # window on this same stand-in does it, and the core delivers its result
+    # into this window.
+    cf task add --tier standard "SMOKE BRIEF"
+    turn "HANDOFF"
   elif [ "$line" = "FLOOD" ]; then
     n=1
     while [ $n -le ${FLOOD_LINES} ]; do
@@ -505,13 +516,14 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     'the child echoed something other than what was typed',
   )
 
-  // The board reaches the window: the human's answer to what the chief asked
-  // from its own terminal came back as a paste the child hexed, header first.
+  // The board both ways: the chief's task reached a worker window, and the
+  // worker's result came back into the chief's window as a paste the child
+  // hexed, header first.
   const board = await app.waitFor('board')
-  assert.ok(Number.isInteger(board.data.question), 'the chief never asked the human')
+  assert.ok(Number.isInteger(board.data.result), 'no result came back from the worker')
   assert.match(
     Buffer.from(board.data.hex, 'hex').toString('utf8'),
-    /^\[ConsensFlow m-\d+ · answer from @human\]/,
+    /^\[ConsensFlow m-\d+ · T-1 · result from @terpsichore-[a-z]+-[a-z]+\]/,
   )
   assert.equal(board.data.delivered, true, 'the core never confirmed the delivery from the record')
 

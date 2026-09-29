@@ -80,28 +80,45 @@ describe('the results file', () => {
     )
   })
 
-  it('names the arm, and what the owner was asked: board decisions / terminal questions', () => {
-    const asked = (board, terminal) => ({
-      board: { decisions: board },
-      terminal: { questions: terminal },
-    })
+  it('names the arm, and what the owner was asked: on the board, and in the terminal', () => {
     const nocard = {
       ...report,
       arm: 'nocard',
-      metrics: { ...report.metrics, ownerQuestions: asked(1, 4) },
+      metrics: {
+        ...report.metrics,
+        questionsOnBoard: 0,
+        ownerQuestions: { questions: 4, turnsAsking: 2, pickers: 0 },
+      },
     }
-    assert.deepEqual([row(nocard)[2], row(nocard)[15]], ["devin [nocard] (devin's default)", '1/4'])
+    assert.deepEqual(
+      [row(nocard)[2], row(nocard)[10], row(nocard)[15]],
+      ["devin [nocard] (devin's default)", '0', '4'],
+    )
     const bare = {
       ...report,
       arm: 'bare',
       staff: undefined,
       mechanics: undefined,
-      metrics: { ...report.metrics, tasks: [], ownerQuestions: asked(0, 3) },
+      metrics: {
+        ...report.metrics,
+        tasks: [],
+        questionsOnBoard: 0,
+        ownerQuestions: { questions: 3, turnsAsking: 2, pickers: 2 },
+      },
     }
     assert.deepEqual(
       [row(bare)[2], row(bare)[3], row(bare)[15]],
-      ["devin [bare] (devin's default)", 'none', '0/3'],
+      ["devin [bare] (devin's default)", 'none', '3+2p'],
     )
+    // A report from when the board took questions reads as it counted them.
+    const boardDays = {
+      ...report,
+      metrics: {
+        ...report.metrics,
+        ownerQuestions: { board: { decisions: 1 }, terminal: { questions: 4 } },
+      },
+    }
+    assert.deepEqual([row(boardDays)[10], row(boardDays)[15]], ['1', '4'])
     assert.equal(row({ ...report, arm: 'card' })[2], "devin (devin's default)")
   })
 })

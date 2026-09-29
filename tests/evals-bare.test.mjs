@@ -102,17 +102,11 @@ describe("a bare chief's numbers", () => {
   it('counts what it asked at the ends of its turns, with no board', () => {
     const metrics = bareMetrics(items, { filesChanged: ['site/legislatie.html'] })
     assert.deepEqual(
-      [metrics.tasks, metrics.questionsToHuman, metrics.chiefTurns, metrics.chiefLastWords],
-      [[], [], 3, 'Done: the page is in place.'],
+      [metrics.tasks, metrics.questionsOnBoard, metrics.chiefTurns, metrics.chiefLastWords],
+      [[], 0, 3, 'Done: the page is in place.'],
     )
-    assert.deepEqual(
-      [
-        metrics.ownerQuestions.board.asked,
-        metrics.ownerQuestions.terminal.questions,
-        metrics.ownerQuestions.terminal.turnsAsking,
-      ],
-      [0, 2, 1],
-    )
+    assert.deepEqual([metrics.ownerQuestions.questions, metrics.ownerQuestions.turnsAsking], [2, 1])
+    assert.deepEqual(metrics.ownerMessages, [12, 17], 'what the owner typed')
     assert.deepEqual(metrics.filesChanged, ['site/legislatie.html'])
   })
 
@@ -148,9 +142,6 @@ describe('a bare record that never marks the end of a turn (Devin, OpenCode)', (
     )
     assert.equal(askingTurnEnd(items.slice(0, 2), new Set(['a1']))?.id, 'a1')
     const metrics = bareMetrics(items, { ends: new Set(['a1', 'a2']) })
-    assert.deepEqual(
-      [metrics.ownerQuestions.terminal.questions, metrics.ownerQuestions.terminal.turnsAsking],
-      [2, 1],
-    )
+    assert.deepEqual([metrics.ownerQuestions.questions, metrics.ownerQuestions.turnsAsking], [2, 1])
   })
 })

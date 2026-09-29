@@ -157,6 +157,12 @@ describe('the Claude Code adapter', () => {
         }),
       )
       assert.ok(!chief.argv.includes('--strict-mcp-config') && !chief.argv.includes('--no-chrome'))
+      // The chief asks the human in its own window: Claude's own question
+      // dialog, no hook putting it on the board.
+      const settings = JSON.parse(
+        await readFile(chief.argv[chief.argv.indexOf('--settings') + 1], 'utf8'),
+      )
+      assert.deepEqual(settings.hooks.PreToolUse, [])
     })
   })
 

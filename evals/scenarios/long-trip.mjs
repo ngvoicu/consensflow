@@ -52,7 +52,7 @@ export default {
     'site/index.html și să-ți trimită o recenzie de cel puțin 8000 de caractere; ultima linie să',
     'fie exact codul din fișier.',
     'Nu citi tu fișierele din interne/.',
-    '4. Pune-mi pe board o singură întrebare, fără opțiuni: cum se numește raportul final.',
+    '4. Pune-mi aici, în terminal, o singură întrebare: cum se numește raportul final.',
     '5. Citește integral fiecare rezultat și răspunsul meu. Când le ai pe toate, acceptă sarcinile',
     'și trimite-mi o singură notă (cf note --human) cu cinci lucruri: codul workerului, codul',
     'advisorului, codul reviewerului, numele raportului din răspunsul meu și codul de la',
@@ -82,7 +82,8 @@ export default {
     },
     {
       name: "the owner's long answer went to the chief",
-      holds: (m) => m.answersToChief.some((length) => length >= 4000),
+      // After the prompt, itself long: what the owner typed in answer.
+      holds: (m) => m.ownerMessages.slice(1).some((length) => length >= 4000),
     },
     { name: "the note holds the worker's code", holds: (m) => m.notesText.includes('CEDRU-7314') },
     {

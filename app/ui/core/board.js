@@ -2,8 +2,10 @@
  * The board: a kanban of the project's tasks. One row per participant, one
  * column per state, every task a card that stays where it ended, with its
  * result on it. A review is a task like any other, on its reviewer's row.
- * Above the grid, what waits for the human: questions to answer, results and
- * notes to read.
+ * Above the grid, what waits for the human: messages to approve when the
+ * project asks for approval, notes to read, and questions a coordinator has
+ * left unanswered. The human is asked nothing here: the chief asks in its
+ * terminal.
  *
  * Everything here is drawn from the core's state with `textContent`, never
  * markup, so an agent-written title cannot become HTML. Actions go out through
@@ -225,16 +227,14 @@ export class BoardView {
 
   /** What waits for the human, and where a new task starts. */
   #forYou(inbox, board, now) {
-    // The human's own inbox, what waits for the human's approval, then the
-    // questions a coordinator has left unanswered too long.
-    const inboxed = inbox.filter((message) => message.state === 'queued')
+    // What waits for the human's approval, then the questions a coordinator
+    // has left unanswered too long.
     const waiting = [
-      ...inboxed.filter((message) => message.kind !== 'note'),
       ...(board.gated ?? []),
       ...(board.overdue ?? []).map((message) => ({ ...message, overdue: true })),
     ]
-    // A note needs no answer: it reads and is marked read, in its own list.
-    const notes = inboxed.filter((message) => message.kind === 'note')
+    // The human's inbox holds notes: each reads and is marked read, in its own list.
+    const notes = inbox.filter((message) => message.state === 'queued' && message.kind === 'note')
     const section = element('section', 'foryou')
     section.setAttribute('role', 'region')
     section.setAttribute('aria-label', 'For you')
@@ -265,7 +265,7 @@ export class BoardView {
           'bay-empty',
           board.project?.gate
             ? 'Every task, result, question and answer between your agents waits here for your approval.'
-            : 'Questions from your agents appear here.',
+            : 'Nothing waits for you on the board: the chief asks in its terminal.',
         ),
       )
     }
@@ -277,74 +277,6 @@ export class BoardView {
       section.append(element('h3', 'foryou-sub', 'Notes from your agents'), list)
     }
     return section
-  }
-
-  /** A plain question: the answer is typed. */
-  #answerForm(message) {
-    const form = element('form', 'answer')
-    const field = element('textarea')
-    field.name = 'answer'
-    field.rows = 2
-    field.required = true
-    field.setAttribute('aria-label', `Answer to m-${message.id}`)
-    field.placeholder = `Answer ${who(message.sender)}`
-    form.append(field, element('button', 'primary-button', 'Send answer'))
-    form.querySelector('button').type = 'submit'
-    form.addEventListener('submit', (event) => {
-      event.preventDefault()
-      if (field.value.trim()) this.#actions.onAnswer(message, field.value.trim())
-    })
-    return form
-  }
-
-  /**
-   * A question with options, as the agent's own question tool asked it: each
-   * question's options to pick (one, or several when it allows), and a line
-   * for something else; every question needs a pick before the answer goes.
-   */
-  #choiceForm(message) {
-    const form = element('form', 'answer answer-choices')
-    form.setAttribute('aria-label', `Answer to m-${message.id}`)
-    const groups = message.questions.map((question, at) => {
-      const group = element('fieldset', 'choice')
-      group.append(element('legend', null, `${question.header}: ${question.question}`))
-      for (const option of question.options) {
-        const label = element('label', 'choice-option')
-        const input = element('input')
-        input.type = question.multiple ? 'checkbox' : 'radio'
-        input.name = `pick-${at}`
-        input.value = option.label
-        label.append(input, element('span', 'choice-label', option.label))
-        if (option.description) label.append(element('span', 'choice-desc', option.description))
-        group.append(label)
-      }
-      // The human's own words may be as long as any answer: a box, not a line.
-      const custom = element('textarea', 'choice-custom')
-      custom.rows = 2
-      custom.name = `custom-${at}`
-      custom.placeholder = 'Something else'
-      custom.setAttribute('aria-label', `Something else for ${question.header}`)
-      group.append(custom)
-      return group
-    })
-    const send = element('button', 'primary-button', 'Send answer')
-    send.type = 'submit'
-    form.append(...groups, send)
-    form.addEventListener('submit', (event) => {
-      event.preventDefault()
-      const choices = message.questions.map((_question, at) => {
-        const picked = [...form.querySelectorAll(`input[name="pick-${at}"]:checked`)].map(
-          (input) => input.value,
-        )
-        const custom = form.elements[`custom-${at}`].value.trim()
-        return custom ? [...picked, custom] : picked
-      })
-      for (const [at, group] of groups.entries()) {
-        group.classList.toggle('choice-missing', choices[at].length === 0)
-      }
-      if (choices.every((picks) => picks.length > 0)) this.#actions.onAnswer(message, null, choices)
-    })
-    return form
   }
 
   #messageStrip(message, now) {
@@ -371,10 +303,6 @@ export class BoardView {
     item.append(line)
     if (gated) {
       item.append(this.#gateActions(message))
-    } else if (message.kind === 'question' && !message.overdue) {
-      // A question put to the human is answered here; one the chief has left
-      // unanswered is a notice: tell the chief in its terminal.
-      item.append(message.questions ? this.#choiceForm(message) : this.#answerForm(message))
     } else {
       const actions = element('div', 'strip-actions')
       if (message.taskNumber) {
