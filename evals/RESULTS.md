@@ -155,3 +155,17 @@ board; [bare] ran without ConsensFlow.
 | 2026-09-29T09-54 | terminal-questions | pi (openrouter/deepseek/deepseek-v4-pro-0813, high) | opencode (medium) | 5/5 | 6/6 | 2 | 1 | 0 | 0 | 0 | 0 | ? | 3 | 0 | 3 | 5 |
 | 2026-09-29T09-59 | terminal-questions | opencode (openrouter/deepseek/deepseek-v4-pro-0813, default) | opencode (medium) | 5/5 | 6/6 | 1 | 1 | 0 | 0 | 0 | 0 | ? | 2 | 0 | 2 | 6 |
 | 2026-09-29T10-03 | terminal-questions | devin (devin's default, default) | opencode (medium) | 4/5 | 6/6 | 0 | 0 | 0 | 0 | 0 | 0 | ? | 5 | 0 | 3 | 4 |
+| 2026-09-29T10-46 | question-trip | claude (claude-opus-5, high) | claude (medium) | 8/8 | 6/6 | 3 | 3 | 1 | 1 | 0 | 1 | 0 | 1 | 0 | 0 | 7 |
+| 2026-09-29T10-53 | question-trip | claude (claude-opus-5, high) | codex (medium) | 8/8 | 6/6 | 3 | 3 | 1 | 1 | 0 | 1 | 0 | 1 | 0 | 0 | 7 |
+| 2026-09-29T11-01 | question-trip | claude (claude-opus-5, high) | pi (medium) | 8/8 | 6/6 | 3 | 3 | 1 | 1 | 0 | 1 | 0 | 1 | 0 | 0 | 7 |
+| 2026-09-29T11-08 | question-trip | claude (claude-opus-5, high) | opencode (medium) | 8/8 | 6/6 | 3 | 3 | 1 | 1 | 0 | 1 | 0 | 1 | 0 | 0 | 7 |
+| 2026-09-29T11-19 | question-trip | claude (claude-opus-5, high) | devin (medium) | 8/8 | 6/6 | 3 | 3 | 1 | 1 | 0 | 1 | 0 | 1 | 0 | 0 | 10 |
+| 2026-09-29T11-59 | question-trip-native | claude (claude-opus-5, high) | claude (medium) | 4/8 | 6/6 | 3 | 3 | 1 | 1 | 0 | 0 | 0 | 1 | 0 | 0 | 40 |
+| 2026-09-29T12-29 | question-trip-native | claude (claude-opus-5, high) | codex (medium) | 7/8 | 6/6 | 3 | 3 | 1 | 1 | 0 | 1 | 0 | 1 | 0 | 0 | 31 |
+| 2026-09-29T12-38 | question-trip-native | claude (claude-opus-5, high) | pi (medium) | 8/8 | 6/6 | 3 | 2 | 1 | 1 | 0 | 1 | 0 | 1 | 0 | 0 | 9 |
+| 2026-09-29T13-18 | question-trip-native | claude (claude-opus-5, high) | opencode (medium) | 4/8 | 6/6 | 3 | 3 | 1 | 1 | 0 | 0 | 0 | 1 | 0 | 0 | 40 |
+| 2026-09-29T13-58 | question-trip-native | claude (claude-opus-5, high) | devin (medium) | 4/8 | 6/6 | 3 | 3 | 1 | 1 | 0 | 0 | 0 | 1 | 0 | 0 | 40 |
+| 2026-09-29T14-13 | question-trip-native | claude (claude-opus-5, high) | claude (medium) | 8/8 | 6/6 | 3 | 3 | 1 | 1 | 0 | 1 | 0 | 1 | 0 | 0 | 8 |
+| 2026-09-29T14-21 | question-trip-native | claude (claude-opus-5, high) | codex (medium) | 8/8 | 6/6 | 3 | 3 | 1 | 1 | 0 | 1 | 0 | 1 | 0 | 0 | 8 |
+| 2026-09-29T14-29 | question-trip-native | claude (claude-opus-5, high) | opencode (medium) | 8/8 | 6/6 | 3 | 3 | 1 | 1 | 0 | 1 | 0 | 1 | 0 | 0 | 8 |
+| 2026-09-29T14-36 | question-trip-native | claude (claude-opus-5, high) | devin (medium) | 8/8 | 6/6 | 3 | 3 | 1 | 1 | 0 | 1 | 0 | 1 | 0 | 0 | 8 |

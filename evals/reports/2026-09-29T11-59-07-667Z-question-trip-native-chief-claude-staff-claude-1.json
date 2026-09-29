@@ -1,0 +1,283 @@
+{
+  "scenario": "question-trip-native",
+  "chief": "claude",
+  "model": "claude-opus-5",
+  "effort": "high",
+  "staffEffort": "medium",
+  "staff": [
+    "claude"
+  ],
+  "staffModels": {
+    "eval-claude-worker": "claude-haiku-4-5-20251001",
+    "eval-claude-worker-2": "claude-haiku-4-5-20251001",
+    "eval-claude-advisor": "claude-haiku-4-5-20251001",
+    "eval-claude-reviewer": "claude-haiku-4-5-20251001"
+  },
+  "run": 1,
+  "seconds": 2403,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Proiect: un site static despre burnout la locul de muncă, în română sub site/ și în engleză sub site/en/. Lucrezi într-…",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-worker-coral-oriole"
+      },
+      {
+        "number": 2,
+        "title": "Proiect: un site static despre burnout la locul de muncă, în română sub site/ și în engleză sub site/en/, HTML simplu, …",
+        "pool": "advisor",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-advisor-misty-pebble"
+      },
+      {
+        "number": 3,
+        "title": "Proiect: un site static despre burnout la locul de muncă, în română sub site/ și în engleză sub site/en/. Lucrezi într-…",
+        "pool": "reviewer",
+        "tier": "standard",
+        "state": "working",
+        "assignee": "eval-claude-reviewer-lively-tundra"
+      }
+    ],
+    "parallel": 3,
+    "advice": 1,
+    "reviews": 1,
+    "questionsOnBoard": 0,
+    "notesToHuman": [],
+    "notesText": "",
+    "longestResult": {
+      "worker": 453,
+      "advisor": 1119,
+      "reviewer": 0
+    },
+    "taskCount": 3,
+    "chiefId": 2,
+    "chiefHarness": "claude-code",
+    "humanId": 1,
+    "chiefTurns": 16,
+    "chiefEdits": 0,
+    "chiefLastWords": "T-2 acceptat (recomandare: IBM Plex Sans, pentru publicul „manageri\"). T-3 e încă în lucru la reviewer; aștept întrebarea lui.",
+    "ownerMessages": [
+      1091,
+      451,
+      612,
+      640,
+      1307
+    ],
+    "askRefused": 0,
+    "ownerQuestions": {
+      "questions": 0,
+      "turnsAsking": 0,
+      "pickers": 0,
+      "texts": []
+    },
+    "plumbing": {
+      "briefs": 3,
+      "briefsDelivered": 3,
+      "results": 2,
+      "resultsDelivered": 2,
+      "memberQuestions": 2,
+      "memberQuestionsAnswered": 2,
+      "answersDelivered": 2,
+      "accepted": 2,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0
+    },
+    "memberQuestionsBy": [
+      {
+        "role": "advisor",
+        "harness": "claude-code",
+        "asked": 1,
+        "answered": 1,
+        "delivered": 1,
+        "longest": 414
+      },
+      {
+        "role": "worker",
+        "harness": "claude-code",
+        "asked": 1,
+        "answered": 1,
+        "delivered": 1,
+        "longest": 254
+      }
+    ],
+    "filesChanged": [
+      "site/notes.md"
+    ]
+  },
+  "checks": [
+    {
+      "name": "a worker, an advisor and a reviewer each get a task",
+      "ok": true
+    },
+    {
+      "name": "the worker asks the chief, and the answer reaches its window",
+      "ok": true
+    },
+    {
+      "name": "the advisor asks the chief, and the answer reaches its window",
+      "ok": true
+    },
+    {
+      "name": "the reviewer asks the chief, and the answer reaches its window",
+      "ok": false
+    },
+    {
+      "name": "the long question reaches the chief whole (over 4000 characters)",
+      "ok": false
+    },
+    {
+      "name": "the chief's note holds the long question's code",
+      "ok": false
+    },
+    {
+      "name": "all three tasks are accepted",
+      "ok": false
+    },
+    {
+      "name": "the owner is not asked anything",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (3/3)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (2/2)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (2/2)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (2/2)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (3/3)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "────────────────────────────────────────────────────────────────────────────────",
+    "❯",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus58426tokens",
+    "pasteagaintoexpand/rc",
+    "✳52",
+    "✢Sketching…77",
+    "Sketching…95",
+    "·Sketching…102 tokens)",
+    "Sketching…6",
+    "Sketching…8",
+    "✢Sketching…10",
+    "Sketching…1",
+    "✳3",
+    "✶34",
+    "✻Sketching…6",
+    "✽Sketching…8",
+    "Sketching…",
+    "20",
+    "⏺✽Sketching… (3s ·↓ 120 tokens)  ⎿  Tip: Run /ultrareview for a cloud-based multi-agent review that finds and      verifies bugs in your branch — 3 free reviews left❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus58426tokens",
+    "pasteagaintoexpand/rc",
+    "1",
+    "2",
+    "✻",
+    "4",
+    "✶5",
+    "✳47",
+    "T-2acceptat(recomandare:IBMPlexSans,pentrupublicul„manageri\").T-3e✢9",
+    "·30",
+    "4",
+    "…6",
+    "încăînlucrulareviewer;așteptîntrebarealui.· Sketching… (running Stophok · 4s · ↓ 136tokens)  ⎿  Tip: Run/ultrareviewfor a cloud-based multi-agent review that finds and verifies bugs in your branch — 3 free reviews left────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus       58913 tokens",
+    "pasteagaintoexpand/rc",
+    "✻Cogitated fo 4s · done 2:22 PM────────────────────────────────────────────────────────────────────────────────❯   workspace Opus58913 tokens  paste again to expand                                                    /rcașteaptă întrebarea reviewerului",
+    "⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent",
+    "58913tokens",
+    "current:2.1.284·latest:2.1.284Checkingforupdates",
+    "/rc",
+    "58913 tokens/rc"
+  ],
+  "arm": "card",
+  "terminalAnswers": 0,
+  "terminalReplies": 0,
+  "pickerAnswers": 0,
+  "followUpsSent": 0,
+  "refusedApprovals": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 70,
+      "line": "chief (claude) ready; typing the prompt"
+    },
+    {
+      "at": 80,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 170,
+      "line": "chief working; tasks T-1:working"
+    },
+    {
+      "at": 175,
+      "line": "chief working; tasks T-1:waiting"
+    },
+    {
+      "at": 180,
+      "line": "chief working; tasks T-1:waiting T-2:working"
+    },
+    {
+      "at": 185,
+      "line": "chief working; tasks T-1:waiting T-2:waiting"
+    },
+    {
+      "at": 195,
+      "line": "chief working; tasks T-1:waiting T-2:waiting T-3:working"
+    },
+    {
+      "at": 205,
+      "line": "chief working; tasks T-1:working T-2:working T-3:working"
+    },
+    {
+      "at": 210,
+      "line": "chief working; tasks T-1:done T-2:working T-3:working"
+    },
+    {
+      "at": 215,
+      "line": "chief working; tasks T-1:accepted T-2:done T-3:working"
+    },
+    {
+      "at": 220,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:working"
+    },
+    {
+      "at": 225,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:working"
+    },
+    {
+      "at": 2403,
+      "line": "time is up"
+    }
+  ]
+}

@@ -1,0 +1,326 @@
+{
+  "scenario": "question-trip-native",
+  "chief": "claude",
+  "model": "claude-opus-5",
+  "effort": "high",
+  "staffEffort": "medium",
+  "staff": [
+    "opencode"
+  ],
+  "staffModels": {
+    "eval-opencode-worker": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-opencode-worker-2": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-opencode-advisor": "openrouter/deepseek/deepseek-v4.1-flash",
+    "eval-opencode-reviewer": "openrouter/deepseek/deepseek-v4.1-flash"
+  },
+  "run": 1,
+  "seconds": 456,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Proiect: un mic site HR în limba română, aflat la /Users/gabrielvoicu/.consensflow-candidate/evals/workspace. Paginile …",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-opencode-worker-vivid-summit"
+      },
+      {
+        "number": 2,
+        "title": "Proiect: un mic site HR în limba română, aflat la /Users/gabrielvoicu/.consensflow-candidate/evals/workspace. Paginile …",
+        "pool": "advisor",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-opencode-advisor-sunny-fjord"
+      },
+      {
+        "number": 3,
+        "title": "Proiect: un mic site HR în limba română, aflat la /Users/gabrielvoicu/.consensflow-candidate/evals/workspace. Paginile …",
+        "pool": "reviewer",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-opencode-reviewer-olive-kestrel"
+      }
+    ],
+    "parallel": 3,
+    "advice": 1,
+    "reviews": 1,
+    "questionsOnBoard": 0,
+    "notesToHuman": [
+      {
+        "id": 13,
+        "body": "Test de funcționare pentru întrebări — încheiat. Toate trei sarcinile au pus întrebarea prin unealta proprie de întrebări a harness-ului lor (nu prin cf), au așteptat răspunsul și abia apoi au continu"
+      }
+    ],
+    "notesText": "Test de funcționare pentru întrebări — încheiat. Toate trei sarcinile au pus întrebarea prin unealta proprie de întrebări a harness-ului lor (nu prin cf), au așteptat răspunsul și abia apoi au continuat. T-1, T-2 și T-3 sunt acceptate.\n\nCE A ÎNTREBAT FIECARE\n\n1) T-1 — worker @eval-opencode-worker-vivid-summit (m-2)\nÎntrebarea, cu titlul „Culoare buton Contact\":\n  Ce culoare să aibă butonul Contact?\ncu trei variante oferite: Albastru („Butonul Contact va fi albastru.\"), Verde („Butonul Contact va fi verde.\"), Roșu („Butonul Contact va fi roșu.\").\nI-am răspuns: albastru.\nRezultat: a creat site/notes.md cu o singură linie, „Albastru\". Verificat: fișierul are exact o linie, 9 octeți.\n\n2) T-2 — advisor @eval-opencode-advisor-sunny-fjord (m-4)\nÎntrebarea, cu titlul „Publicul site-ului\":\n  Pentru ce public e site-ul?\ncu trei variante oferite: Angajați interni („Site-ul e folosit de angajații companiei (resurse umane interne, evaluări, proceduri)\"), Candidați la angajare („Site-ul se adresează candidaților care aplică pentru un job\"), Public larg / clienți („Site-ul e vizibil pentru oricine, public general sau clienți\").\nI-am răspuns: manageri.\nRezultat: a recomandat fontul Inter, pentru diacritice românești complete, lizibilitate la corpuri mici, ton profesional, cifre tabulare și licență liberă cu găzduire locală. Niciun fișier modificat.\n\n3) T-3 — reviewer @eval-opencode-reviewer-olive-kestrel (m-9)\nA pus ca întrebare, integral, textul din interne/intrebare-reviewer.md: toate cele 12 paragrafe numerotate, de la „Întrebarea 1, despre structura paginii principale…\" până la „Întrebarea 12, despre ordinea secțiunilor…\", fiecare întrebând dacă la revizuirea lui site/index.html verifică aspectul respectiv și în versiunea engleză sau doar în cea română, cu aceeași justificare repetată (pagina românească e cea aprobată acum, engleza urmează după aprobarea textului, o verificare dublă ar lungi revizuirea fără să schimbe ce se publică), plus rândul final cu codul. A oferit două variante: „Doar versiunea română\" și „Și engleza, separat\".\nI-am răspuns: doar versiunea română.\n\nCODUL DE PE ULTIMUL RÂND AL ÎNTREBĂRII REVIEWERULUI\n\n  Codul acestei întrebări: PLOP-6142\n\nTextul lung a ajuns neatins: am comparat corpul întrebării primite cu fișierul sursă și suma de control e identică (9ef3df64965d048074bc2ceb244c77f9b5f01cb9) — niciun paragraf pierdut, nimic scurtat, rândul cu codul prezent. Singurele adăugiri ale harness-ului sunt prefixul de titlu „PLOP-6142: \" pe primul rând și lista celor două variante de răspuns la final.\n\nREZULTATUL REVIZUIRII (T-3)\nReviewerul a verificat doar site/index.html, în română, și a notat în raport că engleza nu a fost verificată și de ce. Două blocante: subsolul trimite către despre.html, faq.html și contact.html, care nu există (linkuri moarte, același subsol și în site/evaluare.html), și lipsește <meta name=\"viewport\">, ceea ce strică afișarea pe ecrane mici. Observații minore: nu există niciun buton/CTA către evaluare în corpul paginii, scara scorului e inconsecventă între site (0–100 în evaluare.html) și documente (1–5), iar „Albastru\" din notes.md nu apare printre treptele de culoare din evaluare.html. Concluzia lui: nu e gata de publicare.\n\nINTEGRITATEA FIȘIERELOR\nAm luat sumele de control ale tuturor fișierelor înainte de a pune sarcinile pe board și le-am recomparat la final: singura schimbare din tot proiectul este fișierul nou site/notes.md. Niciun alt fișier nu a fost modificat.",
+    "longestResult": {
+      "worker": 134,
+      "advisor": 863,
+      "reviewer": 3438
+    },
+    "taskCount": 3,
+    "chiefId": 2,
+    "chiefHarness": "claude-code",
+    "humanId": 1,
+    "chiefTurns": 21,
+    "chiefEdits": 0,
+    "chiefLastWords": "Testul s-a încheiat. Toate trei sarcinile au funcționat exact cum trebuia.\n\n**Ce a întrebat fiecare** — fiecare a folosit unealta proprie de întrebări a harness-ului său, nu `cf`, și a așteptat răspunsul înainte de a continua:\n\n| Sarcină | Membru | Întrebarea | Răspunsul meu |\n|---|---|---|---|\n| T-1 (worker) | eval-opencode-worker-vivid-summit | „Ce culoare să aibă butonul Contact?\" (cu variante: Albastru / Verde / Roșu) | albastru |\n| T-2 (advisor) | eval-opencode-advisor-sunny-fjord | „Pentru ce public e site-ul?\" (cu variante: Angajați interni / Candidați / Public larg) | manageri |\n| T-3 (reviewer) | eval-opencode-reviewer-olive-kestrel | textul integral din `interne/intrebare-reviewer.md` — toate cele 12 paragrafe plus rândul cu codul | doar versiunea română |\n\n**Codul de pe ultimul rând al întrebării reviewerului: PLOP-6142**\n\nPartea cea mai interesantă a testului — textul lung a trecut neatins. Am comparat corpul întrebării primite cu fișierul sursă: sumă de control identică (`9ef3df64…`), niciun paragraf pierdut sau scurtat, rândul cu codul prezent. Harness-ul a adăugat doar prefixul de titlu `PLOP-6142: ` pe primul rând și lista celor două variante la final.\n\nRezultatele: workerul a creat `site/notes.md` cu o singură linie, advisorul a recomandat fontul Inter pentru un public de manageri, iar reviewerul a găsit două blocante în `site/index.html` (linkuri moarte în subsol către pagini inexistente și lipsa `<meta name=\"viewport\">`). Toate trei acceptate, iar nota o gă",
+    "ownerMessages": [
+      1091,
+      375,
+      523,
+      323,
+      3262,
+      1053,
+      3631
+    ],
+    "askRefused": 0,
+    "ownerQuestions": {
+      "questions": 0,
+      "turnsAsking": 0,
+      "pickers": 0,
+      "texts": []
+    },
+    "plumbing": {
+      "briefs": 3,
+      "briefsDelivered": 3,
+      "results": 3,
+      "resultsDelivered": 3,
+      "memberQuestions": 3,
+      "memberQuestionsAnswered": 3,
+      "answersDelivered": 3,
+      "accepted": 3,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0
+    },
+    "memberQuestionsBy": [
+      {
+        "role": "advisor",
+        "harness": "opencode",
+        "asked": 1,
+        "answered": 1,
+        "delivered": 1,
+        "longest": 324
+      },
+      {
+        "role": "reviewer",
+        "harness": "opencode",
+        "asked": 1,
+        "answered": 1,
+        "delivered": 1,
+        "longest": 6441
+      },
+      {
+        "role": "worker",
+        "harness": "opencode",
+        "asked": 1,
+        "answered": 1,
+        "delivered": 1,
+        "longest": 176
+      }
+    ],
+    "filesChanged": [
+      "site/notes.md"
+    ]
+  },
+  "checks": [
+    {
+      "name": "a worker, an advisor and a reviewer each get a task",
+      "ok": true
+    },
+    {
+      "name": "the worker asks the chief, and the answer reaches its window",
+      "ok": true
+    },
+    {
+      "name": "the advisor asks the chief, and the answer reaches its window",
+      "ok": true
+    },
+    {
+      "name": "the reviewer asks the chief, and the answer reaches its window",
+      "ok": true
+    },
+    {
+      "name": "the long question reaches the chief whole (over 4000 characters)",
+      "ok": true
+    },
+    {
+      "name": "the chief's note holds the long question's code",
+      "ok": true
+    },
+    {
+      "name": "all three tasks are accepted",
+      "ok": true
+    },
+    {
+      "name": "the owner is not asked anything",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (3/3)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (3/3)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (3/3)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (3/3)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (3/3)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "ucoduldoarversiunearomână────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           68673 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Codul de pe ultimul rând al întrebării reviewerului: PLOP-6142❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus68673tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Parteaceamaiinteresantăatestului—textullungatrecutneatins.Am────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           68673 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "comparatcorpulîntrebăriiprimitecufișierulsursă:sumădecontrolidentică────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           68673 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "(9ef3df64…),niciunparagrafpierdutsauscurtat,rândulcucodulprezent.────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           68673 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Harness-ulaadăugatdoarprefixuldetitluPLOP-6142: peprimulrândși────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           68673 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "listacelordouăvariantelafinal.❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus68673tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Rezultatele:workerulacreatsite/notes.mdcuosingurălinie,advisorula────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           68673 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "recomandatfontulInterpentruunpublicdemanageri,iarreviewerulagăsit────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           68673 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "douăblocanteînsite/index.html(linkurimoarteînsubsolcătrepagini────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           68673 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "inexistenteșilipsa<meta name=\"viewport\">).Toatetreiacceptate,iarnotao────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           68673 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "găseștipeboardcam-13.❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus68673tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Amluatsumeledecontrolaletuturorfișierelorînainteșidupă:singura────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           68673 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "schimbaredintotproiectulefișierulnousite/notes.md.Omicăobservație—────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           68673 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "workerulascris„Albastru\"cumajusculă,deșieuîirăspunsesem„albastru\";────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           68673 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "cerințata(oliniecuculoarea)eîndeplinită,așacăn-amredeschissarcina.✳ Galloping… (1m 6s · ↓2.8k tokens)────────────────────────────────────────────────────────────────────────────────❯",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus68673tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "GallopirunningStop hook · 1m 6s · ↓2.8k tokens)70068",
+    "✻Cogitated fo 1m 6s· done 5:26PM❯",
+    "Pune pe board o sarcină care repară cele două blocante"
+  ],
+  "arm": "card",
+  "terminalAnswers": 0,
+  "terminalReplies": 0,
+  "pickerAnswers": 0,
+  "followUpsSent": 0,
+  "refusedApprovals": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 70,
+      "line": "chief (claude) ready; typing the prompt"
+    },
+    {
+      "at": 80,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 165,
+      "line": "chief working; tasks T-1:working"
+    },
+    {
+      "at": 170,
+      "line": "chief working; tasks T-1:waiting T-2:queued"
+    },
+    {
+      "at": 175,
+      "line": "chief working; tasks T-1:waiting T-2:waiting"
+    },
+    {
+      "at": 180,
+      "line": "chief working; tasks T-1:waiting T-2:waiting T-3:queued"
+    },
+    {
+      "at": 185,
+      "line": "chief working; tasks T-1:waiting T-2:waiting T-3:working"
+    },
+    {
+      "at": 190,
+      "line": "chief working; tasks T-1:working T-2:waiting T-3:working"
+    },
+    {
+      "at": 195,
+      "line": "chief working; tasks T-1:done T-2:working T-3:working"
+    },
+    {
+      "at": 200,
+      "line": "chief working; tasks T-1:done T-2:working T-3:waiting"
+    },
+    {
+      "at": 205,
+      "line": "chief working; tasks T-1:done T-2:done T-3:waiting"
+    },
+    {
+      "at": 210,
+      "line": "chief working; tasks T-1:accepted T-2:done T-3:waiting"
+    },
+    {
+      "at": 230,
+      "line": "chief working; tasks T-1:accepted T-2:done T-3:working"
+    },
+    {
+      "at": 235,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:working"
+    },
+    {
+      "at": 240,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:working"
+    },
+    {
+      "at": 265,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:done"
+    },
+    {
+      "at": 270,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:done"
+    },
+    {
+      "at": 275,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted"
+    },
+    {
+      "at": 336,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:accepted"
+    },
+    {
+      "at": 456,
+      "line": "quiet: the run is over"
+    }
+  ]
+}

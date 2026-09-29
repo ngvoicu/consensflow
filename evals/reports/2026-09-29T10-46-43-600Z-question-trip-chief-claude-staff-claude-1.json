@@ -1,0 +1,318 @@
+{
+  "scenario": "question-trip",
+  "chief": "claude",
+  "model": "claude-opus-5",
+  "effort": "high",
+  "staffEffort": "medium",
+  "staff": [
+    "claude"
+  ],
+  "staffModels": {
+    "eval-claude-worker": "claude-haiku-4-5-20251001",
+    "eval-claude-worker-2": "claude-haiku-4-5-20251001",
+    "eval-claude-advisor": "claude-haiku-4-5-20251001",
+    "eval-claude-reviewer": "claude-haiku-4-5-20251001"
+  },
+  "run": 1,
+  "seconds": 416,
+  "metrics": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Proiectul e la /Users/gabrielvoicu/.consensflow-candidate/evals/workspace (site static, pagini în site/). Lucrezi de la…",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-worker-velvet-juniper"
+      },
+      {
+        "number": 2,
+        "title": "Proiectul e la /Users/gabrielvoicu/.consensflow-candidate/evals/workspace (site static, pagini în site/). Lucrezi de la…",
+        "pool": "advisor",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-advisor-misty-brook"
+      },
+      {
+        "number": 3,
+        "title": "Proiectul e la /Users/gabrielvoicu/.consensflow-candidate/evals/workspace (site static). Lucrezi de la zero: nu ai cont…",
+        "pool": "reviewer",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-reviewer-dusky-harbor"
+      }
+    ],
+    "parallel": 3,
+    "advice": 1,
+    "reviews": 1,
+    "questionsOnBoard": 0,
+    "notesToHuman": [
+      {
+        "id": 13,
+        "body": "Testul de funcționare pentru întrebări: toate trei sarcinile au întrebat înainte de lucru, au primit răspunsul în fereastra lor și au continuat cu el. T-1, T-2 și T-3 sunt acceptate.\n\nT-1 — worker (@e"
+      }
+    ],
+    "notesText": "Testul de funcționare pentru întrebări: toate trei sarcinile au întrebat înainte de lucru, au primit răspunsul în fereastra lor și au continuat cu el. T-1, T-2 și T-3 sunt acceptate.\n\nT-1 — worker (@eval-claude-worker-velvet-juniper), m-2.\nA întrebat: „Ce culoare să aibă butonul Contact?\"\nRăspunsul meu: albastru. A creat fișierul nou site/notes.md, cu o singură linie: albastru.\n\nT-2 — advisor (@eval-claude-advisor-misty-brook), m-4.\nA întrebat: „Pentru ce public e site-ul?\"\nRăspunsul meu: manageri. A recomandat fontul Inter, pentru claritate pe ecran, aspect profesional și citibilitate bună în interfețe cu conținut dens.\n\nT-3 — reviewer (@eval-claude-reviewer-dusky-harbor), m-8.\nA întrebat, înainte de concluzii, punând în întrebare conținutul integral al fișierului interne/intrebare-reviewer.md: cele 12 întrebări numerotate, fiecare cerând dacă la revizuirea lui site/index.html verifică un anumit aspect (structura paginii principale, tonul textelor, butonul de evaluare, subsolul cu linkuri, pagina de legislație, versiunea în engleză, culorile și contrastul, fonturile pentru ecrane mici, meniul de jos, textul despre confidențialitate, trimiterile către specialiști, ordinea secțiunilor) și în versiunea engleză sau doar în cea română, cu aceeași motivare pentru fiecare: pagina română e cea aprobată acum, engleza urmează după aprobarea textului, iar o verificare dublă ar lungi revizuirea fără să schimbe ce se publică.\nAm verificat: textul primit e identic, cuvânt cu cuvânt, cu fișierul, inclusiv ultimul rând.\nCodul de pe ultimul rând al întrebării reviewerului: PLOP-6142\nRăspunsul meu: doar versiunea română. A revizuit apoi site/index.html în română; principala observație: lipsește un CTA proeminent în zona de conținut principal, restul structurii și limbajului fiind coerente.\n\nNiciun alt fișier nu a fost modificat: am comparat hash-urile tuturor fișierelor înainte și după, iar singura diferență este site/notes.md, nou.",
+    "longestResult": {
+      "worker": 8,
+      "advisor": 440,
+      "reviewer": 1712
+    },
+    "taskCount": 3,
+    "chiefId": 2,
+    "chiefHarness": "claude-code",
+    "humanId": 1,
+    "chiefTurns": 23,
+    "chiefEdits": 0,
+    "chiefLastWords": "Testul e complet. Toate trei sarcinile au întrebat înainte de lucru, prin `cf ask`, și au continuat cu răspunsul primit; T-1, T-2 și T-3 sunt acceptate, iar nota (m-13) e pe board.\n\n- **Worker (T-1)** — „Ce culoare să aibă butonul Contact?\" → *albastru*; a scris `site/notes.md`, o singură linie: `albastru`.\n- **Advisor (T-2)** — „Pentru ce public e site-ul?\" → *manageri*; a recomandat fontul Inter.\n- **Reviewer (T-3)** — a pus întrebarea din `interne/intrebare-reviewer.md` integral și verbatim (verificat cuvânt cu cuvânt față de fișier) → *doar versiunea română*. Codul de pe ultimul rând: **PLOP-6142**.\n\nNiciun alt fișier nu s-a modificat: comparația hash-urilor înainte/după arată o singură diferență, `site/notes.md`, nou.",
+    "ownerMessages": [
+      1035,
+      206,
+      196,
+      197,
+      3231,
+      628,
+      1902
+    ],
+    "askRefused": 0,
+    "ownerQuestions": {
+      "questions": 0,
+      "turnsAsking": 0,
+      "pickers": 0,
+      "texts": []
+    },
+    "plumbing": {
+      "briefs": 3,
+      "briefsDelivered": 3,
+      "results": 3,
+      "resultsDelivered": 3,
+      "memberQuestions": 3,
+      "memberQuestionsAnswered": 3,
+      "answersDelivered": 3,
+      "accepted": 3,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0
+    },
+    "memberQuestionsBy": [
+      {
+        "role": "advisor",
+        "harness": "claude-code",
+        "asked": 1,
+        "answered": 1,
+        "delivered": 1,
+        "longest": 27
+      },
+      {
+        "role": "reviewer",
+        "harness": "claude-code",
+        "asked": 1,
+        "answered": 1,
+        "delivered": 1,
+        "longest": 6249
+      },
+      {
+        "role": "worker",
+        "harness": "claude-code",
+        "asked": 1,
+        "answered": 1,
+        "delivered": 1,
+        "longest": 35
+      }
+    ],
+    "filesChanged": [
+      "site/notes.md"
+    ]
+  },
+  "checks": [
+    {
+      "name": "a worker, an advisor and a reviewer each get a task",
+      "ok": true
+    },
+    {
+      "name": "the worker asks the chief, and the answer reaches its window",
+      "ok": true
+    },
+    {
+      "name": "the advisor asks the chief, and the answer reaches its window",
+      "ok": true
+    },
+    {
+      "name": "the reviewer asks the chief, and the answer reaches its window",
+      "ok": true
+    },
+    {
+      "name": "the long question reaches the chief whole (over 4000 characters)",
+      "ok": true
+    },
+    {
+      "name": "the chief's note holds the long question's code",
+      "ok": true
+    },
+    {
+      "name": "all three tasks are accepted",
+      "ok": true
+    },
+    {
+      "name": "the owner is not asked anything",
+      "ok": true
+    }
+  ],
+  "mechanics": [
+    {
+      "name": "every task brief was delivered (3/3)",
+      "ok": true
+    },
+    {
+      "name": "every result reached the chief (3/3)",
+      "ok": true
+    },
+    {
+      "name": "every question a member asked the chief was answered (3/3)",
+      "ok": true
+    },
+    {
+      "name": "every answer reached the member (3/3)",
+      "ok": true
+    },
+    {
+      "name": "every tell the chief sent was answered (0/0)",
+      "ok": true
+    },
+    {
+      "name": "the board showed every task (3/3)",
+      "ok": true
+    }
+  ],
+  "chiefScreen": [
+    "✻",
+    "⏺✻ Booping… (45s · ↓ 1.5k tokens)❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus64187tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "✽",
+    "6",
+    "✻",
+    "✶",
+    "✳",
+    "Testulecomplet.Toatetreisarcinileauîntrebatînaintedelucru,princf",
+    "✢",
+    "·",
+    "…",
+    "7",
+    "✢g",
+    "ask,șiaucontinuatcurăspunsulprimit;T-1,T-2șiT-3suntacceptate,iar✢Booping… (47s · ↓1.5k tokens)────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           64187 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "nota(m-13)epeboard.-────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           64187 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Worker (T-1)—„CeculoaresăaibăbutonulContact?\"→albastru;ascris",
+    "site/notes.md,osingurălinie:albastru.  -❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus64187tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Advisor (T-2)—„Pentrucepublicesite-ul?\"→manageri;arecomandatfontulInter.  -❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus64187tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Reviewer (T-3)—apusîntrebareadininterne/intrebare-reviewer.mdintegral",
+    "șiverbatim(verificatcuvântcucuvântfațădefișier)→doar versiunea ────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           64187 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "română.Coduldepeultimulrând:PLOP-6142.❯ ────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus64187tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "Niciunaltfișiernus-amodificat:comparațiahash-urilorînainte/dupăarată────────────────────────────────────────────────────────────────────────────────❯ ────────────────────────────────────────────────────────────────────────────────workspace Opus                                           64187 tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "osingurădiferență,site/notes.md,nou.· Booping… (running Stop hook · 51s · ↓1.7k tokens)────────────────────────────────────────────────────────────────────────────────❯",
+    "────────────────────────────────────────────────────────────────────────────────",
+    "workspace Opus64995tokens",
+    "⏵⏵bypasspermissionson (shift+tabtocycle)·←1agent/rc",
+    "✻Cogitated for 51s· done 1:44PM❯",
+    "arată-mi nota cu cf inbox"
+  ],
+  "arm": "card",
+  "terminalAnswers": 0,
+  "terminalReplies": 0,
+  "pickerAnswers": 0,
+  "followUpsSent": 0,
+  "refusedApprovals": [],
+  "gate": false,
+  "approvals": 0,
+  "log": [
+    {
+      "at": 70,
+      "line": "chief (claude) ready; typing the prompt"
+    },
+    {
+      "at": 80,
+      "line": "chief working; tasks none"
+    },
+    {
+      "at": 160,
+      "line": "chief working; tasks T-1:working"
+    },
+    {
+      "at": 165,
+      "line": "chief working; tasks T-1:waiting T-2:working"
+    },
+    {
+      "at": 170,
+      "line": "chief working; tasks T-1:waiting T-2:waiting"
+    },
+    {
+      "at": 175,
+      "line": "chief working; tasks T-1:waiting T-2:waiting T-3:queued"
+    },
+    {
+      "at": 180,
+      "line": "chief working; tasks T-1:waiting T-2:waiting T-3:working"
+    },
+    {
+      "at": 185,
+      "line": "chief working; tasks T-1:working T-2:waiting T-3:working"
+    },
+    {
+      "at": 190,
+      "line": "chief idle; tasks T-1:done T-2:working T-3:waiting"
+    },
+    {
+      "at": 195,
+      "line": "chief working; tasks T-1:done T-2:working T-3:waiting"
+    },
+    {
+      "at": 200,
+      "line": "chief working; tasks T-1:accepted T-2:done T-3:waiting"
+    },
+    {
+      "at": 220,
+      "line": "chief working; tasks T-1:accepted T-2:done T-3:waiting"
+    },
+    {
+      "at": 225,
+      "line": "chief working; tasks T-1:accepted T-2:done T-3:working"
+    },
+    {
+      "at": 230,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:working"
+    },
+    {
+      "at": 245,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:done"
+    },
+    {
+      "at": 250,
+      "line": "chief working; tasks T-1:accepted T-2:accepted T-3:accepted"
+    },
+    {
+      "at": 296,
+      "line": "chief idle; tasks T-1:accepted T-2:accepted T-3:accepted"
+    },
+    {
+      "at": 416,
+      "line": "quiet: the run is over"
+    }
+  ]
+}
