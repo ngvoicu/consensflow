@@ -737,6 +737,27 @@ export const AGENT_PRESETS = [
     model: "claude-sonnet-5-5",
     effort: "max",
   },
+  // Sonnet 5.5 below max (2026-09-30): both levels answered on Claude Code 2.1.286.
+  {
+    preset: "forseti",
+    id: "forseti",
+    name: "Forseti",
+    label: "Claude Code Sonnet 5.5 XHIGH",
+    description: "Implementation, code review and planning.",
+    kind: "claude-code",
+    model: "claude-sonnet-5-5",
+    effort: "xhigh",
+  },
+  {
+    preset: "ullr",
+    id: "ullr",
+    name: "Ullr",
+    label: "Claude Code Sonnet 5.5 MEDIUM",
+    description: "Small code changes and focused reviews.",
+    kind: "claude-code",
+    model: "claude-sonnet-5-5",
+    effort: "medium",
+  },
   {
     preset: "nike",
     id: "nike",

@@ -120,9 +120,9 @@ test('Agents lists every catalog agent as one row with nothing to add, and takes
   page.on('request', (request) => requests.push(new URL(request.url()).pathname))
   try {
     await page.goto(`${server.url}/?token=${server.token}`)
-    await expect(page.locator('#agents-count')).toHaveText('92 of 92 shown')
+    await expect(page.locator('#agents-count')).toHaveText('94 of 94 shown')
     await expect(page.locator('#lede')).toHaveText(
-      '92 agents, the catalog’s and your own; a project’s staff is picked from them.',
+      '94 agents, the catalog’s and your own; a project’s staff is picked from them.',
     )
     await expect(page.locator('#agents .offer')).toHaveCount(0)
     await expect(page.locator('#agents').getByRole('button', { name: /^Add/ })).toHaveCount(0)
@@ -157,7 +157,7 @@ test('Agents lists every catalog agent as one row with nothing to add, and takes
     expect(listAgents(t.env).find((a) => a.name === 'custom').workTier).toBe('complex')
     await expect(form.getByLabel('Work tier')).toHaveValue('auto')
     await expect(page.locator('#lede')).toContainText('1 is yours')
-    await expect(page.locator('#agents-count')).toHaveText('93 of 93 shown')
+    await expect(page.locator('#agents-count')).toHaveText('95 of 95 shown')
     // A catalog name is not yours to define again.
     await form.locator('[name="name"]').fill('gefjon')
     await form.locator('[name="harness"]').selectOption('claude')
@@ -688,13 +688,13 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
         'Work tier',
       ])
       await expect(screen.getByRole('heading', { level: 3 })).toHaveCount(0)
-      await expect(screen.locator('#agents-count')).toHaveText('100 of 100 shown')
+      await expect(screen.locator('#agents-count')).toHaveText('102 of 102 shown')
     }
     await fixture.saved(own)
     await expect(own.locator('#agents-count')).toHaveText('8 of 8 shown')
     await search.fill('Astra')
     await expect(own.locator('#agents-count')).toHaveText('5 of 8 shown')
-    await expect(page.locator('#agents-count')).toHaveText('100 of 100 shown')
+    await expect(page.locator('#agents-count')).toHaveText('102 of 102 shown')
     await expect(own.locator('.callsign')).toHaveCount(5)
     await group.selectOption('model-reasoning')
     await expect(own.getByRole('heading', { level: 3 })).toHaveCount(4)
@@ -703,7 +703,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     ).toBeVisible()
     await page.getByRole('searchbox').fill('Astra')
     await page.getByLabel('Group by').selectOption('model-reasoning')
-    await expect(page.locator('#agents-count')).toHaveText('20 of 100 shown')
+    await expect(page.locator('#agents-count')).toHaveText('20 of 102 shown')
     await expect(page.getByRole('heading', { level: 3 })).toHaveText([
       'GPT-6 Astra · Max · 3',
       'GPT-6 Astra · Xhigh · 5',
@@ -731,7 +731,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     await expect(own.locator('.callsign')).toHaveCount(5)
     await search.fill('OpenRouter')
     await expect(own.locator('#agents')).toContainText('No agents match')
-    await expect(page.locator('#agents-count')).toHaveText('20 of 100 shown')
+    await expect(page.locator('#agents-count')).toHaveText('20 of 102 shown')
     await own.getByRole('button', { name: 'Clear filters' }).click()
     await expect(search).toHaveValue('')
     await expect(group).toHaveValue('model-reasoning')
@@ -756,7 +756,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     await page.getByRole('button', { name: 'Clear filters' }).click()
     await expect(page.getByRole('searchbox')).toHaveValue('')
     await expect(page.getByLabel('Group by')).toHaveValue('model-reasoning')
-    await expect(page.getByRole('heading', { level: 3 })).toHaveCount(45)
+    await expect(page.getByRole('heading', { level: 3 })).toHaveCount(47)
     await expect(group).toHaveValue('harness')
     await group.selectOption('model-reasoning')
     for (const name of [
@@ -770,7 +770,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     ]) {
       await expect(own.getByRole('heading', { name, exact: true })).toBeVisible()
     }
-    await expect(page.locator('#agents-count')).toHaveText('100 of 100 shown')
+    await expect(page.locator('#agents-count')).toHaveText('102 of 102 shown')
     await expect(member(page, 'astraeus')).toBeVisible()
     // No description of a model anywhere: its tier and scores say it all.
     await expect(page.locator('#agents')).not.toContainText('Good for')

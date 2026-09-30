@@ -290,7 +290,7 @@ it('ships all compatible low/medium choices with stable identities and Pi OpenRo
       assert.equal(entry.effort, effort)
     }
   }
-  assert.equal(Object.values(CATALOG).flat().length, 92)
+  assert.equal(Object.values(CATALOG).flat().length, 94)
   for (const name of ['orpheus', 'linus', 'erato', 'kronos', 'atlas']) {
     assert.match(catalogEntry(name).model, /^openrouter\/anthropic\//)
     assert.equal(catalogEntry(name).profile.routeLabel, 'OpenRouter · API')
@@ -415,11 +415,26 @@ it('carries GPT-6.1 Sol wherever Sol was, Sonnet 5.5, and MiMo V2.6 Pro through 
     assert.equal(entry.profile.modelLabel, 'GPT-6.1 Sol', entry.name)
     assert.match(entry.description, / GPT 6\.1 Sol /, entry.name)
   }
-  const hermod = catalogEntry('hermod')
-  assert.deepEqual(
-    [hermod.model, hermod.effort, hermod.description, hermod.profile.modelLabel],
-    ['claude-sonnet-5-5', 'max', 'Claude Code Sonnet 5.5 MAX', 'Claude Sonnet 5.5'],
-  )
+  // Sonnet 5.5 at max, xhigh and medium, each probed on Claude Code 2.1.286.
+  for (const [name, effort, label, tier] of [
+    ['hermod', 'max', 'MAX', 'complex'],
+    ['forseti', 'xhigh', 'XHIGH', 'standard'],
+    ['ullr', 'medium', 'MEDIUM', 'standard'],
+  ]) {
+    const entry = catalogEntry(name)
+    assert.deepEqual(
+      [entry.harness, entry.model, entry.effort, entry.description, entry.profile.modelLabel],
+      [
+        'claude',
+        'claude-sonnet-5-5',
+        effort,
+        `Claude Code Sonnet 5.5 ${label}`,
+        'Claude Sonnet 5.5',
+      ],
+      name,
+    )
+    assert.equal(entry.profile.workTier, tier, name)
+  }
   for (const [name, harness] of [
     ['selene', 'pi'],
     ['idun', 'opencode'],
