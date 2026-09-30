@@ -1163,7 +1163,10 @@ export function agentProfile(agent) {
       tier = ['max', 'ultra'].includes(effort) ? 'critical' : ['high', 'xhigh'].includes(effort) ? 'complex' : effort === 'medium' ? 'standard' : 'light';
     else if (profile.modelKey === 'claude-opus-5.5')
       tier = effort === 'max' ? 'critical' : effort === 'xhigh' ? 'complex' : effort === 'low' ? 'light' : 'standard';
-    else if (profile.modelKey === 'gpt-6.1-sol' && !['low', 'medium'].includes(effort)) tier = 'standard';
+    else if (profile.modelKey === 'gpt-6.1-sol')
+      tier = ['max', 'ultra'].includes(effort) ? 'complex' : ['low', 'medium'].includes(effort) ? 'light' : 'standard';
+    else if (profile.modelKey === 'claude-sonnet-5.5')
+      tier = effort === 'max' ? 'complex' : effort === 'low' ? 'light' : 'standard';
   }
   validateWorkTier(agent.workTier);
   profile.workTier = agent.workTier ?? tier;

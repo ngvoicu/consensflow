@@ -355,11 +355,14 @@ it('assigns four work tiers by model and effort across routes, without agent-nam
     ['ilmarinen', 'complex'],
     ['apollo', 'complex'],
     ['kronos', 'complex'],
+    // Sol and Sonnet at max are complex work (Gabriel, 2026-09-30).
+    ['hyperion', 'complex'],
+    ['hermod', 'complex'],
     ['artemis', 'standard'],
     ['thalia', 'standard'],
     ['maia', 'standard'],
-    ['hyperion', 'standard'],
     ['phoebus', 'standard'],
+    ['theia', 'standard'],
     ['diana', 'light'],
     ['electra', 'light'],
     ['pygmalion', 'light'],
@@ -380,6 +383,22 @@ it('assigns four work tiers by model and effort across routes, without agent-nam
       assert.equal(entry.profile.workTier, twin.profile.workTier, harness + entry.name)
     }
   }
+  // Sonnet 5.5 below max, as an agent of your own on Claude Code: xhigh, high
+  // and medium are standard work, low is light.
+  for (const [effort, tier] of [
+    ['xhigh', 'standard'],
+    ['high', 'standard'],
+    ['medium', 'standard'],
+    ['low', 'light'],
+  ]) {
+    const sonnet = agentProfile({ harness: 'claude', model: 'claude-sonnet-5-5', effort })
+    assert.equal(sonnet.workTier, tier, `Sonnet 5.5 ${effort}`)
+  }
+  // Codex's ultra sits above max: Sol there is complex work too.
+  assert.equal(
+    agentProfile({ harness: 'codex', model: 'gpt-6.1-sol', effort: 'ultra' }).workTier,
+    'complex',
+  )
   const custom = agentProfile({ harness: 'codex', model: 'custom', workTier: 'critical' })
   assert.equal(custom.workTier, 'critical')
 })
