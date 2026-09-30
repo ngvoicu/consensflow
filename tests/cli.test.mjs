@@ -209,7 +209,7 @@ describe('the catalog turns a name into a working agent', () => {
     const listed = JSON.parse((await cf(['agent', 'list', '--json'], t.env)).stdout)
     const hyperion = listed.agents.find((p) => p.name === 'hyperion')
     assert.equal(hyperion.harness, 'codex')
-    assert.equal(hyperion.model, 'gpt-5.6-sol')
+    assert.equal(hyperion.model, 'gpt-6.1-sol')
     assert.equal(hyperion.effort, 'max')
     const out = await cf(['agent', 'add', 'hyperion'], t.env)
     assert.equal(out.code, 1)

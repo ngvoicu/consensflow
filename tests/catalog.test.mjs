@@ -56,6 +56,9 @@ describe('every tool ships a list of ready-made agents', () => {
       // where OpenRouter's does: that is why ymir names `high` and audhumla,
       // the same model on the other road, names nothing.
       'audhumla', // Nemotron 3 Ultra free on OpenCode Zen
+      // MiMo V2.6 Pro (2026-09-30): reasoning on or off, no level in any catalog.
+      'selene', // on pi
+      'idun', // on opencode
     ])
     for (const [harness, entries] of Object.entries(CATALOG)) {
       if ((EFFORTS[harness] ?? []).length === 0) continue
@@ -218,7 +221,7 @@ describe('every tool ships a list of ready-made agents', () => {
     assert.deepEqual(ultras, [])
     const hyperion = catalogEntry('hyperion')
     assert.equal(hyperion.effort, 'max')
-    assert.equal(hyperion.description, 'Codex GPT 5.6 Sol MAX')
+    assert.equal(hyperion.description, 'Codex GPT 6.1 Sol MAX')
   })
 })
 
@@ -265,9 +268,9 @@ describe('catalog presentation follows actual model and effort', () => {
 
 it('ships all compatible low/medium choices with stable identities and Pi OpenRouter routing', () => {
   const matrix = [
-    ['codex', 'gpt-5.6-sol', 'hemera', 'phaethon'],
-    ['pi', 'openai-codex/gpt-5.6-sol', 'leto', 'asterope'],
-    ['opencode', 'openrouter/openai/gpt-5.6-sol', 'arvakr', 'alsvidr'],
+    ['codex', 'gpt-6.1-sol', 'hemera', 'phaethon'],
+    ['pi', 'openai-codex/gpt-6.1-sol', 'leto', 'asterope'],
+    ['opencode', 'openrouter/openai/gpt-6.1-sol', 'arvakr', 'alsvidr'],
     ['codex', 'gpt-6-astra', 'electra', 'maia'],
     ['pi', 'openai-codex/gpt-6-astra', 'alcyone', 'merope'],
     ['opencode', 'openrouter/openai/gpt-6-astra', 'dagr', 'skirnir'],
@@ -287,7 +290,7 @@ it('ships all compatible low/medium choices with stable identities and Pi OpenRo
       assert.equal(entry.effort, effort)
     }
   }
-  assert.equal(Object.values(CATALOG).flat().length, 90)
+  assert.equal(Object.values(CATALOG).flat().length, 92)
   for (const name of ['orpheus', 'linus', 'erato', 'kronos', 'atlas']) {
     assert.match(catalogEntry(name).model, /^openrouter\/anthropic\//)
     assert.equal(catalogEntry(name).profile.routeLabel, 'OpenRouter · API')
@@ -379,4 +382,36 @@ it('assigns four work tiers by model and effort across routes, without agent-nam
   }
   const custom = agentProfile({ harness: 'codex', model: 'custom', workTier: 'critical' })
   assert.equal(custom.workTier, 'critical')
+})
+
+it('carries GPT-6.1 Sol wherever Sol was, Sonnet 5.5, and MiMo V2.6 Pro through OpenRouter on Pi and OpenCode', () => {
+  // 2026-09-30: every Sol preset moved to 6.1 (probed on Codex 0.159.2, Pi 0.99.1,
+  // OpenCode 1.18.33), Sonnet to 5.5, and MiMo V2.6 Pro joined.
+  const sol = Object.values(CATALOG)
+    .flat()
+    .filter((entry) => /gpt-[\d.]+-sol$/.test(entry.model))
+  assert.equal(sol.length, 13)
+  for (const entry of sol) {
+    assert.match(entry.model, /gpt-6\.1-sol$/, entry.name)
+    assert.equal(entry.profile.modelLabel, 'GPT-6.1 Sol', entry.name)
+    assert.match(entry.description, / GPT 6\.1 Sol /, entry.name)
+  }
+  const hermod = catalogEntry('hermod')
+  assert.deepEqual(
+    [hermod.model, hermod.effort, hermod.description, hermod.profile.modelLabel],
+    ['claude-sonnet-5-5', 'max', 'Claude Code Sonnet 5.5 MAX', 'Claude Sonnet 5.5'],
+  )
+  for (const [name, harness] of [
+    ['selene', 'pi'],
+    ['idun', 'opencode'],
+  ]) {
+    const entry = catalogEntry(name)
+    assert.ok(entry, name)
+    assert.equal(entry.harness, harness)
+    assert.equal(entry.model, 'openrouter/xiaomi/mimo-v2.6-pro')
+    // MiMo takes reasoning on or off, no level: its presets name none.
+    assert.equal(entry.effort ?? entry.thinking, undefined, name)
+    assert.equal(entry.profile.modelLabel, 'MiMo V2.6 Pro')
+    assert.equal(entry.profile.routeLabel, 'OpenRouter · API')
+  }
 })

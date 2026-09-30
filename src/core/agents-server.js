@@ -348,7 +348,7 @@ const MODEL_ORDER = [
   /^gemini-[0-9.]+-pro(?:-|$)/, /^gemini-[0-9.]+-flash(?:-|$)/, /^gemini-/,
   /^deepseek-v4(?:\\.\\d+)?-pro(?:-|$)/, /^deepseek-v4(?:\\.\\d+)?-flash(?:-|$)/, /^deepseek-/,
   /^glm-[0-9.]+$/, /^glm-[0-9.]+-flash(?:-|$)/, /^glm-/,
-  /^grok-/, /^kimi-/, /^laguna-/, /^minimax-/, /^muse-/, /^nemotron-/,
+  /^grok-/, /^kimi-/, /^laguna-/, /^mimo-/, /^minimax-/, /^muse-/, /^nemotron-/,
   /^qwen[0-9.]+-max(?:-|$)/, /^qwen[0-9.]+-27b(?:-|$)/, /^qwen[0-9]/,
   /^codex-image$/,
 ];

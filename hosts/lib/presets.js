@@ -25,9 +25,18 @@ import { slugify, stripMention } from "./utils.js";
 // `max`. Until then the rows held `high`, the one level two catalogs agreed on. The OpenCode Go
 // rows (every model reached a second way through Go) were dropped on 2026-09-24.
 //
-// The GPT 5.6 trio through OpenCode (sunna/jord/bil) is deliberately NOT at its ceiling: it holds
+// The GPT trio through OpenCode (sunna/jord/bil) is deliberately NOT at its ceiling: it holds
 // the xhigh tier that the same three models occupy on codex and pi, so the trio means the same
 // thing on every harness. A tier ladder is a choice; a level the model lacks is a bug.
+//
+// --- GPT 6.1 Sol, Sonnet 5.5, MiMo V2.6 Pro (2026-09-30) -------------------
+// Every Sol row moved from 5.6 to 6.1 under its old name (Terra and Luna stay 5.6). 6.1 Sol takes
+// low..max on OpenRouter, models.dev and pi 0.99.1's thinking map, so no row's level changed;
+// `ultra` was not probed on 6.1. Probed with a real request: Codex needs 0.159.2 (0.158.0 is
+// refused for a ChatGPT account), pi and opencode ran it through OpenRouter; pi's openai-codex
+// route waited on a fresh login. Hermod moved to Sonnet 5.5 (claude-sonnet-5-5, answered as
+// itself), still at max. MiMo V2.6 Pro (selene on pi, idun on opencode) takes reasoning on or
+// off and no level, so its rows name none; both ran through OpenRouter.
 //
 // --- Fable 5.1 (updated 2026-09-10) --------------------------------------
 // Native Claude uses claude-fable-5-1; OpenRouter uses anthropic/claude-fable-5.1.
@@ -69,7 +78,7 @@ import { slugify, stripMention } from "./utils.js";
 // The effort ladder was probed level by level rather than assumed, and codex — unlike opencode —
 // really validates: a bogus `model_reasoning_effort` is a 400, which is what makes each probe
 // mean something. `minimal` is refused; low, medium, high, xhigh, max and ultra all answer. So
-// the model's ceiling is ULTRA and these two rows deliberately sit below it, the way the GPT 5.6
+// the model's ceiling is ULTRA and these two rows deliberately sit below it, the way the GPT
 // OpenCode trio does: a tier ladder is a choice, and asteria/astraeus were asked for as xhigh and
 // max. Add an ultra row when someone wants the top; the level is there and proven.
 export const AGENT_PRESETS = [
@@ -87,60 +96,60 @@ export const AGENT_PRESETS = [
     preset: "hemera",
     id: "hemera",
     name: "Hemera",
-    label: "Codex GPT 5.6 Sol LOW",
+    label: "Codex GPT 6.1 Sol LOW",
     description: "Small code changes and focused reviews.",
     kind: "codex",
-    model: "gpt-5.6-sol",
+    model: "gpt-6.1-sol",
     effort: "low",
   },
   {
     preset: "phaethon",
     id: "phaethon",
     name: "Phaethon",
-    label: "Codex GPT 5.6 Sol MEDIUM",
+    label: "Codex GPT 6.1 Sol MEDIUM",
     description: "Implementation, code review and planning.",
     kind: "codex",
-    model: "gpt-5.6-sol",
+    model: "gpt-6.1-sol",
     effort: "medium",
   },
   {
     preset: "leto",
     id: "leto",
     name: "Leto",
-    label: "Pi GPT 5.6 Sol LOW",
+    label: "Pi GPT 6.1 Sol LOW",
     description: "Small code changes and focused reviews.",
     kind: "pi",
-    model: "openai-codex/gpt-5.6-sol",
+    model: "openai-codex/gpt-6.1-sol",
     thinking: "low",
   },
   {
     preset: "asterope",
     id: "asterope",
     name: "Asterope",
-    label: "Pi GPT 5.6 Sol MEDIUM",
+    label: "Pi GPT 6.1 Sol MEDIUM",
     description: "Implementation, code review and planning.",
     kind: "pi",
-    model: "openai-codex/gpt-5.6-sol",
+    model: "openai-codex/gpt-6.1-sol",
     thinking: "medium",
   },
   {
     preset: "arvakr",
     id: "arvakr",
     name: "Arvakr",
-    label: "OpenCode GPT 5.6 Sol LOW",
+    label: "OpenCode GPT 6.1 Sol LOW",
     description: "Small code changes and focused reviews.",
     kind: "opencode",
-    model: "openrouter/openai/gpt-5.6-sol",
+    model: "openrouter/openai/gpt-6.1-sol",
     effort: "low",
   },
   {
     preset: "alsvidr",
     id: "alsvidr",
     name: "Alsvidr",
-    label: "OpenCode GPT 5.6 Sol MEDIUM",
+    label: "OpenCode GPT 6.1 Sol MEDIUM",
     description: "Implementation, code review and planning.",
     kind: "opencode",
-    model: "openrouter/openai/gpt-5.6-sol",
+    model: "openrouter/openai/gpt-6.1-sol",
     effort: "medium",
   },
   {
@@ -277,7 +286,7 @@ export const AGENT_PRESETS = [
     effort: "medium",
   },
 
-  // --- GPT 5.6 celestial trio (Codex) --------------------------------------
+  // --- GPT celestial trio (Codex): Sol 6.1, Terra and Luna 5.6 --------------
   // OpenAI's 2026 family: Sol (flagship), Terra (balanced), Luna (fast/affordable).
   // Codex's 5.6 effort ladder extends past xhigh with "max" and "ultra" (ultra =
   // max reasoning + automatic task delegation; Sol/Terra only). All combos verified live.
@@ -288,30 +297,30 @@ export const AGENT_PRESETS = [
     preset: "hyperion",
     id: "hyperion",
     name: "Hyperion",
-    label: "Codex GPT 5.6 Sol MAX",
+    label: "Codex GPT 6.1 Sol MAX",
     description: "Feature work, code review and technical planning.",
     kind: "codex",
-    model: "gpt-5.6-sol",
+    model: "gpt-6.1-sol",
     effort: "max",
   },
   {
     preset: "phoebus",
     id: "phoebus",
     name: "Phoebus",
-    label: "Codex GPT 5.6 Sol XHIGH",
+    label: "Codex GPT 6.1 Sol XHIGH",
     description: "Feature work, code review and technical planning.",
     kind: "codex",
-    model: "gpt-5.6-sol",
+    model: "gpt-6.1-sol",
     effort: "xhigh",
   },
   {
     preset: "theia",
     id: "theia",
     name: "Theia",
-    label: "Codex GPT 5.6 Sol HIGH",
+    label: "Codex GPT 6.1 Sol HIGH",
     description: "Feature work, code review and technical planning.",
     kind: "codex",
-    model: "gpt-5.6-sol",
+    model: "gpt-6.1-sol",
     effort: "high",
   },
   {
@@ -460,29 +469,29 @@ export const AGENT_PRESETS = [
     effort: "high",
   },
 
-  // --- GPT 5.6 on the other engines that reach it --------------------------
+  // --- GPT Sol 6.1, Terra and Luna 5.6 on the other engines ------------------
   // Pi rides the same ChatGPT (Codex) login the codex trio uses — no OpenRouter
   // credits; OpenCode reaches the same three variants through OpenRouter, whose
-  // catalog lists openai/gpt-5.6-{sol,terra,luna}. Greek names on pi, Norse on
+  // catalog lists openai/gpt-6.1-sol and openai/gpt-5.6-{terra,luna}. Greek names on pi, Norse on
   // opencode, matching the rest of the catalog.
   {
     preset: "aether",
     id: "aether",
     name: "Aether",
-    label: "Pi GPT 5.6 Sol XHIGH",
+    label: "Pi GPT 6.1 Sol XHIGH",
     description: "Feature work, code review and technical planning.",
     kind: "pi",
-    model: "openai-codex/gpt-5.6-sol",
+    model: "openai-codex/gpt-6.1-sol",
     thinking: "xhigh",
   },
   {
     preset: "aurora",
     id: "aurora",
     name: "Aurora",
-    label: "Pi GPT 5.6 Sol HIGH",
+    label: "Pi GPT 6.1 Sol HIGH",
     description: "Feature work, code review and technical planning.",
     kind: "pi",
-    model: "openai-codex/gpt-5.6-sol",
+    model: "openai-codex/gpt-6.1-sol",
     thinking: "high",
   },
   {
@@ -509,20 +518,20 @@ export const AGENT_PRESETS = [
     preset: "sunna",
     id: "sunna",
     name: "Sunna",
-    label: "OpenCode GPT 5.6 Sol XHIGH",
+    label: "OpenCode GPT 6.1 Sol XHIGH",
     description: "Feature work, code review and technical planning.",
     kind: "opencode",
-    model: "openrouter/openai/gpt-5.6-sol",
+    model: "openrouter/openai/gpt-6.1-sol",
     effort: "xhigh",
   },
   {
     preset: "skinfaxi",
     id: "skinfaxi",
     name: "Skinfaxi",
-    label: "OpenCode GPT 5.6 Sol HIGH",
+    label: "OpenCode GPT 6.1 Sol HIGH",
     description: "Feature work, code review and technical planning.",
     kind: "opencode",
-    model: "openrouter/openai/gpt-5.6-sol",
+    model: "openrouter/openai/gpt-6.1-sol",
     effort: "high",
   },
   {
@@ -722,10 +731,10 @@ export const AGENT_PRESETS = [
     preset: "hermod",
     id: "hermod",
     name: "Hermod",
-    label: "Claude Code Sonnet 5 MAX",
+    label: "Claude Code Sonnet 5.5 MAX",
     description: "Everyday implementation and tests.",
     kind: "claude-code",
-    model: "claude-sonnet-5",
+    model: "claude-sonnet-5-5",
     effort: "max",
   },
   {
@@ -818,6 +827,17 @@ export const AGENT_PRESETS = [
     description: "Coding and analysis across longer tasks.",
     kind: "pi",
     model: "openrouter/minimax/minimax-m3",
+  },
+  // MiMo V2.6 Pro takes reasoning on or off, no level (models.dev: a toggle; pi: no
+  // thinking map; OpenRouter: no efforts), so it names none. Probed 2026-09-30.
+  {
+    preset: "selene",
+    id: "selene",
+    name: "Selene",
+    label: "Pi MiMo V2.6 Pro",
+    description: "Everyday coding and agent tasks at a low price.",
+    kind: "pi",
+    model: "openrouter/xiaomi/mimo-v2.6-pro",
   },
   {
     preset: "prometheus",
@@ -960,6 +980,15 @@ export const AGENT_PRESETS = [
     model: "openrouter/minimax/minimax-m3",
   },
   {
+    preset: "idun",
+    id: "idun",
+    name: "Idun",
+    label: "OpenCode MiMo V2.6 Pro",
+    description: "Everyday coding and agent tasks at a low price.",
+    kind: "opencode",
+    model: "openrouter/xiaomi/mimo-v2.6-pro",
+  },
+  {
     preset: "mani",
     id: "mani",
     name: "Mani",
@@ -1084,13 +1113,13 @@ export const AGENT_PRESETS = [
 // Keys describe exact model identities, not callsigns or saved preset provenance.
 const MODEL_LABELS = {
   'gpt-6-astra': 'GPT-6 Astra',
-  'gpt-5.6-sol': 'GPT-5.6 Sol',
+  'gpt-6.1-sol': 'GPT-6.1 Sol',
   'gpt-5.6-terra': 'GPT-5.6 Terra',
   'gpt-5.6-luna': 'GPT-5.6 Luna',
   'claude-fable-5.1': 'Claude Fable 5.1',
   'claude-fable-5': 'Claude Fable 5',
   'claude-opus-5.5': 'Claude Opus 5.5',
-  'claude-sonnet-5': 'Claude Sonnet 5',
+  'claude-sonnet-5.5': 'Claude Sonnet 5.5',
   'gemini-3.8-flash': 'Gemini 3.8 Flash',
   'deepseek-v4.1-flash': 'DeepSeek V4.1 Flash',
   'deepseek-v4-pro-0813': 'DeepSeek V4 Pro (0813)',
@@ -1105,6 +1134,7 @@ const MODEL_LABELS = {
   'nemotron-3-ultra-free': 'Nemotron 3 Ultra (Zen free)',
   'laguna-s-2.1:free': 'Laguna S 2.1 (free)',
   'muse-spark-1.3': 'Muse Spark 1.3',
+  'mimo-v2.6-pro': 'MiMo V2.6 Pro',
 }
 
 export const WORK_TIERS = {
@@ -1133,7 +1163,7 @@ export function agentProfile(agent) {
       tier = ['max', 'ultra'].includes(effort) ? 'critical' : ['high', 'xhigh'].includes(effort) ? 'complex' : effort === 'medium' ? 'standard' : 'light';
     else if (profile.modelKey === 'claude-opus-5.5')
       tier = effort === 'max' ? 'critical' : effort === 'xhigh' ? 'complex' : effort === 'low' ? 'light' : 'standard';
-    else if (profile.modelKey === 'gpt-5.6-sol' && !['low', 'medium'].includes(effort)) tier = 'standard';
+    else if (profile.modelKey === 'gpt-6.1-sol' && !['low', 'medium'].includes(effort)) tier = 'standard';
   }
   validateWorkTier(agent.workTier);
   profile.workTier = agent.workTier ?? tier;
@@ -1161,7 +1191,7 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
         .split('/')
         .at(-1)
         // Anthropic's own ids spell the version with a dash; the key with the dot, as OpenRouter does.
-        .replace(/^claude-(fable|opus)-(\d)-(\d)$/, 'claude-$1-$2.$3')
+        .replace(/^claude-(fable|opus|sonnet)-(\d)-(\d)$/, 'claude-$1-$2.$3')
         // Contributor/free are reviewed pricing and data-use routes for Muse 1.3.
         .replace(/^muse-spark-1\.3-contributor(?:-free)?$/, 'muse-spark-1.3')
     : (model ?? "default")
