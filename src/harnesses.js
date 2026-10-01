@@ -70,17 +70,25 @@ export function piSessionDir(env) {
   return piPath(env.PI_CODING_AGENT_SESSION_DIR || join(piAgentDir(env), 'sessions'), env)
 }
 
+/** The kinds of file a window can start on Windows: a program, or a script cmd.exe runs. */
+const STARTABLE = new Set(['.com', '.exe', '.bat', '.cmd'])
+
 /**
  * What an executable is called, per platform.
  *
- * On Windows a CLI on PATH is `claude.cmd` or `claude.exe` — never the bare
- * name — and there is no executable bit to test, so PATHEXT decides and
- * "the file is there" is the whole check.
+ * On Windows a CLI on PATH is `claude.cmd` or `claude.exe`, never the bare
+ * name: npm writes an extensionless sh script beside each `.cmd` shim, which
+ * no Windows program can start. There is no executable bit to test either, so
+ * PATHEXT decides, in its order, among the kinds a window can start, and "the
+ * file is there" is the whole check.
  */
 function candidateNames(command, env) {
   if ((env.OS ?? '').toLowerCase().includes('windows') || process.platform === 'win32') {
-    const exts = (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
-    return [command, ...exts.map((ext) => `${command}${ext.toLowerCase()}`)]
+    return (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
+      .split(';')
+      .map((ext) => ext.toLowerCase())
+      .filter((ext) => STARTABLE.has(ext))
+      .map((ext) => `${command}${ext}`)
   }
   return [command]
 }
