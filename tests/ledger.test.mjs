@@ -1428,6 +1428,48 @@ describe('tasks and the inbox queue', () => {
     })
   })
 
+  it('shows as overdue only a question still waiting: none withdrawn, none whose task or asker went', async () => {
+    await withDir((dir) => {
+      let at = Date.parse('2026-09-19T10:00:00.000Z')
+      const ledger = openLedger(path.join(dir, 'consensflow.db'), {
+        now: () => new Date(at),
+        names: names(),
+      })
+      try {
+        const { project, id } = staff(ledger)
+        const asks = (body, question) => {
+          const { task } = ledger.createTask(project.id, {
+            from: 'chief',
+            pool: 'worker',
+            tier: 'standard',
+            body,
+          })
+          const { message } = ledger.assignTask(project.id, task.number, id('zeus'))
+          deliver(ledger, message)
+          const from = message.recipient
+          return ledger.ask(project.id, { from, to: 'chief', task: task.number, body: question })
+        }
+        // T-1 is cancelled with its question in the chief's window; T-2's
+        // question is withdrawn before it went; diana asks about no task and
+        // leaves the staff; T-3's question waits.
+        deliver(ledger, asks('Parser', 'Which grammar?'))
+        const withdrawn = asks('Lexer', 'Which tokens?')
+        deliver(ledger, asks('Tests', 'Which runner?'))
+        deliver(ledger, ledger.ask(project.id, { from: 'diana', to: 'chief', body: 'Any work?' }))
+        ledger.cancelTask(project.id, 1, { by: 'chief' })
+        ledger.cancelMessage(withdrawn.id, 'no longer asked')
+        ledger.removeMember(project.id, 'diana')
+        at += OVERDUE_MS
+        assert.deepEqual(
+          ledger.board(project.id).overdue.map((m) => [m.taskNumber, m.body]),
+          [[3, 'Which runner?']],
+        )
+      } finally {
+        ledger.close()
+      }
+    })
+  })
+
   it("knows the one asked by participant, not by handle: another project's chief is not it", async () => {
     await withLedger((ledger) => {
       const { project } = staff(ledger)
@@ -2796,6 +2838,39 @@ describe('human approval required: the gate', () => {
         again.id,
         'into the window that asked',
       )
+    })
+  })
+
+  it('keeps a question overdue while its answer waits for the human, and again once that is declined', async () => {
+    await withDir((dir) => {
+      let at = Date.parse('2026-09-20T10:00:00.000Z')
+      const ledger = openLedger(path.join(dir, 'consensflow.db'), {
+        now: () => new Date(at),
+        names: names(),
+      })
+      try {
+        const { project, id } = gated(ledger)
+        const { number, session } = working(ledger, project, id)
+        const question = ledger.ask(project.id, {
+          from: session,
+          to: 'chief',
+          task: number,
+          body: 'Which colour?',
+        })
+        deliver(ledger, ledger.approveMessage(question.id, { by: 'human' }))
+        at += OVERDUE_MS
+        const overdue = () => ledger.board(project.id).overdue.map((m) => m.id)
+        assert.deepEqual(overdue(), [question.id])
+        const answer = ledger.answer(question.id, { from: question.recipientId, body: 'Blue' })
+        assert.deepEqual(overdue(), [question.id], 'the window still waits for an answer')
+        ledger.declineMessage(answer.id, { by: 'human' })
+        assert.deepEqual(overdue(), [question.id], 'declined, it is open again')
+        const again = ledger.answer(question.id, { from: question.recipientId, body: 'Red' })
+        ledger.approveMessage(again.id, { by: 'human' })
+        assert.deepEqual(overdue(), [], 'answered at last')
+      } finally {
+        ledger.close()
+      }
     })
   })
 

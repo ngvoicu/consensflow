@@ -2233,15 +2233,24 @@ class Ledger {
       .map(bayView)
   }
 
-  /** Questions a coordinator has left unanswered for OVERDUE_MS: the human sees them too. */
+  /**
+   * Questions a coordinator has left unanswered for OVERDUE_MS: the human sees
+   * them too. Only one still on its way or in the chief's window counts, from
+   * an asker still on the staff, about no task or one that waits on it; an
+   * answer held for the human or declined is no answer yet, as for the task.
+   */
   #overdueQuestions(projectId) {
     const before = new Date(this.#now().getTime() - OVERDUE_MS).toISOString()
     return this.#db
       .prepare(
         `${MESSAGE_SELECT}
          WHERE m.project_id = ? AND m.kind = 'question' AND r.role = 'chief'
-           AND m.state != 'gated' AND m.created_at <= ?
-           AND NOT EXISTS (SELECT 1 FROM message a WHERE a.reply_to = m.id AND a.kind = 'answer')
+           AND m.state IN ('queued', 'delivering', 'delivered') AND m.created_at <= ?
+           AND s.left_at IS NULL AND (m.task_id IS NULL OR t.state IN ('working', 'waiting'))
+           AND NOT EXISTS (
+             SELECT 1 FROM message a WHERE a.reply_to = m.id AND a.kind = 'answer'
+               AND a.state NOT IN ('gated', 'cancelled')
+           )
          ORDER BY m.id`,
       )
       .all(projectId, before)
