@@ -8,6 +8,7 @@
     "prepare-sidecar": "node scripts/prepare-sidecar.mjs",
     "sync-cli": "node scripts/sync-cli.mjs",
     "smoke:windows": "node scripts/windows-smoke.mjs",
+    "portable": "node scripts/portable.mjs",
     "test:ui": "npm run bundle:ui && playwright test tests/core-page.spec.mjs tests/updates.spec.mjs tests/harnesses.spec.mjs",
     "build": "npm run bundle:ui && npm run prepare-sidecar && tauri build",
     "dev": "npm run bundle:ui && npm run prepare-sidecar && tauri dev"
