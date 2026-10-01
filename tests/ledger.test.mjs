@@ -551,11 +551,25 @@ describe('projects and participants', () => {
 
   it('reuses the previous project staff for the next project', async () => {
     await withLedger((ledger) => {
-      staff(ledger)
+      const { project } = staff(ledger)
+      const iris = { agent: 'iris', harness: 'image', role: 'designer', tier: 'standard' }
+      ledger.addMember(project.id, iris)
       assert.deepEqual(ledger.lastStaff(), [
         { agent: 'zeus', harness: 'claude-code', role: 'worker', roles: ['worker'] },
         { agent: 'diana', harness: 'codex', role: 'worker', roles: ['worker'] },
+        { agent: 'iris', harness: 'image', role: 'designer', roles: ['designer'] },
       ])
+      // A project whose staff is its image designer alone is the last staff too.
+      ledger.createProject({
+        directory: '/work/site',
+        name: 'site',
+        chief: { harness: 'claude-code' },
+        staff: [iris],
+      })
+      assert.deepEqual(
+        ledger.lastStaff().map((member) => member.agent),
+        ['iris'],
+      )
     })
   })
 

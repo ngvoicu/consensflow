@@ -801,13 +801,13 @@ class Ledger {
 
   /** The members of the newest project that has any: the staff a new project starts from. */
   lastStaff() {
+    const member = `role IN (${MEMBER_ROLES.map((role) => `'${role}'`).join(', ')})
+      AND left_at IS NULL AND member_id IS NULL`
     return this.#db
       .prepare(
         `SELECT agent, harness, role, roles FROM participant
-         WHERE project_id = (
-           SELECT MAX(project_id) FROM participant
-           WHERE role IN ('worker', 'advisor', 'reviewer') AND left_at IS NULL AND member_id IS NULL
-         ) AND role IN ('worker', 'advisor', 'reviewer') AND left_at IS NULL AND member_id IS NULL
+         WHERE project_id = (SELECT MAX(project_id) FROM participant WHERE ${member})
+           AND ${member}
          ORDER BY id`,
       )
       .all()
