@@ -245,8 +245,16 @@ export async function startApi({
     if (at === 'POST /api/notes') {
       const body = await readJson(request)
       const active = ledger.activeTask(participant.id, { queued: true })
-      // The chief's note goes to the human; a member's to whoever gave its task.
-      const to = active?.requester ?? (participant.role === 'chief' ? 'human' : 'chief')
+      // The chief's note goes to the human, whatever task it is on (its own
+      // step's requester is itself); a member's to whoever gave its task.
+      const to = participant.role === 'chief' ? 'human' : (active?.requester ?? 'chief')
+      if (body.to === 'human' && to !== 'human') {
+        throw new Refusal(
+          403,
+          'not-the-chief',
+          `only the chief notes the human; without --human, your note goes to @${to}`,
+        )
+      }
       const noted = ledger.note(project.id, {
         from: participant.handle,
         to,

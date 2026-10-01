@@ -212,6 +212,50 @@ describe('the agents API', () => {
     })
   })
 
+  it("notes the human from the chief, also on its own task, and refuses a member's --human", async () => {
+    await withApi(async ({ ledger, project, token, cf }) => {
+      const notes = (handle) =>
+        ledger
+          .inbox(participantId(ledger, project, handle))
+          .filter((m) => m.kind === 'note')
+          .map((m) => [m.sender, m.taskNumber, m.body])
+      ledger.createTask(project.id, {
+        from: 'chief',
+        pool: 'worker',
+        tier: 'standard',
+        body: 'Build',
+      })
+      ledger.createTask(project.id, { from: 'chief', to: 'chief', needs: [1], body: 'Check it' })
+      deliver(
+        ledger,
+        ledger.assignTask(project.id, 1, participantId(ledger, project, 'zeus')).message,
+      )
+      const worker = token(ledger.task(project.id, 1).assignee)
+      const refused = await cf(worker, 'note', '--human', 'Built')
+      assert.deepEqual(
+        [refused.code, refused.err],
+        [1, 'cf: only the chief notes the human; without --human, your note goes to @chief'],
+      )
+      ledger.recordResult(project.id, 1, { body: 'Built.' })
+      ledger.acceptTask(project.id, 1, { by: 'chief' })
+      deliver(
+        ledger,
+        ledger.task(project.id, 2).messages.find((m) => m.kind === 'task'),
+      )
+      assert.equal(ledger.task(project.id, 2).state, 'working', 'the chief is on its own step')
+      const chief = token('chief')
+      const noted = await cf(chief, 'note', '--human', 'T-1 shipped; the build is green')
+      assert.equal(noted.code, 0, noted.err)
+      assert.match(noted.out, /^m-\d+ noted to @human; nothing waits on it\.$/)
+      assert.equal((await cf(chief, 'note', 'And the docs are next')).code, 0)
+      assert.deepEqual(notes('human'), [
+        ['chief', 2, 'And the docs are next'],
+        ['chief', 2, 'T-1 shipped; the build is green'],
+      ])
+      assert.deepEqual(notes('chief'), [], 'the chief never notes itself')
+    })
+  })
+
   it('takes a text from standard input when it is -, which no shell expands', async () => {
     await withApi(async ({ ledger, project, token, cf }) => {
       const chief = token('chief')
@@ -236,6 +280,7 @@ describe('the agents API', () => {
       assert.equal(answered.code, 0, answered.err)
       const noted = await cf(chief, 'note', '--human', '-', { input: 'See `a.txt`.' })
       assert.equal(noted.code, 0, noted.err)
+      assert.match(noted.out, /^m-\d+ noted to @human;/)
       const told = await cf(chief, 'tell', 'T-1', '-', { input: 'Stop: `v2` now.' })
       assert.equal(told.code, 0, told.err)
       const resumed = await cf(chief, 'task', 'resume', 'T-1', '-', { input: 'Go on with `v2`.' })
