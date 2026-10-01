@@ -2919,6 +2919,35 @@ describe('a window that takes long', () => {
     })
   })
 
+  it('closes a window only once the paste its harness is taking is over, and that message goes again', async () => {
+    await setup(async (context) => {
+      const { project } = await withStaff(context)
+      await context.dispatcher.pass()
+      let release
+      const held = new Promise((resolve) => {
+        release = resolve
+      })
+      const deliver = context.adapter.deliver
+      context.adapter.deliver = async (request) => {
+        await held
+        return deliver(request)
+      }
+      const note = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'Late' })
+      await context.dispatcher.pass()
+      const closing = context.dispatcher.closeProject(project.id)
+      await flush()
+      assert.deepEqual(context.host.killed, [], 'not while the harness takes it')
+      release()
+      await closing
+      assert.equal(context.host.killed.length, 1)
+      assert.deepEqual(
+        [context.ledger.message(note.id).state, context.ledger.message(note.id).attempts],
+        ['queued', 1],
+        'on its way when the window went: it goes again',
+      )
+    })
+  })
+
   it('opens the lead again when the human resumes a project that is still closing', async () => {
     await setup(async (context) => {
       const { project, id } = await withStaff(context)
