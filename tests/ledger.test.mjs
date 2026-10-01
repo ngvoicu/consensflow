@@ -563,16 +563,20 @@ describe('projects and participants', () => {
         () => ledger.addMember(project.id, { agent: 'hera', harness: 'pi', role: 'chief' }),
         { code: 'invalid-role' },
       )
-      assert.throws(
-        () =>
-          ledger.addMember(project.id, {
-            agent: 'hera',
-            harness: 'emacs',
-            role: 'worker',
-            tier: 'standard',
-          }),
-        { code: 'invalid-harness' },
-      )
+      // Kimi left ConsensFlow (2026-10): no member runs on it.
+      for (const harness of ['emacs', 'kimi']) {
+        assert.throws(
+          () =>
+            ledger.addMember(project.id, {
+              agent: 'hera',
+              harness,
+              role: 'worker',
+              tier: 'standard',
+            }),
+          { code: 'invalid-harness' },
+          harness,
+        )
+      }
       ledger.addMember(project.id, {
         agent: 'athena',
         harness: 'opencode',

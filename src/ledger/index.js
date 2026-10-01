@@ -52,8 +52,8 @@ export { SCHEMA_VERSION }
  * clock are arguments, and every refusal is a `LedgerError` with a stable code.
  */
 
-export const HARNESSES = ['claude-code', 'codex', 'opencode', 'pi', 'devin', 'kimi', 'image']
-/** Where a project's chief runs: a harness with a terminal the human works in (Kimi is paused). */
+export const HARNESSES = ['claude-code', 'codex', 'opencode', 'pi', 'devin', 'image']
+/** Where a project's chief runs: a harness with a terminal the human works in. */
 export const CHIEF_HARNESSES = ['claude-code', 'codex', 'opencode', 'pi', 'devin']
 const MEMBER_ROLES = ['worker', 'advisor', 'reviewer', 'designer']
 /** Who hands out work and hears when the staff changes: the human and the chief. */

@@ -109,7 +109,7 @@ export function agentsUi(
           return json(200, { preferences: chosen })
         }
         if (request.method === 'POST' && path === '/api/harnesses/update') {
-          if (!['claude', 'codex', 'opencode', 'pi', 'kimi', 'devin'].includes(body.id)) {
+          if (!['claude', 'codex', 'opencode', 'pi', 'devin'].includes(body.id)) {
             return json(400, { error: 'Unknown harness' })
           }
           return json(200, { result: await harnessAdmin.update(body.id) })
@@ -117,7 +117,7 @@ export function agentsUi(
         if (request.method === 'POST' && path === '/api/harnesses/check') {
           if (
             body.id !== undefined &&
-            !['claude', 'codex', 'opencode', 'pi', 'kimi', 'devin'].includes(body.id)
+            !['claude', 'codex', 'opencode', 'pi', 'devin'].includes(body.id)
           ) {
             return json(400, { error: 'Unknown harness' })
           }
@@ -324,11 +324,11 @@ const el = (tag, className, text) => {
   return node;
 };
 
-const HARNESS_LABELS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi', kimi: 'Kimi', devin: 'Devin', image: 'Codex' };
+const HARNESS_LABELS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi', devin: 'Devin', image: 'Codex' };
 const WORK_TIERS = ${JSON.stringify(WORK_TIERS)};
-const EFFORT_ORDER = ['ultra', 'max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'off', 'default', 'kimi-setting', 'not-applicable'];
-const effortValue = p => p.harness === 'image' ? 'not-applicable' : (p.effort || (p.harness === 'kimi' ? 'kimi-setting' : 'default'));
-const effortLabel = value => value === 'not-applicable' ? 'Not applicable' : value === 'kimi-setting' ? 'Kimi setting' : EFFORT_ORDER.includes(value) ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+const EFFORT_ORDER = ['ultra', 'max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'off', 'default', 'not-applicable'];
+const effortValue = p => p.harness === 'image' ? 'not-applicable' : (p.effort || 'default');
+const effortLabel = value => value === 'not-applicable' ? 'Not applicable' : EFFORT_ORDER.includes(value) ? value.charAt(0).toUpperCase() + value.slice(1) : value;
 const rank = (values, value) => values.includes(value) ? values.indexOf(value) : values.length;
 const compareText = (a, b) => String(a).localeCompare(String(b));
 // Curated family/tier order. Provider paths affect routing and identity, not rank.
