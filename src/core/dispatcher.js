@@ -1238,10 +1238,11 @@ export class Dispatcher {
   }
 
   /**
-   * Closes a window whose exit is the dispatcher's own (a switch, a lead that
-   * could not take its first message): the exit settles what the window was
-   * doing, as any exit does, but a lead's does not close its project. It is
-   * the dispatcher's whether its event came already or comes later.
+   * Closes a window whose exit is the dispatcher's own (a switch, a Close, a
+   * lead that could not take its first message): the exit settles what the
+   * window was doing, as any exit does, but a lead's does not close its
+   * project. It is the dispatcher's whether its event came already or comes
+   * later.
    */
   async #closeOwn(runtime, pane) {
     runtime.ownExit = true
