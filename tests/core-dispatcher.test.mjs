@@ -728,6 +728,21 @@ describe('the dispatcher', () => {
     })
   })
 
+  it('counts a delivery only by its header in what the window was given, never in a tool’s output', async () => {
+    await setup(async (context) => {
+      const { project } = await withStaff(context)
+      await context.dispatcher.pass()
+      context.adapter.agent('chief').arrive = false
+      const note = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'hello' })
+      await context.dispatcher.pass()
+      // The agent's own command prints the header (cf inbox read, a grep of a log).
+      const header = deliveryText(context.ledger.message(note.id))
+      context.adapter.agent('chief').items.push(item('tool', header), item('custom', header))
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.message(note.id).state, 'delivering', 'not proof it arrived')
+    })
+  })
+
   it('records an adapter that throws as a failed attempt with its error, not as uncertain', async () => {
     await setup(async (context) => {
       const { project, id } = await withStaff(context)

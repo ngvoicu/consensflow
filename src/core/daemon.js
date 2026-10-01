@@ -46,7 +46,6 @@ export async function startCore(
     input = process.stdin,
     output = process.stdout,
     onOut = (line) => output.write(`${line}\n`),
-    peer,
     exit = (code) => process.exit(code),
   } = {},
 ) {
@@ -132,7 +131,7 @@ export async function startCore(
   const dispatcher = new Dispatcher({
     ledger,
     host,
-    adapters: createAdapters(env, { peer }),
+    adapters: createAdapters(env),
     credentials,
     roster: (agent) => agentRow(agent, env) ?? null,
     roles: (participant, project) =>

@@ -66,7 +66,6 @@ const INTERRUPT_AGAIN_MS = 3_000
 const DOUBLE_PRESS_MS = 150
 const INLINE_LIMIT = 4000
 const OPENING = 3000
-const RECEIVED_ROLES = new Set(['user', 'custom', 'tool'])
 
 /** How long a fresh window's output must hold still before its screen counts as drawn. */
 const DRAWN_QUIET_MS = 1_500
@@ -285,7 +284,7 @@ export class Dispatcher {
     const { participant } = this.#sessionOf(projectId, handle)
     const runtime = this.#runtimeOf(participant.id)
     runtime.pinned = false
-    if (runtime.pane !== null) await this.#retire(participant, runtime)
+    if (runtime.pane !== null) await this.#retire(runtime)
     return this.#ledger.project(projectId)
   }
 
@@ -295,7 +294,7 @@ export class Dispatcher {
     const project = this.#ledger.endSession(projectId, handle, { by: 'human' })
     const runtime = this.#runtimeOf(participant.id)
     runtime.pinned = false
-    if (runtime.pane !== null) await this.#retire(participant, runtime)
+    if (runtime.pane !== null) await this.#retire(runtime)
     this.#changed()
     return project
   }
@@ -619,7 +618,7 @@ export class Dispatcher {
         !runtime.pinned &&
         !this.#ledger.holdsWork(participant.id)
       ) {
-        await this.#retire(participant, runtime)
+        await this.#retire(runtime)
         return
       }
     }
@@ -880,15 +879,11 @@ export class Dispatcher {
   }
 
   /**
-   * One task per member session: the window and its conversation end with the
-   * work, so the next task starts a fresh session with nothing carried over.
-   */
-  /**
    * A session's window closes with its task; its conversation stays until the
    * session ends (the ledger ends both together), so a follow-up given with
    * `--after` comes back on the same conversation.
    */
-  async #retire(_participant, runtime) {
+  async #retire(runtime) {
     runtime.retiring = true
     await this.#host.kill(runtime.pane).catch(() => {})
     this.#changed()
@@ -912,11 +907,15 @@ export class Dispatcher {
     return `${deliveryText(brief)}\n\n${text}`
   }
 
-  /** Whether the message on its way shows in the window's record; it is confirmed if so. */
+  /**
+   * Whether the message on its way shows in the window's record; it is
+   * confirmed if so. Only what the window was given counts: a tool's output
+   * that prints a header (cf inbox read, a log) proves nothing arrived.
+   */
   #confirmArrival(runtime, observed) {
     const { delivering } = runtime
     const arrived = observed.items.find(
-      (item) => RECEIVED_ROLES.has(item.role) && item.text.includes(delivering.marker),
+      (item) => item.role === 'user' && item.text.includes(delivering.marker),
     )
     if (arrived === undefined) return false
     this.#ledger.confirmDelivery(delivering.messageId, { item: arrived.id })
@@ -1308,11 +1307,6 @@ export class Dispatcher {
   }
 
   /**
-   * A member the task was taken back from last, then the fewest tasks taken,
-   * then the earliest joined: a reassigned task goes to another member when
-   * one is free, and back to the same one only when it is the only one.
-   */
-  /**
    * Who of the free members takes a task: one it was taken from goes last;
    * then the harness whose members of this role and tier have taken the fewest
    * tasks, so a tier's work is shared across harnesses; then the member with
@@ -1336,11 +1330,7 @@ export class Dispatcher {
     const unopened = candidates.filter((m) => this.#adapters[m.harness] === undefined)
     const gone = candidates.filter((m) => !unopened.includes(m) && this.#roster(m.agent) === null)
     const out = candidates.filter(
-      (m) =>
-        !unopened.includes(m) &&
-        !gone.includes(m) &&
-        m.outUntil !== null &&
-        Date.parse(m.outUntil) > this.#now(),
+      (m) => !unopened.includes(m) && !gone.includes(m) && this.#isOut(m),
     )
     const low = candidates.filter(
       (m) => !unopened.includes(m) && !gone.includes(m) && !out.includes(m) && this.#isLow(m),
@@ -1369,22 +1359,28 @@ export class Dispatcher {
    */
   async #withoutAgent(project, participant, delivering) {
     const because = `${participant.agent} is no longer among your agents`
-    const lane = this.#ledger
-      .board(project.id)
-      .lanes.find((l) => l.participant.id === participant.id)
-    let released = 0
-    for (const task of lane?.tasks ?? []) {
-      if (!['queued', 'working', 'waiting'].includes(task.state) || task.pool === null) continue
-      this.#ledger.releaseTask(project.id, task.number, { because })
-      released += 1
-    }
+    const tiered = this.#tieredWork(project, participant)
+    for (const task of tiered) this.#ledger.releaseTask(project.id, task.number, { because })
     if (delivering !== null)
       this.#settleFailure(
         delivering,
         `${because}: add it back under Agents, or remove @${participant.handle} from the staff`,
         { retry: false },
       )
-    else if (released > 0) this.#changed()
+    else if (tiered.length > 0) this.#changed()
+  }
+
+  /**
+   * The work a participant holds that was given to its tier (queued, working
+   * or waiting): another member of the tier could take it.
+   */
+  #tieredWork(project, participant) {
+    const lane = this.#ledger
+      .board(project.id)
+      .lanes.find((l) => l.participant.id === participant.id)
+    return (lane?.tasks ?? []).filter(
+      (task) => task.pool !== null && ['queued', 'working', 'waiting'].includes(task.state),
+    )
   }
 
   /**
@@ -1404,12 +1400,7 @@ export class Dispatcher {
       runtime.delivering = null
       this.#settleFailure(delivering, 'the harness ran out of quota', { retry: true })
     }
-    const lane = this.#ledger
-      .board(project.id)
-      .lanes.find((l) => l.participant.id === participant.id)
-    for (const task of lane.tasks) {
-      if (!['queued', 'working', 'waiting'].includes(task.state)) continue
-      if (task.pool === null) continue
+    for (const task of this.#tieredWork(project, participant)) {
       // Near the reset, or with nobody else to take it, the task keeps its
       // window and goes on by itself; otherwise it goes back to the board.
       const soon = Date.parse(until) - this.#now() <= HOLD_MS
@@ -1434,7 +1425,7 @@ export class Dispatcher {
       !runtime.pinned &&
       !this.#ledger.holdsWork(participant.id)
     ) {
-      await this.#retire(participant, runtime)
+      await this.#retire(runtime)
     }
     this.#changed()
   }

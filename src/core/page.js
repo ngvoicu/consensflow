@@ -10,9 +10,6 @@ import { requireOpen } from './dispatcher.js'
  * names (`core_request` in `app/src-tauri/src/commands.rs`), and every change
  * wakes the dispatcher so it happens in the panes at once.
  */
-/** What a paused task's window is told when the human resumes it. */
-export { RESUME_WORDS } from '../ledger/index.js'
-
 export function pageOperations({ ledger, dispatcher, env, kick }) {
   const change = (work) => async (body) => {
     const value = await work(body)
