@@ -1050,6 +1050,14 @@ class Ledger {
     })
   }
 
+  /** The lead read its history (`cf history`): which page, or what it searched for. */
+  historyRead(projectId, { page, find = null, tools = false }) {
+    return this.#write(() => {
+      this.#projectRow(projectId)
+      this.#log(projectId, 'lead.history.read', { page, find, tools })
+    })
+  }
+
   /** The project's latest Switch lead, as `switchChief` logged it, or null. */
   lastSwitch(projectId) {
     const row = this.#db

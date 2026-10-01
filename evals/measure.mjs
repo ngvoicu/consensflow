@@ -100,6 +100,12 @@ export function measure(file, { fixture = null, workspace = null, pickers = 0 } 
         ]),
       ),
       taskCount: tasks.length,
+      // A Switch lead: the harnesses the lead ran on, in order (each switch
+      // starts a conversation), how many switches, and the history the lead
+      // read with cf history (each read is in the ledger, whatever the harness).
+      leads: [...ledger.leadHistory(project.id).map((c) => c.harness), chief.harness],
+      switches: eventsOf(ledger, project.id, 'chief.switched').length,
+      historyReads: eventsOf(ledger, project.id, 'lead.history.read').map((e) => e.data),
       chiefId: chief.id,
       chiefHarness: chief.harness,
       humanId: human.id,
@@ -113,6 +119,7 @@ export function measure(file, { fixture = null, workspace = null, pickers = 0 } 
     ...seen,
     ownerQuestions: ownerQuestions(turnEnds, { pickers }),
     plumbing: plumbing(file, metrics.chiefId, metrics.humanId),
+    leadWordsNow: leadWordsNow(file),
     memberQuestionsBy: memberQuestionsBy(file, metrics.chiefId, metrics.humanId),
     filesChanged: fixture === null || workspace === null ? [] : changed(fixture, workspace),
   }
@@ -366,6 +373,46 @@ export function ownerQuestions(turnEnds, { pickers = 0 } = {}) {
  * another connection finds it locked: this reads a copy of the file and its
  * write-ahead log.
  */
+/** Every event of one kind in a project, oldest first. */
+function eventsOf(ledger, projectId, kind) {
+  const found = []
+  let after = 0
+  for (;;) {
+    const page = ledger.events(projectId, { after, limit: 500 })
+    found.push(...page.filter((event) => event.kind === kind))
+    if (page.length < 500) return found
+    after = page.at(-1).id
+  }
+}
+
+/** What the lead wrote in its current conversation: the one the last switch started. */
+export function leadWordsNow(file) {
+  const dir = mkdtempSync(join(tmpdir(), 'cf-eval-ledger-'))
+  try {
+    const copy = join(dir, 'ledger.db')
+    copyFileSync(file, copy)
+    if (existsSync(`${file}-wal`)) copyFileSync(`${file}-wal`, `${copy}-wal`)
+    const db = new DatabaseSync(copy)
+    try {
+      return db
+        .prepare(
+          `SELECT t.text FROM transcript t
+           JOIN conversation c ON c.id = t.conversation_id
+           JOIN participant p ON p.id = c.participant_id
+           WHERE p.role = 'chief' AND c.ended_at IS NULL AND t.role = 'assistant'
+           ORDER BY t.seq`,
+        )
+        .all()
+        .map((row) => row.text)
+        .join('\n')
+    } finally {
+      db.close()
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
 export function chiefTurnEnd(file) {
   const dir = mkdtempSync(join(tmpdir(), 'cf-eval-ledger-'))
   try {

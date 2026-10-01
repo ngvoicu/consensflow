@@ -12,6 +12,7 @@ import {
   ownerQuestions,
   verdict,
 } from '../evals/measure.mjs'
+import leadSwitch, { CODEWORD } from '../evals/scenarios/lead-switch.mjs'
 import sixDecisions from '../evals/scenarios/six-decisions.mjs'
 import { openLedger } from '../src/ledger/index.js'
 
@@ -403,6 +404,47 @@ describe('measuring a chief from the ledger', () => {
         [true, true, true, true, true, true, true],
         'the round trip holds on this ledger once only notes.md is new and the owner was not asked',
       )
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('measuring a Switch lead', () => {
+  it('reads the leads in order, the switches, the history the new lead read and its words, and judges the scenario', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-evals-switch-'))
+    const file = path.join(dir, 'consensflow.db')
+    try {
+      const ledger = openLedger(file)
+      const project = ledger.createProject({
+        directory: '/work/site',
+        name: 'site',
+        chief: { harness: 'claude-code' },
+      })
+      const chief = ledger.project(project.id).participants.find((p) => p.handle === 'chief')
+      ledger.copyTranscript(ledger.startConversation(chief.id, { harness: 'claude-code' }).id, [
+        { id: 'u', role: 'user', text: `The codeword is ${CODEWORD}`, complete: true, at: null },
+      ])
+      ledger.switchChief(project.id, { harness: 'codex', agent: 'eval-codex-worker' })
+      ledger.copyTranscript(ledger.startConversation(chief.id, { harness: 'codex' }).id, [
+        {
+          id: 'a',
+          role: 'assistant',
+          text: `The codeword is ${CODEWORD}; it goes out on Friday.`,
+          complete: true,
+          at: null,
+        },
+      ])
+      ledger.historyRead(project.id, { page: 2 })
+      ledger.close()
+      const metrics = measure(file)
+      assert.deepEqual(
+        [metrics.leads, metrics.switches, metrics.historyReads],
+        [['claude-code', 'codex'], 1, [{ page: 2, find: null, tools: false }]],
+      )
+      assert.equal(metrics.leadWordsNow, `The codeword is ${CODEWORD}; it goes out on Friday.`)
+      assert.ok(verdict(leadSwitch, metrics).every((check) => check.ok))
+      assert.match(CODEWORD, /^(TERN|LARK|WREN|KITE|ROOK|SWIFT)-\d{4}$/)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

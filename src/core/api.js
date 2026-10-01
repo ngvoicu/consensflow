@@ -102,15 +102,17 @@ export async function startApi({
       }
       const page = Number(url.searchParams.get('page') ?? '1')
       const find = url.searchParams.get('find')
+      const search = find === null || find === '' ? null : find
+      const tools = url.searchParams.get('tools') === '1'
       try {
-        return ok(
-          historyPage(ledger.leadHistory(project.id), {
-            message: (id) => ledger.message(id),
-            page,
-            find: find === null || find === '' ? null : find,
-            tools: url.searchParams.get('tools') === '1',
-          }),
-        )
+        const shown = historyPage(ledger.leadHistory(project.id), {
+          message: (id) => ledger.message(id),
+          page,
+          find: search,
+          tools,
+        })
+        ledger.historyRead(project.id, { page, find: search, tools })
+        return ok(shown)
       } catch (cause) {
         if (cause instanceof RangeError) throw new Refusal(400, 'no-such-page', cause.message)
         throw cause

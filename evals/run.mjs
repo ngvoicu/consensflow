@@ -59,6 +59,9 @@ const { values } = parseArgs({
     // card: ConsensFlow's chief card. nocard: ConsensFlow with a one-line
     // card that names no board. bare: the harness alone, no ConsensFlow.
     arm: { type: 'string', default: 'card' },
+    // A scenario's { switch: true } step moves the lead to this harness, on
+    // its staff agent's model (so the harness must be in --staff).
+    'switch-to': { type: 'string' },
   },
 })
 if (!['card', 'nocard', 'bare'].includes(values.arm)) throw new Error(`no such arm: ${values.arm}`)
@@ -67,6 +70,14 @@ const scenario = (
 ).default
 const chief = values.chief
 const staffHarnesses = (values.staff ?? chief).split(',').map((s) => s.trim())
+if ((scenario.followUps ?? []).some((step) => step?.switch === true)) {
+  const target = values['switch-to']
+  if (target === undefined || !staffHarnesses.includes(target) || target === chief) {
+    throw new Error(
+      `${scenario.id} switches the lead: --switch-to names a --staff harness other than the chief's`,
+    )
+  }
+}
 const repeat = Number(values.repeat)
 const timeoutMs = Number(values['timeout-min']) * 60_000
 const { agents, staff } = staffFor(
@@ -376,6 +387,23 @@ async function run(index) {
       }
       if (followUps.length > 0 && !busy && Date.now() - lastChange > FOLLOW_UP_AFTER_MS) {
         const next = followUps.shift()
+        if (next.switch === true) {
+          // The owner switches the lead from the chief's row; the new window
+          // takes the handoff first, then the owner goes on in it.
+          const agent = `eval-${values['switch-to']}-worker`
+          const before = pane.generation
+          note(`the owner switches the lead to ${values['switch-to']} (${agent})`)
+          const reply = await app.requestNode('chief.switch', { project, agent, when: 'turn' })
+          if (reply?.ok === false) throw new Error(`chief.switch: ${JSON.stringify(reply)}`)
+          await app.waitFor(async () => {
+            const lead = (await chiefLane())?.pane
+            return lead !== null && lead !== undefined && lead.generation !== before
+          }, 240_000)
+          pane = (await chiefLane()).pane
+          await settled(() => app.output(pane.id).length)
+          lastChange = Date.now()
+          continue
+        }
         followUpsSent += 1
         note(`the owner's next message (${followUpsSent}): ${next.slice(0, 80)}`)
         await settled(() => app.output(pane.id).length)
@@ -415,6 +443,7 @@ async function run(index) {
     effort: chiefEffort,
     staffEffort: values['staff-effort'],
     staff: staffHarnesses,
+    switchTo: values['switch-to'] ?? null,
     staffModels: Object.fromEntries(agents.map((a) => [a.id, a.model])),
     run: index,
     seconds: Math.round((Date.now() - started) / 1000),
