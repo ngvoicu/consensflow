@@ -2355,6 +2355,33 @@ test('resizes a terminal while the board redraws faster than a size settles', as
   await page.evaluate(() => clearInterval(window.__busy))
 })
 
+test("gives a card's title room to read, at the default window and on a wider screen", async ({
+  page,
+}) => {
+  const data = model()
+  const zeus = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
+  data.boards[1].lanes.push({
+    participant: session(20, zeus.participant, 'amber-pine'),
+    tasks: [task(21, 'Write the lexer', 'working', 'chief', 'zeus-amber-pine', 3)],
+    activity: { state: 'working' },
+    pane: { id: 'p1-zeus-amber-pine', generation: 9 },
+  })
+  await open(page, data)
+  const titles = () =>
+    page
+      .locator('button.card .card-title')
+      .evaluateAll((nodes) => nodes.map((node) => Math.round(node.getBoundingClientRect().width)))
+  for (const width of [880, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect
+      .poll(async () => Math.min(...(await titles())), { message: `titles at ${width}px` })
+      .toBeGreaterThanOrEqual(60)
+  }
+  // At 1440 the board, beside the windows, still has every column without scrolling.
+  const board = page.getByRole('region', { name: 'Board' })
+  expect(await board.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(0)
+})
+
 test('keeps every button of a lane inside its column, however narrow the board', async ({
   page,
 }) => {

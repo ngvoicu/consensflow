@@ -298,12 +298,13 @@
     .bay-empty { color: var(--muted); font-size: 12px; padding: 2px 2px 0; list-style: none; }
 
     /* The kanban: a row per participant, a column per state. A board too
-       narrow for its columns scrolls sideways rather than crush them. */
+       narrow for its columns scrolls sideways rather than crush them: the
+       staff column, and each state's room for a card's title. */
     .kanban {
       border-collapse: separate;
       border-spacing: 0;
       width: 100%;
-      min-width: 680px;
+      min-width: calc(176px + 6 * 96px);
       table-layout: fixed;
     }
     .kanban thead th {
@@ -372,8 +373,10 @@
     }
     @keyframes lamp-blink { 50% { border-color: transparent; } }
 
-    /* A card: the number block in the colour of its state, the result on it when done. */
-    .cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+    /* A card: the number block in the colour of its state, the result on it
+       when done. The list is what a card measures itself against: a cell of
+       the table cannot be. */
+    .cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; container-type: inline-size; }
     .card {
       --state: var(--slate);
       --state-ink: var(--foam);
@@ -412,7 +415,7 @@
       -webkit-line-clamp: 3;
       overflow: hidden;
     }
-    .card-route { grid-area: route; font: 11px var(--mono); color: var(--muted); }
+    .card-route { grid-area: route; font: 11px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
     .card-state, .card-age { display: none; }
     .card-result {
       grid-area: result;
@@ -433,6 +436,14 @@
     .card[data-state="failed"] { --state: var(--buoy); --state-ink: var(--ink); }
     .card[data-state="accepted"] { --state: var(--seafoam-dim); }
     .card[data-state="cancelled"] { opacity: .6; }
+    /* A column too narrow for the number beside the title: the number heads
+       the card, and the title has the card's whole width. */
+    @container (max-width: 150px) {
+      .card { grid-template-columns: minmax(0, 1fr); grid-template-areas: "number" "title" "route" "result"; padding: 0; }
+      .card-number { padding: 3px 6px; }
+      .card-title, .card-route, .card-result { padding-left: 6px; padding-right: 6px; }
+      .card-title { padding-top: 4px; -webkit-line-clamp: 4; }
+    }
 
     /* A message waiting for the human: a strip with what they may do with it. */
     .strips { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
