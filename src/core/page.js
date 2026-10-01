@@ -2,6 +2,7 @@ import { basename } from 'node:path'
 import { missingHarnesses, offerable } from '../harnesses.js'
 import { RESUME_WORDS } from '../ledger/index.js'
 import { agentRow, harnessForKind, listAgents } from '../roster.js'
+import { requireOpen } from './dispatcher.js'
 
 /**
  * What the board page may ask of the new core: each operation is the human
@@ -160,9 +161,11 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
 
     'message.read': change(async ({ message }) => ({ message: ledger.markRead(message) })),
 
-    'message.approve': change(async ({ message }) => ({
-      message: ledger.approveMessage(message, { by: 'human' }),
-    })),
+    'message.approve': change(async ({ message }) => {
+      const waiting = ledger.message(message)
+      if (waiting !== null) requireOpen(ledger.project(waiting.projectId))
+      return { message: ledger.approveMessage(message, { by: 'human' }) }
+    }),
 
     'message.decline': change(async ({ message }) => ({
       message: ledger.declineMessage(message, { by: 'human' }),

@@ -2140,6 +2140,20 @@ describe('one task per member session', () => {
       )
     })
   })
+
+  it("opens no session's window in a closed project", async () => {
+    await setup(async (context) => {
+      const { project } = await finished(context)
+      await context.dispatcher.closeProject(project.id)
+      const opened = context.host.opened.length
+      await assert.rejects(
+        context.dispatcher.openWindow(project.id, 'zeus-amber-pine'),
+        /app is closed: resume it first/,
+      )
+      await context.dispatcher.pass()
+      assert.equal(context.host.opened.length, opened)
+    })
+  })
 })
 
 describe('the dispatcher traces what its windows do', () => {
@@ -2455,7 +2469,7 @@ describe('switching the lead to another harness', () => {
     })
   })
 
-  it("replaces a handoff still on its way, and opens a suspended project's new lead on Resume with the handoff", async () => {
+  it('replaces a handoff still on its way, and Resume of a closed project brings the lead back with the handoff it had not shown', async () => {
     await withCodex(async (context) => {
       const { project, id } = await withStaff(context)
       await context.dispatcher.pass()
@@ -2479,12 +2493,26 @@ describe('switching the lead to another harness', () => {
       assert.equal(handoffs.length, 1)
       assert.match(handoffs[0].body, /from Codex to you, Claude Code\./)
 
+      // Closed before any look saw the new lead show it: the handoff waits for Resume.
       await context.dispatcher.closeProject(project.id)
-      const opened = context.host.opened.length
-      await context.dispatcher.switchChief(project.id, { harness: 'codex' })
-      assert.equal(context.host.opened.length, opened, 'a suspended project opens nothing')
       await context.dispatcher.resumeProject(project.id)
-      assert.match(context.codex.prepared.at(-1).message, /You are the lead now\./)
+      assert.match(
+        context.adapter.prepared.at(-1).message,
+        /You are the lead now\. The human switched this project's lead from Codex to you, Claude Code\./,
+      )
+    })
+  })
+
+  it('switches no lead of a closed project', async () => {
+    await withCodex(async (context) => {
+      const { project } = await withStaff(context)
+      await context.dispatcher.closeProject(project.id)
+      await assert.rejects(
+        context.dispatcher.switchChief(project.id, { harness: 'codex' }),
+        /app is closed: resume it first/,
+      )
+      assert.equal(chiefOf(context, project).harness, 'claude-code')
+      assert.equal(context.codex.prepared.length, 0)
     })
   })
 

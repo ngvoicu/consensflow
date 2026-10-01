@@ -424,6 +424,31 @@ describe('the page protocol of the new core', () => {
     })
   })
 
+  it('passes nothing on in a closed project', async () => {
+    await withPage(async ({ ledger, operations }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        harness: 'pi',
+        gate: true,
+      })
+      await operations['member.add']({ project: project.id, agent: 'artemis' })
+      const artemis = ledger.project(project.id).participants.find((p) => p.handle === 'artemis')
+      ledger.createTask(project.id, {
+        from: 'chief',
+        pool: 'worker',
+        tier: artemis.tier,
+        body: 'One',
+      })
+      const brief = ledger.assignTask(project.id, 1, artemis.id).message
+      await operations['project.close']({ project: project.id })
+      await assert.rejects(
+        operations['message.approve']({ message: brief.id }),
+        /app is closed: resume it first/,
+      )
+      assert.equal(ledger.message(brief.id).state, 'gated')
+    })
+  })
+
   it("opens, closes and ends a session's window at the human's hand", async () => {
     await withPage(async ({ ledger, operations, dispatcher }) => {
       const { project } = await operations['project.open']({

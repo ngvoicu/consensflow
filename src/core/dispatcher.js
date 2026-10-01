@@ -100,6 +100,11 @@ export function deliveryText(message) {
 
 const markerOf = (messageId) => `[ConsensFlow m-${messageId} ·`
 
+/** A closed project starts and changes no work, whatever asks: it is resumed first. */
+export function requireOpen(project) {
+  if (project.state !== 'open') throw new Error(`${project.name} is closed: resume it first`)
+}
+
 /** A note from ConsensFlow that hands the lead to a new window (`handoff.js`). */
 const isHandoff = (message) =>
   message.kind === 'note' && message.sender === null && message.body.startsWith(HANDOFF_TITLE)
@@ -267,7 +272,8 @@ export class Dispatcher {
    * human closes it, whatever work comes and goes meanwhile.
    */
   async openWindow(projectId, handle) {
-    const { participant } = this.#sessionOf(projectId, handle)
+    const { project, participant } = this.#sessionOf(projectId, handle)
+    requireOpen(project)
     this.#runtimeOf(participant.id).pinned = true
     this.#openSoon(participant.id)
     this.#changed()
@@ -670,6 +676,8 @@ export class Dispatcher {
     await this.#exclusive(
       chief.id,
       async () => {
+        // Asked of the project as it is once the lead's step in progress is over.
+        requireOpen(this.#ledger.project(projectId))
         const runtime = this.#runtimeOf(chief.id)
         if (runtime.pane !== null && !this.#isOut(chief) && (when === 'turn' || note)) {
           // A switch asked again replaces the one waiting, with a note not yet sent.
