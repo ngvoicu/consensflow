@@ -67,6 +67,18 @@ describe('cf manages the roster', () => {
     assert.doesNotMatch((await cf(['agent', 'list'], t.env)).stdout, /mine/)
   })
 
+  it('refuses a flag it would ignore, and writes nothing for it', async () => {
+    for (const flag of [['--dry-run'], ['--from', 'x'], ['--presets', 'x']]) {
+      const out = await cf(
+        ['agent', 'add', 'trial', '--harness', 'codex', '--model', 'gpt-6-astra', ...flag],
+        t.env,
+      )
+      assert.notEqual(out.code, 0, flag[0])
+      assert.match(out.stderr, new RegExp(`Unknown option '${flag[0]}'`))
+    }
+    assert.doesNotMatch((await cf(['agent', 'list'], t.env)).stdout, /trial/)
+  })
+
   it('fails an unknown verb loudly', async () => {
     const out = await cf(['frobnicate'], t.env)
     assert.notEqual(out.code, 0)
