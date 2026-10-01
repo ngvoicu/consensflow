@@ -684,14 +684,36 @@ const TRANSCRIPT_ROLE = {
 export class TaskDrawer {
   #root
   #actions
+  /** The task drawn, as it was read. */
+  #task = null
+  /** Its fold of what its window wrote, kept open or shut while the task is shown. */
+  #fold = null
 
   constructor(root, actions) {
     this.#root = root
     this.#actions = actions
   }
 
-  /** `closed`: the task's project is closed, and its task reads with nothing to do on it. */
-  show(task, { transcript = { items: [], total: 0 }, closed = false, now = Date.now() } = {}) {
+  /** Whether `task` is the one drawn, unchanged since. */
+  shows(task) {
+    return JSON.stringify(task) === JSON.stringify(this.#task)
+  }
+
+  /** Whether `task` is the one drawn, as it was then or since. */
+  #drawn(task) {
+    return this.#task?.projectId === task.projectId && this.#task?.number === task.number
+  }
+
+  /**
+   * Draws `task`. `total` is how many items its window wrote: the fold reads
+   * them when it opens, and again when the task changed while it is open.
+   * `closed`: the task's project is closed, and its task reads with nothing
+   * to do on it. The same task drawn again keeps whatever did not change in
+   * place: its fold open or shut, and the drawer where it was scrolled.
+   */
+  show(task, { total, closed = false, now = Date.now() }) {
+    const same = this.#drawn(task)
+    const changed = !this.shows(task)
     const head = element('header', 'drawer-head')
     const title = element('h2', 'drawer-title')
     title.append(
@@ -710,12 +732,9 @@ export class TaskDrawer {
     meta.dataset.state = task.state
     const sections = [head, meta]
     const panel = (name, label, count) => {
-      const section = element(name === 'transcript' ? 'details' : 'section', 'drawer-section')
+      const section = element('section', 'drawer-section')
       section.dataset.section = name
-      const heading = element(name === 'transcript' ? 'summary' : 'h3', 'drawer-section-head')
-      heading.append(element('span', null, label))
-      if (count !== undefined) heading.append(element('span', 'drawer-count', count))
-      section.append(heading)
+      section.append(sectionHead('h3', label, count))
       return section
     }
     const brief = panel('brief', 'Brief')
@@ -759,45 +778,62 @@ export class TaskDrawer {
       block.append(thread)
       sections.push(block)
     }
-    if (transcript.items.length > 0) {
-      const block = panel(
-        'transcript',
-        'What the agent did',
-        `${transcript.total} item${transcript.total === 1 ? '' : 's'}`,
-      )
-      if (transcript.total > transcript.items.length) {
-        block.append(
-          element(
-            'p',
-            'transcript-more',
-            `The last ${transcript.items.length} of ${transcript.total} items.`,
-          ),
-        )
-      }
-      const list = element('ol', 'transcript')
-      list.setAttribute('aria-label', `What T-${task.number}'s window wrote`)
-      for (const item of transcript.items) {
-        const entry = element('li', 'transcript-item')
-        entry.dataset.role = item.role
-        entry.append(
-          element(
-            'div',
-            'transcript-head',
-            `${TRANSCRIPT_ROLE[item.role] ?? item.role}${item.complete ? '' : ' · still writing'}`,
-          ),
-          element('pre', 'transcript-body', item.text),
-        )
-        list.append(entry)
-      }
-      block.append(list)
-      sections.push(block)
+    // What its window wrote is read only when asked for, folded until then.
+    this.#fold = total > 0 ? ((same ? this.#fold : null) ?? this.#newFold()) : null
+    if (this.#fold !== null) {
+      redraw(this.#fold, [transcriptHead(total), ...[...this.#fold.children].slice(1)])
+      sections.push(this.#fold)
     }
     const actions = element('div', 'drawer-actions')
     if (!closed) actions.append(...this.#taskActions(task))
+    if (actions.childElementCount > 0) sections.push(actions)
+    this.#task = task
     this.#root.setAttribute('aria-label', `Task T-${task.number}`)
     this.#root.dataset.state = task.state
-    this.#root.replaceChildren(...sections, ...(actions.childElementCount > 0 ? [actions] : []))
+    if (same) {
+      redraw(this.#root, sections)
+    } else {
+      this.#root.replaceChildren(...sections)
+      this.#root.scrollTop = 0
+    }
     this.#root.hidden = false
+    if (same && changed && this.#fold?.open) this.#actions.onTranscript(task)
+  }
+
+  /** What the task's window wrote, read for its open fold. */
+  fill(task, { items, total }) {
+    if (!this.#drawn(task) || this.#fold === null) return
+    const list = element('ol', 'transcript')
+    list.setAttribute('aria-label', `What T-${task.number}'s window wrote`)
+    for (const item of items) {
+      const entry = element('li', 'transcript-item')
+      entry.dataset.role = item.role
+      entry.append(
+        element(
+          'div',
+          'transcript-head',
+          `${TRANSCRIPT_ROLE[item.role] ?? item.role}${item.complete ? '' : ' · still writing'}`,
+        ),
+        element('pre', 'transcript-body', item.text),
+      )
+      list.append(entry)
+    }
+    redraw(this.#fold, [
+      transcriptHead(total),
+      ...(total > items.length
+        ? [element('p', 'transcript-more', `The last ${items.length} of ${total} items.`)]
+        : []),
+      list,
+    ])
+  }
+
+  #newFold() {
+    const fold = element('details', 'drawer-section')
+    fold.dataset.section = 'transcript'
+    fold.addEventListener('toggle', () => {
+      if (fold.open) this.#actions.onTranscript(this.#task)
+    })
+    return fold
   }
 
   /**
@@ -805,12 +841,14 @@ export class TaskDrawer {
    * (that is done in its terminal), and no accepting (that is the chief's).
    */
   #taskActions(task) {
+    // A button kept across redraws acts on the task as it was read last.
+    const on = (action) => () => action(this.#task)
     const actions = []
     if (PAUSABLE.includes(task.state) && task.assignee !== 'chief') {
-      actions.push(button('Pause', 'quiet-button', () => this.#actions.onPause(task)))
+      actions.push(button('Pause', 'quiet-button', on(this.#actions.onPause)))
     }
     if (task.state === 'paused') {
-      actions.push(button('Resume', 'primary-button', () => this.#actions.onResume(task)))
+      actions.push(button('Resume', 'primary-button', on(this.#actions.onResume)))
     }
     // Taken from its member and back on the board for its tier; the chief's
     // own work and work given by name have no tier to go back to.
@@ -819,19 +857,32 @@ export class TaskDrawer {
         button(
           'Reassign',
           'quiet-button',
-          () => this.#actions.onReassign(task),
+          on(this.#actions.onReassign),
           `Reassign T-${task.number} to another member of its tier`,
         ),
       )
     }
     if (ACTIVE.includes(task.state)) {
-      actions.push(button('Cancel task', 'danger-button', () => this.#actions.onCancel(task)))
+      actions.push(button('Cancel task', 'danger-button', on(this.#actions.onCancel)))
     }
     return actions
   }
 
   hide() {
+    this.#task = null
+    this.#fold = null
     this.#root.hidden = true
     this.#root.replaceChildren()
   }
 }
+
+/** A drawer section's heading: what it is, and how many when that says something. */
+function sectionHead(tag, label, count) {
+  const heading = element(tag, 'drawer-section-head')
+  heading.append(element('span', null, label))
+  if (count !== undefined) heading.append(element('span', 'drawer-count', count))
+  return heading
+}
+
+const transcriptHead = (total) =>
+  sectionHead('summary', 'What the agent did', `${total} item${total === 1 ? '' : 's'}`)

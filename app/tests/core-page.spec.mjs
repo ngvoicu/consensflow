@@ -314,8 +314,11 @@ async function open(page, data = model()) {
       },
       'task.resume': ({ project, task }) =>
         answer({ task: { ...data.tasks[`${project}:${task}`], state: 'queued' } }),
-      'task.transcript': ({ project, task }) =>
-        answer(data.transcripts?.[`${project}:${task}`] ?? { items: [], total: 0 }),
+      // The last `limit` items, as the core gives them.
+      'task.transcript': ({ project, task, limit = Number.POSITIVE_INFINITY }) => {
+        const { items, total } = data.transcripts?.[`${project}:${task}`] ?? { items: [], total: 0 }
+        return answer({ items: items.slice(Math.max(0, items.length - limit)), total })
+      },
       'project.open': ({ directory }) => answer({ project: { id: 3, name: 'new', directory } }),
     }
     const invoke = async (command, args = {}) => {
@@ -920,6 +923,90 @@ test("shows what a task's window wrote, from ConsensFlow's own copy, under the t
   ])
   await expect(items.nth(2).locator('.transcript-body')).toHaveText('Parser done, 14 tests.')
   await expect(items.nth(2)).toHaveAttribute('data-role', 'assistant')
+})
+
+/** T-2 with a long answer in what its window wrote. */
+function longTranscript() {
+  const data = model()
+  data.transcripts = {
+    '1:2': {
+      total: 2,
+      items: [
+        { id: 'u1', role: 'user', text: 'Write the parser', complete: true, at: null },
+        { id: 'a1', role: 'assistant', text: 'line\n'.repeat(200), complete: true, at: null },
+      ],
+    },
+  }
+  return data
+}
+
+test('reads what a window wrote when its fold opens, and keeps the fold and its scroll across redraws', async ({
+  page,
+}) => {
+  await open(page, longTranscript())
+  await page.locator('button.card[data-task="2"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-2' })
+  const fold = drawer.locator('details[data-section="transcript"]')
+  await expect(fold.locator('summary')).toHaveText('What the agent did2 items')
+  // Opening the drawer reads how much the window wrote, not what.
+  expect(await calls(page, 'task.transcript')).toEqual([{ project: 1, task: 2, limit: 0 }])
+  await fold.locator('summary').click()
+  const answer = drawer.locator('.transcript-body').nth(1)
+  await expect(answer).toHaveText(/^line/)
+  expect(await calls(page, 'task.transcript')).toEqual([
+    { project: 1, task: 2, limit: 0 },
+    { project: 1, task: 2 },
+  ])
+  await answer.evaluate((node) => {
+    node.scrollTop = 600
+  })
+  // Redraws that change nothing of the task leave the drawer as it is, and
+  // read the task again but nothing more of its window.
+  const reads = (await calls(page, 'task.get')).length
+  for (const lamp of ['working', 'idle']) await changed(page, setLamp, ['zeus', lamp])
+  await expect.poll(async () => (await calls(page, 'task.get')).length).toBe(reads + 2)
+  await expect(fold).toHaveAttribute('open', '')
+  expect(await answer.evaluate((node) => node.scrollTop)).toBe(600)
+  expect(await calls(page, 'task.transcript')).toHaveLength(2)
+})
+
+test('redraws a drawer whose task changed, its fold still open and read again', async ({
+  page,
+}) => {
+  await open(page, longTranscript())
+  await page.locator('button.card[data-task="2"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-2' })
+  const fold = drawer.locator('details[data-section="transcript"]')
+  await fold.locator('summary').click()
+  await expect(drawer.locator('.transcript-item')).toHaveCount(2)
+  // The chief sends T-2 back with a word, and the window writes on.
+  await changed(page, () => {
+    const parser = window.__model.tasks['1:2']
+    parser.messages.push({
+      id: 22,
+      kind: 'task',
+      sender: 'chief',
+      recipient: 'zeus',
+      state: 'delivered',
+      reason: null,
+      body: 'Reopened: cover the errors too.',
+    })
+    parser.state = 'working'
+    const transcript = window.__model.transcripts['1:2']
+    transcript.items.push({
+      id: 'a2',
+      role: 'assistant',
+      text: 'Covering the errors.',
+      complete: false,
+      at: null,
+    })
+    transcript.total = 3
+  })
+  await expect(drawer.locator('.thread-body')).toHaveText(['Reopened: cover the errors too.'])
+  await expect(fold).toHaveAttribute('open', '')
+  await expect(fold.locator('summary')).toHaveText('What the agent did3 items')
+  await expect(drawer.locator('.transcript-item')).toHaveCount(3)
+  await expect(drawer.locator('.transcript-body').nth(2)).toHaveText('Covering the errors.')
 })
 
 test('a member whose agent is gone says so on the board and in the staff, with Remove at hand', async ({

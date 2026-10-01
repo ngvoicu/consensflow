@@ -177,6 +177,17 @@ const drawer = new TaskDrawer($('#task-drawer'), {
           : `T-${task.number} resumes in @${resumed.assignee}.`,
       )
     }),
+  // What a task's window wrote, read when its fold opens.
+  onTranscript: async (task) => {
+    try {
+      drawer.fill(
+        task,
+        await core('task.transcript', { project: task.projectId, task: task.number }),
+      )
+    } catch (cause) {
+      report(cause)
+    }
+  },
 })
 
 // The packaged smoke watches acks and arrivals here, on the real paths.
@@ -201,16 +212,24 @@ const terminals = new TerminalsView(stage, {
   onClose: closeTerminal,
 })
 
+/**
+ * How many items a task's window wrote. Only the count: even that walks the
+ * window's whole copy, so it is read when a drawer opens or its task changed.
+ */
+const written = async (project, number) =>
+  (await core('task.transcript', { project, task: number, limit: 0 })).total
+
+const closedProject = (id) => state.projects.find((project) => project.id === id)?.state !== 'open'
+
 /** A task's drawer; one asked for in a project the human has left since stays shut. */
 async function openTask(project, number) {
-  const [{ task }, transcript] = await Promise.all([
+  const [{ task }, total] = await Promise.all([
     core('task.get', { project, task: number }),
-    core('task.transcript', { project, task: number }),
+    written(project, number),
   ])
   if (state.selected !== project) return
-  state.openTask = { project, number }
-  const closed = state.projects.find((shown) => shown.id === project)?.state !== 'open'
-  drawer.show(task, { transcript, closed })
+  state.openTask = { project, number, total }
+  drawer.show(task, { total, closed: closedProject(project) })
 }
 
 function closeTask() {
@@ -221,17 +240,23 @@ function closeTask() {
 /**
  * The open task read again, once the board is drawn: a task that went (its
  * project shown no more, closed or deleted) closes its drawer, and nothing
- * it says keeps the board from drawing.
+ * it says keeps the board from drawing. Its drawer changes only where the
+ * task did.
  */
 async function rereadTask() {
-  if (state.openTask === null) return
-  const { project, number } = state.openTask
+  const opened = state.openTask
+  if (opened === null) return
+  const { project, number } = opened
   if (state.board?.project.id !== project) {
     closeTask()
     return
   }
   try {
-    await openTask(project, number)
+    const { task } = await core('task.get', { project, task: number })
+    if (!drawer.shows(task)) opened.total = await written(project, number)
+    // Closed, or another task opened, while these were on their way.
+    if (state.openTask !== opened) return
+    drawer.show(task, { total: opened.total, closed: closedProject(project) })
   } catch (cause) {
     closeTask()
     report(cause)
