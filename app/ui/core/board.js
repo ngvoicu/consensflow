@@ -605,10 +605,6 @@ export class TaskDrawer {
     this.#actions = actions
   }
 
-  get open() {
-    return !this.#root.hidden
-  }
-
   show(task, { transcript = { items: [], total: 0 }, now = Date.now() } = {}) {
     const head = element('header', 'drawer-head')
     const title = element('h2', 'drawer-title')

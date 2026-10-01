@@ -2139,3 +2139,102 @@ test("the lead's row says when a switch waits for its turn", async ({ page }) =>
     'Switching the lead to Codex after this turn',
   )
 })
+
+test('opens a task only over its own project, and every redraw after still draws', async ({
+  page,
+}) => {
+  const data = twoOpen()
+  data.tasks['1:4'] = { ...task(4, 'Add the tests', 'queued', 'chief', 'zeus', 1), messages: [] }
+  await open(page, data)
+  // harbour's T-4 is asked for and is slow to come; the human chooses foundry meanwhile.
+  await page.evaluate(() => {
+    window.__delay['task.get'] = 300
+    window.__delay['task.transcript'] = 300
+  })
+  await page.locator('button.card[data-task="4"]').click()
+  await chooseProject(page, 'foundry')
+  await expect(page.locator('#project-title')).toHaveText('foundry')
+  await page.waitForTimeout(500)
+  await expect(page.locator('#task-drawer')).toBeHidden()
+  // The next change still draws, and nothing was refused on the way.
+  await page.evaluate(() => {
+    const [, chief] = window.__model.boards[2].lanes
+    window.__model.boards[2].lanes.push({
+      participant: { ...chief.participant, id: 11, handle: 'ares', role: 'worker' },
+      tasks: [],
+      activity: { state: 'closed' },
+      pane: null,
+    })
+    window.__listeners.get('state-changed')()
+  })
+  await expect(page.locator('tr[data-handle="ares"]')).toHaveCount(1)
+  await expect(page.locator('#status')).toHaveText('')
+})
+
+test('closes a drawer whose task is gone, and still draws the board', async ({ page }) => {
+  const data = model()
+  data.tasks['1:4'] = { ...task(4, 'Add the tests', 'queued', 'chief', 'zeus', 1), messages: [] }
+  await open(page, data)
+  await page.locator('button.card[data-task="4"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-4' })
+  await expect(drawer).toBeVisible()
+  await page.evaluate(() => {
+    delete window.__model.tasks['1:4']
+    const zeus = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+    zeus.activity = { state: 'idle' }
+    window.__listeners.get('state-changed')()
+  })
+  await expect(page.locator('tr[data-handle="zeus"]').getByTestId('lamp')).toHaveAttribute(
+    'data-state',
+    'idle',
+  )
+  await expect(drawer).toBeHidden()
+  await expect(page.locator('#status')).toHaveText('no task T-4 in this project')
+})
+
+test("acts on the project a control was drawn for, while another one's board is on its way", async ({
+  page,
+}) => {
+  const data = twoOpen()
+  const zeus = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
+  data.boards[1].lanes.push({
+    participant: session(20, zeus.participant, 'amber-pine'),
+    tasks: [task(21, 'Write the lexer', 'done', 'chief', 'zeus-amber-pine', 3)],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  await page.evaluate(() => {
+    window.__delay['board.get'] = 400
+  })
+  await chooseProject(page, 'foundry')
+  // harbour's board is still the one shown: what is done on it is done in harbour.
+  await page.getByRole('button', { name: "Open @zeus · amber-pine's terminal" }).click()
+  await expect
+    .poll(() => calls(page, 'session.open'))
+    .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
+})
+
+test('switches the lead only of the project it was asked for', async ({ page }) => {
+  await open(page, twoOpen())
+  // The agents come slowly; the human chooses foundry before the dialog is up.
+  await page.evaluate(() => {
+    window.__delay['agents.list'] = 300
+  })
+  await page.getByRole('button', { name: 'Switch the lead to another harness or model' }).click()
+  await chooseProject(page, 'foundry')
+  await expect(page.locator('#project-title')).toHaveText('foundry')
+  await page.waitForTimeout(500)
+  await expect(page.getByRole('dialog', { name: 'Switch the lead' })).toBeHidden()
+  // Asked for again on foundry's own row, it switches foundry's lead.
+  await page.evaluate(() => {
+    window.__delay = {}
+  })
+  await page.getByRole('button', { name: 'Switch the lead to another harness or model' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Switch the lead' })
+  await dialog.getByLabel('The lead runs on').selectOption('harness:codex')
+  await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
+  await expect
+    .poll(() => calls(page, 'chief.switch'))
+    .toEqual([{ project: 2, harness: 'codex', when: 'turn', note: false }])
+})

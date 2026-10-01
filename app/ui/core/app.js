@@ -92,41 +92,41 @@ const board = new BoardView(boardRoot, {
       await core('message.decline', { message: message.id })
       note(`m-${message.id} declined; @${message.sender} is told.`)
     }),
-  onOpenTask: (number) => act(() => openTask(number)),
+  // Each control acts on the project of the board it is on: not yet the one
+  // the human just chose, while that one's board is on its way.
+  onOpenTask: (number) => act(() => openTask(state.board.project.id, number)),
   // Opening a session's closed terminal brings it back on its own
   // conversation and shows it in the dock, the dock unfolded. Closing it ends
   // its process and takes its card away with it.
   onOpenTerminal: (participant) =>
     act(async () => {
-      await core('session.open', { project: state.selected, handle: participant.handle })
+      await core('session.open', { project: participant.projectId, handle: participant.handle })
       unfold('dock')
       state.focus = participant.handle
     }),
   onCloseTerminal: (participant) => closeTerminal(participant),
   onEndSession: (participant) =>
     act(async () => {
-      await core('session.end', { project: state.selected, handle: participant.handle })
+      await core('session.end', { project: participant.projectId, handle: participant.handle })
       note(`@${participant.handle} is gone; its tasks stay on @${participant.member}'s lane.`)
     }),
   onSwitchLead: (chief) => act(() => openSwitchLead(chief)),
   onRedraw: () => render(),
 })
 
+// The drawer's actions are on its task's own project.
 const drawer = new TaskDrawer($('#task-drawer'), {
-  onClose: () => {
-    state.openTask = null
-    drawer.hide()
-  },
+  onClose: () => closeTask(),
   onCancel: (task) =>
-    act(() => core('task.cancel', { project: state.selected, task: task.number })),
+    act(() => core('task.cancel', { project: task.projectId, task: task.number })),
   onPause: (task) =>
     act(async () => {
-      await core('task.pause', { project: state.selected, task: task.number })
+      await core('task.pause', { project: task.projectId, task: task.number })
       note(`T-${task.number} is paused; its work waits.`)
     }),
   onReassign: (task) =>
     act(async () => {
-      await core('task.reassign', { project: state.selected, task: task.number })
+      await core('task.reassign', { project: task.projectId, task: task.number })
       note(
         `T-${task.number} is back on the board for another ${task.pool === 'designer' ? 'image designer' : `${task.tier} ${task.pool}`}.`,
       )
@@ -134,7 +134,7 @@ const drawer = new TaskDrawer($('#task-drawer'), {
   onResume: (task) =>
     act(async () => {
       const { task: resumed } = await core('task.resume', {
-        project: state.selected,
+        project: task.projectId,
         task: task.number,
       })
       note(
@@ -151,8 +151,8 @@ let outputObserver = null
 /** Closing a window, from its board row or its card: its process ends and its card goes with it. */
 function closeTerminal(participant) {
   return act(async () => {
-    await core('session.close', { project: state.selected, handle: participant.handle })
-    terminals.forget(state.selected, participant.handle)
+    await core('session.close', { project: participant.projectId, handle: participant.handle })
+    terminals.forget(participant.projectId, participant.handle)
   })
 }
 
@@ -167,13 +167,40 @@ const terminals = new TerminalsView(stage, {
   onClose: closeTerminal,
 })
 
-async function openTask(number) {
+/** A task's drawer; one asked for in a project the human has left since stays shut. */
+async function openTask(project, number) {
   const [{ task }, transcript] = await Promise.all([
-    core('task.get', { project: state.selected, task: number }),
-    core('task.transcript', { project: state.selected, task: number }),
+    core('task.get', { project, task: number }),
+    core('task.transcript', { project, task: number }),
   ])
-  state.openTask = number
+  if (state.selected !== project) return
+  state.openTask = { project, number }
   drawer.show(task, { transcript })
+}
+
+function closeTask() {
+  state.openTask = null
+  drawer.hide()
+}
+
+/**
+ * The open task read again, once the board is drawn: a task that went (its
+ * project shown no more, closed or deleted) closes its drawer, and nothing
+ * it says keeps the board from drawing.
+ */
+async function rereadTask() {
+  if (state.openTask === null) return
+  const { project, number } = state.openTask
+  if (state.board?.project.id !== project) {
+    closeTask()
+    return
+  }
+  try {
+    await openTask(project, number)
+  } catch (cause) {
+    closeTask()
+    report(cause)
+  }
 }
 
 let refreshing = null
@@ -225,9 +252,9 @@ async function refresh() {
         [board, ...others].filter((read) => read !== null),
         new Set(open.map((project) => project.id)),
       )
-      if (state.openTask !== null && drawer.open) await openTask(state.openTask)
       render()
       if (teamDialog.open) renderStaff()
+      await rereadTask()
     } catch (cause) {
       report(cause)
     } finally {
@@ -259,7 +286,7 @@ function render() {
   teamButton.disabled = project === null || suspended
   const lanes = state.board?.lanes ?? []
   if (!lanes.some((lane) => lane.participant.handle === state.focus)) state.focus = 'chief'
-  if (suspended) drawer.hide()
+  if (suspended) closeTask()
   if (state.board === null) {
     boardRoot.replaceChildren(
       element(
@@ -336,8 +363,7 @@ function renderProjects() {
     select.addEventListener('click', () => {
       state.selected = project.id
       state.focus = 'chief'
-      state.openTask = null
-      drawer.hide()
+      closeTask()
       void refresh()
     })
     item.append(select)
@@ -639,9 +665,13 @@ newProjectDialog
 // model, and the core hands it the lead (the dispatcher's switchChief).
 const switchLeadDialog = $('#switch-lead-dialog')
 const switchLeadForm = switchLeadDialog.querySelector('form')
+/** The project whose lead the dialog switches: the one it was opened for. */
+let switchingProject = null
 
 async function openSwitchLead(chief) {
   const { agents, missing } = await core('agents.list')
+  // Asked for in a project the human has left since: it stays shut.
+  if (state.selected !== chief.projectId) return
   const groups = CHIEF_HARNESSES.filter(
     ([kind]) => !missing.includes(HARNESS_OF_KIND[kind] ?? kind),
   ).map(([kind, label]) => {
@@ -667,6 +697,7 @@ async function openSwitchLead(chief) {
   for (const option of select.options) option.disabled = option.value === current
   select.value = [...select.options].find((option) => !option.disabled)?.value ?? ''
   switchLeadForm.elements.note.checked = false
+  switchingProject = chief.projectId
   switchLeadDialog.showModal()
 }
 
@@ -675,10 +706,11 @@ switchLeadForm.addEventListener('submit', (event) => {
   const [type, name] = switchLeadForm.elements.lead.value.split(':')
   const when = switchLeadForm.elements.when.value
   const askFirst = switchLeadForm.elements.note.checked
+  const project = switchingProject
   switchLeadDialog.close()
   void act(async () => {
     await core('chief.switch', {
-      project: state.selected,
+      project,
       ...(type === 'agent' ? { agent: name } : { harness: name }),
       when,
       note: askFirst,
@@ -770,7 +802,7 @@ function memberRows(member) {
     yes.type = 'button'
     yes.addEventListener('click', () =>
       act(async () => {
-        await core('member.remove', { project: state.selected, agent: member.handle })
+        await core('member.remove', { project: member.projectId, agent: member.handle })
         removing = null
         note(`${name} left the staff.`)
       }),
@@ -795,7 +827,7 @@ function memberRows(member) {
       }
       void act(async () => {
         await core('member.roles', {
-          project: state.selected,
+          project: member.projectId,
           agent: member.handle,
           roles: member.roles.filter((held) => held !== role),
         })
@@ -815,9 +847,10 @@ teamButton.addEventListener('click', () =>
     teamDialog.showModal()
   }),
 )
+// The dialog's staff is the shown board's, and so is what it changes.
 teamGate.addEventListener('change', () =>
   act(async () => {
-    await core('project.gate', { project: state.selected, gate: teamGate.checked })
+    await core('project.gate', { project: state.board.project.id, gate: teamGate.checked })
     note(
       teamGate.checked
         ? 'Every message between agents now waits for your approval.'
@@ -830,15 +863,16 @@ teamForm.addEventListener('submit', (event) => {
   const role = teamForm.elements.role.value
   const agent = teamForm.elements.agent.value
   if (!agent) return
-  const member = (state.board?.lanes ?? []).find((lane) => lane.participant.agent === agent)
+  const { project, lanes } = state.board
+  const member = lanes.find((lane) => lane.participant.agent === agent)
   void act(async () => {
     if (member === undefined) {
-      await core('member.add', { project: state.selected, agent, roles: [role] })
+      await core('member.add', { project: project.id, agent, roles: [role] })
       note(`@${agent} joined the staff as ${ROLE_LABEL[role]}.`)
       return
     }
     await core('member.roles', {
-      project: state.selected,
+      project: project.id,
       agent,
       roles: [...member.participant.roles, role],
     })
