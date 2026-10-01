@@ -51,6 +51,7 @@ export function devinAdapter({
       const roleSetup = await roleConfiguration('devin', {
         role,
         env,
+        launch: launchId,
         cwd: directory,
         executable,
         content: instructions,

@@ -65,6 +65,7 @@ export function openCodeAdapter({
       const roleSetup = await roleConfiguration('opencode', {
         role,
         env,
+        launch: launchId,
         cwd: directory,
         executable,
         content: instructions,

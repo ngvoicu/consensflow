@@ -100,7 +100,7 @@ describe('the Claude Code adapter', () => {
         'launch-1',
         'settings.json',
       )
-      const roles = path.join(env.CONSENSFLOW_HOME, 'roles', 'worker')
+      const roles = path.join(env.CONSENSFLOW_HOME, 'integrations', 'claude', 'launch-1', 'role')
       assert.deepEqual(plan.argv, [
         executable,
         '--settings',
@@ -220,7 +220,10 @@ describe('the Claude Code adapter', () => {
       )
       const at = plan.argv.indexOf('--append-system-prompt-file')
       assert.ok(at > 0)
-      assert.match(plan.argv[at + 1].replaceAll('\\', '/'), /roles\/chief\/.*SKILL\.md$/)
+      assert.match(
+        plan.argv[at + 1].replaceAll('\\', '/'),
+        /integrations\/claude\/launch-1\/role\/.*consensflow-chief\/SKILL\.md$/,
+      )
       assert.equal(await readFile(plan.argv[at + 1], 'utf8'), 'CHIEF INSTRUCTIONS')
       assert.equal(plan.argv.includes('--model'), false)
     })

@@ -114,6 +114,7 @@ export function codexAdapter({
       const roleSetup = await roleConfiguration('codex', {
         role,
         env,
+        launch: launchId,
         cwd: directory,
         executable,
         content: instructions,

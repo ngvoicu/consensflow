@@ -7,7 +7,7 @@ import { join } from 'node:path'
  * launch id lives as long as its window; nothing else reads these folders,
  * so they go when it does.
  */
-const HARNESSES = ['claude', 'pi', 'devin']
+const HARNESSES = ['claude', 'pi', 'devin', 'opencode']
 const LAUNCH_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 const folders = (home, launch) =>

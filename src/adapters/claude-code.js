@@ -59,6 +59,7 @@ export function claudeCodeAdapter({ env, answers = cachedAnswers() }) {
       const roleSetup = await roleConfiguration('claude-code', {
         role,
         env,
+        launch: launchId,
         cwd: directory,
         executable,
         content: instructions,

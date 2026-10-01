@@ -116,6 +116,7 @@ test('private installation preserves native defaults and hooks, and does not edi
   const role = await roleConfiguration('devin', {
     role: 'advisor',
     env: f.env,
+    launch: 'launch-a',
     content: '# ConsensFlow advisor\n',
   })
   assert.match(await fs.readFile(role.env.CF_DEVIN_ROLE_FILE, 'utf8'), /advisor/i)

@@ -54,6 +54,7 @@ export function piAdapter({ env, send = sendPi, answers = cachedAnswers() }) {
       const roleSetup = await roleConfiguration('pi', {
         role,
         env,
+        launch: launchId,
         cwd: directory,
         executable,
         content: instructions,

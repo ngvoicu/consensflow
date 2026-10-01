@@ -88,7 +88,7 @@ it('app preparation owns its launcher and integrations, not role documents or gl
     addAgent({ name: 'mine', harness: 'claude', model: 'example' }, t.env)
     for (let i = 0; i < 2; i++) installation.prepareApp(t.env)
     assert.ok(existsSync(join(t.env.CONSENSFLOW_BIN_DIR, `cf${CMD}`)))
-    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'roles')), false)
+    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'integrations')), false)
     assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'skills-manifest.json')), false)
     for (const file of globals) assert.equal(readFileSync(file, 'utf8'), 'global canary')
   } finally {

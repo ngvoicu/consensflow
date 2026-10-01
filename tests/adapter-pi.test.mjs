@@ -60,8 +60,10 @@ describe('the Pi adapter', () => {
       )
       const skill = path.join(
         env.CONSENSFLOW_HOME,
-        'roles',
-        'worker',
+        'integrations',
+        'pi',
+        'launch-1',
+        'role',
         '.claude',
         'skills',
         'consensflow-worker',
