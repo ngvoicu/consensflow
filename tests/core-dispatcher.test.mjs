@@ -2685,6 +2685,35 @@ describe('a lead whose window does not come up', () => {
     })
   })
 
+  it('notices a lead window that exits before its open is answered', async () => {
+    await withCodex(async (context) => {
+      const { project, id } = await spoken(context)
+      const open = context.host.open.bind(context.host)
+      let die = true
+      context.host.open = async (body) => {
+        const opened = await open(body)
+        // The host sends the exit first, in the same read as its answer to the open.
+        if (die) {
+          die = false
+          await context.host.exit('chief')
+        }
+        return opened
+      }
+      await context.dispatcher.switchChief(project.id, { harness: 'codex' })
+      assert.equal(context.dispatcher.pane(id('chief')), null)
+      assert.equal(
+        context.ledger.project(project.id).state,
+        'suspended',
+        'the lead went, as it would have later',
+      )
+      assert.equal(handoffsOf(context, project)[0].state, 'queued', 'its handoff waits')
+
+      await context.dispatcher.resumeProject(project.id)
+      assert.notEqual(context.dispatcher.pane(id('chief')), null)
+      assert.match(context.codex.prepared.at(-1).message, /You are the lead now\./)
+    })
+  })
+
   it('keeps what was queued for a first lead whose window does not open', async () => {
     await setup(async (context) => {
       const { project } = await withStaff(context)

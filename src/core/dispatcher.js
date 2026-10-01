@@ -428,11 +428,17 @@ export class Dispatcher {
 
   /** A window ended: `pane.exit` from the pane host. */
   async paneExited({ id, generation }) {
+    const ended = (pane) => pane?.id === id && pane.generation === generation
     const entry = [...this.#runtime].find(
-      ([, runtime]) => runtime.pane?.id === id && runtime.pane.generation === generation,
+      ([, runtime]) => ended(runtime.pane) || ended(runtime.opening?.pane),
     )
     if (entry === undefined) return
     const [participantId, runtime] = entry
+    // Still opening: its launch takes the exit once it has the window.
+    if (!ended(runtime.pane)) {
+      runtime.opening.exited = true
+      return
+    }
     this.#credentials.revoke(runtime.token)
     const delivering = runtime.delivering
     // The window's files in the home go with it.
@@ -1094,6 +1100,9 @@ export class Dispatcher {
     }
     const token = this.#credentials.issue({ participant, project })
     const pane = { id: `p${project.id}-${participant.handle}`, generation }
+    // The host watches a window's process before it answers the open, so an
+    // exit can come first, even in the same read: `paneExited` finds it here.
+    runtime.opening = { pane, exited: false }
     const opened = await this.#host
       .open({
         ...pane,
@@ -1103,6 +1112,8 @@ export class Dispatcher {
         dropEnv: plan.dropEnv,
       })
       .catch((cause) => ({ ok: false, error: cause.message }))
+    const { exited } = runtime.opening
+    runtime.opening = null
     if (opened?.ok !== true) {
       this.#credentials.revoke(token)
       this.#launchFailed(
@@ -1133,6 +1144,11 @@ export class Dispatcher {
       activity: { state: 'starting' },
       drawn: false,
     })
+    // A window that exited before its open was answered goes as any exit does.
+    if (exited) {
+      await this.paneExited(pane)
+      return
+    }
     const started = await adapter
       .started({ launch: plan.launch, pane, host: this.#host })
       .catch((cause) => ({ error: cause.message }))
@@ -1550,6 +1566,7 @@ export class Dispatcher {
         id: participantId,
         adapter: null,
         pane: null,
+        opening: null,
         launch: null,
         token: null,
         delivering: null,
