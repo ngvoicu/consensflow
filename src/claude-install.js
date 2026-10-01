@@ -35,9 +35,6 @@ export async function prepareClaudeSettings(env, launch, { boardQuestions = true
       // acceptance dialog, which no one could answer in a host-started pane.
       permissions: { defaultMode: 'bypassPermissions' },
       skipDangerousModePermissionPrompt: true,
-      // A bypass-mode session holds messages from other sessions for approval
-      // and drops them after five minutes; ConsensFlow's own messages must land.
-      crossSessionInbound: 'accept',
       // The classic renderer writes to the terminal's own scrollback, which the
       // dock scrolls; the fullscreen one draws on the alternate screen, which
       // has none.

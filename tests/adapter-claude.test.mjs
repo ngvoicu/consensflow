@@ -128,7 +128,9 @@ describe('the Claude Code adapter', () => {
       const written = JSON.parse(await readFile(settings, 'utf8'))
       assert.equal(written.permissions.defaultMode, 'bypassPermissions')
       assert.equal(written.skipDangerousModePermissionPrompt, true)
-      assert.equal(written.crossSessionInbound, 'accept')
+      // Messages from other Claude sessions keep Claude's own approval hold:
+      // ConsensFlow pastes its messages, so nothing of its own comes that way.
+      assert.equal(written.crossSessionInbound, undefined)
       assert.deepEqual(written.hooks.Stop, [{ hooks: [{ type: 'command', command: 'exit 0' }] }])
       assert.deepEqual(
         written.hooks.PreToolUse,

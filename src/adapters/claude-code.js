@@ -11,8 +11,8 @@ import { executableFor } from './shared.js'
 /**
  * Claude Code, for the new core (see `src/core/dispatcher.js` for the adapter
  * contract). Each launch gets its own settings file under the home: full
- * permission without the one-time dialog, messages from other sessions
- * accepted, and a Stop hook on every turn so every finished turn is recorded.
+ * permission without the one-time dialog, and a Stop hook on every turn so
+ * every finished turn is recorded.
  *
  * - The session id is ours: minted for a fresh window, resumed for a known one.
  * - A message is pasted into a live window as if the human typed it, whatever
