@@ -28,7 +28,19 @@ export async function runHook(event, { selectedSession, instructions = '' }) {
   }
 }
 
-/** Selection comes from this stock TUI's own native session configuration events. */
+/**
+ * The conversation one line of Devin's wire log says the window now shows,
+ * or null: this stock TUI configures each conversation it opens, at start and
+ * at every /new or /resume.
+ */
+export const shownIn = (event) =>
+  event.update?.sessionUpdate === 'config_option_update' &&
+  event.update.configOptions?.some((option) => option.id === 'mode') &&
+  typeof event.sessionId === 'string'
+    ? event.sessionId
+    : null
+
+/** The conversation the window shows, as the whole wire log has it so far. */
 export async function selectedSession(file) {
   let session = null
   const { size } = await stat(file)
@@ -42,13 +54,7 @@ export async function selectedSession(file) {
         const line = pending.slice(0, end)
         pending = pending.slice(end + 1)
         if (!line.trim()) continue
-        const event = JSON.parse(line)
-        if (
-          event.update?.sessionUpdate === 'config_option_update' &&
-          event.update.configOptions?.some((option) => option.id === 'mode') &&
-          typeof event.sessionId === 'string'
-        )
-          session = event.sessionId
+        session = shownIn(JSON.parse(line)) ?? session
       }
     }
   } finally {

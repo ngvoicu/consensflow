@@ -1,22 +1,32 @@
 import { open } from 'node:fs/promises'
 import { setTimeout as wait } from 'node:timers/promises'
-import { selectedSession } from '../../hosts/devin-hooks.mjs'
+import { selectedSession, shownIn } from '../../hosts/devin-hooks.mjs'
 import { cachedAnswers } from '../../hosts/lib/completion.js'
 import { DEVIN_REFUSAL, exhaustedQuota } from '../../hosts/lib/quota.js'
 import { interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
 import { send as sendDevin } from '../channels/devin.js'
 import { prepareDevinIntegration, prepareDevinPrompt } from '../devin-install.js'
 import { roleConfiguration } from '../role-skills.js'
-import { admission, dialogWaiting, executableFor, recordState } from './shared.js'
+import {
+  admission,
+  dialogWaiting,
+  executableFor,
+  recordState,
+  SHOWS_ANOTHER,
+  switchedTo,
+} from './shared.js'
 
 /**
  * Devin, for the new core. Each launch runs on a config of our own (the
  * owner's, plus hooks that log every turn and carry the role instructions),
  * in full-permission mode, with the first message in a prompt file. Devin
  * names its session itself; its own wire log for this launch says which one
- * the window opened. A message is pasted, behind whatever the input box
- * holds, and only while Devin still shows the conversation we know.
+ * the window opened, and which one it shows after a /new or /resume, so the
+ * window is followed to it. A message is pasted, behind whatever the input
+ * box holds, and only while Devin still shows the conversation we know.
  */
+const HOLD = 'Devin has not said yet which conversation its window shows'
+
 export function devinAdapter({
   env,
   send = sendDevin,
@@ -77,7 +87,10 @@ export function devinAdapter({
       throw new Error('Devin never said which session it opened (its wire log stayed empty)')
     },
 
-    async ready({ pane, host }) {
+    async ready({ launch, pane, host }) {
+      const { shown } = await readWire(launch.channel)
+      if (shown === undefined) return HOLD
+      if (shown !== launch.nativeSession) return SHOWS_ANOTHER
       const snapshot = await host.request('pane.snapshot', pane)
       return snapshot?.ok === true && !snapshot.pasteInFlight
     },
@@ -100,11 +113,13 @@ export function devinAdapter({
       if (launch.nativeSession === null) {
         return { items: [], settled: false, waiting: null, failed: false, quota: null }
       }
-      const [record, quota] = await Promise.all([
+      const [record, { shown, quota }] = await Promise.all([
         answers('devin', launch.nativeSession, env),
-        wireQuota(launch.channel),
+        readWire(launch.channel),
       ])
-      return { ...recordState(record), waiting: dialogWaiting(record), quota }
+      const observed = { ...recordState(record), waiting: dialogWaiting(record), quota }
+      if (shown === undefined) return { ...observed, waiting: { reason: HOLD } }
+      return shown === launch.nativeSession ? observed : switchedTo(observed, shown)
     },
 
     transcript({ launch }) {
@@ -114,14 +129,15 @@ export function devinAdapter({
 }
 
 /**
- * Devin's own word on its quota, from the wire log of this launch: a refusal
- * in its message text after the latest prompt ("Reached overall message rate
- * limit … reset in 35 minutes", "Usage limit reached", "Quota exhausted").
- * The log only grows, so each look reads what was appended since the last.
+ * What Devin's own wire log of this launch says: the conversation the window
+ * shows, and its word on its quota, a refusal in its message text after the
+ * latest prompt ("Reached overall message rate limit … reset in 35 minutes",
+ * "Usage limit reached", "Quota exhausted"). The log only grows, so each look
+ * reads what was appended since the last.
  */
-async function wireQuota(channel) {
+async function readWire(channel) {
   const file = await open(channel.wire, 'r').catch(() => null)
-  if (file === null) return channel.quota ?? null
+  if (file === null) return { shown: channel.shown, quota: channel.quota ?? null }
   try {
     const { size } = await file.stat()
     let from = channel.wireOffset ?? 0
@@ -139,6 +155,7 @@ async function wireQuota(channel) {
         } catch {
           continue
         }
+        channel.shown = shownIn(event) ?? channel.shown
         if (event.method === 'session/prompt') channel.quota = null
         const text =
           event.update?.sessionUpdate === 'agent_message_chunk' ? event.update.content?.text : null
@@ -150,5 +167,5 @@ async function wireQuota(channel) {
   } finally {
     await file.close()
   }
-  return channel.quota ?? null
+  return { shown: channel.shown, quota: channel.quota ?? null }
 }

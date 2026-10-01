@@ -52,11 +52,11 @@ const request = (overrides = {}) => ({
 })
 const integration = (env) => path.join(env.CONSENSFLOW_HOME, 'integrations', 'devin', 'launch-1')
 
+const selection = (sessionId) =>
+  `${JSON.stringify({ sessionId, update: { sessionUpdate: 'config_option_update', configOptions: [{ id: 'mode' }] } })}\n`
+
 async function selects(env, sessionId) {
-  await writeFile(
-    path.join(integration(env), 'wire.jsonl'),
-    `${JSON.stringify({ sessionId, update: { sessionUpdate: 'config_option_update', configOptions: [{ id: 'mode' }] } })}\n`,
-  )
+  await writeFile(path.join(integration(env), 'wire.jsonl'), selection(sessionId))
 }
 
 describe('the Devin adapter', () => {
@@ -176,6 +176,54 @@ describe('the Devin adapter', () => {
       assert.equal(await adapter.ready({ launch, pane, host }), true)
       pasteInFlight = true
       assert.equal(await adapter.ready({ launch, pane, host }), false)
+    })
+  })
+
+  it('follows the window to the conversation a /new or /resume left it on, holding until it names one', async () => {
+    await withHome(async ({ env }) => {
+      const read = []
+      const adapter = devinAdapter({
+        env,
+        answers: async (_kind, session) => {
+          read.push(session)
+          return {
+            items: [{ id: `${session}-1`, role: 'user', text: 'hello' }],
+            inFlight: false,
+            settlement: { state: 'settled' },
+          }
+        },
+      })
+      const { launch } = await adapter.prepare(request({ resume: 'mild-coin', message: null }))
+      const host = {
+        async request(op) {
+          return op === 'pane.snapshot' ? { ok: true, pasteInFlight: false } : { ok: true }
+        },
+      }
+      const pane = { id: 's1-zeus', generation: 2 }
+      // Devin has not said yet which conversation the window shows: a message waits.
+      const unnamed = await adapter.observe({ launch })
+      assert.match(unnamed.waiting?.reason ?? '', /Devin has not said/)
+      assert.equal(await adapter.ready({ launch, pane, host }), unnamed.waiting.reason)
+      await selects(env, 'mild-coin')
+      assert.equal((await adapter.observe({ launch })).settled, true)
+      assert.equal(await adapter.ready({ launch, pane, host }), true)
+
+      // /new: Devin's own log now names another conversation.
+      await appendFile(path.join(integration(env), 'wire.jsonl'), selection('fresh-leaf'))
+      const observed = await adapter.observe({ launch })
+      assert.deepEqual(observed.switched, { nativeSession: 'fresh-leaf' })
+      assert.equal(observed.settled, false)
+      assert.equal(
+        await adapter.ready({ launch, pane, host }),
+        'the window shows another conversation',
+      )
+
+      // The dispatcher follows the window: the new conversation's record is read.
+      launch.nativeSession = 'fresh-leaf'
+      const followed = await adapter.observe({ launch })
+      assert.equal(followed.switched, undefined)
+      assert.equal(read.at(-1), 'fresh-leaf')
+      assert.equal(await adapter.ready({ launch, pane, host }), true)
     })
   })
 

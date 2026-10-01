@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { it } from 'node:test'
-import { currentSession, send } from '../src/channels/codex.js'
+import { send, sessionState } from '../src/channels/codex.js'
 
 const SESSION = '01a0817b-e6b0-7f32-8e11-370dc000cbc0'
 
@@ -16,7 +16,9 @@ async function broker(t) {
   const server = createServer(async (request, response) => {
     response.setHeader('content-type', 'application/json')
     if (request.url === '/session')
-      return response.end(JSON.stringify({ launchId: 'owned', sessionId: selected }))
+      return response.end(
+        JSON.stringify({ launchId: 'owned', sessionId: selected, available: true }),
+      )
     let text = ''
     for await (const chunk of request) text += chunk
     const input = JSON.parse(text)
@@ -142,7 +144,7 @@ it('turns a stale native claim into an affirmative zero-byte refusal without ask
 
 it('uses the owned bridge for exact identity and rejects a session switch after the pane claim', async (t) => {
   const f = await broker(t)
-  assert.equal(await currentSession(f.launch), SESSION)
+  assert.deepEqual(await sessionState(f.launch), { sessionId: SESSION, available: true })
   const switched = '01a09094-a559-7db0-bf50-e2309856c3c0'
   f.target.claim = async () => {
     f.select(switched)

@@ -10,7 +10,14 @@ import {
 import { launchConfiguration } from '../channels.js'
 import { prepareOpenCodeExtension } from '../opencode-install.js'
 import { roleConfiguration } from '../role-skills.js'
-import { admission, dialogWaiting, executableFor, recordState } from './shared.js'
+import {
+  admission,
+  dialogWaiting,
+  executableFor,
+  recordState,
+  SHOWS_ANOTHER,
+  switchedTo,
+} from './shared.js'
 
 /**
  * OpenCode, for the new core. A fresh conversation is created on a throwaway
@@ -22,7 +29,9 @@ import { admission, dialogWaiting, executableFor, recordState } from './shared.j
  *
  * An empty conversation says nothing about the window: until the plugin
  * reports that the TUI shows this conversation, OpenCode is still loading (or
- * the human is looking at another one) and nothing is sent.
+ * the human is on its home screen or session list) and nothing is sent. When
+ * the human opens another conversation in it (/new, or one from the list),
+ * the window is followed there.
  *
  * The window's live status, which the plugin reports with the conversation
  * it shows, has the last word where the store cannot: a refused request
@@ -30,6 +39,9 @@ import { admission, dialogWaiting, executableFor, recordState } from './shared.j
  * resets), and an answer a lost window never finished stays unfinished there
  * for good once the conversation is reopened, though OpenCode is idle.
  */
+const STARTING = 'the OpenCode window is starting: its plugin does not answer yet'
+const HOLD = 'the OpenCode window shows no conversation: its home screen or session list is open'
+
 export function openCodeAdapter({
   env,
   createSession = createOpenCodeSession,
@@ -105,7 +117,10 @@ export function openCodeAdapter({
     },
 
     async ready({ launch }) {
-      return (await shown(launch))?.sessionId === launch.nativeSession
+      const window = await shown(launch)
+      if (window === undefined) return STARTING
+      if (window.sessionId === null) return HOLD
+      return window.sessionId === launch.nativeSession ? true : SHOWS_ANOTHER
     },
 
     async deliver({ launch, pane, host, text }) {
@@ -133,12 +148,14 @@ export function openCodeAdapter({
       const idle = showing && window.status?.type === 'idle'
       // A session waiting to retry a request is at work, whatever its record says.
       const retrying = showing && window.status?.type === 'retry'
-      return {
+      const observed = {
         ...state,
         quota: retry ?? state.quota,
         settled: showing && !retrying && (state.settled || idle),
         waiting: dialogWaiting(record),
       }
+      if (window?.sessionId === null) return { ...observed, waiting: { reason: HOLD } }
+      return window === undefined || showing ? observed : switchedTo(observed, window.sessionId)
     },
 
     transcript({ launch }) {

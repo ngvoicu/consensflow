@@ -3,23 +3,21 @@ import { setTimeout as wait } from 'node:timers/promises'
 import { promisify } from 'node:util'
 import { cachedAnswers } from '../../hosts/lib/completion.js'
 import { interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
-import {
-  sessionAvailable as brokerAvailable,
-  currentSession as brokerSession,
-  send as sendCodex,
-} from '../channels/codex.js'
+import { sessionState as brokerState, send as sendCodex } from '../channels/codex.js'
 import { launchConfiguration, withNativeBridge } from '../channels.js'
 import { runnable } from '../harnesses.js'
 import { roleConfiguration } from '../role-skills.js'
-import { admission, executableFor, recordState } from './shared.js'
+import { admission, executableFor, recordState, SHOWS_ANOTHER, switchedTo } from './shared.js'
 
 /**
  * Codex, for the new core. Codex runs under ConsensFlow's supervisor
  * (`hosts/codex-session.mjs`): an app-server, a broker that knows the thread
  * the TUI shows and queues messages on it, and the TUI attached to both. The
  * first message is Codex's last argument; the broker names the thread once
- * Codex starts it. A Codex too old for the native queue is refused: nothing
- * could reach its window.
+ * Codex starts it, and again whenever the human starts or resumes another
+ * one in the window (/new, /resume), so the window is followed to it. A
+ * Codex too old for the native queue is refused: nothing could reach its
+ * window.
  */
 const QUESTION_TOOL = [
   '--enable',
@@ -37,6 +35,14 @@ const QUESTION_TOOL = [
  * the PATH the daemon gave the window. Both probed on Codex 0.156.1.
  */
 const WINDOW = ['-c', 'check_for_update_on_startup=false', '-c', 'allow_login_shell=false']
+
+/**
+ * Why a message waits while the broker names no thread or cannot take one: a
+ * refusal there would spend the message's attempts in seconds (an answer to a
+ * Codex worker was lost that way), so it is held.
+ */
+const HOLD =
+  'the Codex window cannot take a message yet: starting, switching conversations or reconnecting'
 
 /** The MCP servers Codex would start, as `codex mcp list --json` names them. */
 async function codexMcpServers(executable, env) {
@@ -81,8 +87,7 @@ export function codexAdapter({
   env,
   harness = 'codex',
   send = sendCodex,
-  currentSession = brokerSession,
-  sessionAvailable = brokerAvailable,
+  sessionState = brokerState,
   mcpServers = codexMcpServers,
   answers = cachedAnswers(),
   discoverEveryMs = 250,
@@ -141,7 +146,7 @@ export function codexAdapter({
       if (launch.nativeSession !== null) return {}
       const deadline = Date.now() + discoverForMs
       while (Date.now() < deadline) {
-        const thread = await currentSession(launch.channel).catch(() => undefined)
+        const thread = (await sessionState(launch.channel))?.sessionId
         if (typeof thread === 'string') {
           launch.nativeSession = thread
           return { nativeSession: thread }
@@ -152,11 +157,9 @@ export function codexAdapter({
     },
 
     async ready({ launch }) {
-      // Held, not failed: a refusal here would spend the message's attempts
-      // in seconds (an answer to a Codex worker was lost that way).
-      return (await sessionAvailable(launch.channel))
-        ? true
-        : 'the Codex window cannot take a message yet: starting, resuming or reconnecting'
+      const shown = await sessionState(launch.channel)
+      if (shown?.available !== true) return HOLD
+      return shown.sessionId === launch.nativeSession ? true : SHOWS_ANOTHER
     },
 
     async deliver({ launch, pane, host, text }) {
@@ -177,8 +180,15 @@ export function codexAdapter({
       if (launch.nativeSession === null) {
         return { items: [], settled: false, waiting: null, failed: false, quota: null }
       }
-      const record = await answers('codex', launch.nativeSession, env)
-      return { ...recordState(record), waiting: null }
+      const [record, shown] = await Promise.all([
+        answers('codex', launch.nativeSession, env),
+        sessionState(launch.channel),
+      ])
+      const observed = { ...recordState(record), waiting: null }
+      if (typeof shown?.sessionId !== 'string') return { ...observed, waiting: { reason: HOLD } }
+      return shown.sessionId === launch.nativeSession
+        ? observed
+        : switchedTo(observed, shown.sessionId)
     },
 
     transcript({ launch }) {

@@ -144,7 +144,7 @@ describe('the Codex adapter', () => {
       const adapter = codexAdapter({
         env,
         discoverEveryMs: 5,
-        currentSession: async () => (++asked < 3 ? null : thread),
+        sessionState: async () => ({ sessionId: ++asked < 3 ? null : thread, available: true }),
       })
       const { launch } = await adapter.prepare(request())
       assert.deepEqual(await adapter.started({ launch }), { nativeSession: thread })
@@ -191,11 +191,59 @@ describe('the Codex adapter', () => {
 
   it('holds a message while its broker cannot take one: a window starting, resuming or reconnecting', async () => {
     await withHome(async ({ env }) => {
+      const thread = '0f8fad5b-d9cb-469f-a165-70867728950e'
       let available = false
-      const adapter = codexAdapter({ env, sessionAvailable: async () => available })
-      const { launch } = await adapter.prepare(request())
+      const adapter = codexAdapter({
+        env,
+        sessionState: async () => ({ sessionId: thread, available }),
+      })
+      const { launch } = await adapter.prepare(request({ resume: thread, message: null }))
       assert.match(await adapter.ready({ launch }), /cannot take a message yet/)
       available = true
+      assert.equal(await adapter.ready({ launch }), true)
+    })
+  })
+
+  it('follows the window to the thread a /new or /resume left it on, holding while it shows none', async () => {
+    await withHome(async ({ env }) => {
+      const first = '0f8fad5b-d9cb-469f-a165-70867728950e'
+      const next = '7c9e6679-7425-40de-944b-e07fc1f90ae7'
+      let shown = { sessionId: first, available: true }
+      const read = []
+      const adapter = codexAdapter({
+        env,
+        sessionState: async () => shown,
+        answers: async (_kind, thread) => {
+          read.push(thread)
+          return {
+            items: [{ id: `${thread}-1`, role: 'user', text: 'hello' }],
+            inFlight: false,
+            settlement: { state: 'settled' },
+          }
+        },
+      })
+      const launch = { nativeSession: first, channel: { kind: 'codex-queue' } }
+      assert.equal((await adapter.observe({ launch })).settled, true)
+      assert.equal(await adapter.ready({ launch }), true)
+
+      // /new: while Codex starts the new thread, the broker names none...
+      shown = { sessionId: null, available: false }
+      const switching = await adapter.observe({ launch })
+      assert.match(switching.waiting?.reason ?? '', /cannot take a message yet/)
+      assert.equal(await adapter.ready({ launch }), switching.waiting.reason)
+      // ...then names it.
+      shown = { sessionId: next, available: true }
+      const observed = await adapter.observe({ launch })
+      assert.deepEqual(observed.switched, { nativeSession: next })
+      assert.equal(observed.settled, false)
+      assert.equal(await adapter.ready({ launch }), 'the window shows another conversation')
+
+      // The dispatcher follows the window: the new thread's record is read.
+      launch.nativeSession = next
+      const followed = await adapter.observe({ launch })
+      assert.equal(followed.switched, undefined)
+      assert.equal(followed.settled, true)
+      assert.equal(read.at(-1), next)
       assert.equal(await adapter.ready({ launch }), true)
     })
   })
@@ -257,6 +305,7 @@ describe('the Codex adapter', () => {
       const quota = { state: 'low', usedPercent: 96, resetsAt: '2026-09-26T08:29:53.000Z' }
       const adapter = codexAdapter({
         env,
+        sessionState: async () => ({ sessionId: 'thread-1', available: true }),
         answers: async () => ({
           items: [],
           inFlight: false,
@@ -264,12 +313,11 @@ describe('the Codex adapter', () => {
           quota,
         }),
       })
-      const observed = await adapter.observe({
-        launch: { nativeSession: 'thread-1', channel: null },
-      })
+      const channel = { kind: 'codex-queue' }
+      const observed = await adapter.observe({ launch: { nativeSession: 'thread-1', channel } })
       assert.deepEqual([observed.settled, observed.quota], [true, quota])
       assert.equal(
-        (await adapter.observe({ launch: { nativeSession: null, channel: null } })).quota,
+        (await adapter.observe({ launch: { nativeSession: null, channel } })).quota,
         null,
       )
     })

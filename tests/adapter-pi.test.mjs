@@ -154,6 +154,53 @@ describe('the Pi adapter', () => {
     })
   })
 
+  it('follows the window to the conversation a /new or /resume left it on, holding until it names one', async () => {
+    await withHome(async ({ env }) => {
+      const read = []
+      const adapter = piAdapter({
+        env,
+        answers: async (_kind, session) => {
+          read.push(session)
+          return {
+            items: [{ id: `${session}-1`, role: 'user', text: 'hello' }],
+            inFlight: false,
+            settlement: { state: 'settled' },
+          }
+        },
+      })
+      const { launch } = await adapter.prepare(request())
+      const shows = async (sessionId) => {
+        await mkdir(launch.channel.settled, { recursive: true })
+        await writeFile(
+          path.join(launch.channel.settled, 'launch-1.shown.json'),
+          JSON.stringify({ launchId: 'launch-1', sessionId }),
+        )
+      }
+      // Until its extension starts, Pi has not said which conversation it shows.
+      const unnamed = await adapter.observe({ launch })
+      assert.match(unnamed.waiting?.reason ?? '', /Pi has not said/)
+      assert.equal(await adapter.ready({ launch }), unnamed.waiting.reason)
+      await shows(launch.nativeSession)
+      assert.equal((await adapter.observe({ launch })).settled, true)
+      assert.equal(await adapter.ready({ launch }), true)
+
+      // /new: the extension says the window shows another conversation.
+      const fresh = '0199a6f0-4cc1-7d3e-9f7a-3c5b2e1d0a98'
+      await shows(fresh)
+      const observed = await adapter.observe({ launch })
+      assert.deepEqual(observed.switched, { nativeSession: fresh })
+      assert.equal(observed.settled, false)
+      assert.equal(await adapter.ready({ launch }), 'the window shows another conversation')
+
+      // The dispatcher follows the window: the new conversation's record is read.
+      launch.nativeSession = fresh
+      const followed = await adapter.observe({ launch })
+      assert.equal(followed.switched, undefined)
+      assert.equal(read.at(-1), fresh)
+      assert.equal(await adapter.ready({ launch }), true)
+    })
+  })
+
   it("reads each turn's end from the extension's settled marker", async () => {
     await withHome(async ({ env }) => {
       const calls = []

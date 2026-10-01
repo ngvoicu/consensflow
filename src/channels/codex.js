@@ -78,17 +78,13 @@ function uncertain(cause) {
   return { ok: false, admitted: null, error: 'uncertain', cause }
 }
 
-/** Native TUI replies identify the main chief, independently of transcript recency. */
-export async function currentSession(config) {
-  return (await currentSessionState(config))?.sessionId
-}
-
-/** Whether the broker would take a delivery now (a thread shown, no switch, its upstream open). */
-export async function sessionAvailable(config) {
-  return (await currentSessionState(config))?.available === true
-}
-
-async function currentSessionState(config) {
+/**
+ * The broker's word on the window: the thread its TUI shows (null while it
+ * starts, switches threads or has no TUI attached) and whether it would take
+ * a delivery now (a thread shown, no switch, its app-server connected).
+ * Undefined when the broker does not answer for this launch.
+ */
+export async function sessionState(config) {
   if (!config?.sessionBridge || !config.launchId) return undefined
   try {
     const response = await fetch(new URL('/session', config.sessionBridge.endpoint), {
@@ -98,11 +94,7 @@ async function currentSessionState(config) {
     const current = await response.json()
     if (!response.ok || current.launchId !== config.launchId) return undefined
     if (current.sessionId !== null && !UUID.test(current.sessionId ?? '')) return undefined
-    return {
-      sessionId: current.sessionId,
-      empty: current.empty === true,
-      available: current.available === true,
-    }
+    return { sessionId: current.sessionId, available: current.available === true }
   } catch {
     return undefined
   }

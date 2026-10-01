@@ -281,6 +281,60 @@ describe('the Claude Code adapter', () => {
     })
   })
 
+  it('follows the window to the conversation a /clear or /resume left it on', async () => {
+    await withHome(async ({ env }) => {
+      const adapter = claudeCodeAdapter({ env })
+      const first = '1b4e28ba-2fa1-41d2-883f-0016d3cca427'
+      const cleared = '7c9e6679-7425-40de-944b-e07fc1f90ae7'
+      const launch = { nativeSession: first }
+      const host = {
+        async request(op) {
+          return op === 'pane.snapshot' ? { ok: true, pasteInFlight: false } : { ok: false }
+        },
+      }
+      const pane = { id: 's1-chief', generation: 1 }
+      await transcript(env, first, [
+        userLine(first, 1, 'hello'),
+        answerLine(first, 2, 'Hi'),
+        stopLine(first, 3),
+      ])
+      await status(env, first, { status: 'idle' })
+      assert.equal((await adapter.observe({ launch })).settled, true)
+      assert.equal(await adapter.ready({ launch, pane, host }), true)
+
+      // /clear: the window's own Claude process now names another conversation.
+      await status(env, cleared, { status: 'idle' })
+      const observed = await adapter.observe({ launch })
+      assert.deepEqual(observed.switched, { nativeSession: cleared })
+      assert.equal(observed.settled, false)
+      assert.deepEqual(
+        observed.items.map((item) => item.text),
+        ['hello', 'Hi'],
+        "the old conversation's last look",
+      )
+      assert.equal(
+        await adapter.ready({ launch, pane, host }),
+        'the window shows another conversation',
+      )
+
+      // The dispatcher follows the window: the launch names the new conversation.
+      launch.nativeSession = cleared
+      await transcript(env, cleared, [
+        userLine(cleared, 1, 'fresh start'),
+        answerLine(cleared, 2, 'Ready'),
+        stopLine(cleared, 3),
+      ])
+      const followed = await adapter.observe({ launch })
+      assert.equal(followed.switched, undefined)
+      assert.equal(followed.settled, true)
+      assert.deepEqual(
+        followed.items.map((item) => item.text),
+        ['fresh start', 'Ready'],
+      )
+      assert.equal(await adapter.ready({ launch, pane, host }), true)
+    })
+  })
+
   it('pastes a message into the window by default, waiting only for a paste on its way', async () => {
     await withHome(async ({ env }) => {
       const adapter = claudeCodeAdapter({ env })

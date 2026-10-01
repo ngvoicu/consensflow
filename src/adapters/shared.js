@@ -34,6 +34,20 @@ export function recordState(record) {
 export const dialogWaiting = (record) =>
   record?.asking === true ? { reason: 'its own question dialog is open' } : null
 
+/**
+ * A window that shows another conversation than its launch's (the human ran
+ * /new, /clear or /resume in it): this reading is the old conversation's last
+ * look, nothing in it settles, and the dispatcher follows the window to the
+ * one it names. Until it has, a message waits rather than going in.
+ */
+export const switchedTo = (observed, nativeSession) => ({
+  ...observed,
+  settled: false,
+  waiting: null,
+  switched: { nativeSession },
+})
+export const SHOWS_ANOTHER = 'the window shows another conversation'
+
 /** How the native channels answer a send, as an adapter delivery outcome. */
 export function admission(sent, refusal, { queued = false } = {}) {
   if (sent?.ok === true) return queued ? { admitted: true, queued: true } : { admitted: true }

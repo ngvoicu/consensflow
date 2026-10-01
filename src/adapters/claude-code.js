@@ -6,7 +6,7 @@ import { cachedAnswers, hasTranscript } from '../../hosts/lib/completion.js'
 import { interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
 import { prepareClaudeSettings } from '../claude-install.js'
 import { roleConfiguration } from '../role-skills.js'
-import { executableFor } from './shared.js'
+import { executableFor, SHOWS_ANOTHER, switchedTo } from './shared.js'
 
 /**
  * Claude Code, for the new core (see `src/core/dispatcher.js` for the adapter
@@ -23,6 +23,10 @@ import { executableFor } from './shared.js'
  *   that misnames the human's own answers, so it is not used (2026-09-22).
  * - Claude's own `sessions/<pid>.json` says busy, idle or waiting (and why);
  *   the transcript holds the conversation and says whether the turn settled.
+ * - The window's Claude process is the one whose file first named the
+ *   launch's conversation. A /clear or /resume in the window changes the
+ *   conversation that file names, never the process, so the window is
+ *   followed to it.
  */
 /**
  * A member runs in full-permission mode and reads what others wrote, so it
@@ -37,6 +41,12 @@ export function claudeCodeAdapter({ env, answers = cachedAnswers() }) {
   const configDir = path.resolve(
     env.CLAUDE_CONFIG_DIR ?? path.join(env.HOME ?? homedir(), '.claude'),
   )
+  /** Claude's status of the window's process, known once its file names the launch's session. */
+  const windowStatus = async (launch) => {
+    const statuses = await claudeStatuses(configDir)
+    launch.pid ??= [...statuses].find(([, live]) => live.sessionId === launch.nativeSession)?.[0]
+    return launch.pid === undefined ? undefined : statuses.get(launch.pid)
+  }
   return {
     harness: 'claude-code',
 
@@ -81,8 +91,10 @@ export function claudeCodeAdapter({ env, answers = cachedAnswers() }) {
       return {}
     },
 
-    /** A paste waits only for the window to be readable and another paste to be in. */
-    async ready({ pane, host }) {
+    /** A paste waits for the window to be readable, on its conversation, with no paste going in. */
+    async ready({ launch, pane, host }) {
+      const live = await windowStatus(launch)
+      if (live !== undefined && live.sessionId !== launch.nativeSession) return SHOWS_ANOTHER
       const snapshot = await host.request('pane.snapshot', pane)
       if (snapshot?.ok !== true)
         return `the window cannot be read: ${snapshot?.error ?? 'no answer'}`
@@ -98,11 +110,10 @@ export function claudeCodeAdapter({ env, answers = cachedAnswers() }) {
     },
 
     async observe({ launch }) {
-      const [record, statuses] = await Promise.all([
+      const [record, live] = await Promise.all([
         answers('claude-code', launch.nativeSession, env),
-        claudeStatuses(env),
+        windowStatus(launch),
       ])
-      const live = statuses.get(launch.nativeSession)
       const items = Array.isArray(record.items) ? record.items : []
       const transcriptSettled = record.settlement?.state === 'settled'
       // Claude's own status is the word on whether the window is at its
@@ -111,13 +122,16 @@ export function claudeCodeAdapter({ env, answers = cachedAnswers() }) {
       // opened, so a paste on its word alone lands before the prompt is up.
       const settled =
         live !== undefined && live.state === 'idle' && (transcriptSettled || items.length === 0)
-      return {
+      const observed = {
         items,
         settled,
         waiting: live?.state === 'waiting' ? { reason: live.reason ?? null } : null,
         failed: record.failed === true,
         quota: record.quota ?? null,
       }
+      return live !== undefined && live.sessionId !== launch.nativeSession
+        ? switchedTo(observed, live.sessionId)
+        : observed
     },
 
     transcript({ launch }) {
@@ -127,16 +141,13 @@ export function claudeCodeAdapter({ env, answers = cachedAnswers() }) {
 }
 
 /**
- * Claude Code's own live status for each running session, from the
- * `sessions/<pid>.json` files it keeps: busy, idle, or waiting with the
- * reason (a permission prompt, input needed, a dialog). A file whose process
- * is gone is ignored.
+ * Claude Code's own live status for each running process, from the
+ * `sessions/<pid>.json` files it keeps: the conversation it shows, and busy,
+ * idle, or waiting with the reason (a permission prompt, input needed, a
+ * dialog). A file whose process is gone is ignored.
  */
-async function claudeStatuses(env) {
-  const directory = path.join(
-    env.CLAUDE_CONFIG_DIR ?? path.join(env.HOME ?? homedir(), '.claude'),
-    'sessions',
-  )
+async function claudeStatuses(configDir) {
+  const directory = path.join(configDir, 'sessions')
   const statuses = new Map()
   const names = await fs.readdir(directory).catch(() => [])
   for (const name of names) {
@@ -149,7 +160,8 @@ async function claudeStatuses(env) {
       continue
     const state = { busy: 'working', waiting: 'waiting', idle: 'idle', shell: 'idle' }[row.status]
     if (!state) continue
-    statuses.set(row.sessionId, {
+    statuses.set(row.pid, {
+      sessionId: row.sessionId,
       state,
       ...(state === 'waiting' && typeof row.waitingFor === 'string'
         ? { reason: row.waitingFor }

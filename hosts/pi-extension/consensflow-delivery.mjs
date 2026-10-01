@@ -84,6 +84,10 @@ function frontierOf(ctx) {
  * `settled/<launchId>.json` is app-owned evidence with `{launchId, sessionId,
  * frontier: {id}, settledAt}`. It is written at `agent_settled` or when an idle
  * TUI restores a completed assistant leaf, and removed at new work.
+ * `settled/<launchId>.shown.json` says `{launchId, sessionId}`: the
+ * conversation the window shows, written whenever this extension starts on
+ * one (Pi starts it anew at every /new, /resume or /fork), so ConsensFlow
+ * follows the window there.
  * A delivery record carries its own absolute `expiresAt`;
  * this extension never derives a second timeout from launch configuration.
  * Before a send, false means zero-byte refusal. After a send, absent
@@ -127,6 +131,7 @@ export function createDeliveryExtension(
   // A turn on: Pi saves nothing until an answer is complete, so a first
   // request that hangs would leave ConsensFlow nothing to read but this.
   const workingFile = evidenceFile === null ? null : join(settled, `${launchId}.working.json`)
+  const shownFile = evidenceFile === null ? null : join(settled, `${launchId}.shown.json`)
 
   const uniquePath = async (directory, file) => {
     await mkdir(directory, { recursive: true })
@@ -167,6 +172,19 @@ export function createDeliveryExtension(
       await rename(`${workingFile}.tmp`, workingFile)
     } catch (cause) {
       logError(`could not record a working turn: ${cause?.message ?? String(cause)}`)
+    }
+  }
+
+  const writeShown = async () => {
+    if (shownFile === null) return
+    const sessionId = sessionIdOf(context)
+    if (sessionId === null) return
+    try {
+      await mkdir(settled, { recursive: true })
+      await writeFile(`${shownFile}.tmp`, `${JSON.stringify({ launchId, sessionId })}\n`, 'utf8')
+      await rename(`${shownFile}.tmp`, shownFile)
+    } catch (cause) {
+      logError(`could not record the conversation shown: ${cause?.message ?? String(cause)}`)
     }
   }
 
@@ -356,6 +374,7 @@ export function createDeliveryExtension(
     context = ctx
     watcher?.close()
     clearInterval(poller)
+    await writeShown()
     await invalidateSettlement()
     const leaf = ctx.sessionManager?.getLeafEntry?.()
     if (
