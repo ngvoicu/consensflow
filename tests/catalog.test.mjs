@@ -454,12 +454,13 @@ it('carries GPT-6.1 Sol wherever Sol was, Sonnet 5.5, and MiMo V2.6 Pro through 
   }
 })
 
-it("offers Devin's flagship models as presets, each on its twin's tier and marked for Devin Pro", () => {
+it("offers Devin's flagship models as presets, each on its twin's tier", () => {
   // 2026-10-01: Devin lists 54 model families; the catalog carries the ladders
   // Claude Code and Codex carry (Fable 5.1, Opus 5.5, Sonnet 5.5, GPT-6 Astra,
   // GPT-6.1 Sol) and Devin's own SWE-2. Devin writes the level into the model
   // id: a row names family and effort, and the launch joins them. Every one
-  // answered "Upgrade to Pro" on Gabriel's plan, so each says it needs Devin Pro.
+  // answered "Upgrade to Pro" on a free plan; Devin says so itself, so a row
+  // carries no note about plans (the owner's call).
   const devin = CATALOG.devin.filter((entry) => entry.model !== 'default')
   assert.equal(devin.length, 25)
   const twins = [...CATALOG.claude, ...CATALOG.codex]
@@ -468,7 +469,7 @@ it("offers Devin's flagship models as presets, each on its twin's tier and marke
     assert.ok(['low', 'medium', 'high', 'xhigh', 'max'].includes(level), entry.name)
     assert.match(entry.description, new RegExp(`^Devin .+ ${level.toUpperCase()}$`), entry.name)
     assert.equal(entry.profile.routeLabel, 'Devin account', entry.name)
-    assert.equal(entry.profile.routeNote, 'Needs a Devin Pro plan.', entry.name)
+    assert.equal(entry.profile.routeNote, undefined, entry.name)
     if (entry.model === 'swe-2') {
       assert.equal(entry.profile.modelLabel, 'SWE-2', entry.name)
       continue

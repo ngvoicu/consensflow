@@ -96,8 +96,8 @@ export const AGENT_PRESETS = [
   // carry, at the same levels, and Devin's own SWE-2. Devin writes the level
   // into the model id (claude-opus-5-5-max): a row names the family and the
   // effort, and the launch joins them (windows.js). Each family answered
-  // "Upgrade to Pro to access this model" on the owner's plan (probed one level
-  // each with `devin -p`), so each says it needs Devin Pro.
+  // "Upgrade to Pro to access this model" on a free plan (probed one level each
+  // with `devin -p`). The rows carry no note about it: Devin says so itself.
   {
     preset: "thoth",
     id: "thoth",
@@ -1416,10 +1416,6 @@ const MODEL_LABELS = {
   'swe-2': 'SWE-2',
 }
 
-// Devin families its paid plan gates: each answered "Upgrade to Pro to access
-// this model" on 2026-10-01.
-const DEVIN_PRO = new Set(['claude-fable-5.1', 'claude-opus-5.5', 'claude-sonnet-5.5', 'gpt-6-astra', 'gpt-6.1-sol', 'swe-2']);
-
 
 
 export const WORK_TIERS = {
@@ -1487,7 +1483,6 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
         .replace(/^muse-spark-1\.3-contributor(?:-free)?$/, 'muse-spark-1.3')
     : (model ?? "default")
   const contributor = known && key === 'muse-spark-1.3' && model.includes('-contributor')
-  const devinPro = harness === 'devin' && DEVIN_PRO.has(key)
   const routeLabel = model?.startsWith('openrouter/')
     ? 'OpenRouter · API'
     : model?.startsWith('opencode/')
@@ -1504,7 +1499,6 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
     modelLabel: (known && MODEL_LABELS[key]) || model || "Default",
     routeLabel: routeLabel + (contributor ? (model.endsWith('-free') ? ' · Contributor · Free' : ' · Contributor') : ''),
     ...(contributor ? { routeNote: 'Prompts and replies may train Meta models.' } : {}),
-    ...(devinPro ? { routeNote: 'Needs a Devin Pro plan.' } : {}),
   }
 }
 

@@ -7,6 +7,12 @@ import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 const SCRIPT = fileURLToPath(new URL('../app/scripts/portable.mjs', import.meta.url))
+// The script's own tar. On Windows a bare `tar` may be Git's GNU tar, which
+// reads `C:` as a remote host and cannot read a zip.
+const TAR =
+  process.platform === 'win32'
+    ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
+    : 'tar'
 
 /** A release folder as `tauri build` leaves it on Windows, build leftovers included. */
 function release(dir, { missing = [] } = {}) {
@@ -42,7 +48,7 @@ describe('the portable Windows zip', () => {
         '3.0.0-alpha.99',
       ])
       const zip = join(dir, 'out', 'ConsensFlow_3.0.0-alpha.99_x64-portable.zip')
-      const listed = execFileSync('tar', ['-tf', zip], { encoding: 'utf8' })
+      const listed = execFileSync(TAR, ['-tf', zip], { encoding: 'utf8' })
         .split('\n')
         .filter((line) => line !== '' && !line.endsWith('/'))
         .sort()
