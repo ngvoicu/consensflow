@@ -1880,6 +1880,54 @@ class Ledger {
       .map(messageView)
   }
 
+  /**
+   * A window the human switched to another conversation (/clear, /new,
+   * /resume): the participant's conversation is the one on `nativeSession`
+   * from now on, its own earlier one when it had it, else a new one bound to
+   * it, and the one in progress ends. A session that another participant's
+   * conversation holds stays with it: the new conversation is left unbound.
+   */
+  followConversation(participantId, { harness, nativeSession }) {
+    requireHarness(harness)
+    requireText(nativeSession, 'native session', 512)
+    return this.#write(() => {
+      const participant = this.#participantRow(participantId)
+      const held = this.#db
+        .prepare('SELECT * FROM conversation WHERE harness = ? AND native_session = ?')
+        .get(harness, nativeSession)
+      const own = held?.participant_id === participantId
+      if (own && held.ended_at === null) return conversationView(held)
+      const at = this.#at()
+      this.#db
+        .prepare(
+          'UPDATE conversation SET ended_at = ? WHERE participant_id = ? AND ended_at IS NULL',
+        )
+        .run(at, participantId)
+      let id = held?.id
+      if (own) {
+        this.#db.prepare('UPDATE conversation SET ended_at = NULL WHERE id = ?').run(id)
+      } else {
+        id = this.#db
+          .prepare(
+            `INSERT INTO conversation (participant_id, harness, native_session, started_at)
+             VALUES (?, ?, ?, ?)`,
+          )
+          .run(
+            participantId,
+            harness,
+            held === undefined ? nativeSession : null,
+            at,
+          ).lastInsertRowid
+      }
+      this.#log(participant.project_id, 'conversation.followed', {
+        participant: participant.handle,
+        conversation: id,
+        nativeSession,
+      })
+      return this.#conversation(id)
+    })
+  }
+
   /** The human read a message in the app. */
   markRead(messageId) {
     return this.#write(() => {

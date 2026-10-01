@@ -55,7 +55,7 @@ function fakeAdapter(harness = 'claude-code') {
         dropEnv: [],
         nativeSession: agent.native,
         firstMessage: request.message === null ? null : 'argv',
-        launch: { launchId: request.launchId },
+        launch: { launchId: request.launchId, nativeSession: agent.native },
       }
     },
     async started() {
@@ -72,6 +72,18 @@ function fakeAdapter(harness = 'claude-code') {
     },
     async observe({ launch }) {
       const agent = agents.get(launch.launchId)
+      // A window that shows another conversation than its launch's: that
+      // record's last look, and which session it shows now.
+      if (agent.shows !== undefined && agent.shows !== launch.nativeSession) {
+        return {
+          items: [...agent.records[launch.nativeSession]],
+          settled: false,
+          waiting: null,
+          quota: agent.quota,
+          failed: false,
+          switched: { nativeSession: agent.shows },
+        }
+      }
       return {
         items: [...agent.items],
         settled: agent.settled,
@@ -96,6 +108,16 @@ function fakeAdapter(harness = 'claude-code') {
   }
   adapter.quota = (handle, quota) => {
     adapter.agent(handle).quota = quota
+  }
+  // The human switches the window to another conversation (/clear, /new,
+  // /resume): from then on it writes that one's record, idle at first.
+  adapter.switchTo = (handle, native) => {
+    const agent = adapter.agent(handle)
+    agent.records ??= {}
+    agent.records[agent.shows ?? agent.native] = agent.items
+    agent.items = agent.records[native] ?? []
+    agent.shows = native
+    agent.settled = true
   }
   return adapter
 }
@@ -2799,6 +2821,87 @@ describe('a window that takes long', () => {
       assert.equal(
         context.host.opened.filter((pane) => pane.id === `p${project.id}-chief`).length,
         2,
+      )
+    })
+  })
+})
+
+describe('a window the human switches to another conversation', () => {
+  it('follows it: the conversation it shows becomes the session’s, and deliveries go and count there', async () => {
+    await setup(async (context) => {
+      const { project, id } = await withStaff(context)
+      await context.dispatcher.pass()
+      const first = context.ledger.currentConversation(id('chief'))
+      // A note is pasted, and before the next look the human types /clear.
+      const one = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'One' })
+      await context.dispatcher.pass()
+      context.adapter.switchTo('chief', 'native-cleared')
+      await context.dispatcher.pass()
+      assert.equal(
+        context.ledger.message(one.id).state,
+        'delivered',
+        'the record it went to showed it',
+      )
+      const cleared = context.ledger.currentConversation(id('chief'))
+      assert.deepEqual([cleared.nativeSession, cleared.harness], ['native-cleared', 'claude-code'])
+      assert.equal(
+        context.ledger.leadHistory(project.id).find((c) => c.id === first.id).items.length,
+        1,
+        'the first conversation ended with its copy',
+      )
+
+      const two = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'Two' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.message(two.id).state, 'delivered')
+      assert.match(context.adapter.agent('chief').items.at(-1).text, /note from @zeus\]\nTwo$/)
+      assert.equal(context.adapter.agent('chief').items.length, 1, 'in the conversation it shows')
+
+      // /resume back to the first: it is the chief's conversation again.
+      context.adapter.switchTo('chief', first.nativeSession)
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.currentConversation(id('chief')).id, first.id)
+    })
+  })
+})
+
+describe('a message that cannot be delivered', () => {
+  it('tells the human once what it was, for whom and why, whatever its kind', async () => {
+    await setup(async (context) => {
+      const { project, id, open, task } = await withTiers(context)
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(task(1).state, 'working')
+      context.adapter.agent('chief').admit = false
+      const question = context.ledger.ask(project.id, {
+        from: 'zeus-amber-pine',
+        to: 'chief',
+        task: 1,
+        body: 'Which dialect?',
+      })
+      context.adapter.answer('zeus', 'I asked the chief.')
+      for (let n = 0; n < 5; n += 1) await context.dispatcher.pass()
+      assert.equal(context.ledger.message(question.id).state, 'failed')
+      const told = () => context.ledger.inbox(id('human')).map((m) => m.body)
+      assert.deepEqual(told(), [
+        `m-${question.id}, a question from @zeus-amber-pine on T-1, did not reach @chief: refused by the test.`,
+      ])
+      await context.dispatcher.pass()
+      assert.equal(told().length, 1, 'once')
+    })
+  })
+
+  it('tells the human once when a task they gave fails', async () => {
+    await setup(async (context) => {
+      const { project, id } = await withStaff(context)
+      context.adapter.agent('chief').admit = false
+      context.ledger.createTask(project.id, { from: 'human', to: 'chief', body: 'Plan the week' })
+      for (let n = 0; n < 5; n += 1) await context.dispatcher.pass()
+      assert.equal(context.ledger.task(project.id, 1).state, 'failed')
+      assert.deepEqual(
+        context.ledger.inbox(id('human')).map((m) => m.body),
+        ['T-1 failed: refused by the test. Reopen it with: cf task reopen T-1 "…"'],
       )
     })
   })

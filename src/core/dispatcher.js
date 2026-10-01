@@ -550,6 +550,13 @@ export class Dispatcher {
       )
     }
     this.#copyTranscript(participant, runtime, observed)
+    // The human switched the window to another conversation: this look was
+    // the old one's last, and nothing is delivered on it.
+    if (observed.switched !== undefined) {
+      if (runtime.delivering !== null) this.#confirmArrival(runtime, observed)
+      this.#follow(participant, runtime, observed.switched.nativeSession)
+      return
+    }
     if (observed.quota !== undefined) {
       runtime.quota = observed.quota ?? null
       // Low is soft: the current task continues, nothing new comes until the
@@ -788,6 +795,23 @@ export class Dispatcher {
       this.#ledger.copyTranscript(conversation.id, items.slice(from), { from })
     }
     runtime.copied = { conversation: conversation.id, count: items.length }
+  }
+
+  /**
+   * A window the human switched to another conversation (/clear, /new,
+   * /resume) is followed: the participant's conversation is the one it shows
+   * now, and its launch names it, so later looks, deliveries and the
+   * transcript copy go there. A delivery still on its way counts once its
+   * header shows in the record the window now writes.
+   */
+  #follow(participant, runtime, nativeSession) {
+    this.#ledger.followConversation(participant.id, {
+      harness: participant.harness,
+      nativeSession,
+    })
+    runtime.launch.nativeSession = nativeSession
+    runtime.copied = null
+    this.#changed()
   }
 
   /**
@@ -1374,15 +1398,35 @@ export class Dispatcher {
     if (message === null || message.state !== 'delivering') return
     if (retry && message.attempts < this.#maxAttempts) {
       this.#ledger.retryDelivery(message.id, reason)
-    } else {
-      this.#ledger.failDelivery(message.id, reason)
-      if (message.kind === 'task' && message.taskNumber !== null) {
-        const project = this.#ledger.project(message.projectId)
-        const task = this.#ledger.task(project.id, message.taskNumber)
-        if (task.state === 'failed') this.#tellRequester(project, task, reason)
+    } else this.#failDelivery(message, reason)
+    this.#changed()
+  }
+
+  /**
+   * A message that will not be delivered. A brief fails its task, and whoever
+   * gave it hears why. Whoever waits on any other kind (a worker on its
+   * answer, the chief on a result) would wait forever, so the human hears,
+   * once, what it was, for whom and why.
+   */
+  #failDelivery(message, reason) {
+    this.#ledger.failDelivery(message.id, reason)
+    const project = this.#ledger.project(message.projectId)
+    if (message.kind === 'task' && message.taskNumber !== null) {
+      const task = this.#ledger.task(project.id, message.taskNumber)
+      if (task.state === 'failed') {
+        this.#tellRequester(project, task, reason)
+        // A task the human gave: that note was theirs.
+        if (task.requester === 'human') return
       }
     }
-    this.#changed()
+    const kind = message.kind === 'answer' ? 'an answer' : `a ${message.kind}`
+    const from = message.sender === null ? 'ConsensFlow' : `@${message.sender}`
+    const on = message.taskNumber === null ? '' : ` on T-${message.taskNumber}`
+    this.#ledger.note(project.id, {
+      to: 'human',
+      ...(message.taskNumber === null ? {} : { task: message.taskNumber }),
+      body: `m-${message.id}, ${kind} from ${from}${on}, did not reach @${message.recipient}: ${reason}.`,
+    })
   }
 
   #failTask(project, task, reason) {
