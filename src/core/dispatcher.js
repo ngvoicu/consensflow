@@ -285,8 +285,12 @@ export class Dispatcher {
     return deleted
   }
 
-  /** Once, at start: the projects that were open when the previous process ended come back. */
+  /**
+   * Once, at start: what was on its way to a window is settled, and the
+   * projects that were open when the previous process ended come back.
+   */
   async resumeAfterRestart() {
+    this.#settleInFlight()
     const outcomes = []
     for (const project of this.#ledger.projects().filter((s) => s.resumeOnStart)) {
       try {
@@ -299,6 +303,23 @@ export class Dispatcher {
       }
     }
     return outcomes
+  }
+
+  /**
+   * What was on its way to a window when the previous process ended: no
+   * window survives a restart, so none will show it now. A message whose
+   * header ConsensFlow's copy of the window shows had arrived; any other
+   * goes back to its queue with its attempt, for the window that comes back.
+   */
+  #settleInFlight() {
+    for (const message of this.#ledger.inFlight()) {
+      const item = this.#ledger.copiedItemWith(message.recipientId, markerOf(message.id))
+      if (item === null) {
+        this.#ledger.retryDelivery(message.id, 'the daemon stopped before it arrived', {
+          refund: true,
+        })
+      } else this.#ledger.confirmDelivery(message.id, { item })
+    }
   }
 
   /**
@@ -906,11 +927,12 @@ export class Dispatcher {
     }
     runtime.held = null
     this.#ledger.beginDelivery(message.id)
+    const { pane } = runtime
     let outcome
     try {
       outcome = await runtime.adapter.deliver({
         launch: runtime.launch,
-        pane: runtime.pane,
+        pane,
         host: this.#host,
         text: deliveryText(message),
       })
@@ -932,6 +954,14 @@ export class Dispatcher {
     }
     if (outcome.admitted === false) {
       this.#settleFailure(delivering, outcome.reason ?? 'the harness refused it', { retry: true })
+      return
+    }
+    // A window that closed while its harness took the message had nothing
+    // on its way to settle when it went: the message goes again.
+    if (runtime.pane !== pane) {
+      this.#settleFailure(delivering, 'its window closed while it was handed over', {
+        retry: true,
+      })
       return
     }
     runtime.delivering = delivering
@@ -966,10 +996,10 @@ export class Dispatcher {
             admitted: true,
             chief: participant.role === 'chief',
           }
-    if (first !== null) this.#ledger.beginDelivery(first.id)
 
     let plan
     try {
+      if (first !== null) this.#ledger.beginDelivery(first.id)
       // A session plays the role of the task it was started for; a member or
       // the chief its own.
       const { role } = participant

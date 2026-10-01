@@ -1840,6 +1840,35 @@ class Ledger {
     })
   }
 
+  /**
+   * Every message on its way to a window, oldest first. At start none of
+   * those windows is left (they died with the previous process), so each is
+   * settled before anything else is delivered.
+   */
+  inFlight() {
+    return this.#db
+      .prepare(`${MESSAGE_SELECT} WHERE m.state = 'delivering' ORDER BY m.id`)
+      .all()
+      .map(messageView)
+  }
+
+  /**
+   * The first item ConsensFlow's copy of the participant's current
+   * conversation shows it was given (a user item) that contains `text`, or
+   * null: a delivery's header there proves the delivery arrived.
+   */
+  copiedItemWith(participantId, text) {
+    const row = this.#db
+      .prepare(
+        `SELECT t.item_id FROM transcript t JOIN conversation c ON c.id = t.conversation_id
+         WHERE c.participant_id = ? AND c.ended_at IS NULL AND t.role = 'user'
+           AND instr(t.text, ?) > 0
+         ORDER BY t.seq LIMIT 1`,
+      )
+      .get(participantId, text)
+    return row?.item_id ?? null
+  }
+
   /** The human read a message in the app. */
   markRead(messageId) {
     return this.#write(() => {

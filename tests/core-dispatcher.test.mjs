@@ -1162,6 +1162,112 @@ describe('the dispatcher', () => {
   })
 })
 
+describe('a restart while a message is on its way', () => {
+  it('gives a message its window never showed back to the queue with its attempt, and the chief comes back to it and to what follows', async () => {
+    await setup(async (context) => {
+      const { project } = await withStaff(context)
+      await context.dispatcher.pass()
+      context.adapter.agent('chief').arrive = false
+      const one = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'One' })
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.message(one.id).state, 'delivering')
+
+      // The app quits with it on its way: the daemon stops before the window does.
+      context.ledger.suspendForRestart()
+      const after = context.make()
+      await after.resumeAfterRestart()
+      assert.deepEqual(
+        [context.ledger.message(one.id).state, context.ledger.message(one.id).attempts],
+        ['queued', 0],
+        'its window died before it landed: the attempt comes back',
+      )
+      const two = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'Two' })
+      await after.pass()
+      await after.pass()
+      context.adapter.answer('chief', 'Read one.')
+      await after.pass()
+      await after.pass()
+      assert.deepEqual(
+        [context.ledger.message(one.id).state, context.ledger.message(two.id).state],
+        ['delivered', 'delivered'],
+      )
+      assert.deepEqual(
+        context.adapter
+          .agent('chief')
+          .items.filter((i) => i.role === 'user')
+          .map((i) => i.text.split('\n')[1]),
+        ['One', 'Two'],
+      )
+    })
+  })
+
+  it('confirms a message whose header the copy of its window already shows', async () => {
+    await setup(async (context) => {
+      const { project, id } = await withStaff(context)
+      await context.dispatcher.pass()
+      context.adapter.agent('chief').arrive = false
+      const note = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'Shown' })
+      await context.dispatcher.pass()
+      // The window showed it and the copy has it; the daemon stopped before it confirmed it.
+      const shown = item('user', deliveryText(context.ledger.message(note.id)))
+      context.ledger.copyTranscript(context.ledger.currentConversation(id('chief')).id, [shown])
+
+      context.ledger.suspendForRestart()
+      await context.make().resumeAfterRestart()
+      const settled = context.ledger.message(note.id)
+      assert.deepEqual([settled.state, settled.receipt], ['delivered', { item: shown.id }])
+    })
+  })
+
+  it("opens a member's session again on its own conversation with the brief it was opened for", async () => {
+    await setup(async (context) => {
+      const { id, open, task } = await withTiers(context)
+      open()
+      await context.dispatcher.pass()
+      const session = id('zeus-amber-pine')
+      const native = context.ledger.currentConversation(session).nativeSession
+      // The window opened, but its record never showed the brief before the stop.
+      context.adapter.agent('zeus').items = []
+
+      context.ledger.suspendForRestart()
+      const after = context.make()
+      await after.resumeAfterRestart()
+      await after.pass()
+      const launch = context.adapter.prepared.at(-1)
+      assert.deepEqual([launch.participant.handle, launch.resume], ['zeus-amber-pine', native])
+      assert.match(
+        launch.message,
+        /^\[ConsensFlow m-\d+ · T-1 · task from @chief\]\nWrite the parser$/,
+      )
+      await after.pass()
+      assert.equal(task(1).state, 'working')
+    })
+  })
+
+  it('gives a paste back to the queue when its window closes while the harness takes it', async () => {
+    await setup(async (context) => {
+      const { project } = await withStaff(context)
+      await context.dispatcher.pass()
+      const deliver = context.adapter.deliver
+      context.adapter.deliver = async (request) => {
+        const outcome = await deliver(request)
+        await context.host.exit('chief')
+        return outcome
+      }
+      const note = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'Lost' })
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.message(note.id).state, 'queued', 'not left on its way')
+
+      context.adapter.deliver = deliver
+      await context.dispatcher.resumeProject(project.id)
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.message(note.id).state, 'delivering')
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.message(note.id).state, 'delivered')
+    })
+  })
+})
+
 describe('the delivered text', () => {
   it('names the message, the task and the sender, and tells the reader how to answer a question', () => {
     const base = { id: 12, taskNumber: 3, sender: 'zeus', body: 'Which format?' }
@@ -2297,6 +2403,32 @@ describe('switching the lead to another harness', () => {
       await context.dispatcher.pass()
       assert.equal(context.host.killed.length, 1, "only the old lead's window was closed")
       assert.equal(context.ledger.project(project.id).state, 'open')
+    })
+  })
+
+  it('switches a lead that had a message on its way when the daemon stopped', async () => {
+    await withCodex(async (context) => {
+      const { project } = await withStaff(context)
+      await context.dispatcher.pass()
+      context.adapter.answer('chief', 'Hello')
+      await context.dispatcher.pass()
+      context.adapter.agent('chief').arrive = false
+      const one = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'One' })
+      await context.dispatcher.pass()
+      // The daemon starts again a few seconds later.
+      context.clock.advance(5_000)
+      context.ledger.suspendForRestart()
+      const after = context.make()
+      await after.resumeAfterRestart()
+
+      await after.switchChief(project.id, { harness: 'codex' })
+      assert.equal(chiefOf(context, project).harness, 'codex')
+      assert.match(context.codex.prepared.at(-1).message, /You are the lead now\./)
+      await after.pass()
+      context.codex.answer('chief', 'Taken over.')
+      await after.pass()
+      await after.pass()
+      assert.equal(context.ledger.message(one.id).state, 'delivered', 'it follows the new lead')
     })
   })
 })
