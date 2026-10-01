@@ -1337,32 +1337,37 @@ class Ledger {
    * It starts from nothing and ends with its work (CORE-19).
    */
   #startSession(projectId, member, role) {
-    for (let attempt = 0; attempt < 16; attempt += 1) {
-      const handle = `${member.handle}-${this.#names()}`
-      const taken = this.#db
+    const free = (handle) =>
+      this.#db
         .prepare('SELECT 1 FROM participant WHERE project_id = ? AND handle = ?')
-        .get(projectId, handle)
-      if (taken !== undefined) continue
-      const { lastInsertRowid: id } = this.#db
-        .prepare(
-          `INSERT INTO participant (project_id, handle, role, roles, agent, harness, tier, member_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          projectId,
-          handle,
-          role,
-          member.roles,
-          member.agent,
-          member.harness,
-          member.tier,
-          member.id,
-          this.#at(),
-        )
-      this.#log(projectId, 'session.started', { handle, member: member.handle, role })
-      return this.#participantRow(id)
+        .get(projectId, handle) === undefined
+    let name = this.#names()
+    for (let attempt = 1; attempt < 16 && !free(`${member.handle}-${name}`); attempt += 1) {
+      name = this.#names()
     }
-    throw new LedgerError('no-session-name', `no free session name for @${member.handle}`, 409)
+    // A name is never used twice (an ended session keeps its row), so a
+    // member about a thousand sessions in draws only taken ones: the last
+    // name drawn then takes the first number free.
+    let handle = `${member.handle}-${name}`
+    for (let number = 2; !free(handle); number += 1) handle = `${member.handle}-${name}-${number}`
+    const { lastInsertRowid: id } = this.#db
+      .prepare(
+        `INSERT INTO participant (project_id, handle, role, roles, agent, harness, tier, member_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        projectId,
+        handle,
+        role,
+        member.roles,
+        member.agent,
+        member.harness,
+        member.tier,
+        member.id,
+        this.#at(),
+      )
+    this.#log(projectId, 'session.started', { handle, member: member.handle, role })
+    return this.#participantRow(id)
   }
 
   /** A session ends: it leaves the project and its conversation closes. */

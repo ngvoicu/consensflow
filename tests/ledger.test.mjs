@@ -2361,6 +2361,34 @@ describe("sessions: a member's named windows", () => {
     })
   })
 
+  it('never runs out of session names: when every name it draws is taken, the name takes a number', async () => {
+    await withDir((dir) => {
+      // Names are never reused, so a member a thousand sessions in draws only taken ones.
+      const ledger = openLedger(path.join(dir, 'consensflow.db'), {
+        now: clock(),
+        names: () => 'amber-pine',
+      })
+      try {
+        const { project, id } = opened(ledger)
+        for (const body of ['Lexer', 'Docs', 'Tests']) {
+          ledger.createTask(project.id, { from: 'chief', pool: 'worker', tier: 'standard', body })
+        }
+        assert.deepEqual(
+          [1, 2, 3].map(
+            (number) => ledger.assignTask(project.id, number, id('zeus')).task.assignee,
+          ),
+          ['zeus-amber-pine', 'zeus-amber-pine-2', 'zeus-amber-pine-3'],
+        )
+        assert.equal(
+          ledger.assignTask(project.id, 4, id('diana')).task.assignee,
+          'diana-amber-pine',
+        )
+      } finally {
+        ledger.close()
+      }
+    })
+  })
+
   it('continues a session with --after: the follow-up goes to the same window, alive and free', async () => {
     await withLedger((ledger) => {
       const { project, id } = opened(ledger)
