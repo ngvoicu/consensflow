@@ -216,6 +216,20 @@ impl InputArbiter {
         Ok(())
     }
 
+    /// A pane gone from the table leaves the arbiter. A newer generation of
+    /// the same id that took its place keeps its own state.
+    pub fn retire(&self, pane: &PaneKey) {
+        let Ok(mut panes) = self.lock_panes() else {
+            return;
+        };
+        let current = panes
+            .get(&pane.id)
+            .and_then(|state| lock_state(state).ok().map(|state| state.generation));
+        if current == Some(pane.generation) {
+            panes.remove(&pane.id);
+        }
+    }
+
     pub fn snapshot(&self, pane: &PaneKey) -> Result<ArbiterSnapshot, ArbiterError> {
         let state = self.pane_state(pane)?;
         let state = lock_state(&state)?;
@@ -688,6 +702,22 @@ mod tests {
                 b"\r".to_vec(),
             ]
         );
+    }
+
+    /// A pane that leaves the table takes its state with it, but an older
+    /// generation retiring late leaves the newer one's state alone.
+    #[test]
+    fn a_retired_pane_leaves_and_a_newer_generation_stays() {
+        let arbiter = InputArbiter::new(0);
+        let old = PaneKey::new("worker", 1);
+        let new = PaneKey::new("worker", 2);
+        arbiter.register(&old).expect("register the old generation");
+        arbiter.register(&new).expect("register the new generation");
+
+        arbiter.retire(&old);
+        assert_eq!(arbiter.snapshot(&new).expect("still there").generation, 2);
+        arbiter.retire(&new);
+        assert!(matches!(arbiter.snapshot(&new), Err(ArbiterError::Stale)));
     }
 
     #[test]

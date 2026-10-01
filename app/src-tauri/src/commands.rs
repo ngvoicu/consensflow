@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
-use crate::arbiter::InputArbiter;
+use crate::arbiter::{ArbiterError, InputArbiter};
 use crate::bridge::{Bridge, BridgeBuilder, BridgeError};
 use crate::pty::{
     validate_drop_env, PaneEnvironment, PaneKey, PaneOutput, PaneTable, StreamedPane,
@@ -141,17 +141,18 @@ struct PageInputState {
     next_ticket: u64,
 }
 
-#[derive(Clone)]
 struct InputRoute {
     sender: mpsc::SyncSender<InputJob>,
     pending_bytes: Arc<AtomicUsize>,
 }
 
+/// Every open pane's input, in order: one worker and one bounded queue per
+/// pane, from its `pane.open` until it leaves the table.
 struct InputQueue {
     panes: Arc<PaneTable>,
     arbiter: Arc<InputArbiter>,
     senders: Mutex<HashMap<PaneKey, InputRoute>>,
-    workers: Mutex<Vec<JoinHandle<()>>>,
+    workers: Mutex<HashMap<PaneKey, JoinHandle<()>>>,
     page: Mutex<PageInputState>,
     accepting: AtomicBool,
 }
@@ -252,7 +253,7 @@ impl InputQueue {
             panes,
             arbiter,
             senders: Mutex::new(HashMap::new()),
-            workers: Mutex::new(Vec::new()),
+            workers: Mutex::new(HashMap::new()),
             page: Mutex::new(PageInputState {
                 last_sequences: HashMap::new(),
                 completions: HashMap::new(),
@@ -357,6 +358,59 @@ impl InputQueue {
         self.submit(key, InputWork::Claim)
     }
 
+    /// A pane just opened gets its worker and queue.
+    fn open(&self, key: &PaneKey) -> Result<(), String> {
+        let mut senders = self
+            .senders
+            .lock()
+            .map_err(|_| "pane input queue lock is poisoned".to_string())?;
+        if !self.accepting.load(Ordering::Acquire) {
+            return Err("pane input admission is closed".to_string());
+        }
+        let (sender, jobs) = mpsc::sync_channel(INPUT_QUEUE_CAPACITY);
+        let panes = Arc::clone(&self.panes);
+        let arbiter = Arc::clone(&self.arbiter);
+        let worker_key = key.clone();
+        let worker = thread::Builder::new()
+            .name(format!("consensflow-input-{}", worker_key.id))
+            .spawn(move || input_worker(jobs, panes, arbiter, worker_key))
+            .map_err(|error| format!("could not start pane input queue: {error}"))?;
+        self.workers
+            .lock()
+            .map_err(|_| "pane input worker lock is poisoned".to_string())?
+            .insert(key.clone(), worker);
+        senders.insert(
+            key.clone(),
+            InputRoute {
+                sender,
+                pending_bytes: Arc::new(AtomicUsize::new(0)),
+            },
+        );
+        Ok(())
+    }
+
+    /// A pane gone from the table, killed or retired when its program ended,
+    /// takes its input with it: its queue closes (the worker ends once what
+    /// was queued has gone in or failed), and its page count and arbiter
+    /// state go. They used to stay until the app quit, a parked thread per
+    /// window ever opened.
+    fn retire(&self, key: &PaneKey) {
+        self.senders
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(key);
+        self.workers
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(key);
+        self.page
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .last_sequences
+            .remove(key);
+        self.arbiter.retire(key);
+    }
+
     fn submit(
         &self,
         key: PaneKey,
@@ -365,37 +419,18 @@ impl InputQueue {
         if !self.accepting.load(Ordering::Acquire) {
             return Err("pane input admission is closed".to_string());
         }
-        let mut senders = self
+        let senders = self
             .senders
             .lock()
             .map_err(|_| "pane input queue lock is poisoned".to_string())?;
         if !self.accepting.load(Ordering::Acquire) {
             return Err("pane input admission is closed".to_string());
         }
-        let route = match senders.get(&key) {
-            Some(route) => route.clone(),
-            None => {
-                let (sender, jobs) = mpsc::sync_channel(INPUT_QUEUE_CAPACITY);
-                let pending_bytes = Arc::new(AtomicUsize::new(0));
-                let panes = Arc::clone(&self.panes);
-                let arbiter = Arc::clone(&self.arbiter);
-                let worker_key = key.clone();
-                let worker = thread::Builder::new()
-                    .name(format!("consensflow-input-{}", worker_key.id))
-                    .spawn(move || input_worker(jobs, panes, arbiter, worker_key))
-                    .map_err(|error| format!("could not start pane input queue: {error}"))?;
-                self.workers
-                    .lock()
-                    .map_err(|_| "pane input worker lock is poisoned".to_string())?
-                    .push(worker);
-                let route = InputRoute {
-                    sender,
-                    pending_bytes,
-                };
-                senders.insert(key.clone(), route.clone());
-                route
-            }
-        };
+        // A pane the table does not hold has no queue: it was never opened,
+        // or it is gone.
+        let route = senders
+            .get(&key)
+            .ok_or_else(|| ArbiterError::Stale.to_string())?;
         let reserved_bytes = work.byte_count();
         route
             .pending_bytes
@@ -441,7 +476,7 @@ impl InputQueue {
                 .lock()
                 .unwrap_or_else(|error| error.into_inner()),
         );
-        for worker in workers {
+        for worker in workers.into_values() {
             let _ = worker.join();
         }
     }
@@ -1225,6 +1260,7 @@ fn register_pane_handlers(
 ) {
     let open_panes = Arc::clone(&panes);
     let open_arbiter = Arc::clone(&arbiter);
+    let open_inputs = Arc::clone(&inputs);
     let open_output = Arc::clone(&output);
     let open_launches = Arc::clone(&launches);
     builder.on_launch("pane.open", move |bridge, body| {
@@ -1274,9 +1310,13 @@ fn register_pane_handlers(
                 return Err(error);
             }
         };
-        if let Err(error) = open_arbiter.register(&streamed.key) {
+        if let Err(error) = open_arbiter
+            .register(&streamed.key)
+            .map_err(|error| error.to_string())
+            .and_then(|()| open_inputs.open(&streamed.key))
+        {
             let _ = open_panes.kill(&streamed.key);
-            let error = error.to_string();
+            open_inputs.retire(&streamed.key);
             if let Some(slot) = owner_slot {
                 slot.complete(Err(error.clone()));
             }
@@ -1288,6 +1328,7 @@ fn register_pane_handlers(
             bridge,
             Arc::clone(&open_panes),
             Arc::clone(&open_arbiter),
+            Arc::clone(&open_inputs),
             Arc::clone(&open_output),
             Arc::clone(&open_launches),
             request.launch_id,
@@ -1385,11 +1426,13 @@ fn register_pane_handlers(
     });
 
     let kill_panes = Arc::clone(&panes);
+    let kill_inputs = Arc::clone(&inputs);
     let kill_launches = Arc::clone(&launches);
     builder.on("pane.kill", move |_bridge, body| {
         let request: PaneRequest = parse_body(body)?;
         let key = pane_key(&request.id, request.generation)?;
         kill_panes.kill(&key).map_err(|error| error.to_string())?;
+        kill_inputs.retire(&key);
         kill_launches.remove_key(&key);
         Ok(json!({"ok":true}))
     });
@@ -1444,11 +1487,16 @@ fn launch_response(result: Result<PaneKey, String>, deduplicated: bool) -> Resul
 
 /// A pane's output, on to the page, and its end: `pane.exit`, after which a
 /// pane whose program has gone leaves the table.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "A pane's output thread holds everything its end touches"
+)]
 fn stream_to_page(
     streamed: StreamedPane,
     bridge: Bridge,
     panes: Arc<PaneTable>,
     arbiter: Arc<InputArbiter>,
+    inputs: Arc<InputQueue>,
     output: Arc<OutputHub>,
     launches: Arc<LaunchRegistry>,
     launch_id: Option<String>,
@@ -1466,7 +1514,9 @@ fn stream_to_page(
             "pane.exit",
             json!({"id":key.id,"generation":key.generation}),
         );
-        let _ = panes.retire_exited(&key);
+        if matches!(panes.retire_exited(&key), Ok(true)) {
+            inputs.retire(&key);
+        }
     });
 }
 
@@ -2403,6 +2453,7 @@ mod tests {
             )
             .expect("open ordered pane");
         arbiter.register(&key).expect("register ordered pane");
+        inputs.open(&key).expect("open the pane's input");
         let mut ready = [0; 5];
         reader
             .read_exact(&mut ready)
@@ -2507,6 +2558,7 @@ mod tests {
             )
             .expect("open sequenced pane");
         arbiter.register(&key).expect("register sequenced pane");
+        inputs.open(&key).expect("open the pane's input");
         let mut ready = [0; 5];
         reader
             .read_exact(&mut ready)
@@ -2642,6 +2694,7 @@ mod tests {
             )
             .expect("open the pane");
         arbiter.register(&key).expect("register the pane");
+        inputs.open(&key).expect("open the pane's input");
         let mut ready = [0; 5];
         reader.read_exact(&mut ready).expect("read readiness marker");
         assert_eq!(&ready, b"ready");
@@ -2731,6 +2784,9 @@ mod tests {
         arbiter
             .register(&blocked_key)
             .expect("register blocked pane");
+        inputs
+            .open(&blocked_key)
+            .expect("open the blocked pane's input");
 
         let responsive_key = PaneKey::new("responsive-command", 1);
         let responsive = panes
@@ -2750,6 +2806,9 @@ mod tests {
         arbiter
             .register(&responsive_key)
             .expect("register responsive pane");
+        inputs
+            .open(&responsive_key)
+            .expect("open the responsive pane's input");
         let first_output = responsive
             .output
             .recv_timeout(Duration::from_secs(2))
@@ -3294,6 +3353,114 @@ mod tests {
         drop(reader);
         drop(node_stream);
         connected.bridge.wait_closed().expect("bridge closes");
+    }
+
+    /// A pane's input lives as long as the pane: killed, or ended on its own,
+    /// it takes its input worker and queue, its page sequence and its arbiter
+    /// state with it. Each used to stay until the app quit, a parked thread
+    /// per window.
+    #[cfg(unix)]
+    #[test]
+    fn a_pane_gone_from_the_table_takes_its_input_with_it() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+
+        let _pty_guard = crate::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(0));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let mut builder = BridgeBuilder::new(1024 * 1024);
+        register_pane_handlers(
+            &mut builder,
+            Arc::clone(&panes),
+            Arc::clone(&arbiter),
+            Arc::new(OutputHub::new()),
+            Arc::new(LaunchRegistry::new()),
+            Arc::clone(&inputs),
+        );
+        let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
+        node_stream
+            .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
+            .expect("write bridge handle");
+        let connected = builder
+            .connect(rust_stream.try_clone().expect("clone socket"), rust_stream)
+            .expect("connect bridge");
+        let mut reader = BufReader::new(node_stream.try_clone().expect("clone node reader"));
+        let mut number = 0;
+        let mut ask = |op: &str, body: Value| -> Value {
+            number += 1;
+            let id = format!("n-retired-{number}");
+            let mut frame =
+                serde_json::to_vec(&json!({"v":1,"id":id,"kind":"req","op":op,"body":body}))
+                    .expect("serialize request");
+            frame.push(b'\n');
+            node_stream.write_all(&frame).expect("write request");
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).expect("read response");
+                let frame: Value = serde_json::from_str(line.trim()).expect("response JSON");
+                if frame["kind"] == "res" && frame["id"] == id.as_str() {
+                    return frame["body"].clone();
+                }
+            }
+        };
+        let gone = |key: &PaneKey| {
+            !inputs.senders.lock().unwrap().contains_key(key)
+                && !inputs.workers.lock().unwrap().contains_key(key)
+                && !inputs.page.lock().unwrap().last_sequences.contains_key(key)
+                && arbiter.snapshot(key).is_err()
+        };
+
+        let killed = PaneKey::new("killed-pane", 1);
+        let ended = PaneKey::new("ended-pane", 1);
+        for (key, script) in [(&killed, "sleep 30"), (&ended, "read line")] {
+            let opened = ask(
+                "pane.open",
+                json!({"id":key.id,"generation":1,"cwd":"/tmp","argv":["/bin/sh","-c",script],
+                       "env":{},"size":{"rows":24,"cols":80},"backlogBytes":1024}),
+            );
+            assert_eq!(opened["ok"], true, "{opened}");
+            inputs
+                .enqueue_page(key.clone(), 1, InputWork::Human(b"x".to_vec()), true)
+                .expect("the page types into the pane");
+            assert!(!gone(key), "the pane has its input");
+        }
+
+        assert_eq!(
+            ask("pane.kill", json!({"id":killed.id,"generation":1})),
+            json!({"ok":true})
+        );
+        assert!(gone(&killed), "a killed pane kept its input");
+
+        assert_eq!(
+            ask("pane.input", json!({"id":ended.id,"generation":1,"bytes":[13]})),
+            json!({"ok":true})
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !gone(&ended) {
+            assert!(
+                Instant::now() < deadline,
+                "a pane that ended kept its input"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+
+        inputs.close_and_drain();
+        drop(reader);
+        drop(node_stream);
+        connected.bridge.wait_closed().expect("bridge closes");
+    }
+
+    /// Input for a pane the table never held is refused, and starts no
+    /// worker: every key used to get a thread and a queue of its own.
+    #[test]
+    fn input_for_a_pane_never_opened_is_refused() {
+        let panes = Arc::new(PaneTable::new());
+        let inputs = InputQueue::new(Arc::clone(&panes), Arc::new(InputArbiter::new(0)));
+        let refused = inputs.human(PaneKey::new("never-opened", 1), b"x".to_vec());
+        assert_eq!(refused.err().as_deref(), Some("stale pane generation"));
+        assert!(inputs.senders.lock().unwrap().is_empty());
+        assert!(inputs.workers.lock().unwrap().is_empty());
     }
 
     #[cfg(unix)]
