@@ -931,11 +931,12 @@ class Ledger {
       )
       .all(task.assignee_id)
     // A window's copy may hold more than this task (the chief's own, after
-    // its other work): the task's part starts where its brief arrived.
+    // its other work): the task's part starts where its first brief arrived,
+    // not a later one (a resume or a reopen sends another).
     const brief = this.#db
       .prepare(
         `SELECT id FROM message WHERE task_id = ? AND kind = 'task' AND recipient_id = ?
-         ORDER BY id DESC LIMIT 1`,
+         ORDER BY id LIMIT 1`,
       )
       .get(task.id, task.assignee_id)
     const start =

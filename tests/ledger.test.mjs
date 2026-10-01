@@ -3067,6 +3067,44 @@ describe('the transcript copy', () => {
     })
   })
 
+  it("keeps all of a task's part across a pause, a resume and a reopen: it starts at the first brief", async () => {
+    await withLedger((ledger) => {
+      const { project, conversation } = windowed(ledger)
+      const marker = (message) => `[ConsensFlow m-${message.id} · T-1 · task from @chief]`
+      const brief = ledger.task(project.id, 1).messages[0]
+      deliver(ledger, brief)
+      ledger.copyTranscript(conversation.id, [
+        item('u1', 'user', `${marker(brief)}\nParser`),
+        item('a1', 'assistant', 'Wrote src/parser.js'),
+      ])
+      ledger.pauseTask(project.id, 1, { by: 'chief' })
+      const resumed = ledger.resumeTask(project.id, 1, { by: 'chief', body: 'Use v2' }).message
+      deliver(ledger, resumed)
+      ledger.copyTranscript(
+        conversation.id,
+        [
+          item('u2', 'user', `${marker(resumed)}\nResumed: Use v2`),
+          item('a2', 'assistant', 'On v2'),
+        ],
+        { from: 2 },
+      )
+      ledger.recordResult(project.id, 1, { body: 'Parser done' })
+      const again = ledger.reopenTask(project.id, 1, { by: 'chief', body: 'Add tests' }).message
+      deliver(ledger, again)
+      ledger.copyTranscript(
+        conversation.id,
+        [item('u3', 'user', `${marker(again)}\nAdd tests`), item('a3', 'assistant', 'Tests added')],
+        { from: 4 },
+      )
+      const { items, total } = ledger.transcript(project.id, 1)
+      assert.equal(total, 6)
+      assert.deepEqual(
+        items.map((i) => i.id),
+        ['u1', 'a1', 'u2', 'a2', 'u3', 'a3'],
+      )
+    })
+  })
+
   it('copies what is new, brings an item still being written up to date, and reads it by task', async () => {
     await withLedger((ledger) => {
       const { project, conversation } = windowed(ledger)
