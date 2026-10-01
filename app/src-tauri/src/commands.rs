@@ -382,7 +382,7 @@ impl InputQueue {
         let reserved_bytes = work.byte_count();
         route
             .pending_bytes
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |pending| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |pending| {
                 pending
                     .checked_add(reserved_bytes)
                     .filter(|next| *next <= MAX_PENDING_INPUT_BYTES_PER_PANE)
