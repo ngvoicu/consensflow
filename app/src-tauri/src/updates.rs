@@ -245,13 +245,9 @@ pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Value {
                 swapped_in_worker.store(true, std::sync::atomic::Ordering::Release);
                 Ok(())
             })?;
-            if worker.state::<AppRuntime>().begin_shutdown() {
-                let cleanup = worker.clone();
-                if !finish_before_deadline(std::time::Duration::from_secs(5), move || {
-                    cleanup.state::<AppRuntime>().finish_shutdown();
-                }) {
-                    eprintln!("ConsensFlow update installed; internal drain failed or exceeded its five-second deadline. Restarting with no open panes.");
-                }
+            let runtime = worker.state::<AppRuntime>();
+            if runtime.begin_shutdown() && !runtime.finish_shutdown() {
+                eprintln!("ConsensFlow update installed; internal drain failed or exceeded its five-second deadline. Restarting with no open panes.");
             }
             Ok::<_, String>(permit)
         })
@@ -274,27 +270,6 @@ pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Value {
             }
         }
     }
-}
-
-// The internal Node process has already exited and installation admission
-// excludes every pane. A broken bridge callback must not prevent restart.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn finish_before_deadline(
-    timeout: std::time::Duration,
-    finish: impl FnOnce() + Send + 'static,
-) -> bool {
-    let (sent, done) = std::sync::mpsc::sync_channel(1);
-    if std::thread::Builder::new()
-        .name("consensflow-update-drain".into())
-        .spawn(move || {
-            finish();
-            let _ = sent.send(());
-        })
-        .is_err()
-    {
-        return false;
-    }
-    done.recv_timeout(timeout).is_ok()
 }
 
 fn preferences_directory(home: &Path, configured: Option<PathBuf>) -> PathBuf {
@@ -975,28 +950,4 @@ mod tests {
             server.join().unwrap();
         }
     }
-}
-#[cfg(unix)]
-#[test]
-fn restart_does_not_wait_forever_for_a_stalled_drain() {
-    use std::io::Read;
-    use std::os::unix::net::UnixStream;
-    let (mut reader, writer) = UnixStream::pair().unwrap();
-    let started = std::time::Instant::now();
-    assert!(!finish_before_deadline(
-        std::time::Duration::from_millis(30),
-        move || {
-            let _ = reader.read(&mut [0_u8; 1]);
-        }
-    ));
-    assert!(started.elapsed() < std::time::Duration::from_secs(1));
-    drop(writer);
-    assert!(finish_before_deadline(
-        std::time::Duration::from_secs(1),
-        || {}
-    ));
-    assert!(!finish_before_deadline(
-        std::time::Duration::from_secs(1),
-        || panic!("drain failed")
-    ));
 }

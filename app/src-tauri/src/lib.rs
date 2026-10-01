@@ -257,11 +257,24 @@ fn inherited_session_variables<'a>(names: impl IntoIterator<Item = &'a str>) -> 
         .collect()
 }
 
-/// Where the app and its daemon write their error output: `<home>/app/app.log`,
-/// with one previous file kept once it passes `limit` bytes. A Finder-launched
-/// app's stderr is /dev/null, so panics and daemon errors used to leave no
-/// trace at all.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+/// How big the error log grows before it is moved aside.
+const ERROR_LOG_LIMIT: u64 = 10 * 1024 * 1024;
+
+/// Where the app and its daemon write their error output: `<home>/app/app.log`
+/// in ConsensFlow's home (`CONSENSFLOW_HOME`, or `.consensflow` in the user's
+/// home, as the daemon finds it), with one previous file kept once it passes
+/// its limit. A Finder-launched app's stderr is /dev/null and a windowed app
+/// on Windows has none, so panics and daemon errors used to leave no trace.
+#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
+pub(crate) fn error_log() -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("CONSENSFLOW_HOME")
+        .filter(|home| !home.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::home_dir().map(|home| home.join(".consensflow")))?;
+    prepare_error_log(&home, ERROR_LOG_LIMIT).ok()
+}
+
+#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
 fn prepare_error_log(home: &std::path::Path, limit: u64) -> std::io::Result<std::path::PathBuf> {
     let directory = home.join("app");
     std::fs::create_dir_all(&directory)?;
@@ -314,17 +327,8 @@ pub fn run() {
         std::env::remove_var(name);
     }
     #[cfg(target_os = "macos")]
-    if let Some(home) = std::env::var_os("CONSENSFLOW_HOME")
-        .filter(|value| !value.is_empty())
-        .map(std::path::PathBuf::from)
-        .or_else(|| {
-            home.as_ref()
-                .map(|home| std::path::Path::new(home).join(".consensflow"))
-        })
-    {
-        if let Ok(log) = prepare_error_log(&home, 10 * 1024 * 1024) {
-            redirect_stderr(&log);
-        }
+    if let Some(log) = error_log() {
+        redirect_stderr(&log);
     }
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

@@ -23,6 +23,9 @@ use crate::pty::{
 const MAX_FRAME_BYTES: usize = 1024 * 1024;
 /// How long the daemon gets to stop on its own before it is killed.
 const EDITOR_STOP_GRACE: Duration = Duration::from_secs(2);
+/// How long quitting, or installing an update, waits for what was admitted
+/// before the daemon stopped to finish.
+const SHUTDOWN_DRAIN: Duration = Duration::from_secs(5);
 /// The page-side name of Node's `state.changed`. No dot: Tauri rejects it.
 const PAGE_STATE_EVENT: &str = "state-changed";
 /// What the page is told of the daemon (see `CoreStatus`).
@@ -894,8 +897,8 @@ impl AppRuntime {
     }
 
     pub fn shutdown(&self) {
-        if self.begin_shutdown() {
-            self.finish_shutdown();
+        if self.begin_shutdown() && !self.finish_shutdown() {
+            eprintln!("consensflow: quitting with the drain unfinished after its deadline");
         }
     }
 
@@ -912,17 +915,43 @@ impl AppRuntime {
         true
     }
 
-    pub(crate) fn finish_shutdown(&self) {
+    /// Waits for what was admitted before the stop (launches, pane input, the
+    /// bridge's last handlers) and reaps every pane, for `SHUTDOWN_DRAIN` at
+    /// most: quitting had no limit, and a launch that never finished kept the
+    /// app from quitting. `false` when the drain did not finish in time; the
+    /// quit or the update's restart goes on without it.
+    pub(crate) fn finish_shutdown(&self) -> bool {
         let bridge = self.core.bridge();
-        if let Some(bridge) = &bridge {
-            let _ = bridge.wait_launches_closed();
-        }
-        reap_all(&self.panes);
-        self.inputs.close_and_drain();
-        if let Some(bridge) = &bridge {
-            let _ = bridge.wait_closed();
-        }
+        let panes = Arc::clone(&self.panes);
+        let inputs = Arc::clone(&self.inputs);
+        finish_before_deadline(SHUTDOWN_DRAIN, move || {
+            if let Some(bridge) = &bridge {
+                let _ = bridge.wait_launches_closed();
+            }
+            reap_all(&panes);
+            inputs.close_and_drain();
+            if let Some(bridge) = &bridge {
+                let _ = bridge.wait_closed();
+            }
+        })
     }
+}
+
+/// Runs `finish` on a thread of its own and waits for it until `timeout`:
+/// `false` when it failed or was not done by then.
+fn finish_before_deadline(timeout: Duration, finish: impl FnOnce() + Send + 'static) -> bool {
+    let (sent, done) = mpsc::sync_channel(1);
+    if thread::Builder::new()
+        .name("consensflow-drain".into())
+        .spawn(move || {
+            finish();
+            let _ = sent.send(());
+        })
+        .is_err()
+    {
+        return false;
+    }
+    done.recv_timeout(timeout).is_ok()
 }
 
 fn reap_all(panes: &PaneTable) {
@@ -1144,28 +1173,20 @@ fn connect_core(mut command: Command, builder: BridgeBuilder) -> Result<StartedC
 
 /// Where the daemon's error output goes. On Windows a windowed app has no
 /// stderr to hand down (inheriting an invalid handle fails the spawn), so the
-/// daemon writes to `<home>/app/app.log`, the file the macOS build redirects
-/// the app's own stderr to; elsewhere the daemon inherits the app's.
+/// daemon appends to the app's error log, the file the macOS build redirects
+/// the app's own stderr to, kept the same way; elsewhere the daemon inherits
+/// the app's.
 #[cfg(windows)]
 fn daemon_stderr() -> Stdio {
-    let home = std::env::var_os("CONSENSFLOW_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("USERPROFILE").map(|p| PathBuf::from(p).join(".consensflow")));
-    let Some(home) = home else {
-        return Stdio::null();
-    };
-    let directory = home.join("app");
-    if std::fs::create_dir_all(&directory).is_err() {
-        return Stdio::null();
-    }
-    match std::fs::OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(directory.join("app.log"))
-    {
-        Ok(file) => Stdio::from(file),
-        Err(_) => Stdio::null(),
-    }
+    crate::error_log()
+        .and_then(|log| {
+            std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(log)
+                .ok()
+        })
+        .map_or_else(Stdio::null, Stdio::from)
 }
 
 #[cfg(not(windows))]
@@ -3153,6 +3174,108 @@ mod tests {
             "GUI shutdown returned before its admitted launch finished"
         );
         assert!(panes.list().expect("pane list after shutdown").is_empty());
+    }
+
+    /// On Windows the daemon's errors go to the app's error log, kept as the
+    /// macOS app keeps it: a log past its limit is moved aside first. It used
+    /// to grow without end.
+    #[cfg(windows)]
+    #[test]
+    fn the_daemons_errors_go_to_an_app_log_kept_like_the_others() {
+        let home = tempfile::tempdir().expect("home");
+        let log = home.path().join("app").join("app.log");
+        std::fs::create_dir_all(home.path().join("app")).expect("the log's folder");
+        std::fs::write(&log, vec![b'x'; 10 * 1024 * 1024 + 1]).expect("a full log");
+        let configured = std::env::var_os("CONSENSFLOW_HOME");
+        std::env::set_var("CONSENSFLOW_HOME", home.path());
+        let stderr = daemon_stderr();
+        match configured {
+            Some(configured) => std::env::set_var("CONSENSFLOW_HOME", configured),
+            None => std::env::remove_var("CONSENSFLOW_HOME"),
+        }
+        drop(stderr);
+        assert!(
+            home.path().join("app").join("app.log.1").exists(),
+            "the full log was moved aside"
+        );
+        assert_eq!(
+            std::fs::metadata(&log).expect("a fresh log").len(),
+            0,
+            "the daemon writes to a fresh log"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stalled_drain_is_left_behind_at_its_deadline() {
+        use std::io::Read;
+        use std::os::unix::net::UnixStream;
+        let (mut reader, writer) = UnixStream::pair().unwrap();
+        let started = Instant::now();
+        assert!(!finish_before_deadline(
+            Duration::from_millis(30),
+            move || {
+                let _ = reader.read(&mut [0_u8; 1]);
+            }
+        ));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        drop(writer);
+        assert!(finish_before_deadline(Duration::from_secs(1), || {}));
+        assert!(!finish_before_deadline(Duration::from_secs(1), || panic!(
+            "drain failed"
+        )));
+    }
+
+    /// Quitting waits for the drain no longer than installing an update does:
+    /// a launch that never finishes cannot keep the app from quitting.
+    #[cfg(unix)]
+    #[test]
+    fn quitting_waits_for_the_drain_no_longer_than_an_update_does() {
+        use std::io::Write;
+        use std::os::unix::net::UnixStream;
+        use std::sync::Barrier;
+
+        let release = Arc::new(Barrier::new(2));
+        let handler_release = Arc::clone(&release);
+        let (admitted_sender, admitted_receiver) = mpsc::channel();
+        let mut builder = BridgeBuilder::new(1024);
+        builder.on_launch("pane.open", move |_bridge, _body| {
+            admitted_sender.send(()).expect("announce admitted launch");
+            handler_release.wait();
+            Ok(json!({"ok":true}))
+        });
+        let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
+        node_stream
+            .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
+            .expect("write bridge handle");
+        let connected = builder
+            .connect(rust_stream.try_clone().expect("clone socket"), rust_stream)
+            .expect("connect bridge");
+        node_stream
+            .write_all(
+                b"{\"v\":1,\"id\":\"n-open\",\"kind\":\"req\",\"op\":\"pane.open\",\"body\":{}}\n",
+            )
+            .expect("write pane.open");
+        admitted_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("launch admitted");
+        drop(node_stream);
+
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(0));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), arbiter));
+        let runtime = Arc::new(runtime(panes, inputs, None, Some(connected.bridge)));
+        let quitting = Arc::clone(&runtime);
+        let (quit, quitted) = mpsc::channel();
+        let started = Instant::now();
+        thread::spawn(move || {
+            quitting.shutdown();
+            let _ = quit.send(started.elapsed());
+        });
+        let took = quitted.recv_timeout(Duration::from_secs(8));
+        release.wait();
+        let took = took.expect("the quit waited on a launch that never finished");
+        assert!(took >= Duration::from_secs(5), "{took:?}");
     }
 
     /// Whether a pid is still there — signal 0 delivers nothing and only asks.
