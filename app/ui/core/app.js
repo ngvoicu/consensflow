@@ -1,5 +1,5 @@
 import { initializeUpdates } from '../updates.js'
-import { BoardView, element, TaskDrawer } from './board.js'
+import { BoardView, element, redraw, TaskDrawer } from './board.js'
 import { TerminalsView } from './terminals.js'
 
 /**
@@ -363,7 +363,8 @@ function renderProjects() {
   const shown = state.board?.project.id ?? null
   const items = state.projects.map((project) => {
     const item = element('li', 'project')
-    item.dataset.state = project.state
+    // The item names its project: a redraw keeps it only for that one.
+    item.dataset.project = String(project.id)
     item.dataset.current = String(project.id === shown)
     const select = element('button', 'project-select')
     select.type = 'button'
@@ -398,7 +399,7 @@ function renderProjects() {
     return item
   })
   if (items.length === 0) items.push(element('li', 'projects-empty', 'No projects yet.'))
-  projectList.replaceChildren(...items)
+  redraw(projectList, items)
 }
 
 // The notes are in For you, at the top of the board: a folded board unfolds for them.
@@ -753,12 +754,14 @@ function renderStaff() {
     )
     .sort(byRoleAndTier)
     .map((entry) => entry.row)
-  teamList.replaceChildren(...(rows.length ? rows : [element('tr', 'staff-empty')]))
   if (rows.length === 0) {
+    const row = element('tr', 'staff-empty')
     const cell = element('td', null, 'Nobody yet: add the agents this project may use.')
     cell.colSpan = 4
-    teamList.firstChild.append(cell)
+    row.append(cell)
+    rows.push(row)
   }
+  redraw(teamList, rows)
   teamGate.checked = state.board?.project.gate ?? false
   rolePicker(
     teamForm.elements.role,
@@ -771,6 +774,12 @@ function renderStaff() {
     },
   )
 }
+
+/** A member as the board shown has it now, which a Remove kept across redraws acts on. */
+const memberNow = (member) =>
+  state.board?.lanes.find(
+    (lane) => lane.participant.handle === member.handle && lane.participant.member === null,
+  )?.participant ?? member
 
 /**
  * A member's rows, one per role, each with the role it stands for: Remove
@@ -812,7 +821,8 @@ function memberRows(member) {
     yes.type = 'button'
     yes.addEventListener('click', () =>
       act(async () => {
-        await core('member.remove', { project: member.projectId, agent: member.handle })
+        const { projectId, handle } = memberNow(member)
+        await core('member.remove', { project: projectId, agent: handle })
         removing = null
         note(`${name} left the staff.`)
       }),
@@ -830,16 +840,17 @@ function memberRows(member) {
     remove.type = 'button'
     remove.setAttribute('aria-label', `Remove ${ROLE_LABEL[role]} ${name}`)
     remove.addEventListener('click', () => {
-      if (member.roles.length === 1) {
-        removing = member.handle
+      const { projectId, handle, roles } = memberNow(member)
+      if (roles.length === 1) {
+        removing = handle
         renderStaff()
         return
       }
       void act(async () => {
         await core('member.roles', {
-          project: member.projectId,
-          agent: member.handle,
-          roles: member.roles.filter((held) => held !== role),
+          project: projectId,
+          agent: handle,
+          roles: roles.filter((held) => held !== role),
         })
       })
     })

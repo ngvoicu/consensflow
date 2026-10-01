@@ -1,6 +1,6 @@
 import { EmulatorRegistry, paneKey } from '../term.js'
 import { TerminalLink } from '../terminal-link.js'
-import { element, laneOrder } from './board.js'
+import { element, laneOrder, redraw } from './board.js'
 
 /**
  * The live windows beside the board: a horizontal strip of one terminal per
@@ -211,12 +211,12 @@ export class TerminalsView {
       stop.type = 'button'
       stop.setAttribute('aria-label', `Close ${name}'s terminal`)
       stop.addEventListener('click', () => this.#onClose(lane.participant))
-      entry.head.replaceChildren(
+      redraw(entry.head, [
         lamp,
         element('span', 'terminal-name', name),
         element('span', 'terminal-meta', lane.participant.harness ?? ''),
         ...(session ? [stop] : []),
-      )
+      ])
       entry.card.setAttribute('aria-label', `${name}'s terminal`)
       entry.card.dataset.handle = lane.participant.handle
       entry.handle = lane.participant.handle
