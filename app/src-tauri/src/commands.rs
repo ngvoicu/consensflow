@@ -301,6 +301,15 @@ impl InputQueue {
         Ok(ticket)
     }
 
+    /// A new page counts every pane's input from 1: the page that sent the
+    /// old numbers is gone (a reload replaced it), and so are the tickets it
+    /// never came back for. What it had admitted still goes in, in order.
+    fn begin_page(&self) {
+        let mut page = self.page.lock().unwrap_or_else(|error| error.into_inner());
+        page.last_sequences.clear();
+        page.completions.clear();
+    }
+
     fn take_page_completion(&self, ticket: &str) -> Result<PageInputCompletion, String> {
         self.page
             .lock()
@@ -1554,15 +1563,21 @@ pub async fn core_request<R: Runtime>(app: AppHandle<R>, operation: String, body
 /// anywhere, because the sends that followed still returned ok into a channel
 /// nothing was listening to. Only the packaged app could show it: a shimmed
 /// page test has no real channel to end.
+///
+/// Once per page is also what makes it the start of the page's input count.
+/// The page numbers its input in its own memory, so a reload (WebKit's content
+/// process replaced, or the human's Reload) starts again from 1; every pane's
+/// next keystrokes were refused as a regression until the app restarted.
 #[tauri::command]
 pub async fn subscribe_output<R: Runtime>(
     app: AppHandle<R>,
     on_output: Channel<PaneOutputMessage>,
 ) -> Value {
-    let output = {
+    let (output, inputs) = {
         let state = app.state::<AppRuntime>();
-        Arc::clone(&state.output)
+        (Arc::clone(&state.output), Arc::clone(&state.inputs))
     };
+    inputs.begin_page();
     output.register(on_output);
     json!({"ok":true})
 }
@@ -2092,6 +2107,99 @@ mod tests {
         assert_eq!(actual, b"KC");
 
         drop(webview);
+        drop(app);
+    }
+
+    /// A reloaded page counts every pane's input from 1 again: its
+    /// subscription starts the count anew, and what the page before it was
+    /// still owed answers goes with it.
+    #[cfg(unix)]
+    #[test]
+    fn a_reloaded_page_types_into_the_panes_it_finds() {
+        let _pty_guard = crate::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(0));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let key = PaneKey::new("reloaded-page", 1);
+        let mut reader = panes
+            .open_at(
+                key.clone(),
+                Path::new("/tmp"),
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "/bin/stty raw -echo; printf ready; /usr/bin/od -An -tx1 -N 3".to_string(),
+                ],
+                &HashMap::new(),
+                PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+            )
+            .expect("open the pane");
+        arbiter.register(&key).expect("register the pane");
+        let mut ready = [0; 5];
+        reader.read_exact(&mut ready).expect("read readiness marker");
+        assert_eq!(&ready, b"ready");
+
+        let runtime = AppRuntime {
+            panes: Arc::clone(&panes),
+            bridge: None,
+            editor: Mutex::new(None),
+            roster: None,
+            startup_error: None,
+            output: Arc::new(OutputHub::new()),
+            inputs,
+            shutting_down: AtomicBool::new(false),
+        };
+        let app = tauri::test::mock_builder()
+            .manage(runtime)
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build mock app");
+        let handle = app.handle().clone();
+        let subscribe = || {
+            let subscribed = tauri::async_runtime::block_on(subscribe_output(
+                handle.clone(),
+                Channel::new(|_| Ok(())),
+            ));
+            assert_eq!(subscribed["ok"], true);
+        };
+        let wait = |ticket: &Value| {
+            tauri::async_runtime::block_on(pane_input_wait(
+                handle.clone(),
+                ticket.as_str().expect("a ticket").to_string(),
+            ))
+        };
+
+        subscribe();
+        let first = pane_input_enqueue(handle.clone(), key.id.clone(), 1, 1, b"A".to_vec());
+        assert_eq!(wait(&first["ticket"]), json!({"ok":true}));
+        // The page goes away with this one admitted and never waited for.
+        let orphaned = pane_input_enqueue(handle.clone(), key.id.clone(), 1, 2, b"B".to_vec());
+        assert_eq!(orphaned["ok"], true);
+
+        subscribe();
+        let typed = pane_input_enqueue(handle.clone(), key.id.clone(), 1, 1, b"C".to_vec());
+        assert_eq!(typed["ok"], true, "the new page's first keystroke: {typed}");
+        assert_eq!(wait(&typed["ticket"]), json!({"ok":true}));
+        assert_eq!(
+            wait(&orphaned["ticket"]),
+            json!({"ok":false,"error":"pane-input-ticket-not-found"}),
+            "the old page's tickets went with it"
+        );
+
+        let mut output = Vec::new();
+        reader.read_to_end(&mut output).expect("read what reached the pane");
+        assert_eq!(
+            String::from_utf8(output)
+                .expect("od output is UTF-8")
+                .split_whitespace()
+                .collect::<String>(),
+            "414243",
+            "every admitted keystroke reached the pane, in order"
+        );
         drop(app);
     }
 
