@@ -79,8 +79,10 @@ credentials, takes no API key, and writes only inside its own home.
 
 ## Install
 
-Download the app, drag it to Applications, open it. It carries its own Node
-runtime and its own copy of ConsensFlow. Nothing else to install: the harness
+Download it from [Releases](https://github.com/ngvoicu/consensflow/releases):
+on a Mac, open the DMG and drag ConsensFlow to Applications; on Windows, run
+the installer, or unpack the portable zip anywhere and run `ConsensFlow.exe`.
+It carries its own Node runtime and its own copy of ConsensFlow. Nothing else to install: the harness
 integrations it needs are prepared under its home the first time a window of
 that harness opens, and updated the same way.
 

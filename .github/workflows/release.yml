@@ -1,0 +1,174 @@
+# One version tag builds and publishes everything people download: the Mac
+# app (the DMG, and the signed update bundle installed apps fetch through the
+# update feed), the Windows installer and the portable Windows zip.
+#
+#   git tag -a v<version> -m "<release notes>" && git push origin v<version>
+#
+# The tag names the source version (package.json, Cargo.toml and
+# tauri.conf.json agree; prepare-update checks all three). Its message becomes
+# the notes; a tag without one gets the commits since the previous release.
+# A hand run (Actions → Release → Run workflow) builds, signs and smoke-tests
+# the same files and publishes nothing.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Releases go out one at a time, so two tags never race to move the feed.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    # The only job that can read the update signing key: the `release`
+    # environment admits v* tags and main. No third-party action runs here;
+    # Rust comes from the runner's own rustup.
+    environment: release
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            app/package-lock.json
+      - run: rustup update stable --no-self-update && rustup default stable
+      - name: The tag names the source version
+        if: github.ref_type == 'tag'
+        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+
+      - run: npm ci
+      - run: npm ci --prefix app
+      # The page, the Node sidecar and the CLI resources, then the app, its DMG
+      # and its update bundle, signed with the key (it has no password).
+      - name: Build and sign
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        run: npm --prefix app run build
+      - name: The built app passes the packaged smoke
+        env:
+          CONSENSFLOW_SMOKE_APP: ${{ github.workspace }}/app/src-tauri/target/release/bundle/macos/ConsensFlow.app
+        run: npm run smoke
+
+      - name: Notes, and the update feed for this build
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          tag="v$version"
+          bundle=app/src-tauri/target/release/bundle
+          out="$RUNNER_TEMP/release"
+          mkdir -p "$out"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            # Checkout can leave an annotated tag lightweight; fetch the tag itself.
+            git fetch --force origin "+refs/tags/$tag:refs/tags/$tag"
+            if [ "$(git cat-file -t "$tag")" = tag ]; then
+              git tag -l --format='%(contents)' "$tag" > "$out/notes.txt"
+            fi
+          fi
+          if [ ! -s "$out/notes.txt" ]; then
+            previous=$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^ 2>/dev/null || true)
+            {
+              echo "ConsensFlow $version${previous:+, the changes since ${previous#v}}:"
+              echo
+              git log --no-merges --format='- %s' ${previous:+"$previous..HEAD"}
+            } > "$out/notes.txt"
+          fi
+          archive="ConsensFlow_${version}_aarch64.app.tar.gz"
+          cp "$bundle/macos/ConsensFlow.app.tar.gz" "$out/$archive"
+          cp "$bundle/macos/ConsensFlow.app.tar.gz.sig" "$out/$archive.sig"
+          cp "$bundle/dmg/ConsensFlow_${version}_aarch64.dmg" "$out/"
+          case "$version" in *-*) channel=alpha ;; *) channel=stable ;; esac
+          node app/scripts/prepare-update.mjs --repo "$PWD" \
+            --bundle "$bundle/macos/ConsensFlow.app" \
+            --archive "$out/$archive" --signature "$out/$archive.sig" \
+            --notes "$out/notes.txt" --output "$out/latest.json" \
+            --channel "$channel" --date "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ConsensFlow-mac
+          path: ${{ runner.temp }}/release/
+          if-no-files-found: error
+
+  windows:
+    uses: ./.github/workflows/windows-build.yml
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: [mac, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: ${{ runner.temp }}/dist
+          merge-multiple: true
+      # Versioned files first, then the rolling feed installed apps read: a
+      # feed naming an archive that is not up yet would fail every check.
+      - name: Publish the release, then its update feed
+        working-directory: ${{ runner.temp }}/dist
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          mac="ConsensFlow_${version}_aarch64"
+          assets=(
+            "$mac.dmg" "$mac.app.tar.gz" "$mac.app.tar.gz.sig" latest.json
+            "nsis/ConsensFlow_${version}_x64-setup.exe"
+            "portable/ConsensFlow_${version}_x64-portable.zip"
+          )
+          for asset in "${assets[@]}"; do test -s "$asset" || { echo "missing $asset"; exit 1; }; done
+          for asset in "${assets[@]}"; do (cd "$(dirname "$asset")" && sha256sum "$(basename "$asset")"); done > SHA256SUMS
+          {
+            cat notes.txt
+            echo
+            echo "**Downloads.** macOS on Apple silicon: the DMG. It is ad-hoc code-signed and"
+            echo "not notarized, so the first launch may need System Settings → Privacy &"
+            echo "Security → Open Anyway. Windows x64: the installer (\`-setup.exe\`), or the"
+            echo "portable zip: unpack it anywhere and run \`ConsensFlow.exe\`; its data stays in"
+            echo "your user folder either way. Neither Windows file is code-signed, so Windows"
+            echo "shows its unknown-publisher warning. The Mac app updates itself through"
+            echo "ConsensFlow → Check for Updates on the $([[ "$version" == *-* ]] && echo Alpha || echo Stable) channel."
+          } > body.md
+          prerelease=()
+          [[ "$version" == *-* ]] && prerelease=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "ConsensFlow $version" \
+            --notes-file body.md "${prerelease[@]}" "${assets[@]}" SHA256SUMS
+          feeds=(update-alpha)
+          [[ "$version" == *-* ]] || feeds+=(update-stable)
+          for feed in "${feeds[@]}"; do
+            if ! gh release view "$feed" > /dev/null 2>&1; then
+              name="${feed#update-}"
+              gh release create "$feed" --prerelease --title "${name^} update feed" \
+                --notes "The latest.json installed apps read on this channel. Do not delete."
+            fi
+            gh release upload "$feed" latest.json --clobber
+          done
+      - name: The feed serves this release, and its archive downloads
+        working-directory: ${{ runner.temp }}/dist
+        run: |
+          set -euo pipefail
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download"
+          # A replaced asset can be served stale for a moment.
+          for _ in $(seq 12); do
+            curl -fsSL "$base/update-alpha/latest.json" -o served.json && cmp -s served.json latest.json && break
+            sleep 5
+          done
+          cmp served.json latest.json
+          url=$(jq -r '.platforms["darwin-aarch64"].url' latest.json)
+          curl -fsSL "$url" | cmp - "ConsensFlow_${GITHUB_REF_NAME#v}_aarch64.app.tar.gz"
