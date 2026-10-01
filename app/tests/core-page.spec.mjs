@@ -2327,6 +2327,34 @@ test('resizes a terminal once, when a drag that narrows it holds still', async (
   expect(after[1]).toBeLessThan(first)
 })
 
+test('resizes a terminal while the board redraws faster than a size settles', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 800 })
+  await open(page, { ...model(), realTerminals: true })
+  const sizes = () =>
+    page.evaluate(() =>
+      window.__calls
+        .filter(([command, args]) => command === 'pane_resize' && args.id === 'p1-chief')
+        .map(([, args]) => args.cols),
+    )
+  await expect.poll(async () => (await sizes()).length).toBe(1)
+  // A busy board: a state change every 100 ms, as fast as the core sends them,
+  // each redraw asking every terminal to fit.
+  await page.evaluate(() => {
+    window.__busy = setInterval(() => window.__listeners.get('state-changed')(), 100)
+  })
+  const grip = await page.locator('#board-resize').boundingBox()
+  const x = grip.x + grip.width / 2
+  const y = grip.y + 60
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  await page.mouse.move(x + 160, y, { steps: 4 })
+  await page.mouse.up()
+  await expect.poll(async () => (await sizes()).length, { timeout: 2_000 }).toBe(2)
+  const [first, narrowed] = await sizes()
+  expect(narrowed).toBeLessThan(first)
+  await page.evaluate(() => clearInterval(window.__busy))
+})
+
 test('keeps every button of a lane inside its column, however narrow the board', async ({
   page,
 }) => {

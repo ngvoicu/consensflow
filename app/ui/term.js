@@ -61,6 +61,8 @@ export class XtermEmulator {
     /** Whether the terminal has taken its host's size once. */
     this.sized = false
     this.settling = null
+    /** The size the settle waits to take, "colsxrows". */
+    this.pending = null
     this.resizeObserver = new ResizeObserver(() => this.fit())
     this.resizeObserver.observe(host)
   }
@@ -87,16 +89,27 @@ export class XtermEmulator {
   /** Take the host's size: the first at once, a later one once it holds still. */
   fit() {
     if (this.host.clientWidth < 2 || this.host.clientHeight < 2) return
-    clearTimeout(this.settling)
     if (!this.sized) {
       this.#fitNow()
       return
     }
+    const size = this.fitAddon.proposeDimensions()
+    if (!Number.isInteger(size?.cols) || !Number.isInteger(size?.rows)) return
+    // Every redraw asks again: the size already waited for keeps its wait,
+    // so redraws faster than the settle cannot hold a resize off for good.
+    const target = `${size.cols}x${size.rows}`
+    if (target === this.pending) return
+    clearTimeout(this.settling)
+    this.pending = null
+    // The size it has already: nothing to take.
+    if (size.cols === this.terminal.cols && size.rows === this.terminal.rows) return
+    this.pending = target
     this.settling = setTimeout(() => this.#fitNow(), SETTLE_MS)
   }
 
   #fitNow() {
     this.settling = null
+    this.pending = null
     if (this.host.clientWidth < 2 || this.host.clientHeight < 2) return
     try {
       this.fitAddon.fit()
