@@ -61,9 +61,38 @@ function note(text) {
 
 async function core(operation, body = {}) {
   const result = await invoke('core_request', { operation, body })
-  if (result?.ok !== true) throw new Error(result?.error ?? `${operation} did not answer`)
+  // A request the app could not hand to the daemon says why in `detail`.
+  if (result?.ok !== true) {
+    throw new Error(result?.detail ?? result?.error ?? `${operation} did not answer`)
+  }
   return result
 }
+
+// The daemon down: the banner says why and what comes next, and stays until
+// the daemon is back, when everything is read again.
+const coreDown = $('#core-down')
+let coreUp = true
+function coreStatus({ available, cause, retrying }) {
+  coreDown.hidden = available
+  if (available) {
+    if (coreUp) return
+    coreUp = true
+    void act(async () => {
+      state.agents = (await core('agents.list')).agents
+    })
+    return
+  }
+  coreUp = false
+  coreDown.replaceChildren(
+    element('strong', null, 'The daemon is not running.'),
+    ...(cause ? [` ${sentence(cause)}`] : []),
+    retrying ? ' Starting it again…' : ' Quit ConsensFlow and open it again.',
+  )
+}
+
+/** "It stopped." for "it stopped": a cause read as a sentence of its own. */
+const sentence = (text) =>
+  `${text.charAt(0).toUpperCase()}${text.slice(1)}${/[.!?…]$/.test(text) ? '' : '.'}`
 
 /**
  * Runs an action and redraws; a refusal shows in the status line. The redraw
@@ -1015,15 +1044,8 @@ async function start() {
     report('ConsensFlow is not running this page.')
     return
   }
-  if (typeof Channel === 'function') {
-    const channel = new Channel()
-    channel.onmessage = (message) => {
-      outputObserver?.(message)
-      terminals.output(message)
-    }
-    // Once, for the life of the page: a second subscription ends the first.
-    await invoke('subscribe_output', { onOutput: channel })
-  }
+  // Listening comes first: subscribing to the output is when the app tells
+  // the page the core's state, and an event sent before a listener is lost.
   if (typeof listen === 'function') {
     try {
       let pending = false
@@ -1035,9 +1057,19 @@ async function start() {
           void refresh()
         }, 50)
       })
+      await listen('core-status', (event) => coreStatus(event.payload))
     } catch (cause) {
       report(cause)
     }
+  }
+  if (typeof Channel === 'function') {
+    const channel = new Channel()
+    channel.onmessage = (message) => {
+      outputObserver?.(message)
+      terminals.output(message)
+    }
+    // Once, for the life of the page: a second subscription ends the first.
+    await invoke('subscribe_output', { onOutput: channel })
   }
   try {
     state.agents = (await core('agents.list')).agents

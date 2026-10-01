@@ -287,6 +287,9 @@ async function open(page, data = model()) {
     // How long an operation takes to answer, in ms, set by a test while it runs:
     // the real core answers when it can, and a page that assumes at once races.
     window.__delay = {}
+    // Why the daemon is down, while a test has it down: the app answers every
+    // core request with this, as Rust does with no bridge to the daemon.
+    window.__down = null
     const answer = (value) => JSON.parse(JSON.stringify({ ok: true, ...value }))
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
@@ -324,6 +327,14 @@ async function open(page, data = model()) {
         const handle = operations[args.operation]
         const ms = window.__delay[args.operation] ?? 0
         if (ms > 0) await new Promise((wake) => setTimeout(wake, ms))
+        if (window.__down !== null) {
+          return {
+            ok: false,
+            error: 'not-available-yet',
+            operation: args.operation,
+            detail: window.__down,
+          }
+        }
         return handle ? handle(args.body) : { ok: true }
       }
       if (command === 'roster_handle') return { url: 'http://127.0.0.1:1/', token: 'ui-token' }
@@ -345,6 +356,7 @@ async function open(page, data = model()) {
       core: { invoke, Channel },
       event: {
         listen: async (name, handler) => {
+          window.__calls.push(['listen', { name }])
           window.__listeners.set(name, handler)
           return () => window.__listeners.delete(name)
         },
@@ -2237,4 +2249,50 @@ test('switches the lead only of the project it was asked for', async ({ page }) 
   await expect
     .poll(() => calls(page, 'chief.switch'))
     .toEqual([{ project: 2, harness: 'codex', when: 'turn', note: false }])
+})
+
+test('says the daemon is down while it is, why, and what comes next, and reads everything again once it is back', async ({
+  page,
+}) => {
+  await open(page)
+  // The app gives the core's state when the output is subscribed to: the page listens first.
+  const order = await page.evaluate(() =>
+    window.__calls.map(([command, args]) => (command === 'listen' ? args.name : command)),
+  )
+  expect(order).toContain('core-status')
+  expect(order.indexOf('core-status')).toBeLessThan(order.indexOf('subscribe_output'))
+  const banner = page.getByRole('alert')
+  await expect(banner).toBeHidden()
+  const coreStatus = (payload) =>
+    page.evaluate(
+      (payload) => window.__listeners.get('core-status')({ event: 'core-status', payload }),
+      payload,
+    )
+  await page.evaluate(() => {
+    window.__down = 'the Node bridge is not running'
+  })
+  await coreStatus({ available: false, cause: 'the daemon stopped (exit code 1)', retrying: true })
+  await expect(banner).toHaveText(
+    'The daemon is not running. The daemon stopped (exit code 1). Starting it again…',
+  )
+  // What the human does meanwhile is refused with why, not with a code.
+  await page.getByRole('button', { name: 'Close harbour' }).click()
+  await expect(page.locator('#status')).toHaveText('the Node bridge is not running')
+  await coreStatus({ available: false, cause: 'it stopped again.', retrying: false })
+  await expect(banner).toHaveText(
+    'The daemon is not running. It stopped again. Quit ConsensFlow and open it again.',
+  )
+  // Back: the banner goes, and the agents and the board are read again.
+  await page.evaluate(() => {
+    window.__down = null
+  })
+  const [agents, boards] = [
+    (await calls(page, 'agents.list')).length,
+    (await calls(page, 'board.get')).length,
+  ]
+  await coreStatus({ available: true, cause: null, retrying: false })
+  await expect(banner).toBeHidden()
+  await expect.poll(async () => (await calls(page, 'agents.list')).length).toBeGreaterThan(agents)
+  await expect.poll(async () => (await calls(page, 'board.get')).length).toBeGreaterThan(boards)
+  await expect(page.locator('tr[data-handle="zeus"]')).toHaveCount(1)
 })
