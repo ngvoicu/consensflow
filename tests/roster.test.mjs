@@ -1,5 +1,14 @@
 import assert from 'node:assert/strict'
-import { cpSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { AGENT_PRESETS } from '../hosts/lib/presets.js'
@@ -328,6 +337,54 @@ it('legacy import never copies a link that could redirect a future write outside
   } finally {
     t.cleanup()
   }
+})
+
+describe('an agents file that cannot be read', () => {
+  it('is said, never read as an empty roster, and never saved over', () => {
+    const t = tempEnv()
+    try {
+      addAgent({ name: 'mybuilder', harness: 'claude', model: 'claude-opus-5-5' }, t.env)
+      const file = rosterPath(t.env)
+      // A hand edit leaves a trailing comma.
+      const broken = readFileSync(file, 'utf8').replace(/\n\s*\]/, ',\n  ]')
+      writeFileSync(file, broken)
+      const said = /agents file .*agents\.json is not valid JSON: fix it or move it away/
+      for (const read of [
+        () => listAgents(t.env),
+        () => agentRow('mybuilder', t.env),
+        () => preferences(t.env),
+        () => normalizeRoster(t.env),
+      ])
+        assert.throws(read, said)
+      for (const write of [
+        () => setPreferences({ ownHarnessOnly: true }, t.env),
+        () => addAgent({ name: 'other', harness: 'codex', model: 'gpt-6-astra' }, t.env),
+        () => editAgent('mybuilder', { model: 'claude-sonnet-5-5' }, t.env),
+        () => removeAgent('mybuilder', t.env),
+      ])
+        assert.throws(write, said)
+      assert.equal(readFileSync(file, 'utf8'), broken, 'the file is as the human left it')
+      writeFileSync(file, 'null')
+      assert.throws(() => listAgents(t.env), /is not an agents file/)
+    } finally {
+      t.cleanup()
+    }
+  })
+
+  it('is written whole or not at all, beside itself and then in its place', () => {
+    const t = tempEnv()
+    try {
+      addAgent({ name: 'mybuilder', harness: 'claude', model: 'claude-opus-5-5' }, t.env)
+      const file = rosterPath(t.env)
+      const before = statSync(file).ino
+      setPreferences({ ownHarnessOnly: true }, t.env)
+      assert.notEqual(statSync(file).ino, before, 'a new file took its place')
+      assert.deepEqual(readdirSync(dirname(file)), ['agents.json'], 'nothing is left beside it')
+      assert.equal(preferences(t.env).ownHarnessOnly, true)
+    } finally {
+      t.cleanup()
+    }
+  })
 })
 
 describe('the roster keeps what the human chose about it', () => {
