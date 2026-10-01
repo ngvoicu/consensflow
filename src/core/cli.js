@@ -410,7 +410,6 @@ function client(env) {
   }
 }
 
-/** The text, and the named flags picked out of it. */
 /** How a transcript item's role reads in a window. */
 const TRANSCRIPT_ROLE = {
   user: 'Sent to the window',
@@ -420,6 +419,7 @@ const TRANSCRIPT_ROLE = {
 }
 const clip = (text, at) => (text.length > at ? `${text.slice(0, at)}…` : text)
 
+/** The text, and the named flags picked out of it. */
 function split(words, booleans, valued) {
   const flags = {}
   const text = []

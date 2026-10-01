@@ -42,8 +42,7 @@ async function withApi(fn) {
   })
   const participant = (handle) =>
     ledger.project(project.id).participants.find((p) => p.handle === handle)
-  const token = (handle) =>
-    credentials.issue({ participant: participant(handle), project, generation: 1 })
+  const token = (handle) => credentials.issue({ participant: participant(handle), project })
   const call = async (who, method, route, body) => {
     const response = await fetch(`${api.url}${route}`, {
       method,

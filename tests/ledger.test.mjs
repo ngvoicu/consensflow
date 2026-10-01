@@ -1643,6 +1643,12 @@ describe('tasks and the inbox queue', () => {
         ledger.reopenTask(project.id, 3, { by: 'chief', body: 'Retry' }).task.state,
         'queued',
       )
+      // A paused task waits with its window: it is cancelled, never failed.
+      ledger.pauseTask(project.id, 3, { by: 'chief' })
+      assert.throws(() => ledger.failTask(project.id, 3, { reason: 'pane exited' }), {
+        code: 'invalid-transition',
+      })
+      assert.equal(ledger.cancelTask(project.id, 3, { by: 'chief' }).state, 'cancelled')
     })
   })
 

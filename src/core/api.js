@@ -31,13 +31,9 @@ const digest = (token) => createHash('sha256').update(token).digest('hex')
 export class Credentials {
   #byDigest = new Map()
 
-  issue({ participant, project, generation }) {
+  issue({ participant, project }) {
     const token = randomBytes(32).toString('hex')
-    this.#byDigest.set(digest(token), {
-      participantId: participant.id,
-      projectId: project.id,
-      generation,
-    })
+    this.#byDigest.set(digest(token), { participantId: participant.id, projectId: project.id })
     return token
   }
 

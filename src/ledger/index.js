@@ -38,11 +38,12 @@ export { SCHEMA_VERSION }
  *   refused with `invalid-transition`.
  *
  *   open ──assigned──▶ queued ──delivered──▶ working ──question──▶ waiting ──answer delivered──▶ working
- *   queued, working, waiting ──released──▶ open
+ *   queued, working, waiting, paused ──released──▶ open
  *   open, queued, working, waiting ──pause──▶ paused ──resume──▶ open, queued
  *   working, waiting ──result──▶ done ──accept──▶ accepted
  *   done, failed ──reopen──▶ queued
- *   open, queued, working, waiting, paused ──cancel──▶ cancelled, ──fail──▶ failed
+ *   open, queued, working, waiting, paused ──cancel──▶ cancelled
+ *   open, queued, working, waiting ──fail──▶ failed
  *
  * - A review is a task like any other: the chief puts it on the board for a
  *   reviewer of a tier, and the reviewer's findings come back as its result.
@@ -62,9 +63,9 @@ export const TIERS = ['critical', 'complex', 'standard', 'light']
 /** Who takes a task on the board: a worker, an advisor (advice), a reviewer, or an image designer (no tier). */
 const POOLS = ['worker', 'advisor', 'reviewer', 'designer']
 export const PURPOSES = ['critical-review', 'architecture', 'hard-problem', 'important-question']
-/** "standard worker", "image designer": who an open task waits for; `aPool` adds the article. */
 /** When a task's tier moved to one the staff holds, the tier that was asked. */
 const moved = (asked, tier) => (asked !== undefined && asked !== tier ? { asked } : {})
+/** "standard worker", "image designer": who an open task waits for; `aPool` adds the article. */
 const poolName = (pool, tier) => (pool === 'designer' ? 'image designer' : `${tier} ${pool}`)
 const aPool = (pool, tier) => `${pool === 'designer' ? 'an' : 'a'} ${poolName(pool, tier)}`
 const CRITICAL_RULE =
@@ -1280,7 +1281,6 @@ class Ledger {
     )
   }
 
-  /** The active members an open task may go to, with what the daemon ranks them by. */
   /**
    * Whether a member has a task on its hands: one task per member session
    * ends when this is false. Paused work counts: its window stays for the
@@ -1296,6 +1296,7 @@ class Ledger {
     )
   }
 
+  /** The active members an open task may go to, with what the daemon ranks them by. */
   candidates(projectId, number) {
     const task = this.#taskRow(projectId, number)
     return this.members(projectId, task.pool)
@@ -2410,8 +2411,6 @@ class Ledger {
     return participantView(this.#participantRow(id))
   }
 
-  /** The active members of one pool and tier, in join order. */
-  /** The staff's members of one role and tier (any tier when null), whatever role they were saved with first. */
   /**
    * The tier a task for `pool` goes to: the one asked, when somebody holds it;
    * else the nearest one somebody does, the next one up before the next one
@@ -2429,6 +2428,7 @@ class Ledger {
     return near.find((other) => this.#members(projectId, pool, other).length > 0) ?? tier
   }
 
+  /** The staff's members of one role and tier (any tier when null), whatever role they were saved with first. */
   #members(projectId, pool, tier) {
     return this.#db
       .prepare(
