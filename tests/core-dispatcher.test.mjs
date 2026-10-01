@@ -245,7 +245,7 @@ describe('the dispatcher', () => {
       assert.equal(context.adapter.prepared[0].role, 'chief')
       assert.equal(context.adapter.prepared[0].instructions, 'instructions for chief')
       const conversation = context.ledger.currentConversation(id('chief'))
-      assert.equal(conversation.nativeSession, `native-${chief.launch}`)
+      assert.equal(conversation.nativeSession, `native-${context.adapter.prepared[0].launchId}`)
       assert.equal(context.dispatcher.activity(id('chief')).state, 'starting')
       await context.dispatcher.pass()
       assert.equal(context.dispatcher.activity(id('chief')).state, 'idle')

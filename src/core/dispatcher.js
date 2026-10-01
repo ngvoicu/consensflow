@@ -1013,12 +1013,11 @@ export class Dispatcher {
       this.#launchFailed(project, participant, delivering, `the launch failed: ${cause.message}`)
       return
     }
-    const token = this.#credentials.issue({ participant, project, generation })
+    const token = this.#credentials.issue({ participant, project })
     const pane = { id: `p${project.id}-${participant.handle}`, generation }
     const opened = await this.#host
       .open({
         ...pane,
-        launch: launchId,
         cwd: project.directory,
         argv: plan.argv,
         env: { ...this.#paneEnv(participant, project), ...plan.env, CONSENSFLOW_TOKEN: token },
