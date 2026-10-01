@@ -64,10 +64,10 @@ export class TerminalsView {
    * is shown. A window that ended, or gave way to a newer one, goes with its
    * card: a last frame left in the strip still shows the agent's prompt and
    * reads as open beside a lane that says it is closed. Only its own
-   * project's board can say so (its lane has no window or another one, or its
-   * session is gone), or its project being closed or deleted. A window whose
-   * output came first is placed once a board shows it. `open` holds the ids
-   * of the projects open now.
+   * project's board says so (its lane has no window or another one, its
+   * session is gone), or the project itself, closed or deleted. A window
+   * whose output came first is placed once a board shows it. `open` holds
+   * the ids of the projects open now.
    */
   reconcile(boards, open) {
     const lanes = boards.flatMap((board) =>
