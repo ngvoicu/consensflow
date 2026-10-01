@@ -10,8 +10,8 @@ import { fakeExecutable } from './helpers.mjs'
  * The Devin adapter (TEST-BDC-05, IMPL-BDC-07): Devin runs on a config of our
  * own per launch (its hooks log each turn), in full-permission mode, with the
  * first message in a prompt file. Devin names its session itself, and its own
- * wire log says which one this window opened. Messages are pasted, never while
- * the human is typing or while Devin shows another conversation.
+ * wire log says which one this window opened. Messages are pasted behind
+ * whatever the input box holds, never while Devin shows another conversation.
  */
 async function withHome(fn) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cf-devin-adapter-'))

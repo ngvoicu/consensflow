@@ -44,9 +44,9 @@ import { RESUME_WORDS } from '../ledger/index.js'
  *   after the reset is history, not a new one; the member is simply
  *   eligible again. A member low on quota takes nothing new. The human may
  *   also give a working or paused task back to the board (Reassign).
- * - A human typing in a window latches it against pastes. Their Enter releases
- *   the latch once the harness shows a new message of theirs; the pane host
- *   keeps it if they typed again after that Enter.
+ * - What a human typed in a window and left unsent holds nothing (the
+ *   owner's choice, 2026-10-01): a paste goes in behind it. The pane host
+ *   holds only their keys pressed during a paste, until it is in.
  *
  * Harness specifics live in the adapters (`src/adapters/`); the pane host is
  * the Rust PTY host behind the bridge. Time is an argument, so every rule is

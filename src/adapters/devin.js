@@ -14,8 +14,8 @@ import { admission, dialogWaiting, executableFor, recordState } from './shared.j
  * owner's, plus hooks that log every turn and carry the role instructions),
  * in full-permission mode, with the first message in a prompt file. Devin
  * names its session itself; its own wire log for this launch says which one
- * the window opened. A message is pasted, and only while no human is typing
- * and Devin still shows the conversation we know.
+ * the window opened. A message is pasted, behind whatever the input box
+ * holds, and only while Devin still shows the conversation we know.
  */
 export function devinAdapter({
   env,

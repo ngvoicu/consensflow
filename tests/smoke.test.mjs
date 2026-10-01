@@ -130,9 +130,12 @@ const FAKE_HARNESS = String.raw`#!/bin/sh
 #
 # It also keeps the two records a Claude window keeps, because the core reads
 # them before it delivers and after: sessions/<pid>.json says the window is
-# idle, and the transcript holds every line the window took as a user turn
-# answered by an assistant turn. The human's Enter releases the typing latch
-# on the first; a delivery from the board is confirmed by the second.
+# idle, so a delivery may go in, and the transcript holds every line the
+# window took as a user turn answered by an assistant turn, which confirms it.
+#
+# Every window of the smoke runs this script, the chief's first and then the
+# worker's, and each appends its pid: the worker's window closes once its
+# work is done, the chief's lives as long as the app.
 #
 # The flood is asked for rather than printed at start-up: 1.5 MiB of wrapped
 # lines pushes far more rows than xterm keeps, so a banner printed before it
@@ -140,7 +143,7 @@ const FAKE_HARNESS = String.raw`#!/bin/sh
 # seen the banner; only then does the flood run.
 LC_ALL=C
 export LC_ALL
-echo $$ > "$CFSMOKE_PIDFILE"
+echo $$ >> "$CFSMOKE_PIDFILE"
 session=''
 seed=''
 while [ $# -gt 0 ]; do
@@ -555,9 +558,12 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   assert.equal(drained.data.lastFloodLine, FLOOD_LINES)
   assert.ok(drained.data.acks > 1, `only ${drained.data.acks} acks for ${FLOOD_BYTES} bytes`)
 
-  const harnessPid = Number(readFileSync(box.pidFile, 'utf8').trim())
-  assert.ok(Number.isInteger(harnessPid) && harnessPid > 0, 'the fake harness wrote no pid')
-  assert.ok(alive(harnessPid), 'the fake harness was not running when it answered')
+  const harnessPids = readFileSync(box.pidFile, 'utf8').trim().split('\n').map(Number)
+  assert.ok(
+    harnessPids.length >= 2 && harnessPids.every((pid) => Number.isInteger(pid) && pid > 0),
+    `the chief's and the worker's fake harnesses wrote no pids: ${harnessPids}`,
+  )
+  assert.ok(alive(harnessPids[0]), "the chief's fake harness was not running when it answered")
 
   // 5. The packaged pi extension resolves its dependency inside the bundle.
   //    Run by the bundle's own node, from a directory outside this checkout.
@@ -686,7 +692,7 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   app.quit()
   const ended = await app.exited
   assert.equal(ended.code, 0, `the app exited ${ended.code} / ${ended.signal}`)
-  assert.equal(alive(harnessPid), false, 'the fake harness outlived the app')
+  assert.deepEqual(harnessPids.filter(alive), [], 'a fake harness outlived the app')
   finished = true
 })
 

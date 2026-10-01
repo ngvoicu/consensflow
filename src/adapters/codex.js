@@ -19,7 +19,7 @@ import { admission, executableFor, recordState } from './shared.js'
  * that knows the thread the TUI shows and queues messages on it, and the TUI
  * attached to both. The first message is Codex's last argument; the broker
  * names the thread once Codex starts it. A Codex without the queue runs bare
- * and gets its messages pasted, only while no human is typing.
+ * and gets its messages pasted, behind whatever its input box holds.
  */
 const QUESTION_TOOL = [
   '--enable',
