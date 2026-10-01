@@ -340,7 +340,6 @@ async function open(page, data = model()) {
         }
         return handle ? handle(args.body) : { ok: true }
       }
-      if (command === 'roster_handle') return { url: 'http://127.0.0.1:1/', token: 'ui-token' }
       if (command === 'subscribe_output') {
         window.__output = args.onOutput
         return { ok: true }
@@ -384,7 +383,6 @@ async function open(page, data = model()) {
                   emulator.type = callback
                   return { dispose() {} }
                 },
-                resize() {},
                 fit() {},
                 dispose() {
                   emulator.disposed = true

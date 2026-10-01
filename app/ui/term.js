@@ -15,7 +15,6 @@ const SETTLE_MS = 200
  * @typedef {object} Emulator
  * @property {(bytes: Uint8Array) => Promise<void>} write
  * @property {(callback: (data: string) => void) => {dispose: () => void}} onData
- * @property {(cols: number, rows: number) => void} resize
  * @property {() => void} dispose
  */
 
@@ -78,12 +77,6 @@ export class XtermEmulator {
   onData(callback) {
     this.humanListeners.add(callback)
     return { dispose: () => this.humanListeners.delete(callback) }
-  }
-
-  resize(cols, rows) {
-    if (Number.isInteger(cols) && Number.isInteger(rows) && cols > 0 && rows > 0) {
-      this.terminal.resize(cols, rows)
-    }
   }
 
   /** Take the host's size: the first at once, a later one once it holds still. */
@@ -174,20 +167,9 @@ export class EmulatorRegistry {
     this.emulators.delete(key)
   }
 
-  reconcile(liveKeys) {
-    for (const key of this.emulators.keys()) {
-      if (liveKeys.has(key)) continue
-      this.retire(key)
-    }
-  }
-
   fit(id, generation) {
     const emulator = this.get(id, generation)
     if (emulator === null) return
     if (typeof emulator.fit === 'function') requestAnimationFrame(() => emulator.fit())
-  }
-
-  dispose() {
-    this.reconcile(new Set())
   }
 }

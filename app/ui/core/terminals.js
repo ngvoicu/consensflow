@@ -1,6 +1,6 @@
 import { EmulatorRegistry, paneKey } from '../term.js'
 import { TerminalLink } from '../terminal-link.js'
-import { element, laneOrder, redraw } from './board.js'
+import { element, lamp, laneName, laneOrder, redraw } from './board.js'
 
 /**
  * The live windows beside the board: a horizontal strip of one terminal per
@@ -201,9 +201,6 @@ export class TerminalsView {
     }
     if (lane !== null) {
       const name = laneName(lane.participant)
-      const lamp = element('span', 'lamp')
-      lamp.dataset.state = lane.activity?.state ?? 'closed'
-      lamp.setAttribute('aria-hidden', 'true')
       // Only a session's window closes by hand, as on its board row; the
       // chief's stays with the project.
       const session = lane.participant.member !== null
@@ -212,7 +209,7 @@ export class TerminalsView {
       stop.setAttribute('aria-label', `Close ${name}'s terminal`)
       stop.addEventListener('click', () => this.#onClose(lane.participant))
       redraw(entry.head, [
-        lamp,
+        lamp(lane.activity),
         element('span', 'terminal-name', name),
         element('span', 'terminal-meta', lane.participant.harness ?? ''),
         ...(session ? [stop] : []),
@@ -231,8 +228,3 @@ export class TerminalsView {
     return this.#registry.get(pane.id, pane.generation)
   }
 }
-
-const laneName = (participant) =>
-  participant.member
-    ? `@${participant.member} · ${participant.session}`
-    : ({ chief: 'Chief of Staff' }[participant.handle] ?? `@${participant.handle}`)

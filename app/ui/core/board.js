@@ -60,7 +60,7 @@ const ACTIVITY_LABEL = {
   unknown: 'Unknown',
   out: 'Out of quota',
 }
-/** The work tiers, in the order the composer offers them. */
+/** How a message's kind reads. */
 const KIND_LABEL = {
   task: 'Task',
   result: 'Result',
@@ -154,7 +154,6 @@ export function age(iso, now = Date.now()) {
   return `${Math.round(hours / 24)}d`
 }
 
-/** The human and the chief first, then each member with its sessions right under it. */
 /** The role a member's task is for: its pool's. */
 const roleOf = (task, roles) => task.pool ?? roles[0]
 
@@ -196,6 +195,7 @@ export function boardRows(lanes) {
   return rows
 }
 
+/** The human and the chief first, then each member with its sessions right under it. */
 export function laneOrder(lanes) {
   const rank = ({ participant }) => [
     participant.role === 'chief' ? 0 : 1,
@@ -215,7 +215,7 @@ const clock = (iso) =>
 const outOfQuota = (participant, now) =>
   participant.outUntil !== null && Date.parse(participant.outUntil) > now
 /** "@zeus · amber-pine" for a session; the member's own name otherwise. */
-const laneName = (participant) =>
+export const laneName = (participant) =>
   participant.member
     ? `@${participant.member} · ${participant.session}`
     : ({ human: 'You', chief: 'Chief of Staff' }[participant.handle] ?? `@${participant.handle}`)
@@ -259,7 +259,8 @@ const resting = (participant, activity) =>
   participant.member === null &&
   (activity?.state ?? 'closed') === 'closed'
 
-function lamp(activity) {
+/** A participant's lamp: what its window is doing, at a glance. */
+export function lamp(activity) {
   const node = element('span', 'lamp')
   node.dataset.testid = 'lamp'
   node.dataset.state = activity?.state ?? 'closed'
@@ -277,7 +278,6 @@ const acts = (board) => board.project.state === 'open'
 export class BoardView {
   #root
   #actions
-  #drafts = new Map()
   /** The board drawn last: a row's button kept across redraws acts on its lane as it is now. */
   #board = null
 
@@ -286,9 +286,8 @@ export class BoardView {
     this.#actions = actions
   }
 
-  /** Redraw from the core's state, keeping an open composer and its text. */
+  /** Redraw from the core's state. */
   render({ board, inbox, agents = [], now = Date.now() }) {
-    this.#saveDrafts()
     this.#board = board
     const models = new Map(agents.map((agent) => [agent.name, agent]))
     redraw(this.#root, [
@@ -296,7 +295,6 @@ export class BoardView {
       this.#forYou(inbox, board, now),
       this.#kanban(board, models, now),
     ])
-    this.#restoreDrafts()
   }
 
   /** `participant`'s lane on the board drawn last, which a kept button acts on. */
@@ -325,7 +323,7 @@ export class BoardView {
     return banner
   }
 
-  /** What waits for the human, and where a new task starts. */
+  /** What waits for the human. */
   #forYou(inbox, board, now) {
     // What waits for the human's approval, then the questions a coordinator
     // has left unanswered too long.
@@ -486,7 +484,7 @@ export class BoardView {
   }
 
   #row(lane, board, agent, now) {
-    const { participant, activity, pane } = lane
+    const { participant } = lane
     const row = element('tr')
     row.dataset.handle = participant.handle
     row.dataset.role = participant.role
@@ -503,12 +501,11 @@ export class BoardView {
       const list = element('ol', 'cards')
       for (const task of mine) {
         if (columnOf(task) !== state) continue
-        list.append(this.#card(task, now))
+        list.append(this.#card(task))
       }
       if (list.childElementCount > 0) cell.append(list)
       row.append(cell)
     }
-    if (pane === null && !resting(participant, activity)) row.dataset.window = 'none'
     return row
   }
 
@@ -629,7 +626,7 @@ export class BoardView {
     return head
   }
 
-  #card(task, now) {
+  #card(task) {
     const item = element('li', 'card-item')
     const card = button('', 'card', () => this.#actions.onOpenTask(task.number))
     card.dataset.task = String(task.number)
@@ -643,27 +640,10 @@ export class BoardView {
       element('span', 'card-title', task.title),
       element('span', 'card-route', route(task)),
       element('span', 'card-state', STATE_LABEL[task.state]),
-      element('span', 'card-age', age(task.updatedAt, now)),
     )
     if (task.result) card.append(element('span', 'card-result', task.result))
     item.append(card)
     return item
-  }
-
-  /** What the human is writing in a text area survives a redraw. */
-  #saveDrafts() {
-    for (const field of this.#root.querySelectorAll('textarea')) {
-      const key = field.dataset.draft ?? field.getAttribute('aria-label')
-      if (field.value) this.#drafts.set(key, field.value)
-      else this.#drafts.delete(key)
-    }
-  }
-
-  #restoreDrafts() {
-    for (const field of this.#root.querySelectorAll('textarea')) {
-      const key = field.dataset.draft ?? field.getAttribute('aria-label')
-      if (this.#drafts.has(key)) field.value = this.#drafts.get(key)
-    }
   }
 }
 
@@ -729,7 +709,6 @@ export class TaskDrawer {
       'drawer-meta',
       `${who(task.requester)} asked ${task.assignee === null ? `for a ${task.tier} ${task.pool}` : who(task.assignee)} · ${STATE_LABEL[task.state]} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
     )
-    meta.dataset.state = task.state
     const sections = [head, meta]
     const panel = (name, label, count) => {
       const section = element('section', 'drawer-section')

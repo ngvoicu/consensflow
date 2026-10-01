@@ -416,7 +416,7 @@
       overflow: hidden;
     }
     .card-route { grid-area: route; font: 11px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
-    .card-state, .card-age { display: none; }
+    .card-state { display: none; }
     .card-result {
       grid-area: result;
       padding-bottom: 6px;
@@ -450,15 +450,10 @@
     .strip {
       --state: var(--slate);
       --state-ink: var(--foam);
-      width: 100%;
       min-height: 38px;
-      display: grid;
-      align-items: stretch;
-      padding: 0;
       background: var(--strip);
       border: 1px solid var(--line-soft);
       border-radius: 5px;
-      text-align: left;
       overflow: hidden;
     }
     .strip-line > span {
@@ -494,7 +489,7 @@
     .strip-age { white-space: nowrap; }
     .strip-age { justify-content: flex-end; }
 
-    .strip-message { display: block; cursor: default; }
+    .strip-message { cursor: default; }
     .strip-line {
       display: grid;
       grid-template-columns: 66px minmax(0, 1fr) fit-content(30%) 70px;
@@ -507,13 +502,6 @@
     .strip[data-overdue="true"] .strip-route { color: var(--amber); }
     .strip[data-gated="true"] .strip-route { color: var(--seafoam); }
     .strip[data-gated="true"] { border-left: 3px solid var(--seafoam-dim); }
-    .backlog {
-      background: var(--deep);
-      border: 1px dashed var(--slate);
-      border-radius: 10px;
-      padding: 10px 12px 12px;
-    }
-    .backlog .bay-name { color: var(--muted); }
 
     /* One task and its thread. */
     .drawer {
@@ -730,7 +718,6 @@
       }
       .command-bar { flex-wrap: wrap; padding: 8px 12px; gap: 8px; }
       .sidebar { border-right: 0; border-bottom: 1px solid var(--line); max-height: 30vh; }
-      .strip { grid-template-columns: 58px minmax(0, 1fr) 76px; }
       .strip-route, .strip-age, .strip-line > .strip-route { display: none !important; }
       .strip-line { grid-template-columns: 58px minmax(0, 1fr) 60px; }
       .strip-actions { padding-left: 12px; }
@@ -793,7 +780,7 @@
   <dialog id="delete-dialog" class="settings" aria-labelledby="delete-title">
     <form class="dialog-form" method="dialog">
       <h2 id="delete-title">Delete this project?</h2>
-      <p class="dialog-help" id="delete-help">Its board, staff, sessions, every message and every file ConsensFlow kept for its windows go for good; the trace keeps one line saying it was deleted. This cannot be undone.</p>
+      <p class="dialog-help">Its board, staff, sessions, every message and every file ConsensFlow kept for its windows go for good; the trace keeps one line saying it was deleted. This cannot be undone.</p>
       <div class="dialog-actions">
         <button class="quiet-button" type="submit" value="keep">Keep</button>
         <button class="danger-button" type="button" id="delete-confirm">Delete for good</button>

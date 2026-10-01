@@ -145,7 +145,6 @@ const board = new BoardView(boardRoot, {
       await core('project.resume', { project: project.id })
       state.focus = 'chief'
     }),
-  onRedraw: () => render(),
 })
 
 // The drawer's actions are on its task's own project.
@@ -429,14 +428,7 @@ function renderProjects() {
 
 // The notes are in For you, at the top of the board: a folded board unfolds for them.
 inboxButton.addEventListener('click', () => {
-  if (readFold('board') === 'hidden') {
-    try {
-      localStorage.setItem(foldKey('board'), 'shown')
-    } catch {
-      // No storage: nothing was folded to begin with.
-    }
-    applyFolds()
-  }
+  unfold('board')
   boardRoot.querySelector('.foryou')?.scrollIntoView({ block: 'start' })
 })
 
@@ -455,7 +447,7 @@ const TIER_LABEL = {
   light: 'Light work',
 }
 /** The harnesses in the order agents of one tier are listed. */
-const HARNESS_ORDER = ['claude', 'codex', 'opencode', 'pi', 'kimi', 'devin', 'image']
+const HARNESS_ORDER = ['claude', 'codex', 'opencode', 'pi', 'devin', 'image']
 const TIERS = Object.keys(TIER_LABEL)
 const rank = (list, value) => (list.includes(value) ? list.indexOf(value) : list.length)
 /** A staff reads by role, in the order the picker offers them, then by tier, the most critical first, then by name. */
@@ -931,12 +923,6 @@ teamForm.addEventListener('submit', (event) => {
 })
 teamDialog.querySelector('[value="cancel"]').addEventListener('click', () => teamDialog.close())
 
-// The human's agents screens: the daemon's own pages, in a frame each, at
-// the URL and token the app was handed. Closing one refreshes the board's
-// view of the agents (a tag or a tier may have changed).
-// The agents screens open in their own window at the daemon's address: the
-// board's page cannot frame them (WebKit blocks a plain-HTTP frame inside the
-// app's secure page). Their edits show here once this window is back in front.
 // The two side panels fold away and stay folded in this browser (a
 // per-viewer convenience: storage may be missing, so every touch is guarded).
 const shell = $('.shell')
@@ -1039,6 +1025,9 @@ function unfold(name) {
   applyFolds()
 }
 
+// The agents screens open in their own window at the daemon's address: the
+// board's page cannot frame them (WebKit blocks a plain-HTTP frame inside the
+// app's secure page). Their edits show here once this window is back in front.
 const settingsDialog = $('#settings-dialog')
 $('#settings-button').addEventListener('click', () => settingsDialog.showModal())
 for (const entry of settingsDialog.querySelectorAll('[data-agents-page]')) {
