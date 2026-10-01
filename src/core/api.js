@@ -106,7 +106,11 @@ export async function startApi({
       const tools = url.searchParams.get('tools') === '1'
       try {
         const shown = historyPage(ledger.leadHistory(project.id), {
-          message: (id) => ledger.message(id),
+          // A line may name any number: only this project's messages are read out.
+          message: (id) => {
+            const found = ledger.message(id)
+            return found?.projectId === project.id ? found : null
+          },
           page,
           find: search,
           tools,
@@ -279,8 +283,15 @@ export async function startApi({
     }
     if (at === 'POST /api/answers') {
       const body = await readJson(request)
-      const answer = ledger.answer(body.question, {
-        from: participant.handle,
+      // Message numbers run across every project, and every project's chief
+      // is @chief: a question is answered only in the caller's own project.
+      const id = body.question
+      const asked = Number.isInteger(id) && id > 0 ? ledger.message(id) : null
+      if (asked === null || asked.kind !== 'question' || asked.projectId !== project.id) {
+        throw new Refusal(404, 'unknown-message', `no question m-${id} in this project`)
+      }
+      const answer = ledger.answer(asked.id, {
+        from: participant.id,
         body: body.body,
         ...(body.choices === undefined ? {} : { choices: body.choices }),
       })

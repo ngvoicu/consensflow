@@ -314,6 +314,70 @@ describe('the agents API', () => {
     })
   })
 
+  it("answers only a question of the caller's own project: message ids run across projects", async () => {
+    await withApi(async ({ ledger, token, call, cf, credentials }) => {
+      // Another project, gated, whose chief and member have the same handles as this one's.
+      const other = ledger.createProject({
+        directory: '/work/site',
+        name: 'site',
+        chief: { harness: 'codex' },
+        gate: true,
+      })
+      ledger.addMember(other.id, {
+        agent: 'zeus',
+        harness: 'claude-code',
+        role: 'worker',
+        tier: 'standard',
+      })
+      const { message } = ledger.createTask(other.id, { from: 'chief', to: 'zeus', body: 'Site' })
+      deliver(ledger, ledger.approveMessage(message.id, { by: 'human' }))
+      const question = ledger.ask(other.id, {
+        from: 'zeus',
+        to: 'chief',
+        task: 1,
+        body: 'Which database?',
+      })
+      // This chief means its own m-12 and types the other project's number.
+      const crossed = await cf(token('chief'), 'answer', `m-${question.id}`, 'Our customer one')
+      assert.deepEqual(
+        [crossed.code, crossed.err],
+        [1, `cf: no question m-${question.id} in this project`],
+      )
+      assert.equal(ledger.message(question.id).state, 'gated', 'it still waits for its human')
+      assert.deepEqual(
+        ledger.task(other.id, 1).messages.filter((m) => m.kind === 'answer'),
+        [],
+        'nothing reached the other project',
+      )
+      for (const id of [undefined, 'abc', { id: 1 }, 0, -3, 1.5]) {
+        const refused = await call(token('chief'), 'POST', '/api/answers', {
+          question: id,
+          body: 'x',
+        })
+        assert.deepEqual(
+          [refused.status, refused.body.error],
+          [404, 'unknown-message'],
+          JSON.stringify(id),
+        )
+      }
+      // Its own chief answers it as before.
+      ledger.approveMessage(question.id, { by: 'human' })
+      const theirs = ledger.project(other.id).participants.find((p) => p.handle === 'chief')
+      const answered = await cf(
+        credentials.issue({ participant: theirs, project: other }),
+        'answer',
+        `m-${question.id}`,
+        'Postgres',
+      )
+      assert.equal(answered.code, 0, answered.err)
+      const answer = ledger.task(other.id, 1).messages.find((m) => m.kind === 'answer')
+      assert.deepEqual(
+        [answer.sender, answer.recipient, answer.body],
+        ['chief', 'zeus', 'Postgres'],
+      )
+    })
+  })
+
   const COLOUR = {
     question: 'Which colour?',
     header: 'Colour',
@@ -551,6 +615,27 @@ describe('cf history', () => {
       const member = await cf(token('zeus'), 'history')
       assert.notEqual(member.code, 0)
       assert.match(member.err, /the lead history is the lead's to read/)
+    })
+  })
+
+  it("reads out only this project's messages, whatever number a line of the history names", async () => {
+    await withApi(async ({ ledger, project, token, cf }) => {
+      const other = ledger.createProject({
+        directory: '/work/site',
+        name: 'site',
+        chief: { harness: 'codex' },
+      })
+      const theirs = ledger.note(other.id, { from: 'chief', to: 'human', body: 'Launch code 4417' })
+      const chief = ledger.project(project.id).participants.find((p) => p.handle === 'chief')
+      const first = ledger.startConversation(chief.id, { harness: 'claude-code' })
+      ledger.copyTranscript(first.id, [
+        { id: 'a', role: 'user', text: `[ConsensFlow m-${theirs.id} · pasted from elsewhere]` },
+      ])
+      ledger.switchChief(project.id, { harness: 'codex' })
+      const read = await cf(token('chief'), 'history')
+      assert.equal(read.code, 0, read.err)
+      assert.ok(!read.out.includes('4417'), read.out)
+      assert.ok(read.out.includes(`m-${theirs.id}: a message ConsensFlow delivered`), read.out)
     })
   })
 })

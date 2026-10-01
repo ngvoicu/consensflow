@@ -1602,7 +1602,8 @@ class Ledger {
    * question with options is answered by choice (or by text, one line per
    * question): that answer is read at once and never delivered, because the
    * harness door that asked collects it and the tool call completes with it;
-   * the asker's task resumes here.
+   * the asker's task resumes here. `from` is the answerer's participant id:
+   * handles repeat across projects (every chief is `chief`), ids never do.
    */
   answer(questionId, { from, body, choices }) {
     return this.#write(() => {
@@ -1610,13 +1611,17 @@ class Ledger {
       if (question === null || question.kind !== 'question') {
         throw new LedgerError('not-a-question', `message ${questionId} is not a question`, 409)
       }
+      const answerer = this.#participantRow(from)
+      const asker = this.#db
+        .prepare('SELECT sender_id, task_id FROM message WHERE id = ?')
+        .get(questionId)
       // The one asked, or (a question with options) the asker itself: its
       // window may have answered first, and the board's copy takes that answer.
-      const fromWindow = question.questions !== null && from === question.sender
-      if (question.recipient !== from && !fromWindow) {
+      const fromWindow = question.questions !== null && answerer.id === asker.sender_id
+      if (answerer.id !== question.recipientId && !fromWindow) {
         throw new LedgerError(
           'not-your-question',
-          `the question was put to ${question.recipient}, not ${from}`,
+          `the question was put to ${question.recipient}, not ${answerer.handle}`,
           403,
         )
       }
@@ -1627,10 +1632,7 @@ class Ledger {
         question.questions === null ? null : requireChoices(question.questions, { choices, body })
       const text = picks === null ? body : renderChoices(question.questions, picks)
       requireText(text, 'body', MAX_BODY)
-      const answerer = this.#participantByHandle(question.projectId, from)
-      const asker = this.#db
-        .prepare('SELECT sender_id, task_id FROM message WHERE id = ?')
-        .get(questionId)
+      requireActive(answerer)
       requireActive(this.#participantRow(asker.sender_id))
       const id = this.#queue(question.projectId, {
         to: asker.sender_id,
@@ -1644,11 +1646,11 @@ class Ledger {
       this.#log(question.projectId, 'message.sent', {
         message: id,
         kind: 'answer',
-        from,
+        from: answerer.handle,
         to: question.sender,
       })
       // A question still gated is answered before the one asked saw it: it goes no further.
-      if (question.state === 'gated') this.#withdraw(questionId, `answered by @${from}`)
+      if (question.state === 'gated') this.#withdraw(questionId, `answered by @${answerer.handle}`)
       const answer = this.#message(id)
       if (answer.state === 'read') this.#resume(asker.task_id)
       return answer

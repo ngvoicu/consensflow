@@ -711,7 +711,7 @@ describe('the project staff', () => {
       assert.throws(() => ledger.reopenTask(project.id, 1, { by: 'chief', body: 'Again' }), {
         code: 'member-left',
       })
-      assert.throws(() => ledger.answer(question.id, { from: 'chief', body: 'No' }), {
+      assert.throws(() => ledger.answer(question.id, { from: question.recipientId, body: 'No' }), {
         code: 'member-left',
       })
       assert.throws(() => ledger.removeMember(project.id, 'zeus'), { code: 'member-left' })
@@ -931,7 +931,7 @@ describe('switching the lead', () => {
         [[3, 'working']],
       )
 
-      deliver(ledger, ledger.answer(question.id, { from: 'chief', body: 'LL(1)' }))
+      deliver(ledger, ledger.answer(question.id, { from: question.recipientId, body: 'LL(1)' }))
       ledger.acceptTask(project.id, 2, { by: 'chief' })
       const after = ledger.leadOpenWork(project.id)
       assert.deepEqual([after.questions, after.results], [[], []])
@@ -1156,7 +1156,7 @@ describe('tasks and the inbox queue', () => {
       assert.deepEqual([question.kind, question.recipient], ['question', 'chief'])
       assert.equal(ledger.task(project.id, 1).state, 'waiting')
       deliver(ledger, question)
-      const answer = ledger.answer(question.id, { from: 'chief', body: 'JSON' })
+      const answer = ledger.answer(question.id, { from: question.recipientId, body: 'JSON' })
       assert.deepEqual(
         [answer.kind, answer.recipient, answer.replyTo, answer.taskNumber],
         ['answer', 'zeus', question.id, 1],
@@ -1164,7 +1164,7 @@ describe('tasks and the inbox queue', () => {
       assert.equal(ledger.task(project.id, 1).state, 'waiting')
       deliver(ledger, answer)
       assert.equal(ledger.task(project.id, 1).state, 'working')
-      assert.throws(() => ledger.answer(answer.id, { from: 'zeus', body: 'thanks' }), {
+      assert.throws(() => ledger.answer(answer.id, { from: answer.recipientId, body: 'thanks' }), {
         code: 'not-a-question',
       })
       assert.throws(() => ledger.ask(project.id, { to: 'chief', body: 'Who asks?' }), {
@@ -1262,7 +1262,10 @@ describe('tasks and the inbox queue', () => {
     await withLedger((ledger) => {
       const { project, id, question } = asked(ledger)
       assert.equal(ledger.answerTo(question.id), null)
-      const answer = ledger.answer(question.id, { from: 'chief', choices: [['blue'], ['yes']] })
+      const answer = ledger.answer(question.id, {
+        from: question.recipientId,
+        choices: [['blue'], ['yes']],
+      })
       assert.deepEqual(
         [answer.kind, answer.recipient, answer.replyTo, answer.state, answer.choices, answer.body],
         ['answer', 'zeus', question.id, 'read', [['blue'], ['yes']], 'Colour: blue\nShip: yes'],
@@ -1271,7 +1274,8 @@ describe('tasks and the inbox queue', () => {
       assert.equal(ledger.nextDelivery(id('zeus')), null, 'nothing is pasted into the window')
       assert.deepEqual(ledger.answerTo(question.id).choices, [['blue'], ['yes']])
       assert.throws(
-        () => ledger.answer(question.id, { from: 'chief', choices: [['red'], ['no']] }),
+        () =>
+          ledger.answer(question.id, { from: question.recipientId, choices: [['red'], ['no']] }),
         {
           code: 'already-answered',
         },
@@ -1301,19 +1305,19 @@ describe('tasks and the inbox queue', () => {
       assert.equal(ledger.task(project.id, 1).state, 'queued')
       deliver(ledger, message)
       assert.equal(ledger.task(project.id, 1).state, 'waiting')
-      ledger.answer(question.id, { from: 'chief', choices: [['red'], ['no']] })
+      ledger.answer(question.id, { from: question.recipientId, choices: [['red'], ['no']] })
       assert.equal(ledger.task(project.id, 1).state, 'working')
     })
   })
 
   it('lets the asker answer its own question with options, when its window answered first', async () => {
     await withLedger((ledger) => {
-      const { project, question } = asked(ledger)
-      const answer = ledger.answer(question.id, { from: 'zeus', choices: [['red'], ['no']] })
+      const { project, id, question } = asked(ledger)
+      const answer = ledger.answer(question.id, { from: id('zeus'), choices: [['red'], ['no']] })
       assert.deepEqual([answer.sender, answer.recipient, answer.state], ['zeus', 'zeus', 'read'])
       assert.equal(ledger.task(project.id, 1).state, 'working')
       const plain = ledger.ask(project.id, { from: 'zeus', to: 'chief', task: 1, body: 'Plain?' })
-      assert.throws(() => ledger.answer(plain.id, { from: 'zeus', body: 'Me' }), {
+      assert.throws(() => ledger.answer(plain.id, { from: id('zeus'), body: 'Me' }), {
         code: 'not-your-question',
       })
     })
@@ -1322,10 +1326,16 @@ describe('tasks and the inbox queue', () => {
   it('maps a text answer onto the options, one line per question, and keeps free text', async () => {
     await withLedger((ledger) => {
       const { question } = asked(ledger)
-      assert.throws(() => ledger.answer(question.id, { from: 'chief', body: 'blue' }), {
-        code: 'bad-choices',
+      assert.throws(
+        () => ledger.answer(question.id, { from: question.recipientId, body: 'blue' }),
+        {
+          code: 'bad-choices',
+        },
+      )
+      const answer = ledger.answer(question.id, {
+        from: question.recipientId,
+        body: 'BLUE\nmaybe later',
       })
-      const answer = ledger.answer(question.id, { from: 'chief', body: 'BLUE\nmaybe later' })
       assert.deepEqual(answer.choices, [['blue'], ['maybe later']])
       assert.equal(answer.body, 'Colour: blue\nShip: maybe later')
     })
@@ -1342,11 +1352,11 @@ describe('tasks and the inbox queue', () => {
         },
       ])
       assert.throws(
-        () => ledger.answer(question.id, { from: 'chief', choices: [['a'], ['b']] }),
+        () => ledger.answer(question.id, { from: question.recipientId, choices: [['a'], ['b']] }),
         { code: 'bad-choices' },
         'one array of labels per question',
       )
-      const answer = ledger.answer(question.id, { from: 'chief', body: 'a, C' })
+      const answer = ledger.answer(question.id, { from: question.recipientId, body: 'a, C' })
       assert.deepEqual([answer.choices, answer.body], [[['a', 'c']], 'Which: a, c'])
     })
   })
@@ -1358,16 +1368,20 @@ describe('tasks and the inbox queue', () => {
       ])
       // An empty pick is empty; one past the body limit is too long, and says so.
       assert.throws(
-        () => ledger.answer(question.id, { from: 'chief', choices: [['  ']] }),
+        () => ledger.answer(question.id, { from: question.recipientId, choices: [['  ']] }),
         /empty pick/,
       )
       assert.throws(
-        () => ledger.answer(question.id, { from: 'chief', choices: [['x'.repeat(1_000_001)]] }),
+        () =>
+          ledger.answer(question.id, {
+            from: question.recipientId,
+            choices: [['x'.repeat(1_000_001)]],
+          }),
         /too long/,
       )
       // "Something else" at the length of a real answer (6000 characters in the evals) goes through.
       const long = `${'Why this name. '.repeat(400)}DELTA-5530`
-      const answer = ledger.answer(question.id, { from: 'chief', choices: [[long]] })
+      const answer = ledger.answer(question.id, { from: question.recipientId, choices: [[long]] })
       assert.deepEqual(answer.choices, [[long]])
     })
   })
@@ -1377,7 +1391,7 @@ describe('tasks and the inbox queue', () => {
       let at = Date.parse('2026-09-19T10:00:00.000Z')
       const ledger = openLedger(path.join(dir, 'consensflow.db'), { now: () => new Date(at) })
       try {
-        const { project } = staff(ledger)
+        const { project, id } = staff(ledger)
         deliver(
           ledger,
           ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' }).message,
@@ -1395,22 +1409,45 @@ describe('tasks and the inbox queue', () => {
           ledger.board(project.id).overdue.map((m) => [m.id, m.recipient]),
           [[question.id, 'chief']],
         )
-        assert.throws(() => ledger.answer(question.id, { from: 'human', body: 'JSON' }), {
+        assert.throws(() => ledger.answer(question.id, { from: id('human'), body: 'JSON' }), {
           code: 'not-your-question',
         })
-        const answer = ledger.answer(question.id, { from: 'chief', body: 'JSON' })
+        const answer = ledger.answer(question.id, { from: question.recipientId, body: 'JSON' })
         assert.deepEqual(
           [answer.recipient, answer.state, answer.choices],
           ['zeus', 'queued', null],
           'a plain question is answered in text, delivered as before',
         )
         assert.deepEqual(ledger.board(project.id).overdue, [])
-        assert.throws(() => ledger.answer(question.id, { from: 'diana', body: 'CSV' }), {
+        assert.throws(() => ledger.answer(question.id, { from: id('diana'), body: 'CSV' }), {
           code: 'not-your-question',
         })
       } finally {
         ledger.close()
       }
+    })
+  })
+
+  it("knows the one asked by participant, not by handle: another project's chief is not it", async () => {
+    await withLedger((ledger) => {
+      const { project } = staff(ledger)
+      const other = ledger.createProject({
+        directory: '/work/site',
+        name: 'site',
+        chief: { harness: 'codex' },
+      })
+      const theirs = ledger.project(other.id).participants.find((p) => p.handle === 'chief')
+      deliver(
+        ledger,
+        ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' }).message,
+      )
+      const question = ledger.ask(project.id, { from: 'zeus', to: 'chief', task: 1, body: 'JSON?' })
+      assert.throws(() => ledger.answer(question.id, { from: theirs.id, body: 'Yes' }), {
+        code: 'not-your-question',
+      })
+      assert.equal(ledger.answerTo(question.id), null)
+      const answer = ledger.answer(question.id, { from: question.recipientId, body: 'Yes' })
+      assert.deepEqual([answer.sender, answer.recipient], ['chief', 'zeus'])
     })
   })
 
@@ -1453,7 +1490,7 @@ describe('tasks and the inbox queue', () => {
       })
       deliver(ledger, question)
       ledger.recordResult(project.id, 1, { body: 'done, in blue' })
-      const answer = ledger.answer(question.id, { from: 'chief', body: 'Green' })
+      const answer = ledger.answer(question.id, { from: question.recipientId, body: 'Green' })
       assert.equal(answer.state, 'queued')
       ledger.acceptTask(project.id, 1, { by: 'chief' })
       const after = ledger.message(answer.id)
@@ -1562,7 +1599,7 @@ describe('views', () => {
         task: 1,
         body: 'Format?',
       })
-      ledger.answer(question.id, { from: 'chief', body: 'JSON' })
+      ledger.answer(question.id, { from: question.recipientId, body: 'JSON' })
       assert.deepEqual(
         ledger.task(project.id, 1).messages.map((m) => [m.kind, m.sender, m.recipient]),
         [
@@ -2636,10 +2673,10 @@ describe('human approval required: the gate', () => {
             },
           ],
         })
-        assert.throws(() => ledger.answer(other.id, { from: 'human', body: 'Large' }), {
+        assert.throws(() => ledger.answer(other.id, { from: id('human'), body: 'Large' }), {
           code: 'not-your-question',
         })
-        const answer = ledger.answer(other.id, { from: session, choices: [['Large']] })
+        const answer = ledger.answer(other.id, { from: id(session), choices: [['Large']] })
         assert.deepEqual([answer.state, answer.recipient], ['read', session])
         assert.deepEqual(
           [ledger.message(other.id).state, ledger.message(other.id).reason],
@@ -2665,10 +2702,10 @@ describe('human approval required: the gate', () => {
         body: 'Which colour?',
       })
       deliver(ledger, ledger.approveMessage(question.id, { by: 'human' }))
-      const answer = ledger.answer(question.id, { from: 'chief', body: 'Blue' })
+      const answer = ledger.answer(question.id, { from: question.recipientId, body: 'Blue' })
       assert.equal(answer.state, 'gated')
       assert.equal(ledger.answerTo(question.id), null, 'the door keeps waiting')
-      assert.throws(() => ledger.answer(question.id, { from: 'chief', body: 'Red' }), {
+      assert.throws(() => ledger.answer(question.id, { from: question.recipientId, body: 'Red' }), {
         code: 'already-answered',
       })
       const declined = ledger.declineMessage(answer.id, { by: 'human' })
@@ -2677,7 +2714,7 @@ describe('human approval required: the gate', () => {
         noteTo(ledger, id('chief'))[0][3],
         `@human declined your answer to m-${question.id}. Answer it again: cf answer m-${question.id} "…"`,
       )
-      const again = ledger.answer(question.id, { from: 'chief', body: 'Red' })
+      const again = ledger.answer(question.id, { from: question.recipientId, body: 'Red' })
       assert.equal(again.state, 'gated', 'the question was open for another answer')
       assert.equal(ledger.approveMessage(again.id, { by: 'human' }).state, 'queued')
       assert.equal(ledger.answerTo(question.id).id, again.id)
@@ -2700,7 +2737,7 @@ describe('human approval required: the gate', () => {
         questions: [{ question: 'Colour?', header: 'Colour', options: [{ label: 'red' }] }],
       })
       deliver(ledger, ledger.approveMessage(question.id, { by: 'human' }))
-      const answer = ledger.answer(question.id, { from: 'chief', choices: [['red']] })
+      const answer = ledger.answer(question.id, { from: question.recipientId, choices: [['red']] })
       assert.deepEqual([answer.state, answer.choices], ['gated', [['red']]])
       assert.equal(ledger.task(project.id, number).state, 'waiting', 'the task waits on')
       assert.equal(ledger.answerTo(question.id), null)
