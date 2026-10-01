@@ -181,6 +181,13 @@ describe('the OpenCode adapter', () => {
           { ...posted[0].body, expiresAt: typeof posted[0].body.expiresAt },
           { launchId: 'launch-1', sessionId: 'ses_abc123', text: 'hi', expiresAt: 'number' },
         )
+        await adapter.deliver({
+          launch,
+          pane,
+          host,
+          text: 'half \ud83d of it, \u001b[31mred\u001b[0m and 50%\r60%',
+        })
+        assert.equal(posted[1].body.text, 'half  of it, ␛[31mred␛[0m and 50%␍60%')
         answer = { ok: false, admitted: false, bytesWritten: 0, error: 'native-session-changed' }
         assert.deepEqual(await adapter.deliver({ launch, pane, host, text: 'hi' }), {
           admitted: false,

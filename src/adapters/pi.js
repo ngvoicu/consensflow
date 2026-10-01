@@ -5,7 +5,14 @@ import { send as sendPi, shownSession } from '../channels/pi.js'
 import { launchConfiguration } from '../channels.js'
 import { preparePiExtension } from '../pi-install.js'
 import { roleConfiguration } from '../role-skills.js'
-import { admission, executableFor, recordState, SHOWS_ANOTHER, switchedTo } from './shared.js'
+import {
+  admission,
+  executableFor,
+  recordState,
+  SHOWS_ANOTHER,
+  switchedTo,
+  windowText,
+} from './shared.js'
 
 /**
  * Pi, for the new core. Pi takes the session name we give it (`--session-id`
@@ -57,8 +64,8 @@ export function piAdapter({ env, send = sendPi, answers = cachedAnswers() }) {
       const identity = { kind: 'pi', model: agent?.model, thinking: agent?.thinking }
       const runner =
         resume === null
-          ? interactiveStart(identity, nativeSession, message)
-          : interactiveResume(identity, resume, message)
+          ? interactiveStart(identity, nativeSession, windowText(message))
+          : interactiveResume(identity, resume, windowText(message))
       return {
         argv: [executable, ...configuration.args, ...roleSetup.args, ...runner.args],
         env: { ...configuration.env, ...roleSetup.env },
@@ -87,7 +94,7 @@ export function piAdapter({ env, send = sendPi, answers = cachedAnswers() }) {
           pane: pane.id,
           generation: pane.generation,
         },
-        text,
+        windowText(text),
       )
       return admission(sent, 'Pi refused it', { queued: true })
     },

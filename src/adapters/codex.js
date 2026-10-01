@@ -7,7 +7,14 @@ import { sessionState as brokerState, send as sendCodex } from '../channels/code
 import { launchConfiguration, withNativeBridge } from '../channels.js'
 import { runnable } from '../harnesses.js'
 import { roleConfiguration } from '../role-skills.js'
-import { admission, executableFor, recordState, SHOWS_ANOTHER, switchedTo } from './shared.js'
+import {
+  admission,
+  executableFor,
+  recordState,
+  SHOWS_ANOTHER,
+  switchedTo,
+  windowText,
+} from './shared.js'
 
 /**
  * Codex, for the new core. Codex runs under ConsensFlow's supervisor
@@ -116,8 +123,8 @@ export function codexAdapter({
       const identity = { kind: harness, model: agent?.model, effort: agent?.effort }
       const runner =
         resume === null
-          ? interactiveStart(identity, null, message)
-          : interactiveResume(identity, resume, message)
+          ? interactiveStart(identity, null, windowText(message))
+          : interactiveResume(identity, resume, windowText(message))
       // Codex's question tool (request_user_input) is behind a feature still
       // marked under development; the broker answers a member's from the board.
       // The chief has none: it asks the human in plain words in its window.
@@ -168,7 +175,7 @@ export function codexAdapter({
           pane: pane.id,
           generation: pane.generation,
         },
-        text,
+        windowText(text),
       )
       return admission(sent, 'the Codex broker refused it', { queued: true })
     },

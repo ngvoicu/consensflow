@@ -17,6 +17,7 @@ import {
   recordState,
   SHOWS_ANOTHER,
   switchedTo,
+  windowText,
 } from './shared.js'
 
 /**
@@ -97,7 +98,7 @@ export function openCodeAdapter({
           nativeSession,
           channel: configuration.channel,
           directory,
-          firstMessage: message,
+          firstMessage: windowText(message),
           resumed: resume !== null,
           model: agent?.model,
           effort: agent?.effort,
@@ -133,7 +134,7 @@ export function openCodeAdapter({
           pane: pane.id,
           generation: pane.generation,
         },
-        text,
+        windowText(text),
       )
       return admission(sent, 'OpenCode refused it', { queued: true })
     },

@@ -121,8 +121,9 @@ describe('the Pi adapter', () => {
           return { ok: true }
         },
       }
-      // The extension's part: take the record from the inbox, acknowledge it.
+      // The extension's part: take each record from the inbox, acknowledge it.
       const { inbox, ack } = launch.channel
+      const texts = []
       let busy = false
       const extension = setInterval(async () => {
         if (busy) return
@@ -131,13 +132,13 @@ describe('the Pi adapter', () => {
           const names = await readdir(inbox).catch(() => [])
           for (const name of names.filter((n) => n.endsWith('.json'))) {
             const record = JSON.parse(await readFile(path.join(inbox, name), 'utf8'))
+            texts.push(record.text)
             await mkdir(ack, { recursive: true })
             await writeFile(
               path.join(ack, `${record.id}.json`),
               JSON.stringify({ id: record.id, admitted: true, mode: 'tui' }),
             )
             await rm(path.join(inbox, name), { force: true })
-            clearInterval(extension)
           }
         } finally {
           busy = false
@@ -150,6 +151,14 @@ describe('the Pi adapter', () => {
           queued: true,
         })
         assert.deepEqual(claims, [['pane.claim', { pane: 's1-zeus', generation: 2 }]])
+        // Pi hands the text to its model's API, which refuses half a character too.
+        await adapter.deliver({
+          launch,
+          pane,
+          host,
+          text: 'half \ud83d of it, \u001b[31mred\u001b[0m and 50%\r60%',
+        })
+        assert.deepEqual(texts, ['hi', 'half  of it, ␛[31mred␛[0m and 50%␍60%'])
       } finally {
         clearInterval(extension)
       }

@@ -286,6 +286,14 @@ describe('the Codex adapter', () => {
         assert.deepEqual(claims, [['pane.claim', { pane: 's1-diana', generation: 2 }]])
         assert.equal(posted[0].url, '/deliver')
         assert.deepEqual([posted[0].body.sessionId, posted[0].body.text], [thread, 'hi'])
+        // Codex's app-server refuses half a character as the pane host does.
+        await adapter.deliver({
+          launch,
+          pane,
+          host,
+          text: 'half \ud83d of it, \u001b[31mred\u001b[0m and 50%\r60%',
+        })
+        assert.equal(posted[1].body.text, 'half  of it, ␛[31mred␛[0m and 50%␍60%')
       } finally {
         await new Promise((resolve) => broker.close(resolve))
       }

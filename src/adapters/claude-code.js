@@ -4,9 +4,10 @@ import { homedir } from 'node:os'
 import path from 'node:path'
 import { cachedAnswers, hasTranscript } from '../../hosts/lib/completion.js'
 import { interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
+import { writePaste } from '../channels/pty.js'
 import { prepareClaudeSettings } from '../claude-install.js'
 import { roleConfiguration } from '../role-skills.js'
-import { executableFor, SHOWS_ANOTHER, switchedTo } from './shared.js'
+import { admission, executableFor, SHOWS_ANOTHER, switchedTo, windowText } from './shared.js'
 
 /**
  * Claude Code, for the new core (see `src/core/dispatcher.js` for the adapter
@@ -70,8 +71,8 @@ export function claudeCodeAdapter({ env, answers = cachedAnswers() }) {
       const nativeSession = resume ?? randomUUID()
       const resumable = resume !== null && (await hasTranscript('claude-code', resume, env))
       const runner = resumable
-        ? interactiveResume(identity, resume, message)
-        : interactiveStart(identity, nativeSession, message)
+        ? interactiveResume(identity, resume, windowText(message))
+        : interactiveStart(identity, nativeSession, windowText(message))
       return {
         argv: [
           executable,
@@ -103,10 +104,8 @@ export function claudeCodeAdapter({ env, answers = cachedAnswers() }) {
     },
 
     async deliver({ pane, host, text }) {
-      const written = await host.request('pane.write_paste', { ...pane, body: text })
-      return written?.ok === true
-        ? { admitted: true }
-        : { admitted: false, reason: written?.error ?? 'the window refused the paste' }
+      const written = await writePaste(host, pane, windowText(text))
+      return admission(written, 'the window refused the paste')
     },
 
     async observe({ launch }) {

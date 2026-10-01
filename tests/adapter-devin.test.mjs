@@ -175,6 +175,13 @@ describe('the Devin adapter', () => {
         'pane.write_paste',
         { id: 's1-zeus', generation: 2, body: 'hi' },
       ])
+      await adapter.deliver({
+        launch,
+        pane,
+        host,
+        text: 'half \ud83d of it, \u001b[31mred\u001b[0m and 50%\r60%',
+      })
+      assert.equal(requests.at(-1)[1].body, 'half  of it, ␛[31mred␛[0m and 50%␍60%')
       assert.equal(await adapter.ready({ launch, pane, host }), true)
       pasteInFlight = true
       assert.equal(await adapter.ready({ launch, pane, host }), false)

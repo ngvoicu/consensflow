@@ -14,6 +14,7 @@ import {
   recordState,
   SHOWS_ANOTHER,
   switchedTo,
+  windowText,
 } from './shared.js'
 
 /**
@@ -57,8 +58,8 @@ export function devinAdapter({
       const identity = { kind: 'devin', model: agent?.model, effort: agent?.effort }
       const runner = await prepareDevinPrompt(
         resume === null
-          ? interactiveStart(identity, null, message)
-          : interactiveResume(identity, resume, message),
+          ? interactiveStart(identity, null, windowText(message))
+          : interactiveResume(identity, resume, windowText(message)),
         configuration,
       )
       return {
@@ -101,7 +102,7 @@ export function devinAdapter({
           pane: pane.id,
           generation: pane.generation,
         },
-        text,
+        windowText(text),
       )
       return admission(sent, 'Devin refused the paste')
     },

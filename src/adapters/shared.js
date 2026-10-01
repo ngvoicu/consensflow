@@ -48,9 +48,40 @@ export const switchedTo = (observed, nativeSession) => ({
 })
 export const SHOWS_ANOTHER = 'the window shows another conversation'
 
-/** How the native channels answer a send, as an adapter delivery outcome. */
+/**
+ * Text as a window can take it, for a first message and every later one. The
+ * pane host refuses a frame with half a character in it (the dispatcher cuts
+ * a long body at 3,000 code units, and an emoji across the cut leaves its
+ * first half) and a paste with a control character other than tab and
+ * newline; both were retried as a passing failure until the message was
+ * dropped, and a harness's own API refuses half a character too. So half a
+ * character is dropped, a CR before a newline goes as the host would drop
+ * it, and every other control character is shown: as its Unicode picture
+ * (ESC as ␛, a lone CR as ␍), or as U+FFFD for the C1 ones, which have none.
+ * A window opened without a first message has none (null).
+ */
+export function windowText(text) {
+  if (text === null) return null
+  return Array.from(text.replaceAll('\r\n', '\n'), (character) => {
+    const code = character.codePointAt(0)
+    if (code >= 0xd800 && code <= 0xdfff) return ''
+    if (code === 0x09 || code === 0x0a) return character
+    if (code < 0x20) return String.fromCodePoint(0x2400 + code)
+    if (code === 0x7f) return '\u2421'
+    if (code >= 0x80 && code < 0xa0) return '\ufffd'
+    return character
+  }).join('')
+}
+
+/**
+ * How the native channels answer a send, as an adapter delivery outcome. The
+ * bridge's own deadline, or its end, came after the request went out: the
+ * host may have taken it, so it is uncertain and the record decides, rather
+ * than a blind second paste.
+ */
 export function admission(sent, refusal, { queued = false } = {}) {
   if (sent?.ok === true) return queued ? { admitted: true, queued: true } : { admitted: true }
-  if (sent?.admitted === null) return { admitted: null, reason: sent.cause ?? sent.error }
+  if (sent?.admitted === null || sent?.error === 'deadline' || sent?.error === 'eof')
+    return { admitted: null, reason: sent.cause ?? sent.error }
   return { admitted: false, reason: sent?.cause ?? sent?.error ?? refusal }
 }

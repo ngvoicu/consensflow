@@ -337,6 +337,43 @@ describe('the Claude Code adapter', () => {
     })
   })
 
+  it('gives the window text it can take, and leaves a paste the bridge lost uncertain', async () => {
+    await withHome(async ({ env }) => {
+      const adapter = claudeCodeAdapter({ env })
+      const plan = await adapter.prepare(
+        request({ message: 'half \ud83d of it, \u001b[31mred\u001b[0m and 50%\r60%' }),
+      )
+      assert.equal(plan.argv.at(-1), 'half  of it, ␛[31mred␛[0m and 50%␍60%')
+      const pasted = []
+      let answer = { ok: true }
+      const host = {
+        async request(op, body) {
+          pasted.push(body.body)
+          if (answer instanceof Error) throw answer
+          return answer
+        },
+      }
+      const pane = { id: 's1-zeus', generation: 7 }
+      const launch = { nativeSession: plan.nativeSession }
+      const deliver = () =>
+        adapter.deliver({
+          launch,
+          pane,
+          host,
+          text: 'half \ud83d of it, \u001b[31mred\u001b[0m and 50%\r60%',
+        })
+      assert.deepEqual(await deliver(), { admitted: true })
+      assert.equal(pasted.at(-1), 'half  of it, ␛[31mred␛[0m and 50%␍60%')
+      // The bridge's own deadline, or its end, after the paste went out.
+      answer = { ok: false, error: 'deadline' }
+      assert.deepEqual(await deliver(), { admitted: null, reason: 'deadline' })
+      answer = Object.assign(new Error('eof'), { error: 'eof' })
+      assert.deepEqual(await deliver(), { admitted: null, reason: 'eof' })
+      answer = { ok: false, error: 'stale pane' }
+      assert.deepEqual(await deliver(), { admitted: false, reason: 'stale pane' })
+    })
+  })
+
   it('pastes a message into the window by default, waiting only for a paste on its way', async () => {
     await withHome(async ({ env }) => {
       const adapter = claudeCodeAdapter({ env })
