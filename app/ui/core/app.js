@@ -481,7 +481,8 @@ const runsLabel = (agent, tier = agent.profile?.workTier) =>
 /**
  * The two selects that add a member: a role first, then the saved agents
  * that do not hold it yet; any agent may take any role. The chosen agent
- * survives a redraw when it is still on offer.
+ * survives a redraw when it is still on offer, and a role picked refills
+ * the agents from the staff drawn last.
  */
 function rolePicker(roleSelect, agentSelect, hint, holding, onRefill = () => {}) {
   if (roleSelect.options.length === 0) {
@@ -490,7 +491,6 @@ function rolePicker(roleSelect, agentSelect, hint, holding, onRefill = () => {})
       option.value = role
       roleSelect.append(option)
     }
-    roleSelect.addEventListener('change', () => refill())
   }
   const refill = () => {
     const role = roleSelect.value
@@ -538,6 +538,8 @@ function rolePicker(roleSelect, agentSelect, hint, holding, onRefill = () => {})
     hint.hidden = choices.length > 0
     onRefill()
   }
+  // One handler, this drawing's: one added once kept the staff of the first.
+  roleSelect.onchange = refill
   refill()
 }
 
@@ -732,6 +734,8 @@ async function openSwitchLead(chief) {
   const current = chief.agent === null ? `harness:${chief.harness}` : `agent:${chief.agent}`
   for (const option of select.options) option.disabled = option.value === current
   select.value = [...select.options].find((option) => !option.disabled)?.value ?? ''
+  // Each switch starts from the gentle one: the lead finishes its turn, unasked.
+  switchLeadForm.elements.when.value = 'turn'
   switchLeadForm.elements.note.checked = false
   switchingProject = chief.projectId
   switchLeadDialog.showModal()

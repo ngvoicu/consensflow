@@ -1375,6 +1375,35 @@ test('takes a member off the staff once the human confirms', async ({ page }) =>
   await expect.poll(() => calls(page, 'member.remove')).toEqual([{ project: 1, agent: 'zeus' }])
 })
 
+test("offers, after a role is picked, the agents the staff shown does not hold it with: this project's, as it is now", async ({
+  page,
+}) => {
+  await open(page, twoOpen())
+  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  const offered = () =>
+    dialog
+      .getByLabel('Agent')
+      .locator('option')
+      .evaluateAll((options) => options.map((option) => option.value))
+  // harbour's staff seen first, then a reviewer role added there.
+  await page.getByRole('button', { name: 'Staff' }).click()
+  await dialog.getByLabel('Role').selectOption('reviewer')
+  await dialog.getByLabel('Agent').selectOption('zeus')
+  await dialog.getByRole('button', { name: 'Add to staff' }).click()
+  await expect(dialog.locator('tr[data-handle="zeus"]')).toHaveCount(2)
+  await dialog.getByLabel('Role').selectOption('advisor')
+  await dialog.getByLabel('Role').selectOption('reviewer')
+  expect(await offered()).not.toContain('zeus')
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  // foundry has nobody on its staff: every agent may work there.
+  await chooseProject(page, 'foundry')
+  await expect(page.locator('#project-title')).toHaveText('foundry')
+  await page.getByRole('button', { name: 'Staff' }).click()
+  await dialog.getByLabel('Role').selectOption('advisor')
+  await dialog.getByLabel('Role').selectOption('worker')
+  expect(await offered()).toEqual(['hera', 'zeus', 'diana', 'athena'])
+})
+
 test('keeps a pending removal and the chosen agent when the core redraws the staff', async ({
   page,
 }) => {
@@ -2496,6 +2525,26 @@ test('switches the lead from its row: an installed harness on its default, or a 
     .poll(() => calls(page, 'chief.switch'))
     .toEqual([{ project: 1, agent: 'hera', when: 'now', note: true }])
   await expect(dialog).toBeHidden()
+})
+
+test('opens Switch lead letting the lead finish its turn, whatever was picked last time', async ({
+  page,
+}) => {
+  await open(page)
+  const switchLead = page.getByRole('button', {
+    name: 'Switch the lead to another harness or model',
+  })
+  const dialog = page.getByRole('dialog', { name: 'Switch the lead' })
+  await switchLead.click()
+  await dialog.getByLabel('Switch now, cutting its turn off').check()
+  await dialog.getByLabel('First ask the lead to write down where things stand').check()
+  await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  await switchLead.click()
+  await expect(dialog.getByLabel('Let it finish its turn, then switch')).toBeChecked()
+  await expect(
+    dialog.getByLabel('First ask the lead to write down where things stand'),
+  ).not.toBeChecked()
 })
 
 test("the lead's row says when a switch waits for its turn", async ({ page }) => {
