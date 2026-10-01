@@ -15,8 +15,6 @@ export class TerminalsView {
   #registry
   #link
   #cards = new Map()
-  /** Windows the human closed: their cards go at once and never come back. */
-  #dismissed = new Set()
   #onChange
   /** The human closing a live window from its card: the same as from its board row. */
   #onClose
@@ -53,24 +51,26 @@ export class TerminalsView {
 
   /**
    * Keep a terminal for every lane of the project shown that has a live one,
-   * in lane order, and bring `focused` into view. Another project's terminals
-   * stay alive, off screen, with their scrollback: switching projects loses
-   * nothing.
+   * in lane order, and bring `focused` into view. `lanes` are that project's
+   * own, read for it. Another project's terminals stay alive, off screen,
+   * with their scrollback: switching projects loses nothing.
    */
   render(lanes, { focused, project }) {
     const ordered = laneOrder(lanes)
     for (const [order, lane] of ordered.entries()) {
-      if (lane.pane === null || this.#dismissed.has(paneKey(lane.pane))) continue
+      // A window over for good never comes back, whatever a board says.
+      if (lane.pane === null || this.#link.retired(paneKey(lane.pane))) continue
       this.#card(lane.pane, lane, order, project)
     }
     // A window that ended, or gave way to a newer one, goes with its card: a
     // last frame left in the strip still shows the agent's prompt and reads
-    // as open beside a lane that says it is closed.
+    // as open beside a lane that says it is closed. Only its own project's
+    // lanes can say so.
     for (const entry of [...this.#cards.values()]) {
       if (entry.project !== project) continue
       const lane = ordered.find((lane) => lane.participant.handle === entry.handle)
       if (lane === undefined || lane.pane === null || paneKey(lane.pane) !== entry.key) {
-        this.#drop(entry.key)
+        this.#retire(entry.key)
       }
     }
     const cards = [...this.#cards.values()]
@@ -118,7 +118,7 @@ export class TerminalsView {
   /** A closed project's cards go: it has no terminals to read. */
   clear(project) {
     for (const [key, entry] of [...this.#cards]) {
-      if (entry.project === project) this.#drop(key)
+      if (entry.project === project) this.#retire(key)
     }
   }
 
@@ -128,18 +128,15 @@ export class TerminalsView {
    * terminal of the same participant is a new pane and shows as usual.
    */
   forget(project, handle) {
-    for (const [key, entry] of this.#cards) {
-      if (entry.project !== project || entry.handle !== handle) continue
-      this.#dismissed.add(key)
-      this.#drop(key)
+    for (const [key, entry] of [...this.#cards]) {
+      if (entry.project === project && entry.handle === handle) this.#retire(key)
     }
     this.#onChange()
   }
 
-  #drop(key) {
-    const entry = this.#cards.get(key)
-    if (entry === undefined) return
-    entry.card.remove()
+  /** A window over for good: its card and emulator go, and its pane never gets them again. */
+  #retire(key) {
+    this.#cards.get(key)?.card.remove()
     this.#cards.delete(key)
     this.#link.retire(key)
   }

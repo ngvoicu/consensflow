@@ -33,6 +33,8 @@ export class TerminalLink {
     const previous = this.#outputs.get(key) ?? Promise.resolve()
     const next = previous
       .then(async () => {
+        // Retired while these bytes waited their turn: no emulator comes back for them.
+        if (this.#retired.has(key)) return
         const emulator = emulatorFor(message)
         if (emulator === null) return
         await emulator.write(new Uint8Array(message.bytes ?? []))
@@ -72,8 +74,14 @@ export class TerminalLink {
     this.#retired.add(key)
     this.#outputs.delete(key)
     this.#inputs.delete(key)
+    this.#sequences.delete(key)
     this.#sizes.delete(key)
     this.#registry.retire(key)
+  }
+
+  /** Whether a pane is gone for good: it gets no emulator again. */
+  retired(key) {
+    return this.#retired.has(key)
   }
 
   async #syncSize(key) {

@@ -284,6 +284,9 @@ async function open(page, data = model()) {
     window.__calls = []
     window.__model = data
     window.__listeners = new Map()
+    // How long an operation takes to answer, in ms, set by a test while it runs:
+    // the real core answers when it can, and a page that assumes at once races.
+    window.__delay = {}
     const answer = (value) => JSON.parse(JSON.stringify({ ok: true, ...value }))
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
@@ -300,7 +303,12 @@ async function open(page, data = model()) {
         return answer({ project: data.boards[project].project })
       },
       'inbox.get': ({ project }) => answer({ messages: data.inbox[project] ?? [] }),
-      'task.get': ({ project, task }) => answer({ task: data.tasks[`${project}:${task}`] }),
+      'task.get': ({ project, task }) => {
+        const found = data.tasks[`${project}:${task}`]
+        return found === undefined
+          ? { ok: false, error: `no task T-${task} in this project` }
+          : answer({ task: found })
+      },
       'task.resume': ({ project, task }) =>
         answer({ task: { ...data.tasks[`${project}:${task}`], state: 'queued' } }),
       'task.transcript': ({ project, task }) =>
@@ -314,6 +322,8 @@ async function open(page, data = model()) {
       ])
       if (command === 'core_request') {
         const handle = operations[args.operation]
+        const ms = window.__delay[args.operation] ?? 0
+        if (ms > 0) await new Promise((wake) => setTimeout(wake, ms))
         return handle ? handle(args.body) : { ok: true }
       }
       if (command === 'roster_handle') return { url: 'http://127.0.0.1:1/', token: 'ui-token' }
@@ -352,6 +362,8 @@ async function open(page, data = model()) {
               const emulator = {
                 host,
                 written: [],
+                // Retired by the page: its window is over for good.
+                disposed: false,
                 write: async (bytes) => emulator.written.push(...bytes),
                 onData: (callback) => {
                   emulator.type = callback
@@ -359,7 +371,9 @@ async function open(page, data = model()) {
                 },
                 resize() {},
                 fit() {},
-                dispose() {},
+                dispose() {
+                  emulator.disposed = true
+                },
               }
               emulators.push(emulator)
               return emulator
@@ -1658,9 +1672,8 @@ test('shows every open terminal in the strip, offers no Open terminal for them, 
   expect(subscriptions).toBe(1)
 })
 
-test("keeps each project's terminals, scrollback and all, when the human switches projects", async ({
-  page,
-}) => {
+/** Both projects open, each with its chief's window live. */
+function twoOpen() {
   const data = model()
   data.projects[1].state = 'open'
   data.boards[2].project.state = 'open'
@@ -1670,7 +1683,46 @@ test("keeps each project's terminals, scrollback and all, when the human switche
     activity: { state: 'idle' },
     pane: { id: 'p2-chief', generation: 1 },
   })
-  await open(page, data)
+  return data
+}
+
+const chooseProject = (page, name) => page.locator('.project-select', { hasText: name }).click()
+
+/**
+ * Whether a window is still served: output for it is acknowledged, and keys
+ * typed into its card in the dock (found by `handle`) reach its pane.
+ */
+async function served(page, pane, handle) {
+  const count = (command) =>
+    page.evaluate(
+      ([command, id]) =>
+        window.__calls.filter(([c, args]) => c === command && args.id === id).length,
+      [command, pane.id],
+    )
+  const [acks, keys] = [await count('pane_ack'), await count('pane_input_enqueue')]
+  await page.evaluate(
+    ({ id, generation }) =>
+      window.__output.onmessage({ id, generation, seq: Date.now(), bytes: [104, 105] }),
+    pane,
+  )
+  const typed = await page.evaluate((handle) => {
+    const card = document.querySelector(`#stage .terminal-card[data-handle="${handle}"]`)
+    const emulator = window.__emulators.find((e) => card?.contains(e.host) && !e.disposed)
+    emulator?.type('x')
+    return emulator !== undefined
+  }, handle)
+  await expect.poll(() => count('pane_ack')).toBeGreaterThan(acks)
+  expect(typed, `a live emulator in ${handle}'s card`).toBe(true)
+  await expect.poll(() => count('pane_input_enqueue')).toBeGreaterThan(keys)
+}
+
+const disposed = (page) =>
+  page.evaluate(() => window.__emulators.filter((emulator) => emulator.disposed).length)
+
+test("keeps each project's terminals, scrollback and all, when the human switches projects", async ({
+  page,
+}) => {
+  await open(page, twoOpen())
   const dock = page.getByRole('complementary', { name: 'Terminal dock' })
   await expect(dock.locator('.terminal-card')).toHaveCount(2)
   const emulators = () => page.evaluate(() => window.__emulators.length)
@@ -1687,6 +1739,93 @@ test("keeps each project's terminals, scrollback and all, when the human switche
   expect(
     await page.evaluate(() => window.__emulators.some((emulator) => emulator.written.length > 0)),
   ).toBe(true)
+})
+
+test('draws a board only under its own project: one that comes late ends no live window', async ({
+  page,
+}) => {
+  await open(page, twoOpen())
+  const dock = page.getByRole('complementary', { name: 'Terminal dock' })
+  // Each project shown once, so each has its cards.
+  await chooseProject(page, 'foundry')
+  await expect(dock.locator('.terminal-card')).toHaveCount(1)
+  await chooseProject(page, 'harbour')
+  await expect(dock.locator('.terminal-card')).toHaveCount(2)
+  // A redraw of harbour waits on its board (a busy core), and the human
+  // chooses foundry meanwhile.
+  await page.evaluate(() => {
+    window.__delay['board.get'] = 300
+  })
+  const boards = (await calls(page, 'board.get')).length
+  await page.evaluate(() => window.__listeners.get('state-changed')())
+  await expect.poll(async () => (await calls(page, 'board.get')).length).toBeGreaterThan(boards)
+  await chooseProject(page, 'foundry')
+  await page.evaluate(() => {
+    window.__delay['board.get'] = 0
+  })
+  await expect(page.locator('#project-title')).toHaveText('foundry')
+  await expect(dock.locator('.terminal-card')).toHaveCount(1)
+  await page.waitForTimeout(400)
+  expect(await disposed(page), 'no live window was retired').toBe(0)
+  await served(page, { id: 'p2-chief', generation: 1 }, 'chief')
+  await chooseProject(page, 'harbour')
+  await expect(page.locator('#project-title')).toHaveText('harbour')
+  await expect(dock.locator('.terminal-card')).toHaveCount(2)
+  await served(page, { id: 'p1-chief', generation: 5 }, 'chief')
+  await served(page, { id: 'p1-zeus', generation: 7 }, 'zeus')
+  expect(await disposed(page)).toBe(0)
+})
+
+test('starts a project while the board shown is on its way, and its windows go on', async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[3] = {
+    project: { id: 3, name: 'new', directory: '/work/fresh', state: 'open' },
+    open: [],
+    lanes: [
+      {
+        participant: { ...participant(30, 'chief', 'chief'), projectId: 3 },
+        tasks: [],
+        activity: { state: 'starting' },
+        pane: { id: 'p3-chief', generation: 1 },
+      },
+    ],
+  }
+  await open(page, data)
+  const dock = page.getByRole('complementary', { name: 'Terminal dock' })
+  await expect(dock.locator('.terminal-card')).toHaveCount(2)
+  // The project takes a moment to open; a change it causes meanwhile brings
+  // a redraw of harbour, whose board answers slowly.
+  await page.evaluate(() => {
+    window.__delay['project.open'] = 300
+    window.__delay['board.get'] = 250
+    setTimeout(() => {
+      window.__model.projects.push({
+        id: 3,
+        name: 'new',
+        directory: '/work/fresh',
+        state: 'open',
+        resumeOnStart: false,
+      })
+      window.__listeners.get('state-changed')()
+    }, 100)
+  })
+  await page.getByRole('button', { name: 'New project' }).click()
+  await page
+    .getByRole('dialog', { name: 'New project' })
+    .getByRole('button', { name: 'Start project' })
+    .click()
+  await expect(page.locator('#project-title')).toHaveText('new')
+  await page.evaluate(() => {
+    window.__delay = {}
+  })
+  await page.waitForTimeout(400)
+  expect(await disposed(page), 'no live window was retired').toBe(0)
+  await chooseProject(page, 'harbour')
+  await expect(dock.locator('.terminal-card')).toHaveCount(2)
+  await served(page, { id: 'p1-chief', generation: 5 }, 'chief')
+  await served(page, { id: 'p1-zeus', generation: 7 }, 'zeus')
 })
 
 test("takes a closed window's card out of the dock: its lane says so and opens it again", async ({

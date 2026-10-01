@@ -190,17 +190,24 @@ async function refresh() {
       if (!projects.some((project) => project.id === state.selected)) {
         state.selected = (projects.find((s) => s.state === 'open') ?? projects[0])?.id ?? null
       }
-      if (state.selected === null) {
-        state.board = null
-        state.inbox = []
-      } else {
-        const [{ board: current }, { messages }] = await Promise.all([
-          core('board.get', { project: state.selected }),
-          core('inbox.get', { project: state.selected, participant: 'human' }),
-        ])
-        state.board = current
-        state.inbox = messages
+      // A board is drawn only for the project it was read for: one the human
+      // left while it was on its way is read again for the one chosen now.
+      const selected = state.selected
+      const [board, inbox] =
+        selected === null
+          ? [null, []]
+          : await Promise.all([
+              core('board.get', { project: selected }).then((read) => read.board),
+              core('inbox.get', { project: selected, participant: 'human' }).then(
+                (read) => read.messages,
+              ),
+            ])
+      if (state.selected !== selected) {
+        again = true
+        return
       }
+      state.board = board
+      state.inbox = inbox
       if (state.openTask !== null && drawer.open) await openTask(state.openTask)
       render()
       if (teamDialog.open) renderStaff()
@@ -219,7 +226,8 @@ async function refresh() {
 
 function render() {
   renderProjects()
-  const project = state.projects.find((s) => s.id === state.selected) ?? null
+  // Everything here is the board's, under the project it was read for.
+  const project = state.board?.project ?? null
   projectTitle.textContent = project?.name ?? 'No project'
   projectDirectory.textContent = project?.directory ?? ''
   // What For you lists for the human: their unread notes.
@@ -235,7 +243,7 @@ function render() {
   const lanes = state.board?.lanes ?? []
   if (!lanes.some((lane) => lane.participant.handle === state.focus)) state.focus = 'chief'
   if (suspended) {
-    terminals.clear(state.selected)
+    terminals.clear(project.id)
     drawer.hide()
   }
   if (state.board === null) {
@@ -250,7 +258,7 @@ function render() {
     board.render({ board: state.board, inbox: state.inbox, agents: state.agents })
     if (suspended) boardRoot.prepend(suspendedBanner(project))
   }
-  terminals.render(lanes, { focused: state.focus, project: state.selected })
+  terminals.render(lanes, { focused: state.focus, project: project?.id ?? null })
 }
 
 /** What a closed project shows in place of its actions: why it is still, and the one way on. */
@@ -301,13 +309,14 @@ deleteDialog.addEventListener('close', () => {
 })
 
 function renderProjects() {
+  const shown = state.board?.project.id ?? null
   const items = state.projects.map((project) => {
     const item = element('li', 'project')
     item.dataset.state = project.state
-    item.dataset.current = String(project.id === state.selected)
+    item.dataset.current = String(project.id === shown)
     const select = element('button', 'project-select')
     select.type = 'button'
-    select.setAttribute('aria-current', String(project.id === state.selected))
+    select.setAttribute('aria-current', String(project.id === shown))
     // A closed project says so by its buttons (Delete, Resume), not by a pill.
     select.append(element('span', 'project-name', project.name))
     select.addEventListener('click', () => {
