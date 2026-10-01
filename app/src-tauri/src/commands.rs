@@ -33,6 +33,8 @@ const CORE_RESTART: Backoff = Backoff {
     most: Duration::from_secs(30),
 };
 const CORE_STOPPED: &str = "ConsensFlow's core stopped while the app was running";
+/// How long the human's login shell has to say its PATH.
+const LOGIN_PATH_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
 const MAX_INPUT_BYTES: usize = 64 * 1024;
 const INPUT_QUEUE_CAPACITY: usize = 1024;
@@ -1231,14 +1233,71 @@ fn plain_path(path: PathBuf) -> PathBuf {
     path
 }
 
+/// The PATH the human's login shell sets up, where their harness CLIs live,
+/// for the daemon and every pane it opens.
 fn login_path() -> Option<String> {
-    let shell = std::env::var("SHELL").ok()?;
-    let output = Command::new(shell)
-        .args(["-lc", "printf %s \"$PATH\""])
-        .output()
+    login_path_in(Path::new(&std::env::var_os("SHELL")?), LOGIN_PATH_TIMEOUT)
+}
+
+/// A login file may print (`nvm use` does), wait for input or never finish,
+/// and the PATH used to be the shell's whole output, read on the main thread
+/// before the window existed, for as long as the shell took. So the PATH is
+/// read between markers no login file prints, from a shell that exits
+/// cleanly within `timeout`; otherwise there is none, and the daemon keeps
+/// the PATH the app was started with.
+fn login_path_in(shell: &Path, timeout: Duration) -> Option<String> {
+    use std::hash::BuildHasher;
+    use std::io::Read;
+
+    let marker = format!(
+        "<consensflow-path-{:016x}>",
+        std::hash::RandomState::new().hash_one(std::process::id())
+    );
+    let mut child = Command::new(shell)
+        .args(["-lc", &format!("printf '{marker}%s{marker}' \"$PATH\"")])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
         .ok()?;
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    (!path.is_empty()).then_some(path)
+    let mut output = child.stdout.take()?;
+    let (chunks, printed) = mpsc::channel();
+    // Not joined: a process a login file started may hold the output open
+    // long after the shell has gone.
+    thread::spawn(move || {
+        let mut chunk = [0; 4096];
+        while let Ok(read) = output.read(&mut chunk) {
+            if read == 0 || chunks.send(chunk[..read].to_vec()).is_err() {
+                return;
+            }
+        }
+    });
+    let deadline = Instant::now() + timeout;
+    let succeeded = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status.success(),
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break false;
+            }
+        }
+    };
+    if !succeeded {
+        return None;
+    }
+    // The shell has gone, so what it printed is in the pipe, a moment from
+    // the reader at most.
+    let mut bytes = Vec::new();
+    loop {
+        let text = String::from_utf8_lossy(&bytes);
+        let mut parts = text.split(marker.as_str());
+        if let (Some(_), Some(path), Some(_)) = (parts.next(), parts.next(), parts.next()) {
+            return (!path.is_empty()).then(|| path.to_string());
+        }
+        bytes.extend(printed.recv_timeout(Duration::from_secs(1)).ok()?);
+    }
 }
 
 fn register_pane_handlers(
@@ -2207,6 +2266,65 @@ mod tests {
             json!({"available":false,"cause":"the core is held up","retrying":true})
         );
         drop(app);
+    }
+
+    /// A stand-in for the human's login shell: `body` runs with the command
+    /// the app gives it (`-lc <command>`) as `$2`.
+    #[cfg(unix)]
+    fn login_shell(home: &Path, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let shell = home.join("login-shell");
+        std::fs::write(&shell, format!("#!/bin/sh\n{body}\n")).expect("write the shell");
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755))
+            .expect("make the shell executable");
+        shell
+    }
+
+    /// What a login file prints (`nvm use` says which Node it took) is not
+    /// part of the PATH.
+    #[cfg(unix)]
+    #[test]
+    fn the_login_path_is_read_past_what_login_files_print() {
+        let home = tempfile::tempdir().expect("home");
+        let shell = login_shell(
+            home.path(),
+            "echo 'Now using node v22.9.0 (npm v10.8.3)'; exec /bin/sh -c \"$2\"",
+        );
+        assert_eq!(
+            login_path_in(&shell, Duration::from_secs(5)),
+            std::env::var("PATH").ok()
+        );
+    }
+
+    /// A login shell that fails, or takes too long, leaves the daemon on the
+    /// PATH the app was started with; the app's start does not wait on it.
+    #[cfg(unix)]
+    #[test]
+    fn a_login_shell_that_fails_or_hangs_gives_no_path() {
+        let home = tempfile::tempdir().expect("home");
+        let failing = login_shell(home.path(), "/bin/sh -c \"$2\"; exit 3");
+        assert_eq!(login_path_in(&failing, Duration::from_secs(5)), None);
+
+        let hanging = login_shell(home.path(), "exec /bin/sleep 3");
+        let started = Instant::now();
+        assert_eq!(login_path_in(&hanging, Duration::from_millis(300)), None);
+        assert!(started.elapsed() < Duration::from_secs(2), "the shell held up the start");
+    }
+
+    /// Something a login file starts may keep the shell's output open after
+    /// the shell has gone; what the shell printed is read all the same.
+    #[cfg(unix)]
+    #[test]
+    fn a_login_path_is_read_while_a_started_process_holds_the_output() {
+        let home = tempfile::tempdir().expect("home");
+        let shell = login_shell(home.path(), "/bin/sleep 3 & exec /bin/sh -c \"$2\"");
+        let started = Instant::now();
+        assert_eq!(
+            login_path_in(&shell, Duration::from_secs(5)),
+            std::env::var("PATH").ok()
+        );
+        assert!(started.elapsed() < Duration::from_secs(2), "the read waited for the process");
     }
 
     #[test]
