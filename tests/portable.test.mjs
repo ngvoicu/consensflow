@@ -49,7 +49,7 @@ describe('the portable Windows zip', () => {
       ])
       const zip = join(dir, 'out', 'ConsensFlow_3.0.0-alpha.99_x64-portable.zip')
       const listed = execFileSync(TAR, ['-tf', zip], { encoding: 'utf8' })
-        .split('\n')
+        .split(/\r?\n/) // Windows' tar ends its lines with CRLF
         .filter((line) => line !== '' && !line.endsWith('/'))
         .sort()
       assert.deepEqual(listed, [
