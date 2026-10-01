@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
-use crate::arbiter::{ArbiterError, InputArbiter};
+use crate::arbiter::{ArbiterError, InputArbiter, OutputClock};
 use crate::bridge::{Bridge, BridgeBuilder, BridgeError};
 use crate::pty::{
     validate_drop_env, PaneEnvironment, PaneKey, PaneOutput, PaneTable, StreamedPane,
@@ -104,9 +104,10 @@ struct OutputHub {
     state: Mutex<OutputHubState>,
 }
 
+/// What a pane's worker does, in order: the human's keys and the emulator's
+/// replies, a delivery's paste, a native send's claim.
 enum InputWork {
-    Human(Vec<u8>),
-    Reply(Vec<u8>),
+    Write(Vec<u8>),
     Paste(Vec<u8>),
     Claim,
 }
@@ -114,7 +115,7 @@ enum InputWork {
 impl InputWork {
     fn byte_count(&self) -> usize {
         match self {
-            Self::Human(bytes) | Self::Reply(bytes) => bytes.len(),
+            Self::Write(bytes) => bytes.len(),
             Self::Paste(body) => body.len().saturating_add(13),
             Self::Claim => 0,
         }
@@ -290,9 +291,7 @@ impl InputQueue {
 
         page.last_sequences.insert(key.clone(), sequence);
         match &work {
-            InputWork::Human(bytes) | InputWork::Reply(bytes) | InputWork::Paste(bytes) => {
-                validate_input(bytes)?
-            }
+            InputWork::Write(bytes) | InputWork::Paste(bytes) => validate_input(bytes)?,
             InputWork::Claim => {}
         }
         if page.completions.len() >= MAX_PENDING_INPUT_TICKETS {
@@ -328,20 +327,12 @@ impl InputQueue {
             .ok_or_else(|| "pane-input-ticket-not-found".to_string())
     }
 
-    fn human(
+    fn write(
         &self,
         key: PaneKey,
         bytes: Vec<u8>,
     ) -> Result<oneshot::Receiver<InputResponse>, String> {
-        self.submit(key, InputWork::Human(bytes))
-    }
-
-    fn reply(
-        &self,
-        key: PaneKey,
-        bytes: Vec<u8>,
-    ) -> Result<oneshot::Receiver<InputResponse>, String> {
-        self.submit(key, InputWork::Reply(bytes))
+        self.submit(key, InputWork::Write(bytes))
     }
 
     fn paste(
@@ -352,8 +343,9 @@ impl InputQueue {
         self.submit(key, InputWork::Paste(body))
     }
 
-    /// Admit a native-channel send: the pane is current, its input works and
-    /// no paste is going in.
+    /// Admit a native-channel send: the pane is current and its input works,
+    /// and no paste is going in, since the pane's worker runs one job at a
+    /// time.
     fn claim(&self, key: PaneKey) -> Result<oneshot::Receiver<InputResponse>, String> {
         self.submit(key, InputWork::Claim)
     }
@@ -490,8 +482,7 @@ fn input_worker(
 ) {
     for job in jobs {
         let result = match job.work {
-            InputWork::Human(bytes) => arbiter.write_human(&panes, &key, &bytes),
-            InputWork::Reply(bytes) => arbiter.write_reply(&panes, &key, &bytes),
+            InputWork::Write(bytes) => arbiter.write(&panes, &key, &bytes),
             InputWork::Paste(body) => arbiter.write_paste(&panes, &key, &body),
             InputWork::Claim => arbiter.claim(&key),
         }
@@ -1310,24 +1301,27 @@ fn register_pane_handlers(
                 return Err(error);
             }
         };
-        if let Err(error) = open_arbiter
+        let printed = match open_arbiter
             .register(&streamed.key)
             .map_err(|error| error.to_string())
-            .and_then(|()| open_inputs.open(&streamed.key))
+            .and_then(|printed| open_inputs.open(&streamed.key).map(|()| printed))
         {
-            let _ = open_panes.kill(&streamed.key);
-            open_inputs.retire(&streamed.key);
-            if let Some(slot) = owner_slot {
-                slot.complete(Err(error.clone()));
+            Ok(printed) => printed,
+            Err(error) => {
+                let _ = open_panes.kill(&streamed.key);
+                open_inputs.retire(&streamed.key);
+                if let Some(slot) = owner_slot {
+                    slot.complete(Err(error.clone()));
+                }
+                return Err(error);
             }
-            return Err(error);
-        }
+        };
         let key = streamed.key.clone();
         stream_to_page(
             streamed,
             bridge,
             Arc::clone(&open_panes),
-            Arc::clone(&open_arbiter),
+            printed,
             Arc::clone(&open_inputs),
             Arc::clone(&open_output),
             Arc::clone(&open_launches),
@@ -1339,23 +1333,18 @@ fn register_pane_handlers(
         Ok(json!({"ok":true,"id":key.id,"generation":key.generation}))
     });
 
-    let input_queue = Arc::clone(&inputs);
-    builder.on("pane.input", move |_bridge, body| {
-        let request: BytesRequest = parse_body(body)?;
-        validate_input(&request.bytes)?;
-        let key = pane_key(&request.id, request.generation)?;
-        wait_for_input_blocking(input_queue.human(key, request.bytes)?)?;
-        Ok(json!({"ok":true}))
-    });
-
-    let reply_queue = Arc::clone(&inputs);
-    builder.on("pane.reply", move |_bridge, body| {
-        let request: BytesRequest = parse_body(body)?;
-        validate_input(&request.bytes)?;
-        let key = pane_key(&request.id, request.generation)?;
-        wait_for_input_blocking(reply_queue.reply(key, request.bytes)?)?;
-        Ok(json!({"ok":true}))
-    });
+    // Keys typed into a pane and an emulator's replies (a page-less peer
+    // answers a cursor query itself) are written alike.
+    for operation in ["pane.input", "pane.reply"] {
+        let input_queue = Arc::clone(&inputs);
+        builder.on(operation, move |_bridge, body| {
+            let request: BytesRequest = parse_body(body)?;
+            validate_input(&request.bytes)?;
+            let key = pane_key(&request.id, request.generation)?;
+            wait_for_input_blocking(input_queue.write(key, request.bytes)?)?;
+            Ok(json!({"ok":true}))
+        });
+    }
 
     let paste_queue = Arc::clone(&inputs);
     builder.on("pane.write_paste", move |_bridge, body| {
@@ -1468,7 +1457,6 @@ fn register_pane_handlers(
             "generation":snapshot.generation,
             "pasteInFlight":snapshot.paste_in_flight,
             "inputFailed":snapshot.input_failed,
-            "queuedHumanBytes":snapshot.queued_human_bytes,
             "outputQuietMs":snapshot.output_quiet_ms,
         }))
     });
@@ -1495,7 +1483,7 @@ fn stream_to_page(
     streamed: StreamedPane,
     bridge: Bridge,
     panes: Arc<PaneTable>,
-    arbiter: Arc<InputArbiter>,
+    printed: Arc<OutputClock>,
     inputs: Arc<InputQueue>,
     output: Arc<OutputHub>,
     launches: Arc<LaunchRegistry>,
@@ -1504,7 +1492,7 @@ fn stream_to_page(
     thread::spawn(move || {
         let key = streamed.key;
         for message in streamed.output {
-            arbiter.note_output(&key);
+            printed.note();
             output.publish(message.into());
         }
         if let Some(launch_id) = launch_id {
@@ -1729,7 +1717,7 @@ pub fn pane_input_enqueue<R: Runtime>(
     sequence: u64,
     bytes: Vec<u8>,
 ) -> Value {
-    enqueue_page_input(app, id, generation, sequence, InputWork::Human(bytes), true)
+    enqueue_page_input(app, id, generation, sequence, InputWork::Write(bytes), true)
 }
 
 #[tauri::command]
@@ -1740,7 +1728,7 @@ pub fn pane_reply_enqueue<R: Runtime>(
     sequence: u64,
     bytes: Vec<u8>,
 ) -> Value {
-    enqueue_page_input(app, id, generation, sequence, InputWork::Reply(bytes), false)
+    enqueue_page_input(app, id, generation, sequence, InputWork::Write(bytes), false)
 }
 
 #[tauri::command]
@@ -3421,7 +3409,7 @@ mod tests {
             );
             assert_eq!(opened["ok"], true, "{opened}");
             inputs
-                .enqueue_page(key.clone(), 1, InputWork::Human(b"x".to_vec()), true)
+                .enqueue_page(key.clone(), 1, InputWork::Write(b"x".to_vec()), true)
                 .expect("the page types into the pane");
             assert!(!gone(key), "the pane has its input");
         }
@@ -3457,7 +3445,7 @@ mod tests {
     fn input_for_a_pane_never_opened_is_refused() {
         let panes = Arc::new(PaneTable::new());
         let inputs = InputQueue::new(Arc::clone(&panes), Arc::new(InputArbiter::new(0)));
-        let refused = inputs.human(PaneKey::new("never-opened", 1), b"x".to_vec());
+        let refused = inputs.write(PaneKey::new("never-opened", 1), b"x".to_vec());
         assert_eq!(refused.err().as_deref(), Some("stale pane generation"));
         assert!(inputs.senders.lock().unwrap().is_empty());
         assert!(inputs.workers.lock().unwrap().is_empty());
