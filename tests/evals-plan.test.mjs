@@ -70,13 +70,16 @@ describe('an eval run’s plan', () => {
     )
   })
 
-  it('finds the real claude or codex on PATH, never the eval wrapper', () => {
+  it("finds the real claude or codex on PATH, never the eval wrapper or a terminal app's shim", () => {
     const present = new Set([
+      '/tmp/T/cmux-cli-shims/8BB3/claude',
+      '/Applications/cmux.app/Contents/Resources/bin/claude',
       '/h/.consensflow-candidate/evals/bin/claude',
       '/h/.local/bin/claude',
       '/opt/homebrew/bin/codex',
     ])
-    const path = '/h/.consensflow-candidate/evals/bin:/h/.local/bin:/opt/homebrew/bin'
+    const path =
+      '/tmp/T/cmux-cli-shims/8BB3:/Applications/cmux.app/Contents/Resources/bin:/h/.consensflow-candidate/evals/bin:/h/.local/bin:/opt/homebrew/bin'
     assert.equal(
       realOnPath('claude', path, (f) => present.has(f)),
       '/h/.local/bin/claude',

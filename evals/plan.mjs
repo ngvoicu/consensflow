@@ -137,6 +137,10 @@ export function terminalAnswer(scenario, text) {
 export function realOnPath(name, pathVariable, exists = defaultExists) {
   for (const dir of pathVariable.split(':')) {
     if (dir === '' || dir.endsWith('/evals/bin')) continue
+    // A terminal app's shims come first on PATH inside its panes (cmux has its
+    // own claude) and start nothing outside it: an eval window on one printed
+    // nothing for five minutes (2026-10-01).
+    if (dir.includes('/cmux-cli-shims/') || dir.includes('/cmux.app/')) continue
     const candidate = `${dir.replace(/\/$/, '')}/${name}`
     if (exists(candidate)) return candidate
   }

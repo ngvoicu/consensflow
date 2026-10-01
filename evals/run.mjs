@@ -281,7 +281,24 @@ async function run(index) {
     const board = async () => (await app.requestNode('board.get', { project })).board
     const chiefLane = async () =>
       (await board()).lanes.find((l) => l.participant.handle === 'chief')
-    await app.waitFor(async () => (await chiefLane())?.activity?.state === 'idle', 240_000)
+    /** A wait that, when it gives up, says what the chief's window was doing and showed. */
+    const waitForChief = async (what, predicate, ms) => {
+      try {
+        await app.waitFor(predicate, ms)
+      } catch (cause) {
+        const lane = await chiefLane().catch(() => null)
+        const shown = lane?.pane ? lastLines(app.output(lane.pane.id)).slice(-12) : []
+        note(
+          `gave up waiting for ${what}: chief ${JSON.stringify(lane?.activity ?? null)}; its screen: ${shown.join(' ⏎ ')}`,
+        )
+        throw cause
+      }
+    }
+    await waitForChief(
+      'the chief to be ready',
+      async () => (await chiefLane())?.activity?.state === 'idle',
+      240_000,
+    )
     pane = (await chiefLane()).pane
     await settled(() => app.output(pane.id).length)
     note(`chief (${chief}) ready; typing the prompt`)
@@ -395,10 +412,14 @@ async function run(index) {
           note(`the owner switches the lead to ${values['switch-to']} (${agent})`)
           const reply = await app.requestNode('chief.switch', { project, agent, when: 'turn' })
           if (reply?.ok === false) throw new Error(`chief.switch: ${JSON.stringify(reply)}`)
-          await app.waitFor(async () => {
-            const lead = (await chiefLane())?.pane
-            return lead !== null && lead !== undefined && lead.generation !== before
-          }, 240_000)
+          await waitForChief(
+            "the new lead's window",
+            async () => {
+              const lead = (await chiefLane())?.pane
+              return lead !== null && lead !== undefined && lead.generation !== before
+            },
+            240_000,
+          )
           pane = (await chiefLane()).pane
           await settled(() => app.output(pane.id).length)
           lastChange = Date.now()
