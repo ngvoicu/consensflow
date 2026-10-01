@@ -666,6 +666,11 @@ export class Dispatcher {
       async () => {
         const runtime = this.#runtimeOf(chief.id)
         if (runtime.pane !== null && !this.#isOut(chief) && (when === 'turn' || note)) {
+          // A switch asked again replaces the one waiting, with a note not yet sent.
+          const replaced = runtime.pendingSwitch?.note ?? null
+          if (replaced !== null && this.#ledger.message(replaced).state === 'queued') {
+            this.#ledger.cancelMessage(replaced, 'the human asked for the switch again')
+          }
           runtime.pendingSwitch = {
             harness,
             agent,
@@ -694,6 +699,7 @@ export class Dispatcher {
    * moves the chief, and the new window opens with the handoff.
    */
   async #performSwitch(project, chief, runtime, { harness, agent }) {
+    const asked = runtime.pendingSwitch?.note ?? null
     runtime.pendingSwitch = null
     let cut = false
     const { pane } = runtime
@@ -716,9 +722,14 @@ export class Dispatcher {
       if (delivering !== null) this.#giveBack(delivering, 'the lead was switched before it arrived')
       await this.#closeOwn(runtime, pane)
     }
-    // A handoff still on its way is an earlier switch's: this one writes its own.
+    // A handoff still on its way is an earlier switch's: this one writes its
+    // own. The note asking the old lead where things stand was for it alone,
+    // however the switch came (now, or the lead out of quota).
     for (const message of this.#ledger.pending(chief.id)) {
       if (isHandoff(message)) this.#ledger.cancelMessage(message.id, 'the lead was switched again')
+      else if (message.id === asked) {
+        this.#ledger.cancelMessage(message.id, 'the lead was switched before it came')
+      }
     }
     this.#ledger.switchChief(project.id, { harness, agent, cut })
     Object.assign(runtime, {

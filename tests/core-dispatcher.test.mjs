@@ -2401,6 +2401,45 @@ describe('switching the lead to another harness', () => {
     })
   })
 
+  it('never gives the new lead the note that asked the old one where things stand', async () => {
+    await withCodex(async (context) => {
+      const { codex } = context
+      const { project } = await withStaff(context)
+      await context.dispatcher.pass()
+      context.adapter.busy('chief')
+      const asking = (n) =>
+        context.ledger
+          .inbox(chiefOf(context, project).id)
+          .filter((m) => m.body.includes('Write down where things stand'))[n]
+      // Asked twice while the lead works: the second ask replaces the first.
+      await context.dispatcher.switchChief(project.id, {
+        harness: 'codex',
+        when: 'turn',
+        note: true,
+      })
+      const first = asking(0)
+      await context.dispatcher.switchChief(project.id, {
+        harness: 'codex',
+        when: 'turn',
+        note: true,
+      })
+      assert.equal(context.ledger.message(first.id).state, 'cancelled', 'replaced, never sent')
+      await context.dispatcher.pass()
+      // The human does not wait for the answer: Switch lead, now.
+      await context.dispatcher.switchChief(project.id, { harness: 'codex' })
+      assert.equal(chiefOf(context, project).harness, 'codex')
+      assert.equal(context.ledger.message(asking(0).id).state, 'cancelled')
+      await context.dispatcher.pass()
+      codex.answer('chief', 'I have taken over.')
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.ok(
+        !codex.agent('chief').items.some((i) => i.text.includes('Write down where things stand')),
+        'the new lead never saw it',
+      )
+    })
+  })
+
   it('switches a lead out of quota at once, and the new lead is not out', async () => {
     await withCodex(async (context) => {
       const { project, id } = await withStaff(context)
