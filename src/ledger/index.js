@@ -1869,6 +1869,17 @@ class Ledger {
     return row?.item_id ?? null
   }
 
+  /** What is on its way to a participant (queued, or being delivered), oldest first. */
+  pending(participantId) {
+    return this.#db
+      .prepare(
+        `${MESSAGE_SELECT} WHERE m.recipient_id = ? AND m.state IN ('queued', 'delivering')
+         ORDER BY m.id`,
+      )
+      .all(participantId)
+      .map(messageView)
+  }
+
   /** The human read a message in the app. */
   markRead(messageId) {
     return this.#write(() => {
