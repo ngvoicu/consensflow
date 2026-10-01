@@ -257,6 +257,12 @@ describe('consensflow Pi worker followup', () => {
         bytesWritten: 0,
         reason: 'expired-before-send',
       })
+      // The acknowledgment is written before the file moves aside, and a pass
+      // the inbox watcher started may be the one doing it (a Windows runner,
+      // 2026-09-29): the move comes just after.
+      const deadline = Date.now() + 2_000
+      while ((await exists(join(s.inbox, `${id}.json`))) && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 5))
       assert.equal(await exists(join(s.inbox, `${id}.json`)), false, s.logs.join('; '))
       assert.equal(await exists(join(s.expired, `${id}.json`)), true, s.logs.join('; '))
       assert.deepEqual(s.pi.sent, [])

@@ -854,10 +854,50 @@ impl Default for PaneTable {
     }
 }
 
+/// The PTY tests' lock, one test at a time, held with a watchdog: a test that
+/// hung holding it (three arbiter tests on a macOS runner, 2026-09-30) kept
+/// the others waiting until the CI step's 15 minutes ran out, and nobody
+/// learnt which. After 60 s, far past any PTY test's run, the watchdog names
+/// the test on stderr (past the test's capture) and aborts, as the recorder's
+/// ready read does.
 #[cfg(test)]
-pub(crate) fn serial_pty_test() -> MutexGuard<'static, ()> {
+pub(crate) struct SerialPtyTest {
+    _lock: MutexGuard<'static, ()>,
+    done: Arc<AtomicBool>,
+}
+
+#[cfg(test)]
+impl Drop for SerialPtyTest {
+    fn drop(&mut self) {
+        self.done.store(true, Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn serial_pty_test() -> SerialPtyTest {
+    use std::io::Write as _;
     static LOCK: Mutex<()> = Mutex::new(());
-    LOCK.lock().unwrap_or_else(|error| error.into_inner())
+    let lock = LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let done = Arc::new(AtomicBool::new(false));
+    let finished = Arc::clone(&done);
+    let test = std::thread::current()
+        .name()
+        .unwrap_or("a PTY test")
+        .to_string();
+    std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while Instant::now() < deadline {
+            if finished.load(Ordering::SeqCst) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let _ = std::io::stderr().write_all(
+            format!("{test} has held the PTY tests' lock for 60 s: it hung\n").as_bytes(),
+        );
+        std::process::abort();
+    });
+    SerialPtyTest { _lock: lock, done }
 }
 
 impl Drop for PaneTable {
