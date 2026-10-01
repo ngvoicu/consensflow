@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { devinAdapter } from '../src/adapters/devin.js'
-import { fakeExecutable } from './helpers.mjs'
+import { fakeExecutable, fakeNodeExecutable } from './helpers.mjs'
 
 /**
  * The Devin adapter (TEST-BDC-05, IMPL-BDC-07): Devin runs on a config of our
@@ -105,6 +105,31 @@ describe('the Devin adapter', () => {
       )
       const config = JSON.parse(await readFile(path.join(integration(env), 'config.json'), 'utf8'))
       assert.deepEqual(config.hooks.PreToolUse, [])
+    })
+  })
+
+  it('asks Devin its version once, not at every launch, and refuses one too old', async () => {
+    await withHome(async ({ env }) => {
+      const runs = path.join(env.PATH, 'version-runs')
+      const devin = (version) =>
+        fakeNodeExecutable(
+          path.join(env.PATH, 'devin'),
+          `#!${process.execPath}
+import { appendFileSync } from 'node:fs'
+appendFileSync(${JSON.stringify(runs)}, 'x')
+console.log('devin ${version}')
+`,
+        )
+      devin('3000.11.3 (9c803229faa4)')
+      const adapter = devinAdapter({ env })
+      await adapter.prepare(request({ launchId: 'launch-1' }))
+      await adapter.prepare(request({ launchId: 'launch-2' }))
+      assert.equal(await readFile(runs, 'utf8'), 'x', 'one question for an unchanged Devin')
+      devin('3000.9.1 (00000000)')
+      await assert.rejects(
+        adapter.prepare(request({ launchId: 'launch-3' })),
+        /3000\.10\.21 or newer/,
+      )
     })
   })
 
