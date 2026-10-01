@@ -91,7 +91,7 @@ async function status(env, sessionId, fields) {
 describe('the Claude Code adapter', () => {
   it('launches a fresh worker on its own session id, in full-permission mode, with the task last', async () => {
     await withHome(async ({ env, executable }) => {
-      const plan = await claudeCodeAdapter({ env, peer: false }).prepare(request())
+      const plan = await claudeCodeAdapter({ env }).prepare(request())
       assert.match(plan.nativeSession, /^[0-9a-f-]{36}$/)
       const settings = path.join(
         env.CONSENSFLOW_HOME,
@@ -145,7 +145,7 @@ describe('the Claude Code adapter', () => {
 
   it("keeps a member away from the human's connectors and browser; the chief keeps them", async () => {
     await withHome(async ({ env }) => {
-      const adapter = claudeCodeAdapter({ env, peer: false })
+      const adapter = claudeCodeAdapter({ env })
       const member = await adapter.prepare(request())
       assert.ok(member.argv.includes('--strict-mcp-config') && member.argv.includes('--no-chrome'))
       const chief = await adapter.prepare(
@@ -170,7 +170,7 @@ describe('the Claude Code adapter', () => {
     await withHome(async ({ env }) => {
       const session = '0f8fad5b-d9cb-469f-a165-70867728950e'
       await transcript(env, session, [userLine(session, 1, 'Write the parser')])
-      const plan = await claudeCodeAdapter({ env, peer: false }).prepare(
+      const plan = await claudeCodeAdapter({ env }).prepare(
         request({ resume: session, message: null }),
       )
       assert.equal(plan.nativeSession, session)
@@ -190,7 +190,7 @@ describe('the Claude Code adapter', () => {
       // A window opened by hand and lost before anything was said in it:
       // Claude kept no record, and `--resume` would say "No conversation found".
       const session = '6a2f41ac-8c1d-4c55-9b4e-2f1e8a3d9c70'
-      const plan = await claudeCodeAdapter({ env, peer: false }).prepare(
+      const plan = await claudeCodeAdapter({ env }).prepare(
         request({ resume: session, message: 'Review T-1' }),
       )
       assert.equal(plan.nativeSession, session)
@@ -205,7 +205,7 @@ describe('the Claude Code adapter', () => {
 
   it('gives a chief its role instructions and no model of its own', async () => {
     await withHome(async ({ env }) => {
-      const plan = await claudeCodeAdapter({ env, peer: false }).prepare(
+      const plan = await claudeCodeAdapter({ env }).prepare(
         request({
           participant: { ...worker, handle: 'chief', role: 'chief', agent: null },
           role: 'chief',
@@ -225,7 +225,7 @@ describe('the Claude Code adapter', () => {
   it('refuses to launch when Claude is not installed', async () => {
     await withHome(async ({ env }) => {
       await assert.rejects(
-        claudeCodeAdapter({ env: { ...env, PATH: '/nowhere' }, peer: false }).prepare(request()),
+        claudeCodeAdapter({ env: { ...env, PATH: '/nowhere' } }).prepare(request()),
         /claude is not installed/,
       )
     })
@@ -233,7 +233,7 @@ describe('the Claude Code adapter', () => {
 
   it('reads the conversation from the transcript and waits for Claude itself to say the window is idle', async () => {
     await withHome(async ({ env }) => {
-      const adapter = claudeCodeAdapter({ env, peer: false })
+      const adapter = claudeCodeAdapter({ env })
       const session = '1b4e28ba-2fa1-41d2-883f-0016d3cca427'
       const launch = { nativeSession: session }
       await transcript(env, session, [
@@ -269,7 +269,7 @@ describe('the Claude Code adapter', () => {
 
   it('counts a new window with no transcript yet as idle once Claude says so', async () => {
     await withHome(async ({ env }) => {
-      const adapter = claudeCodeAdapter({ env, peer: false })
+      const adapter = claudeCodeAdapter({ env })
       const launch = { nativeSession: 'e2c56db5-dffb-48d2-b060-d0f5a71096e0' }
       const before = await adapter.observe({ launch })
       assert.deepEqual([before.settled, before.items], [false, []], 'still starting')
@@ -314,7 +314,7 @@ describe('the Claude Code adapter', () => {
 
   it('reports a refused request as exhausted quota, with the reset its text names', async () => {
     await withHome(async ({ env }) => {
-      const adapter = claudeCodeAdapter({ env, peer: false })
+      const adapter = claudeCodeAdapter({ env })
       const session = '2c1a6b64-0d2c-4f4e-9a7b-6f1c5f2e8d90'
       await transcript(env, session, [
         userLine(session, 1, '[ConsensFlow m-1 · T-1 · task from @chief]\nWrite the parser'),

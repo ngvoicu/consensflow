@@ -1,12 +1,6 @@
-import { spawn } from 'node:child_process'
-import { isAbsolute } from 'node:path'
-import { runnable, terminate } from '../harnesses.js'
 import { claim } from './pty.js'
 
-export const DEFAULT_DEADLINE_MS = 3_000
-export const MAX_CAPTURE_BYTES = 64 * 1024
-
-const KILL_GRACE_MS = 100
+const DEFAULT_DEADLINE_MS = 3_000
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 function paneTarget(target) {
@@ -38,13 +32,9 @@ function launchConfig(target) {
   if (config === null) {
     throw new Error('codex-queue delivery needs a codex-queue launch configuration')
   }
-  if (typeof config.executable !== 'string' || !isAbsolute(config.executable)) {
-    throw new Error('codex-queue delivery needs an absolute launch executable')
-  }
-  if (typeof config.cwd !== 'string' || !isAbsolute(config.cwd)) {
-    throw new Error('codex-queue delivery needs an absolute launch cwd')
-  }
-  return { config, launch }
+  // Every Codex window runs under the supervisor: its broker is the only way in.
+  if (!config.sessionBridge) throw new Error('codex-queue delivery needs the session broker')
+  return config
 }
 
 function nativeSession(target) {
@@ -84,103 +74,8 @@ function zeroByteRefusal(cause, error = 'failed-with-zero-bytes') {
   }
 }
 
-function appendCapture(current, chunk) {
-  const remaining = MAX_CAPTURE_BYTES - Buffer.byteLength(current, 'utf8')
-  if (remaining <= 0) return current
-  let value = Buffer.from(chunk).subarray(0, remaining).toString('utf8')
-  while (Buffer.byteLength(value, 'utf8') > remaining) value = value.slice(0, -1)
-  return current + value
-}
-
-function childEnvironment(launch, config) {
-  const env = { ...process.env, ...(launch.env ?? {}), ...(config.env ?? {}) }
-  delete env.OPENAI_API_KEY
-  return env
-}
-
-function uncertain(cause, details = {}) {
-  return { ok: false, admitted: null, error: 'uncertain', cause, ...details }
-}
-
-function runQueue(config, launch, session, text, deadline) {
-  const args = ['queue', '--thread', session, '--message', text]
-  const timeoutMs = Math.max(0, deadline - Date.now())
-
-  return new Promise((resolve) => {
-    let child
-    let stdout = ''
-    let stderr = ''
-    let timedOut = false
-    let settled = false
-    let timeout
-    let killTimer
-
-    const finish = (result) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      clearTimeout(killTimer)
-      resolve(result)
-    }
-
-    const stop = () => {
-      if (child?.exitCode === null && child.signalCode === null) {
-        terminate(child, 'SIGTERM')
-        killTimer = setTimeout(() => {
-          if (child.exitCode === null && child.signalCode === null) terminate(child, 'SIGKILL')
-        }, KILL_GRACE_MS)
-        killTimer.unref?.()
-      }
-    }
-
-    try {
-      const run = runnable(config.executable, args)
-      child = spawn(run.file, run.args, {
-        ...run.options,
-        cwd: config.cwd,
-        env: childEnvironment(launch, config),
-        shell: false,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      })
-    } catch (cause) {
-      finish(uncertain('transport', { cause: cause?.message ?? String(cause) }))
-      return
-    }
-
-    if (timeoutMs <= 0) {
-      timedOut = true
-      stop()
-    } else {
-      timeout = setTimeout(() => {
-        timedOut = true
-        stop()
-      }, timeoutMs)
-      timeout.unref?.()
-    }
-
-    child.stdout.on('data', (chunk) => {
-      stdout = appendCapture(stdout, chunk)
-    })
-    child.stderr.on('data', (chunk) => {
-      stderr = appendCapture(stderr, chunk)
-    })
-    child.on('error', () => {
-      finish(uncertain('transport', { stdout, stderr }))
-    })
-    child.on('close', (exitCode, signal) => {
-      if (timedOut) {
-        finish(uncertain('deadline', { exitCode, signal, stdout, stderr }))
-        return
-      }
-      if (exitCode === 0 && signal === null) {
-        // A successful helper exit is admission only. The watcher owns the
-        // later native receipt, so this adapter never reports acceptance.
-        finish({ ok: true, admitted: true })
-        return
-      }
-      finish(uncertain('helper-exit', { exitCode, signal, stdout, stderr }))
-    })
-  })
+function uncertain(cause) {
+  return { ok: false, admitted: null, error: 'uncertain', cause }
 }
 
 /** Native TUI replies identify the main chief, independently of transcript recency. */
@@ -243,7 +138,7 @@ async function sendCurrent(config, session, text, deadline) {
 
 async function sendText(target, text) {
   paneTarget(target)
-  const { config, launch } = launchConfig(target)
+  const config = launchConfig(target)
   const session = nativeSession(target)
   if (typeof text !== 'string') throw new Error('codex-queue delivery needs text')
 
@@ -254,8 +149,7 @@ async function sendText(target, text) {
   if (claimed?.ok !== true) return zeroByteRefusal(claimed)
   if (deadline <= Date.now()) return zeroByteRefusal(undefined, 'expired')
 
-  if (config.sessionBridge) return await sendCurrent(config, session, text, deadline)
-  return await runQueue(config, launch, session, text, deadline)
+  return await sendCurrent(config, session, text, deadline)
 }
 
 export async function send(target, text) {

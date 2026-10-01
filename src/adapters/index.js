@@ -7,13 +7,11 @@ import { piAdapter } from './pi.js'
 /**
  * One adapter per supported harness, keyed the way the ledger names them.
  * An image agent runs in Codex's own window, whose image tool draws on the
- * Codex login. `peer: true` turns
- * Claude's native inbox on instead of pasting (off by default: see the
- * Claude adapter).
+ * Codex login.
  */
-export function createAdapters(env, { peer } = {}) {
+export function createAdapters(env) {
   return {
-    'claude-code': claudeCodeAdapter({ env, ...(peer === undefined ? {} : { peer }) }),
+    'claude-code': claudeCodeAdapter({ env }),
     codex: codexAdapter({ env }),
     image: codexAdapter({ env, harness: 'image' }),
     devin: devinAdapter({ env }),

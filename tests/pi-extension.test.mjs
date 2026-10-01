@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { createDeliveryExtension } from '../hosts/pi-extension/consensflow-delivery.mjs'
-import { send } from '../src/channels.js'
+import { send } from '../src/channels/pi.js'
 
 function fakePi() {
   const handlers = new Map()
@@ -482,7 +482,6 @@ it('a Pi session switch at admission reports a retryable zero-byte refusal', asy
   const s = await setup(null)
   try {
     const result = await send(
-      'pi-extension',
       {
         session: 'native-pi-session',
         pane: 'chief-pane',

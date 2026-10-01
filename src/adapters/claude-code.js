@@ -4,7 +4,6 @@ import { homedir } from 'node:os'
 import path from 'node:path'
 import { cachedAnswers, hasTranscript } from '../../hosts/lib/completion.js'
 import { interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
-import { send as sendPeer } from '../channels/claude-peer.js'
 import { prepareClaudeSettings } from '../claude-install.js'
 import { roleConfiguration } from '../role-skills.js'
 import { executableFor } from './shared.js'
@@ -18,11 +17,10 @@ import { executableFor } from './shared.js'
  * - The session id is ours: minted for a fresh window, resumed for a known one.
  * - A message is pasted into a live window as if the human typed it, whatever
  *   its input box holds: text the human left unsent goes in with it (the
- *   owner's choice, 2026-10-01). Claude's own peer inbox (`peer: true`, macOS
- *   only, the Rust host checks the peer belongs to this pane) bypasses the
+ *   owner's choice, 2026-10-01). Claude's own peer inbox would bypass the
  *   input box, but Claude wraps each such message as a teammate's request
  *   from another Claude session, a hundred tokens of caution per delivery
- *   that misnames the human's own answers; since 2026-09-22 it is off.
+ *   that misnames the human's own answers, so it is not used (2026-09-22).
  * - Claude's own `sessions/<pid>.json` says busy, idle or waiting (and why);
  *   the transcript holds the conversation and says whether the turn settled.
  */
@@ -35,7 +33,7 @@ import { executableFor } from './shared.js'
  */
 const MEMBER_ISOLATION = ['--strict-mcp-config', '--no-chrome']
 
-export function claudeCodeAdapter({ env, peer = false, answers = cachedAnswers() }) {
+export function claudeCodeAdapter({ env, answers = cachedAnswers() }) {
   const configDir = path.resolve(
     env.CLAUDE_CONFIG_DIR ?? path.join(env.HOME ?? homedir(), '.claude'),
   )
@@ -80,15 +78,7 @@ export function claudeCodeAdapter({ env, peer = false, answers = cachedAnswers()
         env: { ...roleSetup.env },
         dropEnv: runner.dropEnv,
         nativeSession,
-        launch: {
-          nativeSession,
-          channel: {
-            kind: 'claude-peer',
-            launchId,
-            configDir,
-            ackTimeoutMs: 3000,
-          },
-        },
+        launch: { nativeSession },
       }
     },
 
@@ -98,7 +88,6 @@ export function claudeCodeAdapter({ env, peer = false, answers = cachedAnswers()
 
     /** A paste waits only for the window to be readable and another paste to be in. */
     async ready({ pane, host }) {
-      if (peer) return true
       const snapshot = await host.request('pane.snapshot', pane)
       if (snapshot?.ok !== true)
         return `the window cannot be read: ${snapshot?.error ?? 'no answer'}`
@@ -106,26 +95,7 @@ export function claudeCodeAdapter({ env, peer = false, answers = cachedAnswers()
       return true
     },
 
-    async deliver({ launch, pane, host, text }) {
-      if (peer) {
-        const sent = await sendPeer(
-          {
-            session: launch.nativeSession,
-            pane: pane.id,
-            generation: pane.generation,
-            launch: launch.channel,
-            bridge: host,
-          },
-          text,
-        )
-        if (sent?.ok === true) return { admitted: true, queued: true }
-        if (sent?.admitted === null) return { admitted: null, reason: sent.cause ?? sent.error }
-        // An inbox Claude has not registered yet (or never will, on an older
-        // build) is not a reason to drop the message: the terminal still works.
-        if (sent?.error !== 'native-session-unavailable') {
-          return { admitted: false, reason: sent?.cause ?? sent?.error ?? 'the peer refused it' }
-        }
-      }
+    async deliver({ pane, host, text }) {
       const written = await host.request('pane.write_paste', { ...pane, body: text })
       return written?.ok === true
         ? { admitted: true }
@@ -163,9 +133,9 @@ export function claudeCodeAdapter({ env, peer = false, answers = cachedAnswers()
 
 /**
  * Claude Code's own live status for each running session, from the
- * `sessions/<pid>.json` files it keeps (the same files peer delivery reads):
- * busy, idle, or waiting with the reason (a permission prompt, input needed, a
- * dialog). A file whose process is gone is ignored.
+ * `sessions/<pid>.json` files it keeps: busy, idle, or waiting with the
+ * reason (a permission prompt, input needed, a dialog). A file whose process
+ * is gone is ignored.
  */
 async function claudeStatuses(env) {
   const directory = path.join(
