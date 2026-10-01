@@ -995,12 +995,28 @@ describe('the dispatcher', () => {
     })
   })
 
-  it('suspends the project when its chief window closes', async () => {
+  it('closes the project when its chief window closes by itself, as Close does: every window goes and the work in them pauses', async () => {
     await setup(async (context) => {
-      const { project } = await withStaff(context)
+      const { project, id, open, task } = await withTiers(context)
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(task(1).state, 'working')
+      const session = task(1).assignee
+      const zeus = context.host.last('zeus')
+      // The human types /exit in the chief's terminal, or the chief crashes.
       await context.host.exit('chief')
       assert.equal(context.ledger.project(project.id).state, 'suspended')
       assert.equal(context.ledger.project(project.id).resumeOnStart, false)
+      assert.deepEqual(context.host.killed, [{ id: zeus.id, generation: zeus.generation }])
+      assert.equal(context.dispatcher.pane(id(session)), null)
+      assert.deepEqual([task(1).state, task(1).assignee], ['paused', session])
+      assert.match(
+        task(1).messages.find((m) => m.kind === 'note').body,
+        /^T-1 is paused: @zeus-amber-pine's window closed\./,
+      )
+      await context.dispatcher.pass()
+      assert.equal(context.host.opened.length, 2, 'nothing opens while it is closed')
     })
   })
 
@@ -1144,6 +1160,25 @@ describe('the dispatcher', () => {
         }),
       },
     )
+  })
+
+  it('closes every window of a deleted project that has not gone yet, before it forgets them', async () => {
+    await setup(async (context) => {
+      const { project, open } = await withTiers(context)
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const windows = [context.host.last('chief'), context.host.last('zeus')]
+      // The windows were told to close; their exits have not come yet.
+      context.host.holdExits = true
+      await context.dispatcher.closeProject(project.id)
+      const killed = context.host.killed.length
+      await context.dispatcher.deleteProject(project.id)
+      assert.deepEqual(
+        context.host.killed.slice(killed),
+        windows.map(({ id, generation }) => ({ id, generation })),
+      )
+    })
   })
 
   it('brings back the projects that were open before a restart, on their own conversations', async () => {

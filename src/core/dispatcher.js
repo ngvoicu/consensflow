@@ -29,7 +29,8 @@ import { HANDOFF_TITLE, handoffText, historyPages, lastWords } from './handoff.j
  *   window and conversation.
  * - A member window lost mid-task (a restart, a crash, a closed window)
  *   pauses the task, and the requester is told how to resume it. A chief
- *   window that closes suspends its project. A member who leaves
+ *   window that closes by itself closes its project, as the human's Close
+ *   does: every window of it goes. A member who leaves
  *   the staff has its window closed once its step in progress ends, and that
  *   exit fails nothing: its open tasks were cancelled when it left.
  * - A task for a tier of member starts open: each pass gives it to a free
@@ -212,7 +213,17 @@ export class Dispatcher {
    */
   async closeProject(projectId) {
     const project = this.#ledger.setProjectState(projectId, 'suspended')
-    for (const participant of project.participants) {
+    await this.#closeWindows(project.participants)
+    this.#changed()
+    return this.#ledger.project(projectId)
+  }
+
+  /**
+   * Closes these participants' windows, each once its step in progress is
+   * over, so a window still opening is closed too.
+   */
+  async #closeWindows(participants) {
+    for (const participant of participants) {
       await this.#exclusive(
         participant.id,
         async () => {
@@ -222,8 +233,6 @@ export class Dispatcher {
         { wait: true },
       )
     }
-    this.#changed()
-    return this.#ledger.project(projectId)
   }
 
   // --- the human's hand on a session's window ------------------------------------------
@@ -271,11 +280,17 @@ export class Dispatcher {
     return { project, participant }
   }
 
-  /** A closed project goes for good; the ledger refuses an open one. Its windows are already gone. */
+  /**
+   * A closed project goes for good; the ledger refuses an open one. A window
+   * of it whose exit has not come yet is closed before it is forgotten, so
+   * nothing of the project keeps running.
+   */
   async deleteProject(projectId) {
     const project = this.#ledger.project(projectId)
     const deleted = this.#ledger.deleteProject(projectId)
-    for (const participant of project?.participants ?? []) {
+    const participants = project?.participants ?? []
+    await this.#closeWindows(participants)
+    for (const participant of participants) {
       const runtime = this.#runtime.get(participant.id)
       if (runtime?.token) this.#credentials.revoke(runtime.token)
       this.#launchFiles.forget(runtime?.launchId)
@@ -416,8 +431,11 @@ export class Dispatcher {
       else this.#settleFailure(delivering, because, { retry: !delivering.launch })
     }
     if (participant.role === 'chief') {
+      // The lead's own exit (the human's /exit, a crash) closes the project
+      // as Close does: no member's window goes on unseen.
       if (project.state === 'open' && !runtime.ownExit) {
         this.#ledger.setProjectState(project.id, 'suspended')
+        await this.#closeWindows(project.participants.filter((p) => p.id !== participantId))
       }
     } else {
       const task = this.#ledger.activeTask(participantId)
