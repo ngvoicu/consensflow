@@ -154,8 +154,9 @@ function migrate(db) {
   }
   if (version === SCHEMA_VERSION) return
   // A migration may rebuild a table others refer to; with foreign keys on,
-  // dropping it would cascade through them. Off for the migrations, then
-  // every reference checked, then on again.
+  // dropping it would cascade through them. Off for the migrations, every
+  // reference checked before each one commits, then on again: a start
+  // refused here leaves the version as it was, so the next start checks too.
   db.exec('PRAGMA foreign_keys = OFF')
   try {
     for (let from = version; from < SCHEMA_VERSION; from += 1) {
@@ -163,19 +164,19 @@ function migrate(db) {
       try {
         db.exec(MIGRATIONS[from])
         db.exec(`PRAGMA user_version = ${from + 1}`)
+        const broken = db.prepare('PRAGMA foreign_key_check').all()
+        if (broken.length > 0) {
+          throw new LedgerError(
+            'ledger-broken',
+            `the ledger's references do not hold after migration: ${JSON.stringify(broken[0])}`,
+            500,
+          )
+        }
         db.exec('COMMIT')
       } catch (cause) {
         db.exec('ROLLBACK')
         throw cause
       }
-    }
-    const broken = db.prepare('PRAGMA foreign_key_check').all()
-    if (broken.length > 0) {
-      throw new LedgerError(
-        'ledger-broken',
-        `the ledger's references do not hold after migration: ${JSON.stringify(broken[0])}`,
-        500,
-      )
     }
   } finally {
     db.exec('PRAGMA foreign_keys = ON')

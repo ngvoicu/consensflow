@@ -349,6 +349,34 @@ describe('the schema', () => {
     }
   })
 
+  it('keeps a migration that leaves a reference dangling from counting: the next start checks again', async () => {
+    await withDir(async (dir) => {
+      const file = path.join(dir, 'consensflow.db')
+      const old = new DatabaseSync(file, { enableForeignKeyConstraints: false })
+      for (const migration of MIGRATIONS.slice(0, SCHEMA_VERSION - 1)) old.exec(migration)
+      old.exec(`PRAGMA user_version = ${SCHEMA_VERSION - 1}`)
+      const at = '2026-09-24T10:00:00.000Z'
+      old.exec(
+        `INSERT INTO project (id, directory, name, state, gate, created_at, updated_at) VALUES (1, '/work/app', 'app', 'open', 0, '${at}', '${at}')`,
+      )
+      // A task asked for by a participant the file does not have.
+      old.exec(
+        `INSERT INTO task (project_id, number, title, body, requester_id, state, pool, created_at, updated_at) VALUES (1, 1, 'Parser', 'Parser', 99, 'open', 'worker', '${at}', '${at}')`,
+      )
+      old.close()
+      for (const start of ['first', 'next']) {
+        assert.throws(() => openLedger(file), { code: 'ledger-broken' }, `the ${start} start`)
+      }
+      const raw = new DatabaseSync(file, { readOnly: true })
+      assert.equal(
+        raw.prepare('PRAGMA user_version').get().user_version,
+        SCHEMA_VERSION - 1,
+        'the version stays where it was',
+      )
+      raw.close()
+    })
+  })
+
   it('refuses what the model never holds, and keeps every reference whole', async () => {
     await withDir(async (dir) => {
       const file = path.join(dir, 'consensflow.db')
