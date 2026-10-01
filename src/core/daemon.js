@@ -34,6 +34,11 @@ const STATE_EVENT_MS = 100
 const SLOW_PASS_MS = 5_000
 /** How often the daemon writes down that it is alive, and how big it is. */
 const HEARTBEAT_MS = 10 * 60_000
+/**
+ * How long a stop waits for the pass in progress: the app ends the daemon
+ * 2 s after asking it to stop, and its exit hooks must run before that.
+ */
+const STOP_WAIT_MS = 1_000
 
 export async function startCore(
   env,
@@ -234,7 +239,16 @@ export function passLoop(work, log = null) {
       stopped = true
       clearInterval(timer)
       clearInterval(heartbeat)
-      await running
+      // A pass still waiting on a window is left behind: what it had on its
+      // way is settled at the next start.
+      let waited
+      await Promise.race([
+        running,
+        new Promise((resolve) => {
+          waited = setTimeout(resolve, STOP_WAIT_MS)
+        }),
+      ])
+      clearTimeout(waited)
     },
   }
 }

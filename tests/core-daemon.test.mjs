@@ -5,10 +5,70 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { Credentials, startApi } from '../src/core/api.js'
 import { passLoop } from '../src/core/daemon.js'
+import { openLedger } from '../src/ledger/index.js'
 
 const EDITOR = fileURLToPath(new URL('./integration/core-editor.mjs', import.meta.url))
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/** How long `work` took, failing past `limit` ms rather than waiting on it for good. */
+async function timed(work, limit) {
+  const started = Date.now()
+  let timer
+  const late = new Promise((resolve) => {
+    timer = setTimeout(resolve, limit, 'late')
+  })
+  try {
+    assert.notEqual(await Promise.race([work(), late]), 'late', `still waiting after ${limit} ms`)
+    return Date.now() - started
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** The app ends the daemon 2 s after asking it to stop, so a stop takes no more than about 1.5 s. */
+describe("the daemon's stop", () => {
+  it('waits only a moment for a pass held up by a slow window', async () => {
+    const loop = passLoop(() => new Promise(() => {}))
+    loop.kick()
+    await sleep(20)
+    assert.ok((await timed(() => loop.stop(), 3_000)) < 1_500)
+  })
+
+  it('answers a door still waiting for an answer at once, so the API closes', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-daemon-stop-'))
+    const ledger = openLedger(path.join(dir, 'consensflow.db'))
+    const credentials = new Credentials()
+    const api = await startApi({ ledger, credentials })
+    try {
+      const project = ledger.createProject({
+        directory: '/work/app',
+        name: 'app',
+        chief: { harness: 'claude-code' },
+      })
+      ledger.addMember(project.id, {
+        agent: 'zeus',
+        harness: 'claude-code',
+        role: 'worker',
+        tier: 'standard',
+      })
+      const zeus = ledger.project(project.id).participants.find((p) => p.handle === 'zeus')
+      const token = credentials.issue({ participant: zeus, project })
+      const asked = ledger.ask(project.id, { from: 'zeus', to: 'chief', body: 'Which?' })
+      const polling = fetch(`${api.url}/api/questions/${asked.id}?wait=25000`, {
+        headers: { authorization: `Bearer ${token}` },
+      })
+      await sleep(100)
+      assert.ok((await timed(() => api.close(), 5_000)) < 1_000)
+      const answered = await polling
+      assert.deepEqual([answered.status, (await answered.json()).answer], [200, null])
+    } finally {
+      ledger.close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
 
 /** The daemon writes down what is worth knowing afterwards: its start, its stop and why, a pass that failed. */
 describe('the daemon and its log', () => {
