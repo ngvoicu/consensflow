@@ -103,6 +103,8 @@ describe('the Pi adapter', () => {
         'cf-1-zeus-0000abcd',
         '--model',
         'openrouter/meta/muse-spark-1.3',
+        '--thinking',
+        'high',
         '--approve',
       ])
     })

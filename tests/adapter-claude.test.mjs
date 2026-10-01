@@ -181,6 +181,8 @@ describe('the Claude Code adapter', () => {
         session,
         '--model',
         'claude-sonnet-5',
+        '--effort',
+        'high',
         '--permission-mode',
         'bypassPermissions',
       ])

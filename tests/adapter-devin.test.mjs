@@ -127,6 +127,8 @@ describe('the Devin adapter', () => {
       assert.deepEqual(plan.argv.slice(3), [
         '--resume',
         'mild-coin',
+        '--model',
+        'swe-1-6-slow',
         '--permission-mode',
         'dangerous',
         '--respect-workspace-trust',

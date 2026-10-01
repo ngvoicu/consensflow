@@ -41,8 +41,7 @@ test('window: opencode opens without an id — the store will tell us later', ()
 
   assert.equal(w.command, 'opencode')
   assert.ok(!w.args.includes('--session'), 'there is no id to give yet')
-  const at = w.args.indexOf('--prompt')
-  assert.equal(w.args[at + 1], 'the packet text', 'the seed rides --prompt')
+  assert.ok(!w.args.includes('the packet text'), 'tasks go through its native API')
 })
 
 test('window: codex opens cold on a positional prompt, id found afterwards', () => {
@@ -150,12 +149,65 @@ test('window: every resume can carry the follow-up as its seed', () => {
   )
 })
 
-test('window: a resume without a seed stays exactly the hand-over it was', () => {
+test("window: a resume opens on the agent's model and effort, with the flags a start uses", () => {
+  // Every restart, --after, reopen and Open window resumes: a resumed window
+  // without them ran on the harness's own default (Codex on config.toml).
+  const devin = { kind: 'devin', model: 'claude-opus-5-5', effort: 'max' }
   assert.deepEqual(interactiveResume(AGENTS.codex, 'thread-1').args, [
     'resume',
     'thread-1',
+    '--model',
+    'gpt-5.6-sol',
+    '-c',
+    'model_reasoning_effort="ultra"',
     '--dangerously-bypass-approvals-and-sandbox',
   ])
+  assert.deepEqual(interactiveResume(AGENTS.claude, 'sess-1').args, [
+    '--resume',
+    'sess-1',
+    '--model',
+    'claude-opus-5',
+    '--effort',
+    'max',
+    '--permission-mode',
+    'bypassPermissions',
+  ])
+  assert.deepEqual(interactiveResume(AGENTS.pi, 'jade-waves').args, [
+    '--session-id',
+    'jade-waves',
+    '--model',
+    'openrouter/qwen/qwen3.8-27b',
+    '--thinking',
+    'max',
+    '--approve',
+  ])
+  assert.deepEqual(interactiveResume(devin, 'mild-coin').args, [
+    '--resume',
+    'mild-coin',
+    '--model',
+    'claude-opus-5-5-max',
+    '--permission-mode',
+    'dangerous',
+    '--respect-workspace-trust',
+    'false',
+  ])
+  // The same flags as a fresh window's, after what names the conversation.
+  const identity = (w, skip) => w.args.slice(skip)
+  assert.deepEqual(
+    identity(interactiveResume(AGENTS.claude, 'u', 's'), 2),
+    identity(interactiveStart(AGENTS.claude, 'u', 's'), 2),
+  )
+  assert.deepEqual(
+    identity(interactiveResume(AGENTS.codex, 't', 's'), 2),
+    identity(interactiveStart(AGENTS.codex, null, 's'), 0),
+  )
+  assert.deepEqual(
+    identity(interactiveResume(AGENTS.pi, 'p', 's'), 0),
+    identity(interactiveStart(AGENTS.pi, 'p', 's'), 0),
+  )
+  assert.deepEqual(identity(interactiveResume(devin, 'd'), 2), identity(interactiveStart(devin), 0))
+  // OpenCode keeps the model with the session, and it is read back on a resume.
+  assert.ok(!interactiveResume(AGENTS.opencode, 'ses_1').args.includes('--model'))
 })
 
 test('window: the billing guard is the same one the one-shot carries', () => {

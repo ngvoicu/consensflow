@@ -132,6 +132,10 @@ describe('the Codex adapter', () => {
         'allow_login_shell=false',
         'resume',
         thread,
+        '--model',
+        'gpt-5.6-luna',
+        '-c',
+        'model_reasoning_effort="low"',
         '--dangerously-bypass-approvals-and-sandbox',
       ])
     })

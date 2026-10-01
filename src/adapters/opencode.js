@@ -83,10 +83,11 @@ export function openCodeAdapter({
           env: childEnv({ ...env, ...roleSetup.env }),
           configuration,
         }))
+      const identity = { kind: 'opencode', model: agent?.model }
       const runner =
         resume === null
-          ? interactiveStart({ kind: 'opencode', model: agent?.model }, nativeSession, null)
-          : interactiveResume({ kind: 'opencode' }, resume, null)
+          ? interactiveStart(identity, nativeSession, null)
+          : interactiveResume(identity, resume, null)
       return {
         argv: [executable, ...configuration.args, ...runner.args],
         env: { ...configuration.env, ...roleSetup.env },

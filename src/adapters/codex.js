@@ -113,14 +113,11 @@ export function codexAdapter({
       })
       // The chief works with the human and keeps the human's connectors.
       const isolation = role === 'chief' ? [] : mcpIsolation(await mcpServers(executable, env))
+      const identity = { kind: harness, model: agent?.model, effort: agent?.effort }
       const runner =
         resume === null
-          ? interactiveStart(
-              { kind: harness, model: agent?.model, effort: agent?.effort },
-              null,
-              message,
-            )
-          : interactiveResume({ kind: harness }, resume, message)
+          ? interactiveStart(identity, null, message)
+          : interactiveResume(identity, resume, message)
       // Codex's question tool (request_user_input) is behind a feature still
       // marked under development; the broker answers a member's from the board.
       // The chief has none: it asks the human in plain words in its window.
