@@ -1999,7 +1999,7 @@ pub async fn open_agents_window<R: Runtime>(app: AppHandle<R>, page: String) -> 
     }
 }
 
-const AGENTS_WINDOW: &str = "agents";
+pub(crate) const AGENTS_WINDOW: &str = "agents";
 const AGENTS_PAGES: &[&str] = &["", "harnesses"];
 
 /// The daemon's page for one agents screen, carrying the UI token.
