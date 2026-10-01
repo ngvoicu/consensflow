@@ -80,8 +80,14 @@ export async function startCore(
       (name) => agents.find((agent) => agent.name === name)?.profile.workTier ?? null,
     )
   }
-  normalizeRoster(env)
-  followCatalog()
+  // An agents file that cannot be read or rewritten stops no start: the
+  // Agents screen says why, and the file waits for the human.
+  try {
+    normalizeRoster(env)
+    followCatalog()
+  } catch (cause) {
+    log.error('the agents file could not be used', cause)
+  }
 
   const credentials = new Credentials()
   let loop = null

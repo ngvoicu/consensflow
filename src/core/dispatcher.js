@@ -785,7 +785,21 @@ export class Dispatcher {
 
   /** A participant whose saved agent the human has since deleted. */
   #agentGone(participant) {
-    return participant.agent !== null && this.#roster(participant.agent) === null
+    return participant.agent !== null && this.#savedAgent(participant.agent) === null
+  }
+
+  /**
+   * A saved agent as the roster has it now: its row, or null when it is gone.
+   * While the human's agents file cannot be read (the roster throws, saying
+   * why) it is undefined: nobody counts as free for new work, and nobody's
+   * agent as gone, so no work is taken back for a typo.
+   */
+  #savedAgent(name) {
+    try {
+      return this.#roster(name)
+    } catch {
+      return undefined
+    }
   }
 
   /**
@@ -1279,7 +1293,7 @@ export class Dispatcher {
   #available(member) {
     return (
       this.#adapters[member.harness] !== undefined &&
-      this.#roster(member.agent) !== null &&
+      this.#savedAgent(member.agent) != null &&
       !this.#isOut(member) &&
       !this.#isLow(member)
     )
@@ -1326,28 +1340,27 @@ export class Dispatcher {
     )
   }
 
+  /** Why each member of the tier is not free, the first reason that holds for it. */
   #whyNotFree(candidates) {
-    const unopened = candidates.filter((m) => this.#adapters[m.harness] === undefined)
-    const gone = candidates.filter((m) => !unopened.includes(m) && this.#roster(m.agent) === null)
-    const out = candidates.filter(
-      (m) => !unopened.includes(m) && !gone.includes(m) && this.#isOut(m),
-    )
-    const low = candidates.filter(
-      (m) => !unopened.includes(m) && !gone.includes(m) && !out.includes(m) && this.#isLow(m),
-    )
-    const parts = []
-    for (const member of unopened)
-      parts.push(
-        `@${member.handle} runs on ${member.harness}, whose windows ConsensFlow cannot open`,
-      )
-    for (const member of gone)
-      parts.push(
-        `@${member.handle} has no agent any more (${member.agent} is not among your agents: define it, or remove the member)`,
-      )
-    for (const member of out)
-      parts.push(`@${member.handle} is out of quota until ${member.outUntil}`)
-    for (const member of low) parts.push(`@${member.handle} is low on quota`)
-    return parts.join('; ')
+    const why = (member) => {
+      if (this.#adapters[member.harness] === undefined) {
+        return `@${member.handle} runs on ${member.harness}, whose windows ConsensFlow cannot open`
+      }
+      const agent = this.#savedAgent(member.agent)
+      if (agent === undefined) {
+        return `@${member.handle}'s agent cannot be read (your agents file needs fixing: see Agents)`
+      }
+      if (agent === null) {
+        return `@${member.handle} has no agent any more (${member.agent} is not among your agents: define it, or remove the member)`
+      }
+      if (this.#isOut(member)) return `@${member.handle} is out of quota until ${member.outUntil}`
+      if (this.#isLow(member)) return `@${member.handle} is low on quota`
+      return null
+    }
+    return candidates
+      .map(why)
+      .filter((reason) => reason !== null)
+      .join('; ')
   }
 
   /**

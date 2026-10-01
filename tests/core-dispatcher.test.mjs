@@ -3018,6 +3018,50 @@ describe('a message that cannot be delivered', () => {
   })
 })
 
+describe('an agents file that cannot be read', () => {
+  it('gives out no new work and takes none back until it can, and every window goes on', async () => {
+    let broken = false
+    await setup(
+      async (context) => {
+        const { open, task, notes } = await withTiers(context)
+        open()
+        await context.dispatcher.pass()
+        await context.dispatcher.pass()
+        assert.equal(task(1).state, 'working')
+        broken = true
+        open({ body: 'Write the docs' })
+        await context.dispatcher.pass()
+        await context.dispatcher.pass()
+        assert.deepEqual(
+          [task(1).state, task(2).state],
+          ['working', 'open'],
+          'nothing taken back, nothing given out',
+        )
+        assert.match(
+          notes('chief').at(-1),
+          /^T-2 waits for a free standard worker: @zeus's agent cannot be read \(your agents file needs fixing: see Agents\)/,
+        )
+        context.adapter.answer('zeus', 'Parser done')
+        await context.dispatcher.pass()
+        assert.equal(task(1).state, 'done', 'the windows went on')
+        broken = false
+        await context.dispatcher.pass()
+        assert.notEqual(task(2).assignee, null)
+      },
+      {
+        roster: (name) => {
+          if (broken) {
+            throw new Error(
+              'Your agents file agents.json is not valid JSON: fix it or move it away; ConsensFlow left it as it is.',
+            )
+          }
+          return { id: name, model: MODELS[name], profile: { modelKey: MODELS[name] } }
+        },
+      },
+    )
+  })
+})
+
 /** Pi has no adapter in these tests: it stands for a harness ConsensFlow cannot open. */
 describe('a harness ConsensFlow has no adapter for', () => {
   const onPi = (context, project) =>

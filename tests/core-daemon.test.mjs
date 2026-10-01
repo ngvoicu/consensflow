@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
@@ -134,4 +134,47 @@ describe('the daemon and its log', () => {
       }
     })
   }
+
+  it('starts though its agents file cannot be used, and says why in its log', {
+    skip: process.getuid?.() === 0 && 'root writes a read-only file all the same',
+  }, async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'cf-daemon-'))
+    const file = path.join(home, 'agents.json')
+    try {
+      // A field older builds wrote, which the start tidies away by rewriting the file it cannot write.
+      await writeFile(
+        file,
+        `${JSON.stringify({ schemaVersion: 1, agents: [{ id: 'mine', kind: 'codex', model: 'gpt-6-astra', profile: {} }] })}\n`,
+      )
+      await chmod(file, 0o444)
+      const child = spawn(process.execPath, [EDITOR], {
+        env: {
+          ...process.env,
+          HOME: home,
+          CONSENSFLOW_HOME: home,
+          CLAUDE_CONFIG_DIR: path.join(home, '.claude'),
+        },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+      let errors = ''
+      child.stderr.on('data', (chunk) => {
+        errors += chunk
+      })
+      const exited = new Promise((resolve) => child.once('exit', resolve))
+      const started = await Promise.race([
+        new Promise((resolve) => child.stdout.once('data', () => resolve(true))),
+        exited.then(() => false),
+      ])
+      assert.ok(started, `it did not start: ${errors}`)
+      child.stdin.end()
+      assert.equal(await exited, 0, errors)
+      assert.match(
+        await readFile(path.join(home, 'daemon.log'), 'utf8'),
+        /\n\S+ error the agents file could not be used\n {4}Error: /,
+      )
+    } finally {
+      await chmod(file, 0o644).catch(() => {})
+      await rm(home, { recursive: true, force: true })
+    }
+  })
 })
