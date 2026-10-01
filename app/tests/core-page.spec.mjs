@@ -1828,6 +1828,109 @@ test('starts a project while the board shown is on its way, and its windows go o
   await served(page, { id: 'p1-zeus', generation: 7 }, 'zeus')
 })
 
+/** Fires a state change and waits for the redraw it brings to have read `project`'s board. */
+async function redrawn(page, project) {
+  const reads = () =>
+    page.evaluate(
+      (project) =>
+        window.__calls.filter(
+          ([command, args]) =>
+            command === 'core_request' &&
+            args.operation === 'board.get' &&
+            args.body.project === project,
+        ).length,
+      project,
+    )
+  const before = await reads()
+  await page.evaluate(() => window.__listeners.get('state-changed')())
+  await expect.poll(reads).toBeGreaterThan(before)
+}
+
+test("lets a window of a project not shown go when that project's own board says it ended", async ({
+  page,
+}) => {
+  const data = twoOpen()
+  const foundry = data.boards[2]
+  const member = { ...participant(11, 'zeus', 'worker'), projectId: 2 }
+  foundry.lanes.push(
+    { participant: member, tasks: [], activity: { state: 'closed' }, pane: null },
+    {
+      participant: { ...session(12, member, 'amber-pine'), projectId: 2 },
+      tasks: [],
+      activity: { state: 'working' },
+      pane: { id: 'p2-zeus-amber-pine', generation: 3 },
+    },
+  )
+  await open(page, data)
+  // Nothing of foundry's in the dock yet: only the board shown is read.
+  await redrawn(page, 1)
+  expect(await calls(page, 'board.get')).not.toContainEqual({ project: 2 })
+  // foundry's session prints while harbour is shown: its window gets an
+  // emulator, off screen, and foundry's board is read to say whose it is.
+  const emulators = await page.evaluate(() => window.__emulators.length)
+  await page.evaluate(() =>
+    window.__output.onmessage({ id: 'p2-zeus-amber-pine', generation: 3, seq: 1, bytes: [104] }),
+  )
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBe(emulators + 1)
+  await redrawn(page, 2)
+  expect(await disposed(page)).toBe(0)
+  // The task done, the window closes; the human is still on harbour.
+  await page.evaluate(() => {
+    const lane = window.__model.boards[2].lanes.find(
+      (l) => l.participant.handle === 'zeus-amber-pine',
+    )
+    lane.pane = null
+    lane.activity = { state: 'closed' }
+  })
+  await redrawn(page, 2)
+  await expect.poll(() => disposed(page)).toBe(1)
+  await expect(page.locator('#project-title')).toHaveText('harbour')
+  await served(page, { id: 'p1-chief', generation: 5 }, 'chief')
+})
+
+test('takes the windows of a project closed or deleted while not shown out of the dock', async ({
+  page,
+}) => {
+  await open(page, twoOpen())
+  const dock = page.getByRole('complementary', { name: 'Terminal dock' })
+  // foundry shown once: its chief's window has its card, kept off screen.
+  await chooseProject(page, 'foundry')
+  await expect(dock.locator('.terminal-card')).toHaveCount(1)
+  await chooseProject(page, 'harbour')
+  await expect(dock.locator('.terminal-card')).toHaveCount(2)
+  // foundry is closed (from another of the human's windows, say): its windows go.
+  await page.evaluate(() => {
+    const { projects, boards } = window.__model
+    projects[1].state = 'suspended'
+    boards[2].project.state = 'suspended'
+    for (const lane of boards[2].lanes) lane.pane = null
+    window.__listeners.get('state-changed')()
+  })
+  await expect.poll(() => disposed(page)).toBe(1)
+  // Resumed, its chief has a new window; then the project is deleted.
+  await page.evaluate(() => {
+    const { projects, boards } = window.__model
+    projects[1].state = 'open'
+    boards[2].project.state = 'open'
+    boards[2].lanes.find((lane) => lane.participant.handle === 'chief').pane = {
+      id: 'p2-chief',
+      generation: 2,
+    }
+  })
+  await page.evaluate(() =>
+    window.__output.onmessage({ id: 'p2-chief', generation: 2, seq: 1, bytes: [104] }),
+  )
+  await redrawn(page, 2)
+  expect(await disposed(page)).toBe(1)
+  await page.evaluate(() => {
+    window.__model.projects.splice(1, 1)
+    window.__listeners.get('state-changed')()
+  })
+  await expect.poll(() => disposed(page)).toBe(2)
+  await expect(dock.locator('.terminal-card')).toHaveCount(2)
+  await served(page, { id: 'p1-chief', generation: 5 }, 'chief')
+})
+
 test("takes a closed window's card out of the dock: its lane says so and opens it again", async ({
   page,
 }) => {

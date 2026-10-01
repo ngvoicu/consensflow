@@ -50,28 +50,67 @@ export class TerminalsView {
   }
 
   /**
-   * Keep a terminal for every lane of the project shown that has a live one,
-   * in lane order, and bring `focused` into view. `lanes` are that project's
-   * own, read for it. Another project's terminals stay alive, off screen,
-   * with their scrollback: switching projects loses nothing.
+   * Whether the dock may hold a window of `project`: one its board placed
+   * here, or one whose output came before any board showed it.
    */
-  render(lanes, { focused, project }) {
-    const ordered = laneOrder(lanes)
+  holds(project) {
+    return [...this.#cards.values()].some(
+      (entry) => entry.project === project || entry.project === null,
+    )
+  }
+
+  /**
+   * What the boards just read say about the windows here, whichever project
+   * is shown. A window that ended, or gave way to a newer one, goes with its
+   * card: a last frame left in the strip still shows the agent's prompt and
+   * reads as open beside a lane that says it is closed. Only its own
+   * project's board can say so (its lane has no window or another one, or its
+   * session is gone), or its project being closed or deleted. A window whose
+   * output came first is placed once a board shows it. `open` holds the ids
+   * of the projects open now.
+   */
+  reconcile(boards, open) {
+    const lanes = boards.flatMap((board) =>
+      board.lanes.map((lane) => ({ project: board.project.id, lane })),
+    )
+    for (const entry of [...this.#cards.values()]) {
+      if (entry.project === null) {
+        const shown = lanes.find(({ lane }) => lane.pane?.id === entry.pane.id)
+        // No board shows it yet, or one read before it opened: it waits.
+        if (shown === undefined || shown.lane.pane.generation < entry.pane.generation) continue
+        if (shown.lane.pane.generation > entry.pane.generation) {
+          this.#retire(entry.key)
+          continue
+        }
+        entry.project = shown.project
+        entry.handle = shown.lane.participant.handle
+      }
+      if (!open.has(entry.project)) {
+        this.#retire(entry.key)
+        continue
+      }
+      const board = boards.find((board) => board.project.id === entry.project)
+      if (board === undefined) continue
+      const lane = board.lanes.find((lane) => lane.participant.handle === entry.handle)
+      if (lane === undefined || lane.pane === null || paneKey(lane.pane) !== entry.key) {
+        this.#retire(entry.key)
+      }
+    }
+  }
+
+  /**
+   * Keep a terminal for every lane of the project `board` is for that has a
+   * live one (a closed project has none), in lane order, and bring `focused`
+   * into view. Another project's terminals stay alive, off screen, with their
+   * scrollback: switching projects loses nothing.
+   */
+  render(board, { focused }) {
+    const project = board?.project.id ?? null
+    const ordered = board?.project.state === 'open' ? laneOrder(board.lanes) : []
     for (const [order, lane] of ordered.entries()) {
       // A window over for good never comes back, whatever a board says.
       if (lane.pane === null || this.#link.retired(paneKey(lane.pane))) continue
       this.#card(lane.pane, lane, order, project)
-    }
-    // A window that ended, or gave way to a newer one, goes with its card: a
-    // last frame left in the strip still shows the agent's prompt and reads
-    // as open beside a lane that says it is closed. Only its own project's
-    // lanes can say so.
-    for (const entry of [...this.#cards.values()]) {
-      if (entry.project !== project) continue
-      const lane = ordered.find((lane) => lane.participant.handle === entry.handle)
-      if (lane === undefined || lane.pane === null || paneKey(lane.pane) !== entry.key) {
-        this.#retire(entry.key)
-      }
     }
     const cards = [...this.#cards.values()]
       .filter((entry) => entry.project === project)
@@ -115,13 +154,6 @@ export class TerminalsView {
     )
   }
 
-  /** A closed project's cards go: it has no terminals to read. */
-  clear(project) {
-    for (const [key, entry] of [...this.#cards]) {
-      if (entry.project === project) this.#retire(key)
-    }
-  }
-
   /**
    * The human closed a participant's terminal: its card goes now, even while
    * the window is still on its way out, and does not come back for it. A new
@@ -142,9 +174,9 @@ export class TerminalsView {
   }
 
   /**
-   * A pane's card and emulator. Output may arrive before the board has drawn
+   * A pane's card and emulator. Output may arrive before any board has shown
    * the pane (or for a project not shown): its card waits, with no project,
-   * until a render places it.
+   * until a board places it.
    */
   #card(pane, lane, order = Number.MAX_SAFE_INTEGER, project = null) {
     const key = paneKey(pane)

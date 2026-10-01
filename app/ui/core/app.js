@@ -193,21 +193,38 @@ async function refresh() {
       // A board is drawn only for the project it was read for: one the human
       // left while it was on its way is read again for the one chosen now.
       const selected = state.selected
-      const [board, inbox] =
+      const open = projects.filter((project) => project.state === 'open')
+      // The other open projects whose windows the dock holds: their own
+      // boards say when those end. One that cannot be read says nothing yet.
+      const elsewhere = open
+        .filter((project) => project.id !== selected && terminals.holds(project.id))
+        .map((project) =>
+          core('board.get', { project: project.id }).then(
+            (read) => read.board,
+            () => null,
+          ),
+        )
+      const [board, inbox, ...others] = await Promise.all([
         selected === null
-          ? [null, []]
-          : await Promise.all([
-              core('board.get', { project: selected }).then((read) => read.board),
-              core('inbox.get', { project: selected, participant: 'human' }).then(
-                (read) => read.messages,
-              ),
-            ])
+          ? null
+          : core('board.get', { project: selected }).then((read) => read.board),
+        selected === null
+          ? []
+          : core('inbox.get', { project: selected, participant: 'human' }).then(
+              (read) => read.messages,
+            ),
+        ...elsewhere,
+      ])
       if (state.selected !== selected) {
         again = true
         return
       }
       state.board = board
       state.inbox = inbox
+      terminals.reconcile(
+        [board, ...others].filter((read) => read !== null),
+        new Set(open.map((project) => project.id)),
+      )
       if (state.openTask !== null && drawer.open) await openTask(state.openTask)
       render()
       if (teamDialog.open) renderStaff()
@@ -242,10 +259,7 @@ function render() {
   teamButton.disabled = project === null || suspended
   const lanes = state.board?.lanes ?? []
   if (!lanes.some((lane) => lane.participant.handle === state.focus)) state.focus = 'chief'
-  if (suspended) {
-    terminals.clear(project.id)
-    drawer.hide()
-  }
+  if (suspended) drawer.hide()
   if (state.board === null) {
     boardRoot.replaceChildren(
       element(
@@ -258,7 +272,7 @@ function render() {
     board.render({ board: state.board, inbox: state.inbox, agents: state.agents })
     if (suspended) boardRoot.prepend(suspendedBanner(project))
   }
-  terminals.render(lanes, { focused: state.focus, project: project?.id ?? null })
+  terminals.render(state.board, { focused: state.focus })
 }
 
 /** What a closed project shows in place of its actions: why it is still, and the one way on. */
