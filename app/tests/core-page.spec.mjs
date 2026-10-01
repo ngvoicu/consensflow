@@ -1099,38 +1099,48 @@ test('a redraw leaves the keyboard where it was, on the board, the projects and 
     pane: { id: 'p1-zeus-amber-pine', generation: 1 },
   })
   await open(page, data)
+  // A lamp changed, and drawn: the redraw has happened.
+  const lampDrawn = async (handle, state) => {
+    await changed(page, setLamp, [handle, state])
+    await expect(page.locator(`tr[data-handle="${handle}"]`).getByTestId('lamp')).toHaveAttribute(
+      'data-state',
+      state,
+    )
+  }
   // A card, while another row's lamp changes.
   await page.locator('button.card[data-task="4"]').focus()
-  await changed(page, setLamp, ['chief', 'idle'])
+  await lampDrawn('chief', 'idle')
   expect(await focusedLabel(page)).toBe('T-4, Add the tests, Queued, from @chief')
   // The card itself moving to another column keeps the keyboard with it.
   await changed(page, () => {
     const zeus = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
     zeus.tasks.find((t) => t.number === 4).state = 'working'
   })
+  await expect(page.locator('td[data-state="working"] button.card[data-task="4"]')).toHaveCount(1)
   expect(await focusedLabel(page)).toBe('T-4, Add the tests, Working, from @chief')
   // A session's Close, on its row and on its card in the dock, while its lamp changes.
   const row = page.locator('tr[data-handle="zeus-amber-pine"]')
   await row.getByRole('button', { name: "Close @zeus · amber-pine's terminal" }).focus()
-  await changed(page, setLamp, ['zeus-amber-pine', 'idle'])
+  await lampDrawn('zeus-amber-pine', 'idle')
   await expect(
     row.getByRole('button', { name: "Close @zeus · amber-pine's terminal" }),
   ).toBeFocused()
   const card = page.locator('.terminal-card[data-handle="zeus-amber-pine"]')
   await card.getByRole('button', { name: "Close @zeus · amber-pine's terminal" }).focus()
-  await changed(page, setLamp, ['zeus-amber-pine', 'working'])
+  await lampDrawn('zeus-amber-pine', 'working')
+  await expect(card.getByTestId('lamp')).toHaveAttribute('data-state', 'working')
   await expect(
     card.getByRole('button', { name: "Close @zeus · amber-pine's terminal" }),
   ).toBeFocused()
   // A project's Close.
   await page.getByRole('button', { name: 'Close harbour' }).focus()
-  await changed(page, setLamp, ['chief', 'working'])
+  await lampDrawn('chief', 'working')
   expect(await focusedLabel(page)).toBe('Close harbour')
   // A member's Remove in the staff dialog.
   await page.getByRole('button', { name: 'Staff' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project staff' })
   await dialog.getByRole('button', { name: 'Remove Worker @diana' }).focus()
-  await changed(page, setLamp, ['chief', 'idle'])
+  await lampDrawn('chief', 'idle')
   expect(await focusedLabel(page)).toBe('Remove Worker @diana')
 })
 
@@ -1141,6 +1151,10 @@ test('a click whose press and release straddle a redraw still lands', async ({ p
   await page.mouse.down()
   // zeus's own row changes under the press: its lamp and its status.
   await changed(page, setLamp, ['zeus', 'working'])
+  await expect(page.locator('tr[data-handle="zeus"]').getByTestId('lamp')).toHaveAttribute(
+    'data-state',
+    'working',
+  )
   await page.mouse.up()
   await expect(page.getByRole('complementary', { name: 'Task T-2' })).toBeVisible()
 })
