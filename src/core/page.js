@@ -108,7 +108,7 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
             agentMissing:
               lane.participant.agent !== null &&
               lane.participant.member === null &&
-              agentRow(lane.participant.agent, env) === undefined,
+              agentGone(lane.participant.agent, env),
             activity: dispatcher.activity(lane.participant.id),
             pane: dispatcher.pane(lane.participant.id),
             // A Switch lead that waits for the lead's turn to end.
@@ -165,6 +165,19 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
     'message.decline': change(async ({ message }) => ({
       message: ledger.declineMessage(message, { by: 'human' }),
     })),
+  }
+}
+
+/**
+ * Whether a saved agent is gone. While the agents file cannot be read, an
+ * agent is unknown, not gone: the board still loads, and the Agents page
+ * says what to fix.
+ */
+function agentGone(agent, env) {
+  try {
+    return agentRow(agent, env) === undefined
+  } catch {
+    return false
   }
 }
 
