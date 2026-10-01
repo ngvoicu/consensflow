@@ -86,6 +86,12 @@ export const OVERDUE_MS = 10 * 60_000
 export const TRANSCRIPT_ITEM_MAX = 64_000
 /** How many items of a transcript the board reads at once, from the end. */
 export const TRANSCRIPT_PAGE = 300
+/**
+ * How much of a message the human's bay on the board carries: two screens
+ * of its strip. The page reads the board in one frame of at most 1 MiB, and
+ * a message may run to a million characters; its task's thread has it all.
+ */
+const BAY_EXCERPT = 2_000
 const TRANSCRIPT_ROLES = ['user', 'assistant', 'tool', 'custom']
 const MAX_QUESTIONS = 4
 const MAX_TITLE = 120
@@ -257,14 +263,8 @@ const deliveryBody = (task) =>
     ? task.body
     : `Critical work: ${task.purpose}. ${CRITICAL_RULE}\n\n${task.body}`
 
-/** A result as its card shows it: the first line that says something, or null. */
-const firstLine = (body) =>
-  body === undefined
-    ? null
-    : (body
-        .split('\n')
-        .map((line) => line.trim())
-        .find(Boolean) ?? null)
+/** A result as its card shows it, the way a title reads; null before there is one. */
+const firstLine = (body) => (body === undefined ? null : titleOf(body))
 
 /** A card title: the first line that says something, shortened to fit. */
 function titleOf(body) {
@@ -379,6 +379,17 @@ const messageView = (row) => ({
   createdAt: row.created_at,
   deliveredAt: row.delivered_at,
 })
+
+/** A message as the bay shows it: a long one cut at BAY_EXCERPT, saying how long it was. */
+const bayView = (row) => {
+  const message = messageView(row)
+  return message.body.length <= BAY_EXCERPT
+    ? message
+    : {
+        ...message,
+        body: `${message.body.slice(0, BAY_EXCERPT)}\n… (${message.body.length} characters; cut here)`,
+      }
+}
 
 const badQuestions = (why) => new LedgerError('bad-questions', `questions: ${why}`, 400)
 const shortText = (value, field) => {
@@ -2182,6 +2193,8 @@ class Ledger {
         .map((row) => [row.task_id, row.body]),
     )
     // Each task with the first line of its latest result: what its card shows.
+    // Its brief stays out: the drawer reads it with the task, and a long-lived
+    // board of briefs would outgrow the frame the page reads it in.
     // A task of a session that has ended sits on its member's lane.
     const rows = this.#db
       .prepare(`${TASK_SELECT} WHERE t.project_id = ? ORDER BY t.number`)
@@ -2194,7 +2207,10 @@ class Ledger {
           : row.assignee,
       ]),
     )
-    const tasks = rows.map((row) => ({ ...taskView(row), result: firstLine(results.get(row.id)) }))
+    const tasks = rows.map((row) => {
+      const { body: _brief, ...card } = taskView(row)
+      return { ...card, result: firstLine(results.get(row.id)) }
+    })
     return {
       project,
       // On the board for a member; one given by name waits in its own lane.
@@ -2213,7 +2229,7 @@ class Ledger {
     return this.#db
       .prepare(`${MESSAGE_SELECT} WHERE m.project_id = ? AND m.state = 'gated' ORDER BY m.id`)
       .all(projectId)
-      .map(messageView)
+      .map(bayView)
   }
 
   /** Questions a coordinator has left unanswered for OVERDUE_MS: the human sees them too. */
@@ -2228,7 +2244,7 @@ class Ledger {
          ORDER BY m.id`,
       )
       .all(projectId, before)
-      .map(messageView)
+      .map(bayView)
   }
 
   /** A task and its whole thread, oldest first; null when there is no such task. */

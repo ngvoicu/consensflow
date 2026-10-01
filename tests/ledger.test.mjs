@@ -1586,6 +1586,79 @@ describe('views', () => {
     })
   })
 
+  it('stays small however long the briefs and results run: no brief on a card, a part in the bay', async () => {
+    await withDir((dir) => {
+      let at = Date.parse('2026-09-19T10:00:00.000Z')
+      const ledger = openLedger(path.join(dir, 'consensflow.db'), {
+        now: () => new Date(at),
+        names: names(),
+      })
+      try {
+        const { project, id } = staff(ledger)
+        ledger.setGate(project.id, true)
+        // More than the page's 1 MiB frame of briefs, a one-line result of
+        // 900,000 characters, and a question as long, both in the bay.
+        const brief = `Fix the parser.\n${'Context, with "quotes" and a path, /src/x.js.\n'.repeat(80)}`
+        for (let n = 0; n < 300; n += 1) {
+          ledger.createTask(project.id, {
+            from: 'chief',
+            pool: 'worker',
+            tier: 'standard',
+            body: brief,
+          })
+        }
+        const working = (number) => {
+          const { message } = ledger.assignTask(project.id, number, id('zeus'))
+          deliver(ledger, ledger.approveMessage(message.id, { by: 'human' }))
+          return message.recipient
+        }
+        const long = 'A finding, with the evidence for it. '.repeat(24_000).trim()
+        working(1)
+        ledger.recordResult(project.id, 1, { body: long })
+        const question = ledger.ask(project.id, {
+          from: working(2),
+          to: 'chief',
+          task: 2,
+          body: long,
+        })
+        ledger.approveMessage(question.id, { by: 'human' })
+        at += OVERDUE_MS
+        const board = ledger.board(project.id)
+        const bytes = Buffer.byteLength(JSON.stringify(board))
+        assert.ok(300 * brief.length > 1024 * 1024, 'more than a frame of briefs')
+        assert.ok(bytes < 256 * 1024, `the board takes ${bytes} bytes`)
+        const cards = [...board.open, ...board.lanes.flatMap((lane) => lane.tasks)]
+        assert.equal(cards.length, 300)
+        assert.equal(
+          cards.some((task) => 'body' in task),
+          false,
+          'the drawer reads the brief with the task',
+        )
+        assert.equal(cards.find((task) => task.number === 1).result, `${long.slice(0, 119)}…`)
+        const bay = [...board.gated, ...board.overdue]
+        assert.deepEqual(
+          bay.map((m) => [m.kind, m.taskNumber]),
+          [
+            ['result', 1],
+            ['question', 2],
+          ],
+        )
+        for (const message of bay) {
+          assert.ok(message.body.startsWith('A finding, with the evidence for it.'))
+          assert.ok(message.body.endsWith(`\n… (${long.length} characters; cut here)`))
+          assert.ok(message.body.length < 2100, `${message.body.length} characters`)
+        }
+        assert.equal(
+          ledger.task(project.id, 1).messages.find((m) => m.kind === 'result').body,
+          long,
+          'the whole stays with its task',
+        )
+      } finally {
+        ledger.close()
+      }
+    })
+  })
+
   it('shows a task with its whole thread, oldest first', async () => {
     await withLedger((ledger) => {
       const { project } = staff(ledger)
