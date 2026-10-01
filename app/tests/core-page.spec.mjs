@@ -1733,3 +1733,72 @@ test("opens a closed session's transcript from its lane, and gives a member's he
     .poll(async () => (await calls(page, 'task.transcript')).some((call) => call.task === 3))
     .toBe(true)
 })
+
+test('switches the lead from its row: an installed harness on its default, or a saved agent, after its turn or now', async ({
+  page,
+}) => {
+  const data = model()
+  data.missing = ['devin']
+  await open(page, data)
+  await page.getByRole('button', { name: 'Switch the lead to another harness or model' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Switch the lead' })
+  await expect(dialog).toBeVisible()
+  const select = dialog.getByLabel('The lead runs on')
+  const groups = await select
+    .locator('optgroup')
+    .evaluateAll((all) =>
+      all.map((group) => [
+        group.label,
+        [...group.querySelectorAll('option')].map((option) => [
+          option.textContent.split(' · ')[0],
+          option.disabled,
+        ]),
+      ]),
+    )
+  // Devin is not installed here, and a hidden agent is never on offer.
+  expect(groups).toEqual([
+    [
+      'Claude Code',
+      [
+        ['Claude Code, on its own default model', true],
+        ['zeus', false],
+      ],
+    ],
+    [
+      'Codex',
+      [
+        ['Codex, on its own default model', false],
+        ['diana', false],
+        ['hera', false],
+      ],
+    ],
+    [
+      'OpenCode',
+      [
+        ['OpenCode, on its own default model', false],
+        ['athena', false],
+      ],
+    ],
+    ['Pi', [['Pi, on its own default model', false]]],
+  ])
+  await select.selectOption('agent:hera')
+  await dialog.getByLabel('Switch now, cutting its turn off').check()
+  await dialog.getByLabel('First ask the lead to write down where things stand').check()
+  await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
+  await expect
+    .poll(() => calls(page, 'chief.switch'))
+    .toEqual([{ project: 1, agent: 'hera', when: 'now', note: true }])
+  await expect(dialog).toBeHidden()
+})
+
+test("the lead's row says when a switch waits for its turn", async ({ page }) => {
+  const data = model()
+  data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').switching = {
+    harness: 'codex',
+    agent: null,
+  }
+  await open(page, data)
+  await expect(page.locator('.row-status[data-state="switching"]')).toHaveText(
+    'Switching the lead to Codex after this turn',
+  )
+})

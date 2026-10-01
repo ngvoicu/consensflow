@@ -1503,6 +1503,7 @@ async fn task_operation<R: Runtime>(
 /// its body; anything else is refused here, before it reaches the daemon.
 const CORE_OPERATIONS: &[&str] = &[
     "projects.list",
+    "chief.switch",
     "project.open",
     "project.resume",
     "project.close",

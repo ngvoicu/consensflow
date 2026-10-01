@@ -52,6 +52,8 @@ export { SCHEMA_VERSION }
  */
 
 export const HARNESSES = ['claude-code', 'codex', 'opencode', 'pi', 'devin', 'kimi', 'image']
+/** Where a project's chief runs: a harness with a terminal the human works in (Kimi is paused). */
+export const CHIEF_HARNESSES = ['claude-code', 'codex', 'opencode', 'pi', 'devin']
 const MEMBER_ROLES = ['worker', 'advisor', 'reviewer', 'designer']
 /** Who hands out work and hears when the staff changes: the human and the chief. */
 const COORDINATOR_HANDLES = ['human', 'chief']
@@ -76,7 +78,11 @@ const HOLDS_WORK = `SELECT 1 FROM task WHERE assignee_id = ? AND state IN (${HEL
 const MAX_BODY = 1_000_000
 /** How long a coordinator may leave a question before the human sees it too. */
 export const OVERDUE_MS = 10 * 60_000
-/** The most of one transcript item that is copied: a tool's output can run to megabytes. */
+/**
+ * The most of one tool's output that is copied: it can run to megabytes, and
+ * the tool can be run again. Words are copied whole (the human's, an agent's,
+ * ConsensFlow's): a lead switched in reads them in `cf history`.
+ */
 export const TRANSCRIPT_ITEM_MAX = 64_000
 /** How many items of a transcript the board reads at once, from the end. */
 export const TRANSCRIPT_PAGE = 300
@@ -585,7 +591,8 @@ class Ledger {
         createdAt: row.created_at,
         members: count(
           `SELECT COUNT(*) AS n FROM participant
-           WHERE project_id = ? AND agent IS NOT NULL AND member_id IS NULL AND left_at IS NULL`,
+           WHERE project_id = ? AND agent IS NOT NULL AND member_id IS NULL AND left_at IS NULL
+             AND role != 'chief'`,
         ),
         sessions: count(
           'SELECT COUNT(*) AS n FROM participant WHERE project_id = ? AND member_id IS NOT NULL',
@@ -677,7 +684,8 @@ class Ledger {
       const members = this.#db
         .prepare(
           `SELECT id, project_id, handle, agent, tier FROM participant
-           WHERE agent IS NOT NULL AND member_id IS NULL AND left_at IS NULL ORDER BY id`,
+           WHERE agent IS NOT NULL AND member_id IS NULL AND left_at IS NULL AND role != 'chief'
+           ORDER BY id`,
         )
         .all()
       const changed = []
@@ -878,12 +886,13 @@ class Ledger {
       for (const [index, item] of items.entries()) {
         if (typeof item?.id !== 'string' || item.id.length === 0) continue
         const text = typeof item.text === 'string' ? item.text : ''
+        const role = TRANSCRIPT_ROLES.includes(item.role) ? item.role : 'custom'
         const { changes } = upsert.run(
           conversationId,
           item.id,
           from + index,
-          TRANSCRIPT_ROLES.includes(item.role) ? item.role : 'custom',
-          text.length > TRANSCRIPT_ITEM_MAX
+          role,
+          role === 'tool' && text.length > TRANSCRIPT_ITEM_MAX
             ? `${text.slice(0, TRANSCRIPT_ITEM_MAX)}\n… (${text.length} characters; cut here)`
             : text,
           item.complete === false ? 0 : 1,
@@ -934,6 +943,122 @@ class Ledger {
         at: row.at,
       })),
     }
+  }
+
+  /**
+   * What the lead said and was told before its current conversation: every
+   * earlier conversation of the chief, oldest first, with the harness it ran
+   * on and its copied items in order. `cf history` pages it for a lead the
+   * human switched in.
+   */
+  leadHistory(projectId) {
+    const chief = this.#participantByHandle(projectId, 'chief')
+    const items = this.#db.prepare(
+      'SELECT item_id, role, text, complete, at FROM transcript WHERE conversation_id = ? ORDER BY seq',
+    )
+    return this.#db
+      .prepare(
+        'SELECT * FROM conversation WHERE participant_id = ? AND ended_at IS NOT NULL ORDER BY id',
+      )
+      .all(chief.id)
+      .map((row) => ({
+        ...conversationView(row),
+        items: items.all(row.id).map((item) => ({
+          id: item.item_id,
+          role: item.role,
+          text: item.text,
+          complete: item.complete === 1,
+          at: item.at,
+        })),
+      }))
+  }
+
+  /**
+   * What waits on the chief now, for a lead that takes over: members'
+   * questions to it without an answer, results it has not decided on, and its
+   * own unfinished tasks.
+   */
+  leadOpenWork(projectId) {
+    const chief = this.#participantByHandle(projectId, 'chief')
+    return {
+      questions: this.#db
+        .prepare(
+          `${MESSAGE_SELECT}
+           WHERE m.project_id = ? AND m.recipient_id = ? AND m.kind = 'question'
+             AND m.state NOT IN ('gated', 'cancelled')
+             AND NOT EXISTS (
+               SELECT 1 FROM message a WHERE a.reply_to = m.id AND a.kind = 'answer'
+                 AND a.state NOT IN ('gated', 'cancelled')
+             )
+           ORDER BY m.id`,
+        )
+        .all(projectId, chief.id)
+        .map(messageView),
+      results: this.#db
+        .prepare(
+          `${TASK_SELECT} WHERE t.project_id = ? AND t.requester_id = ? AND t.state = 'done'
+           ORDER BY t.number`,
+        )
+        .all(projectId, chief.id)
+        .map(taskView),
+      own: this.#db
+        .prepare(
+          `${TASK_SELECT} WHERE t.project_id = ? AND t.assignee_id = ?
+             AND t.state IN ('queued', 'working', 'waiting', 'paused')
+           ORDER BY t.number`,
+        )
+        .all(projectId, chief.id)
+        .map(taskView),
+    }
+  }
+
+  /**
+   * The human's Switch lead: the chief runs on `harness` from now on, on the
+   * saved `agent` (its model and effort) or else the harness's own default.
+   * Its conversation ends here: a conversation belongs to one harness, and
+   * every switch starts a fresh one that reads the history. What it was out
+   * of quota for was the old harness's account, so that clears. The window is
+   * the caller's to close before and open after; `cut` records that the old
+   * lead was stopped in the middle of a turn, for the handoff to say.
+   */
+  switchChief(projectId, { harness, agent = null, cut = false }) {
+    if (!CHIEF_HARNESSES.includes(harness)) {
+      throw new LedgerError(
+        'invalid-harness',
+        `a chief runs on ${CHIEF_HARNESSES.join(', ')}, not ${JSON.stringify(harness)}`,
+      )
+    }
+    if (agent !== null && (typeof agent !== 'string' || !AGENT_ID.test(agent))) {
+      throw new LedgerError('invalid-agent', `invalid agent ${JSON.stringify(agent)}`)
+    }
+    return this.#write(() => {
+      const chief = this.#participantByHandle(projectId, 'chief')
+      this.#db
+        .prepare('UPDATE participant SET harness = ?, agent = ?, out_until = NULL WHERE id = ?')
+        .run(harness, agent, chief.id)
+      this.#db
+        .prepare(
+          'UPDATE conversation SET ended_at = ? WHERE participant_id = ? AND ended_at IS NULL',
+        )
+        .run(this.#at(), chief.id)
+      this.#log(projectId, 'chief.switched', {
+        from: { harness: chief.harness, agent: chief.agent },
+        to: { harness, agent },
+        cut: cut === true,
+      })
+      return this.project(projectId)
+    })
+  }
+
+  /** The project's latest Switch lead, as `switchChief` logged it, or null. */
+  lastSwitch(projectId) {
+    const row = this.#db
+      .prepare(
+        `SELECT data FROM event WHERE project_id = ? AND kind = 'chief.switched'
+         ORDER BY id DESC LIMIT 1`,
+      )
+      .get(projectId)
+    return row === undefined ? null : JSON.parse(row.data)
   }
 
   endConversation(conversationId) {
@@ -1655,13 +1780,37 @@ class Ledger {
     })
   }
 
-  retryDelivery(messageId, reason) {
+  /** A message not yet delivered that no longer applies: it will not be delivered. */
+  cancelMessage(messageId, reason) {
+    requireText(reason, 'reason', 1000)
+    return this.#write(() => {
+      const message = this.#message(messageId)
+      if (message === null || !['queued', 'delivering'].includes(message.state)) {
+        throw new LedgerError(
+          'not-pending',
+          `message ${messageId} is not waiting to be delivered`,
+          409,
+        )
+      }
+      this.#db
+        .prepare(`UPDATE message SET state = 'cancelled', reason = ? WHERE id = ?`)
+        .run(reason, messageId)
+      this.#log(message.projectId, 'delivery.cancelled', { message: messageId, reason })
+      return this.#message(messageId)
+    })
+  }
+
+  /** Queued again; `refund` gives back the attempt when the window went before it could land. */
+  retryDelivery(messageId, reason, { refund = false } = {}) {
     requireText(reason, 'reason', 1000)
     return this.#write(() => {
       const message = this.#requireMessage(messageId, 'delivering')
       this.#db
-        .prepare(`UPDATE message SET state = 'queued', reason = ? WHERE id = ?`)
-        .run(reason, messageId)
+        .prepare(
+          `UPDATE message SET state = 'queued', reason = ?, attempts = MAX(attempts - ?, 0)
+           WHERE id = ?`,
+        )
+        .run(reason, refund ? 1 : 0, messageId)
       this.#log(message.projectId, 'delivery.retried', { message: messageId, reason })
       return this.#message(messageId)
     })

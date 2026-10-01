@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -16,6 +17,7 @@ import { startIntegration } from './harness.mjs'
 
 const CORE_EDITOR = fileURLToPath(new URL('./core-editor.mjs', import.meta.url))
 const FAKE_AGENT = fileURLToPath(new URL('./fake-agent.mjs', import.meta.url))
+const CF = fileURLToPath(new URL('../../bin/cf.mjs', import.meta.url))
 
 test('a chief hands a task to a worker through the board and the result lands in its window', async () => {
   const app = await startIntegration({
@@ -168,6 +170,63 @@ test('one member runs two tasks at once, each in a session and window of its own
       sessions.map((handle) => `p${project}-${handle}`).sort(),
       'each session had a window of its own',
     )
+  } finally {
+    await app.close()
+  }
+})
+
+test('switching the lead opens a fresh window that is handed the lead and reads what the old one was told', async () => {
+  const app = await startIntegration({
+    editor: CORE_EDITOR,
+    fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
+  })
+  try {
+    const opened = await app.requestNode('project.open', {
+      directory: app.workspace,
+      harness: 'claude-code',
+    })
+    const project = opened.project.id
+    const leads = () => app.openFrames.filter((frame) => frame.id === `p${project}-chief`)
+    const sessionOf = (frame) => frame.argv[frame.argv.indexOf('--session-id') + 1]
+    const [first] = leads()
+    await app.waitFor(async () => {
+      const { board } = await app.requestNode('board.get', { project })
+      return board.lanes.find((l) => l.participant.handle === 'chief').activity.state === 'idle'
+    })
+    // The human tells the first lead something only it knows.
+    const typed = await app.requestRust('pane.input', {
+      id: first.id,
+      generation: first.generation,
+      bytes: [...Buffer.from('Reply with exactly: TERN-7314\r')],
+    })
+    assert.equal(typed.ok, true, JSON.stringify(typed))
+    await app.waitFor(() => app.transcript(sessionOf(first)).includes('"text":"TERN-7314"'))
+
+    const switched = await app.requestNode('chief.switch', { project, agent: 'worker' })
+    assert.equal(switched.ok, true, JSON.stringify(switched))
+    await app.waitFor(() => leads().length === 2)
+    const second = leads()[1]
+    assert.notEqual(sessionOf(second), sessionOf(first), 'every switch starts fresh')
+    assert.equal(second.argv[second.argv.indexOf('--model') + 1], 'fake', "the agent's model")
+    await app.waitFor(
+      () => app.transcript(sessionOf(second)).includes('You are the lead now'),
+      30_000,
+    )
+    const { board } = await app.requestNode('board.get', { project })
+    assert.equal(board.project.state, 'open', 'a switch is not a close')
+
+    // The new lead reads, with its own token, what the human told the old one.
+    const history = execFileSync(process.execPath, [CF, 'history'], {
+      env: {
+        ...app.env,
+        CONSENSFLOW_URL: second.env.CONSENSFLOW_URL,
+        CONSENSFLOW_TOKEN: second.env.CONSENSFLOW_TOKEN,
+      },
+      encoding: 'utf8',
+    })
+    assert.match(history, /Human: Reply with exactly: TERN-7314/)
+    assert.match(history, /Claude Code lead: TERN-7314/)
+    assert.ok(!history.includes('[ConsensFlow m-'), 'no page can prove a delivery arrived')
   } finally {
     await app.close()
   }

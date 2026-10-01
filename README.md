@@ -100,6 +100,13 @@ projects.
   live window.
 - **New project.** A folder, the chief's harness, the staff (the last project's
   ticked already) and whether human approval is required.
+- **Switch lead.** On the chief's row: the lead goes on in a new window on
+  another harness, on its default model or on any saved agent's. A lead at
+  work finishes its turn first, or is cut off if you say so; it can first be
+  asked to write down where things stand. Its first message hands it the lead:
+  what waits on the board, your last words, and `cf history`, which pages
+  through what you and the leads before it said. The staff keeps working, and
+  what was on its way to the lead goes to the new one.
 - **Staff.** Which agents this project may use, each with its roles and what
   it runs (model, harness, effort, tier), plus the approval setting. The
   rows read by role, then by work tier with the most critical first; the

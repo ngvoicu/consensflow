@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer } from 'node:http'
 import { LedgerError } from '../ledger/index.js'
+import { historyPage } from './handoff.js'
 
 /**
  * The agents' door into the new core: what `cf` calls from inside a window.
@@ -94,10 +95,34 @@ export async function startApi({
         task: task === null ? null : summary(task),
       })
     }
+    // A lead the human switched in reads what the human and the leads before it said.
+    if (at === 'GET /api/history') {
+      if (participant.role !== 'chief') {
+        throw new Refusal(403, 'not-the-lead', "the lead history is the lead's to read")
+      }
+      const page = Number(url.searchParams.get('page') ?? '1')
+      const find = url.searchParams.get('find')
+      try {
+        return ok(
+          historyPage(ledger.leadHistory(project.id), {
+            message: (id) => ledger.message(id),
+            page,
+            find: find === null || find === '' ? null : find,
+            tools: url.searchParams.get('tools') === '1',
+          }),
+        )
+      } catch (cause) {
+        if (cause instanceof RangeError) throw new Refusal(400, 'no-such-page', cause.message)
+        throw cause
+      }
+    }
     if (at === 'GET /api/staff') {
       return ok({
         members: project.participants
-          .filter((member) => member.agent !== null && member.memberId === null)
+          .filter(
+            (member) =>
+              member.role !== 'chief' && member.agent !== null && member.memberId === null,
+          )
           .map((member) => {
             const row = roster(member.agent)
             return {

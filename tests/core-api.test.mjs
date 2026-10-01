@@ -526,6 +526,35 @@ describe('the agents API', () => {
   })
 })
 
+describe('cf history', () => {
+  it('lets the lead read what the human and the leads before it said, in pages and by search; nobody else', async () => {
+    await withApi(async ({ ledger, project, token, cf }) => {
+      const chief = ledger.project(project.id).participants.find((p) => p.handle === 'chief')
+      const first = ledger.startConversation(chief.id, { harness: 'claude-code' })
+      ledger.copyTranscript(first.id, [
+        { id: 'a', role: 'user', text: 'The codeword is tern' },
+        { id: 'b', role: 'assistant', text: 'Noted' },
+        { id: 'c', role: 'tool', text: 'ok 3 passed' },
+      ])
+      ledger.switchChief(project.id, { harness: 'codex' })
+      const lead = token('chief')
+      const read = await cf(lead, 'history')
+      assert.equal(read.code, 0, read.err)
+      assert.match(read.out, /^Lead history, page 1 of 1: the most recent\./)
+      assert.match(read.out, /Human: The codeword is tern\n\nClaude Code lead: Noted/)
+      assert.ok(!read.out.includes('ok 3 passed'))
+      assert.match((await cf(lead, 'history', '--tools')).out, /Tool output:\nok 3 passed/)
+      assert.match((await cf(lead, 'history', '--find', 'codeword')).out, /entries with "codeword"/)
+      const beyond = await cf(lead, 'history', '--page', '3')
+      assert.notEqual(beyond.code, 0)
+      assert.match(beyond.err, /there is 1 page/)
+      const member = await cf(token('zeus'), 'history')
+      assert.notEqual(member.code, 0)
+      assert.match(member.err, /the lead history is the lead's to read/)
+    })
+  })
+})
+
 describe('cf inside a core window', () => {
   it('hands out a task and lists the board in plain sentences', async () => {
     await withApi(async ({ token, cf }) => {

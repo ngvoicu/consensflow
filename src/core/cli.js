@@ -36,6 +36,9 @@ export const USAGE = `cf inside a ConsensFlow window: the board's commands.
   cf answer m-12 "…"                answer a question put to you
   cf staff                           the members: roles and tiers
   cf whoami                         your project, role and current task
+  cf history [--page 2] [--find "…"] [--tools]
+                                    the chief's: what the human and the leads before you
+                                    said, newest page first (after the lead was switched)
 
 Any "…" can be - to read the text from standard input, as written:
   cf task add --tier standard - <<'BRIEF'   (then the text, then a line BRIEF)
@@ -216,6 +219,15 @@ async function command(verb, rest, call, input) {
                 .map((member) => `@${member.handle} · ${member.roles.join('+')} · ${member.tier}`)
                 .join('\n'),
       }
+    }
+    case 'history': {
+      const { flags } = split(rest, ['--tools'], ['--page', '--find'])
+      const query = new URLSearchParams()
+      if (flags['--page'] !== undefined) query.set('page', flags['--page'])
+      if (flags['--find'] !== undefined) query.set('find', flags['--find'])
+      if (flags['--tools']) query.set('tools', '1')
+      const page = await call('GET', `/api/history${query.size > 0 ? `?${query}` : ''}`)
+      return { data: page, text: page.text }
     }
     case 'whoami': {
       const me = await call('GET', '/api/whoami')

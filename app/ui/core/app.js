@@ -110,6 +110,7 @@ const board = new BoardView(boardRoot, {
       await core('session.end', { project: state.selected, handle: participant.handle })
       note(`@${participant.handle} is gone; its tasks stay on @${participant.member}'s lane.`)
     }),
+  onSwitchLead: (chief) => act(() => openSwitchLead(chief)),
   onRedraw: () => render(),
 })
 
@@ -614,6 +615,61 @@ newProjectForm.addEventListener('submit', (event) => {
 newProjectDialog
   .querySelector('[value="cancel"]')
   .addEventListener('click', () => newProjectDialog.close())
+
+// Switch the lead: the chief goes on in a new window on another harness or
+// model, and the core hands it the lead (the dispatcher's switchChief).
+const switchLeadDialog = $('#switch-lead-dialog')
+const switchLeadForm = switchLeadDialog.querySelector('form')
+
+async function openSwitchLead(chief) {
+  const { agents, missing } = await core('agents.list')
+  const groups = CHIEF_HARNESSES.filter(
+    ([kind]) => !missing.includes(HARNESS_OF_KIND[kind] ?? kind),
+  ).map(([kind, label]) => {
+    const group = element('optgroup')
+    group.label = label
+    group.append(new Option(`${label}, on its own default model`, `harness:${kind}`))
+    const runsHere = agents
+      .filter((agent) => !agent.hidden && (HARNESS_OF_KIND[kind] ?? kind) === agent.harness)
+      .sort((a, b) => a.name.localeCompare(b.name))
+    for (const agent of runsHere) {
+      group.append(new Option(`${agent.name} · ${runsLabel(agent, null)}`, `agent:${agent.name}`))
+    }
+    return group
+  })
+  if (groups.length === 0) {
+    report('No harness is installed here: install one from Agents, Harnesses.')
+    return
+  }
+  const select = switchLeadForm.elements.lead
+  select.replaceChildren(...groups)
+  // What the lead runs on now is no switch.
+  const current = chief.agent === null ? `harness:${chief.harness}` : `agent:${chief.agent}`
+  for (const option of select.options) option.disabled = option.value === current
+  select.value = [...select.options].find((option) => !option.disabled)?.value ?? ''
+  switchLeadForm.elements.note.checked = false
+  switchLeadDialog.showModal()
+}
+
+switchLeadForm.addEventListener('submit', (event) => {
+  event.preventDefault()
+  const [type, name] = switchLeadForm.elements.lead.value.split(':')
+  const when = switchLeadForm.elements.when.value
+  const askFirst = switchLeadForm.elements.note.checked
+  switchLeadDialog.close()
+  void act(async () => {
+    await core('chief.switch', {
+      project: state.selected,
+      ...(type === 'agent' ? { agent: name } : { harness: name }),
+      when,
+      note: askFirst,
+    })
+    state.focus = 'chief'
+  })
+})
+switchLeadDialog
+  .querySelector('[value="cancel"]')
+  .addEventListener('click', () => switchLeadDialog.close())
 
 // The project staff: who the chief may hand work to.
 const teamDialog = $('#staff-dialog')

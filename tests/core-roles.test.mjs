@@ -38,6 +38,7 @@ describe('role instructions for the new core', () => {
           'cf task done',
           'cf note --human',
           'cf staff',
+          'cf history',
         ])
           assert.ok(text.includes(command), `${role} learns ${command}`)
         // The chief asks the human in its terminal: no command asks on the board.

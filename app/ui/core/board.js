@@ -13,6 +13,14 @@
  */
 
 const ACTIVE = ['working', 'waiting', 'queued', 'paused', 'open']
+/** The harnesses a lead runs on, as the human knows them. */
+const HARNESS_NAMES = {
+  'claude-code': 'Claude Code',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+  pi: 'Pi',
+  devin: 'Devin',
+}
 /** What the chief (or the human) may stop: a task on the board or in a window. */
 const PAUSABLE = ['open', 'queued', 'working', 'waiting']
 /** What the human may give back to the board for another member of its tier. */
@@ -447,29 +455,39 @@ export class BoardView {
       'span',
       'row-status',
       lane.agentMissing
-        ? `No agent named ${participant.agent} any more: define one under Agents, or remove @${participant.handle} from the staff`
-        : out
-          ? `Out of quota until ${clock(participant.outUntil)}`
-          : activity?.state === 'waiting' && activity.reason
-            ? `Waiting: ${activity.reason}`
-            : resting(participant, activity)
-              ? sessionsNote(lane, board)
-              : participant.member !== null && (activity?.state ?? 'closed') === 'closed'
-                ? 'Terminal closed'
-                : (ACTIVITY_LABEL[activity?.state] ?? 'No window'),
+        ? coordinator
+          ? `No agent named ${participant.agent} any more: define one under Agents, or switch the lead`
+          : `No agent named ${participant.agent} any more: define one under Agents, or remove @${participant.handle} from the staff`
+        : lane.switching
+          ? `Switching the lead to ${lane.switching.agent ?? HARNESS_NAMES[lane.switching.harness] ?? lane.switching.harness} after this turn`
+          : out
+            ? `Out of quota until ${clock(participant.outUntil)}`
+            : activity?.state === 'waiting' && activity.reason
+              ? `Waiting: ${activity.reason}`
+              : resting(participant, activity)
+                ? sessionsNote(lane, board)
+                : participant.member !== null && (activity?.state ?? 'closed') === 'closed'
+                  ? 'Terminal closed'
+                  : (ACTIVITY_LABEL[activity?.state] ?? 'No window'),
     )
     status.dataset.state = lane.agentMissing
       ? 'missing'
-      : out
-        ? 'out'
-        : (activity?.state ?? 'closed')
+      : lane.switching
+        ? 'switching'
+        : out
+          ? 'out'
+          : (activity?.state ?? 'closed')
     const tools = element('div', 'row-tools')
     // A member's row heads its sessions and has no terminal of its own. A
     // session's closed terminal opens again on its own conversation; an open
     // one closes; the session is deleted from here too, and a closed one's
     // copy is on its last task's card.
     const heading =
-      participant.agent !== null && participant.member === null && pane === null && !lane.ended
+      participant.role !== 'chief' &&
+      participant.agent !== null &&
+      participant.member === null &&
+      pane === null &&
+      !lane.ended
     const session = participant.member !== null
     const latest = lane.tasks.at(-1)
     if (!heading) {
@@ -504,6 +522,16 @@ export class BoardView {
           ),
         )
       }
+    }
+    if (coordinator) {
+      tools.append(
+        button(
+          'Switch lead',
+          'quiet-button',
+          () => this.#actions.onSwitchLead(participant),
+          'Switch the lead to another harness or model',
+        ),
+      )
     }
     if (session) {
       tools.append(

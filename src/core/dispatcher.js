@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { RESUME_WORDS } from '../ledger/index.js'
+import { HANDOFF_TITLE, handoffText, historyPages, lastWords } from './handoff.js'
 
 /**
  * The dispatcher: the only actor in the daemon. Agents never open panes or
@@ -156,6 +157,12 @@ export class Dispatcher {
   /** What a participant's window is doing: starting, working, idle, waiting (with why), closed. */
   activity(participantId) {
     return this.#runtime.get(participantId)?.activity ?? { state: 'closed' }
+  }
+
+  /** The Switch lead waiting for this lead's turn to end, `{harness, agent}`, or null. */
+  pendingSwitch(participantId) {
+    const pending = this.#runtime.get(participantId)?.pendingSwitch ?? null
+    return pending === null ? null : { harness: pending.harness, agent: pending.agent }
   }
 
   /** The live window of a participant, `{id, generation}`, or null. */
@@ -377,7 +384,9 @@ export class Dispatcher {
       })
     }
     if (participant.role === 'chief') {
-      if (project.state === 'open') this.#ledger.setProjectState(project.id, 'suspended')
+      if (project.state === 'open' && !runtime.switching) {
+        this.#ledger.setProjectState(project.id, 'suspended')
+      }
     } else {
       const task = this.#ledger.activeTask(participantId)
       if (task !== null) this.#stall(project, task, `@${participant.handle}'s window closed`)
@@ -421,13 +430,14 @@ export class Dispatcher {
     const runtime = this.#runtimeOf(participant.id)
     if (runtime.pane !== null) return this.#stepOpen(project, participant, runtime)
     if (project.state !== 'open') return
+    // A lead whose agent is gone stays closed: its launch told the human, who switches it.
+    if (participant.role === 'chief' && this.#agentGone(participant)) return
     const next = this.#ledger.nextDelivery(participant.id)
     if (next !== null) return this.#launch(project, participant, next)
     if (participant.role === 'chief') return
     // A member whose agent is gone must not wait for a window that will not
     // open: its held work goes back to the board now.
-    if (participant.agent !== null && this.#roster(participant.agent) === null)
-      return this.#withoutAgent(project, participant, null)
+    if (this.#agentGone(participant)) return this.#withoutAgent(project, participant, null)
     // A member's session is its task's: with the window gone (a restart, a
     // crash) and nothing due to it, nobody is doing the work any more.
     const task = this.#ledger.activeTask(participant.id)
@@ -486,6 +496,11 @@ export class Dispatcher {
       return
     }
     if (out) {
+      // A lead out of quota has no turn to finish: the switch the human asked for goes now.
+      if (runtime.pendingSwitch !== null) {
+        await this.#performSwitch(project, participant, runtime, runtime.pendingSwitch)
+        return
+      }
       this.#setActivity(runtime, {
         state: 'out',
         reason: `out of quota until ${owner.outUntil}`,
@@ -509,10 +524,207 @@ export class Dispatcher {
         return
       }
     }
-    if (runtime.delivering === null && observed.settled && !observed.waiting && !drawing) {
+    const idle = runtime.delivering === null && observed.settled && !observed.waiting && !drawing
+    if (runtime.pendingSwitch !== null) {
+      await this.#awaitSwitch(project, participant, runtime, observed, idle)
+      return
+    }
+    if (idle) {
       const next = this.#ledger.nextDelivery(participant.id)
       if (next !== null) await this.#deliver(runtime, next)
     }
+  }
+
+  /**
+   * A switch the human asked for after the lead's turn: once the turn is
+   * over (and the note asking where things stand came and was answered, when
+   * they asked for one), the lead goes. Until then nothing else is delivered
+   * to it, so its turn can end.
+   */
+  async #awaitSwitch(project, chief, runtime, observed, idle) {
+    if (!idle) return
+    const { note } = runtime.pendingSwitch
+    const asked = note === null ? null : this.#ledger.message(note)
+    if (asked?.state === 'queued') {
+      await this.#deliver(runtime, asked)
+      return
+    }
+    if (asked !== null && asked.state === 'delivered') {
+      const at = observed.items.findIndex((item) => item.id === asked.receipt?.item)
+      const answered = observed.items
+        .slice(at + 1)
+        .some((item) => item.role === 'assistant' && item.complete === true)
+      if (at === -1 || !answered) return
+    }
+    await this.#performSwitch(project, chief, runtime, runtime.pendingSwitch)
+  }
+
+  /**
+   * The human's Switch lead: the chief goes on in a fresh window on
+   * `harness`, on the saved `agent` (model and effort) or the harness's own
+   * default, and the window's first message hands it the lead (`#handoff`).
+   * `when: 'turn'` lets a lead at work finish its turn; `note` first asks it
+   * to write down where things stand, and switches once it has answered. A
+   * lead with no window, or out of quota, switches at once.
+   */
+  async switchChief(projectId, { harness, agent = null, when = 'now', note = false }) {
+    if (this.#adapters[harness] === undefined) throw new Error(`no adapter for ${harness}`)
+    if (agent !== null && this.#roster(agent) === null) {
+      throw new Error(`${agent} is not among your agents`)
+    }
+    const project = this.#ledger.project(projectId)
+    const chief = project.participants.find((participant) => participant.role === 'chief')
+    await this.#exclusive(
+      chief.id,
+      async () => {
+        const runtime = this.#runtimeOf(chief.id)
+        if (runtime.pane !== null && !this.#isOut(chief) && (when === 'turn' || note)) {
+          runtime.pendingSwitch = {
+            harness,
+            agent,
+            note: note
+              ? this.#ledger.note(projectId, {
+                  to: 'chief',
+                  body: `The human is moving this project's lead to ${harness}${agent === null ? '' : ` (${agent})`} once you answer. Write down where things stand, for the lead after you: what you and the human decided, what you promised, what you were about to do, and what is unresolved. Do not start anything new.`,
+                }).id
+              : null,
+          }
+          this.#changed()
+          return
+        }
+        await this.#performSwitch(project, chief, runtime, { harness, agent })
+      },
+      { wait: true },
+    )
+    return this.#ledger.project(projectId)
+  }
+
+  /**
+   * The switch itself, holding the chief's turn: one last look at the old
+   * window (its words become history; a delivery whose header shows there
+   * arrived), what it was still receiving goes back to the queue with its
+   * attempt, the window closes without suspending the project, the ledger
+   * moves the chief, and the new window opens with the handoff.
+   */
+  async #performSwitch(project, chief, runtime, { harness, agent }) {
+    runtime.pendingSwitch = null
+    let cut = false
+    const { pane } = runtime
+    if (pane !== null) {
+      const observed = await runtime.adapter
+        .observe({
+          launch: runtime.launch,
+          pane,
+          conversation: this.#ledger.currentConversation(chief.id),
+          host: this.#host,
+        })
+        .catch(() => null)
+      if (observed !== null) {
+        this.#copyTranscript(chief, runtime, observed)
+        if (runtime.delivering !== null) this.#confirmArrival(runtime, observed)
+        cut = !observed.settled
+      }
+      const { delivering } = runtime
+      runtime.delivering = null
+      if (
+        delivering !== null &&
+        this.#ledger.message(delivering.messageId)?.state === 'delivering'
+      ) {
+        this.#ledger.retryDelivery(
+          delivering.messageId,
+          'the lead was switched before it arrived',
+          {
+            refund: true,
+          },
+        )
+      }
+      runtime.switching = true
+      try {
+        await this.#host.kill(pane).catch(() => {})
+        // The window's exit is the switch's own, whether its event came already or comes later.
+        if (runtime.pane?.id === pane.id && runtime.pane.generation === pane.generation) {
+          await this.paneExited(pane)
+        }
+      } finally {
+        runtime.switching = false
+      }
+    }
+    // A handoff still on its way is an earlier switch's: this one writes its own.
+    for (const message of this.#ledger.inbox(chief.id)) {
+      if (
+        message.kind === 'note' &&
+        message.sender === null &&
+        ['queued', 'delivering'].includes(message.state) &&
+        message.body.startsWith(HANDOFF_TITLE)
+      ) {
+        this.#ledger.cancelMessage(message.id, 'the lead was switched again')
+      }
+    }
+    this.#ledger.switchChief(project.id, { harness, agent, cut })
+    Object.assign(runtime, {
+      quota: null,
+      lowUntil: null,
+      copied: null,
+      interrupted: null,
+      held: null,
+    })
+    this.#changed()
+    const current = this.#ledger.project(project.id)
+    if (current.state !== 'open') return
+    await this.#launch(
+      current,
+      current.participants.find((participant) => participant.role === 'chief'),
+      null,
+    )
+  }
+
+  /**
+   * The note that hands the lead to a fresh window when there is a history
+   * to hand over, written from the ledger (see `handoff.js`), so it needs no
+   * turn of the old lead's; null for a project's first lead.
+   */
+  #handoff(project, chief) {
+    const history = this.#ledger.leadHistory(project.id)
+    if (!history.some((conversation) => conversation.items.length > 0)) return null
+    const switched = this.#ledger.lastSwitch(project.id)
+    const message = (id) => this.#ledger.message(id)
+    return this.#ledger.note(project.id, {
+      to: 'chief',
+      body: handoffText({
+        from: switched?.from ?? { harness: history.at(-1).harness, agent: null },
+        to: { harness: chief.harness, agent: chief.agent },
+        open: this.#ledger.leadOpenWork(project.id),
+        last: lastWords(history),
+        cut: switched?.cut === true,
+        pages: historyPages(history, { message }),
+      }),
+    })
+  }
+
+  /** A participant whose saved agent the human has since deleted. */
+  #agentGone(participant) {
+    return participant.agent !== null && this.#roster(participant.agent) === null
+  }
+
+  /**
+   * A lead whose agent is gone does not open: the human hears why, and what
+   * it was to receive waits for the lead they switch in, its attempt given back.
+   */
+  #leadWithoutAgent(project, chief, delivering) {
+    this.#ledger.note(project.id, {
+      to: 'human',
+      body: `The lead runs on ${chief.agent}, which is no longer among your agents: add it back under Agents, or switch the lead.`,
+    })
+    if (delivering !== null) {
+      this.#ledger.retryDelivery(
+        delivering.messageId,
+        `${chief.agent} is no longer among your agents`,
+        {
+          refund: true,
+        },
+      )
+    }
+    this.#changed()
   }
 
   /**
@@ -597,20 +809,27 @@ export class Dispatcher {
     return `${deliveryText(brief)}\n\n${text}`
   }
 
-  #watchArrival(runtime, observed) {
+  /** Whether the message on its way shows in the window's record; it is confirmed if so. */
+  #confirmArrival(runtime, observed) {
     const { delivering } = runtime
     const arrived = observed.items.find(
       (item) => RECEIVED_ROLES.has(item.role) && item.text.includes(delivering.marker),
     )
-    if (arrived !== undefined) {
-      this.#ledger.confirmDelivery(delivering.messageId, { item: arrived.id })
-      runtime.delivering = null
-      this.#changed()
-      return
-    }
+    if (arrived === undefined) return false
+    this.#ledger.confirmDelivery(delivering.messageId, { item: arrived.id })
+    runtime.delivering = null
+    this.#changed()
+    return true
+  }
+
+  #watchArrival(runtime, observed) {
+    if (this.#confirmArrival(runtime, observed)) return
+    const { delivering } = runtime
     const waited = this.#now() - delivering.since
     if (delivering.launch) {
-      if (waited <= this.#launchTimeoutMs) return
+      // The lead's window is the human's: however long it takes to show its
+      // first message (the handoff), it is never closed for that.
+      if (delivering.chief || waited <= this.#launchTimeoutMs) return
       runtime.delivering = null
       this.#host.kill(runtime.pane).catch(() => {})
       this.#settleFailure(delivering, 'the window never showed its first message', { retry: false })
@@ -727,19 +946,27 @@ export class Dispatcher {
     if (adapter === undefined) throw new Error(`no adapter for ${participant.harness}`)
     const conversation = this.#ledger.currentConversation(participant.id)
     const resume = conversation?.nativeSession ?? null
+    // A lead that starts fresh with earlier conversations behind it (the
+    // human switched it, or the window a switch opened never came up) is
+    // handed the lead first; what was queued for it waits for its next turn.
+    const first =
+      participant.role === 'chief' && conversation === null
+        ? (this.#handoff(project, participant) ?? message)
+        : message
     const launchId = randomUUID()
     const generation = this.#nextGeneration()
     const delivering =
-      message === null
+      first === null
         ? null
         : {
-            messageId: message.id,
-            marker: markerOf(message.id),
+            messageId: first.id,
+            marker: markerOf(first.id),
             since: this.#now(),
             launch: true,
             admitted: true,
+            chief: participant.role === 'chief',
           }
-    if (message !== null) this.#ledger.beginDelivery(message.id)
+    if (first !== null) this.#ledger.beginDelivery(first.id)
 
     let plan
     try {
@@ -750,7 +977,8 @@ export class Dispatcher {
       // has deleted from their agents must not fall back to a harness default.
       const agent = participant.agent === null ? null : this.#roster(participant.agent)
       if (participant.agent !== null && agent === null) {
-        await this.#withoutAgent(project, participant, delivering)
+        if (participant.role === 'chief') this.#leadWithoutAgent(project, participant, delivering)
+        else await this.#withoutAgent(project, participant, delivering)
         return
       }
       plan = await adapter.prepare({
@@ -760,7 +988,7 @@ export class Dispatcher {
         project,
         directory: project.directory,
         resume,
-        message: message === null ? null : this.#launchText(project, participant, message, resume),
+        message: first === null ? null : this.#launchText(project, participant, first, resume),
         agent,
         instructions: this.#roles(participant, project),
       })
@@ -1098,6 +1326,8 @@ export class Dispatcher {
         copied: null,
         interrupted: null,
         pinned: false,
+        pendingSwitch: null,
+        switching: false,
         activity: { state: 'closed' },
       }
       this.#runtime.set(participantId, runtime)

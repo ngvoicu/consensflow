@@ -70,8 +70,14 @@ async function withPage(fn) {
     async deleteProject(id) {
       return ledger.deleteProject(id)
     },
+    switched: [],
+    async switchChief(project, request) {
+      dispatcher.switched.push([project, request])
+      return ledger.switchChief(project, request)
+    },
     activity: () => ({ state: 'idle' }),
     pane: () => null,
+    pendingSwitch: () => null,
   }
   const operations = pageOperations({ ledger, dispatcher, env, kick: () => kicks++ })
   try {
@@ -92,6 +98,47 @@ describe('the page protocol of the new core', () => {
     const forwarded = [...list.matchAll(/"([^"]+)"/g)].map((match) => match[1])
     await withPage(async ({ operations }) => {
       assert.deepEqual(Object.keys(operations).sort(), forwarded.sort())
+    })
+  })
+
+  it("switches the lead to a saved agent on its own harness, or to a harness's default, and to nothing not installed here", async () => {
+    await withPage(async ({ operations, dispatcher, env }) => {
+      // Codex and Claude Code are installed here: their commands are on PATH.
+      const bin = path.join(env.HOME, 'bin')
+      await mkdir(bin, { recursive: true })
+      for (const name of ['codex', 'claude', 'codex.cmd', 'claude.cmd']) {
+        await writeFile(path.join(bin, name), '#!/bin/sh\n', { mode: 0o755 })
+      }
+      env.PATH = bin
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        harness: 'pi',
+      })
+      await operations['chief.switch']({
+        project: project.id,
+        agent: 'diana',
+        when: 'turn',
+        note: true,
+      })
+      await operations['chief.switch']({ project: project.id, harness: 'claude-code' })
+      assert.deepEqual(dispatcher.switched, [
+        [project.id, { harness: 'codex', agent: 'diana', when: 'turn', note: true }],
+        [project.id, { harness: 'claude-code', agent: null, when: 'now', note: false }],
+      ])
+      await assert.rejects(
+        operations['chief.switch']({ project: project.id, harness: 'pi', when: 'later' }),
+        /when is now or turn/,
+      )
+      await assert.rejects(
+        operations['chief.switch']({ project: project.id, agent: 'nobody' }),
+        /no agent named nobody/,
+      )
+      // Nothing is installed on a PATH that holds nothing.
+      env.PATH = path.join(env.HOME, 'nowhere')
+      await assert.rejects(
+        operations['chief.switch']({ project: project.id, harness: 'codex' }),
+        /codex is not installed here/,
+      )
     })
   })
 

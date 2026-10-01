@@ -1,7 +1,7 @@
 import { basename } from 'node:path'
 import { missingHarnesses, offerable } from '../harnesses.js'
 import { RESUME_WORDS } from '../ledger/index.js'
-import { agentRow, listAgents } from '../roster.js'
+import { agentRow, harnessForKind, listAgents } from '../roster.js'
 
 /**
  * What the board page may ask of the new core: each operation is the human
@@ -55,6 +55,25 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
 
     'staff.last': async () => ({ staff: lastStaffNow(ledger, env) }),
 
+    // The human's Switch lead: a saved agent (its harness, model and effort),
+    // or a harness on its own default model. `when: 'turn'` lets a lead at
+    // work finish its turn; `note` first asks it where things stand.
+    'chief.switch': change(
+      async ({ project, agent = null, harness = null, when = 'now', note = false }) => {
+        if (!['now', 'turn'].includes(when)) throw new Error('when is now or turn')
+        const target =
+          agent === null
+            ? { harness, agent: null }
+            : { harness: membership(agent, env).harness, agent }
+        if (missingHarnesses(env).includes(harnessForKind(target.harness))) {
+          throw new Error(`${target.harness} is not installed here`)
+        }
+        return {
+          project: await dispatcher.switchChief(project, { ...target, when, note: note === true }),
+        }
+      },
+    ),
+
     'member.add': change(async ({ project, agent, roles = ['worker'] }) => ({
       member: ledger.addMember(project, { roles, ...membership(agent, env) }),
     })),
@@ -92,6 +111,8 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
               agentRow(lane.participant.agent, env) === undefined,
             activity: dispatcher.activity(lane.participant.id),
             pane: dispatcher.pane(lane.participant.id),
+            // A Switch lead that waits for the lead's turn to end.
+            switching: dispatcher.pendingSwitch(lane.participant.id),
           })),
         },
       }

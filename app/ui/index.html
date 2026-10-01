@@ -828,6 +828,26 @@
     </form>
   </dialog>
 
+  <dialog id="switch-lead-dialog" aria-labelledby="switch-lead-title">
+    <form class="dialog-form">
+      <h2 id="switch-lead-title">Switch the lead</h2>
+      <p class="dialog-help">The lead goes on in a new window on the harness and model you pick. Its first message hands it the lead: what you and the leads before it said, and what waits on the board. The staff keeps working.</p>
+      <label>The lead runs on
+        <select name="lead"></select>
+      </label>
+      <fieldset>
+        <legend>If the lead is in the middle of a turn</legend>
+        <label class="check"><input type="radio" name="when" value="turn" checked>Let it finish its turn, then switch</label>
+        <label class="check"><input type="radio" name="when" value="now">Switch now, cutting its turn off</label>
+      </fieldset>
+      <label class="check"><input type="checkbox" name="note">First ask the lead to write down where things stand</label>
+      <div class="dialog-actions">
+        <button class="quiet-button" type="button" value="cancel">Cancel</button>
+        <button class="primary-button" type="submit">Switch</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="staff-dialog" aria-labelledby="staff-title">
     <form class="dialog-form">
       <h2 id="staff-title">Project staff</h2>

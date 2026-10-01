@@ -827,6 +827,148 @@ describe('conversations', () => {
   })
 })
 
+describe('switching the lead', () => {
+  it('moves the chief to another harness and agent: its conversation ends, its quota clears, the switch is logged', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = staff(ledger)
+      const first = ledger.startConversation(id('chief'), { harness: 'claude-code' })
+      ledger.bindConversation(first.id, 'claude-session')
+      ledger.markOut(id('chief'), { until: '2026-10-02T00:00:00.000Z', reason: 'out' })
+      const before = ledger.project(project.id).participants.find((p) => p.handle === 'chief')
+
+      ledger.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
+      const chief = ledger.project(project.id).participants.find((p) => p.handle === 'chief')
+      assert.deepEqual(
+        [chief.harness, chief.agent, chief.outUntil, chief.outSince],
+        ['codex', 'astraeus', null, before.outSince],
+        "the old harness's quota is not the new one's; when it was marked stays",
+      )
+      assert.equal(ledger.currentConversation(id('chief')), null, 'every switch starts fresh')
+      const switched = ledger.events(project.id).filter((e) => e.kind === 'chief.switched')
+      assert.deepEqual(switched.at(-1).data, {
+        from: { harness: 'claude-code', agent: null },
+        to: { harness: 'codex', agent: 'astraeus' },
+        cut: false,
+      })
+      assert.deepEqual(ledger.lastSwitch(project.id), switched.at(-1).data)
+
+      ledger.switchChief(project.id, { harness: 'pi', cut: true })
+      assert.equal(ledger.lastSwitch(project.id).cut, true, 'the old lead was cut mid-turn')
+      const back = ledger.project(project.id).participants.find((p) => p.handle === 'chief')
+      assert.deepEqual([back.harness, back.agent], ['pi', null], "the harness's own default")
+      for (const harness of ['kimi', 'image', 'nope']) {
+        assert.throws(() => ledger.switchChief(project.id, { harness }), {
+          code: 'invalid-harness',
+        })
+      }
+      assert.throws(() => ledger.switchChief(project.id, { harness: 'pi', agent: 'no such!' }), {
+        code: 'invalid-agent',
+      })
+    })
+  })
+
+  it("keeps the lead's earlier conversations as its history: oldest first, each with its harness and items", async () => {
+    await withLedger((ledger) => {
+      const { project, id } = staff(ledger)
+      const claude = ledger.startConversation(id('chief'), { harness: 'claude-code' })
+      ledger.copyTranscript(claude.id, [
+        { id: 'c1', role: 'user', text: 'the codeword is tern' },
+        { id: 'c2', role: 'assistant', text: 'noted' },
+      ])
+      ledger.switchChief(project.id, { harness: 'codex' })
+      const codex = ledger.startConversation(id('chief'), { harness: 'codex' })
+      ledger.copyTranscript(codex.id, [{ id: 'x1', role: 'user', text: 'and the next step?' }])
+      ledger.switchChief(project.id, { harness: 'pi' })
+      ledger.startConversation(id('chief'), { harness: 'pi' })
+
+      const history = ledger.leadHistory(project.id)
+      assert.deepEqual(
+        history.map((c) => [c.harness, c.items.map((i) => [i.role, i.text])]),
+        [
+          [
+            'claude-code',
+            [
+              ['user', 'the codeword is tern'],
+              ['assistant', 'noted'],
+            ],
+          ],
+          ['codex', [['user', 'and the next step?']]],
+        ],
+        'the current conversation is not history',
+      )
+      assert.ok(history.every((c) => c.endedAt !== null))
+    })
+  })
+
+  it('lists what waits on the lead: questions to it, results it has not decided, its own unfinished tasks', async () => {
+    await withLedger((ledger) => {
+      const { project } = staff(ledger)
+      const parser = ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
+      deliver(ledger, parser.message)
+      const lexer = ledger.createTask(project.id, { from: 'chief', to: 'diana', body: 'Lexer' })
+      deliver(ledger, lexer.message)
+      const question = ledger.ask(project.id, {
+        from: 'zeus',
+        to: 'chief',
+        task: 1,
+        body: 'Which grammar?',
+      })
+      ledger.recordResult(project.id, 2, { body: 'Lexer done' })
+      const own = ledger.createTask(project.id, { from: 'human', to: 'chief', body: 'Plan' })
+      deliver(ledger, own.message)
+
+      const open = ledger.leadOpenWork(project.id)
+      assert.deepEqual(
+        open.questions.map((m) => [m.id, m.sender, m.taskNumber]),
+        [[question.id, 'zeus', 1]],
+      )
+      assert.deepEqual(
+        open.results.map((t) => [t.number, t.assignee]),
+        [[2, 'diana']],
+      )
+      assert.deepEqual(
+        open.own.map((t) => [t.number, t.state]),
+        [[3, 'working']],
+      )
+
+      deliver(ledger, ledger.answer(question.id, { from: 'chief', body: 'LL(1)' }))
+      ledger.acceptTask(project.id, 2, { by: 'chief' })
+      const after = ledger.leadOpenWork(project.id)
+      assert.deepEqual([after.questions, after.results], [[], []])
+    })
+  })
+
+  it('gives back the attempt of a delivery a switch cut off before it could land', async () => {
+    await withLedger((ledger) => {
+      const { project } = staff(ledger)
+      const note = ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'Ready' })
+      ledger.beginDelivery(note.id)
+      ledger.retryDelivery(note.id, 'the lead was switched', { refund: true })
+      assert.deepEqual(
+        [ledger.message(note.id).state, ledger.message(note.id).attempts],
+        ['queued', 0],
+      )
+      ledger.beginDelivery(note.id)
+      ledger.retryDelivery(note.id, 'the window closed')
+      assert.equal(ledger.message(note.id).attempts, 1, 'an ordinary retry keeps the count')
+    })
+  })
+
+  it('does not count a chief with a saved agent as staff', async () => {
+    await withLedger((ledger) => {
+      const { project } = staff(ledger)
+      ledger.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
+      assert.deepEqual(
+        ledger.refreshMemberTiers(() => 'critical').map((change) => change.handle),
+        ['zeus', 'diana'],
+        "the chief's tier is not a member's",
+      )
+      ledger.setProjectState(project.id, 'suspended')
+      assert.equal(ledger.deleteProject(project.id).members, 2)
+    })
+  })
+})
+
 describe('tasks and the inbox queue', () => {
   it('creates a task and queues it for its assignee in one step', async () => {
     await withLedger((ledger) => {
@@ -2853,12 +2995,14 @@ describe('the transcript copy', () => {
     })
   })
 
-  it('cuts an item longer than it keeps, files an unknown role as custom, and skips what has no id', async () => {
+  it("cuts only a tool's output longer than it keeps, files an unknown role as custom, and skips what has no id", async () => {
     await withLedger((ledger) => {
       const { project, conversation } = windowed(ledger)
       const long = 'x'.repeat(TRANSCRIPT_ITEM_MAX + 5)
       ledger.copyTranscript(conversation.id, [
         item('big', 'tool', long),
+        item('said', 'assistant', long),
+        item('asked', 'user', long),
         item('odd', 'system', 'hm'),
         { role: 'user', text: 'no id' },
         item('none', 'assistant', undefined),
@@ -2868,6 +3012,9 @@ describe('the transcript copy', () => {
         items.map((i) => [i.id, i.role, i.text.length]),
         [
           ['big', 'tool', TRANSCRIPT_ITEM_MAX + `\n… (${long.length} characters; cut here)`.length],
+          // Words are kept whole: a lead switched in reads them.
+          ['said', 'assistant', long.length],
+          ['asked', 'user', long.length],
           ['odd', 'custom', 2],
           ['none', 'assistant', 0],
         ],
