@@ -1191,6 +1191,7 @@ mod tests {
     #[cfg(windows)]
     mod windows {
         use std::collections::HashMap;
+        use std::sync::Arc;
 
         use super::super::InputArbiter;
         use crate::pty::conpty_test::{line_echo, open, read_until};
@@ -1201,7 +1202,7 @@ mod tests {
         #[test]
         fn a_paste_and_its_enter_reach_the_child_as_one_line() {
             let _pty_guard = serial_pty_test();
-            let table = PaneTable::new();
+            let table = Arc::new(PaneTable::new());
             let (key, output) = open(&table, &line_echo(), &HashMap::new(), 1 << 20);
             let arbiter = InputArbiter::new(5);
             arbiter.register(&key).expect("register pane");
@@ -1219,7 +1220,7 @@ mod tests {
         #[test]
         fn human_typing_reaches_the_child() {
             let _pty_guard = serial_pty_test();
-            let table = PaneTable::new();
+            let table = Arc::new(PaneTable::new());
             let (key, output) = open(&table, &line_echo(), &HashMap::new(), 1 << 20);
             let arbiter = InputArbiter::new(5);
             arbiter.register(&key).expect("register pane");

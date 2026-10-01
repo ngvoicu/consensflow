@@ -1021,6 +1021,7 @@ fn register_pane_handlers(
         stream_to_page(
             streamed,
             bridge,
+            Arc::clone(&open_panes),
             Arc::clone(&open_arbiter),
             Arc::clone(&open_output),
             Arc::clone(&open_launches),
@@ -1176,9 +1177,12 @@ fn launch_response(result: Result<PaneKey, String>, deduplicated: bool) -> Resul
     })
 }
 
+/// A pane's output, on to the page, and its end: `pane.exit`, after which a
+/// pane whose program has gone leaves the table.
 fn stream_to_page(
     streamed: StreamedPane,
     bridge: Bridge,
+    panes: Arc<PaneTable>,
     arbiter: Arc<InputArbiter>,
     output: Arc<OutputHub>,
     launches: Arc<LaunchRegistry>,
@@ -1197,6 +1201,7 @@ fn stream_to_page(
             "pane.exit",
             json!({"id":key.id,"generation":key.generation}),
         );
+        let _ = panes.retire_exited(&key);
     });
 }
 
