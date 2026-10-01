@@ -1002,7 +1002,6 @@ export class Dispatcher {
     const opened = await this.#host
       .open({
         ...pane,
-        launch: launchId,
         cwd: project.directory,
         argv: plan.argv,
         env: { ...this.#paneEnv(participant, project), ...plan.env, CONSENSFLOW_TOKEN: token },

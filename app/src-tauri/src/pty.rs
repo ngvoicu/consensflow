@@ -46,6 +46,7 @@ pub struct PaneInfo {
     pub idle_ms: u64,
 }
 
+#[cfg(test)]
 pub struct OpenedPane {
     pub key: PaneKey,
     pub reader: Box<dyn Read + Send>,
@@ -298,6 +299,7 @@ impl OutputFlow {
 
 pub struct PaneTable {
     panes: Mutex<HashMap<PaneKey, Pane>>,
+    #[cfg(test)]
     next_id: AtomicU64,
     updating: AtomicBool,
     teardown: Arc<Teardown>,
@@ -347,6 +349,7 @@ impl PaneTable {
     pub fn new() -> Self {
         Self {
             panes: Mutex::new(HashMap::new()),
+            #[cfg(test)]
             next_id: AtomicU64::new(1),
             updating: AtomicBool::new(false),
             teardown: Arc::new(Teardown::default()),
@@ -380,6 +383,10 @@ impl PaneTable {
         Ok(keys)
     }
 
+    /// A test's pane, under a name of the table's own and with its raw
+    /// output: the app opens every pane streamed, at the identity the daemon
+    /// reserved for it (`open_streamed_at`).
+    #[cfg(test)]
     pub fn open(
         &self,
         cwd: &Path,
@@ -392,11 +399,13 @@ impl PaneTable {
         Ok(OpenedPane { key, reader })
     }
 
+    #[cfg(test)]
     fn mint_key(&self) -> PaneKey {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         PaneKey::new(format!("pane-{id}"), 1)
     }
 
+    #[cfg(test)]
     pub fn open_at(
         &self,
         key: PaneKey,
@@ -517,6 +526,7 @@ impl PaneTable {
         Ok(reader)
     }
 
+    #[cfg(test)]
     pub fn open_streamed(
         self: &Arc<Self>,
         cwd: &Path,

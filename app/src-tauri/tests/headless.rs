@@ -4,6 +4,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::{AsRawFd, RawFd};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Mutex, MutexGuard};
 use std::thread;
@@ -247,8 +248,13 @@ impl Drop for Headless {
     }
 }
 
+/// A `pane.open` for a script, at an identity of its own, as the daemon names
+/// every pane it opens.
 fn open_body(script: &str, backlog_bytes: usize) -> Value {
+    static OPENED: AtomicU64 = AtomicU64::new(0);
     json!({
+        "id":format!("pane-{}", OPENED.fetch_add(1, Ordering::Relaxed) + 1),
+        "generation":1,
         "cwd":"/tmp",
         "argv":["/bin/sh","-c",script],
         "env":{},
@@ -1073,26 +1079,35 @@ fn kill_process_group(process_group_id: i32) {
     let _ = unsafe { kill(-process_group_id, SIGKILL) };
 }
 
+/// A window opens at the identity the daemon reserved for it, and only there:
+/// the daemon names every pane it opens, once.
 #[test]
-fn product_bridge_contract_preserves_app_identity_and_launch_deduplication() {
+fn product_bridge_contract_preserves_app_identity_and_opens_it_once() {
     let _pty_guard = serial_headless_test();
     let mut helper = Headless::spawn();
     let mut events = Vec::new();
     let body = json!({
-        "id":"product-pane", "generation":7, "launch":"product-launch",
-        "cwd":"/tmp", "argv":["/bin/cat"], "env":{}
+        "id":"product-pane", "generation":7, "cwd":"/tmp", "argv":["/bin/cat"], "env":{}
     });
     let opened = helper.request("pane.open", body.clone(), &mut events);
     assert_eq!(opened["ok"], true, "production open rejected: {opened}");
-    assert_eq!(opened["id"], "product-pane");
-    assert_eq!(opened["generation"], 7);
-    let duplicate = helper.request("pane.open", body, &mut events);
+    assert_eq!(opened, json!({"ok":true,"id":"product-pane","generation":7}));
     assert_eq!(
-        duplicate["ok"], true,
-        "duplicate launch rejected: {duplicate}"
+        helper.request("pane.open", body, &mut events),
+        json!({"ok":false,"error":"pane product-pane generation 7 is already open"})
     );
-    assert_eq!(duplicate["id"], "product-pane");
-    assert_eq!(duplicate["deduplicated"], true);
+    let unnamed = helper.request(
+        "pane.open",
+        json!({"cwd":"/tmp", "argv":["/bin/cat"], "env":{}}),
+        &mut events,
+    );
+    assert_eq!(unnamed["ok"], false, "an open with no identity: {unnamed}");
+    assert_eq!(
+        helper.request("pane.list", json!({}), &mut events)["panes"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
     helper.close_input_and_wait();
 }
 
@@ -1431,6 +1446,7 @@ while True:
     let opened = helper.request(
         "pane.open",
         json!({
+            "id":"peer-pane", "generation":1,
             "cwd":"/tmp", "argv":["/usr/bin/python3", "-u", "-c", script, socket],
             "env":{}, "size":{"rows":24,"cols":80}, "backlogBytes":4096
         }),

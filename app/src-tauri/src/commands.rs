@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -71,7 +71,7 @@ impl From<PaneOutput> for PaneOutputMessage {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize)]
 struct RosterHandle {
     url: String,
     token: String,
@@ -161,96 +161,6 @@ struct InputQueue {
     workers: Mutex<HashMap<PaneKey, JoinHandle<()>>>,
     page: Mutex<PageInputState>,
     accepting: AtomicBool,
-}
-
-struct LaunchSlot {
-    outcome: Mutex<Option<Result<PaneKey, String>>>,
-    ready: Condvar,
-}
-
-impl LaunchSlot {
-    fn new() -> Self {
-        Self {
-            outcome: Mutex::new(None),
-            ready: Condvar::new(),
-        }
-    }
-
-    fn complete(&self, outcome: Result<PaneKey, String>) {
-        *self
-            .outcome
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = Some(outcome);
-        self.ready.notify_all();
-    }
-
-    fn wait(&self) -> Result<PaneKey, String> {
-        let mut outcome = self
-            .outcome
-            .lock()
-            .map_err(|_| "launch result lock is poisoned".to_string())?;
-        while outcome.is_none() {
-            outcome = self
-                .ready
-                .wait(outcome)
-                .map_err(|_| "launch result lock is poisoned".to_string())?;
-        }
-        outcome
-            .as_ref()
-            .expect("launch outcome checked above")
-            .clone()
-    }
-}
-
-enum LaunchClaim {
-    Owner(Arc<LaunchSlot>),
-    Duplicate(Arc<LaunchSlot>),
-}
-
-struct LaunchRegistry {
-    entries: Mutex<HashMap<String, Arc<LaunchSlot>>>,
-}
-
-impl LaunchRegistry {
-    fn new() -> Self {
-        Self {
-            entries: Mutex::new(HashMap::new()),
-        }
-    }
-
-    fn reserve(&self, id: &str) -> Result<LaunchClaim, String> {
-        let mut entries = self
-            .entries
-            .lock()
-            .map_err(|_| "launch table lock is poisoned".to_string())?;
-        if let Some(slot) = entries.get(id) {
-            return Ok(LaunchClaim::Duplicate(Arc::clone(slot)));
-        }
-        let slot = Arc::new(LaunchSlot::new());
-        entries.insert(id.to_string(), Arc::clone(&slot));
-        Ok(LaunchClaim::Owner(slot))
-    }
-
-    fn remove_id(&self, id: &str) {
-        self.entries
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .remove(id);
-    }
-
-    fn remove_key(&self, key: &PaneKey) {
-        self.entries
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .retain(|_, slot| {
-                slot.outcome
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .as_ref()
-                    .and_then(|outcome| outcome.as_ref().ok())
-                    != Some(key)
-            });
-    }
 }
 
 impl InputQueue {
@@ -849,7 +759,6 @@ impl AppRuntime {
     pub fn start(app: &AppHandle) -> Self {
         let panes = Arc::new(PaneTable::new());
         let output = Arc::new(OutputHub::new());
-        let launches = Arc::new(LaunchRegistry::new());
         let arbiter = Arc::new(InputArbiter::new(ENTER_DELAY_MS));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
 
@@ -879,7 +788,6 @@ impl AppRuntime {
                     Arc::clone(&panes),
                     Arc::clone(&arbiter),
                     Arc::clone(&output),
-                    Arc::clone(&launches),
                     Arc::clone(&inputs),
                 );
                 builder.on_error(|error| eprintln!("consensflow bridge: {error}"));
@@ -1002,12 +910,10 @@ fn stop_editor(editor: &mut Child) {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct OpenRequest {
-    #[serde(default)]
-    id: Option<String>,
-    #[serde(default)]
-    generation: Option<u64>,
-    #[serde(default, alias = "launch")]
-    launch_id: Option<String>,
+    /// The identity the daemon reserved for the window: it names every pane
+    /// it opens, once.
+    id: String,
+    generation: u64,
     cwd: PathBuf,
     argv: Vec<String>,
     #[serde(default)]
@@ -1326,61 +1232,31 @@ fn register_pane_handlers(
     panes: Arc<PaneTable>,
     arbiter: Arc<InputArbiter>,
     output: Arc<OutputHub>,
-    launches: Arc<LaunchRegistry>,
     inputs: Arc<InputQueue>,
 ) {
     let open_panes = Arc::clone(&panes);
     let open_arbiter = Arc::clone(&arbiter);
     let open_inputs = Arc::clone(&inputs);
     let open_output = Arc::clone(&output);
-    let open_launches = Arc::clone(&launches);
     builder.on_launch("pane.open", move |bridge, body| {
         let request: OpenRequest = parse_body(body)?;
-        validate_open_request(&request)?;
-        let owner_slot = match request.launch_id.as_deref() {
-            Some(launch_id) => match open_launches.reserve(launch_id)? {
-                LaunchClaim::Owner(slot) => Some(slot),
-                LaunchClaim::Duplicate(slot) => {
-                    return launch_response(slot.wait(), true);
-                }
-            },
-            None => None,
-        };
-
+        let key = validate_open_request(&request)?;
         let size = PtySize {
             rows: request.size.rows,
             cols: request.size.cols,
             pixel_width: 0,
             pixel_height: 0,
         };
-        let opened = match (&request.id, request.generation) {
-            (Some(id), Some(generation)) => open_panes.open_streamed_at(
-                pane_key(id, generation)?,
+        let streamed = open_panes
+            .open_streamed_at(
+                key,
                 &request.cwd,
                 &request.argv,
                 PaneEnvironment::new(&request.env, &request.drop_env),
                 size,
                 request.backlog_bytes,
-            ),
-            (None, None) => open_panes.open_streamed(
-                &request.cwd,
-                &request.argv,
-                PaneEnvironment::new(&request.env, &request.drop_env),
-                size,
-                request.backlog_bytes,
-            ),
-            _ => return Err("pane.open needs both id and generation, or neither".to_string()),
-        }
-        .map_err(|error| error.to_string());
-        let streamed = match opened {
-            Ok(streamed) => streamed,
-            Err(error) => {
-                if let Some(slot) = owner_slot {
-                    slot.complete(Err(error.clone()));
-                }
-                return Err(error);
-            }
-        };
+            )
+            .map_err(|error| error.to_string())?;
         let printed = match open_arbiter
             .register(&streamed.key)
             .map_err(|error| error.to_string())
@@ -1390,9 +1266,6 @@ fn register_pane_handlers(
             Err(error) => {
                 let _ = open_panes.kill(&streamed.key);
                 open_inputs.retire(&streamed.key);
-                if let Some(slot) = owner_slot {
-                    slot.complete(Err(error.clone()));
-                }
                 return Err(error);
             }
         };
@@ -1404,12 +1277,7 @@ fn register_pane_handlers(
             printed,
             Arc::clone(&open_inputs),
             Arc::clone(&open_output),
-            Arc::clone(&open_launches),
-            request.launch_id,
         );
-        if let Some(slot) = owner_slot {
-            slot.complete(Ok(key.clone()));
-        }
         Ok(json!({"ok":true,"id":key.id,"generation":key.generation}))
     });
 
@@ -1496,13 +1364,11 @@ fn register_pane_handlers(
 
     let kill_panes = Arc::clone(&panes);
     let kill_inputs = Arc::clone(&inputs);
-    let kill_launches = Arc::clone(&launches);
     builder.on("pane.kill", move |_bridge, body| {
         let request: PaneRequest = parse_body(body)?;
         let key = pane_key(&request.id, request.generation)?;
         kill_panes.kill(&key).map_err(|error| error.to_string())?;
         kill_inputs.retire(&key);
-        kill_launches.remove_key(&key);
         Ok(json!({"ok":true}))
     });
 
@@ -1542,23 +1408,8 @@ fn register_pane_handlers(
     });
 }
 
-fn launch_response(result: Result<PaneKey, String>, deduplicated: bool) -> Result<Value, String> {
-    result.map(|key| {
-        json!({
-            "ok":true,
-            "id":key.id,
-            "generation":key.generation,
-            "deduplicated":deduplicated,
-        })
-    })
-}
-
 /// A pane's output, on to the page, and its end: `pane.exit`, after which a
 /// pane whose program has gone leaves the table.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "A pane's output thread holds everything its end touches"
-)]
 fn stream_to_page(
     streamed: StreamedPane,
     bridge: Bridge,
@@ -1566,17 +1417,12 @@ fn stream_to_page(
     printed: Arc<OutputClock>,
     inputs: Arc<InputQueue>,
     output: Arc<OutputHub>,
-    launches: Arc<LaunchRegistry>,
-    launch_id: Option<String>,
 ) {
     thread::spawn(move || {
         let key = streamed.key;
         for message in streamed.output {
             printed.note();
             output.publish(message.into());
-        }
-        if let Some(launch_id) = launch_id {
-            launches.remove_id(&launch_id);
         }
         let _ = bridge.event(
             "pane.exit",
@@ -1591,19 +1437,17 @@ fn stream_to_page(
 /// The headless pane helper, running the WINDOW's handlers.
 ///
 /// `consensflow-bridge` used to carry its own copy of the pane operations, and
-/// a copy is a contract that drifts: it had no launch deduplication, no pane
-/// id or generation on `pane.open`, and it never reported a natural
-/// `pane.exit`. The real Node side speaks to the window, so against the helper
-/// it could only be refused. There is nothing to keep in step here: this is
-/// `register_pane_handlers`, the same `InputQueue`, the same `LaunchRegistry`
-/// and the same shutdown drain the window uses, over stdin and stdout instead
-/// of a webview.
+/// a copy is a contract that drifts: it had no pane id or generation on
+/// `pane.open`, and it never reported a natural `pane.exit`. The real Node
+/// side speaks to the window, so against the helper it could only be refused.
+/// There is nothing to keep in step here: this is `register_pane_handlers`,
+/// the same `InputQueue` and the same shutdown drain the window uses, over
+/// stdin and stdout instead of a webview.
 ///
 /// Serves until the peer closes the transport, then reaps what it opened.
 pub fn run_headless() -> Result<(), String> {
     let panes = Arc::new(PaneTable::new());
     let output = Arc::new(OutputHub::new());
-    let launches = Arc::new(LaunchRegistry::new());
     let arbiter = Arc::new(InputArbiter::new(ENTER_DELAY_MS));
     let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
 
@@ -1613,7 +1457,6 @@ pub fn run_headless() -> Result<(), String> {
         Arc::clone(&panes),
         Arc::clone(&arbiter),
         Arc::clone(&output),
-        Arc::clone(&launches),
         Arc::clone(&inputs),
     );
     builder.on_error(|error| eprintln!("consensflow-bridge: {error}"));
@@ -1654,10 +1497,10 @@ fn parse_body<T: DeserializeOwned>(body: Value) -> Result<T, String> {
     serde_json::from_value(body).map_err(|error| format!("invalid-body: {error}"))
 }
 
-fn validate_open_request(request: &OpenRequest) -> Result<(), String> {
-    if request.id.is_some() != request.generation.is_some() {
-        return Err("pane.open needs both id and generation, or neither".to_string());
-    }
+/// Everything a `pane.open` asks for, checked before anything is spawned; the
+/// answer is the pane's key.
+fn validate_open_request(request: &OpenRequest) -> Result<PaneKey, String> {
+    let key = pane_key(&request.id, request.generation)?;
     if !request.cwd.is_absolute() {
         return Err("pane cwd must be absolute".to_string());
     }
@@ -1669,16 +1512,7 @@ fn validate_open_request(request: &OpenRequest) -> Result<(), String> {
     }
     validate_drop_env(&request.drop_env).map_err(|error| error.to_string())?;
     validate_size(request.size.cols, request.size.rows)?;
-    if let Some(id) = &request.id {
-        validate_text(id, "pane id")?;
-    }
-    if request.generation == Some(0) {
-        return Err("generation must be a positive integer".to_string());
-    }
-    if let Some(launch_id) = &request.launch_id {
-        validate_text(launch_id, "launch id")?;
-    }
-    Ok(())
+    Ok(key)
 }
 
 fn pane_key(id: &str, generation: u64) -> Result<PaneKey, String> {
@@ -1727,7 +1561,7 @@ fn normalize_node_response(operation: &str, response: Value) -> Value {
     let unavailable = response
         .get("error")
         .and_then(Value::as_str)
-        .is_some_and(|error| matches!(error, "unknown-op" | "not yet" | "not-yet"));
+        .is_some_and(|error| error == "unknown-op");
     if unavailable {
         not_available(operation, "the Node handler has not landed yet")
     } else {
@@ -1974,16 +1808,6 @@ pub async fn subscribe_output<R: Runtime>(
     output.register(on_output);
     core.tell_again();
     json!({"ok":true})
-}
-
-/// Where the human's agents screens are: the daemon's URL and the UI token it
-/// handed the app, or null while the daemon is not up.
-#[tauri::command]
-pub fn roster_handle<R: Runtime>(app: AppHandle<R>) -> Value {
-    match app.state::<AppRuntime>().core.roster() {
-        Some(roster) => serde_json::to_value(roster).unwrap_or(Value::Null),
-        None => Value::Null,
-    }
 }
 
 /// The agents screens (the agents, the harnesses) in their own
@@ -2481,6 +2305,8 @@ mod tests {
             ("/tmp", "/bin/sh")
         };
         let relative: OpenRequest = parse_body(json!({
+            "id":"p-1",
+            "generation":1,
             "cwd":"relative",
             "argv":["sh"],
             "size":{"rows":24,"cols":80},
@@ -2497,19 +2323,27 @@ mod tests {
             "size":{"rows":24,"cols":80},
         }))
         .unwrap();
-        assert!(validate_open_request(&absolute).is_ok());
+        assert_eq!(validate_open_request(&absolute), Ok(PaneKey::new("p-1", 1)));
 
-        let half_reserved: OpenRequest = parse_body(json!({
+        assert!(parse_body::<OpenRequest>(json!({
             "id":"p-1",
-            "launchId":"launch-1",
             "cwd":directory,
             "argv":[program],
             "size":{"rows":24,"cols":80},
         }))
+        .is_err());
+        let first_generation: OpenRequest = parse_body(json!({
+            "id":"p-1",
+            "generation":0,
+            "cwd":directory,
+            "argv":[program],
+        }))
         .unwrap();
-        assert!(validate_open_request(&half_reserved).is_err());
+        assert!(validate_open_request(&first_generation).is_err());
 
         let invalid_drop_env: OpenRequest = parse_body(json!({
+            "id":"p-1",
+            "generation":1,
             "cwd":directory,
             "argv":[program],
             "dropEnv":["BAD=NAME"],
@@ -2520,6 +2354,8 @@ mod tests {
             .contains("environment variable name"));
 
         assert!(parse_body::<OpenRequest>(json!({
+            "id":"p-1",
+            "generation":1,
             "cwd":directory,
             "argv":[program],
             "dropEnv":[],
@@ -3520,7 +3356,6 @@ mod tests {
             Arc::clone(&panes),
             arbiter,
             Arc::new(OutputHub::new()),
-            Arc::new(LaunchRegistry::new()),
             Arc::clone(&inputs),
         );
         let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
@@ -3604,7 +3439,6 @@ mod tests {
             Arc::clone(&panes),
             Arc::clone(&arbiter),
             Arc::new(OutputHub::new()),
-            Arc::new(LaunchRegistry::new()),
             Arc::clone(&inputs),
         );
         let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
@@ -3690,99 +3524,6 @@ mod tests {
         assert_eq!(refused.err().as_deref(), Some("stale pane generation"));
         assert!(inputs.senders.lock().unwrap().is_empty());
         assert!(inputs.workers.lock().unwrap().is_empty());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn simultaneous_duplicate_launches_wait_for_and_share_one_result() {
-        use std::io::{BufRead, BufReader, Write};
-        use std::os::unix::net::UnixStream;
-
-        let _pty_guard = crate::pty::serial_pty_test();
-        let panes = Arc::new(PaneTable::new());
-        let arbiter = Arc::new(InputArbiter::new(0));
-        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
-        let launches = Arc::new(LaunchRegistry::new());
-        let mut builder = BridgeBuilder::new(1024 * 1024);
-        register_pane_handlers(
-            &mut builder,
-            Arc::clone(&panes),
-            arbiter,
-            Arc::new(OutputHub::new()),
-            Arc::clone(&launches),
-            Arc::clone(&inputs),
-        );
-        let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
-        node_stream
-            .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
-            .expect("write bridge handle");
-        node_stream.flush().expect("flush bridge handle");
-        let connected = builder
-            .connect(
-                rust_stream.try_clone().expect("clone bridge socket"),
-                rust_stream,
-            )
-            .expect("connect bridge");
-
-        let body = json!({
-            "id":"dedupe-pane",
-            "generation":1,
-            "launchId":"launch-shared",
-            "cwd":"/tmp",
-            "argv":["/bin/sh","-c","sleep 30"],
-            "env":{},
-            "size":{"rows":24,"cols":80},
-            "backlogBytes":1024,
-        });
-        let mut burst = Vec::new();
-        for index in 0..8 {
-            serde_json::to_writer(
-                &mut burst,
-                &json!({
-                    "v":1,
-                    "id":format!("n-dedupe-{index}"),
-                    "kind":"req",
-                    "op":"pane.open",
-                    "body":body,
-                }),
-            )
-            .expect("serialize duplicate request");
-            burst.push(b'\n');
-        }
-        node_stream
-            .write_all(&burst)
-            .expect("write duplicate burst");
-        node_stream.flush().expect("flush duplicate burst");
-
-        let mut reader = BufReader::new(node_stream.try_clone().expect("clone node reader"));
-        let mut responses = Vec::new();
-        while responses.len() < 8 {
-            let mut line = String::new();
-            reader
-                .read_line(&mut line)
-                .expect("read duplicate response");
-            let frame: Value = serde_json::from_str(line.trim()).expect("response JSON");
-            if frame["kind"] == "res" && frame["op"] == "pane.open" {
-                responses.push(frame["body"].clone());
-            }
-        }
-        assert!(
-            responses.iter().all(|response| {
-                response["ok"] == true
-                    && response["id"] == "dedupe-pane"
-                    && response["generation"] == 1
-            }),
-            "duplicates did not share the successful launch: {responses:?}"
-        );
-        assert_eq!(panes.list().expect("one launched pane").len(), 1);
-
-        panes
-            .kill(&PaneKey::new("dedupe-pane", 1))
-            .expect("kill launched pane");
-        inputs.close_and_drain();
-        drop(reader);
-        drop(node_stream);
-        connected.bridge.wait_closed().expect("bridge closes");
     }
 
     #[cfg(unix)]
