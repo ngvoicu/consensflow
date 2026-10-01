@@ -135,6 +135,7 @@ export async function startCore(
         cf: join(BUNDLE_BIN, process.platform === 'win32' ? 'cf.cmd' : 'cf'),
       }),
     trace,
+    log,
     launchFiles: { forget: (launch) => forgetLaunch(home, launch) },
     paneEnv: (participant, project) => ({
       CONSENSFLOW_URL: api.url,

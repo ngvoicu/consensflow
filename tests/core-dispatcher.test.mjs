@@ -160,6 +160,33 @@ function fakeHost() {
   return host
 }
 
+/** One turn of the event loop: what the fakes started (a launch, a delivery) is over by then. */
+const flush = () => new Promise((resolve) => setImmediate(resolve))
+
+/**
+ * A launch or a delivery goes on apart from the pass or the operation that
+ * started it. The fakes here answer at once, so one turn of the event loop
+ * sees it through: each of these calls a test awaits waits that turn too.
+ */
+function settled(dispatcher) {
+  for (const name of [
+    'pass',
+    'openProject',
+    'resumeProject',
+    'openWindow',
+    'switchChief',
+    'resumeAfterRestart',
+  ]) {
+    const call = dispatcher[name].bind(dispatcher)
+    dispatcher[name] = async (...args) => {
+      const value = await call(...args)
+      await flush()
+      return value
+    }
+  }
+  return dispatcher
+}
+
 async function setup(fn, options = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-dispatch-'))
   let at = Date.parse('2026-09-19T12:00:00.000Z')
@@ -184,28 +211,34 @@ async function setup(fn, options = {}) {
   })
   const adapter = fakeAdapter()
   const host = fakeHost()
+  // What failed apart from any pass is written down; no test may leave one.
+  const failures = []
   const { adapters: more = {}, ...rest } = options
   const make = () =>
-    new Dispatcher({
-      ledger,
-      host,
-      // The fake answers for any harness; OpenCode is here for a mixed staff.
-      adapters: { 'claude-code': adapter, opencode: adapter, ...more },
-      clock,
-      credentials: {
-        issue: ({ participant }) => `token-${participant.handle}`,
-        revoke: () => {},
-      },
-      paneEnv: (participant) => ({ CONSENSFLOW_PARTICIPANT: participant.handle }),
-      roles: (participant) => `instructions for ${participant.role}`,
-      roster: (name) => ({ id: name, model: MODELS[name], profile: { modelKey: MODELS[name] } }),
-      arrivalTimeoutMs: 30_000,
-      launchTimeoutMs: 120_000,
-      maxAttempts: 3,
-      ...rest,
-    })
+    settled(
+      new Dispatcher({
+        ledger,
+        host,
+        // The fake answers for any harness; OpenCode is here for a mixed staff.
+        adapters: { 'claude-code': adapter, opencode: adapter, ...more },
+        clock,
+        credentials: {
+          issue: ({ participant }) => `token-${participant.handle}`,
+          revoke: () => {},
+        },
+        paneEnv: (participant) => ({ CONSENSFLOW_PARTICIPANT: participant.handle }),
+        roles: (participant) => `instructions for ${participant.role}`,
+        roster: (name) => ({ id: name, model: MODELS[name], profile: { modelKey: MODELS[name] } }),
+        arrivalTimeoutMs: 30_000,
+        launchTimeoutMs: 120_000,
+        maxAttempts: 3,
+        log: { error: (_message, cause) => failures.push(cause) },
+        ...rest,
+      }),
+    )
   try {
     await fn({ ledger, adapter, host, clock, dispatcher: make(), make, dir })
+    assert.deepEqual(failures, [], 'nothing failed unseen')
   } finally {
     ledger.close()
     await rm(dir, { recursive: true, force: true })
@@ -1162,20 +1195,18 @@ describe('the dispatcher', () => {
     )
   })
 
-  it('closes every window of a deleted project that has not gone yet, before it forgets them', async () => {
+  it('closes every window it still has of a deleted project, however the project was closed, before it forgets them', async () => {
     await setup(async (context) => {
       const { project, open } = await withTiers(context)
       open()
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       const windows = [context.host.last('chief'), context.host.last('zeus')]
-      // The windows were told to close; their exits have not come yet.
-      context.host.holdExits = true
-      await context.dispatcher.closeProject(project.id)
-      const killed = context.host.killed.length
+      // Closed in the ledger alone, as a restart marks a project, with its windows still up.
+      context.ledger.setProjectState(project.id, 'suspended')
       await context.dispatcher.deleteProject(project.id)
       assert.deepEqual(
-        context.host.killed.slice(killed),
+        context.host.killed,
         windows.map(({ id, generation }) => ({ id, generation })),
       )
     })
@@ -2622,6 +2653,153 @@ describe('a lead whose window does not come up', () => {
       context.clock.advance(10_000)
       await context.dispatcher.pass()
       assert.match(context.adapter.prepared.at(-1).message, /note from @zeus\]\nA result$/)
+    })
+  })
+})
+
+describe('a window that takes long', () => {
+  /** Every window opened from now on waits until the returned function lets it. */
+  const holdOpens = (host) => {
+    let open
+    host.hold = new Promise((resolve) => {
+      open = resolve
+    })
+    return async () => {
+      host.hold = null
+      open()
+      await flush()
+    }
+  }
+  const LATE = Symbol('late')
+  /** What a call answers, which must come without waiting for a window. */
+  async function answered(call) {
+    let timer
+    const late = new Promise((resolve) => {
+      timer = setTimeout(resolve, 1_000, LATE)
+    })
+    try {
+      const value = await Promise.race([call, late])
+      assert.notEqual(value, LATE, 'it waited for a window')
+      return value
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  it('holds up only itself: the pass moves on, and other windows are delivered to and looked at meanwhile', async () => {
+    await setup(async (context) => {
+      const { project: slow } = await withStaff(context)
+      const quick = await context.dispatcher.openProject({
+        directory: '/work/api',
+        name: 'api',
+        harness: 'claude-code',
+      })
+      await context.dispatcher.pass()
+      const slowLaunch = context.adapter.prepared[0].launchId
+      let release
+      const held = new Promise((resolve) => {
+        release = resolve
+      })
+      const deliver = context.adapter.deliver
+      context.adapter.deliver = async (request) => {
+        // Pi waits up to 30 s for a paste's acknowledgement; this one waits for the test.
+        if (request.launch.launchId === slowLaunch) await held
+        return deliver(request)
+      }
+      try {
+        const one = context.ledger.note(slow.id, { to: 'chief', body: 'Slow' })
+        const two = context.ledger.note(quick.id, { to: 'chief', body: 'Quick' })
+        await answered(context.dispatcher.pass())
+        assert.equal(context.ledger.message(two.id).state, 'delivering')
+        await context.dispatcher.pass()
+        assert.deepEqual(
+          [context.ledger.message(one.id).state, context.ledger.message(two.id).state],
+          ['delivering', 'delivered'],
+          'the other window was looked at again while the slow one waited',
+        )
+        release()
+        await flush()
+        await context.dispatcher.pass()
+        assert.equal(context.ledger.message(one.id).state, 'delivered')
+      } finally {
+        release()
+      }
+    })
+  })
+
+  it('answers New project, Switch lead, Resume and a session’s Open once the ledger has the change; the window opens after', async () => {
+    await withCodex(async (context) => {
+      const { host, codex } = context
+      let opened = holdOpens(host)
+      const project = await answered(
+        context.dispatcher.openProject({
+          directory: '/work/app',
+          name: 'app',
+          harness: 'claude-code',
+          staff: [{ agent: 'zeus', harness: 'claude-code', role: 'worker', tier: 'standard' }],
+        }),
+      )
+      assert.equal(project.state, 'open')
+      assert.equal(host.opened.length, 0, 'its lead is still opening')
+      await opened()
+      const chief = chiefOf(context, project).id
+      assert.notEqual(context.dispatcher.pane(chief), null)
+      await context.dispatcher.pass()
+      context.adapter.answer('chief', 'Hello')
+      await context.dispatcher.pass()
+
+      opened = holdOpens(host)
+      await answered(context.dispatcher.switchChief(project.id, { harness: 'codex' }))
+      assert.equal(chiefOf(context, project).harness, 'codex')
+      assert.equal(context.dispatcher.pane(chief), null, 'the new lead is still opening')
+      await opened()
+      assert.match(codex.prepared.at(-1).message, /You are the lead now\./)
+      assert.notEqual(context.dispatcher.pane(chief), null)
+
+      await context.dispatcher.closeProject(project.id)
+      opened = holdOpens(host)
+      assert.equal((await answered(context.dispatcher.resumeProject(project.id))).state, 'open')
+      assert.equal(context.dispatcher.pane(chief), null)
+      await opened()
+      assert.notEqual(context.dispatcher.pane(chief), null)
+
+      context.ledger.createTask(project.id, {
+        from: 'chief',
+        pool: 'worker',
+        tier: 'standard',
+        body: 'Parser',
+      })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.adapter.answer('zeus', 'Parser done')
+      await context.dispatcher.pass()
+      const session = context.ledger.task(project.id, 1).assignee
+      const sessionId = context.ledger
+        .project(project.id)
+        .participants.find((p) => p.handle === session).id
+      assert.equal(context.dispatcher.pane(sessionId), null, 'its window went with its task')
+      opened = holdOpens(host)
+      await answered(context.dispatcher.openWindow(project.id, session))
+      assert.equal(context.dispatcher.pane(sessionId), null)
+      await opened()
+      assert.notEqual(context.dispatcher.pane(sessionId), null)
+    })
+  })
+
+  it('opens the lead again when the human resumes a project that is still closing', async () => {
+    await setup(async (context) => {
+      const { project, id } = await withStaff(context)
+      await context.dispatcher.pass()
+      const closing = context.dispatcher.closeProject(project.id)
+      await context.dispatcher.resumeProject(project.id)
+      await closing
+      await flush()
+      assert.equal(context.ledger.project(project.id).state, 'open')
+      assert.notEqual(context.dispatcher.pane(id('chief')), null)
+      assert.equal(
+        context.host.opened.filter((pane) => pane.id === `p${project.id}-chief`).length,
+        2,
+      )
     })
   })
 })

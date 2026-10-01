@@ -12,6 +12,10 @@ import { HANDOFF_TITLE, handoffText, historyPages, lastWords } from './handoff.j
  *   with the message as its first input; the launch is the delivery.
  * - A live window that its harness reports idle (and not waiting for the
  *   human) gets the head of its queue through the adapter's native path.
+ * - A launch or a delivery goes on apart from the pass, holding only its own
+ *   participant, so a harness that takes long holds up no other window; the
+ *   human's operations answer once the ledger has their change, and the
+ *   window they open follows.
  * - A delivery counts only when the harness's own record shows the message
  *   (its `[ConsensFlow m-<id> ·` header in a user item). A refused delivery, or
  *   one that never shows in time (admitted or uncertain), is tried again, up
@@ -122,6 +126,8 @@ export class Dispatcher {
   #maxAttempts
   /** Told each change of a window's activity, for the event file in the home. */
   #trace
+  /** The daemon's log, for a launch or a delivery that failed apart from any pass. */
+  #log
   #runtime = new Map()
   #listeners = new Set()
   #waitingNoted = new Set()
@@ -140,6 +146,7 @@ export class Dispatcher {
     launchTimeoutMs = 180_000,
     maxAttempts = 3,
     trace = () => {},
+    log = null,
     launchFiles = { forget: () => {} },
   }) {
     this.#ledger = ledger
@@ -152,6 +159,7 @@ export class Dispatcher {
     this.#roles = roles
     this.#arrivalTimeoutMs = arrivalTimeoutMs
     this.#trace = trace
+    this.#log = log
     this.#launchFiles = launchFiles
     this.#launchTimeoutMs = launchTimeoutMs
     this.#maxAttempts = maxAttempts
@@ -179,7 +187,10 @@ export class Dispatcher {
     return this.#runtime.get(participantId)?.pane ?? null
   }
 
-  /** A new project: the ledger records it with its staff, and its chief window opens. */
+  /**
+   * A new project: the ledger records it with its staff, and its chief
+   * window opens after the answer (see `#openSoon`).
+   */
   async openProject({ directory, name, harness, staff = [], gate }) {
     const project = this.#ledger.createProject({
       directory,
@@ -189,7 +200,7 @@ export class Dispatcher {
       ...(gate === undefined ? {} : { gate }),
     })
     const chief = project.participants.find((participant) => participant.handle === 'chief')
-    await this.#exclusive(chief.id, () => this.#launch(project, chief, null))
+    this.#openSoon(chief.id)
     return this.#ledger.project(project.id)
   }
 
@@ -199,9 +210,7 @@ export class Dispatcher {
     const chief = project.participants.find((participant) => participant.role === 'chief')
     // The human asks for the lead now: a lead that failed before is tried at once.
     this.#runtimeOf(chief.id).relaunch = null
-    if (this.pane(chief.id) === null) {
-      await this.#exclusive(chief.id, () => this.#launch(project, chief, null))
-    }
+    this.#openSoon(chief.id)
     this.#changed()
     return this.#ledger.project(projectId)
   }
@@ -220,19 +229,24 @@ export class Dispatcher {
 
   /**
    * Closes these participants' windows, each once its step in progress is
-   * over, so a window still opening is closed too.
+   * over, so a window still opening is closed too. Each takes its place at
+   * once, so a Resume that follows opens the lead after its window went;
+   * and each exit is the dispatcher's own, so a lead's never closes a
+   * project resumed meanwhile.
    */
   async #closeWindows(participants) {
-    for (const participant of participants) {
-      await this.#exclusive(
-        participant.id,
-        async () => {
-          const { pane } = this.#runtimeOf(participant.id)
-          if (pane !== null) await this.#host.kill(pane).catch(() => {})
-        },
-        { wait: true },
-      )
-    }
+    await Promise.all(
+      participants.map((participant) =>
+        this.#exclusive(
+          participant.id,
+          async () => {
+            const runtime = this.#runtimeOf(participant.id)
+            if (runtime.pane !== null) await this.#closeOwn(runtime, runtime.pane)
+          },
+          { wait: true },
+        ),
+      ),
+    )
   }
 
   // --- the human's hand on a session's window ------------------------------------------
@@ -243,12 +257,9 @@ export class Dispatcher {
    * human closes it, whatever work comes and goes meanwhile.
    */
   async openWindow(projectId, handle) {
-    const { project, participant } = this.#sessionOf(projectId, handle)
-    const runtime = this.#runtimeOf(participant.id)
-    runtime.pinned = true
-    if (runtime.pane === null) {
-      await this.#exclusive(participant.id, () => this.#launch(project, participant, null))
-    }
+    const { participant } = this.#sessionOf(projectId, handle)
+    this.#runtimeOf(participant.id).pinned = true
+    this.#openSoon(participant.id)
     this.#changed()
     return this.#ledger.project(projectId)
   }
@@ -370,7 +381,11 @@ export class Dispatcher {
     )
   }
 
-  /** One pass over every participant; each moves on its own, so a slow launch holds up no one else. */
+  /**
+   * One pass over every participant: each looks at its window, and a launch
+   * or a delivery it starts goes on apart from the pass (`#act`), so a slow
+   * one holds up no one else.
+   */
   async pass() {
     this.#resumeHeld()
     for (const project of this.#ledger.projects()) {
@@ -485,7 +500,10 @@ export class Dispatcher {
     // A lead whose window keeps failing to start is tried again ever more slowly.
     if (runtime.relaunch !== null && runtime.relaunch.at > this.#now()) return
     const next = this.#ledger.nextDelivery(participant.id)
-    if (next !== null) return this.#launch(project, participant, next)
+    if (next !== null) {
+      this.#act(runtime, () => this.#launch(project, participant, next))
+      return
+    }
     if (participant.role === 'chief') return
     // A member whose agent is gone must not wait for a window that will not
     // open: its held work goes back to the board now.
@@ -583,7 +601,7 @@ export class Dispatcher {
     }
     if (idle) {
       const next = this.#ledger.nextDelivery(participant.id)
-      if (next !== null) await this.#deliver(runtime, next)
+      if (next !== null) this.#act(runtime, () => this.#deliver(runtime, next))
     }
   }
 
@@ -598,7 +616,7 @@ export class Dispatcher {
     const { note } = runtime.pendingSwitch
     const asked = note === null ? null : this.#ledger.message(note)
     if (asked?.state === 'queued') {
-      await this.#deliver(runtime, asked)
+      this.#act(runtime, () => this.#deliver(runtime, asked))
       return
     }
     if (asked !== null && asked.state === 'delivered') {
@@ -697,11 +715,8 @@ export class Dispatcher {
     this.#changed()
     const current = this.#ledger.project(project.id)
     if (current.state !== 'open') return
-    await this.#launch(
-      current,
-      current.participants.find((participant) => participant.role === 'chief'),
-      null,
-    )
+    const lead = current.participants.find((participant) => participant.role === 'chief')
+    this.#act(runtime, () => this.#launch(current, lead, null))
   }
 
   /**
@@ -1386,14 +1401,15 @@ export class Dispatcher {
   // --- small helpers -------------------------------------------------------------------
 
   /**
-   * Runs `work` for one participant at a time. A pass that finds it busy moves
-   * on; `wait` queues behind the step in progress instead.
+   * Runs `work` for one participant at a time. A pass that finds it busy (a
+   * step, or a launch or a delivery still going on) moves on; `wait` queues
+   * behind it instead.
    */
   async #exclusive(participantId, work, { wait = false } = {}) {
     const runtime = this.#runtimeOf(participantId)
-    while (runtime.running !== null) {
+    while (runtime.running !== null || runtime.acting !== null) {
       if (!wait) return undefined
-      await runtime.running.catch(() => {})
+      await (runtime.running ?? runtime.acting).catch(() => {})
     }
     runtime.running = (async () => {
       try {
@@ -1403,6 +1419,46 @@ export class Dispatcher {
       }
     })()
     return runtime.running
+  }
+
+  /**
+   * A launch or a delivery may wait long on its harness (Codex naming its
+   * thread, a paste waiting for Pi's acknowledgement). Started from a step,
+   * it goes on apart from the pass and still holds its participant, so the
+   * pass and every other window move on. Nobody waits for it, so a failure
+   * is written down here, as a failed pass is.
+   */
+  #act(runtime, work) {
+    runtime.acting = (async () => {
+      try {
+        await work()
+      } catch (cause) {
+        console.error('consensflow dispatcher:', cause)
+        this.#log?.error('a launch or a delivery failed', cause)
+      } finally {
+        runtime.acting = null
+      }
+    })()
+  }
+
+  /**
+   * Opens a participant's window once its step in progress is over, apart
+   * from whoever asked: a page operation answers once the ledger has its
+   * change, and a launch that fails says so on the board. A window open by
+   * then, or a project closed meanwhile, opens nothing.
+   */
+  #openSoon(participantId) {
+    this.#exclusive(
+      participantId,
+      () => {
+        const runtime = this.#runtimeOf(participantId)
+        const project = this.#projectOf(participantId)
+        if (runtime.pane !== null || project?.state !== 'open') return
+        const participant = project.participants.find((p) => p.id === participantId)
+        this.#act(runtime, () => this.#launch(project, participant, null))
+      },
+      { wait: true },
+    )
   }
 
   #runtimeOf(participantId) {
@@ -1419,6 +1475,7 @@ export class Dispatcher {
         quota: null,
         lowUntil: null,
         running: null,
+        acting: null,
         retiring: false,
         copied: null,
         interrupted: null,

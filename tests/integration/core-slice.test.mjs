@@ -33,8 +33,7 @@ test('a chief hands a task to a worker through the board and the result lands in
     const project = opened.project.id
     const added = await app.requestNode('member.add', { project, agent: 'worker' })
     assert.equal(added.ok, true, JSON.stringify(added))
-    const leadFrame = app.openFrames.find((frame) => frame.id === `p${project}-chief`)
-    assert.ok(leadFrame, 'the chief window opened')
+    const leadFrame = await app.openFrame(`p${project}-chief`)
 
     await app.tell(project, `DISPATCH --tier ${added.member.tier} Reply with exactly: WORKER_OK`)
 
@@ -97,7 +96,7 @@ test('a chief with unsent text in its terminal still gets its result, behind tha
     })
     const project = opened.project.id
     const { member } = await app.requestNode('member.add', { project, agent: 'worker' })
-    const chief = app.openFrames.find((frame) => frame.id === `p${project}-chief`)
+    const chief = await app.openFrame(`p${project}-chief`)
 
     // The human dispatches from the chief's own terminal, then types more and
     // leaves it unsent. Nothing waits for that text (the owner's choice,
@@ -188,7 +187,7 @@ test('switching the lead opens a fresh window that is handed the lead and reads 
     const project = opened.project.id
     const leads = () => app.openFrames.filter((frame) => frame.id === `p${project}-chief`)
     const sessionOf = (frame) => frame.argv[frame.argv.indexOf('--session-id') + 1]
-    const [first] = leads()
+    const first = await app.openFrame(`p${project}-chief`)
     await app.waitFor(async () => {
       const { board } = await app.requestNode('board.get', { project })
       return board.lanes.find((l) => l.participant.handle === 'chief').activity.state === 'idle'
