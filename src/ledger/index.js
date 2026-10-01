@@ -2254,8 +2254,9 @@ class Ledger {
   /**
    * Questions a coordinator has left unanswered for OVERDUE_MS: the human sees
    * them too. Only one still on its way or in the chief's window counts, from
-   * an asker still on the staff, about no task or one that waits on it; an
-   * answer held for the human or declined is no answer yet, as for the task.
+   * an asker still on the staff, about no task or one still at work (working
+   * or waiting); an answer held for the human or declined is no answer yet,
+   * as for the task.
    */
   #overdueQuestions(projectId) {
     const before = new Date(this.#now().getTime() - OVERDUE_MS).toISOString()
