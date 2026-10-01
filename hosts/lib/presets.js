@@ -1,6 +1,3 @@
-import { slugify, stripMention } from "./utils.js";
-
-
 // Image agents use the Codex login; Codex selects the underlying image model.
 // --- Effort ceilings (audited 2026-08-27) --------------------------------
 // Every preset names the HIGHEST level its model actually takes, and no preset names a level the
@@ -1483,72 +1480,4 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
     routeLabel: routeLabel + (contributor ? (model.endsWith('-free') ? ' · Contributor · Free' : ' · Contributor') : ''),
     ...(contributor ? { routeNote: 'Prompts and replies may train Meta models.' } : {}),
   }
-}
-
-function getPreset(ref) {
-  const id = slugify(stripMention(ref));
-  return AGENT_PRESETS.find((preset) => preset.preset === id || preset.id === id || slugify(preset.name) === id) ?? null;
-}
-
-// --- Catalog drift -------------------------------------------------------
-// A roster entry snapshots its preset's engine fields, so a ConsensFlow update that ships a new
-// catalog (Opus 4.8 → Opus 5, say) does not reach agents that were already added. These
-// helpers re-resolve that: the fields below are decided entirely by the preset — agentFromPreset
-// lets only --name/--id/--cwd/--description through and there is no `agents edit` — so replacing
-// them with the catalog's current values is lossless.
-// `description` joined the list on 2026-08-27, the maintainer's call, after a live update: nyx moved
-// the retired stealth/ox-alpha to z-ai/glm-5.3-flash and the roster — and with it the skill table
-// every chief reads — went on saying "Pi Ox Alpha MAX" beside the new model. It was called cosmetic
-// while it was only a roster field; it is not, now that the generated skill prints it as the line
-// that says WHO an agent is. A label naming a model the agent no longer runs is a wrong answer to
-// the only question the table exists to answer.
-// It was kept out for two reasons, and both were weighed before it went in. The one that expired:
-// two hosts sharing ONE roster worded some descriptions differently (pygmalion's login wording), so
-// syncing would never converge — each host re-flagging the other's text forever. The host payloads
-// went on 2026-08-23 and nothing but the manager writes a description now. The one that stands:
-// `add <preset> --description …` is a real override, and this rewrites it on the next catalog move
-// without asking. The escape hatch is provenance, not wording — an agent added with an explicit
-// --model or --effort carries no `preset` and is never synced at all.
-// Agents with no `preset`, or whose preset has since left the catalog, are left alone.
-const PRESET_OWNED_FIELDS = ["kind", "model", "effort", "thinking", "description"];
-
-// The roster's `description` is the preset's one-line LABEL ("Pi GLM 5.3 Flash MAX") — what an add
-// writes and what the generated skill prints beside the agent's name. The preset's own
-// `description` is the catalog card's paragraph and belongs to the UI, not to a roster row.
-function presetOwnedValue(field, preset) {
-  if (field === "description") return preset.label ?? preset.description;
-  return presetFieldValue(field, preset);
-}
-
-function presetFieldValue(field, source) {
-  const value = source?.[field];
-  if (value === undefined || value === null || value === "") return undefined;
-  return value;
-}
-
-function presetForAgent(agent) {
-  return agent?.preset ? getPreset(agent.preset) : null;
-}
-
-export function presetDrift(agent) {
-  const preset = presetForAgent(agent);
-  if (!preset) return [];
-  const changes = [];
-  for (const field of PRESET_OWNED_FIELDS) {
-    const from = presetFieldValue(field, agent);
-    const to = presetOwnedValue(field, preset);
-    if (from !== to) changes.push({ field, from, to });
-  }
-  return changes;
-}
-
-export function syncAgentWithPreset(agent) {
-  const changes = presetDrift(agent);
-  if (changes.length === 0) return { agent, changes };
-  const synced = { ...agent };
-  for (const { field, to } of changes) {
-    if (to === undefined) delete synced[field];
-    else synced[field] = to;
-  }
-  return { agent: synced, changes };
 }
