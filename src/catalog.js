@@ -1,4 +1,4 @@
-import { AGENT_PRESETS, agentProfile, KIMI_EFFORTS } from '../hosts/lib/presets.js'
+import { AGENT_PRESETS, agentProfile } from '../hosts/lib/presets.js'
 
 export { agentProfile } from '../hosts/lib/presets.js'
 
@@ -34,8 +34,6 @@ export const EFFORTS = {
   pi: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
   // opencode --help: "provider-specific reasoning effort, e.g., high, max, minimal"
   opencode: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
-  // K3 uses the supported per-process KIMI_MODEL_THINKING_EFFORT control.
-  kimi: KIMI_EFFORTS,
   // Devin writes the level into its model id (claude-opus-5-5-max): an agent
   // names the family and one of these, and the launch joins them.
   devin: ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -52,7 +50,6 @@ const KIND_TO_HARNESS = {
   codex: 'codex',
   pi: 'pi',
   opencode: 'opencode',
-  kimi: 'kimi',
   devin: 'devin',
   image: 'image',
 }

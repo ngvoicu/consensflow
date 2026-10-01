@@ -714,10 +714,10 @@ test('built Agents catalog serves complete saved profiles and current browsing c
     import { Credentials, startApi } from ${JSON.stringify(join(cli, 'src/core/api.js'))}
     import { openLedger } from ${JSON.stringify(join(cli, 'src/ledger/index.js'))}
     import { addAgent, listAgents, rosterPath } from ${JSON.stringify(join(cli, 'src/roster.js'))}
-    assert.equal(Object.values(CATALOG).flat().length, 119, 'packaged preset count')
+    assert.equal(Object.values(CATALOG).flat().length, 118, 'packaged preset count')
     assert.equal(catalogEntry('pygmalion').model, 'codex-image')
     // Every catalog agent is in the roster, as the catalog has it; the file keeps only your own.
-    assert.equal(listAgents(process.env).length, 119)
+    assert.equal(listAgents(process.env).length, 118)
     addAgent({ name: 'my-maia', harness: 'codex', model: 'gpt-6-astra', effort: 'low' }, process.env)
     // The agents pages the way the daemon serves them: behind its API, opened with the UI token.
     mkdirSync(process.env.CONSENSFLOW_HOME, { recursive: true })
@@ -738,7 +738,7 @@ test('built Agents catalog serves complete saved profiles and current browsing c
       assert.equal((await fetch(server.url + '/api/agents/maia', { method: 'DELETE', headers })).status, 400)
       assert.equal((await fetch(server.url + '/api/agents/my-maia', { method: 'DELETE', headers })).status, 204)
       const after = await (await fetch(server.url + '/api/agents', { headers })).json()
-      assert.equal(after.agents.length, 119)
+      assert.equal(after.agents.length, 118)
       assert.equal(Object.hasOwn(after, 'catalog'), false)
       console.log('packaged catalog and saved profiles verified')
     } finally {

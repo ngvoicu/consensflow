@@ -59,10 +59,10 @@ test('window: codex opens cold on a positional prompt, id found afterwards', () 
   assert.deepEqual(w.dropEnv, ['OPENAI_API_KEY'], 'the billing guard holds in a window too')
 })
 
-test('window: kimi is the one that cannot be seeded; an image agent opens Codex on its default model', () => {
-  // `-p` is defined as non-interactive and kimi has no positional prompt, so
-  // no flag it owns can open a seeded window. It streams turn one instead.
-  assert.equal(interactiveStart({ id: 'ilmarinen', kind: 'kimi' }, 'anything', 'seed'), null)
+test('window: an image agent opens Codex on its default model; Kimi opens no window', () => {
+  // ConsensFlow does not run Kimi Code (paused 2026-09-19, removed since).
+  assert.equal(interactiveStart({ kind: 'kimi' }, 'anything', 'seed'), null)
+  assert.equal(interactiveResume({ kind: 'kimi' }, 'session_abc', 'seed'), null)
   // The image designer draws with Codex's image tool, whatever model answers:
   // its window is Codex's own, with no model or effort of its own.
   const image = interactiveStart({ kind: 'image', model: 'codex-image' }, null, 'seed')
@@ -85,7 +85,6 @@ test('window: every harness opens and resumes in full-permission mode', () => {
   // Gabriel, 2026-09-19: every harness opens in yolo mode, for every role.
   // Before this only a fresh Codex window did; OpenCode stalled on prompts.
   const devin = { id: 'odin', kind: 'devin', model: 'swe-1-6-slow' }
-  const kimi = { id: 'ilmarinen', kind: 'kimi' }
   const has = (w, ...flags) => {
     const at = w.args.indexOf(flags[0])
     return at !== -1 && flags.every((flag, n) => w.args[at + n] === flag)
@@ -111,7 +110,6 @@ test('window: every harness opens and resumes in full-permission mode', () => {
     assert.ok(has(w, '--permission-mode', 'dangerous'), w.args.join(' '))
     assert.ok(has(w, '--respect-workspace-trust', 'false'), w.args.join(' '))
   }
-  assert.ok(has(interactiveResume(kimi, 'k'), '--auto'), 'kimi is paused, not exempt')
   // Seeds stay the last positional.
   assert.equal(interactiveStart(AGENTS.claude, 'u', 's').args.at(-1), 's')
   assert.equal(interactiveResume(AGENTS.codex, 't', 's').args.at(-1), 's')
@@ -210,53 +208,6 @@ test('window: OpenCode worker opens its exact native session and leaves task del
   assert.equal(w.args[w.args.indexOf('--session') + 1], 'ses_created')
   assert.equal(w.args.includes('--prompt'), false, '--session ignores CLI prompts')
   assert.deepEqual(Object.keys(w.env), ['CONSENSFLOW_CHILD'])
-})
-
-test('kimi: full permissions are IMPLIED by -p, so no flag is the correct shape', () => {
-  // Probed 2026-08-24: `--auto` and `--yolo` are both REFUSED alongside `-p`,
-  // and the session log records "Auto permission mode is active". A missing
-  // danger flag here is the verified answer, not an omission.
-  const agent = { id: 'ilmarinen', kind: 'kimi', model: 'moonshot-ai/kimi-k3' }
-  const args = interactiveStart(agent, 'x', 's')
-
-  assert.equal(args, null, 'kimi cannot open a window on an id it was given')
-})
-
-test('kimi: the window is its own interactive session, resumed', () => {
-  const window = interactiveResume({ id: 'ilmarinen', kind: 'kimi' }, 'session_abc')
-
-  assert.equal(window.command, 'kimi')
-  assert.deepEqual(window.args, ['-S', 'session_abc', '--auto'])
-  // No seed: an interactive kimi takes no first message, so a follow-up sent
-  // this way arrives as a pane the user types into.
-  assert.deepEqual(interactiveResume({ kind: 'kimi' }, 'session_abc', 'seed').args, [
-    '-S',
-    'session_abc',
-    '--auto',
-  ])
-})
-
-test('kimi: the selected K3 effort reaches a resumed window through its environment', () => {
-  for (const effort of ['low', 'high', 'max']) {
-    const agent = { id: 'ilmarinen', kind: 'kimi', model: 'moonshot-ai/kimi-k3', effort }
-    const window = interactiveResume(agent, 'session_abc')
-    assert.deepEqual(window.env, { CONSENSFLOW_CHILD: '1', KIMI_MODEL_THINKING_EFFORT: effort })
-    assert.ok(!window.args.includes('--effort'), 'this CLI uses an environment control')
-    const env = childEnv(
-      { HOME: '/user', KIMI_CODE_HOME: '/kimi', KIMI_MODEL_THINKING_EFFORT: 'off' },
-      window,
-    )
-    assert.equal(
-      env.KIMI_MODEL_THINKING_EFFORT,
-      effort,
-      'saved selection wins over inherited override',
-    )
-    assert.equal(env.KIMI_CODE_HOME, '/kimi', 'native config and credentials stay in place')
-  }
-  for (const effort of ['medium', 'xhigh', 'ultra', 'off', 'on', 0, false]) {
-    const agent = { kind: 'kimi', model: 'moonshot-ai/kimi-k3', effort }
-    assert.throws(() => interactiveResume(agent, 'session_abc'), /low.*high.*max/)
-  }
 })
 
 test('window: devin joins a family and its level into the model id it writes', () => {

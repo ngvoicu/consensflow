@@ -1,5 +1,3 @@
-import { validateKimiEffort } from './presets.js'
-
 /**
  * How each harness's own window opens on a conversation ConsensFlow starts or
  * resumes: the command, its arguments, the environment it needs and the keys
@@ -40,7 +38,6 @@ const YOLO = {
   opencode: ['--auto'],
   pi: ['--approve'],
   devin: ['--permission-mode', 'dangerous', '--respect-workspace-trust', 'false'],
-  kimi: ['--auto'],
 }
 
 /** The environment a window runs with: the base plus what it declares, minus what it must not see. */
@@ -108,21 +105,6 @@ export function interactiveResume(agent, sessionId, seed) {
       const args = ['--session', sessionId, ...YOLO.opencode]
       return { command: 'opencode', args, env: { ...CHILD_ENV }, dropEnv: [] }
     }
-    case 'kimi': {
-      validateKimiEffort(agent)
-      // `-S <id>` without `-p` IS the interactive window on that session. No
-      // flag seeds its first message, so a follow-up sent this way arrives
-      // as a pane the user types into.
-      return {
-        command: 'kimi',
-        args: ['-S', sessionId, ...YOLO.kimi],
-        env: {
-          ...CHILD_ENV,
-          ...(agent.effort ? { KIMI_MODEL_THINKING_EFFORT: agent.effort } : {}),
-        },
-        dropEnv: [],
-      }
-    }
     default:
       return null
   }
@@ -132,8 +114,8 @@ export function interactiveResume(agent, sessionId, seed) {
  * The harness's OWN window on a conversation that does not exist yet. Claude
  * and Pi take the id from us (`--session-id`, minted by the caller); OpenCode
  * opens the empty session its native API created; Codex opens on a positional
- * seed and its own metadata identifies the thread afterwards. Kimi cannot
- * seed a window and an image agent has none: null.
+ * seed and its own metadata identifies the thread afterwards. Null for a kind
+ * with no window of its own.
  */
 export function interactiveStart(agent, sessionId, seed) {
   switch (agent.kind) {

@@ -12,12 +12,6 @@ import path from 'node:path'
 import { piSessionDir } from '../../src/harnesses.js'
 import { codexQuota, exhaustedQuota } from './quota.js'
 
-const SUPPORTED = {
-  kimi: new Set(['1.5']),
-}
-
-class UnsupportedVersionError extends Error {}
-
 export async function answers(kind, sessionId, env, options = {}) {
   if (!sessionId) return { unknown: true, reason: 'missing session id' }
   if (env === null || typeof env !== 'object') {
@@ -31,8 +25,6 @@ export async function answers(kind, sessionId, env, options = {}) {
         return await claudeAnswers(sessionId, env, options)
       case 'pi':
         return await piAnswers(sessionId, env, options)
-      case 'kimi':
-        return await kimiAnswers(sessionId, env)
       case 'opencode':
         return await opencodeAnswers(sessionId, env, options)
       case 'devin':
@@ -41,9 +33,6 @@ export async function answers(kind, sessionId, env, options = {}) {
         return { unknown: true, reason: `unknown kind: ${kind}` }
     }
   } catch (error) {
-    if (error instanceof UnsupportedVersionError) {
-      return { unknown: true, reason: error.message }
-    }
     return { unknown: true, reason: `unreadable: ${describeError(error)}` }
   }
 }
@@ -126,7 +115,6 @@ const cursorKindCodes = Object.freeze(
     codex: 1,
     'claude-code': 2,
     pi: 3,
-    kimi: 4,
     opencode: 5,
     devin: 6,
   }),
@@ -149,14 +137,6 @@ function mintCursor(kind, position) {
     throw new Error(`invalid ${kind} native cursor position`)
   }
   return CURSOR_NAMESPACE + code * CURSOR_KIND_SPAN + position
-}
-
-function checkedVersion(kind, value) {
-  const version = value === undefined || value === null ? 'missing' : String(value)
-  if (!SUPPORTED[kind].has(version)) {
-    throw new UnsupportedVersionError(`unsupported version ${version} for ${kind}`)
-  }
-  return version
 }
 
 function resultBase() {
@@ -255,23 +235,6 @@ async function findFile(root, matches, depth = 6) {
       const found = await findFile(full, matches, depth - 1)
       if (found !== null) return found
     }
-  }
-  return null
-}
-
-async function findDir(root, name, depth = 4) {
-  if (depth < 0) return null
-  let entries
-  try {
-    entries = await fs.readdir(root, { withFileTypes: true })
-  } catch {
-    return null
-  }
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue
-    if (entry.name === name) return path.join(root, entry.name)
-    const found = await findDir(path.join(root, entry.name), name, depth - 1)
-    if (found !== null) return found
   }
   return null
 }
@@ -1521,296 +1484,6 @@ async function piAnswers(sessionId, env, options = {}) {
       hooksInFlight: [],
     },
   )
-  return result
-}
-
-// ================================================================= kimi
-
-function kimiInput(input) {
-  if (typeof input === 'string') return input
-  if (!Array.isArray(input)) return ''
-  return input.map((part) => (typeof part === 'string' ? part : String(part?.text ?? ''))).join('')
-}
-
-function kimiTurn(turns, turnId) {
-  const key = String(turnId)
-  let turn = turns.get(key)
-  if (!turn) {
-    turn = {
-      id: key,
-      openTools: new Set(),
-      ended: null,
-      finalStepId: null,
-      lastStepId: null,
-    }
-    turns.set(key, turn)
-  }
-  return turn
-}
-
-async function kimiAnswers(sessionId, env) {
-  const root = path.join(env.KIMI_CODE_HOME ?? path.join(home(env), '.kimi-code'), 'sessions')
-  const dir = await findDir(root, sessionId)
-  if (dir === null) return { unknown: true, reason: `unreadable: no kimi session ${sessionId}` }
-
-  const result = resultBase()
-  try {
-    const state = JSON.parse(await fs.readFile(path.join(dir, 'state.json'), 'utf8'))
-    if (typeof state.id === 'string' && state.id !== sessionId) result.replaced = true
-  } catch {
-    // state.json is optional; wire.jsonl is authoritative for completion.
-  }
-
-  const file = path.join(dir, 'agents', 'main', 'wire.jsonl')
-  const turns = new Map()
-  const steps = new Map()
-  const toolItems = new Map()
-  const userItems = new Map()
-  const calls = new Map()
-  const admissions = []
-  const pendingPrompts = []
-  let version
-  let currentTurnId = null
-  let latestTurnId = null
-  let turnOpen = false
-
-  const addStep = (stepId, at, seq, turnId) => {
-    const id = nativeId(stepId, 'kimi step', seq)
-    let item = steps.get(id)
-    if (!item) {
-      item = {
-        id,
-        role: 'assistant',
-        text: '',
-        complete: false,
-        settled: false,
-        at,
-        seq,
-        _fragmentOrder: [],
-        _fragmentText: new Map(),
-        _turnId: String(turnId),
-      }
-      steps.set(id, item)
-      result.items.push(item)
-    }
-    item.at = at
-    item.seq = seq
-    return item
-  }
-
-  const addUser = (id, text, at, seq) => {
-    const native = nativeId(id, 'kimi user message', seq)
-    let item = userItems.get(native)
-    if (!item) {
-      item = {
-        id: native,
-        role: 'user',
-        text,
-        complete: true,
-        settled: true,
-        at,
-        seq,
-      }
-      userItems.set(native, item)
-      result.items.push(item)
-    } else {
-      item.text = text
-      item.at = at
-      item.seq = seq
-    }
-    return item
-  }
-
-  const count = await readJsonl(file, (record, recordIndex) => {
-    const seq = mintCursor('kimi', recordIndex)
-    const at = record.time ?? recordIndex
-    result.cursor = seq
-
-    if (record.type === 'metadata') {
-      version = checkedVersion('kimi', record.protocol_version)
-      return
-    }
-
-    if (record.type === 'prompt.accepted') {
-      const id = nativeId(record.promptId, 'kimi accepted prompt', seq)
-      if (!admissions.some((entry) => entry.id === id)) admissions.push({ id, seq })
-      turnOpen = true
-      latestTurnId = null
-      return
-    }
-
-    if (record.type === 'turn.prompt' && record.origin?.kind === 'user') {
-      const text = kimiInput(record.input)
-      if (!text.trim()) return
-      const acceptedIndex =
-        typeof record.promptId === 'string'
-          ? admissions.findIndex((entry) => entry.id === record.promptId)
-          : 0
-      const accepted = acceptedIndex >= 0 ? admissions.splice(acceptedIndex, 1)[0] : undefined
-      const id =
-        typeof record.promptId === 'string' && record.promptId
-          ? record.promptId
-          : (accepted?.id ?? null)
-      if (id) addUser(id, text, at, seq)
-      pendingPrompts.push({ id, text })
-      turnOpen = true
-      latestTurnId = null
-      return
-    }
-
-    if (
-      record.type === 'context.append_message' &&
-      record.message?.role === 'user' &&
-      record.message.origin?.kind === 'user'
-    ) {
-      const message = record.message
-      const id = nativeId(message.id, 'kimi user message', seq)
-      const prompt = pendingPrompts.shift()
-      if (prompt?.id && prompt.id !== id) {
-        throw new Error(`kimi prompt admission ${prompt.id} does not match message ${id}`)
-      }
-      const text = kimiInput(message.content) || prompt?.text || ''
-      if (text.trim()) addUser(id, text, at, seq)
-      turnOpen = true
-      latestTurnId = null
-      return
-    }
-
-    if (record.type === 'turn.ended') {
-      const turn = kimiTurn(turns, record.turnId)
-      turn.ended = {
-        reason: record.reason,
-        error: record.error ?? null,
-        boundary: boundary('turn.ended', seq, at, {
-          turnId: record.turnId,
-          reason: record.reason ?? null,
-        }),
-      }
-      latestTurnId = String(record.turnId)
-      turnOpen = false
-      return
-    }
-
-    if (record.type !== 'context.append_loop_event') return
-    const event = record.event ?? {}
-
-    if (event.type === 'step.begin') {
-      currentTurnId = String(event.turnId)
-      latestTurnId = currentTurnId
-      kimiTurn(turns, currentTurnId)
-      turnOpen = true
-      return
-    }
-
-    if (event.type === 'content.part' && event.part?.type === 'text') {
-      const turnId = String(event.turnId ?? currentTurnId)
-      latestTurnId = turnId
-      const item = addStep(event.stepUuid, at, seq, turnId)
-      const text = String(event.part.text ?? '')
-      updateNativeFragment(item, nativeId(event.uuid, 'kimi content part', seq), text, '')
-      return
-    }
-
-    if (event.type === 'tool.call') {
-      const turnId = String(event.turnId ?? currentTurnId)
-      const turn = kimiTurn(turns, turnId)
-      const callId = event.toolCallId ?? event.uuid
-      if (callId) turn.openTools.add(callId)
-      const owner = { turnId, callId }
-      if (event.uuid) calls.set(event.uuid, owner)
-      if (event.toolCallId) calls.set(event.toolCallId, owner)
-      latestTurnId = turnId
-      turnOpen = true
-      return
-    }
-
-    if (event.type === 'tool.result') {
-      const owner = calls.get(event.parentUuid) ?? calls.get(event.toolCallId)
-      if (owner) kimiTurn(turns, owner.turnId).openTools.delete(owner.callId)
-      const id = nativeId(event.parentUuid ?? event.toolCallId, 'kimi tool result', seq)
-      const text = visibleText(event.result?.output ?? event.result)
-      const existing = toolItems.get(id)
-      if (existing) {
-        existing.text = text
-        existing.at = at
-        existing.seq = seq
-      } else {
-        const item = {
-          id,
-          role: 'tool',
-          text,
-          complete: true,
-          settled: true,
-          at,
-          seq,
-        }
-        toolItems.set(id, item)
-        result.items.push(item)
-      }
-      return
-    }
-
-    if (event.type === 'step.end') {
-      const turnId = String(event.turnId ?? currentTurnId)
-      const turn = kimiTurn(turns, turnId)
-      const item = addStep(event.uuid, at, seq, turnId)
-      turn.lastStepId = item.id
-      if (event.finishReason === 'end_turn') {
-        item.complete = true
-        turn.finalStepId = item.id
-      }
-      latestTurnId = turnId
-    }
-  })
-
-  if (count === 0) throw new Error(`empty kimi wire for ${sessionId}`)
-  result.version = version ?? checkedVersion('kimi', undefined)
-  for (const turn of turns.values()) {
-    if (turn.id === latestTurnId) continue
-    const final = turn.finalStepId ? steps.get(turn.finalStepId) : null
-    if (turn.ended && final?.complete && turn.openTools.size === 0) final.settled = true
-  }
-  const latest = latestTurnId === null ? null : turns.get(String(latestTurnId))
-  const openTools = latest ? [...latest.openTools] : []
-  const final = latest?.finalStepId ? steps.get(latest.finalStepId) : null
-  const complete = Boolean(final?.complete)
-  const failed = latest?.ended?.reason === 'failed'
-  const canSettle = Boolean(
-    latest?.ended &&
-      (complete || failed) &&
-      openTools.length === 0 &&
-      admissions.length === 0 &&
-      !turnOpen,
-  )
-  const terminalItem = final ?? (latest?.lastStepId ? steps.get(latest.lastStepId) : null)
-  if (canSettle && terminalItem) terminalItem.settled = true
-
-  result.failed = failed
-  result.failure = failed
-    ? String(latest.ended.error?.message ?? visibleText(latest.ended.error))
-    : null
-  result.inFlight = turnOpen || openTools.length > 0 || admissions.length > 0
-  const state = canSettle ? 'settled' : result.inFlight ? 'in-flight' : 'unknown'
-  setSettlement(
-    result,
-    state,
-    latest?.ended ? 'native' : state === 'unknown' ? 'unknown' : 'native',
-    latest?.ended?.boundary ?? null,
-    canSettle ? latest.ended.boundary.cursor : null,
-    {
-      complete,
-      openTools,
-      queuedTurns: admissions.map((entry) => entry.id),
-      hooksInFlight: [],
-    },
-  )
-
-  for (const item of result.items) {
-    delete item._fragmentOrder
-    delete item._fragmentText
-    delete item._turnId
-  }
-  result.items.sort((left, right) => left.seq - right.seq || left.id.localeCompare(right.id))
   return result
 }
 

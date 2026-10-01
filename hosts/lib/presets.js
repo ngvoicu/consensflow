@@ -1357,23 +1357,6 @@ export const AGENT_PRESETS = [
     effort: "xhigh",
   },
 
-  // --- Kimi Code (Finnish names, so a kimi agent is recognisable as one at a
-  // glance — Greek, Norse and muse names are all spoken for). Added 2026-08-24.
-  //
-  // K3 only: K2.7 Code and Highspeed retired at the user's request.
-  // Kimi Code uses its own configured account. The child-only
-  // KIMI_MODEL_THINKING_EFFORT control selects Low/High/Max without a CLI flag
-  // or changes to that account's config. Max is an explicit catalog choice.
-  {
-    preset: "ilmarinen",
-    id: "ilmarinen",
-    name: "Ilmarinen",
-    label: "Kimi K3 MAX",
-    description: "Coding and analysis across longer tasks.",
-    kind: "kimi",
-    model: "moonshot-ai/kimi-k3",
-    effort: "max",
-  },
   // --- Image generation through the existing Codex login -----------------
   {
     preset: "pygmalion",
@@ -1491,7 +1474,7 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
           ? 'Codex subscription'
           : model?.startsWith('anthropic/')
             ? 'Anthropic · API'
-            : ({ claude: 'Claude Code account', codex: 'Codex login', kimi: 'Kimi Code account', devin: 'Devin account' }[
+            : ({ claude: 'Claude Code account', codex: 'Codex login', devin: 'Devin account' }[
                 harness
               ] ?? harness)
   return {
@@ -1499,15 +1482,6 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
     modelLabel: (known && MODEL_LABELS[key]) || model || "Default",
     routeLabel: routeLabel + (contributor ? (model.endsWith('-free') ? ' · Contributor · Free' : ' · Contributor') : ''),
     ...(contributor ? { routeNote: 'Prompts and replies may train Meta models.' } : {}),
-  }
-}
-
-export const KIMI_EFFORTS = ['low', 'high', 'max'];
-
-export function validateKimiEffort(agent) {
-  if ((agent.kind ?? agent.harness) !== 'kimi' || agent.effort == null || agent.effort === '') return;
-  if (!KIMI_EFFORTS.includes(agent.effort)) {
-    throw new Error('Kimi K3 effort must be low, high or max; leave it blank to use Kimi settings');
   }
 }
 

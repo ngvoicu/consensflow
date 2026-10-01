@@ -38,9 +38,9 @@ describe('harness executable discovery', () => {
   })
 
   it('detection returns executable identities without unused global skill destinations', () => {
-    for (const name of ['claude', 'codex', 'opencode', 'pi', 'kimi', 'devin']) stubCli(t.env, name)
+    for (const name of ['claude', 'codex', 'opencode', 'pi', 'devin']) stubCli(t.env, name)
     const harnesses = detectHarnesses(t.env)
-    assert.equal(harnesses.length, 6)
+    assert.equal(harnesses.length, 5)
     for (const harness of harnesses)
       assert.deepEqual(Object.keys(harness).sort(), ['command', 'id'])
   })

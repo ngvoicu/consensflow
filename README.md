@@ -7,7 +7,7 @@ to the board, and reviewers judge workers' work on an independent model
 before you see it.
 
 Everything runs through the harness CLIs you already have installed and logged
-in (Claude Code, Codex, OpenCode, Pi, Devin, Kimi Code). ConsensFlow stores no
+in (Claude Code, Codex, OpenCode, Pi, Devin). ConsensFlow stores no
 credentials, takes no API key, and writes only inside its own home.
 
 ## The model

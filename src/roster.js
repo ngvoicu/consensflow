@@ -9,12 +9,7 @@ import {
 } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import {
-  AGENT_PRESETS,
-  agentProfile,
-  validateKimiEffort,
-  validateWorkTier,
-} from '../hosts/lib/presets.js'
+import { AGENT_PRESETS, agentProfile, validateWorkTier } from '../hosts/lib/presets.js'
 
 /**
  * The roster: every catalog agent, exactly as the catalog has it, and the
@@ -33,7 +28,7 @@ import {
 // agent. There is no CLI behind it — image generation is reached through the Codex
 // login — but the roster, the catalog and `cf run` treat it like any other, so
 // @pygmalion works wherever the rest do.
-export const HARNESSES = ['claude', 'codex', 'pi', 'opencode', 'kimi', 'devin', 'image']
+export const HARNESSES = ['claude', 'codex', 'pi', 'opencode', 'devin', 'image']
 
 const NAME_PATTERN = /^[a-z][a-z0-9-]*$/
 const KIND_TO_HARNESS = {
@@ -41,7 +36,6 @@ const KIND_TO_HARNESS = {
   codex: 'codex',
   pi: 'pi',
   opencode: 'opencode',
-  kimi: 'kimi',
   devin: 'devin',
   image: 'image',
 }
@@ -59,7 +53,6 @@ const HARNESS_TO_KIND = {
   codex: 'codex',
   pi: 'pi',
   opencode: 'opencode',
-  kimi: 'kimi',
   devin: 'devin',
   image: 'image',
 }
@@ -323,7 +316,6 @@ function validateAdd(input) {
 /** An agent defined by hand: the catalog's agents are there already. */
 export function addAgent(input, env) {
   validateAdd(input)
-  validateKimiEffort(input)
   validateWorkTier(input.workTier)
   const document = loadDocument(env)
   if (document.agents.some((row) => row.id === input.name)) {
@@ -368,7 +360,6 @@ function applyPatch(row, patch) {
     // Never leave a stale value in the key this kind does not read.
     delete row[key === 'thinking' ? 'effort' : 'thinking']
   }
-  validateKimiEffort(row)
 }
 
 function refuseEffortEdit(name, kind) {

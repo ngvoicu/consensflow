@@ -170,7 +170,7 @@ while IFS= read -r _line; do
   :
 done
 `
-  for (const name of ['claude', 'codex', 'pi', 'opencode', 'kimi']) {
+  for (const name of ['claude', 'codex', 'pi', 'opencode']) {
     const path = join(box.bin, name)
     writeFileSync(path, script(name), 'utf8')
     chmodSync(path, 0o755)
@@ -483,7 +483,6 @@ function smokeEnvironment(box, feed, tls, publicKeyPath, expected) {
     CLAUDE_CONFIG_DIR: join(box.home, '.claude'),
     CODEX_HOME: join(box.home, '.codex'),
     XDG_CONFIG_HOME: join(box.home, '.config'),
-    KIMI_CODE_HOME: join(box.home, '.kimi-code'),
     PI_CODING_AGENT_DIR: join(box.home, '.pi', 'agent'),
     CONSENSFLOW_SELFTEST: '1',
     CONSENSFLOW_SELFTEST_DIR: box.workspace,

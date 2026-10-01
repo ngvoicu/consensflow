@@ -183,24 +183,21 @@ describe('agents defined by hand are stored in full, v1-shaped', () => {
     assert.equal(byName(t.env)['freya-2'], undefined)
   })
 
-  it('a Kimi agent takes only the efforts Kimi accepts, on add and on edit', () => {
-    for (const effort of ['medium', 'xhigh', 'ultra', 'off', 'on', 0, false]) {
-      assert.throws(
-        () =>
-          addAgent(
-            { name: 'invalid', harness: 'kimi', model: 'moonshot-ai/kimi-k3', effort },
-            t.env,
-          ),
-        /low.*high.*max/,
-      )
-    }
-    addAgent(
-      { name: 'my-kimi', harness: 'kimi', model: 'moonshot-ai/kimi-k3', effort: 'low' },
-      t.env,
+  it('defines no agent on Kimi, and reads one an older build saved as a harness it does not run', () => {
+    assert.throws(
+      () => addAgent({ name: 'my-kimi', harness: 'kimi', model: 'moonshot-ai/kimi-k3' }, t.env),
+      /unknown harness "kimi"/,
     )
-    assert.throws(() => editAgent('my-kimi', { effort: 'medium' }, t.env), /low.*high.*max/)
-    editAgent('my-kimi', { effort: '' }, t.env)
-    assert.equal(byName(t.env)['my-kimi'].effort, undefined, 'blank restores native settings')
+    const file = raw(t.env)
+    file.agents.push({
+      id: 'old-kimi',
+      name: 'Old-kimi',
+      kind: 'kimi',
+      model: 'moonshot-ai/kimi-k3',
+    })
+    writeFileSync(rosterPath(t.env), JSON.stringify(file))
+    assert.equal(byName(t.env)['old-kimi'].unsupported, true)
+    removeAgent('old-kimi', t.env)
   })
 
   it('a custom row that took a catalog name on another harness hides that entry', () => {
