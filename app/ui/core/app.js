@@ -98,9 +98,7 @@ const board = new BoardView(boardRoot, {
   // its process and takes its card away with it.
   onOpenTerminal: (participant) =>
     act(async () => {
-      if (participant.member !== null) {
-        await core('session.open', { project: state.selected, handle: participant.handle })
-      }
+      await core('session.open', { project: state.selected, handle: participant.handle })
       unfold('dock')
       state.focus = participant.handle
     }),
@@ -240,8 +238,6 @@ function render() {
     terminals.clear(state.selected)
     drawer.hide()
   }
-  // A row's Terminal button stays live while an ended window is still readable.
-  for (const lane of lanes) lane.ended = terminals.has(state.selected, lane.participant.handle)
   if (state.board === null) {
     boardRoot.replaceChildren(
       element(

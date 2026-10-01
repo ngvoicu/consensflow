@@ -1,6 +1,14 @@
 import { FitAddon, Terminal } from './vendor/xterm.js'
 
 /**
+ * How long a terminal's new size must hold before the terminal and the
+ * program in it take it. Each resize makes the program redraw, and Claude
+ * Code leaves behind a copy of what it showed at the old width: a divider
+ * dragged across dozens of widths left dozens of copies of the chief's answer.
+ */
+const SETTLE_MS = 200
+
+/**
  * The page-side terminal contract. Pane ownership stays in Rust; this object
  * owns only one xterm parser, renderer and input subscription for one pane.
  *
@@ -50,6 +58,9 @@ export class XtermEmulator {
       }
     })
     this.resizeSubscription = this.terminal.onResize(({ cols, rows }) => onResize(cols, rows))
+    /** Whether the terminal has taken its host's size once. */
+    this.sized = false
+    this.settling = null
     this.resizeObserver = new ResizeObserver(() => this.fit())
     this.resizeObserver.observe(host)
   }
@@ -73,10 +84,23 @@ export class XtermEmulator {
     }
   }
 
+  /** Take the host's size: the first at once, a later one once it holds still. */
   fit() {
+    if (this.host.clientWidth < 2 || this.host.clientHeight < 2) return
+    clearTimeout(this.settling)
+    if (!this.sized) {
+      this.#fitNow()
+      return
+    }
+    this.settling = setTimeout(() => this.#fitNow(), SETTLE_MS)
+  }
+
+  #fitNow() {
+    this.settling = null
     if (this.host.clientWidth < 2 || this.host.clientHeight < 2) return
     try {
       this.fitAddon.fit()
+      this.sized = true
     } catch {
       // A card can move between the visible grid and the off-screen parking
       // lot during this frame. The next ResizeObserver delivery fits it.
@@ -84,6 +108,7 @@ export class XtermEmulator {
   }
 
   dispose() {
+    clearTimeout(this.settling)
     this.resizeObserver.disconnect()
     this.userInputSubscription.dispose()
     this.dataSubscription.dispose()

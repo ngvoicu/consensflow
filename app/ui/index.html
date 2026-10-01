@@ -244,6 +244,7 @@
       overflow: auto;
       padding: 16px 20px 56px;
       display: grid;
+      grid-template-columns: minmax(0, 1fr);
       gap: 14px;
       align-content: start;
     }
@@ -284,11 +285,13 @@
     .foryou-sub { margin: 10px 0 4px; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
     .bay-empty { color: var(--muted); font-size: 12px; padding: 2px 2px 0; list-style: none; }
 
-    /* The kanban: a row per participant, a column per state. */
+    /* The kanban: a row per participant, a column per state. A board too
+       narrow for its columns scrolls sideways rather than crush them. */
     .kanban {
       border-collapse: separate;
       border-spacing: 0;
       width: 100%;
+      min-width: 680px;
       table-layout: fixed;
     }
     .kanban thead th {
@@ -304,7 +307,9 @@
       color: var(--muted);
       border-bottom: 1px solid var(--line-soft);
     }
-    .kanban .kanban-staff { width: 19%; }
+    /* Room for a session's buttons beside its indent. A fixed table takes a
+       column's width as given, and a width mixing % and px as none at all. */
+    .kanban .kanban-staff { width: 176px; }
     .kanban th[data-state="finished"] { color: var(--muted); }
     .kanban tbody td, .kanban tbody th {
       vertical-align: top;
@@ -325,6 +330,8 @@
     .row-status[data-state="waiting"] { color: var(--amber); }
     .row-status[data-state="out"], .row-status[data-state="missing"] { color: var(--buoy); }
     .row-tools { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+    /* A button stays in its column: a label too long for it wraps. */
+    .row-tools > button { max-width: 100%; white-space: normal; }
 
     .lamp {
       width: 10px;
@@ -609,6 +616,10 @@
       min-width: 0;
       min-height: 0;
       display: grid;
+      /* The card's width, never its terminal's: a column sized by its
+         content let a terminal wider than its card hold the card open, and
+         each fit took one column off, a resize of the program every time. */
+      grid-template-columns: minmax(0, 1fr);
       grid-template-rows: 30px minmax(0, 1fr);
       background: var(--deep);
       border: 1px solid var(--line-soft);
@@ -626,29 +637,16 @@
     }
     .terminal-name { font-weight: 700; letter-spacing: .08em; }
     .terminal-meta { color: var(--muted); }
-    .terminal-ended {
-      margin-left: auto;
-      padding: 1px 6px;
-      border-radius: 4px;
-      background: var(--panel-raised);
-      color: var(--muted);
-      font: 700 10px var(--mono);
-      letter-spacing: .12em;
-      text-transform: uppercase;
-    }
     .terminal-stop { margin-left: auto; }
-    .terminal-close { display: none; }
-    .terminal-card[data-ended="true"] { border-style: dashed; }
-    /* Its last frame still shows the agent's prompt: faded, it no longer looks live. */
-    .terminal-card[data-ended="true"] .terminal-host { opacity: .45; }
-    .terminal-card[data-ended="true"] .terminal-stop { display: none; }
-    .terminal-card[data-ended="true"] .terminal-close { display: inline-block; }
     .terminal-host { min-height: 0; padding: 4px 2px 2px 6px; }
-    /* The terminal's scrollback shows a scrollbar that stays, not the overlay that hides between scrolls. */
-    .xterm-viewport::-webkit-scrollbar { width: 10px; }
-    .xterm-viewport::-webkit-scrollbar-track { background: var(--panel); }
-    .xterm-viewport::-webkit-scrollbar-thumb { background: var(--line); border: 2px solid var(--panel); border-radius: 5px; }
-    .xterm-viewport::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+    /* Scrollbars that stay, not the overlay that hides between scrolls: a
+       terminal's scrollback, and a board too narrow for its columns, which
+       would otherwise hide the last of them with no sign they are there. */
+    .xterm-viewport::-webkit-scrollbar, .board::-webkit-scrollbar { width: 10px; height: 10px; }
+    .xterm-viewport::-webkit-scrollbar-track, .board::-webkit-scrollbar-track { background: var(--panel); }
+    .xterm-viewport::-webkit-scrollbar-thumb, .board::-webkit-scrollbar-thumb { background: var(--line); border: 2px solid var(--panel); border-radius: 5px; }
+    .xterm-viewport::-webkit-scrollbar-thumb:hover, .board::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+    .board::-webkit-scrollbar-corner { background: var(--panel); }
 
     .status {
       position: absolute;

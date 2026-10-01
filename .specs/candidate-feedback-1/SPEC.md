@@ -85,7 +85,10 @@ reviewer, and wrote down what he saw. His words, in the order they came:
   the PM, then the members, scrolling sideways as the old app did (Gabriel,
   2026-09-20), not one docked window with tabs. A finished window's terminal
   stays in the strip, marked ended and readable, until the member's next
-  window or the human closes it.
+  window or the human closes it. *(Reversed 2026-10-01: a window that ends
+  leaves the strip with its card. Faded and marked "closed", its last frame
+  still showed the agent's prompt and read as open beside a lane offering
+  Open terminal; its lane keeps Open terminal and Transcript.)*
 - **Coordinators get no team-change notes.** A task cancelled by a member
   leaving is still reported to its requester. An unreviewed result carries
   its reason in the result delivery, not as a separate note.
@@ -159,7 +162,8 @@ Design, 2026-09-20, before the code:
   then members in row order; it scrolls sideways; the Terminal button on a
   row scrolls its card into view; an ended window's card stays with an
   "ended" badge and a close button until the member's next window replaces
-  it or the human closes it. The dock tabs go.
+  it or the human closes it. *(Reversed 2026-10-01: an ended window's card
+  goes at once.)* The dock tabs go.
 
 
 - [x] [TEST-CF1-05] Page: columns by state, rows by participant, cards that stay when done with the result's first line, the drawer from a card, the failed and cancelled fold, the lamp on the row head, the composer where the Open tasks bay was. Data: `board.get` returns every task of the project, not the active ones.

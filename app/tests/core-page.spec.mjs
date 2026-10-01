@@ -340,28 +340,31 @@ async function open(page, data = model()) {
         },
       },
       dialog: { open: async () => '/work/fresh' },
-      test: {
-        createEmulator: (host) => {
-          // The keyboard lives in a field inside the host, as xterm's does.
-          host.append(
-            Object.assign(document.createElement('textarea'), { className: 'stub-input' }),
-          )
-          const emulator = {
-            host,
-            written: [],
-            write: async (bytes) => emulator.written.push(...bytes),
-            onData: (callback) => {
-              emulator.type = callback
-              return { dispose() {} }
+      // A test that needs the real xterm asks for it; the rest type into a stand-in.
+      test: data.realTerminals
+        ? {}
+        : {
+            createEmulator: (host) => {
+              // The keyboard lives in a field inside the host, as xterm's does.
+              host.append(
+                Object.assign(document.createElement('textarea'), { className: 'stub-input' }),
+              )
+              const emulator = {
+                host,
+                written: [],
+                write: async (bytes) => emulator.written.push(...bytes),
+                onData: (callback) => {
+                  emulator.type = callback
+                  return { dispose() {} }
+                },
+                resize() {},
+                fit() {},
+                dispose() {},
+              }
+              emulators.push(emulator)
+              return emulator
             },
-            resize() {},
-            fit() {},
-            dispose() {},
-          }
-          emulators.push(emulator)
-          return emulator
-        },
-      },
+          },
     }
   }, data)
   await page.goto(`${origin}/index.html`)
@@ -914,19 +917,22 @@ test('a member whose agent is gone says so on the board and in the staff, with R
   await expect(member.getByRole('button', { name: 'Remove Worker @diana' })).toBeVisible()
 })
 
-test('a terminal keeps a visible scrollbar for its scrollback', async ({ page }) => {
+test('a terminal and a board too narrow for its columns keep a visible scrollbar', async ({
+  page,
+}) => {
   await open(page)
   const rules = await page.evaluate(() =>
     [...document.styleSheets]
       .flatMap((sheet) => [...sheet.cssRules])
       .map((rule) => rule.selectorText ?? '')
-      .filter((selector) => selector.includes('.xterm-viewport::-webkit-scrollbar')),
+      .filter((selector) => selector.includes('::-webkit-scrollbar')),
   )
   expect(rules).toEqual([
-    '.xterm-viewport::-webkit-scrollbar',
-    '.xterm-viewport::-webkit-scrollbar-track',
-    '.xterm-viewport::-webkit-scrollbar-thumb',
-    '.xterm-viewport::-webkit-scrollbar-thumb:hover',
+    '.xterm-viewport::-webkit-scrollbar, .board::-webkit-scrollbar',
+    '.xterm-viewport::-webkit-scrollbar-track, .board::-webkit-scrollbar-track',
+    '.xterm-viewport::-webkit-scrollbar-thumb, .board::-webkit-scrollbar-thumb',
+    '.xterm-viewport::-webkit-scrollbar-thumb:hover, .board::-webkit-scrollbar-thumb:hover',
+    '.board::-webkit-scrollbar-corner',
   ])
 })
 
@@ -1674,44 +1680,133 @@ test("keeps each project's terminals, scrollback and all, when the human switche
   )
   await page.locator('.project-select', { hasText: 'foundry' }).click()
   await expect(dock.locator('.terminal-card')).toHaveCount(1)
-  await expect(dock.locator('.terminal-card[data-handle="chief"]')).toHaveAttribute(
-    'data-ended',
-    'false',
-  )
+  await expect(dock.locator('.terminal-card[data-handle="chief"]')).toHaveCount(1)
   await page.locator('.project-select', { hasText: 'harbour' }).click()
   await expect(dock.locator('.terminal-card')).toHaveCount(2)
-  await expect(dock.locator('.terminal-card[data-ended="true"]')).toHaveCount(0)
   expect(await emulators()).toBe(before + 1, "only foundry's chief got a new terminal")
   expect(
     await page.evaluate(() => window.__emulators.some((emulator) => emulator.written.length > 0)),
   ).toBe(true)
 })
 
-test("keeps a closed window's terminal in the strip, faded, until the human closes it", async ({
+test("takes a closed window's card out of the dock: its lane says so and opens it again", async ({
   page,
 }) => {
-  await open(page)
+  const data = model()
+  const zeusLane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  Object.assign(zeusLane, { tasks: [], activity: { state: 'closed' }, pane: null })
+  data.boards[1].lanes.push({
+    participant: session(20, zeusLane.participant, 'amber-pine'),
+    tasks: [task(21, 'Write the lexer', 'working', 'chief', 'zeus-amber-pine', 3)],
+    activity: { state: 'working' },
+    pane: { id: 'p1-zeus-amber-pine', generation: 9 },
+  })
+  await open(page, data)
   const dock = page.getByRole('complementary', { name: 'Terminal dock' })
-  await expect(dock.locator('.terminal-card[data-handle="zeus"]')).toHaveCount(1)
+  await expect(dock.locator('.terminal-card[data-handle="zeus-amber-pine"]')).toHaveCount(1)
+  // Its task accepted, the window closes: a last frame left in the dock
+  // would still show the agent's prompt and read as open.
   await page.evaluate(() => {
-    const lane = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+    const lane = window.__model.boards[1].lanes.find(
+      (l) => l.participant.handle === 'zeus-amber-pine',
+    )
+    lane.tasks[0].state = 'accepted'
     lane.pane = null
     lane.activity = { state: 'closed' }
     window.__listeners.get('state-changed')()
   })
-  const ended = dock.locator('.terminal-card[data-handle="zeus"]')
-  await expect(ended).toHaveAttribute('data-ended', 'true')
-  // The same word as its lane ("Terminal closed"), and a screen that no
-  // longer looks live: its last frame still shows the agent's prompt.
-  await expect(ended.getByText('closed', { exact: true })).toBeVisible()
-  expect(
-    Number(
-      await ended.locator('.terminal-host').evaluate((host) => getComputedStyle(host).opacity),
-    ),
-  ).toBeLessThan(1)
-  await ended.getByRole('button', { name: "Close @zeus's closed terminal" }).click()
-  await expect(dock.locator('.terminal-card[data-handle="zeus"]')).toHaveCount(0)
-  await expect(page.locator('tr[data-handle="zeus"] .row-tools button')).toHaveCount(0)
+  await expect(dock.locator('.terminal-card[data-handle="zeus-amber-pine"]')).toHaveCount(0)
+  await expect(dock.locator('.terminal-card[data-handle="chief"]')).toHaveAttribute(
+    'data-focused',
+    'true',
+  )
+  const row = page.locator('tr[data-handle="zeus-amber-pine"]')
+  await expect(row.locator('.row-status')).toHaveText('Terminal closed')
+  await expect(row.getByTestId('lamp')).toHaveAttribute('data-state', 'closed')
+  await expect(
+    row.getByRole('button', { name: "What @zeus · amber-pine's terminal wrote" }),
+  ).toBeEnabled()
+  await row.getByRole('button', { name: "Open @zeus · amber-pine's terminal" }).click()
+  await expect
+    .poll(() => calls(page, 'session.open'))
+    .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
+  // The chief's window opens and closes with the project: its row has no Open.
+  await expect(page.locator('tr[data-handle="chief"] .row-tools button')).toHaveText([
+    'Switch lead',
+  ])
+})
+
+test('resizes a terminal once, when a drag that narrows it holds still', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 800 })
+  await open(page, { ...model(), realTerminals: true })
+  const sizes = () =>
+    page.evaluate(() =>
+      window.__calls
+        .filter(([command, args]) => command === 'pane_resize' && args.id === 'p1-chief')
+        .map(([, args]) => args.cols),
+    )
+  // The first size goes at once, and holds: a terminal wider than its card
+  // once held the card open and lost a column at every fit.
+  await expect.poll(async () => (await sizes()).length).toBe(1)
+  await page.waitForTimeout(600)
+  const [first] = await sizes()
+  expect(await sizes()).toEqual([first])
+  const grip = await page.locator('#board-resize').boundingBox()
+  const x = grip.x + grip.width / 2
+  const y = grip.y + 60
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  // A slow drag to the right, the windows narrowing: every step outlasts a
+  // frame, and none outlasts the settle.
+  for (let step = 1; step <= 10; step += 1) {
+    await page.mouse.move(x + step * 16, y)
+    await page.waitForTimeout(40)
+  }
+  await page.mouse.up()
+  await expect.poll(async () => (await sizes()).length, { timeout: 3_000 }).toBe(2)
+  await page.waitForTimeout(600)
+  const after = await sizes()
+  expect(after, 'one resize for the whole drag, and none after it').toHaveLength(2)
+  expect(after[1]).toBeLessThan(first)
+})
+
+test('keeps every button of a lane inside its column, however narrow the board', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 800 })
+  const data = model()
+  const zeusLane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  Object.assign(zeusLane, { tasks: [], activity: { state: 'closed' }, pane: null })
+  data.boards[1].lanes.push({
+    participant: session(20, zeusLane.participant, 'lively-comet'),
+    tasks: [task(21, 'Write the lexer', 'accepted', 'chief', 'zeus-lively-comet', 3)],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  // The board at its narrowest, the windows given the rest.
+  const grip = page.locator('#board-resize')
+  await grip.focus()
+  for (let press = 0; press < 30; press += 1) await grip.press('ArrowLeft')
+  await expect(grip).toHaveAttribute('aria-valuenow', '280')
+  const row = page.locator('tr[data-handle="zeus-lively-comet"]')
+  await expect(row.locator('.row-tools button')).toHaveText([
+    'Open terminal',
+    'Transcript',
+    'Delete session',
+  ])
+  const outside = await page.locator('table[aria-label="Tasks"] tbody th').evaluateAll((heads) =>
+    heads.flatMap((head) => {
+      const column = head.getBoundingClientRect()
+      return [...head.querySelectorAll('button')]
+        .filter((button) => {
+          const box = button.getBoundingClientRect()
+          return box.left < column.left || box.right > column.right + 0.5
+        })
+        .map((button) => button.textContent)
+    }),
+  )
+  expect(outside).toEqual([])
 })
 
 test("opens a closed session's transcript from its lane, and gives a member's heading row no buttons", async ({

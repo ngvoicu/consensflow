@@ -478,41 +478,23 @@ export class BoardView {
           ? 'out'
           : (activity?.state ?? 'closed')
     const tools = element('div', 'row-tools')
-    // A member's row heads its sessions and has no terminal of its own. A
-    // session's closed terminal opens again on its own conversation; an open
-    // one closes; the session is deleted from here too, and a closed one's
-    // copy is on its last task's card.
-    const heading =
-      participant.role !== 'chief' &&
-      participant.agent !== null &&
-      participant.member === null &&
-      pane === null &&
-      !lane.ended
+    // Only a session's terminal is the human's to open and close: a member's
+    // row heads its sessions and has no terminal of its own, and the chief's
+    // opens and closes with the project. An open terminal is in the dock; a
+    // closed one opens again on its own conversation, and its copy is on its
+    // last task's card. The session is deleted from here too.
     const session = participant.member !== null
     const latest = lane.tasks.at(-1)
-    if (!heading) {
-      // An open terminal is already in the dock: only a closed one offers Open.
-      if (pane === null) {
-        const openTerminal = button(
+    if (session && pane === null) {
+      tools.append(
+        button(
           'Open terminal',
           'quiet-button',
           () => this.#actions.onOpenTerminal(participant),
           `Open ${laneName(participant)}'s terminal`,
-        )
-        openTerminal.disabled = !lane.ended && !session
-        tools.append(openTerminal)
-      }
-      if (session && pane !== null) {
-        tools.append(
-          button(
-            'Close terminal',
-            'quiet-button',
-            () => this.#actions.onCloseTerminal(participant),
-            `Close ${laneName(participant)}'s terminal`,
-          ),
-        )
-      }
-      if (session && pane === null && latest !== undefined) {
+        ),
+      )
+      if (latest !== undefined) {
         tools.append(
           button(
             'Transcript',
@@ -522,6 +504,16 @@ export class BoardView {
           ),
         )
       }
+    }
+    if (session && pane !== null) {
+      tools.append(
+        button(
+          'Close terminal',
+          'quiet-button',
+          () => this.#actions.onCloseTerminal(participant),
+          `Close ${laneName(participant)}'s terminal`,
+        ),
+      )
     }
     if (coordinator) {
       tools.append(
