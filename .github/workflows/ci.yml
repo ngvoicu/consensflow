@@ -1,7 +1,9 @@
 # The gate on both platforms the app ships for: lint and the Node suite, the
-# integration suite on a real pane host (the release bridge), and the Rust
-# host's own tests and clippy. The packaged smoke and the page's Playwright
-# suite need a built, signed app and stay with the release build.
+# integration suite on a real pane host (the release bridge), the page's
+# Playwright suite (on macOS: it needs no app, and once is enough), and the
+# Rust host's tests, headless ones included, and clippy. The packaged smoke
+# needs a built app and stays with the release build. Rust comes from the
+# runner's own rustup; the one third-party action is pinned to a commit.
 name: CI
 
 on:
@@ -31,10 +33,8 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             app/package-lock.json
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - run: rustup update stable --no-self-update && rustup default stable && rustup component add clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: app/src-tauri
 
@@ -45,14 +45,18 @@ jobs:
       - run: npm --prefix app run prepare-sidecar
 
       - run: npm run check
+      - if: runner.os == 'macOS'
+        working-directory: app
+        run: npx playwright install chromium && npm run test:ui
       # Cargo reads app/src-tauri/.cargo/config.toml from the folder it runs in:
       # on Windows its runner gives each test binary the manifest it needs.
       - run: cargo build --release --bin consensflow-bridge
         working-directory: app/src-tauri
       - run: npm run test:integration
       # The PTY tests read their children with no time limit of their own; a
-      # stuck read on a runner (seen once on macOS) ends here.
-      - run: cargo test --lib
+      # stuck read on a runner (seen once on macOS) ends here. The headless
+      # tests (tests/headless.rs) are Unix-only and build empty on Windows.
+      - run: cargo test
         working-directory: app/src-tauri
         timeout-minutes: 15
       - run: cargo clippy --all-targets -- -D warnings

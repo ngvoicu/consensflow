@@ -35,9 +35,10 @@ rolling feed installed apps read: `update-alpha` for every version, and
 the new file and that the archive it names downloads byte for byte. Releases
 run one at a time.
 
-**Run it by hand** (Actions → Release → Run workflow) to build, sign and
-smoke-test the same files from any commit without publishing anything; the
-run carries them as its downloads.
+**Run it by hand** (Actions → Release → Run workflow) on `main` to build,
+sign and smoke-test the same files without publishing anything; the run
+carries them as its downloads. Only `main` and version tags may read the
+signing key, so a hand run from another branch stops at its first job.
 
 ## Signing
 

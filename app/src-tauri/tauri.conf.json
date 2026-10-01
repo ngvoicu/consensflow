@@ -42,6 +42,7 @@
     },
     "macOS": {
       "exceptionDomain": "localhost",
+      "minimumSystemVersion": "13.5",
       "signingIdentity": "-",
       "entitlements": "entitlements.plist"
     },

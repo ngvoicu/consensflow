@@ -23,6 +23,10 @@ import { openLedger } from '../src/ledger/index.js'
  * The daemon must have closed the ledger first: the ledger holds its file.
  */
 export function measure(file, { fixture = null, workspace = null, pickers = 0 } = {}) {
+  // Every task, from the task table itself: the board is one of the things a
+  // run checks, so it cannot be what the tasks are counted from. Read before
+  // the ledger opens, which holds the file to itself.
+  const numbers = taskNumbers(file)
   const ledger = openLedger(file)
   let metrics
   try {
@@ -31,11 +35,9 @@ export function measure(file, { fixture = null, workspace = null, pickers = 0 } 
     const full = ledger.project(project.id)
     const human = full.participants.find((p) => p.role === 'human')
     const chief = full.participants.find((p) => p.role === 'chief')
-    const tasks = ledger
-      .board(project.id)
-      .lanes.flatMap((lane) => lane.tasks)
-      .concat(ledger.board(project.id).open)
-      .map((task) => ledger.task(project.id, task.number))
+    const tasks = numbers
+      .filter((row) => row.projectId === project.id)
+      .map((row) => ledger.task(project.id, row.number))
     // The inbox reads newest first; a report reads in order.
     const toHuman = ledger
       .inbox(human.id, { limit: 500 })
@@ -46,10 +48,13 @@ export function measure(file, { fixture = null, workspace = null, pickers = 0 } 
       .map((task) => {
         const brief = task.messages.find((m) => m.kind === 'task')
         const result = task.messages.find((m) => m.kind === 'result')
+        // A window at work: from its brief's delivery to its result, or to
+        // the task's end when it ended without one. A task whose brief never
+        // reached a window (open, queued, withdrawn) never ran.
         return {
           number: task.number,
-          from: brief?.deliveredAt ?? brief?.createdAt ?? task.createdAt,
-          to: result?.createdAt ?? null,
+          from: brief?.deliveredAt ?? null,
+          to: result?.createdAt ?? (ENDED.has(task.state) ? task.updatedAt : null),
         }
       })
     metrics = {
@@ -296,6 +301,22 @@ function chiefWindow(file, chiefId, harness) {
       askRefused: tools.filter((i) => i.text.includes('ask the human here in your terminal'))
         .length,
     }
+  } finally {
+    db.close()
+  }
+}
+
+/** States a task ends in without a result. */
+const ENDED = new Set(['cancelled', 'failed'])
+
+/** Every task's project and number, read from the task table itself. */
+function taskNumbers(file) {
+  const db = new DatabaseSync(file, { readOnly: true })
+  try {
+    return db
+      .prepare('SELECT project_id AS projectId, number FROM task ORDER BY number')
+      .all()
+      .map((row) => ({ projectId: row.projectId, number: row.number }))
   } finally {
     db.close()
   }

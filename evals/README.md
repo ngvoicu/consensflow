@@ -21,16 +21,17 @@ harnesses named logged in on this machine, and your word for the spend.
 
 Everything is real but the human. The daemon, the pane host and the harnesses
 are the ones the app uses (the live bench's shape). `--chief` names the
-chief's harness (claude, codex, pi, opencode, devin); Claude Code,
-OpenCode and Codex take the chief's model from `--model` (Opus for Claude
-Code, the harness's cheap model for the other two, unless given); Pi and
-Devin run their own configured default. Claude and Codex windows start
-through wrappers the runner writes (`~/.consensflow-candidate/evals/bin`)
-that shut out MCP servers, connectors and the browser for the chief too
-(ConsensFlow already does it for members), and give Codex the chief's
-model. `--effort` (default `high`) is the chief's reasoning level, through
-those wrappers and a Pi one; OpenCode's window and Devin have no switch for
-it, and the report says so (`effort: null`). `--staff-effort` (default
+chief's harness (claude, codex, pi, opencode, devin). Every chief but
+Devin takes its model from `--model`; unless given, Claude Code runs Opus,
+Codex its cheap model, and Pi and OpenCode DeepSeek V4 Pro
+(`evals/plan.mjs`). Devin runs the model its own configuration names.
+Claude and Codex windows start through wrappers the runner writes
+(`~/.consensflow-candidate/evals/bin`) that shut out MCP servers,
+connectors and the browser for the chief too (ConsensFlow already does it
+for members) and give Codex the chief's model; a Pi wrapper gives Pi its
+model and thinking level. `--effort` (default `high`) is the chief's
+reasoning level, through those wrappers; OpenCode's window and Devin have no
+switch for it, and the report says so (`effort: null`). `--staff-effort` (default
 `medium`) is every member's, on its roster agent. Before 2026-09-27 no run
 set either: each window ran at the user's own configured default.
 `--staff` names the staff's harnesses: each gives two
@@ -118,6 +119,11 @@ a score).
   two things first, not where: the file's name, and which language first.
   Expected: asked in the terminal, nothing on the board, no `cf ask`, the
   work on the board, and the page made under the name the owner gave.
+- `lead-switch`: the owner tells the lead a codeword and a decision, pastes
+  notes long enough to push both off the first page of `cf history`, then
+  switches the lead to the staff's harness (`--switch-to`) and asks the new
+  lead. Expected: one switch to another harness, `cf history` read, the
+  codeword and the day named, nothing put on the board.
 
 `--arm` compares a chief with its card (`card`, the default), with a
 one-line card that names no board (`nocard`), and as its harness alone

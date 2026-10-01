@@ -10,21 +10,13 @@ const SCRIPT = fileURLToPath(new URL('../app/scripts/prepare-update.mjs', import
 const SIGNER = fileURLToPath(new URL('../app/node_modules/.bin/tauri', import.meta.url))
 const VERSION = '3.0.0-alpha.99'
 const STABLE = '3.0.0'
-const COMPAT = {
-  'claude-code': ['2.1.265'],
-  codex: ['0.153.4'],
-  opencode: ['1.18.29'],
-  pi: ['0.85.1'],
-}
 const DATE = '2026-09-09T12:00:00Z'
 
 function writeRepo(dir, version) {
   mkdirSync(join(dir, 'app', 'src-tauri'), { recursive: true })
-  mkdirSync(join(dir, 'src'), { recursive: true })
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ version }))
   writeFileSync(join(dir, 'app', 'src-tauri', 'Cargo.toml'), `[package]\nversion = "${version}"\n`)
   writeFileSync(join(dir, 'app', 'src-tauri', 'tauri.conf.json'), JSON.stringify({ version }))
-  writeFileSync(join(dir, 'src', 'verified-harnesses.json'), JSON.stringify(COMPAT))
 }
 
 function writeApp(parent, appName, version, cliVersion = version) {
@@ -41,7 +33,6 @@ function writeApp(parent, appName, version, cliVersion = version) {
   writeFileSync(join(cli, 'package.json'), JSON.stringify({ version: cliVersion }))
   writeFileSync(join(cli, 'bin', 'cf.mjs'), '#!/usr/bin/env node\n')
   writeFileSync(join(cli, 'hosts', 'probe.txt'), 'hosts\n')
-  writeFileSync(join(cli, 'src', 'verified-harnesses.json'), JSON.stringify(COMPAT))
   writeFileSync(join(app, 'Contents', 'MacOS', 'ConsensFlow'), 'binary\n')
   chmodSync(join(cli, 'bin', 'cf.mjs'), 0o755)
   chmodSync(join(app, 'Contents', 'MacOS', 'ConsensFlow'), 0o755)
@@ -108,10 +99,8 @@ function fixture({
   const signature = `${archive}.sig`
   const notes = join(root, 'notes.txt')
   writeFileSync(notes, 'Alpha 99 fixes delivery races.\n')
-  const compatibility = join(root, 'compat.json')
-  writeFileSync(compatibility, JSON.stringify(COMPAT))
   const output = join(root, 'latest.json')
-  return { root, repo, bundle, archive, signature, notes, compatibility, output }
+  return { root, repo, bundle, archive, signature, notes, output }
 }
 
 function run(args) {
@@ -314,7 +303,6 @@ describe('TEST-PANE-150 prepare-update metadata', {
     const fx = fixture()
     try {
       writeFileSync(fx.notes, 'See https://evil.example/notes for details.\n')
-      writeFileSync(fx.compatibility, JSON.stringify(COMPAT))
       const result = run(baseArgs(fx))
       assert.equal(result.code, 0, result.stderr)
       const raw = readFileSync(fx.output, 'utf8')

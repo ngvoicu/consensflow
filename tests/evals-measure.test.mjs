@@ -410,6 +410,64 @@ describe('measuring a chief from the ledger', () => {
   })
 })
 
+describe('measuring parallel work', () => {
+  const fixture = async (build) => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-evals-parallel-'))
+    const file = path.join(dir, 'consensflow.db')
+    try {
+      const ledger = openLedger(file)
+      const project = ledger.createProject({
+        directory: '/work/site',
+        name: 'site',
+        chief: { harness: 'claude-code' },
+      })
+      for (const agent of ['zeus', 'diana']) {
+        ledger.addMember(project.id, {
+          agent,
+          harness: 'claude-code',
+          role: 'worker',
+          tier: 'standard',
+        })
+      }
+      const deliver = (message) => {
+        ledger.beginDelivery(message.id)
+        ledger.confirmDelivery(message.id, { evidence: 'native' })
+      }
+      build(ledger, project, deliver)
+      ledger.close()
+      return measure(file)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
+
+  it('counts only windows that had their brief: tasks still on the board never ran', async () => {
+    const metrics = await fixture((ledger, project, deliver) => {
+      deliver(
+        ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Write it' }).message,
+      )
+      for (const body of ['Translate it', 'Check it']) {
+        ledger.createTask(project.id, { from: 'chief', pool: 'worker', tier: 'standard', body })
+      }
+    })
+    assert.equal(metrics.taskCount, 3)
+    assert.equal(metrics.parallel, 1)
+  })
+
+  it('ends a task that ended without a result where it ended', async () => {
+    const metrics = await fixture((ledger, project, deliver) => {
+      deliver(
+        ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Write it' }).message,
+      )
+      ledger.cancelTask(project.id, 1, { by: 'chief' })
+      deliver(
+        ledger.createTask(project.id, { from: 'chief', to: 'diana', body: 'Then this' }).message,
+      )
+    })
+    assert.equal(metrics.parallel, 1)
+  })
+})
+
 describe('measuring a Switch lead', () => {
   it('reads the leads in order, the switches, the history the new lead read and its words, and judges the scenario', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-evals-switch-'))

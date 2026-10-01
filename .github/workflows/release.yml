@@ -2,7 +2,9 @@
 # app (the DMG, and the signed update bundle installed apps fetch through the
 # update feed), the Windows installer and the portable Windows zip.
 #
-#   git tag -a v<version> -m "<release notes>" && git push origin v<version>
+#   git tag -a v<version> -m "<release notes>" && git push upstream v<version>
+#
+# (upstream: the GitHub remote; origin is the NAS mirror, which runs nothing.)
 #
 # The tag names the source version (package.json, Cargo.toml and
 # tauri.conf.json agree; prepare-update checks all three). Its message becomes
@@ -19,9 +21,11 @@ on:
 permissions:
   contents: read
 
-# Releases go out one at a time, so two tags never race to move the feed.
+# Releases go out one at a time, so two tags never race to move the feed. A
+# hand run publishes nothing and queues apart: in the same group it would
+# replace a tag's run that waits there.
 concurrency:
-  group: release
+  group: ${{ github.ref_type == 'tag' && 'release' || format('release-trial-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
