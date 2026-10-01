@@ -187,11 +187,21 @@ export class Dispatcher {
     return this.#runtime.get(participantId)?.pane ?? null
   }
 
+  /** Refuses a harness ConsensFlow has no adapter for: none of its windows could open. */
+  requireAdapter(harness) {
+    if (this.#adapters[harness] === undefined) {
+      throw new Error(`ConsensFlow cannot open ${harness} windows`)
+    }
+  }
+
   /**
    * A new project: the ledger records it with its staff, and its chief
    * window opens after the answer (see `#openSoon`).
    */
   async openProject({ directory, name, harness, staff = [], gate }) {
+    for (const runs of [harness, ...staff.map((member) => member.harness)]) {
+      this.requireAdapter(runs)
+    }
     const project = this.#ledger.createProject({
       directory,
       name,
@@ -645,7 +655,7 @@ export class Dispatcher {
    * lead with no window, or out of quota, switches at once.
    */
   async switchChief(projectId, { harness, agent = null, when = 'now', note = false }) {
-    if (this.#adapters[harness] === undefined) throw new Error(`no adapter for ${harness}`)
+    this.requireAdapter(harness)
     if (agent !== null && this.#roster(agent) === null) {
       throw new Error(`${agent} is not among your agents`)
     }
@@ -1020,7 +1030,6 @@ export class Dispatcher {
   async #launch(project, participant, message) {
     const runtime = this.#runtimeOf(participant.id)
     const adapter = this.#adapters[participant.harness]
-    if (adapter === undefined) throw new Error(`no adapter for ${participant.harness}`)
     const conversation = this.#ledger.currentConversation(participant.id)
     const resume = conversation?.nativeSession ?? null
     const first =
@@ -1044,6 +1053,8 @@ export class Dispatcher {
     let plan
     try {
       if (first !== null) this.#ledger.beginDelivery(first.id)
+      // A harness that lost its adapter fails what came for it, and says why.
+      this.requireAdapter(participant.harness)
       // A session plays the role of the task it was started for; a member or
       // the chief its own.
       const { role } = participant
@@ -1230,9 +1241,14 @@ export class Dispatcher {
     return project.participants.find((p) => p.id === participant.memberId) ?? participant
   }
 
-  /** Free: nothing on its hands, not out of quota, not low on it. */
+  /** Free: on a harness whose windows open, its agent saved, not out of quota, not low on it. */
   #available(member) {
-    return this.#roster(member.agent) !== null && !this.#isOut(member) && !this.#isLow(member)
+    return (
+      this.#adapters[member.harness] !== undefined &&
+      this.#roster(member.agent) !== null &&
+      !this.#isOut(member) &&
+      !this.#isLow(member)
+    )
   }
 
   #isLow(member) {
@@ -1282,12 +1298,23 @@ export class Dispatcher {
   }
 
   #whyNotFree(candidates) {
-    const gone = candidates.filter((m) => this.#roster(m.agent) === null)
+    const unopened = candidates.filter((m) => this.#adapters[m.harness] === undefined)
+    const gone = candidates.filter((m) => !unopened.includes(m) && this.#roster(m.agent) === null)
     const out = candidates.filter(
-      (m) => !gone.includes(m) && m.outUntil !== null && Date.parse(m.outUntil) > this.#now(),
+      (m) =>
+        !unopened.includes(m) &&
+        !gone.includes(m) &&
+        m.outUntil !== null &&
+        Date.parse(m.outUntil) > this.#now(),
     )
-    const low = candidates.filter((m) => !gone.includes(m) && !out.includes(m) && this.#isLow(m))
+    const low = candidates.filter(
+      (m) => !unopened.includes(m) && !gone.includes(m) && !out.includes(m) && this.#isLow(m),
+    )
     const parts = []
+    for (const member of unopened)
+      parts.push(
+        `@${member.handle} runs on ${member.harness}, whose windows ConsensFlow cannot open`,
+      )
     for (const member of gone)
       parts.push(
         `@${member.handle} has no agent any more (${member.agent} is not among your agents: define it, or remove the member)`,

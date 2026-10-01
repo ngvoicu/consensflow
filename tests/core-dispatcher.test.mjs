@@ -2906,3 +2906,80 @@ describe('a message that cannot be delivered', () => {
     })
   })
 })
+
+/** Pi has no adapter in these tests: it stands for a harness ConsensFlow cannot open. */
+describe('a harness ConsensFlow has no adapter for', () => {
+  const onPi = (context, project) =>
+    context.ledger.addMember(project.id, {
+      agent: 'hera',
+      harness: 'pi',
+      role: 'worker',
+      tier: 'standard',
+    })
+
+  it('gives a member on it no work, says why, and every pass goes on', async () => {
+    await setup(async (context) => {
+      const { project, id } = await withStaff(context, [])
+      onPi(context, project)
+      context.ledger.createTask(project.id, {
+        from: 'chief',
+        pool: 'worker',
+        tier: 'standard',
+        body: 'Write the parser',
+      })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const task = context.ledger.task(project.id, 1)
+      assert.deepEqual([task.state, task.assignee], ['open', null])
+      assert.deepEqual(
+        context.ledger
+          .inbox(id('chief'))
+          .filter((m) => m.kind === 'note')
+          .map((m) => m.body),
+        [
+          'T-1 waits for a free standard worker: @hera runs on pi, whose windows ConsensFlow cannot open.',
+        ],
+      )
+      assert.equal(context.host.opened.length, 1, 'only the chief window')
+    })
+  })
+
+  it('fails what was given to a member on it by name, and its requester hears why', async () => {
+    await setup(async (context) => {
+      const { project } = await withStaff(context, [])
+      onPi(context, project)
+      context.ledger.createTask(project.id, { from: 'chief', to: 'hera', body: 'Parser' })
+      await context.dispatcher.pass()
+      const task = context.ledger.task(project.id, 1)
+      assert.equal(task.state, 'failed')
+      assert.match(
+        task.messages.find((m) => m.kind === 'note').body,
+        /^T-1 failed: the launch failed: ConsensFlow cannot open pi windows\./,
+      )
+    })
+  })
+
+  it('opens no project, member or lead on it', async () => {
+    await setup(async (context) => {
+      await assert.rejects(
+        context.dispatcher.openProject({ directory: '/work/app', name: 'app', harness: 'pi' }),
+        /ConsensFlow cannot open pi windows/,
+      )
+      await assert.rejects(
+        context.dispatcher.openProject({
+          directory: '/work/app',
+          name: 'app',
+          harness: 'claude-code',
+          staff: [{ agent: 'hera', harness: 'pi', role: 'worker', tier: 'standard' }],
+        }),
+        /ConsensFlow cannot open pi windows/,
+      )
+      assert.deepEqual(context.ledger.projects(), [])
+      const { project } = await withStaff(context)
+      await assert.rejects(
+        context.dispatcher.switchChief(project.id, { harness: 'pi' }),
+        /ConsensFlow cannot open pi windows/,
+      )
+    })
+  })
+})

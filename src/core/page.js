@@ -74,9 +74,11 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       },
     ),
 
-    'member.add': change(async ({ project, agent, roles = ['worker'] }) => ({
-      member: ledger.addMember(project, { roles, ...membership(agent, env) }),
-    })),
+    'member.add': change(async ({ project, agent, roles = ['worker'] }) => {
+      const member = membership(agent, env)
+      dispatcher.requireAdapter(member.harness)
+      return { member: ledger.addMember(project, { roles, ...member }) }
+    }),
 
     'member.roles': change(async ({ project, agent, roles }) => ({
       member: ledger.setRoles(project, agent, roles),

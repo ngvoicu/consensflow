@@ -78,6 +78,13 @@ async function withPage(fn) {
     activity: () => ({ state: 'idle' }),
     pane: () => null,
     pendingSwitch: () => null,
+    // The harnesses a test says the core has no adapter for.
+    adapterless: new Set(),
+    requireAdapter(harness) {
+      if (dispatcher.adapterless.has(harness)) {
+        throw new Error(`ConsensFlow cannot open ${harness} windows`)
+      }
+    },
   }
   const operations = pageOperations({ ledger, dispatcher, env, kick: () => kicks++ })
   try {
@@ -203,6 +210,24 @@ describe('the page protocol of the new core', () => {
       await assert.rejects(
         operations['member.add']({ project: project.id, agent: 'ghost' }),
         /no agent named ghost/,
+      )
+    })
+  })
+
+  it('adds no member on a harness the core cannot open a window of', async () => {
+    await withPage(async ({ ledger, operations, dispatcher }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        harness: 'pi',
+      })
+      dispatcher.adapterless.add('codex')
+      await assert.rejects(
+        operations['member.add']({ project: project.id, agent: 'diana' }),
+        /ConsensFlow cannot open codex windows/,
+      )
+      assert.deepEqual(
+        ledger.project(project.id).participants.map((p) => p.handle),
+        ['human', 'chief'],
       )
     })
   })
