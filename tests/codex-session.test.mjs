@@ -365,7 +365,7 @@ it('keeps native TUI arguments while explicitly forwarding backend model, effort
   })
 })
 
-it('launches the bundled supervisor for owned panes without changing legacy Codex invocations', async () => {
+it('launches the bundled supervisor with the Codex invocation it supervises', async () => {
   const { withNativeBridge } = await import('../src/channels.js')
   const invocation = {
     command: '/native/codex',
@@ -386,7 +386,6 @@ it('launches the bundled supervisor for owned panes without changing legacy Code
   assert.deepEqual(wrapped.args.slice(1), ['/native/codex', 'resume', A])
   assert.deepEqual(wrapped.env, invocation.env)
   assert.deepEqual(wrapped.dropEnv, invocation.dropEnv)
-  assert.deepEqual(withNativeBridge(invocation, { channel: null }, process.execPath), invocation)
 })
 
 it('keeps native Codex sockets private and inside ConsensFlow home', {

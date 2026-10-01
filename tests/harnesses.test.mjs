@@ -1,9 +1,17 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
-import { missingHarnesses, offerable, paneArgv, runnable, terminate } from '../src/harnesses.js'
+import {
+  missingHarnesses,
+  offerable,
+  paneArgv,
+  probeExecutable,
+  runnable,
+  terminate,
+} from '../src/harnesses.js'
+import { fakeNodeExecutable } from './helpers.mjs'
 
 /** The last line of the shim npm writes for a global package, with npm's variables. */
 const NPM_SHIM =
@@ -109,6 +117,47 @@ describe('runnable', () => {
   it('treats .bat the same and everything else as a program', () => {
     assert.match(runnable('C:\\x\\tool.BAT', [], {}).file, /\\cmd\.exe$/i)
     assert.equal(runnable('C:\\x\\claude.exe', []).file, 'C:\\x\\claude.exe')
+  })
+})
+
+/** What a CLI says about itself is asked once per executable as it is on disk. */
+describe('probing a CLI', () => {
+  it('asks an unchanged CLI once, an updated one again, and one that did not answer again', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cf-probe-'))
+    try {
+      const calls = join(root, 'calls')
+      const slow = join(root, 'slow')
+      const cli = (version) =>
+        fakeNodeExecutable(
+          join(root, 'tool'),
+          `#!${process.execPath}
+import { appendFileSync, existsSync, rmSync } from 'node:fs'
+appendFileSync(${JSON.stringify(calls)}, 'x')
+if (existsSync(${JSON.stringify(slow)})) {
+  rmSync(${JSON.stringify(slow)})
+  setTimeout(() => {}, 5_000)
+} else console.log('tool ${version}')
+`,
+        )
+      const count = () => readFileSync(calls, 'utf8').length
+      let tool = cli('1.0.0')
+      assert.deepEqual(await probeExecutable(tool, ['--version'], process.env), {
+        stdout: 'tool 1.0.0\n',
+        code: 0,
+      })
+      await probeExecutable(tool, ['--version'], process.env)
+      assert.equal(count(), 1, 'an unchanged CLI is asked once')
+      tool = cli('1.1.0')
+      assert.match((await probeExecutable(tool, ['--version'], process.env)).stdout, /1\.1\.0/)
+      assert.equal(count(), 2, 'an updated CLI is asked again')
+      tool = cli('1.2.0')
+      writeFileSync(slow, '')
+      await assert.rejects(probeExecutable(tool, ['--version'], process.env, { timeoutMs: 300 }))
+      assert.match((await probeExecutable(tool, ['--version'], process.env)).stdout, /1\.2\.0/)
+      assert.equal(count(), 4, 'a CLI that did not answer in time is asked again')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })
 

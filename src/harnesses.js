@@ -1,7 +1,8 @@
-import { spawnSync } from 'node:child_process'
-import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs'
+import { execFile, spawnSync } from 'node:child_process'
+import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, dirname, join, resolve, sep } from 'node:path'
+import { promisify } from 'node:util'
 
 /** Discover CLI executables on PATH and native user install paths.
  * Finder-launched apps may lack the interactive shell's tool directories.
@@ -231,6 +232,43 @@ export function paneArgv(argv, env = process.env) {
     throw new Error(`${executable} is not an npm shim, and only cmd.exe could run it in a window`)
   }
   return [target.program, target.script, ...args]
+}
+
+const execute = promisify(execFile)
+const probes = new Map()
+
+/**
+ * What a CLI answers to `args` (`--version`, `queue --help`): its output and
+ * exit code. It is asked once per executable as it is on disk: an update
+ * gives the file another identity, so an updated CLI is asked again and an
+ * unchanged one never twice. One that does not answer in time (a busy
+ * machine took seconds to answer `--help`) or cannot start is not remembered.
+ */
+export function probeExecutable(executable, args, env, { timeoutMs = 30_000 } = {}) {
+  const file = realpathSync(executable)
+  const { dev, ino, size, mtimeMs, ctimeMs } = statSync(file)
+  const key = JSON.stringify([file, dev, ino, size, mtimeMs, ctimeMs, args])
+  let probe = probes.get(key)
+  if (probe === undefined) {
+    const run = runnable(executable, args, env)
+    probe = execute(run.file, run.args, {
+      ...run.options,
+      env,
+      timeout: timeoutMs,
+      maxBuffer: 128 * 1024,
+      encoding: 'utf8',
+      windowsHide: true,
+    }).then(
+      ({ stdout }) => ({ stdout, code: 0 }),
+      (error) => {
+        if (typeof error.code !== 'number') throw error
+        return { stdout: error.stdout ?? '', code: error.code }
+      },
+    )
+    probes.set(key, probe)
+    probe.catch(() => probes.delete(key))
+  }
+  return probe
 }
 
 /**

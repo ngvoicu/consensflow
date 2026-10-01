@@ -14,12 +14,12 @@ import { roleConfiguration } from '../role-skills.js'
 import { admission, executableFor, recordState } from './shared.js'
 
 /**
- * Codex, for the new core. Where Codex has its native queue, it runs under
- * ConsensFlow's supervisor (`hosts/codex-session.mjs`): an app-server, a broker
- * that knows the thread the TUI shows and queues messages on it, and the TUI
- * attached to both. The first message is Codex's last argument; the broker
- * names the thread once Codex starts it. A Codex without the queue runs bare
- * and gets its messages pasted, behind whatever its input box holds.
+ * Codex, for the new core. Codex runs under ConsensFlow's supervisor
+ * (`hosts/codex-session.mjs`): an app-server, a broker that knows the thread
+ * the TUI shows and queues messages on it, and the TUI attached to both. The
+ * first message is Codex's last argument; the broker names the thread once
+ * Codex starts it. A Codex too old for the native queue is refused: nothing
+ * could reach its window.
  */
 const QUESTION_TOOL = [
   '--enable',
@@ -138,7 +138,7 @@ export function codexAdapter({
     },
 
     async started({ launch }) {
-      if (launch.nativeSession !== null || launch.channel === null) return {}
+      if (launch.nativeSession !== null) return {}
       const deadline = Date.now() + discoverForMs
       while (Date.now() < deadline) {
         const thread = await currentSession(launch.channel).catch(() => undefined)
@@ -151,22 +151,15 @@ export function codexAdapter({
       throw new Error('the Codex broker never named the thread it opened')
     },
 
-    async ready({ launch, pane, host }) {
+    async ready({ launch }) {
       // Held, not failed: a refusal here would spend the message's attempts
       // in seconds (an answer to a Codex worker was lost that way).
-      if (launch.channel !== null)
-        return (await sessionAvailable(launch.channel))
-          ? true
-          : 'the Codex window cannot take a message yet: starting, resuming or reconnecting'
-      const snapshot = await host.request('pane.snapshot', pane)
-      return snapshot?.ok === true && !snapshot.pasteInFlight
+      return (await sessionAvailable(launch.channel))
+        ? true
+        : 'the Codex window cannot take a message yet: starting, resuming or reconnecting'
     },
 
     async deliver({ launch, pane, host, text }) {
-      if (launch.channel === null) {
-        const written = await host.request('pane.write_paste', { ...pane, body: text })
-        return admission(written, 'the window refused the paste')
-      }
       const sent = await send(
         {
           launch: launch.channel,

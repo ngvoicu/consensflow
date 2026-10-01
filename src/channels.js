@@ -1,11 +1,9 @@
-import { execFile } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { createServer } from 'node:net'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { promisify } from 'node:util'
 import { DEFAULT_DEADLINE_MS } from './channels/opencode.js'
-import { runnable } from './harnesses.js'
+import { probeExecutable } from './harnesses.js'
 import { configRoot } from './roster.js'
 
 function requireLaunchInput(input) {
@@ -36,33 +34,35 @@ async function freeLoopbackPort() {
   return port
 }
 
-const runHelp = promisify(execFile)
-
-// Feature detection uses the resolved executable, never a second CLI from PATH.
-// A timeout here silently downgrades delivery to pasting, so it is generous:
-// a busy machine took more than 2 s to answer `--help`.
-async function hasNativeQueue(kind, executable) {
-  if (typeof executable !== 'string' || !isAbsolute(executable)) return false
-  try {
-    const run = runnable(executable, ['queue', '--help'])
-    const { stdout } = await runHelp(run.file, run.args, {
-      ...run.options,
-      timeout: 10_000,
-      maxBuffer: 128 * 1024,
-      encoding: 'utf8',
-      env: { ...process.env, OPENAI_API_KEY: undefined, ANTHROPIC_API_KEY: undefined },
-    })
-    if (kind === 'codex') return /--thread\b/.test(stdout) && /--message\b/.test(stdout)
-    return false
-  } catch {
-    return false
-  }
+/**
+ * A Codex window runs under ConsensFlow's supervisor, which needs the native
+ * queue (and the app-server and remote TUI that came with it): a Codex
+ * without it cannot be reached in its window, so it is refused by its
+ * version. Detection asks the resolved executable, never a second CLI from
+ * PATH.
+ */
+async function requireNativeQueue(executable, env) {
+  if (typeof executable !== 'string' || !isAbsolute(executable))
+    throw new Error('a Codex launch needs the absolute path of its CLI')
+  const help = await probeExecutable(executable, ['queue', '--help'], env).catch((cause) => {
+    throw new Error(
+      `could not ask Codex whether it has its native queue: ${cause.killed ? 'it did not answer in time' : cause.message}`,
+    )
+  })
+  if (/--thread\b/.test(help.stdout) && /--message\b/.test(help.stdout)) return
+  const version = await probeExecutable(executable, ['--version'], env).then(
+    ({ stdout }) => stdout.match(/\d+\.\d+\.\d+\S*/)?.[0] ?? null,
+    () => null,
+  )
+  throw new Error(
+    `${version === null ? 'This Codex' : `Codex ${version}`} has no native queue, which ConsensFlow needs to reach its window: update Codex.`,
+  )
 }
 
 export async function launchConfiguration(kind, input) {
   const { launchId, workspace } = requireLaunchInput(input)
   if (kind === 'codex') {
-    if (!(await hasNativeQueue(kind, input.executable))) return { args: [], env: {}, channel: null }
+    await requireNativeQueue(input.executable, input.env)
     const port = await freeLoopbackPort()
     const token = randomBytes(24).toString('base64url')
     return {
@@ -158,10 +158,8 @@ export async function launchConfiguration(kind, input) {
   throw new Error(`no launch configuration for harness: ${kind}`)
 }
 
-/** Native argument construction stays in the window builders; only owned Codex panes need a supervisor. */
+/** Native argument construction stays in the window builders; Codex opens under its supervisor. */
 export function withNativeBridge(invocation, configuration, node) {
-  if (configuration?.channel?.kind !== 'codex-queue' || !configuration.channel.sessionBridge)
-    return invocation
   return {
     ...invocation,
     command: node,

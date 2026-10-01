@@ -13,7 +13,7 @@ import { fakeNodeExecutable } from './helpers.mjs'
  * supervisor (its app-server, a broker that knows the thread and its queue,
  * and the TUI attached to both), in full-permission mode, with the first
  * message as its last argument. The broker names the thread and queues every
- * later message; a Codex without the native queue gets them pasted.
+ * later message; a Codex without the native queue is refused.
  */
 const SUPERVISOR = fileURLToPath(new URL('../hosts/codex-session.mjs', import.meta.url))
 
@@ -26,15 +26,17 @@ async function withHome(fn, { queue = true } = {}) {
     CONSENSFLOW_NODE: process.execPath,
   }
   await mkdir(env.PATH, { recursive: true })
-  // A Codex that answers the three things a launch asks of it: whether it has
-  // the native queue, its effective instructions over the app-server, and the
-  // MCP servers a member's window switches off (none here).
+  // A Codex that answers the four things a launch asks of it: its version,
+  // whether it has the native queue, its effective instructions over the
+  // app-server, and the MCP servers a member's window switches off (none here).
   const executable = fakeNodeExecutable(
     path.join(env.PATH, 'codex'),
     `#!${process.execPath}
 import { createInterface } from 'node:readline'
 if (process.argv[2] === 'mcp' && process.argv[3] === 'list') {
   console.log('[]')
+} else if (process.argv[2] === '--version') {
+  console.log('codex-cli 0.150.0')
 } else if (process.argv[2] === 'queue') {
   ${queue ? "console.log('Usage: codex queue --thread <id> --message <text>')" : 'process.exit(2)'}
 } else if (process.argv[2] === 'app-server') {
@@ -238,27 +240,13 @@ describe('the Codex adapter', () => {
     })
   })
 
-  it('pastes into a Codex without the native queue', async () => {
+  it('refuses to open a Codex without the native queue, naming its version', async () => {
     await withHome(
-      async ({ env, executable }) => {
-        const adapter = codexAdapter({ env })
-        const thread = '0f8fad5b-d9cb-469f-a165-70867728950e'
-        const plan = await adapter.prepare(request({ resume: thread, message: null }))
-        assert.equal(plan.argv[0], executable, 'no supervisor without the queue')
-        const requests = []
-        const host = {
-          async request(op, body) {
-            requests.push([op, body])
-            return { ok: true }
-          },
-        }
-        const pane = { id: 's1-diana', generation: 2 }
-        assert.deepEqual(await adapter.deliver({ launch: plan.launch, pane, host, text: 'hi' }), {
-          admitted: true,
-        })
-        assert.deepEqual(requests, [
-          ['pane.write_paste', { id: 's1-diana', generation: 2, body: 'hi' }],
-        ])
+      async ({ env }) => {
+        await assert.rejects(
+          codexAdapter({ env }).prepare(request()),
+          /Codex 0\.150\.0 has no native queue, which ConsensFlow needs to reach its window: update Codex/,
+        )
       },
       { queue: false },
     )
