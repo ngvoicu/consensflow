@@ -44,10 +44,18 @@ export async function answers(kind, sessionId, env, options = {}) {
  * have not changed returns the previous result instead of being searched for
  * and parsed again. Calls with options, and harnesses read through a
  * database query, always read. Results are shared: callers must not mutate them.
+ * A conversation nobody has asked about for `idleMs` (its window closed) is
+ * forgotten, so a daemon that runs for weeks keeps only what it still reads.
  */
-export function cachedAnswers() {
+export function cachedAnswers({ idleMs = 10 * 60_000, now = Date.now } = {}) {
   const known = new Map()
+  let swept = now()
   return async (kind, sessionId, env, options = {}) => {
+    const at = now()
+    if (at - swept >= idleMs) {
+      swept = at
+      for (const [key, entry] of known) if (at - entry.readAt >= idleMs) known.delete(key)
+    }
     if (
       Object.keys(options).length > 0 ||
       !['claude-code', 'codex', 'pi'].includes(kind) ||
@@ -69,9 +77,12 @@ export function cachedAnswers() {
       return answers(kind, sessionId, env)
     }
     const stamp = `${stat.size}:${stat.mtimeMs}`
-    if (previous?.file === file && previous.stamp === stamp) return previous.result
+    if (previous?.file === file && previous.stamp === stamp) {
+      previous.readAt = at
+      return previous.result
+    }
     const result = await answers(kind, sessionId, env, { file })
-    known.set(key, { file, stamp, result })
+    known.set(key, { file, stamp, result, readAt: at })
     return result
   }
 }

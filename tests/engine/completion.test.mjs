@@ -650,6 +650,25 @@ test('completion/cached: an unchanged transcript returns the previous result; a 
   }
 })
 
+test('completion/cached: a conversation nobody reads any more is forgotten', async () => {
+  // A daemon runs for weeks; a closed window's conversation is never read again.
+  const session = '1b09fb15-feb1-4595-9f47-5eb9ff768191'
+  const { env, root } = await stageJsonl('claude-code', session, 'claude-code/queued-turn.jsonl', {
+    take: 2,
+  })
+  try {
+    let now = 0
+    const read = completion.cachedAnswers({ idleMs: 1000, now: () => now })
+    const first = await read('claude-code', session, env)
+    assert.equal(await read('claude-code', session, env), first, 'read again soon: kept')
+    now = 5000
+    await read('claude-code', '7d1f4e63-0b4c-4f7a-9a8e-2b3c4d5e6f70', env)
+    assert.notEqual(await read('claude-code', session, env), first, 'forgotten, then read anew')
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
 test('completion/claude-code: the captured interrupt cancels; compaction keeps prior answers', async () => {
   const session = '1b09fb15-feb1-4595-9f47-5eb9ff768191'
   const interruptedStage = await stageJsonl('claude-code', session, 'claude-code/interrupted.jsonl')
