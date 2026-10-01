@@ -1594,6 +1594,11 @@ class Ledger {
           403,
         )
       }
+      // The pause first, as one step with the tell: what it withdraws from
+      // the window is never the tell, and a tell refused below pauses nothing.
+      if (urgent && this.#taskRow(projectId, task).state !== 'paused') {
+        this.pauseTask(projectId, task, { by: from })
+      }
       const message = this.#send(projectId, {
         from,
         to,

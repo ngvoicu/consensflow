@@ -351,7 +351,8 @@ export async function startApi({
     if (action === 'tell') {
       // Stop the task and put this to its window: the agent is interrupted as
       // for any pause, reads the question once idle, and its answer comes
-      // back as a message; the chief resumes the task with its words.
+      // back as a message; the chief resumes the task with its words. An
+      // urgent question pauses its task itself, in the same step.
       if (task.assignee === null || !WINDOWED.has(task.state)) {
         throw new Refusal(
           409,
@@ -359,7 +360,6 @@ export async function startApi({
           `T-${number} has no window to tell: it is ${task.state}`,
         )
       }
-      if (task.state !== 'paused') ledger.pauseTask(project.id, number, { by: participant.handle })
       const told = ledger.ask(project.id, {
         from: participant.handle,
         to: task.assignee,

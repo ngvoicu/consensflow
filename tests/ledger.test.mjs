@@ -1020,6 +1020,23 @@ describe('tasks and the inbox queue', () => {
     })
   })
 
+  it("pauses the task for the chief's tell in the same step, and a refused tell pauses nothing", async () => {
+    await withLedger((ledger) => {
+      const { project, id } = staff(ledger)
+      deliver(
+        ledger,
+        ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' }).message,
+      )
+      const tell = (body) =>
+        ledger.ask(project.id, { from: 'chief', to: 'zeus', task: 1, body, urgent: true })
+      assert.throws(() => tell('  '), { code: 'invalid-text' })
+      assert.equal(ledger.task(project.id, 1).state, 'working', 'nothing was paused')
+      const told = tell('Use the new grammar')
+      assert.equal(ledger.task(project.id, 1).state, 'paused')
+      assert.equal(ledger.nextDelivery(id('zeus'))?.id, told.id, 'the pause withdrew nothing of it')
+    })
+  })
+
   it('refuses a task for someone outside the project and writes nothing', async () => {
     await withLedger((ledger) => {
       const { project } = staff(ledger)

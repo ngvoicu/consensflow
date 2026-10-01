@@ -306,6 +306,12 @@ describe('the agents API', () => {
       })
       deliver(ledger, message)
       const chief = token('chief')
+      // A tell the board refuses stops nothing.
+      const refused = await call(chief, 'POST', '/api/tasks/1/tell', {
+        body: 'y'.repeat(1_000_001),
+      })
+      assert.deepEqual([refused.status, refused.body.error], [400, 'invalid-text'])
+      assert.equal(ledger.task(project.id, 1).state, 'working')
       const told = await cf(chief, 'tell', 'T-1', 'Stop: the grammar changed, use v2')
       assert.equal(told.code, 0, told.err)
       assert.match(
