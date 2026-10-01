@@ -410,6 +410,15 @@ describe('projects and participants', () => {
           ['chief', 'chief', 'claude-code'],
         ],
       )
+      // A chief runs where a Switch lead could take it: a harness with a terminal.
+      for (const harness of ['kimi', 'image', 'nope', undefined]) {
+        assert.throws(
+          () => ledger.createProject({ directory: '/work/site', name: 'site', chief: { harness } }),
+          { code: 'invalid-harness' },
+          String(harness),
+        )
+      }
+      assert.equal(ledger.projects().length, 1)
     })
   })
 

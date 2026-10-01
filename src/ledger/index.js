@@ -199,6 +199,17 @@ function requireHarness(harness) {
   return harness
 }
 
+/** A chief's harness: one of CHIEF_HARNESSES, when the project starts and at every Switch lead. */
+function requireChiefHarness(harness) {
+  if (!CHIEF_HARNESSES.includes(harness)) {
+    throw new LedgerError(
+      'invalid-harness',
+      `a chief runs on ${CHIEF_HARNESSES.join(', ')}, not ${JSON.stringify(harness)}`,
+    )
+  }
+  return harness
+}
+
 /** A participant that is still in the project; a member who left is refused. */
 function requireActive(row) {
   if (row.left_at !== null) {
@@ -515,7 +526,7 @@ class Ledger {
   createProject({ directory, name, chief, staff = [], gate = false }) {
     requireText(directory, 'directory', 4096)
     requireText(name, 'name', 100)
-    requireHarness(chief?.harness)
+    requireChiefHarness(chief?.harness)
     requireGate(gate)
     const members = staff.map((member) => ({ ...member, roles: requireMember(member) }))
     return this.#write(() => {
@@ -1034,12 +1045,7 @@ class Ledger {
    * lead was stopped in the middle of a turn, for the handoff to say.
    */
   switchChief(projectId, { harness, agent = null, cut = false }) {
-    if (!CHIEF_HARNESSES.includes(harness)) {
-      throw new LedgerError(
-        'invalid-harness',
-        `a chief runs on ${CHIEF_HARNESSES.join(', ')}, not ${JSON.stringify(harness)}`,
-      )
-    }
+    requireChiefHarness(harness)
     if (agent !== null && (typeof agent !== 'string' || !AGENT_ID.test(agent))) {
       throw new LedgerError('invalid-agent', `invalid agent ${JSON.stringify(agent)}`)
     }
