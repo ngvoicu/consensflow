@@ -1411,25 +1411,128 @@ test('closes an open project from the list', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Close foundry' })).toHaveCount(0)
 })
 
-test('shows a closed project read-only: dimmed, no actions, no windows, and a Resume banner', async ({
+/**
+ * foundry, closed, with something everywhere a control would be: its chief,
+ * a member and a session of it with a finished task, a message that waited
+ * for approval and a note.
+ */
+function closedFoundry() {
+  const data = model()
+  const board = data.boards[2]
+  board.project.gate = true
+  const member = { ...participant(12, 'zeus', 'worker'), projectId: 2 }
+  const lexer = task(3, 'Write the lexer', 'done', 'chief', 'zeus-amber-pine', 30, {
+    projectId: 2,
+    result: 'Lexer done.',
+  })
+  board.lanes.push(
+    {
+      participant: { ...participant(10, 'chief', 'chief'), projectId: 2 },
+      tasks: [],
+      activity: { state: 'closed' },
+      pane: null,
+    },
+    { participant: member, tasks: [], activity: { state: 'closed' }, pane: null },
+    {
+      participant: { ...session(13, member, 'amber-pine'), projectId: 2 },
+      tasks: [lexer],
+      activity: { state: 'closed' },
+      pane: null,
+    },
+  )
+  board.gated = [
+    {
+      id: 30,
+      kind: 'task',
+      state: 'gated',
+      sender: 'chief',
+      recipient: 'zeus-amber-pine',
+      taskNumber: 3,
+      body: 'Add the tests',
+      questions: null,
+      choices: null,
+      createdAt: at(2),
+    },
+  ]
+  data.inbox[2] = [
+    {
+      id: 31,
+      kind: 'note',
+      state: 'queued',
+      sender: null,
+      recipient: 'human',
+      taskNumber: 3,
+      body: 'T-3 is done.',
+      createdAt: at(1),
+    },
+  ]
+  data.tasks['2:3'] = {
+    ...lexer,
+    messages: [
+      {
+        id: 32,
+        kind: 'result',
+        sender: 'zeus-amber-pine',
+        recipient: 'chief',
+        state: 'delivered',
+        reason: null,
+        body: 'Lexer done.',
+      },
+    ],
+  }
+  return data
+}
+
+test('shows a closed project read-only: it reads, nothing on it acts, and a banner resumes it', async ({
   page,
 }) => {
-  await open(page)
-  await page.locator('.project-select', { hasText: 'foundry' }).click()
+  await open(page, closedFoundry())
+  await chooseProject(page, 'foundry')
   const main = page.locator('main.main')
   await expect(main).toHaveAttribute('data-suspended', 'true')
   const banner = page.getByRole('status').filter({ hasText: 'foundry is closed.' })
   await expect(banner).toContainText('nothing is delivered until you resume it')
   await expect(page.getByRole('button', { name: 'Staff' })).toBeDisabled()
-  await expect(page.locator('table[aria-label="Tasks"]')).toHaveCSS('pointer-events', 'none')
-  await expect(page.getByRole('complementary', { name: 'Terminal dock' })).toHaveCSS(
-    'pointer-events',
-    'none',
-  )
   await expect(page.locator('.terminal-card')).toHaveCount(0)
+  // Nothing on the board acts: no button for it to be reached by, with the keyboard either.
+  const board = page.getByRole('region', { name: 'Board' })
+  for (const name of [
+    /^Approve/,
+    /^Decline/,
+    /^Mark .* read$/,
+    /^Open .*'s terminal$/,
+    /^Close .*'s terminal$/,
+    /^Delete .*'s session$/,
+    'Switch the lead to another harness or model',
+  ]) {
+    await expect(board.getByRole('button', { name })).toHaveCount(0)
+  }
+  await banner.getByRole('button', { name: 'Resume project' }).focus()
+  const reached = []
+  for (let press = 0; press < 4; press += 1) {
+    await page.keyboard.press('Tab')
+    reached.push(
+      await page.evaluate(
+        () =>
+          document.activeElement.getAttribute('aria-label') ?? document.activeElement.textContent,
+      ),
+    )
+  }
+  expect(reached).toEqual([
+    'Open task',
+    'Open task',
+    "What @zeus · amber-pine's terminal wrote",
+    'T-3, Write the lexer, Done, from @chief',
+  ])
+  // What it says is all there to read: a card opens its task, with nothing to do on it.
+  await page.locator('button.card[data-task="3"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-3' })
+  await expect(drawer.locator('.drawer-result')).toHaveText('Lexer done.')
+  await expect(drawer.getByRole('button')).toHaveText(['Close'])
+  await drawer.getByRole('button', { name: 'Close the task' }).click()
   await banner.getByRole('button', { name: 'Resume project' }).click()
   await expect.poll(() => calls(page, 'project.resume')).toEqual([{ project: 2 }])
-  await page.locator('.project-select', { hasText: 'harbour' }).click()
+  await chooseProject(page, 'harbour')
   await expect(main).toHaveAttribute('data-suspended', 'false')
   await expect(page.getByRole('button', { name: 'Staff' })).toBeEnabled()
 })

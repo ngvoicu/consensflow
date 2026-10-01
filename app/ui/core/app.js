@@ -140,6 +140,11 @@ const board = new BoardView(boardRoot, {
       note(`@${participant.handle} is gone; its tasks stay on @${participant.member}'s lane.`)
     }),
   onSwitchLead: (chief) => act(() => openSwitchLead(chief)),
+  onResume: (project) =>
+    act(async () => {
+      await core('project.resume', { project: project.id })
+      state.focus = 'chief'
+    }),
   onRedraw: () => render(),
 })
 
@@ -204,7 +209,8 @@ async function openTask(project, number) {
   ])
   if (state.selected !== project) return
   state.openTask = { project, number }
-  drawer.show(task, { transcript })
+  const closed = state.projects.find((shown) => shown.id === project)?.state !== 'open'
+  drawer.show(task, { transcript, closed })
 }
 
 function closeTask() {
@@ -309,13 +315,13 @@ function render() {
   ).length
   inboxButton.textContent = waiting === 0 ? 'Inbox' : `Inbox (${waiting})`
   inboxButton.dataset.waiting = String(waiting > 0)
-  // A closed project is read-only: nothing runs, so nothing here may act on it.
+  // A closed project is read-only: nothing runs, so nothing here may act on
+  // it. Its board and its tasks still read.
   const suspended = project?.state === 'suspended'
   main.dataset.suspended = String(suspended)
   teamButton.disabled = project === null || suspended
   const lanes = state.board?.lanes ?? []
   if (!lanes.some((lane) => lane.participant.handle === state.focus)) state.focus = 'chief'
-  if (suspended) closeTask()
   if (state.board === null) {
     boardRoot.replaceChildren(
       element(
@@ -326,33 +332,8 @@ function render() {
     )
   } else {
     board.render({ board: state.board, inbox: state.inbox, agents: state.agents })
-    if (suspended) boardRoot.prepend(suspendedBanner(project))
   }
   terminals.render(state.board, { focused: state.focus })
-}
-
-/** What a closed project shows in place of its actions: why it is still, and the one way on. */
-function suspendedBanner(project) {
-  const banner = element('section', 'suspended')
-  banner.setAttribute('role', 'status')
-  banner.append(
-    element('strong', null, `${project.name} is closed.`),
-    element(
-      'span',
-      null,
-      ' Its windows are gone, its open work went back to the backlog, and nothing is delivered until you resume it.',
-    ),
-  )
-  const resume = element('button', 'primary-button', 'Resume project')
-  resume.type = 'button'
-  resume.addEventListener('click', () =>
-    act(async () => {
-      await core('project.resume', { project: project.id })
-      state.focus = 'chief'
-    }),
-  )
-  banner.append(resume)
-  return banner
 }
 
 // Deleting a project is confirmed in a dialog that names it.
