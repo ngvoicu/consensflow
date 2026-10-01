@@ -1,4 +1,4 @@
-import { selectedSession } from '../../hosts/devin-receiver.mjs'
+import { selectedSession } from '../../hosts/devin-hooks.mjs'
 
 /** Explicit user tasks only. Results enter through native hooks. */
 export async function send(target, text) {

@@ -1244,7 +1244,6 @@ const SAFE_PATH_SEGMENT = /^[A-Za-z0-9._-]+$/
 // session id and leaf entry. A matching file is native evidence; otherwise the
 // provider backoff is capped at 60 seconds (settings-manager.js:610-615), so a
 // derived settlement requires twice that period without a file append.
-// This describes source completion; the native receiver owns destination readiness.
 const PI_SETTLEMENT_QUIET_MS = 120_000
 
 async function piSettlementEvidence(sessionId, env, options) {

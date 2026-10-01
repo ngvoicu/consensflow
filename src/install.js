@@ -2,7 +2,7 @@ import { prepareOpenCodeExtension } from './opencode-install.js'
 import { preparePiExtension } from './pi-install.js'
 import { installTerminalCommand } from './terminal.js'
 
-/** Opening the standalone app prepares its private launcher and receiver integrations. */
+/** Opening the standalone app prepares its private launcher and its Pi and OpenCode integrations. */
 export function prepareApp(env) {
   const report = []
   try {

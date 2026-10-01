@@ -1,6 +1,6 @@
 import { open } from 'node:fs/promises'
 import { setTimeout as wait } from 'node:timers/promises'
-import { selectedSession } from '../../hosts/devin-receiver.mjs'
+import { selectedSession } from '../../hosts/devin-hooks.mjs'
 import { cachedAnswers } from '../../hosts/lib/completion.js'
 import { DEVIN_REFUSAL, exhaustedQuota } from '../../hosts/lib/quota.js'
 import { interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'

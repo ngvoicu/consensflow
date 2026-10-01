@@ -10,7 +10,6 @@ import WebSocket, { WebSocketServer } from 'ws'
 import { runnable, terminate } from '../src/harnesses.js'
 import { configRoot } from '../src/roster.js'
 import { askTheBoard, boardClient, refusalReason } from './lib/question-door.js'
-import { createReceiver } from './lib/receiver.js'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const MAX_FRAME = 64 * 1024 * 1024
@@ -24,7 +23,6 @@ export async function startBroker({
   launchId,
   upstream,
   freshBypass = false,
-  receiver: receiverOptions,
   board: boardOptions,
   questionWaitMs,
 }) {
@@ -113,36 +111,6 @@ export async function startBroker({
   }
   control.send(JSON.stringify({ method: 'initialized' }))
   ready = true
-  const receiver = receiverOptions
-    ? createReceiver({
-        ...receiverOptions,
-        session: () => (!closed && ready && !switching ? selected : null),
-        ready: () => !closed && ready && !switching && idle.get(selected) === true,
-        insert: async (claim) => {
-          if (
-            closed ||
-            !ready ||
-            switching ||
-            selected !== claim.receiver.session ||
-            idle.get(selected) !== true
-          )
-            return refused('native-session-changed')
-          idle.set(selected, false)
-          empty = false
-          const result = await request(
-            'turn/start',
-            {
-              threadId: selected,
-              input: [],
-              toolOutput: { name: 'consensflow_inbox', namespace: null, output: claim.text },
-            },
-            Date.now() + 5000,
-          )
-          if (!result?.result) throw new Error('native insertion is unconfirmed')
-          return { admitted: true }
-        },
-      })
-    : null
 
   const authorized = (incoming) => {
     const actual = Buffer.from(incoming.headers.authorization ?? '')
@@ -427,13 +395,10 @@ export async function startBroker({
     control.terminate()
     throw error
   }
-  receiver?.start()
   return {
     endpoint: `http://127.0.0.1:${server.address().port}`,
-    receiver,
     async close() {
       closed = true
-      await receiver?.stop().catch(() => {})
       selected = null
       ready = false
       clearControl()
@@ -548,7 +513,6 @@ async function supervise(executable, args) {
     }
     broker = await startBroker({
       ...configuration,
-      receiver: env.CF_RESULT_RECEIVER ? { config: env.CF_RESULT_RECEIVER } : undefined,
       upstream: `ws+unix://${socket}`,
       freshBypass: args.includes('--dangerously-bypass-approvals-and-sandbox'),
     })

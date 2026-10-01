@@ -1,15 +1,16 @@
 import { createReadStream } from 'node:fs'
 import { appendFile, readFile, stat } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
-import { receiverRequest } from './lib/receiver.js'
 
 const silent = () => ({ code: 0 })
 const events = new Set(['SessionStart', 'UserPromptSubmit', 'Stop', 'SessionEnd'])
-const selected = (receiver, event) =>
-  receiver?.session === event.session_id && receiver.retiredAt === undefined
 
-/** Native callbacks fetch once, then return. History verification owns receipt. */
-export async function runHook(event, { request, selectedSession, instructions = '' }) {
+/**
+ * Devin's hooks for one launch: each turn event of the conversation the window
+ * shows is logged for the adapter, and a session starts with its role text.
+ * A subagent's events, or another conversation's, change nothing.
+ */
+export async function runHook(event, { selectedSession, instructions = '' }) {
   const name = event.hook_event_name
   if (
     !events.has(name) ||
@@ -20,63 +21,10 @@ export async function runHook(event, { request, selectedSession, instructions = 
     (await selectedSession()) !== event.session_id
   )
     return silent()
-
-  const role =
-    name === 'SessionStart' && instructions
-      ? {
-          code: 0,
-          stdout: {
-            hookSpecificOutput: {
-              hookEventName: name,
-              additionalContext: `${instructions}\n\nDevin reply collection: available worker or advisor replies are fetched at prompt and stop boundaries. A reply arriving after you become idle stays pending until the next human prompt. Use cf inbox and cf task get to check what the board holds; do not ask the owner to paste a report that is already on the board.`,
-            },
-          },
-        }
-      : silent()
-  if (!request) return role
-  if (name === 'SessionStart') {
-    try {
-      const receiver = await request('state', {})
-      await request('register', {
-        session: event.session_id,
-        previous: receiver?.lease ?? null,
-        source: event.source,
-      })
-    } catch {
-      // Role restrictions must remain present even when registration is unavailable.
-    }
-    return role
-  }
-  let receiver = await request('state', {})
-  if (!selected(receiver, event)) return silent()
-  if (name === 'SessionEnd') {
-    await request('retire', { lease: receiver.lease })
-    return silent()
-  }
-  const claim = await request('claim', { lease: receiver.lease })
-  if (!claim) return silent()
-  const identity = { result: claim.result, claim: claim.id, lease: receiver.lease }
-  await request('begin', identity)
-  receiver = await request('state', {})
-  if (
-    !selected(receiver, event) ||
-    receiver.lease !== identity.lease ||
-    (await selectedSession()) !== event.session_id
-  ) {
-    await request('release', {
-      ...identity,
-      admitted: false,
-      bytesWritten: 0,
-      reason: 'native selection changed before hook output',
-    })
-    return silent()
-  }
+  if (name !== 'SessionStart' || !instructions) return silent()
   return {
     code: 0,
-    stdout:
-      name === 'Stop'
-        ? { decision: 'block', reason: claim.text }
-        : { hookSpecificOutput: { hookEventName: name, additionalContext: claim.text } },
+    stdout: { hookSpecificOutput: { hookEventName: name, additionalContext: instructions } },
   }
 }
 
@@ -136,14 +84,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       instructions: process.env.CF_DEVIN_ROLE_FILE
         ? await readFile(process.env.CF_DEVIN_ROLE_FILE, 'utf8')
         : '',
-      request: process.env.CF_RESULT_RECEIVER
-        ? receiverRequest(process.env.CF_RESULT_RECEIVER)
-        : undefined,
     })
     if (result.stdout) process.stdout.write(JSON.stringify(result.stdout))
     process.exitCode = result.code
   } catch {
-    // A missing app or incomplete native log never becomes a wake or a receipt.
+    // A missing role file or an incomplete native log never stops Devin.
     process.exitCode = 0
   }
 }

@@ -12,8 +12,6 @@ const STRIPPED_CONTROL_ENV = new Set([
   'CONSENSFLOW_PANE_ID',
   'CONSENSFLOW_LEAD_ID',
   'CONSENSFLOW_LAUNCH',
-  'CF_RESULT_RECEIVER',
-  'CF_RESULT_SIGNAL',
 ])
 
 // Every window carries this marker so ConsensFlow tooling running inside it

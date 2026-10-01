@@ -7,7 +7,7 @@ import { runnable } from './harnesses.js'
 import { preparePrivateIntegration } from './private-integration.js'
 import { configRoot } from './roster.js'
 
-const FILES = ['hosts/devin-receiver.mjs', 'hosts/lib/receiver.js', 'package.json']
+const FILES = ['hosts/devin-hooks.mjs']
 const quote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`
 const execute = promisify(execFile)
 

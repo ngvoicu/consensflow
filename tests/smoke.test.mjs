@@ -565,8 +565,8 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   )
   assert.ok(alive(harnessPids[0]), "the chief's fake harness was not running when it answered")
 
-  // 5. The packaged pi extension resolves its dependency inside the bundle.
-  //    Run by the bundle's own node, from a directory outside this checkout.
+  // 5. The packaged pi extension loads from the bundle alone, never from this
+  //    checkout. Run by the bundle's own node, from a directory outside it.
   const extension = join(
     found.app,
     'Contents',
@@ -625,10 +625,6 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     [],
     `the packaged extension resolved files outside the bundle: ${JSON.stringify(outside)}`,
   )
-  assert.ok(
-    resolved.some((entry) => entry.url.endsWith('/hosts/lib/receiver.js')),
-    'the packaged extension never resolved hosts/lib/receiver.js',
-  )
   // Not "nothing under the repo": a locally built bundle LIVES under the
   // repo, so that would be trivially false. What must never be touched are
   // the checkout's live sources, which is where a path that escaped the
@@ -640,27 +636,6 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     [],
     `the packaged extension resolved live sources from this checkout: ${JSON.stringify(leaked)}`,
   )
-
-  // The packaged receiver must load without any checkout or global extension dependency.
-  const receiver = await withBundledNode(
-    found.node,
-    box,
-    `
-    import assert from 'node:assert/strict'
-    import { createReceiver } from ${JSON.stringify(join(bundleRoot, 'hosts/lib/receiver.js'))}
-    const calls = []
-    const receiver = createReceiver({ session: () => 'native-smoke', ready: () => true,
-      request: async (op) => { calls.push(op); return op === 'state' ? null : op === 'register' ? { session:'native-smoke',lease:'smoke' } : null },
-      insert: () => { throw new Error('empty inbox must never insert') },
-    })
-    await receiver.poll()
-    await receiver.stop()
-    assert.deepEqual(calls, ['state','register','claim','retire'])
-    process.stdout.write('PACKAGED-RECEIVER-OK')
-  `,
-  )
-  assert.equal(receiver.code, 0, receiver.err)
-  assert.equal(receiver.out, 'PACKAGED-RECEIVER-OK')
 
   // 6. The ledger is the app's: its exclusive lock refuses the bundled node a
   //    second opening while the app runs.
