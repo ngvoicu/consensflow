@@ -1,0 +1,57 @@
+# The Windows app as people download it: the NSIS installer and the portable
+# zip, built on a Windows runner. Run it by hand (Actions → Windows build →
+# Run workflow) and the run carries both as its download; publish a v* release
+# and both join that release's files. Neither is code-signed, so Windows shows
+# its unknown-publisher warning on first run.
+name: Windows build
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  windows:
+    # The alpha update feed is a release too (update-alpha); only versions get builds.
+    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            app/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+
+      - run: npm ci
+      - run: npm ci --prefix app
+      # The page, the Node sidecar and the CLI resources, then the app and its installer.
+      - run: npm --prefix app run build
+      - run: npm --prefix app run portable
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ConsensFlow-windows
+          path: |
+            app/src-tauri/target/release/bundle/nsis/*-setup.exe
+            app/src-tauri/target/release/bundle/portable/*-portable.zip
+          if-no-files-found: error
+      - if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release upload "${{ github.event.release.tag_name }}" --clobber
+          app/src-tauri/target/release/bundle/nsis/*-setup.exe
+          app/src-tauri/target/release/bundle/portable/*-portable.zip
